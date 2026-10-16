@@ -1,16 +1,21 @@
 ---
-layoutRole: section
-description: Ticket chrome — the header line above each ticket, the dependency rail below it.
+layoutRole: root
+description: The tickets wiki's shell — Grove's nav, sidebar and footer, with each ticket's header line above it and its dependency rail below.
 ---
 
 {/*
-  Wraps every entry under roadmap/, the archive included. Both components gate themselves:
-  <RoadmapMeta> renders only for an entry tagged `roadmap-item`, and <Dependencies> only for
-  a ticket with a dependency edge in either direction, so index pages pass through untouched.
+  The root layout wraps every entry in this bundle, so it is the whole page shell: Grove's
+  standard nav, sidebar and footer (the engine's default, restated), plus the ticket chrome.
+  Both ticket components gate themselves: <RoadmapMeta> renders only for an entry tagged
+  `roadmap-item`, and <Dependencies> only for a ticket with a dependency edge in either
+  direction, so the board and the archive index pass through untouched.
 */}
 
-<RoadmapMeta />
-
-<Outlet />
-
-<Dependencies />
+<GroveNav />
+<GroveSidebar />
+<main className="grove-content">
+  <RoadmapMeta />
+  <Outlet />
+  <Dependencies />
+</main>
+<GroveFooter />
