@@ -1,0 +1,244 @@
+---
+title: "R3-1251 — Baton blocks, external resources and decisions: ticket_blocks with blocked_since, instances and instrument readings, unblocked events and the blocked queries"
+id: R3-1251
+project: baton
+status: available
+updated: 2026-10-15
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1084
+description: "Baton stores why each ticket cannot move — open dependencies, capabilities no live worker has, external resources with no usable instance, open human decisions — as ticket_blocks rows written with their causes, and blocked_since on the ticket; administrators register external resources and their instances, workers, probes and administrators post schema-checked readings that lapse; unblocked events message fitting idle workers and dispatch an owner-set workflow; GET blocks and blocked?on= answer from one index; S-BTN-44, -45, G-BTN-70 (R-BTN-75–78; queues and couriers are R3-1255 and R3-1256). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+tier: critical
+depends_on:
+  - R3-1231
+  - R3-1232
+  - R3-1240
+---
+
+**Brief:** [[home.mdx]]; the owner, 2026-10-15: "the ability to very efficiently
+determine if a ticket is blocked (and why)… which tickets are blocked on the completion of this
+other ticket, or which tickets are blocked on DeepSeek 4.1 flash", and a hook when a blocked
+ticket unblocks; later the same day, a general vocabulary for outside resources (a provider's
+capacity, an API's rate limit, a server's disk), human decisions as blocks, bounded leg
+queues, and couriers that carry decisions to people.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2g R-BTN-75 (blocks, `held`, `blocked_since`,
+the four kinds), R-BTN-76 (external resources, instances, `instance_serves`, readings,
+`resource_fleet`), R-BTN-77 (`blocked`/`unblocked` events, `unblocked` messages,
+`unblocked_workflow`), R-BTN-78 (decisions) and **Asking**; §7.1 (`needs` and `decisions` in
+the board post); §7.2 rule 1 and the matching SQL (the `ticket` and `decision` rows); §4
+(`tickets.blocked_since` and `tickets_blocked`, `requires_by_name`, `leg_needs`,
+`external_resources`, `resource_instances`, `instance_serves`, `worker_instances`,
+`instance_readings`, `resource_fleet`, `ticket_decisions`, `fleet_capabilities`,
+`ticket_blocks` and `blocks_by_ref`, `credentials.allowed_instances`,
+`repositories.unblocked_workflow`, the `blocked`/`unblocked`/`resource` event kinds, the
+`unblocked` message kind); §9; §11 (the heartbeat's `uses` and `refused_uses`, `blocks`,
+`blocked`, `POST /v1/runner/readings`, `POST /v1/probe/readings`, `/v1/admin/resources`,
+`/v1/admin/instances`, `/v1/admin/readings`, the probe registration's `instances[]`, the
+`unblocked_workflow` setting); §14 (blocks on the Courses view, the two **Needs you** entries);
+§13a S-BTN-44, S-BTN-45; §16 G-BTN-70 (docs@630a51c4, docs#213 as merged);
+`BATON_ROADMAP_PR_COURSE.mdx` §6 (the review legs' `needs`)
+**Depends on:** R3-1231 (registered repositories, the board post), R3-1232 (stations, legs and
+the gates), R3-1240 (administrator and owner keys, probe registration, the `baton admin` and
+`baton owner` CLI)
+
+### Requires
+
+- none — every case runs in the integration harness with fixture boards, fixture keys and a
+  fake clock.
+
+### Why
+
+Asking why a ticket is not moving today means re-deriving the gates over the board and the
+fleet, and nothing can ask the reverse ("what waits on R3-1205", "what waits on this model",
+"what waits on the owner"). Runners also poll blindly for work that has just become
+possible, and a leg that ran out of a provider's quota is retried by the next worker that
+uses the same account. Tier: critical — `ticket` and `decision` blocks become claim gates.
+
+**Split.** §2g as merged is too large for one PR. This item builds the four block kinds
+(`ticket`, `capability`, `resource`, `decision`), external resources and readings,
+decisions, the events and the queries. Two follow-ups build the rest on top of it:
+
+- **R3-1255** — leg queues (R-BTN-79, revised to a warning): `leg_queues`, `max_queue`, the
+  `queue-over` notice, and S-BTN-45's queue case and G-BTN-71.
+- **R3-1256** — notices and couriers (R-BTN-80): `couriers`, `notices`, `/v1/courier/*`,
+  `POST /v1/owner/{repository}/couriers`, `remind_after`, `baton inbox`, S-BTN-46 and G-BTN-72.
+
+R-BTN-79's revision (the PR adding §2h) removed the `queue` block kind, so `ticket_blocks.kind`
+has four values.
+
+### What to build
+
+1. **Migration** (one new numbered file): `tickets.blocked_since` and the partial index
+   `tickets_blocked`; `requires_by_name`; `leg_needs` and `needs_by_resource`;
+   `external_resources`, `resource_instances`, `instance_serves` and `serves_by_resource`,
+   `worker_instances` and `worker_instances_by_instance`, `instance_readings`,
+   `resource_fleet`; `ticket_decisions`; `fleet_capabilities`; `ticket_blocks` (kinds
+   `ticket`, `capability`, `resource`, `decision`) and `blocks_by_ref`;
+   `credentials.allowed_instances`; `repositories.unblocked_workflow`; the `blocked`,
+   `unblocked` and `resource` event kinds and the `unblocked` message kind — every column as
+   §4 gives it.
+2. **`src/core/blocks.ts`** — the one writer of `ticket_blocks` and `tickets.blocked_since`:
+   `writeBlocks(tx, ticketIds, cause)` diffs a ticket's old and new rows for the kinds the cause
+   touches, writes only the changed rows, then re-evaluates **held** and **blocked** (R-BTN-75:
+   held — an active claim, a completed claim not yet confirmed, or a fence-pending reap;
+   blocked — not held, and a whole-ticket row, or at least one posted next leg with every one
+   carrying a row) and sets or clears `blocked_since`. A transition logs `blocked` or
+   `unblocked` `{ticket, cleared: [{kind, ref}]}` in the same transaction, except a claim
+   starting or ending, which changes `blocked_since` silently.
+3. **Causes**, each calling `writeBlocks` inside its own transaction:
+   - snapshot acceptance — a changed `blocked_by` (`ticket` rows, `ref` the qualified id, the
+     posted list taken as given), `requires` (`capability` rows against `fleet_capabilities`),
+     `needs` (`leg_needs`, then `resource` rows against `resource_fleet`) or `decisions`
+     (`ticket_decisions`, then `decision` rows);
+   - `fleet_capabilities` crossing zero — counts change when a worker registers or changes what
+     it declares, stops being live (the alarm), is reaped, and when a grant is made, changed or
+     revoked; tickets found through `requires_by_name` joined through `tickets`;
+   - `resource_fleet`'s blocked condition (`usable_workers > 0 AND open_workers = 0`) flipping —
+     on everything that moves `fleet_capabilities`, and on an instance changing state, a
+     worker's `uses` changing, or a resource or instance being registered or changing what it
+     serves or which repositories may use it; tickets found through `needs_by_resource`;
+   - claims starting, ending, confirming and fence clears (held changes only).
+4. **External resources** (R-BTN-76):
+   - `POST /v1/admin/resources` `{name, scope, detail_schema}` and
+     `baton admin resource add <name> --scope worker|account|service --schema <file>`; the name rule
+     `^[a-z][a-z0-9:._/-]{0,79}$`;
+   - `src/core/detailSchema.ts` — an interpreter for exactly R-BTN-76's JSON Schema subset
+     (`type`, `properties`, `required`, `additionalProperties` as a boolean, `items`, `enum`,
+     `const`, `minimum`, `maximum`, `minLength`, `maxLength`, `minItems`, `maxItems`; ≤ 4 KB, ≤ 5
+     levels), refusing anything else at registration; no code generation;
+   - `POST /v1/admin/instances` `{name, serves, repositories}` (re-posted to change either),
+     refusing an instance whose served resources do not share one schema; `service` and
+     `worker` instances are implicit (`<resource>@worker:<id>`);
+   - the heartbeat's `uses`: each name checked (registered, and its repositories include one
+     the key is granted on), written to `worker_instances`, the rest returned in
+     `refused_uses` with the heartbeat still succeeding;
+   - probe registration (`POST /v1/admin/probes`) gains `instances[]`, stored as
+     `credentials.allowed_instances`.
+5. **Readings** (R-BTN-76): one validator for the envelope `{instance, available, until?,
+   valid_for?, detail?}` (`valid_for` ≤ 24 h, default 1 h; `until` no later than the reading's
+   end; `detail` ≤ 4 KB and valid against the served resources' schema) used by
+   `POST /v1/runner/readings` (instances the worker uses and its own `worker` instances; one per
+   worker and instance a minute), `POST /v1/probe/readings` (each instance in the probe's
+   `allowed_instances`) and `POST /v1/admin/readings` / `baton admin resource set <instance> …`
+   (≤ 7 days). `instance_readings` holds one `admin` and one `instrument` row per instance;
+   `lapses_at` is `observed_at + valid_for`, or `until` if sooner for an unavailable reading.
+   State: the admin row while in force, else the instrument row while in force, else
+   `unknown`; an instrument reading posted under an admin row in force is stored and answered
+   `overridden`. The alarm fires at the earliest `lapses_at`. Every change of state is a
+   `resource` event and recounts `resource_fleet` for the repositories the instance serves.
+6. **Decisions** (R-BTN-78): `decisions: [{id, leg?, asks, url}]` validated per ticket (`id`
+   and `asks` patterns; `url` an `https://github.com/<owner>/<name>/…` of the ticket's home
+   repository or one of its `repos:`, checked after percent-decoding, with no `.` or `..`
+   segment, backslash, userinfo or port, else dropped); a leg that is not one of the ticket's
+   posted next legs puts the decision on the whole ticket. A decision stays open until a
+   snapshot stops posting it.
+7. **Gates**: rule 1 and the matching SQL refuse a claim (`blocked`) for a `ticket` row or a
+   whole-ticket `decision` row, and leave out a leg with its own `decision` row; an `advance`
+   into a leg with a `decision` row, or on a ticket with a whole-ticket one, is refused
+   `blocked`; `capability` rows refuse the workers they name through rule 4 (both gates).
+   `resource` rows are advice: recommendations drop the leg after the gate query, for the fleet
+   from the stored row and for the asking worker from its own usable instances; a claim or
+   `advance` into such a leg is accepted and recorded `advice-overridden`.
+8. **Unblocked** (R-BTN-77): on `unblocked`, one pending `unblocked` message per alive idle
+   worker granted on the repository that the ticket now passes the gates for, updated in place
+   (≤ 20 tickets, oldest dropped), delivered in the next heartbeat's `messages`, expired by the
+   alarm when its worker stops being alive; the repository's `unblocked_workflow` (set with
+   `PUT /v1/owner/{repository}/settings`, a path under `.github/workflows/`) dispatched through
+   the sync's App with the one input `tickets`, coalesced one per 30 seconds per repository
+   with a trailing dispatch, at most 100 entries and the rest `{truncated: n}`. Every block
+   change and every instance change of state calls `invalidateRecommend(tx, repository)` in its
+   transaction — a no-op seam until R3-1236 adds the `recommend` cache behind it. No held
+   long-poll; no hook call.
+9. **Queries**: `GET /v1/repositories/{repository}/tickets/{ticket}/blocks[?worker=me]`
+   (`{blocked, blocks, other}`, `other` listing holds, backoff, `waiting_on`, bars on every live
+   worker's tags, an unconfirmed end, and `no-instance`), `GET
+   /v1/repositories/{repository}/blocked?on=ticket:|resource:|capability:|decision:<id or *>`
+   with `transitive=1` (≤ 5 levels) and, with no `on`, grouped by kind and `ref`, 100 per page
+   with `next_cursor`; `baton blocked <ticket>` and `baton blocked --on <kind>:<ref>`; any key
+   granted on the repository, an owner of it or an administrator.
+10. **Dashboard**: each ticket's blocks on the Courses view; **Needs you** lists tickets blocked
+    24 hours on a capability no live worker has and instances `unknown` 24 hours while a posted
+    leg needs them; open decisions appear through `blocked?on=decision:*`.
+11. **Withdrawn**: there is no `resources` or `probe_readings` table and no
+    `/v1/runner/resources`, `/v1/probe/resources` or `/v1/owner/{repository}/resources` route;
+    the earlier draft of this item named them, and nothing in the code may.
+
+### Architecture — the decisions, named
+
+- **One writer**: every path that changes a cause calls `writeBlocks` inside its own
+  transaction; nothing else writes `ticket_blocks` or `blocked_since`, and no read computes
+  blocks — except `?worker=me` and a worker's own recommendations, which compute that one
+  worker's `capability` and `resource` answer on the spot, as R-BTN-75 and R-BTN-76 say.
+- **Counts, not scans**: `fleet_capabilities` and `resource_fleet` are maintained counts; rows
+  are rewritten only when a count crosses zero or the resource condition flips, and only for
+  the tickets the index names.
+- **Readings are per Baton**: an instance's state is shared by every repository it serves;
+  who may report on an instance is fixed in SQLite (a probe's `allowed_instances`, a worker
+  through the instance's repositories), never by the posting key's claim.
+- **Validate before you write**: decisions, `needs`, `uses`, readings, resource and instance
+  registrations all go through `src/core/validate.ts` (with `detailSchema.ts` for `detail`) before
+  any SQL; refusals are `invalid-params` or `forbidden`.
+- **Names are opaque**: no resource, instance, capability, decision or `asks` name appears in
+  `src/core/` (the boundary test). Core reads the reading envelope, never `detail`.
+- **One clock**: `lapses_at`, `until`, `since` and the coalescing window all read `this.now`.
+- **Do not**: make a `resource` block refuse; let `unknown` block (advice fails
+  open); let a decision lapse or fail open; call a hook on unblocking; recompute capability or
+  resource rows on every heartbeat; store a decision's text, a packet body or anything beyond
+  §4's filter fields (R-BTN-33); interpolate the dispatch's `tickets` into anything but the
+  one JSON input.
+
+### Tests
+
+- S-BTN-30's probe clause (a reading for an instance outside the probe's binding is refused
+  `forbidden`): the `it.todo` R3-1239 left in baton's `test/integration/S-BTN-30.signed-requests.test.ts`;
+  probe requests are signed and verified by `verifyRequest` (R3-1239, baton#24).
+- Integration, both hosts: **S-BTN-44** in full (every source of a block, the fleet and
+  `worker=me` answers, precedence, the refused unused instance, the lapse to `unknown`,
+  liveness, the `unblocked` message and fresh recommendation, the coalesced dispatch, **Needs
+  you**); **S-BTN-45** except its queue parts (the `$ref` schema refused, the other
+  repository's worker refused `forbidden`, one reading blocking two resources' legs, the
+  schema-failing reading `invalid-params`, the lapse at `until`, `overridden` and the
+  takeover, no fleet row overnight with `no-instance`, G's leg decision refused at `advance`,
+  H's whole-ticket decision and dropped `url`, the 100-entry dispatch with `{truncated: 50}`).
+  The `fix`/`merge`/`adjudicate` queue cases are R3-1255's.
+- `test/unit/blocks.test.ts`: each cause added and removed and its diff; held versus blocked
+  (a ticket with one free leg, one with no next leg, a claim ending silently); a dependency
+  reopened; a capability count and a resource condition crossing both ways; a reading's
+  `until` passing on `setClock`; `transitive=1` over a chain.
+- `test/unit/detail-schema.test.ts`: every keyword of the subset accepted and enforced; `$ref`,
+  `pattern`, `format`, a 4 KB+ or 6-level schema refused.
+- The query-plan assertion: `blocks` reads by primary key and `blocked?on=` through
+  `blocks_by_ref`, the unfiltered `blocked` through `tickets_blocked` (SQLite `EXPLAIN QUERY
+  PLAN`), so G-BTN-70's cost claim stays true.
+
+### Exit criteria
+
+- [ ] S-BTN-44 passes on both hosts
+- [ ] S-BTN-45's non-queue cases pass on both hosts
+- [ ] `test/unit/blocks.test.ts`, `test/unit/detail-schema.test.ts` and the query-plan assertion
+  pass
+- [ ] `git grep -nE "probe_readings|/v1/(runner|probe)/resources|owner/[^ ]*/resources" src/`
+  finds nothing
+- [ ] `npm test` and `npm run typecheck` green; the boundary test green
+
+### Hand-off
+
+R3-1255 counts leg queues and warns over a bound; R3-1256 queues notices in the transaction
+that first stores a `ticket_decisions` row; R3-1236 passes instance states to hooks and puts
+its `recommend` cache behind `invalidateRecommend`, re-running S-BTN-44's warm-cache step; R3-1254
+models blocks.
+
+## Status
+
+_(filed 2026-10-15)_
+
+_2026-10-15 — rewritten for BATON_SPEC §2g as merged (docs#213, 630a51c4): `blocked_since` and
+held, external resources with instances and instrument readings in place of `resources` and
+`probe_readings`, decisions; leg queues and couriers split to R3-1255 and R3-1256._

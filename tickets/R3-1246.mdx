@@ -1,0 +1,71 @@
+---
+title: "R3-1246 — roadmap-pr leg scripts: the five legs of docs' course as scripts baton run executes"
+id: R3-1246
+project: baton
+status: available
+updated: 2026-10-14
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1080
+tier: judgement
+description: ".baton/courses/roadmap-pr/legs/{implement,review,fix,adjudicate,merge}.mjs start the agent session on each leg's skill step, continue one harness session across legs, name the next leg where the graph branches, and write hand-off documents. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1245
+  - R3-1234
+---
+
+**Brief:** [[home.mdx]].
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.13 (R-BTN-72), §6.12 (the leg table, R-BTN-38,
+-44); `docs/content/specs/BATON_ROADMAP_PR_COURSE.mdx` §1, §5 (model advice per leg) (docs@0928c207; the spec at docs#212 head 0d4ef0e4)
+**Depends on:** R3-1245, R3-1234
+
+### Requires
+
+- none — the scripts are tested with a stub harness; R3-1245's scenario runs them for real.
+
+### Why
+
+`baton run` runs each leg through `.baton/courses/roadmap-pr/legs/<leg>.mjs`; docs has none.
+Tier: judgement — five small scripts over one convention.
+
+### What to build
+
+1. `legs/implement.mjs`, `review.mjs`, `fix.mjs`, `adjudicate.mjs`, `merge.mjs`: each starts
+   the agent session on its leg's section of `next-roadmap-item` (`claude -p` or `opencode
+   run`, from the worker's harness), resuming the previous leg's `session` when the advice
+   keeps the model and starting fresh when it moves the leg to another.
+2. `review.mjs` returns `next: fix | merge | adjudicate` from the round's outcome (open
+   findings and the run count), read from the PR the round just reviewed.
+3. Each exports `handoff(ctx)`, posting the `baton:handoff` comment with BATON_SPEC R-BTN-44's
+   sections, written by the session before it stops.
+4. The scripts honour `ctx.signal`: on abort they kill the session they started.
+
+### Architecture — the decisions, named
+
+- **A script is a launcher, not logic**: what a leg does is the skill's text (R3-1234); the
+  script picks the harness and the session, and reads one git fact where the graph branches.
+- **Do not**: write evidence from the script (the session does); hard-code a model (the
+  advice chooses); add a per-course module above the legs.
+
+### Tests
+
+- `scripts/lib/courses/roadmap-pr/legs.test.mjs`: each script with a stub harness — the
+  command it runs, session reuse, `review`'s `next` for a clean round, open findings, and the
+  third round.
+
+### Exit criteria
+
+- [ ] `node --test scripts/lib/courses/roadmap-pr/legs.test.mjs` green
+- [ ] every leg of `course.json` has exactly one script (`baton test-course`, R3-1248)
+- [ ] `npm run verify` green
+
+## Status
+
+_(filed 2026-10-14)_

@@ -1,0 +1,88 @@
+---
+title: "R3-1247 — Baton webhooks: GitHub App events trigger repository syncs"
+id: R3-1247
+project: baton
+status: done
+updated: 2026-10-16
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1081
+tier: judgement
+description: "Baton verifies GitHub App webhook deliveries and dispatches the sync of every registered repository whose tickets name the event's repository; docs' sync runs in a concurrency group; S-BTN-42 (R-BTN-73). Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/25
+depends_on: []
+---
+
+**Brief:** [[../home.mdx]].
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §7.1 R-BTN-73, §10.3 (the GitHub App), §13a
+S-BTN-42 (docs@0928c207; the spec at docs#212 head 1dae3316)
+**Depends on:** R3-1231
+
+### Requires
+
+- none — deliveries are signed with a test secret in the harness. Installing the App's event
+  subscriptions on the real repositories is R3-1208's operator step.
+
+### Why
+
+Syncs run on a docs push, a dispatch or every 15 minutes, but a ticket's evidence — a review,
+a fix in a code repository, a check — moves no docs commit, so stations lag (owner,
+2026-10-14: use GitHub webhooks). Tier: judgement — a trigger, not a computation.
+
+### What to build
+
+1. `POST /v1/github/webhook`: verifies `X-Hub-Signature-256` with
+   `BATON_GITHUB_WEBHOOK_SECRET` before reading anything; accepts `push`, `pull_request`,
+   `pull_request_review`, `issue_comment`, `workflow_run` (no `check_suite`, since the sixth
+   review).
+2. Reads exactly R-BTN-73's fields — the headers `X-GitHub-Event` and `X-GitHub-Delivery`,
+   `repository.full_name`, `workflow_run.path` for `workflow_run`, `pusher.name` and
+   `head_commit.author.email` for `push` — through one parser that returns only them.
+   Drops repeated `X-GitHub-Delivery` ids (`webhook_deliveries`) and the feedback of its own
+   work — a `workflow_run` whose `path` is a `sync_workflow` or `mirror_workflow`, a `push` by
+   `github-actions[bot]` whose head commit's author is the mirror's
+   (`baton-mirror@immediately.run`, §12); maps the delivery's repository to the registered
+   repositories whose tickets name it (home or `repos:`) and dispatches each one's sync after
+   the response (`waitUntil`), at most once per repository per 30 seconds, plus **one trailing
+   dispatch** when a window in which a delivery was suppressed closes (the alarm, set early
+   for it); the route is the one Worker route without an SSH signature, outside the per-IP
+   rate limit, and §10.1's GitHub App principal.
+3. docs' `baton-sync.yml` gains a `concurrency` group (one running, one pending).
+
+### Architecture — the decisions, named
+
+- **A delivery is only a trigger**: nothing beyond R-BTN-73's listed fields is read — the
+  parser is the only code that touches the payload, and S-BTN-42's harness records its reads.
+- **Do not**: compute stations from a payload; retry a dispatch more than once (the
+  schedule is the backstop); accept an unsigned delivery.
+
+### Tests
+
+- Integration: S-BTN-42.
+- `test/unit/webhook.test.ts`: signature verification, the field parser (extra fields
+  ignored, a missing field a dropped delivery), the self-filter, the repository map, the
+  trailing dispatch on a fake clock, an unknown event.
+
+### Exit criteria
+
+- [x] S-BTN-42 passes
+- [x] `test/unit/webhook.test.ts` passes
+- [x] `npm run typecheck` green in baton; `npm run verify` green in docs
+
+## Status
+
+_in-review 2026-10-16 — Delivered: baton#25 merged 18a5184, deployed 00:08Z; the mirror ran green against it at 00:34Z. Gate: 13 findings over three rounds, all fixed. Production needs R3-1208's operator steps (the App's event subscriptions, BATON_GITHUB_WEBHOOK_SECRET) before deliveries arrive.._
+
+_updated 2026-10-15 — https://github.com/immediately-run/baton/pull/25 — baton#25. The docs half (a concurrency group on baton-sync.yml) was already in place; no docs change. The station-moves clause of S-BTN-42 is the docs sync's and R3-1232's; baton tests the dispatch that starts the run.._
+
+_claimed 2026-10-15 — baton,docs (claim bb4c4e)._
+
+_(filed 2026-10-14)_

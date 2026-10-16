@@ -1,0 +1,83 @@
+---
+title: "R3-1210 — [OP] Spike: hook and process capabilities of Claude Code and opencode for Baton"
+id: R3-1210
+project: baton
+status: available
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - OP
+  - roadmap-item
+order: 1051
+tier: judgement
+description: "Establish, with evidence, what both harnesses offer the Baton sidecar and hooks (deny on pre-tool, tool-call ids, failure events, session start/end, process-group termination) and where the VMs' opencode transcript archiver lives; write the findings note. Requires: human-operator."
+topics:
+  - baton
+  - harness
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** [[home.mdx]].
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.3 (three layers), §6.4, §6.8 (the opencode archiver), §6.9 (pairing) (docs@2dbf1424)
+**Depends on:** —
+
+### Requires
+
+- `human-operator` — exit criteria 1–5: running both harnesses interactively on a fleet VM
+  and on the Mac, and knowing where the VMs' opencode archiver was provisioned.
+
+### Why
+
+Step 2 rests on harness behaviour the spec assumes and nobody has checked: that a pre-tool
+hook can deny a call and sees a call id, that a failure event exists, and that a running tool
+call's processes can be found and killed. The opencode transcript archiver is not in any
+repo. Building R3-1213 and R3-1214 on a wrong assumption would be the costliest defect in the
+rollout.
+
+### What to build
+
+A findings note `content/plans/baton/hook-spike.mdx` answering, per harness, with the command
+run and its output:
+
+1. Claude Code: does `PreToolUse` deny a Bash call (exit code 2 or `permissionDecision:
+   "deny"`), and does its input carry `tool_use_id`? Does `PostToolUse` fire for a failed or
+   interrupted call, and is there a separate failure event?
+2. opencode: the plugin API's `tool.execute.before` (can it throw to deny?), its `callID`, and
+   its after and error events; `session.created` / `session.idle` / end events for starting
+   and stopping a sidecar.
+3. Both: is each Bash tool call its own process group, and can a sibling process (the sidecar)
+   find it from the harness pid and `kill -TERM -<pgid>` it without killing the harness?
+4. Both: what `SessionStart` / the plugin sees as the session id, and whether `claude -p`
+   children fire `SessionStart`.
+5. Where the VMs' opencode archiver lives (unit file, script, repo), and how it would append
+   a line to a spool file.
+6. Both *(added 2026-10-14, BATON_SPEC R-BTN-49)*: can an unattended session switch its main
+   model at a leg boundary (Claude Code `/model` or a settings change mid-session; opencode
+   per-message model), or run one leg in a subagent on another model and provider, and does
+   the switch survive a resume? This decides whether model advice applies per leg or only at
+   launch; §7.2's premise that a session's model is fixed when it starts is re-checked here.
+
+### Architecture — the decisions, named
+
+- Answer each question yes or no with evidence; a "no" names the fallback the spec allows
+  (for example, a hook that cannot deny becomes a wrapper script on `PATH`).
+- **Do not:** change any hook in `.claude/settings.json` or the shared `.opencode/` config;
+  this item only measures.
+
+### Tests
+
+None: a measurement.
+
+### Exit criteria
+
+- [ ] `content/plans/baton/hook-spike.mdx` answers questions 1–6 with commands and outputs
+- [ ] each "no" names its fallback and the spec section it changes, and a spec amendment or a BUG item is filed for it
+- [ ] the archiver's location is recorded, with whether R3-1214 can change it from the repo
+- [ ] `npm run verify` green
+
+## Status
+
+_(filed 2026-10-13)_

@@ -1,0 +1,126 @@
+---
+title: "R3-1243 — Baton's core as a checked formal model: a Quint spec of leases, legs, observations and bars, model-checked in CI"
+id: R3-1243
+project: baton
+status: done
+updated: 2026-10-15
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1078
+tier: critical
+description: "A Quint model of Baton's core state machine — Baton's atomic steps and its two awaits, workers, sync runs, git, the alarm and the owner, with hooks and course output nondeterministic within their contract — whose safety and liveness properties are checked by quint run in npm test and by Apalache in CI. Requires: none."
+topics:
+  - baton
+  - formal-methods
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/10
+depends_on:
+  - R3-1228
+---
+
+**Brief:** [[../home.mdx]]; the owner asked on 2026-10-14 whether Baton's state
+machine can be formally modelled and checked for races and stuck states.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §3 (atomicity between awaits), §3a R-BTN-55,
+§6.1–6.7 (R-BTN-4, -6, -10, -19, -26), §6.12 (R-BTN-39, -40, -63, -64), §7.1 (R-BTN-11, -62),
+§7.2 (rules 1–12, R-BTN-35, -45, -61), R-BTN-52, R-BTN-66/67, §13a (docs@1af0c769; the spec
+at docs#212 head 4e5ab93f)
+**Depends on:** R3-1228 (the spec lands; a model of a spec still moving chases it)
+
+### Requires
+
+- none — Quint runs from npm; Apalache needs a JVM, which CI installs with
+  `actions/setup-java`. A local run without Java uses `quint run` only, and that is enough
+  for the exit criteria an agent checks locally.
+
+### Why
+
+Three review rounds of the 2026-10-14 amendment each found blocking defects of one shape: a
+state from which a ticket can never be claimed again and nobody is told (a suspension that
+could not be confirmed, a `done` end that could not be confirmed, a claim released as stale
+while it progressed), or an interleaving the prose did not consider (a hook call letting
+another claim in). A model checker finds these mechanically, with a counterexample trace,
+and keeps finding them as the spec changes. Tier: critical — it states and checks the lease
+invariants.
+
+### What to build
+
+1. `model/baton.qnt` (Quint): Baton's core state and every action the spec gives it.
+2. `model/properties.qnt`: the invariants and temporal properties below, each with the
+   requirement it checks in a comment.
+3. `npm run model` — `quint run` (simulation, bounded) over every property; part of `npm test`.
+4. `npm run model:verify` — `quint verify` with Apalache over the safety invariants at the
+   bounds below; a CI job `model` in `.github/workflows/ci.yml`.
+5. `model/README.md`: what is modelled, what is abstracted, the bounds, and how to read a
+   counterexample.
+
+### Architecture — the decisions, named
+
+- **Quint, not TLA+ text**: same semantics (it compiles to TLA+ for Apalache), typed, and
+  installable from npm (`@informalsystems/quint`, pinned exact) like the rest of the repo.
+- **Actors**: `Baton` (one action per API call and alarm tick; a call that awaits is split
+  into a pre-await action and a post-await action, so other actions interleave between
+  them exactly where §3 allows); `Worker` (claim, heartbeat, advance with a vouch, end,
+  crash, sleep, wake); `Sync` (take an observation, read git, post; may read a stale
+  checkout or a force-pushed history); `Git` (evidence lands, lands late or never; a PR
+  closes; any pusher writes anything — R-BTN-66); `Alarm`; `Owner` (holds, owner bars,
+  required bars, force-reap).
+- **Course logic is nondeterministic**: a hook returns any refusal set and any order over
+  the candidates it was given, or fails; a sync posts any leg states consistent with the
+  git state it read. So every property holds for every course, which is what R-BTN-50 asks.
+- **Time**: a discrete clock per actor; a worker's clock may drift from Baton's by at most
+  `MAX_DRIFT` (a constant below the 4-minute fencing margin of R-BTN-6), stated as an
+  assumption in `model/README.md`.
+- **Bounds**: 3 workers, 2 tickets, a course of 4 legs with one repeatable, 2 concurrent sync
+  runs, 2 repositories for R-BTN-61; Apalache runs safety at depth 20.
+- **Safety invariants** (each names its requirement): at most one live holder per ticket,
+  counting a reaped claim's worker as live until `fence-cleared` or its timeout (R-BTN-4,
+  -19, -26); no end or vouch confirmed by an observation not greater than its own (R-BTN-10,
+  -62, -63); accepted observations strictly increase (R-BTN-62); a claim is released
+  `stale-board` only when git took the ticket away or its leg went back to `not-yet` with no
+  unconfirmed vouch (R-BTN-35); every claim and advance passes every gate in force, hook
+  failure included (R-BTN-45, -60, -67); a leg under a required bar is never `ready` without
+  it (R-BTN-67).
+- **Liveness** (under weak fairness of Baton, the alarm and syncs): every end is eventually
+  confirmed or flagged; every fence clears; a held history is accepted within 24 h; a
+  suspended ticket whose bars lift becomes claimable; a ready leg with an eligible idle
+  worker is eventually claimed. "Stuck" — never claimable, never flagged — is the deadlock
+  this model exists to rule out.
+- **Do not**: model a course's meaning (no PRs, reviews or providers); encode the
+  implementation's SQL; weaken a property to make it pass — a counterexample is a spec
+  defect, filed against BATON_SPEC with the trace; let the model drift from the spec silently
+  (each action cites its requirement).
+
+### Tests
+
+- The properties are the tests: `npm run model` runs `quint run --invariant` for each safety
+  property and `--temporal` for each liveness one, 10,000 samples at the bounds above.
+- `model/regressions.qnt`: one `run` per defect the 2026-10-14 reviews found (an unconfirmable
+  suspension; a `done` end seen before `/end`; a claim released stale while its station lagged; a review loop whose
+  advance into an unposted leg stalled; a claim during
+  a hook call), each asserting the fixed spec does not reach it.
+- Scenarios: none run yet; R3-1244 checks the S-BTN scenarios' traces against this model.
+
+### Exit criteria
+
+- [x] `npm run model` green, part of `npm test` — `package.json` `test` runs it with `MODEL_SAMPLES=1000`; baton ci run 38699314484 job `test` green on `main` (c4d5076)
+- [x] CI job `model` runs `npm run model:verify` and is green on `main` — baton ci run 38699314484 job `model` (c4d5076), Apalache to depth 5 on `small`
+- [x] `git grep -n "R-BTN-" model/` names every requirement listed in Architecture — each of R-BTN-4, -6, -10, -35, -45, -50, -61, -62, -66, -67 found with `git grep -w` (baton#10)
+- [x] `model/README.md` states the drift assumption and the bounds — its *Bounds and assumptions* section
+- [x] `npm test` and `npm run typecheck` green — locally at 7a55d2d and in baton ci run 38699314484 job `test` (typecheck and test steps) on `main`
+
+### Hand-off
+
+R3-1244 replays the integration scenarios' event logs against this model. A spec change to
+any requirement listed above updates `model/` in the same baton PR that implements it.
+
+## Status
+
+_in-review 2026-10-15 — https://github.com/immediately-run/baton/pull/10 — upstream: item-wrong — Apalache to depth 20 on the full bounds is infeasible (sim: depth 6 unfinished at 28 min; small: depth 5 ≈ 5 min); CI runs small to depth 5 and sim gets 1,000 random 40-step runs; liveness stated, not yet checked (remainder)._
+
+_claimed 2026-10-15 — baton (claim 637703)._
+
+_(filed 2026-10-14)_

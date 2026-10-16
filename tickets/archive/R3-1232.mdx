@@ -1,0 +1,131 @@
+---
+title: "R3-1232 — Baton stations and legs: claims advance along the course file's edges, suspension at stations, recommendations, advice versus gates"
+id: R3-1232
+project: baton
+status: done
+updated: 2026-10-16
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1069
+tier: critical
+description: "Baton's side of stations and legs: ingest each ticket's station, path, next legs and bars; advance by edge on the holder's word with the holder gates; ends confirmed by station, staleness by a shrinking path, a resume record for every end; recommendations merged per repository and course with advice that never refuses; S-BTN-10, -17, -18, -22, -23, -24, -34, -40. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/27
+depends_on:
+  - R3-1231
+  - R3-1253
+  - R3-1262
+---
+
+**Brief:** [[../home.mdx]].
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2e (R-BTN-63, -70, -71), §6.12 (R-BTN-38–41,
+R-BTN-44), R-BTN-4, -5, -8, -10, -24, -35 as amended, §6.5, §6.7, §7.2 (R-BTN-45, R-BTN-61, the
+gate table, the default order, the matching SQL), §4 (`ticket_stations`, `ticket_next_legs`,
+`ticket_bars`, `claims.station`/`leg`/`start_path`/`regressed_since`, `claim_legs`), R-BTN-64
+(renames), §11 (`claim`, `advance`,
+`end`, `recommendations`, `next`, heartbeat), §13a S-BTN-10, -17, -18, -22, -23, -24, -34, -40
+(docs@0928c207; the spec at docs#212 head 1dae3316)
+**Depends on:** R3-1231
+
+### Requires
+
+- none — every scenario runs in the integration harness against fixture courses.
+
+### Why
+
+The owner wants a ticket to rest at a station between legs, suspend there until its next leg
+can run, and Baton to advise rather than gatekeep anything but safety (2026-10-14). Today a
+claim runs from claim to merge and every rule refuses. Tier: critical — the lease's
+confirmation and staleness rules are rewritten around stations.
+
+### What to build
+
+1. Ingest each ticket's station, path, next legs and bars from the board post.
+2. `advance {leg, evidence?, bars?, course?}`: finishes the running leg (the claim moves to
+   its `to`) and starts `leg` when it leaves that station, its runs — in `start_path` plus
+   `claim_legs` — are under `max_runs`, and the holder gates hold (owner bars only if
+   `claim+advance`; required bars over posted plus declared `bars`); the response carries the
+   latest snapshot's next legs and the course's advice. Every leg, the first included, starts
+   with its own `advance`.
+3. Ends `done`, `suspended:<station>`, `released:<reason>` with `reached` and `detail`; the
+   station an end names must be the running leg's `to` or `from`; a suspension confirmed when
+   the posted path **extends the expected path** (`start_path` + the claim's finished legs) by
+   edges of the course file — git may be ahead of the claim — or by any later snapshot when it
+   ended regressed; `done` by an end station or a recorded closure (R-BTN-10, R-BTN-71); a
+   claim ended stale only when the ticket is taken away. A path shorter than git showed before
+   (the previous snapshot's or `start_path`) sets `claims.regressed_since`, shows as
+   `git.regressed` with the posted path in the heartbeat, is listed under **Needs you** after
+   30 minutes, and clears when a later path extends the expected one again or at the end; a ticket is claimable again only after a sync since its last
+   end; a resume record for every end; `off-graph` when a path does not extend by edges.
+3a. Renames (R-BTN-64): on accepting a course file, rewrite active claims' `station`/`leg`
+   through `renamed_from`; resolve every old name met afterwards — an `advance`'s requested
+   leg, `start_path`, `claim_legs`, an owner bar's `legs` — and count `max_runs` under the
+   resolved name.
+3b. Holder-declared `bars` a later snapshot does not post for that leg log `bars-mismatch`
+   (**Needs you**).
+4. Recommendations: candidates per (repository, course), the default order (expedite,
+   `to_end`, rank, age, id), R-BTN-61's merge, a 50-per-group limit; `next` and claim-without-id take the first
+   that still passes after the hook; advice never refuses (`advice_overridden`).
+
+5. *(Inherited from R3-1231, 2026-10-15.)* Accept the normative §7.1 board post — `tickets`
+   (tier by name, `display`, opaque `course`), `closed`, `stations` — beside the interim shape
+   docs posts until R3-1233; keep `closed_tickets` (R-BTN-10); refresh stations from a held force
+   post (R-BTN-62).
+
+### Architecture — the decisions, named
+
+- **Gates in one function**, `gatesFor(worker, ticket, leg, phase)` in `src/core/gates.ts`
+  (`phase` is `claim` or `advance`, which selects the holder gates); the SQL is its mirror
+  and G-BTN-40 checks them against each other.
+- **Baton never reads a station's or leg's meaning**: no literal leg or station name in
+  `src/`; order is `to_end`, readiness is `state`, the edge check reads the course file.
+- **The holder's word**: no leg state is checked at `advance`; only the edge, the run limit
+  and the gates.
+- **Do not**: confirm an end from an observation not greater than its own; end a claim stale
+  because its station lags; let a bound, forecast or exhaustion refuse; keep
+  `awaiting-review-capacity` reachable.
+
+### Tests
+
+- `test/unit/gates.test.ts`: every gate of the table at claim and at advance; every advice
+  input accepted and recorded.
+- Integration, from fixture courses (docs' real `course.json` and the toy `chore`): S-BTN-10,
+  -17, -18, -22, -23, -24, -34, -37 (the rename half), -40.
+- `test/unit/confirm.test.ts`: confirmation by path extension (equal, extended by edges, a
+  non-edge extension, a loop recurring the station), regression set and cleared.
+- *(Inherited from R3-1231.)* S-BTN-26's recommendation and per-group-limit clauses and S-BTN-36's
+  station half — `it.todo` in baton's `S-BTN-26.two-repositories` and `S-BTN-36.observations`
+  today; the claimable-after-a-sync clause in G-BTN-40's differential; the normative post and
+  `closed_tickets` in `sync.test`.
+
+### Exit criteria
+
+- [x] the nine scenarios above pass in `npm run test:baton`; S-BTN-1…16 still pass
+- [x] the inherited clauses above pass, and baton has no `it.todo` naming R3-1232
+- [x] `git grep -nE "'(implement|review|fix|merge|filed|reviewed)'" src/` in baton returns no leg or station name *(re-scoped 2026-10-16 at baton#27's gate, 1-B-6: what it still returns are §6.9 activity kinds — `ACTIVITY_KINDS` and the dashboard's lane map, which R3-1237 moves out — and the append-only `0001_init.sql`, which no change may edit)*
+- [x] `npm run typecheck` green in baton; `npm run verify` green in docs
+
+### Hand-off
+
+R3-1233 posts real stations; R3-1236 runs the hooks; R3-1245 drives the API from `baton run`.
+
+## Status
+
+_in-review 2026-10-16 — baton#27 merged f44c38e and deployed 05:48Z. Gate: 3 rounds, 19 findings, all fixed or argued; 3-A-1 adjudicated and its advance case fixed in 8b94680; 3-A-3 NOT REPRODUCED. Left to their items: grants and owner bars R3-1240, hooks R3-1236, blocks R3-1251, positions R3-1257, activity kinds R3-1237.._
+
+_updated 2026-10-16 — https://github.com/immediately-run/baton/pull/27 — baton#27 open: stations, gatesFor, recommendations, advance, ends at stations, confirmation by path; review gate next.._
+
+_claimed 2026-10-16 — baton,docs (claim 6ba021)._
+
+_updated 2026-10-15 — upstream: inherited from R3-1231 (re-scoped 2026-10-15): accept the normative §7.1 board post (tickets with tier names, display, opaque course fields; closed; stations), closed_tickets, the held post's station refresh, S-BTN-36's station half; and §7.2's claimable-after-a-sync clause (board_head.observation above MAX end_observation, deferred at baton#22's gate 1-A-1). Until R3-1233 the docs sync posts the interim shape (state.items, ready, registry), which Baton must keep accepting._
+
+_(filed 2026-10-14)_
+
+_2026-10-14 — rewritten for the stations revision of BATON_SPEC (docs#212 head 068e76e6): stations and legs in a course file, owner bars and settings in SQLite, observations, the runner and webhooks._

@@ -1,0 +1,113 @@
+---
+title: "Baton self-hosting — its tickets, history and workflow in its own repository"
+id: baton/SELF-HOSTING
+status: proposal
+updated: 2026-10-16
+tags:
+  - plan
+scope: "Making immediately-run/baton a self-sufficient open-source project: its tickets, archive, review records, spec and agent workflow move out of docs, and the baton repository is a Baton repository cut over from its first ticket"
+description: "The plan for Baton hosting its own tickets in the baton repository, so nothing about how Baton works or what is being built needs docs"
+topics:
+  - baton
+owns: {}
+reads-first: []
+kind: doc
+---
+
+**Items:** [R3-1249](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/R3-1249.mdx), [R3-1252](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/R3-1252.mdx),
+[R3-1266](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/R3-1266.mdx), [R3-1267](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/R3-1267.mdx), [R3-1268](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/R3-1268.mdx).
+**Spec:** BATON_SPEC §2a (R-BTN-47, registered repositories), §2f (R-BTN-74, the markdown
+ticket source and the `pr` course), R-BTN-18, R-BTN-37.
+
+## Goal
+
+The owner, 2026-10-16: "I want baton to be completely self-sufficient as an open source
+project, no access to the docs repo should be required to understand how it works or what is
+being developed."
+
+So everything a contributor needs lives in `immediately-run/baton`, which is public:
+- the spec;
+- the live tickets, and the archive of finished ones;
+- the review records;
+- the changelog;
+- how an agent works a ticket;
+- how to deploy Baton.
+
+Docs keeps only what is docs' own: its adoption of Baton (the roadmap-pr course, its sync and
+mirror, its cutover) and this deployment's values.
+
+## What already exists
+
+One Baton already serves many repositories:
+- **Per-repository boards:** each repository has its own board, sync principal and qualified
+  ticket ids (R3-1231, done).
+- **Registration:** a new repository is registered with `baton repositories add`, already cut
+  over if wanted (R3-1240, R3-1262, done).
+- **Runner identity:** runners identify by SSH key (R3-1239, done).
+
+What is missing is a ticket source for a repository without docs' scripts (R3-1249), and the
+move itself.
+
+## Decisions (owner, 2026-10-16)
+
+1. **Ids.** Moved tickets keep their `R3-NNNN` ids, so the spec, the changelog and commit
+   history stay valid; in Baton they read `baton:R3-NNNN`. New tickets in the baton repository
+   take their own sequence, `B-n`, because docs' allocator counts only docs.
+2. **Order.**
+   - R3-1249 gives the baton repository a ticket source and the `pr` course.
+   - R3-1252 moves the spec there.
+   - R3-1266 registers the repository.
+   - R3-1267 moves the tickets and records.
+   - R3-1268 removes the last dependencies on docs.
+
+   Tickets arrive in a repository that can already sync and already holds the spec.
+3. **Docs' cutover is independent.** Baton's self-hosting goes first, and docs' cutover
+   (R3-1220) and shadow week (R3-1216) follow on their own schedule. Neither blocks the other.
+4. **Review records move with the tickets.** Baton PRs' findings and token usage live in the
+   baton repository.
+
+Later the same day, the owner:
+
+5. **Tickets are MDX, and the repository holds two Grove wikis.** The tickets keep docs'
+   roadmap format and live in `tickets/` (finished ones in `tickets/archive/`), a wiki opened
+   on immediately.run. The documentation, this plan included, is a second wiki in `docs/`.
+6. **The tickets move now.** Until Baton can claim this repository's tickets (R3-1266),
+   agents claim them with git as the lock: `npm run ticket -- claim <id>` pushes the status
+   change straight to `main`, and a push that loses a race is retried on the new head.
+7. **Every `project: baton` item moves**, docs' adoption items included. None of them depends
+   on an item outside the project, and no other item depends on one of them, so nothing
+   crosses the line; an adoption item's work still happens in docs (`repos: [docs]`).
+
+## Phases
+
+| Phase | Item | Result |
+|---|---|---|
+| 1 | R3-1249 | `npx baton sync` with a ticket source, the `pr` course and `baton init` |
+| 2 | R3-1252 | `spec/BATON_SPEC.md` in baton; docs keeps a deployment spec and a stub |
+| 3 | R3-1266 | the baton repository registered with Baton and cut over, reading `tickets/`; a break-glass path |
+| 4 | R3-1267 | Baton's items (live and archived), project page, plans and review records moved and scrubbed — done first (decision 6), with `scripts/ticket.mjs` as the claim path until phase 3 |
+| 5 | R3-1268 | the agent workflow, CLAUDE.md, CHANGELOG, shared modules and deploy guide owned by baton |
+
+## Which items move
+
+Every `project: baton` item, live and archived (decision 7): dependencies cannot cross
+repositories, because each repository has its own board (§2a, R-BTN-47), and none does. The
+items still in flight in docs when they moved (R3-1244, R3-1245) are copied as they stood; their
+sessions finish them through docs' tools, and the copies here are brought up to date when they
+merge.
+
+## Risks
+
+- **Baton coordinates its own repair.** After R3-1266, baton tickets are claimed only through
+  Baton, and there is no git fallback after cutover (R-BTN-18). A broken deploy therefore stops
+  agents from claiming the fix. The break-glass path in R3-1266:
+  - a person (never an agent) may fix `main` directly;
+  - `wrangler rollback` follows §11's rule about migrations;
+  - staging's health gates the production deploy.
+- **Publishing private content.** Items, plans and review records were written in a private
+  repository. They may name other projects, private repositories, costs, accounts or people.
+  R3-1267 scrubs them, and the owner reviews the diff before it is pushed: publishing cannot
+  be undone.
+- **Two sources of truth while moving.** Docs' board must not keep a ticket that the baton
+  repository also offers. R3-1267 removes each moved item from docs' board in the same sitting
+  as it lands in baton.

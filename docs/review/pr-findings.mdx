@@ -1,0 +1,346 @@
+---
+title: Review findings
+description: One row per finding the review gate posted on a Baton pull request, and per defect found on main despite it — moved from the immediately.run docs review-gate log.
+tags: [review]
+order: 30
+---
+
+<Lede>Every finding the two-reviewer review gate posted on a Baton pull request, and every
+defect found on `main` that the gate should have caught.</Lede>
+
+Rows from 2026-10-13 to 2026-10-16 were kept in the immediately.run docs repository's
+review-gate log and moved here with Baton's tickets; new rows are appended here.
+
+The columns:
+
+- **date**, **repo** and **PR**: when, and which pull request (`baton` is this repository).
+- **rubric**: the implementation standard the finding cites (`R1`, `R2`, …), or the
+  review round's finding id.
+- **severity**: `blocking`, `should-fix` or `nit`.
+- **finding**: what was wrong. `(A)`, `(B)` or `(AB)` names the reviewer or reviewers who
+  raised it.
+- **disposition**: `fixed` (with where), `argued` (answered and left), `escalated` (the ticket
+  went back to in-progress) or `escaped` (found on `main` after merge).
+- **origin**, **missed-by** and **introduced**: where the defect came from (`impl`, the
+  implementation; `spec-silent` or `spec-wrong`, the spec said nothing or the wrong thing;
+  `item-silent` or `item-wrong`, likewise the ticket), which check should have caught it, and
+  the change that introduced it.
+
+| date | repo | PR | rubric | severity | finding | disposition | origin | missed-by | introduced |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-13 | baton | 1 | R1 | blocking | (AB) force stored no held snapshot, only an event per post, so the sync's 15-minute re-posts pushed the 24 h auto-accept deadline forward forever | fixed — held_snapshots, one row per sha, first deadline kept; test across a clock advance (be8ea50) | impl | — | — |
+| 2026-10-13 | baton | 1 | R7 | blocking | (A) reference() claimed each table is rewritten whole but only upserted model_providers, so a removed account stayed in Baton and on the Providers view | fixed — accounts the file no longer lists are deleted; removal test (be8ea50) | impl | — | — |
+| 2026-10-13 | baton | 1 | R3 | should-fix | (A) checkPayload validated items but no reference data or force type, so a malformed docs data file became a 500 on every sync | fixed — checkReference refuses each malformed block as invalid-params naming the field; refusal cases (be8ea50) | impl | — | — |
+| 2026-10-13 | baton | 1 | R3 | should-fix | (A) both JWT catch blocks mapped a key-set fetch failure to unauthenticated, so an outage read as a bad credential | fixed — unavailable 503 for key-set failures (be8ea50); completed in round 2 | impl | — | — |
+| 2026-10-13 | baton | 1 | R6 | should-fix | (A) priceFor was a drifted second copy of docs sessionUsage.mjs priceFor | fixed — sessionUsage.mjs vendored under R-BTN-37 and imported (be8ea50) | impl | — | — |
+| 2026-10-13 | baton | 1 | R2 | should-fix | (AB) work_items.repos is always [] in production: factory-state's items carry no repos and rowFor defaulted it silently (origin split: spec-silent/impl) | fixed — R3-1207 amended to add repos from frontmatter (docs 97179a48); the real docs board is posted in a test (be8ea50) | spec-silent | — | — |
+| 2026-10-13 | baton | 1 | R9 | nit | (A) the Ready view linked the id, not the title the item and PR body name | fixed — the title is the link (be8ea50) | impl | — | — |
+| 2026-10-13 | baton | 1 | R17 | should-fix | (B) the dashboard poll had no deadline and setInterval overlapped polls, so a slow older answer could overwrite a newer one | fixed — AbortSignal.timeout and newest-poll-only drawing (be8ea50) | impl | — | — |
+| 2026-10-13 | baton | 1 | R11 | nit | (B) .npmrc legacy-peer-deps was a placebo: the tree resolves without it | fixed — removed (be8ea50) | impl | — | — |
+| 2026-10-13 | baton | 1 | R1 | nit | (B) the item named @cloudflare/vitest-pool-workers but the diff used @cloudflare/vitest-plugin with no deviation recorded | fixed — the old package is deprecated and renamed; R3-1206 step 1 amended (docs 97179a48) and the PR body lists it | item-wrong | — | — |
+| 2026-10-13 | baton | 1 | R3 | should-fix | (r2) the 1-A-3 fix still classified a key endpoint answering non-200 or non-JSON (a plain JOSEError) as unauthenticated | fixed — only jose's token-fault classes are unauthenticated; classifier test (a28d371) | impl | — | — |
+| 2026-10-13 | baton | 1 | R3 | should-fix | (r2) checkReference did not refuse duplicate schedule ids or (provider, model) pairs, still a 500 mid-transaction | fixed — duplicate accounts, schedules and pairs refused as invalid-params (a28d371) | impl | — | — |
+| 2026-10-13 | baton | 1 | R2 | should-fix | (r2) no test fed checkReference the real docs data files | fixed — global-setup provides them; posted with the live board (a28d371) | impl | — | — |
+| 2026-10-13 | baton | 1 | R1 | should-fix | (r2) the new unavailable code was not in BATON_SPEC §11 and R3-1207's sync did not retry on it | fixed — §11 and R3-1207 amended (docs ec518c7a) | impl | — | — |
+| 2026-10-13 | baton | 1 | R7 | nit | (r2) held_snapshots existed only in §7.1 prose, not in §4's schema the migration claims to copy | fixed — §4 carries baton_settings and held_snapshots (docs ec518c7a) | spec-silent | — | — |
+| 2026-10-13 | baton | 1 | R7 | nit | (r2) the README said either file while three are vendored | fixed — any of them (a28d371) | impl | — | — |
+| 2026-10-13 | baton | 1 | — | — | (r3) no findings posted — all six round-2 closures verified at a28d371 | — | — | — | — |
+| 2026-10-13 | baton | 2 | R1 | blocking | (AB) S-BTN-13 drove only the vendored syncOnce with a hand-built payload, so the real payload never reached the Worker's validator | fixed — boards.json is docs' buildPayload over the fixture repository; the live-board test posts buildPayload(origin/main) (5d406f2) | impl | — | — |
+| 2026-10-13 | baton | 2 | R7 | should-fix | (A) a token with only Workers Scripts edit cannot deploy the zone route | fixed — Zone Read and Workers Routes Edit stated in the workflow, README and R3-1208 (5d406f2) | item-wrong | — | — |
+| 2026-10-13 | baton | 2 | R5 | should-fix | (A) the staging PUBLIC_ORIGIN was a placeholder no request could match | fixed — staging at workitems-staging.immediately.run with PUBLIC_ORIGIN to match (5d406f2) | impl | — | — |
+| 2026-10-13 | baton | 2 | R1 | nit | (B) the manifest pinned an unmerged docs head | argued: disagree — both PRs merge with merge commits, so the pinned commit stays reachable; docs#205 merges first | impl | — | — |
+| 2026-10-13 | baton | 2 | R6 | should-fix | (r2) test/fixtures/data/*.json duplicated reference.json, so S-BTN-13 and the unit tests could drift apart | fixed — one source; reference.json removed (65eb5cf) | impl | — | — |
+| 2026-10-13 | baton | 2 | R2 | nit | (r3) the fixture's deploy (provisioning) entry now posts provisioning, recorded as expected | argued: disagree — not merge-blocking; R3-1222 switches the fixture to app (deploy) with the stricter repoName | impl | — | — |
+| 2026-10-13 | baton | 3 | — | — | (AB) no findings posted in round one | — | — | — | — |
+| 2026-10-13 | baton | 3 | — | — | (r2) no findings posted | — | — | — | — |
+| 2026-10-13 | baton | 4 | R1 | blocking | (A) a shadow set to in-review released the Baton claim, so every later review-gate activity was refused claim-ended | fixed — in-progress and in-review keep the claim (§6.5); test drives a review-round after in-review (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R3 | blocking | (AB) one bad transcript pointer failed the whole heartbeat, rolling back last_seen_at (origin split: impl/spec-silent) | fixed — pointers refused one by one in transcripts_refused; an unknown activity only loses its link (64ade82) | spec-silent | — | — |
+| 2026-10-13 | baton | 4 | R9 | blocking | (A) the Workers view omitted tier ceiling, capabilities, providers, lease timeout and last activity (§14) | fixed — rendered in the Worker and State cells (64ade82) | item-silent | — | — |
+| 2026-10-13 | baton | 4 | R1 | should-fix | (AB) the body secret_hash authenticated any later heartbeat without X-Worker-Secret | fixed — workers.secret_seen limits it to before the secret is first presented (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R1 | should-fix | (AB) a same-hash re-key returned 200 for a reaped worker and left reaped_at set | fixed — refused as invalid-params; a retried re-key on a live worker stays idempotent (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R1 | blocking | (AB) credential() upserted every CREDENTIALS entry on every worker call, breaking the §3 write budget | fixed — mirrored only when either secret changes (marker in baton_settings) (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R1 | should-fix | (AB) the ack reply was validated inline after the write with a drifted freeText copy that accepted an empty string | fixed — checkAck in validate.ts, called before the UPDATE (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R2 | should-fix | (AB) the revoked-credential test never exercised revocation; the gone credential was unused | fixed — a test revokes by dropping the hash and checks the gone row; policy removal revokes too (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R2 | should-fix | (AB) transcript_repos, usage, rate limits and human-operator rows were untested; no producer sends transcript_repos (origin split: impl/spec-silent) | fixed — tests for each (64ade82); the docs producer half filed upstream on R3-1211 | spec-silent | — | — |
+| 2026-10-13 | baton | 4 | R14 | should-fix | (A) the phone rule hid the Workers view's Activity column | fixed — scoped to #ready-table (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R1 | should-fix | (AB) a stop suspension whose window was already over still sent provider-suspended releases | fixed — ends_at must be after now; a closed window found by the alarm sends nothing (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R10 | should-fix | (AB) the PR body lacked Untested and why, Architecture decisions, Deviations and exit criteria with how checked | fixed — PR body rewritten with the R10 sections | impl | — | — |
+| 2026-10-13 | baton | 4 | R1 | nit | (A) a timed suspension lifted early still logged an ended event | fixed — the end query skips lifted rows (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R13 | nit | (AB) a worker with no model showed the literal null | fixed — an em dash (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R6 | nit | (A) SHA256_HEX was re-exported unused while auth.ts re-spelled it; README cited §10.3 for validation | fixed — auth.ts imports it; README cites §10.4 (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R3 | should-fix | (B) worker_providers rows for an account learned later were never repaired | fixed — the stored settings hash covers which billed accounts are known (64ade82) | spec-silent | — | — |
+| 2026-10-13 | baton | 4 | R3 | should-fix | (B) a malformed ack body was treated as empty, acknowledging the message and dropping the reply | fixed — only an absent body is a plain ack; malformed is invalid-params (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R1 | should-fix | (B) a retried shadow claim report with the same nonce was recorded as a shadow-conflict | fixed — same holder and nonce returns the claim with no event (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R17 | should-fix | (B) the alarm re-armed only after its work succeeded, so one throw ended the 60-second cycle | fixed — re-armed before the work (64ade82) | impl | — | — |
+| 2026-10-13 | baton | 4 | R1 | should-fix | (r2) a same-hash re-key was accepted with no X-Worker-Secret after the secret was seen, reopening the hash-as-bearer path | fixed — idempotent only while secret_seen is 0; secret_seen computed against the stored hash after a re-key (7c5ce2d) | impl | — | — |
+| 2026-10-13 | baton | 4 | R1 | nit | (r2) a pointer reported before its activity lost the link permanently and was listed as refused though stored | fixed — ON CONFLICT fills the link; reported in transcripts_unlinked (7c5ce2d) | impl | — | — |
+| 2026-10-13 | baton | 4 | R1 | nit | (r2) a shadow set ends the claim as released with shadow:\<status>, outside the §6.5 vocabulary | argued: upstream — §13 step 2 names no mapping and a shadow end has no ended_at_sha for completed; spec-silent note on R3-1211 | spec-silent | — | — |
+| 2026-10-13 | baton | 4 | R7 | nit | (r3) the recordTranscripts doc comment and a test comment still described a lost link after 7c5ce2d made it deferred | argued: disagree — comment-only after the last round; carried into R3-1212, which rewrites recordTranscripts | impl | — | — |
+| 2026-10-13 | baton | 5 | R1 | blocking | (A) a held history was accepted only on a re-post of the exact held sha, so any push after the rewrite re-held it; held posts dropped their confirmations | fixed — acceptance accepts the line (a force post against the head the accepted row was held against); held posts apply confirmations (e3ac0d6) | impl | — | — |
+| 2026-10-13 | baton | 5 | R1 | blocking | (A) a released end with ended_at_sha passed validation, then failed the table CHECK as a 500 | fixed — checkEnd refuses it as invalid-params (e3ac0d6) | impl | — | — |
+| 2026-10-13 | baton | 5 | R9 | blocking | (A) the Timeline view did not colour by kind, nest reviewers under their round, or show detail and transcript on click (§14) | fixed — kind groups, nested band, click detail with PR and transcript links; timeline() returns them (e3ac0d6) | impl | — | — |
+| 2026-10-13 | baton | 5 | R9 | blocking | (A) an unconfirmed completion past 6 h had no owner confirm or release, blocking its item forever | fixed — POST /v1/ui/claims/:id/resolve and Needs you buttons (e3ac0d6) | item-silent | — | — |
+| 2026-10-13 | baton | 5 | R17 | should-fix | (A) two stale releases reaped one claim twice | fixed — one reap per claim per tick; every matching release expires (e3ac0d6) | impl | — | — |
+| 2026-10-13 | baton | 5 | R6 | should-fix | (AB) TIER_RANK re-spelled the vendored tier order with different behaviour on an unknown tier | fixed — fitsTier and TIERS.indexOf (e3ac0d6) | impl | — | — |
+| 2026-10-13 | baton | 5 | R2 | should-fix | (A) running(), timeline() and needsYou() server logic had no test | fixed — /v1/ui/state cases for each (e3ac0d6) | impl | — | — |
+| 2026-10-13 | baton | 5 | R3 | should-fix | (AB) a malformed escape on the holder route threw URIError and answered 500 | fixed — decoded in a try and checked against the item-id pattern: invalid-params (e3ac0d6) | impl | — | — |
+| 2026-10-13 | baton | 5 | R5 | nit | (AB) held histories were drawn twice, in Needs you and the old Held section | fixed — the old section removed (e3ac0d6) | impl | — | — |
+| 2026-10-13 | baton | 5 | R1 | should-fix | (B) a sync releasing a claim stale-board before the worker's git-first done made the end claim-ended and lost the completion | fixed — a completed end after stale-board is recorded and the release withdrawn (e3ac0d6) | spec-silent | — | — |
+| 2026-10-13 | baton | 5 | R2 | should-fix | (B) rules 2 and 8 and the reviewer matrix persistence were untested through the server | fixed — server cases for both; the rule-8 test exposed a 500 on a matrix with no usable row, now failing closed as rule 8 (e3ac0d6) | impl | — | — |
+| 2026-10-13 | baton | 5 | R2 | should-fix | (B) the hold-override branch, the legacy reap_after reap and the holder's legacy exclusion were untested | fixed — a case for each (e3ac0d6) | impl | — | — |
+| 2026-10-13 | baton | 5 | R1 | blocking | (r2) the stale-board-then-done conversion completed a claim released for a re-tier, or one whose item another worker had since claimed | fixed — only when git shows the item ended and no later claim exists (a8cdf59) | impl | — | — |
+| 2026-10-13 | baton | 5 | R1 | should-fix | (r2) acceptedLine matched a once-accepted sha forever, so a force post rewinding to it moved the head backwards unheld | fixed — matched only against the head it was held against (a8cdf59) | impl | — | — |
+| 2026-10-13 | baton | 5 | R1 | should-fix | (r3) a force post rewinding main to a once-accepted held sha is held silently — no row, no event, no owner path | argued: disagree — not merge-blocking after the last round; the head cannot move backwards and the sync is off until R3-1208; filed as R3-1223 | impl | — | — |
+| 2026-10-13 | baton | 5 | R10 | nit | (r3) the PR body's test counts still described e3ac0d6 | fixed — PR body updated for a8cdf59 | impl | — | — |
+| 2026-10-13 | baton | 6 | R3 | blocking | (AB) an adoption request for an ended legacy claim could never be cleared: confirm deleted it then threw, rolling the delete back, and the view did not filter ended claims | fixed — Claims.finish deletes the request with the end; the view lists only active legacy claims and live requesters (390296c) | impl | — | — |
+| 2026-10-13 | baton | 6 | R9 | blocking | (A) Needs you showed held items' attempts without their resume records (§14) | fixed — each attempt with its resume record as text (390296c) | item-silent | — | — |
+| 2026-10-13 | baton | 6 | R2 | blocking | (AB) the since and holder validation was untested and one bad note date refused the whole board | fixed — a non-calendar since or malformed holder is that item's unknown; tests for each branch (390296c) | impl | — | — |
+| 2026-10-13 | baton | 6 | R6 | should-fix | (AB) the session-name and item-id patterns were re-spelled | fixed — SESSION_NAME and ITEM_ID imported; owner routes check the id (390296c) | impl | — | — |
+| 2026-10-13 | baton | 6 | R6 | should-fix | (A) the event insert, random hex and unique-index catch were copied into a third class | fixed — src/db.ts shared by all three (390296c) | impl | — | — |
+| 2026-10-13 | baton | 6 | R17 | should-fix | (A) attempt counting scanned the unindexed events table on every end and dashboard poll | fixed — events_by_item and events_by_claim indexes (390296c) | impl | — | — |
+| 2026-10-13 | baton | 6 | R1 | should-fix | (B) confirming an adoption could hand a claim to a requester gone silent, reaped at once as a failed attempt | fixed — refused as requester-silent; the request leaves Needs you (390296c) | spec-silent | — | — |
+| 2026-10-13 | baton | 6 | R7 | nit | (B) stale comments: rules 1-9 and resume records attributed to a later item | fixed (390296c) | impl | — | — |
+| 2026-10-13 | baton | 6 | — | — | (r2) no findings posted | — | — | — | — |
+| 2026-10-13 | baton | 7 | R6 | should-fix | (A) the foreign-claim legacy import copied the cutover's and drifted: no claimed legacy event for the export | fixed — importLegacyClaim shared by both (f809218) | impl | — | — |
+| 2026-10-13 | baton | 7 | R7 | nit | (B) the held foreign-claim branch logged a new event per repeated report despite saying it was idempotent | fixed — a repeated report of the same commit logs nothing (f809218) | impl | — | — |
+| 2026-10-13 | baton | 7 | — | — | (r2) no findings posted | — | — | — | — |
+| 2026-10-13 | baton | 7 | — | — | (r3) no findings posted | — | — | — | — |
+| 2026-10-13 | baton | 8 | R1 | should-fix | (A) an accepted held row was never retired, so when the head came back to the sha it was held against a brand-new rewrite was accepted silently | fixed — an accepted line is consumed (its rows deleted) when it becomes the head (4f5f851) | item-silent | — | — |
+| 2026-10-13 | baton | 8 | R2 | should-fix | (B) the head-mismatch half of the new held predicate had no test | fixed — a hold against an older head is held again with a new deadline, tested (4f5f851) | impl | — | — |
+| 2026-10-13 | baton | 8 | R7 | should-fix | (AB) the docstring and the 0001 schema comments still said the held row is written once, from the first force post | fixed — the docstring says once per hold; the migration stays append-only; spec wording filed upstream spec-silent on R3-1223 (4f5f851) | spec-silent | — | — |
+| 2026-10-13 | baton | 8 | R1 | should-fix | (r2) the consume step retired only accepted rows whose own line became the head, so a hold a fast-forward left behind, accepted later, still accepted a new rewrite silently | fixed — every head move retires all rows held against the head it leaves, answered or not (a7433fe) | impl | — | — |
+| 2026-10-13 | baton | 8 | R5 | should-fix | (r3) after the head-move retirement the round-one row reset (UPDATE branch, again flag, two clauses of held) is unreachable and two comments still describe it | deferred — follow-up R3-1226 (round three; not pushed) | impl | — | — |
+| 2026-10-13 | baton | 9 | — | — | (AB) no findings posted | — | — | — | — |
+| 2026-10-15 | baton | 10 | R1 | blocking | (A) Two overlapping sync runs let the later-numbered run read first and post a shorter path after the earlier one, so lag was flagged as a regression and `safety` failed on a reachable 10-step trace that 1,000 samples missed. | fixed | spec-silent | — | — |
+| 2026-10-15 | baton | 10 | R1 | blocking | (AB) Three of the item's five liveness properties were not stated and none was checked, with 1,000 samples and Apalache at depth 5 where the item prescribes 10,000 and depth 20. | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R1 | should-fix | (A) `fencesClear`'s weak fairness covered one disjunction across all workers, so another worker's crash-and-reap loop satisfied it while the fence stood forever. | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R1 | blocking | (AB) The item's clocks, bounded drift, heartbeat, sleep/wake and alarm were not modelled, so a reaped worker waking to act on its lost lease was unreachable and left as an assumption. | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R1 | blocking | (AB) Neither Apalache at depth 5 nor the simulation reached a fix or merge leg, a regression or a confirmed `done`, so most `safety` invariants held vacuously under a claimed bounded proof. | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R1 | should-fix | (AB) No invariant asserted that every claim and advance passed every gate in force, so a dropped hold, owner-bar or hook guard would still pass `safety`. | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R10 | should-fix | (A) The PR body had no Exit criteria section saying how each criterion was checked, and Tests added gave counts instead of test names. | fixed — completed in round 2 (2-A-4) | impl | — | — |
+| 2026-10-15 | baton | 10 | R7 | should-fix | (A) The README and PR body said the unchecked liveness work was filed as R3-1243's remainder, but no such item existed. | fixed — R3-1254 filed and cited | impl | — | — |
+| 2026-10-15 | baton | 10 | R15 | nit | (AB) Unrelated churn rewrote package.json's description em dash as a JSON escape. | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R1 | should-fix | (B) R-BTN-39 and R-BTN-40, cited by the item, appeared nowhere under `model/`, so the `R-BTN-` grep exit criterion failed. | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R7 | nit | (B) A comment named a nonexistent `verify.qnt`; the instances live in `instances.qnt`. | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R1 | nit | (B) CI ran `npm run model` twice, once inside `npm test` and again in the `model` job. | argued: disagree — `npm test` runs the model at 1,000 samples and the `model` job at the item's 10,000 plus Apalache, as the ci.yml comment says | impl | — | — |
+| 2026-10-15 | baton | 10 | R1 | blocking | (r2) R-BTN-19's fence timeout was modelled on `up` rather than on time, so a force-reaped worker that slept fenced its ticket forever and `fencesClear` was false | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R7 | blocking | (r2) `barsLiftClaimable` concluded only that owner bars empty, which its own fairness guaranteed, never that the ticket became claimable | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R1 | should-fix | (r2) `readyIsClaimed` was false under its fairness, since a free worker could sleep or crash forever while the ticket stayed claimable | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R7 | should-fix | (r2) the README's witness list, `done` claim and `npm test` timing, and a check.mjs comment, disagreed with what check.mjs runs | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R10 | should-fix | (r2) the PR body's Exit criteria were not the item's five and Tests added still gave counts, so 1-A-6 was only partly closed | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R7 | nit | (r2) the drift assumption was worded as a clock offset, which cancels in R-BTN-6's `now − last_ok`; `MAX_DRIFT` bounds the deadline's lag | fixed | item-wrong | — | — |
+| 2026-10-15 | baton | 10 | R1 | blocking | (r3) after round 2, `weakFair(tick)` alone implied `fencesClear` through its `now == MAX_TIME` escape, so it checked nothing about fences | fixed — adjudicated: reproduced at 7a55d2d, fixed at ffd2b0a (the escape now covers only fences whose timeout lies past `MAX_TIME`) | impl | — | — |
+| 2026-10-15 | baton | 10 | R1 | should-fix | (r3) `readyIsClaimed` never asserted a granted claim and had a counterexample at the `MAX_CLAIMS` bound | fixed | impl | — | — |
+| 2026-10-15 | baton | 10 | R1 | should-fix | (r3) `endsResolve` followed from `weakFair(ownerResolve)` alone and assumed no fairness of the sync | fixed — renamed `endsResolveWithOwner` and documented as owner-implied by design; the sync-only form went to R3-1254 | impl | — | — |
+| 2026-10-15 | baton | 10 | R7 | should-fix | (r3) the README's TLC row reported a run of the pre-round-2 `fencesClear` as the current result | fixed | impl | — | — |
+| 2026-10-15 | baton | 13 | R16 | blocking | (AB) The PR merged with only its CHANGELOG commit; R3-1229's commit was pushed to the branch after the merge and reached no open PR. | fixed — redelivered in baton#14 | impl | — | — |
+| 2026-10-15 | baton | 13 | R1 | should-fix | (AB) `OIDC_AUDIENCE` stayed the bare host, against R-BTN-56's origin-verbatim `aud`, deferred to an item that did not own the switch. | fixed — in baton#14 | item-wrong | — | — |
+| 2026-10-15 | baton | 13 | R1 | should-fix | (A) R3-1209 and the baton project page still named the retired host. | fixed — docs 21006a44 | item-silent | — | — |
+| 2026-10-15 | baton | 13 | R2 | nit | (AB) The accepted-audience case asserted only `not 401`. | fixed — in baton#14 | impl | — | — |
+| 2026-10-15 | baton | 13 | R6 | nit | (A) The test helpers re-spelled the origin instead of reading the environment. | fixed — in baton#14 | impl | — | — |
+| 2026-10-15 | baton | 13 | R15 | nit | (A) No CHANGELOG row for the host move. | fixed — in baton#14 | impl | — | — |
+| 2026-10-15 | baton | 13 | R6 | should-fix | (B) `batonClient.mjs` exported two forms of the URL, one frozen at import. | fixed — docs 21006a44 | impl | — | — |
+| 2026-10-15 | baton | 14 | R6 | should-fix | (r2) `OIDC_AUDIENCE` was a second copy of each environment's origin, and the staging pair was untested | fixed | item-wrong | — | — |
+| 2026-10-15 | baton | 14 | R3 | nit | (r2) `batonUrl()` kept a trailing slash or an empty value, so calls went to `//v1/…` | fixed — docs 6ddac4f1 | impl | — | — |
+| 2026-10-15 | baton | 14 | R10 | should-fix | (r3) the PR body described the removed `OIDC_AUDIENCE` and omitted docs 6ddac4f1 | fixed | impl | — | — |
+| 2026-10-15 | baton | 14 | R9 | should-fix | (r3) the origin variable was `PUBLIC_ORIGIN`, where §3a and R-BTN-56 name it `BATON_ORIGIN` | fixed | item-wrong | — | — |
+| 2026-10-15 | baton | 14 | R7 | nit | (r3) the CHANGELOG row omitted docs 6ddac4f1 and the open marker | fixed | impl | — | — |
+| 2026-10-15 | baton | 15 | R1 | should-fix | (AB) 0005 renamed the columns but left `work_item_id` and `item_count` keys inside stored message payloads and event details, which the code now reads as `ticket_id` and `ticket_count` | fixed — e24bf3d | item-silent | — | — |
+| 2026-10-15 | baton | 15 | R10 | nit | (A) the exit grep as written hits 0005 and the migration test, which must name the old tables | fixed — docs b2fbb3f6 amends the criterion | item-wrong | — | — |
+| 2026-10-15 | baton | 15 | R9 | nit | (AB) refusal messages and the dashboard still said work item where the API says ticket | fixed — e24bf3d | impl | — | — |
+| 2026-10-15 | baton | 15 | R7 | nit | (B) README still named the `work_items` row | fixed — e24bf3d | impl | — | — |
+| 2026-10-15 | baton | 16 | R17 | should-fix | (A) the local queue's `outside()` had no holder identity: overlapping calls deadlocked it and a non-holder's call let a second request run beside the holder | fixed — ab578bb | impl | — | — |
+| 2026-10-15 | baton | 16 | R6 | should-fix | (A) the local server's own 400 carried no security headers and labelled every failure an unreadable request | fixed — ab578bb | impl | — | — |
+| 2026-10-15 | baton | 16 | R6 | should-fix | (A) the administrator-key parse was written twice and the copies disagreed on `#` lines | fixed — ab578bb | impl | — | — |
+| 2026-10-15 | baton | 16 | R7 | nit | (A) CLAUDE.md still said `transactionSync` | fixed — ab578bb | impl | — | — |
+| 2026-10-15 | baton | 16 | R7 | nit | (A) the CHANGELOG row did not name baton#16 | fixed — ab578bb | impl | — | — |
+| 2026-10-15 | baton | 16 | R10 | nit | (A) the PR body had no Exit criteria section | fixed — PR body | impl | — | — |
+| 2026-10-15 | baton | 16 | R11 | should-fix | (B) `Gate` and `outside` had no caller while comments said the queue is released at the signature check, which the front does before a request queues | fixed — ab578bb (comments say who will call it) | impl | — | — |
+| 2026-10-15 | baton | 16 | R3 | should-fix | (B) `--port 0` was accepted with the origin `http://127.0.0.1:0`, so every audience check failed unexplained | fixed — ab578bb | impl | — | — |
+| 2026-10-15 | baton | 16 | R1 | nit | (B) a `//x/…` request target became another authority locally, routing differently from the Worker | fixed — ab578bb | impl | — | — |
+| 2026-10-15 | baton | 16 | R2 | nit | (B) the boundary scan did not forbid core importing either host | fixed — ab578bb | impl | — | — |
+| 2026-10-15 | baton | 16 | R7 | nit | (B) README named no Node version and not what `--config` is for | fixed — ab578bb | impl | — | — |
+| 2026-10-15 | baton | 16 | R1 | blocking | (r2) the local store threw on an integer past 2^53, where the Durable Object returns a number, so an accepted heartbeat value turned claims and the dashboard into 500s locally | fixed — 6e602f3 | impl | — | — |
+| 2026-10-15 | baton | 16 | R3 | nit | (r2) the wildcard-host check matched spellings, so `::0` or `0` built an origin no client uses | fixed — 6e602f3 | impl | — | — |
+| 2026-10-15 | baton | 16 | R7 | nit | (r2) two comments named the old layout | fixed — 6e602f3 | impl | — | — |
+| 2026-10-15 | baton | 16 | R4 | should-fix | (r3) two local starts on one `--db` both served, each with its own queue, so §3's one request at a time did not hold | fixed — b2dfff1 | item-silent | — | — |
+| 2026-10-15 | baton | 16 | R3 | nit | (r3) `--origin` was not checked to be an origin, so a mistyped one served only misleading 400s | fixed — b2dfff1 | impl | — | — |
+| 2026-10-15 | baton | 16 | R7 | nit | (r3) the README understated when `--origin` is required | fixed — b2dfff1 | impl | — | — |
+| 2026-10-15 | baton | 16 | R10 | nit | (r3) the exit-criteria note said R3-1213/1214/1215 own S-BTN-14; none does, and its server half ran on one host | fixed — b2dfff1 and the item's note | item-wrong | — | — |
+| 2026-10-15 | baton | 17 | R1 | blocking | (A) the docs half renamed the worker concept in the deploy runbook, where only the prefix moves and the spec's runner is another thing | fixed — docs f24a56d6 | impl | — | — |
+| 2026-10-15 | baton | 17 | R10 | nit | (A) the PR body said the README changed; it names no runner path | fixed — PR body | impl | — | — |
+| 2026-10-15 | baton | 17 | R7 | should-fix | (B) R3-1251's exit grep spelled the old prefix as an alternation, `/v1/(worker|probe)/resources`, which the sweep missed | fixed — docs f24a56d6 | impl | — | — |
+| 2026-10-15 | baton | 19 | R1 | blocking | (AB) `inputs.from` accepted an inherited property (`review.toString`, `__proto__`) as a declared output | fixed — 346fe73 | impl | — | — |
+| 2026-10-15 | baton | 19 | R17 | should-fix | (AB) duplicate-padded `from`/`to` lists made the graph build quadratic: a 145 KB file took 30 s | fixed — 346fe73 | impl | — | — |
+| 2026-10-15 | baton | 19 | R6 | should-fix | (A) course labels used a drifted copy of §10.4's free-text rule | fixed — 346fe73 | impl | — | — |
+| 2026-10-15 | baton | 19 | R10 | nit | (A) the PR body had no Exit criteria and overstated the one-rule-per-file tests | fixed — 346fe73 and the PR body | impl | — | — |
+| 2026-10-15 | baton | 19 | R1 | should-fix | (B) `short_waits` labels and input/output names were held to the station-id pattern the spec gives only ids | fixed — 346fe73 | impl | — | — |
+| 2026-10-15 | baton | 19 | R1 | nit | (B) a repeated station in a list was refused, a rule the spec does not state | fixed — 346fe73 | impl | — | — |
+| 2026-10-15 | baton | 19 | R17 | should-fix | (r2) the cycle pass kept one object per leg × from × to triple: ~100 MB for a file within the caps | fixed — c82d93d | impl | — | — |
+| 2026-10-15 | baton | 19 | R1 | should-fix | (r2) §10.4 free text let C1 controls through, CSI among them | fixed — c82d93d | impl | — | — |
+| 2026-10-15 | baton | 19 | R19 | nit | (r2) the size caps were unnamed and unrecorded; the spec states none | fixed — c82d93d and an upstream note | spec-silent | — | — |
+| 2026-10-15 | baton | 19 | R1 | nit | (r2) a schema path accepted `.`, empty and `..`-free odd segments | fixed — c82d93d | spec-silent | — | — |
+| 2026-10-15 | baton | 19 | R17 | should-fix | (r3) violations accumulated without limit before the cut to 100: a 5.6 MB file exhausted 128 MB | fixed — 6ca58cf | impl | — | — |
+| 2026-10-15 | baton | 19 | R19 | nit | (r3) the violation cap had no name or reason | fixed — 6ca58cf | impl | — | — |
+| 2026-10-15 | baton | 19 | R7 | nit | (r3) text.ts said titles are §10.4 free text; board titles follow their own rule | fixed — 6ca58cf | impl | — | — |
+| 2026-10-15 | baton | 19 | R10 | nit | (r3) the C1 refusal on every free-text field was recorded nowhere | fixed — 6ca58cf and the PR body | impl | — | — |
+| 2026-10-15 | baton | 20 | R15 | blocking | (A) docs 9b769b4f broke `claim.sh --self-test` (16 of 195): the stub's mode and holder fixtures kept the unqualified paths | fixed — docs f6afca77 | impl | — | — |
+| 2026-10-15 | baton | 20 | R1 | should-fix | (AB) any registered repository's sync could overwrite the instance's fleet data (providers, matrix, `min_skills_version`) that gates every repository's claims | fixed — 86c42e8 (only the fleet repository writes it until 2b) | impl | — | — |
+| 2026-10-15 | baton | 20 | R2 | blocking | (A) the two new cross-repository guards — `ownConfirmations` and foreign-claim's forbidden — had no test | fixed — 86c42e8 | impl | — | — |
+| 2026-10-15 | baton | 20 | R6 | should-fix | (AB) the repository-id and local-id patterns, and the `repositoryOf` slice, were each spelled several times | fixed — 86c42e8 | impl | — | — |
+| 2026-10-15 | baton | 20 | R1 | should-fix | (AB) `?repository=` and the cutover body's `repository` reached SQL without `validate.ts` | fixed — 86c42e8 | impl | — | — |
+| 2026-10-15 | baton | 20 | R2 | should-fix | (A) the 0006 migration test claimed an adoption request it did not insert | fixed — 86c42e8 | impl | — | — |
+| 2026-10-15 | baton | 20 | R1 | should-fix | (B) `baton-sync --compare` read the removed top-level head and compared local ids against qualified ones | fixed — docs f6afca77 | impl | — | — |
+| 2026-10-15 | baton | 20 | R1 | should-fix | (r2) `next` could return another repository's ticket, which docs' client stripped to a local id naming a different docs item | fixed — docs 727943a8 (exits 3 and names the pick) | impl | — | — |
+| 2026-10-15 | baton | 20 | R1 | should-fix | (r2) transcript pointers were checked against every repository's transcript repositories combined, not the claim's own | fixed — bf584db | impl | — | — |
+| 2026-10-15 | baton | 20 | R11 | should-fix | (r2) `repositories.tiers` is stored but matching still uses the fixed ladder, undeclared | deferred — 2b, recorded on R3-1231 (docs 5c34ab64) and the PR body | impl | — | — |
+| 2026-10-15 | baton | 20 | R1 | should-fix | (r2) a second repository's no-holder legacy claim was named `item-<id>-<nonce>`, which adopt refused for every session | fixed — bf584db | impl | — | — |
+| 2026-10-15 | baton | 20 | R1 | nit | (r2) the order sorted by repository before rank, so repositories of equal weight did not interleave (R-BTN-61) | fixed — bf584db | impl | — | — |
+| 2026-10-15 | baton | 20 | R9 | nit | (r2) §11 said board/accept takes only the sha; with a board per repository it names the repository | fixed — docs e0266750 and an upstream note | spec-wrong | — | — |
+| 2026-10-15 | baton | 20 | R1 | should-fix | (r3) the heartbeat's transcript check unioned only stored lists, so a repository naming none lost the defaults once another named its own | fixed — 6f1cedd | impl | — | — |
+| 2026-10-15 | baton | 21 | R7 | blocking | (AB) rule 9 differed between the query and isEligible for a ticket whose course has no registry row, every ticket right after migration 0007 | fixed — 80c0078 | impl | — | — |
+| 2026-10-15 | baton | 21 | R9 | blocking | (A) the dashboard never rendered the repositories' or workers' courses the PR body said it showed | fixed — 80c0078 | impl | — | — |
+| 2026-10-15 | baton | 21 | R4 | should-fix | (AB) the registry only grew: a course dropped from a posted registry stayed in force, its refusal never cleared, with no per-repository bound | fixed — 80c0078 (a posted registry is the whole registry) | spec-silent | — | — |
+| 2026-10-15 | baton | 21 | R1 | should-fix | (A) an oversized course file refused the whole board post instead of keeping the previous file | fixed — 80c0078 | impl | — | — |
+| 2026-10-15 | baton | 21 | R6 | nit | (AB) the course-id pattern, the version ceiling and the 64 cap were each spelled more than once | fixed — 80c0078 | impl | — | — |
+| 2026-10-15 | baton | 21 | R2 | should-fix | (AB) the heartbeat courses guards and most registry bounds had no test | fixed — 80c0078 | impl | — | — |
+| 2026-10-15 | baton | 21 | R7 | should-fix | (AB) a worker declaring no course was refused stale-skills but listed in neither stale_courses nor Needs you | fixed — 80c0078 | spec-silent | — | — |
+| 2026-10-15 | baton | 21 | R7 | nit | (r2) the repeat-head registry path applied a body the sync may build at an ancestor, so a course could roll back | fixed — 3d1a7dd (a repeat head applies no registry) | impl | — | — |
+| 2026-10-15 | baton | 21 | R7 | nit | (r2) the new registry caps claimed to be recorded on R3-1231 and were not | fixed — docs 14f8c7ae | impl | — | — |
+| 2026-10-15 | baton | 21 | R17 | should-fix | (r3) a refused course file's violations were stored and served unbounded, repeating its raw keys with control characters | fixed — 6fdfc5b | impl | — | — |
+| 2026-10-15 | baton | 21 | R7 | nit | (r3) a worker was told stale-skills for a course it never declares | fixed — 6fdfc5b | spec-silent | — | — |
+| 2026-10-15 | baton | 22 | R1 | blocking | (AB) docs' sync read its commit and built its payload before taking its number, and a retry reposted that payload under a new number | fixed — docs a3ff238a, 30645f68; vendored 971e8aa, 4ec0617 | impl | — | — |
+| 2026-10-15 | baton | 22 | R1 | should-fix | (B) a refresh at the head never judged staleness, so a claim made while the head-moving post's number was outstanding stayed until the head moved | fixed — 971e8aa | impl | — | — |
+| 2026-10-15 | baton | 22 | R1 | should-fix | (B) the writing transaction re-checked neither the number nor the head after awaiting the row hashes, so a concurrent older post could overwrite a newer one | fixed — 971e8aa | impl | — | — |
+| 2026-10-15 | baton | 22 | R1 | nit | (B) a run that takes a number and posts nothing leaves the repository busy for up to ten minutes | argued: upstream — R3-1231 (spec-silent note, docs 7599d014) | spec-silent | — | — |
+| 2026-10-15 | baton | 22 | R1 | should-fix | (A) end_observation does not yet gate claimability (§7.2's clause that a sync follows the last end) | deferred — part 4, recorded on R3-1231 (docs 5350f8c4) | item-silent | — | — |
+| 2026-10-15 | baton | 22 | R3 | should-fix | (A) a repository 0006 created without a board head could never take a number or post | fixed — 4ec0617 | impl | — | — |
+| 2026-10-15 | baton | 22 | R1 | nit | (A) shadow and legacy claims did not record the counter, so any reading could make them stale | fixed — 4ec0617 | impl | — | — |
+| 2026-10-15 | baton | 22 | R1 | should-fix | (r2) a held force post accepted the reading but never judged claims, so staleness stalled for the hold's 24 hours | fixed — 036efd7 | impl | — | — |
+| 2026-10-15 | baton | 22 | R1 | nit | (r2) the shadow release ended a claim without recording end_observation | fixed — 036efd7 | impl | — | — |
+| 2026-10-15 | baton | 22 | R1 | should-fix | (r3) docs' live sync failed on every run once docs 1c2916f7 reached main, asking the deployed Baton for a route it did not have yet | fixed — merged and deployed with baton#22; the ordering rule recorded on R3-1231 | impl | — | — |
+| 2026-10-15 | baton | 22 | R10 | nit | (r3) the PR body's counts, tests and docs commits were out of date | fixed — PR body | impl | — | — |
+| 2026-10-15 | baton | 22 | R7 | nit | (r3) the CHANGELOG row cited only the first of three docs commits | fixed — 39b6dda | impl | — | — |
+| 2026-10-16 | baton | 23 | R17 | blocking | (AB) branchMatches compiled a pattern from git into a backtracking RegExp, so a pattern with several stars stalled the Durable Object for a minute | fixed — ad9ba0a (a linear wildcard match; at most 4 stars) | impl | — | — |
+| 2026-10-16 | baton | 23 | R9 | should-fix | (A) the branch-holder query refused legal git branch names with 400 instead of answering | fixed — ad9ba0a | spec-silent | — | — |
+| 2026-10-16 | baton | 23 | R6 | should-fix | (AB) the tier name and branch patterns were spelled twice | fixed — ad9ba0a | impl | — | — |
+| 2026-10-16 | baton | 23 | R19 | should-fix | (A) tier_ceilings was bounded by a limit named for courses | fixed — ad9ba0a | impl | — | — |
+| 2026-10-16 | baton | 23 | R2 | should-fix | (AB) query/isEligible parity in a non-docs ladder was checked for two pairs only | fixed — ad9ba0a (a rule 5 differential) | impl | — | — |
+| 2026-10-16 | baton | 23 | R1 | should-fix | (A) a tier_ceilings entry for an unknown repository refused the whole heartbeat | fixed — ad9ba0a (set aside and reported) | spec-silent | — | — |
+| 2026-10-16 | baton | 23 | R1 | nit | (AB) a named ceiling a ladder lacked fell through to the legacy ceiling, possibly the top | fixed — ad9ba0a; R3-1240 note | spec-silent | — | — |
+| 2026-10-16 | baton | 23 | R11 | nit | (AB) the Workers view returned tier_ceilings raw and the dashboard showed only the single ceiling | fixed — ad9ba0a | impl | — | — |
+| 2026-10-16 | baton | 23 | R1 | should-fix | (AB) the re-scope to R3-1232 lived only in Status lines, not in either item's contract sections | fixed — docs f3251ae4; it.todo in ad9ba0a | impl | — | — |
+| 2026-10-16 | baton | 23 | R9 | should-fix | (B) the Ready view offered only docs' three tiers | fixed — ad9ba0a | impl | — | — |
+| 2026-10-16 | baton | 23 | R7 | should-fix | (B) the S-BTN-26 header said the branch clause arrives later | fixed — ad9ba0a | impl | — | — |
+| 2026-10-16 | baton | 23 | R9 | nit | (B) the repository placeholder's expansion was unrecorded | fixed — docs fe6c131e | spec-silent | — | — |
+| 2026-10-16 | baton | 23 | R3 | should-fix | (r2) branch-holder answered 'not held' for git's own spellings, refs/heads/\<branch> and owner/name.git | fixed — 5877948 | impl | — | — |
+| 2026-10-16 | baton | 23 | R1 | nit | (r2) a ceiling for an unregistered repository was dropped, leaving the worker at that ladder's top once it registered | fixed — 5877948 | impl | — | — |
+| 2026-10-16 | baton | 23 | R7 | nit | (r2) the matcher's comment called it linear | fixed — 5877948; R3-1231 note corrected | impl | — | — |
+| 2026-10-16 | baton | 23 | R6 | nit | (r2) aliasing the registered default branch to GIT_BRANCH widened it to characters that break the dashboard's links | fixed — 5877948 | impl | — | — |
+| 2026-10-16 | baton | 23 | R2 | should-fix | (r3) no test reached branch-holder's previous-pattern match or its fence_pending answer | fixed — bb88054 | impl | — | — |
+| 2026-10-16 | baton | 23 | R7 | nit | (r3) R3-1231's description and What to build still promised the work moved to R3-1232 | fixed — docs e95d4975 | impl | — | — |
+| 2026-10-16 | baton | 24 | R7 | blocking | (A) comments still said only JWTs are trusted, that the front verifies every principal, and that nothing calls outside | fixed — e858310 | impl | — | — |
+| 2026-10-16 | baton | 24 | R3 | should-fix | (B) a Signature of a length that is no multiple of 4 made atob throw an internal error instead of 401 | fixed — e858310 | impl | — | — |
+| 2026-10-16 | baton | 24 | R1 | should-fix | (B) the seed would revoke worker keys an owner grants once R3-1240 lands | fixed — e858310 (created_by seed) | item-silent | — | — |
+| 2026-10-16 | baton | 24 | R2 | should-fix | (B) the nonce check across the awaited crypto had no concurrent test | fixed — e858310 | impl | — | — |
+| 2026-10-16 | baton | 24 | R2 | should-fix | (B) migration 0010 was untested on a populated 0009 database | fixed — e858310 | impl | — | — |
+| 2026-10-16 | baton | 24 | R3 | nit | (B) revocation was not re-checked after the awaited crypto | fixed — e858310 | impl | — | — |
+| 2026-10-16 | baton | 24 | R3 | nit | (B) a revoked key listed again was skipped silently | fixed — e858310 (Needs you) | impl | — | — |
+| 2026-10-16 | baton | 24 | R1 | should-fix | (AB) the stale check runs in the object, not the front as What to build 3 says, unrecorded | fixed — e858310 (deviation recorded; docs 79082af7) | item-wrong | — | — |
+| 2026-10-16 | baton | 24 | R17 | should-fix | (A) a signed body was buffered whole before its 1 MiB cap was judged | fixed — e858310 (streaming cap) | impl | — | — |
+| 2026-10-16 | baton | 24 | R3 | should-fix | (A) a malformed BATON_KEYS stopped the whole Baton at start | fixed — e858310 (Needs you; keys in force stay) | impl | — | — |
+| 2026-10-16 | baton | 24 | R1 | should-fix | (A) a session under a bearer token or rotated key could never continue under its new key | fixed — e858310 (handover) | item-silent | — | — |
+| 2026-10-16 | baton | 24 | R7 | nit | (A) the nonce TTL comment and the prune used a later clock than the created check | fixed — e858310 | impl | — | — |
+| 2026-10-16 | baton | 24 | R2 | should-fix | (A) sk- paths were untested against real ssh-keygen output and undeclared | fixed — e858310 (declared: no FIDO authenticator here) | impl | — | — |
+| 2026-10-16 | baton | 24 | R15 | nit | (A) no changelog row | fixed — e858310 | impl | — | — |
+| 2026-10-16 | baton | 24 | R7 | blocking | (r2) keysNotice separated verifySigned from its doc | fixed — cf62b0d | impl | — | — |
+| 2026-10-16 | baton | 24 | R18 | should-fix | (r2) restoring the last good BATON_KEYS left the refusal in Needs you | fixed — cf62b0d | impl | — | — |
+| 2026-10-16 | baton | 24 | R3 | nit | (r2) a concurrent prune by a later clock could free a nonce while a replay awaited its crypto | fixed — cf62b0d (TTL twice the window and a minute) | impl | — | — |
+| 2026-10-16 | baton | 24 | R2 | should-fix | (r2) rotation, pull-back and token-to-token handover were untested | fixed — cf62b0d | impl | — | — |
+| 2026-10-16 | baton | 24 | R3 | should-fix | (r3) an unset BATON_KEYS read as an empty list revoked every seeded key for good | fixed — c2d5c2d | impl | — | — |
+| 2026-10-16 | baton | 24 | R3 | nit | (r3) clearing a refusal dropped the in-force list's revoked-key notice | fixed — c2d5c2d | impl | — | — |
+| 2026-10-16 | baton | 25 | R9 | should-fix | (AB) the webhook answered 200 with a JSON body naming repositories where §11 says 204 | fixed — 6cebb32 | impl | — | — |
+| 2026-10-16 | baton | 25 | R2 | should-fix | (AB) nothing tested that the alarm is armed early for a trailing dispatch | fixed — 6cebb32 | impl | — | — |
+| 2026-10-16 | baton | 25 | R19 | nit | (AB) every suppressed delivery rewrote the same trailing_at | fixed — 6cebb32 | impl | — | — |
+| 2026-10-16 | baton | 25 | R6 | should-fix | (A) the test helper re-implemented deliverySignature | fixed — 6cebb32 | impl | — | — |
+| 2026-10-16 | baton | 25 | R18 | nit | (A) after a restart start() did not arm by the owed trailing dispatch | fixed — 6cebb32 | impl | — | — |
+| 2026-10-16 | baton | 25 | R6 | should-fix | (B) the full-name pattern was a looser copy of GIT_REPO | fixed — 6cebb32 | impl | — | — |
+| 2026-10-16 | baton | 25 | R1 | should-fix | (B) a short name in repos matched any owner's repository of that name | fixed — 6cebb32 (read under the home owner; deviation recorded) | impl | — | — |
+| 2026-10-16 | baton | 25 | R3 | nit | (B) a repository retired inside its window still got a trailing dispatch | fixed — 6cebb32 | impl | — | — |
+| 2026-10-16 | baton | 25 | R2 | should-fix | (r2) half of the push self-filter and per-event reads were untested | fixed — fe129d7 | impl | — | — |
+| 2026-10-16 | baton | 25 | R19 | nit | (r2) the forwarded fields' length caps were bare literals | fixed — fe129d7 | impl | — | — |
+| 2026-10-16 | baton | 25 | R10 | nit | (r2) the PR body misdescribed short-name matching and lacked a Deviations entry | fixed — PR body | impl | — | — |
+| 2026-10-16 | baton | 25 | R1 | should-fix | (r3) a non-Latin-1 author email or workflow path made the front answer 500 and trigger nothing | fixed — e54d5f8 | impl | — | — |
+| 2026-10-16 | baton | 25 | R7 | nit | (r3) the local host lacked R-BTN-55's --github-webhook-secret and the README the config key | fixed — e54d5f8 | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | blocking | (AB) forSync bound a GitHub OIDC token to a forge github repository on any host, not github.com alone | fixed — 61dd2f4 | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | should-fix | (AB) the dot-segment rule never fired because the URL parser resolved dot segments first | fixed — 61dd2f4 | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | should-fix | (AB) the remote grammar accepted userinfo, so a forge credential could reach SQLite | fixed — 61dd2f4 | impl | — | — |
+| 2026-10-16 | baton | 26 | R2 | blocking | (A) seedSyncKeys, the only path from a registration's sync_keys to the table, had no test | fixed — 61dd2f4 | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | blocking | (A) a ready ticket with no url still drew a link on the dashboard | fixed — 61dd2f4 | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | should-fix | (A) a gitlab-ci identity's issuer was never tied to the web_base host | fixed — 61dd2f4 | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | should-fix | (A) a gitlab, gitea or git registration could still carry sync and mirror workflows | fixed — 61dd2f4 | impl | — | — |
+| 2026-10-16 | baton | 26 | R3 | should-fix | (A) register() validated sync_keys and then dropped them | fixed — 61dd2f4 (registerWithKeys) | impl | — | — |
+| 2026-10-16 | baton | 26 | R2 | should-fix | (A) checkPullRequest's accepting branches were untested | fixed — 61dd2f4 | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | should-fix | (A) an administrator key at /v1/sync/* was unauthenticated, not forbidden | fixed — 61dd2f4 | impl | — | — |
+| 2026-10-16 | baton | 26 | R10 | nit | (A) the item named verifySync in auth.ts; the diff splits it across auth.ts and baton.ts | fixed — PR body deviation | item-wrong | — | — |
+| 2026-10-16 | baton | 26 | R1 | should-fix | (B) the board payload's transcript_repos check accepted only owner/name | fixed — 61dd2f4 | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | should-fix | (r2) a github.com repository with sync keys only could still register a mirror_workflow | fixed — 84141cf | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | should-fix | (r2) the written-path check was skipped for https:host forms the parser accepts | fixed — 84141cf | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | should-fix | (r2) an https remote's query or fragment could still carry a credential | fixed — 84141cf | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | should-fix | (r2) registerWithKeys committed the repository before a conflicting key failed | fixed — 84141cf | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | nit | (r2) register() wrote dispatch github-app for a GitHub Enterprise repository | fixed — 84141cf | impl | — | — |
+| 2026-10-16 | baton | 26 | R2 | nit | (r2) the reply calling the no-claim branch unreachable was wrong; orient may carry pr | fixed — 84141cf | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | nit | (r3) trailing control characters passed the link rule and the remote grammar | fixed — c3b0384 | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | nit | (r3) a token ref above U+00FF made the front answer 500 | fixed — c3b0384 | impl | — | — |
+| 2026-10-16 | baton | 26 | R1 | nit | (r3) a sync key later listed as an administrator key still acted as the sync | fixed — c3b0384 | impl | — | — |
+| 2026-10-16 | baton | 27 | R1 | blocking | (AB) a refresh or held post that omitted a live ticket left its old station cached, so it was offered | fixed — 9df2316 | impl | — | — |
+| 2026-10-16 | baton | 27 | R7 | should-fix | (AB) past the expedite bound an expedited ticket sorted last and kept its place in the group | fixed — 9df2316 | spec-silent | — | — |
+| 2026-10-16 | baton | 27 | R1 | blocking | (A) bars-mismatch was judged only for active claims, missing a suspension's own confirming snapshot | fixed — 9df2316 | impl | — | — |
+| 2026-10-16 | baton | 27 | R2 | should-fix | (B) migration 0013 had no upgrade test over a populated 0012 database | fixed — 9df2316 | impl | — | — |
+| 2026-10-16 | baton | 27 | R6 | should-fix | (B) the https pointer check was spelled twice | fixed — 9df2316 | impl | — | — |
+| 2026-10-16 | baton | 27 | R11 | nit | (B) the end's next was validated and dropped | fixed — 9df2316 (kept in the resume record) | impl | — | — |
+| 2026-10-16 | baton | 27 | R7 | nit | (B) the graph cache was described as per request | fixed — 9df2316 | impl | — | — |
+| 2026-10-16 | baton | 27 | R1 | nit | (B) the item's leg-name grep still hits the activity kinds | argued: upstream — R3-1237 moves the activity kinds; 0001 is append-only | item-wrong | — | — |
+| 2026-10-16 | baton | 27 | R1 | should-fix | (r2) a held post dropped closures of tickets the head still had, so a done end waited the hold | fixed — 0e12b6d | impl | — | — |
+| 2026-10-16 | baton | 27 | R1 | should-fix | (r2) a course-changed release at a dropped station was refused | fixed — 0e12b6d | impl | — | — |
+| 2026-10-16 | baton | 27 | R1 | should-fix | (r2) bars-mismatch judged old runs against every later snapshot | fixed — 0e12b6d (judged once) | spec-silent | — | — |
+| 2026-10-16 | baton | 27 | R1 | nit | (r2) bars-mismatch missed runs started under a renamed leg | fixed — 0e12b6d | impl | — | — |
+| 2026-10-16 | baton | 27 | R1 | nit | (r2) normative tickets never appeared in the dashboard's Ready | fixed — 0e12b6d | item-silent | — | — |
+| 2026-10-16 | baton | 27 | R1 | should-fix | (r3) a suspension at a dropped station was accepted and could never confirm | fixed — ca43e0b | impl | — | — |
+| 2026-10-16 | baton | 27 | R1 | blocking | (r3) a given-up self-loop recorded as finished left the suspension unconfirmable | fixed — ca43e0b, 8b94680 (adjudicated: advance case found and fixed) | spec-silent | — | — |
+| 2026-10-16 | baton | 27 | R2 | should-fix | (r3) no chore fixture though the item's tests name it | fixed — ca43e0b | impl | — | — |
+| 2026-10-16 | baton | 27 | R3 | blocking | (r3) a leg named constructor made every board post throw | fixed — ca43e0b; adjudicated NOT REPRODUCED at head | impl | — | — |
+| 2026-10-16 | baton | 28 | R2 | blocking | (AB) releaseBarHolders and the owner-bar released end had no test and no Untested line | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R1 | blocking | (AB) registration checked owner roles outside the owners' transaction, so one key could be owner and sync key | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R1 | blocking | (AB) the heartbeat carried every repository's owner bars, not the worker's | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R1 | should-fix | (A) another owner could re-add an owner key an administrator revoked | fixed — aad821e (repository_owners.revoked_at) | spec-silent | — | — |
+| 2026-10-16 | baton | 28 | R1 | should-fix | (AB) an owner bar's course and legs were never checked against the course files | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R9 | should-fix | (A) the CLI could not clear required bars, reset retry or set unblocked_trigger | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R1 | should-fix | (A) an Access assertion alone replaced the session R-BTN-16 requires | fixed — aad821e (Access alone only while no administrator key is listed) | impl | — | — |
+| 2026-10-16 | baton | 28 | R1 | should-fix | (A) a key added to BATON_ADMIN_KEYS later still acted as worker or owner | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R1 | should-fix | (A) a required-bar change dispatched no sync | fixed — aad821e | item-silent | — | — |
+| 2026-10-16 | baton | 28 | R2 | should-fix | (AB) the G-BTN-40 parity test never ran a granted worker | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R17 | nit | (AB) the login fetch had no rejection sink | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R9 | nit | (A) Limits omitted unblocked_trigger | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R15 | nit | (AB) the package.json description was rewritten with escapes | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R1 | blocking | (B) any repository's owner could take over a BATON_KEYS-seeded key and cut its other reach | fixed — aad821e (only an administrator takes it over) | spec-silent | — | — |
+| 2026-10-16 | baton | 28 | R6 | blocking | (B) the signed-request pre-check was written three times in front.ts | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R6 | should-fix | (B) SESSION_COOKIE was defined twice | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R7 | blocking | (B) checkRetry accepted no backoff though its comment says one to eight | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R7 | should-fix | (B) registry comments still said R3-1240 would add the routes | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R2 | blocking | (B) the required bar at an advance, the judge's policy and the course-file hold were untested | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R2 | should-fix | (B) the sync dispatch on a bar change was never asserted | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R6 | nit | (B) the token pattern was typed twice | fixed — aad821e | impl | — | — |
+| 2026-10-16 | baton | 28 | R1 | should-fix | (r2) provider-suspended was refused as an owner bar's reason | fixed — 6f1cf6d | impl | — | — |
+| 2026-10-16 | baton | 28 | R3 | should-fix | (r2) a required bar naming an unregistered course was accepted and covered nothing | fixed — 6f1cf6d | impl | — | — |
+| 2026-10-16 | baton | 28 | R1 | should-fix | (r2) an administrator's revoke of a token credential was undone by the next secrets edit | fixed — 6f1cf6d (credentials.revoked_by) | impl | — | — |
+| 2026-10-16 | baton | 28 | R1 | should-fix | (r2) fingerprints reached SQL and the event log unchecked | fixed — 6f1cf6d | impl | — | — |
+| 2026-10-16 | baton | 28 | R9 | should-fix | (r2) the change form refused remote, web_base, ci_identity and the workflows | fixed — 6f1cf6d (dispatch stays with R-BTN-94's adapters) | item-silent | — | — |
+| 2026-10-16 | baton | 28 | R2 | should-fix | (r2) afterFailure's policy branch was untested and its null arm unreachable | fixed — 6f1cf6d | impl | — | — |
+| 2026-10-16 | baton | 28 | R1 | should-fix | (r2) a granted key could declare a course of a repository it was not granted | fixed — 6f1cf6d | item-silent | — | — |
+| 2026-10-16 | baton | 28 | R1 | blocking | (r3) a session was refused when an Access assertion Baton's settings reject came with it | fixed — a889da7; adjudicated NOT REPRODUCED at a889da7 | impl | — | — |
+| 2026-10-16 | baton | 28 | R3 | blocking | (r3) the CLI dropped unknown flags and Baton accepted an empty repository change | fixed — a889da7, 614f04a (adjudicated: the CLI half reproduced at a889da7 and fixed) | impl | — | — |
+| 2026-10-16 | baton | 28 | R9 | should-fix | (r3) the CLI could not reach the sync-key, forge, owner-key and link fields of the registration | fixed — a889da7 | impl | — | — |
+| 2026-10-16 | baton | 28 | R9 | blocking | (r3) probes were not shown on the dashboard | fixed — a889da7; adjudicated NOT REPRODUCED at a889da7 | impl | — | — |
+| 2026-10-16 | baton | 28 | R7 | should-fix | (r3) the local host read --admin-keys once though both hosts claim every request | fixed — a889da7 | impl | — | — |
+| 2026-10-16 | baton | 28 | R17 | nit | (r3) the CLI's fetch had no deadline | fixed — a889da7 | impl | — | — |

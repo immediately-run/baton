@@ -1,0 +1,73 @@
+---
+title: "R3-1248 — Baton courses change without Baton: course-file changes under claims, the test kit and per-repository stats"
+id: R3-1248
+project: baton
+status: available
+updated: 2026-10-14
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1082
+tier: judgement
+description: "renamed_from carries claims over, a removed station or leg ends released:course-changed and must raise min_worker_version, baton test-course replays live tickets under a proposed .baton/, and GET /v1/repositories/{repository}/stats shows a course its own record; S-BTN-37, -38. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1232
+  - R3-1231
+---
+
+**Brief:** [[home.mdx]].
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2d (R-BTN-64, -65, the test kit, the stats
+endpoint, `api_version`), §2e (`renamed_from`), §11 (`stats`), §13a S-BTN-37, -38 (docs@0928c207; the spec at docs#212 head 0d4ef0e4)
+**Depends on:** R3-1232, R3-1231
+
+### Requires
+
+- none — the test kit runs the local host against a checkout.
+
+### Why
+
+A minimal core exists so projects — and agents — can change their courses without changing
+Baton (owner, 2026-10-14). That needs claims to survive a course change, a way to test a
+change before it merges, and a way to see whether it helped. Tier: judgement.
+
+### What to build
+
+1. Course changes under claims: `renamed_from` carries a claim's station or leg over; a claim
+   whose station or leg is gone gets `station: unknown` and ends `released:course-changed`.
+2. `baton test-course <root> <course>`: starts a local Baton, posts the proposed `.baton/`,
+   replays every live ticket, fails when one's path shrinks without its evidence changing,
+   when a station or leg is removed without raising `min_worker_version`, or when legs and
+   `legs/` scripts do not pair one to one; runs the generic scenarios against the course.
+3. `GET /v1/repositories/{repository}/stats` for keys granted on the repository.
+4. The `Min-Worker-Version` trailer check in docs' CI (`check-baton.mjs`).
+
+### Architecture — the decisions, named
+
+- **The test kit is the local host**, not a second implementation; it imports R3-1231's
+  `validateCourse`.
+- **Stats are aggregates and ids**: no profile, report or advice text.
+- **Do not**: let a course change release a claim before it reaches a boundary; read stats
+  for a repository the key has no grant on.
+
+### Tests
+
+- Integration: S-BTN-37, S-BTN-38.
+- `test/unit/test-course.test.ts`: the kit over docs' real `.baton/` passes, and over three
+  broken variants fails naming the rule.
+
+### Exit criteria
+
+- [ ] S-BTN-37 and S-BTN-38 pass
+- [ ] `npx baton test-course ../docs roadmap-pr` green against docs `main`
+- [ ] `npm run typecheck` green in baton; `npm run verify` green in docs
+
+## Status
+
+_(filed 2026-10-14)_

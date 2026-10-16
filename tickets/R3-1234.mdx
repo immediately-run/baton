@@ -1,0 +1,80 @@
+---
+title: "R3-1234 — Baton in the skills: stations, legs, advance, suspension and hand-off documents in next-roadmap-item and review-gate"
+id: R3-1234
+project: baton
+status: available
+updated: 2026-10-14
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1071
+tier: critical
+description: "Rewrite the roadmap-pr skills for stations and legs: each leg a self-contained section runnable by baton run's leg scripts or an interactive session, advance naming the next leg, suspension at a station with a hand-off document, the leg/run/claim markers, Step 0 through Baton, the Course-Version trailer. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1233
+  - R3-1215
+---
+
+**Brief:** [[home.mdx]].
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.12 (R-BTN-38, -40, -44, the markers), §2e
+(R-BTN-63, -71), §6.5, §15 rows for `next-roadmap-item` and `review-gate`, R-BTN-22, R-BTN-65 (docs@0928c207; the spec at docs#212 head 0d4ef0e4)
+**Depends on:** R3-1233, R3-1215
+
+### Requires
+
+- none — skill text and the scripts it calls; the scenarios that drive it are Baton's.
+
+### Why
+
+The skills still describe one claim from claim to merge with no stations, no `advance` and
+no hand-off documents. Agents follow the skills, so the protocol exists only once they say
+it. Tier: critical — every claim, fence and status write is described here.
+
+### What to build
+
+1. `next-roadmap-item`: Step 2 claims and reads the claim's station; each leg is a section
+   runnable on its own (`--leg <leg>`), so `baton run`'s leg scripts (R3-1246) and an
+   interactive session use the same text; at each boundary push the evidence, then
+   `advance` naming the next leg; suspend at a station with the hand-off document when a gate
+   refuses, the advice says a line is short, or every leg waits on something slower than CI;
+   `released:provider-exhausted` mid-leg.
+2. `review-gate` (both copies): the `baton:review` and `baton:fix` markers with `leg`, `run`
+   and `claim`, these are evidence and carry no position: the review-gate skill **returns** its verdict to
+   the leg script, whose `close` writes the `baton:close` closing marker with `reached`, `next`
+   and the `out=` pointers, percent-encoded (BATON_SPEC R-BTN-82, R-BTN-83, §6.12); seats from `baton:seats`; substitution posts a new seats marker.
+3. The hand-off document's sections (R-BTN-44).
+4. Step 0 no longer finishes `in-review` tickets unleased; the `Course-Version` trailer
+   replaces `Skills-Version`; `roadmap-pr`'s `version` bumped.
+
+### Architecture — the decisions, named
+
+- **Each leg is a self-contained section** with its inputs (what git must show) and outputs
+  (the evidence it leaves), matching BATON_SPEC §6.12's leg table, so a fresh session can run
+  any leg.
+- **The skill names the next leg only where the graph branches** (from `reviewed`).
+- **Do not**: describe positions or round-numbered leg keys; tell an agent to wait on a lease
+  for more than 30 minutes of CI; write the hand-off document into the branch.
+
+### Tests
+
+- `scripts/check-skills-baton.test.mjs` (new): every leg in `course.json` has a section in
+  `next-roadmap-item` and every marker kind the skills write is one `locate` reads.
+- Scenarios exercised by the skills' text: S-BTN-17, -19, -23 (run by Baton's harness).
+
+### Exit criteria
+
+- [ ] `node --test scripts/check-skills-baton.test.mjs` green
+- [ ] `git grep -n "review:r\|leg_key\|handed-off:" .claude/skills .opencode/skills` returns nothing
+- [ ] `npm run verify` green
+
+## Status
+
+_(filed 2026-10-14)_
+
+_2026-10-14 — rewritten for the stations revision of BATON_SPEC (docs#212 head 0d4ef0e4): stations and legs in a course file, owner bars and settings in SQLite, observations, the runner and webhooks._

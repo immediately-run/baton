@@ -1,0 +1,98 @@
+---
+title: "R3-1245 — Baton runner: baton run claims tickets and runs each leg through the course's per-leg scripts"
+id: R3-1245
+project: baton
+status: in-review
+updated: 2026-10-16
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1079
+tier: critical
+description: "The generic worker loop of R-BTN-72: baton run hosts the sidecar, claims, loads course.json and legs/<leg>.mjs from the claim's snapshot, follows the graph, calls the finished leg's handoff before a suspension or release, aborts on a lost lease; S-BTN-41. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/33
+depends_on:
+  - R3-1232
+  - R3-1239
+---
+
+**Brief:** [[home.mdx]].
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.13 (R-BTN-72), §2e (R-BTN-63, -69), §6.3–6.4
+(the sidecar it hosts, R-BTN-6, -19, -26), §6.8 (child sessions), R-BTN-34, R-BTN-44, §13a
+S-BTN-41 (docs@0928c207; the spec at docs#212 head 1dae3316)
+**Depends on:** R3-1232, R3-1239
+
+### Requires
+
+- none — the scenario runs stub leg scripts against the harness.
+
+### Why
+
+The owner wants a small CLI that asks Baton for the next leg and runs what that leg needs,
+by the same convention as the server's hooks, with no per-course worker logic: the course
+file is the state machine and each leg is a script (2026-10-14). Tier: critical — it holds
+leases and must fence.
+
+### What to build
+
+1. `baton run [--harness …] [--home <checkout>]`: heartbeats (it hosts the sidecar),
+   recommends, claims, and for each leg loads `course.json` and `legs/<leg>.mjs` from the
+   claim's `snapshot_sha` in the home checkout (after R-BTN-34's fetch).
+2. The first leg is the claim response's first ready leg. The result protocol: `{next?,
+   session?, bars?}`, `{suspend: true, reached}`, `{end: 'done', detail?}`, `{release:
+   \<reason>, reached}`; the only edge is taken without asking, a named edge only if it is one
+   (else suspend there), passing the result's `bars` on the single edge too (`adjudicated` →
+   `merge`); a next leg the latest snapshot shows `waiting` suspends instead — unless its
+   `waiting_on` is in `course.json`'s `short_waits` (docs: `ci`), when the runner keeps the
+   claim and re-reads at each heartbeat for up to 30 minutes (R-BTN-40), then suspends;
+   `advance` or `end` called; at an end station, `done`; a gate's or a `max-runs` refusal
+   suspends at the station reached (never releases); an `off-graph` refusal or
+   `station: unknown` ends `released:course-changed`.
+2a. **Regression**: a heartbeat whose `git.regressed` is true fires the `AbortSignal` with
+   `regressed`; the leg stops at its next safe point, `handoff` runs, and the runner ends
+   `suspended:<station>` at the leg's `from`.
+3. Before any suspension or release, the leg's `handoff(ctx)` (required); the `AbortSignal`
+   fires `release` on a release message or a releasing owner bar (stop at the next safe
+   point) and `lease-lost` on a lost lease (stop at once, kill the process group, no
+   hand-off).
+4. Leg sessions get `IR_BATON_PARENT` and `IR_BATON_STATE`: they register no worker, read the
+   runner's state file for the fence and bars, append to its spool, and never claim, advance
+   or end.
+
+### Architecture — the decisions, named
+
+- **The runner knows no course**: no leg or station name appears in its code; the graph and
+  the scripts decide.
+- **Scripts load per claim** (a fresh `import()` of the snapshot's file), so a course change
+  needs no restart.
+- **Do not**: push or comment from the runner; retry a refused `advance` silently; keep a
+  script's module state between claims.
+
+### Tests
+
+- Integration: S-BTN-41 (stub scripts under `test/fixtures/courses/`).
+- `test/unit/runner-protocol.test.ts`: every result shape, the single-edge rule with
+  `bars`, a bad `next`, a `short_waits` wait that clears and one that times out at 30
+  minutes (fake clock), a `max-runs` refusal suspending, a regression.
+
+### Exit criteria
+
+- [ ] S-BTN-41 passes
+- [ ] `test/unit/runner-protocol.test.ts` passes
+- [ ] `npm run typecheck` green
+
+## Status
+
+_in-review 2026-10-16 — https://github.com/immediately-run/baton/pull/33 — in-review 2026-10-16 — baton#33 (a fork PR). Implementation per the spec's 2026-10-15 amendment (never infer the only edge); upstream: item-wrong noted at claim.._
+
+_in-progress 2026-10-16 — upstream: item-wrong — the item's 'the only edge is taken without asking' was retracted by BATON_SPEC §6.13's 2026-10-15 owner amendment ('the runner no longer takes the only leg out without being told') and G-BTN-67/S-BTN-41 ('never inferring a single edge'): implementing the spec — the script names next itself, a bad pair suspends at the leg's from._
+
+_claimed 2026-10-16 — baton (claim 04afba)._
+
+_(filed 2026-10-14)_

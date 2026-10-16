@@ -1,0 +1,83 @@
+---
+title: "R3-1235 — The roadmap-pr course's capacity logic: course data, tags and the hooks for forecasts, exhaustion and model advice"
+id: R3-1235
+project: baton
+status: available
+updated: 2026-10-14
+repos:
+  - docs
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1072
+tier: judgement
+description: "The roadmap-pr course's capacity logic in docs: course data, worker tags and hourly reports, and hooks.js — forecasts over active and ended claims, exhaustion, model advice and seat pairs, the review-queue bound, refusals under owner bars; suspensions are owner bars, never a file; S-BTN-8, -9, -11, -19, -20, -21, -27. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1236
+  - R3-1233
+---
+
+**Brief:** [[home.mdx]].
+**Spec:** `docs/content/specs/BATON_ROADMAP_PR_COURSE.mdx` (all sections; R-BTN-21, -27, -42,
+-43, -49; G-BTN-28–30, -34, -45, -46, -48, -52, -65); `docs/content/specs/BATON_SPEC.mdx`
+R-BTN-52 (hook input), R-BTN-53, R-BTN-67, §13a S-BTN-8, -9, -11, -19, -20, -21, -27 (docs@0928c207; the spec at docs#212 head 0d4ef0e4)
+**Depends on:** R3-1236, R3-1233
+
+### Requires
+
+- none — the hook is pure and runs against fixture inputs and Baton's harness.
+
+### Why
+
+`roadmap-pr` needs provider-aware advice — forecasts, exhaustion, model advice — and
+provider suspensions, and the owner decided all of it is course logic, not core
+(2026-10-14). Since the stations revision a suspension is an owner bar in Baton, not a file
+in git. Tier: judgement — one course, many inputs.
+
+### What to build
+
+1. The sync's course data: providers, prices, matrix and catalog, estimates (no
+   suspensions: they are owner bars, R-BTN-67).
+2. The sidecar's tags (`family:`, `account:`, `model:`) from the harness configuration and
+   reports keyed per UTC hour (`key: h:<hour>`) and per claim.
+3. `.baton/courses/roadmap-pr/hooks.js`: forecasts by reservation over active and ended
+   claims' reports within `report_horizon_h` (168) and the ledger's month totals; exhaustion
+   from any report, worker-level ones included; model advice and `seat_pairs`; the review-queue
+   bound from the board summary; refusing a review to a new claim whose reviewers would bill
+   a line under a `no-new-work` bar (from `claimed_at` and the bar's `starts_at`), and to a
+   worker that cannot bill the seats.
+4. The pre-tool hook reads the bars its heartbeat carried, with their times, to deny reviewer
+   spawns offline.
+
+### Architecture — the decisions, named
+
+- **The hook is one ES module, bundled by the sync**, under 1 MB, importing the pure
+  functions from `scripts/lib/courses/roadmap-pr/` at bundle time.
+- **Suspensions are read only from the bars** in the hook's input and the heartbeat; no file
+  in git sets or lifts one.
+- **Do not**: refuse a claim on a forecast; read another repository's claims (the input has
+  none); write a provider name into core.
+
+### Tests
+
+- `scripts/lib/courses/roadmap-pr/hooks.test.mjs`: every gate test of the course spec §7 over
+  fixture inputs.
+- Integration in Baton's harness with docs' `.baton/` as the fixture course: S-BTN-8, -9, -11,
+  -19, -20, -21, -27.
+
+### Exit criteria
+
+- [ ] `node --test scripts/lib/courses/roadmap-pr/hooks.test.mjs` green
+- [ ] the seven scenarios pass in baton's `npm run test:baton` with this repository's `.baton/`
+- [ ] `npm run verify` green
+
+## Status
+
+_(filed 2026-10-14)_
+
+_2026-10-14 — rewritten for the stations revision of BATON_SPEC (docs#212 head 0d4ef0e4): stations and legs in a course file, owner bars and settings in SQLite, observations, the runner and webhooks._

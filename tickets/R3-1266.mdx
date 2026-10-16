@@ -1,0 +1,82 @@
+---
+title: "R3-1266 — Baton hosts its own tickets: the baton repository joins Baton, cut over from its first ticket"
+id: R3-1266
+project: baton
+status: available
+updated: 2026-10-16
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1098
+description: "The baton repository registers as a second Baton repository, Baton reading its tickets/ MDX tickets with the pr course, cut over from the start, with a break-glass path for when Baton itself is down. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1249
+  - R3-1252
+---
+
+**Brief:** [SELF-HOSTING](https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/plans/self-hosting.mdx). The owner, 2026-10-16: "I want baton to be
+completely self-sufficient as an open source project, no access to the docs repo should be
+required to understand how it works or what is being developed."
+**Spec:** BATON_SPEC §2a (R-BTN-47), §2f (R-BTN-74), R-BTN-18, §11.
+
+### Why
+
+Baton's own tickets live in docs, a private repository, so nobody outside it can see what is
+being built. Baton already serves many repositories (R3-1231, R3-1240, R3-1262), so its own
+repository can be one of them once it has a ticket source (R3-1249).
+
+### What to build
+
+1. **Join.**
+   - Run `baton init --course pr` in immediately-run/baton. It writes `.baton/baton.json`, the
+     `pr` course file, its leg stubs and `.github/workflows/baton-sync.yml`, pinning the CLI.
+   - Tickets are the MDX files in `tickets/`, in docs' roadmap format (owner, 2026-10-16), so
+     the sync reads them through a `.baton/tickets.mjs` source over that folder, or R3-1249's
+     default source taught `.mdx` and the folder's name.
+2. **Register cut over.**
+   - Run `baton repositories add --id baton --github immediately-run/baton --cut-over` against
+     staging, then production.
+   - Add the entry to `BATON_REPOSITORIES` in `wrangler.toml`, so a fresh deployment seeds it.
+   - A new repository has no git-claim history to reconcile, so it skips the shadow week.
+3. **Ids.**
+   - Done in R3-1267: new tickets are `B-n`, taken by `npm run ticket -- new` on the main it
+     pushes to; moved tickets keep their `R3-NNNN` ids; `npm run check:wiki` refuses a
+     duplicate.
+   - Here: retire `scripts/ticket.mjs`'s `claim` and `set` once Baton claims these tickets.
+4. **Break-glass.** Write it into the repository's README and contributing guide. Agents claim
+   baton tickets only through Baton, with no git fallback after cutover (R-BTN-18), so a
+   broken Baton stops agents from claiming its own fix:
+   - a person (never an agent) may push a fix to `main` without a claim;
+   - `npx wrangler rollback` is allowed only to a version at the same migration number (§11);
+   - the deploy workflow deploys staging first and runs the smoke checks there, and production
+     deploys only when staging is healthy.
+5. **First ticket.** File one real `B-1` ticket, claim it through Baton with an SSH-key runner
+   (R3-1239), and take it to merged under the `pr` course. That run is the acceptance test.
+
+### Do not
+
+- Give the baton repository a mirror: R-BTN-74's markdown source needs none.
+- Let a baton ticket depend on a docs ticket: dependencies stay within a repository (§2a).
+
+### Tests
+
+- `baton sync` in CI posts the baton board, and `/v1/sync/head` for `baton` answers its
+  commit.
+- The deploy workflow fails without deploying production when staging's smoke check fails.
+
+### Exit criteria
+
+- [ ] immediately-run/baton is registered and cut over in staging and production; its sync
+      workflow is green
+- [ ] `B-1` claimed through Baton and merged under the `pr` course
+- [ ] the break-glass section is in baton's README; the deploy is gated on staging
+
+## Status
+
+_(filed 2026-10-16)_

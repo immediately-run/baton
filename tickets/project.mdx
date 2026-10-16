@@ -1,0 +1,62 @@
+---
+title: Baton — the factory's live state on a Durable Object
+id: baton
+status: active
+tags:
+  - project
+description: Build Baton (BATON_SPEC) — workers that come and go, one fenced lease per work item, provider suspensions, retries and resume records, and a live dashboard at baton.immediately.run — in four rollout steps (read-only view, shadow week, cutover, consumer migration), each item carrying its integration scenarios.
+kind: project
+nav: Project
+order: 5
+---
+
+
+_Project entity, filed 2026-10-13 from the owner's design session and the approved
+`BATON_SPEC` (docs@f84fa9e2)._
+
+**Plan / spec:** `BATON_SPEC` — rollout in §13, integration scenarios in §13a.
+
+**Status:** `active` — author-set.
+
+## Why this exists
+
+- The factory coordinates through git: `claim.sh` uses a push as its lock, a dead claim
+  blocks an item for up to 7 days, eligibility is self-judged, and nobody can see which
+  workers are up or what they are doing (BATON_SPEC §1).
+- The owner asked for a Temporal-like view of workers, running work and queues, the power to
+  switch off a provider before its credits run out, and integration tests for timeouts,
+  retries, poisoned items, reaps and disabled providers.
+
+## Items
+
+Filed 2026-10-13, in rollout order. Every item names its `S-BTN-n` scenarios (R-BTN-31).
+
+- **Step 1 — read-only view:** the reference data and decision library; the Worker and
+  Durable Object with the read-only dashboard and the integration harness; the deploy and
+  board-sync workflows; [OP] Cloudflare provisioning; Verify: the read-only view.
+- **Before step 2:** [OP] the hook-capability spike.
+- **Step 2 — shadow:** the worker API; claims, matching and reaping; the sidecar and Claude
+  Code hooks; opencode; the skills wiring; Verify: the shadow week.
+- **Step 3 — cutover:** the cutover server; the git mirror; the cutover client; [OP] the
+  cutover; Verify: cutover.
+
+- **The 2026-10-14 amendment** (tickets, courses and legs, suspension, advice versus gates,
+  budgets, repositories and courses, the boundary, hooks and probes; docs#212): land the spec
+  (R3-1228); the host move (R3-1229, before R3-1208); the rename to tickets (R3-1230);
+  repositories and courses (R3-1231); legs on the server (R3-1232); the `roadmap-pr` course
+  (R3-1233); the skills (R3-1234); budgets and model advice (R3-1235); hooks and probes
+  (R3-1236); the boundary move (R3-1237); one codebase on two hosts (R3-1238, before R3-1231);
+  SSH key identity (R3-1239); administration by an instance administrator and repository owners
+  (R3-1240); (R3-1241 and R3-1242, a Firecracker hook sandbox, were superseded the same day: local hooks are
+  trusted and run in plain workerd, built in R3-1236). Cutover (R3-1220) depends on R3-1232–R3-1240.
+
+- **The 2026-10-16 amendment** (Baton without GitHub — forges, sync keys, pulled syncs, per-forge
+  notifications and the `branch` course; docs#217, R3-1253): sync keys and forge-aware repositories
+  (R3-1262); pulled syncs and dispatch adapters (R3-1263); forge notifications (R3-1264); the
+  CLI's runners, fact adapters and the `branch` course (R3-1265).
+
+Step 4 (consumer migration) is filed after cutover.
+
+## Done when
+
+Every item above is done, verification items included.

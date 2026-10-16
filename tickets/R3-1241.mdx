@@ -1,0 +1,85 @@
+---
+title: "R3-1241 — Baton local hook sandbox: workerd in a Firecracker microVM per repository"
+id: R3-1241
+project: baton
+status: superseded
+updated: 2026-10-14
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1078
+tier: critical
+description: "Build the local host's HookRunner: workerd inside a Firecracker microVM per registered repository, no network device, vsock to a supervisor, rebuilt when the repository's hook files change; the local host refuses to start without /dev/kvm; the KVM-host runs are R3-1242."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1236
+  - R3-1238
+---
+
+**Brief:** [[home.mdx]].
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §3a (R-BTN-55 `HookRunner`, R-BTN-59), §2c (R-BTN-51, R-BTN-52, R-BTN-54), §13a S-BTN-31, G-BTN-56 (docs@d36df740, docs#212)
+**Depends on:** R3-1236, R3-1238
+
+### Requires
+
+- none — the code and its tests are written and type-checked here; the tests that start a
+  microVM skip where `/dev/kvm` is absent (the fleet's agent VMs are Firecracker guests
+  without nested virtualisation), and running them on a KVM host is R3-1242.
+
+### Why
+
+The owner wants hooks to run on a local Baton too, sandboxed like everything else, with no
+local limitation (2026-10-14); `workerd` alone "is not a hardened sandbox", and the fleet
+already isolates agents in Firecracker. Until this lands, R3-1238's local host can run
+everything except hooks. Tier: critical — code from any writer of a registered repository
+runs on the host.
+
+### What to build
+
+1. A guest image built by the fleet's VM image pipeline: a minimal root filesystem with
+   `workerd` and a supervisor that loads posted hook modules into `workerd` with
+   `globalOutbound` disabled and answers over vsock.
+2. `src/local/hookRunner.ts`: one warm microVM per registered repository, started through
+   Firecracker's API socket under its `jailer`, with no network interface; requests and
+   results as JSON over vsock with the event's time limit; the VM is replaced when the
+   repository's hook files change, and restarted if it dies.
+3. The local host checks for `/dev/kvm` and the guest image at start and refuses to start
+   without them, naming what is missing.
+
+### Architecture — the decisions, named
+
+- **The same contract as the Cloudflare runner** (R3-1236's `HookRunner`): input, output
+  schema, time limit, fallback and `hook-failed` are shared code; only the transport differs.
+- **One VM per repository**, never a shared one: a repository's hook cannot reach another's.
+- **No network device at all**, not a firewalled one.
+- **Do not**: mount any host path read-write into the guest; pass secrets or the database
+  into the guest; fall back to running a hook outside the microVM.
+
+### Tests
+
+- `test/local/hookRunner.test.ts` (runs only where `/dev/kvm` exists; R3-1242 runs it): a hook that calls `fetch` fails; one that loops past its limit is
+  stopped and the VM survives; results equal the Cloudflare runner's for R3-1236's fixtures.
+- S-BTN-31's hook legs on the local project.
+
+### Exit criteria
+
+- [ ] `test/local/hookRunner.test.ts` exists, skips with a message naming `/dev/kvm` where it is absent, and type-checks
+- [ ] the local host's start-up check is unit-tested with a stubbed `/dev/kvm` probe
+- [ ] `npm test` and `npm run typecheck` green in baton
+
+### Hand-off
+
+The guest image's build lives with the VM image pipeline; this item records where in a
+Status note.
+
+## Status
+
+_superseded 2026-10-14 — superseded 2026-10-14 — the owner made local hooks trusted (dev and CI), run in plain workerd for interface parity (BATON_SPEC R-BTN-59 on docs#212); the local runner is now part of R3-1236.._
+
+_(filed 2026-10-14)_

@@ -1,0 +1,97 @@
+---
+title: "R3-1249 — Baton CLI defaults: the markdown ticket source, the pr course and baton init"
+id: R3-1249
+project: baton
+status: available
+updated: 2026-10-14
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1083
+description: "baton sync falls back to a markdown ticket source and a built-in pr course when a repository has no .baton/tickets.mjs or course sync.mjs; baton init scaffolds .baton/ and --eject copies a default; S-BTN-43, G-BTN-69 (R-BTN-74). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+tier: judgement
+depends_on:
+  - R3-1228
+  - R3-1231
+  - R3-1245
+---
+
+**Brief:** [[home.mdx]]; the owner, 2026-10-14: "the logic by which a grove wiki
+of work items like we have in the docs repo gets transformed into courses and legs should be
+customizable per repository, but the baton CLI should offer a sane default".
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2f (R-BTN-74), R-BTN-51 (the `.baton/` folder),
+§7.1 (the board post), R-BTN-69 (course files), R-BTN-72 (leg scripts), §13a S-BTN-43, §16
+G-BTN-69 (as on docs#212, commit 02fdd72c after review-gate round 3)
+**Depends on:** R3-1228 (the spec lands), R3-1231 (registered repositories and the board
+post), R3-1245 (the `baton` CLI and its leg-script convention)
+
+### Requires
+
+- none — the scenario runs a fixture repository's wiki and recorded PR facts against the
+  local harness.
+
+### Why
+
+Today a repository can join Baton only by writing a ticket source and a station function,
+as docs does with `factory-state.mjs` and `roadmap-pr`. Most repositories have a folder of
+markdown items and ordinary PRs; they should start with no code and replace a default only
+when they need to. Tier: judgement — a default other repositories will copy.
+
+### What to build
+
+1. `npx baton sync`: the board post of §7.1 from `.baton/tickets.mjs` and each course's
+   `.baton/courses/<course>/sync.mjs`, each falling back to the CLI's default when missing.
+2. `src/defaults/tickets-markdown.ts`: the markdown ticket source exactly as R-BTN-74 lists
+   it — files under `items` with an `id`; `status`, `course` (default `default_course`, itself
+   `pr`), `depends_on`, `repos` (through the `repos` map; `owner/name` passes), `tier`,
+   `requires`, `order`, the `tags` list (`EXPEDITE`/`OP`), `prs`, each ticket's opaque
+   `course`; unknown fields ignored; a duplicate id or an unmapped `repos` name fails the sync.
+3. `src/defaults/course-pr/`: the `pr` station function over GitHub PR facts — the ticket's
+   `prs:` and every PR, open or merged, on its current or previous `branch_pattern`; the least
+   advanced PR decides; all merged is `merged`; a closed unmerged PR counts as none; `review`
+   ready once checks finish (red or green; no checks counts as finished); verdicts from review
+   states or a `<!-- baton:verdict approve|changes -->` line; `merge` waiting on `owner` once
+   `fix` has run three times. Only for course `pr`: any other course without `sync.mjs` fails
+   the sync. The `pr` course **file** is not a CLI default — `baton init` writes it into git.
+4. `baton init [--course pr]` (scaffolds `.baton/baton.json`, the course file, leg stubs that
+   run `agent_command` — the `review` stub ends with a verdict line — and
+   `.github/workflows/baton-sync.yml` pinning the CLI version) and
+   `baton init --eject tickets|stations`.
+5. `stations(ctx)` returns `course_data`, which `baton sync` posts keyed by course id.
+
+### Architecture — the decisions, named
+
+- **Defaults are course code in the CLI, never core**: `src/defaults/` is exempt from the
+  boundary test's word scan and `src/core/` may not import it (§2b).
+- **One interface for override and default**: the default is loaded through the same
+  `tickets(ctx)` / `stations(ctx)` signatures a repository's file exports, so `--eject`
+  copies a working file.
+- **Do not**: read item bodies (R-BTN-33); add a frontmatter field core interprets; let a CLI
+  upgrade change tickets without the workflow's pin changing.
+
+### Tests
+
+- Integration: S-BTN-43.
+- `test/unit/tickets-markdown.test.ts`: every field, a file without `id`, closed statuses,
+  `depends_on` readiness, an unknown field, a `repos` short name with no mapping (refused
+  loudly).
+- `test/unit/course-pr.test.ts`: every station from recorded PR facts — a merged PR before
+  and after the file says `done`, two PRs, a closed unmerged PR, a red check, a head with no
+  checks, a comment-only review with and without a verdict line, one identity authoring and
+  reviewing — and the three-fix limit.
+
+### Exit criteria
+
+- [ ] S-BTN-43 passes
+- [ ] both unit suites pass
+- [ ] `npm run typecheck` green; the boundary test green with `src/defaults/` classified as course code
+
+## Status
+
+_(filed 2026-10-14)_

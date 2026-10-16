@@ -26,7 +26,8 @@
     "start:local": "node scripts/start-local.mjs",
     "model": "node model/check.mjs",
     "model:verify": "quint verify model/instances.qnt --main=small --init=pinit --step=pstep --invariant=safety --max-steps=5",
-    "check:wiki": "node scripts/check-wiki.mjs"
+    "check:wiki": "node scripts/check-wiki.mjs",
+    "ticket": "node scripts/ticket.mjs"
   },
   "dependencies": {
     "jose": "^6.2.12"

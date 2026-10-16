@@ -1,0 +1,72 @@
+---
+title: "R3-1254 — Baton model, remainder of R3-1243: exhaustive liveness on a narrowed instance, and blocks, decisions, queues and couriers in the model"
+id: R3-1254
+project: baton
+status: available
+updated: 2026-10-15
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1087
+description: "R3-1243's remainder: make liveness exhaustive on a narrowed instance (TLC timed out on small at 8,187 states), and add blocks, decisions, leg queues and courier notices (R-BTN-75–80, docs#213) to the Quint model with their safety and liveness properties. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1243
+  - R3-1251
+---
+
+**Brief:** [[home.mdx]]; the remainder R3-1243 named in baton#10.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2g (R-BTN-75–80), R-BTN-19, R-BTN-10, §6.7,
+R-BTN-45; `immediately-run/baton` `model/README.md`.
+
+### Why
+
+baton#10 states four liveness properties but could not check them: Apalache does not support
+fairness, and TLC on `small` explored 8,187 distinct states (971 million generated) in 28
+minutes without finishing — each `syncRead` picks any barred-tag set per ticket, so a state has
+thousands of successors. And §2g (docs#213) adds blocks, decisions, queues and notices, whose
+safety and liveness the model does not yet cover.
+
+### What to build
+
+1. **A liveness instance** (`live` in `instances.qnt`): one ticket, two workers, one sync slot,
+   the sync's barred tags drawn from two fixed sets, git and owner budgets of 1. TLC checks
+   `fencesClear`, `endsResolveWithOwner`, `barsLiftClaimable` and `readyIsClaimed` (as rewritten
+   in baton#10's rounds 2–3) to completion; CI runs it if it stays under 10 minutes, else
+   nightly. Add **`endsResolveBySync`**: under fairness of the sync cycle and with no owner act,
+   every completed end whose evidence landed in git is eventually confirmed (baton#10 3-A-2). From the
+   adjudication of 3-A-0: make `fencesClear` exercise `fenceCleared` (today every fence times
+   out or is pushed past the horizon, so a mutant breaking only `fenceCleared` passes — add
+   fairness of a live fenced worker's heartbeat or a property of its own); state
+   `readyIsClaimed` so it survives two tickets (a worker holding the other ticket forever);
+   and give `ownerResolve` the owner budget.
+2. **Blocks** (R-BTN-75): `blocked_since` as a function of rows and next legs; invariants — a
+   ticket with a free next leg is not blocked; a `ticket` or `decision` block is never claimed
+   past (gate ghost); an `unblocked` event only follows a `blocked` one.
+3. **Decisions and notices** (R-BTN-78, R-BTN-80): a decision posted and answered by syncs;
+   couriers claim, crash (lease lapse), mark sent or failed. Safety: no notice for a closed
+   decision is marked sent; liveness: under fairness of each courier's claim, every open
+   decision's notice is eventually sent to every registered courier.
+4. **Queues** (R-BTN-79): depths and full stations over `roadmap-pr`'s course with
+   `max_queue` on `fix`; invariant — depth equals the unheld tickets waiting; liveness — the
+   review ⇄ fix loop with both bounded never deadlocks (advice only).
+5. **Regressions** for every finding docs#213's gate fixed that the model can express.
+
+### Tests
+
+- `npm run model` gains the new invariants and regression runs; the liveness run as above.
+
+### Exit criteria
+
+- [ ] TLC proves the four liveness properties on `live` to completion
+- [ ] blocks, decisions, notices and queues modelled, with their invariants holding in simulation and Apalache's depth-5 proof
+- [ ] `model/README.md`'s *Checked how* table updated
+
+## Status
+
+_(filed 2026-10-15)_

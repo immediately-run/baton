@@ -1,0 +1,140 @@
+---
+title: "R3-1231 — Baton registered repositories and courses: per-repository boards, OIDC, the course registry"
+id: R3-1231
+project: baton
+status: done
+updated: 2026-10-15
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1068
+tier: critical
+description: "Register repositories and courses in Baton: per-repository boards, heads and settings, observation numbers that order what each sync saw (POST /v1/sync/observation), board posts accepted or refused whole, course-file validation, OIDC per repository, rule 9 by min_worker_version, tiers per repository and the branch-holder query; S-BTN-26, -36 (the normative §7.1 tickets post, closed_tickets and the station refresh moved to R3-1232). Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/19
+  - https://github.com/immediately-run/baton/pull/20
+  - https://github.com/immediately-run/baton/pull/21
+  - https://github.com/immediately-run/baton/pull/22
+  - https://github.com/immediately-run/baton/pull/23
+depends_on:
+  - R3-1230
+  - R3-1238
+---
+
+**Brief:** [[../home.mdx]].
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2a (R-BTN-47, -48), §2e R-BTN-69, §7.1 (the board
+post, R-BTN-11, R-BTN-62), §10.3 R-BTN-15, R-BTN-22, R-BTN-65 (rule 9), R-BTN-66 (repository
+settings), §4 (`repositories`, `courses`, `worker_courses`, `board_head`, `held_snapshots`,
+`events.repository_id`, `closed_tickets`), §11 (`POST /v1/sync/observation`, `POST
+/v1/sync/board`), §13a S-BTN-26, -36 (docs@0928c207; the spec at docs#212 head 0d4ef0e4)
+**Depends on:** R3-1230, R3-1238
+
+### Requires
+
+- none — the integration harness runs two fixture repositories with fake OIDC tokens.
+
+### Why
+
+Baton must serve several repositories, each with its own board, courses and settings, and
+order what each sync *saw* in PRs, which no commit orders (R-BTN-62). Today there is one board
+and one head. Tier: critical — the compare-and-set and the sync principal change.
+
+### What to build
+
+1. Migration: `repositories` (with `weight`, `tiers`, `retry`, `required_bars`,
+   `transcript_repos`, `cutover_at`), `courses` (with `course_json`, `min_worker_version`,
+   `branch_pattern`, `report_horizon_h`), `worker_courses`, per-repository `board_head`
+   (`observation`, `last_handed_out`), `held_snapshots` keyed by repository with its
+   observation, `events.repository_id`; qualified ticket ids. *(`closed_tickets` moved to
+   R3-1232, 2026-10-15.)*
+2. `POST /v1/sync/observation`: the head, the next observation number and the owner bars in
+   force; `POST /v1/sync/board` accepted or refused whole: new head, refresh, held force post,
+   `stale-observation`. *(§7.1's normative tickets schema and the held post's station refresh
+   moved to R3-1232, 2026-10-15: they need the stations it ingests.)*
+3. Course-file validation (R-BTN-69) on every registry post: a failing file keeps the
+   previous and is listed under **Needs you**.
+4. OIDC bound per repository (R-BTN-15); rule 9 against `min_worker_version`, at claims only.
+5. *(Added 2026-10-15.)* Tiers per repository (R-BTN-66, rule 5) and `GET /v1/runner/branch-holder`
+   (§6.3, R-BTN-51).
+
+### Architecture — the decisions, named
+
+- **One function validates a course file**, `validateCourse(json)` in `src/core/course.ts`,
+  returning every violation (unreachable station, no route to an end, a cycle without
+  `max_runs`, an unknown name); the sync's test kit (R3-1248) imports the same module.
+- **The counter is per repository and strictly increasing**: Baton records the last number
+  handed out; a post qualifies only when its number is greater than the last accepted one.
+- **No reference repository** and no fleet data; tiers are a repository setting; ticket
+  tiers arrive by name and are stored as positions.
+- **Do not**: read a course file's names for meaning; accept part of a post; let a sync token
+  of one repository read or write another's board or events.
+
+### Tests
+
+- `test/unit/course.test.ts`: `validateCourse` over the real `roadmap-pr` file (from the
+  vendored fixture of docs' `.baton/`), and one broken file per rule.
+- Integration: S-BTN-26 (two repositories, two courses), S-BTN-36's observation half (an older
+  post refused `stale-observation`), S-BTN-13 and S-BTN-16 still green.
+
+### Exit criteria
+
+- [x] S-BTN-26's registry, course, `min_worker_version`, tier and branch clauses and the observation
+      cases of S-BTN-36 pass; S-BTN-1…16 still pass — baton `test/integration/S-BTN-26.two-repositories`
+      (17 cases) and `S-BTN-36.observations` (5) on both hosts at 308c23e, 375 tests green *(re-scoped 2026-10-15: S-BTN-26's
+      recommendation and per-group-limit clauses, S-BTN-36's station half, the normative §7.1
+      tickets post, `closed_tickets` and the claimable-after-a-sync clause are R3-1232's)*
+- [x] `test/unit/course.test.ts` passes — baton#19 (3d60c5f), green at 308c23e
+- [x] `npm run typecheck` green in baton; `npm run verify` green in docs — baton CI test and model
+      green on bb88054 (merged 308c23e); docs verify 24 steps green at the archive commit's base
+
+## Status
+
+_in-review 2026-10-15 — all four parts merged and deployed: baton#19–#23; exit criteria ticked (a758caee); docs' live sync green after the last deploy (2026-10-15T21:45Z)._
+
+_updated 2026-10-15 — correction (baton#23 gate round 2): branch patterns are matched by a wildcard match bounded by branch times pattern length (not a RegExp, so no exponential backtracking), not linearly; a tier_ceilings entry for an unregistered repository is kept and reported as tier_ceilings_unregistered, so the worker is not widened once that repository registers; branch-holder strips refs/heads/ and .git._
+
+_updated 2026-10-15 — upstream: spec-silent (baton#23 gate) — a branch pattern's repository placeholder expands to Baton's repository id; at most 4 stars per pattern, matched linearly; a tier_ceilings entry for a repository Baton does not serve is set aside and reported, never refusing the heartbeat._
+
+_updated 2026-10-15 — https://github.com/immediately-run/baton/pull/23 — part 4 up (tiers per repository, branch-holder): baton#23; docs ca9ce2dd. upstream: spec-silent — a ticket tier name its ladder lacks fits nothing (stored as the ladder's length) rather than refusing the board; a worker's single tier_ceiling, in a ladder without that name, is the ladder's top if unrestricted (critical) and its bottom otherwise, until grants' max_tier (R3-1240)._
+
+_updated 2026-10-15 — re-scoped (part 4): the normative §7.1 tickets post, closed_tickets, the held post's station refresh, S-BTN-36's station half and the claimable-after-a-sync clause need stations, which R3-1232 ingests (its What to build 1 and 3), so they move to R3-1232. Part 4 here is tier positions in each repository's ladder (rule 5, tier_ceilings per repository) and GET /v1/runner/branch-holder (S-BTN-26's branch clause); S-BTN-26's recommendation and per-group-limit clauses are R3-1232's item 4._
+
+_updated 2026-10-15 — part 3 merged: baton#22 (56382d8); gate passed in three rounds (records f595c4d2, 0e2e77bb). Lesson (gate 3-A-0): docs 1c2916f7 reached main before Baton served POST /v1/sync/observation, and docs' live baton-sync failed on every run from 18:26Z until baton#22 deployed; part 4's docs half lands only after its baton change is deployed (baton-deploy runs on merge to main), or tolerates the new route being absent. Next: part 4._
+
+_updated 2026-10-15 — deferred to part 4 (gate 1-A-1 on baton#22): §7.2's clause that a ticket is claimable only once a reading numbered after its last end was accepted (board_head.observation above MAX end_observation); part 4 rebuilds the candidate query on stations, and isEligible gains it there._
+
+_updated 2026-10-15 — https://github.com/immediately-run/baton/pull/22 — part 3 up (observations: the counter, sync-busy, stale-observation, ends and staleness judged by later readings): baton#22; docs 1c2916f7. upstream: spec-silent — a refused post uses its number, a malformed one included; a sync run at the head posts a refresh with nothing to confirm so its number is used (one behind the head still posts nothing and leaves it outstanding until void); the hand-out time is stored to tell a void number._
+
+_updated 2026-10-15 — part 2b merged: baton#21 (1f00c01); gate passed in three rounds (records 9046690c). Next: part 3 (observations)._
+
+_updated 2026-10-15 — upstream: spec-silent — the course registry: a posted registry is the repository's whole registry (a course it no longer lists leaves with its refusal; a post whose tickets still name it is refused); at most 64 courses per registry and per heartbeat; a course file at most 64 KiB (an oversized one is that course's refusal, the previous staying); a repeat-head post's registry is not applied, since the sync builds it at the commit it fetched (gate 2-A-0, 2-A-1)._
+
+_updated 2026-10-15 — https://github.com/immediately-run/baton/pull/21 — part 2b up (course registry, course-file validation on the board post, worker courses, rule 9 by min_worker_version): baton#21; docs da6933f7, 3511a65b (interim one-course registry until R3-1233). Tier positions move from 2b to part 4, where the tickets post names tiers from the repository's ladder; activity kinds per course are R3-1237's (R-BTN-50). The sidecar (R3-1213) must send the heartbeat's courses list._
+
+_updated 2026-10-15 — part 2a merged: baton#20 (d887c44); gate passed in three rounds (records 86fd147d). Next: part 2b._
+
+_updated 2026-10-15 — upstream: spec-wrong — §11 board/accept took only the sha; with a board per repository it names the repository too (fixed e0266750). Deferred to 2b: repositories.tiers is stored but matching still uses the fixed three-tier ladder; tier positions arrive with the course gate (gate 2-A-2)._
+
+_updated 2026-10-15 — https://github.com/immediately-run/baton/pull/20 — part 2a up (registry, per-repository boards, qualified ids, OIDC per repository): baton#20; docs 9b769b4f, 11ab824e._
+
+_in-progress 2026-10-15 — part 1/4 delivered: baton#19 merged at 3d60c5f (in origin/main); gate passed in 3 rounds. Part 2 (registry, migration 0006, qualified ids, OIDC per repository, rule 9 by min_worker_version) next._
+
+_in-progress 2026-10-15 — upstream: spec-silent — and at most 100 violations returned (COURSE_VIOLATIONS_MAX), so 'returns every violation' means every one up to 100 (baton#19 review 3-A-1)._
+
+_in-progress 2026-10-15 — upstream: spec-silent — R-BTN-69 states no size for a course file; validateCourse bounds its work at 100 stations, 200 legs and 64 entries per other list (inputs, outputs, accepts, short_waits, renamed_from), a file past them refused as shape (baton#19 review 2-A-2); R3-1248's kit and the spec should name the same caps._
+
+_in-progress 2026-10-15 — part 1/4 up: baton#19 (validateCourse, the vendored roadmap-pr course file) and docs 093c645b._
+
+_in-progress 2026-10-15 — Delivered in four sequential baton PRs, each gated: (1) validateCourse + the roadmap-pr course file vendored from docs .baton/; (2) registry, migration 0006, qualified ids, OIDC per repository, rule 9 by min_worker_version; (3) observations; (4) the normative §7.1 tickets post, closed tickets, held course files, branch-holder. upstream: item-wrong — docs has no .baton/ yet (R3-1233 adds baton.json, downstream of this item): this item adds .baton/courses/roadmap-pr/course.json from R-BTN-69's example. upstream: item-wrong — S-BTN-26's list order and per-group limit are R3-1232's (R-BTN-61) and its hook order R3-1236's: those clauses become it.todo. upstream: spec-silent — no way to register a repository before R3-1240's admin route (which needs R3-1239): an insert-only BATON_REPOSITORIES seed through the same validated register(). upstream: spec-silent — §4 board_head.sha NOT NULL vs an observation handed out before any snapshot; sync-busy's 10 minutes needs a hand-out time; whether a refused number may be re-posted (taken: single use). upstream: spec-silent — a failing course file with no previous one to keep (taken: the post is refused)._
+
+_claimed 2026-10-15 — baton,docs (claim e9f781)._
+
+_(filed 2026-10-14)_
+
+_2026-10-14 — rewritten for the stations revision of BATON_SPEC (docs#212 head 0d4ef0e4): stations and legs in a course file, owner bars and settings in SQLite, observations, the runner and webhooks._

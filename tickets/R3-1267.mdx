@@ -1,0 +1,96 @@
+---
+title: "R3-1267 — Move Baton's tickets, history and review records from docs into the public baton repository"
+id: R3-1267
+project: baton
+status: in-progress
+updated: 2026-10-16
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1099
+description: "Baton's core items, live and archived, its project page, plans and review-gate records move from docs to immediately-run/baton, scrubbed for private content; docs keeps only its own adoption items and pointer stubs. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1266
+---
+
+**Brief:** [SELF-HOSTING](https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/plans/self-hosting.mdx). The owner, 2026-10-16: tickets, history and
+review records move to the baton repository, with no docs access needed to understand Baton.
+**Spec:** BATON_SPEC §2a (R-BTN-47), R-BTN-33.
+
+### Why
+
+After R3-1266 the baton repository can hold tickets, but Baton's 30-odd live items, its
+archive, its project page, its plans and the review records of its PRs are still in docs. A
+reader of the public repository cannot see what is planned, what was done, or why.
+
+### What to do
+
+1. **Partition.** List every `project: baton` item, live and archived.
+   - **Moved (owner, 2026-10-16): all of them**, docs' adoption items included. No item
+     depends on one outside the project, and no other item depends on one of them, so no
+     dependency crosses the line; an adoption item's work still happens in docs.
+   - Items in flight in docs (R3-1244, R3-1245) are copied as they stand and brought up to date
+     when their sessions finish them there.
+2. **Convert.** Each moved item becomes `tickets/R3-NNNN.mdx` (finished ones go under
+   `tickets/archive/`), in docs' roadmap format (owner, 2026-10-16):
+   - its id, status and dependencies are kept;
+   - wiki links become relative links;
+   - its **Spec:** line cites `spec/BATON_SPEC.md` (R3-1252);
+   - links to docs-only pages become plain text, or are removed when they carry nothing a
+     reader needs.
+3. **Move the rest.**
+   - The `baton` project page becomes `tickets/project.mdx`, beside the tickets it lists.
+   - The self-hosting plan moves to `docs/plans/`; the deployment runbook goes with R3-1268,
+     and `claim-events.mdx`, which docs' mirror writes, stays in docs.
+   - Baton PRs' rows in the review-gate records (`content/plans/review-gate/pr-findings.mdx`,
+     `token-usage.mdx`) move to `docs/review/`.
+   - Until Baton claims this repository's tickets (R3-1266), `scripts/ticket.mjs` claims them
+     with git as the lock (owner, 2026-10-16).
+4. **Scrub.** Before anything is pushed, remove or generalise:
+   - other projects' names and plans;
+   - private repositories, such as the transcript repositories;
+   - account names, email addresses and people's names other than the owner's;
+   - costs and billing, hostnames that are not Baton's, and anything a docs page marks private.
+
+   The owner reviews the scrub diff. Publishing cannot be undone, so nothing is pushed before
+   that review.
+5. **Retire in docs, in the same sitting.**
+   - Each moved item becomes a one-paragraph stub pointing at its file in the baton repository,
+     with `status: superseded` so docs' board drops it.
+   - The archive keeps stubs, so wiki links and `check:ids` stay valid.
+   - Docs' board and the baton board must never both offer one ticket. Verify this on the
+     dashboard after the docs sync.
+6. **Changelog.** `CHANGELOG.md` cites baton commits and PRs for ticket changes from here on.
+   Earlier rows' docs commit ids stay as history, marked as references to the private
+   repository.
+
+### Do not
+
+- Renumber an `R3-NNNN`, or rewrite an item's substance while moving it.
+- Move docs' own items, or anything the scrub cannot make public; such an item stays in docs
+  and its baton counterpart says only what is public.
+
+### Tests
+
+- In baton: every `R3-`/`B-` id cited in `tickets/`, `spec/`, `docs/` and `CHANGELOG.md`
+  resolves to a ticket file; the link check passes; a grep for `immediately-run/docs`,
+  `content/` and the scrub list's terms returns nothing outside a marked history note.
+- In docs: `npm run verify` is green with the stubs; docs' board has no moved ticket.
+
+### Exit criteria
+
+- [ ] the partition list confirmed by the owner, and the scrub diff reviewed
+- [ ] the moved tickets, archive, project page, plans and review records merged in baton; its
+      id and link checks green
+- [ ] the docs stubs merged; `npm run verify` green; the dashboard shows each ticket on one board
+
+## Status
+
+_(filed 2026-10-16)_

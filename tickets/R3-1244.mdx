@@ -1,0 +1,111 @@
+---
+title: "R3-1244 — Baton's code checked against the formal model: scenario traces replayed in Quint, model traces replayed in Baton, and checked correspondence markers"
+id: R3-1244
+project: baton
+status: in-progress
+updated: 2026-10-16
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1079
+tier: judgement
+description: "Record each S-BTN integration scenario's event log as an ITF trace and check it against R3-1243's Quint model, so the implementation never takes a step the checked model forbids. Requires: none."
+topics:
+  - baton
+  - formal-methods
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/31
+depends_on:
+  - R3-1243
+  - R3-1232
+  - R3-1238
+---
+
+**Brief:** [[home.mdx]].
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §13a (R-BTN-29–31), §4 `events`, and the model of
+R3-1243 (docs@1af0c769; the spec at docs#212 head 4e5ab93f)
+**Depends on:** R3-1243 (the model), R3-1232 (legs on the server, which most scenarios
+drive), R3-1238 (the two hosts the scenarios run on)
+
+### Requires
+
+- none — the scenarios run under the repository's own test runner, and `quint` comes from
+  npm.
+
+### Why
+
+A checked model proves the design; it says nothing about the code until the code's runs are
+checked against it. The integration scenarios already drive the real Worker through every
+interleaving the spec names (§13a), so each run's event log is a trace the model can accept
+or reject. A rejected trace is a step the implementation took that the checked model
+forbids. Tier: judgement — one repo, but a mapping between two representations that must
+stay exact.
+
+### What to build
+
+1. `test/integration/trace.ts`: a recorder that every scenario's harness installs, writing
+   the sequence of Baton actions (with their arguments and the resulting state projection)
+   to `test/.traces/<scenario>.itf.json` in Quint's ITF format.
+2. `scripts/check-traces.mjs`: replays each trace through `model/baton.qnt` (`quint run`
+   with the trace as its init and step sequence) and fails naming the scenario, the step
+   and the model action that would not accept it.
+3. `npm test` runs the scenarios and then `check-traces.mjs`; a CI failure prints the step.
+4. **Correspondence markers** *(owner, 2026-10-15: code and model kept in sync, checkably)*:
+   each action in `model/baton.qnt` names its implementation (`// @impl src/core/<file>.ts#<fn>`),
+   and each implementing function names its action back with a hash of the action's text
+   (`// @model <action> sha256:<12 hex>`); `scripts/check-model-links.mjs` (`npm run
+   model:links`, in `npm test`) fails on a missing end or a stale hash, so a model change names
+   the functions to re-check, and re-stamping the hash is the reviewed step.
+5. **Model-based tests, the other direction**: `quint run --out-itf` generates traces from
+   `sim`; `test/model/replay.test.ts` drives the Durable Object (local host, fake clock, stub
+   hooks returning the trace's choices) with each trace's actions and compares
+   `projectState(store)` with the trace's state at every step; 200 traces in `npm test`, more in
+   the `model` CI job.
+
+### Architecture — the decisions, named
+
+- **The projection is the model's state, nothing more**: claims, legs, observations, vouches,
+  bars and holds, keyed as `model/baton.qnt` keys them; one function, `projectState(store)`
+  in `test/integration/trace.ts`, reads it from the `Store` after each request.
+- **One action per request**, plus the pre/post-await split for requests that call a hook,
+  matching R3-1243's actors; the recorder records the post-await half at its commit.
+- **Course hooks in scenarios stay real** (docs' fixture course or the toy course); the model
+  accepts any hook output, so no special case is needed.
+- **Do not**: filter events to make a trace pass; record wall-clock times (the scenarios'
+  fake clock is the model's clock); check traces from the deployed staging object (it has no
+  `Store` access; the staging scenarios stay as they are).
+
+### Tests
+
+- Every S-BTN scenario's trace passes `check-traces.mjs` — the scenarios are the inputs.
+- `test/unit/check-traces.test.ts`: a hand-mutated trace (a second claim on a held ticket; an
+  end confirmed by an older observation) is rejected naming the step.
+- Scenarios: makes no new scenario pass; checks S-BTN-1…40 against the model.
+
+### Exit criteria
+
+- [ ] `npm test` writes a trace per scenario and `check-traces.mjs` accepts all of them
+- [ ] `test/unit/check-traces.test.ts` passes, rejecting both mutated traces
+- [ ] `npm run model:links` passes: every model action and its implementation name each other, hashes current
+- [ ] `test/model/replay.test.ts` passes 200 generated traces
+- [ ] `npm run typecheck` green
+
+### Hand-off
+
+R3-1220 (cutover) depends on this item and on R3-1243: cutover waits for the model and the
+traces to agree.
+
+## Status
+
+_updated 2026-10-16 — https://github.com/immediately-run/baton/pull/31 — baton#31 open; review gate round 1 next._
+
+_claimed 2026-10-16 — baton (claim fff89e)._
+
+_available 2026-10-16 — released without any code written: the claiming session's context was exhausted by the two items it completed before this one; the item is untouched and fully executable — no Requires gap, purely session runway. The next claimant finds the branch baton/claude/r3-1244-quint-traces empty of work (delete it or reuse the name).._
+
+_claimed 2026-10-16 — baton (claim 6440fc)._
+
+_(filed 2026-10-14)_

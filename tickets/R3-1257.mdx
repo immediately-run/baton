@@ -1,0 +1,102 @@
+---
+title: "R3-1257 — Baton positions, ticket history, leg contracts and replay: the queued leg, outcome stations, input/output pointers, worker-side schema checks and baton replay"
+id: R3-1257
+project: baton
+status: available
+updated: 2026-10-15
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1090
+tier: critical
+description: "Build BATON_SPEC §2h: every leg result's (reached, next) position stored as the ticket's queued leg and confirmed by locate; outcome stations; owner re-routes; the per-ticket history; leg contracts with input/output pointers resolved by Baton and schemas checked by baton run, failing the leg on a violation; Baton-raised decisions; and baton replay; S-BTN-47, S-BTN-48, G-BTN-73, G-BTN-74 (R-BTN-78, R-BTN-81–85). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1251
+---
+
+**Brief:** [[home.mdx]]; the owner, 2026-10-15: legs connect stations, a leg's
+completion always names a (station, next leg) pair, Baton keeps a running record and pointers
+to each leg's inputs and outputs, schemas are optional and checked by the worker, and any leg
+can be replayed.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2h (R-BTN-81, -82, -83, -84), R-BTN-33 as
+amended, R-BTN-78 (Baton-raised decisions), R-BTN-69 (`to` lists, `start_leg`, contracts),
+R-BTN-63, -70, -71 (positions in advances, paths and ends), §6.10 (`cannot-finish:contract-input` and `-output`),
+§6.13 (the runner's result, `ctx.inputs`, a leg's `close`), §7.1 (the board post), §7.2 rule 1, §4,
+§10.4 (URIs and markers), §11, §14; §13a S-BTN-47, -48; §16 G-BTN-73, -74, -75 (docs#214)
+**Depends on:** R3-1251 (blocks and decisions, which Baton-raised decisions extend)
+
+### Requires
+
+- none — every case runs in the integration harness with fixture course files, boards and
+  stub leg scripts, and a local git server for `git:` inputs.
+
+### Why
+
+A ticket's next queue must not depend on which course file is in force when someone looks:
+the leg that finished decides it, in git. Legs that read each other's outputs need those
+outputs named, typed and found again; failures should name the producer; a past run should be
+re-runnable. Tier: critical — positions and the queued leg feed rule 1 and every claim.
+
+### What to build
+
+1. **Migration**: `ticket_stations.next_leg`, `next_source`; `claim_legs.to_station` nullable,
+   `next_leg` and `head_sha`; `ticket_history.run`, `snapshot_sha`, `head_sha`;
+   `closed_tickets.purged_at` and `closed_unpurged`; `run_inputs_by_ticket`; the events CHECK's
+   new kinds; `hold_reason` `parked`; `ticket_next_legs.waiting_since`; `ticket_overrides.route_leg`,
+   `route_station`; `ticket_decisions.source`; `repositories.artifact_buckets`; `leg_outputs`,
+   `leg_run_inputs`, `ticket_history` and its index; `notices.payload_json` — as §4 gives them.
+2. **Course file**: `to` as a station or a list; `start_leg` (required); leg `version`,
+   `inputs`, `outputs`, `replay_safe`; the acceptance checks of R-BTN-69, through
+   `src/core/validate.ts`.
+3. **Positions** (R-BTN-83): `advance {reached, leg, outputs?}`, ends with `reached`/`next`;
+   the provisional queued leg, confirmed or replaced by the snapshot's posted pair; `inferred`
+   and `course` sources; `course-changed` stored by Baton on course-file and snapshot
+   acceptance; `not-queued` on a first advance into another leg; owner `route` and its clearing.
+4. **Rule 1 and its SQL** on the queued leg; claim and recommendation `legs` of one.
+5. **History** (R-BTN-81): the one writer `recordHistory(tx, …)`, called from every transaction
+   that changes what it records; `GET …/history`; the alarm's 90-day deletion; hook input's
+   last 10 rows.
+6. **Contracts** (R-BTN-82): URI validation (§10.4, including the repository allowlist and the
+   marker encoding); input resolution at the advance; `input-missing`/`input-version` stored as
+   `waiting` before a leg is offered; foreign-marker outputs never resolved.
+7. **Baton-raised decisions** (R-BTN-78): `baton:retries`, `baton:contract`, `baton:stalled`,
+   the reserved prefix, `POST …/resolve`.
+8. **Discrepancies** (R-BTN-85): a `discrepancy` event and history row, with both values, in
+   every transaction where a snapshot overrides Baton's value; the dashboard's Discrepancies list.
+9. **CLI** (baton repository): `baton run` validates each result's position and schemas, calls the
+   leg's `close` to write the closing marker from it (failing the leg
+   `cannot-finish:contract-input|-output` instead), provides `ctx.inputs`;
+   `baton replay [--against]` with credentials withheld; `baton owner route|resolve`;
+   `baton test-course`'s dataflow and version checks.
+
+### Architecture — the decisions, named
+
+- **Git first**: no position or pointer is reported before the leg's `close` writes it to its
+  closing marker; Baton's copy is provisional until `locate` confirms it.
+- **Pointers, never content**: Baton validates and stores URIs and digests and never fetches.
+- **Do not**: infer `next` from a station's one leg out; let a foreign marker's outputs reach a
+  leg; refuse anything for a Baton-raised decision that advice would not.
+
+### Tests
+
+- Integration, both hosts: **S-BTN-47** and **S-BTN-48**.
+- Unit: `positions.test.ts` (confirmation, replacement, inference, course changes, re-route),
+  `contracts.test.ts` (resolution, version checks, URI validation and marker decoding),
+  `history.test.ts` (rows per transaction, deletion), and the CLI's schema-check and replay
+  tests.
+
+### Exit criteria
+
+- [ ] S-BTN-47 and S-BTN-48 pass on both hosts; G-BTN-73, -74, -75 hold
+- [ ] the unit tests above pass; `npm test` and `npm run typecheck` green; the boundary test green
+
+## Status
+
+_(filed 2026-10-15)_

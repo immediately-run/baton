@@ -1,0 +1,82 @@
+---
+title: "R3-1228 — Land the BATON_SPEC 2026-10-14 amendment (docs#212): review gate and merge"
+id: R3-1228
+project: baton
+status: done
+updated: 2026-10-15
+repos:
+  - docs
+tags:
+  - SPEC
+  - roadmap-item
+order: 1065
+tier: judgement
+description: "Run the review gate on docs#212, the BATON_SPEC amendment of 2026-10-14 (tickets, courses and legs, suspension, advice versus gates, budgets, repositories and courses, the boundary, hooks and probes), close every finding, and merge it; every other item of the amendment depends on this one."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/docs/pull/212
+depends_on: []
+---
+
+**Brief:** [[../home.mdx]]; the owner's design session of 2026-10-14.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2a–§2e, §3a, §6.12, §6.13, §7.1 (R-BTN-62, R-BTN-73), §7.2 (R-BTN-45, R-BTN-61), §10.6, R-BTN-13 and R-BTN-46 as amended, and every row marked 2026-10-14 in §13a, §15, §16 and Decisions; `docs/content/specs/BATON_ROADMAP_PR_COURSE.mdx` (the provider logic and R-BTN-42/-49, moved out of §7.3), as on docs#212 (head 0a5e9b94; spec line updated at review-gate round 1)
+**Depends on:** —
+
+### Requires
+
+- none — the review gate's reviewers run on the agent line; nothing here needs a venue or a person, unless a finding would change one of the owner's decisions (below).
+
+### Why
+
+The amendment is a proposal that the owner directed section by section, but no reviewer has
+read it yet, and the spec's own history (five rounds on 2026-10-13, each finding blocking or
+major) says a design of this size has seams no author sees. Every build item R3-1229–R3-1237
+cites sections that exist only on docs#212 until it merges. Tier: judgement — a spec review
+whose findings are design calls.
+
+### What to build
+
+1. The `review-gate` skill on docs#212: two fresh-context reviewers in round one, at most
+   three rounds, every finding fixed and pushed or answered on its thread.
+2. The merged PR, its findings in `content/plans/review-gate/pr-findings.mdx`, and a row
+   per round in the spec's Review record.
+
+### Architecture — the decisions, named
+
+- **Review against the spec's own lenses**: internal consistency (sections that still say
+  "work item", "workflow" for a course, or a gate that §7.2 now calls advice), seams with the
+  unchanged 2026-10-13 text (R-BTN-4, -5, -10, -17 as amended), security (R-BTN-46, -52,
+  -53, -54), and executability (can R3-1229–R3-1237 be built from it without a new decision).
+- **The owner's decisions are fixed**: git and the PRs win on leg progress; Baton advises and
+  gates only safety; hooks run in Baton, probes outside it; the names ticket, course and leg;
+  the host `baton.immediately.run`; SSH keys for machine identity; one codebase on two hosts. A finding that would reverse one goes to the owner as a
+  decision packet (`prepare-decision-packet`), not into a push.
+- **Fixes stay in the spec**: a finding about an item's scope is fixed in that item's file.
+- **Do not**: merge with an open finding; renumber R-BTN, S-BTN or G-BTN ids (items cite
+  them); restore wording from the 2026-10-13 review record, which is history.
+
+### Tests
+
+None: a docs-only change. `npm run verify` checks links, anchors and the corpus.
+
+### Exit criteria
+
+- [x] docs#212 merged; `git merge-base --is-ancestor <merge commit> origin/main` succeeds — merge commit b7537395, checked 2026-10-15
+- [x] every finding has a disposition in `content/plans/review-gate/pr-findings.mdx` — 45 rows, docs a85e0b6d
+- [x] the spec's Review record has a row per round of this gate — gate rounds 1, 2 and 3 tables
+- [x] `npm run verify` green — CI `verify` success on head a3df6909
+
+### Hand-off
+
+R3-1229–R3-1237 pin `docs@69197d29`; a section renamed or renumbered by a fix gets a note
+on each item that cites it.
+
+## Status
+
+_in-review 2026-10-15 — https://github.com/immediately-run/docs/pull/212 — docs#212 merged as b7537395; review gate rounds 1–3 closed, the blocking 3-r3-0 not reproduced by the adjudicator; findings log a85e0b6d._
+
+_claimed 2026-10-14 — docs (claim b21da0)._
+
+_(filed 2026-10-14)_

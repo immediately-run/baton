@@ -1,0 +1,89 @@
+---
+title: "R3-1229 — Baton host moves to baton.immediately.run in the built code"
+id: R3-1229
+project: baton
+status: done
+updated: 2026-10-15
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1066
+tier: critical
+description: "Move every configured Baton host from workitems.immediately.run to baton.immediately.run (and staging to baton-staging.immediately.run) in the baton Worker's routes, PUBLIC_ORIGIN and OIDC audience and in the docs clients, before R3-1208 provisions anything. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/13
+  - https://github.com/immediately-run/baton/pull/14
+depends_on:
+  - R3-1228
+---
+
+**Brief:** [[../home.mdx]].
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §15 row "the host (2026-10-14)", Decisions "Named the system Baton", R-BTN-15, R-BTN-16 (docs@69197d29, docs#212)
+**Depends on:** R3-1228
+
+### Requires
+
+- none — nothing is deployed yet (R3-1208 is unrun), so no live check exists; the deployed host is checked by R3-1208's own exit criteria.
+
+### Why
+
+The owner moved the host to `baton.immediately.run` on 2026-10-14 when "work item" became
+"ticket". The old name is configured in both repos: `wrangler.toml` lines 5, 23, 27, 43, 50, 53
+(routes, `PUBLIC_ORIGIN`, `OIDC_AUDIENCE`, both environments) and docs
+`scripts/lib/batonClient.mjs:5-6` (`BATON_URL`, `AUDIENCE`), `scripts/baton-worker.mjs:47`,
+comments in `scripts/baton-sync.mjs:13-14` and `scripts/lib/vocabulary.mjs:43`. Tier: critical
+— the OIDC audience is half of the sync principal's check (R-BTN-15).
+
+### What to build
+
+1. baton: production route `baton.immediately.run/*`, `PUBLIC_ORIGIN = "https://baton.immediately.run"`,
+   staging route and origin `baton-staging.immediately.run`, `OIDC_AUDIENCE = "baton.immediately.run"`
+   in both environments.
+2. docs: `BATON_URL` default and `AUDIENCE` in `scripts/lib/batonClient.mjs`, the default in
+   `scripts/baton-worker.mjs`, and the comments that name the host.
+
+### Architecture — the decisions, named
+
+- **One home per literal.** docs reads the host only from `scripts/lib/batonClient.mjs`
+  (`BATON_URL`, `AUDIENCE`); `scripts/baton-worker.mjs:47` imports `BATON_URL` instead of
+  spelling its own default. The baton Worker reads it only from `wrangler.toml` vars.
+- **No transition period.** The Worker accepts exactly one audience. Nothing is deployed, so
+  accepting both names would be a permanent widening for no caller.
+- **Merge order:** both PRs may merge in either order; neither is live until R3-1208.
+- **Do not**: rename the Worker (`baton`, `baton-staging`) or the Durable Object class; touch
+  archived items' text (history); add a redirect from the old host.
+
+### Tests
+
+- baton `test/unit/auth.test.ts`: a token minted with audience `baton.immediately.run` passes;
+  one with `workitems.immediately.run` is refused `unauthenticated`.
+- docs `scripts/baton-client.test.mjs`: `AUDIENCE` and `BATON_URL` are the new host; the OIDC
+  request in `scripts/baton-sync.mjs` asks for that audience (assert on the built request).
+- Scenarios: none new; S-BTN-1…16 stay green (`npm run test:baton`).
+
+### Exit criteria
+
+- [x] `git grep -n workitems` in baton returns nothing — empty at baton `eede8d6` (baton#14 merged)
+- [x] `git grep -n workitems -- scripts .github` in docs returns nothing — empty on docs main after 40c2a977, 21006a44, 6ddac4f1
+- [x] the two tests above pass; `npm test` green in baton — `test/unit/auth.test.ts` (the origin as audience; retired, bare and staging refused) and docs `scripts/baton-client.test.mjs`; baton CI run 38725642632 jobs `test` and `model` green on f969e26
+- [x] `npm run verify` green in docs — the Baton script tests (40), `check-baton` and the changed-file verify green; docs main CI green
+
+### Hand-off
+
+R3-1208 (provisioning) depends on this item and names the new hosts.
+
+## Status
+
+_in-review 2026-10-15 — https://github.com/immediately-run/baton/pull/14 — baton#13 merged before the R3-1229 commit was pushed (only its CHANGELOG commit landed); redelivered in baton#14 (d859010 + fea88c6) with round-1 fixes; docs 21006a44. The OIDC audience switch to each Baton's origin (R-BTN-56) is made here, not deferred._
+
+_in-review 2026-10-15 — https://github.com/immediately-run/baton/pull/13 — baton#13 (574889c) and docs@40c2a977; upstream: spec-vs-code — R-BTN-56 now makes the OIDC aud BATON_ORIGIN verbatim (https://…); this item keeps OIDC_AUDIENCE per its prescription and R3-1238 owns the switch._
+
+_claimed 2026-10-15 — baton,docs (claim 3146cd)._
+
+_(filed 2026-10-14)_

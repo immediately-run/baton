@@ -50,6 +50,8 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
   (or `cloudflare`) runs one.
 - `npm run start:local -- --db <path> --port <n>` — Baton as a local process (below).
 - `npm run typecheck` — the Worker, the local host and the Node scripts.
+- `npm run ticket -- claim|set|done|new …` — claim and move tickets with git as the lock
+  (`scripts/ticket.mjs`; usage in `tickets/home.mdx`), until Baton claims them (R3-1266).
 - `npm run check:wiki` — every page in `tickets/` and `docs/` compiles as MDX, uses only known
   components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
 - `npm run vendor` — re-copy `baton.mjs`, `vocabulary.mjs` and `sessionUsage.mjs` from a sibling `../docs`
