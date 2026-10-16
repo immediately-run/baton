@@ -63,11 +63,12 @@ describe('S-BTN-38 a course measures itself', () => {
     expect(r.json).toMatchObject({
       ok: true, repository: 'docs',
       courses: { 'roadmap-pr': {
-        // implement: the ticket's first claim, so no arrival to measure a wait from; review waited
-        // the ten minutes between the suspension and the next claim. Ready now: T-1's review
-        // since the post at +20 min, T-2's implement since the first post.
-        legs: { implement: { started: 1, finished: 1, abandoned: 0, waited: { count: 0 }, ran: { count: 1, median_s: 1200, max_s: 1200 }, ready_now: { tickets: 1, oldest_s: 3600 } },
-          review: { started: 1, finished: 0, abandoned: 1, waited: { count: 1, median_s: 600, max_s: 600 }, ran: { count: 0 }, ready_now: { tickets: 1, oldest_s: 2400 } } },
+        // implement: T-1's first claim came at once, its leg ready since the first post (a first
+        // wait, round 2, 2-r2-2); review waited the ten minutes between the suspension and the
+        // next claim. Ready now: T-2's implement since the first post. T-1's review is not
+        // claimable until a reading follows its last end (§6.7), so it is not counted (2-r2-1).
+        legs: { implement: { started: 1, finished: 1, abandoned: 0, waited: { count: 1, median_s: 0, max_s: 0 }, ran: { count: 1, median_s: 1200, max_s: 1200 }, ready_now: { tickets: 1, oldest_s: 3600 } },
+          review: { started: 1, finished: 0, abandoned: 1, waited: { count: 1, median_s: 600, max_s: 600 }, ran: { count: 0 }, ready_now: { tickets: 0, oldest_s: null } } },
         stations: { 'pr-open': { waited: { count: 1, median_s: 600, max_s: 600 } } },
       } },
       suspensions: [{ station: 'pr-open', detail: 'waiting on ci', claims: 1 }],
@@ -93,7 +94,10 @@ describe('S-BTN-38 a course measures itself', () => {
     git.place('T-2', placed('reviewed', [['review', 'reviewed']], [['merge', 'ready']]));
     expect(await git.post()).toMatchObject({ status: 200 });
     expect((await readAs(docsKey, `/v1/repositories/docs/stats?since=${new Date(T0 + 61 * MIN).toISOString()}`)).json).toMatchObject({
-      advice_overridden: { count: 1, tickets: ['docs:T-2'] }, off_graph: { count: 1, tickets: ['docs:T-2'] } });
+      advice_overridden: { count: 1, tickets: ['docs:T-2'] }, off_graph: { count: 1, tickets: ['docs:T-2'] },
+      // after the refresh T-1's review is claimable again, waiting since its last end at +60, not
+      // since it turned ready at +20 (2-r2-1); T-2, held by W3, is no longer counted
+      courses: { 'roadmap-pr': { legs: { review: { ready_now: { tickets: 1, oldest_s: 1800 } } } } } });
 
     // Refused: the ops-only key; a bearer (seed) worker key, which has no grant (round 1, 1-A-0);
     // an unsigned call; a malformed window and a malformed segment. An unknown repository is not-found.

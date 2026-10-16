@@ -483,11 +483,14 @@ export class Claims {
     try {
       // R-BTN-62: the counter's last handed-out number now; only a reading numbered above it can
       // make this claim stale.
+      // §2d's course record: how long the offered leg had been ready (R3-1248, 2-r2-2).
+      const readySince = st.next_leg == null ? null
+        : this.rows<{ ready_since: number | null }>(`SELECT ready_since FROM ticket_next_legs WHERE ticket_id = ? AND leg = ? AND state = 'ready'`, item.id, st.next_leg)[0]?.ready_since ?? null;
       this.exec(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, claim_observation,
-                   station, course_id, start_path, offered_leg, advice_json)
-                 VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`,
+                   station, course_id, start_path, offered_leg, advice_json, offered_ready_since)
+                 VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`,
         item.id, workerId, b.request_id, randomHex(3), this.headOf(item.repository) ?? '', now, this.handedOut(item.repository),
-        st.station, item.course, JSON.stringify(st.path), st.next_leg, advice ? JSON.stringify(advice) : null);
+        st.station, item.course, JSON.stringify(st.path), st.next_leg, advice ? JSON.stringify(advice) : null, readySince);
     } catch (e) {
       // R-BTN-4: the partial unique indexes refuse a second holder of the ticket or the worker.
       if (isUniqueViolation(e)) throw new BatonError('not-eligible', `${item.id} is already held`, { rule: 3, rule_code: GATE_CODES[3] });

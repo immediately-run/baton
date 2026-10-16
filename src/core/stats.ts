@@ -68,15 +68,26 @@ export class Stats {
     };
     const key = (...parts: (string | null)[]) => parts.map((x) => x ?? '?').join('\u0000');
 
+    // Each claim of the repository with the end of the ticket's previous claim, in one ordered pass
+    // (LAG over claims_by_ticket — never a scan per claim, 2-r2-0).
+    const history = `SELECT id, ticket_id, course_id, claimed_at, offered_ready_since,
+         LAG(ended_at) OVER t AS prev_ended, LAG(station) OVER t AS prev_station
+       FROM claims WHERE substr(ticket_id, 1, length(?)) = ?
+       WINDOW t AS (PARTITION BY ticket_id ORDER BY claimed_at, id)`;
+
     // Legs started in the window, each with when it arrived at its `from` station: the claim's
-    // previous leg's finish, or — for a claim's first leg — the end of the ticket's previous claim.
+    // previous leg's finish; for a claim's first leg, the end of the ticket's previous claim, or —
+    // a ticket's first claim — when the offered leg had turned ready (2-r2-2).
     const legs = this.rows<{ course_id: string | null; leg: string; started_at: number; finished_at: number | null; abandoned_at: number | null; arrived: number | null }>(
-      `SELECT c.course_id, l.leg, l.started_at, l.finished_at, l.abandoned_at,
-              COALESCE((SELECT p.finished_at FROM claim_legs p WHERE p.claim_id = l.claim_id AND p.seq < l.seq ORDER BY p.seq DESC LIMIT 1),
-                       CASE WHEN l.seq = (SELECT min(f.seq) FROM claim_legs f WHERE f.claim_id = l.claim_id)
-                            THEN (SELECT max(e.ended_at) FROM claims e WHERE e.ticket_id = c.ticket_id AND e.id <> c.id AND e.ended_at <= l.started_at) END) AS arrived
-       FROM claim_legs l JOIN claims c ON c.id = l.claim_id
-       WHERE ${mine} AND l.started_at >= ? AND l.started_at <= ?`, prefix, prefix, since, now);
+      `WITH c AS (${history}),
+            l AS (SELECT claim_id, seq, leg, started_at, finished_at, abandoned_at,
+                         LAG(finished_at) OVER (PARTITION BY claim_id ORDER BY seq) AS prev_finished,
+                         ROW_NUMBER() OVER (PARTITION BY claim_id ORDER BY seq) AS nth
+                  FROM claim_legs WHERE started_at >= ? AND started_at <= ? OR claim_id IN (SELECT claim_id FROM claim_legs WHERE started_at >= ? AND started_at <= ?))
+       SELECT c.course_id, l.leg, l.started_at, l.finished_at, l.abandoned_at,
+              CASE WHEN l.nth = 1 THEN COALESCE(c.prev_ended, c.offered_ready_since) ELSE l.prev_finished END AS arrived
+       FROM l JOIN c ON c.id = l.claim_id
+       WHERE l.started_at >= ? AND l.started_at <= ?`, prefix, prefix, since, now, since, now, since, now);
     for (const l of legs) {
       const r = leg(l.course_id, l.leg);
       r.started++;
@@ -90,12 +101,9 @@ export class Stats {
 
     // Stations: a claim that began in the window, after the ticket's previous claim ended there.
     const claims = this.rows<{ course_id: string | null; claimed_at: number; prev_ended: number; prev_station: string }>(
-      `SELECT * FROM (
-         SELECT c.course_id, c.claimed_at,
-                (SELECT p.ended_at FROM claims p WHERE p.ticket_id = c.ticket_id AND p.ended_at <= c.claimed_at AND p.id <> c.id ORDER BY p.ended_at DESC, p.id DESC LIMIT 1) AS prev_ended,
-                (SELECT p.station FROM claims p WHERE p.ticket_id = c.ticket_id AND p.ended_at <= c.claimed_at AND p.id <> c.id ORDER BY p.ended_at DESC, p.id DESC LIMIT 1) AS prev_station
-         FROM claims c WHERE ${mine} AND c.claimed_at >= ? AND c.claimed_at <= ?)
-       WHERE prev_ended IS NOT NULL`, prefix, prefix, since, now);
+      `WITH c AS (${history})
+       SELECT course_id, claimed_at, prev_ended, prev_station FROM c
+       WHERE claimed_at >= ? AND claimed_at <= ? AND prev_ended IS NOT NULL`, prefix, prefix, since, now);
     for (const c of claims) add(key('s', c.course_id, c.prev_station), Math.max(0, c.claimed_at - c.prev_ended));
 
     for (const [k, ms] of samples) {
@@ -106,12 +114,25 @@ export class Stats {
       else course(cid).stations[name] = { waited: durations(ms) };
     }
 
-    // Legs ready now and not yet claimed: how many tickets, and the oldest wait.
+    // Queued legs ready now that a claimant could take (2-r2-1), by the candidate query's own
+    // conditions (claims.ts candidates): no active or fenced claim, no hold or backoff
+    // (rule 3, rule 10), no unconfirmed completion, and a reading since the ticket's last end
+    // (§6.7) — each waiting since it turned ready or the ticket's last claim ended, whichever is later.
+    const head = this.rows<{ observation: number }>('SELECT observation FROM board_head WHERE repository_id = ?', repository)[0]?.observation ?? 0;
     for (const r of this.rows<{ course_id: string; leg: string; tickets: number; oldest: number | null }>(
-      `SELECT t.course_id, n.leg, count(*) AS tickets, min(n.ready_since) AS oldest FROM ticket_next_legs n JOIN tickets t ON t.id = n.ticket_id
+      `WITH last AS (SELECT ticket_id, max(ended_at) AS ended_at, max(end_observation) AS end_observation,
+                            max(status = 'active' OR (status = 'reaped' AND fence_pending = 1)) AS active, max(status = 'completed' AND confirmed_at IS NULL) AS unconfirmed
+                     FROM claims WHERE substr(ticket_id, 1, length(?)) = ? GROUP BY ticket_id)
+       SELECT t.course_id, n.leg, count(*) AS tickets, min(max(n.ready_since, COALESCE(last.ended_at, 0))) AS oldest
+       FROM ticket_next_legs n JOIN tickets t ON t.id = n.ticket_id
+         JOIN ticket_stations s ON s.ticket_id = t.id AND s.next_leg = n.leg
+         LEFT JOIN last ON last.ticket_id = t.id
+         LEFT JOIN ticket_overrides o ON o.ticket_id = t.id
        WHERE substr(t.id, 1, length(?)) = ? AND n.state = 'ready'
-         AND NOT EXISTS (SELECT 1 FROM claims a WHERE a.ticket_id = t.id AND a.status = 'active')
-       GROUP BY t.course_id, n.leg`, prefix, prefix)) {
+         AND COALESCE(last.active, 0) = 0 AND COALESCE(last.unconfirmed, 0) = 0
+         AND (last.end_observation IS NULL OR last.end_observation < ?)
+         AND NOT (COALESCE(o.hold, 0) = 1 OR COALESCE(o.retry_after, 0) > ?)
+       GROUP BY t.course_id, n.leg`, prefix, prefix, prefix, prefix, head, now)) {
       leg(r.course_id, r.leg).ready_now = { tickets: r.tickets, oldest_s: r.oldest == null ? null : Math.round(Math.max(0, now - r.oldest) / 1000) };
     }
 

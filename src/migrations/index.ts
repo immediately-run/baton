@@ -14,6 +14,7 @@ import webhooks from './0011_webhooks.sql';
 import forges from './0012_forges.sql';
 import stations from './0013_stations.sql';
 import admin from './0014_admin.sql';
+import claimReady from './0015_claim_ready.sql';
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },
@@ -30,4 +31,5 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 12, sql: forges },
   { id: 13, sql: stations },
   { id: 14, sql: admin },
+  { id: 15, sql: claimReady },
 ];

@@ -56,6 +56,9 @@ describe('baton test-course', () => {
     const v = await checkCourse(input({ legScripts: [...legs.filter((l) => l.name !== 'fix'), { name: 'deploy', exports: all }] }));
     expect(v.map((x) => [x.rule, x.message])).toEqual([['legs-scripts', 'leg fix has no legs/fix.mjs'], ['legs-scripts', 'legs/deploy.mjs is no leg of the course']]);
     // §6.13: "The test kit fails a script without all three" (round 1, 1-A-9)
+    // a script that does not load says so, not "exports nothing" (round 2, 2-r2-3)
+    const broken = await checkCourse(input({ legScripts: legs.map((l) => (l.name === 'fix' ? { name: 'fix', exports: [], error: "Cannot find package 'some-missing-pkg'" } : l)) }));
+    expect(broken).toEqual([{ rule: 'legs-scripts', message: "legs/fix.mjs does not load: Cannot find package 'some-missing-pkg'" }]);
     const thin = await checkCourse(input({ legScripts: legs.map((l) => (l.name === 'merge' ? { name: 'merge', exports: ['run'] } : l)) }));
     expect(thin).toEqual([expect.objectContaining({ rule: 'legs-scripts', message: 'legs/merge.mjs exports no handoff, close (§6.13: run, handoff and close)' })]);
     // as `baton run` reads them: named, on a default object, or a default function for run
@@ -92,7 +95,7 @@ describe('baton test-course', () => {
       stations: { 'T-1': { path: [{ leg: 'implement', reached: 'pr-open' }] }, 'C-1': { path: [] } } }));
     const k = await readInputs(root, 'roadmap-pr', { base: 'HEAD', board });
     expect(k).toMatchObject({ base: roadmapPr, proposed: WITHOUT_ADJUDICATE, baseVersions: { version: 3, min_worker_version: 3 }, proposedVersions: { version: 4, min_worker_version: 4 },
-      legScripts: [{ name: 'fix', exports: [] }, { name: 'merge', exports: ['run', 'close'] }], live: [{ id: 'T-1', path: [{ leg: 'implement', reached: 'pr-open' }] }] });
+      legScripts: [{ name: 'fix', exports: [], error: expect.any(String) }, { name: 'merge', exports: ['run', 'close'] }], live: [{ id: 'T-1', path: [{ leg: 'implement', reached: 'pr-open' }] }] });
     expect(await readInputs(root, 'roadmap-pr')).toMatchObject({ base: null, baseVersions: null, live: null });
     await expect(readInputs(root, 'chore')).rejects.toThrow(/no such course file/);
     // a base that does not resolve is an error, never a new course (round 1, 1-A-2/1-B-0)

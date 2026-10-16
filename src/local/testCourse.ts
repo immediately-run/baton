@@ -36,7 +36,7 @@ export interface KitInput {
   baseVersions: Versions | null;
   /** The leg scripts in `legs/` — each name without `.mjs`, and which of §6.13's `run`, `handoff`
    *  and `close` it exports — or null when the course has no `legs/`. */
-  legScripts: { name: string; exports: string[] }[] | null;
+  legScripts: { name: string; exports: string[]; error?: string }[] | null;
   /** Live tickets and where the sync placed them under the course in force; null when none were
    *  given (no board), so the replay did not run. */
   live: { id: string; path: Step[] }[] | null;
@@ -79,6 +79,8 @@ export function staticViolations(k: KitInput): KitViolation[] {
     for (const s of scripts.filter((x) => !legs.includes(x))) out.push({ rule: 'legs-scripts', message: `legs/${s}.mjs is no leg of the course` });
     // §6.13: "The test kit fails a script without all three" (round 1, 1-A-9).
     for (const x of k.legScripts) {
+      // a script that does not load is its own failure, with its error (round 2, 2-r2-3)
+      if (x.error) { out.push({ rule: 'legs-scripts', message: `legs/${x.name}.mjs does not load: ${x.error}` }); continue; }
       const missing = LEG_EXPORTS.filter((e) => !x.exports.includes(e));
       if (missing.length) out.push({ rule: 'legs-scripts', message: `legs/${x.name}.mjs exports no ${missing.join(', ')} (§6.13: run, handoff and close)` });
     }
@@ -263,13 +265,11 @@ export async function readInputs(root: string, course: string, opts: { base?: st
   if (existsSync(legsDir)) {
     legScripts = [];
     for (const f of readdirSync(legsDir).filter((x) => x.endsWith('.mjs')).sort()) {
-      let exports: string[] = [];
       try {
-        exports = legExports(await import(pathToFileURL(join(legsDir, f)).href));
-      } catch {
-        exports = []; // a script that does not load exports nothing
+        legScripts.push({ name: f.slice(0, -4), exports: legExports(await import(pathToFileURL(join(legsDir, f)).href)) });
+      } catch (e) {
+        legScripts.push({ name: f.slice(0, -4), exports: [], error: (e as Error).message.split('\n')[0] });
       }
-      legScripts.push({ name: f.slice(0, -4), exports });
     }
   }
   let live: KitInput['live'] = null;
