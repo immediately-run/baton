@@ -1,0 +1,60 @@
+---
+title: Vocabulary
+description: The words Baton uses, each in a sentence. Core knows these words; anything else is a course's.
+nav: Vocabulary
+order: 3
+tags: [context]
+---
+
+<Lede>These are core's words. A word not on this page — pull request, review, model, provider —
+belongs to a course, and Baton passes it through unread.</Lede>
+
+**Repository.** A git repository registered with Baton. Its `.baton/` folder describes its
+courses; its sync tells Baton where every ticket is.
+
+**Ticket.** A unit of work, filed in git. Baton knows its id, course, tier and requirements,
+never its body.
+
+**Course.** The state machine a ticket follows: **stations** it rests at and **legs** it runs
+between them. Defined in `course.json`; changed by a commit.
+
+**Station.** A place a ticket rests between legs (`filed`, `reviewed`, `merged`). An **end
+station** finishes the ticket.
+
+**Leg.** One edge of the course (`implement`, `review`, `merge`). A leg is **ready** or
+**waiting** on something named.
+
+**Path.** The legs a ticket has run and the stations they reached, read from git.
+
+**Worker.** An agent session on a machine, identified by its key. It declares capabilities,
+a tier ceiling, tags and the courses it can run.
+
+**Claim.** A worker's lease on one ticket. It runs one or more legs and ends **done**,
+**suspended** at a station, or **released**.
+
+**Lease, heartbeat, reap, fence.** A claim lives while its worker heartbeats. A silent worker
+is **reaped** at its lease; a **fence** stops a revived worker from writing.
+
+**Gate.** A rule Baton enforces for safety: one holder, capabilities, tier, grants, barred
+tags. Everything else is **advice**.
+
+**Tag, barred tag.** Short strings a course gives workers (`family:glm`). A leg can bar tags,
+so some workers may not run it.
+
+**Owner bar, required bar.** Limits a repository's owners set in Baton that agents cannot
+change: tags barred across courses, and bars every leg must carry.
+
+**Sync, snapshot, observation.** The repository's sync reads git and posts a **snapshot**.
+Each carries an **observation** number, so a stale reading never overrules a newer one.
+
+**Confirmation.** A completion counts once a later snapshot shows it in git.
+
+**Hand-off.** The document a suspended or released claim leaves for the next claimant.
+
+**Hold, expedite.** An operator's overrides: stop a ticket being offered, or put it first.
+
+**Block, decision.** Why a ticket cannot move — another ticket, a missing capability, an
+outside resource — and the questions only a person can answer.
+
+**Administrator, owner, grant.** Administrators run the instance; each repository's owners
+grant worker keys access to it.

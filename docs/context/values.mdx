@@ -1,0 +1,34 @@
+---
+title: Baton's values
+description: The owner's decisions that settle every design question about Baton. They are tiebreakers, not findings to argue.
+nav: Values
+order: 2
+tags: [context]
+---
+
+<Lede>When two good designs conflict, these decide. Each is an owner decision; none is reopened
+by a review.</Lede>
+
+1. **Git is the truth about tickets; Baton holds what is live.** Every ticket fact and its
+   evidence — the ticket, where it is, what was done — lives in git. When Baton and git
+   disagree about a ticket, git wins and Baton says so. Baton owns only what git cannot: the
+   live leases, and the limits agents must not be able to change (owner bars, required bars,
+   grants), which live in Baton's own store.
+2. **Advice never refuses.** Baton gates only safety. Ordering, scoring and recommendations
+   are advice a worker may override, and overriding is logged, never blocked.
+3. **The core is small and knows no course.** Core code names only its own vocabulary
+   (tickets, stations, legs, leases, gates). Anything that needs to know what a leg *means*
+   is course code, in the repository.
+4. **Baton runs no repository code.** It accepts state and serves state. Every judgement
+   that needs a model, a service or a course's meaning runs on the worker.
+5. **One Baton per team.** One instance serves every repository a team registers. Shared
+   resources belong to the instance.
+6. **Webhooks only trigger syncs.** A webhook tells Baton something changed; the sync reads
+   what. Nothing in a delivery is trusted beyond that.
+7. **SSH keys are machine identity.** Workers, owners and administrators sign requests with
+   SSH keys. No passwords, no shared tokens in the long run.
+8. **Baton runs without GitHub.** Any forge, or a plain git server, is enough.
+9. **One codebase, two hosts.** The same core runs on Cloudflare and as a local process; a
+   test that passes on one passes on the other.
+10. **The code is checked against the model.** Baton's core matches a formal model, and the
+    tests prove it on every change.

@@ -1,0 +1,49 @@
+---
+title: What Baton is
+description: Baton's product definition and value proposition — what it is, who it is for, and what it deliberately is not.
+nav: Product
+order: 1
+tags: [context]
+---
+
+<Lede>Baton hands tickets to AI coding agents one at a time, keeps each claim alive with a lease,
+and shows the whole factory live. Git keeps every ticket and its evidence; Baton keeps what is
+happening now.</Lede>
+
+## The problem
+
+A team of agents that coordinates through git alone pays three costs that grow with the fleet:
+
+- **A dead claim blocks a ticket for days.** Nothing watches liveness continuously; a sweep
+  finds the dead holder eventually.
+- **Eligibility is self-judged.** An agent decides for itself whether it can do a ticket, and
+  finds out it could not after it claimed it.
+- **Nobody can see the factory.** Which workers are up, what each could take and what is
+  running now is inferred after the fact, or not at all.
+
+## What Baton does
+
+- **One fenced lease per ticket.** A worker claims a ticket and keeps it by heartbeat. A
+  worker that goes silent loses it at its lease, and a fence stops a revived one from writing.
+- **Gates for safety, advice for the rest.** Baton refuses only what would be unsafe — a
+  second holder, a missing capability, a tier above the worker's ceiling, a barred tag — and
+  offers everything else in a default order the worker may override.
+- **Courses, not workflows.** Each ticket moves along its repository's course: stations it
+  rests at, legs it runs between them. The course lives in the repository's `.baton/` folder
+  and changes with a commit, not a Baton deploy.
+- **A live view.** Workers, claims, timelines, what is ready, what is blocked and what needs a
+  person — on one dashboard, with the course's own record of how long things take.
+
+## Who it is for
+
+Teams that run many coding agents — or agents and people — against the same repositories, and
+the operator who has to know at a glance what the factory is doing and what it needs.
+
+## What it is not
+
+- **Not the record of the work.** Git holds every ticket fact and its evidence; Baton holds
+  the live leases and the limits agents cannot change, and defers to git about tickets.
+- **Not a workflow engine.** Baton runs no repository code; workers decide how to do a leg.
+  For durable execution of your own code, use something like Temporal
+  ([compared](../compared-to-temporal.mdx)).
+- **Not tied to GitHub.** Any git forge, or a plain git server, will do.
