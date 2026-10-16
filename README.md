@@ -9,7 +9,7 @@ The design is `BATON_SPEC` in the `immediately-run/docs` repository
 an item says `infra/baton/<path>`, it means `<path>` in this repository (BATON_SPEC §3).
 
 How Baton differs from a durable-execution engine such as Temporal, and where each fits:
-[`docs/compared-to-temporal.md`](docs/compared-to-temporal.md).
+[`docs/compared-to-temporal.mdx`](docs/compared-to-temporal.mdx).
 
 ## Layout
 
@@ -45,6 +45,8 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 | `scripts/check-traces.mjs`, `scripts/check-model-links.mjs` | R3-1244: replay each scenario's trace through `model/baton.qnt` (`npm run traces`); check that every model action and its implementation name each other, with current hashes (`npm run model:links`) |
 | `test/hosts/` | The two hosts the harness drives, behind one interface (`#host`) |
 | `test/lib/fixtureRepo.mjs` | The harness's stand-in for `docs/main`: a real bare git repo |
+| `tickets/` | The tickets wiki: Baton's tickets (`tickets/*.mdx`, finished ones in `tickets/archive/`) and their board, opened on immediately.run by Grove (below) |
+| `docs/` | The documentation wiki: how Baton works and how to run it (below) |
 
 ## Commands
 
@@ -54,11 +56,32 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 - `npm run typecheck` — the Worker, the local host and the Node scripts.
 - `npm run model:links`, `npm run traces` — the code against the formal model (R3-1244; `model/README.md`).
   `npm test` runs both after the suite, and the model's own checks.
+- `npm run check:wiki` — every page in `tickets/` and `docs/` compiles as MDX, uses only known
+  components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
 - `npm run vendor` — re-copy `baton.mjs`, `vocabulary.mjs` and `sessionUsage.mjs` from a sibling `../docs`
   checkout (or `DOCS_DIR`) and rewrite `src/shared/manifest.json`. Do this in a PR here after
   docs changes any of them.
 - `npm run fixtures` — regenerate `test/fixtures/boards.json` with the real docs
   `factory-state` code.
+
+## The wikis
+
+The repository holds two [Grove](https://github.com/immediately-run/grove) wikis, which
+immediately.run opens: `package.json`'s `"immediately.run": {"content": ["tickets", "docs"]}`
+lists them, and each folder's `immediately.run.json` opens it with the wiki viewer.
+
+- **`tickets/`**, the tickets:
+  <https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/home.mdx>.
+  A ticket is `tickets/<id>.mdx`. New tickets are `B-n`; tickets that moved here from the
+  immediately.run docs roadmap keep their `R3-NNNN` ids. A finished one moves to
+  `tickets/archive/` with `status: done`. Its frontmatter follows `tickets/item.schema.json`;
+  the body is prose for people and agents. The board's components (`tickets/components/`) are
+  registered in `tickets/immediately.run.json`, as are the board view and the ticket record
+  sets.
+- **`docs/`**, the documentation:
+  <https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/home.mdx>.
+
+Pages are MDX, so `<` and `{` in prose go in backticks or are escaped (`\<`, `\{`).
 
 ## Worker credentials
 
