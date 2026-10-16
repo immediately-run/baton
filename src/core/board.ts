@@ -57,6 +57,12 @@ export interface PostedTicket {
   rank?: number | null;
   /** Shown, never read (§2b). */
   display?: { status?: string; group?: string; project?: string };
+  /** The ticket's opaque course fields (§7.1): accepted unread, the course's own to consume. */
+  course?: Record<string, unknown>;
+  /** Accepted unread (R3-1258). */
+  parent?: string;
+  /** Accepted unread (R3-1259). */
+  not_before?: unknown;
 }
 
 /** Where the sync places a ticket (R-BTN-70, §7.1 `stations`). */
