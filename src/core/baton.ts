@@ -358,13 +358,21 @@ export class BatonCore {
     const tx = <T>(f: () => T): T => this.store.transaction(f);
     const stats = /^\/v1\/repositories\/([^/]+)\/stats$/.exec(p);
     if (m === 'GET' && stats) {
-      // §2d, §11: a course's record, for any key granted on the repository (R-BTN-58); a key with
-      // no grants keeps its interim reach. Aggregates and ids only (G-BTN-64).
+      // §2d, §11: a course's record, for any key granted on the repository (R-BTN-58).
+      // Aggregates and ids only (G-BTN-64).
       if (!cred) throw new BatonError('unauthenticated', 'no worker principal');
-      const repo = checkRepositoryId(decodeURIComponent(stats[1]));
+      let segment: string;
+      try {
+        segment = decodeURIComponent(stats[1]);
+      } catch {
+        throw new BatonError('invalid-params', 'a malformed path segment');
+      }
+      const repo = checkRepositoryId(segment);
       if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
-      if (this.workers.credential(cred).granted
-        && !this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
+      // A grant on the repository, whatever the key (round 1, 1-A-0): a bearer or seed key has no
+      // grant, so it reads no repository's stats — the item's "Do not".
+      this.workers.credential(cred);
+      if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
         throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
       }
       const raw = url.searchParams.get('since');

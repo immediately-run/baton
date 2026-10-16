@@ -114,13 +114,19 @@ describe('baton test-course: the command (R3-1248)', () => {
       const dir = join(root, '.baton/courses/roadmap-pr');
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'course.json'), JSON.stringify(course));
-      const run = () => spawnSync('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'test-course', root, 'roadmap-pr'], { encoding: 'utf8', env: { ...process.env, BATON_URL: 'http://127.0.0.1:1' } });
-      const ok = run();
+      const run = (...more: string[]) => spawnSync('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'test-course', root, 'roadmap-pr', ...more], { encoding: 'utf8', env: { ...process.env, BATON_URL: 'http://127.0.0.1:1' } });
+      // no base resolves: an error naming --base, never a silent skip of the removal rule (round 1, 1-A-3)
+      const nobase = run();
+      expect([nobase.status, nobase.stderr]).toEqual([2, expect.stringContaining('pass --base REF')]);
+      expect(run('--base', 'HAED').stderr).toContain('--base HAED: not a commit');
+      const run2 = () => run('--base', 'none');
+      const ok = run2();
       expect([ok.status, ok.stdout]).toEqual([0, expect.stringContaining('✓ no violations')]);
-      expect(ok.stdout).toContain('with no base (the removal rule is not checked)');
+      expect(ok.stdout).toContain('with --base none (the removal rule is not checked)');
+      expect(ok.stdout).toContain('no --board (live tickets not replayed)');
       mkdirSync(join(dir, 'legs'));
       writeFileSync(join(dir, 'legs/deploy.mjs'), '');
-      const bad = run();
+      const bad = run2();
       expect(bad.status).toBe(1);
       expect(bad.stdout).toContain('✗ legs-scripts: legs/deploy.mjs is no leg of the course');
       const usage = spawnSync('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'test-course', root], { encoding: 'utf8' });

@@ -17,7 +17,11 @@ export interface CourseStats {
   since: number;
   until: number;
   courses: Record<string, {
-    legs: Record<string, { started: number; finished: number; abandoned: number; ran: Durations }>;
+    /** Per leg: runs started in the window; how long each waited at its `from` station before it
+     *  started (from the previous leg's finish in the claim, or the previous claim's end on the
+     *  ticket), and how long it ran; and the tickets whose leg is ready and unclaimed now. */
+    legs: Record<string, { started: number; finished: number; abandoned: number; waited: Durations; ran: Durations; ready_now: { tickets: number; oldest_s: number | null } }>;
+    /** Per station: how long a ticket rested there between one claim's end and the next claim. */
     stations: Record<string, { waited: Durations }>;
   }>;
   ends: { end_reason: string; detail: string | null; claims: number }[];
@@ -54,41 +58,61 @@ export class Stats {
     const mine = 'substr(c.ticket_id, 1, length(?)) = ?';
     const courses: CourseStats['courses'] = {};
     const course = (id: string | null) => (courses[id ?? '?'] ??= { legs: {}, stations: {} });
+    const leg = (c: string | null, name: string) =>
+      (course(c).legs[name] ??= { started: 0, finished: 0, abandoned: 0, waited: durations([]), ran: durations([]), ready_now: { tickets: 0, oldest_s: null } });
+    const samples = new Map<string, number[]>();
+    const add = (key: string, ms: number) => {
+      const xs = samples.get(key);
+      if (xs) xs.push(ms);
+      else samples.set(key, [ms]);
+    };
+    const key = (...parts: (string | null)[]) => parts.map((x) => x ?? '?').join('\u0000');
 
-    // Legs: started in the window; run time is start to finish.
-    const legs = this.rows<{ course_id: string | null; leg: string; started_at: number; finished_at: number | null; abandoned_at: number | null }>(
-      `SELECT c.course_id, l.leg, l.started_at, l.finished_at, l.abandoned_at FROM claim_legs l JOIN claims c ON c.id = l.claim_id
+    // Legs started in the window, each with when it arrived at its `from` station: the claim's
+    // previous leg's finish, or — for a claim's first leg — the end of the ticket's previous claim.
+    const legs = this.rows<{ course_id: string | null; leg: string; started_at: number; finished_at: number | null; abandoned_at: number | null; arrived: number | null }>(
+      `SELECT c.course_id, l.leg, l.started_at, l.finished_at, l.abandoned_at,
+              COALESCE((SELECT p.finished_at FROM claim_legs p WHERE p.claim_id = l.claim_id AND p.seq < l.seq ORDER BY p.seq DESC LIMIT 1),
+                       CASE WHEN l.seq = (SELECT min(f.seq) FROM claim_legs f WHERE f.claim_id = l.claim_id)
+                            THEN (SELECT max(e.ended_at) FROM claims e WHERE e.ticket_id = c.ticket_id AND e.id <> c.id AND e.ended_at <= l.started_at) END) AS arrived
+       FROM claim_legs l JOIN claims c ON c.id = l.claim_id
        WHERE ${mine} AND l.started_at >= ? AND l.started_at <= ?`, prefix, prefix, since, now);
-    const ran = new Map<string, number[]>();
     for (const l of legs) {
-      const r = (course(l.course_id).legs[l.leg] ??= { started: 0, finished: 0, abandoned: 0, ran: durations([]) });
+      const r = leg(l.course_id, l.leg);
       r.started++;
+      if (l.arrived != null) add(key('w', l.course_id, l.leg), Math.max(0, l.started_at - l.arrived));
       if (l.finished_at != null) {
         r.finished++;
-        const k = `${l.course_id ?? '?'}\u0000${l.leg}`;
-        ran.set(k, [...(ran.get(k) ?? []), l.finished_at - l.started_at]);
+        add(key('r', l.course_id, l.leg), l.finished_at - l.started_at);
       }
       if (l.abandoned_at != null) r.abandoned++;
     }
-    for (const [k, ms] of ran) {
-      const [c, leg] = k.split('\u0000');
-      course(c === '?' ? null : c).legs[leg].ran = durations(ms);
+
+    // Stations: a claim that began in the window, after the ticket's previous claim ended there.
+    const claims = this.rows<{ course_id: string | null; claimed_at: number; prev_ended: number; prev_station: string }>(
+      `SELECT * FROM (
+         SELECT c.course_id, c.claimed_at,
+                (SELECT p.ended_at FROM claims p WHERE p.ticket_id = c.ticket_id AND p.ended_at <= c.claimed_at AND p.id <> c.id ORDER BY p.ended_at DESC, p.id DESC LIMIT 1) AS prev_ended,
+                (SELECT p.station FROM claims p WHERE p.ticket_id = c.ticket_id AND p.ended_at <= c.claimed_at AND p.id <> c.id ORDER BY p.ended_at DESC, p.id DESC LIMIT 1) AS prev_station
+         FROM claims c WHERE ${mine} AND c.claimed_at >= ? AND c.claimed_at <= ?)
+       WHERE prev_ended IS NOT NULL`, prefix, prefix, since, now);
+    for (const c of claims) add(key('s', c.course_id, c.prev_station), Math.max(0, c.claimed_at - c.prev_ended));
+
+    for (const [k, ms] of samples) {
+      const [kind, c, name] = k.split('\u0000');
+      const cid = c === '?' ? null : c;
+      if (kind === 'w') leg(cid, name).waited = durations(ms);
+      else if (kind === 'r') leg(cid, name).ran = durations(ms);
+      else course(cid).stations[name] = { waited: durations(ms) };
     }
 
-    // Stations: how long a ticket waited there for a claimant — from a claim's end at a station
-    // to the next claim of the same ticket, when that claim began in the window.
-    const claims = this.rows<{ ticket_id: string; course_id: string | null; claimed_at: number; ended_at: number | null; station: string }>(
-      `SELECT c.ticket_id, c.course_id, c.claimed_at, c.ended_at, c.station FROM claims c WHERE ${mine} ORDER BY c.ticket_id, c.claimed_at, c.id`, prefix, prefix);
-    const waited = new Map<string, number[]>();
-    for (let i = 1; i < claims.length; i++) {
-      const [a, b] = [claims[i - 1], claims[i]];
-      if (a.ticket_id !== b.ticket_id || a.ended_at == null || b.claimed_at < since || b.claimed_at > now) continue;
-      const k = `${b.course_id ?? '?'}\u0000${a.station}`;
-      waited.set(k, [...(waited.get(k) ?? []), Math.max(0, b.claimed_at - a.ended_at)]);
-    }
-    for (const [k, ms] of waited) {
-      const [c, station] = k.split('\u0000');
-      course(c === '?' ? null : c).stations[station] = { waited: durations(ms) };
+    // Legs ready now and not yet claimed: how many tickets, and the oldest wait.
+    for (const r of this.rows<{ course_id: string; leg: string; tickets: number; oldest: number | null }>(
+      `SELECT t.course_id, n.leg, count(*) AS tickets, min(n.ready_since) AS oldest FROM ticket_next_legs n JOIN tickets t ON t.id = n.ticket_id
+       WHERE substr(t.id, 1, length(?)) = ? AND n.state = 'ready'
+         AND NOT EXISTS (SELECT 1 FROM claims a WHERE a.ticket_id = t.id AND a.status = 'active')
+       GROUP BY t.course_id, n.leg`, prefix, prefix)) {
+      leg(r.course_id, r.leg).ready_now = { tickets: r.tickets, oldest_s: r.oldest == null ? null : Math.round(Math.max(0, now - r.oldest) / 1000) };
     }
 
     // Ends in the window, by reason and the course's detail; suspensions by station.
@@ -110,7 +134,7 @@ export class Stats {
     return {
       repository, since, until: now, courses, ends, suspensions,
       advice_overridden: events('advice-overridden'),
-      // Core calls no hook yet (R3-1236): nothing has failed.
+      // Baton runs no repository code (hooks retired with R3-1236): nothing can fail.
       hook_failures: [],
       off_graph: events('off-graph'),
       foreign_writes: events('foreign-claim'),

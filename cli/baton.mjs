@@ -29,7 +29,8 @@
 //
 //   baton test-course <repository root> <course> [--base REF] [--board FILE]
 //                — the course test kit (§2d, R-BTN-64/-65; R3-1248): the working tree's .baton/ is
-//                the proposal, REF's the course in force (default: origin/HEAD, else origin/main),
+//                the proposal, REF's the course in force (default: origin/HEAD, else origin/main;
+//                none resolving is an error — `--base none` skips the removal rule on purpose),
 //                FILE a board payload placing the live tickets. Runs a local Baton; needs no URL or key.
 //
 // The URL is `--url`, else BATON_URL, else https://baton.immediately.run.
@@ -264,15 +265,17 @@ async function testCourse(argv) {
   const { flags, positional } = parseArgs(argv, [], ['base', 'board'], 2);
   if (positional.length !== 2) throw new Error('usage: baton test-course <repository root> <course> [--base REF] [--board FILE]');
   const root = resolve(positional[0]);
-  const base = flags.base ?? defaultBase(root);
+  // A base that does not resolve fails the run, never skips a rule unseen (round 1, 1-A-3).
+  const base = flags.base === 'none' ? null : flags.base ?? defaultBase(root);
+  if (base === null && flags.base !== 'none') throw new Error(`no origin/HEAD or origin/main in ${root}: pass --base REF (fetch the base first), or --base none to skip the removal rule`);
   const { bundleLocal } = await import(new URL('../scripts/bundle.mjs', import.meta.url).href);
   const kit = await bundleLocal('src/local/testCourse.ts', 'test-course.mjs');
-  const input = kit.readInputs(root, positional[1], { base, board: flags.board ?? null });
+  const input = await kit.readInputs(root, positional[1], { base, board: flags.board ?? null });
   const violations = await kit.checkCourse(input);
   const said = [
     `course ${positional[1]} in ${root}`,
-    base ? `against ${base}${input.base ? '' : ' (no such course there: a new course)'}` : 'with no base (the removal rule is not checked)',
-    `${input.live.length} live ticket(s)`,
+    base ? `against ${base}${input.base ? '' : ' (no such course there: a new course)'}` : 'with --base none (the removal rule is not checked)',
+    input.live ? `${input.live.length} live ticket(s) replayed` : 'no --board (live tickets not replayed)',
     input.legScripts ? `${input.legScripts.length} leg script(s)` : 'no legs/',
   ];
   process.stdout.write(`baton test-course: ${said.join('; ')}\n`);

@@ -8,9 +8,10 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { validateCourse } from '../core/course';
 import { graphOf, onGraph, resolvePath, type Graph, type Step } from '../core/graph';
-import { checkPayload } from '../core/board';
+import { checkPayload, DEFAULT_COURSE } from '../core/board';
 import { LocalHost } from './host';
 import { openStore } from './store';
 
@@ -33,14 +34,26 @@ export interface KitInput {
   base: unknown | null;
   proposedVersions: Versions | null;
   baseVersions: Versions | null;
-  /** The leg scripts in `legs/` (names without `.mjs`), or null when the course has no `legs/`. */
-  legScripts: string[] | null;
-  /** Live tickets and where the sync placed them under the course in force. */
-  live: { id: string; path: Step[] }[];
+  /** The leg scripts in `legs/` — each name without `.mjs`, and which of §6.13's `run`, `handoff`
+   *  and `close` it exports — or null when the course has no `legs/`. */
+  legScripts: { name: string; exports: string[] }[] | null;
+  /** Live tickets and where the sync placed them under the course in force; null when none were
+   *  given (no board), so the replay did not run. */
+  live: { id: string; path: Step[] }[] | null;
 }
 
 const asRecord = (v: unknown): Record<string, any> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, any>) : {});
 const names = (v: unknown): string[] => (typeof v === 'string' ? [v] : Array.isArray(v) ? (v as string[]) : []);
+
+/** §6.13's three exports of a leg script, each a function (default-exported or named, as `baton run` reads them). */
+export const LEG_EXPORTS = ['run', 'handoff', 'close'] as const;
+
+/** Which of `LEG_EXPORTS` a loaded leg module provides. */
+export function legExports(mod: Record<string, unknown>): string[] {
+  const d = mod.default;
+  const of = (name: string) => mod[name] ?? (d != null && typeof d === 'object' ? (d as Record<string, unknown>)[name] : undefined) ?? (name === 'run' && typeof d === 'function' ? d : undefined);
+  return LEG_EXPORTS.filter((n) => typeof of(n) === 'function');
+}
 
 /** The stations and legs of `base` the proposed file has neither under the same name nor through a
  *  `renamed_from` (R-BTN-64: a removal, which older workers would misbehave on). */
@@ -61,8 +74,14 @@ export function staticViolations(k: KitInput): KitViolation[] {
   if (out.length) return out;
   if (k.legScripts) {
     const legs = Object.keys(asRecord(asRecord(k.proposed).legs));
-    for (const l of legs.filter((x) => !k.legScripts!.includes(x))) out.push({ rule: 'legs-scripts', message: `leg ${l} has no legs/${l}.mjs` });
-    for (const s of k.legScripts.filter((x) => !legs.includes(x))) out.push({ rule: 'legs-scripts', message: `legs/${s}.mjs is no leg of the course` });
+    const scripts = k.legScripts.map((x) => x.name);
+    for (const l of legs.filter((x) => !scripts.includes(x))) out.push({ rule: 'legs-scripts', message: `leg ${l} has no legs/${l}.mjs` });
+    for (const s of scripts.filter((x) => !legs.includes(x))) out.push({ rule: 'legs-scripts', message: `legs/${s}.mjs is no leg of the course` });
+    // §6.13: "The test kit fails a script without all three" (round 1, 1-A-9).
+    for (const x of k.legScripts) {
+      const missing = LEG_EXPORTS.filter((e) => !x.exports.includes(e));
+      if (missing.length) out.push({ rule: 'legs-scripts', message: `legs/${x.name}.mjs exports no ${missing.join(', ')} (§6.13: run, handoff and close)` });
+    }
   }
   if (k.base) {
     const r = removed(k.base, k.proposed);
@@ -82,7 +101,7 @@ export function staticViolations(k: KitInput): KitViolation[] {
  *  would be placed back without its evidence changing (R-BTN-64). */
 export function replayViolations(proposed: unknown, live: KitInput['live']): KitViolation[] {
   const g = graphOf(proposed);
-  return live.filter((t) => !onGraph(g, t.path)).map((t) => ({
+  return (live ?? []).filter((t) => !onGraph(g, t.path)).map((t) => ({
     rule: 'moves-back',
     message: `${t.id}: its path ${t.path.map((s) => `${s.leg}→${s.reached}`).join(', ') || '(none)'} is not a path of the proposed course${
       resolvePath(g, t.path).some((s) => !g.legs.has(s.leg) || !g.stations.has(s.reached)) ? ' (a leg or station it ran is gone)' : ''}: the ticket would move back with the same evidence`,
@@ -142,16 +161,11 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
   let n = 0;
   const post = async (registry: unknown[], stations: Record<string, unknown>, closed: { id: string; as: 'done' }[] = []) => {
     const repo = core.registry.get(REPO)!;
-    // R-BTN-62: a number first — except the repository's first board, which has none to take.
-    let observation: number | undefined;
-    try {
-      observation = core.observations.observe(REPO).observation;
-    } catch {
-      observation = undefined;
-    }
+    // R-BTN-62: a number first, as the sync takes it; any refusal is the kit's failure (round 1, 1-A-8).
+    const observation = core.observations.observe(REPO).observation;
     const tickets = Object.keys(stations).map(ticket);
     // checked as the sync route checks a post, then judged by the core's own board()
-    const p = checkPayload({ registry, sha: SHA(++n), parent_sha: n === 1 ? null : SHA(n - 1), tickets, closed, stations, ...(observation == null ? {} : { observation }) });
+    const p = checkPayload({ registry, sha: SHA(++n), parent_sha: n === 1 ? null : SHA(n - 1), tickets, closed, stations, observation });
     return (await core.board(repo, p)) as Record<string, unknown>;
   };
   const placedAt = (g: Graph, path: Step[]) => {
@@ -162,7 +176,7 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
   try {
     const proposed = graphOf(k.proposed);
     // The base file first, with the live tickets where it placed them; then the proposed one.
-    if (k.base) await post([entry(k.base, k.baseVersions ?? version)], Object.fromEntries(k.live.filter((t) => onGraph(graphOf(k.base), t.path)).map((t) => [t.id, placedAt(graphOf(k.base), t.path)])));
+    if (k.base) await post([entry(k.base, k.baseVersions ?? version)], Object.fromEntries((k.live ?? []).filter((t) => onGraph(graphOf(k.base), t.path)).map((t) => [t.id, placedAt(graphOf(k.base), t.path)])));
     const route = shortestRoute(proposed) ?? [];
     await post([entry(k.proposed, version)], { 'KIT-1': placedAt(proposed, []) });
     const refused = core.courses.refusals().filter((r) => r.course_id === k.course);
@@ -208,8 +222,10 @@ export async function checkCourse(k: KitInput): Promise<KitViolation[]> {
 }
 
 /** The kit's inputs from a repository checkout: the proposed `.baton/` in the working tree, the
- *  base at git `base` (absent there: a new course), the live tickets from a board payload file. */
-export function readInputs(root: string, course: string, opts: { base?: string | null; board?: string | null } = {}): KitInput {
+ *  base at git `base` (a commit that must resolve; the course absent there is a new course), the
+ *  live tickets from a board payload file, and each leg script's exports (imported: the kit runs
+ *  in the repository's own CI, on its own code). */
+export async function readInputs(root: string, course: string, opts: { base?: string | null; board?: string | null } = {}): Promise<KitInput> {
   const dir = join(root, '.baton', 'courses', course);
   const file = join(dir, 'course.json');
   if (!existsSync(file)) throw new Error(`${file}: no such course file`);
@@ -220,21 +236,46 @@ export function readInputs(root: string, course: string, opts: { base?: string |
   };
   const batonJson = join(root, '.baton', 'baton.json');
   const proposedVersions = existsSync(batonJson) ? versionsOf(JSON.parse(readFileSync(batonJson, 'utf8'))) : null;
-  const show = (path: string) => {
+  const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 << 20 });
+  let base: unknown = null;
+  let baseVersions: Versions | null = null;
+  if (opts.base) {
+    // A base that does not resolve is an error, never "a new course" (round 1, 1-A-2/1-B-0).
     try {
-      return JSON.parse(execFileSync('git', ['-C', root, 'show', `${opts.base}:${path}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 << 20 }));
+      git('rev-parse', '--verify', '--quiet', `${opts.base}^{commit}`);
     } catch {
-      return null;
+      throw new Error(`--base ${opts.base}: not a commit in ${root} (fetch it, or pass --base none to skip the removal rule)`);
     }
-  };
-  const base = opts.base ? show(`.baton/courses/${course}/course.json`) : null;
-  const baseVersions = opts.base ? versionsOf(show('.baton/baton.json')) : null;
+    // Only a path the base does not have reads as absent; a file that is there must parse.
+    const show = (path: string) => {
+      try {
+        git('cat-file', '-e', `${opts.base}:${path}`);
+      } catch {
+        return null;
+      }
+      return JSON.parse(git('show', `${opts.base}:${path}`));
+    };
+    base = show(`.baton/courses/${course}/course.json`);
+    baseVersions = versionsOf(show('.baton/baton.json'));
+  }
   const legsDir = join(dir, 'legs');
-  const legScripts = existsSync(legsDir) ? readdirSync(legsDir).filter((f) => f.endsWith('.mjs')).map((f) => f.slice(0, -4)).sort() : null;
-  let live: KitInput['live'] = [];
+  let legScripts: KitInput['legScripts'] = null;
+  if (existsSync(legsDir)) {
+    legScripts = [];
+    for (const f of readdirSync(legsDir).filter((x) => x.endsWith('.mjs')).sort()) {
+      let exports: string[] = [];
+      try {
+        exports = legExports(await import(pathToFileURL(join(legsDir, f)).href));
+      } catch {
+        exports = []; // a script that does not load exports nothing
+      }
+      legScripts.push({ name: f.slice(0, -4), exports });
+    }
+  }
+  let live: KitInput['live'] = null;
   if (opts.board) {
     const b = asRecord(JSON.parse(readFileSync(opts.board, 'utf8')));
-    const courseOf = new Map((b.tickets as unknown[] ?? []).map(asRecord).map((t) => [String(t.id), String(t.course_id ?? 'roadmap-pr')]));
+    const courseOf = new Map((b.tickets as unknown[] ?? []).map(asRecord).map((t) => [String(t.id), String(t.course_id ?? DEFAULT_COURSE)]));
     live = Object.entries(asRecord(b.stations)).filter(([id]) => (courseOf.get(id) ?? course) === course)
       .map(([id, st]) => ({ id, path: (asRecord(st).path as Step[] | undefined) ?? [] }));
   }

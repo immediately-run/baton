@@ -54,11 +54,12 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 - `npm test` (alias `npm run test:baton`) — the suite on both hosts, with a fake clock; `npx vitest --project local`
   (or `cloudflare`) runs one.
 - `npm run start:local -- --db <path> --port <n>` — Baton as a local process (below).
-- `npx baton test-course <repository root> <course> [--base REF] [--board FILE]` — the course test kit
-  (§2d, R-BTN-64/-65): the working tree's `.baton/` against REF's (default `origin/HEAD`), run on a
-  local Baton — the core accepts the file, live tickets keep their paths, a removal raised
-  `min_worker_version`, `legs/` pairs with the legs, and a ticket runs the shortest route to a
-  confirmed done. Exit 1 names each violation.
+- `npx baton test-course <repository root> <course> [--base REF|none] [--board FILE]` — the course test kit
+  (§2d, R-BTN-64/-65): the working tree's `.baton/` against REF's (default `origin/HEAD`, else
+  `origin/main`; none resolving is an error, `--base none` skips the removal rule), run on a local
+  Baton — the core accepts the file, the live tickets FILE places keep their paths, a removal raised
+  `min_worker_version`, each `legs/` script pairs with a leg and exports `run`, `handoff` and
+  `close`, and a ticket runs the shortest route to a confirmed done. Exit 1 names each violation.
 - `npm run typecheck` — the Worker, the local host and the Node scripts.
 - `npm run model:links`, `npm run traces` — the code against the formal model (R3-1244; `model/README.md`).
   `npm test` runs both after the suite, and the model's own checks.
