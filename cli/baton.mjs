@@ -27,8 +27,15 @@
 //                [--retry 1h,4h --max-failed 3 | --retry default] [--transcript-repos a,b]
 //                [--unblocked-workflow .github/workflows/F.yml | --unblocked-workflow none]
 //
+//   baton test-course <repository root> <course> [--base REF] [--board FILE]
+//                — the course test kit (§2d, R-BTN-64/-65; R3-1248): the working tree's .baton/ is
+//                the proposal, REF's the course in force (default: origin/HEAD, else origin/main),
+//                FILE a board payload placing the live tickets. Runs a local Baton; needs no URL or key.
+//
 // The URL is `--url`, else BATON_URL, else https://baton.immediately.run.
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { readFileSync, realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { signHeaders, signingKey } from './sign.mjs';
 
@@ -239,7 +246,43 @@ export async function send(url, p, keyFile, fetchImpl = fetch) {
   return { status: res.status, json };
 }
 
+/** The base a course change is judged against: `--base`, else the remote's default branch. */
+export function defaultBase(root) {
+  for (const ref of ['origin/HEAD', 'origin/main']) {
+    try {
+      execFileSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { stdio: 'ignore' });
+      return ref;
+    } catch {
+      // not there: the next one
+    }
+  }
+  return null;
+}
+
+/** `baton test-course` (R3-1248): exit 0 when the kit finds nothing, 1 naming each violation. */
+async function testCourse(argv) {
+  const { flags, positional } = parseArgs(argv, [], ['base', 'board'], 2);
+  if (positional.length !== 2) throw new Error('usage: baton test-course <repository root> <course> [--base REF] [--board FILE]');
+  const root = resolve(positional[0]);
+  const base = flags.base ?? defaultBase(root);
+  const { bundleLocal } = await import(new URL('../scripts/bundle.mjs', import.meta.url).href);
+  const kit = await bundleLocal('src/local/testCourse.ts', 'test-course.mjs');
+  const input = kit.readInputs(root, positional[1], { base, board: flags.board ?? null });
+  const violations = await kit.checkCourse(input);
+  const said = [
+    `course ${positional[1]} in ${root}`,
+    base ? `against ${base}${input.base ? '' : ' (no such course there: a new course)'}` : 'with no base (the removal rule is not checked)',
+    `${input.live.length} live ticket(s)`,
+    input.legScripts ? `${input.legScripts.length} leg script(s)` : 'no legs/',
+  ];
+  process.stdout.write(`baton test-course: ${said.join('; ')}\n`);
+  for (const v of violations) process.stdout.write(`✗ ${v.rule}: ${v.message}\n`);
+  process.stdout.write(violations.length ? `${violations.length} violation(s)\n` : '✓ no violations\n');
+  return violations.length ? 1 : 0;
+}
+
 async function main(argv) {
+  if (argv[0] === 'test-course') return testCourse(argv.slice(1));
   if (argv[0] === 'run') {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.
@@ -256,7 +299,8 @@ async function main(argv) {
   return status >= 200 && status < 300 ? 0 : 1;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// argv[1] may be npx's link to this file: compare real paths.
+if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
   main(process.argv.slice(2)).then((code) => process.exit(code), (e) => {
     process.stderr.write(`baton: ${e.message}\n`);
     process.exit(2);

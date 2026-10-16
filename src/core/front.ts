@@ -97,7 +97,7 @@ async function route(req: Request, env: Config, to: Forward): Promise<Response> 
     const ascii = JSON.stringify(d).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
     return forward(new Request(req.url, { method: 'POST' }), to, { 'X-Baton-Webhook': ascii });
   }
-  if (pathname.startsWith('/v1/runner/')) {
+  if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/stats$/.test(pathname)) {
     if (isSigned(req)) return forwardSigned(req, env, to);
     // The transition (R3-1239): a bearer token still serves until every worker signs.
     const credential = await verifyWorker(req, env);

@@ -39,6 +39,7 @@
     "test/unit/runner-main.test.ts",
     "test/integration/S-BTN-41.runner.test.ts",
     "test/unit/check-traces.test.ts",
+    "test/unit/test-course.test.ts",
     "test/model"
   ]
 }

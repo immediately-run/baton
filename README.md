@@ -30,14 +30,15 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 | `src/core/observations.ts` | The per-repository observation counter (R-BTN-62): `POST /v1/sync/observation` hands out the next number (`sync-busy` while one is outstanding, void after 10 minutes); a board post's number is used once and must be above the last accepted reading's |
 | `src/core/courses.ts` | The course registry each sync posts (R-BTN-48): its shape check, each course file judged by `validateCourse` (a failing one keeps the previous and is listed under Needs you, R-BTN-69), the `min_worker_version` rule 9 reads |
 | `src/core/course.ts` | Pure: `validateCourse`, every way a course file breaks R-BTN-69's rules (stations reachable, an end from everywhere, cycles bounded, `start_leg`, inputs) |
+| `src/core/stats.ts` | A course's own record (§2d, R3-1248): `GET /v1/repositories/{repository}/stats` — per station and leg wait and run times, ends by reason and detail, suspensions, advice overridden, `off-graph` and foreign writes; aggregates and ids only |
 | `src/core/board.ts` | Pure: snapshot validation, the `tickets` row an item becomes, peaks, prices |
 | `src/core/auth.ts` | JWT verification (R-BTN-15, R-BTN-16); the one verifier of signed requests, SSHSIG over RFC 9421 (R-BTN-13); worker tokens against `TOKEN_HASHES` during the transition |
 | `src/cloudflare/` | The Cloudflare host: the Worker (`worker.ts`) and the `Baton` Durable Object (`baton.ts`), wiring `ctx.storage`, the alarm and `waitUntil` into the ports |
-| `src/local/` | The local host: `node:sqlite` as the `Store` (`store.ts`), one queue for every request and alarm tick (`queue.ts`), a timer as the alarm (`host.ts`), `node:http` (`server.ts`), the command line (`main.ts`) |
+| `src/local/` | The local host: `node:sqlite` as the `Store` (`store.ts`), one queue for every request and alarm tick (`queue.ts`), a timer as the alarm (`host.ts`), `node:http` (`server.ts`), the command line (`main.ts`); the course test kit (`testCourse.ts`, R3-1248) |
 | `src/runner/` | `baton run`'s worker loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`) and the CLI entry (`main.ts`) |
 | `src/migrations/` | Numbered schema migrations, applied before the object serves |
 | `src/ui/` | The dashboard: one HTML page, one stylesheet, one ES module (`textContent` only) |
-| `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`) |
+| `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton |
 | `src/shared/` | **Vendored** from docs `scripts/lib/` — never edit here (R-BTN-37); `batonSync.mjs` is the board sync's own decision code, which S-BTN-13 drives |
 | `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
 | `test/integration/trace.ts` | R3-1244: every scenario's run on the local host as a trace — one step per request or alarm tick, with the state projection the formal model has — written to `test/.traces/` |
@@ -53,6 +54,11 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 - `npm test` (alias `npm run test:baton`) — the suite on both hosts, with a fake clock; `npx vitest --project local`
   (or `cloudflare`) runs one.
 - `npm run start:local -- --db <path> --port <n>` — Baton as a local process (below).
+- `npx baton test-course <repository root> <course> [--base REF] [--board FILE]` — the course test kit
+  (§2d, R-BTN-64/-65): the working tree's `.baton/` against REF's (default `origin/HEAD`), run on a
+  local Baton — the core accepts the file, live tickets keep their paths, a removal raised
+  `min_worker_version`, `legs/` pairs with the legs, and a ticket runs the shortest route to a
+  confirmed done. Exit 1 names each violation.
 - `npm run typecheck` — the Worker, the local host and the Node scripts.
 - `npm run model:links`, `npm run traces` — the code against the formal model (R3-1244; `model/README.md`).
   `npm test` runs both after the suite, and the model's own checks.
