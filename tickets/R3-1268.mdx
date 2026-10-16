@@ -35,8 +35,10 @@ done there still point at docs:
 
 ### What to build
 
-1. **Agent workflow.** Write `AGENTS.md`, with CLAUDE.md pointing to it, and a skill under
-   `.claude/skills/` that work a `B-n` or moved `R3-NNNN` ticket through Baton:
+1. **Agent workflow.** Write `AGENTS.md`, with CLAUDE.md pointing to it, and the skill
+   `/next-ticket` (`.claude/skills/next-ticket/`; owner, 2026-10-16: skills here are named
+   after tickets, not docs' `next-roadmap-item`) that work a `B-n` or moved `R3-NNNN` ticket
+   through Baton:
    - pick an eligible ticket, claim it, advance it along the `pr` course's legs, run the review
      gate, record the findings under `docs/review/`, and end the claim;
    - claiming uses the CLI and an SSH-key runner (R3-1239). It needs no docs checkout and no
@@ -75,7 +77,7 @@ done there still point at docs:
 
 ### Exit criteria
 
-- [ ] AGENTS.md and the skill merged; a ticket worked end to end from a baton-only clone
+- [ ] AGENTS.md and `/next-ticket` merged; a ticket worked end to end from a baton-only clone
 - [ ] `src/shared/` sourced in baton; docs consumes it; R-BTN-37 amended
 - [ ] `docs/DEPLOY.md` merged; the reference check is green in CI
 

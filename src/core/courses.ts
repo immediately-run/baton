@@ -12,7 +12,7 @@ import { COURSE_ID, COURSE_VERSION_MAX, COURSES_MAX } from './validate';
 
 export { COURSE_ID };
 
-/** A skill's name (`next-roadmap-item`), as a directory under `.claude/skills/`. */
+/** A skill's name (`next-ticket`), as a directory under `.claude/skills/`. */
 const SKILL = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** A branch pattern (R-BTN-51): `{ticket}` and `{repository}` placeholders and `*`. */
 const BRANCH_PATTERN = /^[A-Za-z0-9._/{}*-]{1,200}$/;
