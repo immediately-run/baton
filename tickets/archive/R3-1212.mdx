@@ -1,0 +1,99 @@
+---
+title: "R3-1212 — Baton claims: the lock, matching, reaping, fencing and completion confirmation"
+id: R3-1212
+project: baton
+status: done
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1053
+tier: critical
+description: "Server side of claims in infra/baton: claim and end with idempotency and both unique locks, matching rules 1-9, the alarm's reaps, owner force-reap with fence-pending, holder queries, confirmation by ancestry; S-BTN-1, -2 (server), -12, -15."
+topics:
+  - baton
+  - infra
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/5
+depends_on:
+  - R3-1211
+---
+
+**Brief:** [the Baton project](../projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.1–6.7, §7.2 rules 1–9, §11 (claim, end, holder, reap rows), §14 (Running, Timeline, Needs you) (docs@2dbf1424)
+**Depends on:** R3-1211
+
+### Requires
+
+- none — local Worker tests only.
+
+### Why
+
+The lease is Baton's core: one active claim per item and per worker, claims handed out by
+the matching rules, silent workers reaped, live ones fenced before re-issue, completions
+confirmed by ancestry. It is built now and exercised by the harness in cut-over mode; in
+production the mode stays `shadow` until R3-1220. Tier: critical — the two-holder invariant.
+
+### What to build
+
+1. `POST /v1/worker/claim` (idempotent `request_id`, nonce, both partial unique indexes) and
+   `GET /v1/worker/next`.
+2. `POST /v1/worker/claims/{id}/end` with the closed §6.5 vocabulary and R-BTN-8.
+3. Matching: `isEligible` from `lib/baton.mjs` over the snapshot's `rankReady`, rules 1–9
+   (rule 10 arrives with R3-1217).
+4. The alarm: reap by silence at each worker's clamped timeout; the unacknowledged-release
+   reap at 2 h; `fence_pending` and `fence-cleared` from the heartbeat's `fenced` report
+   (R-BTN-19); the 24-hour auto-accept of a held snapshot.
+5. `GET /v1/worker/items/{item}/holder`, `POST /v1/ui/claims/{id}/reap`, confirmations
+   from the sync (§6.7) and the 6-hour unconfirmed flag.
+6. Dashboard: Running, Timeline and Needs you views.
+
+### Architecture — the decisions, named
+
+- **Matching is the §7.2 SQL query** over `work_items`, `work_item_requires` and Baton's
+  tables, then `isEligible` over the candidates for rules 2 and 8; the claim response carries
+  the item's `path` and `snapshot_sha` (R-BTN-34).
+- **GitHub wins (R-BTN-35).** On each accepted snapshot, an active claim whose item git now
+  shows as done, archived, superseded, deferred, re-tiered above the holder's ceiling or gone
+  is ended `released:stale-board`, and the holder gets a `release`.
+- **The lock is the index.** Claim inserts and lets SQLite's unique indexes refuse a
+  second holder; never check-then-insert without the index.
+- **Mode gate.** Claim and end return `not-cut-over` unless `cutover_at` is set; the test
+  harness sets it directly. Shadow behaviour (shadow-report) stays as R3-1211 built it.
+- **Clamp** `lease_timeout_s` to [900, 86400] on every heartbeat (R-BTN-9).
+- **Do not:** reap on a `last_seen_at` comparison read from `Date.now()` (the injected
+  clock only); re-issue an item with an unconfirmed completion or a fence-pending reap; mark
+  a `claim-ended` refusal as anything but that claim's (§6.9).
+
+### Tests
+
+- `infra/baton/test/unit/claims.test.ts`: G-BTN-1, -2, -3 (clamp and timeout ± 1 s), -6, -14,
+  and G-BTN-40 (the query and `isEligible` agree on fixture boards; git overtaking an active
+  claim ends it).
+- Integration: `S-BTN-1.claim-race`, `S-BTN-2.silent-worker` (server half: reap time, re-issue),
+  `S-BTN-12.completion-confirmation`, `S-BTN-15.stale-skills`, with seeded workers.
+
+### Exit criteria
+
+- [x] `npm run test:baton` passes, including `S-BTN-1`, `S-BTN-12`, `S-BTN-15` and the server half of `S-BTN-2` — 138 passed at baton a8cdf59 (baton#5, merged cb3b8de)
+- [x] `grep -n "one_active_claim_per_item\|one_active_claim_per_worker" infra/baton/src/migrations/*.sql` matches both — `src/migrations/0001_init.sql:92-93`
+- [x] `npm run verify` green — on the ledger commit that archives this item
+
+### Hand-off
+
+R3-1213 gives the reaped session its client-side fence; R3-1217 adds attempts and cutover.
+
+## Status
+
+_in-review 2026-10-13 — https://github.com/immediately-run/baton/pull/5._
+
+_claimed 2026-10-13 — docs (claim a3397a)._
+
+_updated 2026-10-13 — path mapping (owner, 2026-10-13): Baton's code lives in immediately-run/baton, so infra/baton/\<path> in this item means \<path> at that repo's root (BATON_SPEC §3; the decision library is vendored by hash, R-BTN-37).._
+
+_amended 2026-10-13 — BATON_SPEC R-BTN-33/34 made explicit by the owner: Baton holds only the filter fields (`work_items`), and a worker reads item content from git; folded into this item before any claim._
+
+_(filed 2026-10-13)_

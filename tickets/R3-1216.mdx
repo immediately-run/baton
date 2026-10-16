@@ -1,0 +1,66 @@
+---
+title: "R3-1216 — Verify: Baton shadow week"
+id: R3-1216
+project: baton
+status: available
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - OP
+  - roadmap-item
+order: 1057
+tier: judgement
+description: "One week of the fleet heartbeating and reporting in shadow: every git claim matched in Baton, shadow conflicts and would-be reaps reviewed against the witness. Requires: human-operator."
+topics:
+  - baton
+  - verification
+owns: {}
+prs: []
+depends_on:
+  - R3-1213
+  - R3-1214
+  - R3-1215
+---
+
+**Brief:** [the Baton project](projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §13 step 2 (exit) (docs@2dbf1424)
+**Depends on:** R3-1213, R3-1214, R3-1215
+
+### Requires
+
+- `human-operator` — exit criteria 1–3: the owner provisions worker tokens on the fleet,
+  restarts sessions, and reviews the week's comparison.
+
+### Why
+
+Step 2's exit (§13) is one week in which every git claim has a Baton claim, and the reaps the
+alarm would have made are reviewed against the witness's — before Baton decides anything.
+
+### What to build
+
+A one-week observation: tokens issued per VM, the Mac and the cloud environment; sessions
+restarted from a pulled checkout; at the end, a review note
+`content/plans/baton/shadow-week.mdx` with the counts.
+
+### Architecture — the decisions, named
+
+- Tokens are issued per machine (`credentials` rows, R-BTN-13); only the Mac's may declare
+  `human-operator`.
+- **Do not:** set cutover; fix a mismatch in place — file each as a BUG item in `baton`.
+
+### Tests
+
+None to write.
+
+### Exit criteria
+
+- [ ] **live leg** (`human-operator`): every fleet VM, the Mac and the cloud environment show as alive workers on the dashboard
+- [ ] **live leg** (`human-operator`): over 7 days, every `roadmap: claim` commit has a matching shadow claim, and each `shadow-conflict` event is explained in the note
+- [ ] **live leg** (`human-operator`): the note lists the alarm's would-be reaps beside the witness's actions, with every difference explained
+- [ ] `npm run verify` green
+
+## Status
+
+_(filed 2026-10-13)_

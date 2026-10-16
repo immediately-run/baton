@@ -1,0 +1,84 @@
+---
+title: "R3-1217 — Baton cutover server: attempts, retries, holds, resume records, legacy import, one-way cutover"
+id: R3-1217
+project: baton
+status: done
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1058
+tier: critical
+description: "Server side of cutover in infra/baton: failed-attempt counting with backoff and holds (R-BTN-23), resume records and previous_attempts (R-BTN-24), legacy import and owner-confirmed adoption, one-way cutover (R-BTN-28); S-BTN-5, -6, -7, -16 (server)."
+topics:
+  - baton
+  - infra
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/6
+depends_on:
+  - R3-1212
+---
+
+**Brief:** [the Baton project](../projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.10 R-BTN-23, §6.11 R-BTN-24, §7.2 rule 10, §8 (holds), §13 step 3 (legacy import, adoption), R-BTN-28 (docs@2dbf1424)
+**Depends on:** R3-1212
+
+### Requires
+
+- none — local Worker tests only.
+
+### Why
+
+Cutover makes Baton authoritative, and three server behaviours must exist first: an item
+that defeats every claimant is held instead of retried for ever; the next claimant gets the
+last one's work as a record; and items already in progress in git when the switch happens are
+imported, not orphaned. Tier: critical — the cutover is one-way.
+
+### What to build
+
+1. Failed-attempt counting (§6.10: which reaps and releases count, `lease-lost` once per
+   worker, the reset after a hold-lift), backoff (`retry_after` 1 h, 4 h), holds
+   (`attempts-exhausted`, `non-retryable:<class>`, `review-capacity`), `held` events, rule 10.
+2. Resume records (R-BTN-24) written at every non-completed end, and `previous_attempts` in the
+   claim response.
+3. `POST /v1/ui/cutover` (one-way; `cutover_at`), `GET /v1/worker/mode` reporting it.
+4. Legacy import at cutover (one legacy worker per `in-progress` item, `reap_after` = claim
+   note date + 7 days) and `POST /v1/worker/adopt` with owner confirmation on the dashboard.
+5. Dashboard: holds and adoptions in Needs you; Lift hold; Cut over (with confirmation).
+
+### Architecture — the decisions, named
+
+- **Counting is a query, not a counter**: failed claims ended after the newest hold-lift
+  `override` event, so a reset needs no extra state.
+- **The cutover endpoint** refuses unless the newest snapshot is under 15 minutes old, and
+  performs the legacy import in the same transaction.
+- **Do not:** expose any call that clears `cutover_at`; count owner reaps or
+  `provider-suspended` releases; auto-lift a hold.
+
+### Tests
+
+- `infra/baton/test/unit/attempts.test.ts`: G-BTN-31.
+- Integration: `S-BTN-5.retried-item` (server: backoff and `previous_attempts`),
+  `S-BTN-6.poisoned-item`, `S-BTN-7.non-retryable`, `S-BTN-16.cutover` (server: import,
+  adoption, one-way), G-BTN-19, G-BTN-33, G-BTN-35 (server half).
+
+### Exit criteria
+
+- [x] `npm run test:baton` passes, including `S-BTN-6`, `S-BTN-7` and the server halves of `S-BTN-5` and `S-BTN-16` — 166 passed at baton 390296c (baton#6, merged 5f4211d)
+- [x] `grep -rn "cutover_at" infra/baton/src` shows no write but the cutover endpoint — the one INSERT is in `src/cutover.ts`
+- [x] `npm run verify` green — on the ledger commit that archives this item
+
+## Status
+
+_in-review 2026-10-13 — upstream: spec-silent — §7.1's payload carries no claim-note holder for §13 step 3's legacy session name; Baton accepts an optional per-item holder (baton#6) and falls back to item-\<id>; the docs sync's holderOf half is a follow-up._
+
+_in-review 2026-10-13 — https://github.com/immediately-run/baton/pull/6._
+
+_claimed 2026-10-13 — docs (claim 409354)._
+
+_updated 2026-10-13 — path mapping (owner, 2026-10-13): Baton's code lives in immediately-run/baton, so infra/baton/\<path> in this item means \<path> at that repo's root (BATON_SPEC §3; the decision library is vendored by hash, R-BTN-37).._
+
+_(filed 2026-10-13)_

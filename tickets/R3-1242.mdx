@@ -1,0 +1,68 @@
+---
+title: "R3-1242 — [OP] Verify: Baton local hook sandbox on a KVM host"
+id: R3-1242
+project: baton
+status: superseded
+updated: 2026-10-14
+repos:
+  - baton
+  - docs
+tags:
+  - VERIFY
+  - OP
+  - roadmap-item
+order: 1079
+tier: judgement
+description: "On a Linux host with /dev/kvm, run the local hook sandbox's tests and S-BTN-31 with hooks posted, and check a host without /dev/kvm refuses to start. Requires: human-operator."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1241
+---
+
+**Brief:** [the Baton project](projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §3a R-BTN-59, §13a S-BTN-31 (docs@d36df740, docs#212)
+**Depends on:** R3-1241
+
+### Requires
+
+- `human-operator` — every exit criterion needs a Linux host with `/dev/kvm` (the owner's KVM host or a bare-metal fleet host) or, for the last, one without it; agent VMs cannot start a nested microVM.
+
+### Why
+
+R3-1241's microVM tests cannot run on the agent line. This item runs them where they can, so
+the sandbox is proven, not assumed. Tier: judgement — reading the results is a call about a
+security boundary.
+
+### What to build
+
+Nothing new: the runs below, and a Status note with the host, the commands and their output.
+
+### Architecture — the decisions, named
+
+- **Run from a clean checkout of `immediately-run/baton` `main`** with the guest image the
+  VM pipeline builds, not a locally modified one.
+- **Do not**: mark a skipped test as passed; relax a time limit to make a run pass.
+
+### Tests
+
+The runs are the tests.
+
+### Exit criteria
+
+- [ ] live leg (`human-operator`, KVM host): `npx vitest --project local test/local/hookRunner.test.ts` green, no test skipped
+- [ ] live leg (`human-operator`, KVM host): S-BTN-31 green on the local project with hook files posted
+- [ ] live leg (`human-operator`, a host without `/dev/kvm`): `npm run start:local` exits non-zero with a message naming `/dev/kvm`
+- [ ] `npm run verify` green in docs (the Status note)
+
+### Hand-off
+
+None.
+
+## Status
+
+_superseded 2026-10-14 — superseded 2026-10-14 — no Firecracker hook sandbox, so no KVM-host run (BATON_SPEC R-BTN-59 on docs#212).._
+
+_(filed 2026-10-14)_

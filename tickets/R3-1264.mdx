@@ -1,0 +1,66 @@
+---
+title: "R3-1264 — Baton forge notifications: GitLab, Gitea and GitHub repository webhooks verified in the Worker"
+id: R3-1264
+project: baton
+status: available
+updated: 2026-10-16
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1096
+tier: judgement
+description: "POST /v1/forges/{repository}/notify verifies GitLab tokens, Gitea and GitHub-repository HMACs in the Worker against BATON_FORGE_SECRETS, one parser per forge reading only R-BTN-95's fields, recording wants; S-BTN-56's notification cases. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1263
+---
+
+**Brief:** [the Baton project](projects/baton.mdx); filed by R3-1253 (docs#217).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2k R-BTN-95; R-BTN-73; §3 (Worker-first checks); §10.1 (the forge notification principal); §11 (`POST /v1/forges/{repository}/notify`); §13a S-BTN-56 (the notification cases) (docs@71b18e3e)
+**Depends on:** R3-1263
+
+### Requires
+
+- none — deliveries are signed with test secrets in the harness.
+
+### Why
+
+GitLab, Gitea and App-less GitHub repositories need their reviews and pushes to trigger syncs
+too. Tier: judgement — a trigger, verified before anything is read.
+
+### What to build
+
+1. `POST /v1/forges/{repository}/notify`: the verifier from `BATON_FORGE_SECRETS[repository].forge`
+   — GitLab `X-Gitlab-Token` (constant time), Gitea `X-Gitea-Signature`, GitHub repository
+   webhook `X-Hub-Signature-256` — in the Worker, before the body is parsed.
+2. One parser per forge over its accepted events and fields (R-BTN-95), returning only them;
+   no pipeline, job or workflow-run events from GitLab or Gitea; the mirror's push dropped by
+   its author email; repeated delivery ids dropped (`webhook_deliveries`).
+3. The map to repositories whose tickets name the delivery's repository (on the home's forge
+   host) and the want it records (R3-1263).
+
+### Architecture — the decisions, named
+
+- **The parser is the only code that touches a payload**, as `pickDelivery` is for the App.
+- **Do not**: compute anything from a payload; accept an unsigned delivery.
+
+### Tests
+
+- Integration: S-BTN-56's notification cases, both hosts.
+- `test/unit/forge-notify.test.ts`: each verifier, each parser with a recording payload, an
+  unaccepted event, a code repository's delivery through a home repository's route.
+
+### Exit criteria
+
+- [ ] S-BTN-56's notification cases pass on both hosts
+- [ ] `test/unit/forge-notify.test.ts` passes
+- [ ] `npm run typecheck` green
+
+## Status
+
+_(filed 2026-10-16)_

@@ -1,0 +1,79 @@
+---
+title: "R3-1260 — Baton push doorbell: an optional hibernating WebSocket that rings a worker to heartbeat now (BATON_SPEC §2j)"
+id: R3-1260
+project: baton
+status: available
+updated: 2026-10-15
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1093
+tier: judgement
+description: "Build BATON_SPEC R-BTN-91: GET /v1/runner/push, a signed WebSocket upgrade accepted with the Durable Object WebSocket Hibernation API (a local Push implementation on the Node host), rings after a message is queued (at most one a second), closing on reap, re-key, revocation and seal, and the sidecar's reconnecting client that heartbeats on a ring; S-BTN-53, G-BTN-81. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1259
+---
+
+**Brief:** [the Baton project](projects/baton.mdx); the owner, 2026-10-15: workers may receive Baton's
+messages over a push connection, provided it does not fight the Cloudflare architecture.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2j R-BTN-91, R-BTN-55 (the `Push` interface), §9,
+§11 (`GET /v1/runner/push`), §13a S-BTN-53; §16 G-BTN-81
+**Depends on:** R3-1259 (the alarm's unblocking at `not_before`, which rings)
+
+### Requires
+
+- none — the Cloudflare side runs under the test bindings in `vitest.config.ts`; the local
+  side in the integration harness.
+
+### Why
+
+A cancel, a `leg-timeout` or a due recurring run reaches a worker at its next heartbeat, up to
+2 minutes later. A ring makes it about a second, at no idle cost on Cloudflare, without a
+second delivery path. Tier: judgement — latency only; nothing depends on it.
+
+### What to build
+
+1. **`Push`** (R-BTN-55): the Cloudflare implementation with `ctx.acceptWebSocket(ws,
+   [workerId])`, `setWebSocketAutoResponse` for pings and `ctx.getWebSockets(workerId)` for
+   rings; the local implementation over the Node server's upgrade.
+2. **The route**: `GET /v1/runner/push?session_name=`, signed (query included) and
+   replay-checked, with `X-Worker-Secret`, the worker resolved and checked as a heartbeat is;
+   one socket per worker, a new one closing the old; closed on reap, re-key, revocation, loss
+   of liveness (by the alarm) and seal.
+3. **Rings**: after each transaction that queues a message for a worker (and R3-1259's
+   unblocking), one `{ring: [<kind>]}` per worker per second at most, sent after commit, and a
+   trailing ring at the second's end through the alarm set early; the last ring's time and the
+   suppressed kinds in the socket's `serializeAttachment`.
+4. **Keepalive**: `setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))`
+   on Cloudflare; the local `Push` on the `ws` package, pinned exact.
+5. **The sidecar**: connect with its session and secret, reconnect with full-jitter backoff (cap
+   1 s doubling to 5 minutes, reset after a minute open), send `ping` every 30 seconds, heartbeat on a ring; the heartbeat cadence
+   unchanged.
+
+### Architecture — the decisions, named
+
+- **A ring, not a channel**: no message body, acknowledgement or lease state travels on the
+  socket.
+- **Do not**: use server-sent events or any response that keeps the object in memory; add an
+  await to a transaction to send; change the heartbeat cadence.
+
+### Tests
+
+- Integration, both hosts: **S-BTN-53**.
+- Unit: ring coalescing (one a second, the trailing ring, state surviving hibernation), the
+  upgrade's identity checks, socket replacement, closure on each of the five events.
+
+### Exit criteria
+
+- [ ] S-BTN-53 passes on both hosts; G-BTN-81 holds
+- [ ] `npm test` and `npm run typecheck` green; the boundary test green
+
+## Status
+
+_(filed 2026-10-15)_

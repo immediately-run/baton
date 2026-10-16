@@ -1,0 +1,69 @@
+---
+title: "R3-1214 — Baton for opencode: plugin, reviewer child sessions, transcript archiver"
+id: R3-1214
+project: baton
+status: available
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1055
+tier: critical
+description: "The opencode plugin equivalent of the Claude Code hooks, IR_BATON_PARENT child sessions for review-pr-claude and opencode reviewers, and the opencode archiver's spool append, per the spike's findings; S-BTN-4 and S-BTN-8 on opencode."
+topics:
+  - baton
+  - harness
+owns: {}
+prs: []
+depends_on:
+  - R3-1213
+  - R3-1210
+---
+
+**Brief:** [the Baton project](projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.4 (opencode), §6.8 (child sessions, the opencode archiver), §6.9 (pairing by `callID`), §7.4 (reviewer spawn deny); the spike (R3-1210) (docs@2dbf1424)
+**Depends on:** R3-1213, R3-1210
+
+### Requires
+
+- none — the fake harness covers both shapes. If the spike found the archiver outside the
+  repo, its change is the spike's recorded fallback and not part of this item.
+
+### Why
+
+Most of the fleet runs opencode. The sidecar from R3-1213 is harness-neutral; opencode needs
+its plugin, and reviewer child sessions must not register as workers. Tier: critical —
+fencing on the main harness.
+
+### What to build
+
+1. A plugin in the shared `.opencode/` config with the R3-1213 hooks' behaviour on its
+   session, `tool.execute.before` (deny), after, error and prompt events.
+2. `.opencode/agents/review-pr-claude.md` launches `claude -p` with `IR_BATON_PARENT` and
+   `IR_BATON_ACTIVITY`; the opencode reviewer spawn passes the same to child sessions.
+3. The opencode archiver appends its paths to the spool (from the repo if the spike found it
+   there).
+
+### Architecture — the decisions, named
+
+- The plugin calls the same `scripts/hooks/baton-*.mjs` logic through a thin adapter, so the
+  two harnesses share one implementation of the matchers and fence checks.
+- **Do not:** duplicate the matchers in the plugin; let a child session start a sidecar.
+
+### Tests
+
+- Integration: `S-BTN-4.hung-worker` and `S-BTN-8.no-new-work` with the opencode-shaped fake
+  harness; G-BTN-26 (a `claude -p` child with `IR_BATON_PARENT` registers no worker and its
+  transcript lands on the parent's `reviewer` activity); G-BTN-15 and G-BTN-27 for opencode.
+
+### Exit criteria
+
+- [ ] `npm run test:baton` passes, including the opencode variants of `S-BTN-4` and `S-BTN-8`
+- [ ] `grep -n "IR_BATON_PARENT" .opencode/agents/review-pr-claude.md` matches
+- [ ] `npm run verify` green
+
+## Status
+
+_(filed 2026-10-13)_

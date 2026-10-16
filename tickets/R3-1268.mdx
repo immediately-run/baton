@@ -1,0 +1,84 @@
+---
+title: "R3-1268 — Baton is self-sufficient: its agent workflow, shared modules and deploy guide owned by the baton repository"
+id: R3-1268
+project: baton
+status: available
+updated: 2026-10-16
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1100
+description: "Nothing in immediately-run/baton needs docs: a baton-side workflow for working a ticket through Baton, CLAUDE.md and CHANGELOG without docs references, the shared modules sourced in baton and vendored by docs, and a generic deploy guide. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1267
+---
+
+**Brief:** [SELF-HOSTING](https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/plans/self-hosting.mdx). The owner, 2026-10-16: no access to docs should
+be needed to understand how Baton works or what is being developed.
+**Spec:** BATON_SPEC R-BTN-37, §3, §6.4.
+
+### Why
+
+After R3-1267 the tickets and the spec are in the baton repository, but parts of how work gets
+done there still point at docs:
+- CLAUDE.md says the spec and items are in docs.
+- `npm run vendor` copies `src/shared/` from `../docs`.
+- The way an agent works a ticket (`next-roadmap-item`, `claim.sh`) exists only in docs.
+- The deploy runbook is in docs and full of this deployment's values.
+
+### What to build
+
+1. **Agent workflow.** Write `AGENTS.md`, with CLAUDE.md pointing to it, and a skill under
+   `.claude/skills/` that work a `B-n` or moved `R3-NNNN` ticket through Baton:
+   - pick an eligible ticket, claim it, advance it along the `pr` course's legs, run the review
+     gate, record the findings under `docs/review/`, and end the claim;
+   - claiming uses the CLI and an SSH-key runner (R3-1239). It needs no docs checkout and no
+     `claim.sh`.
+2. **CLAUDE.md, README, CHANGELOG.**
+   - No rule or link needs docs.
+   - The vendoring rule is replaced by item 3.
+   - The changelog's preamble describes the baton repository only.
+3. **Shared modules.**
+   - `baton.mjs`, `vocabulary.mjs`, `sessionUsage.mjs` and `batonSync.mjs` become sources in
+     baton, under `src/shared/` with no manifest pin to docs.
+   - Docs consumes them instead: vendored from baton at a pinned commit, or from the published
+     CLI package.
+   - R-BTN-37's direction is amended in the spec (now in baton) and in docs' deployment spec.
+   - Docs' R3-1237 is updated to match.
+4. **Deploy guide.**
+   - `docs/DEPLOY.md` in baton covers deploying any Baton to Cloudflare from the command line,
+     generalised from `content/plans/baton/DEPLOY-RUNBOOK.mdx`, with placeholders for the
+     zone, hostnames, the Access team and owners.
+   - Docs keeps a short page with this deployment's values that points to it.
+5. **Check.** Add a CI step in baton that fails on any `../docs`, `immediately-run/docs` or
+   `content/` reference outside a marked history note, so nothing re-introduces the
+   dependency.
+
+### Do not
+
+- Remove docs' own copies before docs consumes the baton-side sources: docs' sync and claim
+  path must keep working through the switch.
+
+### Tests
+
+- A fresh clone of immediately-run/baton alone: `npm ci && npm test && npm run typecheck` pass,
+  and an agent session following `AGENTS.md` claims and finishes a ticket on staging.
+- The CI reference check fails on a planted `../docs` path.
+- In docs: `npm run verify` and the Baton sync stay green on the baton-sourced modules.
+
+### Exit criteria
+
+- [ ] AGENTS.md and the skill merged; a ticket worked end to end from a baton-only clone
+- [ ] `src/shared/` sourced in baton; docs consumes it; R-BTN-37 amended
+- [ ] `docs/DEPLOY.md` merged; the reference check is green in CI
+
+## Status
+
+_(filed 2026-10-16)_

@@ -1,0 +1,85 @@
+---
+title: "R3-1258 — Baton child tickets, the capacity load test and owner-state export (BATON_SPEC §2i)"
+id: R3-1258
+project: baton
+status: available
+updated: 2026-10-15
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - OP
+  - roadmap-item
+order: 1091
+tier: critical
+description: "Build BATON_SPEC §2i: child tickets (parent stored and validated, children listed, provisional blocks from `spawned`, the default ticket source's fan-in), the capacity envelope's dashboard figures, capacity events and the load test, and owner-state freeze, unfreeze, seal (after every mirror catches up), a repeatable export and import with pending ticket-scoped rows; S-BTN-49, S-BTN-50, G-BTN-76–78 (R-BTN-86–88). Requires: human-operator."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1251
+  - R3-1257
+---
+
+**Brief:** [the Baton project](projects/baton.mdx); the owner, 2026-10-15: tickets are sequential and child
+tickets are the parallelism primitive; one Baton per team, with a stated envelope; owner state
+exportable.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2i (R-BTN-86, -87, -88), R-BTN-74 (the default
+source's `parent` and fan-in), §4 (`tickets.parent`, `closed_tickets.parent`,
+`pending_owner_state`), §11 (children, `spawned`, freeze, export, import), §13 preconditions,
+§13a (the load test), §14; §13a S-BTN-49, -50; §16 G-BTN-76, -77, -78 (docs#215)
+**Depends on:** R3-1251 (blocks), R3-1257 (positions and history, which `spawned` and the
+`spawned` rows extend)
+
+### Requires
+
+- `human-operator` — the staging load test needs the driver's keys registered by an
+  administrator, whose key is kept out of every agent's reach (§10.1), and one real
+  repository's sync workflow. Every other case runs in the integration harness.
+
+### Why
+
+Parallel work needs a primitive that keeps one holder per ticket; a single-object Baton needs
+a stated, tested envelope before cutover; and the state git does not hold needs a way out.
+Tier: critical — the load test is a cutover precondition.
+
+### What to build
+
+1. **Migration**: `tickets.parent` and `tickets_by_parent`, `closed_tickets.parent`,
+   `pending_owner_state`, the events CHECK's `capacity`, `parent-invalid`, `frozen`,
+   `unfrozen`, `sealed`, `imported`; `baton_settings` keys `frozen_at` and `sealed_at`;
+   `repositories.mirror_acked_seq`; `pending_owner_state.key`; the `frozen` and `sealed` codes.
+2. **Child tickets**: `parent` validated and dropped with `parent-invalid` as R-BTN-86 says;
+   `spawned` on a `suspended:` or `released:` end only (at most 50, validated in `src/core/validate.ts`, never the parent)
+   writing provisional `ticket` blocks kept until the first snapshot observed after the end, and
+   the `spawned-unposted` discrepancy; `GET …/children`; the
+   `spawned` history row; the dashboard tree; the CLI's markdown source reading `parent` and
+   adding open children to `blocked_by`.
+3. **Capacity**: the dashboard's figures (counts, 5-minute means), `capacity` on crossing 80%
+   each way, Needs you; `npm run test:load` (local in CI: 20 repositories, history seeded at
+   1,000,000 rows; staging before cutover: seeded by a synthetic `--with-history` import, the
+   worker load, and one real repository posting a generated 5,000-ticket board).
+4. **Owner state**: `freeze` and `unfreeze`, `seal` (no active claim, every mirror caught up),
+   `export [--with-history]` (sealed only, repeatable; every §4 column of the sections,
+   `closed_tickets` included, RFC 8785 digest), `import` (empty check, digest and schema
+   version, one transaction, `pending_owner_state`, `events_seq`, `last_seen_at` = 0), and the
+   move runbook in the README.
+
+### Tests
+
+- Integration, both hosts: **S-BTN-49** and **S-BTN-50**.
+- `npm run test:load` at the envelope (**G-BTN-77**).
+- Unit: parent validation (cycles, depth, self, foreign, orphan), the digest's canonical form,
+  pending rows applied and dropped.
+
+### Exit criteria
+
+- [ ] S-BTN-49 and S-BTN-50 pass on both hosts; G-BTN-76 and -78 hold
+- [ ] the load test passes on the local host in CI and once against staging (G-BTN-77)
+- [ ] `npm test` and `npm run typecheck` green
+
+## Status
+
+_(filed 2026-10-15)_

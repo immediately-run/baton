@@ -1,0 +1,96 @@
+---
+title: "R3-1238 — Baton on two hosts: a portable core behind small interfaces, the Durable Object as wiring, and a Node host"
+id: R3-1238
+project: baton
+status: done
+updated: 2026-10-15
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1075
+tier: judgement
+description: "Restructure Baton so its logic runs on Cloudflare and as a local Node process: src/core behind Store, Scheduler, AdminKeys and HookRunner interfaces, the Durable Object as wiring, a Node host on node:sqlite with one request queue, every scenario run on both hosts; S-BTN-31. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/16
+depends_on:
+  - R3-1230
+---
+
+**Brief:** [the Baton project](../projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §3a (R-BTN-55, R-BTN-56, R-BTN-59), §3, R-BTN-32, §13a S-BTN-31, G-BTN-56, §15 row "the Baton repository's layout" (docs@d36df740, docs#212)
+**Depends on:** R3-1230
+
+### Requires
+
+- none — both hosts run under the repository's own test runner; no account or deploy.
+
+### Why
+
+The owner wants Baton to run both as a Cloudflare Worker and locally (2026-10-14). Its
+coupling is narrow — `src/baton.ts:5` is the only `cloudflare:workers` import, and
+`Claims`, `Cutover`, `Mirror` and `WorkerApi` receive `ctx.storage` and use only
+`sql.exec`, `.toArray()` and `transactionSync` — so the split is cheap now and expensive
+after R3-1231, R3-1232 and R3-1235 add most of the remaining server code. Tier: judgement —
+module structure, one repo, no behaviour change.
+
+### What to build
+
+1. `src/core/`: everything that decides — claims, cutover, mirror, worker API, sync
+   handling, matching — taking `Store`, `Scheduler`, `Clock`, `AdminKeys`, `HookRunner` and
+   `Dispatch` in a constructor; `src/core/ports.ts` declares the interfaces.
+2. `src/cloudflare/`: the `Baton` Durable Object and `worker.ts`, wiring `ctx.storage`, the
+   alarm and `fetch` into the ports.
+3. `src/local/`: `node:sqlite` `DatabaseSync` as `Store`, a single promise queue so requests
+   run one at a time, released only while a request awaits its signature check or a hook call and
+   serialising the alarm too (BATON_SPEC §3, R-BTN-55), a 60-second timer as `Scheduler`, `node:http` serving the same routes;
+   `AdminKeys` reads `--admin-keys <file>` (R-BTN-57); the local `HookRunner` (a `workerd`
+   child process) is R3-1236's — until it lands, tests inject a fake runner.
+4. `npm run start:local -- --db <path> --port <n>` and a `README.md` section.
+5. The Vitest config runs `test/integration/` as two projects, `cloudflare` and `local`.
+
+### Architecture — the decisions, named
+
+- **Synchronous storage on both hosts**: `Store.exec` and `Store.transaction` are
+  synchronous, as the Durable Object's are; `node:sqlite` matches, so the atomicity the spec
+  relies on (§3: one request at a time, transactional writes) holds without new locks.
+- **The queue is the local host's only concurrency control**: every request, alarm tick and
+  dispatch goes through it, as the Durable Object serialises them.
+- **A check, not a convention**: `test/unit/boundary-host.test.ts` fails if any file under
+  `src/core/` imports `cloudflare:workers` or reads `ctx`.
+- **Migrations are shared**: `src/migrations/` runs through `Store` on both hosts.
+- **Do not**: change any rule, response or refusal; add a second storage engine; let the local
+  host read `.dev.vars` secrets; run a hook outside a sandbox (R-BTN-59).
+
+### Tests
+
+- Every integration scenario under both projects (`npx vitest --project local`); S-BTN-31's
+  row in §13a.
+- `test/unit/local-queue.test.ts`: two concurrent claims for one ticket on the local host —
+  one succeeds (the same assertion as S-BTN-1, through the queue).
+- `test/unit/boundary-host.test.ts` as above.
+
+### Exit criteria
+
+- [x] `git grep -n "cloudflare:workers" src/core` returns nothing — evidence: empty on baton main 901f28c; `test/unit/boundary-host.test.ts` enforces it
+- [x] `npm test` runs S-BTN-1…16 green on both projects; S-BTN-31 passes — evidence: every scenario with a test (1, 2, 5–9, 11–13, 15, 16, and S-BTN-14's server half) runs on both projects, 36 files / 238 tests green at b2dfff1 (CI `test` and `model` green); S-BTN-3, -4, -10 have no test yet (R3-1213/1214/1215) and S-BTN-14's end-to-end leg none (see Status); S-BTN-31's hook clause is R3-1236's
+- [x] `npm run typecheck` green — evidence: all three configs at b2dfff1
+
+### Hand-off
+
+R3-1231 and later server items write into `src/core/`; R3-1240 adds administration, R3-1236 the hook runners.
+
+## Status
+
+_in-review 2026-10-15 — https://github.com/immediately-run/baton/pull/16 — upstream: item-silent — the queue is not the local host's only concurrency need: a second process on one --db would serve beside the first; the local store now holds the file exclusively (baton#16 review 3-A-0). upstream: item-wrong — S-BTN-14 has no owning item: its server half (test/unit/mirror.test.ts) runs on both hosts, its end-to-end leg is untested (3-A-3)._
+
+_in-review 2026-10-15 — https://github.com/immediately-run/baton/pull/16 — baton#16 (ba339b7); upstream: item-wrong — the exit criterion names S-BTN-1…16, but S-BTN-3, -4, -10 and -14 have no test yet (R3-1213, R3-1214, R3-1215 own them): every scenario that exists runs on both hosts; S-BTN-31's hook clause is an it.todo until R3-1236's runners._
+
+_claimed 2026-10-15 — baton,docs (claim 7dd5fc)._
+
+_(filed 2026-10-14)_

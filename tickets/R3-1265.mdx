@@ -1,0 +1,73 @@
+---
+title: "R3-1265 — Baton CLI without GitHub: sync and mirror runners, per-forge fact adapters and the branch course"
+id: R3-1265
+project: baton
+status: available
+updated: 2026-10-16
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1097
+tier: judgement
+description: "baton sync and mirror --if-wanted, baton spool for post-receive hooks, --defaults-only from a CLI outside the checkout, the pr course's GitLab and Gitea fact adapters, and the built-in branch course with verdict trailers; S-BTN-54. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1263
+  - R3-1249
+---
+
+**Brief:** [the Baton project](projects/baton.mdx); filed by R3-1253 (docs#217).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2k R-BTN-94 (runners), R-BTN-96 (fact adapters, the `branch` course), R-BTN-97 (`--defaults-only`); R-BTN-74 as amended; §13a S-BTN-54 and S-BTN-56's `--defaults-only` cases (docs@71b18e3e)
+**Depends on:** R3-1263, R3-1249
+
+### Requires
+
+- none — the harness runs a bare repository with a `post-receive` hook and a fake GitLab/Gitea API.
+
+### Why
+
+A plain git server needs a runner and a course whose facts come from git alone; GitLab and
+Gitea need the `pr` course's facts. Tier: judgement — the station rules are fixed by the spec.
+
+### What to build
+
+1. `baton sync --if-wanted` and `baton mirror --if-wanted` (one signed request when nothing is
+   wanted), `baton spool <repository>` for `post-receive` hooks and the sync account's loop
+   that records the want and runs the sync.
+2. `baton sync --defaults-only`: no repository code; refuses to start when the resolved CLI or
+   a module it loads lies inside the checkout.
+3. The `pr` course's fact adapters for GitLab merge requests and Gitea pull requests, mapped to
+   the GitHub facts.
+4. The built-in `branch` course: `baton init --course branch`, its station function (merged
+   first by a `Baton-Ticket` trailer on the default branch's first-parent history; branches
+   with a commit off the default branch; empty verdict commits with `Baton-Verdict` and
+   `Baton-Reviewed`), and leg stubs whose `merge` writes `git merge --no-ff` with the trailer.
+5. `baton init` writes CI configuration whose sync key only default-branch runs can read.
+
+### Architecture — the decisions, named
+
+- **The station rules are written once** over forge-neutral facts.
+- **Do not**: let a `post-receive` hook read the sync key or wait for a sync; bar identities in
+  the `branch` course.
+
+### Tests
+
+- Integration: S-BTN-54, both hosts; S-BTN-56's `--defaults-only` cases.
+- Unit: the `branch` station function over constructed histories (no branch, a branch at the
+  tip, verdicts naming older commits, a fix after a verdict, a squash merge, a deleted branch, a
+  trailer on a merged-in commit).
+
+### Exit criteria
+
+- [ ] S-BTN-54 passes on both hosts
+- [ ] the `branch` station function's unit tests pass
+- [ ] `npm run typecheck` green
+
+## Status
+
+_(filed 2026-10-16)_

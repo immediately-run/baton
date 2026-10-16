@@ -1,0 +1,102 @@
+---
+title: "R3-1253 — Baton without GitHub: sync keys, a pull-based sync trigger, forge adapters and a branch course for plain git"
+id: R3-1253
+project: baton
+status: done
+updated: 2026-10-16
+repos:
+  - baton
+  - docs
+tags:
+  - SPEC
+  - roadmap-item
+order: 1086
+description: "Baton must run as well on Gitea, GitLab or a plain git repository on a shared server as on GitHub: sync posts signed by a repository's sync key (OIDC optional), a pull-based 'sync wanted' trigger so Baton holds no forge credential, per-forge notification and dispatch adapters, a per-repository forge base URL for every link rule, and a forge-neutral branch course with verdict trailers. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/docs/pull/217
+depends_on: []
+---
+
+**Brief:** [the Baton project](../projects/baton.mdx); the owner, 2026-10-15: "github actions could be replaced
+by cron jobs or local git precommit / postcommit hooks which update baton. The webhooks are
+github specific. Is there a way would could make baton run equally well with gitea / gitlab / a
+plain git repository stored on a shared server? I like github but it would be nice to not
+require it for use with baton."
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` R-BTN-62 (the sync's credential), R-BTN-73
+(webhooks), §10.1, §10.3 (the App), §10.4 (URL rules), R-BTN-74 (the CLI's defaults), §3a
+(`BATON_ORIGIN`, the manifest flow).
+
+### Ordering
+
+*(Owner, 2026-10-15.)* This revision lands before R3-1232 and R3-1240 are built — both depend
+on it — so the sync's credential check is written once, behind one interface with GitHub OIDC as
+one option, rather than retrofitted onto every authenticated path.
+
+### Why
+
+Core never talks to GitHub: it sees signed board posts, observation numbers and sync requests.
+GitHub enters through four adapters — the Actions OIDC token, the App's `workflow_dispatch`,
+webhooks, and the `pr` course's PR facts — and §10.4 pins links to `https://github.com/`. An
+open-source Baton should not require GitHub, and the App, which every operator must register,
+is the heaviest step of setting one up.
+
+### What to specify
+
+1. **Sync keys.** A repository's owners register an SSH key for its sync (SSHSIG, as workers
+   sign); a board post or observation request signed by it is the sync's. GitHub OIDC (and
+   GitLab CI `id_tokens`) remain accepted where configured. The key lives where the sync runs —
+   a CI secret, or the shared server — never on worker machines.
+2. **Pull, not dispatch.** Baton records "sync wanted" per repository (after a claim's end, an
+   owner bar, an unblocked ticket, a webhook); a sync runner asks for it with one cheap signed
+   request (`GET /v1/sync/wanted`) from a cron loop, a CI schedule, or a server's
+   `post-receive` hook, which also simply runs the sync. Dispatch through the GitHub App
+   becomes an optional push; GitLab pipeline triggers and Gitea's dispatch API are adapters of
+   the same shape. `unblocked_workflow` becomes an "unblocked trigger" with the same adapters.
+3. **Notifications.** R-BTN-73's verifier per forge: GitHub's HMAC, GitLab's token, Gitea's
+   HMAC; a plain repository needs none (its `post-receive` hook runs the sync). Still only
+   triggers.
+4. **Repositories and links.** A repository is an id plus a remote URL and a forge kind
+   (`github`, `gitlab`, `gitea`, `git`); every URL rule (§10.4, decisions' `url`, activity
+   detail) uses the repository's forge base URL, not `https://github.com/`.
+5. **Course facts.** The `pr` course's fact reader is a CLI adapter per forge (GitHub PRs,
+   GitLab merge requests, Gitea pull requests). For plain git, a built-in `branch` course:
+   a ticket branch pushed, verdicts as commit trailers (`Baton-Verdict: approve|changes`,
+   on a commit by the reviewer), merged when the branch is merged into the default branch.
+6. **Running repository code off GitHub.** A sync runs the repository's course code
+   (`.baton/tickets.mjs`, `sync.mjs`); Actions sandboxes it, a shared server does not. The spec
+   requires a runner to execute it as an unprivileged user in a container, or to run only the
+   CLI's built-in defaults; `baton sync --defaults-only` exists for that.
+7. **Not local hooks.** Client-side `pre-commit`/`post-commit` hooks are rejected in Decisions:
+   they fire before anything is shared (git, not a local commit, is the truth) and would put the
+   sync's credential within agents' reach.
+
+### Do not
+
+- Make core read any forge API or store a forge credential beyond the optional dispatch.
+- Change what a webhook may do (owner: it only triggers a sync).
+
+### Tests
+
+- Scenario: one repository on a plain git server (a bare repository with a `post-receive`
+  hook in the harness) and one on GitHub, served by one Baton: tickets on the `branch` course
+  move to `merged` through trailers, a sync wanted after an end is picked up by the cron loop,
+  and no forge credential is configured for the plain one.
+- A gate for the sync key: a post signed by another key, or by a revoked one, is refused.
+
+### Exit criteria
+
+- [x] the revision merged in BATON_SPEC (or its successor in the baton repository, R3-1252) — docs#217, merge aee925a7
+- [x] the scenario and gate listed in §13; build items filed for each adapter — S-BTN-54–56, G-BTN-82–83; R3-1262–R3-1265
+
+## Status
+
+_in-review 2026-10-16 — Delivered: docs#217 merged aee925a7 after three gate rounds (57 findings, 49 after matching, all resolved; round 3's blocking 3-A-0 adjudicated not reproduced at the head). Build items R3-1262 to R3-1265 filed.._
+
+_updated 2026-10-16 — https://github.com/immediately-run/docs/pull/217 — docs#217: the revision, BATON_SPEC section 2k (R-BTN-92 to 97), S-BTN-54 and 55, G-BTN-82 and 83. Build items are filed after it merges — filed as R3-1262, R3-1263, R3-1264, R3-1265.._
+
+_claimed 2026-10-16 — baton,docs (claim 555d4a)._
+
+_(filed 2026-10-15)_

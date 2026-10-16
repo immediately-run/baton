@@ -1,0 +1,93 @@
+---
+title: "R3-1213 — Baton sidecar, spool and Claude Code hooks, with fencing"
+id: R3-1213
+project: baton
+status: available
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1054
+tier: critical
+description: "The sidecar, spool and state file, batonNow and baton-activity CLIs, the Claude Code hooks (session start and end, pre-tool deny, post-tool, prompt), the git pre-push hook, and the transcript hook's spool append; S-BTN-2, -3, -4 end to end."
+topics:
+  - baton
+  - harness
+owns: {}
+prs: []
+depends_on:
+  - R3-1212
+  - R3-1210
+---
+
+**Brief:** [the Baton project](projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.3 (R-BTN-6/7, R-BTN-26, the three layers — the pre-push refusal covers item branches only), §6.4, §6.8 R-BTN-20, §6.9, R-BTN-32, §13a; the spike `content/plans/baton/hook-spike.mdx` (R3-1210) (docs@2dbf1424)
+**Depends on:** R3-1212, R3-1210
+
+### Requires
+
+- none — the harness drives a scripted fake harness; no real Claude Code session is needed.
+
+### Why
+
+The client half of the lease: a sidecar that heartbeats while the harness lives, and fences
+that stop a session that lost its lease from pushing, merging or writing status — through a
+crashed sidecar, a laptop's sleep and a hung heartbeat. Tier: critical — the two-holder
+invariant on the client side.
+
+### What to build
+
+1. `scripts/baton-sidecar.mjs` (state file, spool drain, heartbeat every 2 min with a 30 s
+   timeout, process-group termination on fence, `--test-harness`).
+2. `scripts/baton-now.mjs`, `scripts/baton-activity.mjs`, and `scripts/hooks/baton-*.mjs` for
+   `SessionStart`, `SessionEnd`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`.
+3. Those hooks registered in `.claude/settings.json` beside the existing ones.
+4. A git `pre-push` hook (`scripts/hooks/pre-push`), installed by
+   `scripts/setup/post-checkout.sh` into every workspace checkout.
+5. `.claude/hooks/archive-transcript.sh` appends each pushed `(repo, path)` to the spool, or
+   the parent's spool when `IR_BATON_PARENT` is set.
+
+### Architecture — the decisions, named
+
+- **Single writer.** Only the sidecar writes `~/.cache/immediately-run/baton/<session>.json`;
+  everything else appends to `<session>.spool` (one JSON line, under 4 KB) or reads.
+- **Every fence check calls one function**, `leaseState(stateFile, now)` in `lib/baton.mjs`
+  (R-BTN-26): lost when `now − last_ok ≥ lease_timeout − 4 min`, the flag is set, or the
+  file is unreadable while the current branch is an item branch; then the holder query.
+- **`pre-push`** refuses only item-branch pushes (`claude/<item-id>-*`) for a lost lease, and
+  after cutover always asks the holder query for item branches; it never refuses a
+  `docs/main` push (a fenced session must leave its note).
+- **Inert outside Baton.** A session with no worker token runs no sidecar, and every hook
+  exits 0 at once.
+- Follow the spike's answers for deny, call ids and failure events; where it answered no, use
+  the fallback it named.
+- **Do not:** read any environment variable for time; block a tool call on the network
+  (hooks only append); start a sidecar when `IR_BATON_PARENT` is set.
+
+### Tests
+
+- `scripts/lib/baton.test.mjs`: `leaseState` at the margin ± 1 s, with a missing file on an
+  item branch and off one.
+- Integration with the fake harness: `S-BTN-2.silent-worker` (the dead session's push
+  refused), `S-BTN-3.long-timeout` (SIGSTOP 11 h kept; 13 h reaped and its resumed push
+  refused), `S-BTN-4.hung-worker` (force-reap; process group killed before the push), and the
+  G-BTN-20 cases (crashed sidecar, wake from sleep, hung heartbeat), G-BTN-25 (network down,
+  the spool keeps the entry), G-BTN-38 (an `IR_BATON_*`/`BATON_NOW` variable changes nothing).
+
+### Exit criteria
+
+- [ ] `npm run test:baton` passes, including `S-BTN-2`, `S-BTN-3`, `S-BTN-4` end to end
+- [ ] `grep -rn "process.env" scripts/baton-now.mjs scripts/lib/baton.mjs` shows no time read
+- [ ] `grep -n "baton-" .claude/settings.json` shows the five hooks
+- [ ] `bash scripts/setup/post-checkout.sh --self-test` passes with the pre-push install
+- [ ] `npm run verify` green
+
+### Hand-off
+
+R3-1214 does the same for opencode; R3-1215 wires the skills to `baton-activity.mjs`.
+
+## Status
+
+_(filed 2026-10-13)_

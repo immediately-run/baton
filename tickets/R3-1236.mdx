@@ -1,0 +1,109 @@
+---
+title: "R3-1236 — Baton hooks: recommend and advance hooks on both hosts, opaque course data, worker reports, external-resource states and queue depths"
+id: R3-1236
+project: baton
+status: available
+updated: 2026-10-15
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1073
+tier: critical
+description: "Run each course's recommend and advance hooks inside Baton on both hosts with R-BTN-52's limits, the three-phase request re-checking every gate after the hook, and the repository-scoped input (live view, reports, board summary with each leg's queue depth and max_queue, bars, the states and latest detail of the external-resource instances its legs need), with the recommend cache and its invalidations; S-BTN-29, -35. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1232
+  - R3-1238
+  - R3-1251
+  - R3-1255
+---
+
+**Brief:** [the Baton project](projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2c (R-BTN-51–54; R-BTN-52's input and cache
+invalidations as amended by §2g), §2g R-BTN-76 (the instance states and `detail` a hook
+receives) and R-BTN-79 (each leg's queue depth and `max_queue` in the board summary), §3 (the
+two awaits), R-BTN-55, R-BTN-59, R-BTN-67 (bars in the input), §10.4 (blob caps), §4 (`hooks`,
+`worker_reports`; `instance_readings` and `leg_queues`, read only), §13a S-BTN-29, -35
+(docs@630a51c4, docs#213 as merged)
+**Depends on:** R3-1232, R3-1238, R3-1251 (external resources, instances and readings — the
+probe's reading in S-BTN-29 is posted through R3-1251's `POST /v1/probe/readings`; the
+`invalidateRecommend` seam), R3-1255 (leg queue depths and bounds)
+
+### Requires
+
+- none — `workerd` runs from npm on the local host; the Cloudflare side runs in the
+  Workers Vitest pool with a Worker Loader binding.
+
+### Why
+
+Course logic that must run at request time — ordering and advice — runs as hooks inside
+Baton, and knowledge that needs secrets comes from instruments outside it (owner, 2026-10-14);
+since §2g, that knowledge arrives as readings of external-resource instances, which R3-1251
+stores, and reaches a hook as their states.
+Tier: critical — the three-phase request and its re-check carry the lease's atomicity.
+
+### What to build
+
+1. `HookRunner` on both hosts: a Dynamic Worker per call (`globalOutbound: null`, no
+   bindings) and a local `workerd`, with 1 s wall, 50 ms CPU, 128 MB; `hook-failed` events.
+2. The three phases: candidates synchronously, the hook awaited, then every gate, the nonce
+   and the `request_id` re-checked in one transaction; the local queue releases only at the
+   two awaits and serialises the alarm.
+3. The input of R-BTN-52, scoped to the repository: the live view, ended claims' reports
+   within the horizon, every granted worker's worker-level reports, the board summary, the
+   bars, `api_version`, `now`; the output caps.
+4. External resources and queues in the input: the states (`available`, `unavailable` with its
+   `until`, or `unknown`) and latest `detail` of the external-resource instances that serve the
+   resources its course's posted legs need (`leg_needs` → `instance_serves` →
+   `instance_readings`, R-BTN-52, R-BTN-76), read from R3-1251's tables — readings themselves,
+   their routes and their validation are R3-1251's; and in the board summary each leg's queue
+   depth and `max_queue` (R-BTN-79), read from R3-1255's `leg_queues` and the course file.
+5. The `recommend` cache per (repository, course, worker, page), up to 60 seconds, behind
+   R3-1251's `invalidateRecommend`: dropped when a claim on the repository starts, advances or
+   ends, a snapshot is accepted, a reading or lapse changes the state or `detail` of an instance
+   its course's legs need, an owner bar is set, lifted, starts or ends, a block row of the
+   repository changes, or the worker's `settings_hash` changes.
+
+### Architecture — the decisions, named
+
+- **Hooks only narrow and order**: an entry for a candidate not given is dropped; a refusal
+  never grants; failure falls back to the default order with no advice.
+- **Scores compare only within a course**; R-BTN-61 merges (R3-1232).
+- **Do not**: give a hook a binding, a secret or another repository's data; await anything
+  but the signature check and the hook inside the object.
+
+### Tests
+
+- Integration: S-BTN-29 (hooks and a probe's reading, passed to the hook as its instance's
+  state and `detail`, unread), S-BTN-35 (a claim during a hook call), both hosts; S-BTN-44's
+  warm-cache step re-run with the cache in place (W3's next recommendation is fresh after
+  `unblocked`).
+- `test/unit/hook-input.test.ts`: the input for a fixture repository holds none of a second
+  repository's claims or reports; it holds the instances its course's legs need and no other;
+  each leg's depth and `max_queue` match `leg_queues`.
+- `test/unit/recommend-cache.test.ts`: each invalidation of R-BTN-52 drops the entry, and an
+  instance its course does not need does not.
+
+### Exit criteria
+
+- [ ] S-BTN-29 and S-BTN-35 pass on both hosts
+- [ ] `test/unit/hook-input.test.ts` and `test/unit/recommend-cache.test.ts` pass
+- [ ] `git grep -n "probe_readings" src/` finds nothing
+- [ ] `npm run typecheck` green
+
+## Status
+
+_(filed 2026-10-14)_
+
+_2026-10-15 — re-pinned to BATON_SPEC docs@630a51c4 (§2g, docs#213): `probe_readings` and the
+repository-scoped `POST /v1/probe/readings {repository, readings}` were withdrawn; the hook input
+now carries the states and latest `detail` of the instances its legs need and each leg's queue
+depth and `max_queue`; readings are built by R3-1251, queues by R3-1255._
+
+_2026-10-14 — rewritten for the stations revision of BATON_SPEC (docs#212 head 0d4ef0e4): stations and legs in a course file, owner bars and settings in SQLite, observations, the runner and webhooks._

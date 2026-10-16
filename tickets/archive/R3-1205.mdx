@@ -1,0 +1,125 @@
+---
+title: "R3-1205 — Baton reference data and decision library: reviewer matrix, providers, baton.json, matching functions"
+id: R3-1205
+project: baton
+status: done
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1046
+tier: critical
+description: "Data files (reviewer-matrix.json, model-providers.json, baton.json) and the pure decision library scripts/lib/baton.mjs (familyOf, capabilitiesOf, qualifyingPair, matching rules, batonNow) with the review-gate matrix table generated from data and checked in verify; the draft-roadmap-item rule for Baton items (R-BTN-31)."
+topics:
+  - baton
+  - review-gate
+owns: {}
+prs:
+  - https://github.com/immediately-run/docs/pull/204
+depends_on: []
+---
+
+**Brief:** the owner's 2026-10-13 design session — [the Baton project](../projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §4 (`reviewer_agents`, `model_providers`, `peak_schedules`), §5 R-BTN-22, §6.8, §7.2, §7.4 R-BTN-27, §13a R-BTN-31, R-BTN-32 (docs@2dbf1424)
+**Depends on:** —
+
+### Requires
+
+- none — every exit criterion is a unit test, a grep or `npm run verify`.
+
+### Why
+
+Baton's server and its Node tooling must make the same decisions — who may review, which
+account a model bills, whether a worker can take an item — and today the inputs live in
+prose (the matrix in `.opencode/skills/review-gate/SKILL.md` step 1) or in modules that
+cannot be bundled into a Worker (`scripts/lib/workQueues.mjs` imports
+`check-roadmap-requires.mjs`, which imports `node:fs`). This item puts the inputs in data
+and the decisions in pure functions, before any service exists. Tier: critical — it
+generates the review gate's matrix, a stated invariant.
+
+### What to build
+
+1. `scripts/data/reviewer-matrix.json`, `scripts/data/model-providers.json` and
+   `scripts/data/baton.json`, holding today's matrix, accounts and settings.
+2. `scripts/lib/vocabulary.mjs` (pure) and `scripts/lib/baton.mjs` (pure): the decision
+   functions below.
+3. `scripts/baton-seats.mjs --authors <family,…> [--date] [--suspensions <file>]`: prints the
+   seats `qualifyingPair` returns, as JSON.
+4. The opencode review-gate matrix table generated from `reviewer-matrix.json`, and a
+   `verify` step that fails when they differ.
+5. The R-BTN-31 rule in `.claude/skills/draft-roadmap-item/SKILL.md`.
+
+### Architecture — the decisions, named
+
+- **Pure modules, no `node:` imports.** `scripts/lib/vocabulary.mjs` takes `CAPABILITIES`,
+  `ROLES`, `RESOURCES`, `CLAUSE_NAMES` from `check-roadmap-requires.mjs` and `TIERS`,
+  `fitsTier`, `AGENT_HOLDS` from `lib/workQueues.mjs`; both old modules re-export them, so
+  every existing import keeps working. `capabilitiesOf(declared)` lives beside `ROLES` in
+  `vocabulary.mjs` (a role expands through `ROLES`; a legacy name only matches itself;
+  `none` is satisfied by everyone). `lib/baton.mjs` imports only `vocabulary.mjs`. Reason:
+  the Worker (R3-1206) bundles both.
+- **`lib/baton.mjs` exports:** `familyOf(modelId, matrix)`; `qualifyingPair(authorFamilies,
+  workerBilling, suspensions, date, catalog, matrix)` (§7.4: the row's seats, else
+  substitutes seated by some row on `date`, family not in `authorFamilies` and not the other
+  seat's, nothing billed suspended, cheapest by `cost` in the catalog entry, else `null`);
+  `suspended(suspensions, providerId, modelId, now)`; `isEligible(worker, item, ctx)`
+  returning `{ok}` or `{ok: false, rule}` for rules 3–10 of §7.2 over a ranked list;
+  `batonNow()` (R-BTN-32: `Date.now()` unless a test clock is injected with
+  `setTestClock(fn)`; it never reads `process.env`).
+- **The ranking stays in Node.** Add `rankReady(state)` to `lib/factoryState.mjs`: the
+  `claimOrder` ranking **without** the expedite-lane withholding, which Baton applies from
+  its own claims (§7.2 rule 2). `claimOrder` becomes `rankReady` plus the withholding, so
+  the rank has one implementation.
+- **Data shapes.** `reviewer-matrix.json`: `{"families": {"<family>": ["<regex>", …]},
+  "agents": {"\<name>": {"reviews_on": "…", "bills": ["\<prefix>"], "cost": \<usd>}},
+  "rows": [{"author": "\<family>|default", "a": [{"agent", "from"?, "until"?}], "b": […]}]}`,
+  written from today's skill table: seats with date windows (`until`, `from`). `model-providers.json`: the provider
+  accounts, `prefixes` (a model prefix → the accounts that bill it), `peak_schedules`, and
+  per-model `monthly_limit_usd`. `baton.json`: `{"skills_version": 1, "protocol_files": [...],
+  "transcript_repos": ["<transcript repo>", …], "cut_over": false}`.
+- **The generated table.** `scripts/baton-matrix-table.mjs --write` rewrites the table between
+  `<!-- baton:matrix -->` markers in `.opencode/skills/review-gate/SKILL.md` and
+  `.opencode/AGENTS.md`; `--check` (a new `verify` step, `check:matrix`) fails on drift.
+- **Do not:** compute anything from the `model:` pins (§7.4: `review-pr-claude`'s pin is its
+  orchestrator); read `process.env` or `Date.now()` directly in `baton.mjs`; change any
+  current seat while moving the matrix into data; copy `fitsTier` instead of moving it.
+
+### Tests
+
+- `scripts/lib/baton.test.mjs` (in `test:scripts`), inputs from the **real** data files:
+  `familyOf` maps every model id in `.opencode/agents/*.md` and the ledger's models; for every
+  `rows` entry, author family and the dates 2026-10-28 and 2026-10-29, `qualifyingPair` with
+  no suspensions returns that row's seats (G-BTN-34); with one billing account suspended it
+  substitutes per §7.4 or returns `null`, never Kimi, never a family in `authorFamilies`;
+  `isEligible` refuses with each rule number 3–10 on a fixture item; `batonNow` ignores
+  `process.env.BATON_NOW` (G-BTN-38's unit half).
+- `scripts/lib/vocabulary.test.mjs`: the re-exports from `check-roadmap-requires.mjs` and
+  `workQueues.mjs` are the same objects; `capabilitiesOf([role])` returns `ROLES[role]` for every
+  role key; neither pure module's source imports `node:`.
+- `rankReady` vs `claimOrder` over the real board (`factory-state.mjs --tree` output): equal
+  when the lane is not full. Scenarios: none run yet; S-BTN-10 (R3-1215) consumes
+  `qualifyingPair`.
+
+### Exit criteria
+
+- [x] `node --test scripts/lib/baton.test.mjs scripts/lib/vocabulary.test.mjs` passes — 22 pass at docs#204 head 47e187b
+- [x] `grep -rn "from 'node:" scripts/lib/baton.mjs scripts/lib/vocabulary.mjs` prints nothing — empty at 47e187b, and vocabulary.test.mjs asserts it
+- [x] `node scripts/baton-matrix-table.mjs --check` passes, and the two tables are byte-identical to today's apart from the markers — `git diff` after `--write` showed only the two marker lines per file (docs#204)
+- [x] `grep -n "S-BTN" .claude/skills/draft-roadmap-item/SKILL.md` shows the R-BTN-31 rule — line 290
+- [x] `npm run verify` green — CI verify success on each docs#204 head (5a99b23, 1f528c3, 47e187b)
+
+### Hand-off
+
+R3-1206 bundles `lib/baton.mjs`; R3-1207's sync posts the three data files; R3-1215 points the
+review gate at `baton-seats.mjs`. A later change to the matrix edits `reviewer-matrix.json`
+and runs `--write`.
+
+## Status
+
+_in-review 2026-10-13 — https://github.com/immediately-run/docs/pull/204 — docs#204 — reviewer matrix, providers and baton.json as data; pure vocabulary.mjs and baton.mjs (familyOf, qualifyingPair, isEligible rules 2-10, batonNow); rankReady; baton-seats and the generated matrix table with check:matrix; the R-BTN-31 drafting rule. The PR re-anchors two BATON_SPEC §16 rows to lib/vocabulary.mjs.._
+
+_claimed 2026-10-13 — docs (claim 4608d7)._
+
+_(filed 2026-10-13)_

@@ -1,0 +1,81 @@
+---
+title: "R3-1261 — Baton's runner API moves under /v1/runner"
+id: R3-1261
+status: done
+updated: 2026-10-15
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1076
+tier: judgement
+description: "Move every route under /v1/worker/ to /v1/runner/ in Baton's server, both hosts' fronts, the docs clients and the claim.sh stubs, with no alias; no other name, shape or behaviour changes. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/17
+depends_on:
+  - R3-1238
+---
+
+**Brief:** [the Baton project](../projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §3 (rate limits), §3a, §10, §11, §15 row "the runner API's path prefix (2026-10-15)"
+**Depends on:** R3-1238
+
+### Requires
+
+- none
+
+### Why
+
+The owner set the runner API's prefix to `/v1/runner` (2026-10-15): the routes a worker's sidecar
+and runner call are the runner API. Every later server item (R3-1231, R3-1232, R3-1251, R3-1260)
+writes routes under the prefix, so the move lands first and alone, where a reviewer can check it
+changes nothing else. Tier: judgement — two repositories and a wire change.
+
+### What to build
+
+1. baton: every route under `/v1/worker/` moves to `/v1/runner/` — the front's principal check
+   (`src/core/front.ts`), the core's router (`src/core/baton.ts`), and every message, refusal and
+   comment that names a path; the tests and README follow.
+2. docs: `scripts/baton-worker.mjs`, `scripts/claim.sh` (its self-test stubs) and
+   `scripts/baton-client.test.mjs` call the new paths; `skills_version` is bumped (a protocol file
+   changes, `check-baton`).
+
+### Architecture — the decisions, named
+
+- **No alias**: the old prefix is not served, because nothing is deployed (R3-1208 is unrun) and
+  no client outside these two repositories exists.
+- **The prefix only**: route names, request and response shapes, refusal codes, the `worker`
+  concept (tables, `worker_id`, `/v1/ui/` views) and the principal header stay as they are.
+- **Do not**: change any rule, response or refusal other than a path; edit archived items or the
+  spec's history rows (§15's earlier rows, the review record).
+
+### Tests
+
+- Every existing unit and integration test passes on both hosts with only paths changed.
+- `test/integration/S-BTN-31.both-hosts.test.ts` (or a unit test): a request to the old prefix is
+  `not-found` on both hosts.
+- docs `node --test scripts/baton-client.test.mjs` and `bash scripts/claim.sh --self-test` pass.
+- Scenarios: none new.
+
+### Exit criteria
+
+- [x] `git grep -nE 'v1\\?/worker' -- src test ':!test/integration/S-BTN-31.both-hosts.test.ts'` returns nothing in baton, nor `-- scripts` in docs — the pattern also catches a regex's escaped `\/v1\/worker`, and S-BTN-31 must name the old prefix to show it is not served *(amended 2026-10-15 while building)* — evidence: empty on baton main 743df7b and docs scripts
+- [x] `npm test` and `npm run typecheck` green in baton; an old-prefix request is `not-found` on both hosts — evidence: 36 files / 240 tests, CI `test` and `model` green at 7c33b9f; S-BTN-31's old-prefix case on both projects
+- [x] `scripts/claim.sh --self-test` green; `npm run verify` green in docs — evidence: self-test 195/195; verify 24 steps green on docs main 2026-10-15
+
+### Hand-off
+
+R3-1231 and later server items write runner routes under `/v1/runner/`.
+
+## Status
+
+_in-review 2026-10-15 — https://github.com/immediately-run/baton/pull/17 — baton#17 (ae01ca4) and docs 33ae7b74; the exit grep amended (addeff9f) to catch escaped paths and spare S-BTN-31's old-prefix check (upstream: item-wrong — the grep as written hits the test that proves the old prefix is gone)._
+
+_claimed 2026-10-15 — baton,docs (claim 8a7efb)._
+
+_(filed 2026-10-15)_

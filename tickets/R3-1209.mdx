@@ -1,0 +1,63 @@
+---
+title: "R3-1209 — Verify: Baton read-only view on baton.immediately.run"
+id: R3-1209
+project: baton
+status: available
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - OP
+  - roadmap-item
+order: 1050
+tier: critical
+description: "Live leg of the read-only view: dashboard behind Access, Ready order equal to rankReady per tier, staging S-BTN-13 green after deploy. Requires: human-operator."
+topics:
+  - baton
+  - verification
+owns: {}
+prs: []
+depends_on:
+  - R3-1207
+  - R3-1208
+---
+
+**Brief:** [the Baton project](projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §13 step 1 (exit), §13a (staging), §14 (docs@2dbf1424)
+**Depends on:** R3-1207, R3-1208
+
+### Requires
+
+- `human-operator` — exit criteria 1–3: signing in through Cloudflare Access as the owner.
+
+### Why
+
+Step 1's exit (§13) is that the live Ready view's order equals `rankReady` for every tier on
+the same snapshot (Baton applies the expedite bound from its own claims, so git's withholding
+in `claimOrder` is not compared — amended by docs#205's review); only a deployed Worker behind the real Access policy proves it.
+
+### What to build
+
+A verification sitting (about 15 minutes), no code.
+
+### Architecture — the decisions, named
+
+- Compare on one snapshot: read the sha the dashboard shows, then run `--compare` at that sha.
+- **Do not:** fix a difference here; file a BUG item against R3-1206 or R3-1207 instead.
+
+### Tests
+
+None to write. The automated half is S-BTN-13 on `baton-staging` after each deploy.
+
+### Exit criteria
+
+- [ ] **live leg** (`human-operator`): `https://baton.immediately.run/` asks for the owner's Access sign-in and then shows the Ready and Providers views; another account is refused
+- [ ] **live leg** (`human-operator`): the Ready view's snapshot sha equals `git rev-parse origin/main` within one sync, and `node scripts/baton-sync.mjs --compare` exits 0 for `routine`, `judgement` and `critical`
+- [ ] **live leg** (`human-operator`): Providers shows DeepSeek and Z.AI peak state matching the current UTC time
+- [ ] the latest `baton-deploy` run shows staging `S-BTN-13` green
+- [ ] `npm run verify` green
+
+## Status
+
+_(filed 2026-10-13)_

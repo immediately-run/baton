@@ -1,0 +1,113 @@
+---
+title: "R3-1208 — [OP] Provision Baton on Cloudflare: Worker route, Access, secrets, staging namespace"
+id: R3-1208
+project: baton
+status: available
+updated: 2026-10-14
+repos:
+  - docs
+tags:
+  - OP
+  - roadmap-item
+order: 1049
+tier: critical
+description: "The owner sets up the Cloudflare account, the baton.immediately.run route, the Access application, the Worker and GitHub secrets, and the baton-staging namespace, then runs the first deploy. Requires: cloudflare-admin, github-admin, human-operator."
+topics:
+  - baton
+  - infra
+owns: {}
+prs: []
+depends_on:
+  - R3-1207
+  - R3-1222
+  - R3-1229
+---
+
+**Brief:** [the Baton project](projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §3, §10.1, §10.5 R-BTN-16, §13a (staging) (docs@2dbf1424)
+**Depends on:** R3-1207
+**Runbook:** `DEPLOY-RUNBOOK` — every step below from the command line, with the check after each.
+
+### Requires
+
+- `cloudflare-admin` — exit criteria 1–4: the Worker route, Access application and Worker
+  vars live in the owner's Cloudflare account.
+- `github-admin` — exit criterion 5: the `CLOUDFLARE_API_TOKEN` repository secret.
+- `human-operator` — the Cloudflare and Access consoles are interactive.
+
+### Why
+
+R3-1207's deploy workflow cannot run until the account, route, Access policy and secret
+exist, and only the owner holds them.
+
+### What to build
+
+The owner, in one sitting (about 30 minutes):
+
+1. In Cloudflare: the `immediately.run` zone serves the Worker `baton` at
+   `baton.immediately.run/*` and the staging Worker `baton-staging` (its own Durable Object
+   namespace) at `baton-staging.immediately.run/*` — both declared in
+   `immediately-run/baton`'s `wrangler.toml` (baton#2), so the first deploy creates them. Add
+   the DNS records both hostnames need (proxied).
+2. In Zero Trust → Access: a self-hosted application for `baton.immediately.run` (and one
+   for `baton-staging.immediately.run`) with a policy allowing only the owner's email, **excluding** the paths `/v1/runner/*` and
+   `/v1/sync/*` (they carry their own tokens). Note the application's `aud` tag and the team
+   domain.
+3. Worker vars for both environments: `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `OWNER_EMAILS`.
+   Also the Worker secret **`BATON_ADMIN_KEYS`** in both environments — the owner's SSH public
+   key: `npx wrangler secret put BATON_ADMIN_KEYS < ~/.ssh/id_ed25519.pub` (BATON_SPEC
+   R-BTN-57, docs#212). *(2026-10-14: once R3-1240 lands, administrators are these keys and
+   the dashboard uses one-time sign-in links; Access in steps 2–3 then becomes optional
+   hardening, kept here so the read-only view is protected before that. Use a separate,
+   touch-required administrator key, `~/.ssh/baton_admin.pub`, never loaded into an
+   ssh-agent agent sessions reach — R-BTN-57 as revised.)*
+3a. The Baton GitHub App (BATON_SPEC §10.3, R-BTN-73, as of docs#212 head 1dae3316): create
+   it with **Actions: write** and read-only **Contents**, **Pull requests** and **Issues** (the
+   permissions its subscriptions need; no Checks), subscriptions to `push`, `pull_request`,
+   `pull_request_review`, `issue_comment` and `workflow_run`, webhook URL
+   `https://baton.immediately.run/v1/github/webhook` and a generated webhook secret; an
+   **organisation owner** of `immediately-run` installs it on `immediately-run/docs` and the
+   code repositories docs' tickets change (GitHub's rule; a Baton owner key cannot); then `npx wrangler secret put BATON_GITHUB_APP_KEY` (its
+   private key) and `BATON_GITHUB_WEBHOOK_SECRET` in both environments.
+4. An API token with **Workers Scripts: Edit** on this account and **Zone: Read** plus
+   **Workers Routes: Edit** on the `immediately.run` zone — wrangler resolves the zone and
+   writes the two routes on deploy (found in baton#2's review).
+5. In GitHub `immediately-run/baton` → Settings → Environments → `production`: the secret
+   `CLOUDFLARE_API_TOKEN` (the deploy workflow lives in that repository since the owner moved
+   Baton's code there, BATON_SPEC §3).
+6. Re-run the latest `baton-deploy` workflow on `immediately-run/baton` `main`.
+7. In GitHub `immediately-run/docs` → Settings → Variables: `BATON_ENABLED` = `true`, which
+   turns on `baton-sync.yml` (off until now, so it never ran against a Worker that was not
+   there); dispatch it once and check the run posts the board.
+
+### Architecture — the decisions, named
+
+- One account, one zone; staging shares the Worker code but never the Durable Object.
+- The API token is scoped to Workers Scripts on this account and Zone Read plus Workers
+  Routes on the one zone, nothing else.
+- **Do not:** add the test signing key to any deployed environment (§13a); allow any email
+  but the owner's in the Access policy.
+
+### Tests
+
+None to write: provisioning. The live checks are R3-1209.
+
+### Exit criteria
+
+- [ ] `curl -sI https://baton.immediately.run/` answers with an Access redirect (`302` to the team domain)
+- [ ] `curl -s https://baton.immediately.run/v1/sync/head` answers `401` `unauthenticated` (reaches the Worker, not Access)
+- [ ] `npx wrangler secret list` shows `BATON_ADMIN_KEYS` in both environments
+- [ ] the `baton-deploy` run on `main` is green for both environments
+- [ ] `wrangler deployments list --name baton` shows the deploy
+- [ ] the `production` environment secret `CLOUDFLARE_API_TOKEN` exists in `immediately-run/baton`
+- [ ] the docs variable `BATON_ENABLED` is `true` and the dispatched `baton-sync` run is green
+- [ ] `npx wrangler secret list` shows `BATON_GITHUB_APP_KEY` and `BATON_GITHUB_WEBHOOK_SECRET`, and the App's recent deliveries page shows a delivery to `/v1/github/webhook` answered 2xx
+- [ ] the account's plan offers the Worker Loader binding (Dynamic Workers) that R3-1236 needs: `wrangler deploy --dry-run` with a ``worker_loaders`` binding succeeds, or the answer and its cost are recorded in a Status note for the owner (BATON_SPEC §2c R-BTN-52, open question)
+
+### Hand-off
+
+R3-1209 verifies the view live.
+
+## Status
+
+_(filed 2026-10-13)_

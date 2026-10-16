@@ -1,0 +1,81 @@
+---
+title: "R3-1237 — Baton boundary: move roadmap-pr knowledge out of Baton, boundary test and a toy course"
+id: R3-1237
+project: baton
+status: available
+updated: 2026-10-14
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1074
+tier: judgement
+description: "Move roadmap-pr knowledge out of core: rule 8 as the generic tags gate with owner and required bars, provider and reviewer tables and the review-capacity hold removed, step kinds from the registry, the vendored set ended, a boundary test over all of src and the toy course chore; S-BTN-28, -33, -39. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1232
+  - R3-1233
+---
+
+**Brief:** [the Baton project](projects/baton.mdx).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2b (R-BTN-50, R-BTN-60, the what-moves table, the
+boundary test), R-BTN-37 (the vendored set ends), R-BTN-67 (owner and required bars in the
+gate), §7.2 rule 8, §13a S-BTN-28, -33, -39 (docs@0928c207; the spec at docs#212 head 0d4ef0e4)
+**Depends on:** R3-1232, R3-1233
+
+### Requires
+
+- none — unit and integration tests in baton, and the vendoring script.
+
+### Why
+
+Core still holds `roadmap-pr` knowledge built before the 2026-10-14 amendment: rule 8 as
+`qualifyingPair` over reviewer tables, provider tables and their endpoints, the
+review-capacity hold, fixed step kinds, and docs' functions vendored into the Worker. Each
+ties a course change to a Baton deploy. Tier: judgement — removals behind a test.
+
+### What to build
+
+1. Rule 8 as the generic tags gate: the ticket's posted bars per leg, joined by owner bars in
+   force (claim-only bars skipped at advances), refused `barred-tag`; required bars hold a leg
+   `waiting` on `policy` and refuse an advance into it.
+2. Drop the provider, usage, suspension, reviewer and matrix tables and endpoints, the
+   `review-capacity` hold and `awaiting-review-capacity`; step kinds from each course's
+   registry entry.
+3. End the vendored set: gates, default order and merge live in `src/core/`; `src/shared/`
+   keeps nothing course-specific, and `npm run vendor` and its manifest go once nothing
+   needs them.
+4. The boundary test over all of `src/` with its shrinking exceptions list; the toy course
+   `chore` (stations, a `redo` loop, no hooks) in `test/fixtures/`.
+
+### Architecture — the decisions, named
+
+- **Core compares tag strings and leg names, never meanings**; the boundary test's word list
+  is BATON_SPEC §2b's.
+- **Owner and required bars are read from SQLite at every gate**, never from the board.
+- **Do not**: keep a compatibility shim that reads the old reviewer tables; let the toy course
+  share a fixture with `roadmap-pr`.
+
+### Tests
+
+- Integration: S-BTN-28 (the toy course runs the generic scenarios), S-BTN-33 (tags gate),
+  S-BTN-39 (limits agents cannot change — the gate half).
+- `test/unit/boundary.test.ts`.
+
+### Exit criteria
+
+- [ ] S-BTN-28, -33 and -39 pass; S-BTN-1…16 still pass
+- [ ] `test/unit/boundary.test.ts` passes with an exceptions list no longer than before
+- [ ] `git grep -n "qualifyingPair\|reviewer_agents\|provider_suspensions" src/` returns nothing
+- [ ] `npm run typecheck` green
+
+## Status
+
+_(filed 2026-10-14)_
+
+_2026-10-14 — rewritten for the stations revision of BATON_SPEC (docs#212 head 0d4ef0e4): stations and legs in a course file, owner bars and settings in SQLite, observations, the runner and webhooks._
