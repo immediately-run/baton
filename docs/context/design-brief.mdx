@@ -1,0 +1,63 @@
+---
+title: Design brief — the dashboard
+description: A brief for iterating on Baton's web UI with Claude Design. What the dashboard is for, who reads it, what it shows and the constraints a design must keep.
+nav: Design brief
+order: 4
+tags: [context, design]
+---
+
+<Lede>Baton's dashboard is the operator's live view of an AI coding factory: who is working,
+on what, what is stuck, and what needs a person. It should read in five seconds and act in
+two clicks.</Lede>
+
+## Who uses it
+
+- **The operator**, an instance administrator, most often on a laptop, sometimes on a phone.
+  They check in a few times a day, want the exceptions first and rarely browse.
+- **A repository owner**, reading their course's record: what waits longest, which legs
+  fail.
+
+## The questions it answers, in priority order
+
+1. **Does anything need me?** Unconfirmed completions, held tickets, open decisions, tickets
+   nobody can take, git overruling Baton.
+2. **What is running?** Each active claim: ticket, worker, leg, how long, when its lease runs
+   out, and whether it is stalled.
+3. **Who is working?** Workers alive or dead, what each can do, what each holds.
+4. **What happened today?** A 24-hour timeline: one lane per worker, claims as bars,
+   activities nested inside them.
+5. **What is ready?** The queue in Baton's order, and, separately, what nobody can take and why.
+6. **How does a course perform?** Each course drawn as stations and legs, with tickets on
+   it, wait and run times, and the legs that back up.
+
+## What it does
+
+Expedite, hold, cancel, force-reap (with confirmation), confirm or release a completion,
+resync a repository, cut over a repository. Repositories, owners, grants and bars are shown
+read-only: they are managed from the CLI.
+
+## Constraints a design must keep
+
+- **Text, never markup.** Everything from tickets and workers is untrusted text. It is shown
+  as text, never rendered as HTML or Markdown.
+- **Polling, not push.** The page reads one state endpoint every 10 seconds. Show how fresh
+  the data is.
+- **Small and dependency-free.** One HTML page, one stylesheet, one ES module, no framework,
+  no build step, no external fonts or scripts.
+- **Accessible.** Real tables for tabular data, headings per section, keyboard reachable,
+  never colour alone for state.
+- **Light and dark.** Follow the system setting.
+- **Course-agnostic.** Station, leg and tag names are data. Nothing in the layout may assume
+  `roadmap-pr`'s names.
+- **Phone-readable.** "Needs you" and "Running" must work at 375 px wide.
+
+## The feel
+
+Calm, dense and factual — closer to a status board than a product page. Temporal's UI is the
+owner's reference for the timeline and worker views. Status by shape and label first, colour
+second. Exceptions stand out; the normal case recedes.
+
+## Where to look
+
+The current page is `src/ui/` (`index.html`, `app.css`, `app.js`), served at the instance's
+origin; its data is `GET /v1/ui/state`. The view list is BATON_SPEC §14 in the docs repository.
