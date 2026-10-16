@@ -1,0 +1,100 @@
+---
+title: "R3-1220 — [OP] Baton cutover: preconditions, drain and switch"
+id: R3-1220
+project: baton
+status: available
+updated: 2026-10-16
+repos:
+  - docs
+tags:
+  - OP
+  - roadmap-item
+order: 1061
+tier: critical
+description: "The owner takes Workers Paid, sets docs' owner bars and required bars, drains the fleet, sets cutover on the dashboard and records the measurement-source row. Requires: cloudflare-admin, human-operator."
+topics:
+  - baton
+  - claims
+owns: {}
+prs: []
+depends_on:
+  - R3-1245
+  - R3-1246
+  - R3-1247
+  - R3-1248
+  - R3-1243
+  - R3-1244
+  - R3-1216
+  - R3-1219
+  - R3-1232
+  - R3-1233
+  - R3-1234
+  - R3-1235
+  - R3-1269
+  - R3-1270
+  - R3-1271
+  - R3-1272
+  - R3-1237
+  - R3-1238
+  - R3-1239
+  - R3-1240
+  - R3-1251
+  - R3-1253
+  - R3-1254
+  - R3-1255
+  - R3-1256
+  - R3-1257
+  - R3-1258
+---
+
+**Brief:** the Baton project.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §13 step 3 (preconditions, drain, R-BTN-28), R-BTN-66/67 (owner bars and required bars), R-BTN-2 (docs@2dbf1424; amended at docs#212 4e5ab93f: the path-rule precondition is withdrawn)
+**Depends on:** R3-1216, R3-1219, the amendment's items R3-1231–R3-1240, and the checked model R3-1243 with its trace check R3-1244; and the 2026-10-15 amendments' items R3-1251 and R3-1253–R3-1258 (§2g–§2i; R3-1258's load test is a cutover precondition)
+
+### Requires
+
+- `cloudflare-admin` — exit criterion 1: the Workers Paid plan.
+- `human-operator` — exit criteria 3–5: the drain, the dashboard switch and the deployment-log row.
+
+### Why
+
+Cutover is one-way (R-BTN-28) and has three preconditions only the owner can meet: the paid
+plan (a quota outage would stop all claiming, R-BTN-18), docs' owner bars and required bars
+set in Baton (R-BTN-67), and a drained fleet. *(2026-10-14: the owner withdrew the push rule on
+the Baton workflows — whoever can push is a legitimate user, R-BTN-66.)*
+
+### What to build
+
+The owner, in one sitting:
+
+1. Cloudflare: move the account to Workers Paid.
+2. Baton: `baton owner settings docs --required-bar '*' --course roadmap-pr --except
+   implement,review,adjudicate --tag-prefix family:`, and any provider suspensions in force as
+   owner bars on every course (`baton owner bar docs --course '*' …`) — bars are per course
+   since docs#212 @1dae3316.
+3. Drain: stop every fleet session; confirm the dashboard's Workers view is empty.
+4. Dashboard → Cut over (confirm). Legacy items appear in Needs you; confirm each adoption as
+   its session returns.
+5. Restart the fleet from pulled checkouts.
+6. Add the measurement-source row to the deployment's log (§13).
+
+### Architecture — the decisions, named
+
+- Order matters: the paid plan and the bars first, then the drain, then the switch.
+- **Do not:** cut over with a worker alive, or before R3-1243's model and R3-1244's trace check are green.
+
+### Tests
+
+None to write.
+
+### Exit criteria
+
+- [ ] the Cloudflare account shows Workers Paid
+- [ ] `baton owner settings docs` lists the two required bars
+- [ ] **live leg** (`human-operator`): the dashboard shows `mode: cut-over` and every legacy claim either adopted or listed with its `reap_after`
+- [ ] the deployment's log has the measurement-source row dated the cutover day
+- [ ] `npm run verify` green
+
+## Status
+
+_(filed 2026-10-13)_

@@ -1,0 +1,128 @@
+---
+title: "R3-1256 — Baton notices and couriers: decisions queued for people, the courier API and baton inbox"
+id: R3-1256
+project: baton
+status: available
+updated: 2026-10-16
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1089
+tier: judgement
+description: "Baton queues one notice per courier for each open decision, couriers claim and mark them over /v1/courier/*, notices close when git shows the answer and remind after remind_after, and baton inbox is the CLI courier; S-BTN-46, G-BTN-72 (R-BTN-80). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1251
+---
+
+**Brief:** the Baton project; the owner, 2026-10-15: as instruments push readings in, a
+service outside Baton pulls human-in-the-loop requests out — claiming them, then marking them
+sent; the simplest courier is a CLI that shows them.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2g R-BTN-80 (and R-BTN-78, the decisions it
+carries); R-BTN-13 and R-BTN-57 (credential kind `courier`, one role per key); §4 (`couriers`,
+`notices`, `notices_due`, `notices_alarm`, `credentials.kind` `courier`,
+`repositories.remind_after_s`); §10.6 (owners register couriers and set `remind_after`); §11
+(`POST /v1/courier/notices/claim`, `POST /v1/courier/notices/{id}`, `GET
+/v1/courier/decisions`, `POST /v1/owner/{repository}/couriers`, the `closed` error code); §13a
+S-BTN-46; §16 G-BTN-72 (docs@630a51c4, docs#213 as merged)
+**Depends on:** R3-1251 (`ticket_decisions` and the decision blocks, the `unblocked` event; it
+depends on R3-1240 for owner keys and the `baton owner` CLI)
+
+### Amended 2026-10-16 (BATON_SPEC §2l, docs@646eca6 (docs#220), R-BTN-103)
+
+Owner-confirmed 2026-10-16. Where this item's text says otherwise, this block wins:
+
+- The couriers above are **personal channels**: one copy each, as written.
+- **Worker couriers**: a heartbeat may carry `couriers: [{repository, asks}]` for repositories its key is granted on, stored in `worker_couriers (worker_id, repository_id, asks, seen_at)`. When a notice is queued, a `(repository, asks)` with a worker courier's heartbeat in the last 24 hours also gets **one pool copy**, `credential_id` the reserved `credentials` row `pool` (kind `courier`, `public_key` NULL, `created_by` `'system'`). A worker courier claims pool copies with `POST /v1/courier/notices/claim?repository=<id>` signed by its machine key (no worker secret), the claimer stored in the new `notices.claimed_by`; a lapsed lease or `failed` returns it to the pool; `forbidden` for another claimer's copy is by `claimed_by`.
+- **Needs you**: a pool copy unclaimed for an hour; a repository with an open `owner` decision and no personal `owner` channel.
+- Tests: `test/integration/S-BTN-60.worker-couriers.test.ts` joins S-BTN-46 in the exit criteria.
+
+### Requires
+
+- none — every case runs in the integration harness with fixture keys and a fake clock.
+
+### Why
+
+Filed from R3-1251. A decision block (R-BTN-78) stops a ticket until a person answers, but
+nothing tells the person; today the owner finds packets by running a skill. Couriers let any
+outside service — a laptop CLI, a phone-push relay — pull requests out of Baton, while Baton
+itself sends no mail and calls no service. Tier: judgement — it shortens the owner's loop but
+gates nothing.
+
+### What to build
+
+1. **Migration** (one new numbered file): `couriers`, `notices` with `notices_due` and
+   `notices_alarm`, the `courier` credential kind, `repositories.remind_after_s` (default
+   86,400, from 3,600 to 604,800).
+2. **Registration**: `POST /v1/owner/{repository}/couriers` `{public_key, asks}` or
+   `{fingerprint, revoke: true}` and `baton owner courier add <key> --asks owner`; a key already
+   registered as a worker, probe, owner or administrator key is refused `conflict`; another
+   repository's owners may add an existing courier key to theirs; revoking closes that
+   repository's notices for the courier, and the credential goes when no repository registers
+   it or an administrator revokes it. A courier added, or given a new `asks`, is queued a notice
+   for each decision already open there that it now delivers. `remind_after` joins the owner
+   settings (`PUT /v1/owner/{repository}/settings`).
+3. **Queueing**: in the transaction that first stores a `ticket_decisions` row, one notice per
+   courier of the ticket's repository registered for its `asks` — `{notice_id, kind: 'decision',
+   repository, ticket, title, decision: {id, asks, url?}, unblocks, created_at}`, all text under
+   §10.4.
+4. **Lifecycle** (`src/core/notices.ts`, the one writer of `notices`): `queued` → `claimed` →
+   `sent`; `POST /v1/courier/notices/claim` takes up to 50 queued notices of the courier's own,
+   each leased 10 minutes; `POST /v1/courier/notices/{id}` `{state: 'sent'|'failed', channel?}`
+   — `failed` re-queues after 1, 5, 30 minutes, then hourly; a lapsed lease re-queues; a mark on
+   a closed notice is answered `closed`, a mark from a lapsed lease is accepted, another
+   courier's notice is `forbidden`. A sent notice still open after `remind_after` is queued
+   again. The alarm drives leases, backoffs, reminders and deletion through `notices_alarm`.
+5. **Closing**: the snapshot that stops posting a decision closes its notices in that
+   transaction, whatever their state; a closed notice is deleted after 7 days.
+6. **`GET /v1/courier/decisions`**: every open decision the courier delivers over its
+   repositories and `asks`, with each notice's state — the courier's own read of
+   `blocked?on=decision:*`.
+7. **`baton inbox`**: claims the user's key's notices, prints them as text (title, question,
+   link), marks each `sent`; `--watch` asks once a minute; `--all` lists `GET
+   /v1/courier/decisions`.
+
+### Architecture — the decisions, named
+
+- **Baton sends nothing**: no mail, no push, no outbound call; delivery is the courier's.
+- **One notice per courier**, not one shared, so a CLI and a push service each get theirs; at
+  least once, deduped by `notice_id`.
+- **The answer stays in git**: a notice carries the link; nothing in Baton records an answer.
+- **Text, never markup**: titles, decision ids and URLs are passed as text and printed by
+  `baton inbox` as text.
+- **Do not**: let a courier see another repository's notices; let a key hold two roles; store a
+  packet's body or question text beyond §4's columns (R-BTN-33); close a notice on anything but
+  the snapshot that drops its decision or a revocation.
+
+### Tests
+
+- Integration, both hosts: **S-BTN-46** — two notices queued for docs' two couriers and none for
+  the other repository's; the push courier's lapsed lease re-claimed; `baton inbox` prints E's
+  title, question and link as text and marks its notice sent, and `--all` lists R3-E-1; the CLI's
+  notice re-queued after 24 h; the answering snapshot closes both notices and fires `unblocked`;
+  the late mark answered `closed`; a third courier added while a decision is open is queued its
+  notice at once; the CLI's key added as a worker key refused `conflict`.
+- `test/unit/notices.test.ts`: each transition and its backoff on `setClock`, a revocation, a new
+  `asks`, deletion after 7 days.
+
+### Exit criteria
+
+- [ ] S-BTN-46 passes on both hosts
+- [ ] `test/unit/notices.test.ts` passes
+- [ ] `npm test` and `npm run typecheck` green; the boundary test green
+
+### Hand-off
+
+R3-1234's skills may point the owner at `baton inbox`; R3-1254 models couriers.
+
+## Status
+
+_2026-10-16 — amended for BATON_SPEC §2l (R-BTN-103): worker couriers and the pool copy, beside personal channels._
+
+
+_(filed 2026-10-15 — split from R3-1251 for BATON_SPEC §2g, docs#213)_

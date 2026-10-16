@@ -1,0 +1,87 @@
+---
+title: "R3-1223 — Baton: a rewind to a once-accepted held history is held with a row, an event and an owner path"
+id: R3-1223
+project: baton
+status: done
+updated: 2026-10-13
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1061
+tier: judgement
+description: "A force post that rewinds main to a sha the owner once accepted is held like any rewritten history — a fresh held row, a snapshot-rejected event, a Needs you entry, the 24-hour auto-accept and the owner's Accept — instead of a silent 409. Continues R3-1212 (baton round three, 3-r3-0). Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/8
+depends_on:
+  - R3-1212
+---
+
+**Brief:** the Baton project; continues [R3-1212](R3-1212.mdx) — its review's round three (baton PR 5, `rg:3-r3-0`).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §7.1 R-BTN-11 (docs@2dbf1424)
+**Depends on:** R3-1212
+
+### Requires
+
+- none — local Worker tests only.
+
+### Why
+
+R3-1212 accepts a held history as a line: a force post against the head the accepted row was
+held against becomes the head. Round two closed the backwards move — a once-accepted sha
+re-posted after the head moved past it is no longer accepted. Round three found that such a
+rewind is held **silently**: `board()` finds the sha's old held row (already accepted, held
+against an older head) and treats it as known, so it writes no new row and no
+`snapshot-rejected` event; the dashboard's held list, the alarm's 24-hour auto-accept and the
+owner's Accept all act only on unaccepted rows. The sync gets `409` on every post until `main`
+moves off that sha, and the owner has no way to accept it. The sync stays off until R3-1208
+sets `BATON_ENABLED`, so nothing live can reach this before it lands.
+
+Tier: judgement — one branch of the board's compare-and-set.
+
+### What to build
+
+1. In `board()`'s force branch, treat a sha as already held only when its row is unaccepted
+   **and** was held against the current head. Otherwise reset the row — `head_sha` the current
+   head, `accepted_at` NULL, `received_at` now and a new `auto_accept_at` — and log
+   `snapshot-rejected`, exactly as for a first hold.
+2. The reset is the only write: a repeat post of the same rewind against the same head stays a
+   no-op, as R-BTN-11 requires of the sync's 15-minute re-posts.
+
+### Architecture — the decisions, named
+
+- `held_snapshots` keeps one row per sha (its primary key); a rewind reuses that row rather than
+  adding a second.
+- **Do not:** accept a rewind automatically because its sha was accepted once; let a held post
+  move the head.
+
+### Tests
+
+- `test/unit/claims-gate.test.ts`: extend the rewind case — after the rewind's 409, a
+  `snapshot-rejected` event is logged, `/v1/ui/state` lists it under `held`, the owner's Accept
+  makes the next force post the head, and with no answer the alarm accepts it 24 h later; a
+  repeat post of the rewind changes nothing.
+- Scenarios: S-BTN-13 re-run; none new.
+
+### Exit criteria
+
+- [x] `npm run test:baton` passes with the extended rewind case
+- [x] `npm run verify` green
+
+### Hand-off
+
+None: R3-1208 turns the sync on.
+
+## Status
+
+_in-review 2026-10-13 — upstream: spec-silent — BATON_SPEC §4 (held_snapshots written once, received_at the first force post) and R-BTN-11 (the 24-hour clock starts at the first) describe one hold; a rewind or a hold against a new head is a new hold that resets the row, and an accepted row is consumed when its line becomes the head (baton PR 8)._
+
+_in-review 2026-10-13 — https://github.com/immediately-run/baton/pull/8._
+
+_claimed 2026-10-13 — baton (claim 657083)._
+
+_(filed 2026-10-13 from baton PR 5's round-three finding `rg:3-r3-0`)_

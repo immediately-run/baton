@@ -31,5 +31,21 @@ tickets whose dependencies are all done.
   against it. The body is for people and agents; Baton never stores it.
 - A finished ticket moves to `archive/` with `status: done`.
 
+## Claiming a ticket
+
+Until Baton claims this repository's tickets itself (R3-1266), git is the lock. Each command
+below is one commit pushed straight to `main` from a fresh checkout of it; if someone else
+pushed first, it retries on the new head, and `claim` refuses a ticket that is not available
+or whose dependencies are not all done.
+
+```sh
+npm run ticket -- claim R3-1249                  # available → in-progress
+npm run ticket -- set R3-1249 in-review --pr https://github.com/immediately-run/baton/pull/40
+npm run ticket -- done R3-1249                   # done, moved to archive/
+npm run ticket -- new --title "…" --depends-on R3-1249 --order 1100   # the next B-n
+```
+
+[The project page](projects/baton.mdx) has Baton's rollout steps and how the tickets group.
+
 How Baton itself works is in the [documentation wiki](https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/home.mdx)
 (the repository's `docs/` folder).

@@ -1,0 +1,102 @@
+---
+title: "R3-1211 — Baton worker API: identity, secrets, heartbeats, messages, suspensions, activities and transcripts"
+id: R3-1211
+project: baton
+status: done
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1052
+tier: critical
+description: "Server side of workers in infra/baton: credential-bound registration, sidecar-generated secrets and re-keys, heartbeats, messages, provider suspensions, activities and transcript pointers, the mode and shadow-report endpoints; S-BTN-8, -9, -11."
+topics:
+  - baton
+  - infra
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/4
+depends_on:
+  - R3-1206
+---
+
+**Brief:** the Baton project.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §5, §6.8, §6.9, §7.3, §7.4, §9, §10.1–10.2 R-BTN-13/14, §10.4, §11 (worker and ui rows), R-BTN-28 (mode, shadow-report), §13a (docs@2dbf1424)
+**Depends on:** R3-1206
+
+### Requires
+
+- none — local Worker tests only.
+
+### Why
+
+Every later piece talks to Baton as a worker: a sidecar registers and heartbeats, hooks
+report activities and transcripts, the owner suspends providers and sends messages. This item
+builds that surface, with no claims yet (R3-1212). Tier: critical — credentials, secrets and
+token binding.
+
+### What to build
+
+1. `POST /v1/worker/heartbeat` with registration, sidecar-generated secret hash, re-key,
+   credential binding and capability allow-lists (R-BTN-13/14), the §11 request and response.
+2. `POST /v1/worker/activities` and the heartbeat's `transcripts` (§6.8–6.9), with the
+   10-minute close-only grace.
+3. Messages: `POST /v1/ui/messages`, delivery in the heartbeat, `POST /v1/worker/messages/{id}/ack`.
+4. Suspensions: `POST /v1/ui/suspensions`, `/lift`, scheduled start and timed end on the alarm,
+   `suspensions[]` in the heartbeat response.
+5. `GET /v1/worker/mode` (always `shadow` until R3-1217) and `POST /v1/worker/shadow-report`
+   with `shadow-conflict` events.
+6. Dashboard: the Workers view, and Suspend / Lift and Send status request actions.
+
+### Architecture — the decisions, named
+
+- **Credentials** are rows in `credentials` (§4) plus a Worker secret `TOKEN_HASHES` (JSON
+  map credential id → SHA-256); a token's hostname and `allowed_capabilities` are checked on
+  every heartbeat; revocation is deleting the hash. A `credentials` row `test` exists only in
+  test bindings, and only it may send `test_harness: true` (R-BTN-32).
+- **Validation (§10.4)** is one module `src/validate.ts`: the `session_name` regex, the
+  500-character free-text rule, per-kind `detail_json` schemas, the transcript allow-list from
+  the synced `baton.json` and the path regex. Every endpoint calls it before any write.
+- **Write budget (§3):** capabilities and providers rows are rewritten only when the
+  heartbeat's `settings_hash` changes.
+- **The alarm** is set once by the object and re-armed every 60 s; this item gives it the
+  suspension start/end and message expiry; R3-1212 adds reaping.
+- **Do not:** return the worker secret (the server never has it); accept `test_harness` from a
+  non-test credential; let one worker's activity id touch another's row (primary key
+  `(worker_id, id)`); add claim logic here.
+
+### Tests
+
+- `infra/baton/test/unit/workers.test.ts`: G-BTN-5 (secret, hostname, capability allow-list),
+  G-BTN-17 (idempotent first heartbeat, re-key), G-BTN-13 (free text), G-BTN-23 (transcript
+  allow-list and links), G-BTN-24 (activity upsert, cross-worker refusal, grace).
+- `infra/baton/test/integration/S-BTN-11.scheduled-suspension.test.ts`.
+- `S-BTN-8` and `S-BTN-9` server halves: a heartbeat during each mode's suspension returns it,
+  and `stop` sends a `release` with reason `provider-suspended` to each holder (holders are
+  seeded rows here; R3-1212 makes them real).
+
+### Exit criteria
+
+- [x] `npm run test:baton` passes, including `S-BTN-11` and the server halves of `S-BTN-8` and `S-BTN-9` — 84 passed at baton 7c5ce2d (baton#4, merged ecb5af5)
+- [x] `grep -rn "test_harness" infra/baton/src` shows the credential check — `src/workerApi.ts` refuses it unless `cred.id === 'test'`
+- [x] `npm run verify` green — on the ledger commit that archives this item
+
+### Hand-off
+
+R3-1212 adds claims on top of these workers; R3-1213 is the first real sidecar.
+
+## Status
+
+_in-review 2026-10-13 — upstream: spec-silent — §13 step 2 does not say how a shadow git status maps to a claim end; shadow ends are recorded released with end_reason shadow:\<status> (no ended_at_sha exists for completed) (baton#4)._
+
+_in-review 2026-10-13 — upstream: spec-silent — §11's POST /v1/sync/board row and docs baton-sync.mjs do not carry baton.json's transcript_repos; Baton reads it from the board (baton#4), the producer half is a docs follow-up._
+
+_in-review 2026-10-13 — https://github.com/immediately-run/baton/pull/4._
+
+_claimed 2026-10-13 — baton (claim 9da3e2)._
+
+_updated 2026-10-13 — path mapping (owner, 2026-10-13): Baton's code lives in immediately-run/baton, so infra/baton/\<path> in this item means \<path> at that repo's root (BATON_SPEC §3; the decision library is vendored by hash, R-BTN-37).._
+
+_(filed 2026-10-13)_

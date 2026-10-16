@@ -1,0 +1,95 @@
+---
+title: "R3-1230 — Baton schema and API rename: work items become tickets"
+id: R3-1230
+project: baton
+status: done
+updated: 2026-10-15
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1067
+tier: judgement
+description: "Rename Baton's schema and API from work items to tickets — tables, columns, indexes, the holder path and the no-eligible code — in one append-only migration, with the docs clients and vendored modules following; no behaviour changes. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/15
+depends_on:
+  - R3-1228
+---
+
+**Brief:** the Baton project.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2a *Names*, §4, §11, §15 row "Baton's schema and API names (2026-10-14)" (docs@69197d29, docs#212)
+**Depends on:** R3-1228
+
+### Requires
+
+- none
+
+### Why
+
+The owner renamed Baton's unit from "work item" to "ticket" (2026-10-14): "work item" is the
+docs roadmap's word. Every later item of the amendment writes against the new names, so the
+rename lands first and alone, where a reviewer can check it changes nothing else. Tier:
+judgement — two repos and a schema migration.
+
+### What to build
+
+1. baton `src/migrations/0005_tickets.sql`: `work_items` → `tickets`, `work_item_claims` →
+   `claims`, `item_overrides` → `ticket_overrides`, `work_item_requires` → `ticket_requires`;
+   every `work_item_id` column → `ticket_id`; `board_snapshots.item_count` → `ticket_count`;
+   indexes renamed to match (`one_active_claim_per_ticket`, `tickets_ready`).
+2. API: `GET /v1/worker/tickets/{ticket}/holder` replaces `/v1/worker/items/{item}/holder`;
+   every request and response field `work_item_id` becomes `ticket_id`; error code
+   `no-eligible-ticket` replaces `no-eligible-item`.
+3. docs: `scripts/baton-worker.mjs` (the holder call at line 302, the code list at 189 and the
+   comment at 27), `scripts/claim.sh` (its self-test stubs at 1381–1399),
+   `scripts/lib/batonClient.mjs`, `scripts/lib/batonSync.mjs`, `scripts/lib/baton.mjs`,
+   `scripts/baton-mirror.mjs` and their tests; then `npm run vendor` in baton.
+
+### Architecture — the decisions, named
+
+- **SQLite renames in place**: `ALTER TABLE … RENAME TO` and `ALTER TABLE … RENAME COLUMN`;
+  indexes are dropped and re-created under their new names in the same migration. Rows are
+  never copied.
+- **Append-only**: `0001`–`0004` stay as they are (baton `CLAUDE.md`); the object's
+  migration runner applies `0005` like any other.
+- **No aliases**: the old path and field names are not kept, because nothing is deployed
+  (R3-1208 is unrun) and no client outside these two repos exists.
+- **Vendored modules change in docs first** (`scripts/lib/baton.mjs`, `scripts/lib/batonSync.mjs`),
+  then `npm run vendor` updates `src/shared/` and `manifest.json` (R-BTN-37).
+- **Qualified ids are not this item**: `docs:R3-1205` arrives with R3-1231; here a ticket id
+  is still the bare `R3-…`.
+- **Do not**: change any query's logic, any refusal, or any test's expectation other than a
+  name; rename `isEligible`'s `item` parameter (internal); edit archived roadmap items.
+
+### Tests
+
+- baton `test/unit/migrations.test.ts` (new): a database at `0004` with a claim, an override
+  and a requires row, migrated to `0005`, keeps every row under the new names.
+- Every existing unit and integration test passes with only names changed; `test/unit/workItems.test.ts`
+  becomes `test/unit/tickets.test.ts`.
+- docs `scripts/baton-client.test.mjs` and `scripts/claim.sh --self-test` pass against the new path.
+- Scenarios: none new; S-BTN-1…16 pass unchanged (`npm run test:baton`).
+
+### Exit criteria
+
+- [x] `git grep -nE "work_item|item_overrides|no-eligible-item|/v1/worker/items/" -- src test ':!src/migrations/000*' ':!test/unit/migrations.test.ts'` returns nothing in baton, nor `-- scripts` in docs — the migrations (0001–0004 append-only, 0005 doing the rename) and the migration test must name the old names *(amended 2026-10-15, baton#15 review gate round 1, 1-A-1)* — evidence: empty in baton main (8962584) and docs scripts, 2026-10-15
+- [x] `test/unit/migrations.test.ts` passes; `npm test` and `npm run typecheck` green in baton — evidence: 21 files, 183 tests plus the model; baton#15 CI `test` and `model` green at e24bf3d
+- [x] `scripts/claim.sh --self-test` green; `npm run verify` green in docs — evidence: self-test 195/195; verify 24 steps green at 3443aa82
+
+### Hand-off
+
+R3-1231 adds `repository_id`, `local_id` and qualified ids on top of `tickets`.
+
+## Status
+
+_in-review 2026-10-15 — https://github.com/immediately-run/baton/pull/15 — baton#15 (be334ea) and docs 70f40d28; the exit grep excludes the append-only migrations 0001–0004 (upstream: item-silent — the grep as written hits them, and the item forbids editing them); held_snapshots.item_count renamed too._
+
+_claimed 2026-10-15 — baton,docs (claim a0f0d8)._
+
+_(filed 2026-10-14)_

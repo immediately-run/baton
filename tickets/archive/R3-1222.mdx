@@ -1,0 +1,96 @@
+---
+title: "R3-1222 — Baton sync: strict repos names, checked before merge"
+id: R3-1222
+project: baton
+status: done
+updated: 2026-10-13
+repos:
+  - docs
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1048
+tier: judgement
+description: "repoName accepts only the bracketed shapes the board uses and check:requires validates every live item's repos: with it, so one bad entry is refused on the PR, never halting the sync after merge; the baton fixture uses the real shape. Continues R3-1207 (round 3 of its docs PR review). Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/docs/pull/206
+  - https://github.com/immediately-run/baton/pull/3
+depends_on:
+  - R3-1207
+---
+
+**Brief:** the Baton project; continues [R3-1207](R3-1207.mdx) — its review's round three (docs#205, baton#2).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2 (`repos` is a filter field), §7.1 (docs@a6bc7c28)
+**Depends on:** R3-1207
+
+### Requires
+
+- none — unit tests, `check:requires` and `npm run verify`.
+
+### Why
+
+R3-1207's `repoName` turns each `repos:` entry into the repository name Baton filters on. Round
+three of its review found two defects, left for this item because the sync stays off until
+R3-1208 sets `BATON_ENABLED`, so neither can touch a live board before this lands:
+
+- the `kind (name)` form takes the bracket for **any** `word (word)` entry, so a `repo (note)`
+  entry — `deploy (provisioning)`, `site-main (follow-up)` — posts the wrong repository; the
+  board's only bracketed shape is `app (<name>)`;
+- an unreadable entry throws in the sync, which runs only after merge, so one bad `repos:`
+  line on `main` would halt every sync until fixed. Nothing checks `repos:` on the PR that
+  adds it (archived items carry such shapes: R3-70's `app repo (file-commander)`).
+
+Tier: judgement — one rule, applied in two places (the sync and the board check), across two
+repositories.
+
+### What to build
+
+1. `repoName` (docs `scripts/baton-sync.mjs`, or moved to a pure `scripts/lib/repoName.mjs` that
+   both callers import): accept a bare name, `app (<name>)`, `owner/<name>` and a GitHub URL;
+   throw on everything else, a bracket after any other word included.
+2. `check-roadmap-requires.mjs` (`check:requires`, in verify): every **live** item's `repos:`
+   entries pass `repoName`, or the check fails naming the item and the entry — so the refusal
+   happens on the PR's own tree, never on the sync after merge.
+3. baton: `test/fixtures/roadmap/R3-9003.mdx` uses the real shape (`app (deploy)`), the
+   `fixtureRepo.mjs` comment says so, `npm run fixtures` regenerates `boards.json`, and
+   `npm run vendor` if a vendored module changed.
+4. docs `scripts/baton-sync.test.mjs`: drop the stale `claimOrder` comment and assertion under
+   the payload test (round 3's 3-r3-3).
+
+### Architecture — the decisions, named
+
+- One function, two callers: the board check and the sync must accept exactly the same set.
+- **Do not:** guess a name from an unknown shape; skip archived items' `repos:` (they are not
+  live and are never posted) — the check covers live items only.
+
+### Tests
+
+- `scripts/baton-sync.test.mjs`: `app (devtools)` → `devtools`; `deploy (provisioning)`,
+  `site-main (follow-up)` and `app repo (file-commander)` throw.
+- `check-roadmap-requires.mjs --self-test`: a fixture item with `repos: [x (y)]` fails the check
+  naming it; one with `repos: [app (devtools)]` passes.
+- Scenarios: S-BTN-13 (baton) re-run with the regenerated fixtures; none new.
+
+### Exit criteria
+
+- [x] `node --test scripts/baton-sync.test.mjs` passes with the cases above — 12 of 12 at docs#206 head 0f2e692
+- [x] `node scripts/check-roadmap-requires.mjs --self-test` passes with the new cases — 42 of 42
+- [x] `npm run check:requires` passes on the live board — 222 items, every repos: entry readable
+- [x] `npm run test:baton` passes, `S-BTN-13` included, with the regenerated fixtures — 53 pass, baton#3 against docs main after docs#206 merged
+- [x] `npm run verify` green — CI verify success on docs#206 head 0f2e692
+
+### Hand-off
+
+R3-1208 depends on this item, so the sync is switched on only after it lands.
+
+## Status
+
+_in-review 2026-10-13 — https://github.com/immediately-run/docs/pull/206 https://github.com/immediately-run/baton/pull/3 — docs#206 — lib/repoName.mjs shared by the sync and check:requires (bare, app (\<name>), owner/\<name>, GitHub URL; anything else refused on its PR); baton#3 — the fixture uses app (deploy).._
+
+_claimed 2026-10-13 — docs,baton (claim 7bd104)._
+
+_(filed 2026-10-13)_
