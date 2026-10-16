@@ -95,14 +95,21 @@ export function opencodeRecords(exported, scope = "main") {
   const records = [];
   const children = [];
   for (const m of exported?.messages ?? []) {
-    const info = m.info ?? {};
-    if (info.role === "assistant" && info.tokens) {
-      const t = info.tokens;
+    // v1 shape: { info: { role, tokens, providerID, modelID, time }, parts }
+    // v2 shape: { type: "assistant", tokens, model: { id, providerID }, time, content } —
+    // the v1 -> v2 port flattened the wrapper (fc-opencode incident 24); both
+    // are read so a mixed ledger history keeps aggregating.
+    const info = m.info ?? m;
+    const isAssistant = info.role === "assistant" || m.type === "assistant";
+    const t = info.tokens;
+    if (isAssistant && t) {
       const ms = info.time?.completed ?? info.time?.created;
+      const provider = m.model?.providerID ?? info.providerID;
+      const model = m.model?.id ?? info.modelID;
       records.push({
         id: info.id,
         at: typeof ms === "number" ? new Date(ms).toISOString() : null,
-        model: info.providerID ? `${info.providerID}/${info.modelID}` : info.modelID ?? "unknown",
+        model: provider ? `${provider}/${model}` : model ?? "unknown",
         scope,
         input: t.input ?? 0,
         // opencode does not say which TTL a write used; Anthropic's default is 5 minutes
@@ -113,11 +120,12 @@ export function opencodeRecords(exported, scope = "main") {
         output: (t.output ?? 0) + (t.reasoning ?? 0),
       });
     }
-    for (const p of m.parts ?? []) {
-      if (p.type !== "tool" || p.tool !== "task") continue;
-      const sid = p.state?.metadata?.sessionId;
+    for (const p of m.parts ?? m.content ?? []) {
+      if (p.type !== "tool") continue;
+      if ((p.tool ?? p.name) !== "task") continue; // v1: tool, v2: name
+      const sid = p.state?.metadata?.sessionId ?? p.state?.metadata?.sessionID;
       if (!sid) continue;
-      const agent = p.state?.input?.subagent_type;
+      const agent = p.state?.input?.subagent_type ?? p.state?.input?.agent;
       children.push({ sessionId: sid, scope: agent ? `sub:${agent}` : "sub" });
     }
   }

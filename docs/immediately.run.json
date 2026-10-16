@@ -1,0 +1,4 @@
+{
+  "opensWith": { "task": "open-wiki", "version": "1.0" },
+  "kind": "wiki"
+}
