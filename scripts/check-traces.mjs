@@ -369,7 +369,7 @@ function applyPost(Q, env, k) {
     for (let x = g.length; x > common; x--) acts.push(`regress(${q(t)})`);
     g = g.slice(0, common);
     for (const l of target.slice(common)) {
-      if (!FROM[l]?.includes(stationOf(g))) return { reject: `${t}'s posted path ${target.join(',')} is not a path of the course` };
+      if (!FROM[l]?.includes(stationOf(g))) return { end: `${t}'s posted path ${target.join(',')} is off the course graph (§2e: git can hold it; Baton logs off-graph — not modelled)` };
       acts.push(`foreignPush(${q(t)}, ${q(l)})`);
       g = [...g, l];
     }

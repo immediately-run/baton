@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkCourse, readInputs, removed, shortestRoute, type KitInput } from '../../src/local/testCourse';
+import { checkCourse, legExports, readInputs, removed, shortestRoute, type KitInput } from '../../src/local/testCourse';
 import { graphOf } from '../../src/core/graph';
 
 const DOCS = join(import.meta.dirname, '../fixtures/courses/roadmap-pr/course.json'); // docs' .baton course, verbatim
@@ -18,7 +18,7 @@ afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })))
 
 const input = (over: Partial<KitInput> = {}): KitInput => ({
   course: 'roadmap-pr', proposed: roadmapPr, base: roadmapPr, proposedVersions: { version: 3, min_worker_version: 3 }, baseVersions: { version: 3, min_worker_version: 3 },
-  legScripts: null, live: [], ...over,
+  legScripts: null, live: null, ...over,
 });
 const { adjudicate: _a, ...legsWithout } = roadmapPr.legs;
 const { adjudicated: _s, ...stationsWithout } = roadmapPr.stations;
@@ -49,11 +49,21 @@ describe('baton test-course', () => {
     expect(await checkCourse(input({ proposed: WITHOUT_ADJUDICATE, proposedVersions: null }))).toEqual([expect.objectContaining({ rule: 'min-worker-version' })]);
   }, 60_000);
 
-  it('leg scripts that do not pair one to one with the legs fail', async () => {
-    const legs = Object.keys(roadmapPr.legs);
+  it('leg scripts that do not pair one to one with the legs, or lack run, handoff and close, fail', async () => {
+    const all = ['run', 'handoff', 'close'];
+    const legs = Object.keys(roadmapPr.legs).map((name) => ({ name, exports: all }));
     expect(await checkCourse(input({ legScripts: legs }))).toEqual([]);
-    const v = await checkCourse(input({ legScripts: [...legs.filter((l) => l !== 'fix'), 'deploy'] }));
+    const v = await checkCourse(input({ legScripts: [...legs.filter((l) => l.name !== 'fix'), { name: 'deploy', exports: all }] }));
     expect(v.map((x) => [x.rule, x.message])).toEqual([['legs-scripts', 'leg fix has no legs/fix.mjs'], ['legs-scripts', 'legs/deploy.mjs is no leg of the course']]);
+    // §6.13: "The test kit fails a script without all three" (round 1, 1-A-9)
+    const thin = await checkCourse(input({ legScripts: legs.map((l) => (l.name === 'merge' ? { name: 'merge', exports: ['run'] } : l)) }));
+    expect(thin).toEqual([expect.objectContaining({ rule: 'legs-scripts', message: 'legs/merge.mjs exports no handoff, close (§6.13: run, handoff and close)' })]);
+    // as `baton run` reads them: named, on a default object, or a default function for run
+    const f = () => {};
+    expect(legExports({ run: f, handoff: f, close: f })).toEqual(all);
+    expect(legExports({ default: { run: f, handoff: f, close: f } })).toEqual(all);
+    expect(legExports({ default: f, close: f })).toEqual(['run', 'close']);
+    expect(legExports({ run: 'not a function' })).toEqual([]);
   }, 60_000);
 
   it('a live ticket the proposed file would move back fails, naming it', async () => {
@@ -62,7 +72,7 @@ describe('baton test-course', () => {
     expect(v).toEqual([expect.objectContaining({ rule: 'moves-back', message: expect.stringContaining('T-7') })]);
   }, 60_000);
 
-  it('reads a checkout: the working tree proposes, git’s base is in force, baton.json gives the versions', () => {
+  it('reads a checkout: the working tree proposes, git’s base is in force, baton.json gives the versions', async () => {
     const root = mkdtempSync(join(tmpdir(), 'baton-kit-'));
     dirs.push(root);
     const git = (...a: string[]) => execFileSync('git', ['-C', root, ...a], { stdio: 'ignore' });
@@ -75,14 +85,20 @@ describe('baton test-course', () => {
     git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'base');
     writeFileSync(join(root, '.baton/courses/roadmap-pr/course.json'), JSON.stringify(WITHOUT_ADJUDICATE));
     writeFileSync(join(root, '.baton/baton.json'), baton(4));
-    writeFileSync(join(root, '.baton/courses/roadmap-pr/legs/merge.mjs'), '');
+    writeFileSync(join(root, '.baton/courses/roadmap-pr/legs/merge.mjs'), 'export function run() {}\nexport function close() {}\n');
+    writeFileSync(join(root, '.baton/courses/roadmap-pr/legs/fix.mjs'), 'this is not a module');
     const board = join(root, 'board.json');
     writeFileSync(board, JSON.stringify({ tickets: [{ id: 'T-1', course_id: 'roadmap-pr' }, { id: 'C-1', course_id: 'chore' }],
       stations: { 'T-1': { path: [{ leg: 'implement', reached: 'pr-open' }] }, 'C-1': { path: [] } } }));
-    const k = readInputs(root, 'roadmap-pr', { base: 'HEAD', board });
+    const k = await readInputs(root, 'roadmap-pr', { base: 'HEAD', board });
     expect(k).toMatchObject({ base: roadmapPr, proposed: WITHOUT_ADJUDICATE, baseVersions: { version: 3, min_worker_version: 3 }, proposedVersions: { version: 4, min_worker_version: 4 },
-      legScripts: ['merge'], live: [{ id: 'T-1', path: [{ leg: 'implement', reached: 'pr-open' }] }] });
-    expect(readInputs(root, 'roadmap-pr')).toMatchObject({ base: null, baseVersions: null });
-    expect(() => readInputs(root, 'chore')).toThrow(/no such course file/);
+      legScripts: [{ name: 'fix', exports: [] }, { name: 'merge', exports: ['run', 'close'] }], live: [{ id: 'T-1', path: [{ leg: 'implement', reached: 'pr-open' }] }] });
+    expect(await readInputs(root, 'roadmap-pr')).toMatchObject({ base: null, baseVersions: null, live: null });
+    await expect(readInputs(root, 'chore')).rejects.toThrow(/no such course file/);
+    // a base that does not resolve is an error, never a new course (round 1, 1-A-2/1-B-0)
+    await expect(readInputs(root, 'roadmap-pr', { base: 'HAED' })).rejects.toThrow(/--base HAED: not a commit/);
+    // a base that resolves but lacks the course is a new course
+    const empty = execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit-tree', '4b825dc642cb6eb9a060e54bf8d69288fbee4904', '-m', 'empty'], { encoding: 'utf8' }).trim();
+    expect(await readInputs(root, 'roadmap-pr', { base: empty })).toMatchObject({ base: null, baseVersions: null });
   });
 });
