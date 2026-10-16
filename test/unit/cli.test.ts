@@ -3,7 +3,7 @@
 // file by `ssh-keygen -Y sign` that Baton's verifier accepts. Node only: it runs ssh-keygen.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { duration, parseArgs, plan, send } from '../../cli/baton.mjs';
@@ -104,4 +104,29 @@ describe('send: signed with a key file, verified by Baton', () => {
     expect(ok.json.url).toMatch(/\/login#[0-9a-f]{64}$/);
     expect(await send(ORIGIN, plan('admin', ['open']), other, fetchImpl)).toMatchObject({ status: 401, json: { code: 'unauthenticated' } });
   });
+});
+
+describe('baton test-course: the command (R3-1248)', () => {
+  it('exits 0 on a sound course and 1 naming each violation, needing no Baton or key', () => {
+    const root = mkdtempSync(join(tmpdir(), 'baton-cli-kit-'));
+    try {
+      const course = JSON.parse(readFileSync(join(import.meta.dirname, '../fixtures/courses/roadmap-pr/course.json'), 'utf8'));
+      const dir = join(root, '.baton/courses/roadmap-pr');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'course.json'), JSON.stringify(course));
+      const run = () => spawnSync('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'test-course', root, 'roadmap-pr'], { encoding: 'utf8', env: { ...process.env, BATON_URL: 'http://127.0.0.1:1' } });
+      const ok = run();
+      expect([ok.status, ok.stdout]).toEqual([0, expect.stringContaining('✓ no violations')]);
+      expect(ok.stdout).toContain('with no base (the removal rule is not checked)');
+      mkdirSync(join(dir, 'legs'));
+      writeFileSync(join(dir, 'legs/deploy.mjs'), '');
+      const bad = run();
+      expect(bad.status).toBe(1);
+      expect(bad.stdout).toContain('✗ legs-scripts: legs/deploy.mjs is no leg of the course');
+      const usage = spawnSync('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'test-course', root], { encoding: 'utf8' });
+      expect([usage.status, usage.stderr]).toEqual([2, expect.stringContaining('usage: baton test-course')]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

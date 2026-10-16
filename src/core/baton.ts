@@ -23,6 +23,7 @@ import { Courses } from './courses';
 import { Observations } from './observations';
 import { Webhooks, type Delivery } from './webhook';
 import { fileUrl } from './links';
+import { Stats, STATS_WINDOW_MS } from './stats';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import type { Ports, Row, SqlValue, Store, Workflow } from './ports';
 
@@ -43,6 +44,7 @@ export class BatonCore {
   readonly webhooks: Webhooks;
   readonly stations: Stations;
   readonly admin: Admin;
+  readonly stats: Stats;
   readonly store: Store;
   /** §12: workflows to dispatch once the current request or alarm has committed, one per
    *  repository and kind. */
@@ -69,6 +71,7 @@ export class BatonCore {
     this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo) });
     this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
     this.cutover = new Cutover({ store, now: () => this.now() });
+    this.stats = new Stats(store);
     this.mirror = new Mirror({ store, now: () => this.now() });
     this.workers = new WorkerApi({ store, config: ports.config, now: () => this.now(), fenced: (w, inc, id) => this.claims.fenced(w, inc, id),
       claimView: (id) => this.claims.holderView(id),
@@ -353,6 +356,23 @@ export class BatonCore {
       if ((await this.admin.adminFingerprints()).has(cred)) throw new BatonError('forbidden', 'an administrator key is never a worker key (R-BTN-57)');
     }
     const tx = <T>(f: () => T): T => this.store.transaction(f);
+    const stats = /^\/v1\/repositories\/([^/]+)\/stats$/.exec(p);
+    if (m === 'GET' && stats) {
+      // §2d, §11: a course's record, for any key granted on the repository (R-BTN-58); a key with
+      // no grants keeps its interim reach. Aggregates and ids only (G-BTN-64).
+      if (!cred) throw new BatonError('unauthenticated', 'no worker principal');
+      const repo = checkRepositoryId(decodeURIComponent(stats[1]));
+      if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
+      if (this.workers.credential(cred).granted
+        && !this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
+        throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
+      }
+      const raw = url.searchParams.get('since');
+      const now = this.now();
+      const since = raw == null ? now - STATS_WINDOW_MS : Date.parse(raw);
+      if (!Number.isFinite(since) || since > now) throw new BatonError('invalid-params', 'since: must be an ISO time not in the future');
+      return json({ ok: true, ...this.stats.of(repo, since, now) });
+    }
     if (p.startsWith('/v1/runner/')) {
       if (!cred) throw new BatonError('unauthenticated', 'no worker principal');
       if (m === 'POST' && p === '/v1/runner/heartbeat') {

@@ -36,6 +36,7 @@
     "test/unit/boundary-host.test.ts",
     "test/unit/cli.test.ts",
     "test/unit/check-traces.test.ts",
+    "test/unit/test-course.test.ts",
     "test/model"
   ]
 }

@@ -55,6 +55,10 @@
     "at": 5,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   },
+  "S-BTN-37.course-renames › S-BTN-37 a course changes under a claim (renames) > a removal raises min_worker_version: the claim there ends course-changed, old workers stop; a loop with no max_runs is refused": {
+    "at": 8,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
   "S-BTN-37.course-renames › S-BTN-37 a course changes under a claim (renames) > a renamed leg carries its claims, its runs and old names over": {
     "at": 8,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
