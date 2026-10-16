@@ -1,0 +1,137 @@
+---
+title: Runbook — the baton repository on baton.immediately.run
+description: Registering immediately-run/baton with the production Baton, step by step with the check after each, up to the cutover that retires npm run ticket (R3-1266).
+tags: [runbook]
+order: 40
+---
+
+<Lede>How the baton repository becomes a repository that the Baton at
+`https://baton.immediately.run` serves: its tickets on the dashboard, claimed by `baton run`
+instead of `npm run ticket`.</Lede>
+
+Commands run from a checkout of this repository on the owner's machine. The CLI is
+`node cli/baton.mjs`; it talks to `https://baton.immediately.run` unless `--url` or `BATON_URL`
+says otherwise. Do each step on staging first (`--url https://baton-staging.immediately.run`, and
+`--env staging` for wrangler), then on production.
+
+## What can be done today, and what waits
+
+| Step | Ready? |
+|---|---|
+| 1. Keys | yes |
+| 2. Make yourself administrator | yes |
+| 3. Register the repository | yes |
+| 4. The sync | **waits on R3-1249** (`baton sync` and a ticket source for `tickets/*.mdx`) |
+| 5. Workers | the grant is ready; `baton run` waits on the `pr` course's legs (R3-1249's `baton init`) |
+| 6. Cut over | after 4 and 5 |
+
+Until step 6, tickets are claimed with `npm run ticket` (git is the lock), and registering the
+repository changes nothing about that.
+
+## 1. Keys
+
+Three roles, three keys: a key holds one role, and Baton refuses a key used in a second
+(`conflict`).
+
+```sh
+ssh-keygen -t ed25519-sk -f ~/.ssh/baton_admin -C "baton admin"     # administrator; a touch-required
+                                                                     # hardware key if you have one,
+                                                                     # else -t ed25519
+ssh-keygen -t ed25519 -f ~/.ssh/baton_owner_baton -C "owner of baton" # owner of this repository
+```
+
+Never load the administrator key into an ssh-agent an agent session can use. Worker keys are made
+on each worker machine (step 5).
+
+## 2. Make yourself administrator
+
+Production has no administrator yet: `npx wrangler secret list` is empty.
+
+```sh
+npx wrangler secret put BATON_ADMIN_KEYS < ~/.ssh/baton_admin.pub
+npx wrangler secret put BATON_ADMIN_KEYS --env staging < ~/.ssh/baton_admin.pub
+node cli/baton.mjs admin -i ~/.ssh/baton_admin open     # prints a one-time login link (5 minutes)
+```
+
+Check: the link opens the dashboard (a session for 12 hours). From now on the dashboard needs a
+login link: Cloudflare Access still stands in front, but on its own it opens the dashboard only
+while `BATON_ADMIN_KEYS` lists no key.
+
+## 3. Register the repository
+
+```sh
+node cli/baton.mjs admin -i ~/.ssh/baton_admin repo add immediately-run/baton --id baton \
+  --owner-key ~/.ssh/baton_owner_baton.pub --default-branch main \
+  --sync-workflow .github/workflows/baton-sync.yml --ci-identity github-actions
+```
+
+- Leave out `--cut-over`: step 6 cuts over from the dashboard once a sync and a worker work.
+- `--weight N` sets the share of claims among repositories; the default is fine to start.
+- Registration is insert-only. To make a fresh deployment know the repository too, add the same
+  entry to `BATON_REPOSITORIES` in `wrangler.toml` (both environments) in a PR:
+  `{"id":"baton","github":"immediately-run/baton","default_branch":"main","sync_workflow":".github/workflows/baton-sync.yml"}`.
+
+Check: the dashboard lists `baton` under the repositories, with no board yet.
+
+## 4. The sync (waits on R3-1249)
+
+The sync posts the board: every ticket's frontmatter from `tickets/` at `main`'s head. It
+authenticates with GitHub Actions OIDC from the workflow registered in step 3, so it needs no
+secret.
+
+1. A ticket source for this repository's MDX tickets: `.baton/tickets.mjs` over `tickets/` and
+   `tickets/archive/`, or R3-1249's default source taught `.mdx` and the folder (R3-1266).
+2. `.github/workflows/baton-sync.yml`: on a push to `main` that touches `tickets/**` or `.baton/**`,
+   on `workflow_dispatch`, and every 15 minutes; `permissions: id-token: write`; it runs
+   `baton sync` at the CLI version it pins. `baton init` (R3-1249) writes it.
+
+Check: `gh workflow run baton-sync.yml -R immediately-run/baton` goes green, and the dashboard
+shows the `baton` board with the live tickets and the next available one.
+
+## 5. Workers
+
+On each machine that will work baton tickets:
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/baton_worker -C "$(hostname)"   # on the worker
+```
+
+Then, as the repository's owner, grant that key (copy its `.pub` over first):
+
+```sh
+node cli/baton.mjs owner -i ~/.ssh/baton_owner_baton grant baton --key worker.pub \
+  --hostname <the worker's hostname> --capabilities create-pr,llm-call,agent-venue --max-tier judgement
+```
+
+The hostname must be what the machine reports (`hostname`, or `IR_BATON_NAME`), or its heartbeats
+are refused. Capabilities are from `src/shared/vocabulary.mjs` (`authentication`, `llm-call`,
+`create-pr`, `drivable-browser`, `agent-venue`); only an administrator grants `human-operator`.
+
+Once the `pr` course's legs exist (R3-1249), the worker runs:
+
+```sh
+IR_BATON_KEY_FILE=~/.ssh/baton_worker BATON_REPOSITORY=baton \
+  node cli/baton.mjs run --harness claude-code --home <a checkout of immediately-run/baton>
+```
+
+Check: the dashboard's Workers view shows the machine heartbeating.
+
+## 6. Cut over
+
+On the dashboard, under the `baton` repository, choose **Cut over** and confirm twice. From then
+on Baton holds the claims for this repository, and git is not a fallback (R-BTN-18).
+
+Then, in a PR (R3-1266): retire `scripts/ticket.mjs`'s `claim` and `set`, and say in
+`tickets/home.mdx` and the README that tickets are claimed by `baton run`.
+
+Check: `baton run` on a granted worker claims the next available ticket and takes it through the
+`pr` course to merged.
+
+## Break-glass
+
+When Baton itself is down, agents cannot claim the ticket that fixes it. Then:
+
+- a person (never an agent) may push a fix to `main` without a claim; the deploy workflow deploys
+  it;
+- `npx wrangler rollback` puts the previous version back, but only to a version at the same
+  migration number (`npx wrangler deployments list`): the schema does not roll back.
