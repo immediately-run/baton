@@ -9,7 +9,7 @@ The design is `BATON_SPEC` in the `immediately-run/docs` repository
 an item says `infra/baton/<path>`, it means `<path>` in this repository (BATON_SPEC §3).
 
 How Baton differs from a durable-execution engine such as Temporal, and where each fits:
-[`docs/compared-to-temporal.md`](docs/compared-to-temporal.md).
+[`docs/compared-to-temporal.mdx`](docs/compared-to-temporal.mdx).
 
 ## Layout
 
@@ -41,7 +41,8 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 | `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
 | `test/hosts/` | The two hosts the harness drives, behind one interface (`#host`) |
 | `test/lib/fixtureRepo.mjs` | The harness's stand-in for `docs/main`: a real bare git repo |
-| `content/` | The wiki: Baton's tickets (`content/roadmap/*.mdx`, finished ones in `roadmap/archive/`) and the pages around them, opened on immediately.run by Grove (below) |
+| `tickets/` | The tickets wiki: Baton's tickets (`tickets/*.mdx`, finished ones in `tickets/archive/`) and their board, opened on immediately.run by Grove (below) |
+| `docs/` | The documentation wiki: how Baton works and how to run it (below) |
 
 ## Commands
 
@@ -49,28 +50,32 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
   (or `cloudflare`) runs one.
 - `npm run start:local -- --db <path> --port <n>` — Baton as a local process (below).
 - `npm run typecheck` — the Worker, the local host and the Node scripts.
-- `npm run check:wiki` — every page in `content/` compiles as MDX, uses only known components,
-  links only to files that exist, and every ticket matches `content/roadmap/item.schema.json`.
+- `npm run check:wiki` — every page in `tickets/` and `docs/` compiles as MDX, uses only known
+  components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
 - `npm run vendor` — re-copy `baton.mjs`, `vocabulary.mjs` and `sessionUsage.mjs` from a sibling `../docs`
   checkout (or `DOCS_DIR`) and rewrite `src/shared/manifest.json`. Do this in a PR here after
   docs changes any of them.
 - `npm run fixtures` — regenerate `test/fixtures/boards.json` with the real docs
   `factory-state` code.
 
-## The wiki
+## The wikis
 
-`content/` is a [Grove](https://github.com/immediately-run/grove) wiki: `package.json`'s
-`"immediately.run": {"content": "content"}` points immediately.run at it, and
-`content/immediately.run.json` opens it with the wiki viewer. Read it at
-<https://immediately.run/present/github/immediately-run/baton/main/files/content/home.mdx>.
+The repository holds two [Grove](https://github.com/immediately-run/grove) wikis, which
+immediately.run opens: `package.json`'s `"immediately.run": {"content": ["tickets", "docs"]}`
+lists them, and each folder's `immediately.run.json` opens it with the wiki viewer.
 
-- A ticket is `content/roadmap/<id>.mdx`. New tickets are `B-n`; tickets that moved here from
-  the immediately.run docs roadmap keep their `R3-NNNN` ids. A finished one moves to
-  `content/roadmap/archive/` with `status: done`.
-- Its frontmatter follows `content/roadmap/item.schema.json`; the body is prose for people and
-  agents. Pages are MDX, so `<` and `{` in prose go in backticks or are escaped (`\<`, `\{`).
-- The roadmap pages' components (`content/components/`) are registered in
-  `content/immediately.run.json`, as are the board view and the ticket record sets.
+- **`tickets/`**, the tickets:
+  <https://immediately.run/present/github/immediately-run/baton/main/files/tickets/home.mdx>.
+  A ticket is `tickets/<id>.mdx`. New tickets are `B-n`; tickets that moved here from the
+  immediately.run docs roadmap keep their `R3-NNNN` ids. A finished one moves to
+  `tickets/archive/` with `status: done`. Its frontmatter follows `tickets/item.schema.json`;
+  the body is prose for people and agents. The board's components (`tickets/components/`) are
+  registered in `tickets/immediately.run.json`, as are the board view and the ticket record
+  sets.
+- **`docs/`**, the documentation:
+  <https://immediately.run/present/github/immediately-run/baton/main/files/docs/home.mdx>.
+
+Pages are MDX, so `<` and `{` in prose go in backticks or are escaped (`\<`, `\{`).
 
 ## Worker credentials
 

@@ -3,7 +3,10 @@
   "private": true,
   "license": "Apache-2.0",
   "immediately.run": {
-    "content": "content"
+    "content": [
+      "tickets",
+      "docs"
+    ]
   },
   "type": "module",
   "description": "Baton — work-item leases, workers and the factory dashboard, on a Cloudflare Durable Object or as a local Node process (BATON_SPEC §3a).",

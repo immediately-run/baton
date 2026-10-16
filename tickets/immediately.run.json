@@ -6,15 +6,15 @@
   "kind": "wiki",
   "views": [
     {
-      "name": "Roadmap board",
+      "name": "Ticket board",
       "opensWith": {
         "app": "github:immediately-run/kanban-board",
         "version": "1.0"
       },
-      "subtree": "/roadmap",
+      "subtree": "/",
       "projection": {
         "source": {
-          "recordSet": "roadmap-items"
+          "recordSet": "tickets"
         },
         "map": {
           "id": {
@@ -66,16 +66,16 @@
   "layout": {
     "version": 1,
     "recordSets": {
-      "roadmap-items": {
-        "dir": "/roadmap",
+      "tickets": {
+        "dir": "/",
         "select": "*-*.mdx",
         "record": "mdx-frontmatter",
-        "schema": "/roadmap/item.schema.json",
+        "schema": "/item.schema.json",
         "id": {
           "from": "filename"
         },
         "unique": [
-          "roadmap-archive"
+          "tickets-archive"
         ],
         "wellKnown": {
           "title": "frontmatter.title",
@@ -102,11 +102,11 @@
         },
         "writable": []
       },
-      "roadmap-archive": {
-        "dir": "/roadmap/archive",
+      "tickets-archive": {
+        "dir": "/archive",
         "select": "*-*.mdx",
         "record": "mdx-frontmatter",
-        "schema": "/roadmap/item.schema.json",
+        "schema": "/item.schema.json",
         "id": {
           "from": "filename"
         },

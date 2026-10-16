@@ -98,7 +98,7 @@ export function isEntryPath(path: string): boolean {
  * `/app/content/roadmap/archive/R3-174.mdx`).
  */
 export function isArchivedPath(path: string): boolean {
-  return path.includes('/roadmap/archive/');
+  return path.includes('/archive/'); // baton: the tickets bundle's archive is /archive/
 }
 
 /** Is this metadata entry a roadmap work item (live or archived)? */

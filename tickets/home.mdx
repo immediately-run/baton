@@ -1,0 +1,35 @@
+---
+title: Baton tickets
+description: Every live Baton ticket, grouped by status, with the next one to work on — a query over this folder, never a hand-kept list.
+nav: Board
+order: 0
+tags: [tickets]
+---
+
+<Lede>Baton's own tickets: what is planned, what is in progress, and, in
+[the archive](archive/index.mdx), what was done and why. This page is a query: a ticket
+added to this folder appears here without anyone editing this page.</Lede>
+
+## Next available
+
+The first ticket that can be claimed, in execution order: the lowest `order` among available
+tickets whose dependencies are all done.
+
+<NextAvailable />
+
+## The board
+
+<RoadmapBoard groupBy="status" />
+
+## How tickets work
+
+- A ticket is one `.mdx` file in this folder, named after its id. New tickets are `B-1`,
+  `B-2`, and so on; tickets that moved here from the immediately.run docs roadmap keep their
+  `R3-NNNN` ids.
+- Its frontmatter is what Baton reads: `status`, `depends_on`, `order`, `tags`, `prs` and
+  `repos`. `item.schema.json` is its shape, and `npm run check:wiki` checks every ticket
+  against it. The body is for people and agents; Baton never stores it.
+- A finished ticket moves to `archive/` with `status: done`.
+
+How Baton itself works is in the [documentation wiki](https://immediately.run/present/github/immediately-run/baton/main/files/docs/home.mdx)
+(the repository's `docs/` folder).
