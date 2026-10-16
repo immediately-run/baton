@@ -1,0 +1,84 @@
+---
+title: "R3-1215 — Baton in the skills: shadow reports from claim.sh, activity calls, reviewer frontmatter, seats CLI"
+id: R3-1215
+project: baton
+status: available
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1056
+tier: critical
+description: "claim.sh reports each transition to Baton in shadow mode; next-roadmap-item and review-gate mark their phases with baton-activity; reviewer agents gain reviews_on and bills; the gate takes seats from baton-seats.mjs; S-BTN-10."
+topics:
+  - baton
+  - review-gate
+owns: {}
+prs: []
+depends_on:
+  - R3-1205
+  - R3-1211
+  - R3-1213
+---
+
+**Brief:** the Baton project.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.9 (skill-declared phases), §7.4 (catalog frontmatter, substitution), R-BTN-27, §13 step 2 (shadow reports), §15 rows for `claim.sh`, the skills and the agents (docs@2dbf1424)
+**Depends on:** R3-1205, R3-1211, R3-1213
+
+### Requires
+
+- none.
+
+### Why
+
+Shadow week needs `claim.sh` to report every transition, the skills to mark their phases, the
+reviewer agents to declare what they review on and bill, and the gate to take its seats from
+the one function that also decides matching. Tier: critical — the review gate's invariant.
+
+### What to build
+
+1. `claim.sh claim` and `set --status` report the transition to `POST /v1/runner/shadow-report`
+   after a successful push (best effort; a failure never fails the claim in shadow).
+2. `next-roadmap-item` (both copies) and `review-gate` (both copies) call
+   `baton-activity.mjs` at the §6.9 phase boundaries.
+3. `reviews_on:` and `bills:` frontmatter on every `.opencode/agents/review-pr-*.md` and
+   `adjudicator.md`, and `models:` where an agent spends a second model (`review-pr-claude`:
+   a second model on another provider account), matching `scripts/data/reviewer-matrix.json`'s
+   `agents` (R3-1205).
+4. The opencode review gate takes its seats from `node docs/scripts/baton-seats.mjs --authors …
+   --accounts <the session's declared accounts>` (required since R3-1205; the sidecar's state
+   file holds the declaration) at round one and keeps them for the gate (§7.4), with the `awaiting-review-capacity`
+   release and the blocked-adjudicator packet.
+
+### Architecture — the decisions, named
+
+- `claim.sh` gains one function, `baton_report`, called after each successful push, with a
+  5 s timeout and no retry; it uses the sidecar's state file for credentials and does nothing
+  without one.
+- The skill text keeps the matrix table (generated, R3-1205) for reading, but the gate's
+  choice is the CLI's output, recorded in the `reviewer` activity's detail.
+- **Do not:** let a shadow report change any exit code of `claim.sh`; edit the matrix by hand
+  (run `baton-matrix-table.mjs --write`); bump `skills_version` in this item — it starts at 1
+  with these protocol files listed.
+
+### Tests
+
+- `bash scripts/claim.sh --self-test` gains: with a stub Baton returning 500, `claim` still
+  exits 0 and pushes.
+- Integration: `S-BTN-10.no-review-capacity` with the real `baton-seats.mjs` and stub
+  reviewers; G-BTN-29 and G-BTN-30.
+
+### Exit criteria
+
+- [ ] `npm run test:baton` passes, including `S-BTN-10`
+- [ ] `grep -L "reviews_on:" .opencode/agents/review-pr-*.md .opencode/agents/adjudicator.md` prints nothing
+- [ ] `bash scripts/claim.sh --self-test` passes
+- [ ] `npm run verify` green
+
+## Status
+
+_updated 2026-10-13 — from docs#204 round 3 (3-r3-1): baton-seats --accounts takes plain account ids and picks each prefix's first held candidate in model-providers.json order. That equals the heartbeat's worker_providers choice only while every prefix has one candidate, which is true today. Before a second account joins a prefix, make --accounts take prefix=account pairs from the sidecar's state file, so the gate and rule 8 read the same declaration.._
+
+_(filed 2026-10-13)_

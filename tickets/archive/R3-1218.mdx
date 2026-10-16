@@ -1,0 +1,95 @@
+---
+title: "R3-1218 — Baton git mirror workflow"
+id: R3-1218
+project: baton
+status: done
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1059
+tier: critical
+description: "The baton-mirror workflow and scripts/baton-mirror.mjs: per-item commits with today's subjects and event author dates, status preconditions, foreign-claim handling, hold notes, the claim-events export; S-BTN-14."
+topics:
+  - baton
+  - ci
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/7
+  - https://github.com/immediately-run/docs/pull/207
+depends_on:
+  - R3-1217
+---
+
+**Brief:** the Baton project.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §12 (R-BTN-17, foreign claims, export), §6.10 (held notes), §8 (override → `EXPEDITE`), §10.3 (`baton-mirror.yml` OIDC, dispatch token) (docs@2dbf1424)
+**Depends on:** R3-1217
+
+### Requires
+
+- none — the mirror script runs against the harness's bare repo.
+
+### Why
+
+After cutover every git reader — `check:claims`, `factory-state.mjs`, `reconcile-merged-items.mjs`,
+`claimedAt()`, the process dashboard's timelines — still needs claims in git, in today's
+shapes and with the right times. Tier: critical — it writes `docs/main`.
+
+### What to build
+
+1. `scripts/baton-mirror.mjs`: reads `GET /v1/sync/events?after=<cursor>`, writes one commit
+   per transition with today's subjects and notes, `GIT_AUTHOR_DATE` = the event's time; the
+   claim note is `(claim <nonce>)` with **no session** (R-BTN-36), and the export names
+   workers only by claim id.
+2. Preconditions (R-BTN-17), at-least-once replay, push-conflict retry.
+3. Foreign-claim handling (§12), held notes (§6.10), `EXPEDITE` from overrides, the
+   `content/plans/baton/claim-events.mdx` export.
+4. `.github/workflows/baton-mirror.yml`: `workflow_dispatch` plus a 15-minute schedule, OIDC
+   audience `workitems.immediately.run`.
+5. Baton dispatches the workflow after each claim, release or reap, with the Actions-write
+   token (§10.3).
+
+### Architecture — the decisions, named
+
+- **Reuse the transforms.** Status and note edits go through the same awk transforms
+  `claim.sh` uses (`transform_claim`, `transform_set`), called as `claim.sh --transform-only`
+  (a new flag that prints the rewritten file to stdout), so there is one writer of those
+  shapes.
+- **The cursor** is stored in the export file's front matter; it advances only after a push
+  lands.
+- **Notes** pass `check-note-mdx`; free text goes in code spans (§10.4).
+- **Do not:** write a status whose precondition fails; batch several items in one commit
+  (`claimedAt` and `itemTimelines` read per-item subjects); change the subject shapes.
+
+### Tests
+
+- `scripts/baton-mirror.test.mjs`: precondition table; replay is a no-op; author date equals
+  the event's time; G-BTN-41 — no mirrored note, subject or export line contains a session
+  name, worker id or hostname, and `holderOf` returns nothing for a mirrored claim.
+- Integration: `S-BTN-14.mirror-preconditions`; G-BTN-8, G-BTN-9 (`check:claims`,
+  `factory-state.mjs`, `claimedAt`, `itemTimelines` read the mirror's commits as they read
+  `claim.sh`'s).
+
+### Exit criteria
+
+- [x] `node --test scripts/baton-mirror.test.mjs` passes
+- [x] `npm run test:baton` passes, including `S-BTN-14`
+- [x] `npm run verify` green
+
+## Status
+
+_in-review 2026-10-13 — upstream: spec-wrong — §12 exports each claim's transcript pointers, but §6.8's paths carry the session id (and an opencode host's name), which R-BTN-36 forbids; the export keeps repo and role only (docs#207)._
+
+_in-review 2026-10-13 — upstream: spec-wrong — R-BTN-17's status-only preconditions do not make a replay a no-op once an item has had two claims; the mirror also requires the event's claim nonce (docs#207)._
+
+_in-review 2026-10-13 — upstream: item-wrong — the export's cursor cannot live in its front matter (the wiki's doc schema rejects unknown keys); it is a body line (docs#207)._
+
+_in-review 2026-10-13 — https://github.com/immediately-run/baton/pull/7 https://github.com/immediately-run/docs/pull/207._
+
+_claimed 2026-10-13 — docs (claim 581784)._
+
+_amended 2026-10-13 — R-BTN-36 (owner): the mirror never writes the holder; folded in before any claim._
+
+_(filed 2026-10-13)_

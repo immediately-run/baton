@@ -1,0 +1,99 @@
+---
+title: "R3-1240 — Baton administration: administrators, repository owners, grants, owner bars and settings, and the baton admin and baton owner CLI"
+id: R3-1240
+project: baton
+status: done
+updated: 2026-10-16
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1077
+tier: critical
+description: "Build Baton's administration: administrators in BATON_ADMIN_KEYS with one-time links and __Host- sessions; owners granting worker keys per repository with capabilities and max_tier; owner bars, required bars, retry and transcript repositories as owner settings in SQLite; one role per key; the baton admin and baton owner CLI; S-BTN-32, -39. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/28
+depends_on:
+  - R3-1231
+  - R3-1253
+  - R3-1239
+  - R3-1262
+---
+
+**Brief:** the Baton project.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §10.6 (R-BTN-57, -58), R-BTN-66, -67 (owner bars,
+required bars, repository settings), R-BTN-16 (`__Host-` cookie, login CSRF), §4
+(`repository_owners`, `worker_grants` with `capabilities` and `max_tier`, `owner_bars`,
+`login_links`, `dashboard_sessions`), §11 (admin, owner and login endpoints), §13a S-BTN-32,
+-39 (docs@0928c207; the spec at docs#212 head 1dae3316)
+**Depends on:** R3-1231, R3-1239
+
+### Requires
+
+- none — the harness runs administrator and owner keys locally.
+
+### Why
+
+Setting up a Baton must take a deploy, one secret and a few commands (owner, 2026-10-14), and
+every limit agents must not change lives in Baton's SQLite, set by owner or administrator
+keys. Tier: critical — who may grant what.
+
+### What to build
+
+1. Administrators from `BATON_ADMIN_KEYS` (`--admin-keys` locally): register, change and
+   retire repositories (`weight`, `tiers`, `cut_over`), probes, `human-operator` grants;
+   revoke any key; one-time login links and `__Host-` sessions that end when the key leaves
+   the secret.
+2. Owners per repository: grants with expanded capabilities and `max_tier`, unique names
+   (`conflict`), owners (never the last); owner bars (`course` — a course id or `*` —, `legs` only
+   under a named course, `applies`, times, `release_holders`, `reason`) and their lifting;
+   required bars (`{course | *, leg | *, except?, tag_prefix}`, a named `leg` only under a
+   named course, following `renamed_from`; a course file lacking a named `leg` is held, a
+   missing `except` entry dropped), `retry`,
+   `transcript_repos`.
+3. One role per key: a key in two roles is refused.
+4. `baton admin …` and `baton owner …` (`grant`, `bar`, `bar lift`, `settings`) on one set
+   of validated functions in `src/core/admin.ts`.
+
+### Architecture — the decisions, named
+
+- **A bar change is an `admin` event and dispatches the repository's sync**; the alarm
+  releases tagged holders at a bar's start when it says so.
+- **Do not**: read any of these settings from a board post; let an owner grant
+  `human-operator`; offer a management path but the CLI (the dashboard shows them read-only).
+
+### Tests
+
+- Integration: S-BTN-32, S-BTN-39 (the settings half), both hosts.
+- S-BTN-30's administrator clause (an admin request signed by a key not in `BATON_ADMIN_KEYS`
+  is refused `unauthenticated`): the `it.todo` R3-1239 left in baton's
+  `test/integration/S-BTN-30.signed-requests.test.ts`; admin and owner requests go through the
+  same `verifyRequest` and nonce cache (R3-1239, baton#24). Granted keys carry `created_by`
+  `owner:`/`admin:`, which the interim `BATON_KEYS` seed (`created_by = 'seed'`) never revokes.
+- `test/unit/admin.test.ts`: every refusal of R-BTN-57/58 by code; a bar on `chore` never
+  bars a `roadmap-pr` leg, a `*` bar bars both.
+
+### Exit criteria
+
+- [x] S-BTN-32 and S-BTN-39 pass
+- [x] `test/unit/admin.test.ts` passes
+- [x] `npm run typecheck` green
+
+## Status
+
+_in-review 2026-10-16 — https://github.com/immediately-run/baton/pull/28 — baton#28 merged (282a140) after the three-round gate and adjudication; records fc66fc8d._
+
+_updated 2026-10-16 — https://github.com/immediately-run/baton/pull/28 — baton#28 open; review gate round 1 next._
+
+_claimed 2026-10-16 — baton,docs (claim 5bf59e)._
+
+_updated 2026-10-15 — upstream: from R3-1231 (baton#23 gate 1-A-6) — changing a repository's tiers must recompute tickets.tier_position for its tickets (written at each board post today)._
+
+_(filed 2026-10-14)_
+
+_2026-10-14 — rewritten for the stations revision of BATON_SPEC (docs#212 head 068e76e6): stations and legs in a course file, owner bars and settings in SQLite, observations, the runner and webhooks._

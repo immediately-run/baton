@@ -11,7 +11,7 @@
 //   - compiles as MDX — a bare `<word>` or `{word}` in prose fails here, as it would in Grove;
 //   - uses only Grove's built-in components and the ones its bundle's immediately.run.json registers;
 //   - has no `import`/`export` and no `{expression}` other than a `{/* comment */}`;
-//   - links ([text](path) and [[path]]) only to files that exist, relative to the page.
+//   - links ([text](path), [[path]] and [[label|path]]) only to files that exist, relative to the page.
 // In a bundle with an item.schema.json (tickets/), every ticket — a file named like an id, in
 // the bundle's root or its archive/:
 //   - matches item.schema.json: its required keys, no other keys, the id pattern and the
@@ -120,7 +120,9 @@ async function checkBundle(root) {
         if (path && !existsSync(path)) fail(file, `line ${line}: link to ${node.url}, which does not exist`);
       }
       if (node.type === 'text') {
-        for (const [, link] of node.value.matchAll(/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g)) {
+        // Grove's wiki-link syntax is [[target]] or [[label|target]] (label first).
+        for (const [, inner] of node.value.matchAll(/\[\[([^[\]]+)\]\]/g)) {
+          const link = inner.includes('|') ? inner.slice(inner.indexOf('|') + 1) : inner;
           const path = target(file, link.trim());
           if (path && !existsSync(path)) fail(file, `line ${line}: [[${link}]] does not exist`);
         }

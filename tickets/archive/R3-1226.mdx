@@ -1,0 +1,67 @@
+---
+title: "R3-1226 — Baton: drop the unreachable held-row reset now that a head move retires every hold"
+id: R3-1226
+project: baton
+status: done
+updated: 2026-10-13
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+topics:
+  - baton
+order: 1064
+tier: routine
+description: "Remove board()'s held-row reset (the UPDATE branch, the again flag, the accepted and other-head clauses of held) that R3-1223's head-move retirement made unreachable, and correct the two comments that describe it. Continues R3-1223 (baton PR 8 round three, 3-r3-0). Requires: none."
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/9
+depends_on:
+  - R3-1223
+---
+
+**Brief:** the Baton project; continues [R3-1223](R3-1223.mdx) — its review's round three (baton PR 8, `rg:3-r3-0`).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §7.1 R-BTN-11
+**Depends on:** R3-1223
+
+### Requires
+
+- none — local Worker tests only.
+
+### Why
+
+R3-1223's round one made `board()`'s force branch reset a `held_snapshots` row that was
+accepted or held against another head. Its round two then retired every row held against the
+head being replaced on every head move, so every row left is a hold against the current head:
+an accepted one makes `acceptedLine(head)` true (the force branch is skipped), an unaccepted
+one is already held. The reset — the `UPDATE` branch, the `again: true` event flag, two of the
+three clauses of `held` — is unreachable (a `throw` in it leaves the suite green), and the
+docstring and the force-branch comment still describe it.
+
+Tier: routine — dead code and two comments.
+
+### What to build
+
+1. In `board()`'s force branch: `held` is `!!known`; drop the `UPDATE` branch and the `again`
+   flag; a first post of a sha INSERTs.
+2. Rewrite the docstring and the force-branch comment: a hold is one row against the current
+   head, deleted when the head moves; a later force post of that sha is a fresh hold.
+
+### Tests
+
+- `test/unit/claims-gate.test.ts`: the R3-1223 cases stay green unchanged.
+- Scenarios: S-BTN-13 re-run; none new.
+
+### Exit criteria
+
+- [x] `npm run test:baton` passes
+- [x] `npm run verify` green
+
+## Status
+
+_in-review 2026-10-13 — https://github.com/immediately-run/baton/pull/9._
+
+_claimed 2026-10-13 — baton (claim 72d81d)._
+
+_(filed 2026-10-13 from baton PR 8's round-three finding `rg:3-r3-0`)_

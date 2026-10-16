@@ -1,0 +1,80 @@
+---
+title: "R3-1263 — Baton pulled syncs: sync wants, GET /v1/sync/wanted, POST /v1/sync/want, dispatch adapters per forge and BATON_FORGE_SECRETS"
+id: R3-1263
+project: baton
+status: available
+updated: 2026-10-16
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1095
+tier: critical
+description: "Baton records sync and mirror wants and runners pull them; dispatch becomes an optional per-forge push (GitHub App, GitLab trigger, Gitea) with secrets in BATON_FORGE_SECRETS; the unblocked trigger; S-BTN-56's want and dispatch cases, G-BTN-83. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1262
+---
+
+**Brief:** the Baton project; filed by R3-1253 (docs#217).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2k R-BTN-94; R-BTN-73, R-BTN-77, R-BTN-88 (export, the seal) and §10.3 as amended; §3a (`ForgeSecrets`); §11 (`GET /v1/sync/wanted`, `POST /v1/sync/want`); §13a S-BTN-56 (the want and dispatch cases), G-BTN-83 (docs@71b18e3e)
+**Depends on:** R3-1262
+
+### Amended 2026-10-16 (BATON_SPEC §2l, docs@646eca6 (docs#220), R-BTN-105, R-BTN-102)
+
+- `GET /v1/sync/wanted` also returns `head_sha`: the newest commit any post named, held posts included, so a worker comparing it with `git ls-remote` is not re-triggered forever by a held head.
+- `POST /v1/owner/{repository}/sync-want` (an owner key) records a want, for a person pushing from a machine with no worker; `baton owner sync-want` is R3-1272's.
+- Machine keys calling these routes are R3-1270's; this item's verifier answers the credential kinds it already knows.
+
+### Requires
+
+- none — dispatch adapters are faked in the harness.
+
+### Why
+
+A sync must happen without Baton holding a forge credential: Baton records a want and any
+runner pulls it; dispatch becomes an optional push. Tier: critical — a lost want leaves a
+ticket's station stale, and the clearing rule rides R-BTN-62's numbers.
+
+### What to build
+
+1. Sync wants: every place that dispatches a sync today records `sync_wanted_at` (earliest)
+   and `sync_wanted_after` (`board_head.last_handed_out`, 0 before any) in its transaction; an
+   accepted or held post numbered above it clears both; not exported, cleared on import.
+2. The mirror's want: events of kinds the mirror writes above `mirror_acked_seq`.
+3. `GET /v1/sync/wanted` (per role, no state change but the nonce) and `POST /v1/sync/want`.
+4. Dispatch adapters behind one port: the GitHub App (today's `dispatchWorkflow`), GitLab
+   pipeline triggers, Gitea workflow dispatch; secrets from `BATON_FORGE_SECRETS`
+   (`--forge-secrets` locally), whose entries also carry `forge` and `gitlab_issuer`; one retry
+   at most; the unblocked trigger through the same adapters, restricted to the repository's
+   own target.
+5. Needs you: a want older than 30 minutes, a mirror 30 minutes behind, a configured adapter
+   with no secret; the seal's mirror rule ("has a mirror").
+
+### Architecture — the decisions, named
+
+- **A want is state; a dispatch is a hint**: nothing depends on a dispatch arriving.
+- **Do not**: store a forge credential in SQLite or export one; retry a dispatch twice.
+
+### Tests
+
+- Integration: S-BTN-56's mid-run want and failed dispatch, both hosts.
+- Unit: the clearing rule against R-BTN-62's counter (before any number, a held post, an
+  import), the mirror's want, each adapter's request shape.
+
+### Exit criteria
+
+- [ ] S-BTN-56's want and dispatch cases pass on both hosts
+- [ ] no code path sends a dispatch without first recording the want
+- [ ] `npm run typecheck` green
+
+## Status
+
+_2026-10-16 — amended for BATON_SPEC §2l: `head_sha` on `wanted`, the owner's `sync-want` route._
+
+
+_(filed 2026-10-16)_

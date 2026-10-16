@@ -1,0 +1,85 @@
+---
+title: "R3-1239 — Baton machine identity by SSH keys: SSHSIG-signed requests and key-bound credentials"
+id: R3-1239
+project: baton
+status: done
+updated: 2026-10-15
+repos:
+  - baton
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1076
+tier: critical
+description: "Replace bearer tokens with SSH keys: credentials by fingerprint with one registered name per key, SSHSIG signatures over RFC 9421 (ed25519, P-256 and sk- keys, @authority, empty-body digest), a nonce cache for every signer; Baton verifies no commit or marker signature; S-BTN-30. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/24
+depends_on:
+  - R3-1238
+---
+
+**Brief:** the Baton project.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §10.1 R-BTN-13 (key types, SSHSIG over RFC 9421,
+`@authority`, the empty-body digest, the fingerprint `keyid`, the `baton-request` namespace),
+R-BTN-14, R-BTN-66 (Baton verifies no git signature), §4 (`credentials`, `request_nonces` by
+fingerprint), §6.4 (cloud keys register the environment's name), §13a S-BTN-30 (docs@0928c207; the spec at docs#212 head 0d4ef0e4)
+**Depends on:** R3-1238
+
+### Requires
+
+- none — test keys of every type are generated in the harness.
+
+### Why
+
+Bearer tokens work for anyone who holds them until revoked; the owner chose SSH keypairs
+(2026-10-14). The revision of the same day withdrew commit and marker signing: Baton does not
+fortify git's security model. Tier: critical — authentication.
+
+### What to build
+
+1. `credentials` keyed by fingerprint with one registered name per worker key (unique; a
+   cloud environment's containers share it), subjects and repositories for probes.
+2. Verification of SSHSIG signatures over the RFC 9421 base for `ssh-ed25519`,
+   `ecdsa-sha2-nistp256` and their `sk-` forms (FIDO flags and counter), with `@authority`,
+   `content-digest` (the empty string's for no body), `created` within 5 minutes and a nonce
+   cache by fingerprint for every signer, administrators and owners included.
+3. The Worker rejects unsigned, malformed, stale or foreign-`@authority` requests before the
+   Durable Object; key and nonce checks run inside it.
+4. The sidecar and CLIs sign through `ssh-agent` or a key file.
+
+### Architecture — the decisions, named
+
+- **One verifier**, `verifyRequest(req, lookupKey)` in `src/core/auth.ts`, used for every
+  principal; the namespace is always `baton-request`.
+- **Do not**: verify signatures on commits or markers; accept a signature in another
+  namespace; store a private key.
+
+### Tests
+
+- Integration: S-BTN-30 on both hosts, with keys of all four types.
+- `test/unit/auth.test.ts`: a replay to another `@authority`, a body-less request's digest,
+  a git-namespace signature presented as a request.
+
+### Exit criteria
+
+- [x] S-BTN-30 passes on both hosts
+- [x] `git grep -n "verify-commit\|baton-marker" src/` returns nothing
+- [x] `npm run typecheck` green
+
+## Status
+
+_in-review 2026-10-15 — Delivered: baton#24 merged b6f4ce3, deployed, production sync green 23:08Z; docs signing half 52650925 (batonSign.mjs, baton-worker signs when IR_BATON_KEY_FILE or IR_BATON_KEY is set). Gate: 20 findings over three rounds, all fixed. Production still runs on bearer tokens until the operator sets BATON_KEYS (runbook).._
+
+_updated 2026-10-15 — Deviation, round 1 (1-A-6, 1-B-6): What to build 3's stale check runs in the object, not the Worker front, because Baton has one clock (R-BTN-32) and the front none; the front still refuses unsigned, malformed, foreign-authority and mis-digested requests, and the object judges created before any key or crypto. Also from round 1: a session moves from its bearer token to its machine's key at its next proven heartbeat; the BATON_KEYS seed revokes only its own keys (created_by seed).._
+
+_updated 2026-10-15 — https://github.com/immediately-run/baton/pull/24 — baton#24: the server half. Interim choices: bearer tokens still serve unsigned requests until every worker signs; BATON_KEYS seeds worker keys until R3-1240 grants; created is checked in the object (the one clock, R-BTN-32), the front checks shape, authority and digest. Docs signing lands after the deploy.._
+
+_claimed 2026-10-15 — baton,docs (claim 02462e)._
+
+_(filed 2026-10-14)_
+
+_2026-10-14 — rewritten for the stations revision of BATON_SPEC (docs#212 head 0d4ef0e4): stations and legs in a course file, owner bars and settings in SQLite, observations, the runner and webhooks._

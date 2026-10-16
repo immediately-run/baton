@@ -1,0 +1,77 @@
+---
+title: "R3-1262 — Baton sync keys and forge-aware repositories: verifySync, sync_key_repositories, forge path, remote, web_base and the one link rule"
+id: R3-1262
+project: baton
+status: done
+updated: 2026-10-16
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1094
+tier: critical
+description: "Sync keys (one repository and role each) and CI identity tokens behind one verifySync; repositories gain forge, remote, web_base, ci_identity; the link rule over web_base; S-BTN-55, G-BTN-82. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/26
+depends_on: []
+---
+
+**Brief:** the Baton project; filed by R3-1253 (docs#217).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2k R-BTN-92, R-BTN-93; R-BTN-15 and R-BTN-57 as amended; §4 (`repositories` columns and `repositories_forge_path`, `credentials.kind` `sync`, `sync_key_repositories`); §10.4 and R-BTN-78 (the link rule); §6.8 (transcript links); §11 (`/v1/sync/*`, `POST /v1/admin/repositories`); §13a S-BTN-55, G-BTN-82 (docs@71b18e3e)
+**Depends on:** R3-1239 (done)
+
+### Requires
+
+- none — keys and tokens are generated in the harness.
+
+### Why
+
+R-BTN-93 puts every sync credential behind one verifier so R3-1232 and R3-1240 write the check
+once; R-BTN-92 makes a repository a forge path, a remote and a forge. Tier: critical —
+authentication and per-repository trust.
+
+### What to build
+
+1. A migration: `repositories` gains `forge`, `remote`, `web_base`, `ci_identity`, `dispatch`,
+   `unblocked_trigger`, `sync_wanted_at`, `sync_wanted_after`; `sync_workflow` nullable; the
+   unique index per forge host; existing rows backfilled as §4's comment says;
+   `credentials.kind` accepts `sync`; `sync_key_repositories` with `credential_id` unique.
+2. `verifySync(req) → {repository, role}` in `src/core/auth.ts`: a sync key's signature
+   (through `verifyRequest`, the Worker's pre-check and the nonce cache), GitHub Actions OIDC
+   (today's `verifySyncToken`), and GitLab `id_tokens` (issuer allow-listed, `project_path`,
+   `ref_type: branch`, `ref`, audience `#sync`/`#mirror`); every `/v1/sync/*` route uses it.
+3. Registration and change of the new fields (`BATON_REPOSITORIES` seed until R3-1240's admin
+   route), forge-path grammar and `web_base` validation, sync keys at registration.
+4. The one link rule (R-BTN-92) in one function, used by activity detail URLs, decisions'
+   `url`, output/input URIs and transcript links (`<forge>:<web_base>` entries).
+
+### Architecture — the decisions, named
+
+- **One key, one repository, one role**: never accept a key for a second repository.
+- **Do not**: read a forge; store a forge secret in SQLite.
+
+### Tests
+
+- Integration: S-BTN-55 on both hosts.
+- Unit: the link rule's cases (segment boundary, port, userinfo, dot segments, encoded `/`),
+  the forge-path grammar, GitLab token claims (tag `ref_type`, wrong audience, unlisted issuer).
+
+### Exit criteria
+
+- [x] S-BTN-55 passes on both hosts
+- [x] every `/v1/sync/*` route authenticates only through `verifySync`
+- [x] `npm run typecheck` green
+
+## Status
+
+_in-review 2026-10-16 — https://github.com/immediately-run/baton/pull/26 — baton#26 merged f98fa74 and deployed 03:43Z; docs sync green 03:45Z. Gate: 3 rounds, 21 findings, all fixed.._
+
+_updated 2026-10-16 — https://github.com/immediately-run/baton/pull/26 — baton#26. Sync keys live in their own table (spec section 4 amended in docs 7d8dc04b: a migration cannot rebuild a referenced table with foreign keys on); the forge path stays unique across hosts for now.._
+
+_claimed 2026-10-16 — baton (claim 25cf4b)._
+
+_(filed 2026-10-16)_

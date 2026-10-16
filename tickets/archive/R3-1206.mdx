@@ -1,0 +1,133 @@
+---
+title: "R3-1206 — Baton Worker and Durable Object: schema, board sync endpoints, OIDC and Access, read-only dashboard, integration harness"
+id: R3-1206
+project: baton
+status: done
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1047
+tier: critical
+description: "infra/baton — the Worker and its SQLite Durable Object with numbered migrations, the board-sync endpoints with ancestry CAS (R-BTN-11) and OIDC (R-BTN-15), the Access-protected read-only dashboard (Ready, Providers), and the fake-clock integration harness (R-BTN-29) with S-BTN-13. Requires: none."
+topics:
+  - baton
+  - infra
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/1
+depends_on:
+  - R3-1205
+---
+
+**Brief:** the Baton project.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §3, §4, §7.1 R-BTN-11, §10.1, §10.3 R-BTN-15, §10.5 R-BTN-16, §11 (sync and ui rows), §13a R-BTN-29/32, §14 (Ready, Providers) (docs@2dbf1424)
+**Depends on:** R3-1205
+
+### Requires
+
+- none — the Worker runs locally under Cloudflare's Vitest pool; deploying it is R3-1207
+  and R3-1208.
+
+### Why
+
+Step 1 of the rollout (§13) is a read-only view: the board, the providers and the ready queue
+on a dashboard, with no workers and no claims. It is also where the service, its schema and
+the integration harness every later item extends are born. Tier: critical — it verifies
+OIDC and Access tokens.
+
+### What to build
+
+1. `infra/baton/`: its own `package.json` (wrangler, `@cloudflare/vitest-plugin` — the
+   renamed `@cloudflare/vitest-pool-workers`, which is deprecated —
+   vitest, typescript), `wrangler.toml` (route `workitems.immediately.run/*`, Durable Object
+   class `Baton`, SQLite storage), `src/worker.ts`, `src/baton.ts` (the Durable Object).
+2. Migrations `src/migrations/0001_init.sql` with every §4 table, applied in order before the
+   object serves.
+3. `GET /v1/sync/head`, `POST /v1/sync/board` (§7.1 CAS), `GET /v1/ui/state`.
+4. The dashboard at `/`: Ready and Providers views (§14), polling `/v1/ui/state` every 10 s.
+5. The integration harness `infra/baton/test/integration/` (R-BTN-29) and S-BTN-13.
+6. Root `package.json`: `"test:baton": "npm --prefix infra/baton test"`.
+
+### Architecture — the decisions, named
+
+- **One fixed object.** `worker.ts` authenticates, then forwards to
+  `env.BATON.idFromName('baton')`; all SQL lives in `baton.ts`. The object takes a clock in
+  its constructor (`this.now`), production `() => Date.now()`, tests a fake (R-BTN-32).
+- **Sync auth (R-BTN-15).** Verify the GitHub OIDC JWT with `jose` against
+  `https://token.actions.githubusercontent.com/.well-known/jwks`; require `aud`
+  `workitems.immediately.run`, `repository` `immediately-run/docs`, `ref`
+  `refs/heads/main`, `job_workflow_ref` `immediately-run/docs/.github/workflows/baton-sync.yml@refs/heads/main`
+  for `/v1/sync/board` and `/v1/sync/head`. The JWKS URL and the accepted workflow refs are
+  `wrangler.toml` vars; the test environment overrides them with a local key (§13a).
+- **Owner auth (R-BTN-16).** Verify `Cf-Access-Jwt-Assertion` against the team's certs
+  (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` vars), allow only `OWNER_EMAILS`; every response
+  carries the R-BTN-16 headers; state-changing `/v1/ui/*` needs JSON and a same `Origin`
+  (none exist yet but the middleware ships now).
+- **Filter fields only, as tables (R-BTN-33/35).** The accepted snapshot is materialized into
+  `work_items` and `work_item_requires` (§4): upsert rows whose `row_hash` changed, delete
+  rows for items no longer live; no JSON copy of the board is stored (`board_snapshots` keeps
+  sha, parent and counts only). The table is a cache of git and never edited otherwise. The
+  payload and the table carry no body, note or exit-criteria text; the Ready view links each
+  title to `https://github.com/immediately-run/docs/blob/main/<path>`.
+- **Requires as stored (§4, §7.2 rules 4 and 6, as amended by docs#204).** `work_item_requires`
+  holds the clause **expanded** through `capabilitiesOf` from `lib/vocabulary.mjs` — a role
+  becomes its capabilities, a legacy name stays itself, `none` and no clause store no row —
+  so it compares directly with the expanded `worker_capabilities`. No role name is stored,
+  `human-operator` included: `work_items.operator_only` is 1 when the item has the `OP` tag
+  or a `human-operator` name in its clause, and rule 6 reads that column. `reviewer_agents`
+  carries the optional `models` column (§4, §7.4).
+- **CAS (R-BTN-11).** `POST /v1/sync/board` accepts `parent_sha === board_head.sha`, or
+  `parent_sha: null` when no head exists; else `head-moved`. `force: true` stores a held
+  snapshot and a `snapshot-rejected` event; auto-accept at 24 h is the alarm's job, added in
+  R3-1212 — this item stores the held snapshot only.
+- **The dashboard** is static HTML + one ES module in `src/ui/`, rendering with
+  `textContent` only (§10.4). Ready lists each item's `requires`, tier and rank reason;
+  Providers lists accounts, peak now and next change from `peak_schedules`.
+- **Shared code.** `src/` imports `../../scripts/lib/baton.mjs`; wrangler bundles it.
+- **Do not:** call `Date.now()` outside the clock; trust any header but the verified JWTs;
+  render with `innerHTML`; let the test key's verification path exist outside the test
+  bindings (§13a); add worker endpoints (R3-1211).
+
+### Tests
+
+- `infra/baton/test/unit/auth.test.ts`: a token for another repo, ref or workflow is refused
+  (G-BTN-11); an Access JWT for another email or `aud` is refused; a POST without the same
+  `Origin` is refused (G-BTN-12).
+- `infra/baton/test/unit/sync.test.ts`: first snapshot with `parent_sha: null`; a stale
+  `parent_sha` gets `head-moved`; `force` is held (G-BTN-7).
+- `infra/baton/test/unit/workItems.test.ts`: a snapshot changing one item rewrites one row;
+  a clause naming `agent-venue` lands in `work_item_requires` as its four capabilities and a
+  legacy name (`mcp-chrome`) as itself; `none` and no clause store no row and set
+  `requires_clause`; an `OP`-tagged item and a `human-operator` clause each set
+  `operator_only = 1` with no `human-operator` row;
+  a removed item's row is deleted; no column holds body text (G-BTN-39's server half).
+- `infra/baton/test/integration/S-BTN-13.board-ordering.test.ts`: the harness's bare repo
+  gets two pushes; their syncs post out of order; the head never moves backwards; a rewritten
+  history is held. Board states come from running the real `scripts/factory-state.mjs` on the
+  bare repo's fixture items.
+
+### Exit criteria
+
+- [x] `npm run test:baton` passes, including `S-BTN-13` — in immediately-run/baton (BATON_SPEC §3): 53 pass at baton#1 head a28d371 with a docs sibling, 51 + 2 skipped in its CI
+- [x] `grep -rn "Date.now()" infra/baton/src` matches only the production clock line — `src/baton.ts:17`; the other match is the vendored library's own R-BTN-32 `batonNow`, which the object never calls
+- [x] `grep -rn "innerHTML" infra/baton/src` prints nothing — empty at a28d371
+- [x] `npm run verify` green — docs verify on the amendments (97179a48, ec518c7a) and the gate records; baton#1 changes no docs file
+
+### Hand-off
+
+R3-1207 deploys this and posts real snapshots; R3-1211 adds the worker endpoints.
+
+## Status
+
+_in-review 2026-10-13 — https://github.com/immediately-run/baton/pull/1 — baton#1 — the Worker and the Baton object in immediately-run/baton: OIDC and Access, the R-BTN-11 board sync with force held, the work_items cache with expanded requires and operator_only, reference data, the Ready and Providers dashboard, the library vendored by hash (R-BTN-37), and S-BTN-13 on a real fixture git repo.._
+
+_in-progress 2026-10-13 — upstream: item-wrong — the owner directed on 2026-10-13 (this session) that Baton's application lives in immediately-run/baton, not docs/infra/baton. Every infra/baton/\<path> here means \<path> at the root of that repo. docs is private, so src/ imports vendored copies of baton.mjs and vocabulary.mjs pinned by hash (BATON_SPEC §3 R-BTN-37) instead of ../../scripts/lib/baton.mjs.._
+
+_claimed 2026-10-13 — baton (claim 454139)._
+
+_amended 2026-10-13 — BATON_SPEC R-BTN-33/34 made explicit by the owner: Baton holds only the filter fields (`work_items`), and a worker reads item content from git; folded into this item before any claim._
+
+_(filed 2026-10-13)_

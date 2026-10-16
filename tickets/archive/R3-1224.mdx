@@ -1,0 +1,74 @@
+---
+title: "R3-1224 — Baton mirror: a replayed legacy end is a no-op over a later git claim"
+id: R3-1224
+project: baton
+status: done
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+topics:
+  - baton
+order: 1062
+tier: judgement
+description: "A replayed end of a legacy claim (reaped:legacy, or adopted then released) writes nothing once git carries the end note it wrote the first time, so it cannot set available over a stale clone's claim that landed after. Continues R3-1218 (docs PR 207 round three, 3-r3-0). Requires: none."
+owns: {}
+prs:
+  - https://github.com/immediately-run/docs/pull/210
+depends_on:
+  - R3-1218
+---
+
+**Brief:** the Baton project; continues [R3-1218](R3-1218.mdx) — its review's round three (docs PR 207, `rg:3-r3-0`).
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §12 (the mirror), §13 step 3 (legacy claims)
+**Depends on:** R3-1218
+
+### Requires
+
+- none — local script tests only.
+
+### Why
+
+R3-1218's planner (`scripts/lib/batonMirror.mjs`, `planEvent`) guards a `released`/`reaped`
+write on git's newest claim nonce. A legacy claim's note is claim.sh's own, so for a legacy
+claim the planner drops that check and skips only when git's newest nonce is one the mirror
+wrote (`git.mirrorNonces`). Round three found the gap: if the end is replayed (a run that
+failed before its cursor moved) after a stale clone's old claim.sh pushed a fresh claim, git's
+newest nonce is the stale clone's — not a mirror nonce — so the replay writes `available`
+over that claim. The mirror stays off until R3-1208 sets `BATON_ENABLED`, so nothing live can
+reach this before it lands.
+
+Tier: judgement — one branch of the planner's preconditions.
+
+### What to build
+
+1. In `planEvent`'s legacy branch, also skip when `git.text` already carries the end note's
+   `(claim <nonce>)` for this claim — Baton's random nonce reaches git only through that note,
+   so its presence means the end was written.
+2. The stale clone's claim is then left to the foreign-claim path, as for any claim the mirror
+   did not write.
+
+### Tests
+
+- `scripts/baton-mirror.test.mjs`: the replay sequence — a legacy end written, a foreign claim
+  commit landing after it, the same end replayed: nothing written, the foreign claim reported.
+- Scenarios: none new.
+
+### Exit criteria
+
+- [x] `npm run test:scripts` passes with the replay case
+- [x] `npm run verify` green
+
+### Hand-off
+
+None: R3-1208 turns the mirror on.
+
+## Status
+
+_in-review 2026-10-13 — https://github.com/immediately-run/docs/pull/210 — upstream: item-wrong — the prescribed proof, (claim \<nonce>) in git.text, is already true for a foreign import, whose nonce is the foreign commit's own; the end note itself is the proof (https://github.com/immediately-run/docs/pull/210)._
+
+_claimed 2026-10-13 — docs (claim 2677bf)._
+
+_(filed 2026-10-13 from docs PR 207's round-three finding `rg:3-r3-0`)_

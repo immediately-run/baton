@@ -1,0 +1,92 @@
+---
+title: "R3-1219 — Baton cutover client: claim.sh and next-available on Baton, fenced status writes, CI checks"
+id: R3-1219
+project: baton
+status: done
+updated: 2026-10-13
+repos:
+  - docs
+tags:
+  - FEAT
+  - roadmap-item
+order: 1060
+tier: critical
+description: "claim.sh and next-available.sh in cut-over mode, the sticky marker, fenced status writes (exit 10), the CI checks for the cut_over hint, skills_version bumps and foreign claims, and next-roadmap-item's resume and branch-reuse steps; S-BTN-5 and -16 (client)."
+topics:
+  - baton
+  - claims
+owns: {}
+prs:
+  - https://github.com/immediately-run/docs/pull/209
+depends_on:
+  - R3-1217
+  - R3-1218
+---
+
+**Brief:** the Baton project.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.3 R-BTN-7, R-BTN-22 (bump check), R-BTN-28 (sticky marker, `cut_over` check), §6.11 R-BTN-25, §15 (`claim.sh`, `next-roadmap-item` rows) (docs@2dbf1424)
+**Depends on:** R3-1217, R3-1218
+
+### Requires
+
+- none.
+
+### Why
+
+At cutover the agents' own tools must switch: `claim.sh` and `next-available.sh` ask Baton,
+status writes are fenced against a live holder, a checkout that has seen cutover never claims
+through git again, and the next claimant continues the last one's branch. Tier: critical —
+the claim protocol.
+
+### What to build
+
+1. `claim.sh`: `GET /v1/worker/mode` on each run; in cut-over mode `claim` calls
+   `POST /v1/worker/claim`; `set --status` is refused with exit 10 against a live non-legacy
+   holder or a fence-pending reap; the sticky marker `~/.cache/immediately-run/baton/cut-over`.
+2. `next-available.sh` reads `GET /v1/worker/next` in cut-over mode.
+3. CI checks (post-hoc flags, R-BTN-22/28): `check:baton-flag` (the `cut_over` hint never
+   flips back), `check:skills-version` (a `protocol_files` change bumps `skills_version` or
+   carries `Skills-Version: unchanged — <why>`), and a foreign-claim alert.
+4. `next-roadmap-item` Step 2 makes the claimed item present (R-BTN-34: `git cat-file -e
+   \<snapshot_sha>`, else one `git fetch origin main`, else release `stale-board`), reads it
+   with `git show origin/main:<path>`, then reads `previous_attempts`; Step 3 reuses a `claude/<item-id>-*`
+   branch and its open PR (R-BTN-25); releases use `cannot-finish:<class>`.
+
+### Architecture — the decisions, named
+
+- `claim.sh` keeps its git path for the shadow mode, unchanged; the mode decides which path
+  runs, and the sticky marker overrides an unreachable Baton.
+- The checks live in `scripts/check-baton.mjs` with `--self-test`, added to `verify` and
+  `check:selftests`.
+- **Do not:** fall back to git claiming when Baton is unreachable after cutover (R-BTN-18);
+  remove the sticky marker anywhere; make the CI checks gates (agents push to `main`).
+
+### Tests
+
+- `bash scripts/claim.sh --self-test`: exit 10 against a stub live holder; success with no
+  holder (the witness's delivered row, G-BTN-16); the sticky marker wins over an unreachable
+  stub.
+- `node scripts/check-baton.mjs --self-test`: G-BTN-35 (flag flip), G-BTN-36 (bump).
+- Integration: G-BTN-39 (client half): a fake harness whose checkout lacks the snapshot's
+  commit fetches once and reads the item from `origin/main`; with the commit unreachable it
+  releases `stale-board`.
+- Integration: `S-BTN-16.cutover` (client: the clone that saw cutover never claims through
+  git), `S-BTN-5.retried-item` (client: the third claimant reuses the branch and PR).
+
+### Exit criteria
+
+- [x] `bash scripts/claim.sh --self-test` and `node scripts/check-baton.mjs --self-test` pass
+- [x] `npm run test:baton` passes, including `S-BTN-5` and `S-BTN-16` end to end
+- [x] `npm run verify` green
+
+## Status
+
+_in-review 2026-10-13 — upstream: spec-wrong — §13a R-BTN-29 puts claim.sh's scenarios in baton's Workers vitest harness, which cannot run claim.sh or git; the client halves of S-BTN-16 and S-BTN-5 and G-BTN-39 run in docs (scripts/baton-client.test.mjs, under test:baton) against a stub answering §11's shapes, as S-BTN-14 does (docs PR 209)._
+
+_in-review 2026-10-13 — https://github.com/immediately-run/docs/pull/209._
+
+_claimed 2026-10-13 — docs (claim 375da9)._
+
+_amended 2026-10-13 — BATON_SPEC R-BTN-33/34 made explicit by the owner: Baton holds only the filter fields (`work_items`), and a worker reads item content from git; folded into this item before any claim._
+
+_(filed 2026-10-13)_

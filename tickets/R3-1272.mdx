@@ -1,0 +1,69 @@
+---
+title: "R3-1272 — Baton CLI ranks and syncs on the worker: rank.mjs from the remote head, views, prefer claims, syncs from the commit and worker sync triggers"
+id: R3-1272
+project: baton
+status: available
+updated: 2026-10-16
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1103
+tier: judgement
+description: "baton run, the sidecar and launchers load a course's rank.mjs from the remote default head, pass it the views and claim with prefer; baton sync reads every input from the commit it posts; a worker that offers to sync polls wanted and ls-remote once a minute; baton owner sync-want (BATON_SPEC R-BTN-98, R-BTN-105); S-BTN-57, -59. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1245
+  - R3-1265
+  - R3-1269
+  - R3-1270
+---
+
+**Brief:** the Baton project; the owner, 2026-10-16: ranking the next leg is the worker's job, and a plain git repository needs nothing on the server.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2l R-BTN-98 (the ranking code: where it loads from, `view`, the return shape, the merge between groups), R-BTN-105 (every sync input from the commit; triggers; `baton owner sync-want`), R-BTN-102 (a machine key syncs), §13a S-BTN-57, S-BTN-59 (docs@646eca6, the merge of docs#220)
+**Depends on:** R3-1245 (`baton run`), R3-1265 (the CLI's sync and mirror runners), R3-1269 (the views and `prefer`), R3-1270 (sync under a machine key)
+
+### Requires
+
+- none — the git remote in tests is a local bare repository (`test/lib/fixtureRepo.mjs`).
+
+### Why
+
+With hooks gone, a course's ordering and advice run on the worker. The CLI must load the
+course's `rank.mjs` from the commit the fleet agrees on, give it the views, and claim by its
+order; and a worker must be able to keep a passive repository synced. Tier: judgement — spans
+the runner, the sidecar's claim path and the sync runner.
+
+### What to build
+
+1. `loadRanking(repo, course)` in the CLI: fetch the remote default branch, extract that commit's tree (`git archive <sha> | tar -x`) into a fresh temporary directory, import `.baton/courses/<course>/rank.mjs` from it; absent → `null`.
+2. `baton run`, before each claim: read `recommendations?all=1`, the fleet view of each candidate's repository and the instance view; call each course's `rank` with R-BTN-98's `view`; order groups by Baton's merge and within a group by `order`; claim with `prefer`; keep the chosen candidate's `advice` for the leg scripts.
+3. `baton launch-plan`: the same with `worker: null` over `launch-candidates`, printing `launch` for each course.
+4. `baton sync` extracts the commit it posts and reads every input from there; a worker configured to sync a repository polls `wanted` and `git ls-remote` at most once a minute and runs the sync when `wanted` or the head differs from `head_sha`.
+5. `baton owner sync-want <repository>`.
+
+### Architecture — the decisions, named
+
+- **One extractor** `extractCommit(repo, sha) → dir` serves both `loadRanking` and `baton sync`; it never reads the working tree and deletes its directory when the caller is done.
+- **`rank` gets everything in its argument**: the CLI makes the Baton requests; `rank` makes none. A `rank` that throws, or returns an entry for a candidate it was not given, falls back to Baton's order for that course, with a warning on stderr.
+- **The poller is a function of the sidecar's loop** (one timer), not a second daemon, and is off unless the worker's configuration names the repository.
+- **Do not**: import `rank.mjs` from the working tree; send `rationale` larger than 4 KB (truncate and say so); poll more than once a minute; sync with a sync key when the machine key is granted.
+
+### Tests
+
+- `test/unit/cli.test.ts`: `extractCommit` returns the commit's file when the working tree differs; `loadRanking` falls back on a throwing `rank`; the merge keeps Baton's group order.
+- Integration: S-BTN-57's ranking and launch steps and S-BTN-59's trigger steps (`ls-remote` within a minute, a Baton-raised want answered without a push, an uncommitted `course.json` not posted), against a fixture bare repository.
+
+### Exit criteria
+
+- [ ] `npm run test:baton` green with S-BTN-57 and S-BTN-59 complete on both hosts
+- [ ] `test/unit/cli.test.ts` passes
+- [ ] `npm run typecheck` green
+
+## Status
+
+_(filed 2026-10-16)_

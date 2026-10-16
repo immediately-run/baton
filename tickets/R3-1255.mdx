@@ -1,0 +1,105 @@
+---
+title: "R3-1255 — Baton leg queues: queue depths, and a queue-over warning at the course's max_queue"
+id: R3-1255
+project: baton
+status: available
+updated: 2026-10-16
+repos:
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1088
+tier: critical
+description: "Baton counts each leg's queue — the unheld tickets whose queued leg it is — in leg_queues; a depth above the course file's max_queue logs queue-over and queues a notice per owner courier, closed when the depth is back within the bound; no ticket is held, blocked or refused; S-BTN-45, G-BTN-71 (R-BTN-79 as revised). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1251
+  - R3-1256
+  - R3-1257
+---
+
+**Brief:** the Baton project; the owner, 2026-10-15: a blocked leg leaves its ticket
+queued at the station, so the legs between stations are queues, and a course must be able to
+bound each — then, the same day: a ticket held outside a full queue would be a second, hidden
+queue, so let it enter and issue a warning notice.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2g R-BTN-79 (as revised in §2h's PR), R-BTN-75's
+**held**, R-BTN-80 (the `queue-over` notice), R-BTN-83 (the queued leg); §2e R-BTN-69
+(`max_queue`); R-BTN-52 (depths and bounds in the hook's board summary); §4 (`leg_queues`); §14;
+§13a S-BTN-45 (its queue case); §16 G-BTN-71
+**Depends on:** R3-1251 (held, the claim transactions), R3-1256 (notices and couriers), R3-1257
+(the queued leg and re-routes, R-BTN-83)
+
+### Requires
+
+- none — every case runs in the integration harness with fixture course files and boards and a
+  fake clock.
+
+### Why
+
+Without a bound, a fast leg can pile tickets in front of a slow one (reviews waiting on a
+single fixer) and nobody hears of it. The bound is a warning, not a gate: git is anyone's,
+advice never refuses, a bounded loop could deadlock under a gate, and holding the overflow
+outside the queue would hide it. Tier: critical — queue counts move in the claim transactions.
+
+### What to build
+
+1. **Migration** (one new numbered file): `leg_queues` as §4 gives it.
+2. **Course file**: accept `max_queue` on a leg, an integer from 1 to 10,000 (R-BTN-69), through
+   `src/core/validate.ts`.
+3. **`src/core/queues.ts`** — the one writer of `leg_queues`: a ticket is in L's queue while L
+   is its queued leg (R-BTN-83; an owner re-route counts) and it is not held. `depth` changes
+   in the transactions that accept a snapshot, start, end or advance a claim, confirm an end,
+   clear a fence or re-route a ticket.
+4. **The warning**: when L's depth rises above `max_queue`, log `queue-over` and queue a
+   `queue-over` notice per `owner` courier of the repository through R3-1256's notices
+   (`{leg, depth, max_queue, oldest_since}`), updated in place while L stays over; close them
+   when the depth falls to the bound or below.
+5. **Course intake**: a course is `closed` while any of its legs is over `max_queue` (logged
+   `course-closed`/`course-opened`); while closed, recommendations leave out its new
+   (at `start`, empty path), unexpedited tickets after the gate query, and a claim of one by id
+   records `advice-overridden`.
+6. **Visible**: depths, bounds and intake state on the dashboard's Courses view and in the repository's stats;
+   each leg's depth and `max_queue` in the hook input's board summary (R-BTN-52), exposed by
+   `queues.ts` for R3-1269's fleet view to serve (R3-1236 is superseded, BATON_SPEC R-BTN-98).
+
+### Architecture — the decisions, named
+
+- **Counted, never scanned**: depth is maintained in the transaction that changes membership;
+  no request counts tickets.
+- **Do not**: hold, block, refuse or reorder a ticket for a full queue (R-BTN-79's rejected
+  designs: a refusing bound, feeder `queue` blocks, admission blocks); count a held ticket.
+
+### Tests
+
+- Integration, both hosts: **S-BTN-45**'s queue case — `fix` with `max_queue: 2` and three
+  tickets queued for it: all three enter, the third logs `queue-over` and queues one notice
+  per `owner` courier with depth 3 and bound 2; meanwhile the course is `closed` — a new ticket
+  at `filed` is not recommended, an expedited one is, and a claim of a new one by id is accepted
+  `advice-overridden`; claiming one drops the depth to two, closes the notices and reopens the
+  course.
+- `test/unit/queues.test.ts`: membership through each transaction that changes it (a claim, an
+  end, a confirm, a fence clear, a re-route, a snapshot moving a ticket), a crossing both ways,
+  a course-file change of bounds, the notice updated in place while over.
+
+### Exit criteria
+
+- [ ] S-BTN-45's queue and intake case passes on both hosts
+- [ ] `test/unit/queues.test.ts` passes
+- [ ] `npm test` and `npm run typecheck` green; the boundary test green
+
+### Hand-off
+
+R3-1269 serves each leg's depth and `max_queue` in the fleet view (BATON_SPEC R-BTN-99), for the course's ranking code on the worker; R3-1235's `roadmap-pr` hook may rank a
+full leg's tickets first; R3-1254 models queues.
+
+## Status
+
+_2026-10-16 — hand-off retargeted: no hook reads the queues; R3-1269's fleet view serves them (BATON_SPEC §2l)._
+
+
+_(filed 2026-10-15 — split from R3-1251 for BATON_SPEC §2g, docs#213; rewritten the same day for
+R-BTN-79's revision to a warning)_

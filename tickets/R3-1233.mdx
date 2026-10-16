@@ -1,0 +1,99 @@
+---
+title: "R3-1233 — The roadmap-pr course in docs: its course file, locate placing tickets at stations, and the sync"
+id: R3-1233
+project: baton
+status: available
+updated: 2026-10-14
+repos:
+  - docs
+  - baton
+tags:
+  - FEAT
+  - roadmap-item
+order: 1070
+tier: judgement
+description: "The roadmap-pr course in docs: .baton/baton.json and the course file of stations and legs, locate placing each ticket (station, path, next legs, bars per leg) from its PRs and baton: markers, and sync.mjs posting the board in §7.1's order (observation, fetch, compute). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1232
+  - R3-1249
+---
+
+**Brief:** the Baton project.
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2e (R-BTN-69, -70), §6.12 (R-BTN-38, -39, the leg
+table and markers), §7.1 (the sync's steps and board post), R-BTN-46 (markers carry the claim's
+nonce), R-BTN-51; `docs/content/specs/BATON_ROADMAP_PR_COURSE.mdx` §6 (independence as bars,
+`pairExists`) (docs@0928c207; the spec at docs#212 head 1dae3316)
+**Depends on:** R3-1232, R3-1249 (`npx baton sync`)
+
+### Requires
+
+- none — `locate` is pure and runs over fixture item files and recorded PR evidence.
+
+### Why
+
+Baton needs to know where each docs ticket is, computed from git by docs' own code and
+posted with every snapshot; today `factory-state.mjs` knows only item statuses. Tier:
+judgement — one repository's course code, but its output feeds every gate.
+
+### What to build
+
+1. `.baton/baton.json` (the course, its `version`, `min_worker_version`, `step_kinds`,
+   `branch_pattern`, `protocol_files`) and `.baton/courses/roadmap-pr/course.json` exactly as
+   BATON_SPEC §2e shows it, `"short_waits": ["ci"]` and `"start_leg": "implement"` included
+   (R-BTN-69, R-BTN-83) — `locate`'s `waiting_on` for a
+   leg held by checks is exactly `ci`, so the runner waits on it rather than suspend.
+2. `scripts/lib/courses/roadmap-pr/locate.mjs`: `locate(ticket, evidence, course, bars)` →
+   `{station, path: [{leg, reached}], next_leg, next_source, next: [{leg, state, waiting_on}],
+   outputs: [{leg, run, name, uri, digest?}], bars: {leg: [tag]}}` (R-BTN-70, R-BTN-82,
+   R-BTN-83) from the item file, its PRs, reviews, checks and `baton:` markers — the queued
+   leg from the last closing marker's `next`, `next_source: inferred` where git shows work with
+   no marker, `course` for a new ticket; outputs only from markers whose nonce names a claim on
+   the ticket; `review` waits on `review-seats` only under
+   a `stop` owner bar; `fix` and `merge` carry the seats' families; each `review` leg posts
+   `needs` — the `account:`/`model:` line each seat bills, after substitution (BATON_SPEC
+   R-BTN-76, as on docs#213).
+3. `.baton/courses/roadmap-pr/sync.mjs` (`stations(ctx)` → stations, every marker on live
+   tickets' primary PRs with its nonce, and the course's `course_data`) and
+   `.baton/tickets.mjs` (`tickets(ctx)`, wrapping `factory-state.mjs`), run by `npx baton
+   sync`, which does §7.1's steps 1–4 (R-BTN-74, as amended at docs#212 02fdd72c); docs'
+   `scripts/baton-sync.mjs` and `scripts/lib/batonSync.mjs` retire, and
+   `.github/workflows/baton-sync.yml` runs the pinned CLI.
+4. `scripts/data/baton.json` keeps only `cut_over`; `check-baton.mjs` reads the course's
+   `version` and `protocol_files` from `.baton/baton.json`.
+
+### Architecture — the decisions, named
+
+- **Edge conditions live in `locate`, never in `course.json`**: from `reviewed`, `merge` is
+  ready when the round left no finding open, `fix` when it did and fewer than two fixes ran,
+  `adjudicate` after the third review with findings open.
+- **Markers**: `<!-- baton:<kind> leg=<leg> run=<n> reached=<station> next=<leg> head=<sha>
+  claim=\<nonce> out=\<name>:\<uri>… -->` on the primary PR, every value percent-encoded; one
+  `baton:close` closing marker per leg run, written by the leg script's `close`, carries the
+  position and outputs; `locate` reads only markers and PR facts, never a hand-off's prose (R-BTN-83).
+- **`pairExists` and `qualifyingPair` share one implementation** in
+  `scripts/lib/courses/roadmap-pr/seats.mjs`; nothing here is vendored into Baton.
+- **Do not**: put a condition or a provider in `course.json`; compute a station from Baton's
+  claims; post legs the course file does not have.
+
+### Tests
+
+- `scripts/lib/courses/roadmap-pr/locate.test.mjs`: recorded evidence for a ticket at every
+  station, through two review/fix loops, a closed PR (path shrinks), a ticket `in-review`
+  from before markers, and a `stop` bar on a seat's line.
+- `scripts/baton-sync.test.mjs`: the post validates against BATON_SPEC §7.1's schema.
+
+### Exit criteria
+
+- [ ] `node --test scripts/lib/courses/roadmap-pr/` green
+- [ ] `npx baton sync --dry-run` prints a board whose every station and leg is in `course.json`
+- [ ] `npm run verify` green
+
+## Status
+
+_(filed 2026-10-14)_
+
+_2026-10-14 — rewritten for the stations revision of BATON_SPEC (docs#212 head 0d4ef0e4): stations and legs in a course file, owner bars and settings in SQLite, observations, the runner and webhooks._

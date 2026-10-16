@@ -1,0 +1,88 @@
+---
+title: "R3-1252 — Move BATON_SPEC into the open-source baton repository, splitting out docs' course and cutover"
+id: R3-1252
+project: baton
+status: available
+updated: 2026-10-15
+repos:
+  - baton
+  - docs
+tags:
+  - SPEC
+  - roadmap-item
+order: 1085
+description: "Baton is a standalone open-source project, so its core spec moves to immediately-run/baton as Markdown, made generic (docs only as a labelled example, no private paths, item ids or hosts); docs' roadmap-pr course, its cutover and its mirror stay in docs; a stub keeps docs' links and item Spec lines valid. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1243
+  - R3-1251
+---
+
+**Brief:** the Baton project; the owner, 2026-10-15: "since baton should be a
+standalone open source project, i think the baton spec should be moved into the baton repo
+(but we can wait with this if this creates a lot of work due to docs-repo check scripts
+assuming work items refer to the spec)."
+**Spec:** `docs/content/specs/BATON_SPEC.mdx` (whole); `docs/content/specs/BATON_ROADMAP_PR_COURSE.mdx`.
+
+### Why
+
+Baton is an open-source project whose specification lives in a private-flavoured docs wiki:
+a contributor to `immediately-run/baton` cannot read the spec the code is built to, and the
+spec mixes Baton's core (course-agnostic, any host) with one deployment's course, cutover and
+mirror. The mechanical cost is small: about 45 items and 28 wiki links name BATON_SPEC, and no
+docs check resolves an `R-BTN-n` against the spec's path (`check-spec-anchors` reads code
+anchors; `check-spec-amendments` reads each spec's own ledger). The real work is editorial.
+
+### When
+
+After docs#213 (R3-1251's spec) and baton#10 (R3-1243) merge, so no open PR edits the file
+being moved and the model's README can cite the new path.
+
+### What to do
+
+1. **Split.** Core sections (§1–§11, §2g, the schema, the API, the scenarios `S-BTN-n`, the
+   requirements `R-BTN-n`, the Decisions log, the review records) move to
+   `immediately-run/baton` as `spec/BATON_SPEC.md`. Docs keeps what is docs': the cutover
+   (§13, §13a), the mirror and `claim.sh`'s door (§12), the roadmap-pr course
+   (`BATON_ROADMAP_PR_COURSE.mdx`, already separate) and docs' bars and stations, as
+   `content/specs/BATON_DOCS_DEPLOYMENT.mdx`, which cites the moved spec.
+2. **Make it generic.** Docs, its item ids and `roadmap-pr` appear only as a labelled example;
+   no private paths, hosts (BATON_ORIGIN already) or account names; examples use neutral
+   tickets. Requirement and scenario ids are kept unchanged — code, tests and items cite them.
+3. **Markdown, not MDX.** Wiki links become relative links or plain text; frontmatter reduced to
+   title, status and updated; tables and code blocks unchanged.
+4. **Keep links valid.** `content/specs/BATON_SPEC.mdx` becomes a stub: its frontmatter, one
+   paragraph pointing to the baton repo's file at a pinned commit and to the deployment spec,
+   and a table mapping each moved section to its new heading. Items' **Spec:** lines stay
+   valid through the stub; new items cite `baton/spec/BATON_SPEC.md`.
+5. **Repoint.** Baton's `CLAUDE.md`, `README.md`, `model/README.md` and `CHANGELOG.md`, and the
+   `baton` project page, cite the new path. Docs scripts' comments that cite BATON_SPEC §12–§13
+   cite the deployment spec.
+6. **Review in baton.** The moved spec is reviewed under the same gate (two blind reviewers,
+   the findings log), as one PR in each repository, merged baton first.
+
+### Do not
+
+- Renumber or rename any `R-BTN-n`, `S-BTN-n` or `G-BTN-n`.
+- Change any requirement while moving it; a defect found in the move is filed separately.
+- Delete the docs file: the stub stays as long as any item cites it.
+
+### Tests
+
+- `npm run verify` in docs (wiki links, roadmap ids, amendments) green with the stub.
+- In baton: a check that every `R-BTN-n` cited in `src/`, `test/` and `model/` is defined in
+  `spec/BATON_SPEC.md`; a grep for `immediately-run/docs`, `R3-` and `content/` in the moved
+  spec outside the example section returns nothing.
+
+### Exit criteria
+
+- [ ] `spec/BATON_SPEC.md` merged in immediately-run/baton; the id check and the scrub grep pass
+- [ ] `BATON_DOCS_DEPLOYMENT.mdx` and the stub merged in docs; `npm run verify` green
+- [ ] baton's `CLAUDE.md`, README, model README and project page cite the new path
+
+## Status
+
+_(filed 2026-10-15)_
