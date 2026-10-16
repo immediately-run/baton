@@ -29,12 +29,21 @@ two clicks.</Lede>
 5. **What is ready?** The queue in Baton's order, and, separately, what nobody can take and why.
 6. **How does a course perform?** Each course drawn as stations and legs, with tickets on
    it, wait and run times, and the legs that back up.
+7. **Where did git overrule Baton?** Discrepancies by kind and age: what Baton had, what git
+   showed.
+8. **Is the instance healthy?** Capacity — request rate and live counts against the
+   envelope — and the instance view workers rank from (shared resources and their readings).
+
+These map to §14's views: Needs you (1), Running (2), Workers (3), Timeline (4), Ready (5),
+Courses (6), Discrepancies (7), Capacity and the instance view, formerly Advice (8).
 
 ## What it does
 
-Expedite, hold, cancel, force-reap (with confirmation), confirm or release a completion,
-resync a repository, cut over a repository. Repositories, owners, grants and bars are shown
-read-only: they are managed from the CLI.
+Expedite, hold, cancel (a hold plus a release message), request a worker's status,
+force-reap (with confirmation), accept a rejected history, confirm an adoption, confirm or
+release an unconfirmed completion, resync a repository, and cut over a repository — every one
+an instance administrator's. Repositories, owners, grants, probes, owner bars and required
+bars are shown read-only: they are managed from the CLI.
 
 ## Constraints a design must keep
 

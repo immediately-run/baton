@@ -47,9 +47,13 @@ describe('S-BTN-38 a course measures itself', () => {
     expect((await advance('vm-a', w1.secret, c1.claim_id, { leg: 'implement' })).status).toBe(200);
     await setClock(T0 + 20 * MIN);
     expect((await endClaim('vm-a', w1.secret, c1.claim_id, { end_reason: 'suspended:pr-open', reached: 'pr-open', detail: 'waiting on ci' })).status).toBe(200);
-    git.place('T-1', placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]));
+    git.place('T-1', placed('pr-open', [['implement', 'pr-open']], [['review', 'waiting', 'ci']]));
     expect(await git.post()).toMatchObject({ status: 200, confirmed: 1 });
-    // Ten minutes later another worker takes it up, reviews for 30 minutes and gives it back.
+    // CI passes at +25: review turns ready. A leg not yet ready is not waiting for a claimant (3-r3-0).
+    await setClock(T0 + 25 * MIN);
+    git.place('T-1', placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]));
+    expect(await git.post()).toMatchObject({ status: 200 });
+    // At +30 another worker takes it up, reviews for 30 minutes and gives it back.
     await setClock(T0 + 30 * MIN);
     const w2 = await register('vm-b');
     const { json: c2 } = await claimItem('vm-b', w2.secret, { ticket_id: 'docs:T-1' });
@@ -64,11 +68,12 @@ describe('S-BTN-38 a course measures itself', () => {
       ok: true, repository: 'docs',
       courses: { 'roadmap-pr': {
         // implement: T-1's first claim came at once, its leg ready since the first post (a first
-        // wait, round 2, 2-r2-2); review waited the ten minutes between the suspension and the
-        // next claim. Ready now: T-2's implement since the first post. T-1's review is not
-        // claimable until a reading follows its last end (§6.7), so it is not counted (2-r2-1).
+        // wait, round 2, 2-r2-2); review waited five minutes — ready at +25, claimed at +30 — though
+        // the ticket rested at pr-open ten (3-r3-0). Ready now: T-2's implement since the first
+        // post. T-1's review is not claimable until a reading follows its last end (§6.7), so it
+        // is not counted (2-r2-1).
         legs: { implement: { started: 1, finished: 1, abandoned: 0, waited: { count: 1, median_s: 0, max_s: 0 }, ran: { count: 1, median_s: 1200, max_s: 1200 }, ready_now: { tickets: 1, oldest_s: 3600 } },
-          review: { started: 1, finished: 0, abandoned: 1, waited: { count: 1, median_s: 600, max_s: 600 }, ran: { count: 0 }, ready_now: { tickets: 0, oldest_s: null } } },
+          review: { started: 1, finished: 0, abandoned: 1, waited: { count: 1, median_s: 300, max_s: 300 }, ran: { count: 0 }, ready_now: { tickets: 0, oldest_s: null } } },
         stations: { 'pr-open': { waited: { count: 1, median_s: 600, max_s: 600 } } },
       } },
       suspensions: [{ station: 'pr-open', detail: 'waiting on ci', claims: 1 }],

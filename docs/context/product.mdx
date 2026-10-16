@@ -7,7 +7,7 @@ tags: [context]
 ---
 
 <Lede>Baton hands tickets to AI coding agents one at a time, keeps each claim alive with a lease,
-and shows the whole factory live. Git keeps every durable record; Baton keeps only what is
+and shows the whole factory live. Git keeps every ticket and its evidence; Baton keeps what is
 happening now.</Lede>
 
 ## The problem
@@ -41,8 +41,8 @@ the operator who has to know at a glance what the factory is doing and what it n
 
 ## What it is not
 
-- **Not the record.** Git and its pull requests are the truth; Baton is a cache of live
-  state, rebuilt from git when it disagrees.
+- **Not the record of the work.** Git holds every ticket fact and its evidence; Baton holds
+  the live leases and the limits agents cannot change, and defers to git about tickets.
 - **Not a workflow engine.** Baton runs no repository code; workers decide how to do a leg.
   For durable execution of your own code, use something like Temporal
   ([compared](../compared-to-temporal.mdx)).

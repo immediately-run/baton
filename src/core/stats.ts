@@ -76,8 +76,8 @@ export class Stats {
        WINDOW t AS (PARTITION BY ticket_id ORDER BY claimed_at, id)`;
 
     // Legs started in the window, each with when it arrived at its `from` station: the claim's
-    // previous leg's finish; for a claim's first leg, the end of the ticket's previous claim, or —
-    // a ticket's first claim — when the offered leg had turned ready (2-r2-2).
+    // previous leg's finish; for a claim's first leg, the later of the ticket's previous claim's
+    // end and when the offered leg turned ready (2-r2-2, 3-r3-0) — a leg not yet ready is not waiting.
     const legs = this.rows<{ course_id: string | null; leg: string; started_at: number; finished_at: number | null; abandoned_at: number | null; arrived: number | null }>(
       `WITH c AS (${history}),
             l AS (SELECT claim_id, seq, leg, started_at, finished_at, abandoned_at,
@@ -85,7 +85,7 @@ export class Stats {
                          ROW_NUMBER() OVER (PARTITION BY claim_id ORDER BY seq) AS nth
                   FROM claim_legs WHERE started_at >= ? AND started_at <= ? OR claim_id IN (SELECT claim_id FROM claim_legs WHERE started_at >= ? AND started_at <= ?))
        SELECT c.course_id, l.leg, l.started_at, l.finished_at, l.abandoned_at,
-              CASE WHEN l.nth = 1 THEN COALESCE(c.prev_ended, c.offered_ready_since) ELSE l.prev_finished END AS arrived
+              CASE WHEN l.nth = 1 THEN max(COALESCE(c.prev_ended, c.offered_ready_since), COALESCE(c.offered_ready_since, c.prev_ended)) ELSE l.prev_finished END AS arrived
        FROM l JOIN c ON c.id = l.claim_id
        WHERE l.started_at >= ? AND l.started_at <= ?`, prefix, prefix, since, now, since, now, since, now);
     for (const l of legs) {

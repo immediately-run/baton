@@ -64,7 +64,7 @@
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   },
   "S-BTN-38.course-stats › S-BTN-38 a course measures itself > a key granted on docs reads its course record — aggregates and ids, no worker; an ops-only key is forbidden": {
-    "at": 17,
+    "at": 19,
     "reason": "docs:T-2's posted path review is off the course graph (§2e: git can hold it; Baton logs off-graph — not modelled)"
   },
   "S-BTN-39.limits › S-BTN-39 limits agents cannot change > an owner bar on every course, claims only, from +1 h: new Go claims are refused, a held one still advances": {
