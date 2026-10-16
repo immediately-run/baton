@@ -65,7 +65,7 @@ immediately.run opens: `package.json`'s `"immediately.run": {"content": ["ticket
 lists them, and each folder's `immediately.run.json` opens it with the wiki viewer.
 
 - **`tickets/`**, the tickets:
-  <https://immediately.run/present/github/immediately-run/baton/main/files/tickets/home.mdx>.
+  <https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/home.mdx>.
   A ticket is `tickets/<id>.mdx`. New tickets are `B-n`; tickets that moved here from the
   immediately.run docs roadmap keep their `R3-NNNN` ids. A finished one moves to
   `tickets/archive/` with `status: done`. Its frontmatter follows `tickets/item.schema.json`;
@@ -73,7 +73,7 @@ lists them, and each folder's `immediately.run.json` opens it with the wiki view
   registered in `tickets/immediately.run.json`, as are the board view and the ticket record
   sets.
 - **`docs/`**, the documentation:
-  <https://immediately.run/present/github/immediately-run/baton/main/files/docs/home.mdx>.
+  <https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/home.mdx>.
 
 Pages are MDX, so `<` and `{` in prose go in backticks or are escaped (`\<`, `\{`).
 
