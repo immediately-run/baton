@@ -54,9 +54,10 @@ const textModules: Plugin = {
   },
 };
 
-/** The tests only the local project runs: they need Node (the request queue, the file scan).
- *  It also runs every integration scenario and the mirror's unit tests (S-BTN-14's server half). */
-const NODE_ONLY = ['test/unit/local-queue.test.ts', 'test/unit/boundary-host.test.ts', 'test/unit/cli.test.ts', 'test/model/replay.test.ts', 'test/unit/check-traces.test.ts'];
+/** The tests only the local project runs: they need Node (the request queue, the file scan,
+ *  the runner's leg child processes, the model replay). It also runs every integration scenario
+ *  and the mirror's unit tests (S-BTN-14's server half). */
+const NODE_ONLY = ['test/unit/local-queue.test.ts', 'test/unit/boundary-host.test.ts', 'test/unit/cli.test.ts', 'test/model/replay.test.ts', 'test/unit/check-traces.test.ts', 'test/unit/runner-main.test.ts', 'test/integration/S-BTN-41.runner.test.ts'];
 const host = (name: string) => ({ '#host': resolve(import.meta.dirname, `test/hosts/${name}.ts`) });
 
 /** The test SSH keys (R-BTN-13 as amended, R3-1239): one of each type, made per run, seeded
@@ -111,7 +112,7 @@ export default defineConfig({
           environment: 'node',
           globalSetup: ['./test/global-setup.ts'],
           setupFiles: ['./test/setup.ts'],
-          include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', ...NODE_ONLY],
+          include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...NODE_ONLY],
           provide: { localConfig: { ...wranglerVars(), ...bindings } },
         },
       },

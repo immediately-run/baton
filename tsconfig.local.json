@@ -24,6 +24,7 @@
   "include": [
     "src/core",
     "src/local",
+    "src/runner",
     "src/migrations",
     "src/modules.d.ts",
     "test/hosts/local.ts",
@@ -31,6 +32,8 @@
     "test/unit/local-queue.test.ts",
     "test/unit/boundary-host.test.ts",
     "test/unit/cli.test.ts",
+    "test/unit/runner-main.test.ts",
+    "test/integration/S-BTN-41.runner.test.ts",
     "test/unit/check-traces.test.ts",
     "test/model/replay.test.ts"
   ]
