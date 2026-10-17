@@ -152,14 +152,14 @@ export function branchMatches(pattern: string, branch: string): boolean {
  * every open-or-merged fact whose head branch matches the pattern; with several, the least
  * advanced decides — but every PR merged is `merged`, the end station. No PR is `filed`, with
  * `implement` waiting while a dependency or an open child is not done. */
-/** The PR numbers a ticket's `prs:` names: a bare number, or a pull-request URL —
+/** The PR numbers a ticket's `prs:` names: a bare number or `#n`, or a pull-request URL —
  * `https://<host>/<owner>/<name>/pull/<n>` — of this repository (`repository`, `owner/name`,
  * when known; a URL naming another repository is not one of this repository's PRs). */
 export function prNumbers(prs: unknown[], repository?: string | null): string[] {
   const out: string[] = [];
   for (const p of prs) {
     const text = String(p).trim();
-    if (/^\d+$/.test(text)) out.push(text);
+    if (/^#?\d+$/.test(text)) out.push(text.replace(/^#/, ''));
     const m = /^https?:\/\/[^/]+\/([^/]+\/[^/]+)\/pull\/(\d+)(?:[/#?].*)?$/.exec(text);
     if (m && (repository == null || m[1].toLowerCase() === repository.toLowerCase())) out.push(m[2]);
   }

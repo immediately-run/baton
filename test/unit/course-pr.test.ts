@@ -133,7 +133,7 @@ describe('several PRs, and merged ones', () => {
   });
 
   it("prs: takes numbers and this repository's pull-request URLs, never another repository's", () => {
-    expect(prNumbers([7, '8', 'https://github.com/o/r/pull/9', 'https://github.com/o/r/pull/10/files', 'https://github.com/x/y/pull/11', 'junk'], 'o/r')).toEqual(['7', '8', '9', '10']);
+    expect(prNumbers(['#6', 7, '8', 'https://github.com/o/r/pull/9', 'https://github.com/o/r/pull/10/files', 'https://github.com/x/y/pull/11', 'junk'], 'o/r')).toEqual(['6', '7', '8', '9', '10']);
     expect(prNumbers(['https://github.com/x/y/pull/11'])).toEqual(['11']); // the repository unknown: recorded facts
     const byUrl = run([ticket('A', { course: { prs: ['https://github.com/o/r/pull/9'] } })], [pr({ number: 9, head: 'feature/unrelated' })], new Set(), { repository: 'O/R' });
     expect(byUrl.A).toMatchObject({ station: 'pr-open' });
