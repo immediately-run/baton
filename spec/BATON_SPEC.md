@@ -620,7 +620,7 @@ the legs and their transitions are a closed set, and none of it is encoded in Ba
   resumes. *(Rejected: "state", which collides with a leg's `ready`/`waiting` and is as
   generic as "workflow"; "stage" (the product's stage region, the retired free-text
   `stage`); "checkpoint" (local-store checkpoints); "milestone"; "exchange zone".)*
-- **R-BTN-69 (the course file).** *(Amended 2026-10-17 by §2m: a station may carry `entry` (R-BTN-109); a leg `no_chain_from`, `isolation` (R-BTN-106, R-BTN-107), `kind: person` with `asks` (R-BTN-116), `stream` (R-BTN-118) and `spawns` (R-BTN-111); a check course `checks` (R-BTN-114); output schemas are named (R-BTN-108); a leg carries `requires` (R-BTN-120), `retry`, `max_ready_s` (R-BTN-122), `max_context` and `max_refreshes` (R-BTN-123); the course declares `capability_types` and `capability_roles` (R-BTN-121) and `error_types` (R-BTN-122).)*  `.baton/courses/<course>/course.json`, in a schema core
+- **R-BTN-69 (the course file).** *(Amended 2026-10-17 by §2m: a station may carry `entry` (R-BTN-109); a leg `no_chain_from`, `isolation` (R-BTN-106, R-BTN-107), `kind: person` with `asks` (R-BTN-116), `stream` (R-BTN-118) and `spawns` (R-BTN-111); a check course `checks` (R-BTN-114); output schemas are named (R-BTN-108); a leg carries `requires` (R-BTN-120), `retry`, `max_ready_s` (R-BTN-122), `max_context` and `max_refreshes` (R-BTN-123); the course declares `capability_types` and `capability_roles` (R-BTN-121) and `error_types` (R-BTN-122). Amended 2026-10-17, R3-1254: a course has exactly one start and at least one end, and an end station is terminal.)*  `.baton/courses/<course>/course.json`, in a schema core
   owns:
 
   ```json
@@ -642,13 +642,16 @@ the legs and their transitions are a closed set, and none of it is encoded in Ba
   carry `label`, `max_runs` (how often one ticket may run it), `max_duration` (seconds a run of it may take, R-BTN-90), `max_queue` (how many tickets
   may wait for it, R-BTN-79; 2026-10-15), a contract — `version`, `inputs`, `outputs` — and
   `replay_safe` (R-BTN-82, R-BTN-84), and `renamed_from`; a station `label` and
-  `renamed_from`. The file always names a `start_leg`, the queued leg of a new ticket
+  `renamed_from`. A course has **exactly one start** — `start` is one station, never a list —
+  and **at least one end**: `end` is a non-empty list, and an end station is **terminal**, since a
+  ticket at one is done (R-BTN-70) and no leg leaving it could ever be offered. The file always names a `start_leg`, the queued leg of a new ticket
   (R-BTN-83), even when only one leg leaves `start`. The file may also list
   `short_waits`: `waiting_on` labels short enough that a holder waits on them under its claim
   rather than suspend — for `roadmap-pr`, `["ci"]` (R-BTN-40, R-BTN-72; after the sixth
   review); core compares them as strings. Ids match
   `^[a-z][a-z0-9-]{0,39}$`. The sync posts the file with the registry (§7.1), and Baton
-  accepts it only if every station is reachable from `start` (through any outcome), an end is
+  accepts it only if `start` names one station, `end` names at least one, no leg's `from`
+  names an end station, every station is reachable from `start` (through any outcome), an end is
   reachable from every station, every `from` and `to` names a station, every cycle contains a
   leg with `max_runs`, `start_leg` names a leg whose `from` includes `start`, and every
   `inputs.from` names a leg and one of its outputs — so every
