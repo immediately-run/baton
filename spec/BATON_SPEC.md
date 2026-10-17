@@ -738,7 +738,7 @@ roadmap — become tickets on courses and legs is that repository's choice, and 
 offers a sane default.)*
 
 - **R-BTN-74 (two override points, a default for each).** *(Amended 2026-10-17 by §2m: `baton init` and `baton sync` are now `baton repo init` and `baton repo sync` — R-BTN-127.)* *(Amended 2026-10-17 by §2m: the CLI gains a third default ticket source, `changes`, for check courses (R-BTN-114), and a third default course, `epic`, for planning (R-BTN-124).)*  A repository's sync — `npx baton
-  sync` in its sync workflow (§7.1) — builds the board post from two pieces of the
+  repo sync` in its sync workflow (§7.1) — builds the board post from two pieces of the
   repository's code, both optional:
   - the **ticket source**, `.baton/tickets.mjs`, default-exporting `tickets(ctx)` → the
     board's `tickets` and `closed` (§7.1's generic fields: id, course, title, tier, requires
@@ -771,7 +771,7 @@ offers a sane default.)*
   - **the `pr` course's station function** (only for a course whose id is `pr` — and the
     `branch` course's for a course whose id is `branch`, R-BTN-96; a ticket on
     any other course without its `sync.mjs` fails the sync *(review gate round 3)*), over the file `baton
-    init --course pr` writes: stations `filed` → `pr-open` → `reviewed` → `merged`, with
+    repo init --course pr` writes: stations `filed` → `pr-open` → `reviewed` → `merged`, with
     `fixed` between `reviewed` and the next review; legs `implement` (`filed` → `pr-open`),
     `review` (`pr-open` or `fixed` → `reviewed`, `max_runs` 4), `fix` (`reviewed` → `fixed`,
     `max_runs` 3), `merge` (`reviewed` → `merged`); `short_waits: ["ci"]`. It reads its forge through the CLI's fact adapter (R-BTN-96): the facts below are GitHub's, and GitLab's and Gitea's are mapped to the same ones; a `git` repository uses the `branch` course instead. On GitHub it reads GitHub
@@ -2253,7 +2253,7 @@ archiver — and git's server-side hooks are unaffected: they are not Baton hook
   - **Every input from the commit.** A sync run anywhere reads the tickets, `.baton/` and each
     course's `course.json`, `sync.mjs` and ticket source from the commit it posts (`sha`) —
     the remote default branch's head as just fetched — never from a working tree: `baton
-    sync` extracts that commit's tree into a fresh directory and imports from there. R-BTN-11's
+    repo sync` extracts that commit's tree into a fresh directory and imports from there. R-BTN-11's
     check that the post's commit descends from the head stops a stale commit; this rule makes
     sure the course file and code really are that commit's (§7.1's `registry` carries the
     course file with every post, R-BTN-69).
@@ -2264,7 +2264,7 @@ archiver — and git's server-side hooks are unaffected: they are not Baton hook
     after its push. A worker that offers to sync a repository (its own configuration; none
     is required to) asks `GET /v1/sync/wanted?repository=<id>` and runs `git ls-remote` on
     the repository's `remote`, each at most once a minute while it is live; it runs `baton
-    sync` when `wanted` is true — a want Baton raised itself after a claim's end, a bar or an
+    repo sync` when `wanted` is true — a want Baton raised itself after a claim's end, a bar or an
     unblocking (R-BTN-94) — or when the remote head differs from the `head_sha` the answer
     carries: the newest commit any post named, held posts included, so a held head does not
     re-trigger forever. R-BTN-62's numbering and `sync-busy` keep several workers from posting
@@ -2739,7 +2739,7 @@ Baton's own shared code; git stays the truth and Baton a cache (R-BTN-39).
 ### 2m.5 Watching and stopping a running leg
 
 - **R-BTN-118 (a running leg's output streams to its viewers, and is never stored).** *(Amends
-  R-BTN-33 and R-BTN-91.)* *(Amended 2026-10-17 by §2m: the runner also saves the frames to the repository's transcript repos and Baton keeps a pointer, never the bytes; the CLI watches through `GET /v1/stream`, signed by an owner or administrator key; credentials are masked before any frame leaves the runner — R-BTN-128.)*
+  R-BTN-33 and R-BTN-91.)* *(Amended 2026-10-17 by §2m: frames are cut once per run from the masked bytes, with one `seq` the stream and the archive share; the runner also saves the frames to the repository's transcript repos and Baton keeps a pointer, never the bytes; the CLI watches through `GET /v1/stream`, signed by an owner or administrator key; credentials are masked before any frame leaves the runner — R-BTN-128.)*
   - **On demand.** A dashboard session opens `GET /v1/ui/stream?claim=<id>`, a WebSocket over
     TLS. Baton refuses the upgrade unless its `Origin` is Baton's own origin (a cross-site page
     can open a WebSocket with the viewer's cookie); refuses an unknown claim, a claim not
@@ -3265,8 +3265,13 @@ output now, and to rename the old commands outright, with no aliases.)*
   is; the only top-level verbs are `help` and `version`. Each command signs as one key role
   (R-BTN-57: one role per key) — the **Signs as** column — with the key `-i <file>` names,
   else the one the CLI's configuration maps to that role (`~/.config/baton/keys.json`:
-  `{admin, owner: {<repository>: <file>}, courier, worker}`); a command with no key for its
-  role exits 2 naming the role.
+  `{admin, owner: {<repository>: <file>}, courier, worker, sync: {<repository>: <file>},
+  mirror: {<repository>: <file>}}`); a command with no key for its role exits 2 naming the
+  role. Where a row names two roles, the CLI tries the first it has a key for, in the order
+  written. `repo sync` and `repo mirror` sign, in order, with a CI identity token the
+  environment provides (GitHub Actions OIDC, or a GitLab `id_tokens` JWT in
+  `BATON_CI_TOKEN`; R-BTN-93), the repository's sync or mirror key, or the worker's machine
+  key where R-BTN-102 lets a machine key sync.
 
   | Command | Route | Signs as | Was |
   |---|---|---|---|
@@ -3277,10 +3282,10 @@ output now, and to rename the old commands outright, with no aliases.)*
   | `leg stop <ticket>` (**Stop leg**, R-BTN-119) | `POST /v1/owner/{repository}/tickets/{ticket}/release` *(new)*, `{reason: 'requested', confirm: true}` | owner | — |
   | `status`, `output`, `done`, `suspend`, `release`, `next`, `yield` (inside a leg) | the local channel (R-BTN-106) | — (the runner signs) | unchanged |
   | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | the blocks routes (R-BTN-75) | owner, or worker granted on the repository | `baton blocked` |
-  | `ticket history <ticket>` | `GET …/tickets/{ticket}/history` (§11) | its principals there | — |
+  | `ticket history <ticket>` | `GET …/tickets/{ticket}/history` (§11) | owner, or worker granted on the repository | — |
   | `course test <root> <course> [--base <ref>] [--board <file>]` | none: a local Baton (§2d) | — | `baton test-course` |
   | `repo init [--course pr\|branch\|epic] [--forge …] [--eject tickets\|stations]` | none: writes files | — | `baton init` |
-  | `repo sync [--if-wanted] [--defaults-only]`, `repo mirror [--if-wanted]`, `repo spool <repository>` | `/v1/sync/*` (§7.1, R-BTN-93) | sync, or mirror | `baton sync`, `baton mirror`, `baton spool` |
+  | `repo sync [--if-wanted] [--defaults-only]`, `repo mirror [--if-wanted]`, `repo spool <repository>` | `/v1/sync/*` (§7.1, R-BTN-93) | a CI identity token, sync (or mirror), or worker (R-BTN-102) | `baton sync`, `baton mirror`, `baton spool` |
   | `runner start [--legs …] [--max-legs <n>] [--until <t>] [--attached] [--sessions <provider>]` | `/v1/runner/*` (§6.13) | worker | `baton run` |
   | `runner register --token <t> --name <name> [--key ssh\|api]` | as R-BTN-117 | the token | `baton register` |
   | `decision list [--all]` | `/v1/courier/*` (the CLI courier, R-BTN-80) | courier | `baton inbox` |
@@ -3310,13 +3315,23 @@ output now, and to rename the old commands outright, with no aliases.)*
   repository whose owners opt in, it now also saves it, where the repository keeps
   transcripts, so a finished leg has a log Baton never holds.
   - **Opt-in.** Owners turn it on with `leg_logs: true` (R-BTN-66; default `false`), and only
-    with at least one `transcript_repos` entry. Saving widens who can read a leg's output from
+    with at least one `transcript_repos` entry. The runner learns it from the claim: the claim's
+    reply, and each `advance` reply, carry `leg_logs: {repo}` — the transcript repository to
+    archive to — only while the setting is on, and the runner archives a run only when its
+    claim said so. A change of the setting takes effect at the next claim. Baton drops, and
+    logs `invalid-pointer`, a pointer for a claim whose reply carried no `leg_logs`, so the
+    opt-in does not rest on the runner alone. Saving widens who can read a leg's output from
     Baton-authorized viewers to every reader of the transcript repository, so it is never on
     without the owners' word (threat model P5).
   - **What is saved.** For each leg run in `process` mode, the runner reads the leg
     process's stdout and stderr pipes whether or not anyone is watching, and writes them in
-    the stream's frame shape, `{seq, at, stream, text}` as JSON lines, frames of at most 8 KB,
-    with no rate limit. `attached` and `session` runs are not archived: their agent runs in the
+    the stream's frame shape, `{seq, at, stream, text}` as JSON lines, with no rate limit.
+    **One sequence.** The runner cuts the masked bytes into frames once, numbering them with
+    one `seq` per run, and both sinks carry those frames and numbers unchanged — the archive
+    every one, the stream (its scrollback included) those it sends. A frame the stream drops
+    keeps its number, so a reader sees the hole. A frame is at most 8 KB of encoded bytes, cut
+    at a code-point boundary; `text` is the bytes decoded as UTF-8, an invalid sequence
+    becoming U+FFFD. `attached` and `session` runs are not archived: their agent runs in the
     session, not as the runner's child, and the session's transcript is their log (§6.8,
     R-BTN-113). A leg the course marks `"stream": false` is neither streamed nor archived.
   - **Where.** The archive is
@@ -3396,11 +3411,12 @@ output now, and to rename the old commands outright, with no aliases.)*
 | `PUT /v1/owner/{repository}/settings` | `api_keys`, `required_independence`, `checks`; `retry` as `{default, ceiling: {max_attempts, max_attempts_s, in_claim, max_interval_s, max_refreshes, max_blocked, initial_s}, never_retry}` (R-BTN-117, R-BTN-106, R-BTN-114, R-BTN-122, R-BTN-123) |
 | `POST /v1/runner/end` (released) | `error: {type, message?}` (R-BTN-122); the reason `blocked` with `prerequisite: {kind, ref}`, for a resource `reading: {instance, available: false, until?, valid_for?, detail?}`, for a ticket or decision `commit`; refusal `invalid-prerequisite` (R-BTN-126) |
 | `POST /v1/runner/heartbeat` (leg logs) | `leg_logs: [{claim, leg, run, repo, path, pushed_at, bytes}]` (R-BTN-128) |
-| `GET /v1/repositories/{repository}/tickets/{ticket}/legs/{leg}/runs` *(new)* | each run's claim, worker, times, session link, log and transcript pointers; for keys granted on, or owning, the repository (R-BTN-128) |
+| `GET /v1/repositories/{repository}/tickets/{ticket}/legs/{leg}/runs` *(new)* | each run's claim, worker, times, session link, log and transcript pointers; for an owner key of the repository or an administrator key (R-BTN-128) |
 | `GET /v1/stream?claim=<id>` *(new)* | the CLI's viewer upgrade, signed by an owner or administrator key (R-BTN-128) |
 | `PUT /v1/owner/{repository}/settings` (logs) | `leg_logs: true` (R-BTN-128; default `false`) |
 | `POST /v1/owner/{repository}/tickets/{ticket}/release` *(new)* | `{reason: 'requested', confirm: true}`: **Stop leg** from the CLI, an owner's release message (R-BTN-119, R-BTN-127) |
 | `POST /v1/runner/advance`, `POST /v1/runner/end` (leg logs) | `leg_logs` pointers pending, as on the heartbeat (R-BTN-128) |
+| `POST /v1/runner/claim`, `POST /v1/runner/advance` (replies) | `leg_logs: {repo}` while the repository's owners have it on (R-BTN-128) |
 | local channel | `baton leg release --blocked --kind <kind> --ref <ref> [--instance <i>] [--until <RFC 3339>] [--valid-for <s>] [--detail <json>] [--commit <sha>]` (R-BTN-126) |
 | board post: each ticket's `decisions` | `severity?` (R-BTN-125) |
 | `POST /v1/owner/{repository}/couriers` (again) | `severities?` beside `asks` (R-BTN-125) |
@@ -3409,7 +3425,7 @@ output now, and to rename the old commands outright, with no aliases.)*
 | `POST /v1/runner/activities` | the kind `context-handoff`, with both sessions' links (R-BTN-123) |
 | `POST /v1/owner/{repository}/check-runners`, `…/{fingerprint}/revoke` *(new)* | an owner registers or revokes a check-runner key (R-BTN-114) |
 | `PUT /v1/admin/settings` *(new)* | an administrator sets `link_hosts` and `session_hosts`, kept in a new single-row `instance_settings` table (R-BTN-112, R-BTN-113) |
-| **Stop leg** | the existing `POST /v1/ui/messages` with `{kind: 'release', payload: {ticket_id, reason: 'requested'}}` (§9) — no new route |
+| **Stop leg** (the dashboard) | the existing `POST /v1/ui/messages` with `{kind: 'release', payload: {ticket_id, reason: 'requested'}}` (§9) — no new route; *(2026-10-17, R-BTN-127)* the CLI's `baton leg stop` uses `POST /v1/owner/{repository}/tickets/{ticket}/release` |
 | `baton owner key create --api` | `POST /v1/owner/{repository}/grants` with `{name, api_key: true, capabilities, max_tier?}`, returning `{api_key}` once (R-BTN-117) |
 
 **R-BTN-55's interface table gains** `Stream` (Cloudflare: a Durable Object per claim on the
@@ -3478,7 +3494,7 @@ attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refr
   | S-BTN-94 how a leg reports a block | a leg script throws `LegError('quota', …, {prerequisite: {kind: 'resource', ref: 'llm:x'}})`; with `reading: {instance: 'acct-1', available: false, valid_for: 3600}`, and once with no reading; a session sends `baton leg release --blocked --kind capability --ref vpn:corp`; a script throws a `ticket` block without `commit`; another sends `--kind capability --ref printer:x`, a capability no `requires` names; a leg whose policy has `in_claim: 2` hits a block | the first ends `released:blocked` with its reading stored; the reading-less one ends `blocked` with the need added and nothing lowered for anyone; the capability one ends `blocked`; none is retried in the claim or waits in it; the `ticket` block without `commit` is recorded by Baton as `cannot-finish:transient`, answered `invalid-prerequisite`, and counted; the `printer:x` one is turned into `cannot-finish:transient` by the runner and counted |
   | S-BTN-95 blocked ends are bounded | the owners' `max_blocked` is 3; a leg ends `blocked` four times in a day on one ticket; one worker ends `blocked` 13 times across five tickets; an older runner ends `released:provider-exhausted` using one account instance that serves the leg's need; another uses two instances, one serving the need; a third uses two that both serve the leg's needs, with no reading in force; a fourth uses two serving instances and has posted one of them unavailable until +6 h; a fifth, using one serving instance, has posted it unavailable until +6 h | the fourth end holds the ticket `blocked-exhausted` and raises `baton:retries` listing the four prerequisites; lifting the hold resets the count; the worker is listed under **Needs you**; the first two legacy ends are recorded `blocked` with an hour's unavailable reading of the serving account, and the leg is lowered for that worker's account; the third is recorded `blocked` with no reading and counted toward `max_blocked`; the fourth is recorded with no reading and not counted, its reading lowering the leg for 6 h; the fifth's +6 h reading is kept, not replaced by an hour's, so the leg is not offered back to it hourly; every legacy end counts toward the worker's Needs-you threshold |
   | S-BTN-96 edges, not stations | a course with stations `filed`, `pr-open`, `reviewed`; tickets whose queued legs are ready, running, blocked before a start on a missing capability, blocked during a run on a resource the course names in its `needs`, backing off, and not queued | the **Courses** view and `baton leg why` draw each leg as an edge labelled `ready`, `running`, `blocked: capability (before-start)`, `blocked: resource (during-run, until …)`, `backing-off` and `not-queued`, each with colour and text; no view draws a station the course file does not name |
-  | S-BTN-97 the command tree | a user runs each of the twelve old names (`baton why`, `run`, `test-course`, `init`, `sync`, `mirror`, `spool`, `inbox`, `blocked`, `replay`, `register`, `start`), `baton leg why T-1` while T-1's `review` runs, `baton leg why R3-9` where `R3-9` is a local id in two of the key's repositories, `baton leg why T-1` with no owner or worker key configured, `baton leg done --reached x` outside a leg, the same inside a leg's session, `baton leg`, `baton lgo`, and `baton ticket blocked --on resource:llm:x --json` | each old name exits 2 printing only its "renamed:" line; the second answers T-1's running `review`; the third exits 2 listing the two qualified ids; the fourth exits 2 naming the role it needs; the channel verb outside a leg exits 2 "not inside a leg", inside it reports on the socket; `baton leg` prints the leg verbs; `baton lgo` suggests `leg`; the last prints the route's JSON as is |
+  | S-BTN-97 the command tree | a user runs each of the twelve old names (`baton why`, `run`, `test-course`, `init`, `sync`, `mirror`, `spool`, `inbox`, `blocked`, `replay`, `register`, `start`), `baton leg why T-1` while T-1's `review` runs, `baton leg why R3-9` where `R3-9` is a local id in two of the key's repositories, `baton leg why T-1` with no owner or worker key configured, `baton repo sync` in docs' CI with no keys.json, `baton leg done --reached x` outside a leg, the same inside a leg's session, `baton leg`, `baton lgo`, and `baton ticket blocked --on resource:llm:x --json` | each old name exits 2 printing only its "renamed:" line; the second answers T-1's running `review`; the third exits 2 listing the two qualified ids; the fourth exits 2 naming the role it needs; `baton repo sync` in docs' CI signs with the workflow's OIDC token and needs no key file; the channel verb outside a leg exits 2 "not inside a leg", inside it reports on the socket; `baton leg` prints the leg verbs; `baton lgo` suggests `leg`; the last prints the route's JSON as is |
   | S-BTN-98 a leg's log | a repository with `transcript_repos` and `leg_logs: true`; W1 runs `implement` in `process` mode, unwatched, printing 3 MB that holds the worker secret, a `credential:deploy` value, the push token, a 6-byte credential, and a secret split across two 8 KB reads, plus an OSC 52 sequence; it crosses a 5-minute mark; its first push is rejected; a second leg is `stream: false`; a third run prints 60 MB; a runner under `--max-legs 1` runs a 30-second leg and exits; a heartbeat reports a pointer to another claim's path; another repository has `transcript_repos` and no `leg_logs`; a user without read access to the transcript repo runs `baton leg log` | W1 archives the pipes with no viewer, pushes during the run and at its end, retrying the rejected push after a rebase, and reports each push; Baton stores only the pointers; every listed credential, the split one included, appears as `***` in the archive and the stream, and the 6-byte one is logged as unmasked; `baton leg log T implement` prints the finished run from git with the user's credentials, without the OSC 52 sequence, and with `--transcripts` the session's transcript, also stripped; the `stream: false` leg and the repository without `leg_logs` have no archive, and `baton leg log` says why; the 60 MB run's archive ends in one `gap` frame at 50 MB while its stream continues; the short leg's pointer arrives on its `end`; the foreign pointer is dropped, logged `invalid-pointer`; the user without access gets the run record, "cannot read …" and exit 1 |
   | S-BTN-99 watching from the CLI | an owner of the repository, an administrator, an owner of another repository and a worker key run `baton leg log T implement -f` on a running leg whose archive holds frames up to `seq` 400 and whose scrollback starts at `seq` 350; the first owner's key is then revoked; an owner runs `baton leg stop T` | the owner and the administrator are upgraded on `GET /v1/stream`, print frames up to 400 from the archive, then only stream frames from 401, with OSC sequences stripped; the other two are refused `forbidden` and ring nothing; the revoked key's stream is closed; `leg stop` sends the release, and the runner stops the leg as R-BTN-119 says |
 
@@ -5532,7 +5548,7 @@ never machine keys.)*
 | Courier | `/v1/courier/*` | a request signed with the courier's SSH key, bound to the repositories and `asks` its owners registered (R-BTN-80) | claim its notices and mark them sent or failed |
 | Probe | `/v1/probe/*` | a request signed with the probe's SSH key, bound to the external-resource instances it may report on (R-BTN-53, R-BTN-76) | post readings of those instances |
 | GitHub App webhook | `POST /v1/github/webhook` | the delivery's `X-Hub-Signature-256` by the App's webhook secret (R-BTN-73) | trigger a sync dispatch; Baton reads only the fields R-BTN-73 lists — the event name, the delivery id, `repository.full_name`, and `workflow_run.path` or a push's `pusher.name` and `head_commit.author.email`, to drop its own feedback |
-| Instance administrator | `/v1/admin/*`, and `/`, `/v1/ui/*` through a dashboard session | a request signed with a key in `BATON_ADMIN_KEYS` (R-BTN-57) — a key kept out of every agent's reach; the dashboard through a one-time sign-in link such a key mints | register repositories, owners and probes; register external resources and account instances, and post readings by hand (R-BTN-76); grant `human-operator`; revoke keys; read everything, blocks included; overrides; messages; force-reap; accept a rejected history |
+| Instance administrator | `/v1/admin/*`, and `/`, `/v1/ui/*` through a dashboard session; *(2026-10-17, §2m)* `GET /v1/stream` and `GET …/legs/{leg}/runs` for any claim (R-BTN-128) | a request signed with a key in `BATON_ADMIN_KEYS` (R-BTN-57) — a key kept out of every agent's reach; the dashboard through a one-time sign-in link such a key mints | register repositories, owners and probes; register external resources and account instances, and post readings by hand (R-BTN-76); grant `human-operator`; revoke keys; read everything, blocks included; overrides; messages; force-reap; accept a rejected history |
 | Repository owner | `/v1/owner/{repository}/*`; *(2026-10-17, §2m)* `GET /v1/stream` and `GET …/legs/{leg}/runs` for the repository's claims (R-BTN-128) | a request signed with one of that repository's owner keys (R-BTN-58) | grant and revoke worker keys for that repository, with any capabilities but `human-operator`; add and remove its owners; set and lift its owner bars; set and clear expedite and hold on its tickets (§8); set its required bars, `retry`, `transcript_repos`, `unblocked_trigger`, `remind_after` and `artifact_buckets` (R-BTN-66/67, R-BTN-77, R-BTN-80, R-BTN-82); re-route tickets and resolve Baton's decisions (R-BTN-83, R-BTN-78); register and revoke its couriers (R-BTN-80) and its sync keys (R-BTN-93); ask the blocks of its tickets (R-BTN-75) |
 
 - **R-BTN-13 (key binding).** *(Amended 2026-10-17 by §2m: an owner's registration token registers a session's worker credential within its scope, and a worker or personal courier may use an API key in place of the signature (R-BTN-117).)*  *(Amended 2026-10-16 by §2l: a `worker` credential is a machine key, trusted with
