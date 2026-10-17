@@ -3598,7 +3598,7 @@ and to put every route in the registry, with the MCP surface filtered.)*
 | **Stop leg** (the dashboard) | the existing `POST /v1/ui/messages` with `{kind: 'release', payload: {ticket_id, reason: 'requested'}}` (§9) — no new route; *(2026-10-17, R-BTN-127)* the CLI's `baton leg stop` uses `POST /v1/owner/{repository}/tickets/{ticket}/release` |
 | `baton owner key create --api` | `POST /v1/owner/{repository}/grants` with `{name, api_key: true, capabilities, max_tier?}`, returning `{api_key}` once (R-BTN-117) |
 
-**R-BTN-55's interface table gains** `CursorKey` (Cloudflare: the `BATON_CURSOR_KEY` secret; local: a key file; R-BTN-130), `Stream` (Cloudflare: a Durable Object per claim on the
+**R-BTN-55's interface table gains** `CursorKey` (Cloudflare: the `BATON_CURSOR_KEY` secret; local: `--cursor-key <file>`; R-BTN-130), `Stream` (Cloudflare: a Durable Object per claim on the
 hibernation API; local: an in-process fan-out) and `SigningKey` (Cloudflare: the
 `BATON_SIGNING_KEY` secret; local: a key file), so S-BTN-68 and S-BTN-70 run on both hosts.
 **§4 gains** `instance_settings` (`link_hosts`, `session_hosts`), `check_runners`
@@ -3819,7 +3819,7 @@ server stands). The same code also runs as a local process — **for development
 continuous integration** (owner, 2026-10-14), where the repositories and their hooks are
 trusted.
 
-- **R-BTN-55 (a thin platform shell over portable logic).** *(Amended 2026-10-17 by §2m: the interface table gains `Stream` and `SigningKey`, each with a Cloudflare and a local implementation (§2m.7a).)*  Everything Baton decides lives in
+- **R-BTN-55 (a thin platform shell over portable logic).** *(Amended 2026-10-17 by §2m: the interface table gains `Stream` and `SigningKey`, each with a Cloudflare and a local implementation (§2m.7a); and, by R-BTN-130, `CursorKey` — the Worker secret `BATON_CURSOR_KEY`, or `--cursor-key <file>` locally.)*  Everything Baton decides lives in
   plain TypeScript that names no platform; each platform service it needs is one small
   interface with two implementations:
 
