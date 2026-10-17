@@ -194,7 +194,7 @@ outstanding (`sync-busy`). `overlappingSyncRunsRefusedTest` keeps it.
 | `safety`, 10,000 × 40 steps of `step`; 3,000 × 40 of `progressStep` | `sim` | no violation |
 | witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all reached |
 | a second review | — | reached by a regression run only (`maxRunsSurviveResumptionTest`) |
-| Apalache, `safety` | `small`, depth 5 | no violation (15 min 29 s on 4 CPUs) |
+| Apalache, `safety` | `small`, depth 5 | no violation. 15 min 29 s on 4 CPUs before R3-1254; 49–59 min with its queued leg, measured beside another model run. Each model PR's `model:full` report carries the figure for its head (R-BTN-68) |
 | liveness, `fencesClear` | `small`, TLC (Apalache cannot check fairness) | **at `b76af9c`, the pre-round-2 formula and model**: no violation in 8,187 distinct states before a 28-minute cap, not exhaustive. The current formulas (rounds 2–3) have not been run; R3-1254 runs them to completion on a narrowed instance |
 
 Depth 5 on `small` reaches claims, advances, pushes and a sync; it does not reach a judged
