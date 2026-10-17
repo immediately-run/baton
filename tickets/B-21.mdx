@@ -1,0 +1,58 @@
+---
+title: "B-21 — Baton blocked edges: a prerequisite that fails during a leg ends released:blocked and blocks that leg's edge"
+id: B-21
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1124
+tier: critical
+description: "Build R-BTN-126: the released:blocked end and its validation, resource readings and end-sourced needs, capability removal, provisional ticket and decision rows, the max_blocked bound, the runner's LegError and channel forms, the legacy provider-exhausted mapping, and edges drawn with their state (BATON_SPEC §2m.6c; S-BTN-91–96). Requires: B-10, B-11."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-10
+  - B-11
+---
+
+**Brief:** the owner, 2026-10-17: a prerequisite may fail during a leg, as well as before it starts. That is a coloured edge in the course graph, not a new station. B-20 specified it (baton#44).
+**Spec:** `spec/BATON_SPEC.md` §2m.6c (R-BTN-126), with its dated notes on R-BTN-75, R-BTN-76, R-BTN-77, R-BTN-78, R-BTN-101, R-BTN-106, R-BTN-120, R-BTN-122, §6.10, §6.12, §6.13 and §14.
+
+### Why
+
+R-BTN-126 is specified. This ticket builds it.
+
+### What to build
+
+1. **The end.** `POST /v1/runner/end` takes `released:blocked` with `prerequisite`, plus `reading` and `commit` where the kind needs them. Build the validation for each kind; an invalid prerequisite is recorded as a counted `cannot-finish:transient` in the refusing call. Readings are refused (`reading-refused`) or found invalid exactly as R-BTN-126 splits them.
+2. **Resource.** Store the reading, add the `end`-sourced need, and write the ticket's row against R-BTN-76's counts, all in one transaction. Stamp `found_at`, and drop the need and its row at the leg's next end that is not blocked on it, or after 7 days.
+3. **Capability.** Remove the capability from the runner's declared set in the end's transaction, updating `fleet_capabilities`.
+4. **Ticket and decision.** Write provisional rows that refuse a claim into the leg (rule 1) and stay outside `blocked_since`. Settle them at the first snapshot containing the end's commit, and drop them with `prerequisite-unconfirmed` after an hour.
+5. **Bounds.** Add `max_blocked` to the owners' `retry` ceiling. Count blocked ends from `claims.blocked_kind` and `claims.blocked_ref`, apply the `blocked-exhausted` hold with `baton:retries`, and list a worker's blocked ends under **Needs you**.
+6. **The runner.** `LegError` options gain `prerequisite`, `reading?` and `commit?`. Add `baton leg release --blocked --kind … --ref …` and the runner's own checks. A block is never retried in the claim.
+7. **The legacy mapping.** Map `released:provider-exhausted` exactly as R-BTN-126 states, never shortening a reading already in force.
+8. **Views.** The dashboard's **Courses** view and `baton why` draw each leg as an edge with a state, in colour and a text label, with `found`.
+9. **Migration.** Add `ticket_blocks.provisional` and `found`, `leg_needs.source`, `added_at` and `found_at`, `claims.blocked_kind` and `blocked_ref` with their index, and the `blocked-exhausted` hold reason.
+
+### Do not
+
+- Add a station for a blocked leg anywhere.
+- Retry an error that names a prerequisite.
+
+### Tests
+
+- S-BTN-91 to S-BTN-96 as integration scenarios on both hosts, with their traces replayed through the model.
+- G-BTN-111 to G-BTN-116.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts
+- [ ] merged under the review gate
+
+## Status
