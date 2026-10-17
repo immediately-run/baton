@@ -110,7 +110,8 @@ export class Blocks {
   write(ticketIds: Iterable<string>, kinds: readonly BlockKind[] = BLOCK_KINDS, silent = false) {
     const now = this.c.now();
     for (const id of new Set(ticketIds)) {
-      const t = this.rows<{ repository_id: string; blocked_by: string }>('SELECT repository_id, blocked_by FROM tickets WHERE id = ?', id)[0];
+      const t = this.rows<{ repository_id: string; blocked_by: string; blocked_since: number | null; answer_lost: string | null }>(
+        'SELECT repository_id, blocked_by, blocked_since, answer_lost FROM tickets WHERE id = ?', id)[0];
       if (!t) continue;
       const want = new Map<string, { kind: BlockKind; ref: string; leg: string; until: number | null }>();
       for (const kind of kinds) for (const r of this.desired(id, t.repository_id, t.blocked_by, kind)) want.set(`${r.kind}\u0000${r.ref}\u0000${r.leg}`, r);
@@ -130,17 +131,48 @@ export class Blocks {
         }
         want.delete(key);
       }
-      for (const w of want.values()) {
+      const added = [...want.values()];
+      for (const w of added) {
         this.exec('INSERT INTO ticket_blocks (repository_id, ticket_id, leg, kind, ref, since, until) VALUES (?, ?, ?, ?, ?, ?, ?)', t.repository_id, id, w.leg, w.kind, w.ref, now, w.until);
         changed = true;
       }
       if (changed) this.invalidateRecommend(t.repository_id);
       // A `resource` row that went only because no live worker has a usable instance left (the
       // fleet emptied overnight) is an answer lost, not a resource back: like a claim, it clears
-      // `blocked_since` without an `unblocked` (R-BTN-77 as amended by R3-1251).
+      // `blocked_since` without an `unblocked`, and the ticket remembers what it lost until the
+      // fleet can answer again (`settleLost`; R-BTN-77 as amended by R3-1251). An answer that comes
+      // back blocked writes the row again silently: the evening's `blocked` still stands.
       const lost = cleared.length > 0 && cleared.every((c) => c.kind === 'resource' && !this.answerable(t.repository_id, c.ref));
-      this.evaluate(id, cleared, silent || lost);
+      const reblock = t.answer_lost != null && added.length > 0 && added.every((w) => w.kind === 'resource');
+      this.evaluate(id, cleared, silent || lost || reblock);
+      if (lost && !silent && t.blocked_since != null && this.blockedSince(id) == null) {
+        const was: Cleared[] = t.answer_lost ? JSON.parse(t.answer_lost) : [];
+        this.exec('UPDATE tickets SET answer_lost = ? WHERE id = ?', JSON.stringify([...was, ...cleared]), id);
+      } else if (t.answer_lost != null) {
+        this.settleLost(id);
+      }
     }
+  }
+
+  private blockedSince(id: string): number | null {
+    return this.rows<{ b: number | null }>('SELECT blocked_since AS b FROM tickets WHERE id = ?', id)[0]?.b ?? null;
+  }
+
+  /** The fleet can answer again for every resource a ticket lost its answer for (R-BTN-77 as
+   *  amended by R3-1251): if the ticket is still unblocked, unheld and has a queued leg, the
+   *  resource came back while nobody could see it — that is the `unblocked` the evening's `blocked`
+   *  was owed, with its message and trigger. Blocked again, or held, it is settled silently. */
+  private settleLost(id: string) {
+    const t = this.rows<{ repository_id: string; blocked_since: number | null; answer_lost: string | null }>(
+      'SELECT repository_id, blocked_since, answer_lost FROM tickets WHERE id = ?', id)[0];
+    if (!t?.answer_lost) return;
+    const lost = JSON.parse(t.answer_lost) as Cleared[];
+    if (!lost.every((c) => this.answerable(t.repository_id, c.ref))) return;
+    this.exec('UPDATE tickets SET answer_lost = NULL WHERE id = ?', id);
+    const queued = this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', id)[0]?.next_leg ?? null;
+    if (t.blocked_since != null || queued == null || this.isHeld(id)) return;
+    logEvent(this.c.store, this.c.now(), 'unblocked', 'baton', { ticket: id, cleared: lost }, id);
+    this.unblocked(t.repository_id, id, lost);
   }
 
   /** A claim started, ended, was confirmed or its fence cleared: whether the ticket is held
@@ -204,7 +236,7 @@ export class Blocks {
       `SELECT kind, leg, ref FROM ticket_blocks WHERE ticket_id = ? AND (leg = '' OR leg = ?) ORDER BY kind, ref, leg`, id, queued);
     const now = this.c.now();
     if (blocking.length && t.blocked_since == null) {
-      this.exec('UPDATE tickets SET blocked_since = ? WHERE id = ?', now, id);
+      this.exec(`UPDATE tickets SET blocked_since = ?${silent ? '' : ', answer_lost = NULL'} WHERE id = ?`, now, id);
       if (!silent) logEvent(this.c.store, now, 'blocked', 'baton', { ticket: id, blocks: blocking.map((b) => ({ kind: b.kind, ref: b.ref, ...(b.leg ? { leg: b.leg } : {}) })) }, id);
     } else if (!blocking.length && t.blocked_since != null) {
       this.exec('UPDATE tickets SET blocked_since = NULL WHERE id = ?', id);
@@ -230,7 +262,9 @@ export class Blocks {
    * tickets whose stored causes changed, for `write`. A need that fails the resource rule is kept
    * out (it blocks nothing); a decision whose id is Baton's own (`baton:`) is dropped, one naming
    * a leg that is not a posted next leg sits on the whole ticket, and a `url` outside the ticket's
-   * repositories is dropped — the decision stays (R-BTN-78, §10.4). What was dropped is returned,
+   * repositories is dropped — the decision stays (R-BTN-78, §10.4). A well-formed need for a
+   * resource not registered is kept (registering it later takes effect) and reported as
+   * `<ticket>:needs:<name>:unregistered` (R-BTN-76). What was dropped or is unregistered is returned,
    * for the snapshot's event: logged, never refused.
    */
   posted(repo: string, stations: Map<string, PostedStation>, live: string[]): { changed: string[]; dropped: string[] } {
@@ -467,7 +501,9 @@ export class Blocks {
                  ON CONFLICT (repository_id, resource) DO UPDATE SET usable_workers = excluded.usable_workers, open_workers = excluded.open_workers`,
         n.repository_id, n.resource, usable, open);
       const was = !!before && before.usable_workers > 0 && before.open_workers === 0;
-      if (!before || was !== (usable > 0 && open === 0)) flipped.add(key);
+      // The condition flipping rewrites the rows; the fleet becoming able to answer at all settles
+      // what the tickets lost while it could not (`settleLost`).
+      if (!before || was !== (usable > 0 && open === 0) || (before.usable_workers > 0) !== (usable > 0)) flipped.add(key);
     }
     for (const key of haveRes.keys()) {
       const [repo, resource] = key.split('\u0000');

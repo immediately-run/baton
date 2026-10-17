@@ -4,11 +4,12 @@
 // refused at registration; another repository's worker is refused `forbidden` for go_plus; one
 // reading blocks both resources' legs; a reading whose detail fails the schema is `invalid-params`;
 // an unavailable reading lapses at its `until`; an administrator's reading wins and an instrument's
-// takes over after it (`overridden` meanwhile); overnight the rows clear silently, none is written and
-// `other` lists `no-instance`; G's leg decision refuses the advance into it, not the claim; H's decision naming a
-// leg it lacks sits on the whole ticket and its `url` is dropped. The 150 unblockings that dispatch
-// 100 entries and `{truncated: 50}` are in test/unit/blocks.test.ts: the formal model cannot replay
-// an instance of 152 tickets (scripts/check-traces.mjs), and the cap is the core's alone.
+// takes over after it (`overridden` meanwhile); overnight the rows clear silently, none is written,
+// `other` lists `no-instance`, and the morning's answer logs the `unblocked` the evening was owed;
+// G's leg decision refuses the advance into it, not the claim; H's decision naming a leg it lacks
+// sits on the whole ticket and its `url` is dropped. The 150 unblockings that dispatch 100 entries
+// and `{truncated: 50}` are in test/unit/blocks.test.ts: the formal model cannot replay an instance
+// of 152 tickets (scripts/check-traces.mjs), and the cap is the core's alone.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, cutover, keyCall, placed, rows, setAdminKeys, setClock, syncCall, syncToken, tick } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
@@ -120,10 +121,16 @@ describe('S-BTN-45 the edges of blocks', () => {
     const night = await blocksOf('D');
     expect(night).toMatchObject({ blocked: false, blocks: [] });
     expect(night.other).toEqual(expect.arrayContaining([{ kind: 'no-instance', detail: { leg: 'review', resource: DS } }]));
-    // The first heartbeat in the morning (the probe's reading long lapsed) writes no block it then clears.
-    const before = (await rows<{ n: number }>(`SELECT count(*) AS n FROM events WHERE kind IN ('blocked', 'unblocked')`))[0].n;
+    // The first heartbeat in the morning: the probe's reading lapsed overnight, so go_plus is back
+    // to unknown while nobody could see it. The fleet answers again, and D and F get the `unblocked`
+    // their evening `blocked` was owed (R-BTN-77 as amended) — no block written and cleared.
+    const seq = (await rows<{ s: number }>('SELECT max(seq) AS s FROM events'))[0].s;
     await w1.beat();
-    expect((await rows<{ n: number }>(`SELECT count(*) AS n FROM events WHERE kind IN ('blocked', 'unblocked')`))[0].n).toBe(before);
+    expect(await rows(`SELECT kind, ticket_id, json_extract(detail_json, '$.cleared') AS cleared FROM events WHERE seq > ? AND kind IN ('blocked', 'unblocked') ORDER BY ticket_id`, seq)).toEqual([
+      { kind: 'unblocked', ticket_id: 'docs:D', cleared: JSON.stringify([{ kind: 'resource', ref: DS, leg: 'review' }]) },
+      { kind: 'unblocked', ticket_id: 'docs:F', cleared: JSON.stringify([{ kind: 'resource', ref: GLM, leg: 'review' }]) },
+    ]);
+    expect(await rows('SELECT answer_lost FROM tickets WHERE answer_lost IS NOT NULL')).toEqual([]);
     expect((await blocksOf('D')).blocked).toBe(false);
   });
 

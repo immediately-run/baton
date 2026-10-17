@@ -6,6 +6,9 @@
 -- R-BTN-75: set while the ticket is blocked; NULL otherwise.
 ALTER TABLE tickets ADD COLUMN blocked_since INTEGER;
 CREATE INDEX tickets_blocked ON tickets(repository_id) WHERE blocked_since IS NOT NULL;
+-- R-BTN-77 as amended (R3-1251): the `resource` rows a ticket lost, silently, when no live worker
+-- could answer for them any more (JSON {kind, ref, leg}); the next answer settles it. NULL otherwise.
+ALTER TABLE tickets ADD COLUMN answer_lost TEXT;
 CREATE INDEX requires_by_name ON ticket_requires(name);  -- R-BTN-75: tickets needing a capability
 
 CREATE TABLE leg_needs (                         -- R-BTN-76: the resources a next leg needs, as posted

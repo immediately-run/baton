@@ -150,6 +150,79 @@ describe('R-BTN-75, R-BTN-76: the counts crossing zero', () => {
   });
 });
 
+describe('R-BTN-76, R-BTN-77: a worker\'s own instance, and an answer lost', () => {
+  it('a worker-scope reading blocks; its lapse unblocks and deletes the state row; a worker that does not exist is not-found', async () => {
+    const W = 'github-api';
+    await keyCall(admin, '/v1/admin/resources', { name: W, scope: 'worker', detail_schema: SCHEMA });
+    const probe = await makeKey('ssh-ed25519', 'probe');
+    expect((await keyCall(admin, '/v1/admin/probes', { public_key: probe.publicKey, label: 'p' })).status).toBe(200);
+    git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [W] }] });
+    await git.post();
+    await cutover(T0);
+    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue']);
+    const inst = `${W}@worker:${w.id}`;
+    expect((await w.call('/v1/runner/readings', { readings: [{ instance: inst, available: false, valid_for: 600 }] })).json).toMatchObject({ ok: true, refused: [] });
+    expect(await rows('SELECT instance, state FROM instance_states')).toEqual([{ instance: inst, state: 'unavailable' }]);
+    expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: W, leg: 'review', since: T0 }]);
+    expect(await since('D')).toBe(T0);
+    await setClock(T0 + 11 * MIN);
+    await w.beat();
+    await tick();
+    // Lapsed: unknown with no reading, so the worker instance's row goes, and D is unblocked.
+    expect(await rows('SELECT * FROM instance_states')).toEqual([]);
+    expect(await rows(`SELECT detail_json AS d FROM events WHERE kind = 'resource' ORDER BY seq`)).toEqual([
+      { d: JSON.stringify({ instance: inst, state: 'unavailable' }) },
+      { d: JSON.stringify({ instance: inst, state: 'unknown', was: 'unavailable' }) },
+    ]);
+    expect(await blockRows('D')).toEqual([]);
+    expect(await kinds('unblocked')).toEqual(['docs:D']);
+    const ghost = await signed(probe, '/v1/probe/readings', { body: { readings: [{ instance: `${W}@worker:999`, available: false }] } });
+    expect(ghost.json.refused).toEqual([{ instance: `${W}@worker:999`, code: 'not-found' }]);
+    expect(await rows('SELECT * FROM instance_states')).toEqual([]);
+  });
+
+  it('an answer lost overnight and given back blocked re-blocks silently: the evening\'s `blocked` stands', async () => {
+    await keyCall(admin, '/v1/admin/resources', { name: R, scope: 'account', detail_schema: SCHEMA });
+    await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
+    git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R] }] });
+    await git.post();
+    await cutover(T0);
+    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }] });
+    expect(await since('D')).toBe(T0);
+    expect(await kinds('blocked')).toEqual(['docs:D']);
+    // The worker's lease lapses: no one can answer, so the row goes silently and the loss is kept.
+    await setClock(T0 + 16 * MIN);
+    await tick();
+    expect(await blockRows('D')).toEqual([]);
+    expect(await since('D')).toBeNull();
+    expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: JSON.stringify([{ kind: 'resource', ref: R, leg: 'review' }]) }]);
+    expect(await kinds('unblocked')).toEqual([]);
+    // It comes back: the resource is still down, so D is blocked again with no second `blocked`.
+    await w.beat();
+    expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 + 16 * MIN }]);
+    expect(await since('D')).toBe(T0 + 16 * MIN);
+    expect(await kinds('blocked')).toEqual(['docs:D']);
+    expect(await kinds('unblocked')).toEqual([]);
+    expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: null }]);
+  });
+
+  it('a well-formed need for an unregistered resource is reported and kept; registering it later takes effect', async () => {
+    git.add('U', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: ['llm:not-yet'] }] });
+    expect(((await git.post()) as Record<string, unknown>).dropped).toEqual(['docs:U:needs:llm:not-yet:unregistered']);
+    expect(await rows(`SELECT json_extract(detail_json, '$.dropped') AS d FROM events WHERE kind = 'snapshot-accepted' ORDER BY seq DESC LIMIT 1`)).toEqual([{ d: JSON.stringify(['docs:U:needs:llm:not-yet:unregistered']) }]);
+    expect(await rows('SELECT leg, resource FROM leg_needs WHERE ticket_id = ?', 'docs:U')).toEqual([{ leg: 'review', resource: 'llm:not-yet' }]);
+    expect(await blockRows('U')).toEqual([]);
+    // Registered later, with an instance a live worker uses that is down: the kept need now blocks.
+    await keyCall(admin, '/v1/admin/resources', { name: 'llm:not-yet', scope: 'account', detail_schema: SCHEMA });
+    await keyCall(admin, '/v1/admin/instances', { name: 'acct:later', serves: ['llm:not-yet'], repositories: ['docs'] });
+    await cutover(T0);
+    await grantedWorker(owner, 'docs', 'wu', ['agent-venue'], ['acct:later']);
+    await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'acct:later', available: false, valid_for: 3600 }] });
+    expect(await blockRows('U')).toEqual([{ kind: 'resource', ref: 'llm:not-yet', leg: 'review', since: T0 }]);
+  });
+});
+
 describe('R-BTN-77: unblocking wakes work, bounded', () => {
   it('150 tickets unblocked in one window dispatch 100 entries and {truncated: 50}', async () => {
     const sent: Workflow[] = [];

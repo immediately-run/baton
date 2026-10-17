@@ -914,13 +914,16 @@ export class BatonCore {
 
   /** A snapshot's share of the blocks (R-BTN-75): its `needs` and `decisions` stored, the fleet
    *  counts brought to what is needed now, and the rows of every ticket whose causes changed —
-   *  its row, its needs or decisions, or its queued leg — rewritten. Returns what it dropped: a
-   *  need failing the resource rule, a decision with a reserved id (R-BTN-76, R-BTN-78). */
+   *  its row, its needs or decisions, or its queued leg — rewritten. Returns what it reports: a
+   *  need failing the resource rule or naming an unregistered resource, a decision with a reserved
+   *  id or a url outside the ticket's repositories (R-BTN-76, R-BTN-78). */
   private applyBlocks(r: string, stations: Map<string, PostedStation>, upserted: string[], legsBefore: Map<string, string | null>, removed = false): string[] {
     const live = this.sql<{ local_id: string }>('SELECT local_id FROM tickets WHERE repository_id = ?', r).map((x) => x.local_id);
     const { changed, dropped } = this.blocks.posted(r, stations, live);
-    // The counts follow what is needed: only a post that changed a ticket's row (its `requires`)
-    // or its needs, or dropped a ticket, recounts (R-BTN-75, R-BTN-76).
+    // The counts follow what is needed: a post that changed a ticket — its row (where `requires`
+    // lives), its needs or its decisions — or dropped one recounts; a post that changed nothing
+    // does not (R-BTN-75, R-BTN-76). Coarser than "what is needed changed", by design: a row's
+    // hash does not say which field moved, and a recount that finds no crossing writes no row.
     if (upserted.length || changed.length || removed) this.blocks.recount();
     const moved = [...this.queuedLegs(r)].filter(([id, leg]) => legsBefore.get(id) !== leg).map(([id]) => id);
     this.blocks.write([...upserted, ...changed, ...moved]);
