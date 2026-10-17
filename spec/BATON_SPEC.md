@@ -6326,7 +6326,7 @@ integration suite that drives them together, on a controllable clock, proves the
   | S-BTN-55 the sync key | `plain`'s sync key posts a board; then registering `docs`' sync key for `plain` too, a post by a worker key, by `plain`'s mirror key, by a revoked sync key, and a replay of the first post | the first is accepted; the second registration is `conflict`; the worker key's and the mirror key's posts are `forbidden`, the revoked key's and the replay `unauthenticated`; registering a worker key as a sync key is `conflict` |
   | S-BTN-56 other forges and the edges of a want | `lab` (forge `gitlab`, a GitLab CI identity) and `tea` (forge `gitea`, sync key), each with a webhook secret and a dispatch adapter in `BATON_FORGE_SECRETS`; a GitLab notification with a wrong `X-Gitlab-Token`, a Gitea one with a forged signature, then good ones; a GitLab `id_tokens` JWT with audience `#mirror` posting a board, then one with `#sync`; a claim ends while `lab`'s sync is reading with an observation number already handed out; `tea`'s dispatch adapter answers 500; a decision `url` of `<lab web_base>-evil/…`, one with a port, one under `lab`'s `web_base`; `baton repo sync --defaults-only` over a ticket on a course with its own `sync.mjs`, and run through `npx` from the checkout | the bad notifications are refused in the Worker with no object request, the good ones record wants; the `#mirror` token's post is `forbidden` and the `#sync` one accepted; that run's post leaves the want set and the next run's clears it; the failed dispatch is retried once and the want stays for the runner; only the URL under `lab`'s `web_base` is kept; `--defaults-only` fails that ticket and refuses to start from the checkout |
 
-- **R-BTN-68 (the core is a checked model).** *(Amendment 2026-10-14, owner.)* Baton's core
+- **R-BTN-68 (the core is a checked model).** *(Amendment 2026-10-14, owner. Amended 2026-10-17, owner, R3-1254: the model is checked on the author's machine, not on hosted CI runners.)* Baton's core
   state machine — claims, fencing, stations and legs, observations, ends and their
   confirmation, bars and gates — is also written as a Quint model, with course hooks and
   sync output nondeterministic within their contract, so its properties hold for every
@@ -6334,9 +6334,15 @@ integration suite that drives them together, on a controllable clock, proves the
   confirmed by an earlier observation; observations only increase; staleness only when git
   takes the ticket back; every gate holds at claim and advance) and its liveness (every end
   confirmed or flagged; every fence clears; a ready leg with an eligible idle worker is
-  eventually taken) in CI, and every integration scenario's event log is checked against it
+  eventually taken), and every integration scenario's event log is checked against it
   (R3-1243, R3-1244). Both are cutover preconditions (§13). A spec change to a requirement
-  the model cites changes the model in the same baton PR.
+  the model cites changes the model in the same baton PR. The checking runs on the author's
+  machine, not on hosted CI runners, whose time limits it outgrew: a PR that changes the
+  model, the core, the replay or the trace check carries `npm run model:full`'s report for its
+  head — simulation, witnesses, the model-drawn traces driving the core, and the proof — and the
+  review gate checks the report's commit. CI runs the deterministic part on every change: the
+  model's typecheck and regression runs, the scenario traces checked against it, and the
+  `@impl`/`@model` links.
 - **R-BTN-31 (part of drafting).** Every roadmap item in project `baton` names, in its **Tests** section, the
   `S-BTN-n` scenarios it adds or makes pass — new scenarios get the next number and a row in
   this table in the same change — and its exit criteria require `npm run test:baton`
@@ -6803,7 +6809,8 @@ table is in docs' `BATON_DOCS_DEPLOYMENT` §16, where `check-spec-anchors` re-re
   another course's legs of the same name. **Rejected:** per-repository bars (the fifth
   revision).
 - **A checked model of the core** (2026-10-14, owner; R-BTN-68): a Quint model, model-checked
-  in CI and checked against every scenario's trace, before cutover.
+  before merge and checked against every scenario's trace, before cutover. *(Amended
+  2026-10-17, owner: checked on the author's machine, not in CI — R-BTN-68.)*
 - **Revisions after the second review, and for courses that change without Baton**
   (2026-10-14, owner direction; §2d):
   - **Trust the holder's evidence** (owner). *(Superseded the same day by the course file,
