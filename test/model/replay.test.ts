@@ -3,8 +3,8 @@
 // take), and each trace drives the core on the local host — fake clock, the trace's choices —
 // one model step at a time, comparing the core's state projection (test/integration/trace.ts)
 // with the trace's state after every step. A difference is a step where the code and the
-// checked model disagree. `REPLAY_TRACES` sets the count: 200 in `npm test`, more in CI's
-// `model` job.
+// checked model disagree. `REPLAY_TRACES` sets the count: 200 in `npm test`, 1,000 in
+// `npm run model:full`.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';

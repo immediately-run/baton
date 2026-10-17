@@ -19,19 +19,33 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 | `instances.qnt` | `sim` (R3-1243's bounds: 3 workers, 2 tickets, 2 overlapping sync runs) and `small` (2 workers, 1 ticket, 1 sync run, for Apalache) |
 | `regressions.qnt` | one deterministic run per defect the reviews found (24), each asserting the merged spec does not reach it |
 | `replay.qnt` | the traces `test/model/replay.test.ts` drives the core with (R3-1244): `sim`'s instance, every action the harness can make the core take |
-| `check.mjs` | `npm run model` |
+| `check.mjs` | `npm run model` and `npm run model:quick` |
+| `full.mjs` | `npm run model:full`: every check, with a report for the PR |
+| `verify.mjs` | `npm run model:verify` |
 
 ## Commands
 
+**Where the checks run (R-BTN-68, amended 2026-10-17).** Model checking runs on the
+author's machine, not on hosted CI runners, whose time limits it outgrew. A pull request that
+changes `model/`, `src/core/`, the replay or the trace check carries `npm run model:full`'s
+report in its body, and the review gate checks that the report's commit is the PR's head. CI
+runs only the deterministic part, inside `npm test`: `npm run model:quick`, the scenario traces
+(`npm run traces`), the links (`npm run model:links`) and 200 model-drawn traces driving the core.
+
+- `npm run model:full` — every check below, in order: `npm run model`, the model-based tests
+  with 1,000 traces, and `npm run model:verify`. It runs every step even after a failure and
+  prints a Markdown report on stdout: the commit (flagged when the tree has uncommitted changes
+  to the files the checks read), the Quint version, and each check's result and minutes. Paste
+  it into the PR. Needs Java for the last step.
 - `npm run model` — typecheck, the 24 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
-  eight reachability witnesses. No JVM; about 6 minutes, run by CI's `model` job. `npm test`
-  runs it with `MODEL_SAMPLES=1000`, which also scales the `progressStep` runs (300), in
-  about two minutes.
-- `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 5, about
-  15 minutes on 4 CPUs since the round-1 fixes (depth 6 does not finish in CI's budget). Needs
-  Java (CI installs Temurin 21); the first run downloads Apalache. `model/verify.mjs` compiles
+  eight reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
+  and scales the `progressStep` runs (30%).
+- `npm run model:quick` — the typecheck and the regression runs alone; `npm test` runs it.
+- `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 5: about
+  15 minutes on 4 CPUs on `main` before R3-1254, 49 minutes with its queued leg (measured beside
+  another model run). Needs Java; the first run downloads Apalache. `model/verify.mjs` compiles
   the model to Quint's JSON IR in a file and runs Apalache's command line on it: `quint verify`
   sends the model to an Apalache server in one request, whose reader refuses a string over 20 MB,
   and `small` compiles to just over that since R3-1254 (19.8 MB before it).
