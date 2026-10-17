@@ -6,7 +6,7 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
-import { COURSE_ID as LEG_ID, isHttpsPointer, LOCAL_ID, SESSION_NAME, TAG } from './validate';
+import { ASKS, COURSE_ID as LEG_ID, DECISION_ID, DECISIONS_MAX, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG } from './validate';
 import type { Step } from './graph';
 
 /** One factory-state item, as the sync posts it (`docs/scripts/factory-state.mjs`). Only the
@@ -66,9 +66,20 @@ export interface PostedStation {
   next_leg: string | null;
   next_source: 'course' | 'marker' | 'inferred' | 'holder';
   handoff_url: string | null;
-  next: { leg: string; state: 'ready' | 'waiting'; waiting_on: string | null }[];
+  next: { leg: string; state: 'ready' | 'waiting'; waiting_on: string | null; needs?: string[] }[];
+  /** R-BTN-78: the ticket's open decisions as its sync posts them; checked for shape here, each
+   *  one's `leg` and `url` judged against the ticket when stored (`Blocks.posted`). */
+  decisions?: PostedDecision[];
   /** Tags barred from each leg of the course the sync knows them for (`ticket_bars`). */
   bars: Record<string, string[]>;
+}
+
+/** R-BTN-78: an open decision a sync posts with a ticket's station. */
+export interface PostedDecision {
+  id: string;
+  leg?: string | null;
+  asks: string;
+  url?: string | null;
 }
 
 export interface BoardPayload {
@@ -270,6 +281,21 @@ function checkNormative(p: BoardPayload) {
         if (n.waiting_on != null && (typeof n.waiting_on !== 'string' || !WAITING_ON.test(n.waiting_on))) fail(`${at}.next[${j}].waiting_on`, 'must be a short label');
         if (legs.has(n.leg)) fail(`${at}.next[${j}]`, `${n.leg} appears twice`);
         legs.add(n.leg);
+        // R-BTN-76: a name that fails the resource rule is kept out when stored, blocking nothing;
+        // only the list's shape refuses.
+        if (n.needs !== undefined && !(isObjArr(n.needs, NEEDS_MAX) && n.needs.every((x) => typeof x === 'string' && /^[^\u0000-\u001f\u007f]{1,100}$/.test(x)))) fail(`${at}.next[${j}].needs`, `must be a list of at most ${NEEDS_MAX} resource names`);
+      }
+      if (st.decisions !== undefined) {
+        if (!isObjArr(st.decisions, DECISIONS_MAX)) fail(`${at}.decisions`, `must be a list of at most ${DECISIONS_MAX}`);
+        const ids = new Set<string>();
+        for (const [j, d] of st.decisions.entries()) {
+          if (!isObj(d) || typeof d.id !== 'string' || !DECISION_ID.test(d.id)) fail(`${at}.decisions[${j}].id`, `must match ${DECISION_ID}`);
+          if (typeof d.asks !== 'string' || !ASKS.test(d.asks)) fail(`${at}.decisions[${j}].asks`, `must match ${ASKS}`);
+          if (d.leg != null && (typeof d.leg !== 'string' || !LEG_ID.test(d.leg))) fail(`${at}.decisions[${j}].leg`, 'must be a leg id');
+          if (d.url != null && typeof d.url !== 'string') fail(`${at}.decisions[${j}].url`, 'must be a string');
+          if (ids.has(d.id)) fail(`${at}.decisions[${j}].id`, `${d.id} appears twice`);
+          ids.add(d.id);
+        }
       }
       if (!isObj(st.bars) || Object.keys(st.bars).length > BARS_MAX) fail(`${at}.bars`, `must map at most ${BARS_MAX} legs to tags`);
       for (const [leg, tags] of Object.entries(st.bars)) {
@@ -287,7 +313,8 @@ export function stationOf(st: PostedStation): PostedStation {
     next_leg: st.next_leg,
     next_source: st.next_source,
     handoff_url: st.handoff_url ?? null,
-    next: st.next.map((n) => ({ leg: n.leg, state: n.state, waiting_on: n.waiting_on ?? null })),
+    next: st.next.map((n) => ({ leg: n.leg, state: n.state, waiting_on: n.waiting_on ?? null, needs: [...new Set(n.needs ?? [])] })),
+    decisions: (st.decisions ?? []).map((d) => ({ id: d.id, leg: d.leg ?? null, asks: d.asks, url: d.url ?? null })),
     bars: Object.fromEntries(Object.entries(st.bars).map(([leg, tags]) => [leg, [...new Set(tags)].sort()])),
   };
 }

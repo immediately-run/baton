@@ -54,6 +54,9 @@ export interface GateContext {
   lastEndObservation: number;
   /** At an advance, the tags the holder bars from the new leg itself (R-BTN-63). */
   holderBars?: string[];
+  /** R-BTN-75, R-BTN-78: the ticket's stored `ticket` and `decision` blocks — the kinds that
+   *  refuse (`leg` '' for the whole ticket). `capability` refuses through rule 4; `resource` is advice. */
+  blocks?: { kind: string; leg: string }[];
 }
 
 export type Phase = 'claim' | 'advance';
@@ -92,9 +95,16 @@ export function claimHolds(c: { status: string; confirmed_at: number | null; fen
  * and rule 9 is not re-checked, so a course change never strands a claim halfway (R-BTN-22).
  */
 export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, phase: Phase, facts: GateContext): GateVerdict {
+  // Rule 1's blocks (R-BTN-75, R-BTN-78): an open dependency refuses a claim; an open decision on
+  // the whole ticket or on the leg refuses a claim of it and an advance into it — never fails open.
+  const blocks = facts.blocks ?? [];
+  const decided = blocks.some((b) => b.kind === 'decision' && (b.leg === '' || b.leg === leg.name));
   if (phase === 'claim') {
     if (leg.state !== 'ready') return refuse(1);
+    if (decided || blocks.some((b) => b.kind === 'ticket')) return refuse(1, 'blocked');
     if (facts.claims.some(claimHolds)) return refuse(3);
+  } else if (decided) {
+    return refuse(1, 'blocked');
   }
   if (facts.override?.hold) return refuse(3, 'held');
 

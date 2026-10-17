@@ -8,13 +8,14 @@ import { transcriptUrl } from './links';
 import { isUniqueViolation, logEvent, randomHex } from './db';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
-import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkEnd, checkOverride, checkResolve, type End } from './validate';
+import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkEnd, checkOverride, checkResolve, isGrantedKey, type End } from './validate';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
 import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Step } from './graph';
 import type { Seen, Stations } from './stations';
 import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
 import type { Row, SqlValue, Store } from './ports';
+import type { Blocks } from './blocks';
 const EXPEDITE_BOUND = 2; // §7.2 rule 2, advice
 /** §2e: a claim regressed this long is listed under Needs you. */
 export const REGRESSED_FLAG_MS = 30 * 60_000;
@@ -36,6 +37,8 @@ export interface Ctx {
   /** §12: ask for the ticket's repository's sync or mirror to be dispatched once this
    *  request's transaction has committed. */
   dispatch?: (kind: 'mirror' | 'sync', ticketId: string) => void;
+  /** R-BTN-75: whether a claim holds a ticket moves its blocked state; each change says so. */
+  blocks?: Blocks;
 }
 
 interface WorkerFacts {
@@ -202,7 +205,7 @@ export class Claims {
    *  registered works only where it is granted; a bearer token or a BATON_KEYS seed key is not
    *  granted at all and keeps its interim reach until the seed retires (null). */
   private grantsOf(credential: string, createdBy: string | null): WorkerFacts['grants'] {
-    if (!createdBy || !/^(owner|admin):/.test(createdBy)) return null;
+    if (!isGrantedKey(createdBy)) return null;
     return Object.fromEntries(this.rows<{ repository_id: string; capabilities: string; max_tier: number | null }>(
       'SELECT repository_id, capabilities, max_tier FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', credential)
       .map((g) => [g.repository_id, { capabilities: JSON.parse(g.capabilities) as string[], max_tier: g.max_tier }]));
@@ -280,6 +283,7 @@ export class Claims {
       headObservation: this.rows<{ n: number }>('SELECT observation AS n FROM board_head WHERE repository_id = ?', item.repository)[0]?.n ?? 0,
       lastEndObservation: this.rows<{ n: number | null }>('SELECT MAX(end_observation) AS n FROM claims WHERE ticket_id = ?', item.id)[0]?.n ?? -1,
       holderBars: opts.holderBars,
+      blocks: this.rows<{ kind: string; leg: string }>(`SELECT kind, leg FROM ticket_blocks WHERE ticket_id = ? AND kind IN ('ticket', 'decision')`, item.id),
     };
     return gatesFor({ declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants }, ticket, this.postedLeg(item, leg, phase), phase, facts);
   }
@@ -322,6 +326,8 @@ export class Claims {
                                 OR (c.status = 'reaped' AND c.fence_pending = 1)))                             -- rule 3
            AND NOT EXISTS (SELECT 1 FROM ticket_overrides o WHERE o.ticket_id = w.id
                            AND (o.hold = 1 OR o.retry_after > :now))                                          -- rules 3, 10
+           AND NOT EXISTS (SELECT 1 FROM ticket_blocks k WHERE k.ticket_id = w.id
+                           AND (k.kind = 'ticket' OR (k.kind = 'decision' AND k.leg IN ('', a.leg))))         -- rule 1's blocks
            AND (:granted = 0 OR EXISTS (SELECT 1 FROM worker_grants g WHERE g.credential_id = :credential
                                         AND g.repository_id = w.repository_id AND g.revoked_at IS NULL))      -- rule 7
            AND NOT EXISTS (SELECT 1 FROM ticket_requires r WHERE r.ticket_id = w.id
@@ -375,7 +381,9 @@ export class Claims {
         const g = groups.get(key) ?? { rows: [], done: false };
         groups.set(key, g);
         const item = this.item(c.id);
-        if (item?.station?.next_leg && this.gate(w, item, item.station.next_leg, 'claim').ok) g.rows.push({ ...c, item });
+        // R-BTN-76: a leg blocked on a resource — for the fleet, or for this worker by its own
+        // instances — is left out after the gate query: advice, never a refusal.
+        if (item?.station?.next_leg && this.gate(w, item, item.station.next_leg, 'claim').ok && !this.resourceAdvice(w.id, item.id, item.station.next_leg).length) g.rows.push({ ...c, item });
       }
       for (const [key, g] of groups) if ((counts.get(key) ?? 0) < 50) g.done = true;
     }
@@ -409,7 +417,7 @@ export class Claims {
   /** The refusal a failed gate becomes (§11): `barred-tag`, `stale-skills` and `backing-off` have
    *  codes of their own; every other gate is `not-eligible` naming the rule. */
   private refusal(ticketId: string, v: Exclude<GateVerdict, { ok: true }>, phase: Phase): BatonError {
-    const code = v.rule === 8 ? 'barred-tag' : v.rule === 9 ? 'stale-skills' : v.rule === 10 ? 'backing-off' : 'not-eligible';
+    const code = v.code === 'blocked' ? 'blocked' : v.rule === 8 ? 'barred-tag' : v.rule === 9 ? 'stale-skills' : v.rule === 10 ? 'backing-off' : 'not-eligible';
     return new BatonError(code, `${ticketId}: ${v.code} at ${phase === 'claim' ? 'a claim' : 'an advance'}`, { rule: v.rule, rule_code: v.code });
   }
 
@@ -425,9 +433,11 @@ export class Claims {
       // R-BTN-45: advice never refuses; a claim against it is accepted and recorded.
       const recs = this.recommend(w, 50);
       const place = recs.findIndex((r) => r.ticket_id === wanted);
+      const resources = this.resourceAdvice(w.id, item.id, item.station.next_leg);
       const overridden = [
         ...(place !== 0 ? [{ advice: 'order', place: place < 0 ? null : place + 1, first: recs[0]?.ticket_id ?? null }] : []),
         ...(item.expedite && this.expediteActive() >= EXPEDITE_BOUND ? [{ advice: 'expedite-bound', bound: EXPEDITE_BOUND }] : []),
+        ...(resources.length ? [{ advice: 'resource', leg: item.station.next_leg, resources }] : []),
       ];
       return { item, advice: overridden.length ? { recommendation: place < 0 ? null : recs[place], overridden } : place === 0 ? { recommendation: recs[0] } : null };
     }
@@ -444,6 +454,23 @@ export class Claims {
       throw new BatonError('stale-skills', 'this worker does not declare the ready tickets’ courses at their min_worker_version — it declares an older version or none (R-BTN-22, R-BTN-65)', { rule: 9 });
     }
     throw new BatonError('no-eligible-ticket', 'no ready ticket fits this worker');
+  }
+
+  /** R-BTN-76: the resources that make `leg` of the ticket advice against, for this worker: the
+   *  fleet's stored `resource` rows on it, and those its own usable instances are all down for. */
+  private resourceAdvice(workerId: number, ticketId: string, leg: string): string[] {
+    if (!this.c.blocks || !this.rows('SELECT 1 FROM leg_needs WHERE ticket_id = ? AND leg = ? LIMIT 1', ticketId, leg).length) return [];
+    const fleet = this.rows<{ ref: string }>(`SELECT ref FROM ticket_blocks WHERE ticket_id = ? AND kind = 'resource' AND leg = ?`, ticketId, leg).map((r) => r.ref);
+    const mine = this.c.blocks.forWorker(workerId, ticketId).blocks.filter((b) => b.kind === 'resource' && b.leg === leg).map((b) => b.ref);
+    return [...new Set([...fleet, ...mine])].sort();
+  }
+
+  /** R-BTN-77: whether `workerId` would pass the claim gates for the ticket's queued leg now — who
+   *  an `unblocked` message goes to. */
+  fits(workerId: number, ticketId: string): boolean {
+    const item = this.item(ticketId);
+    if (!item?.station?.next_leg) return false;
+    return this.gate(this.worker(workerId), item, item.station.next_leg, 'claim').ok;
   }
 
   // ── the worker calls (§11) ──────────────────────────────────────────────────────────────
@@ -498,6 +525,7 @@ export class Claims {
     }
     const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
     this.event('claimed', `worker:${workerId}`, { request_id: b.request_id, station: st.station, leg: st.next_leg }, item.id, id);
+    this.c.blocks?.held(item.id, true); // a claimed ticket is not waiting (R-BTN-77: silently)
     if (advice?.overridden) this.event('advice-overridden', `worker:${workerId}`, { overridden: advice.overridden }, item.id, id);
     this.c.dispatch?.('mirror', item.id);
     this.c.dispatch?.('sync', item.id); // R-BTN-73: after every claim
@@ -623,6 +651,9 @@ export class Claims {
     if (unmet) throw new BatonError('not-eligible', `policy: ${leg} must bar a ${unmet.tag_prefix} tag (an owner's required bar)`, { rule: 8, rule_code: 'policy' });
     const v = this.gate(this.worker(workerId), item, leg, 'advance', { except: claimId, holderBars: b.bars });
     if (!v.ok) throw this.refusal(c.ticket_id, v, 'advance');
+    // R-BTN-76: an advance into a leg blocked on a resource is accepted — the holder may know better.
+    const resources = this.resourceAdvice(workerId, c.ticket_id, leg);
+    if (resources.length) this.event('advice-overridden', `worker:${workerId}`, { overridden: [{ advice: 'resource', leg, resources }] }, c.ticket_id, claimId);
 
     const now = this.c.now();
     const n = this.handedOut(repo);
@@ -657,6 +688,7 @@ export class Claims {
         this.exec(`UPDATE messages SET status = 'expired' WHERE to_worker_id = ? AND kind = 'release' AND status IN ('pending','delivered')
                    AND json_extract(payload_json, '$.ticket_id') = ? AND json_extract(payload_json, '$.reason') = 'stale-board'`, workerId, c.ticket_id);
         this.event('completed', `worker:${workerId}`, { end_reason: e.end_reason, ended_at_sha: e.ended_at_sha, after: 'released:stale-board' }, c.ticket_id, c.id);
+        this.c.blocks?.held(c.ticket_id, true);
         this.confirmByClosure(c.id);
         this.c.dispatch?.('sync', c.ticket_id);
         return { ok: true };
@@ -733,6 +765,8 @@ export class Claims {
     // §13 step 3: a legacy claim that ends takes its adoption request with it.
     this.exec('DELETE FROM adoptions WHERE claim_id = ?', claimId);
     this.writeResume(claimId, reason, now, opts.next ?? null);
+    // R-BTN-77: an end changes whether the ticket is blocked silently — it is not an unblocking.
+    this.c.blocks?.held(ticketId, true);
     if (status === 'completed') this.confirmByClosure(claimId);
     else this.applyRetryPolicy(claimId, ticketId, reason);
   }
@@ -916,6 +950,7 @@ export class Claims {
     if (!c) return false;
     this.exec('UPDATE claims SET fence_pending = 0 WHERE id = ?', claimId);
     this.event('fence-cleared', `worker:${workerId}`, { by: 'sidecar' }, c.ticket_id, claimId);
+    this.c.blocks?.held(c.ticket_id, false);
     return true;
   }
 
@@ -955,6 +990,7 @@ export class Claims {
       this.c.dispatch?.('mirror', c.ticket_id);
       this.event('released', `owner:${owner}`, { by: 'owner', unconfirmed: { end_reason: c.end_reason, ended_at_sha: c.ended_at_sha } }, c.ticket_id, claimId);
     }
+    this.c.blocks?.held(c.ticket_id, action !== 'confirm');
     return { ok: true };
   }
 
@@ -1002,6 +1038,7 @@ export class Claims {
       if (!c) continue;
       this.exec('UPDATE claims SET confirmed_at = ? WHERE id = ?', now, k.claim_id);
       this.event('confirmed', 'sync', { sha: k.sha }, c.ticket_id, k.claim_id);
+      this.c.blocks?.held(c.ticket_id, false);
       n++;
     }
     return n;
@@ -1037,6 +1074,7 @@ export class Claims {
     if (!closed && !atEnd) return false;
     this.exec('UPDATE claims SET confirmed_at = ? WHERE id = ?', this.c.now(), claimId);
     this.event('confirmed', 'sync', { by: closed ? 'closure' : 'end-station' }, c.ticket_id, claimId);
+    this.c.blocks?.held(c.ticket_id, false);
     return true;
   }
 
@@ -1068,6 +1106,7 @@ export class Claims {
       if (this.endShown(c, observation)) {
         this.exec('UPDATE claims SET confirmed_at = ? WHERE id = ?', this.c.now(), c.id);
         this.event('confirmed', 'sync', { observation }, c.ticket_id, c.id);
+        this.c.blocks?.held(c.ticket_id, false);
         confirmed++;
       } else if (c.end_reason === 'done' && this.confirmByClosure(c.id)) {
         confirmed++;
@@ -1219,6 +1258,7 @@ export class Claims {
       this.exec('UPDATE claims SET fence_pending = 0 WHERE id = ?', c.id);
       this.exec('UPDATE workers SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.worker_id);
       this.event('fence-cleared', 'alarm', { by: 'timeout' }, c.ticket_id, c.id);
+      this.c.blocks?.held(c.ticket_id, false);
     }
     // §7.1: a held history is accepted automatically 24 h after its first post.
     for (const h of this.rows<{ repository_id: string; sha: string }>('SELECT repository_id, sha FROM held_snapshots WHERE accepted_at IS NULL AND auto_accept_at <= ?', now)) {

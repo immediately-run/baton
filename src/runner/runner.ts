@@ -231,7 +231,10 @@ export class Runner {
         // the same way, as a release message — §11's heartbeat bars carry no release flag.)
         this.signalLeg('release', `released:${m.payload?.reason ?? 'requested'}`);
       } else if (m.kind === 'unblocked') {
-        this.unblocked = true; // R-BTN-77: the idle wait ends with the next claim attempt
+        // R-BTN-77, §9: the idle wait ends with the next claim attempt, and the cue is acknowledged
+        // so it is not delivered again with every beat.
+        this.unblocked = true;
+        this.toAck.push(m.id);
       }
     }
     if (!this.inflight) for (const id of this.toAck.splice(0)) await this.o.api.ack(id).catch(() => {});
