@@ -59,6 +59,19 @@ describe('ticketsMarkdown', () => {
     expect(tickets.find((t) => t.id === 'D')!).toMatchObject({ depends_on: ['P'], blocked_by: [] });
   });
 
+  it('reads the YAML shapes a wiki writes: a numeric id, a scalar for a list, quoted items, a decimal or quoted order', () => {
+    const { tickets } = ticketsMarkdown([
+      file('n.md', 'id: 1042\ndepends_on: S0\ntags: EXPEDITE\nprs: 12\norder: 3.5'),
+      file('q.md', 'id: Q\ndepends_on: ["S0", \'S1\']\nrequires:\n  - "agent-venue"\norder: "7"'),
+    ]);
+    expect(tickets.find((t) => t.id === '1042')).toMatchObject({ depends_on: ['S0'], expedite: true, course: { prs: ['12'] }, rank: 4 });
+    expect(tickets.find((t) => t.id === 'Q')).toMatchObject({ depends_on: ['S0', 'S1'], requires: ['agent-venue'], rank: 7 });
+    // A scalar repos name goes through the map like a list's, and an unmapped one still fails.
+    expect(() => ticketsMarkdown([file('r.md', 'id: R\nrepos: docs')])).toThrow(/r\.md: repos names docs/);
+    // An order that is not a number fails the sync naming the file, rather than unranking it.
+    expect(() => ticketsMarkdown([file('o.md', 'id: O\norder: soon')])).toThrow(/o\.md: order "soon" is not a number/);
+  });
+
   it('repos short names resolve through the map; owner/name stands; an unmapped name fails the sync', () => {
     const { tickets } = ticketsMarkdown([file('a.md', 'id: A\nrepos: [docs]')], { repos: { docs: 'immediately-run/docs' } });
     expect(tickets[0].repos).toEqual(['immediately-run/docs']);

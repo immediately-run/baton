@@ -8,14 +8,24 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { BatonApi, type Auth, type Transport } from '../runner/api';
+import { BatonApi, BatonRefusal, type Auth, type Transport } from '../runner/api';
+import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { DEFAULT_BRANCH_PATTERN, PR_COURSE, stationsPr, type PrFact, type StationsResult } from './course-pr';
 import { ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
 const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8' }).trim();
+/** `owner/name` of a checkout's `origin` remote (an SSH or HTTPS URL, or the proxy's
+ * `…/git/owner/name` form), or null when it has none. */
+function remoteSlug(root: string): string | null {
+  try {
+    return git(root, 'remote', 'get-url', 'origin').replace(/^git@[^:]+:/, '').replace(/^https?:\/\/[^/]+\//, '').replace(/^git\//, '').replace(/\.git$/, '');
+  } catch {
+    return null;
+  }
+}
 
 /** The baton package's root: the nearest directory above this module whose package.json is
  * `@immediately-run/baton`. Found by walking up, because this module runs both as source
@@ -68,6 +78,9 @@ export interface SyncArgs {
   url?: string;
   /** Recorded PR facts (tests, R-BTN-96's adapter offline); absent, the forge is read live. */
   factsFile?: string;
+  /** `--latest <branch>`: after the observation, fetch that branch and check it out detached, so
+   * a slow run for an older push posts the newest board (§7.1 step 2). The workflow passes it. */
+  latest?: string;
   token?: string;
   transport?: Transport;
   auth?: Auth;
@@ -86,6 +99,7 @@ export function parseSyncArgs(argv: string[], env: NodeJS.ProcessEnv = process.e
     if (a === '--root') out.root = value();
     else if (a === '--url') out.url = value();
     else if (a === '--facts') out.factsFile = value();
+    else if (a === '--latest') out.latest = value();
     else if (a === '--token') out.token = value();
     else throw new Error(`${a}: not a flag of baton repo sync`);
   }
@@ -106,16 +120,16 @@ function stationsResult(value: unknown, from: string): StationsResult {
   return { stations: v.stations, markers: v.markers ?? [], course_data: v.course_data ?? {} };
 }
 
-/** One sync (§7.1): the observation first, then the tickets and stations from the
- * repository's own code or the CLI's defaults, the registry from `baton.json`'s courses, then
- * the board post over the head. */
-export async function syncMain(args: SyncArgs): Promise<number> {
-  const log = args.log ?? ((l: string) => process.stdout.write(`${l}\n`));
-  const root = args.root;
-  const batonJsonPath = join(root, '.baton', 'baton.json');
-  if (!existsSync(batonJsonPath)) throw new Error(`${root} has no .baton/baton.json — run \`baton repo init\` first`);
-  const batonJson = JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson;
-  const url = args.url ?? batonJson.baton_url ?? DEFAULT_URL;
+/** What one reading of the repository posts (§7.1): every field but the protocol's own. */
+interface Board {
+  payload: { registry: Record<string, unknown>[]; tickets: TicketsResult['tickets']; closed: TicketsResult['closed']; stations: StationsResult['stations']; markers: StationsResult['markers']; course_data: Record<string, unknown> };
+  /** A ticket's status at this reading for §6.7's confirmations: its file's, `live`, or null once closed. */
+  statusOf: (id: string) => string | null;
+}
+
+/** Read the board from the checkout as it stands: the tickets and stations from the
+ * repository's own code or the CLI's defaults, the registry from `baton.json`'s courses. */
+async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void): Promise<Board> {
   const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
   const ctx = { root, settings };
 
@@ -123,7 +137,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   let result: TicketsResult;
   const own = join(root, '.baton', 'tickets.mjs');
   if (existsSync(own)) {
-    const mod = (await import(pathToFileURL(own).href)) as { default?: { tickets?: (ctx: unknown) => Promise<TicketsResult> } };
+    const mod = (await import(`${pathToFileURL(own).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default?: { tickets?: (ctx: unknown) => Promise<TicketsResult> } };
     if (typeof mod.default?.tickets !== 'function') throw new Error('.baton/tickets.mjs default-exports no tickets(ctx)');
     result = await mod.default.tickets(ctx);
   } else {
@@ -140,6 +154,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   if (stray) throw new Error(`ticket ${stray.id} is on course ${stray.course_id}, which .baton/baton.json's courses do not list`);
 
   // The PR facts: recorded (tests) or the forge's own, gathered through the adapter's seam.
+  const repository = remoteSlug(root);
   const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : await githubFacts(root, log);
 
   // Each course's stations, markers and course data: its own sync.mjs, else the default only
@@ -153,11 +168,11 @@ export async function syncMain(args: SyncArgs): Promise<number> {
     if (!existsSync(courseFile)) throw new Error(`.baton/courses/${c.id}/course.json is missing — run \`baton repo init --course ${c.id}\``);
     const course = JSON.parse(readFileSync(courseFile, 'utf8')) as { legs?: Record<string, unknown> };
     const branchPatterns = [c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])];
-    const fnCtx = { ...ctx, course: c.id, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, branchPatterns };
+    const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, branchPatterns };
     const syncMjs = join(root, '.baton', 'courses', c.id, 'sync.mjs');
     let fn: StationFn;
     if (existsSync(syncMjs)) {
-      const mod = (await import(pathToFileURL(syncMjs).href)) as { default?: { stations?: StationFn } };
+      const mod = (await import(`${pathToFileURL(syncMjs).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default?: { stations?: StationFn } };
       if (typeof mod.default?.stations !== 'function') throw new Error(`.baton/courses/${c.id}/sync.mjs default-exports no stations(ctx)`);
       fn = mod.default.stations;
     } else if (c.id === 'pr') {
@@ -175,23 +190,76 @@ export async function syncMain(args: SyncArgs): Promise<number> {
       branch_pattern: branchPatterns[0], ...(c.previous_branch_pattern ? { previous_branch_pattern: c.previous_branch_pattern } : {}),
     });
   }
-
-  // §7.1: the observation first, then the head, then the post over it.
-  const auth = args.auth ?? bearerAuth(args.token ?? process.env.BATON_SYNC_TOKEN ?? (await actionsToken(url)));
-  const api = new BatonApi({ url, transport: args.transport ?? ((req) => fetch(req)), auth }, log);
-  const observation = await api.observation();
-  const head = await api.head();
-  const sha = git(root, 'rev-parse', 'HEAD');
-  await api.board({ registry, sha, parent_sha: head.sha ?? null, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, observation: observation.observation });
-  log(`baton: posted ${sha.slice(0, 10)} — ${result.tickets.length} tickets, ${result.closed.length} closed`);
-  return 0;
+  const status = new Map(result.tickets.map((t) => [t.id, t.display?.status ?? 'live']));
+  return {
+    payload: { registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData },
+    statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
+  };
 }
 
-/** The markdown source's files: every file directly under `items`. */
+/** A Baton call through the vendored sync's `{ok, code}` shape: a refusal is its code, never a throw. */
+async function asResult(call: () => Promise<Record<string, any>>): Promise<Record<string, any>> {
+  try {
+    return { ok: true, ...(await call()) };
+  } catch (e) {
+    if (e instanceof BatonRefusal) return { ok: false, code: e.code };
+    throw e;
+  }
+}
+
+/** One sync (§7.1), its decisions the vendored `syncOnce` (R-BTN-37: the code S-BTN-12 and
+ * S-BTN-13 drive): the observation number first, then — with `--latest` — the current default
+ * branch fetched and checked out, then the board read from the checkout, the head read and the
+ * ancestry decided; a lost race takes a new number and reads again, once. */
+export async function syncMain(args: SyncArgs): Promise<number> {
+  const log = args.log ?? ((l: string) => process.stdout.write(`${l}\n`));
+  const root = args.root;
+  const batonJsonPath = join(root, '.baton', 'baton.json');
+  if (!existsSync(batonJsonPath)) throw new Error(`${root} has no .baton/baton.json — run \`baton repo init\` first`);
+  const url = args.url ?? (JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson).baton_url ?? DEFAULT_URL;
+  const auth = args.auth ?? bearerAuth(args.token ?? process.env.BATON_SYNC_TOKEN ?? (await actionsToken(url)));
+  const api = new BatonApi({ url, transport: args.transport ?? ((req) => fetch(req)), auth }, log);
+  let board: Board | null = null;
+  const { outcome, steps, next } = await syncOnce(git(root, 'rev-parse', 'HEAD'), {
+    observe: () => asResult(() => api.observation()),
+    // Everything posted under a number is read after it (§7.1 steps 1–2): the commit and the board.
+    fetchNext: async () => {
+      if (args.latest) {
+        git(root, 'fetch', '-q', 'origin', args.latest);
+        git(root, 'checkout', '-q', '--detach', 'FETCH_HEAD');
+      }
+      // baton.json too is read at the commit posted.
+      board = await readBoard(root, JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson, args, log);
+      return git(root, 'rev-parse', 'HEAD');
+    },
+    readHead: () => asResult(() => api.head()),
+    post: (body: Record<string, unknown>) => asResult(() => api.board(body)),
+    isAncestor: async (a: string, b: string) => {
+      try {
+        execFileSync('git', ['-C', root, 'merge-base', '--is-ancestor', a, b], { stdio: 'ignore' });
+        return true;
+      } catch {
+        return false; // not an ancestor, or a commit this clone lacks: never "descends"
+      }
+    },
+    buildPayload: async () => board!.payload,
+    statusOf: (id: string) => board!.statusOf(id),
+    sleep: (ms: number) => new Promise((r) => setTimeout(r, ms)),
+  });
+  log(`baton: ${outcome} at ${String(next).slice(0, 10)} — ${steps.join('; ')}`);
+  return outcome === 'advanced' || outcome === 'confirmed' || outcome === 'held' || outcome === 'busy' ? 0 : 1;
+}
+
+/** The markdown source's files: every file under `items`, at any depth (an `archive/` of done
+ * tickets included), each path relative to `items`. */
 function readItems(root: string, items = 'tickets'): { path: string; text: string }[] {
   const dir = join(root, items);
   if (!existsSync(dir)) return [];
-  return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => ({ path: e.name, text: readFileSync(join(dir, e.name), 'utf8') }));
+  return (readdirSync(dir, { recursive: true, withFileTypes: true }) as import('node:fs').Dirent[])
+    .filter((e) => e.isFile())
+    .map((e) => relative(dir, join(e.parentPath, e.name)).split(sep).join('/'))
+    .sort()
+    .map((path) => ({ path, text: readFileSync(join(dir, path), 'utf8') }));
 }
 
 /** This workflow run's GitHub Actions OIDC token for Baton (R-BTN-15), audience Baton's origin
@@ -200,7 +268,7 @@ async function actionsToken(audience: string): Promise<string | null> {
   const url = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
   const bearer = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
   if (!url || !bearer) return null;
-  const res = await fetch(`${url}&audience=${encodeURIComponent(audience)}`, { headers: { Authorization: `Bearer ${bearer}` } });
+  const res = await fetch(`${url}&audience=${encodeURIComponent(audience)}`, { headers: { Authorization: `Bearer ${bearer}` }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`the Actions OIDC token request answered ${res.status}`);
   return ((await res.json()) as { value: string }).value;
 }
@@ -212,30 +280,60 @@ function bearerAuth(token: string | null): Auth {
   return (_m, _u, _b, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
 }
 
-/** R-BTN-96's fact adapter, GitHub half: the repository's PRs with their head's checks, its
- * commit date, its reviews and its comments, mapped to PrFact. Live forge access — the tests
- * inject recorded facts instead. */
+/** How long one GitHub or token call may take before the sync fails (§6.3's bound). */
+const FETCH_TIMEOUT_MS = 30_000;
+/** The most pages of 100 one list may span; beyond it the sync fails rather than truncate. */
+const MAX_PAGES = 50;
+/** The `author_association` values whose reviews and comments carry a verdict. */
+const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
+/** R-BTN-96's fact adapter, GitHub half: the repository's PRs with their head's checks, their
+ * commits' dates, their reviews and their comments, mapped to PrFact. Every list is read to its
+ * end (GitHub's `Link: rel="next"`), so a long-lived repository or a long thread is never cut
+ * off. Live forge access — the tests inject recorded facts instead. */
 async function githubFacts(root: string, log: (l: string) => void): Promise<PrFact[]> {
-  const slug = git(root, 'remote', 'get-url', 'origin').replace(/^git@github.com:/, '').replace(/^https:\/\/github.com\//, '').replace(/\.git$/, '');
+  const slug = remoteSlug(root);
+  if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error('no GITHUB_TOKEN to read GitHub — pass --facts <file> for recorded facts');
-  const call = async <T>(path: string): Promise<T> => {
-    const res = await fetch(`https://api.github.com${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' } });
-    if (!res.ok) throw new Error(`GitHub ${path}: ${res.status}`);
-    return (await res.json()) as T;
+  const get = async (url: string): Promise<Response> => {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!res.ok) throw new Error(`GitHub ${url}: ${res.status}`);
+    return res;
+  };
+  /** Every item of a paged list; `pick` takes a page's items from its body. */
+  const all = async <T>(path: string, pick: (body: any) => T[] = (b) => b as T[]): Promise<T[]> => {
+    const out: T[] = [];
+    let url: string | null = `https://api.github.com${path}${path.includes('?') ? '&' : '?'}per_page=100`;
+    for (let page = 0; url != null; page++) {
+      if (page === MAX_PAGES) throw new Error(`GitHub ${path}: more than ${MAX_PAGES * 100} items — the sync will not post a truncated reading`);
+      const res = await get(url);
+      out.push(...pick(await res.json()));
+      url = /<([^>]+)>;\s*rel="next"/.exec(res.headers.get('link') ?? '')?.[1] ?? null;
+    }
+    return out;
   };
   const out: PrFact[] = [];
-  for (const pr of await call<any[]>(`/repos/${slug}/pulls?state=all&per_page=100`)) {
-    const checks = (await call<{ check_runs: any[] }>(`/repos/${slug}/commits/${pr.head.sha}/check-runs?per_page=100`)).check_runs.map((c: any) => c.conclusion ?? null);
-    // A push after a verdict is read from the head commit's own date, never `updated_at`.
-    const headCommit = await call<any>(`/repos/${slug}/commits/${pr.head.sha}`);
-    const reviews = (await call<any[]>(`/repos/${slug}/pulls/${pr.number}/reviews?per_page=100`))
-      .map((r: any) => ({ author: r.user?.login ?? '?', state: r.state, submittedAt: Date.parse(r.submitted_at), body: r.body ?? '' }));
-    const comments = (await call<any[]>(`/repos/${slug}/issues/${pr.number}/comments?per_page=100`))
-      .map((c: any) => ({ author: c.user?.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.created_at), body: c.body ?? '' }));
+  for (const pr of await all<any>(`/repos/${slug}/pulls?state=all`)) {
+    // A closed unmerged PR counts as none (R-BTN-74): recorded, but nothing more is read for it.
+    if (pr.state === 'closed' && !pr.merged_at) {
+      out.push({ number: pr.number, head: pr.head.ref, state: 'closed', pushedAt: 0, checks: [], reviews: [] });
+      continue;
+    }
+    const checks = (await all<any>(`/repos/${slug}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null);
+    // A push is read from its commits' own dates, never `updated_at`, which a comment moves.
+    const pushes = (await all<any>(`/repos/${slug}/pulls/${pr.number}/commits`)).map((c) => Date.parse(c.commit.committer.date));
+    // A verdict counts only from someone with a say over the repository — its owner, a member
+    // or a collaborator (GitHub's author_association) — never a drive-by comment on a public PR.
+    const reviews = (await all<any>(`/repos/${slug}/pulls/${pr.number}/reviews`))
+      .filter((r) => TRUSTED.has(r.author_association))
+      .map((r) => ({ author: r.user?.login ?? '?', state: r.state, submittedAt: Date.parse(r.submitted_at), body: r.body ?? '' }));
+    const comments = (await all<any>(`/repos/${slug}/issues/${pr.number}/comments`))
+      .filter((c) => TRUSTED.has(c.author_association))
+      .map((c) => ({ author: c.user?.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.created_at), body: c.body ?? '' }));
     out.push({
       number: pr.number, head: pr.head.ref, state: pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open',
-      pushedAt: Date.parse(headCommit.commit.committer.date), checks, reviews: [...reviews, ...comments],
+      pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments],
     });
   }
   log(`baton: read ${out.length} PRs of ${slug} from GitHub`);
@@ -261,14 +359,15 @@ async function bundleSource(entrySource: string, outfile: string): Promise<void>
  * default's own source). */
 const WRAPPERS: Record<'tickets' | 'stations', () => string> = {
   tickets: () => `import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { ticketsMarkdown } from ${JSON.stringify(source('tickets-markdown.ts'))};
 export default {
   // The same signature the sync calls a repository's own source with: edit freely.
   async tickets(ctx) {
     const dir = join(ctx.root, ctx.settings.items ?? 'tickets');
     let names = [];
-    try { names = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name); } catch {}
+    // Every file under items, at any depth, its path relative to items.
+    try { names = readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => relative(dir, join(e.parentPath, e.name)).split(sep).join('/')).sort(); } catch {}
     const files = names.map((name) => ({ path: name, text: readFileSync(join(dir, name), 'utf8') }));
     return ticketsMarkdown(files, ctx.settings);
   },
@@ -279,7 +378,7 @@ export default {
   // The same signature the sync calls a repository's own function with: edit freely. Returns
   // {stations, markers, course_data} (R-BTN-74).
   async stations(ctx) {
-    return stationsPr({ tickets: ctx.tickets, facts: ctx.facts, closed: ctx.closed, done: ctx.done, branchPatterns: ctx.branchPatterns });
+    return stationsPr({ tickets: ctx.tickets, facts: ctx.facts, closed: ctx.closed, done: ctx.done, branchPatterns: ctx.branchPatterns, repository: ctx.repository });
   },
 };
 `,
@@ -294,19 +393,31 @@ const STUB_POSITION: Record<string, string> = {
   merge: "{ reached: 'merged', next: null }",
 };
 
-/** One leg stub's source (R-BTN-74): run `agent_command` with the ticket, leg and checkout;
- * the review stub asks the agent for a verdict and returns it, and the bundled `close` writes
- * it as the verdict line. */
-function stubSource(leg: string, agentCommand: string): string {
+/** The most output a stub keeps from its agent (the review reads only the last line). */
+const AGENT_OUTPUT_MAX = 64 * 1024 * 1024;
+
+/** One leg stub's source (R-BTN-74): run the `agent_command` that `.baton/baton.json` names at
+ * the time the leg runs, through the shell (so it may carry arguments), with the ticket, the
+ * leg and the checkout as its arguments. The review stub asks the agent for a verdict and
+ * returns it, and the bundled `close` writes it as the verdict line. */
+function stubSource(leg: string): string {
   const review = leg === 'review';
   return `import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { prClose } from ${JSON.stringify(source('pr-close.ts'))};
 // The \`${leg}\` leg of the \`pr\` course, written by \`baton repo init\`: it runs this repository's
-// agent (\`agent_command\` in .baton/baton.json) with the ticket, the leg and the checkout.${review ? `
+// agent — \`agent_command\` in .baton/baton.json, read when the leg runs — with the ticket, the
+// leg and the checkout as its arguments.${review ? `
 // The review: the agent's last line of output must be its verdict, \`approve\` or \`changes\`;
 // \`close\` writes it on the PR as the verdict line (\`<!-- baton:verdict … -->\`).` : ''}
 export async function run(ctx) {
-  const out = await new Promise((resolve, reject) => execFile(${JSON.stringify(agentCommand)}, [ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout], { cwd: ctx.checkout, env: { ...process.env, BATON_LEG: ${JSON.stringify(leg)}${review ? ", BATON_VERDICT: 'print approve or changes as your last line'" : ''} } }, (e, stdout) => (e ? reject(e) : resolve(String(stdout)))));${review ? `
+  const settings = JSON.parse(readFileSync(join(ctx.checkout, '.baton', 'baton.json'), 'utf8'));
+  if (typeof settings.agent_command !== 'string' || settings.agent_command === '') throw new Error('.baton/baton.json names no agent_command');
+  const out = await new Promise((resolve, reject) => execFile('sh', ['-c', settings.agent_command + ' "$@"', 'agent', ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout], {
+    cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX},
+    env: { ...process.env, BATON_LEG: ${JSON.stringify(leg)}${review ? ", BATON_VERDICT: 'print approve or changes as your last line'" : ''} },
+  }, (e, stdout) => (e ? reject(e) : resolve(String(stdout)))));${review ? `
   const verdict = out.trim().split('\\n').at(-1)?.trim();
   if (verdict !== 'approve' && verdict !== 'changes') throw new Error('the review agent printed no verdict (approve or changes) as its last line');` : `
   void out;`}
@@ -321,20 +432,26 @@ export async function handoff() { return null; }
  * CLI runs from. Outside a git checkout, `--pin` must name one. */
 function cliPin(): string {
   const root = packageRoot();
+  const slug = remoteSlug(root);
+  let sha: string | null = null;
   try {
-    const slug = git(root, 'remote', 'get-url', 'origin').replace(/^git@github.com:/, '').replace(/^https?:\/\/[^/]+\//, '').replace(/^git\//, '').replace(/\.git$/, '');
-    return `${slug}@${git(root, 'rev-parse', 'HEAD')}`;
+    sha = git(root, 'rev-parse', 'HEAD');
   } catch {
-    throw new Error('the CLI is not a git checkout, so it cannot pin itself — pass --pin owner/name@<commit>');
+    sha = null;
   }
+  if (slug == null || sha == null) throw new Error('the CLI is not a git checkout with an origin, so it cannot pin itself — pass --pin owner/name@<commit>');
+  return `${slug}@${sha}`;
 }
 
-/** `baton repo init [--course pr] [--eject tickets|stations] [--pin SPEC]`. */
+/** `baton repo init [--course pr] [--eject tickets|stations] [--pin owner/name@commit] [--force]`.
+ * A file the repository already has is kept — re-running init to move the pin rewrites only
+ * the workflow — unless `--force`. */
 export async function initMain(argv: string[], io: { root?: string; log?: (l: string) => void } = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   let course = 'pr';
   let eject: 'tickets' | 'stations' | null = null;
   let pin: string | null = null;
+  let force = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = (): string => {
@@ -344,6 +461,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     };
     if (a === '--course') course = value();
     else if (a === '--pin') pin = value();
+    else if (a === '--force') force = true;
     else if (a === '--eject') {
       const v = value();
       if (v !== 'tickets' && v !== 'stations') throw new Error('--eject: tickets or stations');
@@ -352,6 +470,8 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   }
   if (course !== 'pr') throw new Error(`--course ${course}: the CLI scaffolds only the pr course; write .baton/courses/${course}/ yourself`);
   const root = io.root ?? process.env.BATON_HOME ?? process.cwd();
+  const ejectTo = eject === 'tickets' ? join(root, '.baton', 'tickets.mjs') : eject === 'stations' ? join(root, '.baton', 'courses', course, 'sync.mjs') : null;
+  if (ejectTo && existsSync(ejectTo) && !force) throw new Error(`${relative(root, ejectTo)} already exists — it may hold your edits; --force overwrites it`);
   if (eject === 'tickets') {
     mkdirSync(join(root, '.baton'), { recursive: true });
     await bundleSource(WRAPPERS.tickets(), join(root, '.baton', 'tickets.mjs'));
@@ -367,17 +487,28 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   const workflow = syncWorkflow(pin ?? cliPin());
   // Scaffold: the settings, the course file (in git — the sync posts and `baton runner start`
   // load the same file, R-BTN-69/-72), the leg stubs, the pinned sync workflow, the tickets dir.
-  mkdirSync(join(root, '.baton', 'courses', course, 'legs'), { recursive: true });
+  const kept: string[] = [];
+  /** Write `rel` unless the repository already has it (and `--force` is not given). */
+  const put = async (rel: string, write: (abs: string) => void | Promise<void>): Promise<void> => {
+    const abs = join(root, rel);
+    if (existsSync(abs) && !force) {
+      kept.push(rel);
+      return;
+    }
+    mkdirSync(dirname(abs), { recursive: true });
+    await write(abs);
+  };
   const legs = Object.keys(PR_COURSE.legs);
   const settings: BatonJson = { baton_url: process.env.BATON_URL ?? DEFAULT_URL, items: 'tickets', default_course: course, repos: {}, agent_command: 'echo', courses: [courseEntry(course, legs)] };
-  writeFileSync(join(root, '.baton', 'baton.json'), `${JSON.stringify(settings, null, 2)}\n`);
-  writeFileSync(join(root, '.baton', 'courses', course, 'course.json'), `${JSON.stringify(PR_COURSE, null, 2)}\n`);
+  await put('.baton/baton.json', (abs) => writeFileSync(abs, `${JSON.stringify(settings, null, 2)}\n`));
+  await put(`.baton/courses/${course}/course.json`, (abs) => writeFileSync(abs, `${JSON.stringify(PR_COURSE, null, 2)}\n`));
   // Each stub is bundled with `close`, so it imports nothing the runner's scratch copy lacks.
-  for (const leg of legs) await bundleSource(stubSource(leg, settings.agent_command!), join(root, '.baton', 'courses', course, 'legs', `${leg}.mjs`));
+  for (const leg of legs) await put(`.baton/courses/${course}/legs/${leg}.mjs`, (abs) => bundleSource(stubSource(leg), abs));
+  // The workflow carries the pin: always written, so re-running init is how the pin moves.
   mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
   writeFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), workflow);
-  mkdirSync(join(root, 'tickets'), { recursive: true });
-  if (!existsSync(join(root, 'tickets', 'README.md'))) writeFileSync(join(root, 'tickets', 'README.md'), '# Tickets\n\nOne `*.md` file per ticket; `baton repo init` wrote this directory.\n');
+  await put('tickets/README.md', (abs) => writeFileSync(abs, '# Tickets\n\nOne `*.md` file per ticket; `baton repo init` wrote this directory.\n'));
+  if (kept.length) log(`baton: kept ${kept.join(', ')} (already there; --force overwrites)`);
   log(`baton: .baton/ scaffolded (course ${course}) — commit it, add tickets/*.md, and the workflow does the rest`);
   return 0;
 }
@@ -389,21 +520,32 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
  * The CLI mints the run's OIDC token itself (`id-token: write`, R-BTN-15). */
 export function syncWorkflow(pin: string): string {
   const at = pin.lastIndexOf('@');
-  if (at < 1 || !/^[\w.-]+\/[\w.-]+$/.test(pin.slice(0, at)) || !/^[0-9a-f]{7,40}$/.test(pin.slice(at + 1))) {
-    throw new Error(`--pin ${pin}: must be owner/name@<commit sha>, the baton repository at one commit`);
+  if (at < 1 || !/^[\w.-]+\/[\w.-]+$/.test(pin.slice(0, at)) || !/^[0-9a-f]{40}$/.test(pin.slice(at + 1))) {
+    // A full sha: actions/checkout fetches a 40-hex ref as a commit, never a short one.
+    throw new Error(`--pin ${pin}: must be owner/name@<commit sha>, all 40 hex characters — the baton repository at one commit`);
   }
   return `name: baton sync
 on:
   push:
     branches: [main]
   workflow_dispatch:
+  # A backstop for a missed trigger (§7.1): a run that finds nothing new posts nothing.
+  schedule:
+    - cron: '*/15 * * * *'
 permissions:
   id-token: write
   contents: read
   pull-requests: read
   checks: read
+# One run at a time, one pending (§7.1): runs never race for observation numbers.
+concurrency:
+  group: baton-sync
+  cancel-in-progress: false
 jobs:
   sync:
+    # Off until the repository variable BATON_ENABLED is 'true' — set once the repository is
+    # registered with Baton (§7.1), so an unregistered repository's pushes fail nothing.
+    if: vars.BATON_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -419,7 +561,9 @@ jobs:
           ref: ${pin.slice(at + 1)}
           path: .baton-cli
       - run: npm ci --prefix .baton-cli
-      - run: node .baton-cli/cli/baton.mjs repo sync
+      # --latest main: after its observation number the run reads the newest main, so a slow
+      # run for an older push still posts the newest board (§7.1 step 2).
+      - run: node .baton-cli/cli/baton.mjs repo sync --latest main
         env:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
 `;

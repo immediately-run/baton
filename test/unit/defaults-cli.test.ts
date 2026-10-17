@@ -24,6 +24,7 @@ const gitInit = (dir: string) => {
   execFileSync('git', ['-C', dir, 'config', 'user.name', 't'], { stdio: 'ignore' });
 };
 /** A fresh import of an ejected or scaffolded module (the query defeats the module cache). */
+const PIN = 'immediately-run/baton@abababababababababababababababababababab';
 const load = async (file: string) => import(`${pathToFileURL(file).href}?t=${Math.random()}`);
 
 describe('parseSyncArgs', () => {
@@ -41,7 +42,7 @@ describe('baton repo init, through the built CLI', () => {
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), 'baton-init-'));
     gitInit(root);
-    baton(root, 'repo', 'init', '--pin', 'immediately-run/baton@abc1234');
+    baton(root, 'repo', 'init', '--pin', PIN);
   }, 120_000);
   afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -51,10 +52,15 @@ describe('baton repo init, through the built CLI', () => {
     expect(settings.courses).toEqual([{ id: 'pr', version: 1, min_worker_version: 1, skill: 'baton-pr', step_kinds: ['implement', 'review', 'fix', 'merge'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [] }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
-    expect(workflow).toBe(syncWorkflow('immediately-run/baton@abc1234'));
+    expect(workflow).toBe(syncWorkflow(PIN));
     // The pinned commit is checked out and run: the CLI is not published to a registry.
-    expect(workflow).toContain('repository: immediately-run/baton\n          ref: abc1234\n          path: .baton-cli');
-    expect(workflow).toContain('- run: node .baton-cli/cli/baton.mjs repo sync');
+    expect(workflow).toContain(`repository: immediately-run/baton\n          ref: ${'ab'.repeat(20)}\n          path: .baton-cli`);
+    // §7.1: the newest main read after the number, one run at a time, off until registered,
+    // and a 15-minute backstop.
+    expect(workflow).toContain('- run: node .baton-cli/cli/baton.mjs repo sync --latest main');
+    expect(workflow).toContain('concurrency:\n  group: baton-sync\n  cancel-in-progress: false');
+    expect(workflow).toContain("if: vars.BATON_ENABLED == 'true'");
+    expect(workflow).toContain("- cron: '*/15 * * * *'");
     expect(workflow).toContain('id-token: write'); // the CLI mints the run's OIDC token itself
     expect(readFileSync(join(root, 'tickets', 'README.md'), 'utf8')).toContain('One `*.md` file per ticket');
   });
@@ -67,6 +73,7 @@ describe('baton repo init, through the built CLI', () => {
       expect(readFileSync(join(other, '.github', 'workflows', 'baton-sync.yml'), 'utf8')).toContain(`ref: ${sha}\n`);
       expect(() => syncWorkflow('latest')).toThrow('owner/name@<commit sha>');
       expect(() => syncWorkflow('immediately-run/baton@main')).toThrow('owner/name@<commit sha>');
+      expect(() => syncWorkflow('immediately-run/baton@abc1234')).toThrow('all 40 hex characters'); // actions/checkout cannot fetch a short sha
     } finally {
       rmSync(other, { recursive: true, force: true });
     }
@@ -92,39 +99,67 @@ describe('baton repo init, through the built CLI', () => {
     }
   });
 
-  it('the review stub returns the agent’s verdict and queues fix or merge by it; no verdict fails the leg', async () => {
+  it('the stubs run the agent_command baton.json names when the leg runs, arguments and all; the review returns its verdict', async () => {
     const agent = join(root, 'agent.sh');
-    writeFileSync(agent, '#!/bin/sh\necho "reviewing $1 $2"\necho "$VERDICT"\n');
+    writeFileSync(agent, '#!/bin/sh\necho "$1 $2 $3 $4" > "$(dirname "$0")/agent.args"\necho "reviewing"\necho "$VERDICT"\n');
     chmodSync(agent, 0o755);
-    const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
-    const other = mkdtempSync(join(tmpdir(), 'baton-init-'));
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
     try {
-      writeFileSync(join(other, 'placeholder'), '');
-      // A stub bakes in agent_command at init: re-scaffold with it set.
-      baton(other, 'repo', 'init', '--pin', 'immediately-run/baton@abc1234');
-      const file = join(other, '.baton', 'courses', 'pr', 'legs', 'review.mjs');
-      writeFileSync(file, readFileSync(file, 'utf8').replace(JSON.stringify(settings.agent_command), JSON.stringify(agent)));
-      const stub = await load(file);
+      // Edited after init: the stub reads it at run time, and the command may carry arguments.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: `${agent} --flag` }));
+      const file = join(root, '.baton', 'courses', 'pr', 'legs', 'review.mjs');
       process.env.VERDICT = 'changes';
-      expect(await stub.run({ ticket: { id: 'A-1' }, checkout: other })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
+      expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: root })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
+      expect(readFileSync(join(root, 'agent.args'), 'utf8').trim()).toBe(`--flag A-1 review ${root}`);
       process.env.VERDICT = 'approve';
-      expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: other })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
+      expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: root })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
       process.env.VERDICT = 'maybe';
-      await expect((await load(file)).run({ ticket: { id: 'A-1' }, checkout: other })).rejects.toThrow('no verdict');
+      await expect((await load(file)).run({ ticket: { id: 'A-1' }, checkout: root })).rejects.toThrow('no verdict');
+      // The fix stub queues review, the only leg leaving `fixed`.
+      expect(await (await load(join(root, '.baton', 'courses', 'pr', 'legs', 'fix.mjs'))).run({ ticket: { id: 'A-1' }, checkout: root })).toEqual({ reached: 'fixed', next: 'review' });
     } finally {
       delete process.env.VERDICT;
-      rmSync(other, { recursive: true, force: true });
+      writeFileSync(settingsFile, before);
+    }
+  });
+
+  it('re-running init keeps the repository’s files and rewrites only the workflow (the pin); --force overwrites', () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const stub = join(root, '.baton', 'courses', 'pr', 'legs', 'merge.mjs');
+    const settings = readFileSync(settingsFile, 'utf8');
+    const stubText = readFileSync(stub, 'utf8');
+    try {
+      writeFileSync(settingsFile, settings.replace('"repos": {}', '"repos": { "docs": "o/docs" }'));
+      writeFileSync(stub, `${stubText}\n// edited by hand\n`);
+      const other = `immediately-run/baton@${'cd'.repeat(20)}`;
+      expect(baton(root, 'repo', 'init', '--pin', other)).toContain('kept .baton/baton.json');
+      expect(readFileSync(settingsFile, 'utf8')).toContain('"docs": "o/docs"');
+      expect(readFileSync(stub, 'utf8')).toContain('// edited by hand');
+      expect(readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8')).toContain(`ref: ${'cd'.repeat(20)}`);
+      baton(root, 'repo', 'init', '--pin', other, '--force');
+      expect(readFileSync(settingsFile, 'utf8')).not.toContain('o/docs');
+      expect(readFileSync(stub, 'utf8')).not.toContain('// edited by hand');
+    } finally {
+      baton(root, 'repo', 'init', '--pin', PIN, '--force');
     }
   }, 120_000);
 
   it('--eject tickets writes a standalone source that answers what the default answers, and edits take', async () => {
     baton(root, 'repo', 'init', '--eject', 'tickets');
     writeFileSync(join(root, 'tickets', 'a.md'), '---\nid: A-1\ntitle: A\norder: 2\n---\n');
-    writeFileSync(join(root, 'tickets', 'b.md'), '---\nid: B-1\nstatus: done\n---\n');
+    execFileSync('mkdir', ['-p', join(root, 'tickets', 'archive')]);
+    // A done ticket archived in a subdirectory still closes its dependents' dependency.
+    writeFileSync(join(root, 'tickets', 'archive', 'b.md'), '---\nid: B-1\nstatus: done\n---\n');
     const ctx = { root, settings: { items: 'tickets', default_course: 'pr' } };
-    const files = ['a.md', 'b.md', 'README.md'].map((f) => ({ path: f, text: readFileSync(join(root, 'tickets', f), 'utf8') }));
+    const files = ['README.md', 'a.md', 'archive/b.md'].map((f) => ({ path: f, text: readFileSync(join(root, 'tickets', f), 'utf8') }));
     const ejected = await load(join(root, '.baton', 'tickets.mjs'));
-    expect(await ejected.default.tickets(ctx)).toEqual(ticketsMarkdown(files, ctx.settings));
+    const out = await ejected.default.tickets(ctx);
+    expect(out).toEqual(ticketsMarkdown(files, ctx.settings));
+    expect(out.closed).toEqual([{ id: 'B-1', as: 'done' }]);
+    // A second eject would overwrite edits: refused without --force.
+    expect(() => baton(root, 'repo', 'init', '--eject', 'tickets')).toThrow();
+    baton(root, 'repo', 'init', '--eject', 'tickets', '--force');
     const text = readFileSync(join(root, '.baton', 'tickets.mjs'), 'utf8');
     expect([...text.matchAll(/^import .* from ["']([^"']+)["']/gm)].every((m) => m[1].startsWith('node:'))).toBe(true);
   }, 120_000);

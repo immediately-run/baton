@@ -3,7 +3,8 @@
 // adapter gathers them from the forge in the sync command), so the same function serves an
 // ejected `.baton/courses/pr/sync.mjs` through its default export. Course code in the CLI,
 // never core (§2b): it may read what a ticket's opaque `course` fields carry.
-import type { PostedStation, PostedTicket } from '../core/board';
+import type { PostedStation } from '../core/board';
+import type { SourceTicket } from './tickets-markdown';
 import type { Step } from '../core/graph';
 
 /** One PR as the fact adapter records it (R-BTN-96): GitHub's shape, GitLab's and Gitea's
@@ -16,6 +17,9 @@ export interface PrFact {
   /** When the head commit was made, epoch ms (its committer date) — a head newer than the
    * verdict is a push after it: `fixed`. Never the PR's `updated_at`, which a comment moves. */
   pushedAt: number;
+  /** Every commit's date on the PR, epoch ms, when the adapter has them (GitHub's does); absent,
+   * `pushedAt` alone. A fix is a push between a verdict and the next one. */
+  pushes?: number[];
   /** The head's checks; a null conclusion is still running. Empty means none: finished. */
   checks: (string | null)[];
   /** The PR's reviews and its plain comments — a comment is `COMMENTED`, read only for a
@@ -36,7 +40,7 @@ export interface StationsResult {
 export const DEFAULT_BRANCH_PATTERN = 'claude/{ticket}-*';
 
 /** The `pr` course's graph: filed → pr-open → reviewed → merged, with fixed between reviewed
- * and the next review (the course file `baton init` writes into git, R-BTN-69). */
+ * and the next review (the course file `baton repo init` writes into git, R-BTN-69). */
 export const PR_COURSE = {
   start: 'filed',
   start_leg: 'implement',
@@ -72,17 +76,18 @@ export const checksDone = (f: PrFact): boolean => f.checks.every((c) => c != nul
 const verdictsOf = (f: PrFact) => [...f.reviews].filter((r) => verdictOf(r) != null).sort((a, b) => a.submittedAt - b.submittedAt);
 
 /** The path one PR's timeline implies (R-BTN-74: "the least advanced PR's timeline in order"):
- * `implement` opened it; each verdict is a `review`; a changes verdict followed by a later
- * verdict or by the head's push was a `fix` (the graph's only way back to `review`). Verdicts
- * with no fix between them are one review. The facts carry only the latest push, so a fix is
- * known by what followed it, not by its own push. */
+ * `implement` opened it; each verdict is a `review`; a push after a verdict, before the next
+ * one, was a `fix` (the graph's only way back to `review`), whatever that verdict said, since a
+ * verdict is on the head it was given on. Verdicts with no push between them — two reviewers of
+ * one head — are one review. */
 function timelineOf(f: PrFact): Step[] {
   const path: Step[] = [{ leg: 'implement', reached: 'pr-open' }];
+  const pushes = f.pushes?.length ? f.pushes : [f.pushedAt];
   const verdicts = verdictsOf(f);
   verdicts.forEach((v, i) => {
     if (path.at(-1)!.reached !== 'reviewed') path.push({ leg: 'review', reached: 'reviewed' });
-    const followed = i + 1 < verdicts.length || f.pushedAt > v.submittedAt;
-    if (verdictOf(v) === 'changes' && followed) path.push({ leg: 'fix', reached: 'fixed' });
+    const until = verdicts[i + 1]?.submittedAt ?? Number.POSITIVE_INFINITY;
+    if (pushes.some((p) => p > v.submittedAt && p < until)) path.push({ leg: 'fix', reached: 'fixed' });
   });
   return path;
 }
@@ -147,7 +152,21 @@ export function branchMatches(pattern: string, branch: string): boolean {
  * every open-or-merged fact whose head branch matches the pattern; with several, the least
  * advanced decides — but every PR merged is `merged`, the end station. No PR is `filed`, with
  * `implement` waiting while a dependency or an open child is not done. */
-export function stationsPr(ctx: { tickets: PostedTicket[]; facts: PrFact[]; branchPatterns?: string[]; closed: Set<string>; done?: Set<string> }): StationsResult {
+/** The PR numbers a ticket's `prs:` names: a bare number, or a pull-request URL —
+ * `https://<host>/<owner>/<name>/pull/<n>` — of this repository (`repository`, `owner/name`,
+ * when known; a URL naming another repository is not one of this repository's PRs). */
+export function prNumbers(prs: unknown[], repository?: string | null): string[] {
+  const out: string[] = [];
+  for (const p of prs) {
+    const text = String(p).trim();
+    if (/^\d+$/.test(text)) out.push(text);
+    const m = /^https?:\/\/[^/]+\/([^/]+\/[^/]+)\/pull\/(\d+)(?:[/#?].*)?$/.exec(text);
+    if (m && (repository == null || m[1].toLowerCase() === repository.toLowerCase())) out.push(m[2]);
+  }
+  return out;
+}
+
+export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; branchPatterns?: string[]; closed: Set<string>; done?: Set<string>; repository?: string | null }): StationsResult {
   const stations: Record<string, PostedStation> = {};
   // The course's current and previous patterns (R-BTN-51). `{repository}` matches anything: the
   // facts are this repository's own PRs, so it can only ever name this repository.
@@ -156,7 +175,7 @@ export function stationsPr(ctx: { tickets: PostedTicket[]; facts: PrFact[]; bran
   const done = ctx.done ?? ctx.closed;
   for (const t of ctx.tickets) {
     if (ctx.closed.has(t.id)) continue; // closed tickets are the `closed` list, not stations
-    const prs = ((t.course as { prs?: unknown[] } | undefined)?.prs ?? []).map(String);
+    const prs = prNumbers((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], ctx.repository);
     // A closed unmerged PR counts as none, listed or matched alike.
     const mine = ctx.facts.filter((f) => f.state !== 'closed'
       && (prs.includes(String(f.number)) || patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), f.head))));

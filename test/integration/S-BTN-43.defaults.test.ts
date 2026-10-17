@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
-const init = (root: string, ...argv: string[]) => initMain([...argv, ...(argv.includes('--eject') ? [] : ['--pin', 'immediately-run/baton@0000000'])], { root, log: () => {} });
+const init = (root: string, ...argv: string[]) => initMain([...argv, ...(argv.includes('--eject') ? [] : ['--pin', 'immediately-run/baton@'+'0'.repeat(40)])], { root, log: () => {} });
 import type { PrFact } from '../../src/defaults/course-pr';
 import { ORIGIN, rows, setClock, syncToken } from '../helpers';
 
@@ -161,5 +161,58 @@ describe('S-BTN-43 a repository with no course code', () => {
     expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'reviewed', next_leg: 'merge' });
     // The red check made review ready all along — the review reads it and asks for a fix.
     expect((await nextOf('T-1'))[0]).toMatchObject({ leg: 'merge', state: 'ready' });
+  }, 60_000);
+});
+
+// G-BTN-69's refusals: each fails the sync before anything is posted, naming what to fix.
+describe('S-BTN-43 the sync refuses, posting nothing', () => {
+  const posted = async () => (await rows('SELECT count(*) AS n FROM tickets'))[0];
+  // A refused run already holds its observation number; the next run is `sync-busy` until the
+  // number is 10 minutes old (R-BTN-62), so each retry here moves the clock past that.
+  let minutes = 0;
+  const later = () => setClock(T0 + (minutes += 11) * 60_000);
+
+  it('a course with no sync.mjs other than pr, a ticket on an unlisted course, a bad stations return, no baton.json', async () => {
+    mkdirSync(join(repo.dir, '.baton')); // the harness keeps its recorded facts there
+    await expect(repo.sync()).rejects.toThrow('has no .baton/baton.json — run `baton repo init` first');
+    await init(repo.dir);
+    const settingsFile = join(repo.dir, '.baton', 'baton.json');
+    const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+
+    // A ticket on a course baton.json does not list.
+    repo.write('tickets/stray.md', '---\nid: S-1\ncourse: epic\n---\n');
+    repo.commit();
+    await later();
+    await expect(repo.sync()).rejects.toThrow('ticket S-1 is on course epic, which .baton/baton.json\'s courses do not list');
+    expect(await posted()).toEqual({ n: 0 });
+
+    // A listed course other than pr, with a course file but no sync.mjs.
+    mkdirSync(join(repo.dir, '.baton', 'courses', 'epic'), { recursive: true });
+    writeFileSync(join(repo.dir, '.baton', 'courses', 'epic', 'course.json'), readFileSync(join(repo.dir, '.baton', 'courses', 'pr', 'course.json')));
+    writeFileSync(settingsFile, JSON.stringify({ ...settings, courses: [...settings.courses, { id: 'epic', version: 1 }] }));
+    repo.commit();
+    await later();
+    await expect(repo.sync()).rejects.toThrow("course epic has no sync.mjs and the CLI's default serves only `pr`");
+    expect(await posted()).toEqual({ n: 0 });
+
+    // A station function returning a bare map instead of {stations, markers, course_data}.
+    writeFileSync(join(repo.dir, '.baton', 'courses', 'epic', 'sync.mjs'), "export default { stations: () => ({ 'S-1': { station: 'filed' } }) };\n");
+    repo.commit();
+    await later();
+    await expect(repo.sync()).rejects.toThrow('.baton/courses/epic/sync.mjs: stations(ctx) must return {stations, markers, course_data}');
+    expect(await posted()).toEqual({ n: 0 });
+  }, 60_000);
+
+  it('a checkout behind the head posts nothing: a slow run for an older push never moves the board back', async () => {
+    await init(repo.dir);
+    const older = repo.commit();
+    repo.write('tickets/fourth.md', '---\nid: T-4\ntitle: Fourth\n---\n');
+    repo.commit();
+    await repo.sync();
+    expect(await posted()).toEqual({ n: 4 });
+    execFileSync('git', ['-C', repo.dir, 'checkout', '-q', '--detach', older], { stdio: 'ignore' });
+    await repo.sync();
+    // The older reading (no T-4) was not posted: the head and its four tickets stand.
+    expect(await posted()).toEqual({ n: 4 });
   }, 60_000);
 });

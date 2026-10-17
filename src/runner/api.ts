@@ -90,7 +90,7 @@ export class BatonApi {
   recommendations(limit = 10): Promise<Record<string, any>> {
     return this.call('GET', `/v1/runner/recommendations?limit=${limit}`);
   }
-/** §6.9: activity rows from the spool, upserted under their own call. */
+  /** §6.9: activity rows from the spool, upserted under their own call. */
   activities(activities: unknown[]): Promise<Record<string, any>> {
     return this.call('POST', '/v1/runner/activities', { activities });
   }

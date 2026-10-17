@@ -2,7 +2,7 @@
 // `*.md`/`*.mdx` file under the `items` setting whose frontmatter carries an `id` is a ticket.
 // Pure over injected file texts, so the sync command reads the tree and this decides; the same
 // function serves an ejected `.baton/tickets.mjs` through its default export (one interface
-// for override and default, so `baton init --eject tickets` copies a working file).
+// for override and default, so `baton repo init --eject tickets` copies a working file).
 import type { PostedTicket } from '../core/board';
 
 export interface MarkdownSettings {
@@ -19,8 +19,17 @@ export interface MarkdownFile {
   text: string;
 }
 
+/** A ticket as a ticket source posts it (§7.1): the generic fields core reads, plus the
+ * fields core stores unread — the opaque `course` fields, `parent` (R-BTN-86) and `not_before`
+ * (R-BTN-89). Typed here, in course code, so `src/core/` gains no line (S-BTN-43). */
+export interface SourceTicket extends PostedTicket {
+  course?: Record<string, unknown>;
+  parent?: string;
+  not_before?: unknown;
+}
+
 export interface TicketsResult {
-  tickets: PostedTicket[];
+  tickets: SourceTicket[];
   closed: { id: string; as: 'done' | 'withdrawn' }[];
 }
 
@@ -41,22 +50,29 @@ export function parseFrontmatter(text: string): Record<string, unknown> | null {
       const items: string[] = [];
       while (i + 1 < lines.length && /^\s+-\s+/.test(lines[i + 1])) {
         i++;
-        items.push(lines[i].replace(/^\s+-\s+/, '').trim());
+        items.push(unquote(lines[i].replace(/^\s+-\s+/, '')));
       }
       out[key] = items;
     } else if (/^\[.*\]$/.test(rest.trim())) {
-      out[key] = rest.trim().slice(1, -1).split(',').map((s) => s.trim()).filter(Boolean);
-    } else if (/^-?\d+$/.test(rest.trim())) {
+      out[key] = rest.trim().slice(1, -1).split(',').map(unquote).filter(Boolean);
+    } else if (/^-?\d+(\.\d+)?$/.test(rest.trim())) {
       out[key] = Number(rest.trim());
     } else {
-      out[key] = rest.trim().replace(/^["']|["']$/g, '');
+      out[key] = unquote(rest);
     }
   }
   return out;
 }
 
-const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
-const strList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+/** A value without its surrounding quotes, `"a"` or `'a'`. */
+const unquote = (v: string): string => {
+  const t = v.trim();
+  return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
+};
+/** A scalar field: a string, or a number read as its text (`id: 1042` is the id `1042`). */
+const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : typeof v === 'number' ? String(v) : null);
+/** A list field: a list, or one scalar standing for a list of one (`depends_on: S0`). */
+const strList = (v: unknown): string[] => (Array.isArray(v) ? v : v == null || v === '' ? [] : [v]).map(str).filter((x): x is string => x != null);
 
 const CLOSED: Record<string, 'done' | 'withdrawn'> = { done: 'done', withdrawn: 'withdrawn', superseded: 'withdrawn', deferred: 'withdrawn' };
 
@@ -66,7 +82,7 @@ const CLOSED: Record<string, 'done' | 'withdrawn'> = { done: 'done', withdrawn: 
 export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSettings = {}): TicketsResult {
   const itemsDir = settings.items ?? 'tickets';
   const defaultCourse = settings.default_course ?? 'pr';
-  const tickets: PostedTicket[] = [];
+  const tickets: SourceTicket[] = [];
   const closed: { id: string; as: 'done' | 'withdrawn' }[] = [];
   const byId = new Map<string, string>(); // id → file, for duplicate detection
   const openChildren = new Map<string, string[]>(); // parent id → its live children (R-BTN-86)
@@ -75,6 +91,11 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
     const fm = parseFrontmatter(f.text);
     const id = str(fm?.id);
     if (fm == null || id == null) continue; // a file without frontmatter or `id` is not a ticket
+    // `order` is a number or nothing: anything else fails the sync naming the file, rather
+    // than silently unranking the ticket.
+    const order = fm.order == null || fm.order === '' ? null : typeof fm.order === 'number' ? fm.order
+      : typeof fm.order === 'string' && /^-?\d+(\.\d+)?$/.test(fm.order) ? Number(fm.order) : Number.NaN;
+    if (order != null && !Number.isFinite(order)) throw new Error(`${f.path}: order ${JSON.stringify(fm.order)} is not a number`);
     if (byId.has(id)) throw new Error(`${f.path}: id ${id} already appears in ${byId.get(id)}`);
     byId.set(id, f.path);
     const as = CLOSED[str(fm.status) ?? ''];
@@ -104,7 +125,7 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
       depends_on: dep,
       blocked_by: [],
       repos: resolved as string[],
-      rank: typeof fm.order === 'number' ? Math.max(0, Math.round(fm.order)) : null,
+      rank: order != null ? Math.max(0, Math.round(order)) : null,
       // Opaque to Baton, read by the course's own code (§2b): the PR list the pr course reads.
       course: { ...(strList(fm.prs).length ? { prs: strList(fm.prs) } : {}) },
       ...(parent != null ? { parent } : {}),

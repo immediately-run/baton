@@ -4,13 +4,13 @@
 // review with and without a verdict line, one identity authoring and reviewing — and the
 // three-fix limit. Pure and host-neutral.
 import { describe, it, expect } from 'vitest';
-import { branchMatches, stationsPr, type PrFact } from '../../src/defaults/course-pr';
-import type { PostedTicket } from '../../src/core/board';
+import { branchMatches, prNumbers, stationsPr, type PrFact } from '../../src/defaults/course-pr';
+import type { SourceTicket as PostedTicket } from '../../src/defaults/tickets-markdown';
 
 const T0 = 1_000_000;
 const ticket = (id: string, over: Partial<PostedTicket> = {}): PostedTicket => ({ id, course_id: 'pr', path: `tickets/${id}.md`, title: id, requires: [], operator_only: false, expedite: false, depends_on: [], blocked_by: [], repos: [], rank: null, ...over });
 const pr = (over: Partial<PrFact> & { number: number }): PrFact => ({ head: `claude/A-${over.number}`, state: 'open', pushedAt: T0 - 1000, checks: ['success'], reviews: [], ...over });
-const run = (tickets: PostedTicket[], facts: PrFact[], closed = new Set<string>(), more: { done?: Set<string>; branchPatterns?: string[] } = {}) =>
+const run = (tickets: PostedTicket[], facts: PrFact[], closed = new Set<string>(), more: { done?: Set<string>; branchPatterns?: string[]; repository?: string } = {}) =>
   stationsPr({ tickets, facts, closed, ...more }).stations;
 
 describe('no PR, or a closed unmerged one', () => {
@@ -74,11 +74,27 @@ describe('an open PR', () => {
     expect(out.A.path).toEqual([{ leg: 'implement', reached: 'pr-open' }, { leg: 'review', reached: 'reviewed' }, { leg: 'fix', reached: 'fixed' }]);
   });
 
+  it('a push after an approval is fixed too: review again, merge is not offered over unreviewed commits', () => {
+    const out = run([ticket('A')], [pr({ number: 1, pushedAt: T0 + 5, reviews: [{ author: 'r', state: 'APPROVED', submittedAt: T0 - 10 }] })]);
+    expect(out.A).toMatchObject({ station: 'fixed', next_leg: 'review', next: [{ leg: 'review', state: 'ready' }] });
+  });
+
+  it('two reviewers of one head are one review: no push between them is no fix, however many verdicts', () => {
+    // Three rounds of two reviewers each asking for changes, with no push at all.
+    const reviews = [60, 55, 40, 35, 20, 15].map((d, i) => ({ author: i % 2 ? 'b' : 'a', state: 'CHANGES_REQUESTED' as const, submittedAt: T0 - d }));
+    const out = run([ticket('A')], [pr({ number: 1, pushedAt: T0 - 100, pushes: [T0 - 100], reviews })]);
+    expect(out.A.path.map((s) => s.leg)).toEqual(['implement', 'review']);
+    expect(out.A).toMatchObject({ station: 'reviewed', next_leg: 'fix', next: [{ leg: 'fix', state: 'ready' }] });
+    // One push between the rounds is one fix.
+    const fixedOnce = run([ticket('A')], [pr({ number: 1, pushedAt: T0 - 30, pushes: [T0 - 100, T0 - 30], reviews })]);
+    expect(fixedOnce.A.path.map((s) => s.leg)).toEqual(['implement', 'review', 'fix', 'review']);
+  });
+
   it('the three-fix limit: after three fixes, a fourth changes verdict leaves merge waiting on the owner', () => {
     // Three changes verdicts each followed by a fix push (the head's last push at T0-75), then
     // a fourth review asking for changes again: the fixes are spent, merge needs the owner.
     const reviews = [100, 90, 80, 70].map((d) => ({ author: 'r', state: 'CHANGES_REQUESTED' as const, submittedAt: T0 - d }));
-    const out = run([ticket('A')], [pr({ number: 1, pushedAt: T0 - 75, reviews })]);
+    const out = run([ticket('A')], [pr({ number: 1, pushedAt: T0 - 75, pushes: [T0 - 200, T0 - 95, T0 - 85, T0 - 75], reviews })]);
     expect(out.A).toMatchObject({ station: 'reviewed', next_leg: 'merge', next: [{ leg: 'merge', state: 'waiting', waiting_on: 'owner' }] });
     // The whole timeline: implement, then three review → fix rounds, then the fourth review.
     expect(out.A.path.map((s) => s.leg)).toEqual(['implement', 'review', 'fix', 'review', 'fix', 'review', 'fix', 'review']);
@@ -113,6 +129,15 @@ describe('several PRs, and merged ones', () => {
     const byBranch = run([ticket('A')], [pr({ number: 3, head: 'claude/A-runner' })]);
     expect(byBranch.A).toMatchObject({ station: 'pr-open' });
     const foreign = run([ticket('A')], [pr({ number: 4, head: 'claude/B-runner' })]);
+    expect(foreign.A).toMatchObject({ station: 'filed' });
+  });
+
+  it("prs: takes numbers and this repository's pull-request URLs, never another repository's", () => {
+    expect(prNumbers([7, '8', 'https://github.com/o/r/pull/9', 'https://github.com/o/r/pull/10/files', 'https://github.com/x/y/pull/11', 'junk'], 'o/r')).toEqual(['7', '8', '9', '10']);
+    expect(prNumbers(['https://github.com/x/y/pull/11'])).toEqual(['11']); // the repository unknown: recorded facts
+    const byUrl = run([ticket('A', { course: { prs: ['https://github.com/o/r/pull/9'] } })], [pr({ number: 9, head: 'feature/unrelated' })], new Set(), { repository: 'O/R' });
+    expect(byUrl.A).toMatchObject({ station: 'pr-open' });
+    const foreign = run([ticket('A', { course: { prs: ['https://github.com/x/y/pull/9'] } })], [pr({ number: 9, head: 'feature/unrelated' })], new Set(), { repository: 'o/r' });
     expect(foreign.A).toMatchObject({ station: 'filed' });
   });
 
