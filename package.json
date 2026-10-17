@@ -29,6 +29,7 @@
     "traces": "node scripts/check-traces.mjs",
     "model:verify": "quint verify model/instances.qnt --main=small --init=pinit --step=pstep --invariant=safety --max-steps=5",
     "check:wiki": "node scripts/check-wiki.mjs",
+    "check:spec": "node scripts/check-spec.mjs",
     "ticket": "node scripts/ticket.mjs"
   },
   "dependencies": {
