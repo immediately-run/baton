@@ -1,0 +1,50 @@
+---
+title: "B-2 — Baton runner: sessions report over a local channel, bounded runs, independence by credential, attached and session-mode cloud runners"
+id: B-2
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1105
+tier: critical
+description: "The runner's local channel (`baton leg …`, `0600` socket), bounded runs, `no_chain_from` and `required_independence` keyed by credential, and the `attached`/`process`/`session` isolation modes with a leg's floor (BATON_SPEC R-BTN-106, R-BTN-107); S-BTN-62–64, -75, -78. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.1 (R-BTN-106, R-BTN-107), §2m.7a's heartbeat and advance rows, §6.13 and R-BTN-72 as amended.
+
+### Why
+
+§2m is agreed and specified; this ticket builds its part of it.
+
+### What to build
+
+1. **Channel.** The runner listens on a `0600` Unix socket named by `IR_BATON_SOCKET`; the CLI wraps it as `baton leg status | output | done | suspend | release | next | yield`. The runner checks each move (station, next leg, outputs, entry) before it calls Baton; the session never holds the worker secret or nonce (`IR_BATON_STATE` is the view without them).
+2. **Bounded runs.** `baton run --legs <a,b> --max-legs n --until <t>`.
+3. **Independence.** Rule `chain`: refuse a claim or advance into a leg whose `no_chain_from`, or the owners' `required_independence`, names a leg the same credential ran on the ticket (`claim_legs` → claim → worker → key). The owner setting joins the course file's lists.
+4. **Isolation.** The heartbeat carries `isolation`; `attached` (`baton run --attached`, `baton leg next`) and `session` (one cloud session per agent leg, a brief with no Baton credential, a `baton-leg-result` block checked like a channel move). A leg's `isolation: session` floor is a gate (rule `isolation`) and a recommendation filter.
+
+### Do not
+
+- Let the session talk to Baton, or hand it the worker secret.
+- Let a course file loosen `required_independence`.
+
+### Tests
+
+- S-BTN-62, S-BTN-63, S-BTN-64, S-BTN-75 and S-BTN-78 as integration scenarios on both hosts; G-BTN-89, G-BTN-90 and G-BTN-99.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] merged under the review gate
+
+## Status
