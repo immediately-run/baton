@@ -54,6 +54,32 @@ module baton {
   // max_runs; 99 stands for none, which R-BTN-69 allows only off every cycle
   pure val MAX_RUNS: str -> int = Map(
     "implement" -> 99, "review" -> 3, "fix" -> 2, "adjudicate" -> 99, "merge" -> 99)
+  // R-BTN-69's acceptance, which the course above passes (courseIsAcceptedTest): exactly one
+  // start (`START` is one station) and at least one end, an end terminal — no leg leaves it,
+  // since a ticket there is done (R3-1254, owner) — `start_leg` leaving `start`, every station
+  // reachable from `start`, an end reachable from every station, and every cycle holding a leg
+  // with `max_runs`. Without it the properties could hold of a course core would refuse.
+  pure def courseOk(start: str, startLeg: str, ends: Set[str], legs: Set[str], froms: str -> Set[str],
+                    tos: str -> str, maxRuns: str -> int): bool = {
+    val stations = legs.map(l => froms.get(l)).flatten().union(legs.map(l => tos.get(l))).union(Set(start)).union(ends)
+    val n = stations.size()
+    // the stations `seed` reaches through `via`'s legs, forwards or (back) backwards
+    pure def closure(seed: Set[str], via: Set[str], back: bool): Set[str] =
+      0.to(n).fold(seed, (r, _) => r.union(
+        if (back) via.filter(l => r.contains(tos.get(l))).map(l => froms.get(l)).flatten()
+        else via.filter(l => froms.get(l).intersect(r) != Set()).map(l => tos.get(l))))
+    val unbounded = legs.filter(l => maxRuns.get(l) >= 99)
+    and {
+      ends != Set(),
+      legs.forall(l => froms.get(l).intersect(ends) == Set()),
+      legs.contains(startLeg) and froms.get(startLeg).contains(start),
+      closure(Set(start), legs, false) == stations,
+      closure(ends, legs, true) == stations,
+      // no station is back on itself by unbounded legs alone
+      stations.forall(s => not(closure(unbounded.filter(l => froms.get(l).contains(s)).map(l => tos.get(l)), unbounded, false).contains(s))),
+    }
+  }
+  pure val courseWellFormed: bool = courseOk(START, START_LEG, ENDS, LEGS, FROM, TO, MAX_RUNS)
 
   // ---- prerequisites (R-BTN-120): what a ticket's source posts it waits for ----
   // A `depends_at` entry (§7.1): another ticket `at` one of `stations` now, having `reached` one,

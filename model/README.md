@@ -38,7 +38,7 @@ runs only the deterministic part, inside `npm test`: `npm run model:quick`, the 
   prints a Markdown report on stdout: the commit (flagged when the tree has uncommitted changes
   to the files the checks read), the Quint version, and each check's result and minutes. Paste
   it into the PR. Needs Java for the last step.
-- `npm run model` — typecheck, the 24 regression runs, 10,000 random runs of 40 steps of `sim`
+- `npm run model` — typecheck, the 38 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
   eight reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
@@ -101,7 +101,10 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
 
 - **The course** is `roadmap-pr`'s `course.json` (§2e, R-BTN-69): `filed` → `pr-open` →
   `reviewed` ⇄ `fixed`, `adjudicated`, `merged`; `review` at most 3 runs, `fix` 2. Core reads it
-  as a graph only.
+  as a graph only. `courseOk` is R-BTN-69's acceptance — one start, at least one end, no leg
+  leaving an end (an end is terminal: R3-1254, owner), `start_leg` leaving `start`, every
+  station reachable from `start` and reaching an end, a `max_runs` leg in every cycle — and the
+  course passes it (`courseIsAcceptedTest`); `courseRulesRefuseTest` breaks each rule alone.
 - **A claim is one transaction** (R-BTN-98, §7.2): `claim` checks every gate and takes the
   ticket at once. *(R3-1254: it was `claimStart` and `claimFinish` around the course's claim
   hook, R-BTN-52's await and rule 12, which R-BTN-98 retired.)*
@@ -217,6 +220,16 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
 - dropping the fence from the claim gate fails `forceReapFencesTest`;
 - dropping the advance's gate guard reaches a `gateViolation` (`gatesHeld`);
 - clearing a fence without its timeout fails `heartbeatingFenceHoldsTest`;
+- R3-1254's prerequisites: a claim or an advance that ignores the rows fails
+  `atPrerequisiteFollowsTheOtherTicketTest` and `backoffRefusesAdvanceTest` (with others);
+  keeping a provisional row past the snapshot that contains it, or dropping it at any snapshot,
+  fails `provisionalRowUntilASnapshotContainsItTest`; a silent end fails
+  `endLeavingTheTicketBlockedLogsBlockedTest`; a decision on an unposted leg kept on that leg
+  fails `decisionOnAnUnpostedLegIsOnTheTicketTest`; a withdrawn ticket meeting prerequisites
+  fails `withdrawnMeetsNothingTest`; `reached` read as `at` fails
+  `reachedPrerequisiteStaysMetTest`; no hold at `max_blocked` fails
+  `blockedEndsHoldPastMaxBlockedTest`; a course whose end is not terminal passes
+  `courseOk` and fails `courseRulesRefuseTest`;
 - `MAX_DRIFT = 3`, above `MARGIN = 2`, lets a reaped worker push (`noActAfterLoss`); at
   `MAX_DRIFT = 2` it cannot — the spec's assumption is drift ≤ the margin.
 
@@ -224,9 +237,9 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
 
 | Check | Instance | Result |
 |---|---|---|
-| 24 regression runs | `sim` sizes, zero drift | pass |
+| 38 regression runs | `sim` sizes, zero drift | pass |
 | `safety`, 10,000 × 40 steps of `step`; 3,000 × 40 of `progressStep` | `sim` | no violation |
-| witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all reached |
+| witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap, a blocked ticket, a provisional row, a backoff, an `unblocked` event; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all 12 reached |
 | a second review | — | reached by a regression run only (`maxRunsSurviveResumptionTest`) |
 | Apalache, `safety` | `small`, depth 5 | no violation (15 min 29 s on 4 CPUs) |
 | liveness, `fencesClear` | `small`, TLC (Apalache cannot check fairness) | **at `b76af9c`, the pre-round-2 formula and model**: no violation in 8,187 distinct states before a 28-minute cap, not exhaustive. The current formulas (rounds 2–3) have not been run; R3-1254 runs them to completion on a narrowed instance |

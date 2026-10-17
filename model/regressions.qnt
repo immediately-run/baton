@@ -268,7 +268,9 @@ module regressions {
   // R-BTN-120: a withdrawn ticket meets no prerequisite; the block stands, and is no deadlock
   // (noStuckTicket counts it: a block is listed, R-BTN-75).
   run withdrawnMeetsNothingTest =
-    start.then(gitDepends("t1", T2_DONE, true)).then(withdraw("t2")).then(sync1)
+    start.then(gitDepends("t1", { leg: "", other: "t2", mode: "at", stations: Set("filed") }, true)).then(sync1)
+      .expect(not(st.blocked.get("t1")) and ticketClaimable("t1"))
+      .then(withdraw("t2")).then(sync1)
       .expect(st.blocked.get("t1") and st.postedGone.get("t2") and not(ticketClaimable("t1")))
 
   // R-BTN-78: a decision on a leg refuses the advance into it, not a claim of another leg; one on
@@ -356,4 +358,22 @@ module regressions {
       .expect(st.blocked.get("t1") and st.lastEvent.get("t1") == "blocked")
       .then(gitDecides("t1", "", false)).then(sync1)
       .expect(not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked" and not(st.unpairedUnblock))
+
+  // R-BTN-69 (R3-1254, owner: "exactly one start and at least one terminal station for each
+  // course"): the model's course passes the acceptance rules, and each rule refuses a course that
+  // breaks it alone — a leg leaving an end, no end, a cycle of unbounded legs, a start_leg not
+  // leaving start, a station nothing reaches, a station with no way on.
+  run courseIsAcceptedTest = start.expect(courseWellFormed)
+  run courseRulesRefuseTest = start.expect(and {
+    not(courseOk(START, START_LEG, ENDS, LEGS.union(Set("reopen")), FROM.put("reopen", Set("merged")),
+                 TO.put("reopen", "filed"), MAX_RUNS.put("reopen", 1))),
+    not(courseOk(START, START_LEG, Set(), LEGS, FROM, TO, MAX_RUNS)),
+    not(courseOk(START, START_LEG, ENDS, LEGS, FROM, TO, MAX_RUNS.put("fix", 99).put("review", 99))),
+    courseOk(START, START_LEG, ENDS, LEGS, FROM, TO, MAX_RUNS.put("fix", 99)),
+    not(courseOk(START, "merge", ENDS, LEGS, FROM, TO, MAX_RUNS)),
+    not(courseOk(START, START_LEG, ENDS, LEGS.union(Set("leave")), FROM.put("leave", Set("orphan")),
+                 TO.put("leave", "merged"), MAX_RUNS.put("leave", 99))),
+    not(courseOk(START, START_LEG, ENDS, LEGS.union(Set("wedge")), FROM.put("wedge", Set("pr-open")),
+                 TO.put("wedge", "stuck"), MAX_RUNS.put("wedge", 99))),
+  })
 }
