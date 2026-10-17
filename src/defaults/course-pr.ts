@@ -148,10 +148,6 @@ export function branchMatches(pattern: string, branch: string): boolean {
   return j === p.length;
 }
 
-/** The `pr` course's stations (R-BTN-74): the ticket's PRs are its `course.prs` numbers and
- * every open-or-merged fact whose head branch matches the pattern; with several, the least
- * advanced decides — but every PR merged is `merged`, the end station. No PR is `filed`, with
- * `implement` waiting while a dependency or an open child is not done. */
 /** The PR numbers a ticket's `prs:` names: a bare number or `#n`, or a pull-request URL —
  * `https://<host>/<owner>/<name>/pull/<n>` — of this repository (`repository`, `owner/name`,
  * when known; a URL naming another repository is not one of this repository's PRs). */
@@ -166,19 +162,32 @@ export function prNumbers(prs: unknown[], repository?: string | null): string[] 
   return out;
 }
 
+/** The course's branch patterns ready to match (R-BTN-51): the current and previous ones, the
+ * default when it names none. `{repository}` matches anything: the facts are this repository's
+ * own PRs, so it can only ever name this repository. */
+export const matchPatterns = (branchPatterns?: string[]): string[] =>
+  (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, '*'));
+
+/** Whether PR `number` on head branch `head` is one of ticket `t`'s: listed in its `prs:`, or
+ * on a branch one of `patterns` (from `matchPatterns`) maps to it. */
+export function ticketOwns(t: SourceTicket, pr: { number: number; head: string }, patterns: string[], repository?: string | null): boolean {
+  return prNumbers((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], repository).includes(String(pr.number))
+    || patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), pr.head));
+}
+
+/** The `pr` course's stations (R-BTN-74): the ticket's PRs are its `course.prs` numbers and
+ * every open-or-merged fact whose head branch matches the pattern; with several, the least
+ * advanced decides — but every PR merged is `merged`, the end station. No PR is `filed`, with
+ * `implement` waiting while a dependency or an open child is not done. */
 export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; branchPatterns?: string[]; closed: Set<string>; done?: Set<string>; repository?: string | null }): StationsResult {
   const stations: Record<string, PostedStation> = {};
-  // The course's current and previous patterns (R-BTN-51). `{repository}` matches anything: the
-  // facts are this repository's own PRs, so it can only ever name this repository.
-  const patterns = (ctx.branchPatterns?.length ? ctx.branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, '*'));
+  const patterns = matchPatterns(ctx.branchPatterns);
   // A dependency counts once it is closed `done` (R-BTN-74); `done` absent, every closed id.
   const done = ctx.done ?? ctx.closed;
   for (const t of ctx.tickets) {
     if (ctx.closed.has(t.id)) continue; // closed tickets are the `closed` list, not stations
-    const prs = prNumbers((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], ctx.repository);
     // A closed unmerged PR counts as none, listed or matched alike.
-    const mine = ctx.facts.filter((f) => f.state !== 'closed'
-      && (prs.includes(String(f.number)) || patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), f.head))));
+    const mine = ctx.facts.filter((f) => f.state !== 'closed' && ticketOwns(t, f, patterns, ctx.repository));
     if (!mine.length) {
       // No PR is `filed`; `implement` is the queued leg, waiting while a dependency is not
       // closed done or an open child blocks it (R-BTN-74, R-BTN-83: the queue is the queued leg).

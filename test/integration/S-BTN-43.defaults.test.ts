@@ -38,7 +38,10 @@ class Repo {
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
     this.write('tickets/first.md', '---\nid: T-1\ntitle: First\ntier: routine\nmystery: unknown-field\n---\n');
     this.write('tickets/second.md', '---\nid: T-2\ntitle: Second\ndepends_on: [T-1]\n---\n');
-    this.write('tickets/third.md', '---\nid: T-3\ntitle: Third\n---\n');
+    // T-3 depends on an archived done item, which the source reads from tickets/archive/.
+    this.write('tickets/third.md', '---\nid: T-3\ntitle: Third\ndepends_on: [T-0]\n---\n');
+    mkdirSync(join(this.dir, 'tickets', 'archive'), { recursive: true });
+    this.write('tickets/archive/zero.md', '---\nid: T-0\nstatus: done\n---\n');
     this.write('tickets/done.md', '---\nid: T-9\nstatus: done\n---\n');
     this.write('tickets/noid.md', '---\ntitle: no id here\n---\n');
     this.write('tickets/notes.txt', 'not markdown\n');
@@ -52,11 +55,11 @@ class Repo {
     return execFileSync('git', ['-C', this.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   }
   /** One sync: recorded facts, the harness's sync credential, the local host's transport. */
-  async sync(): Promise<void> {
+  async sync(...extra: string[]): Promise<void> {
     const facts = join(this.dir, '.baton', 'facts.json');
     writeFileSync(facts, JSON.stringify(this.facts));
     const token = await syncToken();
-    const args = parseSyncArgs(['--root', this.dir, '--url', ORIGIN, '--facts', facts], {});
+    const args = parseSyncArgs(['--root', this.dir, '--url', ORIGIN, '--facts', facts, ...extra], {});
     await syncMain({ ...args, auth: () => ({ Authorization: `Bearer ${token}` }), transport: (req) => hostCall(req), log: () => {} });
   }
 }
@@ -93,7 +96,9 @@ describe('S-BTN-43 a repository with no course code', () => {
       { id: 'docs:T-2', course_id: 'pr' },
       { id: 'docs:T-3', course_id: 'pr' },
     ]);
-    expect(await rows('SELECT ticket_id, closed_as FROM closed_tickets')).toEqual([{ ticket_id: 'docs:T-9', closed_as: 'done' }]);
+    expect(await rows('SELECT ticket_id, closed_as FROM closed_tickets ORDER BY ticket_id')).toEqual([{ ticket_id: 'docs:T-0', closed_as: 'done' }, { ticket_id: 'docs:T-9', closed_as: 'done' }]);
+    // The archived done dependency counts: T-3's implement is ready.
+    expect((await nextOf('T-3'))[0]).toMatchObject({ leg: 'implement', state: 'ready' });
     // The dependent ticket is not ready until its dependency is done.
     expect((await stationOf('T-2'))[0]).toMatchObject({ station: 'filed', next_leg: 'implement' });
     expect((await nextOf('T-2'))[0]).toMatchObject({ state: 'waiting', waiting_on: 'dependencies' });
@@ -214,5 +219,30 @@ describe('S-BTN-43 the sync refuses, posting nothing', () => {
     await repo.sync();
     // The older reading (no T-4) was not posted: the head and its four tickets stand.
     expect(await posted()).toEqual({ n: 4 });
+  }, 60_000);
+});
+
+describe('S-BTN-43 --latest, as the workflow runs it', () => {
+  it('after its number the run fetches the newest main and posts that board, not the older checkout it started on', async () => {
+    await init(repo.dir);
+    repo.commit();
+    // A bare origin, and a second clone that pushes one commit the local checkout lacks.
+    const bare = mkdtempSync(join(tmpdir(), 'baton-s43-origin-'));
+    const other = mkdtempSync(join(tmpdir(), 'baton-s43-other-'));
+    try {
+      execFileSync('git', ['clone', '-q', '--bare', repo.dir, bare], { stdio: 'ignore' });
+      execFileSync('git', ['-C', repo.dir, 'remote', 'add', 'origin', bare], { stdio: 'ignore' });
+      execFileSync('git', ['clone', '-q', bare, other], { stdio: 'ignore' });
+      writeFileSync(join(other, 'tickets', 'fifth.md'), '---\nid: T-5\ntitle: Fifth\n---\n');
+      for (const a of [['add', '-A'], ['-c', 'user.email=o@t', '-c', 'user.name=o', 'commit', '-qm', 'T-5'], ['push', '-q', 'origin', 'HEAD:main']]) execFileSync('git', ['-C', other, ...a], { stdio: 'ignore' });
+      const newest = execFileSync('git', ['-C', other, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      await repo.sync('--latest', 'main');
+      expect(await rows('SELECT id FROM tickets WHERE id = ?', 'docs:T-5')).toEqual([{ id: 'docs:T-5' }]);
+      // The checkout now sits at the newest main, detached: the commit it posted.
+      expect(execFileSync('git', ['-C', repo.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(newest);
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+      rmSync(other, { recursive: true, force: true });
+    }
   }, 60_000);
 });

@@ -33,8 +33,8 @@ export interface TicketsResult {
   closed: { id: string; as: 'done' | 'withdrawn' }[];
 }
 
-/** Frontmatter: a `---`-fenced block of `key: value` lines, values scalar, `[a, b]` or a
- * `- item` block list. A file with no fence, or none carrying `id`, is not a ticket. */
+/** Frontmatter: a `---`-fenced block of `key: value` lines, each value text (unquoted, never
+ * turned into a number here), an inline `[a, b]` or a `- item` block list. A file with no fence, or none carrying `id`, is not a ticket. */
 export function parseFrontmatter(text: string): Record<string, unknown> | null {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!m) return null;
@@ -55,8 +55,6 @@ export function parseFrontmatter(text: string): Record<string, unknown> | null {
       out[key] = items;
     } else if (/^\[.*\]$/.test(rest.trim())) {
       out[key] = rest.trim().slice(1, -1).split(',').map(unquote).filter(Boolean);
-    } else if (/^-?\d+(\.\d+)?$/.test(rest.trim())) {
-      out[key] = Number(rest.trim());
     } else {
       out[key] = unquote(rest);
     }
@@ -69,8 +67,8 @@ const unquote = (v: string): string => {
   const t = v.trim();
   return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
 };
-/** A scalar field: a string, or a number read as its text (`id: 1042` is the id `1042`). */
-const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : typeof v === 'number' ? String(v) : null);
+/** A scalar field, as the text the file wrote (`id: 0042` is the id `0042`, never `42`). */
+const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 /** A list field: a list, or one scalar standing for a list of one (`depends_on: S0`). */
 const strList = (v: unknown): string[] => (Array.isArray(v) ? v : v == null || v === '' ? [] : [v]).map(str).filter((x): x is string => x != null);
 
@@ -87,13 +85,16 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
   const byId = new Map<string, string>(); // id → file, for duplicate detection
   const openChildren = new Map<string, string[]>(); // parent id → its live children (R-BTN-86)
   for (const f of files) {
-    if (!/^\.?[A-Za-z0-9._-]+\.(md|mdx)$/.test(f.path.split('/').pop() ?? '')) continue;
+    // Every `*.md` or `*.mdx` file (R-BTN-74), the extension in any case: a space or a non-ASCII
+    // letter in the name is still a ticket.
+    if (!/\.mdx?$/i.test(f.path)) continue;
     const fm = parseFrontmatter(f.text);
     const id = str(fm?.id);
     if (fm == null || id == null) continue; // a file without frontmatter or `id` is not a ticket
     // `order` is a number or nothing: anything else fails the sync naming the file, rather
     // than silently unranking the ticket.
-    const order = fm.order == null || fm.order === '' ? null : typeof fm.order === 'number' ? fm.order
+    // Every value stays text; `order` alone is parsed, being the one field that is a number.
+    const order = fm.order == null || fm.order === '' ? null
       : typeof fm.order === 'string' && /^-?\d+(\.\d+)?$/.test(fm.order) ? Number(fm.order) : Number.NaN;
     if (order != null && !Number.isFinite(order)) throw new Error(`${f.path}: order ${JSON.stringify(fm.order)} is not a number`);
     if (byId.has(id)) throw new Error(`${f.path}: id ${id} already appears in ${byId.get(id)}`);

@@ -4,13 +4,13 @@
 // stubs imported from a scratch copy, as the runner loads them, and run; both ejections
 // imported and called, answering what the defaults answer; and `prClose` in a real git repo.
 // Node only: init writes a real tree and runs git.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseSyncArgs, syncWorkflow } from '../../src/defaults/cli';
+import { githubFacts, parseSyncArgs, syncWorkflow } from '../../src/defaults/cli';
 import { PR_COURSE, stationsPr, type PrFact } from '../../src/defaults/course-pr';
 import { prClose, verdictLine, type Exec } from '../../src/defaults/pr-close';
 import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
@@ -23,6 +23,13 @@ const gitInit = (dir: string) => {
   execFileSync('git', ['-C', dir, 'config', 'user.email', 't@t'], { stdio: 'ignore' });
   execFileSync('git', ['-C', dir, 'config', 'user.name', 't'], { stdio: 'ignore' });
 };
+/** Commit everything in `dir`; its new HEAD. */
+const commitAll = (dir: string): string => {
+  execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' });
+  execFileSync('git', ['-C', dir, 'commit', '-qm', 'scaffold', '--allow-empty'], { stdio: 'ignore' });
+  return execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+};
+const at = (dir: string) => ({ sha: execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() });
 /** A fresh import of an ejected or scaffolded module (the query defeats the module cache). */
 const PIN = 'immediately-run/baton@abababababababababababababababababababab';
 const load = async (file: string) => import(`${pathToFileURL(file).href}?t=${Math.random()}`);
@@ -43,6 +50,7 @@ describe('baton repo init, through the built CLI', () => {
     root = mkdtempSync(join(tmpdir(), 'baton-init-'));
     gitInit(root);
     baton(root, 'repo', 'init', '--pin', PIN);
+    commitAll(root);
   }, 120_000);
   afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -93,34 +101,39 @@ describe('baton repo init, through the built CLI', () => {
       copyFileSync(join(root, '.baton', 'courses', 'pr', 'legs', 'implement.mjs'), join(scratch, 'implement.mjs'));
       const stub = await load(join(scratch, 'implement.mjs'));
       expect(typeof stub.close).toBe('function');
-      expect(await stub.run({ ticket: { id: 'A-1' }, checkout: root })).toEqual({ reached: 'pr-open', next: 'review' });
+      expect(await stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot: at(root) })).toEqual({ reached: 'pr-open', next: 'review' });
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }
   });
 
-  it('the stubs run the agent_command baton.json names when the leg runs, arguments and all; the review returns its verdict', async () => {
+  it('the stubs run the agent_command baton.json names at the claim’s snapshot, arguments and all; the review returns its verdict', async () => {
     const agent = join(root, 'agent.sh');
     writeFileSync(agent, '#!/bin/sh\necho "$1 $2 $3 $4" > "$(dirname "$0")/agent.args"\necho "reviewing"\necho "$VERDICT"\n');
     chmodSync(agent, 0o755);
     const settingsFile = join(root, '.baton', 'baton.json');
     const before = readFileSync(settingsFile, 'utf8');
     try {
-      // Edited after init: the stub reads it at run time, and the command may carry arguments.
+      // Committed after init: the stub reads it at the snapshot, and the command may carry arguments.
       writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: `${agent} --flag` }));
+      const snapshot = { sha: commitAll(root) };
+      // An uncommitted edit — a branch under review choosing its reviewer — is never read.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: 'echo approve' }));
       const file = join(root, '.baton', 'courses', 'pr', 'legs', 'review.mjs');
       process.env.VERDICT = 'changes';
-      expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: root })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
+      expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
       expect(readFileSync(join(root, 'agent.args'), 'utf8').trim()).toBe(`--flag A-1 review ${root}`);
       process.env.VERDICT = 'approve';
-      expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: root })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
+      expect(await (await load(file)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
       process.env.VERDICT = 'maybe';
-      await expect((await load(file)).run({ ticket: { id: 'A-1' }, checkout: root })).rejects.toThrow('no verdict');
+      await expect((await load(file)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).rejects.toThrow('no verdict');
+      await expect((await load(file)).run({ ticket: { id: 'A-1' }, checkout: root })).rejects.toThrow('no snapshot');
       // The fix stub queues review, the only leg leaving `fixed`.
-      expect(await (await load(join(root, '.baton', 'courses', 'pr', 'legs', 'fix.mjs'))).run({ ticket: { id: 'A-1' }, checkout: root })).toEqual({ reached: 'fixed', next: 'review' });
+      expect(await (await load(join(root, '.baton', 'courses', 'pr', 'legs', 'fix.mjs'))).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'review' });
     } finally {
       delete process.env.VERDICT;
       writeFileSync(settingsFile, before);
+      commitAll(root);
     }
   });
 
@@ -142,6 +155,7 @@ describe('baton repo init, through the built CLI', () => {
       expect(readFileSync(stub, 'utf8')).not.toContain('// edited by hand');
     } finally {
       baton(root, 'repo', 'init', '--pin', PIN, '--force');
+      commitAll(root);
     }
   }, 120_000);
 
@@ -208,5 +222,70 @@ describe('prClose', () => {
     // The first line is exactly the line the station function reads (course-pr's VERDICT).
     expect(calls[0].args[3].split('\n')[0]).toBe(verdictLine('changes'));
     await expect(prClose(ctx, { reached: 'reviewed' }, run)).rejects.toThrow('no verdict');
+  });
+});
+
+describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', () => {
+  let dir: string;
+  const calls: string[] = [];
+  /** A fake api.github.com: `routes` maps a path (without host or per_page) to its JSON, and a
+   * `[json, next]` pair answers with a Link to the next page. */
+  const serve = (routes: Record<string, unknown>) => vi.stubGlobal('fetch', async (url: string) => {
+    const u = new URL(url);
+    u.searchParams.delete('per_page');
+    const key = `${u.pathname}${u.search}`;
+    calls.push(key);
+    if (!(key in routes)) return new Response('{}', { status: 404 });
+    const r = routes[key];
+    const [body, next] = Array.isArray(r) && r.length === 2 && typeof r[1] === 'string' && r[1].startsWith('/') ? r as [unknown, string] : [r, null];
+    return new Response(JSON.stringify(body), { headers: next ? { link: `<https://api.github.com${next}>; rel="next"` } : {} });
+  });
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'baton-facts-'));
+    gitInit(dir);
+    execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/o/r.git']);
+    process.env.GITHUB_TOKEN = 't';
+  });
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+    delete process.env.GITHUB_TOKEN;
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    calls.length = 0;
+  });
+  const pr = (number: number, head: string, state: string, merged = false) => ({ number, head: { ref: head, sha: `s${number}` }, state, merged_at: merged ? '2026-10-01T00:00:00Z' : null });
+  const who = (author_association: string, body: string, at: string) => ({ user: { login: 'x' }, author_association, body, created_at: at, submitted_at: at, state: 'COMMENTED' });
+
+  it('pages the PR list, reads detail only for PRs a live ticket owns, and keeps verdicts from people with a say', async () => {
+    serve({
+      '/repos/o/r/pulls?state=all': [[pr(1, 'claude/A-1-x', 'open'), pr(2, 'claude/Z-9-old', 'closed', true)], '/repos/o/r/pulls?state=all&page=2'],
+      '/repos/o/r/pulls?state=all&page=2': [pr(3, 'claude/A-1-y', 'closed')],
+      '/repos/o/r/commits/s1/check-runs': { check_runs: [{ conclusion: 'success' }, { conclusion: null }] },
+      '/repos/o/r/pulls/1/commits': [{ commit: { committer: { date: '2026-10-02T00:00:00Z' } } }, { commit: { committer: { date: '2026-10-03T00:00:00Z' } } }],
+      '/repos/o/r/pulls/1/reviews': [],
+      '/repos/o/r/issues/1/comments': [who('NONE', '<!-- baton:verdict approve -->', '2026-10-04T00:00:00Z'), who('MEMBER', '<!-- baton:verdict changes -->', '2026-10-05T00:00:00Z')],
+    });
+    const facts = await githubFacts(dir, () => {}, (p) => p.head.startsWith('claude/A-1-'));
+    expect(facts.map((f) => [f.number, f.state])).toEqual([[1, 'open'], [2, 'merged'], [3, 'closed']]);
+    // The owned open PR: its checks, every commit's date, and the member's verdict alone.
+    expect(facts[0]).toMatchObject({ checks: ['success', null], pushes: [Date.parse('2026-10-02T00:00:00Z'), Date.parse('2026-10-03T00:00:00Z')], pushedAt: Date.parse('2026-10-03T00:00:00Z') });
+    expect(facts[0].reviews.map((r) => r.body)).toEqual(['<!-- baton:verdict changes -->']);
+    // The unowned merged PR and the closed one cost no request beyond the list.
+    expect(calls.filter((c) => /\/(2|3|s2|s3)\//.test(c))).toEqual([]);
+    expect(calls).toHaveLength(6);
+  });
+
+  it('refuses before the request budget is spent, rather than truncate or starve the next runs', async () => {
+    const many = Array.from({ length: 60 }, (_, i) => pr(i + 1, `claude/A-${i + 1}-x`, 'open'));
+    const routes: Record<string, unknown> = { '/repos/o/r/pulls?state=all': many };
+    for (const p of many) {
+      routes[`/repos/o/r/commits/s${p.number}/check-runs`] = { check_runs: [] };
+      routes[`/repos/o/r/pulls/${p.number}/commits`] = [];
+      routes[`/repos/o/r/pulls/${p.number}/reviews`] = [];
+      routes[`/repos/o/r/issues/${p.number}/comments`] = [];
+    }
+    serve(routes);
+    await expect(githubFacts(dir, () => {}, () => true)).rejects.toThrow('more than 200 requests');
   });
 });

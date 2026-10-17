@@ -8,8 +8,8 @@ import { parseFrontmatter, ticketsMarkdown, type MarkdownFile } from '../../src/
 const file = (path: string, fm: string, body = 'prose\n'): MarkdownFile => ({ path, text: `---\n${fm}\n---\n\n${body}` });
 
 describe('parseFrontmatter', () => {
-  it('reads scalars, numbers, inline and block lists; a fence-less file is nothing', () => {
-    expect(parseFrontmatter(file('a.md', 'id: A\ntitle: "A ticket"\norder: 3\ntags: [EXPEDITE, OP]\ndepends_on:\n  - B\n  - C').text)).toEqual({ id: 'A', title: 'A ticket', order: 3, tags: ['EXPEDITE', 'OP'], depends_on: ['B', 'C'] });
+  it('reads scalars as text, inline and block lists; a fence-less file is nothing', () => {
+    expect(parseFrontmatter(file('a.md', 'id: A\ntitle: "A ticket"\norder: 3\ntags: [EXPEDITE, OP]\ndepends_on:\n  - B\n  - C').text)).toEqual({ id: 'A', title: 'A ticket', order: '3', tags: ['EXPEDITE', 'OP'], depends_on: ['B', 'C'] });
     expect(parseFrontmatter('no fence here\n')).toBeNull();
     expect(parseFrontmatter('---\ntitle: no id\n---\n')).toEqual({ title: 'no id' });
   });
@@ -22,7 +22,7 @@ describe('ticketsMarkdown', () => {
       file('two.md', 'id: T-2\ncourse: ops'),
     ], { items: 'wiki', default_course: 'pr', repos: { docs: 'immediately-run/docs' } });
     expect(closed).toEqual([]);
-    expect(tickets[0]).toMatchObject({ id: 'T-1', course_id: 'pr', path: 'wiki/one.md', title: 'One', tier: 'routine', requires: ['agent-venue'], expedite: true, operator_only: false, rank: 2, course: { prs: ['7'] }, parent: 'T-0', not_before: 1792152000000 });
+    expect(tickets[0]).toMatchObject({ id: 'T-1', course_id: 'pr', path: 'wiki/one.md', title: 'One', tier: 'routine', requires: ['agent-venue'], expedite: true, operator_only: false, rank: 2, course: { prs: ['7'] }, parent: 'T-0', not_before: '1792152000000' });
     expect(tickets[1]).toMatchObject({ id: 'T-2', course_id: 'ops', rank: null });
     expect('mystery' in (tickets[0] as unknown as Record<string, unknown>)).toBe(false); // unknown fields ignored
   });
@@ -38,6 +38,11 @@ describe('ticketsMarkdown', () => {
     expect(closed).toEqual([{ id: 'A', as: 'done' }, { id: 'B', as: 'withdrawn' }, { id: 'C', as: 'withdrawn' }, { id: 'D', as: 'withdrawn' }]);
     expect(tickets.map((t) => t.id)).toEqual(['E']); // any other value is live and shown
     expect(tickets[0].display).toEqual({ status: 'in-progress' });
+  });
+
+  it('every *.md or *.mdx file is read, whatever its name: spaces, non-ASCII letters, an upper-case extension', () => {
+    const { tickets } = ticketsMarkdown([file('my ticket.md', 'id: S'), file('über.md', 'id: U'), file('C.MD', 'id: C'), file('archive/old.Mdx', 'id: O')]);
+    expect(tickets.map((t) => t.id).sort()).toEqual(['C', 'O', 'S', 'U']);
   });
 
   it('a file without an id, or not markdown, is not a ticket', () => {
@@ -64,6 +69,10 @@ describe('ticketsMarkdown', () => {
       file('n.md', 'id: 1042\ndepends_on: S0\ntags: EXPEDITE\nprs: 12\norder: 3.5'),
       file('q.md', 'id: Q\ndepends_on: ["S0", \'S1\']\nrequires:\n  - "agent-venue"\norder: "7"'),
     ]);
+    // Every value is the text the file wrote: a zero-padded id stays padded, so its dependents,
+    // which name it the same way, resolve.
+    const padded = ticketsMarkdown([file('p.md', 'id: 0042'), file('d.md', 'id: D\ndepends_on: [0042]')]).tickets;
+    expect(padded.map((t) => [t.id, t.depends_on])).toEqual([['0042', []], ['D', ['0042']]]);
     expect(tickets.find((t) => t.id === '1042')).toMatchObject({ depends_on: ['S0'], expedite: true, course: { prs: ['12'] }, rank: 4 });
     expect(tickets.find((t) => t.id === 'Q')).toMatchObject({ depends_on: ['S0', 'S1'], requires: ['agent-venue'], rank: 7 });
     // A scalar repos name goes through the map like a list's, and an unmapped one still fails.

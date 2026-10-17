@@ -6,14 +6,15 @@
 // Course code in the CLI, never core (§2b). Reached through the esbuild bundle
 // (scripts/baton-cli.mjs), the way `baton run` reaches src/runner.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, type Auth, type Transport } from '../runner/api';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { DEFAULT_BRANCH_PATTERN, PR_COURSE, stationsPr, type PrFact, type StationsResult } from './course-pr';
+import { DEFAULT_BRANCH_PATTERN, PR_COURSE, matchPatterns, stationsPr, ticketOwns, type PrFact, type StationsResult } from './course-pr';
+import { readItems } from './read-items';
 import { ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
 const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8' }).trim();
@@ -21,7 +22,9 @@ const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C',
  * `…/git/owner/name` form), or null when it has none. */
 function remoteSlug(root: string): string | null {
   try {
-    return git(root, 'remote', 'get-url', 'origin').replace(/^git@[^:]+:/, '').replace(/^https?:\/\/[^/]+\//, '').replace(/^git\//, '').replace(/\.git$/, '');
+    // The proxy's `…/git/owner/name` form drops its `git/` — only when `owner/name` follows, so an
+    // owner named `git` keeps its name.
+    return git(root, 'remote', 'get-url', 'origin').replace(/^git@[^:]+:/, '').replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '').replace(/^git\/(?=[^/]+\/[^/]+$)/, '');
   } catch {
     return null;
   }
@@ -155,7 +158,13 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
 
   // The PR facts: recorded (tests) or the forge's own, gathered through the adapter's seam.
   const repository = remoteSlug(root);
-  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : await githubFacts(root, log);
+  // A PR is a live ticket's when its course's patterns or the ticket's `prs:` name it.
+  const owners = courses.map((c) => ({
+    patterns: matchPatterns([c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])]),
+    tickets: result.tickets.filter((t) => t.course_id === c.id && !closedIds.has(t.id)),
+  }));
+  const owns = (pr: { number: number; head: string }) => owners.some((o) => o.tickets.some((t) => ticketOwns(t, pr, o.patterns, repository)));
+  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : await githubFacts(root, log, owns);
 
   // Each course's stations, markers and course data: its own sync.mjs, else the default only
   // `pr` has. The function sees its own course's tickets alone.
@@ -250,18 +259,6 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   return outcome === 'advanced' || outcome === 'confirmed' || outcome === 'held' || outcome === 'busy' ? 0 : 1;
 }
 
-/** The markdown source's files: every file under `items`, at any depth (an `archive/` of done
- * tickets included), each path relative to `items`. */
-function readItems(root: string, items = 'tickets'): { path: string; text: string }[] {
-  const dir = join(root, items);
-  if (!existsSync(dir)) return [];
-  return (readdirSync(dir, { recursive: true, withFileTypes: true }) as import('node:fs').Dirent[])
-    .filter((e) => e.isFile())
-    .map((e) => relative(dir, join(e.parentPath, e.name)).split(sep).join('/'))
-    .sort()
-    .map((path) => ({ path, text: readFileSync(join(dir, path), 'utf8') }));
-}
-
 /** This workflow run's GitHub Actions OIDC token for Baton (R-BTN-15), audience Baton's origin
  * (R-BTN-56); null outside Actions. The workflow grants `id-token: write`. */
 async function actionsToken(audience: string): Promise<string | null> {
@@ -284,6 +281,10 @@ function bearerAuth(token: string | null): Auth {
 const FETCH_TIMEOUT_MS = 30_000;
 /** The most pages of 100 one list may span; beyond it the sync fails rather than truncate. */
 const MAX_PAGES = 50;
+/** The most GitHub requests one sync run may make. An Actions `GITHUB_TOKEN` has 1,000 an
+ * hour and the workflow runs at least four times an hour, so a run stays well inside a quarter;
+ * one that would need more fails before it is spent rather than starve the next runs. */
+const MAX_REQUESTS = 200;
 /** The `author_association` values whose reviews and comments carry a verdict. */
 const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
@@ -291,12 +292,14 @@ const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
  * commits' dates, their reviews and their comments, mapped to PrFact. Every list is read to its
  * end (GitHub's `Link: rel="next"`), so a long-lived repository or a long thread is never cut
  * off. Live forge access — the tests inject recorded facts instead. */
-async function githubFacts(root: string, log: (l: string) => void): Promise<PrFact[]> {
+export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string }) => boolean): Promise<PrFact[]> {
   const slug = remoteSlug(root);
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error('no GITHUB_TOKEN to read GitHub — pass --facts <file> for recorded facts');
+  let requests = 0;
   const get = async (url: string): Promise<Response> => {
+    if (++requests > MAX_REQUESTS) throw new Error(`GitHub: this sync would need more than ${MAX_REQUESTS} requests — refusing before the token's hourly budget is spent`);
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`GitHub ${url}: ${res.status}`);
     return res;
@@ -315,9 +318,12 @@ async function githubFacts(root: string, log: (l: string) => void): Promise<PrFa
   };
   const out: PrFact[] = [];
   for (const pr of await all<any>(`/repos/${slug}/pulls?state=all`)) {
-    // A closed unmerged PR counts as none (R-BTN-74): recorded, but nothing more is read for it.
-    if (pr.state === 'closed' && !pr.merged_at) {
-      out.push({ number: pr.number, head: pr.head.ref, state: 'closed', pushedAt: 0, checks: [], reviews: [] });
+    const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
+    // Only a PR a live ticket owns needs its detail read: a closed unmerged PR counts as none
+    // (R-BTN-74), and any other PR places no ticket. Those are recorded from the list alone,
+    // so the requests a run makes grow with the live tickets, not with the repository's history.
+    if (state === 'closed' || !owns({ number: pr.number, head: pr.head.ref })) {
+      out.push({ number: pr.number, head: pr.head.ref, state, pushedAt: 0, checks: [], reviews: [] });
       continue;
     }
     const checks = (await all<any>(`/repos/${slug}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null);
@@ -332,11 +338,11 @@ async function githubFacts(root: string, log: (l: string) => void): Promise<PrFa
       .filter((c) => TRUSTED.has(c.author_association))
       .map((c) => ({ author: c.user?.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.created_at), body: c.body ?? '' }));
     out.push({
-      number: pr.number, head: pr.head.ref, state: pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open',
+      number: pr.number, head: pr.head.ref, state,
       pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments],
     });
   }
-  log(`baton: read ${out.length} PRs of ${slug} from GitHub`);
+  log(`baton: read ${out.length} PRs of ${slug} from GitHub in ${requests} requests`);
   return out;
 }
 
@@ -358,17 +364,12 @@ async function bundleSource(entrySource: string, outfile: string): Promise<void>
  * interface the sync calls a repository's own file with, ready to edit (the bundle's top is the
  * default's own source). */
 const WRAPPERS: Record<'tickets' | 'stations', () => string> = {
-  tickets: () => `import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+  tickets: () => `import { readItems } from ${JSON.stringify(source('read-items.ts'))};
 import { ticketsMarkdown } from ${JSON.stringify(source('tickets-markdown.ts'))};
 export default {
   // The same signature the sync calls a repository's own source with: edit freely.
   async tickets(ctx) {
-    const dir = join(ctx.root, ctx.settings.items ?? 'tickets');
-    let names = [];
-    // Every file under items, at any depth, its path relative to items.
-    try { names = readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => relative(dir, join(e.parentPath, e.name)).split(sep).join('/')).sort(); } catch {}
-    const files = names.map((name) => ({ path: name, text: readFileSync(join(dir, name), 'utf8') }));
+    const files = readItems(ctx.root, ctx.settings.items);
     return ticketsMarkdown(files, ctx.settings);
   },
 };
@@ -397,22 +398,24 @@ const STUB_POSITION: Record<string, string> = {
 const AGENT_OUTPUT_MAX = 64 * 1024 * 1024;
 
 /** One leg stub's source (R-BTN-74): run the `agent_command` that `.baton/baton.json` names at
- * the time the leg runs, through the shell (so it may carry arguments), with the ticket, the
+ * the claim's snapshot (`ctx.snapshot.sha`, the commit the runner loads the leg scripts from), through the shell (so it may carry arguments), with the ticket, the
  * leg and the checkout as its arguments. The review stub asks the agent for a verdict and
  * returns it, and the bundled `close` writes it as the verdict line. */
 function stubSource(leg: string): string {
   const review = leg === 'review';
-  return `import { execFile } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+  return `import { execFile, execFileSync } from 'node:child_process';
 import { prClose } from ${JSON.stringify(source('pr-close.ts'))};
 // The \`${leg}\` leg of the \`pr\` course, written by \`baton repo init\`: it runs this repository's
-// agent — \`agent_command\` in .baton/baton.json, read when the leg runs — with the ticket, the
-// leg and the checkout as its arguments.${review ? `
+// agent — \`agent_command\` in .baton/baton.json, read when the leg runs at the claim's snapshot,
+// the commit the runner loaded this script from, never the working tree an agent may have
+// changed (so a branch under review cannot pick its reviewer) — with the ticket, the leg and
+// the checkout as its arguments.${review ? `
 // The review: the agent's last line of output must be its verdict, \`approve\` or \`changes\`;
 // \`close\` writes it on the PR as the verdict line (\`<!-- baton:verdict … -->\`).` : ''}
 export async function run(ctx) {
-  const settings = JSON.parse(readFileSync(join(ctx.checkout, '.baton', 'baton.json'), 'utf8'));
+  const sha = ctx.snapshot?.sha;
+  if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
+  const settings = JSON.parse(execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':.baton/baton.json'], { encoding: 'utf8' }));
   if (typeof settings.agent_command !== 'string' || settings.agent_command === '') throw new Error('.baton/baton.json names no agent_command');
   const out = await new Promise((resolve, reject) => execFile('sh', ['-c', settings.agent_command + ' "$@"', 'agent', ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout], {
     cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX},
