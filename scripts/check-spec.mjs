@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // check-spec.mjs — the spec and the code agree on what the spec defines (R3-1252).
 //
-//   npm run check:spec        check spec/BATON_SPEC.md against src/, test/, model/, cli/ and tickets/
+//   npm run check:spec        check spec/BATON_SPEC.md against src/, test/, model/ and cli/ (the
+//                             requirement ids they cite) and tickets/ (the tickets it cites)
 //
 // - every requirement id (`R-BTN-n`) the code cites is defined in the spec — as a bold
 //   `**R-BTN-n` rule heading or a bold rule followed by `(R-BTN-n)` — or is one of the
@@ -14,15 +15,16 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Terms removed when the spec moved here (R3-1267's scrub list): a hostname that is not
- *  Baton's, and docs' private publication. */
-export const SCRUBBED = ['garda', 'publication/', 'study-log', 'the study'];
+/** Terms the move removed (R3-1267's scrub list): a hostname that is not Baton's, and docs'
+ *  private study and its plans. This keeps them out; it does not prove the scrub complete —
+ *  the owner reviewed what stays (R3-1252, 2026-10-17). */
+export const SCRUBBED = ['garda', 'publication/', 'study-log', 'the study', 'skill-history'];
 
-/** Requirement ids defined in docs' `BATON_ROADMAP_PR_COURSE`, the reference deployment's course
- *  spec, which stays in docs: the code that serves that course may cite them. */
 /** Ticket ids the spec uses only as examples of a value (`'remainder:R3-9'`, §4). */
 export const EXAMPLE_TICKETS = ['R3-9'];
 
+/** Requirement ids defined in docs' `BATON_ROADMAP_PR_COURSE`, the reference deployment's course
+ *  spec, which stays in docs: the code that serves that course may cite them. */
 export const COURSE_IDS = ['R-BTN-21', 'R-BTN-27', 'R-BTN-42', 'R-BTN-43', 'R-BTN-49'];
 
 /** The requirement ids the spec defines: each `**R-BTN-n` that opens a rule, and each bold rule

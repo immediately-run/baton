@@ -10,8 +10,9 @@ updated: 2026-10-17
 > reference deployment** — the first repository Baton served — and appear throughout as the
 > worked example: where a rule says "for docs" or "for `roadmap-pr`", that is the example, not
 > core. Two parts of the old document are that deployment's alone and stay in docs, in
-> `BATON_DOCS_DEPLOYMENT`: what a cutover changes in docs' own text (§15) and the code anchors
-> into docs' scripts (§16's Depends-on-today). `BATON_ROADMAP_PR_COURSE`, the `roadmap-pr`
+> `BATON_DOCS_DEPLOYMENT`: §15's rows for what a cutover changes in docs' own text (its rows for
+> Baton's own repository, host, credentials and names stay here) and the code anchors into docs'
+> scripts (§16's Depends-on-today). `BATON_ROADMAP_PR_COURSE`, the `roadmap-pr`
 > course's own logic, stays in docs too. Tickets cited as `R3-n` are in [`tickets/`](../tickets/).
 
 
@@ -24,7 +25,7 @@ updated: 2026-10-17
 > (today's claim protocol), `BATON_ROADMAP_PR_COURSE` (the `roadmap-pr` course's
 > provider logic, split out of §7.3 on 2026-10-14), `docs/scripts/factory-state.mjs` and `lib/factoryState.mjs` (the
 > board as typed JSON and its claim order), the `next-roadmap-item` and `witness` skills (how a
-> claim is taken, held and reaped today), and docs' `skill-history` plan.
+> claim is taken, held and reaped today), and docs' process history.
 
 ## 1. Why this exists *(normative)*
 
@@ -3203,8 +3204,8 @@ CREATE TABLE hooks (
   claim, never at an `advance` — so the worker finishes under the protocol it started with. For docs, `scripts/data/baton.json`'s `skills_version` (3 today) becomes
   `roadmap-pr`'s `version`, and its `protocol_files` move to `.baton/baton.json`, its
   `transcript_repos` to the repository's Baton settings (R-BTN-66); the `cut_over` hint stays (R-BTN-28). This makes the cutover drain (§13)
-  a permanent rule rather than a one-off, and stops the failure recorded in skill-history
-  entry 22, where a worker acted on agent definitions from the base it was provisioned on.
+  a permanent rule rather than a one-off, and stops a failure docs
+  recorded, where a worker acted on agent definitions from the base it was provisioned on.
   **Flagged:** agents push straight to `main`, so this is a post-hoc check, not a gate — a
   check in CI turns `main` red, and the witness digest lists it, for a `docs/main` push that changes a file listed in
   a course's `protocol_files` (the claim, gate and activity sections' skills, the
@@ -4999,9 +5000,24 @@ seconds. Its views mirror Temporal's:
 
 ## 15. What this amends *(proposal — applied at cutover)*
 
-What a cutover changes is the deploying repository's own text — for the reference
-deployment, docs' parallel-agent spec, skills and scripts. It is in docs'
-`BATON_DOCS_DEPLOYMENT` §15.
+The rows below are Baton's own: its repository, host, credentials and names. What a cutover
+changes in the deploying repository's text — for the reference deployment, docs' parallel-agent
+spec, skills and scripts — is in docs' `BATON_DOCS_DEPLOYMENT` §15.
+
+| Text | Change at cutover |
+|---|---|
+| `.baton/courses/roadmap-pr/legs/*.mjs` (new) and the baton repository's CLI *(2026-10-14)* | `baton run` (R-BTN-72) and `roadmap-pr`'s five leg scripts: each starts the agent session on its skill step, continuing one harness session across legs where it can; `review` names `fix`, `merge` or `adjudicate` from the round's outcome |
+| the Baton GitHub App *(2026-10-14)* | subscribes to repository events; Baton verifies them with `BATON_GITHUB_WEBHOOK_SECRET` and dispatches syncs (R-BTN-73) |
+| the host *(2026-10-14)* | immediately.run's instance moves from `workitems.immediately.run` to `baton.immediately.run`: its `BATON_ORIGIN` (§3a) `https://baton.immediately.run`, R3-1208's route and checks (not yet provisioned), the Worker's OIDC `aud` check, which compares with `BATON_ORIGIN` (R3-1206), and docs' `baton_url`, the audience its workflows request their tokens for (R3-1207, R3-1218) — one change, made before R3-1208 runs; no code names the host *(review gate round 2)* |
+| *(2026-10-16: no `HookRunner`, R-BTN-98.)* the Baton repository's layout *(2026-10-14)* | logic moves under `src/core/` behind `Store`, `Scheduler`, `AdminKeys` and `HookRunner`; the Durable Object is wiring; a Node host under `src/local/` (R-BTN-55), before the amendment's other server items |
+| worker and probe credentials *(2026-10-14)* | SSH keys and signed requests replace bearer tokens in `src/auth.ts` (built by R3-1211), the docs client, the sidecar (R3-1213), and key management through the administrator and repository owners (§10.6) instead of token secrets |
+| Baton's settings *(2026-10-14)* | `workers.skills_version` and `min_skills_version` are dropped for each course's `version` (rule 9 keeps its code `stale-skills`); `credentials.allowed_capabilities` moves into `worker_grants.capabilities`; the reference repository is dropped (§2a) |
+| Baton's schema and API names *(2026-10-14)* | `work_items` → `tickets`, `work_item_id` → `ticket_id`, `work_item_claims` → `claims`, `item_overrides` → `ticket_overrides`, `/v1/worker/items/{item}/holder` → `/v1/worker/tickets/{ticket}/holder`, `no-eligible-item` → `no-eligible-ticket`: a numbered migration in the baton repository, with the §2b move |
+| the runner API's path prefix *(2026-10-15)* | `/v1/worker/*` → `/v1/runner/*` (owner, 2026-10-15): every route a worker's sidecar or runner calls — heartbeat, claim, next, end, advance, activities, messages, holder, push and the rest — keeps its name and shape under the new prefix; the docs clients and the baton repository's routes follow, with no alias (R3-1261) |
+| the sidecar *(2026-10-14)* | usage reported per claim; every provider rate limit reported with `resets_at` when given |
+
+Each text gets a dated note pointing here when its change lands, per spec_style's
+amendment-propagation rule.
 
 ## 16. Load-bearing assumptions & code anchors
 
