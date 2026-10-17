@@ -68,7 +68,7 @@ export interface PostedStation {
   handoff_url: string | null;
   next: { leg: string; state: 'ready' | 'waiting'; waiting_on: string | null; needs?: string[] }[];
   /** R-BTN-78: the ticket's open decisions as its sync posts them; checked for shape here, each
-   *  one's `leg` and `url` judged against the ticket when stored (decisionsOf). */
+   *  one's `leg` and `url` judged against the ticket when stored (`Blocks.posted`). */
   decisions?: PostedDecision[];
   /** Tags barred from each leg of the course the sync knows them for (`ticket_bars`). */
   bars: Record<string, string[]>;

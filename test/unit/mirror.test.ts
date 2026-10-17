@@ -102,6 +102,14 @@ describe('§12: foreign claims', () => {
     expect((await feed()).events.find((e) => e.kind === 'claimed').claim).toMatchObject({ nonce: 'f0f0f0', legacy: true });
   });
 
+  it('an imported claim holds a blocked ticket: blocked_since clears (R-BTN-75)', async () => {
+    await cutover(T0);
+    await rows(`INSERT INTO ticket_blocks (repository_id, ticket_id, kind, ref, since) VALUES ('docs', 'docs:R3-9001', 'decision', 'd1', ?)`, T0);
+    await rows(`UPDATE tickets SET blocked_since = ? WHERE id = 'docs:R3-9001'`, T0);
+    expect(await (await report({})).json()).toMatchObject({ imported: true });
+    expect(await rows(`SELECT blocked_since AS b FROM tickets WHERE id = 'docs:R3-9001'`)).toEqual([{ b: null }]);
+  });
+
   it('refuses a malformed report', async () => {
     await cutover(T0);
     for (const bad of [{ nonce: 'xyz' }, { ticket_id: '../R3' }, { sha: 'abc' }, { at: -1 }]) {

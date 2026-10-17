@@ -4,8 +4,8 @@
 // refused at registration; another repository's worker is refused `forbidden` for go_plus; one
 // reading blocks both resources' legs; a reading whose detail fails the schema is `invalid-params`;
 // an unavailable reading lapses at its `until`; an administrator's reading wins and an instrument's
-// takes over after it (`overridden` meanwhile); overnight no row is written and `other` lists
-// `no-instance`; G's leg decision refuses the advance into it, not the claim; H's decision naming a
+// takes over after it (`overridden` meanwhile); overnight the rows clear silently, none is written and
+// `other` lists `no-instance`; G's leg decision refuses the advance into it, not the claim; H's decision naming a
 // leg it lacks sits on the whole ticket and its `url` is dropped. The 150 unblockings that dispatch
 // 100 entries and `{truncated: 50}` are in test/unit/blocks.test.ts: the formal model cannot replay
 // an instance of 152 tickets (scripts/check-traces.mjs), and the cap is the core's alone.
@@ -69,6 +69,11 @@ describe('S-BTN-45 the edges of blocks', () => {
     expect(hb.json.refused_uses).toEqual([{ instance: GO, code: 'forbidden' }]);
     expect((await opsWorker.call('/v1/runner/readings', { readings: [{ instance: GO, available: false }] })).json.refused).toEqual([{ instance: GO, code: 'forbidden' }]);
 
+    // A malformed name is refused on its own entry; the heartbeat and the good name stand.
+    const mixed = await opsWorker.beat({ uses: ['Not A Name'] });
+    expect(mixed.status).toBe(200);
+    expect(mixed.json.refused_uses).toEqual([{ instance: 'Not A Name', code: 'invalid-params' }]);
+
     // W1 uses go_plus: one reading — unavailable until +20 min, valid_for 24 h — blocks F and D together.
     const w1 = await grantedWorker(owner, 'docs', 'w1', CAPS, [GO]);
     const posted = await w1.call('/v1/runner/readings', { readings: [
@@ -105,8 +110,13 @@ describe('S-BTN-45 the edges of blocks', () => {
     expect((await blocksOf('F')).blocked).toBe(true);
 
     // Overnight every worker stops: no live worker has a usable instance, so no row, and `no-instance`.
+    // The lost answer clears F's row silently: nothing became claimable, so no `unblocked` (R-BTN-77).
+    const unblockedF = async () => (await rows(`SELECT seq FROM events WHERE kind = 'unblocked' AND ticket_id = 'docs:F'`)).length;
+    const eveningF = await unblockedF();
     await setClock(T0 + 12 * H);
     await tick();
+    expect((await blocksOf('F')).blocked).toBe(false);
+    expect(await unblockedF()).toBe(eveningF);
     const night = await blocksOf('D');
     expect(night).toMatchObject({ blocked: false, blocks: [] });
     expect(night.other).toEqual(expect.arrayContaining([{ kind: 'no-instance', detail: { leg: 'review', resource: DS } }]));

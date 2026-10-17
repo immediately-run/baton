@@ -8,7 +8,7 @@ import { transcriptUrl } from './links';
 import { isUniqueViolation, logEvent, randomHex } from './db';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
-import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkEnd, checkOverride, checkResolve, type End } from './validate';
+import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkEnd, checkOverride, checkResolve, isGrantedKey, type End } from './validate';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
 import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Step } from './graph';
@@ -205,7 +205,7 @@ export class Claims {
    *  registered works only where it is granted; a bearer token or a BATON_KEYS seed key is not
    *  granted at all and keeps its interim reach until the seed retires (null). */
   private grantsOf(credential: string, createdBy: string | null): WorkerFacts['grants'] {
-    if (!createdBy || !/^(owner|admin):/.test(createdBy)) return null;
+    if (!isGrantedKey(createdBy)) return null;
     return Object.fromEntries(this.rows<{ repository_id: string; capabilities: string; max_tier: number | null }>(
       'SELECT repository_id, capabilities, max_tier FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', credential)
       .map((g) => [g.repository_id, { capabilities: JSON.parse(g.capabilities) as string[], max_tier: g.max_tier }]));

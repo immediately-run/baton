@@ -1007,7 +1007,7 @@ another ticket, or a third-party resource is unavailable.)*
   is git's — the packet's own protocol; Baton records what the sync posts. Reaching the person
   who must answer is R-BTN-80's. *(It replaces the free
   label `waiting_on: owner` wherever a course can name the decision.)*
-- **R-BTN-77 (blocked and unblocked are events; unblocking wakes work).** *(Amended 2026-10-17 by §2m: a provisional row (R-BTN-126) does not count toward `blocked_since`, so its writing or dropping is neither a `blocked` nor an `unblocked` transition; its confirmation by a snapshot is an ordinary row change.)* A ticket whose
+- **R-BTN-77 (blocked and unblocked are events; unblocking wakes work).** *(Amended 2026-10-17, R3-1251: a `resource` row that goes only because no live worker granted on the repository has a usable instance left — the fleet emptied, R-BTN-76's unanswerable case — clears `blocked_since` silently, like a claim: the answer was lost, nothing became available, so it is not an unblocking and fires no message or trigger. The next answer writes the row again with a `blocked`.)* *(Amended 2026-10-17 by §2m: a provisional row (R-BTN-126) does not count toward `blocked_since`, so its writing or dropping is neither a `blocked` nor an `unblocked` transition; its confirmation by a snapshot is an ordinary row change.)* A ticket whose
   `blocked_since` is set (R-BTN-75) is logged `blocked`, and one whose `blocked_since` is cleared
   other than by a claim is **unblocked**, logged `unblocked` with `{ticket, cleared: [{kind,
   ref}]}` — the rows whose removal cleared it — both in the transaction that changed it *(review
@@ -4173,9 +4173,25 @@ ALTER TABLE board_head ADD COLUMN fleet_version INTEGER NOT NULL DEFAULT 0;   --
 -- with `kind TEXT NOT NULL CHECK (kind IN ('state','measure'))`, `available INTEGER` nullable with
 -- CHECK ((kind = 'state') = (available IS NOT NULL)), `source` 'admin' (one administrator reading,
 -- whoever posted it, named in `posted_by`), 'worker:<workers.id>' per session or 'probe:<fingerprint>',
--- and PRIMARY KEY (instance, source). The reserved credentials row 'pool' (kind 'courier',
+-- and PRIMARY KEY (instance, source, kind) — *(amended 2026-10-17, R3-1251: keyed by kind too, so an
+-- instrument's `measure` never overwrites its own `state` reading, which R-BTN-101 says a measure
+-- must never change; `valid_for` is in seconds)*. The reserved credentials row 'pool' (kind 'courier',
 -- public_key NULL, created_by 'system') is what a pool notice's credential_id names; credentials'
 -- public_key is NULL only for 'legacy' and 'pool'.
+
+-- *(2026-10-17, R3-1251)* Two tables the build of §2g needed and this section did not name.
+CREATE TABLE instance_states (                    -- R-BTN-76: each instance's state as last evaluated, so a change —
+  instance      TEXT PRIMARY KEY,                 -- by a reading or by a lapse the alarm sees — is one `resource` event and
+  state         TEXT NOT NULL CHECK (state IN ('available','unavailable','unknown')),  -- one recount; a registered
+  until         INTEGER,                          -- instance starts 'unknown' (Needs you's "a day unknown" counts from it);
+  changed_at    INTEGER NOT NULL                  -- a worker's implicit instance back at 'unknown' with no reading is deleted
+);
+CREATE TABLE unblocked_dispatch (                 -- R-BTN-77: each repository's coalescing window for its unblocked trigger
+  repository_id TEXT PRIMARY KEY REFERENCES repositories(id),
+  last_sent_at  INTEGER,
+  pending_json  TEXT NOT NULL DEFAULT '[]',       -- the window's {ticket, cleared} entries, sent at most 100 and a {truncated}
+  due_at        INTEGER                           -- the trailing dispatch's time; the alarm is armed by it, at start too
+);
 
 -- Hook modules of each repository's head snapshot (R-BTN-51), one per course (R-BTN-52).
 -- *(Dropped 2026-10-16, R-BTN-98; §2l lists the data model's other changes.)*

@@ -4,10 +4,11 @@
 // reading's `until` passing on the fake clock; `transitive=1` over a chain; and the query plans
 // G-BTN-70's cost claim rests on.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, cutover, keyCall, placed, register, beat, claimItem, endClaim, rows, setAdminKeys, setClock, tick, withCore } from '../helpers';
+import { Git, armedAt, cutover, keyCall, placed, register, beat, claimItem, endClaim, rows, seedClaim, setAdminKeys, setClock, tick, withCore } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { grantedWorker, signed, SCHEMA } from '../lib/fleet';
 import type { Workflow } from '../../src/core/ports';
+import { BLOCK_SQL } from '../../src/core/blocks';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const MIN = 60_000;
@@ -68,11 +69,12 @@ describe('R-BTN-75: each cause written with its diff', () => {
     git.place('G', placed('reviewed', [['implement', 'pr-open'], ['review', 'reviewed']], [['merge', 'ready']], { decisions: [{ id: 'd1', leg: 'merge', asks: 'owner' }] }));
     await git.post();
     expect(await since('G')).toBe(T0);
-    // An end station has no queued leg; a whole-ticket decision still blocks it.
+    // An end station has no queued leg: nothing waits, so even a whole-ticket decision leaves it
+    // unblocked (R-BTN-75 — blocked means a queued leg cannot be claimed); the row is still kept.
     git.place('G', placed('merged', [['implement', 'pr-open'], ['review', 'reviewed'], ['merge', 'merged']], [], { decisions: [{ id: 'd2', asks: 'owner' }] }));
     await git.post();
     expect(await blockRows('G')).toEqual([{ kind: 'decision', ref: 'd2', leg: '', since: T0 }]);
-    expect(await since('G')).toBe(T0);
+    expect(await since('G')).toBeNull();
   });
 });
 
@@ -187,6 +189,26 @@ describe('R-BTN-77: unblocking wakes work, bounded', () => {
 
 });
 
+describe('R-BTN-76, R-BTN-77: the alarm after a restart', () => {
+  it('start() arms the alarm by the next reading to lapse and the trailing unblocked dispatch still owed', async () => {
+    // Times ahead of the real clock: an alarm armed in the past fires (and clears) at once.
+    const B = Math.ceil(Date.now() / 1000) * 1000 + 600_000;
+    const restart = () => withCore(async (c) => {
+      await (c as unknown as { ports: { scheduler: { set(at: number): Promise<void> } } }).ports.scheduler.set(B + 60_000);
+      await c.start();
+    });
+    await withCore((c) => {
+      c.store.exec(`INSERT INTO unblocked_dispatch (repository_id, last_sent_at, pending_json, due_at) VALUES ('docs', ?, '[]', ?)`, B - 30_000, B + 20_000);
+      c.store.exec(`INSERT INTO instance_readings (instance, source, kind, available, observed_at, lapses_at, posted_by) VALUES (?, 'admin', 'state', 0, ?, ?, 'admin:x')`, GO, B - 30_000, B + 10_000);
+    });
+    await restart();
+    expect(await armedAt()).toBe(B + 10_000);
+    await rows('DELETE FROM instance_readings');
+    await restart();
+    expect(await armedAt()).toBe(B + 20_000);
+  });
+});
+
 describe('R-BTN-75: asking', () => {
   it('transitive=1 follows ticket blocks along a chain, at most five levels', async () => {
     git.add('T0');
@@ -209,12 +231,52 @@ describe('R-BTN-75: asking', () => {
   });
 
   it('reads by index: blocks by primary key, blocked?on= through blocks_by_ref, the unfiltered page through tickets_blocked', async () => {
+    // The very statements the queries run (BLOCK_SQL), so a change to one is planned here.
     const plan = (q: string, ...p: unknown[]) => withCore((c) => c.store.exec<{ detail: string }>(`EXPLAIN QUERY PLAN ${q}`, ...p).toArray().map((r) => r.detail).join(' | '));
-    expect(await plan('SELECT kind, leg, ref, since, until FROM ticket_blocks WHERE ticket_id = ? ORDER BY kind, ref, leg', 'docs:A')).toMatch(/USING (PRIMARY KEY|INDEX sqlite_autoindex_ticket_blocks_1)/);
-    expect(await plan('SELECT DISTINCT ticket_id FROM ticket_blocks WHERE repository_id = ? AND kind = ? AND ref IN (SELECT value FROM json_each(?)) ORDER BY ticket_id', 'docs', 'resource', '[]')).toMatch(/USING (COVERING )?INDEX blocks_by_ref/);
-    expect(await plan('SELECT DISTINCT ticket_id FROM ticket_blocks WHERE repository_id = ? AND kind = ? ORDER BY ticket_id', 'docs', 'decision')).toMatch(/USING (COVERING )?INDEX blocks_by_ref/);
-    expect(await plan('SELECT id, blocked_since FROM tickets WHERE repository_id = ? AND blocked_since IS NOT NULL AND id > ? ORDER BY id LIMIT ?', 'docs', '', 101)).toMatch(/USING INDEX tickets_blocked/);
+    expect(await plan(BLOCK_SQL.rows, 'docs:A')).toMatch(/USING (PRIMARY KEY|INDEX sqlite_autoindex_ticket_blocks_1)/);
+    expect(await plan(BLOCK_SQL.on, 'docs', 'resource', '[]')).toMatch(/USING (COVERING )?INDEX blocks_by_ref/);
+    expect(await plan(BLOCK_SQL.onAny, 'docs', 'decision')).toMatch(/USING (COVERING )?INDEX blocks_by_ref/);
+    expect(await plan(BLOCK_SQL.page, 'docs', '', 101)).toMatch(/USING INDEX tickets_blocked/);
     expect(await plan('SELECT ticket_id FROM ticket_requires WHERE name = ?', 'x')).toMatch(/requires_by_name/);
     expect(await plan('SELECT ticket_id FROM leg_needs WHERE repository_id = ? AND resource = ?', 'docs', R)).toMatch(/needs_by_resource/);
+  });
+  it('`other` names each thing that keeps a ticket from being offered and is not a block, and only the bars that apply', async () => {
+    await keyCall(admin, '/v1/admin/resources', { name: R, scope: 'account', detail_schema: SCHEMA });
+    git.add('O', {}, { ...placed('reviewed', [['implement', 'pr-open'], ['review', 'reviewed']], [['fix', 'ready'], ['merge', 'waiting', 'ci']]),
+      next: [{ leg: 'fix', state: 'ready', needs: [R] }, { leg: 'merge', state: 'waiting', waiting_on: 'ci' }] });
+    await git.post();
+    await cutover(T0);
+    const other = async () => (await withCore((c) => c.blocks.blocksOf('docs:O', null))).other;
+    // No live worker: the resource need has no instance, and no bar is reported (nobody to bar).
+    expect(await other()).toEqual([{ kind: 'waiting_on', detail: { leg: 'merge', on: 'ci' } }, { kind: 'no-instance', detail: { leg: 'fix', resource: R } }]);
+
+    const w = await register('vm-a');
+    await rows(`INSERT INTO worker_tags (worker_id, tag) VALUES (?, 'night')`, w.id);
+    const bar = (course: string, tag: string, legs: string[]) => rows(`INSERT INTO owner_bars (repository_id, course, tag, legs, applies, starts_at, reason, set_by)
+      VALUES ('docs', ?, ?, ?, 'claim', 0, 'test', 'owner:test') RETURNING id`, course, tag, JSON.stringify(legs)).then((r) => (r[0] as { id: number }).id);
+    const every = await bar('*', 'night', []);
+    const onFix = await bar('roadmap-pr', 'night', ['fix']);
+    await bar('another-course', 'night', []); // another course: not this ticket's
+    await bar('roadmap-pr', 'night', ['merge']); // a leg that is not queued
+    await bar('*', 'day', []); // a tag the live worker lacks
+    await rows(`INSERT INTO ticket_overrides (ticket_id, hold, hold_reason, retry_after, set_by, set_at) VALUES ('docs:O', 1, 'owner', ?, 'owner:test', 0)`, T0 + MIN);
+    const active = await seedClaim(w.id, 'docs:O', T0);
+    await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, ended_at, ended_at_sha) VALUES ('docs:O', ?, 'seed:done', 'abc124', '', ?, 'completed', ?, 'abc')`, w.id, T0, T0);
+    await rows(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status, fence_pending, ended_at) VALUES ('docs:O', ?, 'seed:reaped', 'abc125', '', ?, 'reaped', 1, ?)`, w.id, T0, T0);
+    const [done, reaped] = (await rows<{ id: number }>(`SELECT id FROM claims WHERE ticket_id = 'docs:O' AND status != 'active' ORDER BY id`)).map((r) => r.id);
+    expect(await other()).toEqual([
+      { kind: 'claimed', detail: { claim_id: active } },
+      { kind: 'unconfirmed-end', detail: { claim_id: done } },
+      { kind: 'fence-pending', detail: { claim_id: reaped } },
+      { kind: 'hold', detail: { reason: 'owner' } },
+      { kind: 'backoff', detail: { retry_after: T0 + MIN } },
+      { kind: 'waiting_on', detail: { leg: 'merge', on: 'ci' } },
+      { kind: 'bars', detail: { bar: every, tag: 'night' } },
+      { kind: 'bars', detail: { bar: onFix, tag: 'night' } },
+      { kind: 'no-instance', detail: { leg: 'fix', resource: R } },
+    ]);
+    // The backoff passes: no longer listed.
+    await setClock(T0 + MIN);
+    expect((await other()).map((o) => o.kind)).not.toContain('backoff');
   });
 });

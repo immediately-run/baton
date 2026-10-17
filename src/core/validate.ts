@@ -107,8 +107,8 @@ export interface Heartbeat {
   usage: { provider_id: string; model_id: string; hour: number; usd_list: number }[];
   rate_limits: { provider_id: string; model_id?: string; resets_at?: number }[];
   transcript_refusals: { index: number; code: string; message: string }[];
-  /** R-BTN-76: the account instances it uses; absent declares none. */
-  uses: string[];
+  /** R-BTN-76: the account instances it uses (absent declares none), and the strings refused as names. */
+  uses: { names: string[]; refused: { instance: string; code: string }[] };
 }
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number }
@@ -564,14 +564,23 @@ export const DECISIONS_MAX = 32;
 /** R-BTN-76, R-BTN-101: how long a reading may stay in force, in seconds, by who posts it. */
 export const VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600, admin_s: 7 * 24 * 3600 } as const;
 
+/** R-BTN-58: a key an owner or administrator registered works only where it is granted; any other
+ *  (a bearer token, a BATON_KEYS seed key) keeps its interim reach on every repository. The one
+ *  test of `credentials.created_by`, in TypeScript and as SQL over a column. */
+export const isGrantedKey = (createdBy: string | null | undefined): boolean => !!createdBy && /^(owner|admin):/.test(createdBy);
+export const grantedKeySql = (column: string) => `(${column} LIKE 'owner:%' OR ${column} LIKE 'admin:%')`;
+
 export const isInstanceName = (v: unknown): v is string => typeof v === 'string' && (INSTANCE_NAME.test(v) || WORKER_INSTANCE.test(v));
 
-/** The heartbeat's `uses` (R-BTN-76): instance names, the shape only; whether each may be used is
- *  the heartbeat's own check, which refuses a name without refusing the heartbeat. */
-export function checkUses(v: unknown): string[] {
-  if (v === undefined) return [];
-  if (!Array.isArray(v) || v.length > USES_MAX || !v.every((x) => typeof x === 'string' && INSTANCE_NAME.test(x))) bad('uses', `must be a list of at most ${USES_MAX} instance names`);
-  return [...new Set(v as string[])];
+/** The heartbeat's `uses` (R-BTN-76): a list of at most 64 strings, or the heartbeat is refused;
+ *  a string that is no instance name is returned refused, never refusing the heartbeat — a
+ *  failed heartbeat would stop `last_seen_at` and get a live worker reaped. Whether each name may
+ *  be used is the heartbeat's own check. */
+export function checkUses(v: unknown): { names: string[]; refused: { instance: string; code: string }[] } {
+  if (v === undefined) return { names: [], refused: [] };
+  if (!Array.isArray(v) || v.length > USES_MAX || !v.every((x) => typeof x === 'string')) bad('uses', `must be a list of at most ${USES_MAX} instance names`);
+  const names = [...new Set(v as string[])];
+  return { names: names.filter((n) => INSTANCE_NAME.test(n)), refused: names.filter((n) => !INSTANCE_NAME.test(n)).map((n) => ({ instance: n.slice(0, 100), code: 'invalid-params' })) };
 }
 
 /** One reading's envelope (R-BTN-76, R-BTN-101), checked before any write; `detail` against its

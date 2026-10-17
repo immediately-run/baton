@@ -79,9 +79,9 @@ export class BatonCore {
     this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo) });
     this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, blocks: this.blocks,
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
-    this.cutover = new Cutover({ store, now: () => this.now() });
+    this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store);
-    this.mirror = new Mirror({ store, now: () => this.now() });
+    this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.workers = new WorkerApi({ store, config: ports.config, now: () => this.now(), fenced: (w, inc, id) => this.claims.fenced(w, inc, id),
       // R-BTN-76: what a heartbeat declares it uses; the fleet's counts move with the worker.
       uses: (w, repos, names) => this.resources.applyUses(w, repos, names), fleetChanged: () => this.blocks.recount(),
@@ -230,7 +230,8 @@ export class BatonCore {
         // R-BTN-76: readings lapse; R-BTN-75: liveness moves the counts; R-BTN-77: a pending
         // `unblocked` message dies with its worker's liveness, and a window's trailing dispatch goes.
         lapse = this.resources.alarm();
-        this.blocks.recount();
+        // Time moves liveness: recount when, and only when, the live set changed (R-BTN-75).
+        if (this.blocks.liveChanged()) this.blocks.recount();
         this.blocks.expireMessages();
         this.takeUnblocked();
       });
@@ -864,7 +865,7 @@ export class BatonCore {
       const seen = this.stations.apply(r, p.sha, n, stations, p.closed ?? [], at);
       // R-BTN-75–78: the snapshot's causes — `blocked_by`, `requires`, `needs`, `decisions` and
       // where each ticket is queued — rewrite the changed tickets' blocks in this transaction.
-      const dropped = this.applyBlocks(r, stations, upserted, legsBefore);
+      const dropped = this.applyBlocks(r, stations, upserted, legsBefore, changed.deleted > 0);
       if (dropped.length) changed.dropped = dropped.slice(0, 100);
       // A non-fleet repository's fleet fields are ignored, and its answer says so.
       if (this.reference(r, p)) changed.fleet_ignored = true;
@@ -915,10 +916,12 @@ export class BatonCore {
    *  counts brought to what is needed now, and the rows of every ticket whose causes changed —
    *  its row, its needs or decisions, or its queued leg — rewritten. Returns what it dropped: a
    *  need failing the resource rule, a decision with a reserved id (R-BTN-76, R-BTN-78). */
-  private applyBlocks(r: string, stations: Map<string, PostedStation>, upserted: string[], legsBefore: Map<string, string | null>): string[] {
+  private applyBlocks(r: string, stations: Map<string, PostedStation>, upserted: string[], legsBefore: Map<string, string | null>, removed = false): string[] {
     const live = this.sql<{ local_id: string }>('SELECT local_id FROM tickets WHERE repository_id = ?', r).map((x) => x.local_id);
     const { changed, dropped } = this.blocks.posted(r, stations, live);
-    this.blocks.recount();
+    // The counts follow what is needed: only a post that changed a ticket's row (its `requires`)
+    // or its needs, or dropped a ticket, recounts (R-BTN-75, R-BTN-76).
+    if (upserted.length || changed.length || removed) this.blocks.recount();
     const moved = [...this.queuedLegs(r)].filter(([id, leg]) => legsBefore.get(id) !== leg).map(([id]) => id);
     this.blocks.write([...upserted, ...changed, ...moved]);
     return dropped;

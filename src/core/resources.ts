@@ -67,7 +67,7 @@ export class Resources {
         this.exec(`INSERT INTO instance_states (instance, state, changed_at) VALUES (?, 'unknown', ?) ON CONFLICT (instance) DO NOTHING`, r.name, now);
       }
       logEvent(this.c.store, now, 'admin', actor, { act: 'resource-added', name: r.name, scope: r.scope }, null, null, null);
-      this.c.blocks.recount();
+      this.c.blocks.instancesChanged([r.name]);
       return { ok: true };
     });
   }
@@ -97,7 +97,7 @@ export class Resources {
       // `unknown` from registration: a day of it while a leg needs the instance is Needs you.
       if (fresh) this.exec(`INSERT INTO instance_states (instance, state, changed_at) VALUES (?, 'unknown', ?) ON CONFLICT (instance) DO NOTHING`, i.name, now);
       logEvent(this.c.store, now, 'admin', actor, { act: fresh ? 'instance-added' : 'instance-changed', name: i.name, serves: i.serves, repositories: i.repositories }, null, null, null);
-      this.c.blocks.instanceChanged(i.name);
+      this.c.blocks.instancesChanged([i.name]);
       return { ok: true };
     });
   }
@@ -140,6 +140,8 @@ export class Resources {
   private servedBy(instance: string): { resource: string; scope: string; schema: Schema }[] {
     const w = WORKER_INSTANCE.exec(instance);
     if (w) {
+      // Only a worker that exists has an instance: nothing makes rows for an imagined one.
+      if (!this.rows('SELECT 1 FROM workers WHERE id = ?', Number(w[2])).length) return [];
       const r = this.rows<{ scope: string; detail_schema: string }>(`SELECT scope, detail_schema FROM external_resources WHERE name = ? AND scope = 'worker'`, w[1])[0];
       return r ? [{ resource: w[1], scope: r.scope, schema: JSON.parse(r.detail_schema) }] : [];
     }
@@ -233,30 +235,39 @@ export class Resources {
   }
 
   /** Re-evaluate these instances' states (every instance with a reading or a stored state when
-   *  none is named): each change is stored, logged as a `resource` event, and recounted. */
+   *  none is named): each change is stored and logged as a `resource` event, then all are
+   *  recounted at once. A worker's implicit instance back at `unknown` with no reading left loses
+   *  its row — one per worker session would otherwise accumulate for ever. */
   refresh(instances?: Iterable<string>) {
     const now = this.c.now();
     const names = instances ? [...instances] : this.rows<{ instance: string }>('SELECT instance FROM instance_states UNION SELECT instance FROM instance_readings').map((r) => r.instance);
+    const changed: string[] = [];
     for (const name of names) {
       const s = this.stateOf(name, now);
       const stored = this.rows<{ state: InstanceState; until: number | null }>('SELECT state, until FROM instance_states WHERE instance = ?', name)[0];
+      const transient = WORKER_INSTANCE.test(name) && s.state === 'unknown' && !this.rows('SELECT 1 FROM instance_readings WHERE instance = ?', name).length;
+      if (transient && stored) this.exec('DELETE FROM instance_states WHERE instance = ?', name);
       if (stored?.state === s.state && stored.until === s.until) continue;
       if (!stored && s.state === 'unknown') continue;
-      this.exec(`INSERT INTO instance_states (instance, state, until, changed_at) VALUES (?, ?, ?, ?)
-                 ON CONFLICT (instance) DO UPDATE SET state = excluded.state, until = excluded.until,
-                   changed_at = CASE WHEN instance_states.state = excluded.state THEN instance_states.changed_at ELSE excluded.changed_at END`,
-        name, s.state, s.until, now);
+      if (!transient) {
+        this.exec(`INSERT INTO instance_states (instance, state, until, changed_at) VALUES (?, ?, ?, ?)
+                   ON CONFLICT (instance) DO UPDATE SET state = excluded.state, until = excluded.until,
+                     changed_at = CASE WHEN instance_states.state = excluded.state THEN instance_states.changed_at ELSE excluded.changed_at END`,
+          name, s.state, s.until, now);
+      }
       if (stored?.state !== s.state) logEvent(this.c.store, now, 'resource', 'baton', { instance: name, state: s.state, ...(s.until != null ? { until: s.until } : {}), ...(stored ? { was: stored.state } : {}) }, null, null, null);
-      this.c.blocks.instanceChanged(name);
+      changed.push(name);
     }
+    this.c.blocks.instancesChanged(changed);
   }
 
-  /** The alarm's share: lapsed readings change states; then they are dropped (every reading in
-   *  force is kept, R-BTN-101). Returns when the next one lapses. */
+  /** The alarm's share: lapsed readings are dropped (every reading in force is kept, R-BTN-101),
+   *  and the states they held change. Returns when the next one lapses. */
   alarm(): number | null {
     const now = this.c.now();
-    this.refresh();
+    const lapsed = this.rows<{ instance: string }>('SELECT DISTINCT instance FROM instance_readings WHERE lapses_at <= ?', now).map((r) => r.instance);
     this.exec('DELETE FROM instance_readings WHERE lapses_at <= ?', now);
+    this.refresh(lapsed);
     return this.nextLapse();
   }
 

@@ -12,7 +12,7 @@ import { DEFAULT_TRANSCRIPT_REPOS, repositoryOf, transcriptReposOf } from './reg
 export { DEFAULT_TRANSCRIPT_REPOS };
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import {
-  checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, checkSuspension, bad, HOSTNAME,
+  checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, checkSuspension, bad, HOSTNAME, isGrantedKey,
   type ActivityReport, type Heartbeat,
 } from './validate';
 
@@ -93,7 +93,7 @@ export class WorkerApi {
     if (!row || row.revoked_at != null) throw new BatonError('forbidden', 'this credential is not registered or is revoked');
     // R-BTN-58: a key an owner or administrator granted may declare what its grants together give
     // it — expanded capabilities, `human-operator` only from an administrator's grant.
-    if (row.created_by && /^(owner|admin):/.test(row.created_by)) {
+    if (isGrantedKey(row.created_by)) {
       const caps = new Set(this.rows<{ capabilities: string }>('SELECT capabilities FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', id)
         .flatMap((g) => JSON.parse(g.capabilities) as string[]));
       return { id: row.id, hostname: row.hostname, allowed: [...caps, 'none'].sort(), kind: row.kind, granted: true };
@@ -365,7 +365,8 @@ export class WorkerApi {
     // R-BTN-76: the instances it uses, each it may use; a refused one never refuses the heartbeat.
     const uses = this.c.uses?.(w.id, cred.granted
       ? this.rows<{ repository_id: string }>('SELECT repository_id FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', cred.id).map((r) => r.repository_id)
-      : null, hb.uses) ?? { changed: false, refused: [] };
+      : null, hb.uses.names) ?? { changed: false, refused: [] };
+    const refusedUses = [...hb.uses.refused, ...uses.refused];
     if (!was?.live || rewrote || uses.changed) this.c.fleetChanged?.();
     const refused = hb.transcript_refusals;
     const unlinked = this.recordTranscripts(w.id, hb, now);
@@ -391,7 +392,7 @@ export class WorkerApi {
         .map((r) => [r.id, r.cutover_at == null ? 'shadow' : 'cut-over'])),
       server_time: now,
       ...(refused.length ? { transcripts_refused: refused } : {}),
-      ...(uses.refused.length ? { refused_uses: uses.refused } : {}),
+      ...(refusedUses.length ? { refused_uses: refusedUses } : {}),
       ...(unlinked.length ? { transcripts_unlinked: unlinked } : {}),
     };
   }
