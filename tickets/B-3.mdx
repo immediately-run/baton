@@ -1,0 +1,51 @@
+---
+title: "B-3 — Baton leg outputs: one envelope, versioned schemas with a base, one validator, station entry, the std: library, signatures and declarative views"
+id: B-3
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1106
+tier: critical
+description: "The output envelope, `id@version` schemas keyed per repository with `x-baton-base` refinement, the restricted-subset validator in `src/shared/` (linear-time patterns, no `$ref` cycles), station `entry`, the `std:` library, a course's signature with `spawns`, and `x-baton-view` with the plain/html/ui renderers (BATON_SPEC R-BTN-108–R-BTN-112); S-BTN-65, -66, -76, -79, -80. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.2 (R-BTN-108 to R-BTN-112), R-BTN-33, R-BTN-82 and §10.4 as amended.
+
+### Why
+
+§2m is agreed and specified; this ticket builds its part of it.
+
+### What to build
+
+1. **Envelope and schemas.** `{name, schema, uri?, digest?, value?}`; schemas immutable per `(repository_id, id, version)`; a sync posts only its own `<course>:` ids; a `std:` post is refused.
+2. **One validator** (`src/shared/schema.mjs`) for server, CLI, sync and the test kit: the subset R-BTN-108 lists, the Thompson-automaton pattern grammar, refinement checked statically by `baton test-course`.
+3. **Entry.** Baton refuses an arrival without its entry outputs (rule `entry`) and validates inline values in full; the sync validates pointers and posts validity; an invalid one is `output-invalid`.
+4. **Library, signatures, views.** Ship `std:` schemas; `baton test-course` prints each course's signature and checks `spawns`; render `x-baton-view` in three renderers that escape or text-set every value and link only to `web_base` or `link_hosts`.
+
+### Do not
+
+- Add a JSON Schema dependency: the validator implements its subset itself.
+- Let a course ship rendering code.
+
+### Tests
+
+- S-BTN-65, S-BTN-66, S-BTN-76, S-BTN-79, S-BTN-80; G-BTN-91, G-BTN-92, G-BTN-100, G-BTN-102.
+- Unit tests of the validator's subset and pattern grammar, including the refused forms.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] merged under the review gate
+
+## Status
