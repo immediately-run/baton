@@ -70,11 +70,11 @@ re-runnable. Tier: critical — positions and the queued leg feed rule 1 and eve
    the reserved prefix, `POST …/resolve`.
 8. **Discrepancies** (R-BTN-85): a `discrepancy` event and history row, with both values, in
    every transaction where a snapshot overrides Baton's value; the dashboard's Discrepancies list.
-9. **CLI** (baton repository): `baton run` validates each result's position and schemas, calls the
+9. **CLI** (baton repository): `baton runner start` validates each result's position and schemas, calls the
    leg's `close` to write the closing marker from it (failing the leg
    `cannot-finish:contract-input|-output` instead), provides `ctx.inputs`;
-   `baton replay [--against]` with credentials withheld; `baton owner route|resolve`;
-   `baton test-course`'s dataflow and version checks.
+   `baton leg replay [--against]` with credentials withheld; `baton owner route|resolve`;
+   `baton course test`'s dataflow and version checks.
 
 ### Architecture — the decisions, named
 

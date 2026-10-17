@@ -32,7 +32,7 @@ depends_on:
 
 ### Why
 
-`baton run` runs each leg through `.baton/courses/roadmap-pr/legs/<leg>.mjs`; docs has none.
+`baton runner start` runs each leg through `.baton/courses/roadmap-pr/legs/<leg>.mjs`; docs has none.
 Tier: judgement — five small scripts over one convention.
 
 ### What to build
@@ -63,7 +63,7 @@ Tier: judgement — five small scripts over one convention.
 ### Exit criteria
 
 - [ ] `node --test scripts/lib/courses/roadmap-pr/legs.test.mjs` green
-- [ ] every leg of `course.json` has exactly one script (`baton test-course`, R3-1248)
+- [ ] every leg of `course.json` has exactly one script (`baton course test`, R3-1248)
 - [ ] `npm run verify` green
 
 ## Status

@@ -28,7 +28,7 @@ depends_on:
 
 ### What to build
 
-1. `baton init --course epic` writes the course file, its `locate` and stub leg scripts calling the repository's `agent_command`.
+1. `baton repo init --course epic` writes the course file, its `locate` and stub leg scripts calling the repository's `agent_command`.
 2. `plan`'s output is a `std:git.file@1` plan, and `integrate` reads it.
 
 ### Do not
@@ -37,7 +37,7 @@ depends_on:
 
 ### Tests
 
-- S-BTN-89; G-BTN-109; `baton test-course` passes on the shipped course.
+- S-BTN-89; G-BTN-109; `baton course test` passes on the shipped course.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green.
 
 ### Exit criteria
