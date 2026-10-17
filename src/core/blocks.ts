@@ -249,7 +249,12 @@ export class Blocks {
       `SELECT kind, leg, ref FROM ticket_blocks WHERE ticket_id = ? AND (leg = '' OR leg = ?) ORDER BY kind, ref, leg`, id, queued);
     const now = this.c.now();
     if (blocking.length && t.blocked_since == null) {
-      // A logged transition ends any lost answer: the events are paired again.
+      // A logged transition ends any lost answer: the events are paired again. A new block while
+      // the evening's is still open (a lost answer, then a different block) first closes that one
+      // with the `unblocked` it was owed — logged only: the ticket is blocked again at once, so
+      // no worker is woken and no trigger is sent (R-BTN-77 as amended by R3-1251).
+      const lostRows = silent ? null : this.rows<{ a: string | null }>('SELECT answer_lost AS a FROM tickets WHERE id = ?', id)[0]?.a;
+      if (lostRows) logEvent(this.c.store, now, 'unblocked', 'baton', { ticket: id, cleared: (JSON.parse(lostRows) as LostAnswer).rows }, id);
       this.exec(`UPDATE tickets SET blocked_since = ?${silent ? '' : ', answer_lost = NULL'} WHERE id = ?`, since ?? now, id);
       if (!silent) logEvent(this.c.store, now, 'blocked', 'baton', { ticket: id, blocks: blocking.map((b) => ({ kind: b.kind, ref: b.ref, ...(b.leg ? { leg: b.leg } : {}) })) }, id);
     } else if (!blocking.length && t.blocked_since != null) {

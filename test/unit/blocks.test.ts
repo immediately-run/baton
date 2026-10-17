@@ -260,6 +260,40 @@ describe('R-BTN-76, R-BTN-77: a worker\'s own instance, and an answer lost', () 
     expect(await kinds('unblocked')).toEqual(['docs:D']);
   });
 
+  it('a lost answer then a different block logs the owed `unblocked` before the new `blocked`, and wakes nobody', async () => {
+    const R2 = 'llm:glm-5';
+    const GO2 = 'acct:other';
+    for (const name of [R, R2]) await keyCall(admin, '/v1/admin/resources', { name, scope: 'account', detail_schema: SCHEMA });
+    await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
+    await keyCall(admin, '/v1/admin/instances', { name: GO2, serves: [R2], repositories: ['docs'] });
+    git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R] }] });
+    await git.post();
+    await cutover(T0);
+    await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    const w2 = await grantedWorker(owner, 'docs', 'w2', ['agent-venue'], [GO2]);
+    await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }, { instance: GO2, available: false, valid_for: 24 * 3600 }] });
+    expect(await kinds('blocked')).toEqual(['docs:D']);
+    // W1 lapses, W2 stays: the answer for R is lost silently.
+    for (const t of [T0 + 8 * MIN, T0 + 16 * MIN]) {
+      await setClock(t);
+      await w2.beat();
+      await tick();
+    }
+    expect(await since('D')).toBeNull();
+    const messages = (await rows<{ n: number }>(`SELECT count(*) AS n FROM messages WHERE kind = 'unblocked'`))[0].n;
+    // The sync moves D to merge, which needs R2 — down, and answered by W2.
+    git.place('D', { ...placed('reviewed', [['implement', 'pr-open'], ['review', 'reviewed']], [['merge', 'ready']]), next: [{ leg: 'merge', state: 'ready', needs: [R2] }] });
+    await git.post();
+    expect(await rows(`SELECT kind, json_extract(detail_json, '$.cleared') AS c FROM events WHERE ticket_id = 'docs:D' AND kind IN ('blocked', 'unblocked') ORDER BY seq`)).toEqual([
+      { kind: 'blocked', c: null },
+      { kind: 'unblocked', c: JSON.stringify([{ kind: 'resource', ref: R, leg: 'review' }]) },
+      { kind: 'blocked', c: null },
+    ]);
+    expect(await since('D')).toBe(T0 + 16 * MIN);
+    expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: null }]);
+    expect((await rows<{ n: number }>(`SELECT count(*) AS n FROM messages WHERE kind = 'unblocked'`))[0].n).toBe(messages);
+  });
+
   it('a well-formed need for an unregistered resource is reported and kept; registering it later takes effect', async () => {
     git.add('U', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: ['llm:not-yet'] }] });
     expect(((await git.post()) as Record<string, unknown>).dropped).toEqual(['docs:U:needs:llm:not-yet:unregistered']);
