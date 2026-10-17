@@ -159,6 +159,9 @@ export function translate(trace) {
     posted: Object.fromEntries(T.map((t) => [t, []])),
     gone: Object.fromEntries(T.map((t) => [t, false])),
     bars: Object.fromEntries(T.map((t) => [t, []])),
+    // the queued leg each ticket's last accepted post carried (R-BTN-83); the model starts every
+    // ticket at its course's start_leg; null for a ticket no longer posted
+    queued: Object.fromEntries(T.map((t) => [t, 'implement'])),
     seen: Object.fromEntries(T.map((t) => [t, false])),
     slots: { 1: { phase: 'idle', obs: 0, voided: false, at: 0 }, 2: { phase: 'idle', obs: 0, voided: false, at: 0 } },
     ids: {},
@@ -244,7 +247,7 @@ function translateStep(step, P, env, k) {
     if (!s) {
       // both runs hold voided numbers: one posts and is refused, freeing its slot
       s = 1;
-      if (env.slots[1].phase === 'numbered') acts.push(`syncRead(1, ${barsMap(env)})`);
+      if (env.slots[1].phase === 'numbered') acts.push(`syncRead(1, ${barsMap(env)}, ${firstLegs(env)})`);
       acts.push('syncPost(1)');
     }
     acts.push(`syncNumber(${s})`);
@@ -259,9 +262,9 @@ function translateStep(step, P, env, k) {
       if (Q.lastAccepted === n && n > P.lastAccepted) {
         const r = applyPost(Q, env, k);
         if (r.end || r.reject) return r;
-        acts.push(...r.acts, `syncRead(${s}, ${barsMap(env)})`, `syncPost(${s})`);
+        acts.push(...r.acts, `syncRead(${s}, ${barsMap(env)}, ${queuedMap(env)})`, `syncPost(${s})`);
       } else {
-        if (env.slots[s].phase === 'numbered') acts.push(`syncRead(${s}, ${barsMap(env)})`);
+        if (env.slots[s].phase === 'numbered') acts.push(`syncRead(${s}, ${barsMap(env)}, ${firstLegs(env)})`);
         if (!env.slots[s].voided) acts.push(`syncVoid(${s})`);
         acts.push(`syncPost(${s})`);
       }
@@ -288,7 +291,7 @@ function translateStep(step, P, env, k) {
       if (d.leg !== '' || d.finished.length || d.status !== 'active') return { reject: `claim ${id} created already advanced or ended` };
       env.ids[id] = env.nextId++;
       env.claimTier[id] = Q.tickets[d.ticket]?.tier ?? null;
-      acts.push(`heartbeat(${w})`, `claimStart(${w}, ${q(d.ticket)})`, `claimFinish(${w}, "order")`);
+      acts.push(`heartbeat(${w})`, `claim(${w}, ${q(d.ticket)})`);
       continue;
     }
     const m = env.ids[id];
@@ -302,7 +305,7 @@ function translateStep(step, P, env, k) {
       if (!sameSet(sent, d.legBars)) return { reject: `claim ${id}'s leg stored bars ${JSON.stringify(d.legBars)}, not the ${JSON.stringify(sent)} the holder sent` };
       acts.push(`heartbeat(${w})`);
       if (c.leg !== '') acts.push(`pushEvidence(${w}, false)`);
-      acts.push(`advance(${w}, ${q(d.leg)}, ${qSet(sent)}, false)`);
+      acts.push(`advance(${w}, ${q(d.leg)}, ${qSet(sent)})`);
     } else if (c.status === 'active' && d.status !== 'active' && /\/end$/.test(origin)) {
       const reached = d.finished.length > c.finished.length;
       acts.push(`heartbeat(${w})`);
@@ -388,6 +391,7 @@ function applyPost(Q, env, k) {
       bars = sets[0] ?? [];
     }
     env.bars[t] = bars;
+    env.queued[t] = v?.present ? (v.queued ?? '') : null;
     env.posted[t] = g;
     env.gone[t] = env.withdrawn[t];
     if (v?.present) env.seen[t] = true;
@@ -396,6 +400,11 @@ function applyPost(Q, env, k) {
 }
 
 const barsMap = (env) => `Map(${Object.keys(env.bars).map((t) => `${q(t)} -> ${qSet(env.bars[t])}`).join(', ')})`;
+/** The queued legs an accepted post carried (R-BTN-83); a ticket it no longer posts gets the
+ *  model's first leg out of git's station, a value the read accepts and nothing reads. */
+const queuedMap = (env) => `Map(${Object.keys(env.queued).map((t) => `${q(t)} -> ${env.queued[t] == null ? `firstLeg(st.gitPath.get(${q(t)}))` : q(env.queued[t])}`).join(', ')})`;
+/** A refused post's read: any valid queued legs, since a refused post sets none. */
+const firstLegs = (env) => `Map(${Object.keys(env.queued).map((t) => `${q(t)} -> firstLeg(st.gitPath.get(${q(t)}))`).join(', ')})`;
 
 /** What the model's state must be after the step: the projection, in the model's names. */
 function expectations(Q, env, T, W) {
@@ -407,6 +416,7 @@ function expectations(Q, env, T, W) {
     e.push([`posted ${t}`, `st.posted.get(${q(t)}) == ${qList(env.posted[t])}`]);
     e.push([`postedGone ${t}`, `st.postedGone.get(${q(t)}) == ${env.gone[t]}`]);
     e.push([`postedBars ${t}`, `st.postedBars.get(${q(t)}) == ${qSet(env.bars[t])}`]);
+    if (env.queued[t] != null) e.push([`queued ${t}`, `st.queued.get(${q(t)}) == ${q(env.queued[t])}`]);
     e.push([`held ${t}`, `st.held.get(${q(t)}) == ${!!Q.held[t]}`]);
   }
   const bars = [...new Set(Q.ownerBars.map((b) => `{ tag: ${q(b.tag)}, applies: ${q(b.applies)} }`))];
@@ -429,8 +439,8 @@ function expectations(Q, env, T, W) {
       [`claim ${id} startPath`, `${g}.startPath == ${qList(c.startPath)}`],
       [`claim ${id} claimObs`, `${g}.claimObs == ${c.claimObs}`],
       [`claim ${id} endObs`, `${g}.endObs == ${c.endObs}`],
-      // regressed_since clears with the end (§2e); the model keeps the flag on ended claims
-      ...(c.status === 'active' ? [[`claim ${id} regressed`, `${g}.regressed == ${c.regressed}`]] : []),
+      // regressed_since clears with the end (§4), in the model and in core alike (R3-1254)
+      [`claim ${id} regressed`, `${g}.regressed == ${c.regressed}`],
       [`claim ${id} endedRegressed`, `${g}.endedRegressed == ${c.endedRegressed}`],
       [`claim ${id} confirmed`, `${g}.confirmed == ${c.confirmed}`],
       [`claim ${id} fencePending`, `${g}.fencePending == ${c.fencePending}`],

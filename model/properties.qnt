@@ -71,8 +71,9 @@ module properties {
       (c.startBars.intersect(FAMILIES).size() > 0 and c.startBars.intersect(TAGS.get(c.worker)).size() == 0)
   })
 
-  // R-BTN-45, R-BTN-52, rules 3, 8, 12: every claim and every advance was granted with every
-  // gate in force holding, hook refusal included — recorded at the grant, apart from the guard.
+  // R-BTN-45, rules 1, 3, 8: every claim and every advance was granted with every gate in force
+  // holding — the queued leg included (R-BTN-83) — recorded at the grant, apart from the guard.
+  // (Rule 12, the hook's refusal, went with R-BTN-98.)
   val gatesHeld = st.claims.keys().forall(i => not(st.claims.get(i).gateViolation))
 
   // R-BTN-6, R-BTN-26: no worker pushes for a claim Baton reaped without a fence — its own
@@ -81,8 +82,9 @@ module properties {
 
   // No deadlock: a ticket git has not finished or withdrawn, once the syncs are idle and the
   // head matches git, is held by a claim, fenced (clears at fence-cleared or the timeout),
-  // held by the owner, waiting on `policy` or flagged unconfirmed (both under Needs you), or
-  // claimable — never stuck where nobody can claim it and nobody is told.
+  // held by the owner, its queued leg waiting on `policy` or flagged unconfirmed (both under
+  // Needs you), without a queued leg until a sync queues one, or claimable — never stuck where
+  // nobody can claim it and nobody is told.
   def quiescent(t: str): bool = and {
     SLOTS.forall(s => st.syncs.get(s).phase == "idle"),
     st.posted.get(t) == st.gitPath.get(t),
@@ -92,7 +94,8 @@ module properties {
   val noStuckTicket = TICKETS.forall(t =>
     atEnd(st.gitPath.get(t)) or st.withdrawn.get(t) or not(quiescent(t))
       or activeOf(t).size() > 0 or fencedOf(t).size() > 0 or unconfirmedOf(t).size() > 0
-      or st.held.get(t) or (nextLegs(st.posted.get(t)).size() > 0 and readyLegs(t).size() == 0)
+      // no queued leg: Baton offers nothing until a sync queues one (round 1, 1-B-4)
+      or st.held.get(t) or st.queued.get(t) == "" or not(readyLegs(t).contains(st.queued.get(t)))
       or ticketClaimable(t) or st.nextId > MAX_CLAIMS)
 
   val safety = and {

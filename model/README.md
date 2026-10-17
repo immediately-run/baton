@@ -2,7 +2,9 @@
 
 A [Quint](https://quint-lang.org) model of Baton's core state machine, written against
 `BATON_SPEC` (now [`spec/BATON_SPEC.md`](../spec/BATON_SPEC.md); written against it in
-`immediately-run/docs` as merged at `b7537395`, docs#212). Each action, helper
+`immediately-run/docs` as merged at `b7537395`, docs#212) and being brought up to the spec's
+§2g–§2m by R3-1254 — so far R-BTN-98's one-transaction claim and R-BTN-83's queued leg; *Not
+modelled* lists the rest. Each action, helper
 and property names the requirement it models (`R-BTN-n`, §n). A counterexample is a spec
 defect: it is filed against BATON_SPEC with the trace, never fixed by weakening a property.
 
@@ -15,21 +17,39 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 | `liveness.qnt` | the liveness properties under weak fairness, over `small` (kept apart: their fairness terms made Apalache's input too large) |
 | `witnesses.qnt` | the reachability witnesses, each an invariant that must fail |
 | `instances.qnt` | `sim` (R3-1243's bounds: 3 workers, 2 tickets, 2 overlapping sync runs) and `small` (2 workers, 1 ticket, 1 sync run, for Apalache) |
-| `regressions.qnt` | one deterministic run per defect the reviews found (24), each asserting the merged spec does not reach it |
+| `regressions.qnt` | one deterministic run per defect the reviews found (28), each asserting the merged spec does not reach it |
 | `replay.qnt` | the traces `test/model/replay.test.ts` drives the core with (R3-1244): `sim`'s instance, every action the harness can make the core take |
-| `check.mjs` | `npm run model` |
+| `check.mjs` | `npm run model` and `npm run model:quick` |
+| `full.mjs` | `npm run model:full`: every check, with a report for the PR |
+| `verify.mjs` | `npm run model:verify` |
 
 ## Commands
 
-- `npm run model` — typecheck, the 24 regression runs, 10,000 random runs of 40 steps of `sim`
+**Where the checks run (R-BTN-68, amended 2026-10-17).** Model checking runs on the
+author's machine, not on hosted CI runners, whose time limits it outgrew. A pull request that
+changes `model/`, `src/core/`, the replay or the trace check carries `npm run model:full`'s
+report in its body. CI's `model-report` workflow (`scripts/model-report.mjs`) runs no model: it
+reads the body, and fails until the report is there, names the PR's head and shows every check
+passing; editing the body re-runs it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick`, the scenario traces
+(`npm run traces`), the links (`npm run model:links`) and 200 model-drawn traces driving the core.
+
+- `npm run model:full` — every check below, in order: `npm run model`, the model-based tests
+  with 1,000 traces, and `npm run model:verify`. It runs every step even after a failure and
+  prints a Markdown report on stdout: the commit (flagged when the tree has uncommitted changes
+  to the files the checks read), the Quint version, and each check's result and minutes. Paste
+  it into the PR. Needs Java for the last step.
+- `npm run model` — typecheck, the 28 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
-  eight reachability witnesses. No JVM; about 6 minutes, run by CI's `model` job. `npm test`
-  runs it with `MODEL_SAMPLES=1000`, which also scales the `progressStep` runs (300), in
-  about two minutes.
-- `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 5, about
-  15 minutes on 4 CPUs since the round-1 fixes (depth 6 does not finish in CI's budget). Needs
-  Java (CI installs Temurin 21); the first run downloads Apalache.
+  eight reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
+  and scales the `progressStep` runs (30%).
+- `npm run model:quick` — the typecheck and the regression runs alone; `npm test` runs it.
+- `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 5: about
+  15 minutes on 4 CPUs on `main` before R3-1254, 49 minutes with its queued leg (measured beside
+  another model run). Needs Java; the first run downloads Apalache. `model/verify.mjs` compiles
+  the model to Quint's JSON IR in a file and runs Apalache's command line on it: `quint verify`
+  sends the model to an Apalache server in one request, whose reader refuses a string over 20 MB,
+  and `small` compiles to just over that since R3-1254 (19.8 MB before it).
 
 Simulation uses Quint's TypeScript backend: the Rust evaluator is fetched from GitHub
 releases at first use, which a sandboxed agent cannot always reach.
@@ -74,28 +94,35 @@ already silent past its lease without a fence (R-BTN-19's fence, already timed o
 voids an observation number by its clock alone. `replay.qnt` draws only traces in which these
 coincide with the model's single steps, and says so. The model keeps a reaped claim's leg as its
 worker's view; Baton keeps no worker's view, so a leg is compared while its claim is active.
-Claim hooks (`claimFinish(…, "refuse")`) are not driven: core calls none until R3-1236.
+Each post the replay sends carries the queued leg the model's sync read (R-BTN-83), and the
+scenario traces read it from `ticket_stations.next_leg`, so both compare it after every step.
 
 ## What is modelled
 
 - **The course** is `roadmap-pr`'s `course.json` (§2e, R-BTN-69): `filed` → `pr-open` →
   `reviewed` ⇄ `fixed`, `adjudicated`, `merged`; `review` at most 3 runs, `fix` 2. Core reads it
   as a graph only.
-- **Claims around the hook's await** (§3, R-BTN-52, R-BTN-55): `claimStart` computes the
-  candidate; other actions interleave; `claimFinish` takes the hook's answer — order, refuse or
-  fail — and re-checks every gate against the state as it is then.
+- **A claim is one transaction** (R-BTN-98, §7.2): `claim` checks every gate and takes the
+  ticket at once. *(R3-1254: it was `claimStart` and `claimFinish` around the course's claim
+  hook, R-BTN-52's await and rule 12, which R-BTN-98 retired.)*
+- **The queued leg** (R-BTN-83, §7.2 rule 1): each accepted post sets a ticket's queued leg —
+  one leaving the station git shows, which the course's sync chooses (here, any such leg), or
+  none; a new ticket starts at `start_leg`. A claim is offered that leg alone, rule 8 is judged
+  on it, and the claim's first advance must be into it (`not-queued`).
 - **Advance** (R-BTN-63): finishes the running leg, starts the next along an edge under its
   `max_runs` (counted from `start_path` plus the claim's legs), on the holder's word, if the
   holder gates hold: the hold (rule 3), barred tags — the sync's, the owner's `claim+advance`
   bars, the holder's own `bars` (rule 8, R-BTN-60, R-BTN-67) — the required bar over posted plus
-  holder bars (R-BTN-67), and the hook's refusal. Git first (R-BTN-8): a leg's evidence is
+  holder bars (R-BTN-67), and, for the first advance, the queued leg. Git first (R-BTN-8): a leg's evidence is
   pushed before the advance that finishes it, and may land, be rejected or be lost.
 - **Ends** (R-BTN-71, §6.5): `done`, `suspended` at the `to` reached or the `from` given up,
   `release`. A `done` may come from any station — the runner also ends done when git shows the
   ticket closed (§11, R-BTN-72), which Baton cannot see — and is confirmed only by an end
   station or a closure (R-BTN-10). *(R3-1244's scenario traces found the model requiring an end
   station, narrower than the spec; `progressStep` keeps the runner's own rule, so its runs still
-  reach merges.)*
+  reach merges.)* Every end — a worker's, a reap, a stale release — clears the claim's
+  regression flag and records it as `endedRegressed` (§4: `regressed_since` "cleared … at the
+  end"; R3-1254's model-based tests found the model keeping it).
 - **Time and the lease** (§6.3, §6.6, R-BTN-4, R-BTN-6, R-BTN-19, R-BTN-26): abstract ticks;
   a claim's lease lasts `TIMEOUT` ticks from the last heartbeat and the alarm reaps it then —
   its worker dead, or alive and silent (asleep). A worker acts on the claim *it believes* it
@@ -131,9 +158,9 @@ Claim hooks (`claimFinish(…, "refuse")`) are not driven: core calls none until
 | `regressedOnlyWhenGitRegressed` — lag is never a regression | §2e |
 | `boundedLoops` — no claim runs a leg past its `max_runs` | R-BTN-63, R-BTN-69 |
 | `writingLegsBarred` — every writing leg started under the required bar, by a worker of no barred family | R-BTN-45, R-BTN-60, R-BTN-67 |
-| `gatesHeld` — every claim and advance was granted with every gate in force holding (hold, barred tags, required bar, hook refusal), recorded at the grant apart from the guard | R-BTN-45, R-BTN-52, rules 3, 8, 12 |
+| `gatesHeld` — every claim and advance was granted with every gate in force holding (hold, barred tags, required bar, the queued leg), recorded at the grant apart from the guard | R-BTN-45, R-BTN-83, rules 1, 3, 8 |
 | `noActAfterLoss` — no worker pushes for a claim the alarm reaped (unfenced) | R-BTN-6, R-BTN-26 |
-| `noStuckTicket` — no deadlock: a ticket git has not finished or withdrawn, once the syncs are idle and the head matches git, is held, fenced, owner-held, waiting on `policy`, flagged, or claimable | §6.7, R-BTN-10, R-BTN-35, R-BTN-67 |
+| `noStuckTicket` — no deadlock: a ticket git has not finished or withdrawn, once the syncs are idle and the head matches git, is held, fenced, owner-held, its queued leg waiting on `policy`, flagged, or claimable | §6.7, R-BTN-10, R-BTN-35, R-BTN-67, R-BTN-83 |
 
 **Liveness** — `fencesClear`, `endsResolveWithOwner` (implied by the owner's fairness alone, by design: §6.7), `barsLiftClaimable`, `readyIsClaimed` — is stated
 in `liveness.qnt` under weak fairness of each resolving step, per worker. The item's fifth,
@@ -148,7 +175,11 @@ outstanding (`sync-busy`). `overlappingSyncRunsRefusedTest` keeps it.
 
 **Mutation checks** — each mutant fails the run or probe that names its defect:
 - restoring the fifth revision's regression rule fails `lostPushIsNotRegressionTest`;
-- dropping the gate re-check after the hook fails `claimDuringHookCallTest`;
+- dropping the first advance's `not-queued` check fails `claimOfferedQueuedLegOnlyTest`;
+- judging rule 8 on any ready leg, not the queued one, fails `barredQueuedLegRefusesClaimTest`;
+- keeping the regression flag past an end, at any one of the four ends — a worker's, an alarm reap, a
+  force-reap, a stale release — fails that end's run (`workerEndClearsRegressedTest`,
+  `alarmReapClearsRegressedTest`, `forceReapClearsRegressedTest`, `staleReleaseClearsRegressedTest`);
 - dropping the fence from the claim gate fails `forceReapFencesTest`;
 - dropping the advance's gate guard reaches a `gateViolation` (`gatesHeld`);
 - clearing a fence without its timeout fails `heartbeatingFenceHoldsTest`;
@@ -159,11 +190,11 @@ outstanding (`sync-busy`). `overlappingSyncRunsRefusedTest` keeps it.
 
 | Check | Instance | Result |
 |---|---|---|
-| 24 regression runs | `sim` sizes, zero drift | pass |
+| 28 regression runs | `sim` sizes, zero drift | pass |
 | `safety`, 10,000 × 40 steps of `step`; 3,000 × 40 of `progressStep` | `sim` | no violation |
 | witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all reached |
 | a second review | — | reached by a regression run only (`maxRunsSurviveResumptionTest`) |
-| Apalache, `safety` | `small`, depth 5 | no violation (15 min 29 s on 4 CPUs) |
+| Apalache, `safety` | `small`, depth 5 | no violation. 15 min 29 s on 4 CPUs before R3-1254; 49–59 min with its queued leg, measured beside another model run. Each model PR's `model:full` report carries the figure for its head (R-BTN-68) |
 | liveness, `fencesClear` | `small`, TLC (Apalache cannot check fairness) | **at `b76af9c`, the pre-round-2 formula and model**: no violation in 8,187 distinct states before a 28-minute cap, not exhaustive. The current formulas (rounds 2–3) have not been run; R3-1254 runs them to completion on a narrowed instance |
 
 Depth 5 on `small` reaches claims, advances, pushes and a sync; it does not reach a judged
@@ -193,7 +224,7 @@ invariants the evidence is the simulation and the regression runs, not the proof
 - **Course changes and renames** (R-BTN-64): a renamed name resolves to the same edge; a removed
   one ends the claim `released:course-changed`, a release the model already has.
 - **The retry policy** (§6.10, R-BTN-23): a backoff after a failed attempt, and the hold at the
-  third, are a time gate on `claimStart` and a hold the owner's `setHold` already stands for;
+  third, are a time gate on `claim` and a hold the owner's `setHold` already stands for;
   S-BTN-5, -6 and -7 cover them. The model-based tests turn the policy off so a drawn re-claim
   after a reap meets only the model's gates (found by R3-1244's 1000-draw run).
 - **Tiers, grants and requires** (rules 4–7): column comparisons with no interleaving of their
@@ -202,4 +233,13 @@ invariants the evidence is the simulation and the regression runs, not the proof
   state as given; **R-BTN-40** (suspend rather than wait on the lease) is a worker's choice, so
   `endClaim(…, "suspended", …)` may happen at any point — both are modelled as nondeterminism,
   not as rules of their own.
-- **Blocks, decisions, leg queues and notices** (BATON_SPEC §2g, R-BTN-75–80; docs#213): R3-1254, with exhaustive liveness on a narrowed instance.
+- **The rest of §2g–§2m, still R3-1254's.** Next, in its own pull request: a leg's prerequisites
+  (R-BTN-120 — other tickets `at`, `reached` or `done`, capabilities, resources, decisions,
+  retry), blocks and `blocked_since` with their events (R-BTN-75, R-BTN-77, R-BTN-78), retries
+  per leg (R-BTN-122) and a prerequisite failing during a leg (R-BTN-126: `released:blocked`,
+  provisional rows, `max_blocked`). After it: open-world claims (R-BTN-104), sync wants
+  (R-BTN-94), `no_chain_from` (R-BTN-106), child tickets' spawned rows (R-BTN-86), `not_before`
+  and leg deadlines (R-BTN-89, R-BTN-90; R3-1259 names the deadline's model change), the
+  holder's reported `next` (R-BTN-83's provisional queued leg), and exhaustive liveness on a
+  narrowed instance. Leg queues (R-BTN-79, now a warning) and notices (R-BTN-80, which no leg
+  waits on) gate nothing, so they stay out.
