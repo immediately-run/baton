@@ -107,6 +107,8 @@ export interface Heartbeat {
   usage: { provider_id: string; model_id: string; hour: number; usd_list: number }[];
   rate_limits: { provider_id: string; model_id?: string; resets_at?: number }[];
   transcript_refusals: { index: number; code: string; message: string }[];
+  /** R-BTN-76: the account instances it uses; absent declares none. */
+  uses: string[];
 }
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number }
@@ -180,6 +182,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     last_activity_at: b.last_activity_at as number | undefined,
     test_harness: b.test_harness === true,
     fenced: checkFenced(b.fenced),
+    uses: checkUses(b.uses),
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
@@ -537,4 +540,106 @@ export function checkOverride(body: unknown): { expedite?: boolean; hold?: boole
   for (const k of ['expedite', 'hold']) if (b[k] !== undefined && typeof b[k] !== 'boolean') bad(k, 'must be a boolean');
   if (b.expedite === undefined && b.hold === undefined) bad('body', 'names expedite or hold');
   return { expedite: b.expedite as boolean | undefined, hold: b.hold as boolean | undefined };
+}
+
+// ── blocks, external resources and readings (§2g R-BTN-75–78, §2l R-BTN-101; R3-1251) ─────
+
+/** R-BTN-76: an external resource's name — opaque to core (`llm:<model>`, `github-api`). */
+export const RESOURCE_NAME = /^[a-z][a-z0-9:._/-]{0,79}$/;
+/** An account instance's name (`opencode-go:go_plus`): the resource rule with `_` (spec-silent,
+ *  recorded on R3-1251 — the scenarios' own instances carry it). Never `@`: that is a worker's. */
+export const INSTANCE_NAME = /^[a-z][a-z0-9_:./-]{0,79}$/;
+/** A worker-scope resource's implicit instance per worker: `<resource>@worker:<workers.id>`. */
+export const WORKER_INSTANCE = /^([a-z][a-z0-9:._/-]{0,79})@worker:([1-9][0-9]{0,14})$/;
+/** R-BTN-78: a decision's id and its `asks` label. */
+export const DECISION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+export const ASKS = /^[a-z][a-z0-9-]{0,31}$/;
+export const RESOURCE_SCOPES = ['worker', 'account', 'service'] as const;
+/** Instances one heartbeat declares in `uses`, readings one post carries, resources one leg
+ *  needs, decisions one ticket posts (spec-silent, recorded on R3-1251). */
+export const USES_MAX = 64;
+export const READINGS_MAX = 50;
+export const NEEDS_MAX = 32;
+export const DECISIONS_MAX = 32;
+/** R-BTN-76, R-BTN-101: how long a reading may stay in force, in seconds, by who posts it. */
+export const VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600, admin_s: 7 * 24 * 3600 } as const;
+
+export const isInstanceName = (v: unknown): v is string => typeof v === 'string' && (INSTANCE_NAME.test(v) || WORKER_INSTANCE.test(v));
+
+/** The heartbeat's `uses` (R-BTN-76): instance names, the shape only; whether each may be used is
+ *  the heartbeat's own check, which refuses a name without refusing the heartbeat. */
+export function checkUses(v: unknown): string[] {
+  if (v === undefined) return [];
+  if (!Array.isArray(v) || v.length > USES_MAX || !v.every((x) => typeof x === 'string' && INSTANCE_NAME.test(x))) bad('uses', `must be a list of at most ${USES_MAX} instance names`);
+  return [...new Set(v as string[])];
+}
+
+/** One reading's envelope (R-BTN-76, R-BTN-101), checked before any write; `detail` against its
+ *  resources' schema is the caller's, which knows them. `valid_for` is seconds. */
+export interface Reading {
+  instance: string;
+  kind: 'state' | 'measure';
+  available: boolean | null;
+  until: number | null;
+  valid_for_s: number;
+  detail: unknown;
+}
+export function checkReading(v: unknown, field: string, maxStateS: number): Reading {
+  if (!isObj(v)) bad(field, 'must be an object');
+  const r = v as Record<string, unknown>;
+  for (const k of Object.keys(r)) if (!['instance', 'kind', 'available', 'until', 'valid_for', 'detail'].includes(k)) bad(`${field}.${k}`, 'is not a reading field');
+  if (!isInstanceName(r.instance)) bad(`${field}.instance`, 'must be an instance name');
+  const raw = r.kind ?? 'state';
+  if (raw !== 'state' && raw !== 'measure') bad(`${field}.kind`, "must be 'state' or 'measure'");
+  const kind = raw as Reading['kind'];
+  const max = kind === 'measure' ? VALID_FOR.measure_s : maxStateS;
+  const valid = r.valid_for ?? VALID_FOR.default_s;
+  if (!Number.isSafeInteger(valid) || (valid as number) < 1 || (valid as number) > max) bad(`${field}.valid_for`, `must be 1 to ${max} seconds`);
+  if (kind === 'measure') {
+    if (r.available !== undefined || r.until !== undefined) bad(field, 'a measure carries only detail and valid_for');
+    if (r.detail === undefined) bad(`${field}.detail`, 'a measure carries a detail');
+    return { instance: r.instance as string, kind, available: null, until: null, valid_for_s: valid as number, detail: r.detail };
+  }
+  if (typeof r.available !== 'boolean') bad(`${field}.available`, 'must be a boolean');
+  if (r.until !== undefined && (r.available || !isTime(r.until))) bad(`${field}.until`, 'is epoch ms, for an unavailable instance only');
+  return { instance: r.instance as string, kind, available: r.available as boolean, until: (r.until as number | undefined) ?? null, valid_for_s: valid as number, detail: r.detail };
+}
+
+/** A readings post: `{readings: [...]}`, each checked. */
+export function checkReadings(body: unknown, maxStateS: number = VALID_FOR.state_s): Reading[] {
+  if (!isObj(body) || !Array.isArray(body.readings) || body.readings.length < 1 || body.readings.length > READINGS_MAX) bad('readings', `must be a list of 1 to ${READINGS_MAX}`);
+  return ((body as { readings: unknown[] }).readings).map((r, i) => checkReading(r, `readings[${i}]`, maxStateS));
+}
+
+/** `POST /v1/admin/resources` (R-BTN-76): the schema itself is detailSchema.ts's to judge. */
+export function checkResource(body: unknown): { name: string; scope: (typeof RESOURCE_SCOPES)[number]; detail_schema: unknown } {
+  if (!isObj(body)) bad('body', 'must be a JSON object');
+  const b = body as Record<string, unknown>;
+  for (const k of Object.keys(b)) if (!['name', 'scope', 'detail_schema'].includes(k)) bad(`body.${k}`, 'is not a field of a resource');
+  if (typeof b.name !== 'string' || !RESOURCE_NAME.test(b.name)) bad('name', `must match ${RESOURCE_NAME}`);
+  if (!RESOURCE_SCOPES.includes(b.scope as never)) bad('scope', `must be one of ${RESOURCE_SCOPES.join(', ')}`);
+  if (b.detail_schema === undefined) bad('detail_schema', 'is required');
+  return { name: b.name as string, scope: b.scope as (typeof RESOURCE_SCOPES)[number], detail_schema: b.detail_schema };
+}
+
+/** `POST /v1/admin/instances` (R-BTN-76): an account instance, what it serves and who may use it. */
+export function checkInstance(body: unknown): { name: string; serves: string[]; repositories: string[] } {
+  if (!isObj(body)) bad('body', 'must be a JSON object');
+  const b = body as Record<string, unknown>;
+  for (const k of Object.keys(b)) if (!['name', 'serves', 'repositories'].includes(k)) bad(`body.${k}`, 'is not a field of an instance');
+  if (typeof b.name !== 'string' || !INSTANCE_NAME.test(b.name)) bad('name', 'must be an instance name');
+  if (!Array.isArray(b.serves) || b.serves.length < 1 || b.serves.length > 64 || !b.serves.every((s) => typeof s === 'string' && RESOURCE_NAME.test(s))) bad('serves', 'must be 1 to 64 resource names');
+  if (!Array.isArray(b.repositories) || b.repositories.length > 64) bad('repositories', 'must be a list of at most 64 repository ids');
+  const repositories = (b.repositories as unknown[]).map((r, i) => checkRepositoryId(r, `repositories[${i}]`));
+  return { name: b.name as string, serves: [...new Set(b.serves as string[])].sort(), repositories: [...new Set(repositories)].sort() };
+}
+
+/** A blocks query's `on` (R-BTN-75): `<kind>:<ref>`, the ref an id, a name or `*`. */
+export function checkBlockedOn(v: string): { kind: 'ticket' | 'capability' | 'resource' | 'decision'; ref: string } {
+  const i = v.indexOf(':');
+  const kind = i < 0 ? '' : v.slice(0, i);
+  const ref = i < 0 ? '' : v.slice(i + 1);
+  if (!['ticket', 'capability', 'resource', 'decision'].includes(kind)) bad('on', 'must be ticket:, resource:, capability: or decision: and a name');
+  if (!(ref === '*' || /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/.test(ref))) bad('on', 'names a malformed ref');
+  return { kind: kind as 'ticket', ref };
 }

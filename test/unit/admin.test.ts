@@ -341,6 +341,6 @@ describe('round 3', () => {
     const probe = await makeKey('ssh-ed25519', 'probe');
     expect(await code(adm('/probes', { public_key: probe.publicKey, label: 'neon probe', instances: ['neon:main'] }))).toBe(200);
     const state = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as Record<string, any>;
-    expect(state.limits.probes).toEqual([expect.objectContaining({ fingerprint: probe.fingerprint, label: 'neon probe', allowed_instances: '["neon:main"]' })]);
+    expect(state.limits.probes).toEqual([expect.objectContaining({ fingerprint: probe.fingerprint, label: 'neon probe', allowed_instances: '[]' })]);
   });
 });

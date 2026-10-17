@@ -45,6 +45,13 @@ export interface Ctx {
   claimView?: (claimId: number) => Record<string, unknown>;
   /** R-BTN-67: the owner bars in force on the credential's repositories, for the heartbeat's `bars`. */
   bars?: (now: number, credentialId: string) => unknown[];
+  /** R-BTN-76: store the instances a heartbeat says it uses (`repos`: those its key works on, null
+   *  for every one), returning whether that changed and what was refused. */
+  uses?: (workerId: number, repos: string[] | null, names: string[]) => { changed: boolean; refused: { instance: string; code: string }[] };
+  /** R-BTN-75, R-BTN-76: a worker became live or changed what it declares or uses. */
+  fleetChanged?: () => void;
+  /** R-BTN-75: a shadow report's claim holds its ticket, or no longer does. */
+  held?: (ticketId: string) => void;
 }
 
 export class WorkerApi {
@@ -297,6 +304,8 @@ export class WorkerApi {
     const modelProvider = hb.model_provider_id && knownAccounts.has(hb.model_provider_id) ? hb.model_provider_id : null;
 
     let rekeyed = false;
+    // R-BTN-75: a worker that was not live before this heartbeat joins the fleet's counts.
+    const was = w ? this.rows<{ live: number }>(`SELECT reaped_at IS NULL AND ? - last_seen_at < lease_timeout_ms AS live FROM workers WHERE id = ?`, now, w.id)[0] : null;
     if (!w) {
       if (!hb.secret_hash) bad('secret_hash', 'the first heartbeat of a session carries its SHA-256');
       this.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, model_id, model_provider_id,
@@ -351,7 +360,13 @@ export class WorkerApi {
     // skipped while its account was unknown is written once the account arrives (§7.4).
     const known = Object.values(hb.billing).filter((a) => knownAccounts.has(a)).sort().join(',');
     const storedHash = `${settingsHash}:${fnv1a(known)}`;
-    if (storedHash !== w.settings_hash || rekeyed) this.rewriteSettings(w.id, hb, knownAccounts, storedHash);
+    const rewrote = storedHash !== w.settings_hash || rekeyed;
+    if (rewrote) this.rewriteSettings(w.id, hb, knownAccounts, storedHash);
+    // R-BTN-76: the instances it uses, each it may use; a refused one never refuses the heartbeat.
+    const uses = this.c.uses?.(w.id, cred.granted
+      ? this.rows<{ repository_id: string }>('SELECT repository_id FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', cred.id).map((r) => r.repository_id)
+      : null, hb.uses) ?? { changed: false, refused: [] };
+    if (!was?.live || rewrote || uses.changed) this.c.fleetChanged?.();
     const refused = hb.transcript_refusals;
     const unlinked = this.recordTranscripts(w.id, hb, now);
     this.recordUsage(w.id, hb, knownAccounts, now);
@@ -376,6 +391,7 @@ export class WorkerApi {
         .map((r) => [r.id, r.cutover_at == null ? 'shadow' : 'cut-over'])),
       server_time: now,
       ...(refused.length ? { transcripts_refused: refused } : {}),
+      ...(uses.refused.length ? { refused_uses: uses.refused } : {}),
       ...(unlinked.length ? { transcripts_unlinked: unlinked } : {}),
     };
   }
@@ -474,7 +490,7 @@ export class WorkerApi {
   private deliver(workerId: number, now: number) {
     const out = this.rows<{ id: number; kind: string; payload_json: string | null; sent_at: number }>(
       `SELECT id, kind, payload_json, sent_at FROM messages WHERE to_worker_id = ? AND status IN ('pending','delivered')
-       AND kind IN ('release','status_request') ORDER BY id`, workerId);
+       AND kind IN ('release','status_request','unblocked') ORDER BY id`, workerId);
     this.exec(`UPDATE messages SET status = 'delivered', delivered_at = ? WHERE to_worker_id = ? AND status = 'pending'`, now, workerId);
     return out.map((m) => ({ id: m.id, kind: m.kind, payload: m.payload_json ? JSON.parse(m.payload_json) : null, sent_at: m.sent_at }));
   }
@@ -705,6 +721,7 @@ export class WorkerApi {
         r.ticket_id, workerId, `shadow:${workerId}:${r.ticket_id}:${r.nonce}`, r.nonce!, head, r.at, repo, r.ticket_id, r.ticket_id, r.ticket_id);
       const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
       this.event('claimed', actor, { shadow: true, nonce: r.nonce }, r.ticket_id, id);
+      this.c.held?.(r.ticket_id);
       return { ok: true, claim_id: id };
     }
     // `set`: in-progress and in-review keep the claim — in-review is an activity of an active
@@ -718,6 +735,7 @@ export class WorkerApi {
                  end_observation = COALESCE((SELECT last_handed_out FROM board_head WHERE repository_id = ?), 0) WHERE id = ?`,
       r.at, `shadow:${r.status}`, repo, holder.id);
     this.event('released', actor, { shadow: true, status: r.status }, r.ticket_id, holder.id);
+    this.c.held?.(r.ticket_id);
     return { ok: true, claim_id: holder.id };
   }
 

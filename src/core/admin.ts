@@ -9,7 +9,7 @@ import { BatonError, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { KEY_FINGERPRINT, parseSshKey, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, TAG, checkRepositoryId } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkRepositoryId } from './validate';
 import { parseTranscriptRepo } from './links';
 import { checkRegistration, tierPosition, type Registration, type Registry } from './registry';
 import { graphOf, resolveLeg, type Graph } from './graph';
@@ -107,6 +107,8 @@ export class Admin {
     origin: string;
     /** R-BTN-67: a bar change dispatches the repository's sync, after commit. */
     dispatchSync: (repository: string) => void;
+    /** R-BTN-75, R-BTN-76: a grant made, changed or revoked moves the fleet's counts. */
+    fleetChanged?: () => void;
   }) {}
 
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
@@ -292,22 +294,24 @@ export class Admin {
     return { ok: true };
   }
 
-  /** `POST /v1/admin/probes`: a probe key with its label and the instances it may report on
-   *  (R-BTN-53; the instances are R3-1251's to read). */
+  /** `POST /v1/admin/probes`: a probe key with its label. Since R-BTN-101 a probe reports on any
+   *  registered instance: `instances` is still taken, for the CLI that sends it, and ignored —
+   *  `allowed_instances` is written `[]`. */
   async addProbe(actor: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
     only(b, ['public_key', 'label', 'instances'], 'body');
     const key = await this.parseKey(b.public_key, 'public_key');
     const label = typeof b.label === 'string' && LABEL.test(b.label) ? b.label : bad('label', 'must be a short label');
-    const instances = Array.isArray(b.instances) && b.instances.length <= 64 && b.instances.every((i) => typeof i === 'string' && /^[a-z][a-z0-9:._/-]{0,79}$/.test(i))
-      ? (b.instances as string[]) : bad('instances', 'must be at most 64 instance names');
+    if (b.instances !== undefined && !(Array.isArray(b.instances) && b.instances.length <= 64 && b.instances.every((i) => typeof i === 'string' && INSTANCE_NAME.test(i)))) {
+      bad('instances', 'must be at most 64 instance names');
+    }
     const admins = await this.adminFingerprints();
     this.c.store.transaction(() => {
       const role = this.roleOf(key.fingerprint, admins);
       if (role) throw new BatonError('conflict', `this key is already a ${role} key (R-BTN-57: one role per key)`);
       this.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by, label, allowed_instances) VALUES (?, ?, '[]', 'probe', ?, ?, ?, ?)`,
-        key.fingerprint, `probe:${key.fingerprint}`, key.line, actor, label, JSON.stringify(instances));
+        key.fingerprint, `probe:${key.fingerprint}`, key.line, actor, label, '[]');
       this.event(actor, { act: 'probe-added', key: key.fingerprint, label }, null);
     });
     return { ok: true };
@@ -333,6 +337,7 @@ export class Admin {
         throw new BatonError('not-found', 'no key with that fingerprint');
       }
       this.event(actor, { act: 'key-revoked', key: fingerprint }, null);
+      this.c.fleetChanged?.();
       return { ok: true };
     });
   }
@@ -435,6 +440,7 @@ export class Admin {
                    granted_by = excluded.granted_by, granted_at = excluded.granted_at, revoked_at = NULL`,
         key.fingerprint, repository, JSON.stringify(caps), maxTier, actor, this.c.now());
       this.event(actor, { act: 'grant', key: key.fingerprint, repository, capabilities: caps, max_tier: maxTier }, repository);
+      this.c.fleetChanged?.();
       return { ok: true, fingerprint: key.fingerprint };
     });
   }
@@ -446,6 +452,7 @@ export class Admin {
       this.exec('UPDATE worker_grants SET revoked_at = ? WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', this.c.now(), fingerprint, repository);
       if (!this.changed()) throw new BatonError('not-found', `no grant of ${fingerprint} on ${repository}`);
       this.event(actor, { act: 'grant-revoked', key: fingerprint, repository }, repository);
+      this.c.fleetChanged?.();
       return { ok: true };
     });
   }

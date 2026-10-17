@@ -174,7 +174,7 @@ describe('G-BTN-31 through the server', () => {
     expect((await owner('/v1/ui/overrides/docs:R3-9002', { expedite: true })).status).toBe(200);
     expect((await owner('/v1/ui/overrides/docs:R3-9002', { hold: true })).status).toBe(200);
     expect((await owner('/v1/ui/overrides/docs:R3-9002', { hold: 'yes' })).status).toBe(400);
-    expect(await rows(`SELECT kind FROM events WHERE ticket_id = 'docs:R3-9002' ORDER BY seq`)).toEqual([{ kind: 'override' }, { kind: 'override' }, { kind: 'held' }]);
+    expect(await rows(`SELECT kind FROM events WHERE ticket_id = 'docs:R3-9002' AND kind NOT IN ('blocked', 'unblocked') ORDER BY seq`)).toEqual([{ kind: 'override' }, { kind: 'override' }, { kind: 'held' }]);
     expect(await rows(`SELECT expedite, hold, hold_reason FROM ticket_overrides WHERE ticket_id = 'docs:R3-9002'`)).toEqual([{ expedite: 1, hold: 1, hold_reason: 'owner' }]);
     const { secret } = await register('vm-a');
     expect((await workerCall('/v1/runner/next', { secret })).status).toBe(200);

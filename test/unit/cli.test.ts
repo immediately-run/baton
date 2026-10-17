@@ -75,6 +75,22 @@ describe('plan: one request per command', () => {
     expect(() => plan('admin', ['repo', 'add', 'o/r', '--owner-key', PUB, '--ci-identity', 'circle'], key)).toThrow('--ci-identity');
   });
 
+  it('resources, instances, a reading by hand, and the blocks queries (R3-1251)', () => {
+    expect(plan('admin', ['resource', 'add', 'llm:x', '--scope', 'account', '--schema', 'schema.json'], key, () => '{"type":"object"}')).toEqual({
+      method: 'POST', path: '/v1/admin/resources', body: { name: 'llm:x', scope: 'account', detail_schema: { type: 'object' } } });
+    expect(plan('admin', ['instance', 'add', 'opencode-go:go_plus', '--serves', 'llm:x,llm:y', '--repositories', 'docs'], key)).toEqual({
+      method: 'POST', path: '/v1/admin/instances', body: { name: 'opencode-go:go_plus', serves: ['llm:x', 'llm:y'], repositories: ['docs'] } });
+    expect(plan('admin', ['resource', 'set', 'opencode-go:go_plus', '--unavailable', '--until', '2026-10-17T12:00:00Z', '--valid-for', '2h', '--detail', '{"used":3}'], key)).toEqual({
+      method: 'POST', path: '/v1/admin/readings',
+      body: { readings: [{ instance: 'opencode-go:go_plus', available: false, until: Date.parse('2026-10-17T12:00:00Z'), valid_for: 7200, detail: { used: 3 } }] } });
+    expect(() => plan('admin', ['resource', 'set', 'i', '--available', '--unavailable'], key)).toThrow(/one of --available or --unavailable/);
+    expect(() => plan('admin', ['resource', 'set', 'i', '--available', '--until', '2026-10-17T12:00:00Z'], key)).toThrow(/--unavailable/);
+    expect(plan('blocked', ['docs:R3-1205'])).toEqual({ method: 'GET', path: '/v1/repositories/docs/tickets/R3-1205/blocks' });
+    expect(plan('blocked', ['--repository', 'docs', '--on', 'decision:*'])).toEqual({ method: 'GET', path: '/v1/repositories/docs/blocked?on=decision%3A*' });
+    expect(() => plan('blocked', ['R3-1205'])).toThrow(/<repository>:<id>/);
+    expect(() => plan('blocked', ['--on', 'resource:x'])).toThrow(/--repository/);
+  });
+
   it('parseArgs and duration', () => {
     expect(parseArgs(['a', '--x', '1', '--flag'], ['flag'])).toEqual({ flags: { x: '1', flag: true }, positional: ['a'], groups: [] });
     expect(() => parseArgs(['--x'])).toThrow('needs a value');
