@@ -69,9 +69,7 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
   const tickets: PostedTicket[] = [];
   const closed: { id: string; as: 'done' | 'withdrawn' }[] = [];
   const byId = new Map<string, string>(); // id → file, for duplicate detection
-  const openChildren = new Map<string, Set<string>>(); // parent id → its open children
-  const depends = new Map<string, string[]>();
-  const live = new Set<string>();
+  const openChildren = new Map<string, string[]>(); // parent id → its live children (R-BTN-86)
   for (const f of files) {
     if (!/^\.?[A-Za-z0-9._-]+\.(md|mdx)$/.test(f.path.split('/').pop() ?? '')) continue;
     const fm = parseFrontmatter(f.text);
@@ -84,7 +82,6 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
       closed.push({ id, as });
       continue;
     }
-    live.add(id);
     const tags = strList(fm.tags);
     const names = strList(fm.repos);
     const resolved = names.map((r) => (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : settings.repos?.[r] ?? null));
@@ -93,11 +90,8 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
       throw new Error(`${f.path}: repos names ${unknown}, which the baton.json repos map does not resolve`);
     }
     const dep = strList(fm.depends_on);
-    depends.set(id, dep);
-    for (const d of dep) {
-      if (!openChildren.has(d)) openChildren.set(d, new Set());
-      openChildren.get(d)!.add(id);
-    }
+    const parent = fm.parent != null ? String(fm.parent) : null;
+    if (parent != null) openChildren.set(parent, [...(openChildren.get(parent) ?? []), id]);
     tickets.push({
       id,
       course_id: str(fm.course) ?? defaultCourse,
@@ -113,16 +107,15 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
       rank: typeof fm.order === 'number' ? Math.max(0, Math.round(fm.order)) : null,
       // Opaque to Baton, read by the course's own code (§2b): the PR list the pr course reads.
       course: { ...(strList(fm.prs).length ? { prs: strList(fm.prs) } : {}) },
-      ...(fm.parent != null ? { parent: String(fm.parent) } : {}),
+      ...(parent != null ? { parent } : {}),
       ...(fm.not_before != null ? { not_before: fm.not_before } : {}),
       ...(str(fm.status) != null ? { display: { status: str(fm.status)! } } : {}),
     });
   }
-  // A live ticket's open children block it (R-BTN-74); its dependencies' readiness is the
-  // course's to show — the pr course waits `implement` on them, the board stores blocked_by.
-  for (const t of tickets) {
-    t.blocked_by = [...(openChildren.get(t.id) ?? [])].filter((c) => live.has(c));
-  }
+  // A live ticket's open children — the live tickets naming it as `parent` (R-BTN-86) — are
+  // its `blocked_by` (R-BTN-74); a closed child is not open, so it never reaches the map. Its
+  // dependencies' readiness is the course's to show: the pr course waits `implement` on them.
+  for (const t of tickets) t.blocked_by = (openChildren.get(t.id) ?? []).slice().sort();
   // rank by `order`, then id (R-BTN-74); unranked tickets follow ranked ones, ids keeping order.
   tickets.sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return { tickets, closed };

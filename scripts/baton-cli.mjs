@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// baton-cli.mjs — the `baton sync` and `baton init` bundle (BATON_SPEC §2f R-BTN-74): bundles
+// baton-cli.mjs — the `baton repo sync` and `baton repo init` bundle (BATON_SPEC §2f R-BTN-74): bundles
 // src/defaults/cli.ts with esbuild the way scripts/baton-run.mjs bundles the runner, and
 // re-exports its command entrypoints. The bundle lands in `.local/` (gitignored) and is
 // rebuilt on every start, so the commands a checkout runs are always its current source.

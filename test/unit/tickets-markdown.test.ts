@@ -45,13 +45,18 @@ describe('ticketsMarkdown', () => {
     expect(tickets).toEqual([]);
   });
 
-  it('depends_on readiness is the course’s to show: live dependencies stay on the ticket, open children block it', () => {
+  it('depends_on readiness is the course’s to show; a ticket’s open children — by parent — block it', () => {
     const { tickets } = ticketsMarkdown([
       file('parent.md', 'id: P'),
-      file('child.md', 'id: K\ndepends_on: [P]'),
+      file('child.md', 'id: K\nparent: P'),
+      file('closed-child.md', 'id: C\nparent: P\nstatus: done'),
+      file('dependent.md', 'id: D\ndepends_on: [P]'),
     ]);
-    expect(tickets.find((t) => t.id === 'P')!.blocked_by).toEqual(['K']); // the open child
-    expect(tickets.find((t) => t.id === 'K')!.depends_on).toEqual(['P']);
+    // The open child blocks its parent; the done child and the dependent do not — a ticket
+    // waits for what it depends on, never for what depends on it.
+    expect(tickets.find((t) => t.id === 'P')!.blocked_by).toEqual(['K']);
+    expect(tickets.find((t) => t.id === 'K')!).toMatchObject({ parent: 'P', blocked_by: [] });
+    expect(tickets.find((t) => t.id === 'D')!).toMatchObject({ depends_on: ['P'], blocked_by: [] });
   });
 
   it('repos short names resolve through the map; owner/name stands; an unmapped name fails the sync', () => {

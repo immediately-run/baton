@@ -1,9 +1,9 @@
 // S-BTN-43 a repository with no course code (BATON_SPEC §13a S-BTN-43, §2f R-BTN-74; R3-1249):
 // a fresh repository with a `tickets/` wiki of five items (one `depends_on` another, one
-// `done`, one with an unknown frontmatter field, one file without `id`) runs `baton init` and
+// `done`, one with an unknown frontmatter field, one file without `id`) runs `baton repo init` and
 // its sync with no `.baton/tickets.mjs` or `sync.mjs`; a PR opens for one ticket, checks pass,
 // a review requests changes, a fix is pushed, a review approves, the PR merges and the item is
-// marked `done`; then `baton init --eject tickets` and an edit to the copy. Must hold: four
+// marked `done`; then `baton repo init --eject tickets` and an edit to the copy. Must hold: four
 // tickets on the `pr` course (the file without `id` is none, the `done` one closed); the
 // dependent ticket is not ready until its dependency is done; the ticket moves
 // filed → pr-open (review waiting on ci, then ready) → reviewed (fix ready) → fixed → reviewed
@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
+const init = (root: string, ...argv: string[]) => initMain([...argv, ...(argv.includes('--eject') ? [] : ['--pin', 'immediately-run/baton@0000000'])], { root, log: () => {} });
 import type { PrFact } from '../../src/defaults/course-pr';
 import { ORIGIN, rows, setClock, syncToken } from '../helpers';
 
@@ -37,6 +38,7 @@ class Repo {
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
     this.write('tickets/first.md', '---\nid: T-1\ntitle: First\ntier: routine\nmystery: unknown-field\n---\n');
     this.write('tickets/second.md', '---\nid: T-2\ntitle: Second\ndepends_on: [T-1]\n---\n');
+    this.write('tickets/third.md', '---\nid: T-3\ntitle: Third\n---\n');
     this.write('tickets/done.md', '---\nid: T-9\nstatus: done\n---\n');
     this.write('tickets/noid.md', '---\ntitle: no id here\n---\n');
     this.write('tickets/notes.txt', 'not markdown\n');
@@ -80,28 +82,30 @@ function rev(author: string, state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTE
 }
 
 describe('S-BTN-43 a repository with no course code', () => {
-  it('init then sync: three tickets on the pr course, the dependent not ready, the timeline to merged', async () => {
-    expect(await initMain([], { root: repo.dir, log: () => {} })).toBe(0);
+  it('init then sync: four tickets on the pr course, the dependent not ready, the timeline to merged', async () => {
+    expect(await init(repo.dir)).toBe(0);
     repo.commit();
     await repo.sync();
-    // Three tickets — the no-id file and the .txt are none; the done one is closed as done.
+    // Four tickets from five items — the no-id file (and the .txt) are none; the done one is
+    // closed as done; the one with an unknown field (T-1) is a ticket like the rest.
     expect(await rows('SELECT id, course_id FROM tickets ORDER BY id')).toEqual([
       { id: 'docs:T-1', course_id: 'pr' },
       { id: 'docs:T-2', course_id: 'pr' },
+      { id: 'docs:T-3', course_id: 'pr' },
     ]);
     expect(await rows('SELECT ticket_id, closed_as FROM closed_tickets')).toEqual([{ ticket_id: 'docs:T-9', closed_as: 'done' }]);
     // The dependent ticket is not ready until its dependency is done.
-    expect((await stationOf('T-2'))[0]).toMatchObject({ station: 'filed', next_leg: null });
+    expect((await stationOf('T-2'))[0]).toMatchObject({ station: 'filed', next_leg: 'implement' });
     expect((await nextOf('T-2'))[0]).toMatchObject({ state: 'waiting', waiting_on: 'dependencies' });
 
     // A PR opens for T-1; checks run; review waits on ci then is ready.
     repo.facts = [fact(7, 'open', [null], [])];
     await repo.sync();
-    expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'pr-open' });
+    expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'pr-open', next_leg: 'review' });
     expect((await nextOf('T-1'))[0]).toMatchObject({ state: 'waiting', waiting_on: 'ci' });
     repo.facts = [fact(7, 'open', ['success'], [])];
     await repo.sync();
-    expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'pr-open' });
+    expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'pr-open', next_leg: 'review' });
     expect((await nextOf('T-1'))[0]).toMatchObject({ state: 'ready', waiting_on: null });
 
     // A review requests changes; a fix is pushed; a review approves; the PR merges.
@@ -110,7 +114,7 @@ describe('S-BTN-43 a repository with no course code', () => {
     expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'reviewed', next_leg: 'fix' });
     repo.facts = [fact(7, 'open', ['success'], [rev('r1', 'CHANGES_REQUESTED', 100)], T0 - 50)];
     await repo.sync();
-    expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'fixed', next_leg: null });
+    expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'fixed', next_leg: 'review' });
     expect((await nextOf('T-1'))[0]).toMatchObject({ leg: 'review', state: 'ready' });
     repo.facts = [fact(7, 'open', ['success'], [rev('r1', 'CHANGES_REQUESTED', 100), rev('r1', 'APPROVED', 10)], T0 - 50)];
     await repo.sync();
@@ -129,11 +133,11 @@ describe('S-BTN-43 a repository with no course code', () => {
   }, 60_000);
 
   it('--eject tickets, then an edit to the copy: the edited source’s tickets are posted', async () => {
-    await initMain([], { root: repo.dir, log: () => {} });
+    await init(repo.dir);
     repo.commit();
     await repo.sync();
-    expect(await rows('SELECT count(*) AS n FROM tickets')).toEqual([{ n: 2 }]);
-    await initMain(['--eject', 'tickets'], { root: repo.dir, log: () => {} });
+    expect(await rows('SELECT count(*) AS n FROM tickets')).toEqual([{ n: 3 }]);
+    await init(repo.dir, '--eject', 'tickets');
     const ejected = readFileSync(join(repo.dir, '.baton', 'tickets.mjs'), 'utf8');
     repo.write('.baton/tickets.mjs', ejected.replace(
       'return ticketsMarkdown(files, ctx.settings);',
@@ -145,7 +149,7 @@ describe('S-BTN-43 a repository with no course code', () => {
   }, 60_000);
 
   it('one identity, comment-only verdict reviews, moves the same way; a red check makes review ready', async () => {
-    await initMain([], { root: repo.dir, log: () => {} });
+    await init(repo.dir);
     repo.commit();
     // The same identity authors and reviews; GitHub refuses self-approval, so the verdict is
     // the marker line a comment-only review opens with.

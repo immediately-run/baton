@@ -341,14 +341,10 @@ async function main(argv) {
     const { runMain } = await import('../scripts/baton-run.mjs');
     return runMain(argv.slice(1));
   }
-  if (argv[0] === 'sync') {
-    // §2f: the defaults are TypeScript under src/defaults, bundled the same way.
-    const { parseSyncArgs, syncMain } = await import('../scripts/baton-cli.mjs');
-    return syncMain(parseSyncArgs(argv.slice(1)));
-  }
-  if (argv[0] === 'init') {
-    const { initMain } = await import('../scripts/baton-cli.mjs');
-    return initMain(argv.slice(1));
+  if (argv[0] === 'repo' && (argv[1] === 'sync' || argv[1] === 'init')) {
+    // §2f, R-BTN-127's names: the defaults are TypeScript under src/defaults, bundled the same way.
+    const { parseSyncArgs, syncMain, initMain } = await import('../scripts/baton-cli.mjs');
+    return argv[1] === 'sync' ? syncMain(parseSyncArgs(argv.slice(2))) : initMain(argv.slice(2));
   }
   const [role, ...rest] = argv;
   const { flags } = parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
