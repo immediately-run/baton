@@ -7,7 +7,8 @@
 ALTER TABLE tickets ADD COLUMN blocked_since INTEGER;
 CREATE INDEX tickets_blocked ON tickets(repository_id) WHERE blocked_since IS NOT NULL;
 -- R-BTN-77 as amended (R3-1251): the `resource` rows a ticket lost, silently, when no live worker
--- could answer for them any more (JSON {kind, ref, leg}); the next answer settles it. NULL otherwise.
+-- could answer for them any more, and the `blocked_since` they cleared (JSON {since, rows}); settled
+-- when each row's need is gone or answerable again, or by any logged transition. NULL otherwise.
 ALTER TABLE tickets ADD COLUMN answer_lost TEXT;
 CREATE INDEX requires_by_name ON ticket_requires(name);  -- R-BTN-75: tickets needing a capability
 

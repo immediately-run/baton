@@ -196,15 +196,68 @@ describe('R-BTN-76, R-BTN-77: a worker\'s own instance, and an answer lost', () 
     await tick();
     expect(await blockRows('D')).toEqual([]);
     expect(await since('D')).toBeNull();
-    expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: JSON.stringify([{ kind: 'resource', ref: R, leg: 'review' }]) }]);
+    expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: JSON.stringify({ since: T0, rows: [{ kind: 'resource', ref: R, leg: 'review' }] }) }]);
     expect(await kinds('unblocked')).toEqual([]);
-    // It comes back: the resource is still down, so D is blocked again with no second `blocked`.
+    // It comes back: the resource is still down, so D is blocked again with no second `blocked`,
+    // and blocked since the evening, as that `blocked` says.
     await w.beat();
     expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 + 16 * MIN }]);
-    expect(await since('D')).toBe(T0 + 16 * MIN);
+    expect(await since('D')).toBe(T0);
     expect(await kinds('blocked')).toEqual(['docs:D']);
     expect(await kinds('unblocked')).toEqual([]);
     expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: null }]);
+  });
+
+  it('a post that moves the only ticket needing a resource past its leg is an unblocking, not a lost answer', async () => {
+    await keyCall(admin, '/v1/admin/resources', { name: R, scope: 'account', detail_schema: SCHEMA });
+    await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
+    git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R] }] });
+    await git.post();
+    await cutover(T0);
+    await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }] });
+    expect(await since('D')).toBe(T0);
+    // The sync places D past review: its need goes, and with it the fleet's count for R.
+    git.place('D', placed('reviewed', [['implement', 'pr-open'], ['review', 'reviewed']], [['merge', 'ready']]));
+    await git.post();
+    expect(await rows('SELECT * FROM resource_fleet')).toEqual([]);
+    expect(await since('D')).toBeNull();
+    expect(await kinds('unblocked')).toEqual(['docs:D']);
+    expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: null }]);
+  });
+
+  it('two resources lost together: one coming back blocked re-blocks silently, its recovery unblocks once, and a later block of the other is logged', async () => {
+    const R2 = 'llm:glm-5';
+    const GO2 = 'acct:other';
+    for (const name of [R, R2]) await keyCall(admin, '/v1/admin/resources', { name, scope: 'account', detail_schema: SCHEMA });
+    await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
+    await keyCall(admin, '/v1/admin/instances', { name: GO2, serves: [R2], repositories: ['docs'] });
+    git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R, R2] }] });
+    await git.post();
+    await cutover(T0);
+    const w1 = await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    const w2 = await grantedWorker(owner, 'docs', 'w2', ['agent-venue'], [GO2]);
+    await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }, { instance: GO2, available: false, valid_for: 24 * 3600 }] });
+    expect(await kinds('blocked')).toEqual(['docs:D']);
+    // Both workers lapse: both rows are lost, silently.
+    await setClock(T0 + 16 * MIN);
+    await tick();
+    expect(await since('D')).toBeNull();
+    expect(JSON.parse((await rows<{ a: string }>('SELECT answer_lost AS a FROM tickets WHERE id = ?', 'docs:D'))[0].a).rows).toHaveLength(2);
+    // W1 returns with R still down: re-blocked silently, from the evening; R2 still unanswerable.
+    await w1.beat();
+    expect(await since('D')).toBe(T0);
+    expect(await kinds('blocked')).toEqual(['docs:D']);
+    // R comes up: an ordinary unblocking, logged once, and the lost answer ends with it.
+    await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: true, valid_for: 24 * 3600 }] });
+    expect(await since('D')).toBeNull();
+    expect(await kinds('unblocked')).toEqual(['docs:D']);
+    expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: null }]);
+    // W2 returns with R2 still down: a new block, and logged as one.
+    await w2.beat();
+    expect(await since('D')).toBe(T0 + 16 * MIN);
+    expect(await kinds('blocked')).toEqual(['docs:D', 'docs:D']);
+    expect(await kinds('unblocked')).toEqual(['docs:D']);
   });
 
   it('a well-formed need for an unregistered resource is reported and kept; registering it later takes effect', async () => {

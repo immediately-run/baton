@@ -20,6 +20,9 @@ export type BlockKind = (typeof BLOCK_KINDS)[number];
 export interface Block { kind: BlockKind; leg?: string; ref: string; since: number; until?: number }
 /** A block whose removal cleared a ticket (R-BTN-77's `cleared`). */
 export interface Cleared { kind: BlockKind; ref: string; leg?: string }
+/** `tickets.answer_lost`: the `resource` rows cleared silently when no one could answer, and the
+ *  `blocked_since` they cleared (R-BTN-77 as amended by R3-1251). */
+interface LostAnswer { since: number; rows: Cleared[] }
 
 /** R-BTN-77: an `unblocked` dispatch is coalesced like the sync's (one window, `DISPATCH_WINDOW_MS`),
  *  capped at 100 entries; an `unblocked` message names at most 20 tickets. */
@@ -138,17 +141,22 @@ export class Blocks {
       }
       if (changed) this.invalidateRecommend(t.repository_id);
       // A `resource` row that went only because no live worker has a usable instance left (the
-      // fleet emptied overnight) is an answer lost, not a resource back: like a claim, it clears
-      // `blocked_since` without an `unblocked`, and the ticket remembers what it lost until the
-      // fleet can answer again (`settleLost`; R-BTN-77 as amended by R3-1251). An answer that comes
-      // back blocked writes the row again silently: the evening's `blocked` still stands.
-      const lost = cleared.length > 0 && cleared.every((c) => c.kind === 'resource' && !this.answerable(t.repository_id, c.ref));
-      const reblock = t.answer_lost != null && added.length > 0 && added.every((w) => w.kind === 'resource');
-      this.evaluate(id, cleared, silent || lost || reblock);
+      // fleet emptied overnight) — its leg still needs the resource, and the count says no one can
+      // answer — is an answer lost, not a resource back: like a claim, it clears `blocked_since`
+      // without an `unblocked`, and the ticket remembers what it lost, and since when it was
+      // blocked, until the fleet can answer again (`settleLost`; R-BTN-77 as amended by R3-1251).
+      // A row that went because its need went (the leg moved past, the need was dropped) is an
+      // ordinary unblocking. An answer that comes back blocked on exactly what was lost writes the
+      // row again silently, with the evening's `blocked_since`: that `blocked` still stands.
+      const marker = t.answer_lost ? (JSON.parse(t.answer_lost) as LostAnswer) : null;
+      const lost = cleared.length > 0 && cleared.every((c) => c.kind === 'resource' && this.lostAnswer(id, c));
+      const reblock = marker != null && added.length > 0
+        && added.every((w) => w.kind === 'resource' && marker.rows.some((r) => r.ref === w.ref && (r.leg ?? '') === w.leg));
+      this.evaluate(id, cleared, silent || lost || reblock, reblock ? marker.since : null);
       if (lost && !silent && t.blocked_since != null && this.blockedSince(id) == null) {
-        const was: Cleared[] = t.answer_lost ? JSON.parse(t.answer_lost) : [];
-        this.exec('UPDATE tickets SET answer_lost = ? WHERE id = ?', JSON.stringify([...was, ...cleared]), id);
-      } else if (t.answer_lost != null) {
+        const next: LostAnswer = { since: marker?.since ?? t.blocked_since, rows: [...(marker?.rows ?? []), ...cleared] };
+        this.exec('UPDATE tickets SET answer_lost = ? WHERE id = ?', JSON.stringify(next), id);
+      } else if (marker) {
         this.settleLost(id);
       }
     }
@@ -158,21 +166,31 @@ export class Blocks {
     return this.rows<{ b: number | null }>('SELECT blocked_since AS b FROM tickets WHERE id = ?', id)[0]?.b ?? null;
   }
 
-  /** The fleet can answer again for every resource a ticket lost its answer for (R-BTN-77 as
-   *  amended by R3-1251): if the ticket is still unblocked, unheld and has a queued leg, the
-   *  resource came back while nobody could see it — that is the `unblocked` the evening's `blocked`
-   *  was owed, with its message and trigger. Blocked again, or held, it is settled silently. */
+  /** Whether a cleared `resource` row is an answer lost: the ticket's leg still needs the resource,
+   *  and the fleet's count for it says no live granted worker has a usable instance. */
+  private lostAnswer(id: string, c: Cleared): boolean {
+    return this.rows(`SELECT 1 FROM leg_needs l JOIN resource_fleet f ON f.repository_id = l.repository_id AND f.resource = l.resource
+                      WHERE l.ticket_id = ? AND l.leg = ? AND l.resource = ? AND f.usable_workers = 0`, id, c.leg ?? '', c.ref).length > 0;
+  }
+
+  /** Settle what a ticket lost its answer for (R-BTN-77 as amended by R3-1251). A lost row is
+   *  settled once its need is gone or the fleet can answer for it again; until every one is, the
+   *  marker stays. Then, if the ticket is still unblocked, unheld and has a queued leg, the
+   *  resource came back while nobody could see it (or its need went meanwhile) — that is the
+   *  `unblocked` the evening's `blocked` was owed, with its message and trigger. Blocked again, or
+   *  held, it is settled silently. A logged transition settles it too (`evaluate`). */
   private settleLost(id: string) {
     const t = this.rows<{ repository_id: string; blocked_since: number | null; answer_lost: string | null }>(
       'SELECT repository_id, blocked_since, answer_lost FROM tickets WHERE id = ?', id)[0];
     if (!t?.answer_lost) return;
-    const lost = JSON.parse(t.answer_lost) as Cleared[];
-    if (!lost.every((c) => this.answerable(t.repository_id, c.ref))) return;
+    const marker = JSON.parse(t.answer_lost) as LostAnswer;
+    const pending = marker.rows.filter((c) => this.lostAnswer(id, c));
+    if (pending.length) return;
     this.exec('UPDATE tickets SET answer_lost = NULL WHERE id = ?', id);
     const queued = this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', id)[0]?.next_leg ?? null;
     if (t.blocked_since != null || queued == null || this.isHeld(id)) return;
-    logEvent(this.c.store, this.c.now(), 'unblocked', 'baton', { ticket: id, cleared: lost }, id);
-    this.unblocked(t.repository_id, id, lost);
+    logEvent(this.c.store, this.c.now(), 'unblocked', 'baton', { ticket: id, cleared: marker.rows }, id);
+    this.unblocked(t.repository_id, id, marker.rows);
   }
 
   /** A claim started, ended, was confirmed or its fence cleared: whether the ticket is held
@@ -204,11 +222,6 @@ export class Blocks {
       .map((d) => ({ kind, ref: d.decision_id, leg: d.leg, until: null }));
   }
 
-  /** Whether the fleet can answer for `resource` in `repo`: a live granted worker has a usable instance. */
-  private answerable(repo: string, resource: string): boolean {
-    return (this.rows<{ n: number }>('SELECT usable_workers AS n FROM resource_fleet WHERE repository_id = ? AND resource = ?', repo, resource)[0]?.n ?? 0) > 0;
-  }
-
   /** When the first instance of `resource` is expected back: the earliest `until` of its
    *  unavailable instances, or null when none says. */
   private expectedBack(resource: string): number | null {
@@ -228,7 +241,7 @@ export class Blocks {
   /** R-BTN-75: blocked when not held, with a queued leg, and with a whole-ticket row or a row on
    *  that leg — a ticket with no queued leg (done, or placed nowhere) is not blocked; `blocked_since`
    *  follows, and its transitions are the `blocked` and `unblocked` events. */
-  private evaluate(id: string, cleared: Cleared[], silent: boolean) {
+  private evaluate(id: string, cleared: Cleared[], silent: boolean, since: number | null = null) {
     const t = this.rows<{ repository_id: string; blocked_since: number | null }>('SELECT repository_id, blocked_since FROM tickets WHERE id = ?', id)[0];
     if (!t) return;
     const queued = this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', id)[0]?.next_leg ?? null;
@@ -236,10 +249,11 @@ export class Blocks {
       `SELECT kind, leg, ref FROM ticket_blocks WHERE ticket_id = ? AND (leg = '' OR leg = ?) ORDER BY kind, ref, leg`, id, queued);
     const now = this.c.now();
     if (blocking.length && t.blocked_since == null) {
-      this.exec(`UPDATE tickets SET blocked_since = ?${silent ? '' : ', answer_lost = NULL'} WHERE id = ?`, now, id);
+      // A logged transition ends any lost answer: the events are paired again.
+      this.exec(`UPDATE tickets SET blocked_since = ?${silent ? '' : ', answer_lost = NULL'} WHERE id = ?`, since ?? now, id);
       if (!silent) logEvent(this.c.store, now, 'blocked', 'baton', { ticket: id, blocks: blocking.map((b) => ({ kind: b.kind, ref: b.ref, ...(b.leg ? { leg: b.leg } : {}) })) }, id);
     } else if (!blocking.length && t.blocked_since != null) {
-      this.exec('UPDATE tickets SET blocked_since = NULL WHERE id = ?', id);
+      this.exec(`UPDATE tickets SET blocked_since = NULL${silent ? '' : ', answer_lost = NULL'} WHERE id = ?`, id);
       if (!silent) {
         logEvent(this.c.store, now, 'unblocked', 'baton', { ticket: id, cleared }, id);
         this.unblocked(t.repository_id, id, cleared);
