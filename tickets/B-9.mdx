@@ -1,0 +1,50 @@
+---
+title: "B-9 — Baton leg streams and Stop leg: a running leg's output over wss, never stored, and the runner stopping a leg's process group"
+id: B-9
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1112
+tier: critical
+description: "`/v1/ui/stream` and `/v1/runner/stream` behind the `Stream` interface (a Durable Object per claim; an in-process fan-out locally), the `watch`/`unwatch` rings, frames bounded by the channel, holder-only runner side, and Cancel/release stopping the process group with SIGINT, SIGTERM, then SIGKILL at 25 s (BATON_SPEC R-BTN-118, R-BTN-119); S-BTN-70, -71. Requires: B-2."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-2
+---
+
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.5 (R-BTN-118, R-BTN-119), R-BTN-33 and R-BTN-91 as amended, §11's stream rows.
+
+### Why
+
+§2m is agreed and specified; this ticket builds its part of it.
+
+### What to build
+
+1. Viewer upgrade: same `Origin`, a known running claim, `stream` not false, a session that may view it; else `forbidden`, ringing nothing.
+2. Runner upgrade: only the claim's holder, after `watch`; a second connection replaces the first.
+3. The channel enforces 8 KB frames and 64 KB/s, counting drops in `gap`; nothing stored, logged or exported.
+4. **Stop leg** on the dashboard sends the release message; the runner stops the group within 30 s and ends `released:requested`.
+
+### Do not
+
+- Write a frame to storage or logs.
+
+### Tests
+
+- S-BTN-70, S-BTN-71; G-BTN-95, G-BTN-96.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] merged under the review gate
+
+## Status
