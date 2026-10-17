@@ -1,0 +1,110 @@
+---
+title: Baton compared with Gas Town
+description: Baton with its pr course against Gas Town, Steve Yegge's orchestrator for many coding agents — the same problem, solved with a lease server over git instead of supervising agents in one town.
+tags: [concepts]
+order: 21
+---
+
+[Gas Town](https://github.com/steveyegge/gastown) is Steve Yegge's orchestrator for running
+many coding agents at once on one machine. Baton, with the built-in `pr` course (implement →
+review → fix → merge, R-BTN-74), addresses the same problem: keeping a fleet of agents busy on
+a backlog without two of them doing the same work, and keeping the work moving when an agent
+crashes, stalls or fills its context. The two make different bets about who keeps order. This
+page compares them, as [Baton compared with Temporal](compared-to-temporal.mdx) does for
+durable execution. The rules referred to (`R-BTN-n`) are in `spec/BATON_SPEC.md`. What this
+page says about Gas Town comes from its README and published reviews as of October 2026; Gas
+Town is alpha software and changes quickly.
+
+## The one-line difference
+
+- **Gas Town supervises agents with agents.** A coordinating agent (the Mayor) breaks work
+  into issues and assigns them; per-project agents watch the workers (the Witness), merge their
+  output (the Refinery) and patrol the whole town (the Deacon). Work state is kept in git
+  (beads and hooks), and the agents run as tmux sessions on the host.
+- **Baton is a lease server over git.** No agent coordinates. Workers pull the next leg they can
+  do, hold it under a fenced lease, and report where the ticket got to; git holds every ticket
+  fact, and Baton keeps only leases, the owners' limits and a record of what it saw (R-BTN-39,
+  R-BTN-66). Workers can be on any machine or in the cloud, and a person can do any leg by
+  pushing to git.
+
+## How the concepts map
+
+| Gas Town | Baton | Note |
+|---|---|---|
+| Town (the workspace, `~/gt`) | One Baton, serving a team's repositories | One Baton per team. |
+| Rig (a project repository) | A registered repository (R-BTN-47) | |
+| Bead (a git-backed issue) | A ticket, from the repository's ticket source | The default source is a folder of Markdown files (R-BTN-74); any source can post tickets. |
+| Convoy (beads bundled for assignment) | A parent ticket and its child tickets (R-BTN-86) | A leg can wait for its children at a station (R-BTN-120). |
+| Formula, molecule (a TOML workflow template, instantiated with tracked steps) | A course: stations joined by legs (R-BTN-69) | A course is a graph, not a script; its conditions live in the course's `locate`. |
+| Mayor (the coordinating agent) | None in core | A course may give planning its own leg, which spawns children. |
+| `gt sling` (push work to an agent) | Pull: a worker asks for recommendations and claims one (R-BTN-98) | Baton advises an order; it assigns nothing. |
+| Polecat (a worker agent; persistent identity, ephemeral sessions) | A worker running `baton run`; each leg a child session (§6.13, R-BTN-106) | Identity is the machine's key and session name (R-BTN-13). |
+| Hook, and the propulsion principle (work on your hook is yours to run) | A claim: a fenced lease on one ticket (R-BTN-6, R-BTN-7) | A lapsed lease is reaped and fenced, so a stale worker's push is refused. |
+| Refinery (a batching, bisecting merge queue) | The `pr` course's `merge` leg | Baton leaves merge queues to the forge (GitHub's merge queue, for example). |
+| Witness (watches workers, nudges, triggers hand-offs) | Heartbeats, lease timeouts, fenced reaps; **Running**'s stalled flag (§14) | Baton detects and reaps; it does not nudge a live agent. |
+| Deacon, Dogs, Boot (the watchdog chain) | The Durable Object's alarm (§3) | Server-side, not agents. |
+| Crew (a person's own clone) | Anyone pushing to git; a `human-operator` worker (R-BTN-58) | |
+| `gt escalate` (severities, routed upwards) | Decisions (R-BTN-78), delivered by couriers (R-BTN-80), listed under **Needs you** | |
+| Handoff, `gt prime`, seance (asking a predecessor session) | The hand-off document (R-BTN-44), the resume record (§6.11), transcript pointers (§6.8), a leg's session link (R-BTN-113) | |
+| Scheduler `max_polecats` | Resource instances and readings (R-BTN-76, R-BTN-101), owner bars (R-BTN-67), `max_queue` (R-BTN-79) | Baton's limits are per account or resource, not one number. |
+| `gt feed`, problems view, dashboard | The dashboard (§14), the leg stream (R-BTN-118) | |
+| Verification gates in the Refinery | The review gate as course legs; check courses (R-BTN-114) | |
+| Wasteland (towns federated over DoltHub) | None | |
+
+## What Gas Town gives that Baton does not
+
+1. **A coordinator that plans.** Tell the Mayor what to build and it decomposes the work,
+   bundles it into convoys and dispatches it. Baton starts from tickets someone, or some leg,
+   has already written.
+2. **Active supervision of live agents.** A Witness nudges a stuck agent and refreshes one
+   whose context is filling, without ending its work. Baton notices silence and staleness, and
+   reaps a silent claim; a live but stuck agent runs until its leg's deadline (R-BTN-90).
+3. **A merge queue in the box.** The Refinery batches merge requests, runs the gates on the
+   merged stack and bisects a red batch. Baton's `merge` leg merges one change at a time and
+   leaves queuing to the forge.
+4. **Steps inside a step.** A molecule tracks the steps of a formula, and a poured wisp
+   recovers from a checkpoint. Baton's unit of durability is the station: a leg that dies is
+   restarted from its hand-off document.
+5. **Push dispatch.** `gt sling` sends a given bead to a given rig and runtime. Baton never
+   assigns; an owner can expedite, hold or re-route a ticket (§8, R-BTN-83), not pin it to a
+   worker.
+6. **Talking to the previous session.** Seance lets an agent ask its predecessor. Baton keeps
+   pointers to the transcript, the hand-off document and the session link.
+7. **OpenTelemetry out of the box,** and a federation of towns (the Wasteland).
+
+## What Baton gives that Gas Town does not
+
+1. **One holder per ticket, enforced.** A claim is a fenced lease: two workers never hold one
+   ticket, and a worker whose lease lapsed is refused at its next push (R-BTN-4, R-BTN-6). Gas
+   Town's agents coordinate by convention and supervision.
+2. **Any machine, any cloud.** Workers on laptops, VMs and cloud sessions share one Baton over
+   signed HTTP (R-BTN-13, R-BTN-107). Gas Town's roles run as tmux sessions on one host.
+3. **Git is the truth.** Everything a ticket is, is in git; a person or another tool moving it
+   is simply seen by the next sync, and every disagreement is logged before git wins
+   (R-BTN-85). Baton could be rebuilt from git and its exports.
+4. **Limits agents cannot change.** Keys, grants, owner bars, required bars, independence, retry
+   bounds and check conclusions are Baton state that only owners set (R-BTN-66, R-BTN-122). An
+   agent that edits the course file cannot loosen them.
+5. **Independent review by construction.** A course can bar the key that wrote a change from
+   reviewing it (R-BTN-106), and merge checks come from keys only owners register (R-BTN-114).
+6. **Courses are data, checked before they ship.** `baton test-course` checks a course change
+   against live tickets, contracts and schemas (§2d, R-BTN-108); typed outputs, entry
+   requirements and retry policies per leg (R-BTN-109, R-BTN-122) make a leg's interface
+   explicit.
+7. **People are first-class.** Decisions reach people through couriers and wait without a time
+   limit; a person's answer in git moves the ticket (R-BTN-78, R-BTN-116).
+8. **A checked core.** Baton's core is a Quint model, and every integration scenario's trace is
+   replayed through it (R-BTN-68).
+
+## Where each fits
+
+Gas Town fits one developer driving many agents on one machine, interactively: a person
+talking to a Mayor, watching the feed, and stepping in. It makes the most of one powerful host
+and a large subscription.
+
+Baton fits a team's backlog worked by a fleet that comes and goes — agents on several machines
+and in the cloud, people, and other tools — where who may do what must hold against agents,
+work must be reviewable in pull requests, and the record must survive any single machine.
+
+They can be combined: a Gas Town polecat can be a Baton worker, claiming legs through `baton
+run` and doing them with Gas Town's machinery inside the leg.
