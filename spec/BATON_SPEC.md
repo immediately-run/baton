@@ -817,7 +817,7 @@ one provider's model; and to be told when a blocked ticket unblocks. A worker ca
 a ticket's pending leg for three reasons: it lacks a required capability, the ticket depends on
 another ticket, or a third-party resource is unavailable.)*
 
-- **R-BTN-75 (blocks are stored, not recomputed).** *(Amended 2026-10-17 by §2m: a `ticket` row may sit on one leg and name the stations the other ticket must be at or have reached, or require it closed `done`, and `capability` rows are kept per leg for a leg's own list (R-BTN-120); `GET …/tickets/{ticket}/prerequisites` and `baton why` answer for one leg, every prerequisite met or not.)*  A **block** is one reason a ticket's next
+- **R-BTN-75 (blocks are stored, not recomputed).** *(Amended 2026-10-17 by §2m: a `ticket` row may sit on one leg and name the stations the other ticket must be at or have reached, or require it closed `done`, and `capability` rows are kept per leg for a leg's own list (R-BTN-120); `GET …/tickets/{ticket}/prerequisites` and `baton why` answer for one leg, every prerequisite met or not; a run that ends `released:blocked` writes its prerequisite's row on that leg, a `ticket` or `decision` row provisional until a snapshot confirms it (R-BTN-126).)*  A **block** is one reason a ticket's next
   leg cannot be worked, kept as a row of `ticket_blocks` (repository, ticket, leg or none,
   `kind`, `ref`, `since`, `until`) that Baton writes in the same transaction as the change that
   caused it — so asking is a read of one repository-scoped index, never a pass over the board.
@@ -2379,7 +2379,7 @@ ssh for runner auth is not great, users should be able to fall back to regular a
 non-interactive leg's output streams to the dashboard over the existing WebSocket stack —
 "we don't need hand-rolled encryption for streaming logs if we use standard wss://"; and the
 dashboard can stop a running leg; and, the same day, a leg's prerequisites in one place, with
-capability types a course declares — §2m.6; and retry policies per leg, a backoff being one more prerequisite — §2m.6a; and, after comparing Baton with Gas Town, a fresh context, a planning course and decision severities — §2m.6b.)*
+capability types a course declares — §2m.6; and retry policies per leg, a backoff being one more prerequisite — §2m.6a; and, after comparing Baton with Gas Town, a fresh context, a planning course and decision severities — §2m.6b; and a prerequisite that fails during a leg, which blocks that leg's edge and adds no station — §2m.6c.)*
 
 What follows is the whole of the change. The rules it amends carry a dated note pointing here.
 **Scope, stated:** no new principal tier in Baton's sense beyond the two credential kinds
@@ -2945,7 +2945,8 @@ the next retry attempt.")*
     `contract-input`) are built-in types with their present retryability, and the class of a
     course type is `transient` when it is retryable, else `spec`. An exception the script does
     not type is `transient`: retried, as Temporal retries an unknown error. `baton test-course`
-    refuses a leg policy naming an undeclared type.
+    refuses a leg policy naming an undeclared type. *(R-BTN-126: a `LegError` that names a
+    `prerequisite` ends `released:blocked`, not with an error class — a block, never a retry.)*
   - **A leg may carry a policy:** `"retry": {"initial_s": 3600, "coefficient": 4,
     "max_interval_s": 86400, "max_attempts": 3, "non_retryable": [<type>, …], "in_claim": 0,
     "max_attempts_s": null}`. After failed attempt *n* (counted as §6.10 counts, but **per
@@ -2971,7 +2972,8 @@ the next retry attempt.")*
     same schedule (capped at 5 minutes each, so a claim never idles for hours), before it
     releases with a failed attempt. An in-claim retry is not a run for `max_runs` (§2e) and
     not a failed attempt; each one is an activity in the history (§6.9). It suits a network
-    blip or a provider's 429, where giving the ticket back costs more than waiting.
+    blip, where giving the ticket back costs more than waiting; a provider's capacity reached
+    is a blocked prerequisite (R-BTN-126), never an in-claim retry.
   - **A budget across attempts.** `max_attempts_s`, Temporal's schedule-to-close: seconds from
     the leg's first attempt within which every attempt must start. Past it the leg is not
     retried, whatever `max_attempts` says, and the ticket is held as above, with `why:
@@ -3115,6 +3117,64 @@ decisions; mention, and do not build, asking a predecessor session.)*
   a pointer output (`std:object@1`, R-BTN-110) that a later leg's script could read. This
   amendment adds no field, route or output for it.
 
+### 2m.6c A prerequisite can fail during a leg
+
+*(Owner, 2026-10-17: "any leg of a ticket may be blocked by an unmet prerequisite, which may be
+apparent before a runner starts completing the given leg, but can also become apparent during
+implementation. For example, because a language model provider's token capacity has been
+reached. This is not a new station in the course graph. It is simply a colored edge in the
+graph." Then "Go" on the proposal.)*
+
+- **R-BTN-126 (a prerequisite that fails during a leg blocks that leg's edge).** *(Amends
+  R-BTN-75, R-BTN-120, R-BTN-122, §6.12's mid-leg exhaustion and the end reasons of §6.)*
+  R-BTN-120 blocks a leg on a prerequisite known before it starts. The same prerequisite can
+  fail while the leg runs: a provider's token capacity reached, a VPN dropped, a database
+  unreachable, a credential expired. Either way the ticket stays at the station the leg leaves,
+  and the leg — the edge — is blocked. No station is added, and nothing is a failure.
+  - **The ending.** The runner ends the claim **`released:blocked`** with `prerequisite: {kind,
+    ref, until?}`, after the steps of any release (§6.13): the leg's work so far is pushed, and
+    `handoff` writes the hand-off document, so the next claimant resumes it. The kinds:
+    - **`resource`** — `ref` an instance the worker `uses` or its own `worker` instance
+      (R-BTN-76). The end carries the instance's reading, `available: false` with its `until`
+      when the provider says one, which Baton stores as a reading from that worker (R-BTN-101)
+      in the end's transaction, so every worker on that line sees it at once. Baton writes a
+      `resource` block row on the leg — even when the course named no `needs` for it — cleared
+      as resource blocks are, by a reading that makes an instance usable or at `until`.
+    - **`capability`** — `ref` a capability the runner declared and has now lost (its check
+      failed, R-BTN-121). The runner's next heartbeat drops it, so the leg is not offered to it
+      again; Baton writes a `capability` row on the leg only when no other live runner both
+      declares and is granted it (R-BTN-75's rule), so another runner may take the leg at once.
+    - **`ticket`** or **`decision`** — a prerequisite that lives in git: the leg writes it to
+      the ticket source first (a `depends_at` entry, a posted decision, R-BTN-78), and the end
+      names it. Baton writes a **provisional** row on the leg, which the next accepted snapshot
+      replaces with the prerequisites it posts — git wins (R-BTN-39), so a row git does not
+      confirm is dropped and logged `prerequisite-unconfirmed`.
+  - **Not a failure.** A `blocked` end is not a failed attempt (§6.10, R-BTN-122), not a run for
+    `max_runs` (§2e), and starts no backoff; the leg's `retry` prerequisite is untouched. A leg
+    script reports one by throwing `LegError(type, message, {prerequisite})`, or through the
+    local channel as `baton leg release --blocked <kind>:<ref> [--until <t>]` (R-BTN-106): **an
+    error that names a prerequisite is a block, never a retry.** Retry policies are for failures
+    that name none — a flaky test, an unexplained crash. A provider throttle that its own
+    harness waits out inside a step is neither: the leg never sees it.
+  - **Never sleep on the lease.** The runner does not wait in the claim for a prerequisite to
+    return; `in_claim` retries (R-BTN-122) are for failures, never for blocks. The lease and
+    the worker go back to work another leg can use.
+  - **`provider-exhausted` is a case of it.** §6.12's mid-leg exhaustion is `released:blocked`
+    with `{kind: resource, ref: <the holder's line's instance>, until?}`. Baton still accepts
+    `released:provider-exhausted` from a runner below the course's next `min_worker_version`
+    and records it as that `blocked` end.
+  - **Churn is listed, not held.** Five `blocked` ends on one leg of one ticket within 24 hours
+    list the ticket under **Needs you** with each end's prerequisite: a worker that keeps
+    reporting a block another worker's readings deny is a misbehaving worker or a mis-scoped
+    resource, and a hold would hide which.
+  - **A blocked edge, drawn as one.** Wherever Baton draws a course — the dashboard's
+    **Courses** view, a ticket's path, `baton why` — every leg is an edge between stations
+    with a state: `ready`; `running` (a claim holds it); `blocked`, by the kind of each unmet
+    prerequisite, with `since` and `until` and whether it was found before a start or during a
+    run (a `retry` block reads as `backing-off`); or not queued. A blocked edge is never drawn
+    as a station, and a state is shown by colour **and** a text label (§14's rule against
+    colour alone). The view is Baton's from the blocks index; a course adds no node for it.
+
 ### 2m.7a The wire, the settings and the interfaces
 
 §11's existing rows gain these fields; §11 also lists §2m's new routes.
@@ -3127,7 +3187,8 @@ decisions; mention, and do not build, asking a predecessor session.)*
 | `POST /v1/courier/notices/claim` | `?delivers=forge-check`; the notice `{notice_id, kind: 'forge-check', repository, sha, name, conclusion, summary, seq, issued_at, kid, signature}` (R-BTN-114) |
 | `POST /v1/courier/notices/{id}` | `check_id` when marking a `forge-check` notice `sent` |
 | `PUT /v1/owner/{repository}/settings` | `api_keys`, `required_independence`, `checks`; `retry` as `{default, ceiling: {max_attempts, max_attempts_s, in_claim, max_interval_s, max_refreshes, initial_s}, never_retry}` (R-BTN-117, R-BTN-106, R-BTN-114, R-BTN-122, R-BTN-123) |
-| `POST /v1/runner/end` (released) | `error: {type, message?}` (R-BTN-122) |
+| `POST /v1/runner/end` (released) | `error: {type, message?}` (R-BTN-122); the reason `blocked` with `prerequisite: {kind, ref, until?}` and, for a resource, `reading: {instance, available, until?, detail?}` (R-BTN-126) |
+| local channel | `baton leg release --blocked <kind>:<ref> [--until <t>]` (R-BTN-126) |
 | board post: each ticket's `decisions` | `severity?` (R-BTN-125) |
 | `POST /v1/owner/{repository}/couriers` (again) | `severities?` beside `asks` (R-BTN-125) |
 | `POST /v1/courier/notices/claim` (decision notices) | `decision.severity` (R-BTN-125) |
@@ -3150,7 +3211,7 @@ ticket, leg, `attempts`, `first_attempt_at`, `retry_after`, `last_error_type`; R
 
 ### 2m.7 What core gains
 
-R-BTN-50's table gains, all generic: an output's envelope and schema id; a schema's id,
+R-BTN-50's table gains, all generic: the `blocked` end with its prerequisite, and a leg edge's state (R-BTN-126); an output's envelope and schema id; a schema's id,
 version, digest and base; a station's `entry`; a leg's `no_chain_from`, `isolation`, `kind:
 person`, `asks`, `stream` and `spawns`; a check course's `checks` map; a worker's `isolation`;
 a leg run's `session_url`; the `watch` and `unwatch` rings; the `forge-check` notice; the
@@ -3191,12 +3252,13 @@ attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refr
   | S-BTN-81 a check nobody sends | a `forge-check` notice is queued and no forge courier claims it for 15 minutes; a work key tries to claim the check ticket | the notice is listed under **Needs you** and the change stays pending; the work key's claim is refused |
   | S-BTN-82 prerequisite cycles and closed tickets | A's leg requires B `at: merged`; B's requires A `reached: planned`; C requires D `at: merged` and D is withdrawn; E requires F `reached: review` and F closes done | A and B stay blocked and are listed `prerequisite-cycle`; C's prerequisite never holds; E's holds from `closed_tickets.final_path` |
   | S-BTN-83 an exponential schedule | a leg's policy is `initial_s` 600, `coefficient` 2, `max_interval_s` 3600, `max_attempts` 5; it fails four times, `transient` | its `retry_after`s are 10, 20, 40 and 60 minutes after each failure, each within ±10%; while one runs, the leg is not offered, a claim into it is refused, and `baton why` shows `retry: backing-off` with `attempt: n of 5`; at `retry_after` the leg is offered again and `unblocked` fires; the ticket's other legs are unaffected |
-  | S-BTN-84 course error types | a course declares `merge-conflict` non-retryable and `rate-limited` retryable; a leg throws each, and once throws a plain `Error` | `merge-conflict` holds the ticket at once with `baton:retries`; `rate-limited` and the plain error back off as `transient`; each end carries `error.type` |
-  | S-BTN-85 in-claim retries | a leg with `in_claim: 2` fails `rate-limited` twice, then succeeds | the runner re-runs it under the same claim, waiting at most 5 minutes each time; the claim advances; no failed attempt is counted and `max_runs` is untouched; two activities record the retries |
+  | S-BTN-84 course error types | a course declares `merge-conflict` non-retryable and `flaky-test` retryable; a leg throws each, and once throws a plain `Error`; once it throws `flaky-test` naming a `prerequisite` | `merge-conflict` holds the ticket at once with `baton:retries`; `flaky-test` and the plain error back off as `transient`; each end carries `error.type`; the one naming a prerequisite ends `released:blocked` and spends no attempt |
+  | S-BTN-85 in-claim retries | a leg with `in_claim: 2` fails `network-blip` twice, then succeeds | the runner re-runs it under the same claim, waiting at most 5 minutes each time; the claim advances; no failed attempt is counted and `max_runs` is untouched; two activities record the retries |
   | S-BTN-86 owners bound the course | the owners' `retry` ceiling is `max_attempts` 3 and its floor names `spec-violation`; a course sets `max_attempts` 1000 and makes `spec-violation` retryable | Baton applies 3 attempts and never retries `spec-violation`; `baton test-course` warns of both cut-backs; the course's view shows the policy in force; a course setting `in_claim` 50 and `max_refreshes` 20 runs 2 and 3; one setting `coefficient` 0.5 is refused; one that renames `spec-violation` is accepted with the warning that the floor's type is undeclared |
   | S-BTN-87 a budget across attempts | a leg has `max_attempts_s` 7200 and `max_attempts` 10; its third failure's backoff would start an attempt after 2 hours | the leg is not retried; the ticket is held, `why: budget-spent`; a leg with `max_ready_s` 3600, ready and unclaimed for an hour, is listed under **Needs you** |
   | S-BTN-88 a fresh context | a leg with `max_context: 0.6` and `max_refreshes: 1`, in `session` mode; its session passes 60% twice; the same leg in `process` mode passes it once; in `attached` mode, once | in `session` mode, at the first, the session's `baton leg yield` answers `refresh: true`, the runner has `handoff` write the hand-off, starts a fresh session on the same leg under the same claim, and records `context-handoff` with both links; no run or attempt is counted and the lease holds; at the second it suspends at the leg's `from`; in `process` mode the script's `baton leg yield --context 0.7` is answered `refresh: true`, `run` is aborted with reason `context`, `handoff` runs, and `run` is called again with `ctx.refresh`; a `process` script that reports no use is never refreshed; in `attached` mode nothing is refreshed and the runner logs it once |
   | S-BTN-89 an epic | `baton init --course epic`; a ticket's `plan` files three children on `pr`; two merge, one is withdrawn; `replan` files a replacement, which merges | `integrate` is queued and blocked by `ticket` rows while children are open; after the withdrawal `locate` queues `replan`, which waits for the other two to close; once `replan` files the replacement, `locate` queues `integrate`, which skips the withdrawn child and is blocked by the replacement alone; after it merges, `integrate` runs and the epic ends at `integrated`; a second epic whose `replan` files nothing integrates over its two merged children |
+  | S-BTN-91 a prerequisite fails during a leg | W1 runs `implement` on the line `llm:x@acct-1`, which the course names in no `needs`; the provider reports its token capacity reached until +2 h; W2 uses `acct-2`; another ticket's `review` has W3's `vpn:corp` check fail mid-leg while W4 holds `vpn:corp`; a third leg writes a `depends_at` on an open ticket and ends naming it; a fourth worker reports `blocked` five times in a day on an instance a probe reads available | W1 pushes, writes the hand-off and ends `released:blocked` with `{resource, llm:x@acct-1, until}`; the reading is stored with the end; the leg's edge is `blocked` (found during a run) with a `resource` row, the ticket stays at its station, no attempt or run is counted and no backoff starts; W2 is offered the leg and resumes from the hand-off; the `review` leg gets no `capability` row and W4 is offered it; the third leg's provisional `ticket` row is replaced by the posted one at the next snapshot; the fifth churned end lists the ticket under **Needs you**; a runner below `min_worker_version` ending `released:provider-exhausted` is recorded as the same `blocked` end |
   | S-BTN-90 decision severities | three decisions open, `critical`, `high` and `normal`; one courier registered for `critical,high`, another for all; `remind_after` 24 hours | the first courier gets two notices and the second three, each carrying its severity; **Needs you** and `baton inbox` list them critical first; unanswered, the critical one is re-sent after 3 hours, the high after 6, the normal after 24; with the second courier revoked, **Needs you** lists the `normal` decision as unserved; re-registering the first for all severities queues it the `normal` notice |
 
 - **New gates** (Must-establish, §16):
@@ -3225,6 +3287,7 @@ attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refr
   | A leg past its `max_context` is refreshed under the same claim, at most `max_refreshes` times, counting neither a run nor an attempt, then suspended | G-BTN-108 (S-BTN-88) |
   | The `epic` course's `integrate` is queued only when no withdrawal is unanswered by a `replan`, and starts only when every child not withdrawn closed `done`; `children` selects closed children; `skip_withdrawn` alone lets a withdrawn ticket out of an entry | G-BTN-109 (S-BTN-89) |
   | Notices carry their decision's severity; a courier receives only the severities it registered, and one that gains a severity gets the open decisions of it; an `(asks, severity)` no personal channel takes is listed; reminders and lists follow severity | G-BTN-110 (S-BTN-90) |
+  | A `blocked` end writes its prerequisite's block row on that leg in the end's transaction (a `capability` row only when no live runner has it; a `ticket` or `decision` row provisional until a snapshot confirms it), spends no attempt, run or backoff, and leaves the ticket at the leg's station; an error naming a prerequisite is never retried | G-BTN-111 (S-BTN-91) |
 
 ## 3. The service *(proposal)*
 
@@ -4251,7 +4314,7 @@ label (§10.4) core stores and shows but never reads. `handed-off:<buffer>` and
 |---|---|---|
 | `done` | the course's last leg is done — for `roadmap-pr`, the ticket archived by the reconciler (Step 5.5), or closed with a remainder (detail `remainder:<id>`) | `completed` |
 | `suspended:<station>` | the session stops at the station it reached (R-BTN-71) — a gate refuses the next leg or the session follows advice that its line is short, the next leg waits on something slower than CI (for `roadmap-pr`, detail `awaiting-ci`, `awaiting-owner`, `awaiting-release-approval`, … from Step 5.9), or the session must stop — having pushed the finished leg's evidence and the hand-off document (§6.12, R-BTN-40, R-BTN-44) | `completed` |
-| `released:<reason>` | the session gives the ticket back; `<reason>` is an owner bar's `reason` when that bar released it (R-BTN-67), else exactly one of `stale-board`, `cannot-finish:transient`, `cannot-finish:capability`, `cannot-finish:spec`, `cannot-finish:contract-output`, `cannot-finish:contract-input`, `lease-lost`, `requested` (an owner's release message), `owner-cancel` (Cancel, §8), `provider-exhausted` (the holder's own line ran out mid-leg, §6.12), `course-changed` (its leg left the course, R-BTN-64), `leg-timeout` (the running leg passed its deadline, R-BTN-90); `awaiting-review-capacity` is retired — a review with no capacity is simply not ready | `released` |
+| `released:<reason>` | the session gives the ticket back; `<reason>` is an owner bar's `reason` when that bar released it (R-BTN-67), else exactly one of `stale-board`, `cannot-finish:transient`, `cannot-finish:capability`, `cannot-finish:spec`, `cannot-finish:contract-output`, `cannot-finish:contract-input`, `lease-lost`, `requested` (an owner's release message), `owner-cancel` (Cancel, §8), `provider-exhausted` (the holder's own line ran out mid-leg, §6.12), `course-changed` (its leg left the course, R-BTN-64), `leg-timeout` (the running leg passed its deadline, R-BTN-90), `blocked` (a prerequisite failed during the leg, with the prerequisite; *(added 2026-10-17 by §2m, R-BTN-126; `provider-exhausted` is recorded as one)*); `awaiting-review-capacity` is retired — a review with no capacity is simply not ready | `released` |
 
 **R-BTN-8 (git first).** For every `completed` end — `suspended:` included, with the finished leg's evidence and the hand-off document (§6.12) — the worker pushes the git side first
 (for `roadmap-pr`: `claim.sh set --status in-review|done`, the reconciler's archive, a PR
@@ -4607,7 +4670,7 @@ does under one claim — are a different thing and keep their name.
   the ticket's PR commits and its provenance rows. Reviews run as subagents of the claiming
   session on the seats' models, so the author's own session may run its `review` legs;
   independence is the seats' families barred from `fix` and `merge` (R-BTN-60, R-BTN-27).
-- **Exhausted mid-leg: push, release, never sleep on the lease.** A session whose own
+- **Exhausted mid-leg: push, release, never sleep on the lease.** *(Amended 2026-10-17 by §2m: this is `released:blocked` with the holder's line as a `resource` prerequisite, the general rule for a prerequisite that fails during a leg — R-BTN-126; `provider-exhausted` is accepted from older runners and recorded as it.)* A session whose own
   account runs out inside a leg (its provider refused with a rate limit) commits and
   pushes what it has, writes the hand-off document, and ends `released:provider-exhausted`
   — not a failed attempt. The leg is recommended again when its line is forecast to
@@ -5822,7 +5885,7 @@ integration suite that drives them together, on a controllable clock, proves the
 
 ## 14. The dashboard *(proposal)*
 
-*(Amended 2026-10-17 by §2m: **Workers** show each worker's `isolation` and credential kind; **Running** and the **Timeline** link each leg run's `session_url` (R-BTN-113) and open its output stream (R-BTN-118); **Actions** gain **Stop leg** (R-BTN-119); **Needs you** gains unsent `forge-check` notices, `check-mismatch` and `output-invalid` discrepancies (R-BTN-114, R-BTN-109).)* 
+*(Amended 2026-10-17 by §2m: **Courses** draws every leg as an edge with its state — ready, running, blocked by kind (found before a start or during a run), backing off — in colour and a text label, never a blocked station (R-BTN-126); **Needs you** lists a leg with five `blocked` ends in 24 hours; **Workers** show each worker's `isolation` and credential kind; **Running** and the **Timeline** link each leg run's `session_url` (R-BTN-113) and open its output stream (R-BTN-118); **Actions** gain **Stop leg** (R-BTN-119); **Needs you** gains unsent `forge-check` notices, `check-mismatch` and `output-invalid` discrepancies (R-BTN-114, R-BTN-109).)* 
 
 At the Baton's origin (`/`), behind a dashboard session (R-BTN-57), polling `GET /v1/ui/state` every 10
 seconds. Its views mirror Temporal's:
@@ -6421,6 +6484,12 @@ table is in docs' `BATON_DOCS_DEPLOYMENT` §16, where `check-spec-anchors` re-re
   Chose each course file over the repository's `baton.json` (owner); two courses may define one
   type differently, and the dashboard shows it. Rejected: keeping `ROLES` in docs' vendored
   library — core would keep one deployment's vocabulary.
+- **A prerequisite that fails during a leg blocks the leg's edge** (2026-10-17, owner; R-BTN-126):
+  "not a new station in the course graph … simply a colored edge". A blocked end spends no
+  attempt, and an error that names a prerequisite is never retried. Rejected: a `blocked`
+  station in each course — a course would need one per leg, and the ticket's station must be
+  where its work is; treating capacity as a retryable error — it spends attempts on something
+  no attempt can fix; waiting in the claim — it holds a lease another leg could use (§6.12).
 - **Retries per leg, typed by the course, bounded by the owners** (2026-10-17, owner; R-BTN-122):
   Temporal's retry policy, error types and timeouts apply to legs as to activities. A backoff
   is a prerequisite (owner), so a leg waiting for its next attempt is never offered and `baton
