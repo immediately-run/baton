@@ -1,0 +1,49 @@
+---
+title: "B-8 — Baton registration tokens and API keys beside SSH keys"
+id: B-8
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1111
+tier: critical
+description: "Owners mint scoped, expiring, revocable registration tokens; a session registers an SSH key or an API key with them; API keys work as worker or personal-courier credentials unless the owners set `api_keys: false`; today's bearer and seed keys become API keys with explicit grants (BATON_SPEC R-BTN-117); S-BTN-69. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.4 (R-BTN-117), R-BTN-13, R-BTN-57 and R-BTN-58 as amended, §2m.7a's grants and settings rows.
+
+### Why
+
+§2m is agreed and specified; this ticket builds its part of it.
+
+### What to build
+
+1. `baton owner token create --ttl --max-tier --role worker|courier [--asks]` and the registration route; a credential never exceeds its token and dies with it.
+2. API keys in `Authorization` on every call, including the push and stream upgrades; 7 days idle ends one; refused in any other role.
+3. `api_keys: false` refuses an API-key worker at its next call.
+4. The migration: grant each legacy key what it declared on repositories it used in 30 days, each listed under **Needs you**.
+
+### Do not
+
+- Store an API key in clear: keep a hash.
+
+### Tests
+
+- S-BTN-69; G-BTN-94.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] merged under the review gate
+
+## Status
