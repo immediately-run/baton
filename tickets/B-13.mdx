@@ -1,0 +1,48 @@
+---
+title: "B-13 — Baton epic course: baton init --course epic, a planning leg that files child tickets"
+id: B-13
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1116
+tier: judgement
+description: "The CLI's `epic` course: `plan` files child tickets, `locate` queues `replan` after an unanswered withdrawal and `integrate` otherwise, `integrate` with `children done: true, skip_withdrawn: true` (BATON_SPEC R-BTN-124); S-BTN-89. Requires: B-10."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-10
+---
+
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.6b (R-BTN-124), R-BTN-74 and R-BTN-86 as amended.
+
+### Why
+
+§2m is agreed and specified; this ticket builds its part of it.
+
+### What to build
+
+1. `baton init --course epic` writes the course file, its `locate` and stub leg scripts calling the repository's `agent_command`.
+2. `plan`'s output is a `std:git.file@1` plan, and `integrate` reads it.
+
+### Do not
+
+- Add a coordinator to core.
+
+### Tests
+
+- S-BTN-89; G-BTN-109; `baton test-course` passes on the shipped course.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] merged under the review gate
+
+## Status
