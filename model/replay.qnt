@@ -49,7 +49,7 @@ module replay {
     nondet kind = Set("done", "suspended", "release").oneOf()
     nondet holderBars = FAMILIES.powerset().oneOf()
     nondet postBars = TICKETS.setOfMaps(FAMILIES.powerset()).oneOf()
-    nondet pick = LEGS.oneOf()
+    nondet picks = TICKETS.setOfMaps(LEGS).oneOf()
     nondet tag = FAMILIES.oneOf()
     nondet applies = Set("claim", "claim+advance").oneOf()
     nondet i = 1.to(MAX_CLAIMS).oneOf()
@@ -68,7 +68,7 @@ module replay {
       all { setHold(t, b), quiet }, all { setOwnerBar(tag, applies), quiet }, all { liftOwnerBars, quiet },
       all { ownerResolve(i), quiet },
       all { foreignPush(t, leg), quiet }, all { regress(t), quiet }, all { withdraw(t), quiet },
-      all { syncNumber(s), takes(s) }, all { syncRead(s, postBars, queuedFor(st.gitPath, pick)), quiet }, all { syncPost(s), quiet },
+      all { syncNumber(s), takes(s) }, all { syncRead(s, postBars, queuedFor(st.gitPath, picks)), quiet }, all { syncPost(s), quiet },
     }
   }
 
@@ -91,7 +91,7 @@ module replay {
     nondet kind = Set("done", "suspended", "release").oneOf()
     nondet holderBars = FAMILIES.powerset().oneOf()
     nondet postBars = TICKETS.setOfMaps(FAMILIES.powerset().exclude(Set(Set()))).oneOf()
-    nondet pick = LEGS.oneOf()
+    nondet picks = TICKETS.setOfMaps(LEGS).oneOf()
     nondet i = 1.to(MAX_CLAIMS).oneOf()
     any {
       all { claim(w, t), called(w) },
@@ -102,7 +102,7 @@ module replay {
       all { advance(w, leg, holderBars), called(w) }, all { advance(w, leg, holderBars), called(w) },
       all { endClaim(w, kind, true), called(w) },
       all { heartbeat(w), called(w) },
-      all { syncNumber(1), takes(1) }, all { syncRead(1, postBars, queuedFor(st.gitPath, pick)), quiet }, all { syncPost(1), quiet },
+      all { syncNumber(1), takes(1) }, all { syncRead(1, postBars, queuedFor(st.gitPath, picks)), quiet }, all { syncPost(1), quiet },
       all { regress(t), quiet },
       all { timeMayPass, tick, quiet },
       all { st.claims.keys().contains(i), lapsed(i), lapsedActive == Set(i), lapsedFences.size() == 0, alarmReap(i), quiet },
@@ -127,7 +127,7 @@ module replay {
       all { timeMayPass, tick, quiet }, all { timeMayPass, tick, quiet },
       all { st.claims.keys().contains(i), lapsed(i), lapsedActive == Set(i), lapsedFences.size() == 0, alarmReap(i), quiet },
       all { st.claims.keys().contains(i), lapsed(i), lapsedFences == Set(i), lapsedActive.size() == 0, fenceTimeout(i), quiet },
-      all { syncNumber(1), takes(1) }, all { syncRead(1, TICKETS.mapBy(x => Set()), queuedFor(st.gitPath, "")), quiet }, all { syncPost(1), quiet },
+      all { syncNumber(1), takes(1) }, all { syncRead(1, TICKETS.mapBy(x => Set()), queuedFor(st.gitPath, TICKETS.mapBy(_ => ""))), quiet }, all { syncPost(1), quiet },
     }
   }
 
@@ -139,7 +139,7 @@ module replay {
     nondet t = TICKETS.oneOf()
     nondet leg = legChoices(w).oneOf()
     nondet postBars = TICKETS.setOfMaps(FAMILIES.powerset().exclude(Set(Set()))).oneOf()
-    nondet pick = LEGS.oneOf()
+    nondet picks = TICKETS.setOfMaps(LEGS).oneOf()
     any {
       all { claim(w, t), called(w) },
       all { pushEvidence(w, true), quiet }, all { pushEvidence(w, true), quiet },
@@ -148,7 +148,7 @@ module replay {
       all { advance(w, leg, FAMILIES.exclude(TAGS.get(w))), called(w) },
       all { endDoneAtEnd(w), called(w) },
       all { heartbeat(w), called(w) },
-      all { syncNumber(1), takes(1) }, all { syncRead(1, postBars, queuedFor(st.gitPath, pick)), quiet }, all { syncPost(1), quiet },
+      all { syncNumber(1), takes(1) }, all { syncRead(1, postBars, queuedFor(st.gitPath, picks)), quiet }, all { syncPost(1), quiet },
     }
   }
 }

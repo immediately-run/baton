@@ -6332,8 +6332,9 @@ integration suite that drives them together, on a controllable clock, proves the
   the model cites changes the model in the same baton PR. The checking runs on the author's
   machine, not on hosted CI runners, whose time limits it outgrew: a PR that changes the
   model, the core, the replay or the trace check carries `npm run model:full`'s report for its
-  head — simulation, witnesses, the model-drawn traces driving the core, and the proof — and the
-  review gate checks the report's commit. CI runs the deterministic part on every change: the
+  head — simulation, witnesses, the model-drawn traces driving the core, and the proof — and a
+  CI job that runs no model reads the PR body and fails until that report is there, names the
+  PR's head and passes (`model-report`). CI runs the deterministic part on every change: the
   model's typecheck and regression runs, the scenario traces checked against it, and the
   `@impl`/`@model` links.
 - **R-BTN-31 (part of drafting).** Every roadmap item in project `baton` names, in its **Tests** section, the

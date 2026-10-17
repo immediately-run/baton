@@ -17,8 +17,8 @@ module regressions {
       .then(pushEvidence(w, true))
   // a sync posting each ticket's first leg in the course's order as its queued leg (R-BTN-83)
   action sync1: bool =
-    syncNumber(1).then(syncRead(1, TICKETS.mapBy(t => Set("family:b")), queuedFor(st.gitPath, ""))).then(syncPost(1))
-  action read(s: int, bars: Set[str]): bool = syncRead(s, TICKETS.mapBy(t => bars), queuedFor(st.gitPath, ""))
+    syncNumber(1).then(syncRead(1, TICKETS.mapBy(t => Set("family:b")), queuedFor(st.gitPath, TICKETS.mapBy(_ => "")))).then(syncPost(1))
+  action read(s: int, bars: Set[str]): bool = syncRead(s, TICKETS.mapBy(t => bars), queuedFor(st.gitPath, TICKETS.mapBy(_ => "")))
 
   // The fifth review's B3 (a claim hook as an await, R-BTN-52) and its fallback runs went with
   // R-BTN-98, which retired the hook: a claim is one transaction (R3-1254).
@@ -30,7 +30,7 @@ module regressions {
   run claimOfferedQueuedLegOnlyTest =
     start.then(claim("w2", "t1")).then(leg("w2", "implement")).then(leg("w2", "review"))
       .then(endClaim("w2", "suspended", true))
-      .then(syncNumber(1)).then(syncRead(1, TICKETS.mapBy(t => Set("family:b")), queuedFor(st.gitPath, "adjudicate"))).then(syncPost(1))
+      .then(syncNumber(1)).then(syncRead(1, TICKETS.mapBy(t => Set("family:b")), queuedFor(st.gitPath, TICKETS.mapBy(_ => "adjudicate")))).then(syncPost(1))
       .expect(st.queued.get("t1") == "adjudicate" and claimableBy("t1", "w1"))
       .then(claim("w1", "t1"))
       .expect(workerClaim("w1").size() == 1 and st.claims.get(2).offered == "adjudicate")
@@ -42,7 +42,7 @@ module regressions {
   run barredQueuedLegRefusesClaimTest =
     start.then(claim("w2", "t1")).then(leg("w2", "implement")).then(leg("w2", "review"))
       .then(endClaim("w2", "suspended", true))
-      .then(syncNumber(1)).then(syncRead(1, TICKETS.mapBy(t => Set("family:a")), queuedFor(st.gitPath, "fix"))).then(syncPost(1))
+      .then(syncNumber(1)).then(syncRead(1, TICKETS.mapBy(t => Set("family:a")), queuedFor(st.gitPath, TICKETS.mapBy(_ => "fix")))).then(syncPost(1))
       .expect(st.queued.get("t1") == "fix" and not(claimableBy("t1", "w1")) and claimableBy("t1", "w2"))
       .then(claim("w1", "t1"))
       .fail()
@@ -119,6 +119,24 @@ module regressions {
       .then(endClaim("w1", "suspended", false))
       .then(sync1)
       .expect(c1.confirmed and ticketClaimable("t1"))
+
+  // §4 (R3-1254, round 1 1-B-1): every end clears the regression flag and records it as
+  // `endedRegressed` — a worker's end, an alarm reap, a force-reap and a stale release.
+  action regressedClaim: bool =
+    start.then(claim("w1", "t1")).then(leg("w1", "implement")).then(advance("w1", "review", NONE))
+      .then(sync1).then(regress("t1")).then(sync1).expect(c1.regressed)
+  run workerEndClearsRegressedTest =
+    regressedClaim.then(endClaim("w1", "suspended", false))
+      .expect(not(c1.regressed) and c1.endedRegressed)
+  run alarmReapClearsRegressedTest =
+    regressedClaim.then(sleep("w1")).then(tick).then(tick).then(tick).then(tick).then(alarmReap(1))
+      .expect(c1.status == "reaped" and not(c1.regressed) and c1.endedRegressed)
+  run forceReapClearsRegressedTest =
+    regressedClaim.then(forceReap("w1"))
+      .expect(not(c1.regressed) and c1.endedRegressed)
+  run staleReleaseClearsRegressedTest =
+    regressedClaim.then(withdraw("t1")).then(sync1)
+      .expect(c1.status == "released" and c1.kind == "stale" and not(c1.regressed) and c1.endedRegressed)
 
   // Third review B1: the closure of a `done` ticket, seen before /end, confirms it.
   run doneSeenBeforeEndTest =

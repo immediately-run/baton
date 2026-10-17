@@ -83,7 +83,8 @@ module properties {
   // No deadlock: a ticket git has not finished or withdrawn, once the syncs are idle and the
   // head matches git, is held by a claim, fenced (clears at fence-cleared or the timeout),
   // held by the owner, its queued leg waiting on `policy` or flagged unconfirmed (both under
-  // Needs you), or claimable — never stuck where nobody can claim it and nobody is told.
+  // Needs you), without a queued leg until a sync queues one, or claimable — never stuck where
+  // nobody can claim it and nobody is told.
   def quiescent(t: str): bool = and {
     SLOTS.forall(s => st.syncs.get(s).phase == "idle"),
     st.posted.get(t) == st.gitPath.get(t),
@@ -93,7 +94,8 @@ module properties {
   val noStuckTicket = TICKETS.forall(t =>
     atEnd(st.gitPath.get(t)) or st.withdrawn.get(t) or not(quiescent(t))
       or activeOf(t).size() > 0 or fencedOf(t).size() > 0 or unconfirmedOf(t).size() > 0
-      or st.held.get(t) or (st.queued.get(t) != "" and not(readyLegs(t).contains(st.queued.get(t))))
+      // no queued leg: Baton offers nothing until a sync queues one (round 1, 1-B-4)
+      or st.held.get(t) or st.queued.get(t) == "" or not(readyLegs(t).contains(st.queued.get(t)))
       or ticketClaimable(t) or st.nextId > MAX_CLAIMS)
 
   val safety = and {

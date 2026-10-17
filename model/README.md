@@ -17,7 +17,7 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 | `liveness.qnt` | the liveness properties under weak fairness, over `small` (kept apart: their fairness terms made Apalache's input too large) |
 | `witnesses.qnt` | the reachability witnesses, each an invariant that must fail |
 | `instances.qnt` | `sim` (R3-1243's bounds: 3 workers, 2 tickets, 2 overlapping sync runs) and `small` (2 workers, 1 ticket, 1 sync run, for Apalache) |
-| `regressions.qnt` | one deterministic run per defect the reviews found (24), each asserting the merged spec does not reach it |
+| `regressions.qnt` | one deterministic run per defect the reviews found (28), each asserting the merged spec does not reach it |
 | `replay.qnt` | the traces `test/model/replay.test.ts` drives the core with (R3-1244): `sim`'s instance, every action the harness can make the core take |
 | `check.mjs` | `npm run model` and `npm run model:quick` |
 | `full.mjs` | `npm run model:full`: every check, with a report for the PR |
@@ -28,8 +28,9 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 **Where the checks run (R-BTN-68, amended 2026-10-17).** Model checking runs on the
 author's machine, not on hosted CI runners, whose time limits it outgrew. A pull request that
 changes `model/`, `src/core/`, the replay or the trace check carries `npm run model:full`'s
-report in its body, and the review gate checks that the report's commit is the PR's head. CI
-runs only the deterministic part, inside `npm test`: `npm run model:quick`, the scenario traces
+report in its body. CI's `model-report` workflow (`scripts/model-report.mjs`) runs no model: it
+reads the body, and fails until the report is there, names the PR's head and shows every check
+passing; editing the body re-runs it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick`, the scenario traces
 (`npm run traces`), the links (`npm run model:links`) and 200 model-drawn traces driving the core.
 
 - `npm run model:full` — every check below, in order: `npm run model`, the model-based tests
@@ -37,7 +38,7 @@ runs only the deterministic part, inside `npm test`: `npm run model:quick`, the 
   prints a Markdown report on stdout: the commit (flagged when the tree has uncommitted changes
   to the files the checks read), the Quint version, and each check's result and minutes. Paste
   it into the PR. Needs Java for the last step.
-- `npm run model` — typecheck, the 24 regression runs, 10,000 random runs of 40 steps of `sim`
+- `npm run model` — typecheck, the 28 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
   eight reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
@@ -176,6 +177,9 @@ outstanding (`sync-busy`). `overlappingSyncRunsRefusedTest` keeps it.
 - restoring the fifth revision's regression rule fails `lostPushIsNotRegressionTest`;
 - dropping the first advance's `not-queued` check fails `claimOfferedQueuedLegOnlyTest`;
 - judging rule 8 on any ready leg, not the queued one, fails `barredQueuedLegRefusesClaimTest`;
+- keeping the regression flag past an end, at any one of the four ends — a worker's, an alarm reap, a
+  force-reap, a stale release — fails that end's run (`workerEndClearsRegressedTest`,
+  `alarmReapClearsRegressedTest`, `forceReapClearsRegressedTest`, `staleReleaseClearsRegressedTest`);
 - dropping the fence from the claim gate fails `forceReapFencesTest`;
 - dropping the advance's gate guard reaches a `gateViolation` (`gatesHeld`);
 - clearing a fence without its timeout fails `heartbeatingFenceHoldsTest`;
@@ -186,7 +190,7 @@ outstanding (`sync-busy`). `overlappingSyncRunsRefusedTest` keeps it.
 
 | Check | Instance | Result |
 |---|---|---|
-| 24 regression runs | `sim` sizes, zero drift | pass |
+| 28 regression runs | `sim` sizes, zero drift | pass |
 | `safety`, 10,000 × 40 steps of `step`; 3,000 × 40 of `progressStep` | `sim` | no violation |
 | witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all reached |
 | a second review | — | reached by a regression run only (`maxRunsSurviveResumptionTest`) |
