@@ -28,7 +28,10 @@ two clicks.</Lede>
    activities nested inside them.
 5. **What is ready?** The queue in Baton's order, and, separately, what nobody can take and why.
 6. **How does a course perform?** Each course drawn as stations and legs, with tickets on
-   it, wait and run times, and the legs that back up.
+   it, wait and run times, and the legs that back up. Each leg is an edge with a state —
+   ready, running, blocked by an unmet prerequisite (whether found before a start or during a
+   run), backing off — and a blocked leg is a marked edge, never a station of its own
+   (R-BTN-126).
 7. **Where did git overrule Baton?** Discrepancies by kind and age: what Baton had, what git
    showed.
 8. **Is the instance healthy?** Capacity — request rate and live counts against the

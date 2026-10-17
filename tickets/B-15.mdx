@@ -34,7 +34,7 @@ depends_on:
 
 1. **Capability types.** Declare `roadmap-pr`'s capability types and roles in its course file (`capability_types`, `capability_roles`). Then retire `ROLES` from docs' `vocabulary.mjs` after B-10's transition window, and run `npm run vendor` in baton.
 2. **Independence.** Give `review` a `no_chain_from: ["implement", "fix"]`, and set the docs repository's `required_independence` owner setting to match.
-3. **Retries.** Declare the course's `error_types` (for example `merge-conflict` as non-retryable and `rate-limited` as retryable). Give the agent legs `retry` policies within the owners' ceiling, and throw `LegError` from the leg scripts (R3-1246).
+3. **Retries.** Declare the course's `error_types` (for example `merge-conflict` as non-retryable and `flaky-test` as retryable; a provider's capacity reached is a blocked prerequisite, not an error type, R-BTN-126). Give the agent legs `retry` policies within the owners' ceiling, and throw `LegError` from the leg scripts (R3-1246).
 4. **Fresh context.** Set `max_context` on `implement` and `fix`, and have their scripts report context use with `baton leg yield --context`.
 5. **Docs.** Amend `BATON_ROADMAP_PR_COURSE` and `BATON_DOCS_DEPLOYMENT` to match, each with a dated note.
 
