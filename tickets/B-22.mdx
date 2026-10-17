@@ -1,0 +1,46 @@
+---
+title: "B-22 — BATON_SPEC R-BTN-127 and R-BTN-128: the CLI as a tree of nouns and verbs, and a leg's log saved to git"
+id: B-22
+project: baton
+status: in-review
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1125
+tier: judgement
+description: "Every command becomes baton <noun> <verb>, with every leg command under baton leg; the old top-level verbs are renamed outright; the runner saves each leg run's output to the repository's transcript repos and baton leg log reads it (owner, 2026-10-17). Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/46
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-17: "I would like the Baton CLI to have a Git-like command, subcommand hierarchy where, for example, all the commands that pertain to a given leg of a ticket would have the prefix baton leg … baton leg log would give you the logs produced by the leg of a given ticket." Asked two questions, the owner chose to save each leg run's output now, and to rename the old commands outright.
+**Spec:** `spec/BATON_SPEC.md`, new §2m.6d: R-BTN-127 (the command tree) and R-BTN-128 (a leg run's output saved to git, and `baton leg log`). It also renames the old commands in place throughout the spec, with dated notes.
+
+### Why
+
+The CLI mixes role namespaces (`baton admin …`, `baton owner …`) with top-level verbs (`baton why`, `baton replay`, `baton test-course`). And a finished leg has no log anywhere.
+
+### What to do
+
+1. Add §2m.6d:
+   - R-BTN-127: the noun and verb tree, how legs are named, the channel verbs working only inside a leg, the old names refused with their replacements, help, and `--json`;
+   - R-BTN-128: the archive in the transcript repos, its bounds and masking, what is not saved, `baton leg log`, and the CLI's stream upgrade.
+2. Rename the old commands throughout the spec, add dated notes to the rules they belong to, add the wire rows, the §4 table and the settings row, add S-BTN-97 to S-BTN-99 and G-BTN-117 to G-BTN-119, and add a Decisions entry and a CHANGELOG row.
+3. Review it under the review gate.
+
+### Tests
+
+- `npm run check:spec` and `npm run check:wiki` green.
+
+### Exit criteria
+
+- [ ] R-BTN-127 and R-BTN-128 merged, reviewed under the gate
+- [ ] the implementation ticket filed, covering the docs repository's callers
+
+## Status
