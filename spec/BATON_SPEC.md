@@ -617,7 +617,7 @@ the legs and their transitions are a closed set, and none of it is encoded in Ba
   resumes. *(Rejected: "state", which collides with a leg's `ready`/`waiting` and is as
   generic as "workflow"; "stage" (the product's stage region, the retired free-text
   `stage`); "checkpoint" (local-store checkpoints); "milestone"; "exchange zone".)*
-- **R-BTN-69 (the course file).** *(Amended 2026-10-17 by §2m: a station may carry `entry` (R-BTN-109); a leg `no_chain_from`, `isolation` (R-BTN-106, R-BTN-107), `kind: person` with `asks` (R-BTN-116), `stream` (R-BTN-118) and `spawns` (R-BTN-111); a check course `checks` (R-BTN-114); output schemas are named (R-BTN-108); a leg carries `requires` (R-BTN-120), `retry`, `max_ready_s` (R-BTN-122), `max_context` and `max_refreshes` (R-BTN-123); the course declares `capability_types` and `roles` (R-BTN-121) and `error_types` (R-BTN-122).)*  `.baton/courses/<course>/course.json`, in a schema core
+- **R-BTN-69 (the course file).** *(Amended 2026-10-17 by §2m: a station may carry `entry` (R-BTN-109); a leg `no_chain_from`, `isolation` (R-BTN-106, R-BTN-107), `kind: person` with `asks` (R-BTN-116), `stream` (R-BTN-118) and `spawns` (R-BTN-111); a check course `checks` (R-BTN-114); output schemas are named (R-BTN-108); a leg carries `requires` (R-BTN-120), `retry`, `max_ready_s` (R-BTN-122), `max_context` and `max_refreshes` (R-BTN-123); the course declares `capability_types` and `capability_roles` (R-BTN-121) and `error_types` (R-BTN-122).)*  `.baton/courses/<course>/course.json`, in a schema core
   owns:
 
   ```json
@@ -2169,7 +2169,7 @@ archiver — and git's server-side hooks are unaffected: they are not Baton hook
   settings stay out of agents' reach (R-BTN-57, R-BTN-66). Sync keys, instrument keys and
   personal courier keys keep one role each. An instrument key has no hostname, so it never
   heartbeats or claims.
-- **R-BTN-103 (worker couriers deliver from a pool).** *(Amended 2026-10-17 by §2m: there are three kinds of courier, not two — the forge courier delivers only `forge-check` notices and never from the pool (R-BTN-115).)*  *(Amends R-BTN-80.)* There are two kinds
+- **R-BTN-103 (worker couriers deliver from a pool).** *(Amended 2026-10-17 by §2m: there are three kinds of courier, not two — the forge courier delivers only `forge-check` notices and never from the pool (R-BTN-115). A worker courier's heartbeat entry may name `severities`, a pool copy is keyed on `(repository, asks, severity)`, and the **Needs you** check below is per severity, still for `owner` decisions only (R-BTN-125).)*  *(Amends R-BTN-80.)* There are two kinds
   of courier:
   - a **personal channel** — a courier key an owner registers with its `asks`, as R-BTN-80
     describes — gets **its own copy** of each notice, so a person's laptop CLI and a
@@ -2397,8 +2397,9 @@ Baton's own shared code; git stays the truth and Baton a cache (R-BTN-39).
     speaks JSON lines; the CLI wraps it: `baton leg status` (the leg, its grant and its
     deadline), `baton leg output <name> --uri <uri> [--digest …] | --value <json>`, and exactly
     one of `baton leg done --reached <station> --next <leg>`, `baton leg suspend --reached
-    <station>` or `baton leg release --reason <reason>`; and `baton leg yield`, which marks a
-    point between steps and answers whether the runner wants a fresh session (R-BTN-123). A leg script may still return its
+    <station>` or `baton leg release --reason <reason>`; and `baton leg yield [--context
+    <fraction>]`, which marks a point between steps, reports context use, and answers whether
+    the runner wants a fresh session (R-BTN-123). A leg script may still return its
     result directly (R-BTN-72); the channel is how a script that hands the leg to an agent
     gets the agent's word back. **The session never talks to Baton.** The runner hands it a
     state view without the worker secret and the claim nonce (`IR_BATON_STATE` names that view,
@@ -2993,7 +2994,7 @@ the next retry attempt.")*
     rename; on a course's own types it binds only as git does — a course that renames a type
     escapes it, as it could mark it retryable — so `baton test-course` warns when a floor type
     is no longer declared, and an owner who needs a hard bound sets the ceiling (`max_attempts`
-    1 holds every failure at once).
+    1 and `in_claim` 0 hold every failure at once).
   - **What stays.** `lease-lost` counts once per distinct worker; `contract-input` holds at
     once and is not an attempt; lifting a hold resets the counts (now per leg) — §6.10 as it
     reads, with the counting per leg.
@@ -3006,32 +3007,43 @@ decisions; mention, and do not build, asking a predecessor session.)*
 
 - **R-BTN-123 (a leg hands off to a fresh session when its context fills).** *(Amends R-BTN-72
   and §6.13.)* An agent's output degrades as its context window fills, well before it is full.
-  - A leg may carry `"max_context": <fraction>` (0.1 to 0.95) in the course file. The runner
-    reads the session's context use through a **session adapter**, one per harness, which the
-    runner loads by the harness the leg's session runs (`claude-code`, `opencode`, …): it
-    exports `contextUse(session) → fraction | null` and the flag `refreshable` (it can end the
-    session and start another). The session marks the points where it is between steps with
-    **`baton leg yield`** on the local channel (R-BTN-106), which answers `{refresh: true |
-    false}`; `baton leg status` answers `refresh` too. Once use passes the fraction, the next
-    yield answers `refresh: true`, the session stops, and the runner:
-    1. calls the leg script's `handoff(ctx)` with `ctx.reason: 'context'`, which writes the
+  - A leg may carry `"max_context": <fraction>` (0.1 to 0.95) in the course file. **Who
+    reports the context use** depends on who started the session, so the runner never guesses
+    a harness:
+    - in **`session`** mode the runner starts the session through its session provider
+      (`--sessions <provider>`, R-BTN-107), which is the **session adapter**: it exports
+      `contextUse(sessionId) → fraction | null`;
+    - in **`process`** mode the leg script started the agent and is the only one that knows
+      it, so the session (or the script for it) reports its use on the local channel:
+      **`baton leg yield --context <fraction>`** (R-BTN-106) — the script's `ctx.yield(fraction)`
+      is the same call. A script that never reports one is never refreshed.
+
+    The session marks each point where it is between steps with `baton leg yield` (with or
+    without `--context`), which answers `refresh: true | false`; `baton leg status` answers
+    `refresh` too. Once the latest use passes the fraction, the next yield answers `refresh:
+    true` and the runner:
+    1. **stops the session**: in `session` mode it ends the child session; in `process` mode
+       it fires `ctx.signal` with reason `context` — stop at the yield just answered, writing
+       nothing more — waits for `run` to return (its result is discarded), and stops the
+       process group as for a release if it has not returned within 30 seconds (R-BTN-119);
+    2. calls the leg script's `handoff(ctx)` with `ctx.reason: 'context'`, which writes the
        hand-off document as for a suspension (R-BTN-44), for the work so far;
-    2. starts a fresh session on **the same leg, under the same claim**, whose brief is the
-       hand-off document and the leg's inputs — how depends on the mode (R-BTN-107):
-       - **`session`**: the runner ends the child session and starts the next one itself;
-       - **`process`**: the leg script owns its agent, so the runner aborts `run` with
-         `ctx.signal`'s reason `context`, waits for it to return, and calls `run(ctx)` again
-         with `ctx.refresh: {n, handoff}`, from which the script starts a fresh agent;
-       - **`attached`**: never refreshed — the session hosts the runner, so it cannot be
-         replaced under it; the runner ignores `max_context` and logs that once per leg;
-    3. records the refresh as an activity, `context-handoff`, with both sessions' links
+    3. starts a fresh session on **the same leg, under the same claim**, whose brief is the
+       hand-off document and the leg's inputs: in `session` mode the runner starts it through
+       the provider; in `process` mode it calls `run(ctx)` again with `ctx.refresh: {n,
+       handoff}` (the refresh's number and the hand-off's URL), from which the script starts a
+       fresh agent;
+    4. records the refresh as an activity, `context-handoff`, with both sessions' links
        (R-BTN-113).
+
+    In **`attached`** mode a leg is never refreshed — the session hosts the runner, so it
+    cannot be replaced under it; the runner ignores `max_context` and logs that once per leg.
   - A refresh is not a new run for `max_runs` (§2e), not a failed attempt (§6.10), and the
     lease never lapses for it. A leg refreshes at most `"max_refreshes"` times (default 3,
     bounded by the owners' ceiling, R-BTN-122);
     beyond that the runner suspends at the leg's `from` with the hand-off, so the next
-    claimant starts fresh. A harness whose adapter reports no context use (`null`) or is not
-    `refreshable` is never refreshed, and the runner logs that once per session. It is the runner's alone: Baton sees only the activity
+    claimant starts fresh. A session whose provider reports no context use (`null`), or whose
+    script never reports one, is never refreshed, and the runner logs that once per session. It is the runner's alone: Baton sees only the activity
     and the session link.
 
 - **R-BTN-124 (a planning course, shipped by the CLI).** *(Amends R-BTN-74.)* Beside `pr` and
@@ -3071,7 +3083,7 @@ decisions; mention, and do not build, asking a predecessor session.)*
     approved first adds a person's leg (R-BTN-116) between `plan` and its children being
     claimable — the course is a file the repository may change (§2d).
 
-- **R-BTN-125 (decisions carry a severity).** *(Amends R-BTN-78 and R-BTN-80.)*
+- **R-BTN-125 (decisions carry a severity).** *(Amends R-BTN-78, R-BTN-80 and R-BTN-103.)*
   - A posted decision may carry `severity`: `critical`, `high` or `normal` (the default):
     `decisions: [{id, leg?, asks, url, severity?}]`. Baton's own decisions are `normal`, but
     `baton:contract` is `high`.
@@ -3085,9 +3097,11 @@ decisions; mention, and do not build, asking a predecessor session.)*
     heartbeat entry may name `severities` too (`couriers: [{repository, asks, severities?}]`,
     default all), and a pool copy is queued for a `(repository, asks, severity)` a worker
     courier covered within 24 hours (R-BTN-103).
-  - **Nothing goes unserved unseen.** R-BTN-103's check becomes per severity: **Needs you**
-    lists a repository with an open decision whose `(asks, severity)` no personal channel
-    takes — a channel registered `--severities critical` alone does not cover `normal`. A
+  - **Nothing goes unserved unseen.** R-BTN-103's check becomes per severity, and stays on
+    `owner` decisions, the ones a person must hear: **Needs you** lists a repository with an
+    open `owner` decision whose severity no personal channel for `owner` takes — a channel
+    registered `--severities critical` alone does not cover `normal`. Other `asks` labels may
+    rely on the pool, as before. A
     courier that gains a severity (re-registered with `--severities`) is queued a notice for
     each open decision it now delivers, as R-BTN-80 does for a new `asks`.
   - A severity is the deciding repository's word, like the rest of its decision (R-BTN-78): it
@@ -3181,7 +3195,7 @@ attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refr
   | S-BTN-85 in-claim retries | a leg with `in_claim: 2` fails `rate-limited` twice, then succeeds | the runner re-runs it under the same claim, waiting at most 5 minutes each time; the claim advances; no failed attempt is counted and `max_runs` is untouched; two activities record the retries |
   | S-BTN-86 owners bound the course | the owners' `retry` ceiling is `max_attempts` 3 and its floor names `spec-violation`; a course sets `max_attempts` 1000 and makes `spec-violation` retryable | Baton applies 3 attempts and never retries `spec-violation`; `baton test-course` warns of both cut-backs; the course's view shows the policy in force; a course setting `in_claim` 50 and `max_refreshes` 20 runs 2 and 3; one setting `coefficient` 0.5 is refused; one that renames `spec-violation` is accepted with the warning that the floor's type is undeclared |
   | S-BTN-87 a budget across attempts | a leg has `max_attempts_s` 7200 and `max_attempts` 10; its third failure's backoff would start an attempt after 2 hours | the leg is not retried; the ticket is held, `why: budget-spent`; a leg with `max_ready_s` 3600, ready and unclaimed for an hour, is listed under **Needs you** |
-  | S-BTN-88 a fresh context | a leg with `max_context: 0.6` and `max_refreshes: 1`, in `session` mode; its session passes 60% twice; the same leg in `process` mode passes it once; in `attached` mode, once | in `session` mode, at the first, the session's `baton leg yield` answers `refresh: true`, the runner has `handoff` write the hand-off, starts a fresh session on the same leg under the same claim, and records `context-handoff` with both links; no run or attempt is counted and the lease holds; at the second it suspends at the leg's `from`; in `process` mode `run` is aborted with reason `context` and called again with `ctx.refresh`; in `attached` mode nothing is refreshed and the runner logs it once |
+  | S-BTN-88 a fresh context | a leg with `max_context: 0.6` and `max_refreshes: 1`, in `session` mode; its session passes 60% twice; the same leg in `process` mode passes it once; in `attached` mode, once | in `session` mode, at the first, the session's `baton leg yield` answers `refresh: true`, the runner has `handoff` write the hand-off, starts a fresh session on the same leg under the same claim, and records `context-handoff` with both links; no run or attempt is counted and the lease holds; at the second it suspends at the leg's `from`; in `process` mode the script's `baton leg yield --context 0.7` is answered `refresh: true`, `run` is aborted with reason `context`, `handoff` runs, and `run` is called again with `ctx.refresh`; a `process` script that reports no use is never refreshed; in `attached` mode nothing is refreshed and the runner logs it once |
   | S-BTN-89 an epic | `baton init --course epic`; a ticket's `plan` files three children on `pr`; two merge, one is withdrawn; `replan` files a replacement, which merges | `integrate` is queued and blocked by `ticket` rows while children are open; after the withdrawal `locate` queues `replan`, which waits for the other two to close; once `replan` files the replacement, `locate` queues `integrate`, which skips the withdrawn child and is blocked by the replacement alone; after it merges, `integrate` runs and the epic ends at `integrated`; a second epic whose `replan` files nothing integrates over its two merged children |
   | S-BTN-90 decision severities | three decisions open, `critical`, `high` and `normal`; one courier registered for `critical,high`, another for all; `remind_after` 24 hours | the first courier gets two notices and the second three, each carrying its severity; **Needs you** and `baton inbox` list them critical first; unanswered, the critical one is re-sent after 3 hours, the high after 6, the normal after 24; with the second courier revoked, **Needs you** lists the `normal` decision as unserved; re-registering the first for all severities queues it the `normal` notice |
 
@@ -4613,7 +4627,7 @@ does under one claim — are a different thing and keep their name.
 *(Owner, 2026-10-14: a small CLI asks Baton for the next leg and invokes what that leg needs,
 by the same convention the server uses for hooks.)*
 
-- **R-BTN-72 (the runner).** *(Amended 2026-10-17 by §2m: a session in a leg reports to the runner over a local channel, a run may be bounded, a leg may forbid chaining from another (R-BTN-106); a cloud session may be the runner or each leg (R-BTN-107); Cancel and a release message stop the leg's process (R-BTN-119); a leg whose context fills hands off to a fresh session under the same claim, per mode, through a session adapter, and a `process`-mode script's `run` may be called again with `ctx.refresh` (R-BTN-123).)* `baton run`, in the baton repository's CLI, is a generic worker
+- **R-BTN-72 (the runner).** *(Amended 2026-10-17 by §2m: a session in a leg reports to the runner over a local channel, a run may be bounded, a leg may forbid chaining from another (R-BTN-106); a cloud session may be the runner or each leg (R-BTN-107); Cancel and a release message stop the leg's process (R-BTN-119); a leg whose context fills hands off to a fresh session under the same claim, per mode — the session provider reports its use in `session` mode, the script through `baton leg yield --context` in `process` mode — and a `process`-mode script's `run` may be called again with `ctx.refresh` (R-BTN-123).)* `baton run`, in the baton repository's CLI, is a generic worker
   loop: it heartbeats (it hosts the sidecar of §6.3–6.4), asks for recommendations, claims,
   and runs the ticket's legs one at a time, each by the **script for that leg**, advancing,
   suspending or ending as the script's result and the course file allow. *(Amended the same
@@ -4642,7 +4656,10 @@ by the same convention the server uses for hooks.)*
     checkout's path, the `session` token the previous leg returned, and an `AbortSignal`
     that fires with a reason: `lease-lost` (R-BTN-6) — stop at once — or `release` (a release
     message, an owner bar that releases holders, §9, R-BTN-67) or `regressed` (the heartbeat's
-    `git` says the path went backwards, §2e) — stop at the next safe point.
+    `git` says the path went backwards, §2e) — stop at the next safe point — or, since §2m,
+    `context` (R-BTN-123) — stop at the yield just answered. *(Amended 2026-10-17 by §2m: `ctx`
+    also carries `refresh: {n, handoff}` when the runner calls `run` again after a context
+    refresh, and `yield(fraction?)`, the local channel's `baton leg yield`; R-BTN-123.)*
   - **Idle**, with no claim, the runner asks for recommendations when its heartbeat carries an
     `unblocked` message, and otherwise at its own interval (R-BTN-77; review gate round 3).
   - **The first leg** after a claim is the ticket's queued leg, the one the claim response
