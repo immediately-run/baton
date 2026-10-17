@@ -166,7 +166,7 @@ describe('§6.5 ends', () => {
     expect((await claimRow(c.claim_id)).end_reason).toBe('released:stale-board');
     expect((await endClaim('vm-a', secret, c.claim_id, { end_reason: 'done', ended_at_sha: fake('b') })).status).toBe(200);
     expect(await claimRow(c.claim_id)).toMatchObject({ status: 'completed', end_reason: 'done', confirmed_at: null });
-    expect((await beat('vm-a', secret)).json.messages).toEqual([]); // the withdrawn release
+    expect((await beat('vm-a', secret)).json.messages.filter((m: { kind: string }) => m.kind !== 'unblocked')).toEqual([]); // the withdrawn release (R-BTN-77's are another kind)
     // A released end after stale-board is still claim-ended.
     expect((await endClaim('vm-a', secret, c.claim_id, { end_reason: 'released:requested' })).json.code).toBe('claim-ended');
   });
@@ -331,7 +331,7 @@ describe('§14: Running, Timeline and Needs you', () => {
     const { json: c } = await claimItem('vm-a', a.secret);
     await owner('/v1/ui/messages', { to_worker_id: a.id, kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'requested' } });
     expect((await uiState()).needs_you.unacknowledged_releases).toHaveLength(1);
-    const msg = (await beat('vm-a', a.secret)).json.messages[0];
+    const msg = (await beat('vm-a', a.secret)).json.messages.find((m: { kind: string }) => m.kind === 'release');
     await workerCall(`/v1/runner/messages/${msg.id}/ack`, { secret: a.secret, method: 'POST' });
     expect((await uiState()).needs_you.unacknowledged_releases).toEqual([]);
     await owner(`/v1/ui/claims/${c.claim_id}/reap`, { confirm: true });

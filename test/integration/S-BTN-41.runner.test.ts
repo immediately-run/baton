@@ -10,7 +10,8 @@
 // `next` suspends at its station; a release aborts the leg at its next safe point, writes the
 // hand-off and ends `released:requested` naming whether the leg reached its `to`; a leg
 // session's claim is refused, since it carries IR_BATON_PARENT, and leg sessions register no
-// worker of their own. Node only: it spawns the legs' child processes and runs git.
+// worker of their own; an `unblocked` message is acknowledged. Node only: it spawns the legs'
+// child processes and runs git.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -654,5 +655,17 @@ describe('S-BTN-41 the runner', () => {
     await home.post({});
     expect(await makeRunner().runOnce()).toBeNull();
     expect(await rows('SELECT * FROM claims')).toEqual([]);
+  }, 30_000);
+
+  it('an unblocked message is acknowledged, so it is not delivered with every beat (R-BTN-77)', async () => {
+    home.leg('build', `return { reached: 'built' };`);
+    home.commit();
+    await home.post({});
+    const runner = makeRunner();
+    await runner.tick();
+    const [{ id: worker }] = await rows<{ id: number }>('SELECT id FROM workers');
+    await rows(`INSERT INTO messages (kind, payload_json, from_principal, to_worker_id, sent_at, status) VALUES ('unblocked', '{"tickets":[]}', 'baton', ?, ?, 'pending')`, worker, T0);
+    await runner.tick(); // delivered, and acknowledged at once: the runner holds no claim
+    expect(await rows(`SELECT status FROM messages WHERE kind = 'unblocked'`)).toEqual([{ status: 'acknowledged' }]);
   }, 30_000);
 });

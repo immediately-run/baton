@@ -2,8 +2,8 @@
 title: "R3-1251 — Baton blocks, external resources and decisions: ticket_blocks with blocked_since, instances and instrument readings, unblocked events and the blocked queries"
 id: R3-1251
 project: baton
-status: available
-updated: 2026-10-16
+status: done
+updated: 2026-10-17
 repos:
   - baton
 tags:
@@ -14,7 +14,8 @@ description: "Baton stores why each ticket cannot move — open dependencies, ca
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/45
 tier: critical
 depends_on:
   - R3-1231
@@ -77,7 +78,7 @@ decisions, the events and the queries. Two follow-ups build the rest on top of i
 - **R3-1255** — leg queues (R-BTN-79, revised to a warning): `leg_queues`, `max_queue`, the
   `queue-over` notice, and S-BTN-45's queue case and G-BTN-71.
 - **R3-1256** — notices and couriers (R-BTN-80): `couriers`, `notices`, `/v1/courier/*`,
-  `POST /v1/owner/{repository}/couriers`, `remind_after`, `baton inbox`, S-BTN-46 and G-BTN-72.
+  `POST /v1/owner/{repository}/couriers`, `remind_after`, `baton decision list`, S-BTN-46 and G-BTN-72.
 
 R-BTN-79's revision (the PR adding §2h) removed the `queue` block kind, so `ticket_blocks.kind`
 has four values.
@@ -170,7 +171,7 @@ has four values.
    worker's tags, an unconfirmed end, and `no-instance`), `GET
    /v1/repositories/{repository}/blocked?on=ticket:|resource:|capability:|decision:<id or *>`
    with `transitive=1` (≤ 5 levels) and, with no `on`, grouped by kind and `ref`, 100 per page
-   with `next_cursor`; `baton blocked <ticket>` and `baton blocked --on <kind>:<ref>`; any key
+   with `next_cursor`; `baton ticket blocked <ticket>` and `baton ticket blocked --on <kind>:<ref>`; any key
    granted on the repository, an owner of it or an administrator.
 10. **Dashboard**: each ticket's blocks on the Courses view; **Needs you** lists tickets blocked
     24 hours on a capability no live worker has and instances `unknown` 24 hours while a posted
@@ -229,13 +230,13 @@ has four values.
 
 ### Exit criteria
 
-- [ ] S-BTN-44 passes on both hosts
-- [ ] S-BTN-45's non-queue cases pass on both hosts
-- [ ] `test/unit/blocks.test.ts`, `test/unit/detail-schema.test.ts` and the query-plan assertion
+- [x] S-BTN-44 passes on both hosts
+- [x] S-BTN-45's non-queue cases pass on both hosts
+- [x] `test/unit/blocks.test.ts`, `test/unit/detail-schema.test.ts` and the query-plan assertion
   pass
-- [ ] `git grep -nE "probe_readings|/v1/(runner|probe)/resources|owner/[^ ]*/resources" src/`
+- [x] `git grep -nE "probe_readings|/v1/(runner|probe)/resources|owner/[^ ]*/resources" src/`
   finds nothing
-- [ ] `npm test` and `npm run typecheck` green; the boundary test green
+- [x] `npm test` and `npm run typecheck` green; the boundary test green
 
 ### Hand-off
 
@@ -245,6 +246,8 @@ its `recommend` cache behind `invalidateRecommend`, re-running S-BTN-44's warm-c
 models blocks.
 
 ## Status
+
+_2026-10-17 — built in baton#45. What the spec did not settle, decided there and recorded in BATON_SPEC §4 and R-BTN-77: `instance_readings` is keyed `(instance, source, kind)` (a `measure` must never overwrite the instrument's `state` reading); `instance_states` holds each instance's evaluated state, and `unblocked_dispatch` the coalescing window; `valid_for` is in seconds; an account instance's name may hold `_` (`opencode-go:go_plus`); `uses` takes at most 64 names, a reading post at most 50 readings, a leg at most 32 needs, a ticket at most 32 decisions; a worker may not report on a `service` instance (R-BTN-101 names only its own and account instances); the mirror's feed leaves out `blocked`, `unblocked` and `resource`; a `resource` row lost because the fleet emptied clears `blocked_since` silently, and the ticket keeps what it lost and since when (`tickets.answer_lost`) until each lost row's need is gone or answerable again: then it logs the `unblocked` it was owed, or is re-blocked silently from the evening's `blocked_since`; a row cleared because its need went is an ordinary unblocking, and any logged transition ends the record (R-BTN-77 amended); the counts are recomputed from the live fleet and diffed — on a change of the live set, a grant, a registration or a changed `uses`, an instance's state, or a post that changed a ticket (its row, needs or decisions) or dropped one — and a ticket's rows still change only where a count crosses zero; §14's Courses view does not exist yet, so the blocks are shown in a Blocked section. The 150-ticket dispatch case runs in `test/unit/blocks.test.ts`: the trace replay cannot model 152 tickets._
 
 _2026-10-16 — amended for BATON_SPEC §2l (R-BTN-101): readings per instrument, `state` and `measure` kinds, reporting scoped by the instance's repositories; R3-1236's hook input and cache are withdrawn (R3-1269 serves the views)._
 

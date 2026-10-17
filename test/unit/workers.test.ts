@@ -20,7 +20,9 @@ beforeEach(async () => {
 describe('G-BTN-5: identity — the secret, the hostname and the capability allow-list', () => {
   it('a first heartbeat registers; later calls need the secret; a wrong one is session-taken', async () => {
     const { id, secret, first } = await register('vm-a');
-    expect(first).toMatchObject({ worker_id: id, incarnation: 1, lease_timeout_s: 900, claim: null, messages: [], mode: { docs: 'shadow' }, stale_courses: [] });
+    expect(first).toMatchObject({ worker_id: id, incarnation: 1, lease_timeout_s: 900, claim: null, mode: { docs: 'shadow' }, stale_courses: [] });
+    // R-BTN-77: a worker whose arrival unblocks tickets is told so; nothing else is waiting for it.
+    expect((first.messages as { kind: string }[]).filter((m: { kind: string }) => m.kind !== 'unblocked')).toEqual([]);
     expect((await beat('vm-a', secret)).status).toBe(200);
     const wrong = await beat('vm-a', 'not-the-secret');
     expect(wrong.status).toBe(409);
@@ -222,10 +224,10 @@ describe('messages (§9)', () => {
     const { id, secret } = await register('vm-a');
     const sent = (await (await owner('/v1/ui/messages', { to_worker_id: id, kind: 'status_request' })).json()) as { id: number };
     const first = await beat('vm-a', secret);
-    expect(first.json.messages).toEqual([{ id: sent.id, kind: 'status_request', payload: null, sent_at: T0 }]);
-    expect((await beat('vm-a', secret)).json.messages).toHaveLength(1); // not acknowledged yet
+    expect(first.json.messages.filter((m: { kind: string }) => m.kind !== 'unblocked')).toEqual([{ id: sent.id, kind: 'status_request', payload: null, sent_at: T0 }]);
+    expect((await beat('vm-a', secret)).json.messages.filter((m: { kind: string }) => m.kind !== 'unblocked')).toHaveLength(1); // not acknowledged yet
     expect((await workerCall(`/v1/runner/messages/${sent.id}/ack`, { secret, body: { reply: { text: 'implementing' } } })).status).toBe(200);
-    expect((await beat('vm-a', secret)).json.messages).toEqual([]);
+    expect((await beat('vm-a', secret)).json.messages.filter((m: { kind: string }) => m.kind !== 'unblocked')).toEqual([]);
     expect(await rows(`SELECT from_worker_id, json_extract(payload_json, '$.text') AS text FROM messages WHERE kind = 'status_report'`)).toEqual([{ from_worker_id: id, text: 'implementing' }]);
   });
 
@@ -241,7 +243,7 @@ describe('messages (§9)', () => {
     await owner('/v1/ui/messages', { to_worker_id: id, kind: 'status_request' });
     await rows('UPDATE workers SET reaped_at = 1 WHERE id = ?', id);
     await tick();
-    expect(await rows('SELECT status FROM messages')).toEqual([{ status: 'expired' }]);
+    expect(await rows(`SELECT status FROM messages WHERE kind = 'status_request'`)).toEqual([{ status: 'expired' }]);
   });
 });
 

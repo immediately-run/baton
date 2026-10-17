@@ -1,0 +1,50 @@
+---
+title: "B-11 — Baton retries per leg: course error types, Temporal-style policies, a backoff as a prerequisite, owners' bounds"
+id: B-11
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1114
+tier: critical
+description: "`error_types` and `LegError`, per-leg `retry` policies with jitter, `in_claim`, `max_attempts_s` and `max_ready_s`, `leg_attempts` replacing the per-ticket backoff, the `retry` block refused `backing-off`, and the owners' default, ceiling and floor (BATON_SPEC R-BTN-122); S-BTN-83–87. Requires: B-10."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-10
+---
+
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.6a (R-BTN-122), §6.10, R-BTN-23, R-BTN-66 and §7.2 rule 10 as amended.
+
+### Why
+
+§2m is agreed and specified; this ticket builds its part of it.
+
+### What to build
+
+1. A migration adding `leg_attempts`, `claims.error_type` and the `retry` block kind; rule 10 and the gate query read the leg's backoff.
+2. The schedule, jittered ±10%, counted per ticket and leg; the alarm clears the row and fires `unblocked`.
+3. The runner's `LegError` export and in-claim retries (each an activity, capped at 5 minutes).
+4. The owners' `retry` setting: the default, the ceiling on every quota-spending field, `coefficient` ≥ 1, the floor; `baton course test` warns of cut-backs and of an undeclared floor type.
+
+### Do not
+
+- Let a course policy exceed the owners' ceiling.
+
+### Tests
+
+- S-BTN-83 to S-BTN-87; G-BTN-105, G-BTN-106, G-BTN-107.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] merged under the review gate
+
+## Status

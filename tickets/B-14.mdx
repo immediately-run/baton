@@ -1,0 +1,44 @@
+---
+title: "B-14 — Baton decision severities: critical, high and normal decisions routed and ordered"
+id: B-14
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1117
+tier: judgement
+description: "`severity` on posted decisions and notices, couriers and worker couriers registering the severities they take, re-queue on a gained severity, an unserved `(asks, severity)` under Needs you, reminders at a quarter and an eighth of `remind_after`, lists ordered by severity (BATON_SPEC R-BTN-125); S-BTN-90. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.6b (R-BTN-125), R-BTN-78, R-BTN-80 and R-BTN-103 as amended.
+
+### Why
+
+§2m is agreed and specified; this ticket builds its part of it.
+
+### What to build
+
+1. A migration adding `couriers.severities` and `notices.severity`.
+2. `--severities` on courier registration and `severities` on worker-courier heartbeats.
+3. **Needs you** per severity; `baton decision list` and the dashboard ordered by severity, then age.
+
+### Tests
+
+- S-BTN-90; G-BTN-110.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] merged under the review gate
+
+## Status

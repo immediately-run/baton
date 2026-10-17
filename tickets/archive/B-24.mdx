@@ -1,0 +1,50 @@
+---
+title: "B-24 — BATON_SPEC R-BTN-129 and R-BTN-130: one registry of actions behind the API, CLI, dashboard and MCP, and Baton's MCP endpoint"
+id: B-24
+project: baton
+status: done
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1127
+tier: judgement
+description: "Every action is one registry entry checked by one authorize call whatever the surface; the router, CLI tree and MCP tools are generated from it; Baton serves MCP to owner-minted, narrowed MCP keys (owner, 2026-10-17). Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/47
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-17: "I would like a single registry of actions that an authenticated user can take, depending on what permissions they are granted. It shouldn't matter if they are invoking this through Baton's REST API or the CLI or an MCP integration for an agent." The owner's three answers:
+- keep today's roles and scopes;
+- serve a remote MCP endpoint from Baton;
+- put every route in the registry, with the MCP surface filtered.
+
+**Spec:** `spec/BATON_SPEC.md` new §2m.6e: R-BTN-129 (the action registry) and R-BTN-130 (Baton's MCP endpoint).
+
+### Why
+
+Who may do what is spread across §10.1, §11, R-BTN-127's table and §14, and every surface checks it separately. There is no MCP surface for agents.
+
+### What to do
+
+1. Add §2m.6e:
+   - R-BTN-129: the entry shape, one `authorize` call, generated surfaces, `GET /v1/actions` and `confirm`.
+   - R-BTN-130: the stateless MCP endpoint, owner-minted MCP keys, what MCP never reaches, tools, content as data, and bounds.
+2. Add dated notes on R-BTN-57, -58, -117, -127, §10.1, §11 and §14. Add S-BTN-100 to S-BTN-102 and G-BTN-120 and G-BTN-121, a Decisions entry, an open question on OAuth, and a CHANGELOG row.
+3. Review it under the review gate.
+
+### Tests
+
+- `npm run check:spec` and `npm run check:wiki` green.
+
+### Exit criteria
+
+- [x] R-BTN-129 and R-BTN-130 merged, reviewed under the gate
+- [x] the implementation ticket filed (B-25)
+
+## Status

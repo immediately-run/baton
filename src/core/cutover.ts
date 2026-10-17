@@ -43,6 +43,8 @@ export function importLegacyClaim(sql: Store, now: number,
 export interface Ctx {
   store: Store;
   now: () => number;
+  /** R-BTN-75: an imported claim holds its ticket; a claim's start changes `blocked_since` silently. */
+  held?: (ticketId: string) => void;
 }
 
 export class Cutover {
@@ -106,6 +108,7 @@ export class Cutover {
         item: it.id, preferred: it.holder, nonce: randomHex(3), sha, requestId: `legacy:${it.id}`,
         claimedAt: it.since ? Date.parse(`${it.since}T00:00:00Z`) : now, detail: { since: it.since },
       });
+      this.c.held?.(it.id);
       out.push(it.id);
     }
     return out;

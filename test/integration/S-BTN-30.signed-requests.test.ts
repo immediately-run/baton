@@ -6,8 +6,9 @@
 // signature presented as a request's is refused (namespace); fresh signed requests by every key
 // type pass, with and without a body. Runs on both hosts.
 //
-// Two clauses wait for the routes they exercise: the probe's out-of-binding reading for
-// R3-1251 (probes and instances) and the administrator's key for R3-1240 (`/v1/admin/*`).
+// The probe clause is amended by R-BTN-101 (§2l): a probe reports on any registered instance, so
+// a reading outside the instances it was registered with is accepted; a key in another role is
+// refused at the probe's route.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { HOST, ORIGIN, call, hbBody, keyCall, register, setAdminKeys, rows, setClock, sha256, signedCall, SSH_KEYS, withCore } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
@@ -175,7 +176,25 @@ describe(`S-BTN-30 signed requests (${HOST})`, () => {
     expect(await rows('SELECT credential_id FROM workers')).toEqual([{ credential_id: 'vm-a' }]);
   });
 
-  it.todo('a probe reading for an instance outside its binding is refused forbidden (R3-1251)');
+  it('a probe reading for an instance outside its registered list is accepted (R-BTN-101); another role’s key is forbidden', async () => {
+    const admin = await makeKey('ssh-ed25519', 'admin');
+    const probe = await makeKey('ecdsa-sha2-nistp256', 'probe');
+    await setAdminKeys(admin);
+    expect((await keyCall(admin, '/v1/admin/resources', { name: 'github-api', scope: 'service', detail_schema: { type: 'object' } })).status).toBe(200);
+    expect((await keyCall(admin, '/v1/admin/probes', { public_key: probe.publicKey, label: 'p', instances: ['neon:main'] })).status).toBe(200);
+    const post = async (key: typeof probe, body: unknown) => {
+      const created = Math.floor((await withCore((c) => c.now())) / 1000);
+      return hostCall(await signedRequest(key, `${ORIGIN}/v1/probe/readings`, { created, body: JSON.stringify(body) }));
+    };
+    const res = await post(probe, { readings: [{ instance: 'github-api', available: false }, { instance: 'nowhere', available: true }] });
+    expect(await res.json()).toEqual({ ok: true, refused: [{ instance: 'nowhere', code: 'not-found' }] });
+    expect(await rows('SELECT state FROM instance_states WHERE instance = ?', 'github-api')).toEqual([{ state: 'unavailable' }]);
+    // Unsigned, or signed by a key Baton keeps for no instrument: refused before any reading is read.
+    expect(await code(await call('/v1/probe/readings', { method: 'POST', body: '{}' }))).toBe('unauthenticated');
+    expect(await code(await post(admin, { readings: [{ instance: 'github-api', available: true }] }))).toBe('unauthenticated');
+    // A worker key is a key in another role (R-BTN-57).
+    expect(await code(await post(SSH_KEYS['vm-ed'], { readings: [{ instance: 'github-api', available: true }] }))).toBe('forbidden');
+  });
   it('an admin request signed by a key not in BATON_ADMIN_KEYS is refused unauthenticated (R3-1240)', async () => {
     const admin = await makeKey('ssh-ed25519', 'admin');
     const other = await makeKey('ssh-ed25519', 'other');

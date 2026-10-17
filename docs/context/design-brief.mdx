@@ -28,7 +28,10 @@ two clicks.</Lede>
    activities nested inside them.
 5. **What is ready?** The queue in Baton's order, and, separately, what nobody can take and why.
 6. **How does a course perform?** Each course drawn as stations and legs, with tickets on
-   it, wait and run times, and the legs that back up.
+   it, wait and run times, and the legs that back up. Each leg is an edge with a state —
+   ready, running, blocked by an unmet prerequisite (whether found before a start or during a
+   run), backing off — and a blocked leg is a marked edge, never a station of its own
+   (R-BTN-126). A leg's log, live or finished, opens from its edge (R-BTN-128).
 7. **Where did git overrule Baton?** Discrepancies by kind and age: what Baton had, what git
    showed.
 8. **Is the instance healthy?** Capacity — request rate and live counts against the
@@ -69,4 +72,4 @@ second. Exceptions stand out; the normal case recedes.
 ## Where to look
 
 The current page is `src/ui/` (`index.html`, `app.css`, `app.js`), served at the instance's
-origin; its data is `GET /v1/ui/state`. The view list is BATON_SPEC §14 in the docs repository.
+origin; its data is `GET /v1/ui/state`. The view list is BATON_SPEC §14 (`spec/BATON_SPEC.md`).

@@ -16,6 +16,8 @@ const events = async () =>
     .map((e) => ({ actor: e.actor, ...JSON.parse(e.detail_json) }));
 const releases = (workerId: number) =>
   rows<{ payload_json: string }>(`SELECT payload_json FROM messages WHERE to_worker_id = ? AND kind = 'release'`, workerId);
+// The heartbeat's messages less R-BTN-77's `unblocked` ones, which a new worker is sent too.
+const onlyReleases = (messages: { kind: string }[]) => messages.filter((m) => m.kind !== 'unblocked');
 // A Go Plus worker: its model's prefix bills to opencode_go_plus.
 const GO = { model_id: 'opencode-go/kimi-k3', model_provider_id: 'opencode_go_plus' };
 
@@ -70,7 +72,7 @@ describe('S-BTN-8 / S-BTN-9 server halves', () => {
     const hb = await beat('vm-a', go.secret, GO);
     expect(hb.json.suspensions).toEqual([expect.objectContaining({ provider_id: 'opencode_go_plus', mode: 'no-new-work' })]);
     expect(hb.json.claim).toMatchObject({ ticket_id: 'docs:R3-9001' });
-    expect(hb.json.messages).toEqual([]);
+    expect(onlyReleases(hb.json.messages)).toEqual([]);
     expect(await releases(go.id)).toEqual([]);
   });
 
@@ -83,8 +85,8 @@ describe('S-BTN-8 / S-BTN-9 server halves', () => {
 
     const hb = await beat('vm-a', go.secret, GO);
     expect(hb.json.suspensions).toEqual([expect.objectContaining({ provider_id: 'opencode_go_plus', mode: 'stop' })]);
-    expect(hb.json.messages).toEqual([expect.objectContaining({ kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'provider-suspended' } })]);
-    expect((await beat('vm-b', zai.secret)).json.messages).toEqual([]);
+    expect(onlyReleases(hb.json.messages)).toEqual([expect.objectContaining({ kind: 'release', payload: { ticket_id: 'docs:R3-9001', reason: 'provider-suspended' } })]);
+    expect(onlyReleases((await beat('vm-b', zai.secret)).json.messages)).toEqual([]);
     expect(await releases(zai.id)).toEqual([]);
 
     // The alarm does not send it twice.

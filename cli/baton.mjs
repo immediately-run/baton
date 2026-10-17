@@ -15,7 +15,13 @@
 //                [--add-owner-key PUB[,…]] [--add-sync-key PUB[,…]] [--add-mirror-key PUB[,…]] [--remove-sync-key FP[,…]]
 //   baton admin -i KEY repo retire ID
 //   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T]
-//   baton admin -i KEY probe add --key PUB --label L [--instances a,b]
+//   baton admin -i KEY probe add --key PUB --label L
+//   baton admin -i KEY resource add NAME --scope worker|account|service --schema FILE|JSON    (R-BTN-76)
+//   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
+//   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
+//   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
+//                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
+//                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
 //   baton admin -i KEY revoke FINGERPRINT                          baton admin -i KEY open
 //   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T]
 //   baton owner -i KEY revoke REPO FINGERPRINT
@@ -98,8 +104,21 @@ export function duration(v) {
  * The request a command makes: `{method, path, body}`. `readKey(path)` reads a public key file
  * (or returns the argument when it is a key line itself). Pure: no network, no signing.
  */
-export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim())) {
+export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? p : readFileSync(p, 'utf8').trim()), readJson = (p) => readFileSync(p, 'utf8')) {
   const [cmd, ...rest] = argv;
+  if (role === 'blocked') {
+    // R-BTN-75: a GET any key granted on the repository, an owner of it or an administrator signs.
+    const { flags, positional } = parseArgs(argv, ['transitive'], ['on', 'repository'], 1);
+    if (flags.on) {
+      if (positional.length) throw new Error('baton blocked --on KIND:REF takes no ticket');
+      const q = new URLSearchParams({ on: flags.on, ...(flags.transitive ? { transitive: '1' } : {}) });
+      return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(need(flags.repository, '--repository (with --on)'))}/blocked?${q}` };
+    }
+    const ticket = need(positional[0], 'the ticket, <repository>:<id>');
+    const i = ticket.indexOf(':');
+    if (i < 1) throw new Error('the ticket is <repository>:<id>');
+    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(ticket.slice(0, i))}/tickets/${encodeURIComponent(ticket.slice(i + 1))}/blocks` };
+  }
   if (role === 'admin') {
     if (cmd === 'repo') {
       const [sub, target, ...more] = rest;
@@ -155,7 +174,26 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       parseArgs(rest, [], [], 0);
       return { method: 'POST', path: '/v1/admin/login-links', body: {} };
     }
-    throw new Error('baton admin repo|grant|probe|revoke|open');
+    if (cmd === 'resource' && rest[0] === 'add') {
+      const { flags, positional } = parseArgs(rest.slice(1), [], ['scope', 'schema'], 1);
+      return { method: 'POST', path: '/v1/admin/resources', body: { name: need(positional[0], 'the resource name'), scope: need(flags.scope, '--scope'), detail_schema: jsonArg(need(flags.schema, '--schema'), readJson) } };
+    }
+    if (cmd === 'resource' && rest[0] === 'set') {
+      // R-BTN-76: an administrator's reading by hand, in force at most 7 days.
+      const { flags, positional } = parseArgs(rest.slice(1), ['available', 'unavailable'], ['until', 'valid-for', 'detail'], 1);
+      if (!!flags.available === !!flags.unavailable) throw new Error('baton admin resource set INSTANCE names one of --available or --unavailable');
+      if (flags.until && !flags.unavailable) throw new Error('--until is for an --unavailable instance');
+      return { method: 'POST', path: '/v1/admin/readings', body: { readings: [{
+        instance: need(positional[0], 'the instance'), available: !!flags.available,
+        ...(flags.until ? { until: time(flags.until, '--until') } : {}), ...(flags['valid-for'] ? { valid_for: Math.round(duration(flags['valid-for']) / 1000) } : {}),
+        ...(flags.detail ? { detail: jsonArg(flags.detail, readJson) } : {}),
+      }] } };
+    }
+    if (cmd === 'instance' && rest[0] === 'add') {
+      const { flags, positional } = parseArgs(rest.slice(1), [], ['serves', 'repositories'], 1);
+      return { method: 'POST', path: '/v1/admin/instances', body: { name: need(positional[0], 'the instance name'), serves: need(list(flags.serves), '--serves'), repositories: list(flags.repositories) ?? [] } };
+    }
+    throw new Error('baton admin repo|grant|probe|resource|instance|revoke|open');
   }
   if (role === 'owner') {
     if (cmd === 'grant') {
@@ -213,6 +251,16 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
 
 const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier'];
 
+/** A JSON argument: inline (`{…}`), else a file holding it. */
+function jsonArg(v, readJson) {
+  const text = v.trim().startsWith('{') ? v : readJson(v);
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${v.slice(0, 40)}: not JSON`);
+  }
+}
+
 /** `--ci-identity` (R-BTN-93): none, github-actions, or a GitLab issuer (`gitlab-mirror:` when its
  *  mirror posts with the same identity). */
 function ciIdentity(v) {
@@ -234,8 +282,9 @@ function grantBody(flags, readKey, extra) {
 export async function send(url, p, keyFile, fetchImpl = fetch) {
   const key = signingKey(keyFile);
   const target = new URL(p.path, url).toString();
-  const body = JSON.stringify(p.body ?? {});
-  const headers = { 'Content-Type': 'application/json', ...signHeaders({ method: p.method, url: target, body, key }) };
+  // A GET carries no body; its digest is of the empty one.
+  const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
+  const headers = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...signHeaders({ method: p.method, url: target, body, key }) };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
   const res = await fetchImpl(target, { method: p.method, headers, body, signal: AbortSignal.timeout(30_000) });
   let json = null;
@@ -305,7 +354,7 @@ async function main(argv) {
   const { flags } = parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
   const args = rest.filter((_, i, a) => !(a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
   const p = plan(role, args);
-  const { status, json } = await send(flags.url ?? process.env.BATON_URL ?? DEFAULT_URL, p, need(flags.identity, '-i KEY (the administrator or owner key file)'));
+  const { status, json } = await send(flags.url ?? process.env.BATON_URL ?? DEFAULT_URL, p, need(flags.identity, '-i KEY (an administrator, owner or worker key file)'));
   if (role === 'admin' && args[0] === 'open' && json?.url) process.stdout.write(`${json.url}\n`);
   else process.stdout.write(`${JSON.stringify(json)}\n`);
   return status >= 200 && status < 300 ? 0 : 1;

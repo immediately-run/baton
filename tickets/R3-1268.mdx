@@ -35,15 +35,15 @@ done there still point at docs:
 
 ### What to build
 
-1. **Agent workflow, without an entry-point skill** (owner, 2026-10-16: `baton run` claims
+1. **Agent workflow, without an entry-point skill** (owner, 2026-10-16: `baton runner start` claims
    tickets and runs each leg through the course's leg scripts, R3-1245, so no `/next-ticket` is
    needed):
    - **`AGENTS.md`**, with CLAUDE.md pointing to it: how to work a `B-n` or moved `R3-NNNN`
-     ticket by hand while git is the lock (`npm run ticket`, until R3-1266), and how `baton run`
+     ticket by hand while git is the lock (`npm run ticket`, until R3-1266), and how `baton runner start`
      drives the legs once Baton claims this repository's tickets. It needs no docs checkout and
      no `claim.sh`.
    - **The `pr` course's legs** in `.baton/courses/pr/legs/` (written by R3-1249's
-     `baton init`): each leg's instructions for the agent session it launches — implement,
+     `baton repo init`): each leg's instructions for the agent session it launches — implement,
      review ending with a verdict line, fix, merge — beside its script, since a leg script is a
      launcher and what the leg does is its instructions' text. Review findings are recorded
      under `docs/review/`.

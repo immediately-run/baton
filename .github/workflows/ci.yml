@@ -31,6 +31,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run check:wiki   # content/, the tickets' wiki
+      - run: npm run check:spec   # spec/BATON_SPEC.md defines every R-BTN-n the code cites
 
   # Which of the model's jobs this change needs. The model reads only model/ (and quint, from
   # package.json); every other change still runs npm test's 1,000-sample model check above.

@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1097
 tier: judgement
-description: "baton sync and mirror --if-wanted, baton spool for post-receive hooks, --defaults-only from a CLI outside the checkout, the pr course's GitLab and Gitea fact adapters, and the built-in branch course with verdict trailers; S-BTN-54. Requires: none."
+description: "baton repo sync and mirror --if-wanted, baton repo spool for post-receive hooks, --defaults-only from a CLI outside the checkout, the pr course's GitLab and Gitea fact adapters, and the built-in branch course with verdict trailers; S-BTN-54. Requires: none."
 topics:
   - baton
 owns: {}
@@ -36,18 +36,18 @@ Gitea need the `pr` course's facts. Tier: judgement — the station rules are fi
 
 ### What to build
 
-1. `baton sync --if-wanted` and `baton mirror --if-wanted` (one signed request when nothing is
-   wanted), `baton spool <repository>` for `post-receive` hooks and the sync account's loop
+1. `baton repo sync --if-wanted` and `baton repo mirror --if-wanted` (one signed request when nothing is
+   wanted), `baton repo spool <repository>` for `post-receive` hooks and the sync account's loop
    that records the want and runs the sync.
-2. `baton sync --defaults-only`: no repository code; refuses to start when the resolved CLI or
+2. `baton repo sync --defaults-only`: no repository code; refuses to start when the resolved CLI or
    a module it loads lies inside the checkout.
 3. The `pr` course's fact adapters for GitLab merge requests and Gitea pull requests, mapped to
    the GitHub facts.
-4. The built-in `branch` course: `baton init --course branch`, its station function (merged
+4. The built-in `branch` course: `baton repo init --course branch`, its station function (merged
    first by a `Baton-Ticket` trailer on the default branch's first-parent history; branches
    with a commit off the default branch; empty verdict commits with `Baton-Verdict` and
    `Baton-Reviewed`), and leg stubs whose `merge` writes `git merge --no-ff` with the trailer.
-5. `baton init` writes CI configuration whose sync key only default-branch runs can read.
+5. `baton repo init` writes CI configuration whose sync key only default-branch runs can read.
 
 ### Architecture — the decisions, named
 

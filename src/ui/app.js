@@ -91,6 +91,27 @@ function renderReady() {
   if (!order.length) body.append(el('tr', {}, el('td', { text: 'Nothing is ready under this ceiling.', attrs: { colspan: '5' }, cls: 'muted' })));
 }
 
+/** R-BTN-75: each blocked ticket and why — text only (§10.4). */
+function renderBlocked() {
+  const box = document.getElementById('blocked');
+  box.replaceChildren();
+  for (const t of state.blocked ?? []) {
+    const why = t.blocks.map((b) => `${b.kind} ${b.ref}${b.leg ? ` (${b.leg})` : ''}${b.until ? ` until ${fmtTime(b.until)}` : ''}`).join('; ');
+    box.append(el('li', { text: `${t.ticket_id}: blocked since ${fmtTime(t.since)} — ${why}` }));
+  }
+  if (!box.children.length) box.append(el('li', { text: 'No ticket is blocked.', cls: 'muted' }));
+}
+
+/** R-BTN-76: the external resources' instances and their states. */
+function renderResources() {
+  const box = document.getElementById('resources');
+  box.replaceChildren();
+  for (const i of state.resources?.instances ?? []) {
+    box.append(el('li', { text: `${i.name}: ${i.state}${i.until ? ` until ${fmtTime(i.until)}` : ''} — serves ${i.serves.join(', ')}${i.repositories.length ? ` · for ${i.repositories.join(', ')}` : ''}` }));
+  }
+  if (!box.children.length) box.append(el('li', { text: 'No external resource is registered.', cls: 'muted' }));
+}
+
 function renderProviders() {
   const box = document.getElementById('providers');
   box.replaceChildren();
@@ -367,6 +388,10 @@ function renderNeeds() {
   }
   // R3-1239: the BATON_KEYS seed; the keys in force stay until a list seeds.
   if (n.keys?.refused) list.append(el('li', { text: `BATON_KEYS was refused (${n.keys.refused}); the keys in force stay` }));
+  // R-BTN-75, R-BTN-76: a day blocked on a capability no live worker has; an instance a posted leg
+  // needs that no instrument has reported on for a day.
+  for (const b of n.blocked_capability ?? []) list.append(el('li', { text: `${b.ticket_id}: blocked since ${fmtTime(b.since)} on ${b.capability}, which no live worker declares` }));
+  for (const i of n.instances_unknown ?? []) list.append(el('li', { text: `${i.instance}: unknown since ${fmtTime(i.since)} while a posted leg needs it — no reading in force` }));
   for (const fp of n.keys?.revoked_listed ?? []) list.append(el('li', { text: `BATON_KEYS names ${fp}, a revoked key: it stays revoked — give the machine a new key` }));
   for (const h of n.held_items) {
     // §6.10: the owner decides what a hold means — retry (Lift), re-draft, re-tier or park.
@@ -438,7 +463,8 @@ function renderLimits() {
   };
   list('Owners', l.owners.map((o) => `${o.repository_id}: ${o.fingerprint} (added by ${o.added_by}, ${fmtTime(o.added_at)})`), 'No repository has an owner key yet.');
   list('Grants', l.grants.map((g) => `${g.repository_id}: ${g.hostname}${g.label ? ` (${g.label})` : ''} — ${parsed(g.capabilities, []).join(', ') || 'no capabilities'}${g.max_tier != null ? ` · up to ${g.max_tier}` : ''} · by ${g.granted_by}`), 'No key is granted.');
-  list('Probes', (l.probes ?? []).map((p) => `${p.label}: ${p.fingerprint} — ${parsed(p.allowed_instances, []).join(', ') || 'no instances'} · by ${p.created_by}`), 'No probe key.');
+  // R-BTN-101: a probe reports on any registered instance.
+  list('Probes', (l.probes ?? []).map((p) => `${p.label}: ${p.fingerprint} · by ${p.created_by}`), 'No probe key.');
   list('Owner bars', l.bars.map((b) => `#${b.id} ${b.repository_id}: ${b.tag} barred from ${b.course === '*' ? 'every course' : b.course}${b.legs.length ? ` (${b.legs.join(', ')})` : ''} at ${b.applies === 'claim' ? 'claims' : 'claims and advances'}, ${fmtTime(b.starts_at)} to ${b.ends_at == null ? 'lifted' : fmtTime(b.ends_at)}${b.release_holders ? ', releasing holders' : ''} — ${b.reason}`), 'No owner bar is in force or scheduled.');
   list('Settings', l.settings.map((s) => {
     const parts = [];
@@ -457,6 +483,8 @@ function renderLimits() {
 function render() {
   renderHead();
   renderReady();
+  renderBlocked();
+  renderResources();
   renderProviders();
   renderMode();
   renderNeeds();

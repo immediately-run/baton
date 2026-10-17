@@ -51,13 +51,17 @@ export interface HookRunner {
  *  mirror, resolved by the core to the GitHub repository and the workflow file. */
 export interface Workflow {
   repository: string;
-  kind: 'sync' | 'mirror';
+  /** `unblocked`: the repository's unblocked trigger (R-BTN-77), carrying `tickets`. */
+  kind: 'sync' | 'mirror' | 'unblocked';
+  tickets?: unknown[];
 }
 export interface DispatchTarget {
   github: string;
   /** The workflow file's name, as `actions/workflows/{workflow}/dispatches` takes it. */
   workflow: string;
   ref: string;
+  /** `workflow_dispatch` inputs, strings (R-BTN-77's one input, `tickets`). */
+  inputs?: Record<string, string>;
 }
 
 /** Outbound dispatch (§10.3), and the host's way to finish work after a response. */

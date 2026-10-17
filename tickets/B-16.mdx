@@ -1,0 +1,47 @@
+---
+title: "B-16 — Ticket commits carry provenance trailers: TICKET_TRAILERS in scripts/ticket.mjs"
+id: B-16
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1119
+tier: routine
+description: "npm run ticket appends TICKET_TRAILERS to every commit it pushes, and refuses an empty one under TICKET_REQUIRE_TRAILERS=1, as docs' claim.sh does with CLAIM_TRAILERS. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the handoff's commit rule: every commit carries the agent-provenance trailers, then `Claude-Session` and `Co-Authored-By`. Since R3-1267, the commits `npm run ticket` pushes to `main` carry none.
+**Spec:** none; repository tooling (`scripts/ticket.mjs`).
+
+### Why
+
+Every ticket state change is a commit on `main`. Without trailers, those commits cannot be attributed to the session or harness that made them, unlike docs' `claim.sh`, which takes `CLAIM_TRAILERS`.
+
+### What to build
+
+1. `scripts/ticket.mjs` appends the value of `TICKET_TRAILERS`, after a blank line, to every commit message it makes. This mirrors docs' `CLAIM_TRAILERS`.
+2. With `TICKET_REQUIRE_TRAILERS=1`, a command refuses when `TICKET_TRAILERS` is empty. The agent workflow (R3-1268) sets the variable.
+3. The README's tickets section documents both variables.
+
+### Do not
+
+- Call docs' `agent-provenance.mjs` from baton: baton must not depend on the docs repository (R3-1268).
+
+### Tests
+
+- A unit test of the commit-message builder, with trailers, without them, and refused under `TICKET_REQUIRE_TRAILERS=1`.
+
+### Exit criteria
+
+- [ ] ticket commits carry the trailers they were given
+- [ ] merged
+
+## Status

@@ -1,0 +1,69 @@
+---
+title: "B-25 — Baton action registry and MCP endpoint: one authorize behind every surface, generated router, CLI and tools, and POST /v1/mcp with MCP keys"
+id: B-25
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1128
+tier: critical
+description: "Build R-BTN-129 and R-BTN-130: the action registry in src/shared/actions.mjs with one authorize for every surface; the router, CLI tree and MCP tools generated from it and kept equal by check:actions; GET /v1/actions; confirm on destructive routes; the stateless MCP endpoint with its closed allowlist; owner-minted MCP keys in mcp_keys, and CursorKey. Requires: B-24, B-23."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-24
+  - B-23
+---
+
+**Brief:** the owner, 2026-10-17, asked for one registry of the actions an authenticated user can take, the same whether the call comes through Baton's REST API, the CLI or an agent's MCP integration. B-24 specified it (baton#47).
+**Spec:** `spec/BATON_SPEC.md` §2m.6e: R-BTN-129 (the action registry) and R-BTN-130 (Baton's MCP endpoint), with their dated notes and the §10.1, §11 and §14 rows.
+
+### Why
+
+R-BTN-129 and R-BTN-130 are specified. This ticket builds them.
+
+### What to build
+
+1. **The registry.** `src/shared/actions.mjs`:
+   - every action is one entry: a `<noun>.<verb>` id, `callers` with scopes, effect, schemas, an optional route, a dashboard control and an `mcp` flag;
+   - CLI commands live in a second table.
+2. **One `authorize`.** Every surface calls it: the router, the dashboard, the CLI and MCP.
+3. **Generated surfaces.**
+   - The router and the CLI tree (B-23's) are generated from the registry.
+   - `npm run check:actions` fails when a route, command or tool is outside the registry. It also fails when `owner.mcp-key.create`'s callers are anything but `[owner]`, or when an entry outside the closed allowlist carries `mcp`.
+4. **`GET /v1/actions`.** It shows a caller only their own actions.
+5. **Destructive actions.** The listed destructive ids require `confirm: true` on their routes, and the refusal code is `confirm-required`.
+6. **`POST /v1/mcp`.**
+   - stateless transport, with `initialize` and the `MCP-Protocol-Version` rule;
+   - the closed allowlist: owner reads, plus `ticket.expedite`, `ticket.hold` and `leg.stop`;
+   - no upgrades;
+   - pages of at most 256 KB, with `CursorKey`-signed cursors;
+   - rate and size bounds;
+   - content returned as data.
+7. **MCP keys.**
+   - The `mcp_keys` table holds `bmcp_` keys. Ids are fixed at minting, and only an `[owner]` key can mint one.
+   - A key dies with its minter, and is refused (not killed) while `api_keys: false`.
+   - `CursorKey` is wired on both hosts: the Worker secret `BATON_CURSOR_KEY`, or `--cursor-key <file>` locally.
+
+### Do not
+
+- Let an MCP key reach administrator actions, machine protocols, credential or owner changes, or R-BTN-66 writes.
+- Check authority anywhere but `authorize`.
+
+### Tests
+
+- S-BTN-100 to S-BTN-103 as integration scenarios on both hosts; G-BTN-120 to G-BTN-122.
+- `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:actions` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts
+- [ ] every route, command and MCP tool comes from the registry, checked by `check:actions`
+- [ ] merged under the review gate
+
+## Status

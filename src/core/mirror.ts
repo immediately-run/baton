@@ -20,6 +20,8 @@ const actorKind = (actor: string) => actor.split(':')[0];
 export interface Ctx {
   store: Store;
   now: () => number;
+  /** R-BTN-75: an imported claim holds its ticket; a claim's start changes `blocked_since` silently. */
+  held?: (ticketId: string) => void;
 }
 
 export class Mirror {
@@ -40,7 +42,10 @@ export class Mirror {
   events(repo: string, after: number, limit: number) {
     const n = Math.min(Math.max(1, limit || MAX_PAGE), MAX_PAGE);
     const rows = this.rows<{ seq: number; at: number; kind: string; ticket_id: string | null; claim_id: number | null; actor: string; detail_json: string | null }>(
-      'SELECT seq, at, kind, ticket_id, claim_id, actor, detail_json FROM events WHERE repository_id = ? AND seq > ? ORDER BY seq LIMIT ?', repo, after, n);
+      // R-BTN-75–77's `blocked`, `unblocked` and `resource` are Baton's own state, nothing git
+      // holds (§12 writes claims, holds and overrides): the feed leaves them out.
+      `SELECT seq, at, kind, ticket_id, claim_id, actor, detail_json FROM events WHERE repository_id = ? AND seq > ?
+         AND kind NOT IN ('blocked', 'unblocked', 'resource') ORDER BY seq LIMIT ?`, repo, after, n);
     const events = rows.map((e) => {
       let detail: Record<string, unknown> = {};
       try {
@@ -111,6 +116,7 @@ export class Mirror {
       item, preferred: null, nonce, claimedAt: b.at as number, sha: head, requestId: `foreign:${item}:${nonce}`, detail: { foreign: true },
     });
     logEvent(this.c.store, now, 'foreign-claim', 'sync', { nonce, sha: b.sha, imported: true }, item, claimId);
+    this.c.held?.(item);
     return { imported: true, claim_id: claimId, nonce };
   }
 }
@@ -129,7 +135,7 @@ export async function dispatchWorkflow(token: string | undefined, target: Dispat
     const res = await fetch(`https://api.github.com/repos/${target.github}/actions/workflows/${target.workflow}/dispatches`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ref: target.ref }),
+      body: JSON.stringify(target.inputs ? { ref: target.ref, inputs: target.inputs } : { ref: target.ref }),
     });
     return res.ok;
   } catch {

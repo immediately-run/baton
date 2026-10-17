@@ -1,0 +1,45 @@
+---
+title: "B-7 — Baton person legs: legs a person runs, answered in git"
+id: B-7
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1110
+tier: judgement
+description: "`kind: person` legs with `asks`: never offered to or claimable by a worker (rule `person`), a decision opened with its notices, the answer's arrival checked at the snapshot, `std:decision@1` as its output (BATON_SPEC R-BTN-116); S-BTN-67. Requires: B-3."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-3
+---
+
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.3 (R-BTN-116), R-BTN-78 and R-BTN-80 as amended.
+
+### Why
+
+§2m is agreed and specified; this ticket builds its part of it.
+
+### What to build
+
+1. Refuse claims and advances into a person's leg, rule `person`.
+2. Open the decision and queue notices when the ticket queues the leg.
+3. Check the arrival a sync posts through the leg; log a missing answer `output-invalid`.
+
+### Tests
+
+- S-BTN-67; G-BTN-90's person clause.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] merged under the review gate
+
+## Status

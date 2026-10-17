@@ -64,7 +64,11 @@ describe('the cutover’s refusals and the import’s names', () => {
       if (it.id === 'R3-9001' || it.id === 'R3-9002') Object.assign(it, { status: 'in-progress', node: 'in-progress', holder: 'shared-session' });
     }
     await syncCall('/v1/sync/board', payload(sha.B, sha.A, { ...board.states.B, state: { items }, ready: ['R3-9003'] }));
+    // A blocked ticket imported as a legacy claim is held, no longer blocked (R-BTN-75).
+    await rows(`INSERT INTO ticket_blocks (repository_id, ticket_id, kind, ref, since) VALUES ('docs', 'docs:R3-9001', 'decision', 'd1', 1)`);
+    await rows(`UPDATE tickets SET blocked_since = 1 WHERE id = 'docs:R3-9001'`);
     expect(await (await owner('/v1/ui/cutover', { repository: 'docs', confirm: true })).json()).toMatchObject({ imported: ['docs:R3-9001', 'docs:R3-9002'] });
+    expect(await rows(`SELECT blocked_since AS b FROM tickets WHERE id = 'docs:R3-9001'`)).toEqual([{ b: null }]);
     expect(await rows(`SELECT c.ticket_id, w.session_name FROM claims c JOIN workers w ON w.id = c.worker_id ORDER BY c.ticket_id`)).toEqual([
       { ticket_id: 'docs:R3-9001', session_name: 'shared-session' }, { ticket_id: 'docs:R3-9002', session_name: 'item-R3-9002' }]);
   });

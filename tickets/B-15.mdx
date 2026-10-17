@@ -1,0 +1,56 @@
+---
+title: "B-15 — The roadmap-pr course adopts §2m: capability types in its course file, independent review, retries per leg and fresh context"
+id: B-15
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - docs
+  - baton
+tags:
+  - roadmap-item
+order: 1118
+tier: judgement
+description: "docs' reference course declares its capability types and roles (ROLES leaves vocabulary.mjs), gives review no_chain_from with the owners' required_independence, declares error types and per-leg retry policies, and sets max_context (BATON_SPEC R-BTN-106, R-BTN-120–123). Requires: B-2, B-10, B-11, B-12."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-2
+  - B-10
+  - B-11
+  - B-12
+---
+
+**Brief:** the owner, 2026-10-17 (§2m, B-1, baton#43). docs and `roadmap-pr` are Baton's labelled reference deployment, so they should use what §2m adds once Baton serves it.
+**Spec:** `spec/BATON_SPEC.md` §2m.1 (R-BTN-106 `no_chain_from`), §2m.6 (R-BTN-120, R-BTN-121), §2m.6a (R-BTN-122), §2m.6b (R-BTN-123); docs' `BATON_ROADMAP_PR_COURSE` and `BATON_DOCS_DEPLOYMENT`.
+
+### Why
+
+§2m changes what a course file can say. `roadmap-pr`, the course docs runs, still keeps its roles in the vendored `vocabulary.mjs`, counts retries per ticket, and leaves the independence of `review` to convention.
+
+### What to build
+
+1. **Capability types.** Declare `roadmap-pr`'s capability types and roles in its course file (`capability_types`, `capability_roles`). Then retire `ROLES` from docs' `vocabulary.mjs` after B-10's transition window, and run `npm run vendor` in baton.
+2. **Independence.** Give `review` a `no_chain_from: ["implement", "fix"]`, and set the docs repository's `required_independence` owner setting to match.
+3. **Retries.** Declare the course's `error_types` (for example `merge-conflict` as non-retryable and `flaky-test` as retryable; a provider's capacity reached is a blocked prerequisite, not an error type, R-BTN-126). Give the agent legs `retry` policies within the owners' ceiling, and throw `LegError` from the leg scripts (R3-1246).
+4. **Fresh context.** Set `max_context` on `implement` and `fix`, and have their scripts report context use with `baton leg yield --context`.
+5. **Docs.** Amend `BATON_ROADMAP_PR_COURSE` and `BATON_DOCS_DEPLOYMENT` to match, each with a dated note.
+
+### Do not
+
+- Put any of this in Baton's core (R-BTN-50): it is course data.
+
+### Tests
+
+- `baton course test` passes on docs' course, with no cut-back warnings that are not intended.
+- docs' `npm run verify` is green.
+- A shadow run shows `review` refused to the key that ran `implement`.
+
+### Exit criteria
+
+- [ ] the course file and leg scripts use §2m's fields, merged in docs under the review gate
+- [ ] `ROLES` retired from the vendored library
+
+## Status

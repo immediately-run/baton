@@ -1,0 +1,52 @@
+---
+title: "B-6 — [OP] Baton merge check: create the dedicated check GitHub App and pin branch protection to it"
+id: B-6
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - OP
+  - roadmap-item
+order: 1109
+tier: judgement
+description: "Operator step for R-BTN-115: create a GitHub App used only to post Baton's merge check, install it on the registered repositories, give its key only to the forge courier, and pin each repository's required check to the App's id (BATON_SPEC R-BTN-115). Requires: B-5."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-5
+---
+
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.3 (R-BTN-115).
+
+### Why
+
+§2m is agreed and specified; this ticket builds its part of it.
+
+### What to build
+
+1. **Operator.** Create the App (checks: write, nothing else), never Baton's own App.
+2. Install it on immediately-run/baton (and docs once it uses check courses).
+3. Hand its private key only to the forge courier's host; record the App id in the repository's settings.
+4. Set branch protection's required check to the check name, pinned to the App's id.
+
+### Do not
+
+- Reuse `BATON_GITHUB_APP_KEY`'s App.
+- Give the key to Baton's Worker or to any machine key.
+
+### Tests
+
+- A status context of the same name posted by a token does not satisfy the required check (S-BTN-68's case, run against the real repository).
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] merged under the review gate
+
+## Status

@@ -1,0 +1,44 @@
+---
+title: "B-4 — Baton session links: a leg run's session URL from an allowlisted host"
+id: B-4
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1107
+tier: judgement
+description: "`session_url` on heartbeats, advances and ends, kept only for an `https` link on `session_hosts` with no userinfo and at most 512 characters, and the administrators' `instance_settings` (`link_hosts`, `session_hosts`) (BATON_SPEC R-BTN-113); S-BTN-77. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.3 (R-BTN-113), §2m.7a's `PUT /v1/admin/settings` row.
+
+### Why
+
+§2m is agreed and specified; this ticket builds its part of it.
+
+### What to build
+
+1. Store `claim_legs.session_url` under R-BTN-113's rule; drop and log the rest.
+2. Add `instance_settings` and `PUT /v1/admin/settings`.
+3. Show the link on the dashboard and in the history.
+
+### Tests
+
+- S-BTN-77; G-BTN-101.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] merged under the review gate
+
+## Status

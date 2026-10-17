@@ -1,5 +1,5 @@
 ---
-title: "R3-1256 — Baton notices and couriers: decisions queued for people, the courier API and baton inbox"
+title: "R3-1256 — Baton notices and couriers: decisions queued for people, the courier API and baton decision list"
 id: R3-1256
 project: baton
 status: available
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1089
 tier: judgement
-description: "Baton queues one notice per courier for each open decision, couriers claim and mark them over /v1/courier/*, notices close when git shows the answer and remind after remind_after, and baton inbox is the CLI courier; S-BTN-46, G-BTN-72 (R-BTN-80). Requires: none."
+description: "Baton queues one notice per courier for each open decision, couriers claim and mark them over /v1/courier/*, notices close when git shows the answer and remind after remind_after, and baton decision list is the CLI courier; S-BTN-46, G-BTN-72 (R-BTN-80). Requires: none."
 topics:
   - baton
 owns: {}
@@ -83,7 +83,7 @@ gates nothing.
 6. **`GET /v1/courier/decisions`**: every open decision the courier delivers over its
    repositories and `asks`, with each notice's state — the courier's own read of
    `blocked?on=decision:*`.
-7. **`baton inbox`**: claims the user's key's notices, prints them as text (title, question,
+7. **`baton decision list`**: claims the user's key's notices, prints them as text (title, question,
    link), marks each `sent`; `--watch` asks once a minute; `--all` lists `GET
    /v1/courier/decisions`.
 
@@ -94,7 +94,7 @@ gates nothing.
   least once, deduped by `notice_id`.
 - **The answer stays in git**: a notice carries the link; nothing in Baton records an answer.
 - **Text, never markup**: titles, decision ids and URLs are passed as text and printed by
-  `baton inbox` as text.
+  `baton decision list` as text.
 - **Do not**: let a courier see another repository's notices; let a key hold two roles; store a
   packet's body or question text beyond §4's columns (R-BTN-33); close a notice on anything but
   the snapshot that drops its decision or a revocation.
@@ -102,7 +102,7 @@ gates nothing.
 ### Tests
 
 - Integration, both hosts: **S-BTN-46** — two notices queued for docs' two couriers and none for
-  the other repository's; the push courier's lapsed lease re-claimed; `baton inbox` prints E's
+  the other repository's; the push courier's lapsed lease re-claimed; `baton decision list` prints E's
   title, question and link as text and marks its notice sent, and `--all` lists R3-E-1; the CLI's
   notice re-queued after 24 h; the answering snapshot closes both notices and fires `unblocked`;
   the late mark answered `closed`; a third courier added while a decision is open is queued its
@@ -118,7 +118,7 @@ gates nothing.
 
 ### Hand-off
 
-R3-1234's skills may point the owner at `baton inbox`; R3-1254 models couriers.
+R3-1234's skills may point the owner at `baton decision list`; R3-1254 models couriers.
 
 ## Status
 

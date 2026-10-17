@@ -1,0 +1,47 @@
+---
+title: "B-12 — Baton fresh context: a leg hands off to a fresh session under the same claim when its context fills"
+id: B-12
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1115
+tier: judgement
+description: "`max_context` and `max_refreshes`, session adapters (`contextUse`, `refreshable`), `baton leg yield`, the refresh in `session` and `process` modes (never `attached`), and the `context-handoff` activity (BATON_SPEC R-BTN-123); S-BTN-88. Requires: B-2, B-11."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-2
+  - B-11
+---
+
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.6b (R-BTN-123), R-BTN-72 and §6.13 as amended.
+
+### Why
+
+§2m is agreed and specified; this ticket builds its part of it.
+
+### What to build
+
+1. Session adapters for `claude-code` and `opencode`.
+2. `baton leg yield` and `refresh` in `baton leg status`.
+3. `session` mode: replace the child session; `process` mode: abort `run` with reason `context`, call it again with `ctx.refresh`; `attached`: log once.
+4. Neither a run nor an attempt; at most `max_refreshes` (under the owners' ceiling), then suspend at `from`.
+
+### Tests
+
+- S-BTN-88; G-BTN-108.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] merged under the review gate
+
+## Status

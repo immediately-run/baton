@@ -34,7 +34,7 @@ repository can be one of them once it has a ticket source (R3-1249).
 ### What to build
 
 1. **Join.**
-   - Run `baton init --course pr` in immediately-run/baton. It writes `.baton/baton.json`, the
+   - Run `baton repo init --course pr` in immediately-run/baton. It writes `.baton/baton.json`, the
      `pr` course file, its leg stubs and `.github/workflows/baton-sync.yml`, pinning the CLI.
    - Tickets are the MDX files in `tickets/`, in docs' roadmap format (owner, 2026-10-16), so
      the sync reads them through a `.baton/tickets.mjs` source over that folder, or R3-1249's
@@ -66,7 +66,7 @@ repository can be one of them once it has a ticket source (R3-1249).
 
 ### Tests
 
-- `baton sync` in CI posts the baton board, and `/v1/sync/head` for `baton` answers its
+- `baton repo sync` in CI posts the baton board, and `/v1/sync/head` for `baton` answers its
   commit.
 - The deploy workflow fails without deploying production when staging's smoke check fails.
 
