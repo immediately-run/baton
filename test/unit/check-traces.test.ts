@@ -83,7 +83,9 @@ describe('check-traces rejects what the model forbids, naming the step', () => {
   }, 120_000);
 });
 
-describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1)', () => {
+// each case checks one trace through the model; the first also pays for loading it, which outgrew
+// the default 5 s with R3-1254's prerequisites (the cases above already allow 120 s)
+describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1)', { timeout: 120_000 }, () => {
   const claimed = (over: Partial<ClaimView> = {}) => (p: Projection) => ({ ...p, claims: { 1: claim(over) } });
   const rejected = async (name: string, rest: [Step['origin'], (p: Projection) => Projection][], reason: string) => {
     const r = await check(name, trace(rest));
