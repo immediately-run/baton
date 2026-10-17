@@ -1,0 +1,50 @@
+---
+title: "B-5 — Baton check courses: check-runner keys, owner-held conclusions and the Baton-signed merge check a forge courier delivers"
+id: B-5
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1108
+tier: critical
+description: "Check courses (`checks`), check tickets per change head, owner-registered check-runner keys, the owners' conclusions map, `forge-check` notices signed with a named key (`GET /v1/keys/signing`), the forge courier credential kind, and `check-mismatch` from the sync's read-back (BATON_SPEC R-BTN-114, R-BTN-115); S-BTN-68, -81. Requires: B-3."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-3
+---
+
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.3 (R-BTN-114, R-BTN-115), §2m.7a's courier, notice and check-runner rows, R-BTN-66 and R-BTN-103 as amended.
+
+### Why
+
+§2m is agreed and specified; this ticket builds its part of it.
+
+### What to build
+
+1. **Check tickets** from the `changes` ticket source, `check.<course>.<number>`, superseded by a push; claimable only by a check-runner key, and only in `session` isolation.
+2. **The notice.** Queued only after a sync confirms the end and its entry; conclusion from the owners' `checks` setting; signed (Ed25519, `BATON_SIGNING_KEY`, `kid`); retired keys still listed.
+3. **The forge courier.** Its own credential kind, never a machine key, never the pool; `?delivers=forge-check`; `check_id` on `sent`; an unsent notice listed after 15 minutes.
+4. **Read-back.** The sync reads the check runs; a run Baton did not issue is logged `check-mismatch`.
+
+### Do not
+
+- Let the course file's `checks` set conclusions: they are the owners'.
+
+### Tests
+
+- S-BTN-68, S-BTN-81; G-BTN-93, G-BTN-103.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] merged under the review gate
+
+## Status
