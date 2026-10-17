@@ -18,7 +18,7 @@ updated: 2026-10-17
 
 # immediately.run Baton — the factory's live state, off git
 
-**Status:** proposal — approved 2026-10-13 after a claims-truth review and five adversarial and final review rounds (Review record); owned by project [`baton`](../tickets/projects/baton.mdx), items R3-1205–R3-1221 (§13). **Amended 2026-10-14** (owner direction): the ticket as a course of legs derived from git (§6.12), rate-limit exhaustion, provider budget forecasts and model advice as the `roadmap-pr` course's logic (§7.3, now `BATON_ROADMAP_PR_COURSE`), Baton as an advisor that gates only safety (R-BTN-45), the boundary between Baton and courses (§2b, R-BTN-50), hooks, probes and their trust model (§2c), hosting on Cloudflare and locally (§3a), **amended 2026-10-15** with blocks and their queries (§2g), positions, history, contracts and replay (§2h), child tickets, the capacity envelope and owner-state export (§2i), time on legs and the push doorbell (§2j), SSH key identity (R-BTN-13 as amended), administration by deployment-anchored administrators and repository owners (§10.6), provider capacity as course logic and the tags gate (§2b, §7.3), cooperative locks with detection (R-BTN-46), and registered repositories and courses (§2a), **amended 2026-10-16** so Baton runs without GitHub — forges, sync keys, pulled syncs, per-forge notifications and the `branch` course (§2k, R3-1253) — and **amended again 2026-10-16** so Baton runs no repository code: hooks retired, workers rank from a fleet and instance view, claims name preferences and the accounts they bill, readings kept per instrument from any machine key, a machine key trusted to sync, report and deliver, worker couriers, open-world claims and a passive plain git server (§2l) — reviewed adversarially six times on 2026-10-14 and revised after each (Review record), §2l twice on 2026-10-16 and revised; a cutover precondition (§13); **amended 2026-10-17** (owner direction, §2m): the runner organizes a ticket's legs and sessions report to it (R-BTN-106), cloud sessions as runners (R-BTN-107), one envelope and named, refinable schemas for leg outputs and readings (R-BTN-108), station entry requirements (R-BTN-109), the standard output formats (R-BTN-110), a course's signature (R-BTN-111), declarative views (R-BTN-112), session links (R-BTN-113), check courses and the merge check delivered by a forge courier (R-BTN-114, R-BTN-115), legs a person runs (R-BTN-116), registration tokens and API keys (R-BTN-117), a running leg's output streamed to its viewers (R-BTN-118) and stopping a running leg (R-BTN-119), a leg's prerequisites in one place (R-BTN-120) and capability types declared by courses (R-BTN-121) · **Updated:** 2026-10-17
+**Status:** proposal — approved 2026-10-13 after a claims-truth review and five adversarial and final review rounds (Review record); owned by project [`baton`](../tickets/projects/baton.mdx), items R3-1205–R3-1221 (§13). **Amended 2026-10-14** (owner direction): the ticket as a course of legs derived from git (§6.12), rate-limit exhaustion, provider budget forecasts and model advice as the `roadmap-pr` course's logic (§7.3, now `BATON_ROADMAP_PR_COURSE`), Baton as an advisor that gates only safety (R-BTN-45), the boundary between Baton and courses (§2b, R-BTN-50), hooks, probes and their trust model (§2c), hosting on Cloudflare and locally (§3a), **amended 2026-10-15** with blocks and their queries (§2g), positions, history, contracts and replay (§2h), child tickets, the capacity envelope and owner-state export (§2i), time on legs and the push doorbell (§2j), SSH key identity (R-BTN-13 as amended), administration by deployment-anchored administrators and repository owners (§10.6), provider capacity as course logic and the tags gate (§2b, §7.3), cooperative locks with detection (R-BTN-46), and registered repositories and courses (§2a), **amended 2026-10-16** so Baton runs without GitHub — forges, sync keys, pulled syncs, per-forge notifications and the `branch` course (§2k, R3-1253) — and **amended again 2026-10-16** so Baton runs no repository code: hooks retired, workers rank from a fleet and instance view, claims name preferences and the accounts they bill, readings kept per instrument from any machine key, a machine key trusted to sync, report and deliver, worker couriers, open-world claims and a passive plain git server (§2l) — reviewed adversarially six times on 2026-10-14 and revised after each (Review record), §2l twice on 2026-10-16 and revised; a cutover precondition (§13); **amended 2026-10-17** (owner direction, §2m): the runner organizes a ticket's legs and sessions report to it (R-BTN-106), cloud sessions as runners (R-BTN-107), one envelope and named, refinable schemas for leg outputs and readings (R-BTN-108), station entry requirements (R-BTN-109), the standard output formats (R-BTN-110), a course's signature (R-BTN-111), declarative views (R-BTN-112), session links (R-BTN-113), check courses and the merge check delivered by a forge courier (R-BTN-114, R-BTN-115), legs a person runs (R-BTN-116), registration tokens and API keys (R-BTN-117), a running leg's output streamed to its viewers (R-BTN-118) and stopping a running leg (R-BTN-119), a leg's prerequisites in one place (R-BTN-120), capability types declared by courses (R-BTN-121) and retry policies per leg (R-BTN-122) · **Updated:** 2026-10-17
 
 > **Reads first:** `PARALLEL_AGENT_DOCS_SPEC` §5 (R-PAD-6/7: claims and ids as one
 > scripted act on `docs/main`; this spec amends R-PAD-6 only, §15), `docs/scripts/claim.sh`
@@ -546,7 +546,7 @@ section is what makes that safe.
   | `owner_bars` (R-BTN-67) | its owners | tags no worker may claim or advance with, on matching legs of one course or of every course, in a time window — for docs, the owner's provider suspensions |
   | `required_bars` (R-BTN-67) | its owners | a leg of a course — or every leg but those listed — must carry a barred tag with a given prefix; for docs' `roadmap-pr`, every leg but `implement`, `review` and `adjudicate` must bar a `family:` tag, so a new or re-routed writing leg is covered too (R-BTN-67 states what it still cannot catch) |
   | `tiers` | the administrator, at registration | the tier ladder rule 5 compares; a grant's `max_tier` (R-BTN-58) caps what a key may declare |
-  | `retry` | its owners | R-BTN-23's backoffs and attempt limit, so no commit can let a poisoned ticket burn quota |
+  | `retry` | its owners | R-BTN-23's backoffs and attempt limit, so no commit can let a poisoned ticket burn quota — *(§2m)* the default leg policy, its ceiling and its floor of never-retried types (R-BTN-122) |
   | `unblocked_trigger` (was `unblocked_workflow`, R-BTN-94) | its owners | the adapter call Baton makes when a ticket unblocks (R-BTN-77) |
   | `transcript_repos` | its owners | the only repositories a transcript pointer may name (§6.8) |
   | `weight` | the administrator | cross-repository priority (R-BTN-61) |
@@ -859,7 +859,7 @@ another ticket, or a third-party resource is unavailable.)*
   `tickets.blocked_since`; `blocked` and `unblocked` (R-BTN-77) are its transitions, except that
   a claim starting or ending changes it silently — a claimed ticket is not waiting, and its end
   is not an unblocking. The same answer lists, as `other`, what else keeps it
-  from being offered that is not a block: a hold or a backoff (§8, §6.10), a leg waiting on a
+  from being offered that is not a block: a hold or a backoff (§8, §6.10; *2026-10-17, §2m: a leg's backoff is now a block of kind `retry`, R-BTN-122*), a leg waiting on a
   course label (`waiting_on`, R-BTN-70: `ci`, `owner`, `policy`) or on `time` (R-BTN-89), owner bars on every live
   worker's tags (R-BTN-67), an unconfirmed end (§6.7). Blocks bind as their kind does: a
   `ticket` block refuses a claim and a `capability` block refuses the workers it names (rules
@@ -2379,7 +2379,7 @@ ssh for runner auth is not great, users should be able to fall back to regular a
 non-interactive leg's output streams to the dashboard over the existing WebSocket stack —
 "we don't need hand-rolled encryption for streaming logs if we use standard wss://"; and the
 dashboard can stop a running leg; and, the same day, a leg's prerequisites in one place, with
-capability types a course declares — §2m.6.)*
+capability types a course declares — §2m.6; and retry policies per leg, a backoff being one more prerequisite — §2m.6a.)*
 
 What follows is the whole of the change. The rules it amends carry a dated note pointing here.
 **Scope, stated:** no new principal tier in Baton's sense beyond the two credential kinds
@@ -2785,8 +2785,9 @@ prerequisite may say where the other ticket is now (`at`) or that it has been th
 (`reached`); capability types are declared in each course file.)*
 
 - **R-BTN-120 (a leg's prerequisites).** *(Amends R-BTN-69, R-BTN-75, R-BTN-76 and §7.2 rule 4.)*
-  A leg can be started when every one of its prerequisites holds. There are five kinds, and the
-  course file names four of them under the leg's `requires`:
+  A leg can be started when every one of its prerequisites holds. There are six kinds; the
+  course file names three of them under the leg's `requires`, and its `retry` policy governs
+  a fourth (R-BTN-122):
 
   ```json
   "deploy": { "from": ["approved"], "to": "deployed",
@@ -2824,6 +2825,9 @@ prerequisite may say where the other ticket is now (`at`) or that it has been th
   - **People** — no decision is open on the leg or the ticket (R-BTN-78). Where the next leg
     needs the answer itself, the course routes the ticket through a person's leg and requires
     its output at the station (R-BTN-116, R-BTN-109); no separate field is needed.
+  - **Retry** — the leg is not waiting out a backoff: after a failed attempt, its retry policy
+    sets when it may next be tried (`retry_after`, R-BTN-122), and until then no worker may
+    claim it or advance into it.
 
   **Stored, as blocks are.** Each unmet prerequisite is a `ticket_blocks` row (R-BTN-75) on
   the leg it belongs to: `ticket` rows now carry the leg and `ref`
@@ -2856,7 +2860,9 @@ prerequisite may say where the other ticket is now (`at`) or that it has been th
     with `worker=me`, `not-declared` or `not-granted` for the asking runner;
   - `resource`: `unavailable`, with `until`;
   - `decision`: `open`, with its `url` and `asks`;
-  - `other`, as R-BTN-75's answer has it: a hold, a backoff, a `waiting_on` label, `time`, owner
+  - `retry`: `backing-off`, with `until` (its `retry_after`) and `attempt: <n> of <max>`, or
+    `budget-spent` when its `max_attempts_s` has run out (R-BTN-122);
+  - `other`, as R-BTN-75's answer has it: a hold, a `waiting_on` label, `time`, owner
     bars on every live runner's tags, an unconfirmed end.
 
   It reads the blocks index and, for `worker=me`, rule 4 for that one runner — never a pass
@@ -2907,6 +2913,67 @@ prerequisite may say where the other ticket is now (`at`) or that it has been th
     `<type>:*`. A legacy capability with no `:` (`agent-venue`) is accepted as a type-less
     name only for a course file that declares no types.
 
+### 2m.6a Retries per leg
+
+*(Owner, 2026-10-17: "We haven't talked about retries. Some errors should be retryable, other
+errors no, and we haven't talked about a retry schedule. These are all core concepts in
+temporal, which apply equally well to the legs of a course." Agreed the same day, with: "When
+the retry policy prescribes a delay until a leg is retried, this becomes another type of
+prerequisite which disqualifies a leg from being claimed by a worker if it is still waiting on
+the next retry attempt.")*
+
+- **R-BTN-122 (leg retry policies, course-declared error types, owners' bounds).** *(Amends
+  §6.10, R-BTN-23, R-BTN-66 and R-BTN-75.)*
+  - **Error types are the course's.** The course file declares
+    `"error_types": {<type>: {"retryable": true | false, "description": …}}`, a type matching
+    `^[a-z][a-z0-9.-]{0,63}$`. A leg script throws `LegError(type, message)` (the runner's
+    export, Temporal's `ApplicationFailure`); the runner ends the claim
+    `released:cannot-finish:<class>` with `error: {type, message}` — `message` free text under
+    §10.4. Core's own classes (`transient`, `capability`, `spec`, `contract-output`,
+    `contract-input`) are built-in types with their present retryability, and the class of a
+    course type is `transient` when it is retryable, else `spec`. An exception the script does
+    not type is `transient`: retried, as Temporal retries an unknown error. `baton test-course`
+    refuses a leg policy naming an undeclared type.
+  - **A leg may carry a policy:** `"retry": {"initial_s": 3600, "coefficient": 4,
+    "max_interval_s": 86400, "max_attempts": 3, "non_retryable": [<type>, …], "in_claim": 0,
+    "max_attempts_s": null}`. After failed attempt *n* (counted as §6.10 counts, but **per
+    ticket and leg**, so a failing `review` spends none of `implement`'s), the leg's
+    `retry_after` is now plus `min(initial_s × coefficient^(n−1), max_interval_s)`, multiplied
+    by a uniform factor in [0.9, 1.1] so tickets failing together do not return together. When
+    *n* reaches `max_attempts`, or the type is non-retryable, Baton holds the ticket and raises
+    `baton:retries` as today (R-BTN-78). A leg with no policy takes the repository's default.
+  - **A backoff is a prerequisite.** While `now < retry_after` the leg's prerequisite `retry`
+    is unmet (R-BTN-120): it is a `ticket_blocks` row of kind `retry` on that leg, with
+    `until` its `retry_after`, so it refuses a claim into the leg and an `advance` into it,
+    keeps the leg out of recommendations, and `baton why` shows it with the attempt count. The
+    alarm clears the row at `retry_after` and the leg's `unblocked` event follows (R-BTN-77).
+    A backoff on one leg does not stop the ticket's other legs.
+  - **In the claim, first.** `"in_claim": n` lets the runner re-run a leg that failed with a
+    retryable type up to *n* more times under the same claim, waiting the first steps of the
+    same schedule (capped at 5 minutes each, so a claim never idles for hours), before it
+    releases with a failed attempt. An in-claim retry is not a run for `max_runs` (§2e) and
+    not a failed attempt; each one is an activity in the history (§6.9). It suits a network
+    blip or a provider's 429, where giving the ticket back costs more than waiting.
+  - **A budget across attempts.** `max_attempts_s`, Temporal's schedule-to-close: seconds from
+    the leg's first attempt within which every attempt must start. Past it the leg is not
+    retried, whatever `max_attempts` says, and the ticket is held as above, with `why:
+    budget-spent`. With `max_duration` (R-BTN-90; start-to-close) and the lease timeout
+    (R-BTN-9; heartbeat), and `max_ready_s` below, the four Temporal timeouts each have a home.
+  - **Ready but untaken.** A leg may carry `"max_ready_s"`, Temporal's schedule-to-start: a leg
+    `ready` and unclaimed for that long is listed under **Needs you**. `baton:stalled`
+    (R-BTN-78) keeps its fixed 72 hours for legs that set none.
+  - **The owners bound every policy** (R-BTN-66: the course file is in git, and an agent could
+    otherwise set `max_attempts: 1000` and burn quota). The owners' `retry` setting holds the
+    repository's **default policy** (by default: `initial_s` 3600, `coefficient` 4,
+    `max_attempts` 3 — today's 1 hour, 4 hours, then a hold), a **ceiling** (`max_attempts`
+    and `max_attempts_s` at most, `initial_s` at least) and a **floor** of types that are
+    never retried. Baton applies, field by field, the stricter of the course's policy and the
+    owners' bounds, so a course can only tighten them; `baton test-course` warns where it cuts
+    a course's policy back, and the course's view shows the policy in force.
+  - **What stays.** `lease-lost` counts once per distinct worker; `contract-input` holds at
+    once and is not an attempt; lifting a hold resets the counts (now per leg) — §6.10 as it
+    reads, with the counting per leg.
+
 ### 2m.7a The wire, the settings and the interfaces
 
 §11's existing rows gain these fields; §11 also lists §2m's new routes.
@@ -2918,7 +2985,8 @@ prerequisite may say where the other ticket is now (`at`) or that it has been th
 | `POST /v1/owner/{repository}/couriers` | `{public_key, delivers: ['forge-check']}` beside `{public_key, asks}` (R-BTN-115) |
 | `POST /v1/courier/notices/claim` | `?delivers=forge-check`; the notice `{notice_id, kind: 'forge-check', repository, sha, name, conclusion, summary, seq, issued_at, kid, signature}` (R-BTN-114) |
 | `POST /v1/courier/notices/{id}` | `check_id` when marking a `forge-check` notice `sent` |
-| `PUT /v1/owner/{repository}/settings` | `api_keys`, `required_independence`, `checks` (R-BTN-117, R-BTN-106, R-BTN-114) |
+| `PUT /v1/owner/{repository}/settings` | `api_keys`, `required_independence`, `checks`; `retry` as `{default, ceiling, never_retry}` (R-BTN-117, R-BTN-106, R-BTN-114, R-BTN-122) |
+| `POST /v1/runner/end` (released) | `error: {type, message?}` (R-BTN-122) |
 | `POST /v1/owner/{repository}/check-runners`, `…/{fingerprint}/revoke` *(new)* | an owner registers or revokes a check-runner key (R-BTN-114) |
 | `PUT /v1/admin/settings` *(new)* | an administrator sets `link_hosts` and `session_hosts`, kept in a new single-row `instance_settings` table (R-BTN-112, R-BTN-113) |
 | **Stop leg** | the existing `POST /v1/ui/messages` with `{kind: 'release', payload: {ticket_id, reason: 'requested'}}` (§9) — no new route |
@@ -2941,7 +3009,9 @@ a leg run's `session_url`; the `watch` and `unwatch` rings; the `forge-check` no
 discrepancy subs `output-invalid` and `check-mismatch`; a leg's `requires` (`tickets`,
 `capabilities`, `resources`), a ticket's posted `depends_at`, `ticket` blocks per leg with
 `at` or `reached`, and a course's `capability_types` and `capability_roles` (§2m.6); the check-runner key role; and
-the **Needs you** entry `prerequisite-cycle` (§2m.6).
+the **Needs you** entry `prerequisite-cycle` (§2m.6); a course's `error_types`, a leg's
+`retry`, `max_ready_s` and `max_attempts_s`, the `retry` block kind, an end's `error`, and
+attempt counts per ticket and leg (§2m.6a).
 
 ### 2m.8 Scenarios and gates
 
@@ -2970,6 +3040,11 @@ the **Needs you** entry `prerequisite-cycle` (§2m.6).
   | S-BTN-80 signatures and spawns | a leg declares `spawns` of a course whose start requires `brief` and whose end stations `done` and `abandoned` produce `result` and nothing; the leg provides `brief` and awaits `result` | `baton test-course` prints both courses' signatures and reports that `abandoned` does not produce `result` |
   | S-BTN-81 a check nobody sends | a `forge-check` notice is queued and no forge courier claims it for 15 minutes; a work key tries to claim the check ticket | the notice is listed under **Needs you** and the change stays pending; the work key's claim is refused |
   | S-BTN-82 prerequisite cycles and closed tickets | A's leg requires B `at: merged`; B's requires A `reached: planned`; C requires D `at: merged` and D is withdrawn; E requires F `reached: review` and F closes done | A and B stay blocked and are listed `prerequisite-cycle`; C's prerequisite never holds; E's holds from `closed_tickets.final_path` |
+  | S-BTN-83 an exponential schedule | a leg's policy is `initial_s` 600, `coefficient` 2, `max_interval_s` 3600, `max_attempts` 5; it fails four times, `transient` | its `retry_after`s are 10, 20, 40 and 60 minutes after each failure, each within ±10%; while one runs, the leg is not offered, a claim into it is refused, and `baton why` shows `retry: backing-off` with `attempt: n of 5`; at `retry_after` the leg is offered again and `unblocked` fires; the ticket's other legs are unaffected |
+  | S-BTN-84 course error types | a course declares `merge-conflict` non-retryable and `rate-limited` retryable; a leg throws each, and once throws a plain `Error` | `merge-conflict` holds the ticket at once with `baton:retries`; `rate-limited` and the plain error back off as `transient`; each end carries `error.type` |
+  | S-BTN-85 in-claim retries | a leg with `in_claim: 2` fails `rate-limited` twice, then succeeds | the runner re-runs it under the same claim, waiting at most 5 minutes each time; the claim advances; no failed attempt is counted and `max_runs` is untouched; two activities record the retries |
+  | S-BTN-86 owners bound the course | the owners' `retry` ceiling is `max_attempts` 3 and its floor names `spec-violation`; a course sets `max_attempts` 1000 and makes `spec-violation` retryable | Baton applies 3 attempts and never retries `spec-violation`; `baton test-course` warns of both cut-backs; the course's view shows the policy in force |
+  | S-BTN-87 a budget across attempts | a leg has `max_attempts_s` 7200 and `max_attempts` 10; its third failure's backoff would start an attempt after 2 hours | the leg is not retried; the ticket is held, `why: budget-spent`; a leg with `max_ready_s` 3600, ready and unclaimed for an hour, is listed under **Needs you** |
 
 - **New gates** (Must-establish, §16):
 
@@ -2991,6 +3066,9 @@ the **Needs you** entry `prerequisite-cycle` (§2m.6).
   | A schema posted with a changed digest, outside the subset, with an unsupported pattern, in a `$ref` cycle, or under a `std:` id or another course's prefix is refused; schemas are keyed per repository | G-BTN-102 (S-BTN-79) |
   | Only a check-runner key claims a check ticket; the conclusions come from the owners' setting; an unsent `forge-check` is listed after 15 minutes | G-BTN-103 (S-BTN-68, -81) |
   | A prerequisite cycle keeps its blocks and is listed; a withdrawn ticket meets no prerequisite; `reached` on a closed ticket reads its final path | G-BTN-104 (S-BTN-82) |
+  | A leg in backoff is a `retry` block until its `retry_after`: refused at claim and advance, absent from recommendations, shown by `baton why`; the schedule is the policy's, jittered ±10%, counted per ticket and leg | G-BTN-105 (S-BTN-83) |
+  | A course-declared non-retryable type holds at once; an untyped error is `transient`; in-claim retries count neither as runs nor as attempts | G-BTN-106 (S-BTN-84, -85) |
+  | The policy in force is, field by field, the stricter of the course's and the owners' bounds; `max_attempts_s` stops retries once spent | G-BTN-107 (S-BTN-86, -87) |
 
 ## 3. The service *(proposal)*
 
@@ -4198,6 +4276,8 @@ dashboard draws on each worker's timeline. They replace the earlier free-text `s
 
 ### 6.10 Attempts, retries and the automatic hold
 
+*(Amended 2026-10-17 by §2m: retries are per leg, with course-declared error types, an exponential schedule, in-claim retries and a budget across attempts, bounded by the owners (R-BTN-122); a backoff is a leg prerequisite, `retry` (R-BTN-120).)*
+
 A ticket that defeats every claimant — a contradictory spec, an environment that fails, a
 tier set too low — would otherwise be claimed, reaped and claimed again for ever, spending
 quota each time.
@@ -4223,7 +4303,7 @@ quota each time.
   raised — R-BTN-82). `capability` and `spec` are
   **non-retryable**: the server holds the ticket at once (`hold_reason:
   non-retryable:<class>`), because another claimant would hit the same wall.
-- **R-BTN-23 (retry policy).** After a failed attempt the ticket is not claimable for a
+- **R-BTN-23 (retry policy).** *(Amended 2026-10-17 by §2m: the fixed backoffs below become the owners' default policy, initial 1 hour, coefficient 4, three attempts; a leg may carry its own policy within the owners' ceiling and floor, attempts are counted per ticket and leg, and a course may declare its own error types (R-BTN-122).)*  After a failed attempt the ticket is not claimable for a
   backoff — by default 1 hour after the first, 4 hours after the second (`retry_after`);
   a repository's owners may set its own backoffs and limit (`retry`, a Baton setting —
   R-BTN-66 — so no commit can loosen it). After the **third**
@@ -6180,6 +6260,13 @@ table is in docs' `BATON_DOCS_DEPLOYMENT` §16, where `check-spec-anchors` re-re
   Chose each course file over the repository's `baton.json` (owner); two courses may define one
   type differently, and the dashboard shows it. Rejected: keeping `ROLES` in docs' vendored
   library — core would keep one deployment's vocabulary.
+- **Retries per leg, typed by the course, bounded by the owners** (2026-10-17, owner; R-BTN-122):
+  Temporal's retry policy, error types and timeouts apply to legs as to activities. A backoff
+  is a prerequisite (owner), so a leg waiting for its next attempt is never offered and `baton
+  why` says so. Courses declare and type their errors; owners hold the default, the ceiling
+  and the floor, because a course file is in git. Rejected: retry policies only per
+  repository (today's) — one failing leg spent every leg's attempts; letting the course's
+  policy override the owners' — an agent could raise `max_attempts` without bound.
 - **Stopping a leg is the runner's, asked through Cancel** (2026-10-17, owner; R-BTN-119): the
   existing release path is authenticated and logged; a viewer's stream never controls.
 
@@ -6198,7 +6285,8 @@ table is in docs' `BATON_DOCS_DEPLOYMENT` §16, where `check-spec-anchors` re-re
 - **Default timeout budgets** (Temporal's start-to-close and schedule-to-start): a course sets
   its own `max_duration` per leg (R-BTN-90); a default per tier for a claim, and an alert when a
   ready ticket has had no eligible worker for N hours, still need a few weeks of activity data
-  first.
+  first. *(2026-10-17, R-BTN-122: a leg may now set `max_ready_s` and `max_attempts_s`; the
+  defaults per tier remain open.)*
 - Should the mirror also write activities (review rounds) into git, or is the export enough?
   *(2026-10-14: legs are already in git as their evidence, §6.12.)*
 - **Dynamic Workers on our plan** (R-BTN-52): availability and pricing of the Worker Loader
