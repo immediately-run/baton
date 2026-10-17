@@ -3262,7 +3262,7 @@ have the prefix baton leg … baton leg log would give you the logs produced by 
 given ticket." Asked how a finished leg's log is kept, the owner chose to save each leg run's
 output now, and to rename the old commands outright, with no aliases.)*
 
-- **R-BTN-127 (the CLI is a tree of nouns and verbs).** *(Amended 2026-10-17 by §2m: the tree below is generated from the action registry's `cli` entries, and each command's **Signs as** is its entry's `principal` — R-BTN-129.)* *(Amends R-BTN-58, R-BTN-72, R-BTN-74,
+- **R-BTN-127 (the CLI is a tree of nouns and verbs).** *(Amended 2026-10-17 by §2m: the tree below is generated from the registry's command table, and each command's **Signs as** is its actions' `callers`, in order — R-BTN-129.)* *(Amends R-BTN-58, R-BTN-72, R-BTN-74,
   R-BTN-80, R-BTN-84, R-BTN-106, R-BTN-117, §2d, §3a, §6.13 and every command this spec
   names.)* Every command is `baton <noun> <verb> [<arguments>] [<flags>]`, as `git remote add`
   is; the only top-level verbs are `help` and `version`. Each command signs as one key role
@@ -3477,7 +3477,9 @@ and to put every route in the registry, with the MCP surface filtered.)*
 - **R-BTN-130 (Baton serves MCP).** *(Amends §10.1, §11, R-BTN-57, R-BTN-58, R-BTN-66 and
   R-BTN-117.)*
   - **What MCP may reach is a closed list.** `mcp: true` is allowed only on:
-    - an action whose `effect` is `read` and whose `callers` include `owner`;
+    - an action whose `effect` is `read`, whose `callers` include `owner`, and which is no
+      WebSocket upgrade (a stateless JSON endpoint cannot hold a stream, so `leg.stream` and
+      every `http.upgrade` entry are never `mcp: true`);
     - the three narrow writes `ticket.expedite`, `ticket.hold` and `leg.stop` (destructive).
 
     `npm run check:actions` fails on any other `mcp: true`. Never reachable over MCP, so,
@@ -3492,21 +3494,26 @@ and to put every route in the registry, with the MCP surface filtered.)*
       agents.
   - **The MCP key.** An MCP caller presents a bearer **MCP key**, an API key of the kind `mcp`
     (R-BTN-117).
-    - **Minting.** An owner mints one through its own action, `owner.mcp-key.create`:
+    - **Minting.** An owner mints one through its own action, `owner.mcp-key.create`, whose
+      `callers` are exactly `[owner]` — no dashboard session or administrator mints one, so
+      every key has a minting owner key to die with, and `check:actions` fails otherwise:
       `baton owner mcp-key create <repository> --name <name> [--actions read | <id>,…]
       [--ttl <days>]`, which is `POST /v1/owner/{repository}/mcp-keys`. `--name` is unique in
       the repository. It returns the key once, as `bmcp_` followed by 32 random bytes in
       base32; the prefix is for secret scanning. Baton stores its hash.
-    - **What Baton stores.** The repository, the minting owner key's fingerprint, the name,
-      the action ids resolved at minting, the expiry and the last use. `read` means the
+    - **What Baton stores.** One `mcp_keys` row (§4): the repository, the name, the key's hash,
+      the minting owner key's fingerprint, the action ids resolved at minting, the expiry, the
+      last use and any revocation. "The kind `mcp`" names this table, not a `credentials.kind`
+      value; `credentials` keeps its fingerprint-keyed rows. `read` means the
       allowlisted `read` ids that exist at minting, so a later release never widens a key.
       `leg.stop`, the destructive one, is included only when listed by id. An id outside the
       allowlist, or outside the owner's own actions, is refused at minting.
     - **Lifetime.** At most 90 days (default 30); 7 days with no call end it. The last use is
       written at most once a minute per key.
-    - **Death.** The key dies when its minting owner key is removed or revoked, or when the
-      repository's owners set `api_keys: false` (R-BTN-117 covers every API key, MCP keys
-      included). Its owners revoke it with `owner.mcp-key.revoke` (`POST
+    - **Death and refusal.** The key dies when its minting owner key is removed or revoked.
+      While the repository's owners have `api_keys: false` it is refused, as every API key is
+      (R-BTN-117), and it works again when the setting returns to `true`, if it has not
+      expired. Its owners revoke it with `owner.mcp-key.revoke` (`POST
       /v1/owner/{repository}/mcp-keys/{name}/revoke`, `confirm: true`). It is listed with
       the repository's credentials, with its minter.
   - **How it authorizes.** `authorize` treats an `mcp` principal as its minting owner, on its
@@ -3517,7 +3524,9 @@ and to put every route in the registry, with the MCP surface filtered.)*
   - **The endpoint.** `POST /v1/mcp` speaks MCP's streamable HTTP transport, statelessly, in
     JSON (no server-sent stream):
     - Revisions: the ones the build lists in `MCP_VERSIONS` (at least `2025-06-18`), as
-      `initialize` negotiates. A request whose `MCP-Protocol-Version` is not listed is `400`.
+      `initialize` negotiates. `initialize` needs no `MCP-Protocol-Version` header. On any
+      other request an absent header means `2025-03-26`, as the transport says, and a revision
+      not in `MCP_VERSIONS`, given or assumed, is `400`.
     - Methods: `initialize`; `notifications/initialized`, and any other notification,
       answered `202`; `ping`; `tools/list`; `tools/call`. Any other method is JSON-RPC
       `-32601`, and a batch array is `-32600`.
@@ -3541,15 +3550,16 @@ and to put every route in the registry, with the MCP surface filtered.)*
     `leg.stop` only by explicit id — together with the key's narrow list.
   - **Content is data.** Ticket titles, decision text and readings come from git and from
     workers. They are returned as JSON values and rendered text, never as instructions, and
-    the tool descriptions say so (P8). `leg.log` over MCP returns the run's pointers and live
-    state, not the log's bytes: Baton holds none (R-BTN-128).
+    the tool descriptions say so (P8). An agent reads a leg's log through `leg.runs`, which
+    returns the run's pointers and live state, never the log's bytes: Baton holds none
+    (R-BTN-128).
   - **Bounds.**
     - **Rate.** At most 60 calls per key in any 60 seconds, counted in the repository's
       object, in memory. A restart empties the counter, which is the one burst it allows. A
       call over the limit is refused `rate-limited`, with `retry_after_s`.
     - **Pages.** A tool whose output is a list takes an optional `cursor` input and returns
-      `next_cursor`. The cursor is opaque, bound by HMAC to the key, the action and the
-      input, and refused under any other.
+      `next_cursor`. The cursor is opaque, bound by an HMAC under `CursorKey` (R-BTN-55) to
+      the key, the action and the input, and refused under any other.
     - **Size.** A page is at most 256 KB; a single item larger than that is refused
       `too-large`.
 
@@ -3588,7 +3598,7 @@ and to put every route in the registry, with the MCP surface filtered.)*
 | **Stop leg** (the dashboard) | the existing `POST /v1/ui/messages` with `{kind: 'release', payload: {ticket_id, reason: 'requested'}}` (§9) — no new route; *(2026-10-17, R-BTN-127)* the CLI's `baton leg stop` uses `POST /v1/owner/{repository}/tickets/{ticket}/release` |
 | `baton owner key create --api` | `POST /v1/owner/{repository}/grants` with `{name, api_key: true, capabilities, max_tier?}`, returning `{api_key}` once (R-BTN-117) |
 
-**R-BTN-55's interface table gains** `Stream` (Cloudflare: a Durable Object per claim on the
+**R-BTN-55's interface table gains** `CursorKey` (Cloudflare: the `BATON_CURSOR_KEY` secret; local: a key file; R-BTN-130), `Stream` (Cloudflare: a Durable Object per claim on the
 hibernation API; local: an in-process fan-out) and `SigningKey` (Cloudflare: the
 `BATON_SIGNING_KEY` secret; local: a key file), so S-BTN-68 and S-BTN-70 run on both hosts.
 **§4 gains** `instance_settings` (`link_hosts`, `session_hosts`), `check_runners`
@@ -3596,7 +3606,7 @@ hibernation API; local: an in-process fan-out) and `SigningKey` (Cloudflare: the
 `final_path`, schemas keyed `(repository_id, id, version)`, `leg_attempts` (repository,
 ticket, leg, `attempts`, `first_attempt_at`, `retry_after`, `last_error_type`; R-BTN-122),
 `claims.error_type` (the message is not stored, R-BTN-33), `ticket_blocks.kind` `retry`,
-`couriers.severities`, `notices` carrying `severity`, `ticket_blocks.provisional` (the commit a provisional row waits for) and `ticket_blocks.found` (`before-start` or `during-run`), `leg_needs.source` (`posted` or `end`), `added_at` and `found_at`, `claims.blocked_kind` and `blocked_ref` with an index on (ticket, leg, ended_at), the hold reason `blocked-exhausted` (R-BTN-126), `leg_logs` (claim, leg, run, repo, path, pushed_at, bytes; R-BTN-128), `repositories.leg_logs`, `claim_legs.leg_logs_repo`, and the owner settings above.
+`couriers.severities`, `notices` carrying `severity`, `ticket_blocks.provisional` (the commit a provisional row waits for) and `ticket_blocks.found` (`before-start` or `during-run`), `leg_needs.source` (`posted` or `end`), `added_at` and `found_at`, `claims.blocked_kind` and `blocked_ref` with an index on (ticket, leg, ended_at), the hold reason `blocked-exhausted` (R-BTN-126), `leg_logs` (claim, leg, run, repo, path, pushed_at, bytes; R-BTN-128), `repositories.leg_logs`, `claim_legs.leg_logs_repo`, `mcp_keys` (id, repository, name, hash, minter fingerprint, action ids, expires_at, last_used_at, revoked_at; R-BTN-130), and the owner settings above.
 
 ### 2m.7 What core gains
 
@@ -3658,9 +3668,9 @@ attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refr
   | S-BTN-98 a leg's log | a repository with `transcript_repos` and `leg_logs: true`; W1 runs `implement` in `process` mode, unwatched, printing 3 MB that holds the worker secret, a `credential:deploy` value, the push token, a 6-byte credential, and a secret split across two 8 KB reads, plus an OSC 52 sequence; it crosses a 5-minute mark; its first push is rejected; a second leg is `stream: false`; a third run prints 60 MB; a runner under `--max-legs 1` runs a 30-second leg and exits; a heartbeat reports a pointer to another claim's path; the owners turn `leg_logs` off while W1's claim is between `implement` and `review`; a runner archives a run whose reply carried no `leg_logs`; a `post-receive` hook runs `baton repo spool` with no key configured; another repository has `transcript_repos` and no `leg_logs`; a user without read access to the transcript repo runs `baton leg log` | W1 archives the pipes with no viewer, pushes during the run and at its end, retrying the rejected push after a rebase, and reports each push; Baton stores only the pointers; every listed credential, the split one included, appears as `***` in the archive and the stream, and the 6-byte one is logged as unmasked; `baton leg log T implement` prints the finished run from git with the user's credentials, without the OSC 52 sequence, and with `--transcripts` the session's transcript, also stripped; the `stream: false` leg and the repository without `leg_logs` have no archive, and `baton leg log` says why; the 60 MB run's archive ends in one `gap` frame at 50 MB while its stream continues; the short leg's pointer arrives on its `end`; the foreign pointer is dropped, logged `invalid-pointer`; `review`, started after the change, is not archived, and the ungranted run's pointers are dropped `invalid-pointer`; `repo spool` touches the spool file and signs nothing; the user without access gets the run record, "cannot read …" and exit 1 |
   | S-BTN-99 watching from the CLI | an owner of the repository, an administrator, an owner of another repository and a worker key run `baton leg log T implement -f` on a running leg whose archive holds frames up to `seq` 400 and whose scrollback starts at `seq` 350; the first owner's key is then revoked; an owner runs `baton leg stop T` | the owner and the administrator are upgraded on `GET /v1/stream`, print frames up to 400 from the archive, then only stream frames from 401, with OSC sequences stripped; the other two are refused `forbidden` and ring nothing; the revoked key's stream is closed; `leg stop` sends the release, and the runner stops the leg as R-BTN-119 says |
   | S-BTN-100 one registry | the router, the command table, the MCP tool list and §11's rows; an owner key, a worker key, a probe key, an administrator key and a dashboard session each call `GET /v1/actions`; a route is added with no entry; an entry is flagged `mcp: true` on `owner.grant.add`; an id `a_b.c` is added; a body on `POST …/overrides/{ticket}` sets both `hold` and `cancel` | every route, command, tool and row matches one entry, local commands included; each caller is shown only its own actions; `npm run check:actions` fails on the new route, on the flag and on the id; a request matching no entry is answered `404` `not-found`; the mixed body is `invalid-params` |
-  | S-BTN-101 Baton's MCP endpoint | an owner mints `--actions read` and `--actions leg.stop,ticket.hold`, and tries `--actions owner.owners.add`; an agent initializes, sends `notifications/initialized` and `ping`, lists and calls tools with each key; calls `leg_stop` without `confirm`; calls `leg_stop` with the read-only key; names a ticket of another repository; calls an unknown tool; sends a batch, a `GET` and an unlisted protocol version; a request carries a foreign `Origin`; it sends 61 calls in a minute; a list exceeds one page; the key is presented on `POST /v1/owner/{repository}/overrides/{ticket}` | the third mint is refused; the notification is `202` and `ping` answers; the first key lists only read tools, the second adds `leg_stop` and `ticket_hold`; `leg_stop` without `confirm` is `confirm-required`; the read-only key's `leg_stop`, the other repository's ticket and the unknown tool all answer the same `forbidden`; the batch is `-32600`, the `GET` `405`, the version `400`, the `Origin` `403`; the 61st call is `rate-limited` with `retry_after_s`; the page returns a `next_cursor` that another key cannot use; the REST call is `unauthenticated`; a ticket title carrying instructions comes back as a JSON value |
+  | S-BTN-101 Baton's MCP endpoint | an owner mints `--actions read` and `--actions leg.stop,ticket.hold`, and tries `--actions owner.owners.add`; a dashboard session tries to mint one; a request after `initialize` carries no `MCP-Protocol-Version` while `MCP_VERSIONS` lacks `2025-03-26`; an agent initializes, sends `notifications/initialized` and `ping`, lists and calls tools with each key; calls `leg_stop` without `confirm`; calls `leg_stop` with the read-only key; names a ticket of another repository; calls an unknown tool; sends a batch, a `GET` and an unlisted protocol version; a request carries a foreign `Origin`; it sends 61 calls in a minute; a list exceeds one page; the key is presented on `POST /v1/owner/{repository}/overrides/{ticket}` | the third mint is refused, and a dashboard session's mint is `forbidden`; the notification is `202` and `ping` answers; the first key lists only read tools, the second adds `leg_stop` and `ticket_hold`; `leg_stop` without `confirm` is `confirm-required`; the read-only key's `leg_stop`, the other repository's ticket and the unknown tool all answer the same `forbidden`; the batch is `-32600`, the `GET` `405`, the unlisted and the absent versions `400`, the `Origin` `403`; the 61st call is `rate-limited` with `retry_after_s`; the page returns a `next_cursor` that another key cannot use; the REST call is `unauthenticated`; a ticket title carrying instructions comes back as a JSON value |
   | S-BTN-102 the same action, three ways | `leg.stop` on one running leg through `POST /v1/owner/{repository}/tickets/{ticket}/release`, `baton leg stop` and the MCP tool `leg_stop`, each with `confirm` by a key allowed it, then by one that is not | the three allowed calls send the same release through the same core function and return the same output, the MCP one recorded as `mcp:<name>`; the three refusals carry the same code from the same `authorize` call |
-  | S-BTN-103 an MCP key's life | a key minted with `--ttl 120`; a key minted with `read` before a release adds a new read action; a key unused for 8 days; a key whose minting owner key is then revoked; the repository's owners set `api_keys: false`; an owner revokes a key by name without `confirm`, then with it | the 120-day mint is refused; the older key never lists the new action; the idle, orphaned and `api_keys: false` keys are refused `401`; the revoke without `confirm` is `confirm-required`, with it the key is dead |
+  | S-BTN-103 an MCP key's life | a key minted with `--ttl 120`; a key minted with `read` before a release adds a new read action; a key unused for 8 days; a key whose minting owner key is then revoked; the repository's owners set `api_keys: false`; an owner revokes a key by name without `confirm`, then with it | the 120-day mint is refused; the older key never lists the new action; the idle and orphaned keys are dead and refused `401`; under `api_keys: false` the key is refused `401` and works again once the setting is `true`; the revoke without `confirm` is `confirm-required`, with it the key is dead |
 
 - **New gates** (Must-establish, §16):
 
@@ -3671,7 +3681,7 @@ attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refr
   | A value is valid only against its schema and every base; the test kit reports every refinement it cannot prove; one validator module serves server, CLI, sync and kit | G-BTN-91 (S-BTN-65) |
   | An arrival at a station without its entry outputs is refused; an inline value is validated in full; a pointer the sync posts invalid is never resolved as an input | G-BTN-92 (S-BTN-66) |
   | A `success` merge check is queued only after a sync confirms the end and its entry, with the owners' conclusions; every check notice is signed with a named key; a check run Baton did not issue is logged; a forge courier is never a machine key and its notices never go to the pool | G-BTN-93 (S-BTN-68) |
-  | A token-registered credential never exceeds the token's scope and dies with it; an API key is refused on a repository with `api_keys: false` and in any role but worker or personal courier | G-BTN-94 (S-BTN-69) |
+  | A token-registered credential never exceeds the token's scope and dies with it; an API key is refused on a repository with `api_keys: false` and in any role but worker or personal courier *(2026-10-17, §2m: or an MCP key on `POST /v1/mcp`, R-BTN-130, G-BTN-121)* | G-BTN-94 (S-BTN-69) |
   | Leg output is relayed only from the claim's holder, only while an authorized same-origin viewer is watching, within Baton's own size and rate bounds, never for a `stream: false` leg, and is never written to storage, logs or exports | G-BTN-95 (S-BTN-70) |
   | Cancel and a release message stop the leg's process group within 30 seconds of the release reaching the runner, and report no output of the stopped leg | G-BTN-96 (S-BTN-71) |
   | A leg is offered only when its station, its ticket prerequisites (`at`, `reached` or `done`, a withdrawn ticket skipped only where the entry says so), its and its ticket's capabilities, its resources and every decision on it or its ticket hold; each unmet one is a block row on that leg | G-BTN-97 (S-BTN-72, -74) |
@@ -3699,7 +3709,7 @@ attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refr
   | The CLI's stream upgrade is accepted only for an owner key of the claim's repository or an administrator key, under R-BTN-118's rules, and closed when that key is revoked; the CLI joins archive and stream on `seq`, printing no frame twice | G-BTN-119 (S-BTN-99) |
   | Every route, CLI command, dashboard action and MCP tool is a registry entry, authorized by the one `authorize` call; `GET /v1/actions` shows a caller only its own actions; every listed destructive action needs `confirm` on every surface; `check:actions` fails on any unregistered surface, bad id or out-of-allowlist `mcp` flag | G-BTN-120 (S-BTN-100, -102) |
   | An MCP key reaches only its stored, still-allowlisted ids on its one repository, accepted only on `POST /v1/mcp`; it never reaches an administrator action, a machine protocol, a credential or owner change, or an R-BTN-66 write; out-of-scope, unlisted and unknown targets answer alike; the transport, rate and page rules hold | G-BTN-121 (S-BTN-101) |
-  | An MCP key's ids are fixed at minting; it dies with its expiry, 7 idle days, its minting owner key, `api_keys: false` or its revocation | G-BTN-122 (S-BTN-103) |
+  | An MCP key's ids are fixed at minting; it dies with its expiry, 7 idle days, its minting owner key or its revocation, and is refused while `api_keys` is `false` | G-BTN-122 (S-BTN-103) |
 
 ## 3. The service *(proposal)*
 
