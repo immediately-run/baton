@@ -78,7 +78,7 @@ decisions, the events and the queries. Two follow-ups build the rest on top of i
 - **R3-1255** — leg queues (R-BTN-79, revised to a warning): `leg_queues`, `max_queue`, the
   `queue-over` notice, and S-BTN-45's queue case and G-BTN-71.
 - **R3-1256** — notices and couriers (R-BTN-80): `couriers`, `notices`, `/v1/courier/*`,
-  `POST /v1/owner/{repository}/couriers`, `remind_after`, `baton inbox`, S-BTN-46 and G-BTN-72.
+  `POST /v1/owner/{repository}/couriers`, `remind_after`, `baton decision list`, S-BTN-46 and G-BTN-72.
 
 R-BTN-79's revision (the PR adding §2h) removed the `queue` block kind, so `ticket_blocks.kind`
 has four values.
@@ -171,7 +171,7 @@ has four values.
    worker's tags, an unconfirmed end, and `no-instance`), `GET
    /v1/repositories/{repository}/blocked?on=ticket:|resource:|capability:|decision:<id or *>`
    with `transitive=1` (≤ 5 levels) and, with no `on`, grouped by kind and `ref`, 100 per page
-   with `next_cursor`; `baton blocked <ticket>` and `baton blocked --on <kind>:<ref>`; any key
+   with `next_cursor`; `baton ticket blocked <ticket>` and `baton ticket blocked --on <kind>:<ref>`; any key
    granted on the repository, an owner of it or an administrator.
 10. **Dashboard**: each ticket's blocks on the Courses view; **Needs you** lists tickets blocked
     24 hours on a capability no live worker has and instances `unknown` 24 hours while a posted

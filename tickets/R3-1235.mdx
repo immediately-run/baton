@@ -44,7 +44,7 @@ code on the worker, judging room from measurements. Tier: judgement — one cour
 1. The sync's course data: providers (accounts, per-model limits, `max_concurrent`, the prefix → accounts map), prices, matrix and catalog, estimates (p75 per leg kind and family). No `factory_share`; no suspensions (owner bars).
 2. The sidecar: tags (`family:`, `account:`, `model:`) from the harness configuration; hourly reports; a **`measure`** reading per billed account — the session's cumulative list-price spend per window, at each leg's end and at most hourly while billing, `valid_for` up to the longest window (≤ 31 days); `state` readings on a rate limit and on recovery; `bills` on every claim and `advance` (the claimant's coding account for `implement`, `fix`, `merge`; the seats' accounts, with `n`, for `review`).
 3. `.baton/courses/roadmap-pr/rank.mjs`, listed in `protocol_files`: `rank(view)` marks each account short or possibly roomy from its readings, summed `measure`s and billing count against `max_concurrent`; orders candidates; skips a review the worker cannot bill or whose reviewers bill a line under a `no-new-work` bar for a new claim; flags `wip-bound` past 8 tickets beyond `filed`; returns per-candidate `advice` (ranked models, `seat_pairs`) and, for `worker: null`, `launch` (the model to start on).
-4. The leg scripts and `baton-seats.mjs` read `seat_pairs` from the `advice` `baton run` kept, falling back to the matrix order.
+4. The leg scripts and `baton-seats.mjs` read `seat_pairs` from the `advice` `baton runner start` kept, falling back to the matrix order.
 5. The pre-tool hook keeps denying reviewer spawns on suspended lines from the heartbeat's bars, fail closed.
 
 ### Architecture — the decisions, named

@@ -28,9 +28,9 @@ depends_on: []
 ### What to build
 
 1. **Envelope and schemas.** `{name, schema, uri?, digest?, value?}`; schemas immutable per `(repository_id, id, version)`; a sync posts only its own `<course>:` ids; a `std:` post is refused.
-2. **One validator** (`src/shared/schema.mjs`) for server, CLI, sync and the test kit: the subset R-BTN-108 lists, the Thompson-automaton pattern grammar, refinement checked statically by `baton test-course`.
+2. **One validator** (`src/shared/schema.mjs`) for server, CLI, sync and the test kit: the subset R-BTN-108 lists, the Thompson-automaton pattern grammar, refinement checked statically by `baton course test`.
 3. **Entry.** Baton refuses an arrival without its entry outputs (rule `entry`) and validates inline values in full; the sync validates pointers and posts validity; an invalid one is `output-invalid`.
-4. **Library, signatures, views.** Ship `std:` schemas; `baton test-course` prints each course's signature and checks `spawns`; render `x-baton-view` in three renderers that escape or text-set every value and link only to `web_base` or `link_hosts`.
+4. **Library, signatures, views.** Ship `std:` schemas; `baton course test` prints each course's signature and checks `spawns`; render `x-baton-view` in three renderers that escape or text-set every value and link only to `web_base` or `link_hosts`.
 
 ### Do not
 

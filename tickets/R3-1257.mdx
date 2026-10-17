@@ -1,5 +1,5 @@
 ---
-title: "R3-1257 — Baton positions, ticket history, leg contracts and replay: the queued leg, outcome stations, input/output pointers, worker-side schema checks and baton replay"
+title: "R3-1257 — Baton positions, ticket history, leg contracts and replay: the queued leg, outcome stations, input/output pointers, worker-side schema checks and baton leg replay"
 id: R3-1257
 project: baton
 status: available
@@ -12,7 +12,7 @@ tags:
   - roadmap-item
 order: 1090
 tier: critical
-description: "Build BATON_SPEC §2h: every leg result's (reached, next) position stored as the ticket's queued leg and confirmed by locate; outcome stations; owner re-routes; the per-ticket history; leg contracts with input/output pointers resolved by Baton and schemas checked by baton run, failing the leg on a violation; Baton-raised decisions; and baton replay; S-BTN-47, S-BTN-48, G-BTN-73, G-BTN-74 (R-BTN-78, R-BTN-81–85). Requires: none."
+description: "Build BATON_SPEC §2h: every leg result's (reached, next) position stored as the ticket's queued leg and confirmed by locate; outcome stations; owner re-routes; the per-ticket history; leg contracts with input/output pointers resolved by Baton and schemas checked by baton runner start, failing the leg on a violation; Baton-raised decisions; and baton leg replay; S-BTN-47, S-BTN-48, G-BTN-73, G-BTN-74 (R-BTN-78, R-BTN-81–85). Requires: none."
 topics:
   - baton
 owns: {}
@@ -70,11 +70,11 @@ re-runnable. Tier: critical — positions and the queued leg feed rule 1 and eve
    the reserved prefix, `POST …/resolve`.
 8. **Discrepancies** (R-BTN-85): a `discrepancy` event and history row, with both values, in
    every transaction where a snapshot overrides Baton's value; the dashboard's Discrepancies list.
-9. **CLI** (baton repository): `baton run` validates each result's position and schemas, calls the
+9. **CLI** (baton repository): `baton runner start` validates each result's position and schemas, calls the
    leg's `close` to write the closing marker from it (failing the leg
    `cannot-finish:contract-input|-output` instead), provides `ctx.inputs`;
-   `baton replay [--against]` with credentials withheld; `baton owner route|resolve`;
-   `baton test-course`'s dataflow and version checks.
+   `baton leg replay [--against]` with credentials withheld; `baton owner route|resolve`;
+   `baton course test`'s dataflow and version checks.
 
 ### Architecture — the decisions, named
 

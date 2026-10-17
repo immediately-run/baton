@@ -31,7 +31,7 @@ depends_on:
 1. A migration adding `leg_attempts`, `claims.error_type` and the `retry` block kind; rule 10 and the gate query read the leg's backoff.
 2. The schedule, jittered ±10%, counted per ticket and leg; the alarm clears the row and fires `unblocked`.
 3. The runner's `LegError` export and in-claim retries (each an activity, capped at 5 minutes).
-4. The owners' `retry` setting: the default, the ceiling on every quota-spending field, `coefficient` ≥ 1, the floor; `baton test-course` warns of cut-backs and of an undeclared floor type.
+4. The owners' `retry` setting: the default, the ceiling on every quota-spending field, `coefficient` ≥ 1, the floor; `baton course test` warns of cut-backs and of an undeclared floor type.
 
 ### Do not
 
