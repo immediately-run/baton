@@ -526,7 +526,7 @@ section is what makes that safe.
   only the exports it knows (`recommend`, `advance`) and ignores any other, so a course can
   ship an export for a later Baton before that Baton runs it.
 - **R-BTN-66 (agents can change anything in git; what they must not change lives in
-  Baton's SQLite).** *(Owner, 2026-10-14.)* Baton assumes every byte of a registered
+  Baton's SQLite).** *(Owner, 2026-10-14.)* *(Amended 2026-10-17 by §2m: no setting or bar here is writable over MCP; an MCP key reaches only allowlisted reads and three narrow writes, R-BTN-130.)* Baton assumes every byte of a registered
   repository — its `.baton/`, its sync and hooks, its tickets' tiers and requirements, the
   barred tags and leg states the sync computes, any review an agent writes — can be changed
   by an agent, review gate or not. And **Baton does not replace or fortify git's security
@@ -2385,8 +2385,8 @@ dashboard can stop a running leg; and, the same day, a leg's prerequisites in on
 capability types a course declares — §2m.6; and retry policies per leg, a backoff being one more prerequisite — §2m.6a; and, after comparing Baton with Gas Town, a fresh context, a planning course and decision severities — §2m.6b; and a prerequisite that fails during a leg, which blocks that leg's edge and adds no station — §2m.6c; and a CLI of nouns and verbs, with each leg run's output saved to git and read by `baton leg log` — §2m.6d; and one registry of actions behind the REST API, the CLI, the dashboard and MCP — §2m.6e.)*
 
 What follows is the whole of the change. The rules it amends carry a dated note pointing here.
-**Scope, stated:** no new principal tier in Baton's sense beyond the two credential kinds
-R-BTN-115 and R-BTN-117 add; core still reads no course meaning (R-BTN-50); Baton still runs no
+**Scope, stated:** no new principal tier in Baton's sense beyond the credential kinds
+R-BTN-115, R-BTN-117 and R-BTN-130 add (the forge courier, API keys, MCP keys); core still reads no course meaning (R-BTN-50); Baton still runs no
 repository code (R-BTN-98) — a schema and a view are data, and the validator and renderers are
 Baton's own shared code; git stays the truth and Baton a cache (R-BTN-39).
 
@@ -2728,7 +2728,10 @@ Baton's own shared code; git stays the truth and Baton a cache (R-BTN-39).
   - **Roles.** An API key may be a worker's or a personal courier's credential. Administrator,
     owner, sync, instrument and forge-courier credentials stay SSH keys (or, for a sync, a CI
     identity token): each guards something an agent must not reach (R-BTN-57, R-BTN-66), or
-    something an attacker could forge.
+    something an attacker could forge. *(Amended 2026-10-17 by §2m: the one bearer credential that
+    carries owner actions is an MCP key, R-BTN-130. That is acceptable because it reaches only
+    allowlisted reads and three narrow writes on one repository, never a credential, an owner or
+    an R-BTN-66 write. `api_keys: false` refuses MCP keys too.)*
   - **Existing bearer keys.** The bearer tokens and `BATON_KEYS` seed keys the code accepts
     today become API-key credentials when the ticket that builds this rule migrates them: each
     is granted, on each repository it heartbeated or claimed for in the 30 days before, the
@@ -3409,78 +3412,146 @@ questions, the owner chose to keep today's roles and scopes, to serve MCP from B
 and to put every route in the registry, with the MCP surface filtered.)*
 
 - **R-BTN-129 (one registry of actions; every surface is derived from it).** *(Amends §10.1,
-  §11, §14's Actions, R-BTN-57, R-BTN-58 and R-BTN-127.)*
+  §10.6, §11, §14's Actions, R-BTN-57, R-BTN-58 and R-BTN-127.)*
   - **An action** is one entry in `src/shared/actions.mjs`, Baton's own shared code:
-    `{id, summary, principal, scope, requires?, effect, input, output, http, cli?, ui?, mcp}`.
-    - `id` is `<noun>.<verb>` in R-BTN-127's nouns (`leg.why`, `leg.stop`,
-      `owner.grant.add`, `runner.heartbeat`).
-    - `principal` is one of §10.1's: `administrator`, `owner`, `worker`, `courier`, `probe`,
-      `check-runner`, `sync`, `mirror`, or `mcp` (R-BTN-130).
-    - `scope` is what the credential must hold: `instance`, `repository` (the route's
-      repository is one the key owns or is granted on), `claim-holder` (the key holds the
-      claim's lease), or `own` (its own credential or notices).
-    - `requires` names any capability, tier or owner setting the grant must carry, as rule 4
-      and R-BTN-66 read them.
-    - `effect` is `read`, `write` or `destructive`. Destructive actions are the force-reap,
-      Cancel, **Stop leg**, revocations, reset-like settings and a repository's retirement.
+    `{id, summary, callers, effect, input, output, http, ui?, mcp}`.
+    - `id` matches `^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$` — dots and hyphens, never `_` —
+      in R-BTN-127's nouns: `leg.why`, `leg.stop`, `ticket.expedite`, `owner.owners.add`,
+      `runner.heartbeat`.
+    - `callers` lists every principal that may call it, each with its scope. Order matters:
+      the CLI tries them in this order.
+      - The principals: `administrator`, `dashboard` (a dashboard session, which acts as the
+        administrator), `owner`, `worker`, `courier`, `probe`, `check-runner`, `sync`, `mirror`,
+        `mcp` (R-BTN-130), `token` (a registration token, R-BTN-117), `webhook` (the GitHub App's
+        signature), `forge` (a forge verifier, R-BTN-95), and `public` (no credential:
+        `POST /v1/login`, `GET /v1/keys/signing`).
+      - The scopes: `instance`, `repository` (the route's repository is one the key owns or is
+        granted on), `claim-holder` (the key holds the claim's lease), `own` (its own
+        credential or notices), `instances` (a probe's allowed instances, R-BTN-53), and `asks`
+        (a courier's labels, R-BTN-80).
+    - `effect` is `read`, `write` or `destructive`.
     - `input` and `output` are schemas in the shared validator's subset (R-BTN-108).
-    - `http` is the route; `cli` its command (R-BTN-127); `ui` the dashboard control (§14);
-      `mcp` whether R-BTN-130 may expose it.
-  - **One check.** The front resolves the request's principal and scope, then calls
-    `authorize(principal, action, target)` in core: one function, whichever surface the call
-    came from. No route, CLI command, dashboard control or MCP tool checks permissions itself,
-    and a request that matches no registry entry is answered `404`. The dashboard's Actions
-    are registry calls in a dashboard session, which acts as the administrator (§14).
+    - `http` is the route: `{method, path, upgrade?: 'websocket', match?}`. A WebSocket upgrade
+      (`/v1/runner/push`, `/v1/runner/stream`, `/v1/ui/stream`, `/v1/stream`) is an action,
+      authorized at the upgrade. `match` names a body field's value, for a route that serves
+      more than one action: `POST …/overrides/{ticket}` is `ticket.expedite`, `ticket.hold`
+      and `ticket.cancel`, told apart by which field is set, and a body that matches no action
+      or several is `invalid-params`.
+    - `ui` is the dashboard control (§14).
+    - `mcp` is whether R-BTN-130 may expose the action.
+  - **Destructive actions, by id:**
+    - `ticket.cancel`, `leg.stop`, `claim.force-reap`;
+    - `owner.owners.remove`, `owner.grant.revoke`, `owner.courier.revoke`,
+      `owner.check-runner.revoke`, `owner.token.revoke`, `owner.mcp-key.revoke`;
+    - `admin.key.revoke`, `admin.repo.retire`.
+
+    Each of these routes takes `confirm: true` in its body, or is refused `confirm-required`.
+    The CLI asks for it, or takes `--yes`; the dashboard's confirmation dialogs send it.
+  - **The CLI's commands** are a second table in the same file: each command names the
+    action ids it calls (`leg log` calls `leg.runs`, `leg.stream` and reads git), or `local`
+    for one that calls none (`course test`, `repo init`, `repo spool`, `server start`, the
+    channel verbs, `help`). R-BTN-127's tree and every `--help` are generated from it, and a
+    command's **Signs as** is its actions' `callers`, in order.
+  - **One check.** The front resolves the request's credential to a principal and a target,
+    then calls `authorize(principal, action, target)` in core. It is one function, whichever
+    surface the call came from, and no route, command, dashboard control or MCP tool checks
+    permissions itself.
+    - Under `/v1`, a request that matches no entry is answered `404` `not-found`; the
+      dashboard's static assets are not actions.
+    - A dashboard session authorizes as `dashboard`. An administrator's actions, and an owner
+      action whose `callers` list `dashboard`, are open to it on every repository (§14).
   - **The surfaces are generated from it.**
     - The router's table comes from `http`.
-    - R-BTN-127's tree, `baton help` and every `--help` come from `cli`.
+    - The CLI tree comes from the command table.
     - The MCP tool list comes from `mcp`.
-    - §11's rows document the registry; `npm run check:actions` fails when a route, a CLI
-      command, an MCP tool or a §11 row has no entry, or an entry has none of them.
-  - **What can I do.** `GET /v1/actions` answers the caller's own entries: those its
-    principal and scopes allow, each with its `input` schema. `baton help` with a key, and
-    MCP's `tools/list`, read it; a caller is never shown an action it cannot take.
-  - **Destructive actions are confirmed.** Every surface carries `confirm: true` for a
-    `destructive` action, or the action is refused `confirm-required`. The CLI asks for it,
-    or takes `--yes`; the dashboard keeps its confirmation dialogs; an MCP call must pass it as
-    an argument.
 
-- **R-BTN-130 (Baton serves MCP).** *(Amends §10.1, §11, R-BTN-57, R-BTN-58 and R-BTN-117.)*
-  - **The endpoint.** `POST /v1/mcp` speaks MCP's streamable HTTP transport, statelessly: each
-    JSON-RPC request is authorized on its own, Baton keeps no MCP session (it issues no
-    `Mcp-Session-Id`), and it answers `initialize`, `tools/list` and `tools/call` only, in
-    JSON (no server-sent stream). A request carrying an `Origin` header is refused unless it
-    is Baton's own origin, so a web page cannot drive it (P7).
-  - **The MCP key.** An MCP caller presents an **MCP key**, a bearer API key of the new kind
-    `mcp`. An owner mints one: `baton owner key create --mcp <repository> [--actions read |
-    <id>,…] [--ttl <d>]` (`POST /v1/owner/{repository}/grants` with `{mcp: true, actions,
-    ttl}`), which returns the key once; Baton stores its hash (R-BTN-117).
-    - The key is bound to that one repository, and to the owner's actions it lists. The
-      default is `read`: every `read` action with `mcp: true` whose principal is `owner`.
-      A listed action outside the owner's own `mcp: true` entries is refused at minting.
-    - Its `ttl` is at most 90 days (default 30), and 7 days with no call end it.
-    - It is listed with the repository's credentials, and its owners revoke it as any key.
-  - **What MCP may reach.** `mcp: true` only on entries a person, or a person's agent, may
-    take. **Never** on an administrator's action (R-BTN-57: the administrator's key stays out
-    of every agent's reach). Never on the runner's protocol, the sync's, a courier's or a
-    probe's: a session inside a leg must not talk to Baton (R-BTN-106), and those
-    credentials are machines', never an agent's. Never on a credential's own minting, so an
-    MCP key cannot mint another.
-  - **Tools.** `tools/list` returns the key's actions from `GET /v1/actions`:
-    - the name is the `id` with `.` as `_` (`leg_why`);
-    - `inputSchema` is the entry's `input`;
-    - the annotations come from `effect` (`readOnlyHint` for `read`, `destructiveHint` for
-      `destructive`).
+    §11's rows document the registry. `npm run check:actions` fails when:
+    - a route, a command or a §11 row has no entry;
+    - an entry has neither a route nor a command;
+    - an id breaks the grammar;
+    - an `mcp: true` entry falls outside R-BTN-130's allowlist.
+  - **What can I do.** `GET /v1/actions` answers the caller's own entries: those its principal
+    and scopes allow, each with its `input` schema. `baton help` with a key reads it, and so
+    does MCP's `tools/list`. A caller is never shown an action it cannot take.
 
-    `tools/call` runs the same core function as the route. Its result carries the output as
-    `structuredContent` and as text, through the `plain` renderer (R-BTN-112). A refusal is a
-    tool error with the route's refusal code.
+- **R-BTN-130 (Baton serves MCP).** *(Amends §10.1, §11, R-BTN-57, R-BTN-58, R-BTN-66 and
+  R-BTN-117.)*
+  - **What MCP may reach is a closed list.** `mcp: true` is allowed only on:
+    - an action whose `effect` is `read` and whose `callers` include `owner`;
+    - the three narrow writes `ticket.expedite`, `ticket.hold` and `leg.stop` (destructive).
+
+    `npm run check:actions` fails on any other `mcp: true`. Never reachable over MCP, so,
+    whatever an owner lists:
+    - an administrator's action (R-BTN-57: the administrator's key stays out of every agent's
+      reach);
+    - a machine protocol (the runner's, the sync's, a courier's or a probe's): a session
+      inside a leg must not talk to Baton (R-BTN-106);
+    - any action that adds, grants, mints, registers or revokes a key, an owner, a token, a
+      courier, a check-runner or a sync key — MCP keys included;
+    - any write of an R-BTN-66 setting or bar, which hold the limits owners keep against
+      agents.
+  - **The MCP key.** An MCP caller presents a bearer **MCP key**, an API key of the kind `mcp`
+    (R-BTN-117).
+    - **Minting.** An owner mints one through its own action, `owner.mcp-key.create`:
+      `baton owner mcp-key create <repository> --name <name> [--actions read | <id>,…]
+      [--ttl <days>]`, which is `POST /v1/owner/{repository}/mcp-keys`. `--name` is unique in
+      the repository. It returns the key once, as `bmcp_` followed by 32 random bytes in
+      base32; the prefix is for secret scanning. Baton stores its hash.
+    - **What Baton stores.** The repository, the minting owner key's fingerprint, the name,
+      the action ids resolved at minting, the expiry and the last use. `read` means the
+      allowlisted `read` ids that exist at minting, so a later release never widens a key.
+      `leg.stop`, the destructive one, is included only when listed by id. An id outside the
+      allowlist, or outside the owner's own actions, is refused at minting.
+    - **Lifetime.** At most 90 days (default 30); 7 days with no call end it. The last use is
+      written at most once a minute per key.
+    - **Death.** The key dies when its minting owner key is removed or revoked, or when the
+      repository's owners set `api_keys: false` (R-BTN-117 covers every API key, MCP keys
+      included). Its owners revoke it with `owner.mcp-key.revoke` (`POST
+      /v1/owner/{repository}/mcp-keys/{name}/revoke`, `confirm: true`). It is listed with
+      the repository's credentials, with its minter.
+  - **How it authorizes.** `authorize` treats an `mcp` principal as its minting owner, on its
+    one repository, narrowed to its stored ids — an id that has since lost `mcp: true` is
+    refused. The action is recorded as `mcp:<name>`, minted by that owner, in history and in
+    release messages. An MCP key is accepted only on `POST /v1/mcp`; every REST route answers
+    it `unauthenticated`.
+  - **The endpoint.** `POST /v1/mcp` speaks MCP's streamable HTTP transport, statelessly, in
+    JSON (no server-sent stream):
+    - Revisions: the ones the build lists in `MCP_VERSIONS` (at least `2025-06-18`), as
+      `initialize` negotiates. A request whose `MCP-Protocol-Version` is not listed is `400`.
+    - Methods: `initialize`; `notifications/initialized`, and any other notification,
+      answered `202`; `ping`; `tools/list`; `tools/call`. Any other method is JSON-RPC
+      `-32601`, and a batch array is `-32600`.
+    - Sessions: Baton keeps none and issues no `Mcp-Session-Id`.
+    - `GET /v1/mcp` is `405`.
+    - A missing or unknown key is `401` with `WWW-Authenticate: Bearer`.
+    - A request carrying an `Origin` header other than Baton's own is refused `403`, as the
+      transport requires against DNS rebinding.
+  - **Tools.**
+    - `tools/list` returns the key's stored ids that still carry `mcp: true`. The name is
+      the id with `.` as `_` (`leg_stop`): ids have no `_`, so names never collide.
+      `inputSchema` is the entry's `input`, and the annotations come from `effect`
+      (`readOnlyHint` for `read`, `destructiveHint` for `destructive`).
+    - `tools/call` runs the same core function as the route. Its result carries the output
+      as `structuredContent` and as text, through the `plain` renderer (R-BTN-112).
+    - A refusal is a tool error with the route's refusal code. A tool the key does not hold,
+      an unknown tool, and a target outside the key's repository all answer the same
+      `forbidden`, so MCP is no existence oracle (P7).
+  - **`confirm` over MCP is a schema check, not a human gate.** The agent that passes it is the
+    agent a hostile ticket might steer. The safeguard is the owner's choice at minting —
+    `leg.stop` only by explicit id — together with the key's narrow list.
   - **Content is data.** Ticket titles, decision text and readings come from git and from
     workers. They are returned as JSON values and rendered text, never as instructions, and
-    the tool descriptions say so (threat model P1). `leg.log` over MCP returns the run's
-    pointers and its live state, not the log's bytes: Baton holds none (R-BTN-128).
-  - **Bounds.** At most 60 calls a minute per MCP key, and each answer is at most 256 KB, cut
-    to a page with a cursor.
+    the tool descriptions say so (P8). `leg.log` over MCP returns the run's pointers and live
+    state, not the log's bytes: Baton holds none (R-BTN-128).
+  - **Bounds.**
+    - **Rate.** At most 60 calls per key in any 60 seconds, counted in the repository's
+      object, in memory. A restart empties the counter, which is the one burst it allows. A
+      call over the limit is refused `rate-limited`, with `retry_after_s`.
+    - **Pages.** A tool whose output is a list takes an optional `cursor` input and returns
+      `next_cursor`. The cursor is opaque, bound by HMAC to the key, the action and the
+      input, and refused under any other.
+    - **Size.** A page is at most 256 KB; a single item larger than that is refused
+      `too-large`.
 
 ### 2m.7a The wire, the settings and the interfaces
 
@@ -3499,7 +3570,8 @@ and to put every route in the registry, with the MCP surface filtered.)*
 | `GET /v1/repositories/{repository}/tickets/{ticket}/legs/{leg}/runs` *(new)* | each run's claim, worker, times, session link, log and transcript pointers; for an owner key of the repository or an administrator key (R-BTN-128) |
 | `GET /v1/actions` *(new)* | the caller's own registry entries, with their `input` schemas (R-BTN-129) |
 | `POST /v1/mcp` *(new)* | MCP's streamable HTTP transport: `initialize`, `tools/list`, `tools/call`, for an MCP key (R-BTN-130) |
-| `POST /v1/owner/{repository}/grants` (MCP keys) | `{mcp: true, actions, ttl}`, returning the key once (R-BTN-130) |
+| `POST /v1/owner/{repository}/mcp-keys` *(new)*, `…/mcp-keys/{name}/revoke` *(new)* | an owner mints `{name, actions, ttl}`, returning the key once, or revokes it with `confirm: true` (R-BTN-130) |
+| The destructive routes (R-BTN-129) | `confirm: true` in the body: `…/overrides/{ticket}` with `cancel`, `…/tickets/{ticket}/release`, `/v1/ui/claims/{id}/reap`, `…/owners` removals, `…/grants` and `…/couriers` revocations, the check-runner, token and MCP-key revocations, `/v1/admin/keys/{fingerprint}/revoke`, a repository's retirement |
 | `GET /v1/stream?claim=<id>` *(new)* | the CLI's viewer upgrade, signed by an owner or administrator key (R-BTN-128) |
 | `PUT /v1/owner/{repository}/settings` (logs) | `leg_logs: true` (R-BTN-128; default `false`) |
 | `POST /v1/owner/{repository}/tickets/{ticket}/release` *(new)* | `{reason: 'requested', confirm: true}`: **Stop leg** from the CLI, an owner's release message (R-BTN-119, R-BTN-127) |
@@ -3585,9 +3657,10 @@ attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refr
   | S-BTN-97 the command tree | a user runs each of the twelve old names (`baton why`, `run`, `test-course`, `init`, `sync`, `mirror`, `spool`, `inbox`, `blocked`, `replay`, `register`, `start`), `baton leg why T-1` while T-1's `review` runs, `baton leg why R3-9` where `R3-9` is a local id in two of the key's repositories, `baton leg why T-1` with no owner or worker key configured, `baton repo sync` in docs' CI with no keys.json, `baton leg done --reached x` outside a leg, the same inside a leg's session, `baton leg`, `baton lgo`, and `baton ticket blocked --on resource:llm:x --json` | each old name exits 2 printing only its "renamed:" line; the second answers T-1's running `review`; the third exits 2 listing the two qualified ids; the fourth exits 2 naming the role it needs; `baton repo sync` in docs' CI signs with the workflow's OIDC token and needs no key file; the channel verb outside a leg exits 2 "not inside a leg", inside it reports on the socket; `baton leg` prints the leg verbs; `baton lgo` suggests `leg`; the last prints the route's JSON as is |
   | S-BTN-98 a leg's log | a repository with `transcript_repos` and `leg_logs: true`; W1 runs `implement` in `process` mode, unwatched, printing 3 MB that holds the worker secret, a `credential:deploy` value, the push token, a 6-byte credential, and a secret split across two 8 KB reads, plus an OSC 52 sequence; it crosses a 5-minute mark; its first push is rejected; a second leg is `stream: false`; a third run prints 60 MB; a runner under `--max-legs 1` runs a 30-second leg and exits; a heartbeat reports a pointer to another claim's path; the owners turn `leg_logs` off while W1's claim is between `implement` and `review`; a runner archives a run whose reply carried no `leg_logs`; a `post-receive` hook runs `baton repo spool` with no key configured; another repository has `transcript_repos` and no `leg_logs`; a user without read access to the transcript repo runs `baton leg log` | W1 archives the pipes with no viewer, pushes during the run and at its end, retrying the rejected push after a rebase, and reports each push; Baton stores only the pointers; every listed credential, the split one included, appears as `***` in the archive and the stream, and the 6-byte one is logged as unmasked; `baton leg log T implement` prints the finished run from git with the user's credentials, without the OSC 52 sequence, and with `--transcripts` the session's transcript, also stripped; the `stream: false` leg and the repository without `leg_logs` have no archive, and `baton leg log` says why; the 60 MB run's archive ends in one `gap` frame at 50 MB while its stream continues; the short leg's pointer arrives on its `end`; the foreign pointer is dropped, logged `invalid-pointer`; `review`, started after the change, is not archived, and the ungranted run's pointers are dropped `invalid-pointer`; `repo spool` touches the spool file and signs nothing; the user without access gets the run record, "cannot read …" and exit 1 |
   | S-BTN-99 watching from the CLI | an owner of the repository, an administrator, an owner of another repository and a worker key run `baton leg log T implement -f` on a running leg whose archive holds frames up to `seq` 400 and whose scrollback starts at `seq` 350; the first owner's key is then revoked; an owner runs `baton leg stop T` | the owner and the administrator are upgraded on `GET /v1/stream`, print frames up to 400 from the archive, then only stream frames from 401, with OSC sequences stripped; the other two are refused `forbidden` and ring nothing; the revoked key's stream is closed; `leg stop` sends the release, and the runner stops the leg as R-BTN-119 says |
-  | S-BTN-100 one registry | the router, the CLI tree, the MCP tool list and §11's rows; an owner key, a worker key and an administrator key each call `GET /v1/actions`; a route is added with no registry entry | every route, command, tool and row matches one entry; each key is shown only its own actions; `npm run check:actions` fails on the new route; a request matching no entry is answered `404` |
-  | S-BTN-101 Baton's MCP endpoint | an owner mints an MCP key with `--actions read` and another with `leg.stop`; an agent lists and calls tools with each; it calls `leg_stop` without `confirm`; it asks to mint an MCP key, to heartbeat as a runner, and to call an administrator's action; a request carries a foreign `Origin`; the key is revoked | the first key lists only read tools, the second adds `leg_stop`; `leg_stop` without `confirm` is refused `confirm-required`; minting, the runner's protocol and the administrator's action are not listed and are refused; the foreign `Origin` is refused; after revocation every call is refused; a ticket title carrying instructions comes back as a JSON value |
-  | S-BTN-102 the same action, three ways | `leg.stop` on one running leg through `POST /v1/owner/{repository}/tickets/{ticket}/release`, `baton leg stop` and the MCP tool `leg_stop`, each with `confirm` by a key allowed it, then by one that is not | the three allowed calls send the same release through the same core function and return the same output; the three refusals carry the same code from the same `authorize` call |
+  | S-BTN-100 one registry | the router, the command table, the MCP tool list and §11's rows; an owner key, a worker key, a probe key, an administrator key and a dashboard session each call `GET /v1/actions`; a route is added with no entry; an entry is flagged `mcp: true` on `owner.grant.add`; an id `a_b.c` is added; a body on `POST …/overrides/{ticket}` sets both `hold` and `cancel` | every route, command, tool and row matches one entry, local commands included; each caller is shown only its own actions; `npm run check:actions` fails on the new route, on the flag and on the id; a request matching no entry is answered `404` `not-found`; the mixed body is `invalid-params` |
+  | S-BTN-101 Baton's MCP endpoint | an owner mints `--actions read` and `--actions leg.stop,ticket.hold`, and tries `--actions owner.owners.add`; an agent initializes, sends `notifications/initialized` and `ping`, lists and calls tools with each key; calls `leg_stop` without `confirm`; calls `leg_stop` with the read-only key; names a ticket of another repository; calls an unknown tool; sends a batch, a `GET` and an unlisted protocol version; a request carries a foreign `Origin`; it sends 61 calls in a minute; a list exceeds one page; the key is presented on `POST /v1/owner/{repository}/overrides/{ticket}` | the third mint is refused; the notification is `202` and `ping` answers; the first key lists only read tools, the second adds `leg_stop` and `ticket_hold`; `leg_stop` without `confirm` is `confirm-required`; the read-only key's `leg_stop`, the other repository's ticket and the unknown tool all answer the same `forbidden`; the batch is `-32600`, the `GET` `405`, the version `400`, the `Origin` `403`; the 61st call is `rate-limited` with `retry_after_s`; the page returns a `next_cursor` that another key cannot use; the REST call is `unauthenticated`; a ticket title carrying instructions comes back as a JSON value |
+  | S-BTN-102 the same action, three ways | `leg.stop` on one running leg through `POST /v1/owner/{repository}/tickets/{ticket}/release`, `baton leg stop` and the MCP tool `leg_stop`, each with `confirm` by a key allowed it, then by one that is not | the three allowed calls send the same release through the same core function and return the same output, the MCP one recorded as `mcp:<name>`; the three refusals carry the same code from the same `authorize` call |
+  | S-BTN-103 an MCP key's life | a key minted with `--ttl 120`; a key minted with `read` before a release adds a new read action; a key unused for 8 days; a key whose minting owner key is then revoked; the repository's owners set `api_keys: false`; an owner revokes a key by name without `confirm`, then with it | the 120-day mint is refused; the older key never lists the new action; the idle, orphaned and `api_keys: false` keys are refused `401`; the revoke without `confirm` is `confirm-required`, with it the key is dead |
 
 - **New gates** (Must-establish, §16):
 
@@ -3624,8 +3697,9 @@ attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refr
   | Every command is `baton <noun> <verb>` and signs as the one role its route needs; each old top-level name does nothing but name its replacement; an ambiguous ticket id names its matches; the channel verbs act only inside a leg's session | G-BTN-117 (S-BTN-97) |
   | A `process`-mode leg run's output is archived only when the owners set `leg_logs: true`, only to the repository's `transcript_repos` at the claim's own path, never for a `stream: false` leg, with the closed credential set masked on the byte stream before framing and at most 50 MB per run; a failed push never delays the end; Baton stores only valid pointers bound to their claim; `baton leg log` reads the archive from git with the user's credentials, strips every escape and control on every path it prints, and exits 1 when it cannot read | G-BTN-118 (S-BTN-98) |
   | The CLI's stream upgrade is accepted only for an owner key of the claim's repository or an administrator key, under R-BTN-118's rules, and closed when that key is revoked; the CLI joins archive and stream on `seq`, printing no frame twice | G-BTN-119 (S-BTN-99) |
-  | Every route, CLI command, dashboard action and MCP tool is a registry entry, authorized by the one `authorize` call; `GET /v1/actions` shows a caller only its own actions; a destructive action needs `confirm` on every surface | G-BTN-120 (S-BTN-100, -102) |
-  | An MCP key reaches only the `mcp: true` owner actions it was minted with, on its one repository, never an administrator's action, a machine protocol or a credential's minting; a foreign `Origin` is refused | G-BTN-121 (S-BTN-101) |
+  | Every route, CLI command, dashboard action and MCP tool is a registry entry, authorized by the one `authorize` call; `GET /v1/actions` shows a caller only its own actions; every listed destructive action needs `confirm` on every surface; `check:actions` fails on any unregistered surface, bad id or out-of-allowlist `mcp` flag | G-BTN-120 (S-BTN-100, -102) |
+  | An MCP key reaches only its stored, still-allowlisted ids on its one repository, accepted only on `POST /v1/mcp`; it never reaches an administrator action, a machine protocol, a credential or owner change, or an R-BTN-66 write; out-of-scope, unlisted and unknown targets answer alike; the transport, rate and page rules hold | G-BTN-121 (S-BTN-101) |
+  | An MCP key's ids are fixed at minting; it dies with its expiry, 7 idle days, its minting owner key, `api_keys: false` or its revocation | G-BTN-122 (S-BTN-103) |
 
 ## 3. The service *(proposal)*
 
@@ -5642,7 +5716,7 @@ never machine keys.)*
 | Probe | `/v1/probe/*` | a request signed with the probe's SSH key, bound to the external-resource instances it may report on (R-BTN-53, R-BTN-76) | post readings of those instances |
 | GitHub App webhook | `POST /v1/github/webhook` | the delivery's `X-Hub-Signature-256` by the App's webhook secret (R-BTN-73) | trigger a sync dispatch; Baton reads only the fields R-BTN-73 lists — the event name, the delivery id, `repository.full_name`, and `workflow_run.path` or a push's `pusher.name` and `head_commit.author.email`, to drop its own feedback |
 | Instance administrator | `/v1/admin/*`, and `/`, `/v1/ui/*` through a dashboard session; *(2026-10-17, §2m)* `GET /v1/stream` and `GET …/legs/{leg}/runs` for any claim (R-BTN-128) | a request signed with a key in `BATON_ADMIN_KEYS` (R-BTN-57) — a key kept out of every agent's reach; the dashboard through a one-time sign-in link such a key mints | register repositories, owners and probes; register external resources and account instances, and post readings by hand (R-BTN-76); grant `human-operator`; revoke keys; read everything, blocks included; overrides; messages; force-reap; accept a rejected history |
-| MCP key *(2026-10-17, §2m)* | `POST /v1/mcp` | a bearer MCP key an owner minted for one repository (R-BTN-130) | the `mcp: true` owner actions it was minted with, on that repository; never an administrator's action, a machine protocol or a credential's minting |
+| MCP key *(2026-10-17, §2m)* | `POST /v1/mcp` only | a bearer MCP key (`bmcp_…`) an owner minted for one repository (R-BTN-130) | its stored ids among the allowlisted reads and `ticket.expedite`, `ticket.hold`, `leg.stop`, on that repository, as its minting owner; never an administrator's action, a machine protocol, a credential or owner change, or an R-BTN-66 write |
 | Repository owner | `/v1/owner/{repository}/*`; *(2026-10-17, §2m)* `GET /v1/stream` and `GET …/legs/{leg}/runs` for the repository's claims (R-BTN-128) | a request signed with one of that repository's owner keys (R-BTN-58) | grant and revoke worker keys for that repository, with any capabilities but `human-operator`; add and remove its owners; set and lift its owner bars; set and clear expedite and hold on its tickets (§8); set its required bars, `retry`, `transcript_repos`, `unblocked_trigger`, `remind_after` and `artifact_buckets` (R-BTN-66/67, R-BTN-77, R-BTN-80, R-BTN-82); re-route tickets and resolve Baton's decisions (R-BTN-83, R-BTN-78); register and revoke its couriers (R-BTN-80) and its sync keys (R-BTN-93); ask the blocks of its tickets (R-BTN-75) |
 
 - **R-BTN-13 (key binding).** *(Amended 2026-10-17 by §2m: an owner's registration token registers a session's worker credential within its scope, and a worker or personal courier may use an API key in place of the signature (R-BTN-117).)*  *(Amended 2026-10-16 by §2l: a `worker` credential is a machine key, trusted with
@@ -5908,7 +5982,7 @@ Baton's SQLite — except the administrators' own, which anchor everything else.
 *(Amended 2026-10-17 by §2m: the rows below gain the fields §2m.7a lists, and §2m's new routes follow the push connection's row. Every row is an action registry entry and documents it; `npm run check:actions` keeps the two equal; `GET /v1/actions` and `POST /v1/mcp` are §2m's — R-BTN-129, R-BTN-130.)*
 
 All bodies are JSON. Errors: `{ "ok": false, "code": <code>, "message": <text> }`, with codes
-`unauthenticated`, `forbidden`, `session-taken`, `worker-reaped`, `invalid-params`,
+`unauthenticated`, `forbidden`, `session-taken`, `worker-reaped`, `invalid-params`, *(2026-10-17, §2m)* `not-found` (no registry entry, R-BTN-129), `confirm-required`, `rate-limited` (with `retry_after_s`), `too-large` (R-BTN-130), `invalid-prerequisite` (R-BTN-126),
 `not-eligible` (with `rule`; gates only, R-BTN-45), `blocked` (open dependencies or decisions, R-BTN-75, R-BTN-78), `no-eligible-ticket`, `barred-tag`, `hook-refused` (with the hook's reason), `stale-skills` (the course version, rule 9), `backing-off`, `not-holder`, `claim-ended`, `head-moved`, `stale-observation` (R-BTN-62), `sync-busy` (a number still outstanding, R-BTN-62), `closed` (a notice whose decision was answered, R-BTN-80), `conflict` (a key's hostname, R-BTN-58),
 `snapshot-rejected`, `quota`, `not-cut-over` (a worker claim call before cutover, R-BTN-28),
 `unavailable` (503, retryable: a key set GitHub could not serve, so an outage is never
@@ -6849,7 +6923,9 @@ table is in docs' `BATON_DOCS_DEPLOYMENT` §16, where `check-spec-anchors` re-re
 - **One registry of actions; Baton serves MCP** (2026-10-17, owner; R-BTN-129, R-BTN-130):
   the REST API, the CLI, the dashboard and MCP are surfaces of one list, checked by one
   function. The owner chose today's roles and scopes over named permissions, a remote MCP
-  endpoint over a local `baton mcp`, and every route in the registry. Rejected: a local stdio
+  endpoint over a local `baton mcp`, and every route in the registry. What MCP may reach is a
+  closed allowlist, reads and three narrow writes (review gate round 1), because an open rule let
+  a key add owners or loosen limits. Rejected: a local stdio
   server only, which hosted agents cannot reach; giving MCP the owner's own key, which would
   put a person's key in an agent's hands. An MCP key is a narrowed, expiring owner grant
   instead.
