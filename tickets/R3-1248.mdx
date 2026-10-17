@@ -65,11 +65,13 @@ change before it merges, and a way to see whether it helped. Tier: judgement.
 
 ### Exit criteria
 
-- [ ] S-BTN-37 and S-BTN-38 pass
-- [ ] `npx baton test-course ../docs roadmap-pr` green against docs `main`
-- [ ] `npm run typecheck` green in baton; `npm run verify` green in docs
+- [x] S-BTN-37 and S-BTN-38 pass — 8/8 at 4745c91 (2026-10-17)
+- [x] `npx baton test-course ../docs roadmap-pr` green against docs `main` — "✓ no violations" at 4745c91 (2026-10-17)
+- [x] `npm run typecheck` green in baton; `npm run verify` green in docs — typecheck at 4745c91; docs verify's 24 steps green at docs cee2d17f (2026-10-17)
 
 ## Status
+
+_done 2026-10-17 — baton#35, baton#38 and baton#40 merged (4745c91); the review gate closed after three rounds, its findings logged in docs' gate records; refreshed from docs, where the item is archived._
 
 _in-review 2026-10-16 — https://github.com/immediately-run/baton/pull/35 — baton#35: `baton test-course`, the course stats endpoint, S-BTN-37 removal half and S-BTN-38; docs 88805507 (check-baton Min-Worker-Version check). Review gate next.._
 
