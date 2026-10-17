@@ -24,6 +24,7 @@ export interface TicketView {
   tier: string | null;
   status: string | null;
   path: string[];                  // ticket_stations.path, as leg names
+  queued: string | null;           // ticket_stations.next_leg: the queued leg (R-BTN-83)
   closed: 'done' | 'withdrawn' | null;
   bars: Record<string, string[]>;  // ticket_bars, per leg
 }
@@ -70,10 +71,10 @@ export function projectState(store: Store, now: number): Projection {
     'SELECT observation, last_handed_out, handed_out_at FROM board_head WHERE repository_id = ?', MODEL_REPOSITORY)[0];
   const tickets: Record<string, TicketView> = {};
   const inScope = (id: string) => id.startsWith(`${MODEL_REPOSITORY}:`);
-  for (const t of rows<{ id: string; course_id: string | null; path: string | null; tier: string | null; status: string | null }>(
-    `SELECT t.id, t.course_id, s.path, t.tier, t.status FROM tickets t LEFT JOIN ticket_stations s ON s.ticket_id = t.id WHERE t.repository_id = ?`, MODEL_REPOSITORY)) {
+  for (const t of rows<{ id: string; course_id: string | null; path: string | null; next_leg: string | null; tier: string | null; status: string | null }>(
+    `SELECT t.id, t.course_id, s.path, s.next_leg, t.tier, t.status FROM tickets t LEFT JOIN ticket_stations s ON s.ticket_id = t.id WHERE t.repository_id = ?`, MODEL_REPOSITORY)) {
     if ((t.course_id ?? MODEL_COURSE) !== MODEL_COURSE) continue;
-    tickets[t.id] = { present: true, path: legsOf(t.path), closed: null, bars: {}, tier: t.tier, status: t.status };
+    tickets[t.id] = { present: true, path: legsOf(t.path), queued: t.next_leg, closed: null, bars: {}, tier: t.tier, status: t.status };
   }
   for (const b of rows<{ ticket_id: string; leg: string; tag: string }>('SELECT ticket_id, leg, tag FROM ticket_bars ORDER BY ticket_id, leg, tag')) {
     const t = tickets[b.ticket_id];
@@ -81,7 +82,7 @@ export function projectState(store: Store, now: number): Projection {
   }
   for (const c of rows<{ ticket_id: string; closed_as: 'done' | 'withdrawn' }>('SELECT ticket_id, closed_as FROM closed_tickets')) {
     if (!inScope(c.ticket_id) || tickets[c.ticket_id]?.present) continue;
-    tickets[c.ticket_id] = { present: false, path: [], closed: c.closed_as, bars: {}, tier: null, status: null };
+    tickets[c.ticket_id] = { present: false, path: [], queued: null, closed: c.closed_as, bars: {}, tier: null, status: null };
   }
   const claims: Record<string, ClaimView> = {};
   for (const c of rows<{ id: number; ticket_id: string; worker_id: number; status: string; end_reason: string | null; station: string | null; leg: string | null;

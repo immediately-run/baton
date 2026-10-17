@@ -125,10 +125,10 @@ async function drive(r: Run, before: any, after: any, action: string, p: Record<
   const w: string = p.w;
   const active = (st: any, who: string) => Object.entries(st.claims as Record<string, any>).find(([, c]) => c.worker === who && c.status === 'active');
   switch (action) {
-    case 'claimFinish': {
+    case 'claim': {
       // a crashed or sleeping machine makes no request; past MAX_CLAIMS is the model's bound only
       if (!b.up[w] || b.asleep[w] || b.nextId > 6) return;
-      const t = b.pending[w];
+      const t: string = p.t;
       const res = await worker(w, '/v1/runner/claim', { request_id: `req-${w}-${after.st.nextId}-${Math.random().toString(16).slice(2, 8)}`, ticket_id: `docs:${TICKET(t)}` }, r.secrets[w]);
       const json = (await res.json()) as { claim_id?: number };
       if (after.st.nextId > b.nextId && json.claim_id) r.claims.set(b.nextId, json.claim_id);
@@ -198,7 +198,8 @@ async function drive(r: Run, before: any, after: any, action: string, p: Record<
         tickets.push(ticket(id, { rank: Number(t.slice(1)) }));
         const bars = run.bars[t].length ? Object.fromEntries(REQUIRED.map((l) => [l, run.bars[t]])) : {};
         let at = 'filed';
-        stations[id] = placed(st, path.map((l) => { at = TO[l as keyof typeof TO]; return [l, at] as [string, string]; }), next, { bars });
+        // the queued leg the model's sync read (R-BTN-83)
+        stations[id] = placed(st, path.map((l) => { at = TO[l as keyof typeof TO]; return [l, at] as [string, string]; }), next, { bars, next_leg: run.queued[t] || null });
       }
       const head = (await rows<{ sha: string }>(`SELECT sha FROM board_head WHERE repository_id = 'docs'`))[0].sha;
       const sha = (BigInt(`0x${head}`) + 1n).toString(16).padStart(40, '0');
@@ -207,8 +208,8 @@ async function drive(r: Run, before: any, after: any, action: string, p: Record<
       return;
     }
     default:
-      // claimStart, the holder's pushes, git, time, a machine crashing, sleeping or waking: the
-      // core takes no step
+      // the holder's pushes, git, time, a machine crashing, sleeping or waking: the core takes no
+      // step
       return;
   }
 }
@@ -241,6 +242,7 @@ function differences(m: any, core: Projection, r: Run): string[] {
     if (m.postedGone[t]) eq(`${t} withdrawn`, true, v?.closed === 'withdrawn');
     else {
       eq(`${t} posted`, m.posted[t], v?.path ?? null);
+      eq(`${t} queued`, m.queued[t] || null, v?.queued ?? null);
       // the model's one bar set stands for the covered legs' (round 1, 1-A-4)
       const bars = [...(m.postedBars[t] as string[])].sort();
       eq(`${t} postedBars`, REQUIRED.map(() => bars), REQUIRED.map((l) => [...(v?.bars[l] ?? [])].sort()));

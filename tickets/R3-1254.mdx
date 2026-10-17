@@ -21,8 +21,9 @@ depends_on:
 ---
 
 **Brief:** the Baton project; the remainder R3-1243 named in baton#10.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2g (R-BTN-75–80), R-BTN-19, R-BTN-10, §6.7,
-R-BTN-45; `immediately-run/baton` `model/README.md`.
+**Spec:** `spec/BATON_SPEC.md` (moved here by R3-1252) §2g (R-BTN-75–80), R-BTN-19, R-BTN-10, §6.7,
+R-BTN-45; widened 2026-10-17 to §2h R-BTN-83, §2l R-BTN-98, §2m.6 R-BTN-120, §2m.6a R-BTN-122 and
+§2m.6c R-BTN-126 (Status); `model/README.md`.
 
 ### Why
 
@@ -70,3 +71,27 @@ safety and liveness the model does not yet cover.
 ## Status
 
 _(filed 2026-10-15)_
+
+_2026-10-17 — claimed; scope widened at the owner's request: "inspect the model and ensure that it
+is up to date with recent spec changes, including the kinds of station arrival prerequisites which
+may block a leg from being completed." A read of the spec against the model found it at R-BTN-74:
+no change since — §2g to §2m — reached it, though R-BTN-68 asks every spec change to a cited
+requirement to change the model in the same pull request. Delivered in parts:_
+
+1. _**One-step claims and the queued leg** (R-BTN-98, R-BTN-83): `claim` replaces the hook's
+   `claimStart`/`claimFinish`; a claim is offered the queued leg the sync posts, rule 8 is judged on
+   it, and the first advance must be into it; every end clears the claim's regression flag (§4).
+   The scenario traces and the model-based tests compare the queued leg after every step._
+2. _**A leg's prerequisites** (R-BTN-120): other tickets `at`, `reached` or `done`, capabilities,
+   resources, decisions and retry; blocks and `blocked_since` with paired events (R-BTN-75,
+   R-BTN-77, R-BTN-78); retries per leg (R-BTN-122); a prerequisite failing during a leg
+   (R-BTN-126: `released:blocked`, provisional rows, `max_blocked`)._
+3. _The rest, each its own part or ticket: open-world claims (R-BTN-104), sync wants (R-BTN-94),
+   `no_chain_from` (R-BTN-106), child tickets' spawned rows (R-BTN-86), `not_before` (R-BTN-89),
+   the holder's reported `next` (R-BTN-83), and item 1 below (liveness on `live`). Leg deadlines
+   (R-BTN-90) are R3-1259's._
+
+_Items 3 and 4 below changed under the spec since filing: notices gate nothing ("a leg never
+waits on a delivery", R-BTN-80) and leg queues are a warning (R-BTN-79, revised), so neither
+belongs in the core model; item 2's "a ticket with a free next leg is not blocked" is now the
+queued leg alone (R-BTN-75)._
