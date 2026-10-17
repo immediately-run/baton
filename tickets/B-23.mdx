@@ -1,0 +1,74 @@
+---
+title: "B-23 — Baton CLI command tree and leg logs: baton <noun> <verb>, the runner's leg-output archive, and baton leg log"
+id: B-23
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+  - docs
+tags:
+  - roadmap-item
+order: 1126
+tier: critical
+description: "Build R-BTN-127 and R-BTN-128: the noun-verb CLI with each command signing as one role and the old names refused; the runner archiving process-mode leg output to the transcript repos, masked, when the owners opt in; the runs, stream and release routes; baton leg log; and every caller in this repository and in docs moved to the new names in the same release. Requires: B-22."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-22
+---
+
+**Brief:** the owner, 2026-10-17: a Git-like CLI with every leg command under `baton leg`, and `baton leg log` showing a leg's logs. Each leg run's output is saved now, and the old command names go outright. B-22 specified it (baton#46).
+**Spec:** `spec/BATON_SPEC.md` §2m.6d: R-BTN-127 and R-BTN-128, with their dated notes and the §11 rows.
+
+### Why
+
+R-BTN-127 and R-BTN-128 are specified. This ticket builds them, and moves every caller of the old names in the same release.
+
+### What to build
+
+1. **The tree.** Rebuild `cli/baton.mjs` as R-BTN-127's tree:
+   - each command signs as its one role, with `-i` or `~/.config/baton/keys.json`;
+   - each old name exits 2 with its "renamed:" line;
+   - an ambiguous ticket id lists its matches;
+   - the leg default is running, then queued, then most recent;
+   - the channel verbs work only inside a leg;
+   - `help` covers every level, with nearest-name suggestions;
+   - every read takes `--json`.
+2. **The archive.** In `src/runner`: read the pipes of a `process`-mode leg whether or not anyone is watching, mask the closed credential set on the byte stream before framing, append to `baton-legs/<repository id>/<local ticket id>/<leg>/<run>-<claim id>.jsonl` with bounded retries and buffer, and report the pointers on heartbeat, `advance` and `end`. Only when the owners set `leg_logs: true`.
+3. **The server.**
+   - the `leg_logs` table and its pointer validation;
+   - the `leg_logs` setting;
+   - `GET …/tickets/{ticket}/legs/{leg}/runs`;
+   - `GET /v1/stream`, signed by an owner or administrator key and closed on revocation;
+   - `POST /v1/owner/{repository}/tickets/{ticket}/release`.
+4. **`baton leg log`.**
+   - finished runs from git, with the user's credentials;
+   - `-f`, joining the archive and the stream on `seq`;
+   - `--transcripts`;
+   - session and attached runs as links;
+   - the failure messages;
+   - escapes and controls stripped on every printed path.
+5. **The callers, in the same release.**
+   - this repository's `README.md`, `scripts/`, tests and the runner's usage text;
+   - the docs repository: `content/specs/BATON_DOCS_DEPLOYMENT.mdx` (docs' CI, `npx baton repo sync`, `baton course test`), `BATON_ROADMAP_PR_COURSE.mdx`, its skills and workflows that call `baton run`, `baton sync` or `baton test-course`.
+
+### Do not
+
+- Keep an alias for any old name.
+- Store a log's bytes in Baton.
+
+### Tests
+
+- S-BTN-97, S-BTN-98 and S-BTN-99 as integration scenarios on both hosts; G-BTN-117 to G-BTN-119.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green, and docs' `npm run verify` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts
+- [ ] no caller in either repository uses an old name
+- [ ] merged under the review gate
+
+## Status

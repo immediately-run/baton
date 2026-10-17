@@ -28,9 +28,9 @@ depends_on: []
 ### What to build
 
 1. **Channel.** The runner listens on a `0600` Unix socket named by `IR_BATON_SOCKET`; the CLI wraps it as `baton leg status | output | done | suspend | release | next | yield`. The runner checks each move (station, next leg, outputs, entry) before it calls Baton; the session never holds the worker secret or nonce (`IR_BATON_STATE` is the view without them).
-2. **Bounded runs.** `baton run --legs <a,b> --max-legs n --until <t>`.
+2. **Bounded runs.** `baton runner start --legs <a,b> --max-legs n --until <t>`.
 3. **Independence.** Rule `chain`: refuse a claim or advance into a leg whose `no_chain_from`, or the owners' `required_independence`, names a leg the same credential ran on the ticket (`claim_legs` → claim → worker → key). The owner setting joins the course file's lists.
-4. **Isolation.** The heartbeat carries `isolation`; `attached` (`baton run --attached`, `baton leg next`) and `session` (one cloud session per agent leg, a brief with no Baton credential, a `baton-leg-result` block checked like a channel move). A leg's `isolation: session` floor is a gate (rule `isolation`) and a recommendation filter.
+4. **Isolation.** The heartbeat carries `isolation`; `attached` (`baton runner start --attached`, `baton leg next`) and `session` (one cloud session per agent leg, a brief with no Baton credential, a `baton-leg-result` block checked like a channel move). A leg's `isolation: session` floor is a gate (rule `isolation`) and a recommendation filter.
 
 ### Do not
 

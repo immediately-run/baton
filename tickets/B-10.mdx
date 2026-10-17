@@ -1,5 +1,5 @@
 ---
-title: "B-10 — Baton leg prerequisites and capability types: one requires per leg, baton why, course-declared capability types"
+title: "B-10 — Baton leg prerequisites and capability types: one requires per leg, baton leg why, course-declared capability types"
 id: B-10
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1113
 tier: critical
-description: "A leg's `requires` (tickets `at`/`reached`/`done` with `children`/`parent`/`posted`, `skip_withdrawn`, `allow_empty`; capabilities; resources), block rows per leg, cycles listed, `GET …/prerequisites` and `baton why`, and `capability_types`/`roles` declared in each course file with runner-side checks and `<type>:*` grants (BATON_SPEC R-BTN-120, R-BTN-121); S-BTN-72–74, -82. Requires: none."
+description: "A leg's `requires` (tickets `at`/`reached`/`done` with `children`/`parent`/`posted`, `skip_withdrawn`, `allow_empty`; capabilities; resources), block rows per leg, cycles listed, `GET …/prerequisites` and `baton leg why`, and `capability_types`/`roles` declared in each course file with runner-side checks and `<type>:*` grants (BATON_SPEC R-BTN-120, R-BTN-121); S-BTN-72–74, -82. Requires: none."
 topics:
   - baton
 owns: {}
@@ -29,12 +29,12 @@ depends_on: []
 
 1. Per-leg `ticket` and `capability` rows with `@at`, `@reached` and `@done` refs, rewritten in the transaction that changes a referenced ticket; `closed_tickets.final_station`, `final_path` and `parent` read for closed tickets.
 2. `depends_at` on the posted ticket; cycles listed `prerequisite-cycle`, blocks kept.
-3. `GET /v1/repositories/{repository}/tickets/{ticket}/prerequisites` and `baton why` from the blocks index alone.
+3. `GET /v1/repositories/{repository}/tickets/{ticket}/prerequisites` and `baton leg why` from the blocks index alone.
 4. Capability types and roles validated with the course file; runners re-run checks while idle; `ROLES` leaves the vendored library through the transition window.
 
 ### Do not
 
-- Read past the blocks index to answer `baton why`.
+- Read past the blocks index to answer `baton leg why`.
 
 ### Tests
 

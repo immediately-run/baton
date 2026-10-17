@@ -36,7 +36,7 @@ R-BTN-126 is specified. This ticket builds it.
 5. **Bounds.** Add `max_blocked` to the owners' `retry` ceiling. Count blocked ends from `claims.blocked_kind` and `claims.blocked_ref`, apply the `blocked-exhausted` hold with `baton:retries`, and list a worker's blocked ends under **Needs you**.
 6. **The runner.** `LegError` options gain `prerequisite`, `reading?` and `commit?`. Add `baton leg release --blocked --kind … --ref …` and the runner's own checks. A block is never retried in the claim.
 7. **The legacy mapping.** Map `released:provider-exhausted` exactly as R-BTN-126 states, never shortening a reading already in force.
-8. **Views.** The dashboard's **Courses** view and `baton why` draw each leg as an edge with a state, in colour and a text label, with `found`.
+8. **Views.** The dashboard's **Courses** view and `baton leg why` draw each leg as an edge with a state, in colour and a text label, with `found`.
 9. **Migration.** Add `ticket_blocks.provisional` and `found`, `leg_needs.source`, `added_at` and `found_at`, `claims.blocked_kind` and `blocked_ref` with their index, and the `blocked-exhausted` hold reason.
 
 ### Do not

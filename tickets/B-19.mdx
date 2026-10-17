@@ -28,7 +28,7 @@ This ticket records reserved work so it is not lost. It is **deferred**: do not 
 
 ### What to build (when un-deferred)
 
-1. **The runner saves a leg's session.** The runner already reads each leg's stdout and stderr for the stream (B-9). It may also save them, with the harness's session file where an adapter can export one, to the repository's transcript store (§6.8). Saving is per repository and opt-in, and it is pointed at, never stored in Baton (R-BTN-33).
+1. *(2026-10-17: done by R-BTN-128, which saves each leg run's output to the transcript repos now; its build is B-23.)* **The runner saves a leg's session.** The runner already reads each leg's stdout and stderr for the stream (B-9). It may also save them, with the harness's session file where an adapter can export one, to the repository's transcript store (§6.8). Saving is per repository and opt-in, and it is pointed at, never stored in Baton (R-BTN-33).
 2. **A course's leg may ask its predecessor.** This is a feature of that course's leg script, not of Baton's core (R-BTN-50). The script resumes or replays the saved session to answer a question.
 
 ### Do not
