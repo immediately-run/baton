@@ -34,7 +34,9 @@ check(`safety, ${progressSamples} random runs of 40 steps of progressStep`, sp.s
 const wsim = (step) => ['model/witnesses.qnt', '--main=witnesses', '--init=winit', `--step=${step}`,
   '--backend=typescript'];
 const witnesses = [
-  ['wstep', ['noConfirmedSuspension', 'noResumedClaim', 'noFence', 'noAlarmReap']],
+  ['wstep', ['noConfirmedSuspension', 'noResumedClaim', 'noFence', 'noAlarmReap',
+    // R3-1254: a blocked ticket, a provisional row, a backoff, an `unblocked` event
+    'noBlockedTicket', 'noProvisionalRow', 'noRetryRow', 'noUnblockedEvent']],
   ['wprogress', ['noFixLeg', 'noRegressedClaim', 'noMerge', 'noConfirmedDone']],
 ];
 // A second review takes a long specific sequence random runs rarely produce;

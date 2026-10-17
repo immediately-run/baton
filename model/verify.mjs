@@ -7,7 +7,7 @@
 // `q::init`, `q::step` and `q::inv` that `quint verify` would name. The Apalache distribution is the
 // one quint pins and caches (`~/.quint/apalache-dist-<version>`), fetched as quint fetches it.
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdtempSync, openSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,16 +16,19 @@ const require = createRequire(import.meta.url);
 const { fetchApalache, DEFAULT_APALACHE_VERSION_TAG } = require('@informalsystems/quint/dist/src/apalache.js');
 
 const DEPTH = process.env.MODEL_VERIFY_DEPTH ?? '5';
-const compiled = spawnSync('npx', ['quint', 'compile', 'model/instances.qnt', '--main=small', '--init=pinit', '--step=pstep',
-  '--invariant=safety', '--target=json'], { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
-if (compiled.status !== 0) {
-  console.log(compiled.stdout.slice(-4000), compiled.stderr);
-  process.exit(1);
-}
 const dir = mkdtempSync(join(tmpdir(), 'baton-verify-'));
 const file = join(dir, 'small.qnt.json');
-writeFileSync(file, compiled.stdout);
-console.log(`compiled model/instances.qnt (small): ${(compiled.stdout.length / 1e6).toFixed(1)} MB of JSON IR`);
+// quint's stdout goes straight to the file: piped, it is cut short on a model this size, and
+// `--out` writes an earlier, unflattened stage that Apalache does not read
+const out = openSync(file, 'w');
+const compiled = spawnSync('npx', ['quint', 'compile', 'model/instances.qnt', '--main=small', '--init=pinit', '--step=pstep',
+  '--invariant=safety', '--target=json'], { stdio: ['ignore', out, 'pipe'], encoding: 'utf8' });
+closeSync(out);
+if (compiled.status !== 0 || !existsSync(file)) {
+  console.log(compiled.stderr);
+  process.exit(1);
+}
+console.log(`compiled model/instances.qnt (small): ${(statSync(file).size / 1e6).toFixed(1)} MB of JSON IR`);
 
 const bin = await fetchApalache(DEFAULT_APALACHE_VERSION_TAG, 0);
 if (bin.isLeft()) {

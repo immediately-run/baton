@@ -860,8 +860,12 @@ another ticket, or a third-party resource is unavailable.)*
   ticket with no queued leg — done — is not blocked)*. Baton evaluates this in the
   transaction that changes its rows, its next legs or whether it is held, and stores it as
   `tickets.blocked_since`; `blocked` and `unblocked` (R-BTN-77) are its transitions, except that
-  a claim starting or ending changes it silently — a claimed ticket is not waiting, and its end
-  is not an unblocking. The same answer lists, as `other`, what else keeps it
+  a claim starting changes it silently — a claimed ticket is not waiting. A claim's end is never
+  an unblocking; an end that leaves the ticket blocked — a backoff it starts (R-BTN-122), a
+  decision posted while it was held — logs `blocked`, which wakes no one *(amended 2026-10-17,
+  R3-1254: the end was silent too, and the formal model found the backoff's `unblocked`
+  (R-BTN-122) then logged with no `blocked` before it; every `unblocked` now follows a
+  `blocked`)*. The same answer lists, as `other`, what else keeps it
   from being offered that is not a block: a hold or a backoff (§8, §6.10; *2026-10-17, §2m: a leg's backoff is now a block of kind `retry`, R-BTN-122*), a leg waiting on a
   course label (`waiting_on`, R-BTN-70: `ci`, `owner`, `policy`) or on `time` (R-BTN-89), owner bars on every live
   worker's tags (R-BTN-67), an unconfirmed end (§6.7). Blocks bind as their kind does: a
