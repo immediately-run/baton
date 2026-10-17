@@ -25,6 +25,7 @@
     "src/core",
     "src/local",
     "src/runner",
+    "src/defaults",
     "src/migrations",
     "src/modules.d.ts",
     "test/hosts/local.ts",
@@ -37,6 +38,8 @@
     "test/unit/check-traces.test.ts",
     "test/unit/test-course.test.ts",
     "test/unit/stats-size.test.ts",
-    "test/model/replay.test.ts"
+    "test/model/replay.test.ts",
+    "test/integration/S-BTN-43.defaults.test.ts",
+    "test/unit/defaults-cli.test.ts"
   ]
 }

@@ -94,6 +94,17 @@ export class BatonApi {
   activities(activities: unknown[]): Promise<Record<string, any>> {
     return this.call('POST', '/v1/runner/activities', { activities });
   }
+  /** §7.1: the sync's three calls — the observation first (R-BTN-62), then the head, then the
+   * board post carrying it. */
+  observation(): Promise<Record<string, any>> {
+    return this.call('POST', '/v1/sync/observation', {});
+  }
+  head(): Promise<Record<string, any>> {
+    return this.call('GET', '/v1/sync/head');
+  }
+  board(body: Record<string, unknown>): Promise<Record<string, any>> {
+    return this.call('POST', '/v1/sync/board', body);
+  }
   claim(body: { request_id: string; ticket_id?: string }): Promise<Record<string, any>> {
     return this.call('POST', '/v1/runner/claim', body);
   }
