@@ -4,8 +4,8 @@ The immediately.run factory's live state — work-item leases, workers, provider
 dashboard at `https://baton.immediately.run` — on a Cloudflare Worker and one SQLite
 Durable Object.
 
-The design is `BATON_SPEC` in the `immediately-run/docs` repository
-(`content/specs/BATON_SPEC.mdx`); the work is the `baton` project's roadmap items there. Where
+The design is `BATON_SPEC`, [`spec/BATON_SPEC.md`](spec/BATON_SPEC.md) (moved here from the
+`immediately-run/docs` repository in R3-1252); the work is the tickets in [`tickets/`](tickets/). Where
 an item says `infra/baton/<path>`, it means `<path>` in this repository (BATON_SPEC §3).
 
 How Baton differs from a durable-execution engine such as Temporal, and where each fits:

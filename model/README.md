@@ -1,7 +1,8 @@
 # Baton's core as a formal model (R3-1243)
 
 A [Quint](https://quint-lang.org) model of Baton's core state machine, written against
-`BATON_SPEC` in `immediately-run/docs` as merged at `b7537395` (docs#212). Each action, helper
+`BATON_SPEC` (now [`spec/BATON_SPEC.md`](../spec/BATON_SPEC.md); written against it in
+`immediately-run/docs` as merged at `b7537395`, docs#212). Each action, helper
 and property names the requirement it models (`R-BTN-n`, §n). A counterexample is a spec
 defect: it is filed against BATON_SPEC with the trace, never fixed by weakening a property.
 

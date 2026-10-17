@@ -1,7 +1,8 @@
 # CLAUDE.md — Baton
 
-Baton is specified by `BATON_SPEC` in `immediately-run/docs` (`content/specs/BATON_SPEC.mdx`),
-and built through the `baton` project's roadmap items there. Read the item and the spec
+Baton is specified by `BATON_SPEC`, `spec/BATON_SPEC.md` in this repository (moved from
+`immediately-run/docs` in R3-1252), and built through the tickets in `tickets/`. Amend the spec
+here, by pull request; docs' `content/specs/BATON_SPEC.mdx` is a stub. Read the item and the spec
 sections it cites before changing anything. See `README.md` for the layout.
 
 ## Rules
