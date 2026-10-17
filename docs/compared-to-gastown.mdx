@@ -12,8 +12,11 @@ a backlog without two of them doing the same work, and keeping the work moving w
 crashes, stalls or fills its context. The two make different bets about who keeps order. This
 page compares them, as [Baton compared with Temporal](compared-to-temporal.mdx) does for
 durable execution. The rules referred to (`R-BTN-n`) are in `spec/BATON_SPEC.md`. What this
-page says about Gas Town comes from its README and published reviews as of October 2026; Gas
-Town is alpha software and changes quickly.
+page says about Gas Town comes from [its README](https://github.com/steveyegge/gastown) and
+published coverage — [heise](https://www.heise.de/en/background/Full-Control-Gas-Town-Orchestrates-Ten-or-More-Coding-Agents-11178824.html),
+[The New Stack](https://thenewstack.io/steve-yegges-ai-agent-orchestration-project-gas-town-comes-to-the-cloud-and-brings-the-wasteland-with-it/)
+and [SD Times](https://sdtimes.com/softwaredev/gas-town-by-kilo-multi-agent-orchestrator-now-available/)
+— as of October 2026; Gas Town is alpha software and changes quickly.
 
 ## The one-line difference
 
@@ -36,16 +39,16 @@ Town is alpha software and changes quickly.
 | Bead (a git-backed issue) | A ticket, from the repository's ticket source | The default source is a folder of Markdown files (R-BTN-74); any source can post tickets. |
 | Convoy (beads bundled for assignment) | A parent ticket and its child tickets (R-BTN-86) | A leg can wait for its children at a station (R-BTN-120). |
 | Formula, molecule (a TOML workflow template, instantiated with tracked steps) | A course: stations joined by legs (R-BTN-69) | A course is a graph, not a script; its conditions live in the course's `locate`. |
-| Mayor (the coordinating agent) | None in core | A course may give planning its own leg, which spawns children. |
+| Mayor (the coordinating agent) | The `epic` course's `plan` and `replan` legs (R-BTN-124) | Planning is a leg that files child tickets, not a standing agent in core. |
 | `gt sling` (push work to an agent) | Pull: a worker asks for recommendations and claims one (R-BTN-98) | Baton advises an order; it assigns nothing. |
 | Polecat (a worker agent; persistent identity, ephemeral sessions) | A worker running `baton run`; each leg a child session (§6.13, R-BTN-106) | Identity is the machine's key and session name (R-BTN-13). |
 | Hook, and the propulsion principle (work on your hook is yours to run) | A claim: a fenced lease on one ticket (R-BTN-6, R-BTN-7) | A lapsed lease is reaped and fenced, so a stale worker's push is refused. |
 | Refinery (a batching, bisecting merge queue) | The `pr` course's `merge` leg | Baton leaves merge queues to the forge (GitHub's merge queue, for example). |
-| Witness (watches workers, nudges, triggers hand-offs) | Heartbeats, lease timeouts, fenced reaps; **Running**'s stalled flag (§14) | Baton detects and reaps; it does not nudge a live agent. |
+| Witness (watches workers, nudges, triggers hand-offs) | Heartbeats, lease timeouts, fenced reaps; **Running**'s stalled flag (§14); the runner's context refresh (R-BTN-123) | Baton detects and reaps, and refreshes a filling context under the same claim; it does not nudge a live agent. |
 | Deacon, Dogs, Boot (the watchdog chain) | The Durable Object's alarm (§3) | Server-side, not agents. |
 | Crew (a person's own clone) | Anyone pushing to git; a `human-operator` worker (R-BTN-58) | |
-| `gt escalate` (severities, routed upwards) | Decisions (R-BTN-78), delivered by couriers (R-BTN-80), listed under **Needs you** | |
-| Handoff, `gt prime`, seance (asking a predecessor session) | The hand-off document (R-BTN-44), the resume record (§6.11), transcript pointers (§6.8), a leg's session link (R-BTN-113) | |
+| `gt escalate` (severities, routed upwards) | Decisions (R-BTN-78) with a severity (R-BTN-125), delivered by couriers that take the severities they register (R-BTN-80), listed under **Needs you** | |
+| Handoff, `gt prime`, seance (asking a predecessor session) | The hand-off document (R-BTN-44), the context refresh (R-BTN-123), the resume record (§6.11), transcript pointers (§6.8), a leg's session link (R-BTN-113) | Asking a predecessor is reserved for a course's leg, not built. |
 | Scheduler `max_polecats` | Resource instances and readings (R-BTN-76, R-BTN-101), owner bars (R-BTN-67), `max_queue` (R-BTN-79) | Baton's limits are per account or resource, not one number. |
 | `gt feed`, problems view, dashboard | The dashboard (§14), the leg stream (R-BTN-118) | |
 | Verification gates in the Refinery | The review gate as course legs; check courses (R-BTN-114) | |
@@ -53,12 +56,15 @@ Town is alpha software and changes quickly.
 
 ## What Gas Town gives that Baton does not
 
-1. **A coordinator that plans.** Tell the Mayor what to build and it decomposes the work,
-   bundles it into convoys and dispatches it. Baton starts from tickets someone, or some leg,
-   has already written.
-2. **Active supervision of live agents.** A Witness nudges a stuck agent and refreshes one
-   whose context is filling, without ending its work. Baton notices silence and staleness, and
-   reaps a silent claim; a live but stuck agent runs until its leg's deadline (R-BTN-90).
+1. **A standing coordinator.** Tell the Mayor what to build and it decomposes the work,
+   bundles it into convoys, dispatches it and keeps the whole picture as the work goes on.
+   Baton's `epic` course plans too (R-BTN-124) — its `plan` leg files child tickets, and
+   `replan` answers a withdrawn one — but each is a leg that ends; no agent watches the epic
+   between legs or re-plans on its own initiative.
+2. **Nudging live agents.** A Witness nudges a stuck agent. Baton notices silence and
+   staleness and reaps a silent claim, and its runner refreshes a session whose context is
+   filling under the same claim (R-BTN-123); but a live, stuck agent runs until its leg's
+   deadline (R-BTN-90).
 3. **A merge queue in the box.** The Refinery batches merge requests, runs the gates on the
    merged stack and bisects a red batch. Baton's `merge` leg merges one change at a time and
    leaves queuing to the forge.
@@ -69,7 +75,8 @@ Town is alpha software and changes quickly.
    assigns; an owner can expedite, hold or re-route a ticket (§8, R-BTN-83), not pin it to a
    worker.
 6. **Talking to the previous session.** Seance lets an agent ask its predecessor. Baton keeps
-   pointers to the transcript, the hand-off document and the session link.
+   pointers to the transcript, the hand-off document and the session link; asking a
+   predecessor is reserved for a course's own leg, to be built when a problem needs it.
 7. **OpenTelemetry out of the box,** and a federation of towns (the Wasteland).
 
 ## What Baton gives that Gas Town does not
