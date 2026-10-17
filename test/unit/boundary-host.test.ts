@@ -44,4 +44,12 @@ describe('the host boundary (R-BTN-55)', () => {
       expect([line, PLATFORM.some((re) => re.test(line))]).toEqual([line, true]);
     }
   });
+
+  // §2b / R-BTN-74: the CLI's defaults are course code, exempt from the word scan (they may
+  // name a `ctx` and read the forge), and core may not import them — Baton receives only results.
+  it('src/defaults/ is exempt from the scan, and src/core/ imports none of it', () => {
+    expect(files(join(ROOT, 'src/defaults')).length).toBeGreaterThan(0); // the exemption is real, not vacuous
+    const imports = files(join(ROOT, 'src/core')).filter((p) => /from\s+['"]\.\.\/(\.\.\/)*defaults\b/.test(code(p))).map((p) => relative(ROOT, p));
+    expect(imports).toEqual([]);
+  });
 });

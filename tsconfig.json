@@ -32,6 +32,7 @@
     "test/lib",
     "src/local",
     "src/runner",
+    "src/defaults",
     "test/hosts/local.ts",
     "test/unit/local-queue.test.ts",
     "test/unit/boundary-host.test.ts",
@@ -41,6 +42,8 @@
     "test/unit/check-traces.test.ts",
     "test/unit/test-course.test.ts",
     "test/unit/stats-size.test.ts",
-    "test/model"
+    "test/model",
+    "test/integration/S-BTN-43.defaults.test.ts",
+    "test/unit/defaults-cli.test.ts"
   ]
 }

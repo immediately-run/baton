@@ -2,8 +2,8 @@
 title: "R3-1249 — Baton CLI defaults: the markdown ticket source, the pr course and baton repo init"
 id: R3-1249
 project: baton
-status: in-progress
-updated: 2026-10-16
+status: done
+updated: 2026-10-17
 repos:
   - baton
 tags:
@@ -14,7 +14,8 @@ description: "baton repo sync falls back to a markdown ticket source and a built
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/41
 tier: judgement
 depends_on:
   - R3-1228
@@ -88,9 +89,9 @@ when they need to. Tier: judgement — a default other repositories will copy.
 
 ### Exit criteria
 
-- [ ] S-BTN-43 passes
-- [ ] both unit suites pass
-- [ ] `npm run typecheck` green; the boundary test green with `src/defaults/` classified as course code
+- [x] S-BTN-43 passes
+- [x] both unit suites pass
+- [x] `npm run typecheck` green; the boundary test green with `src/defaults/` classified as course code
 
 ## Status
 
