@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1104
 tier: judgement
-description: "The owner's 2026-10-16/17 design decisions as a spec amendment, §2m (R-BTN-106–121, S-BTN-62–74, G-BTN-89–98), with dated notes on every rule it amends. Requires: none."
+description: "The owner's 2026-10-16/17 design decisions as a spec amendment, §2m (R-BTN-106–125, S-BTN-62–90, G-BTN-89–110), with dated notes on every rule it amends, and a Gas Town comparison page. Requires: none."
 topics:
   - baton
 owns: {}
@@ -19,8 +19,8 @@ prs:
 depends_on: []
 ---
 
-**Brief:** the owner, 2026-10-16 and 2026-10-17, in one design discussion (the session's summary of the agreed points, then "go"): the runner organizes a ticket's legs and sessions report to it; cloud sessions as runners; one envelope and named schemas for leg outputs and readings; station entry requirements; standard output formats as a library; a course's signature; declarative views; session links; check courses with the merge check delivered to GitHub by a trusted courier; registration tokens with API keys as a fallback to SSH; a running leg's output streamed over wss; stopping a leg from the dashboard; a leg's prerequisites in one place, with tickets `at` or `reached` a station; capability types declared in each course file.
-**Spec:** `spec/BATON_SPEC.md` — new §2m; dated notes on R-BTN-13, -33, -37, -58, -69, -72, -75, -76, -78, -80, -82, -91, -101, §7.2 rule 4, §10.1, §11 and §14.
+**Brief:** the owner, 2026-10-16 and 2026-10-17, in one design discussion (the session's summary of the agreed points, then "go"): the runner organizes a ticket's legs and sessions report to it; cloud sessions as runners; one envelope and named schemas for leg outputs and readings; station entry requirements; standard output formats as a library; a course's signature; declarative views; session links; check courses with the merge check delivered to GitHub by a trusted courier; registration tokens with API keys as a fallback to SSH; a running leg's output streamed over wss; stopping a leg from the dashboard; a leg's prerequisites in one place, with tickets `at` or `reached` a station; capability types declared in each course file. Later the same day: retries per leg, Temporal-style, with a backoff as a prerequisite; a comparison with Gas Town; and from it, handing off when the context fills, a planning leg shipped as a course, and severity on decisions — with asking a predecessor session mentioned, not built.
+**Spec:** `spec/BATON_SPEC.md` — new §2m; dated notes on R-BTN-13, -23, -33, -37, -55, -57, -58, -69, -72, -74, -75, -76, -78, -80, -82, -91, -101, -102 and -103; §4's tables; §6.10, §6.13 and §7.1; §7.2 rules 4 and 10 and the gate query; §9, §10.1, §11 and §14; new page `docs/compared-to-gastown.mdx`.
 
 ### Why
 
@@ -28,9 +28,10 @@ The owner settled these points in discussion; until they are in the spec, no imp
 
 ### What to do
 
-1. Add §2m before §3: R-BTN-106 to R-BTN-121, scenarios S-BTN-62 to S-BTN-74 and gates G-BTN-89 to G-BTN-98.
+1. Add §2m before §3: R-BTN-106 to R-BTN-125 (§2m.6a retries, §2m.6b fresh context, the `epic` course and decision severities among them), scenarios S-BTN-62 to S-BTN-90 and gates G-BTN-89 to G-BTN-110.
 2. Propagate the amendment: put a dated note on every rule §2m amends, add §11's new routes, and update the header and the decisions and open questions.
-3. Review it in this repository under the review gate.
+3. Add `docs/compared-to-gastown.mdx` (Baton with its `pr` course against Gas Town), linked from `docs/home.mdx`.
+4. Review it in this repository under the review gate.
 
 ### Do not
 
@@ -40,7 +41,8 @@ The owner settled these points in discussion; until they are in the spec, no imp
 ### Tests
 
 - `npm run check:spec` green.
-- A diff that touches only §2m, the dated notes, §11's rows, the header, the decisions and the open questions.
+- `npm run check:wiki` green.
+- A diff that touches only §2m, the dated notes, §4's and §11's rows, the header, the decisions and the open questions, the docs pages, the CHANGELOG and this ticket.
 
 ### Exit criteria
 

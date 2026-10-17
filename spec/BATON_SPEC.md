@@ -18,7 +18,7 @@ updated: 2026-10-17
 
 # immediately.run Baton — the factory's live state, off git
 
-**Status:** proposal — approved 2026-10-13 after a claims-truth review and five adversarial and final review rounds (Review record); owned by project [`baton`](../tickets/projects/baton.mdx), items R3-1205–R3-1221 (§13). **Amended 2026-10-14** (owner direction): the ticket as a course of legs derived from git (§6.12), rate-limit exhaustion, provider budget forecasts and model advice as the `roadmap-pr` course's logic (§7.3, now `BATON_ROADMAP_PR_COURSE`), Baton as an advisor that gates only safety (R-BTN-45), the boundary between Baton and courses (§2b, R-BTN-50), hooks, probes and their trust model (§2c), hosting on Cloudflare and locally (§3a), **amended 2026-10-15** with blocks and their queries (§2g), positions, history, contracts and replay (§2h), child tickets, the capacity envelope and owner-state export (§2i), time on legs and the push doorbell (§2j), SSH key identity (R-BTN-13 as amended), administration by deployment-anchored administrators and repository owners (§10.6), provider capacity as course logic and the tags gate (§2b, §7.3), cooperative locks with detection (R-BTN-46), and registered repositories and courses (§2a), **amended 2026-10-16** so Baton runs without GitHub — forges, sync keys, pulled syncs, per-forge notifications and the `branch` course (§2k, R3-1253) — and **amended again 2026-10-16** so Baton runs no repository code: hooks retired, workers rank from a fleet and instance view, claims name preferences and the accounts they bill, readings kept per instrument from any machine key, a machine key trusted to sync, report and deliver, worker couriers, open-world claims and a passive plain git server (§2l) — reviewed adversarially six times on 2026-10-14 and revised after each (Review record), §2l twice on 2026-10-16 and revised; a cutover precondition (§13) · **Updated:** 2026-10-16
+**Status:** proposal — approved 2026-10-13 after a claims-truth review and five adversarial and final review rounds (Review record); owned by project [`baton`](../tickets/projects/baton.mdx), items R3-1205–R3-1221 (§13). **Amended 2026-10-14** (owner direction): the ticket as a course of legs derived from git (§6.12), rate-limit exhaustion, provider budget forecasts and model advice as the `roadmap-pr` course's logic (§7.3, now `BATON_ROADMAP_PR_COURSE`), Baton as an advisor that gates only safety (R-BTN-45), the boundary between Baton and courses (§2b, R-BTN-50), hooks, probes and their trust model (§2c), hosting on Cloudflare and locally (§3a), **amended 2026-10-15** with blocks and their queries (§2g), positions, history, contracts and replay (§2h), child tickets, the capacity envelope and owner-state export (§2i), time on legs and the push doorbell (§2j), SSH key identity (R-BTN-13 as amended), administration by deployment-anchored administrators and repository owners (§10.6), provider capacity as course logic and the tags gate (§2b, §7.3), cooperative locks with detection (R-BTN-46), and registered repositories and courses (§2a), **amended 2026-10-16** so Baton runs without GitHub — forges, sync keys, pulled syncs, per-forge notifications and the `branch` course (§2k, R3-1253) — and **amended again 2026-10-16** so Baton runs no repository code: hooks retired, workers rank from a fleet and instance view, claims name preferences and the accounts they bill, readings kept per instrument from any machine key, a machine key trusted to sync, report and deliver, worker couriers, open-world claims and a passive plain git server (§2l) — reviewed adversarially six times on 2026-10-14 and revised after each (Review record), §2l twice on 2026-10-16 and revised; a cutover precondition (§13); **amended 2026-10-17** (owner direction, §2m): the runner organizes a ticket's legs and sessions report to it (R-BTN-106), cloud sessions as runners (R-BTN-107), one envelope and named, refinable schemas for leg outputs and readings (R-BTN-108), station entry requirements (R-BTN-109), the standard output formats (R-BTN-110), a course's signature (R-BTN-111), declarative views (R-BTN-112), session links (R-BTN-113), check courses and the merge check delivered by a forge courier (R-BTN-114, R-BTN-115), legs a person runs (R-BTN-116), registration tokens and API keys (R-BTN-117), a running leg's output streamed to its viewers (R-BTN-118) and stopping a running leg (R-BTN-119), a leg's prerequisites in one place (R-BTN-120), capability types declared by courses (R-BTN-121), retry policies per leg (R-BTN-122), a fresh session when a leg's context fills (R-BTN-123), the `epic` planning course (R-BTN-124) and decision severities (R-BTN-125) · **Updated:** 2026-10-17
 
 > **Reads first:** `PARALLEL_AGENT_DOCS_SPEC` §5 (R-PAD-6/7: claims and ids as one
 > scripted act on `docs/main`; this spec amends R-PAD-6 only, §15), `docs/scripts/claim.sh`
@@ -73,7 +73,7 @@ role, no change to the review gate, the reconciler, filing or id allocation.
 | Course data such as docs' `model-prices.json`, `model-providers.json` and `reviewer-matrix.json` (`BATON_ROADMAP_PR_COURSE`) | An opaque copy, posted by the sync and read only by the course's hook |
 | | Keys, grants and owners (§10.6); external-resource readings (R-BTN-53, R-BTN-76); every limit agents must not change — owner bars, required bars, tiers, retry, transcript repositories (R-BTN-66) |
 
-**R-BTN-33 (Baton holds filter fields, never content).** Baton stores, per live ticket, only
+**R-BTN-33 (Baton holds filter fields, never content).** *(Amended 2026-10-17 by §2m: a leg's inline output value of at most 4 KB is stored as opaque course data, like a reading's `detail` (R-BTN-108) — only a value whose schema bounds every string and closes every object, so a ticket's prose has nowhere to arrive; the fields §2m adds are filter fields of the same kind: a ticket's posted `depends_at`, a leg's `requires` (in the stored course file), a leg run's `session_url`, `closed_tickets`' final station and path. A running leg's output may be relayed to viewers Baton authorized, and is never stored, logged or exported (R-BTN-118).)*  Baton stores, per live ticket, only
 the fields matching (§7.2) and the dashboard's lists read: id, title, path, course, tier,
 `requires`, operator-only, expedite, `depends_on` and `blocked_by`, `parent` (R-BTN-86), `repos`, rank, and a
 small `display` object the dashboard shows and core never reads (for docs: status, node,
@@ -546,10 +546,14 @@ section is what makes that safe.
   | `owner_bars` (R-BTN-67) | its owners | tags no worker may claim or advance with, on matching legs of one course or of every course, in a time window — for docs, the owner's provider suspensions |
   | `required_bars` (R-BTN-67) | its owners | a leg of a course — or every leg but those listed — must carry a barred tag with a given prefix; for docs' `roadmap-pr`, every leg but `implement`, `review` and `adjudicate` must bar a `family:` tag, so a new or re-routed writing leg is covered too (R-BTN-67 states what it still cannot catch) |
   | `tiers` | the administrator, at registration | the tier ladder rule 5 compares; a grant's `max_tier` (R-BTN-58) caps what a key may declare |
-  | `retry` | its owners | R-BTN-23's backoffs and attempt limit, so no commit can let a poisoned ticket burn quota |
+  | `retry` | its owners | R-BTN-23's backoffs and attempt limit, so no commit can let a poisoned ticket burn quota — *(§2m)* the default leg policy, its ceiling and its floor of never-retried types (R-BTN-122) |
   | `unblocked_trigger` (was `unblocked_workflow`, R-BTN-94) | its owners | the adapter call Baton makes when a ticket unblocks (R-BTN-77) |
   | `transcript_repos` | its owners | the only repositories a transcript pointer may name (§6.8) |
   | `weight` | the administrator | cross-repository priority (R-BTN-61) |
+  | `api_keys` *(§2m)* | its owners | whether API-key credentials may act on it (R-BTN-117; default `true`) |
+  | `required_independence` *(§2m)* | its owners | the legs a key that ran another leg of the ticket may not take, joined to the course file's `no_chain_from` (R-BTN-106) |
+  | `checks` *(§2m)* | its owners | each check course's name and which end station is which conclusion (R-BTN-114) |
+  | `check_runners` *(§2m)* | its owners | the keys that may claim check tickets, and nothing else (R-BTN-114) |
 
   Everything else a course needs stays in git, where agents may improve it: the course file's
   stations and legs, step kinds, `branch_pattern`, `report_horizon_h`, `min_worker_version`, the sync, the hooks
@@ -613,7 +617,7 @@ the legs and their transitions are a closed set, and none of it is encoded in Ba
   resumes. *(Rejected: "state", which collides with a leg's `ready`/`waiting` and is as
   generic as "workflow"; "stage" (the product's stage region, the retired free-text
   `stage`); "checkpoint" (local-store checkpoints); "milestone"; "exchange zone".)*
-- **R-BTN-69 (the course file).** `.baton/courses/<course>/course.json`, in a schema core
+- **R-BTN-69 (the course file).** *(Amended 2026-10-17 by §2m: a station may carry `entry` (R-BTN-109); a leg `no_chain_from`, `isolation` (R-BTN-106, R-BTN-107), `kind: person` with `asks` (R-BTN-116), `stream` (R-BTN-118) and `spawns` (R-BTN-111); a check course `checks` (R-BTN-114); output schemas are named (R-BTN-108); a leg carries `requires` (R-BTN-120), `retry`, `max_ready_s` (R-BTN-122), `max_context` and `max_refreshes` (R-BTN-123); the course declares `capability_types` and `capability_roles` (R-BTN-121) and `error_types` (R-BTN-122).)*  `.baton/courses/<course>/course.json`, in a schema core
   owns:
 
   ```json
@@ -730,7 +734,7 @@ the legs and their transitions are a closed set, and none of it is encoded in Ba
 roadmap — become tickets on courses and legs is that repository's choice, and the baton CLI
 offers a sane default.)*
 
-- **R-BTN-74 (two override points, a default for each).** A repository's sync — `npx baton
+- **R-BTN-74 (two override points, a default for each).** *(Amended 2026-10-17 by §2m: the CLI gains a third default ticket source, `changes`, for check courses (R-BTN-114), and a third default course, `epic`, for planning (R-BTN-124).)*  A repository's sync — `npx baton
   sync` in its sync workflow (§7.1) — builds the board post from two pieces of the
   repository's code, both optional:
   - the **ticket source**, `.baton/tickets.mjs`, default-exporting `tickets(ctx)` → the
@@ -813,7 +817,7 @@ one provider's model; and to be told when a blocked ticket unblocks. A worker ca
 a ticket's pending leg for three reasons: it lacks a required capability, the ticket depends on
 another ticket, or a third-party resource is unavailable.)*
 
-- **R-BTN-75 (blocks are stored, not recomputed).** A **block** is one reason a ticket's next
+- **R-BTN-75 (blocks are stored, not recomputed).** *(Amended 2026-10-17 by §2m: a `ticket` row may sit on one leg and name the stations the other ticket must be at or have reached, or require it closed `done`, and `capability` rows are kept per leg for a leg's own list (R-BTN-120); `GET …/tickets/{ticket}/prerequisites` and `baton why` answer for one leg, every prerequisite met or not.)*  A **block** is one reason a ticket's next
   leg cannot be worked, kept as a row of `ticket_blocks` (repository, ticket, leg or none,
   `kind`, `ref`, `since`, `until`) that Baton writes in the same transaction as the change that
   caused it — so asking is a read of one repository-scoped index, never a pass over the board.
@@ -855,7 +859,7 @@ another ticket, or a third-party resource is unavailable.)*
   `tickets.blocked_since`; `blocked` and `unblocked` (R-BTN-77) are its transitions, except that
   a claim starting or ending changes it silently — a claimed ticket is not waiting, and its end
   is not an unblocking. The same answer lists, as `other`, what else keeps it
-  from being offered that is not a block: a hold or a backoff (§8, §6.10), a leg waiting on a
+  from being offered that is not a block: a hold or a backoff (§8, §6.10; *2026-10-17, §2m: a leg's backoff is now a block of kind `retry`, R-BTN-122*), a leg waiting on a
   course label (`waiting_on`, R-BTN-70: `ci`, `owner`, `policy`) or on `time` (R-BTN-89), owner bars on every live
   worker's tags (R-BTN-67), an unconfirmed end (§6.7). Blocks bind as their kind does: a
   `ticket` block refuses a claim and a `capability` block refuses the workers it names (rules
@@ -865,7 +869,7 @@ another ticket, or a third-party resource is unavailable.)*
   worker, as its own instances say (R-BTN-76) — and a claim or `advance` into it is accepted and
   recorded `advice-overridden`, because a worker may know better — its own account or token
   may not be the one that ran out.
-- **R-BTN-76 (external resources, their instances and instrument readings).** *(Revised
+- **R-BTN-76 (external resources, their instances and instrument readings).** *(Amended 2026-10-17 by §2m: a course file may also name a leg's resources, under its `requires`; they join the `needs` the sync posts (R-BTN-120).)*  *(Revised
   2026-10-15, owner direction: a general vocabulary for whatever outside Baton a leg can be
   blocked on — a model provider's capacity, an API's rate limit, disk on a shared server.)*
   - **An external resource** is registered by an administrator (`baton admin resource add
@@ -954,7 +958,7 @@ another ticket, or a third-party resource is unavailable.)*
     per-worker answer is computed on the spot — for `?worker=me` and for that worker's
     recommendations (§7.2). Hooks receive the states and latest `detail` of the instances of the
     resources their course's legs need (R-BTN-52), in place of the old probe payloads.
-- **R-BTN-78 (human decisions block, and are not resources).** *(Owner, 2026-10-15.)* A leg
+- **R-BTN-78 (human decisions block, and are not resources).** *(Amended 2026-10-17 by §2m: a decision may carry a `severity`, R-BTN-125; a leg may be a person's (`kind: person`), its decision posted on it and its answer an output (R-BTN-116).)*  *(Owner, 2026-10-15.)* A leg
   waiting for a person — an approval, an answer — is blocked on a **decision**, a fourth kind
   of block, and not an external resource: a decision does not lapse and must not fail open, no
   worker can know better, and it is one-shot and attributable to whoever must answer. With each
@@ -1065,7 +1069,7 @@ another ticket, or a third-party resource is unavailable.)*
     *(rejected the same day: feeder `queue` blocks, and admission blocks)*.
   - **Visible.** Depths against bounds are on the dashboard's Courses view (§14) and in the
     repository's stats.
-- **R-BTN-80 (notices: Baton queues requests for people; couriers deliver them).** *(Owner,
+- **R-BTN-80 (notices: Baton queues requests for people; couriers deliver them).** *(Amended 2026-10-17 by §2m: a notice carries its decision's severity, a courier may take only some severities, and reminders come sooner for urgent ones, R-BTN-125; a third kind of courier, the forge courier, delivers Baton-signed `forge-check` notices and never takes pool copies (R-BTN-114, R-BTN-115).)*  *(Owner,
   2026-10-15: as instruments push readings in, a service outside Baton pulls human-in-the-loop
   requests out — claiming them, then marking them sent; the simplest courier is a CLI that
   shows them.)* Baton sends no mail and calls no service.
@@ -1221,7 +1225,7 @@ leg on a violation; with the record and the pointers, any leg can be replayed.)*
   dashboard's ticket view, and passed — its last 10 rows per candidate, at most 50 candidates — to
   the course's hooks.
 
-- **R-BTN-82 (leg contracts: declared inputs and outputs, as pointers, checked by the worker).**
+- **R-BTN-82 (leg contracts: declared inputs and outputs, as pointers, checked by the worker).** *(Amended 2026-10-17 by §2m: an output is an envelope naming its schema as `id@version`, given by pointer or as an inline value of at most 4 KB; schemas refine a base and are checked by one shared validator (R-BTN-108); a station names the outputs any leg arriving at it must have produced, and Baton checks them (R-BTN-109) — so "Baton does not" check below holds for pointer contents only.)* 
   - **A contract** is optional, per leg in the course file: a `version` (an integer, raised
     whenever the leg's inputs or outputs change meaning), named `outputs` — each with an
     optional `schema`, a JSON Schema file in the course directory — and named `inputs`, each
@@ -1643,9 +1647,9 @@ run one child ticket per run.)*
   - *(Rejected: Baton-imposed default budgets per tier or activity — values would need weeks of
     activity data, which is why the open question held them back; a budget the course chooses
     needs none. Rejected: killing the leg from Baton — it holds no process, and the fence
-    already stops what matters.)*
+    already stops what matters.)* *(2026-10-17, R-BTN-119: still so — Baton asks the runner, which stops the process.)*
 
-- **R-BTN-91 (the doorbell: an optional push connection; the heartbeat stays the truth).** A
+- **R-BTN-91 (the doorbell: an optional push connection; the heartbeat stays the truth).** *(Amended 2026-10-17 by §2m: the ring gains the kinds `watch` and `unwatch`, which open and close a leg's output stream on its own connection (R-BTN-118); the doorbell itself stays a ring.)*  A
   worker may hold a WebSocket to its Baton, `GET /v1/runner/push?session_name=<name>`.
   - **Identified as a heartbeat is** *(review gate round 1)*: the upgrade is signed by the
     machine's key (§10.1), its query in the signature, and carries `X-Worker-Secret`; Baton
@@ -2095,7 +2099,7 @@ archiver — and git's server-side hooks are unaffected: they are not Baton hook
   A claim against Baton's own advice (a resource block, the expedite lane's bound,
   `max_queue`) is accepted and records `advice-overridden`, as before (R-BTN-45); a claim
   against the course's ranking is invisible to Baton and records nothing.
-- **R-BTN-101 (readings per instrument).** *(Amends R-BTN-76's "two readings per instance" and
+- **R-BTN-101 (readings per instrument).** *(Amended 2026-10-17 by §2m: a reading names its `detail`'s schema, validated by the shared validator (R-BTN-108).)*  *(Amends R-BTN-76's "two readings per instance" and
   who may report.)*
   - **Who may report.** A machine key may post readings for its own `worker` instances and
     for any account instance that lists a repository its key is granted on; an instrument
@@ -2128,7 +2132,7 @@ archiver — and git's server-side hooks are unaffected: they are not Baton hook
     comparing readings with its own rough sense of the leg's size. A reading can show an
     account depleted or close to it; nothing guarantees that one shown with room has room for
     a given leg, and the provider's own limit is the truth.
-- **R-BTN-102 (a machine key is trusted with everything a machine does).** *(Amends R-BTN-13,
+- **R-BTN-102 (a machine key is trusted with everything a machine does).** *(Amended 2026-10-17 by §2m: a machine key is never a forge courier and never a check-runner, which are key roles of their own (R-BTN-114, R-BTN-115); an API-key worker credential (R-BTN-117) works and reports readings but neither syncs nor delivers.)*  *(Amends R-BTN-13,
   R-BTN-53, R-BTN-57, R-BTN-80 and R-BTN-93.)* A worker's SSH key — a **machine key**, the
   credential kind `worker` — may, with its ordinary signed requests and **none of it required
   of it**:
@@ -2165,7 +2169,7 @@ archiver — and git's server-side hooks are unaffected: they are not Baton hook
   settings stay out of agents' reach (R-BTN-57, R-BTN-66). Sync keys, instrument keys and
   personal courier keys keep one role each. An instrument key has no hostname, so it never
   heartbeats or claims.
-- **R-BTN-103 (worker couriers deliver from a pool).** *(Amends R-BTN-80.)* There are two kinds
+- **R-BTN-103 (worker couriers deliver from a pool).** *(Amended 2026-10-17 by §2m: there are three kinds of courier, not two — the forge courier delivers only `forge-check` notices and never from the pool (R-BTN-115). A worker courier's heartbeat entry may name `severities`, a pool copy is keyed on `(repository, asks, severity)`, and the **Needs you** check below is per severity, still for `owner` decisions only (R-BTN-125).)*  *(Amends R-BTN-80.)* There are two kinds
   of courier:
   - a **personal channel** — a courier key an owner registers with its `asks`, as R-BTN-80
     describes — gets **its own copy** of each notice, so a person's laptop CLI and a
@@ -2361,6 +2365,867 @@ archiver — and git's server-side hooks are unaffected: they are not Baton hook
   fleet view's board summary; core's `max_queue` advice is unchanged (R-BTN-79).
 
 
+## 2m. Runners organize legs; outputs are typed; checks merge through a courier *(amendment 2026-10-17, owner direction; proposal)*
+
+*(Owner, 2026-10-16 and 2026-10-17, in one design discussion: the runner organizes a ticket's
+legs and a session reports to it, never to Baton; a cloud Claude session can be a runner; leg
+outputs and instrument readings share one envelope with a course-described `detail`; a station
+names what any leg arriving at it must have produced; standard output formats are a shared
+library, not core; a course's signature is its start and end stations' requirements; schemas
+carry a declarative view and Baton ships the renderers; each leg run carries a session link;
+check courses replace GitHub Actions, and the merge check is delivered to GitHub by a trusted
+courier; sessions register with a scoped, expiring token and need no user's key — "requiring
+ssh for runner auth is not great, users should be able to fall back to regular api keys"; a
+non-interactive leg's output streams to the dashboard over the existing WebSocket stack —
+"we don't need hand-rolled encryption for streaming logs if we use standard wss://"; and the
+dashboard can stop a running leg; and, the same day, a leg's prerequisites in one place, with
+capability types a course declares — §2m.6; and retry policies per leg, a backoff being one more prerequisite — §2m.6a; and, after comparing Baton with Gas Town, a fresh context, a planning course and decision severities — §2m.6b.)*
+
+What follows is the whole of the change. The rules it amends carry a dated note pointing here.
+**Scope, stated:** no new principal tier in Baton's sense beyond the two credential kinds
+R-BTN-115 and R-BTN-117 add; core still reads no course meaning (R-BTN-50); Baton still runs no
+repository code (R-BTN-98) — a schema and a view are data, and the validator and renderers are
+Baton's own shared code; git stays the truth and Baton a cache (R-BTN-39).
+
+### 2m.1 The runner as organizer
+
+- **R-BTN-106 (a session reports to its runner; the runner checks every move).** *(Amends
+  R-BTN-72.)* The runner already runs a ticket's legs one at a time (§6.13). What changes is how
+  an agent session inside a leg reports, and what bounds it:
+  - **The local channel.** The runner listens on a Unix socket in its state directory, mode
+    `0600`, named to the session by `IR_BATON_SOCKET` beside `IR_BATON_PARENT` (§6.13). It
+    speaks JSON lines; the CLI wraps it: `baton leg status` (the leg, its grant and its
+    deadline), `baton leg output <name> --uri <uri> [--digest …] | --value <json>`, and exactly
+    one of `baton leg done --reached <station> --next <leg>`, `baton leg suspend --reached
+    <station>` or `baton leg release --reason <reason>`; and `baton leg yield [--context
+    <fraction>]`, which marks a point between steps, reports context use, and answers whether
+    the runner wants a fresh session (R-BTN-123). A leg script may still return its
+    result directly (R-BTN-72); the channel is how a script that hands the leg to an agent
+    gets the agent's word back. **The session never talks to Baton.** The runner hands it a
+    state view without the worker secret and the claim nonce (`IR_BATON_STATE` names that view,
+    no longer the runner's own state file, §6.13), and the session makes no Baton request. In
+    `process` and `attached` mode that is the runner's discipline, not a boundary: the session
+    runs as the runner's OS user, so it can read the runner's own state file and use its
+    ssh-agent (R-BTN-14's secret is not a boundary between sessions of one user). Only
+    `session` mode keeps every Baton credential out of the session's reach (R-BTN-107).
+  - **The runner checks the move**, as it checks a script's result: `reached` an outcome of
+    the running leg, `next` a leg leaving it, each named output valid against its schema
+    (R-BTN-108) and every entry requirement of `reached` met (R-BTN-109). A move that fails is
+    answered on the channel with the reason, and the session may correct it until the leg's
+    deadline; nothing reaches Baton until the move passes. Then the runner runs `close` and,
+    where the result suspends or releases, `handoff` — per leg, as R-BTN-72 orders them — and
+    advances.
+  - **A bounded run.** `baton run --legs <leg,…> [--max-legs <n>] [--until <instant>]` grants
+    the runner itself a run: it claims only tickets whose queued leg is named, chains only into
+    named legs, runs at most `n` legs per claim (default 8) and starts none after `until`. A
+    move into a leg outside the grant suspends at `reached` with the hand-off, so the next
+    claimant takes it. The grant is the runner's own discipline, not a Baton gate: Baton sees
+    only advances, which its own gates check.
+  - **Legs that may not be chained.** A leg may carry `"no_chain_from": [<leg>, …]` in the
+    course file (R-BTN-69): Baton refuses a claim into it, and an `advance` into it, by a
+    **credential** that has run any named leg on this ticket, in this claim or an earlier one
+    (`claim_legs` joined through each claim's worker to its credential), `not-eligible`, rule
+    `chain` — so the key that wrote what a review reviews never reviews it. The runner
+    suspends at the station instead of advancing, and a runner under another key takes the
+    leg; a cloud environment's containers share one key (R-BTN-13), so they count as one. It is
+    core vocabulary: leg names and key fingerprints compared as strings. **It binds as strongly
+    as git**, because the course file is in git (R-BTN-66). Owners who need it held whatever
+    the course file says set `required_independence: {<leg>: [<leg>, …]}`, an owner setting in
+    R-BTN-66's table, which Baton joins to the course file's lists as it joins required bars to
+    posted ones (R-BTN-67). *(For `roadmap-pr`, `review` and `adjudicate` name
+    `implement` and `fix`; family bars, R-BTN-60, stay as they are.)*
+
+- **R-BTN-107 (a cloud session can be a runner).** Two modes, named by the runner on its
+  heartbeat as `isolation`:
+  - **`attached`** — `baton run --attached`, started in the background inside the session's
+    own container. The runner hosts the sidecar and the claim; each agent leg is handed back
+    to the session that started it, which reads the leg with `baton leg next` (it blocks until
+    the runner has a leg to give) and reports on the channel. **The isolation is advisory**:
+    the session can read the runner's state file, the worker secret and the key, so a
+    misbehaving session could act on the claim itself. That is the cost of one container, and
+    the dashboard shows the worker as `attached`.
+  - **`session`** — the runner, on any machine, starts **one cloud session per agent leg**
+    through a session provider (for Claude, the remote-session API: create, send, read events,
+    interrupt, archive) and gives it only the leg's brief: the ticket, the leg, its inputs'
+    URIs and the hand-off document — **never** the claim id, the worker secret or a Baton
+    credential. The child reports by ending its session with one fenced block,
+    ```` ```baton-leg-result ```` holding the same JSON the channel takes; the runner reads it
+    from the session's events, checks it as R-BTN-106 does, and does the rest. The provider
+    adapter is the runner's code, chosen with `--sessions <provider>`; core knows only the
+    mode's name.
+  - **`process`** is the default: legs run as the runner's child processes (§6.13). For
+    credentials it is as advisory as `attached` (R-BTN-106): the child is the runner's user.
+  - A leg may require `"isolation": "session"` in the course file, the one mode that keeps
+    credentials out of the leg's reach. Baton refuses a claim into such a leg, and an
+    `advance` into it, by a worker whose heartbeat declares another mode (rule `isolation`,
+    `not-eligible`), and the recommendation omits it for that worker. The declaration is the worker's own word, like
+    its tags (R-BTN-60): it stops a cooperating runner from taking a leg it should not, not a
+    hostile one.
+
+### 2m.2 Typed outputs: one envelope, a course-described detail
+
+- **R-BTN-108 (one envelope, named schemas, one validator).** *(Amends R-BTN-82 and
+  R-BTN-101.)* Leg outputs and instrument readings are one mechanism:
+  - **Core owns the envelope.** A leg output is `{name, schema: "<id>@<version>", uri?,
+    digest?, value?}` — `uri` and `digest` as R-BTN-82 has them, or an inline `value` of at
+    most 4 KB serialized, never both. A reading keeps R-BTN-76's envelope and names the schema
+    of its `detail` in `schema`. Core reads the envelope; what `value` and `detail` mean is the
+    schema's.
+  - **An inline value is bounded.** Baton stores a `value` only when its schema chain bounds
+    it: every object sets `additionalProperties: false` and every string a `maxLength` of at
+    most 256 — identifiers, numbers, states, links. Anything else is given by pointer. Stored
+    values are course data, in the owner-state export as readings' `detail` is (R-BTN-88), and
+    they are what R-BTN-33's note admits; a ticket's prose has no bounded schema to arrive in.
+  - **Schemas are named `id@version`.** `std:<name>@<n>` is the standard library's
+    (R-BTN-110); a course's are `<course>:<name>@<n>`, kept at
+    `.baton/schemas/<course>/<name>@<n>.json` and posted with the course file at every sync
+    (R-BTN-69's rule that the course file travels with every sync now covers its schemas),
+    each with its SHA-256 digest. A schema version is **immutable**: a posted schema whose
+    digest differs from the one Baton holds for the same id and version is refused, the
+    course file with it, and listed under **Needs you** — a change is a new version.
+    Baton keys a course's schemas by **(repository, id, version)**, so two repositories'
+    courses of one name never collide. A sync may post only schemas of its own repository's
+    courses (`<course>:` for a course it posts) and never a `std:` id, which comes only from
+    the library Baton ships (R-BTN-110); a `$ref` or `x-baton-base` resolves among the same
+    repository's schemas and the `std:` library.
+  - **Refinement, always checked both ways.** A schema may name one base,
+    `"x-baton-base": "<id>@<version>"`. A value is valid when it is valid against its schema
+    **and** every schema up its base chain — that is the guarantee a consumer of the base gets,
+    whatever the refinement says. Statically, `baton test-course` (§2d) also checks that each
+    schema **refines** its base: the same or a narrower `type`; every `required` of the base
+    still required; each shared property refining the base's, recursively; a new property only
+    where the base's `additionalProperties` allows it; `enum` a subset, `const` equal, bounds
+    equal or tighter, `pattern` equal. The check is sound but conservative: a refinement it
+    cannot prove is reported, with the keyword, and a course fixes it by restating the base's
+    keyword.
+  - **The restricted subset.** A schema is JSON Schema 2020-12 restricted to `type`,
+    `properties`, `required`, `additionalProperties`, `items`, `prefixItems`, `enum`, `const`,
+    `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength`,
+    `minItems`, `maxItems`, `pattern`, `format` (`date-time`, `uri` only), `$ref` to another
+    named schema, `title`, `description`, `x-baton-base` and `x-baton-view` (R-BTN-112); at
+    most 32 KB, 16 levels deep. No `anyOf`, `oneOf`, `allOf`, `not`, `if`, conditional or
+    dynamic reference: they make refinement undecidable in practice and validation unbounded.
+    **A `pattern`** is a regular expression in a grammar the validator implements itself and
+    runs in time linear in its input (a Thompson automaton, no backtracking): literals and
+    `\`-escapes, `.`, character classes (`[a-z]`, `[^…]`, `\d`, `\w`, `\s`), the anchors `^`
+    and `$`, groups, alternation and the quantifiers `?`, `*`, `+`, `{n}` and `{n,m}` with
+    `m` ≤ 1000; no back-reference, look-around, lazy or possessive quantifier, flag or Unicode
+    property; at most 512 characters. One outside the grammar is a schema error. The same
+    engine reads capability `values` (R-BTN-121). **A `$ref` cycle** — a schema reaching itself
+    through `$ref`s or `x-baton-base`s — is refused at the sync, so validation and the
+    refinement check always end. A schema using anything else is refused at the sync, with
+    its course file.
+  - **One validator.** The subset's validator and the refinement check are one module of
+    Baton's, `src/shared/schema.mjs`, with no dependency; the server, the CLI and runner, the
+    sync (`npx baton sync`, R-BTN-74) and `baton test-course` all import it, so no two parts of
+    Baton disagree on validity.
+  - **The legacy form.** A contract output whose `schema` is a file path (R-BTN-82 before this
+    amendment) is read as `<course>:<leg>.<output>@<contract version>` with no base, until
+    the course changes it.
+
+- **R-BTN-109 (station entry requirements).** A station may name what any leg arriving at it
+  must have produced: `"entry": [{"output": <name>, "schema": "<id>@<version>"}, …]` in the
+  course file.
+  - **Baton checks presence and identity.** At an `advance` or an `end` whose `reached` is the
+    station, each requirement must be met by an output the finished leg reports with that
+    name and a schema that is the required one or refines it (by the posted base chains),
+    with the posted digest; an inline `value` is validated in full with the shared validator.
+    A requirement unmet is refused `not-eligible` (rule `entry`), which the runner treats as an
+    output contract failure: `released:cannot-finish:contract-output` (R-BTN-82).
+  - **The sync checks pointers.** For an output given by `uri`, the sync fetches it from git
+    or the forge as the station function already reads git, validates it, and posts each
+    output's verdict with the ticket. An invalid one is logged as a discrepancy, sub
+    `output-invalid` (R-BTN-85), is never resolved as an input (so its consumer waits on
+    `input-missing`, R-BTN-82), and is listed under **Needs you**. Baton never fetches.
+  - **A sync-posted arrival** — a path the sync posts through a leg no claim reported, a
+    person's leg among them (R-BTN-116) — is checked the same way when the snapshot is
+    accepted: an unmet requirement or an invalid inline value is logged `output-invalid`, the
+    station's outputs are not resolved as inputs, and the ticket is listed under **Needs you**.
+  - **Side effects.** A leg whose work is only a side effect arrives at a station with no
+    `entry`, or with one `std:effect@1` requirement that names what it did.
+  - `baton test-course` checks that every `entry` schema is posted, and that every leg
+    arriving at a station declares, in its contract, outputs that can meet the station's
+    requirements.
+
+- **R-BTN-110 (standard output formats are a shared library, not core).** Baton ships, beside
+  its CLI, a library of `std:` schemas, each with a view (R-BTN-112). Core never reads their
+  meaning (R-BTN-50): to core a `std:` id is a string with a digest, like any other.
+  - `std:git.commit@1` — `{repository, sha}`;
+  - `std:git.file@1` — `{repository, commit, path, blob?}`;
+  - `std:forge.change@1` — `{repository, number, url, head_sha, state}`, a pull or merge request;
+  - `std:forge.comment@1` — `{url, change?, author?}`;
+  - `std:forge.check@1` — `{repository, sha, name, conclusion, check_id?}` (R-BTN-114);
+  - `std:object@1` — `{uri, digest, media_type, size}`, a stored artifact;
+  - `std:url@1` — `{url}`, under the link rule (§10.4);
+  - `std:effect@1` — `{kind, ref?, at}`, a side effect done;
+  - `std:decision@1` — `{id, option, answered_by?, commit}`, a person's answer (R-BTN-116).
+
+  A course extends one by refinement (`"x-baton-base": "std:forge.change@1"`). A `std:`
+  version, once published, never changes; a new field is a new version.
+
+- **R-BTN-111 (a course's signature).** A course's **input** is its `start` station's entry
+  requirement and its **output** is each `end` station's. `baton test-course` prints the
+  signature, and `GET /v1/repositories/{repository}/stats` (§2d) carries it per course. This
+  makes child tickets checkable (R-BTN-86): a leg that spawns children may declare
+  `"spawns": {"course": <id>, "provides": [<output>…], "awaits": [<output>…]}`, and the test
+  kit checks that what it provides meets the child course's input, and that every end station
+  of the child course produces what it awaits.
+
+- **R-BTN-112 (declarative views; Baton's renderers).** A schema may carry `x-baton-view`:
+  `{title?, summary?, fields?: [{label, pointer, as, unit?, max?, tones?}]}`.
+  - `title` and `summary` are templates in which `{<JSON Pointer>}` is replaced by the
+    pointed value as text; nothing else is interpreted. `as` is one of `text`, `number` (with
+    `unit`), `time` (an RFC 3339 instant, shown relative and absolute), `gauge` (a number
+    against `max`), `status` (a string mapped by `tones` to `ok`, `warn`, `bad` or `info`),
+    `table` (an array of objects, at most 50 rows, its columns the first row's keys, each cell
+    as `text`) and `link` — shown as a link only when the URL passes §10.4's link rule for
+    the ticket's repositories or its host is in the instance's `link_hosts` setting (an
+    administrator's, R-BTN-57; default empty), else as text. A view is at most 4 KB and 24
+    fields.
+  - **Baton ships one renderer per channel** in the shared library: `plain` (the CLI and a
+    courier's text), `html` (a courier's email: every value escaped, inline styles only, no
+    script, image or remote resource) and `ui` (the dashboard, through `textContent`, §10.4).
+    **Courses never ship rendering code.**
+  - **Fallback.** A value is shown by its own schema's view, else the nearest view up its base
+    chain, else a generic rendering of keys and values two levels deep, truncated.
+  - **Core events** (a resource exhausted, a ticket held after its attempts, a check failed)
+    are rendered by core's own templates, each with one slot where the course's view of the
+    relevant value goes.
+
+### 2m.3 Session links, checks and couriers
+
+- **R-BTN-113 (a leg run carries its session's link).** A heartbeat may carry `session_url`
+  for the running leg, and an `advance` or an `end` for the leg it finishes. The URL must be
+  `https`, at most 512 characters, with no userinfo, and its host must be in the instance's
+  `session_hosts` setting (an administrator's; default `claude.ai`) — R-BTN-92's link rule with
+  the allowlist in place of a repository's `web_base` — or it is dropped and logged. It is
+  stored on the leg's `claim_legs` row (`session_url`, nullable; the latest wins while the leg runs)
+  and shown on **Running** and the **Timeline** (§14). In `session` mode (R-BTN-107) it is the
+  child session's link.
+
+- **R-BTN-114 (check courses: Baton schedules, workers run, a courier reports).** A course may
+  run a repository's checks instead of a CI service:
+  - **The tickets.** A third CLI default beside R-BTN-74's two, the **`changes` ticket
+    source**: run by `npx baton sync` in the repository's sync, it lists the forge's open
+    changes through the sync's forge reads (§2k; on GitHub, the open pull requests) and posts
+    one ticket per change from one of the repository's own branches: id
+    `check.<course>.<number>` (the local-id grammar, §4), its course's opaque fields carrying
+    the head sha. A push to the change's head is a new ticket state: the source posts the new head,
+    the station function puts it back at `start`, and a claim on the old head goes stale
+    (R-BTN-35) — **superseded**. A webhook or a forge notification triggers the sync (R-BTN-73,
+    R-BTN-95); it never carries state.
+  - **Who may run a check.** A check ticket is claimable only by a **check-runner** credential:
+    a key role of its own (R-BTN-57's one role per key) that a repository's owners register,
+    `baton owner check-runner add <key>`, which may claim check tickets and nothing else; no
+    work key may claim one. So the key that wrote a change never reports its check. Its legs
+    require `"isolation": "session"` (R-BTN-107), so the code under test runs where no Baton
+    credential is, with every write-capable credential and secret withheld, as replay does
+    (R-BTN-84). Until a sandbox ticket says otherwise, a check course takes changes from the
+    repository's own branches only (never a fork) and starts on private repositories.
+  - **The conclusions are the owners'.** Which end station is which conclusion is an **owner
+    setting**, `checks: {<course>: {name, conclusions: {<end station>: …}}}` in R-BTN-66's
+    table, not course-file text, so no agent turns `failed` into `success` by editing git; a
+    course file's `checks` is only the proposal `baton test-course` prints.
+  - **The trust, stated.** The sync confirms that the ticket's path ends at the end station and
+    that the change's head is still the ticket's head; the end itself rests on the
+    check-runner's report. A check is therefore as trustworthy as the check-runner keys the
+    owners registered and the isolation their legs run in — said as R-BTN-102 says a machine
+    key's trust.
+  - **The merge check.** The course file maps its end stations to conclusions,
+    `"checks": {"name": <check name>, "conclusions": {<end station>: "success" | "failure" |
+    "neutral"}}` — read from the owner setting above. When a sync **confirms** a check ticket at an end station — the end
+    confirmed and every entry requirement of that station met and, for pointers, posted valid
+    (R-BTN-109) — Baton queues a `forge-check` notice for the repository's forge courier
+    (R-BTN-115): `{notice_id, repository, sha, name, conclusion, summary, seq, issued_at, kid,
+    signature}`, `summary` rendered `plain` from the end station's outputs (R-BTN-112). A check
+    ticket's first claim also queues one with conclusion `in_progress`, so the change shows
+    the check pending.
+  - **Signed by Baton.** `signature` is an Ed25519 signature by the instance's signing key
+    (the `BATON_SIGNING_KEY` secret, behind R-BTN-55's `SigningKey` interface) over the
+    canonical JSON of the other fields; `kid` names the key, and `GET /v1/keys/signing` lists
+    the current key and every retired one, so a rotation leaves earlier check runs verifiable. The courier writes `notice_id` to the check run's
+    `external_id` and the signature into its output. The sync reads the change's check runs
+    back and posts them; a check run of the courier's App on that head with no notice Baton
+    issued, or whose conclusion or signature does not match it, is a discrepancy, sub
+    `check-mismatch`, and listed under **Needs you**. A courier can still lie by withholding;
+    it cannot post a success Baton did not issue without that being seen.
+  - **The gate is GitHub's.** The repository's branch protection requires the check by name
+    **and by the id of a dedicated check App** — never Baton's own App (R-BTN-57), whose key
+    the Worker holds as `BATON_GITHUB_APP_KEY` — so neither a status context any token could
+    post nor the Worker itself can satisfy it. Only the forge courier holds the check App's
+    key.
+    v1 supports GitHub only; GitLab and Gitea checks are an open question.
+  - **Order.** `seq` increases per `(repository, sha, name)`; the courier posts only the
+    highest it has claimed and drops older ones, so a late `success` never overwrites a newer
+    `failure`. A notice for a superseded head is still delivered: the forge ties it to its sha.
+
+- **R-BTN-115 (courier kinds).** *(Amends R-BTN-80, R-BTN-102 and R-BTN-103.)*
+
+  | kind | registered by | delivers | copies |
+  |---|---|---|---|
+  | personal channel | a repository's owners, `--asks <label>` | decision notices to a person | its own copy of each |
+  | worker courier | a machine key's heartbeat (R-BTN-103) | decision notices, from the pool | one shared pool copy |
+  | **forge courier** | a repository's owners, `baton owner courier add <key> --delivers forge-check` | signed `forge-check` notices | its own copy of each; **never the pool** |
+
+  A forge courier key is credential kind `forge-courier` and has exactly that role (R-BTN-57):
+  it is never a machine key, so no worker on a repository can deliver, or withhold, its
+  checks. It holds the check App's private key on its own host; Baton holds no credential of
+  the check App. It claims with `POST /v1/courier/notices/claim?delivers=forge-check`
+  under the same 10-minute lease, marks each `sent` with the check run's id, or `failed`; a
+  `forge-check` notice not sent within 15 minutes of being queued is listed under **Needs
+  you**, and the change stays pending — the gate fails closed.
+
+- **R-BTN-116 (waiting on a person is a leg a person runs).** *(Amends R-BTN-78 and R-BTN-69.)*
+  A leg may be `"kind": "person"` with `"asks": <label>`. No worker is offered or may claim or
+  advance into it (rule `person`). While a ticket's queued leg is a person's, the sync posts
+  its open decision (R-BTN-78) on that leg; couriers deliver its notices as before. When git
+  shows the answer, the sync posts the ticket's path extended by that leg — R-BTN-70's path
+  is git's evidence, and needs no claim — with the leg's output, a `std:decision@1` value or a
+  refinement of it. The station it reaches can then require that output (R-BTN-109), so the
+  next leg reads a typed answer instead of parsing the item.
+  **A leg never waits on a delivery.** "Sent" is a courier's word, which no one can check
+  (R-BTN-103). A leg waits on the **effect**: a person's answer in git (above), or an effect
+  the sync reads back from the forge — a check run present (R-BTN-114).
+
+### 2m.4 Registering without a user's key
+
+- **R-BTN-117 (registration tokens; API keys beside SSH keys).** *(Amends R-BTN-13 and §10.1.)*
+  - **Registration tokens.** A repository owner mints one: `baton owner token create --repo
+    <id> --role worker [--capabilities …] [--max-tier <t>] [--ttl 30d] [--uses <n>]`. It is
+    shown once, `brt_<id>_<secret>` (256 random bits), and stored as its SHA-256 with its
+    scope. A session registers with it, `baton register --token <t> --name <name> [--key ssh |
+    --key api]`, and gets a credential of the token's role with a grant inside the token's
+    scope — never wider, never `human-operator` (R-BTN-58). A courier token (`--role courier
+    --asks <label>`) registers a personal courier for those `asks`. Registration refuses
+    (`conflict`) a name already bound to another live credential; renewing one's own name is a
+    re-key (R-BTN-14). A token expires at its TTL (at most 90 days) or
+    after its last use, and is revoked with `baton owner token revoke`.
+  - **What a token-registered credential is.** It lasts until the token's `grant_ttl` (default
+    the token's TTL), or 7 days without an authenticated call, whichever is first; revoking the token
+    revokes every credential registered with it. The dashboard shows each worker's credential
+    kind and token.
+  - **SSH keys stay the default.** `--key ssh` generates an Ed25519 key in the session and
+    registers its public half; every request is signed as R-BTN-13 says.
+  - **API keys are the fallback.** `--key api` — or `baton owner key create --api --name
+    <name>` with no token — returns an API key once, `bak_<id>_<secret>` (256 random bits);
+    Baton stores its SHA-256, bound to one name and its grants as an SSH key is. It is sent as
+    `Authorization: Bearer` over TLS in place of the signature, with the worker secret
+    unchanged (R-BTN-14). **The cost, stated:** a bearer key is a reusable secret, so a
+    captured request can be replayed until the key expires, and a key read from an
+    environment works from anywhere — the reasons R-BTN-13 chose signatures. What bounds it:
+    TLS only, a TTL of at most 90 days, the 7-day idle expiry, one name per key, revocation at
+    the next call, and `api_keys: false`, a repository setting (R-BTN-66; default `true`) that
+    refuses API-key credentials on that repository.
+  - **What an API-key worker may do.** It works and reports readings (R-BTN-101) on the
+    repositories its grant covers; it does **not** sync or deliver as a worker courier — those
+    two powers of R-BTN-102 stay with signed machine keys. Its push and stream upgrades carry
+    the key in `Authorization`, as its other calls do.
+  - **Roles.** An API key may be a worker's or a personal courier's credential. Administrator,
+    owner, sync, instrument and forge-courier credentials stay SSH keys (or, for a sync, a CI
+    identity token): each guards something an agent must not reach (R-BTN-57, R-BTN-66), or
+    something an attacker could forge.
+  - **Existing bearer keys.** The bearer tokens and `BATON_KEYS` seed keys the code accepts
+    today become API-key credentials when the ticket that builds this rule migrates them: each
+    is granted, on each repository it heartbeated or claimed for in the 30 days before, the
+    capabilities it declared there, and each such grant is listed under **Needs you** for that
+    repository's owners to confirm or revoke — so no key acts without a grant, and none gains
+    one it did not use (baton#35's review, finding 1-A-0).
+
+### 2m.5 Watching and stopping a running leg
+
+- **R-BTN-118 (a running leg's output streams to its viewers, and is never stored).** *(Amends
+  R-BTN-33 and R-BTN-91.)*
+  - **On demand.** A dashboard session opens `GET /v1/ui/stream?claim=<id>`, a WebSocket over
+    TLS. Baton refuses the upgrade unless its `Origin` is Baton's own origin (a cross-site page
+    can open a WebSocket with the viewer's cookie); refuses an unknown claim, a claim not
+    running, a leg the course marks `stream: false` and a session that may not view it alike,
+    `forbidden` (P7); and only then rings the holder `watch` (R-BTN-91's doorbell gains the
+    kind); the runner opens `GET /v1/runner/stream?claim=<id>`, upgraded and signed as the push
+    connection is, and sends frames. Only the claim's holder may open the runner side — the
+    worker whose key holds the claim's lease, while the claim runs; any other worker, and the
+    holder before a `watch` ring, is refused `forbidden`, so no key can inject frames into
+    another claim's viewers; a second connection from the holder replaces the first. When the last viewer has been gone for 60 seconds Baton
+    rings `unwatch` and the runner closes it. With nobody watching, nothing streams.
+  - **Its own channel.** Each watched claim's stream runs behind R-BTN-55's `Stream` interface
+    — on Cloudflare a Durable Object per claim id, on the hibernation API; on the local host an
+    in-process fan-out — with one connection per viewer and one for the runner; the
+    repository's object only authorizes and rings. The doorbell stays a ring, not a channel.
+  - **Frames.** `{seq, at, stream: "stdout" | "stderr" | "agent", text}`, each at most 8 KB of
+    text; at most 64 KB a second per claim, beyond which the runner drops frames and sends
+    `{gap: <frames dropped>}`. The stream channel enforces the same bounds itself: it drops a
+    frame over 8 KB and frames beyond 64 KB a second, counting them in the next `gap`, so a
+    runner that ignores the limits floods no viewer. On connecting, the runner first sends its scrollback, the last
+    256 KB it kept, under the same bounds. The `ui` renderer strips terminal escapes and shows
+    text through `textContent`.
+  - **Relayed, never stored.** Baton passes frames from the runner to the viewers and keeps
+    none: no frame is written to storage or logged, and none is in an export. *(R-BTN-33 as
+    amended: Baton may relay a leg's output to viewers it authorized, and never stores,
+    logs or indexes it.)* A leg that must not be watched carries `"stream": false` in the
+    course file, and the runner never streams it. A durable log is a leg output, a
+    `std:object@1` or a `git:` file (R-BTN-82), never Baton's.
+  - **Who watches.** A dashboard session, as for every view (§14). A leg in `session` mode has
+    no stream; its session link is the view (R-BTN-113).
+
+- **R-BTN-119 (stopping a running leg).** *(Amends R-BTN-72 and the R-BTN-90 rejection of
+  killing a leg from Baton.)* **Cancel** (§8; hold, and a `release` with reason
+  `owner-cancel`) and a release message (`requested`) reach the runner at the doorbell's ring,
+  within about a second, or without a push connection at its next heartbeat (R-BTN-91: the
+  doorbell is optional). The runner's `AbortSignal` already fires `release`; for these two
+  reasons the runner **stops the leg's process** instead of waiting for a safe point:
+  `SIGINT` to its process group, `SIGTERM` after 10 seconds, `SIGKILL` after 25 — so the
+  group is gone within 30 seconds of the runner receiving the release; in `session`
+  mode it interrupts the child session through its provider. Then it calls `close` and
+  `handoff` as R-BTN-72 orders them and ends `released:<reason>`; no output of the stopped leg
+  is reported. Baton still kills nothing — it holds no process — it asks the runner, which
+  does. The dashboard's **Stop leg** action sends the release message alone, without the hold.
+
+### 2m.6 A leg's prerequisites, in one place
+
+*(Owner, 2026-10-17: "I would like the prerequisites of a leg to be the ticket residing at a
+particular station, with potentially other dependent tickets at specific stations […], the
+capabilities required by the leg to be held by the runner who is about to execute it, and any
+human in the loop requests to be completed. It should be easy to check which of these
+prerequisites are missing if a leg cannot be started yet." Settled the same day: a ticket
+prerequisite may say where the other ticket is now (`at`) or that it has been there
+(`reached`); capability types are declared in each course file.)*
+
+- **R-BTN-120 (a leg's prerequisites).** *(Amends R-BTN-69, R-BTN-75, R-BTN-76 and §7.2 rule 4.)*
+  A leg can be started when every one of its prerequisites holds. There are six kinds; the
+  course file names three of them under the leg's `requires`, and its `retry` policy governs
+  a fourth (R-BTN-122):
+
+  ```json
+  "deploy": { "from": ["approved"], "to": "deployed",
+    "requires": {
+      "tickets":      [{ "select": "children", "at": ["merged"] },
+                       { "select": "parent", "reached": ["planned"] }],
+      "capabilities": ["deployer", "db:orders:rw", "harness:claude-code"],
+      "resources":    ["llm:deepseek-v4-flash"] } }
+  ```
+
+  - **The station** — the ticket is at one of the leg's `from` stations (R-BTN-69, unchanged).
+  - **Other tickets** — each entry selects tickets and names stations: `select` is `children`
+    (every child, open or closed — R-BTN-86's link, which `closed_tickets.parent` keeps until
+    purge), `parent`, or `posted`, the ids the ticket source posts for
+    the ticket in `depends_at: [{ticket, at | reached | done, leg?}]` (§7.1, `done` as `"done":
+    true` below), where `leg` names the
+    leg of this ticket the entry binds (absent: every leg); exactly one of
+    **`at`** — the ticket is at one of the stations now —, **`reached`** — the ticket's path
+    (R-BTN-70) contains one of them, so a ticket that has moved past still counts — or
+    **`"done": true`** — the ticket closed `done`, at whichever end station of its own course,
+    for selecting tickets on several courses at once. A ticket
+    closed `done` is at the end station it closed at, and its path is the path it closed with:
+    §4's `closed_tickets` keeps both (`final_station`, `final_path`). A ticket closed
+    `withdrawn` meets no ticket prerequisite — unless the entry says `"skip_withdrawn": true`,
+    which leaves a withdrawn ticket out of its selection instead (a course that replaces
+    withdrawn children, as the `epic` course does, R-BTN-124, uses it; with every selected
+    ticket withdrawn, the entry is empty and `allow_empty` decides). Baton evaluates them itself, from the stations and paths it
+    stores, for tickets of the same repository (R-BTN-86's rule). A `children` entry with no
+    children does not hold unless it says `"allow_empty": true` — a parent whose children the
+    sync has not posted yet must not start the leg that waits for them; a `parent` entry on a ticket with no parent, or a `posted` id Baton has
+    not seen, does not — it is listed under **Needs you**, because a prerequisite that cannot
+    be met must not be met by default. `baton test-course` checks that each named station
+    exists in the course of a ticket it can select (`select: parent` and `children` take an
+    optional `course`, else the leg's own). The posted `blocked_by` (R-BTN-75) stays, read as
+    `at` every end station of the other ticket's course on the whole ticket.
+  - **Capabilities** — the runner about to start the leg declares, and is granted on the
+    repository, every capability listed (rule 4, below), after roles expand (R-BTN-121). The
+    ticket's own `requires` clause, posted by the ticket source (§7.1), still applies to every
+    leg; the leg's list joins it for that leg only.
+  - **Resources** — an instance of each named external resource is usable (R-BTN-76); the
+    course file's list joins the `needs` the sync posts for the leg.
+  - **People** — no decision is open on the leg or the ticket (R-BTN-78). Where the next leg
+    needs the answer itself, the course routes the ticket through a person's leg and requires
+    its output at the station (R-BTN-116, R-BTN-109); no separate field is needed.
+  - **Retry** — the leg is not waiting out a backoff: after a failed attempt, its retry policy
+    sets when it may next be tried (`retry_after`, R-BTN-122), and until then no worker may
+    claim it or advance into it.
+
+  **Stored, as blocks are.** Each unmet prerequisite is a `ticket_blocks` row (R-BTN-75) on
+  the leg it belongs to: `ticket` rows now carry the leg and `ref`
+  `<ticket>@at:<station>,…`, `@reached:…` or `@done`, and Baton rewrites them in the transaction that
+  changes the referenced ticket's station or path, or changes which tickets an entry selects —
+  a child posted, closed or re-parented, a `depends_at` changed (index `ticket_dependents`); `capability`
+  rows are kept per leg for a leg's own list, per ticket for the ticket's clause; a leg's
+  `station` prerequisite needs no row, because only a leg leaving the ticket's station is
+  ever offered. A ticket is blocked as R-BTN-75 defines it, now counting rows on its queued
+  leg of every kind.
+
+  **Cycles.** Baton cannot see whether a station is reachable, so a loop of ticket
+  prerequisites — A waits for B at a station B reaches only after A moves — could block both
+  for ever. When an accepted snapshot's prerequisites form a cycle among a repository's tickets
+  (each entry's selected tickets taken as edges), Baton keeps every block (failing closed) and
+  lists the cycle under **Needs you** as `prerequisite-cycle`, with its tickets.
+
+  **§7.2 rule 4** reads, for the leg to be started: `capabilitiesOf(ticket.requires ∪
+  leg.requires.capabilities) ⊆ capabilitiesOf(declared) ∩ grant(repository)` — checked at the
+  claim for the queued leg and at each `advance` into a leg.
+
+  **Why a leg cannot start, in one answer.** `GET
+  /v1/repositories/{repository}/tickets/{ticket}/prerequisites[?leg=<leg>][&worker=me]`
+  (default: the queued leg) and `baton why <ticket> [<leg>]` return `{leg, ready, prerequisites:
+  [{kind, ref, met, why, since?, until?, url?}]}` — every prerequisite, met or not:
+  - `station`: `met`, or `why: not-at` with where the ticket is;
+  - `ticket`: `not-at`, `not-reached` or `not-done` with where the other ticket is (or
+    `withdrawn`), `no-parent`, or `unknown-ticket`;
+  - `capability`: `no-live-runner` (no live runner both declares it and is granted it), or,
+    with `worker=me`, `not-declared` or `not-granted` for the asking runner;
+  - `resource`: `unavailable`, with `until`;
+  - `decision`: `open`, with its `url` and `asks`;
+  - `retry`: `backing-off`, with `until` (its `retry_after`) and `attempt: <n> of <max>`, or
+    `budget-spent` when its `max_attempts_s` has run out (R-BTN-122);
+  - `other`, as R-BTN-75's answer has it: a hold, a `waiting_on` label, `time`, owner
+    bars on every live runner's tags, an unconfirmed end.
+
+  It reads the blocks index and, for `worker=me`, rule 4 for that one runner — never a pass
+  over the board. A worker key granted on the repository, the repository's owners and a
+  dashboard session may ask. **Ready** (§14) shows the same list for a ticket with no
+  eligible runner.
+
+- **R-BTN-121 (capability types are declared in the course file).** *(Amends R-BTN-37 — the
+  vocabulary leaves the vendored library — and R-BTN-58.)* A capability is
+  `<type>:<value>`, compared as a string, like a tag (R-BTN-60).
+  - **The course declares its types:**
+
+    ```json
+    "capability_types": {
+      "vpn":        { "description": "a tunnel to a named network",       "values": "^[a-z0-9-]{1,32}$" },
+      "db":         { "description": "access to a named database",         "values": "^[a-z0-9-]+:(ro|rw)$" },
+      "credential": { "description": "a named secret in the runner's env", "values": "^[A-Z0-9_]{1,64}$" },
+      "harness":    { "description": "an authenticated agent harness",     "values": "^[a-z0-9-]+$" } },
+    "capability_roles": { "deployer": ["vpn:corp", "credential:DEPLOY_TOKEN"] }
+    ```
+
+    A type id matches `^[a-z][a-z0-9-]{0,31}$`; `values` is a pattern in the linear-time
+    engine of R-BTN-108; a role expands to its list (roles do not nest). Baton accepts the
+    course file only if every capability a leg lists, after expansion, is of a declared type
+    with a value matching its pattern, or is a built-in. **Core keeps one built-in**,
+    `human-operator`, which only an administrator grants (rule 6). The capability vocabulary
+    and `ROLES` leave the vendored `vocabulary.mjs`: docs' `roadmap-pr` course file declares
+    its types and roles (its current roles, as `capability_roles`). **The window is per course
+    file.** A course file that declares `capability_types` must type every capability it and
+    its tickets' clauses name; one that declares none is read as today, its untyped names
+    expanded through the vendored `ROLES`. A course leaves the window when an accepted snapshot
+    first carries its course file with types — an event Baton sees — and `ROLES` is removed
+    once no registered course reads through it, which **Courses** shows.
+  - **Shown, not only checked.** The course's types and roles are served with its course file
+    (`GET /v1/repositories/{repository}/courses`), printed by `baton test-course`, and shown on
+    the dashboard's **Courses** view, so a runner's operator can see what a course may ask for.
+    Two courses on one Baton may define one type differently — the strings are compared, never
+    the meanings — and the **Courses** view lists every type so defined.
+  - **The runner declares what it has**, in its own configuration (`baton run --config`, by
+    default `~/.config/baton/runner.json`): `{capabilities: [{name, check?: [<argv>…],
+    every_s?}]}`. A capability with a `check` is declared only while the command exits 0: the
+    runner runs it at start, before each claim, and every `every_s` seconds (default 300)
+    while idle, and drops a capability whose check fails from its next heartbeat. The check is
+    the runner's, run with the runner's rights — Baton runs nothing (R-BTN-98) — and a
+    capability stays self-reported (R-BTN-60): it stops a cooperating runner taking a leg it
+    cannot do, not a hostile one.
+  - **Grants** list capabilities as before (R-BTN-58), and may name a whole type,
+    `<type>:*`. A legacy capability with no `:` (`agent-venue`) is accepted as a type-less
+    name only for a course file that declares no types.
+
+### 2m.6a Retries per leg
+
+*(Owner, 2026-10-17: "We haven't talked about retries. Some errors should be retryable, other
+errors no, and we haven't talked about a retry schedule. These are all core concepts in
+temporal, which apply equally well to the legs of a course." Agreed the same day, with: "When
+the retry policy prescribes a delay until a leg is retried, this becomes another type of
+prerequisite which disqualifies a leg from being claimed by a worker if it is still waiting on
+the next retry attempt.")*
+
+- **R-BTN-122 (leg retry policies, course-declared error types, owners' bounds).** *(Amends
+  §6.10, R-BTN-23, R-BTN-66 and R-BTN-75.)*
+  - **Error types are the course's.** The course file declares
+    `"error_types": {<type>: {"retryable": true | false, "description": …}}`, a type matching
+    `^[a-z][a-z0-9.-]{0,63}$`. A leg script throws `LegError(type, message)` (the runner's
+    export, Temporal's `ApplicationFailure`); the runner ends the claim
+    `released:cannot-finish:<class>` with `error: {type, message}` — `message` free text under
+    §10.4. Core's own classes (`transient`, `capability`, `spec`, `contract-output`,
+    `contract-input`) are built-in types with their present retryability, and the class of a
+    course type is `transient` when it is retryable, else `spec`. An exception the script does
+    not type is `transient`: retried, as Temporal retries an unknown error. `baton test-course`
+    refuses a leg policy naming an undeclared type.
+  - **A leg may carry a policy:** `"retry": {"initial_s": 3600, "coefficient": 4,
+    "max_interval_s": 86400, "max_attempts": 3, "non_retryable": [<type>, …], "in_claim": 0,
+    "max_attempts_s": null}`. After failed attempt *n* (counted as §6.10 counts, but **per
+    ticket and leg**, so a failing `review` spends none of `implement`'s), the leg's
+    `retry_after` is now plus `min(initial_s × coefficient^(n−1), max_interval_s)`, multiplied
+    by a uniform factor in [0.9, 1.1] so tickets failing together do not return together. When
+    *n* reaches `max_attempts`, or the type is non-retryable, Baton holds the ticket and raises
+    `baton:retries` as today (R-BTN-78). A leg with no policy takes the repository's default.
+  - **A backoff is a prerequisite.** While `now < retry_after` the leg's prerequisite `retry`
+    is unmet (R-BTN-120): it is a `ticket_blocks` row of kind `retry` on that leg, with
+    `until` its `retry_after`, so it refuses a claim into the leg and an `advance` into it,
+    keeps the leg out of recommendations, and `baton why` shows it with the attempt count. The
+    alarm clears the row at `retry_after` and the leg's `unblocked` event follows (R-BTN-77).
+    A backoff on one leg does not stop the ticket's other legs. A claim or advance into a leg
+    in backoff is refused **`backing-off`** (with `until`), not `blocked`, so a worker can tell
+    a wait that ends from one that needs someone; every other block still refuses `blocked`.
+    The counts live in a new `leg_attempts` table (§4: repository, ticket, leg, `attempts`,
+    `first_attempt_at`, `retry_after`, `last_error_type`), which replaces
+    `ticket_overrides.retry_after` and the per-ticket counts; R-BTN-23's resume records stay
+    per ticket.
+  - **In the claim, first.** `"in_claim": n` lets the runner re-run a leg that failed with a
+    retryable type up to *n* more times under the same claim, waiting the first steps of the
+    same schedule (capped at 5 minutes each, so a claim never idles for hours), before it
+    releases with a failed attempt. An in-claim retry is not a run for `max_runs` (§2e) and
+    not a failed attempt; each one is an activity in the history (§6.9). It suits a network
+    blip or a provider's 429, where giving the ticket back costs more than waiting.
+  - **A budget across attempts.** `max_attempts_s`, Temporal's schedule-to-close: seconds from
+    the leg's first attempt within which every attempt must start. Past it the leg is not
+    retried, whatever `max_attempts` says, and the ticket is held as above, with `why:
+    budget-spent`. With `max_duration` (R-BTN-90; start-to-close) and the lease timeout
+    (R-BTN-9; heartbeat), and `max_ready_s` below, the four Temporal timeouts each have a home.
+  - **Ready but untaken.** A leg may carry `"max_ready_s"`, Temporal's schedule-to-start: a leg
+    `ready` and unclaimed for that long is listed under **Needs you**. `baton:stalled`
+    (R-BTN-78) keeps its fixed 72 hours for legs that set none.
+  - **The owners bound every policy** (R-BTN-66: the course file is in git, and an agent could
+    otherwise set `max_attempts: 1000` and burn quota). The owners' `retry` setting holds the
+    repository's **default policy** (by default: `initial_s` 3600, `coefficient` 4,
+    `max_attempts` 3 — today's 1 hour, 4 hours, then a hold), a **ceiling** on every field
+    that spends quota — at most `max_attempts` (default 10), `max_attempts_s` (7 days),
+    `in_claim` (2), `max_interval_s` (7 days) and R-BTN-123's `max_refreshes` (3); at least
+    `initial_s` (60) — with `coefficient` at least 1 (a course's below 1 is refused, by core
+    and by `baton test-course`), and a **floor** of types that are never retried. Baton
+    applies, field by field, the stricter of the course's policy and the owners' bounds;
+    `baton test-course` warns where it cuts a course's policy back, and the course's view shows
+    the policy in force. The floor binds hard on core's built-in types, which a course cannot
+    rename; on a course's own types it binds only as git does — a course that renames a type
+    escapes it, as it could mark it retryable — so `baton test-course` warns when a floor type
+    is no longer declared, and an owner who needs a hard bound sets the ceiling (`max_attempts`
+    1 and `in_claim` 0 hold every failure at once).
+  - **What stays.** `lease-lost` counts once per distinct worker; `contract-input` holds at
+    once and is not an attempt; lifting a hold resets the counts (now per leg) — §6.10 as it
+    reads, with the counting per leg.
+
+### 2m.6b Fresh context, a planning course and urgent decisions
+
+*(Owner, 2026-10-17, after comparing Baton with Gas Town — `docs/compared-to-gastown.mdx`: add
+handing off when the context fills, a planning leg shipped as a course, and severity on
+decisions; mention, and do not build, asking a predecessor session.)*
+
+- **R-BTN-123 (a leg hands off to a fresh session when its context fills).** *(Amends R-BTN-72
+  and §6.13.)* An agent's output degrades as its context window fills, well before it is full.
+  - A leg may carry `"max_context": <fraction>` (0.1 to 0.95) in the course file. **Who
+    reports the context use** depends on who started the session, so the runner never guesses
+    a harness:
+    - in **`session`** mode the runner starts the session through its session provider
+      (`--sessions <provider>`, R-BTN-107), which is the **session adapter**: it exports
+      `contextUse(sessionId) → fraction | null`;
+    - in **`process`** mode the leg script started the agent and is the only one that knows
+      it, so the session (or the script for it) reports its use on the local channel:
+      **`baton leg yield --context <fraction>`** (R-BTN-106) — the script's `ctx.yield(fraction)`
+      is the same call. A script that never reports one is never refreshed.
+
+    The session marks each point where it is between steps with `baton leg yield` (with or
+    without `--context`), which answers `refresh: true | false`; `baton leg status` answers
+    `refresh` too. Once the latest use passes the fraction, the next yield answers `refresh:
+    true` and the runner:
+    1. **stops the session**: in `session` mode it ends the child session; in `process` mode
+       it fires `ctx.signal` with reason `context` — stop at the yield just answered, writing
+       nothing more — waits for `run` to return (its result is discarded), and stops the
+       process group as for a release if it has not returned within 30 seconds (R-BTN-119);
+    2. calls the leg script's `handoff(ctx)` with `ctx.reason: 'context'`, which writes the
+       hand-off document as for a suspension (R-BTN-44), for the work so far;
+    3. starts a fresh session on **the same leg, under the same claim**, whose brief is the
+       hand-off document and the leg's inputs: in `session` mode the runner starts it through
+       the provider; in `process` mode it calls `run(ctx)` again with `ctx.refresh: {n,
+       handoff}` (the refresh's number and the hand-off's URL), from which the script starts a
+       fresh agent;
+    4. records the refresh as an activity, `context-handoff`, with both sessions' links
+       (R-BTN-113).
+
+    In **`attached`** mode a leg is never refreshed — the session hosts the runner, so it
+    cannot be replaced under it; the runner ignores `max_context` and logs that once per leg.
+  - A refresh is not a new run for `max_runs` (§2e), not a failed attempt (§6.10), and the
+    lease never lapses for it. A leg refreshes at most `"max_refreshes"` times (default 3,
+    bounded by the owners' ceiling, R-BTN-122);
+    beyond that the runner suspends at the leg's `from` with the hand-off, so the next
+    claimant starts fresh. A session whose provider reports no context use (`null`), or whose
+    script never reports one, is never refreshed, and the runner logs that once per session. It is the runner's alone: Baton sees only the activity
+    and the session link.
+
+- **R-BTN-124 (a planning course, shipped by the CLI).** *(Amends R-BTN-74.)* Beside `pr` and
+  `branch`, `baton init --course epic` writes a course that turns a request into child tickets
+  and integrates them — the "tell it what to build" entry point, with no coordinator in core:
+
+  ```json
+  { "start": "filed", "start_leg": "plan", "end": ["integrated", "abandoned"],
+    "stations": { "filed": {}, "planned": {}, "integrated": {}, "abandoned": {} },
+    "legs": {
+      "plan":      { "from": ["filed"],   "to": "planned" },
+      "replan":    { "from": ["planned"], "to": ["planned", "abandoned"], "max_runs": 2 },
+      "integrate": { "from": ["planned"], "to": "integrated",
+                     "requires": { "tickets": [{ "select": "children", "done": true,
+                                                 "skip_withdrawn": true }] } } } }
+  ```
+
+  - **`plan`** writes the child tickets into the ticket source, each naming the ticket as its
+    `parent` (R-BTN-86), git first, and reports them as `spawned` on its end; each child is an
+    ordinary ticket on whichever course its file names (by default `pr`). Its output is a
+    `std:git.file@1`, the plan, which `integrate` reads.
+  - **Which leg is queued at `planned`.** The epic's `locate`, which the CLI ships, queues
+    `replan` when a child closed `withdrawn` after the newest `plan` or `replan` closing
+    marker (R-BTN-83), and `integrate` otherwise. So a withdrawal is always answered by a
+    `replan` before `integrate` can be queued.
+  - **`integrate`** may start only when every child it selects — every child not withdrawn —
+    has closed `done` (R-BTN-120; an epic with no such child never integrates, since
+    `allow_empty` is off) and checks the children's results together — an agent leg, which
+    may open a final change.
+  - **`replan`** — as R-BTN-86's fan-in keeps the whole parent blocked while any child is
+    open, it runs once the others have closed: it files replacement children (the epic stays
+    at `planned`, `locate` now queues `integrate`, and `integrate` waits for the replacements),
+    files none (the withdrawn child was not needed; `integrate` follows over the rest), or
+    ends the epic at `abandoned`.
+  - The CLI writes stub leg scripts that call the repository's `agent_command`, as for `pr`
+    (R-BTN-74); the planning prompt is the repository's. A repository that wants the plan
+    approved first adds a person's leg (R-BTN-116) between `plan` and its children being
+    claimable — the course is a file the repository may change (§2d).
+
+- **R-BTN-125 (decisions carry a severity).** *(Amends R-BTN-78, R-BTN-80 and R-BTN-103.)*
+  - A posted decision may carry `severity`: `critical`, `high` or `normal` (the default):
+    `decisions: [{id, leg?, asks, url, severity?}]`. Baton's own decisions are `normal`, but
+    `baton:contract` is `high`.
+  - **Delivery follows it.** A notice carries its decision's severity. A courier registers the
+    severities it delivers with its `asks` (`--severities critical,high`; default all), so a
+    phone-push courier can take only urgent ones and a daily-digest courier the rest. The
+    reminder interval is `remind_after` for `normal`, a quarter of it for `high` and an
+    eighth for `critical` (at least 15 minutes).
+  - **Needs you** and `baton inbox` list open decisions by severity, then age.
+  - **The notice** carries it: `decision: {id, asks, url?, severity}`. A worker courier's
+    heartbeat entry may name `severities` too (`couriers: [{repository, asks, severities?}]`,
+    default all), and a pool copy is queued for a `(repository, asks, severity)` a worker
+    courier covered within 24 hours (R-BTN-103).
+  - **Nothing goes unserved unseen.** R-BTN-103's check becomes per severity, and stays on
+    `owner` decisions, the ones a person must hear: **Needs you** lists a repository with an
+    open `owner` decision whose severity no personal channel for `owner` takes — a channel
+    registered `--severities critical` alone does not cover `normal`. Other `asks` labels may
+    rely on the pool, as before. A
+    courier that gains a severity (re-registered with `--severities`) is queued a notice for
+    each open decision it now delivers, as R-BTN-80 does for a new `asks`.
+  - A severity is the deciding repository's word, like the rest of its decision (R-BTN-78): it
+    orders and routes, and gates nothing more than the decision already does.
+
+- **Reserved, not built: asking a predecessor session.** A leg might one day query or resume
+  the session that ran an earlier leg, as Gas Town's seance does. That is a feature of a
+  particular course's leg, not of core, and it waits until a course meets a problem it solves.
+  Its precondition would be the worker **saving a leg's session**: its stdout and stderr, which
+  the runner already reads to stream them (R-BTN-118), and the harness's transcript, written as
+  a pointer output (`std:object@1`, R-BTN-110) that a later leg's script could read. This
+  amendment adds no field, route or output for it.
+
+### 2m.7a The wire, the settings and the interfaces
+
+§11's existing rows gain these fields; §11 also lists §2m's new routes.
+
+| Row | Gains |
+|---|---|
+| `POST /v1/runner/heartbeat` | `isolation: 'attached' \| 'process' \| 'session'`; `session_url?` for the running leg (R-BTN-107, R-BTN-113) |
+| `POST /v1/runner/advance`, `POST /v1/runner/end` | `session_url?` for the leg finished; each output as the envelope `{name, schema, uri?, digest?, value?}` (R-BTN-108); refusals `not-eligible` with rules `chain`, `isolation`, `person`, `entry` |
+| `POST /v1/owner/{repository}/couriers` | `{public_key, delivers: ['forge-check']}` beside `{public_key, asks}` (R-BTN-115) |
+| `POST /v1/courier/notices/claim` | `?delivers=forge-check`; the notice `{notice_id, kind: 'forge-check', repository, sha, name, conclusion, summary, seq, issued_at, kid, signature}` (R-BTN-114) |
+| `POST /v1/courier/notices/{id}` | `check_id` when marking a `forge-check` notice `sent` |
+| `PUT /v1/owner/{repository}/settings` | `api_keys`, `required_independence`, `checks`; `retry` as `{default, ceiling: {max_attempts, max_attempts_s, in_claim, max_interval_s, max_refreshes, initial_s}, never_retry}` (R-BTN-117, R-BTN-106, R-BTN-114, R-BTN-122, R-BTN-123) |
+| `POST /v1/runner/end` (released) | `error: {type, message?}` (R-BTN-122) |
+| board post: each ticket's `decisions` | `severity?` (R-BTN-125) |
+| `POST /v1/owner/{repository}/couriers` (again) | `severities?` beside `asks` (R-BTN-125) |
+| `POST /v1/courier/notices/claim` (decision notices) | `decision.severity` (R-BTN-125) |
+| `POST /v1/runner/heartbeat` (worker couriers) | `couriers: [{repository, asks, severities?}]` (R-BTN-125) |
+| `POST /v1/runner/activities` | the kind `context-handoff`, with both sessions' links (R-BTN-123) |
+| `POST /v1/owner/{repository}/check-runners`, `…/{fingerprint}/revoke` *(new)* | an owner registers or revokes a check-runner key (R-BTN-114) |
+| `PUT /v1/admin/settings` *(new)* | an administrator sets `link_hosts` and `session_hosts`, kept in a new single-row `instance_settings` table (R-BTN-112, R-BTN-113) |
+| **Stop leg** | the existing `POST /v1/ui/messages` with `{kind: 'release', payload: {ticket_id, reason: 'requested'}}` (§9) — no new route |
+| `baton owner key create --api` | `POST /v1/owner/{repository}/grants` with `{name, api_key: true, capabilities, max_tier?}`, returning `{api_key}` once (R-BTN-117) |
+
+**R-BTN-55's interface table gains** `Stream` (Cloudflare: a Durable Object per claim on the
+hibernation API; local: an in-process fan-out) and `SigningKey` (Cloudflare: the
+`BATON_SIGNING_KEY` secret; local: a key file), so S-BTN-68 and S-BTN-70 run on both hosts.
+**§4 gains** `instance_settings` (`link_hosts`, `session_hosts`), `check_runners`
+(credential, repository), `claim_legs.session_url`, `closed_tickets.final_station` and
+`final_path`, schemas keyed `(repository_id, id, version)`, `leg_attempts` (repository,
+ticket, leg, `attempts`, `first_attempt_at`, `retry_after`, `last_error_type`; R-BTN-122),
+`claims.error_type` (the message is not stored, R-BTN-33), `ticket_blocks.kind` `retry`,
+`couriers.severities`, `notices` carrying `severity`, and the owner settings above.
+
+### 2m.7 What core gains
+
+R-BTN-50's table gains, all generic: an output's envelope and schema id; a schema's id,
+version, digest and base; a station's `entry`; a leg's `no_chain_from`, `isolation`, `kind:
+person`, `asks`, `stream` and `spawns`; a check course's `checks` map; a worker's `isolation`;
+a leg run's `session_url`; the `watch` and `unwatch` rings; the `forge-check` notice; the
+`forge-courier` credential kind; registration tokens and API-key credentials; and the
+discrepancy subs `output-invalid` and `check-mismatch`; a leg's `requires` (`tickets`,
+`capabilities`, `resources`), a ticket's posted `depends_at`, `ticket` blocks per leg with
+`at` or `reached`, and a course's `capability_types` and `capability_roles` (§2m.6); the check-runner key role; and
+the **Needs you** entry `prerequisite-cycle` (§2m.6); a course's `error_types`, a leg's
+`retry`, `max_ready_s` and `max_attempts_s`, the `retry` block kind, an end's `error`, and
+attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refreshes`, the
+`context-handoff` activity, a ticket prerequisite's `done`, and a decision's `severity` (§2m.6b).
+
+### 2m.8 Scenarios and gates
+
+- **New scenarios** (§13a):
+
+  | Scenario | Setup | Outcome |
+  |---|---|---|
+  | S-BTN-62 a session reports to its runner | a runner runs `implement` by handing it to an agent session; the session sends `done` with a `reached` that is not an outcome, then a valid move without the station's required output, then a valid move | the first two are answered on the channel with their reasons and nothing reaches Baton; the third is closed, advanced and recorded; the state view the session was given holds no worker secret or nonce |
+  | S-BTN-63 no review by its author's key | a claim runs `implement` and reaches `pr-open`; its runner tries to advance into `review`, which names `implement` in `no_chain_from`; it suspends, then claims the ticket again under the same key; the course file drops the list while the owners' `required_independence` names it | the advance and the second claim are refused, rule `chain`; a runner under another key takes `review`; with the list dropped from git the owner setting still refuses the first key |
+  | S-BTN-64 isolation floors | a leg requires `isolation: session`; an `attached`, a `process` and a `session` worker ask for recommendations | only the `session` worker is offered it; the others' claims and advances into it are refused, rule `isolation` |
+  | S-BTN-65 refinement | a course schema refines `std:forge.change@1` but drops `head_sha` from `required`; a second keeps it; a leg reports a value missing `url` against the second | `baton test-course` reports the first, naming `required`; the value fails both its schema and the base, and the leg ends `released:cannot-finish:contract-output` |
+  | S-BTN-66 entry requirements | `reviewed` requires `findings` of `roadmap:findings@2`; a leg reaches it with no `findings`, then with an inline value, then with a pointer the sync finds invalid | the first advance is refused, rule `entry`; the second is accepted and validated in full; the third is accepted, then posted invalid, logged `output-invalid`, and its consumer waits on `input-missing` |
+  | S-BTN-67 a person's leg | a ticket's queued leg is `approve`, `kind: person`, `asks: owner`; a worker asks for it; the owner answers in git; on a second ticket the answer the sync posts lacks `option` | the worker is not offered it and its claim is refused, rule `person`; the decision is open with its notices; the next snapshot posts the path through `approve` with a `std:decision@1` output, and the decision closes; the second ticket's arrival is logged `output-invalid` and listed under **Needs you** |
+  | S-BTN-68 the merge check | a check-runner's check ticket ends at `passed`; the forge courier posts its notice; a push supersedes the head; a token posts a status context of the same name; the check App posts a success Baton never issued; an agent edits the course file's `checks` to map `failed` to `success`; Baton's signing key is rotated | a signed `success` notice is queued only after the sync confirms the end; the new head gets its own ticket and an `in_progress` notice; the status context does not satisfy the required check; the unissued success is logged `check-mismatch`; the edited `checks` changes nothing, the owners' setting holds; earlier check runs still verify under the retired key |
+  | S-BTN-69 registration and API keys | an owner mints a token with `--ttl 30d --max-tier 2`; one session registers an SSH key, another an API key; a third tries `--max-tier 3`; the repository sets `api_keys: false` | both get grants within tier 2; the third is refused; after the setting the API-key worker is refused at its next call, the SSH worker is not; revoking the token revokes both |
+  | S-BTN-70 watching a leg | a viewer opens a running leg's stream; the leg prints 200 KB a second; a runner that ignores the limit sends 1 MB a second; a page on another origin, a viewer naming an unknown claim and one naming a `stream: false` leg try to open streams; a second worker opens `/v1/runner/stream` for the first one's claim; the viewer leaves | the runner is rung `watch`, sends its scrollback, then frames with `gap` markers at the rate limit; the stream channel drops what the misbehaving runner sends over the limit; the three refused upgrades all answer `forbidden` and ring nothing; the second worker's upgrade is refused `forbidden` and no frame of its reaches the viewer; 60 seconds after the viewer leaves the runner is rung `unwatch`; Baton's storage and logs hold no frame |
+  | S-BTN-71 stopping a leg | a leg runs a process that ignores `SIGINT` and `SIGTERM`; the dashboard's **Stop leg** is pressed | the runner sends `SIGINT`, then `SIGTERM` after 10 s, then `SIGKILL` at 25 s; the group is gone within 30 s of the release reaching the runner; it calls `close` and `handoff` and ends `released:requested` with no output reported; no hold is set |
+  | S-BTN-72 tickets at stations | a parent's `integrate` requires its children `at: merged` and its own epic `reached: planned`; one child is merged, one is at `review`; the epic has moved on to `building`; a second ticket's leg requires a parent it does not have | `integrate` is blocked by one `ticket` row, the child at `review`, until it merges, then offered; the epic counts (`reached`); the second ticket's prerequisite is unmet, `no-parent`, and listed under **Needs you** |
+  | S-BTN-73 capability types | a course declares `vpn` and `db` and the role `deployer`; a leg requires `deployer` and `db:orders:rw`; runner R1's `vpn:corp` check fails, R2 holds everything, R3 is granted `db:*` but not `credential:*` | the course file is accepted, and a leg listing `printer:x` (no such type) is refused; R1 drops `vpn:corp` from its next heartbeat and is not offered the leg; R2 is; R3 is refused at rule 4 |
+  | S-BTN-74 why a leg cannot start | a ticket whose queued leg lacks a child at `merged`, a capability no live runner has, an open owner decision and an unavailable resource; the asking runner lacks one more capability | `baton why` lists the station as met and each of the four unmet prerequisites with its `why`, plus `not-declared` for the asker's own gap; nothing about the answer reads past the blocks index |
+  | S-BTN-75 a bounded run | `baton run --legs review,fix --max-legs 2 --until <t>`; a ticket queues `implement`, another `review`; the second's review moves into `fix`, then `merge`; `<t>` passes during `fix` | only the second ticket is claimed; `fix` runs; the move into `merge` suspends at `fixed` with the hand-off; after `<t>` no leg starts |
+  | S-BTN-76 hostile values rendered | a view's `title` template and a `table` cell carry `<script>`, `"><img onerror>` and `javascript:`; a `link` field names a host neither in `link_hosts` nor the repository's `web_base` | `plain` prints the text as is; `html` escapes every value and emits no script, image or remote resource; `ui` sets text through `textContent`; the link is shown as text in all three |
+  | S-BTN-77 host allowlists | heartbeats carry `session_url`s on `claude.ai`, on another host, with userinfo, and over 512 characters; an administrator adds a host to `session_hosts` | only the `claude.ai` link is stored and shown; the others are dropped and logged; after the change the added host's link is kept |
+  | S-BTN-78 session mode | a runner in `session` mode starts a cloud session for a leg | the child's brief carries the ticket, the leg, its inputs' URIs and the hand-off, and no claim id, worker secret or Baton credential; its `baton-leg-result` block is checked like a channel move |
+  | S-BTN-79 schemas refused | a sync posts `roadmap:findings@2` again with a changed digest; a schema using `oneOf`; one whose `pattern` has a back-reference; two that `$ref` each other; a `std:object@1` of its own; another repository posts its own `roadmap:findings@2` | the first four are refused with the course file, which stays as it was, and listed under **Needs you**; the `std:` post is refused; the other repository's schema is accepted, keyed to it |
+  | S-BTN-80 signatures and spawns | a leg declares `spawns` of a course whose start requires `brief` and whose end stations `done` and `abandoned` produce `result` and nothing; the leg provides `brief` and awaits `result` | `baton test-course` prints both courses' signatures and reports that `abandoned` does not produce `result` |
+  | S-BTN-81 a check nobody sends | a `forge-check` notice is queued and no forge courier claims it for 15 minutes; a work key tries to claim the check ticket | the notice is listed under **Needs you** and the change stays pending; the work key's claim is refused |
+  | S-BTN-82 prerequisite cycles and closed tickets | A's leg requires B `at: merged`; B's requires A `reached: planned`; C requires D `at: merged` and D is withdrawn; E requires F `reached: review` and F closes done | A and B stay blocked and are listed `prerequisite-cycle`; C's prerequisite never holds; E's holds from `closed_tickets.final_path` |
+  | S-BTN-83 an exponential schedule | a leg's policy is `initial_s` 600, `coefficient` 2, `max_interval_s` 3600, `max_attempts` 5; it fails four times, `transient` | its `retry_after`s are 10, 20, 40 and 60 minutes after each failure, each within ±10%; while one runs, the leg is not offered, a claim into it is refused, and `baton why` shows `retry: backing-off` with `attempt: n of 5`; at `retry_after` the leg is offered again and `unblocked` fires; the ticket's other legs are unaffected |
+  | S-BTN-84 course error types | a course declares `merge-conflict` non-retryable and `rate-limited` retryable; a leg throws each, and once throws a plain `Error` | `merge-conflict` holds the ticket at once with `baton:retries`; `rate-limited` and the plain error back off as `transient`; each end carries `error.type` |
+  | S-BTN-85 in-claim retries | a leg with `in_claim: 2` fails `rate-limited` twice, then succeeds | the runner re-runs it under the same claim, waiting at most 5 minutes each time; the claim advances; no failed attempt is counted and `max_runs` is untouched; two activities record the retries |
+  | S-BTN-86 owners bound the course | the owners' `retry` ceiling is `max_attempts` 3 and its floor names `spec-violation`; a course sets `max_attempts` 1000 and makes `spec-violation` retryable | Baton applies 3 attempts and never retries `spec-violation`; `baton test-course` warns of both cut-backs; the course's view shows the policy in force; a course setting `in_claim` 50 and `max_refreshes` 20 runs 2 and 3; one setting `coefficient` 0.5 is refused; one that renames `spec-violation` is accepted with the warning that the floor's type is undeclared |
+  | S-BTN-87 a budget across attempts | a leg has `max_attempts_s` 7200 and `max_attempts` 10; its third failure's backoff would start an attempt after 2 hours | the leg is not retried; the ticket is held, `why: budget-spent`; a leg with `max_ready_s` 3600, ready and unclaimed for an hour, is listed under **Needs you** |
+  | S-BTN-88 a fresh context | a leg with `max_context: 0.6` and `max_refreshes: 1`, in `session` mode; its session passes 60% twice; the same leg in `process` mode passes it once; in `attached` mode, once | in `session` mode, at the first, the session's `baton leg yield` answers `refresh: true`, the runner has `handoff` write the hand-off, starts a fresh session on the same leg under the same claim, and records `context-handoff` with both links; no run or attempt is counted and the lease holds; at the second it suspends at the leg's `from`; in `process` mode the script's `baton leg yield --context 0.7` is answered `refresh: true`, `run` is aborted with reason `context`, `handoff` runs, and `run` is called again with `ctx.refresh`; a `process` script that reports no use is never refreshed; in `attached` mode nothing is refreshed and the runner logs it once |
+  | S-BTN-89 an epic | `baton init --course epic`; a ticket's `plan` files three children on `pr`; two merge, one is withdrawn; `replan` files a replacement, which merges | `integrate` is queued and blocked by `ticket` rows while children are open; after the withdrawal `locate` queues `replan`, which waits for the other two to close; once `replan` files the replacement, `locate` queues `integrate`, which skips the withdrawn child and is blocked by the replacement alone; after it merges, `integrate` runs and the epic ends at `integrated`; a second epic whose `replan` files nothing integrates over its two merged children |
+  | S-BTN-90 decision severities | three decisions open, `critical`, `high` and `normal`; one courier registered for `critical,high`, another for all; `remind_after` 24 hours | the first courier gets two notices and the second three, each carrying its severity; **Needs you** and `baton inbox` list them critical first; unanswered, the critical one is re-sent after 3 hours, the high after 6, the normal after 24; with the second courier revoked, **Needs you** lists the `normal` decision as unserved; re-registering the first for all severities queues it the `normal` notice |
+
+- **New gates** (Must-establish, §16):
+
+  | New invariant | Proven by (gate test) |
+  |---|---|
+  | A session's move reaches Baton only after the runner has checked its station, its next leg, its outputs and the station's entry; a session is handed no worker secret, and in `session` mode can reach none | G-BTN-89 (S-BTN-62, -78) |
+  | A claim or an advance into a leg is refused when the credential ran, on that ticket, a leg the target names in `no_chain_from` or the owners' `required_independence`, or the worker's declared isolation is not the leg's floor, or the leg is a person's | G-BTN-90 (S-BTN-63, -64, -67) |
+  | A value is valid only against its schema and every base; the test kit reports every refinement it cannot prove; one validator module serves server, CLI, sync and kit | G-BTN-91 (S-BTN-65) |
+  | An arrival at a station without its entry outputs is refused; an inline value is validated in full; a pointer the sync posts invalid is never resolved as an input | G-BTN-92 (S-BTN-66) |
+  | A `success` merge check is queued only after a sync confirms the end and its entry, with the owners' conclusions; every check notice is signed with a named key; a check run Baton did not issue is logged; a forge courier is never a machine key and its notices never go to the pool | G-BTN-93 (S-BTN-68) |
+  | A token-registered credential never exceeds the token's scope and dies with it; an API key is refused on a repository with `api_keys: false` and in any role but worker or personal courier | G-BTN-94 (S-BTN-69) |
+  | Leg output is relayed only from the claim's holder, only while an authorized same-origin viewer is watching, within Baton's own size and rate bounds, never for a `stream: false` leg, and is never written to storage, logs or exports | G-BTN-95 (S-BTN-70) |
+  | Cancel and a release message stop the leg's process group within 30 seconds of the release reaching the runner, and report no output of the stopped leg | G-BTN-96 (S-BTN-71) |
+  | A leg is offered only when its station, its ticket prerequisites (`at`, `reached` or `done`, a withdrawn ticket skipped only where the entry says so), its and its ticket's capabilities, its resources and every decision on it or its ticket hold; each unmet one is a block row on that leg | G-BTN-97 (S-BTN-72, -74) |
+  | A course file's capabilities are of declared types with matching values or built-in; a runner declares a checked capability only while its check passes; a grant's `<type>:*` covers the type | G-BTN-98 (S-BTN-73) |
+  | A bounded run claims only named legs, starts at most `n` per claim and none after `until` | G-BTN-99 (S-BTN-75) |
+  | Every renderer escapes or text-sets every value, and links only to the repository's `web_base` or `link_hosts` | G-BTN-100 (S-BTN-76) |
+  | A `session_url` is kept only on an allowlisted host, `https`, no userinfo, at most 512 characters | G-BTN-101 (S-BTN-77) |
+  | A schema posted with a changed digest, outside the subset, with an unsupported pattern, in a `$ref` cycle, or under a `std:` id or another course's prefix is refused; schemas are keyed per repository | G-BTN-102 (S-BTN-79) |
+  | Only a check-runner key claims a check ticket; the conclusions come from the owners' setting; an unsent `forge-check` is listed after 15 minutes | G-BTN-103 (S-BTN-68, -81) |
+  | A prerequisite cycle keeps its blocks and is listed; a withdrawn ticket meets no prerequisite; `reached` on a closed ticket reads its final path | G-BTN-104 (S-BTN-82) |
+  | A leg in backoff is a `retry` block until its `retry_after`: refused at claim and advance, absent from recommendations, shown by `baton why`; the schedule is the policy's, jittered ±10%, counted per ticket and leg | G-BTN-105 (S-BTN-83) |
+  | A course-declared non-retryable type holds at once; an untyped error is `transient`; in-claim retries count neither as runs nor as attempts | G-BTN-106 (S-BTN-84, -85) |
+  | The policy in force is, field by field, the stricter of the course's and the owners' bounds on every quota-spending field (`max_attempts`, `max_attempts_s`, `in_claim`, `max_interval_s`, `max_refreshes`, `initial_s`, `coefficient` ≥ 1); the floor binds on built-in types; `max_attempts_s` stops retries once spent | G-BTN-107 (S-BTN-86, -87) |
+  | A leg past its `max_context` is refreshed under the same claim, at most `max_refreshes` times, counting neither a run nor an attempt, then suspended | G-BTN-108 (S-BTN-88) |
+  | The `epic` course's `integrate` is queued only when no withdrawal is unanswered by a `replan`, and starts only when every child not withdrawn closed `done`; `children` selects closed children; `skip_withdrawn` alone lets a withdrawn ticket out of an entry | G-BTN-109 (S-BTN-89) |
+  | Notices carry their decision's severity; a courier receives only the severities it registered, and one that gains a severity gets the open decisions of it; an `(asks, severity)` no personal channel takes is listed; reminders and lists follow severity | G-BTN-110 (S-BTN-90) |
+
 ## 3. The service *(proposal)*
 
 - **One Worker, one Durable Object.** A Baton's origin — its operator's choice, `BATON_ORIGIN`
@@ -2402,7 +3267,7 @@ archiver — and git's server-side hooks are unaffected: they are not Baton hook
   `scripts/lib/vocabulary.mjs`, which `check-roadmap-requires.mjs` and `lib/workQueues.mjs`
   re-export (R3-1205). *(Amended 2026-10-14: that is the state before R3-1237; R-BTN-37 says
   where it ends.)*
-- **R-BTN-37 (one decision library, vendored by hash).** docs is private, so the baton
+- **R-BTN-37 (one decision library, vendored by hash).** *(Amended 2026-10-17 by §2m: the capability vocabulary and `ROLES` move to each course file's `capability_types` and `capability_roles` (R-BTN-121); the vendored `ROLES` is read only through the dual-read window.)*  docs is private, so the baton
   repository's CI cannot read it. The Worker imports byte-identical copies of the pure docs
   modules it needs — `baton.mjs`, `vocabulary.mjs` and, until R3-1237 removes the provider
   tables, `sessionUsage.mjs` (for `priceFor`) — from `src/shared/`, listed in `src/shared/manifest.json` with the docs
@@ -2467,7 +3332,7 @@ server stands). The same code also runs as a local process — **for development
 continuous integration** (owner, 2026-10-14), where the repositories and their hooks are
 trusted.
 
-- **R-BTN-55 (a thin platform shell over portable logic).** Everything Baton decides lives in
+- **R-BTN-55 (a thin platform shell over portable logic).** *(Amended 2026-10-17 by §2m: the interface table gains `Stream` and `SigningKey`, each with a Cloudflare and a local implementation (§2m.7a).)*  Everything Baton decides lives in
   plain TypeScript that names no platform; each platform service it needs is one small
   interface with two implementations:
 
@@ -2779,7 +3644,7 @@ CREATE TABLE ticket_overrides (
   expedite     INTEGER NOT NULL DEFAULT 0,
   hold         INTEGER NOT NULL DEFAULT 0,
   hold_reason  TEXT,                         -- 'owner', 'attempts-exhausted', 'non-retryable:<class>', 'parked'
-  retry_after  INTEGER,                      -- §6.10 backoff: not claimable before this
+  retry_after  INTEGER,                      -- §6.10 backoff: not claimable before this (superseded 2026-10-17 by §2m: `leg_attempts.retry_after`, per leg, R-BTN-122)
   route_leg    TEXT,                         -- R-BTN-83: an owner's re-route of the queued leg
   route_station TEXT,                        -- the station it was set at; cleared when the ticket's station changes
   set_by       TEXT NOT NULL,                -- 'admin:<fingerprint>', 'owner:<fingerprint>' or 'server'
@@ -3101,7 +3966,7 @@ CREATE TABLE ticket_blocks (                     -- R-BTN-75: why a ticket canno
   repository_id TEXT NOT NULL REFERENCES repositories(id),
   ticket_id    TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
   leg          TEXT NOT NULL DEFAULT '',          -- '' for whole-ticket blocks: ticket, capability, a ticket's decision
-  kind         TEXT NOT NULL CHECK (kind IN ('ticket','capability','resource','decision')),
+  kind         TEXT NOT NULL CHECK (kind IN ('ticket','capability','resource','decision','retry')),  -- 'retry': §2m, R-BTN-122
   ref          TEXT NOT NULL,                     -- a `blocked_by` id (qualified), the capability, the resource, or the decision id
   since        INTEGER NOT NULL,
   until        INTEGER,                           -- a resource block's expected end
@@ -3567,6 +4432,8 @@ dashboard draws on each worker's timeline. They replace the earlier free-text `s
 
 ### 6.10 Attempts, retries and the automatic hold
 
+*(Amended 2026-10-17 by §2m: retries are per leg, with course-declared error types, an exponential schedule, in-claim retries and a budget across attempts, bounded by the owners (R-BTN-122); a backoff is a leg prerequisite, `retry` (R-BTN-120).)*
+
 A ticket that defeats every claimant — a contradictory spec, an environment that fails, a
 tier set too low — would otherwise be claimed, reaped and claimed again for ever, spending
 quota each time.
@@ -3592,7 +4459,7 @@ quota each time.
   raised — R-BTN-82). `capability` and `spec` are
   **non-retryable**: the server holds the ticket at once (`hold_reason:
   non-retryable:<class>`), because another claimant would hit the same wall.
-- **R-BTN-23 (retry policy).** After a failed attempt the ticket is not claimable for a
+- **R-BTN-23 (retry policy).** *(Amended 2026-10-17 by §2m: the fixed backoffs below become the owners' default policy, initial 1 hour, coefficient 4, three attempts; a leg may carry its own policy within the owners' ceiling and floor, attempts are counted per ticket and leg, and a course may declare its own error types (R-BTN-122).)*  After a failed attempt the ticket is not claimable for a
   backoff — by default 1 hour after the first, 4 hours after the second (`retry_after`);
   a repository's owners may set its own backoffs and limit (`retry`, a Baton setting —
   R-BTN-66 — so no commit can loosen it). After the **third**
@@ -3760,7 +4627,7 @@ does under one claim — are a different thing and keep their name.
 *(Owner, 2026-10-14: a small CLI asks Baton for the next leg and invokes what that leg needs,
 by the same convention the server uses for hooks.)*
 
-- **R-BTN-72 (the runner).** `baton run`, in the baton repository's CLI, is a generic worker
+- **R-BTN-72 (the runner).** *(Amended 2026-10-17 by §2m: a session in a leg reports to the runner over a local channel, a run may be bounded, a leg may forbid chaining from another (R-BTN-106); a cloud session may be the runner or each leg (R-BTN-107); Cancel and a release message stop the leg's process (R-BTN-119); a leg whose context fills hands off to a fresh session under the same claim, per mode — the session provider reports its use in `session` mode, the script through `baton leg yield --context` in `process` mode — and a `process`-mode script's `run` may be called again with `ctx.refresh` (R-BTN-123).)* `baton run`, in the baton repository's CLI, is a generic worker
   loop: it heartbeats (it hosts the sidecar of §6.3–6.4), asks for recommendations, claims,
   and runs the ticket's legs one at a time, each by the **script for that leg**, advancing,
   suspending or ending as the script's result and the course file allow. *(Amended the same
@@ -3789,7 +4656,10 @@ by the same convention the server uses for hooks.)*
     checkout's path, the `session` token the previous leg returned, and an `AbortSignal`
     that fires with a reason: `lease-lost` (R-BTN-6) — stop at once — or `release` (a release
     message, an owner bar that releases holders, §9, R-BTN-67) or `regressed` (the heartbeat's
-    `git` says the path went backwards, §2e) — stop at the next safe point.
+    `git` says the path went backwards, §2e) — stop at the next safe point — or, since §2m,
+    `context` (R-BTN-123) — stop at the yield just answered. *(Amended 2026-10-17 by §2m: `ctx`
+    also carries `refresh: {n, handoff}` when the runner calls `run` again after a context
+    refresh, and `yield(fraction?)`, the local channel's `baton leg yield`; R-BTN-123.)*
   - **Idle**, with no claim, the runner asks for recommendations when its heartbeat carries an
     `unblocked` message, and otherwise at its own interval (R-BTN-77; review gate round 3).
   - **The first leg** after a claim is the ticket's queued leg, the one the claim response
@@ -3840,7 +4710,7 @@ by the same convention the server uses for hooks.)*
   and the leg), passing the previous leg's `session` back so a ticket's legs continue in one
   harness session when they can — the one-session norm as a cost saving (R-BTN-38) — and
   starting fresh when the advice moves the leg to another model (R-BTN-49).
-- **Leg sessions are the runner's children** *(after the fifth review)*. The runner starts
+- **Leg sessions are the runner's children** *(after the fifth review)*. *(Amended 2026-10-17 by §2m: a leg's session may be replaced by a fresh one under the same claim when its context fills, R-BTN-123; `IR_BATON_STATE` names a state view without the worker secret and the claim nonce, and the session may also report over the local channel (R-BTN-106); this keeps a cooperating session from using them, not a hostile one.)* The runner starts
   each with `IR_BATON_PARENT=<worker id>` and `IR_BATON_STATE=<the runner's state file>`
   (§6.4). Such a session starts no sidecar and registers no worker; its harness hooks read
   the runner's state file — read-only — for the fence (R-BTN-26), the owner bars and the
@@ -3862,6 +4732,8 @@ by the same convention the server uses for hooks.)*
 ## 7. The board, matching and providers *(proposal)*
 
 ### 7.1 Board sync
+
+*(Amended 2026-10-17 by §2m: each posted ticket may carry `depends_at: [{ticket, at | reached | done, leg?}]` (R-BTN-120), and each output a sync posts carries its validity (R-BTN-109); the course file travels with its schemas (R-BTN-108).)*
 
 *(2026-10-14: each registered repository has its own sync workflow and board (R-BTN-47);
 this subsection describes docs'. Every repository's workflow runs `npx baton sync` at a
@@ -4206,6 +5078,8 @@ SELECT id FROM (
                          OR (c.status = 'reaped' AND c.fence_pending = 1)))   -- rule 3
     AND NOT EXISTS (SELECT 1 FROM ticket_overrides o WHERE o.ticket_id = w.id
                     AND (o.hold = 1 OR o.retry_after > :now))                  -- rules 3, 10
+                    -- (amended 2026-10-17 by §2m: rule 10 reads the queued leg's
+                    --  `leg_attempts.retry_after`, through its `retry` block, R-BTN-122)
     AND NOT EXISTS (SELECT 1 FROM ticket_requires r WHERE r.ticket_id = w.id
                     AND r.name NOT IN (
                       SELECT c.capability FROM worker_capabilities c, worker_grants g,
@@ -4249,7 +5123,7 @@ worker is eligible for a ticket when all hold — one pure function in
    not git `in-progress`; an expedite ticket over the bound waits, overrides included;
 3. the ticket has no active claim (at an `advance`, none but the advancing one), no unconfirmed
    completion, and no `hold` override;
-4. `capabilitiesOf(ticket.requires) ⊆ capabilitiesOf(declared) ∩ grant(repository)`: a role expands through
+4. `capabilitiesOf(ticket.requires) ⊆ capabilitiesOf(declared) ∩ grant(repository)` *(2026-10-17, R-BTN-120: for the leg to be started, `ticket.requires ∪ leg.requires.capabilities`; roles expand through the course's `capability_roles`, R-BTN-121)*: a role expands through
    `ROLES` on both sides (a ticket naming `agent-venue` needs its four capabilities), a legacy
    resource name matches only when declared verbatim, and `none` or no clause
    (`requires == null`) is satisfied by every worker;
@@ -4271,7 +5145,7 @@ worker is eligible for a ticket when all hold — one pure function in
    (`BATON_ROADMAP_PR_COURSE` §6);
 9. at a claim, the worker declares the ticket's course at the registry's `min_worker_version` or later (R-BTN-22, R-BTN-65,
    R-BTN-48; refusal code `stale-skills`);
-10. the ticket's `retry_after`, if any, has passed (§6.10; refusal code `backing-off`);
+10. the ticket's `retry_after`, if any, has passed (§6.10; refusal code `backing-off`); *(Amended 2026-10-17 by §2m: the backoff is per leg — the leg to be started has no `retry` block, `leg_attempts.retry_after` ≤ now (R-BTN-122); the refusal code stays `backing-off`.)*
 11. *(retired 2026-10-14: work-in-progress bounds are the course's hook's advice, R-BTN-41)*;
 12. *(retired 2026-10-16 with the hooks, R-BTN-98)* the course's hook does not refuse the candidate (R-BTN-52; refusal code
     `hook-refused` with the hook's reason).
@@ -4320,7 +5194,7 @@ that the mirror (§12) writes into the tag.
   worker, updated in place; an idle runner asks for recommendations on it, then acknowledges).
 - **Delivery is a poll.** A heartbeat response returns the worker's pending messages and marks
   them `delivered` in the same transaction; the worker acts, then acknowledges.
-- **`release`:** the agent stops at its next safe point, leaves what exists in git with its
+- **`release`:** *(Amended 2026-10-17 by §2m: for the reasons `requested` and `owner-cancel` the runner stops the leg's process at once rather than at a safe point (R-BTN-119).)* the agent stops at its next safe point, leaves what exists in git with its
   hand-off document (R-BTN-44, in its course's form), ends the claim `released:<the message's reason>` — `requested`,
   `owner-cancel`, `leg-timeout` (R-BTN-90) or an owner bar's reason such as `provider-suspended` (§6.5, R-BTN-67) — and acknowledges. If a
   delivered `release` is unacknowledged after 2 hours — 15 minutes for `leg-timeout` — the alarm reaps the claim (fencing makes
@@ -4330,6 +5204,8 @@ that the mirror (§12) writes into the tag.
 ## 10. Security *(proposal)*
 
 ### 10.1 Principals
+
+*(Amended 2026-10-17 by §2m: a worker or a personal courier may authenticate with an API key, and a session registers with an owner's token (R-BTN-117); the Courier row includes the forge courier, which claims only `forge-check` notices (R-BTN-115); a dashboard session may open a leg's output stream (R-BTN-118).)* 
 
 *(Amended 2026-10-16 by §2l, R-BTN-102: the Worker row's machine key may also act as the Board sync (not the
 mirror) of a repository its key is granted on unless its owners turned `machine_sync` off, post
@@ -4349,7 +5225,7 @@ never machine keys.)*
 | Instance administrator | `/v1/admin/*`, and `/`, `/v1/ui/*` through a dashboard session | a request signed with a key in `BATON_ADMIN_KEYS` (R-BTN-57) — a key kept out of every agent's reach; the dashboard through a one-time sign-in link such a key mints | register repositories, owners and probes; register external resources and account instances, and post readings by hand (R-BTN-76); grant `human-operator`; revoke keys; read everything, blocks included; overrides; messages; force-reap; accept a rejected history |
 | Repository owner | `/v1/owner/{repository}/*` | a request signed with one of that repository's owner keys (R-BTN-58) | grant and revoke worker keys for that repository, with any capabilities but `human-operator`; add and remove its owners; set and lift its owner bars; set and clear expedite and hold on its tickets (§8); set its required bars, `retry`, `transcript_repos`, `unblocked_trigger`, `remind_after` and `artifact_buckets` (R-BTN-66/67, R-BTN-77, R-BTN-80, R-BTN-82); re-route tickets and resolve Baton's decisions (R-BTN-83, R-BTN-78); register and revoke its couriers (R-BTN-80) and its sync keys (R-BTN-93); ask the blocks of its tickets (R-BTN-75) |
 
-- **R-BTN-13 (key binding).** *(Amended 2026-10-16 by §2l: a `worker` credential is a machine key, trusted with
+- **R-BTN-13 (key binding).** *(Amended 2026-10-17 by §2m: an owner's registration token registers a session's worker credential within its scope, and a worker or personal courier may use an API key in place of the signature (R-BTN-117).)*  *(Amended 2026-10-16 by §2l: a `worker` credential is a machine key, trusted with
   work, sync, readings and delivery, and a `probe` an instrument key — R-BTN-102; the probe
   `allowed_instances` refusal below is withdrawn, R-BTN-101.)* *(Amended 2026-10-14, owner: SSH keypairs replace bearer
   tokens; revised the same day after review.)* A machine's identity is an **SSH keypair** of
@@ -4523,7 +5399,7 @@ for every instance. **R-BTN-16:**
 Getting started must take a few commands, and keys never live in git. Every key lives in
 Baton's SQLite — except the administrators' own, which anchor everything else.
 
-- **R-BTN-57 (administrators: whoever controls the deployment).** Anyone who can deploy a
+- **R-BTN-57 (administrators: whoever controls the deployment).** *(Amended 2026-10-17 by §2m: two key roles join the one-role rule — the forge courier and the check-runner — and a check course's merge check uses a dedicated check App, never Baton's own (R-BTN-114, R-BTN-115).)*  Anyone who can deploy a
   Baton or set its secrets can already replace its code, so that control — on Cloudflare,
   the account's login and second factor; locally, control of the process — is the root of
   trust, and Baton adds no second one. The administrators are the SSH public keys in the
@@ -4583,7 +5459,7 @@ Baton's SQLite — except the administrators' own, which anchor everything else.
     App's id, private key and webhook secret, which it writes straight to the Worker secrets
     (`wrangler secret put`) or to a local Baton's files, never to the terminal or a file in a
     repository. It then prints the App's installation link for an organisation owner.
-- **R-BTN-58 (repository owners).** Each registered repository has a set of owner SSH public
+- **R-BTN-58 (repository owners).** *(Amended 2026-10-17 by §2m: a grant may name a whole capability type, `<type>:*` (R-BTN-121).)*  Each registered repository has a set of owner SSH public
   keys (`repository_owners`). An owner signs requests to `/v1/owner/{repository}/*` to, **for
   that repository only**: grant a worker key access, with the capabilities it may use on
   that repository's tickets and its `max_tier` (`worker_grants`); add or remove
@@ -4608,6 +5484,8 @@ Baton's SQLite — except the administrators' own, which anchor everything else.
   local operator who edits the SQLite file directly bypasses validation at their own risk.
 
 ## 11. API *(proposal)*
+
+*(Amended 2026-10-17 by §2m: the rows below gain the fields §2m.7a lists, and §2m's new routes follow the push connection's row.)*
 
 All bodies are JSON. Errors: `{ "ok": false, "code": <code>, "message": <text> }`, with codes
 `unauthenticated`, `forbidden`, `session-taken`, `worker-reaped`, `invalid-params`,
@@ -4668,6 +5546,12 @@ round 3)*.
 | `POST /v1/owner/{repository}/overrides/{ticket}` | an owner of that repository: `{expedite?, hold?, cancel?}` on one of its tickets (§8, R-BTN-66); `cancel: true` sets `hold` and sends the holder a `release` with reason `owner-cancel` | `{ok: true}` |
 | `POST /v1/owner/{repository}/claims/{id}/deadline` | an owner of that repository: `{extend_to}` (later than now and than the current deadline; refused with no deadline or once the `leg-timeout` release is queued) or `{cancel_at}` (after now and within 7 days, or `null` to withdraw it) on an active claim (R-BTN-90) | `{ok: true, deadline_at, cancel_at}`, `claim-ended` or `invalid-params` |
 | `GET /v1/runner/push?session_name=<name>` | a WebSocket upgrade signed by the machine's key, query included, with `X-Worker-Secret`, identified as a heartbeat is (R-BTN-91) | `101`; then `{ring: [<kind>]}` frames, at most one a second plus a trailing one, and `pong` to `ping`; `unauthenticated`, `forbidden`, `session-taken` or `worker-reaped` instead of the upgrade |
+| `GET /v1/runner/stream?claim=<id>` *(§2m)* | a WebSocket upgrade signed as the push connection is, by the claim's holder, after a `watch` ring | `101`; then the runner sends `{seq, at, stream, text}` and `{gap}` frames, its scrollback first (R-BTN-118); `forbidden` for another worker's claim |
+| `GET /v1/ui/stream?claim=<id>` *(§2m)* | a dashboard session | `101`; then the claim's frames as they arrive, none stored (R-BTN-118) |
+| `POST /v1/owner/{repository}/tokens`, `…/tokens/{id}/revoke` *(§2m)* | an owner of that repository: `{role: 'worker'\|'courier', capabilities?, max_tier?, ttl_s?, uses?, grant_ttl_s?}` | `{token}` once, then only its id; revoking revokes every credential registered with it (R-BTN-117) |
+| `POST /v1/register` *(§2m)* | `Authorization: Baton-Token <token>`; `{name, public_key}` or `{name, api_key: true}` | `{credential_id, grant}`, and `{api_key}` once for the second form; `forbidden` beyond the token's scope, `unauthenticated` for a spent, expired or revoked token (R-BTN-117) |
+| `GET /v1/keys/signing` *(§2m)* | none | `{alg: 'Ed25519', public_key}` — the key `forge-check` notices are signed with (R-BTN-114) |
+| `GET /v1/repositories/{repository}/tickets/{ticket}/prerequisites` *(§2m)* | a worker key granted on the repository, an owner of it, or a dashboard session; `?leg=` (default the queued leg), `?worker=me` | `{leg, ready, prerequisites: [{kind, ref, met, why, since?, until?, url?}]}` — every prerequisite of the leg, met or not (R-BTN-120) |
 | `POST /v1/owner/{repository}/bars`, `…/bars/{id}/lift`, `PUT /v1/owner/{repository}/settings` | an owner of that repository: an owner bar `{course, tag, legs?, applies, starts_at?, ends_at?, release_holders?, reason}` (`course` a course id or `*`); lift one; set `required_bars` (`[{course, leg, except?, tag_prefix}]`), `retry`, `transcript_repos`, `unblocked_trigger` (R-BTN-94's `dispatch` shape; on GitHub a path under `.github/workflows/`, R-BTN-77) (R-BTN-66/67) | `{id}` / `{ok: true}` |
 | `POST /v1/ui/messages` | `{to_worker_id, kind, payload}` | `{id}` |
 | `POST /v1/ui/claims/{id}/reap` | `{confirm: true}` | `{ok: true}` |
@@ -4937,6 +5821,8 @@ integration suite that drives them together, on a controllable clock, proves the
   replaced by short real timeouts configured for that namespace).
 
 ## 14. The dashboard *(proposal)*
+
+*(Amended 2026-10-17 by §2m: **Workers** show each worker's `isolation` and credential kind; **Running** and the **Timeline** link each leg run's `session_url` (R-BTN-113) and open its output stream (R-BTN-118); **Actions** gain **Stop leg** (R-BTN-119); **Needs you** gains unsent `forge-check` notices, `check-mismatch` and `output-invalid` discrepancies (R-BTN-114, R-BTN-109).)* 
 
 At the Baton's origin (`/`), behind a dashboard session (R-BTN-57), polling `GET /v1/ui/state` every 10
 seconds. Its views mirror Temporal's:
@@ -5484,8 +6370,84 @@ table is in docs' `BATON_DOCS_DEPLOYMENT` §16, where `check-spec-anchors` re-re
   the commit the post names, never a working tree. **Rejected:** a hash with the body only on
   change — a few KB per course is not worth the second path.
 
+- **The runner organizes legs; a session reports to it, never to Baton** (2026-10-17, owner;
+  R-BTN-106): the session needs no claim credential, and every move is checked once, where the
+  claim lives. A bounded run is the runner's own discipline; `no_chain_from` is a gate, because
+  independence is owed to the owner, not chosen by the worker.
+- **Cloud sessions as runners, two modes** (2026-10-17, owner; R-BTN-107): `attached` is cheap
+  and its isolation advisory, said so and shown; `session` keeps the claim out of every agent
+  session. Rejected: giving a child session a scoped claim token — a credential in the child is
+  what `session` mode exists to avoid.
+- **One envelope, named schemas, refinement checked both ways** (2026-10-17, owner; R-BTN-108):
+  validating against the base as well as the refinement is the guarantee a base's consumer
+  needs; the static refinement check is sound but conservative. Rejected: full JSON Schema
+  (`anyOf`, `oneOf`, conditionals) — refinement becomes undecidable in practice and validation
+  unbounded.
+- **Entry requirements on stations, not legs** (2026-10-17, owner; R-BTN-109): what must hold
+  on arrival is the station's meaning, whichever leg arrives. Baton checks presence and inline
+  values; the sync checks pointers, so Baton still never fetches.
+- **Standard formats are a library, not core** (2026-10-17, owner; R-BTN-110, R-BTN-50): core
+  stays course-agnostic; a `std:` id is a string to it.
+- **Views are data; Baton renders** (2026-10-17, owner; R-BTN-112): a course shipping rendering
+  code would be repository code running in Baton or in every viewer (R-BTN-98).
+- **Checks run as courses; the merge check is delivered by a forge courier and signed by Baton**
+  (2026-10-17, owner; R-BTN-114, R-BTN-115): Baton holds no credential of the check App; the
+  signature and the read-back make a check Baton never issued visible; branch protection pinned
+  to a dedicated check App makes a status context, or Baton's own App, insufficient. Who may
+  report a check is a key role the owners register, and its conclusions are an owner setting,
+  so the key that wrote a change never reports its check (review gate round 1, baton#43).
+  Rejected: the worker courier pool for checks — any worker could then withhold or post its own
+  change's check; check tickets claimable by work keys — the same, one step earlier.
+- **A leg never waits on a delivery** (2026-10-17; R-BTN-116): "sent" is a courier's word; a leg
+  waits on an effect git or the forge shows.
+- **API keys beside SSH keys** (2026-10-17, owner: "requiring ssh for runner auth is not great,
+  users should be able to fall back to regular api keys"; R-BTN-117): reverses the 2026-10-14
+  choice of signatures only, for workers and personal couriers, with the cost stated in the rule;
+  owner, administrator, sync, instrument and forge-courier keys stay signed.
+- **A leg's output streams over TLS and is never stored** (2026-10-17, owner: "we don't need
+  hand-rolled encryption for streaming logs if we use standard wss://"; R-BTN-118): Baton sees
+  the frames as it relays them, so R-BTN-33 is amended to relaying, not storing. Rejected:
+  end-to-end encryption to the viewer — more machinery than a stream nobody stores needs. Each
+  stream has its own object, so the doorbell stays a ring.
+- **A leg's prerequisites in one place, answered in one call** (2026-10-17, owner; R-BTN-120):
+  the five kinds existed under five names and two scopes; they are now one `requires` per leg,
+  stored as the blocks they already were, and `baton why` answers every one. Another ticket may
+  be required `at` a station (where it is now) or to have `reached` one (owner: both). Rejected:
+  a separate decision field — a person's answer the next leg needs is a person's leg and an
+  entry requirement (R-BTN-116, R-BTN-109).
+- **Capability types belong to the course file** (2026-10-17, owner; R-BTN-121): a VPN, a
+  database, a credential or an authenticated harness is what a course's legs need, so the
+  course declares the type and its value pattern, and the runner checks what it declares.
+  Chose each course file over the repository's `baton.json` (owner); two courses may define one
+  type differently, and the dashboard shows it. Rejected: keeping `ROLES` in docs' vendored
+  library — core would keep one deployment's vocabulary.
+- **Retries per leg, typed by the course, bounded by the owners** (2026-10-17, owner; R-BTN-122):
+  Temporal's retry policy, error types and timeouts apply to legs as to activities. A backoff
+  is a prerequisite (owner), so a leg waiting for its next attempt is never offered and `baton
+  why` says so. Courses declare and type their errors; owners hold the default, the ceiling
+  and the floor, because a course file is in git. Rejected: retry policies only per
+  repository (today's) — one failing leg spent every leg's attempts; letting the course's
+  policy override the owners' — an agent could raise `max_attempts` without bound.
+- **A fresh context under the same claim; a planning course instead of a coordinator; urgent
+  decisions** (2026-10-17, owner; R-BTN-123 to R-BTN-125), each taken from Gas Town where it fits
+  Baton's model: the runner refreshes a session whose context is filling, as Gas Town's Witness
+  does, without losing the lease; planning is a course the CLI ships, not an agent in core;
+  severity routes and orders decisions. **Not built:** asking a predecessor session — a course
+  leg's feature, to build when a course needs it, on top of the worker saving a leg's session
+  (owner). Rejected from Gas Town: a merge queue (the forge's), steps inside a leg (the station
+  is Baton's unit of durability), federation (one Baton per team) and agents supervising agents
+  (Baton's alarm, leases and fencing).
+- **Stopping a leg is the runner's, asked through Cancel** (2026-10-17, owner; R-BTN-119): the
+  existing release path is authenticated and logged; a viewer's stream never controls.
+
 ## Open questions
 
+- **Checks on GitLab and Gitea** (R-BTN-114): which status each forge offers that a token
+  other than the courier's cannot satisfy.
+- **The check legs' sandbox** (R-BTN-114): what "every secret withheld" needs beyond replay's
+  credential rule before forks and public repositories are taken.
+- **Watching for owners** (R-BTN-118): a repository owner's dashboard session, once owners have
+  one (§14 is the administrator's today).
 
 - Retire the git mirror after consumers migrate (removing ~390 claim commits a fortnight),
   or keep it permanently as the readable record?
@@ -5493,7 +6455,8 @@ table is in docs' `BATON_DOCS_DEPLOYMENT` §16, where `check-spec-anchors` re-re
 - **Default timeout budgets** (Temporal's start-to-close and schedule-to-start): a course sets
   its own `max_duration` per leg (R-BTN-90); a default per tier for a claim, and an alert when a
   ready ticket has had no eligible worker for N hours, still need a few weeks of activity data
-  first.
+  first. *(2026-10-17, R-BTN-122: a leg may now set `max_ready_s` and `max_attempts_s`; the
+  defaults per tier remain open.)*
 - Should the mirror also write activities (review rounds) into git, or is the export enough?
   *(2026-10-14: legs are already in git as their evidence, §6.12.)*
 - **Dynamic Workers on our plan** (R-BTN-52): availability and pricing of the Worker Loader
