@@ -1,0 +1,49 @@
+---
+title: "B-18 — Baton spec: settle §2m's open questions — merge checks on GitLab and Gitea, the check legs' sandbox for forks and public repositories, owners watching leg streams"
+id: B-18
+project: baton
+status: available
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1121
+tier: judgement
+description: "Three open questions from §2m (R-BTN-114, R-BTN-115, R-BTN-118) settled as spec amendments, with the owner where they are decisions, and their implementation tickets filed. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** §2m's open questions (the spec's **Open questions**, 2026-10-17), and the binding decision that Baton runs without GitHub.
+**Spec:** `spec/BATON_SPEC.md` §2m.3 (R-BTN-114, R-BTN-115), §2m.5 (R-BTN-118), §14, **Open questions**.
+
+### Why
+
+Three decisions in §2m are still open, and each blocks a use:
+- **Checks on GitLab and Gitea.** v1 merge checks are GitHub-only, so a repository on another forge cannot gate merges on a check course.
+- **The check legs' sandbox.** What "every secret withheld" needs beyond replay's credential rule. Until that is settled, check courses must not run code from forks or public repositories.
+- **Watching for owners.** The leg stream is open to the administrator's dashboard session, and owners have no session yet.
+
+### What to do
+
+1. Settle each question as a spec amendment in `spec/BATON_SPEC.md`, with the owner where it is a decision. The forge question needs the status or check primitive on each forge that a token other than the courier's cannot satisfy. The sandbox question needs the rule for forks and public repositories.
+2. File the implementation tickets each amendment needs.
+
+### Do not
+
+- Run check courses on forks or public repositories before the sandbox amendment lands.
+
+### Tests
+
+- `npm run check:spec` is green.
+
+### Exit criteria
+
+- [ ] the three questions settled in the spec, merged under the review gate
+- [ ] their implementation tickets filed
+
+## Status

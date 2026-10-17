@@ -1,0 +1,49 @@
+---
+title: "B-20 — BATON_SPEC R-BTN-126: a prerequisite can fail during a leg — a blocked edge, not a station"
+id: B-20
+project: baton
+status: done
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1123
+tier: judgement
+description: "A leg's run ends released:blocked with the prerequisite that failed; Baton writes the block row on that leg, spends no attempt, and draws the edge blocked; provider-exhausted becomes a case of it; an error naming a prerequisite is a block, not a retry (owner, 2026-10-17). Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/44
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-17: "any leg of a ticket may be blocked by an unmet prerequisite, which may be apparent before a runner starts completing the given leg, but can also become apparent during implementation. For example, because a language model provider's token capacity has been reached. This is not a new station in the course graph. It is simply a colored edge in the graph." Then "Go" on the proposal.
+**Spec:** `spec/BATON_SPEC.md` — new §2m.6c, R-BTN-126; dated notes on R-BTN-75, R-BTN-122, §6.12's mid-leg exhaustion, the release reasons and §14.
+
+### Why
+
+R-BTN-120 blocks a leg on a prerequisite known before it starts. A prerequisite that fails while the leg runs has a general ending only for one course's model accounts (`provider-exhausted`). Without one, a VPN, a database or a provider's capacity lost mid-leg can only end as a retryable error, which spends retries on something that is not a failure.
+
+### What to do
+
+1. Add §2m.6c with R-BTN-126:
+   - a leg's run ends `released:blocked` with the prerequisite that failed;
+   - Baton writes the block row on that leg in the same transaction, and spends no attempt;
+   - `provider-exhausted` becomes a case of `released:blocked`;
+   - an error naming a prerequisite is a block, not a retry;
+   - a blocked leg is drawn as a coloured, labelled edge, never as a station.
+2. Add dated notes to every rule it amends, plus scenario S-BTN-91 and gate G-BTN-111, the wire rows, a Decisions entry, the CHANGELOG and the design brief.
+3. Review it under the review gate.
+
+### Tests
+
+- `npm run check:spec` and `npm run check:wiki` green.
+
+### Exit criteria
+
+- [x] R-BTN-126 merged, reviewed under the gate (three rounds; baton#44)
+- [x] its implementation ticket filed: B-21
+
+## Status

@@ -1,0 +1,47 @@
+---
+title: "B-19 — Baton reserved: the runner saves a leg's session, and a course's leg may ask its predecessor session"
+id: B-19
+project: baton
+status: deferred
+updated: 2026-10-17
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1122
+tier: judgement
+description: "Deferred until a course hits a problem it solves (owner, 2026-10-17): the runner, which already reads a leg's stdout and stderr for the stream, saves the session to the repository's transcript store; asking the predecessor is a feature of that course's leg, not core (BATON_SPEC §2m.6b's reserved note). Requires: B-9."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-9
+---
+
+**Brief:** the owner, 2026-10-17: "Asking a predecessor session" is "an interesting idea, but it should be implemented as a feature of a specific course's leg. Don't do this until we hit a problem it solves. We should have the ability to save leg's session by the worker. The worker already needs to read a leg's std\{err, out\} to allow streaming it to the web ui, so this seems like a modest addition - but one reserved for the future."
+**Spec:** `spec/BATON_SPEC.md` §2m.6b (the reserved note after R-BTN-125), R-BTN-118 (the runner reads a leg's output), §6.8 (transcript pointers).
+
+### Why
+
+This ticket records reserved work so it is not lost. It is **deferred**: do not take it until a course hits a problem that asking a predecessor session solves. Name that problem in the ticket when you move it to available.
+
+### What to build (when un-deferred)
+
+1. **The runner saves a leg's session.** The runner already reads each leg's stdout and stderr for the stream (B-9). It may also save them, with the harness's session file where an adapter can export one, to the repository's transcript store (§6.8). Saving is per repository and opt-in, and it is pointed at, never stored in Baton (R-BTN-33).
+2. **A course's leg may ask its predecessor.** This is a feature of that course's leg script, not of Baton's core (R-BTN-50). The script resumes or replays the saved session to answer a question.
+
+### Do not
+
+- Store any transcript or output in Baton.
+- Build either part before the problem is named.
+
+### Tests
+
+- To be written with the problem.
+
+### Exit criteria
+
+- [ ] the problem it solves is named, then the two parts above are merged
+
+## Status
