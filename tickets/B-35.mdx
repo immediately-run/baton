@@ -36,6 +36,20 @@ The adapter reads only what changed since the last sync, so its requests grow wi
 - **Detail only while it can matter.** A merged or closed PR whose ticket's station already reflects it needs no re-read on every sync.
 - **GraphQL**, one query per repository for PRs with their reviews, comments, commit dates and check rollup, if its point cost fits.
 
+### Decided at claim (2026-10-18)
+
+docs' real board was measured against GitHub on 2026-10-18 (47 of 61 list pages read; the 14 repositories this session cannot read counted at one page each):
+- about **61 list pages**;
+- **49 owned PRs**, of which 26 are open, across 16 tickets: four detail requests each is **196**.
+
+That makes about 257 requests in all. Reading detail only for tickets with an open PR gives about 185, which leaves no headroom.
+
+**Taken: batch the detail over GraphQL.** The REST lists stay. The PRs a live ticket owns are read in one GraphQL query per repository, up to 25 PRs a query: each PR's head-commit check runs, commits, reviews and issue comments, mapped to the same facts as before. That is about 61 + 16 = 77 requests for docs. A PR whose connection overflows its first page (more than 100 reviews, comments, commits or check runs) is read for that connection over REST, as today, so nothing is cut off. A batch is one request against the budget.
+
+**Not taken:**
+- **ETags.** They need state kept between workflow runs, which a sync with read-only contents has nowhere to keep. Revisit if lists come to dominate.
+- **Detail only for tickets with an open PR.** It changes which facts a PR carries depending on its siblings, and saves little once detail is batched.
+
 ### Tests
 
 - Against a recorded GitHub, a board shaped like docs' (35 repositories, about 80 owned PRs) syncs within the budget on its second run, where nothing changed, and on a run where one PR changed.
