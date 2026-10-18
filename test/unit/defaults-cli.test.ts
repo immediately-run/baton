@@ -298,6 +298,11 @@ describe('prClose', () => {
     // The first line is exactly the line the station function reads (course-pr's VERDICT).
     expect(calls[0].args[3].split('\n')[0]).toBe(verdictLine('changes'));
     await expect(prClose(ctx, { reached: 'reviewed' }, run)).rejects.toThrow('no verdict');
+    // A PR the agent named (B-29): the line goes there, whatever the checkout's branch.
+    calls.length = 0;
+    await prClose(ctx, { verdict: 'approve', pr: 'https://github.com/o/site/pull/7' }, run);
+    expect(calls[0].args.slice(0, 4)).toEqual(['pr', 'comment', 'https://github.com/o/site/pull/7', '--body']);
+    await expect(prClose(ctx, { verdict: 'approve', pr: 'o/site#7' }, run)).rejects.toThrow('named no PR URL to write on');
   });
 
   /** The comment body prClose posts for `leg`, as a review fact the station functions read. */
@@ -387,6 +392,23 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     expect(calls).toHaveLength(10);
   });
 
+  it('reads each other repository a live ticket names, and only those, tagging every fact with its repository (B-29)', async () => {
+    serve({
+      '/repos/o/r/pulls?state=all': [],
+      '/repos/o/site/pulls?state=all': [pr(7, 'claude/A-1-x', 'open'), pr(8, 'claude/Z-9-x', 'open')],
+      '/repos/o/site/commits/s7/check-runs': { check_runs: [] },
+      '/repos/o/site/pulls/7/commits': [],
+      '/repos/o/site/pulls/7/reviews': [],
+      '/repos/o/site/issues/7/comments': [who('MEMBER', '<!-- baton:verdict approve -->', '2026-10-05T00:00:00Z')],
+    });
+    const facts = await githubFacts(dir, () => {}, (p) => p.repository === 'o/site' && p.head.startsWith('claude/A-1-'), ['o/site', 'O/R']);
+    expect(facts.map((f) => [f.repository, f.number])).toEqual([['o/site', 7], ['o/site', 8]]);
+    expect(facts[0].reviews.map((r) => r.body)).toEqual(['<!-- baton:verdict approve -->']);
+    // The home in another case is no sibling; the unowned sibling PR costs no request beyond the list.
+    expect(calls.filter((c) => /\/(8|s8)\//.test(c))).toEqual([]);
+    expect(calls.filter((c) => c.includes('/repos/o/r/'))).toEqual(['/repos/o/r/pulls?state=all']);
+  });
+
   it('refuses before the request budget is spent, rather than truncate or starve the next runs', async () => {
     const many = Array.from({ length: 60 }, (_, i) => pr(i + 1, `claude/A-${i + 1}-x`, 'open'));
     const routes: Record<string, unknown> = { '/repos/o/r/pulls?state=all': many };
@@ -448,6 +470,20 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       expect(await stub.run({ ticket: { id: 'B-1' }, checkout: root, snapshot })).toEqual({ reached: 'new-cause', next: 'file' });
       process.env.OUTCOME = 'maybe';
       await expect(stub.run({ ticket: { id: 'B-1' }, checkout: root, snapshot })).rejects.toThrow('the dedupe agent printed no outcome (new-cause or duplicate) as its last line');
+      // A PR course's commenting leg may name the PR after its answer (B-29); anything else after it is refused.
+      const review = await load(join(root, '.baton', 'courses', 'review-pr', 'legs', 'review.mjs'));
+      process.env.OUTCOME = 'approve https://github.com/o/site/pull/7';
+      expect(await review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ reached: 'approved', next: null, verdict: 'approve', pr: 'https://github.com/o/site/pull/7' });
+      process.env.OUTCOME = 'changes';
+      expect(await review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ suspend: true, reached: 'changes-requested', next: 'review', verdict: 'changes' });
+      process.env.OUTCOME = 'approve o/site#7';
+      await expect(review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).rejects.toThrow('the review agent\'s last line names no PR URL after its verdict');
+      // A leg with no answer names its PR by a last line that is a URL alone; any other last line names none.
+      const conclude = await load(join(root, '.baton', 'courses', 'review-pr', 'legs', 'conclude.mjs'));
+      process.env.OUTCOME = 'https://github.com/o/site/pull/7';
+      expect(await conclude.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ reached: 'concluded', next: null, pr: 'https://github.com/o/site/pull/7' });
+      process.env.OUTCOME = 'summary posted';
+      expect(await conclude.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ reached: 'concluded', next: null });
       // A marker course's stub closes with markerClose; a PR course's with prClose.
       expect(stub.close.name).toBe('markerClose');
       expect((await load(join(root, '.baton', 'courses', 'review-pr', 'legs', 'conclude.mjs'))).close.name).toBe('prClose');

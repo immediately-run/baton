@@ -26,6 +26,8 @@ export interface PrFact {
   /** The PR's reviews and its plain comments — a comment is `COMMENTED`, read only for a
    * verdict line (R-BTN-74: "a comment or comment-only review"). */
   reviews: { author: string; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED'; submittedAt: number; body?: string }[];
+  /** The repository the PR is in, `owner/name` (B-29); absent, the home repository's. */
+  repository?: string;
 }
 
 /** What a station function returns (R-BTN-74): the stations, the markers it saw and its
@@ -111,8 +113,8 @@ export const checksDone = (f: PrFact): boolean => f.checks.every((c) => c != nul
 /** A PR's verdicts, oldest first. */
 const verdictsOf = (f: PrFact) => [...f.reviews].filter((r) => verdictOf(r) != null).sort((a, b) => a.submittedAt - b.submittedAt);
 
-/** The path one PR's timeline implies (R-BTN-74: "the least advanced PR's timeline in order"):
- * `implement` opened it; each verdict is a `review`; a push after a verdict, before the next
+/** The path a change's timeline implies (R-BTN-74: "the change's timeline in order" — one PR,
+ * or `together`'s several): `implement` opened it; each verdict is a `review`; a push after a verdict, before the next
  * one, was a `fix` (the graph's only way back to `review`), whatever that verdict said, since a
  * verdict is on the head it was given on. Verdicts with no push between them — two reviewers of
  * one head — are one review. */
@@ -175,8 +177,6 @@ function placeOf(fact: PrFact, graph: PrGraph): PostedStation {
   return at('reviewed', path, [{ leg: 'fix', state: 'ready', waiting_on: null }]);
 }
 
-const LEAST: Record<string, number> = { filed: 0, 'pr-open': 1, fixed: 2, reviewed: 3, adjudicated: 4, merged: 5 };
-
 /** A wildcard match, not a regex: `*` matches any run of characters (the same walk the core's
  * branch-holder uses, at most |branch| × |pattern| steps — a star never backtracks twice). */
 export function branchMatches(pattern: string, branch: string): boolean {
@@ -206,19 +206,36 @@ export function branchMatches(pattern: string, branch: string): boolean {
   return j === p.length;
 }
 
-/** The PR numbers a ticket's `prs:` names: a bare number or `#n`, or a pull-request URL —
- * `https://<host>/<owner>/<name>/pull/<n>` — of this repository (`repository`, `owner/name`,
- * when known; a URL naming another repository is not one of this repository's PRs). */
-export function prNumbers(prs: unknown[], repository?: string | null): string[] {
-  const out: string[] = [];
+/** GitHub's owner and repository names ignore case. */
+const sameRepo = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+
+/** The PRs a ticket's `prs:` names, each as its repository and number: a bare number or `#n` is
+ * the home repository's (`home`, `owner/name`, null when unknown); a pull-request URL —
+ * `https://<host>/<owner>/<name>/pull/<n>` — names its own (B-29). */
+export function prRefs(prs: unknown[], home?: string | null): { repository: string | null; number: string }[] {
+  const out: { repository: string | null; number: string }[] = [];
   for (const p of prs) {
     const text = String(p).trim();
-    if (/^#?\d+$/.test(text)) out.push(text.replace(/^#/, ''));
+    if (/^#?\d+$/.test(text)) out.push({ repository: home ?? null, number: text.replace(/^#/, '') });
     const m = /^https?:\/\/[^/]+\/([^/]+\/[^/]+)\/pull\/(\d+)(?:[/#?].*)?$/.exec(text);
-    if (m && (repository == null || m[1].toLowerCase() === repository.toLowerCase())) out.push(m[2]);
+    if (m) out.push({ repository: m[1], number: m[2] });
   }
   return out;
 }
+
+/** The PR numbers a ticket's `prs:` names in repository `repository` (`owner/name`, when known;
+ * a URL naming another repository is not one of its PRs): `prRefs`, narrowed to one repository. */
+export function prNumbers(prs: unknown[], repository?: string | null): string[] {
+  return prRefs(prs, repository).filter((r) => repository == null || r.repository == null || sameRepo(r.repository, repository)).map((r) => r.number);
+}
+
+/** Whether `ref` names fact `f`: the same number in the same repository, a fact with no
+ * `repository` being the home's (`home`); with the home unknown, any repository's (B-29). */
+const refNames = (ref: { repository: string | null; number: string }, f: { number: number; repository?: string }, home?: string | null): boolean => {
+  if (ref.number !== String(f.number)) return false;
+  const repo = f.repository ?? home ?? null;
+  return ref.repository == null || repo == null || sameRepo(ref.repository, repo);
+};
 
 /** The course's branch patterns ready to match (R-BTN-51): the current and previous ones, the
  * default when it names none. `{repository}` matches anything: the facts are this repository's
@@ -226,18 +243,36 @@ export function prNumbers(prs: unknown[], repository?: string | null): string[] 
 export const matchPatterns = (branchPatterns?: string[]): string[] =>
   (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, '*'));
 
-/** Whether PR `number` on head branch `head` is one of ticket `t`'s: listed in its `prs:`, or
- * on a branch one of `patterns` (from `matchPatterns`) maps to it. */
-export function ticketOwns(t: SourceTicket, pr: { number: number; head: string }, patterns: string[], repository?: string | null): boolean {
-  return prNumbers((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], repository).includes(String(pr.number))
+/** Whether PR `number` on head branch `head`, in `pr.repository` (absent, the home, `repository`),
+ * is one of ticket `t`'s: listed in its `prs:`, or on a branch one of `patterns` (from
+ * `matchPatterns`) maps to it. A PR in another repository is the ticket's only when the ticket
+ * names that repository in `repos:` (B-29). */
+export function ticketOwns(t: SourceTicket, pr: { number: number; head: string; repository?: string }, patterns: string[], repository?: string | null): boolean {
+  const repo = pr.repository ?? repository ?? null;
+  if (repo != null && repository != null && !sameRepo(repo, repository) && !(t.repos ?? []).some((r) => sameRepo(r, repo))) return false;
+  return prRefs((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], repository).some((r) => refNames(r, pr, repository))
     || patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), pr.head));
 }
 
+/** A ticket's PRs as one change (B-29): `close` writes each line on one PR, so a verdict, an
+ * adjudication or a push on any of them is the change's; `review` waits on every open PR's
+ * checks; and the change is merged when every PR is. One PR is itself. */
+function together(facts: PrFact[]): PrFact {
+  if (facts.length === 1) return facts[0];
+  const open = facts.filter((f) => f.state === 'open');
+  const pushes = facts.flatMap((f) => (f.pushes?.length ? f.pushes : [f.pushedAt])).sort((a, b) => a - b);
+  return {
+    number: Math.min(...facts.map((f) => f.number)), head: facts[0].head, repository: facts[0].repository,
+    state: open.length ? 'open' : 'merged', pushedAt: Math.max(...pushes), pushes,
+    checks: open.flatMap((f) => f.checks), reviews: facts.flatMap((f) => f.reviews),
+  };
+}
+
 /** The `create-pr` course's stations (R-BTN-74, R-BTN-131), and the `pr` course's: the
- * ticket's PRs are its `course.prs` numbers and every open-or-merged fact whose head branch
- * matches the pattern; with several, the least advanced decides — but every PR merged is
- * `merged`, the end station. No PR is `filed`, with `implement` waiting while a dependency or an
- * open child is not done. `graph` is the course file; absent, the `pr` course's bounds. */
+ * ticket's PRs are its `course.prs` and every open-or-merged fact whose head branch matches the
+ * pattern, in its home or a repository its `repos:` names; several are read together as one
+ * change (`together`, B-29) — and every PR merged is `merged`, the end station. No PR is
+ * `filed`, with `implement` waiting while a dependency or an open child is not done. `graph` is the course file; absent, the `pr` course's bounds. */
 export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; branchPatterns?: string[]; closed: Set<string>; done?: Set<string>; repository?: string | null; graph?: PrGraph }): StationsResult {
   const graph = ctx.graph ?? {};
   const stations: Record<string, PostedStation> = {};
@@ -260,14 +295,7 @@ export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; bran
       };
       continue;
     }
-    if (mine.every((f) => f.state === 'merged')) {
-      stations[t.id] = placeOf(mine[0], graph);
-      continue;
-    }
-    // The least advanced open PR decides, and its timeline is the path.
-    const placed = mine.filter((f) => f.state === 'open').map((f) => ({ f, st: placeOf(f, graph) }));
-    placed.sort((a, b) => (LEAST[a.st.station] ?? 0) - (LEAST[b.st.station] ?? 0) || a.f.number - b.f.number);
-    stations[t.id] = placed[0].st;
+    stations[t.id] = placeOf(together(mine), graph);
   }
   return { stations, markers: [], course_data: {} };
 }
@@ -288,8 +316,9 @@ export function stationsReviewPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]
   const stations: Record<string, PostedStation> = {};
   for (const t of ctx.tickets) {
     if (ctx.closed.has(t.id)) continue;
-    const numbers = prNumbers((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], ctx.repository);
-    const fact = ctx.facts.find((f) => numbers.includes(String(f.number)));
+    // By repository and number: two repositories may both have a PR #7 (B-29).
+    const refs = prRefs((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], ctx.repository);
+    const fact = ctx.facts.find((f) => refs.some((r) => refNames(r, f, ctx.repository)));
     if (!fact) {
       stations[t.id] = at('requested', [], [{ leg: 'review', state: 'waiting', waiting_on: 'pr' }]);
       continue;
