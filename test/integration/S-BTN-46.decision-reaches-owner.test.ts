@@ -12,7 +12,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, keyCall, placed, rows, setAdminKeys, setClock, tick } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { signed } from '../lib/fleet';
-// @ts-expect-error a plain .mjs module, no types
 import { listOnce } from '../../cli/decisions.mjs';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
