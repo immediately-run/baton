@@ -33,7 +33,8 @@ function prNode(routes: Routes, repo: string, n: number): unknown {
   const reviews = items(routes, `/repos/${repo}/pulls/${n}/reviews`) ?? [];
   const comments = items(routes, `/repos/${repo}/issues/${n}/comments`) ?? [];
   return {
-    head: { nodes: [{ commit: { oid: pr.head.sha, statusCheckRollup: runs.length ? { contexts: first(runs.map((c) => (c.conclusion == null ? { __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: null } : { __typename: 'CheckRun', status: 'COMPLETED', conclusion: String(c.conclusion).toUpperCase() }))) } : null } }] },
+    // One check suite holding every run; a list of more than 100 runs overflows its first page.
+    head: { nodes: [{ commit: { oid: pr.head.sha, checkSuites: { pageInfo: { hasNextPage: false }, nodes: runs.length ? [{ checkRuns: first(runs.map((c) => (c.conclusion == null ? { status: 'IN_PROGRESS', conclusion: null } : { status: 'COMPLETED', conclusion: String(c.conclusion).toUpperCase() }))) }] : [] } } }] },
     commits: first(commits.map((c) => ({ commit: { committedDate: c.commit.committer.date } }))),
     reviews: first(reviews.map((r) => ({ author: r.user ? { login: r.user.login } : null, authorAssociation: r.author_association, state: r.state, submittedAt: r.submitted_at, body: r.body }))),
     comments: first(comments.map((c) => ({ author: c.user ? { login: c.user.login } : null, authorAssociation: c.author_association, createdAt: c.created_at, body: c.body }))),

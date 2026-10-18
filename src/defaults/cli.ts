@@ -340,6 +340,8 @@ function bearerAuth(token: string | null): Auth {
   return (_m, _u, _b, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
 }
 
+/** GitHub's API origin, REST and GraphQL alike. */
+const GITHUB_API = 'https://api.github.com';
 /** How long one GitHub or token call may take before the sync fails (§6.3's bound). */
 const FETCH_TIMEOUT_MS = 30_000;
 /** The most pages of 100 one list may span; beyond it the sync fails rather than truncate. */
@@ -355,16 +357,20 @@ const GRAPHQL_BATCH = 25;
 
 /** The detail of one PR that a GraphQL batch asks for (B-35): the head commit's check runs, the
  * commits' dates, the reviews and the issue comments — the four REST lists it replaces, first
- * pages of 100, each with `hasNextPage` so an overflowing one is read over REST in full. */
+ * pages of 100, each with `hasNextPage` so an overflowing one is read over REST in full. The
+ * check runs come through the head's check suites (the latest run of each check, as REST's
+ * check-runs list gives them), never `statusCheckRollup`, which takes in commit statuses too and
+ * so may need a permission the sync workflow does not grant: `checks: read` covers this, as it
+ * covered the REST read. */
 const PR_DETAIL = `fragment D on PullRequest {
-  head: commits(last: 1) { nodes { commit { oid statusCheckRollup { contexts(first: 100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { status conclusion } } } } } } }
+  head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
   commits(first: 100) { pageInfo { hasNextPage } nodes { commit { committedDate } } }
   reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body } }
   comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation createdAt body } }
 }`;
 
 /** The GraphQL query reading `numbers`' detail in one repository, each PR under alias `p<n>`. */
-export const detailQuery = (numbers: number[]): string =>
+const detailQuery = (numbers: number[]): string =>
   `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${numbers.map((n) => `p${n}: pullRequest(number: ${n}) { ...D }`).join(' ')} } }\n${PR_DETAIL}`;
 
 /** R-BTN-96's fact adapter, GitHub half: the repository's PRs with their head's checks, their
@@ -379,22 +385,27 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error('no GITHUB_TOKEN to read GitHub — pass --facts <file> for recorded facts');
   let requests = 0;
-  const get = async (url: string): Promise<Response> => {
+  /** One request of the budget, REST or GraphQL alike: past it the sync refuses. */
+  const spend = (): void => {
     if (++requests > MAX_REQUESTS) throw new Error(`GitHub: this sync would need more than ${MAX_REQUESTS} requests — refusing before the token's hourly budget is spent`);
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    // A rate limit is GitHub's 403 or 429 with no requests left, or a secondary limit's retry-after.
+  };
+  /** `res`, or the error a failed one is: its status, and whether it is a rate limit — GitHub's
+   * 403 or 429 with no requests left, or a secondary limit's retry-after — which `list` reads. */
+  const checked = (res: Response, what: string): Response => {
     const limited = res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after');
-    if (!res.ok) throw Object.assign(new Error(`GitHub ${url}: ${res.status}${limited ? ' (rate limited)' : ''}`), { status: res.status, limited });
+    if (!res.ok) throw Object.assign(new Error(`GitHub ${what}: ${res.status}${limited ? ' (rate limited)' : ''}`), { status: res.status, limited });
     return res;
+  };
+  const get = async (url: string): Promise<Response> => {
+    spend();
+    return checked(await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), url);
   };
   /** One GraphQL query, one request of the budget (B-35). An answer carrying `errors` fails the
    * sync, as a failed REST read does: no partial reading is posted. */
   const graphql = async (query: string, variables: Record<string, unknown>): Promise<any> => {
-    if (++requests > MAX_REQUESTS) throw new Error(`GitHub: this sync would need more than ${MAX_REQUESTS} requests — refusing before the token's hourly budget is spent`);
-    const url = 'https://api.github.com/graphql';
-    const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'baton-sync' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    const limited = res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after');
-    if (!res.ok) throw Object.assign(new Error(`GitHub ${url} (${String(variables.owner)}/${String(variables.name)}): ${res.status}${limited ? ' (rate limited)' : ''}`), { status: res.status, limited });
+    spend();
+    const url = `${GITHUB_API}/graphql`;
+    const res = checked(await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'baton-sync' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), `${url} (${String(variables.owner)}/${String(variables.name)})`);
     const body = (await res.json()) as { data?: any; errors?: { message?: string }[] };
     if (body.errors?.length) throw new Error(`GitHub GraphQL (${String(variables.owner)}/${String(variables.name)}): ${body.errors.map((e) => e.message ?? '?').join('; ')}`);
     return body.data;
@@ -402,7 +413,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   /** Every item of a paged list; `pick` takes a page's items from its body. */
   const all = async <T>(path: string, pick: (body: any) => T[] = (b) => b as T[]): Promise<T[]> => {
     const out: T[] = [];
-    let url: string | null = `https://api.github.com${path}${path.includes('?') ? '&' : '?'}per_page=100`;
+    let url: string | null = `${GITHUB_API}${path}${path.includes('?') ? '&' : '?'}per_page=100`;
     for (let page = 0; url != null; page++) {
       if (page === MAX_PAGES) throw new Error(`GitHub ${path}: more than ${MAX_PAGES * 100} items — the sync will not post a truncated reading`);
       const res = await get(url);
@@ -449,11 +460,12 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   async function detailOf(repo: string, pr: any, node: any): Promise<Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>> {
     if (node == null) throw new Error(`GitHub GraphQL (${repo}): no pull request #${pr.number}, though the list has it`);
     const head = node.head?.nodes?.[0]?.commit;
-    const contexts = head?.statusCheckRollup?.contexts;
-    const checks = head?.oid !== pr.head.sha || contexts?.pageInfo?.hasNextPage
+    const suites = head?.checkSuites;
+    const overflow = suites?.pageInfo?.hasNextPage || (suites?.nodes ?? []).some((cs: any) => cs?.checkRuns?.pageInfo?.hasNextPage);
+    const checks = head?.oid !== pr.head.sha || overflow
       ? (await all<any>(`/repos/${repo}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null)
       // A run not yet completed has no conclusion: null, as the REST list gives it.
-      : (contexts?.nodes ?? []).filter((c: any) => c?.__typename === 'CheckRun').map((c: any) => (c.status === 'COMPLETED' && c.conclusion ? String(c.conclusion).toLowerCase() : null));
+      : (suites?.nodes ?? []).flatMap((cs: any) => cs?.checkRuns?.nodes ?? []).map((c: any) => (c.status === 'COMPLETED' && c.conclusion ? String(c.conclusion).toLowerCase() : null));
     // A push is read from its commits' own dates, never `updated_at`, which a comment moves.
     const pushes = node.commits.pageInfo.hasNextPage
       ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/commits`)).map((c) => Date.parse(c.commit.committer.date))

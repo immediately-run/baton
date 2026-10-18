@@ -1,5 +1,5 @@
 // S-BTN-106 a ticket's PRs in other repositories (BATON_SPEC §13a S-BTN-106, R-BTN-74, R-BTN-96,
-// R-BTN-131; B-29): a repository whose ticket names two other repositories in `repos:` — its
+// R-BTN-131; B-29, B-35): a repository whose ticket names two other repositories in `repos:` — its
 // home (docs) gets no PR — syncs against a recorded GitHub. Must hold: the sync reads the home
 // and the two repositories the live ticket names, and no other; the ticket is placed from their
 // PRs; a verdict written on one PR moves the whole change to `reviewed`; one PR merged leaves it
@@ -72,6 +72,9 @@ describe('S-BTN-106 a ticket\'s PRs in other repositories', () => {
     // The home and the two repositories A-1 names — never the closed ticket's o/old.
     const repoOf = (k: string) => (k.startsWith('graphql ') ? k.split(' ')[1] : k.split('/').slice(2, 4).join('/'));
     expect([...new Set(asked.map(repoOf))].sort()).toEqual(['o/docs', 'o/sdk', 'o/site']);
+    // Each owned PR's detail is one GraphQL query for its repository, never four REST reads (B-35).
+    expect(asked.filter((k) => k.startsWith('graphql ')).sort()).toEqual(['graphql o/sdk 3', 'graphql o/site 3']);
+    expect(asked.filter((k) => /\/(pulls|issues)\/3\/|\/check-runs/.test(k))).toEqual([]);
 
     // The review wrote its verdict line on the SDK's PR alone: the change is reviewed.
     github = { ...github, ...detail('o/sdk', 3, [verdict]) };

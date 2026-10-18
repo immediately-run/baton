@@ -482,7 +482,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
       const res = await real(url, init);
       if (!url.endsWith('/graphql')) return res;
       const body = await res.json();
-      body.data.repository.p1.head.nodes[0].commit = { oid: 'older', statusCheckRollup: null };
+      body.data.repository.p1.head.nodes[0].commit = { oid: 'older', checkSuites: null };
       return Response.json(body);
     });
     expect((await githubFacts(dir, () => {}, () => true))[0].checks).toEqual(['failure']);
@@ -510,6 +510,76 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     // 61 list requests and one GraphQL query for each of the 16 repositories with owned PRs: 77, against 200.
     expect(calls.filter((c) => c.startsWith('graphql '))).toHaveLength(16);
     expect(calls).toHaveLength(77);
+  });
+
+  it('reads over REST in full each connection that overflows: commits, reviews and the head\'s check runs (B-35)', async () => {
+    const at = (i: number) => new Date(Date.parse('2026-10-01T00:00:00Z') + i * 60_000).toISOString();
+    const commits = Array.from({ length: 150 }, (_, i) => ({ commit: { committer: { date: at(i) } } }));
+    const reviews = Array.from({ length: 150 }, (_, i) => ({ ...who('MEMBER', `r${i}`, at(i)), state: 'COMMENTED' }));
+    const runs = Array.from({ length: 150 }, (_, i) => ({ conclusion: i === 149 ? 'failure' : 'success' }));
+    serve({
+      '/repos/o/r/pulls?state=all': [pr(1, 'claude/A-1-x', 'open')],
+      '/repos/o/r/pulls/1/commits': [commits.slice(0, 100), '/repos/o/r/pulls/1/commits?page=2'],
+      '/repos/o/r/pulls/1/commits?page=2': commits.slice(100),
+      '/repos/o/r/pulls/1/reviews': [reviews.slice(0, 100), '/repos/o/r/pulls/1/reviews?page=2'],
+      '/repos/o/r/pulls/1/reviews?page=2': reviews.slice(100),
+      '/repos/o/r/commits/s1/check-runs': [{ check_runs: runs.slice(0, 100) }, '/repos/o/r/commits/s1/check-runs?page=2'],
+      '/repos/o/r/commits/s1/check-runs?page=2': { check_runs: runs.slice(100) },
+    });
+    const [fact] = await githubFacts(dir, () => {}, () => true);
+    expect(fact.pushes).toHaveLength(150);
+    expect(fact.pushedAt).toBe(Date.parse(at(149)));
+    expect(fact.reviews.map((r) => r.body)).toEqual(reviews.map((r) => r.body));
+    expect(fact.checks).toHaveLength(150);
+    expect(fact.checks.at(-1)).toBe('failure');
+    expect(calls.filter((c) => !c.startsWith('graphql ')).sort()).toEqual([
+      '/repos/o/r/commits/s1/check-runs', '/repos/o/r/commits/s1/check-runs?page=2',
+      '/repos/o/r/pulls/1/commits', '/repos/o/r/pulls/1/commits?page=2',
+      '/repos/o/r/pulls/1/reviews', '/repos/o/r/pulls/1/reviews?page=2',
+      '/repos/o/r/pulls?state=all',
+    ]);
+  });
+
+  it('maps an answer in GitHub\'s GraphQL shape: runs across suites, a run not completed null, enums lowercased, a ghost author, untrusted authors dropped (B-35)', async () => {
+    // Written to GitHub's public GraphQL schema, not built from the REST fixtures: the runs sit in
+    // several check suites, one of them empty, and a deleted user is a null author.
+    const runs = (nodes: unknown[]) => ({ checkRuns: { pageInfo: { hasNextPage: false }, nodes } });
+    const answer = {
+      data: { repository: { p4: {
+        head: { nodes: [{ commit: { oid: 's4', checkSuites: { pageInfo: { hasNextPage: false }, nodes: [
+          runs([{ status: 'COMPLETED', conclusion: 'SUCCESS' }, { status: 'QUEUED', conclusion: null }]),
+          runs([]),
+          runs([{ status: 'COMPLETED', conclusion: 'ACTION_REQUIRED' }]),
+        ] } } }] },
+        commits: { pageInfo: { hasNextPage: false }, nodes: [{ commit: { committedDate: '2026-10-07T10:00:00Z' } }, { commit: { committedDate: '2026-10-07T09:00:00Z' } }] },
+        reviews: { pageInfo: { hasNextPage: false }, nodes: [
+          { author: null, authorAssociation: 'MEMBER', state: 'CHANGES_REQUESTED', submittedAt: '2026-10-07T11:00:00Z', body: '<!-- baton:verdict changes -->' },
+          { author: { login: 'drive' }, authorAssociation: 'FIRST_TIME_CONTRIBUTOR', state: 'APPROVED', submittedAt: '2026-10-07T11:30:00Z', body: '<!-- baton:verdict approve -->' },
+        ] },
+        comments: { pageInfo: { hasNextPage: false }, nodes: [{ author: { login: 'own' }, authorAssociation: 'OWNER', createdAt: '2026-10-07T12:00:00Z', body: null }] },
+      } } },
+    };
+    const lists = githubFake({ '/repos/o/r/pulls?state=all': [pr(4, 'claude/A-4-x', 'open')] });
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.endsWith('/graphql') ? Response.json(answer) : lists(url, init)));
+    const [fact] = await githubFacts(dir, () => {}, () => true);
+    expect(fact).toEqual({
+      number: 4, head: 'claude/A-4-x', state: 'open', repository: 'o/r',
+      checks: ['success', null, 'action_required'],
+      pushes: [Date.parse('2026-10-07T10:00:00Z'), Date.parse('2026-10-07T09:00:00Z')], pushedAt: Date.parse('2026-10-07T10:00:00Z'),
+      reviews: [
+        { author: '?', state: 'CHANGES_REQUESTED', submittedAt: Date.parse('2026-10-07T11:00:00Z'), body: '<!-- baton:verdict changes -->' },
+        { author: 'own', state: 'COMMENTED', submittedAt: Date.parse('2026-10-07T12:00:00Z'), body: '' },
+      ],
+    });
+    // More check suites than the first page: the head's runs are read over REST in full.
+    const many = structuredClone(answer);
+    many.data.repository.p4.head.nodes[0].commit.checkSuites.pageInfo.hasNextPage = true;
+    const restRuns = githubFake({ '/repos/o/r/pulls?state=all': [pr(4, 'claude/A-4-x', 'open')], '/repos/o/r/commits/s4/check-runs': { check_runs: [{ conclusion: 'neutral' }] } });
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.endsWith('/graphql') ? Response.json(many) : restRuns(url, init)));
+    expect((await githubFacts(dir, () => {}, () => true))[0].checks).toEqual(['neutral']);
+    // A listed PR the query cannot find fails the sync, rather than reading it as having no detail.
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.endsWith('/graphql') ? Response.json({ data: { repository: { p4: null } } }) : lists(url, init)));
+    await expect(githubFacts(dir, () => {}, () => true)).rejects.toThrow('GitHub GraphQL (o/r): no pull request #4, though the list has it');
   });
 
   it('fails the sync on a GraphQL answer carrying errors, posting nothing (B-35)', async () => {
