@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { githubFacts, parseSyncArgs, remoteSlug, syncWorkflow } from '../../src/defaults/cli';
+import { githubFake } from '../githubFake';
 import { graphOf } from '../../src/core/graph';
 import { decide } from '../../src/runner/protocol';
 import { CREATE_PR_COURSE, stationsPr, stationsReviewPr, type PrFact } from '../../src/defaults/course-pr';
@@ -338,18 +339,8 @@ describe('prClose', () => {
 describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', () => {
   let dir: string;
   const calls: string[] = [];
-  /** A fake api.github.com: `routes` maps a path (without host or per_page) to its JSON, and a
-   * `[json, next]` pair answers with a Link to the next page. */
-  const serve = (routes: Record<string, unknown>) => vi.stubGlobal('fetch', async (url: string) => {
-    const u = new URL(url);
-    u.searchParams.delete('per_page');
-    const key = `${u.pathname}${u.search}`;
-    calls.push(key);
-    if (!(key in routes)) return new Response('{}', { status: 404 });
-    const r = routes[key];
-    const [body, next] = Array.isArray(r) && r.length === 2 && typeof r[1] === 'string' && r[1].startsWith('/') ? r as [unknown, string] : [r, null];
-    return new Response(JSON.stringify(body), { headers: next ? { link: `<https://api.github.com${next}>; rel="next"` } : {} });
-  });
+  /** A recorded api.github.com (test/githubFake.ts): REST routes, and GraphQL answered from them. */
+  const serve = (routes: Record<string, unknown>) => vi.stubGlobal('fetch', githubFake(routes, calls));
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'baton-facts-'));
     gitInit(dir);
@@ -387,9 +378,8 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     expect(facts[0].reviews.map((r) => r.body)).toEqual(['<!-- baton:verdict changes -->']);
     // The closed unmerged PR a live ticket owns is read: review-pr concludes on it (R-BTN-131).
     expect(facts[2].reviews.map((r) => r.body)).toEqual(['<!-- baton:concluded -->']);
-    // The unowned merged PR costs no request beyond the list.
-    expect(calls.filter((c) => /\/(2|s2)\//.test(c))).toEqual([]);
-    expect(calls).toHaveLength(10);
+    // The two owned PRs' detail is one GraphQL query (B-35); the unowned merged PR costs nothing beyond the list.
+    expect(calls).toEqual(['/repos/o/r/pulls?state=all', '/repos/o/r/pulls?state=all&page=2', 'graphql o/r 1,3']);
   });
 
   it('reads each other repository a live ticket names, and only those, tagging every fact with its repository (B-29)', async () => {
@@ -404,48 +394,42 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     const facts = await githubFacts(dir, () => {}, (p) => p.repository === 'o/site' && p.head.startsWith('claude/A-1-'), [{ repository: 'o/site', tickets: ['A-1'] }, { repository: 'O/R', tickets: ['A-1'] }]);
     expect(facts.map((f) => [f.repository, f.number])).toEqual([['o/site', 7], ['o/site', 8]]);
     expect(facts[0].reviews.map((r) => r.body)).toEqual(['<!-- baton:verdict approve -->']);
-    // The home in another case is no sibling; the unowned sibling PR costs no request beyond the list.
-    expect(calls.filter((c) => /\/(8|s8)\//.test(c))).toEqual([]);
-    expect(calls.filter((c) => c.includes('/repos/o/r/'))).toEqual(['/repos/o/r/pulls?state=all']);
+    // The home in another case is no sibling; the unowned sibling PR costs nothing beyond the list.
+    expect(calls).toEqual(['/repos/o/r/pulls?state=all', '/repos/o/site/pulls?state=all', 'graphql o/site 7']);
   });
 
-  it('refuses before the request budget is spent, rather than truncate or starve the next runs', async () => {
-    const many = Array.from({ length: 60 }, (_, i) => pr(i + 1, `claude/A-${i + 1}-x`, 'open'));
-    const routes: Record<string, unknown> = { '/repos/o/r/pulls?state=all': many };
-    for (const p of many) {
-      routes[`/repos/o/r/commits/s${p.number}/check-runs`] = { check_runs: [] };
-      routes[`/repos/o/r/pulls/${p.number}/commits`] = [];
-      routes[`/repos/o/r/pulls/${p.number}/reviews`] = [];
-      routes[`/repos/o/r/issues/${p.number}/comments`] = [];
+  /** `pages` pages of 100 open PRs in `repo`, every one on a ticket's branch: a list request a page,
+   * and a GraphQL request for every 25 owned PRs. */
+  const paged = (routes: Record<string, unknown>, repo: string, pages: number) => {
+    for (let k = 0; k < pages; k++) {
+      const key = `/repos/${repo}/pulls?state=all${k ? `&page=${k + 1}` : ''}`;
+      const prs = Array.from({ length: 100 }, (_, i) => pr(k * 100 + i + 1, `claude/A-${k * 100 + i + 1}-x`, 'open'));
+      routes[key] = k + 1 < pages ? [prs, `/repos/${repo}/pulls?state=all&page=${k + 2}`] : prs;
     }
-    serve(routes);
+    return routes;
+  };
+
+  it('refuses before the request budget is spent, rather than truncate or starve the next runs', async () => {
+    // 50 pages of 100 owned PRs: 50 list requests and 200 GraphQL batches, over 200.
+    serve(paged({}, 'o/r', 50));
     await expect(githubFacts(dir, () => {}, () => true)).rejects.toThrow('more than 200 requests');
   });
 
   it('the home and the repositories a ticket names share the one budget; an unreadable one fails the sync naming its tickets (B-29)', async () => {
-    // 30 owned PRs in each repository: 1 + 30 × 4 = 121 requests apiece, 242 together — over 200, though neither alone is.
-    const routes: Record<string, unknown> = {};
-    for (const repo of ['o/r', 'o/site']) {
-      const many = Array.from({ length: 30 }, (_, i) => pr(i + 1, `claude/A-${i + 1}-x`, 'open'));
-      routes[`/repos/${repo}/pulls?state=all`] = many;
-      for (const p of many) {
-        routes[`/repos/${repo}/commits/s${p.number}/check-runs`] = { check_runs: [] };
-        routes[`/repos/${repo}/pulls/${p.number}/commits`] = [];
-        routes[`/repos/${repo}/pulls/${p.number}/reviews`] = [];
-        routes[`/repos/${repo}/issues/${p.number}/comments`] = [];
-      }
-    }
+    // 30 pages of 100 owned PRs in each repository: 30 + 3,000 / 25 = 150 requests apiece, 300 together — over 200, though neither alone is.
+    const routes = paged(paged({}, 'o/r', 30), 'o/site', 30);
     serve(routes);
-    expect((await githubFacts(dir, () => {}, () => true)).length).toBe(30); // the home alone fits
+    expect((await githubFacts(dir, () => {}, () => true)).length).toBe(3000); // the home alone fits
     await expect(githubFacts(dir, () => {}, () => true, [{ repository: 'o/site', tickets: ['A-1'] }])).rejects.toThrow('more than 200 requests');
     // A repository the token cannot read (or a typo) stops the sync, and says which ticket named it.
     serve({ '/repos/o/r/pulls?state=all': [] });
     await expect(githubFacts(dir, () => {}, () => true, [{ repository: 'o/private', tickets: ['A-1', 'B-2'] }]))
       .rejects.toThrow("GitHub https://api.github.com/repos/o/private/pulls?state=all&per_page=100: 404 — o/private is named in repos: by A-1, B-2; the sync's token cannot read it, or it does not exist");
     // Only the list's 403 or 404 says so: a failure reading a listed PR's detail is passed through as it is.
-    serve({ '/repos/o/r/pulls?state=all': [], '/repos/o/site/pulls?state=all': [pr(7, 'claude/A-1-x', 'open')] });
+    const lists = githubFake({ '/repos/o/r/pulls?state=all': [], '/repos/o/site/pulls?state=all': [pr(7, 'claude/A-1-x', 'open')] });
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.endsWith('/graphql') ? new Response('{}', { status: 502 }) : lists(url, init)));
     const detail = githubFacts(dir, () => {}, () => true, [{ repository: 'o/site', tickets: ['A-1'] }]);
-    await expect(detail).rejects.toThrow('GitHub https://api.github.com/repos/o/site/commits/s7/check-runs?per_page=100: 404');
+    await expect(detail).rejects.toThrow('GitHub https://api.github.com/graphql (o/site): 502');
     await expect(detail).rejects.not.toThrow('named in repos:');
     // A rate-limit 403 on the list is the token's budget, not the repository: passed through too.
     vi.stubGlobal('fetch', async (url: string) => url.includes('/repos/o/r/')
@@ -454,6 +438,84 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     const limited = githubFacts(dir, () => {}, () => true, [{ repository: 'o/site', tickets: ['A-1'] }]);
     await expect(limited).rejects.toThrow('GitHub https://api.github.com/repos/o/site/pulls?state=all&per_page=100: 403 (rate limited)');
     await expect(limited).rejects.not.toThrow('named in repos:');
+  });
+
+  it('reads the owned PRs\' detail over GraphQL, 25 to a query, mapped as the REST lists are (B-35)', async () => {
+    const owned = Array.from({ length: 30 }, (_, i) => pr(i + 1, `claude/A-${i + 1}-x`, 'open'));
+    const routes: Record<string, unknown> = { '/repos/o/r/pulls?state=all': [...owned, pr(99, 'feature/other', 'open')] };
+    routes['/repos/o/r/commits/s1/check-runs'] = { check_runs: [{ conclusion: 'success' }, { conclusion: 'timed_out' }, { conclusion: null }] };
+    routes['/repos/o/r/pulls/1/commits'] = [{ commit: { committer: { date: '2026-10-02T00:00:00Z' } } }];
+    routes['/repos/o/r/pulls/1/reviews'] = [{ ...who('COLLABORATOR', '<!-- baton:verdict approve -->', '2026-10-03T00:00:00Z'), state: 'APPROVED' }, who('CONTRIBUTOR', 'drive-by', '2026-10-03T01:00:00Z')];
+    routes['/repos/o/r/issues/1/comments'] = [who('OWNER', '<!-- baton:verdict changes -->', '2026-10-04T00:00:00Z')];
+    serve(routes);
+    const facts = await githubFacts(dir, () => {}, (p) => p.head.startsWith('claude/'));
+    expect(calls).toEqual(['/repos/o/r/pulls?state=all', `graphql o/r ${owned.slice(0, 25).map((p) => p.number).join(',')}`, 'graphql o/r 26,27,28,29,30']);
+    expect(facts).toHaveLength(31);
+    expect(facts[0]).toEqual({
+      number: 1, head: 'claude/A-1-x', state: 'open', repository: 'o/r',
+      checks: ['success', 'timed_out', null], pushes: [Date.parse('2026-10-02T00:00:00Z')], pushedAt: Date.parse('2026-10-02T00:00:00Z'),
+      reviews: [
+        { author: 'x', state: 'APPROVED', submittedAt: Date.parse('2026-10-03T00:00:00Z'), body: '<!-- baton:verdict approve -->' },
+        { author: 'x', state: 'COMMENTED', submittedAt: Date.parse('2026-10-04T00:00:00Z'), body: '<!-- baton:verdict changes -->' },
+      ],
+    });
+    // An owned PR with no checks, commits or reviews; an unowned PR from the list alone.
+    expect(facts[1]).toMatchObject({ checks: [], pushes: [], pushedAt: 0, reviews: [] });
+    expect(facts[30]).toEqual({ number: 99, head: 'feature/other', state: 'open', pushedAt: 0, checks: [], reviews: [], repository: 'o/r' });
+  });
+
+  it('reads over REST, in full, a connection that overflows its first page, and the checks of a head the batch read at another commit (B-35)', async () => {
+    const many = Array.from({ length: 150 }, (_, i) => who('MEMBER', `c${i}`, '2026-10-05T00:00:00Z'));
+    serve({
+      '/repos/o/r/pulls?state=all': [pr(1, 'claude/A-1-x', 'open')],
+      '/repos/o/r/issues/1/comments': [many.slice(0, 100), '/repos/o/r/issues/1/comments?page=2'],
+      '/repos/o/r/issues/1/comments?page=2': many.slice(100),
+      '/repos/o/r/commits/s1/check-runs': { check_runs: [{ conclusion: 'failure' }] },
+    });
+    const [fact] = await githubFacts(dir, () => {}, () => true);
+    expect(fact.reviews.map((r) => r.body)).toEqual(many.map((c) => c.body));
+    expect(calls).toEqual(['/repos/o/r/pulls?state=all', 'graphql o/r 1', '/repos/o/r/issues/1/comments', '/repos/o/r/issues/1/comments?page=2']);
+    // The list's head moved on after the batch read the PR: its checks are read at the list's head.
+    const routes = { '/repos/o/r/pulls?state=all': [pr(1, 'claude/A-1-x', 'open')], '/repos/o/r/commits/s1/check-runs': { check_runs: [{ conclusion: 'failure' }] } };
+    const real = githubFake(routes);
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => {
+      const res = await real(url, init);
+      if (!url.endsWith('/graphql')) return res;
+      const body = await res.json();
+      body.data.repository.p1.head.nodes[0].commit = { oid: 'older', statusCheckRollup: null };
+      return Response.json(body);
+    });
+    expect((await githubFacts(dir, () => {}, () => true))[0].checks).toEqual(['failure']);
+  });
+
+  it('a board shaped like docs\' fits the budget: 35 repositories, 61 list pages, 49 owned PRs in 16 of them (B-35)', async () => {
+    // docs' board as measured on 2026-10-18 (B-35): list pages per repository, and the owned PRs.
+    const pages = [8, 5, 4, 4, 3, 3, 3, 2, 2, 2, ...Array(25).fill(1)]; // 35 repositories, 61 pages
+    const ownedIn = [10, 6, 5, 4, 3, 3, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1]; // 49 owned PRs in 16 repositories
+    const routes: Record<string, unknown> = {};
+    const repos = pages.map((_, k) => (k === 0 ? 'o/r' : `o/s${k}`));
+    repos.forEach((repo, k) => {
+      for (let p = 0; p < pages[k]; p++) {
+        const key = `/repos/${repo}/pulls?state=all${p ? `&page=${p + 1}` : ''}`;
+        const prs = Array.from({ length: p + 1 < pages[k] ? 100 : 40 }, (_, i) => {
+          const n = p * 100 + i + 1;
+          return pr(n, n <= (ownedIn[k] ?? 0) ? `claude/R3-${k}${n}-x` : `old/${n}`, n <= (ownedIn[k] ?? 0) ? 'open' : 'closed', true);
+        });
+        routes[key] = p + 1 < pages[k] ? [prs, `/repos/${repo}/pulls?state=all&page=${p + 2}`] : prs;
+      }
+    });
+    serve(routes);
+    const facts = await githubFacts(dir, () => {}, (p) => p.head.startsWith('claude/'), repos.slice(1).map((repository) => ({ repository, tickets: ['R3-1'] })));
+    expect(facts.filter((f) => f.head.startsWith('claude/'))).toHaveLength(49);
+    // 61 list requests and one GraphQL query for each of the 16 repositories with owned PRs: 77, against 200.
+    expect(calls.filter((c) => c.startsWith('graphql '))).toHaveLength(16);
+    expect(calls).toHaveLength(77);
+  });
+
+  it('fails the sync on a GraphQL answer carrying errors, posting nothing (B-35)', async () => {
+    const lists = githubFake({ '/repos/o/r/pulls?state=all': [pr(1, 'claude/A-1-x', 'open')] });
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.endsWith('/graphql') ? Response.json({ data: null, errors: [{ message: 'Something went wrong' }] }) : lists(url, init)));
+    await expect(githubFacts(dir, () => {}, () => true)).rejects.toThrow('GitHub GraphQL (o/r): Something went wrong');
   });
 });
 

@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import { ORIGIN, rows, setClock, syncToken } from '../helpers';
+import { githubFake } from '../githubFake';
 
 const T0 = Date.parse('2026-10-18T12:00:00Z');
 let dir: string;
@@ -54,12 +55,8 @@ beforeEach(async () => {
   commit();
   process.env.GITHUB_TOKEN = 't';
   asked.length = 0;
-  vi.stubGlobal('fetch', async (url: string) => {
-    const key = String(url).replace('https://api.github.com', '').replace(/[?&]per_page=100/, '');
-    asked.push(key);
-    if (!(key in github)) return new Response('{}', { status: 404 });
-    return new Response(JSON.stringify(github[key]));
-  });
+  // REST lists, and the owned PRs' detail over GraphQL answered from the same routes (B-35).
+  vi.stubGlobal('fetch', (url: string, init?: { body?: string }) => githubFake(github, asked)(url, init));
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -73,7 +70,8 @@ describe('S-BTN-106 a ticket\'s PRs in other repositories', () => {
     await sync();
     expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'review' });
     // The home and the two repositories A-1 names — never the closed ticket's o/old.
-    expect([...new Set(asked.map((k) => k.split('/').slice(1, 4).join('/')))].sort()).toEqual(['repos/o/docs', 'repos/o/sdk', 'repos/o/site']);
+    const repoOf = (k: string) => (k.startsWith('graphql ') ? k.split(' ')[1] : k.split('/').slice(2, 4).join('/'));
+    expect([...new Set(asked.map(repoOf))].sort()).toEqual(['o/docs', 'o/sdk', 'o/site']);
 
     // The review wrote its verdict line on the SDK's PR alone: the change is reviewed.
     github = { ...github, ...detail('o/sdk', 3, [verdict]) };

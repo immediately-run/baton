@@ -2033,7 +2033,14 @@ place; this paragraph covers the rest.
   partial reading; each fact records its `repository`. A private sibling repository needs a
   token that can read it; a named repository the token cannot read, or that does not exist,
   fails the sync — posting nothing, as any partial reading — with an error naming the tickets
-  whose `repos:` names it. For a `git` repository, `baton repo init --course branch` writes the built-in
+  whose `repos:` names it. *(Amended 2026-10-18, B-35.)* It lists each repository's PRs over
+  REST and reads the detail of the PRs a live ticket owns over GraphQL, up to 25 PRs in one
+  query per repository: each PR's head-commit check runs, its commits' dates, its reviews and
+  its issue comments, mapped to the same facts. A connection that overflows its first page of
+  100, or a head the query read at another commit, is read over REST in full. A query is one
+  request against the budget, so a sync's requests grow with the repositories and the live
+  tickets' PRs, not with four reads a PR. An answer carrying `errors` fails the sync like any
+  failed read. For a `git` repository, `baton repo init --course branch` writes the built-in
   **`branch`** course, whose station function the CLI provides (R-BTN-74, as it does `pr`'s)
   and whose facts come from git alone:
   - stations `filed` → `pushed` → `reviewed` → `merged`, with `fixed` between `reviewed` and
