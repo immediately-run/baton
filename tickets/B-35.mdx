@@ -77,9 +77,28 @@ Split into reviewed PRs along §10.7's four parts. Each is independent.
    - The signature profile, the headers, `trigger_workflows`, foreign claims after cutover,
      the fence per incarnation, and courier `asks`.
 
-5. **The migration.** One new numbered migration with §4's 2026-10-18 §10.7 block: the
-   columns, `tainted_branches`, `open_world_bars` and `login_codes` (migrations are
-   append-only, so `login_links` stays, unwritten).
+5. **The migration.** One new numbered migration with §4's 2026-10-18 §10.7 block.
+   - Columns: the columns listed there, and `worker_grants.accepted_at`, backfilled to each
+     grant's creation time so existing grants stay active.
+   - Tables: `tainted_branches`, `open_world_bars`, `login_codes`, `write_budgets`,
+     `observation_lapses` and `action_confirmations`.
+   - Migrations are append-only, so `login_links` stays, unwritten.
+   - The release notes name the cost: keys already active on two or more repositories lose
+     machine sync and delivery until owners set the grant flags. `baton owner grants list`
+     names them beforehand.
+6. **Rounds 2 and 3's additions** (each with its scenario):
+   - pending grants, with `runner.grant.accept` and `runner.grant.decline` and their routes
+     and commands;
+   - the board post's `source: {kind, cli}`;
+   - observation renewal, the 30-minute age and the sync key's or CI's void;
+   - the observation response's `trusted_identities`, effective `code_repos` and
+     `tainted_branches`;
+   - confirmation codes for the dashboard's authority-changing actions, with `baton admin
+     confirm` (and its `dry_run`);
+   - the sign-in eviction order;
+   - bearer refusal by peer on an `http` listener, `--trusted-proxy`, and the Cloudflare
+     host's refusal on plain `http`;
+   - the tainted-branch `pre-push` hook.
 
 ### Architecture
 
