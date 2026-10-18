@@ -444,8 +444,8 @@ function expectations(Q, env, T, W) {
       [`claim ${id} startPath`, `${g}.startPath == ${qList(c.startPath)}`],
       [`claim ${id} claimObs`, `${g}.claimObs == ${c.claimObs}`],
       [`claim ${id} endObs`, `${g}.endObs == ${c.endObs}`],
-      // regressed_since clears with the end (§2e); the model keeps the flag on ended claims
-      ...(c.status === 'active' ? [[`claim ${id} regressed`, `${g}.regressed == ${c.regressed}`]] : []),
+      // regressed_since clears with the end (§4), in the model and in core alike (R3-1254)
+      [`claim ${id} regressed`, `${g}.regressed == ${c.regressed}`],
       [`claim ${id} endedRegressed`, `${g}.endedRegressed == ${c.endedRegressed}`],
       [`claim ${id} confirmed`, `${g}.confirmed == ${c.confirmed}`],
       [`claim ${id} fencePending`, `${g}.fencePending == ${c.fencePending}`],

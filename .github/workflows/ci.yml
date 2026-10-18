@@ -35,6 +35,7 @@ jobs:
 
   # The model's simulation, witnesses, 1,000-trace replay and Apalache proof do not run here
   # (R-BTN-68, amended 2026-10-17): they outgrew hosted runners' time limits, so the author runs
-  # `npm run model:full` and pastes its report, stamped with the commit, into the PR. npm test
+  # `npm run model:full` and pastes its report, stamped with the commit, into the PR, which
+  # model-report.yml checks against the head. npm test
   # above keeps the deterministic part: the model's typecheck and regression runs, the scenario
   # traces checked against it, the @impl/@model links and 200 model-drawn traces driving the core.

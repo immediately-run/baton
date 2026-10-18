@@ -694,9 +694,11 @@ module baton {
   }
   // The course's sync reads git and computes any barred tags consistent with it (here, any
   // set of families on the writing legs — course logic is nondeterministic, R-BTN-50) and each
-  // ticket's queued leg: one of the legs leaving the station git shows, or none ("" — at an
-  // end, where max_runs leaves none, or where the course queues nothing yet). Which one is the
-  // course's to say (R-BTN-83: the holder's `next`, a re-route or the start leg).
+  // ticket's queued leg: one of the legs leaving the station git shows, or none (""). None is
+  // what a sync posts at an end, where max_runs leaves no leg, and where it queues nothing yet —
+  // S-BTN-40's syncs post none mid-course; Baton then offers the ticket nothing until a post
+  // queues a leg, which `noStuckTicket` counts as waiting on the sync. Which leg is the course's
+  // to say (R-BTN-83: the holder's `next`, a re-route or the start leg).
   pure def queuedValid(git: str -> List[str], queued: str -> str): bool =
     git.keys().forall(t => queued.get(t) == "" or nextLegs(git.get(t)).contains(queued.get(t)))
   // @impl external — the repository's sync reads git and computes the bars and queued legs
@@ -710,16 +712,17 @@ module baton {
                      .with("deps", st.gitDeps).with("decisions", st.gitDecisions)
                      .with("version", st.gitVersion))),
   }
-  // A queued leg for each ticket of `git`: `pick` where it leaves the station, else the first
-  // leg in the course's order that does — the schedulers' way to draw a valid one. (Each reads
+  // A queued leg for each ticket of `git`: its own pick where that leaves the station, else the
+  // first leg in the course's order that does — the schedulers' way to draw a valid one, per
+  // ticket, so two tickets at one station may queue different legs (round 1, 1-A-5). (Each reads
   // nextLegs once: Apalache inlines every call.)
   pure val ORDER = List("implement", "review", "fix", "adjudicate", "merge")
   pure def firstOf(n: Set[str]): str = ORDER.foldl("", (q, l) => if (q == "" and n.contains(l)) l else q)
   pure def firstLeg(p: List[str]): str = firstOf(nextLegs(p))
-  pure def queuedFor(git: str -> List[str], pick: str): str -> str =
+  pure def queuedFor(git: str -> List[str], picks: str -> str): str -> str =
     git.keys().mapBy(t => {
       val n = nextLegs(git.get(t))
-      if (n.contains(pick)) pick else firstOf(n)
+      if (n.contains(picks.get(t))) picks.get(t) else firstOf(n)
     })
 
   // What an accepted snapshot does to one claim (R-BTN-35, §2e, R-BTN-10, R-BTN-71).
@@ -791,7 +794,7 @@ module baton {
     nondet kind = Set("done", "suspended", "release", "fail").oneOf()
     nondet holderBars = FAMILIES.powerset().oneOf()
     nondet postBars = TICKETS.setOfMaps(FAMILIES.powerset()).oneOf()
-    nondet pick = LEGS.oneOf()
+    nondet picks = TICKETS.setOfMaps(LEGS).oneOf()
     nondet tag = FAMILIES.oneOf()
     nondet applies = Set("claim", "claim+advance").oneOf()
     nondet i = 1.to(MAX_CLAIMS).oneOf()
@@ -806,7 +809,7 @@ module baton {
       setHold(t, b), setOwnerBar(tag, applies), liftOwnerBars, ownerResolve(i),
       foreignPush(t, leg), regress(t), withdraw(t), gitDepends(t, d, b), gitDecides(t, decisionLeg, b),
       retryElapse(t, leg), provisionalLapses(t, leg),
-      syncNumber(s), syncRead(s, postBars, queuedFor(st.gitPath, pick)), syncVoid(s), syncPost(s),
+      syncNumber(s), syncRead(s, postBars, queuedFor(st.gitPath, picks)), syncVoid(s), syncPost(s),
     }
   }
 
@@ -829,11 +832,11 @@ module baton {
     nondet t = TICKETS.oneOf()
     nondet leg = LEGS.oneOf()
     nondet postBars = TICKETS.setOfMaps(Set(Set("family:b"))).oneOf()
-    nondet pick = LEGS.oneOf()
+    nondet picks = TICKETS.setOfMaps(LEGS).oneOf()
     any {
       claim(w, t),
       pushEvidence(w, true), advance(w, leg, Set("family:b")), endDoneAtEnd(w),
-      syncNumber(1), syncRead(1, postBars, queuedFor(st.gitPath, pick)), syncPost(1), regress(t),
+      syncNumber(1), syncRead(1, postBars, queuedFor(st.gitPath, picks)), syncPost(1), regress(t),
     }
   }
 }

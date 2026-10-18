@@ -305,7 +305,9 @@ describe('the draw reaches what it is for (round 1, 1-A-5, 1-B-3)', () => {
   });
 });
 
-describe(`model-based tests: ${traces.length} traces drawn from model/replay.qnt drive the core`, () => {
+// one trace drives the core through up to 40 model steps: a few seconds, more on a busy machine,
+// where vitest's default 5 s failed a trace that agreed at every step (trace 598, 6.8 s)
+describe(`model-based tests: ${traces.length} traces drawn from model/replay.qnt drive the core`, { timeout: 60_000 }, () => {
   beforeEach(async () => {
     await setClock(T0);
   });

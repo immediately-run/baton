@@ -1,0 +1,53 @@
+---
+title: "B-26 — Baton logs blocked at a claim's end: an end that leaves the ticket blocked is an event, a start is not"
+id: B-26
+project: baton
+status: available
+updated: 2026-10-17
+tags:
+  - roadmap-item
+tier: routine
+description: "Build R-BTN-75 as amended by R3-1254: Claims.finish re-evaluates blocked_since with an event, so an end that leaves the ticket blocked (a backoff, a decision posted while held) logs blocked; a claim start stays silent. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** R3-1254 (the formal model brought up to §2g–§2m) found a ticket's event log showing an `unblocked` with no `blocked` before it. The owner, 2026-10-17, chose to log `blocked` when a claim's end leaves the ticket blocked.
+**Spec:** `spec/BATON_SPEC.md` R-BTN-75, as amended 2026-10-17 by R3-1254; R-BTN-77; R-BTN-122.
+
+### Why
+
+R-BTN-75 made a claim's start **and** end change `blocked_since` silently. So the end of a claim could block its ticket without an event:
+- a failed attempt that starts a backoff (R-BTN-122);
+- a decision posted while the ticket was held.
+
+The `unblocked` that clears that block is still logged (R-BTN-122: "the leg's `unblocked` event follows"). The log then reads `unblocked` with no `blocked` before it. The model's `unblockedFollowsBlocked` invariant (R3-1254) found this.
+
+The amendment keeps a claim's start silent. A claim's end is never an unblocking, and an end that leaves the ticket blocked now logs `blocked`. That event wakes no one: no message and no trigger.
+
+### What to build
+
+1. **The end logs.** `Claims.finish` re-evaluates `blocked_since` with an event, `Blocks.held(ticket, false)`, for every end and reap: a worker's end, the alarm's reap, an owner's force-reap, a stale release.
+2. **The start stays silent.** The claim's own call stays `held(ticket, true)`, and so do the cutover's and the mirror's legacy imports, which are claim starts.
+3. **One test per path:**
+   - an end that leaves the ticket blocked logs `blocked`;
+   - an end that does not, logs nothing;
+   - the later `unblocked` follows the `blocked`.
+
+### Do not
+
+- Do not log anything at a claim's start.
+- Do not send an `unblocked` message or dispatch the trigger for a `blocked` event; only `unblocked` wakes anyone.
+
+### Tests
+
+- A unit case in `test/unit/blocks.test.ts` for each path above.
+- The model's `@impl pending` notes on `endClaim` and `alarmReap` that name B-26 come off, and the `@model` stamps are re-checked.
+
+### Exit criteria
+
+- [ ] an end that leaves a ticket blocked logs `blocked`; a claim start logs nothing
+- [ ] `npm test` and `npm run typecheck` green; `npm run model:links` lists no B-26 note

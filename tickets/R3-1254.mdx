@@ -95,3 +95,8 @@ _Items 3 and 4 below changed under the spec since filing: notices gate nothing (
 waits on a delivery", R-BTN-80) and leg queues are a warning (R-BTN-79, revised), so neither
 belongs in the core model; item 2's "a ticket with a free next leg is not blocked" is now the
 queued leg alone (R-BTN-75)._
+
+_Item 1's "CI runs it if it stays under 10 minutes, else nightly" is superseded too: R-BTN-68,
+amended 2026-10-17 at the owner's direction, takes model checking off hosted CI runners. The
+liveness run joins `npm run model:full` on the author's machine, and a PR changing the model
+carries its report, which CI's `model-report` job checks against the PR's head._
