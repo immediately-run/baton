@@ -23,10 +23,13 @@ export interface RunArgs {
   tier: string;
   capabilities: string[];
   beatEvery: number;
+  /** The one course this runner serves, of several the home checkout declares (R-BTN-131). */
+  course?: string;
 }
 
 /** `baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]
- * [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b] [--beat-every <ms>]`.
+ * [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b] [--beat-every <ms>]
+ * [--course <id>]`.
  * Unknown flags are refused, never dropped. */
 export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): RunArgs {
   const out: RunArgs = {
@@ -52,6 +55,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     else if (a === '--repository') out.repository = value();
     else if (a === '--hostname') out.hostname = value();
     else if (a === '--tier') out.tier = value();
+    else if (a === '--course') out.course = value();
     else if (a === '--capabilities') out.capabilities = value().split(',').map((s) => s.trim()).filter(Boolean);
     else if (a === '--beat-every') {
       const n = Number(value());
@@ -100,6 +104,21 @@ export function declareCourses(home: string): { course: string; version: number 
   return [{ course: listed[0], version }];
 }
 
+/** The one course a runner serves (R-BTN-131): `--course` picks it from the declared ones; with no
+ * flag the home checkout must declare exactly one. The claim response names no course, so a
+ * runner declares — and rule 9 hands it tickets on — only the course it will load at the claim;
+ * a repository on several courses runs one runner for each. */
+export function runnerCourse(declared: { course: string; version: number }[], chosen?: string): { course: string; version: number } {
+  const names = declared.map((c) => c.course).join(', ');
+  if (chosen != null) {
+    const one = declared.find((c) => c.course === chosen);
+    if (!one) throw new Error(`--course ${chosen}: the home checkout declares ${names || 'no course'}`);
+    return one;
+  }
+  if (declared.length !== 1) throw new Error(`the home checkout runs ${declared.length} courses (${names}); baton run serves one — pass --course <id>, one runner for each`);
+  return declared[0];
+}
+
 /** The one place `~/.cache/immediately-run` is materialised for a cloud key (§6.4). */
 function cacheDir(): string {
   const dir = join(homedir(), '.cache', 'immediately-run', 'baton');
@@ -138,15 +157,14 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     return file;
   });
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
-  // The runner takes exactly one course per home checkout (the claim response names no course,
-  // so several cannot be told apart at a claim): refuse at startup, loudly, not per claim.
-  const declared = declareCourses(a.home);
-  if (declared.length !== 1) throw new Error(`the home checkout runs ${declared.length} courses; baton run serves exactly one — name it in .baton/baton.json`);
+  // One course per runner (the claim response names no course): refused at startup, loudly, not
+  // per claim.
+  const course = runnerCourse(declareCourses(a.home), a.course);
   const runner = new Runner({
     api: new BatonApi({ url: a.url, transport: (req) => fetch(req), auth }, log),
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, capabilities: a.capabilities,
-    courses: declareCourses(a.home), // one course per home: several are refused above
+    courses: [course],
     stateFile: join(cacheDir(), `${a.session}.json`),
     beatEvery: a.beatEvery, log,
     fetch: io.fetch ?? ((home) => fetchMain(home, log)),

@@ -55,6 +55,19 @@ describe('the standard courses (R-BTN-131)', () => {
     });
   }
 
+  it('a leg whose next waits on someone outside the claim suspends it; every other leg goes on', () => {
+    const waits = new Set(['create-pr adjudicate owner', 'review-pr review changes', 'decision prepare']);
+    for (const b of BUILT_INS) {
+      for (const [leg, stub] of Object.entries(b.legs)) {
+        for (const answer of stub.ask?.values ?? [undefined]) {
+          const pos = new Function('answer', `return (${stub.position});`)(answer) as { suspend?: boolean };
+          const key = [b.id, leg, answer].filter(Boolean).join(' ');
+          expect(pos.suspend === true, key).toBe(waits.has(key));
+        }
+      }
+    }
+  });
+
   it('the instruction directories hold exactly the registered courses', () => {
     const root = join(__dirname, '..', '..', 'src', 'defaults', 'courses');
     expect(readdirSync(root).filter((d) => existsSync(join(root, d, '.'))).sort()).toEqual(BUILT_INS.map((b) => b.id).sort());

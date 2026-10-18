@@ -6,9 +6,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { declareCourses, fetchMain, parseRunArgs } from '../../src/runner/main';
+import { declareCourses, fetchMain, parseRunArgs, runnerCourse } from '../../src/runner/main';
 import { envAuth } from '../../src/runner/api';
-import { freshSecret } from '../../src/runner/home';
+import { courseOf, freshSecret } from '../../src/runner/home';
 
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
@@ -29,6 +29,34 @@ describe('parseRunArgs', () => {
     expect(() => parseRunArgs(['--harness', 'vim'], {})).toThrow('opencode or claude-code');
     expect(() => parseRunArgs(['--beat-every', '10'], {})).toThrow('at least 50 ms');
     expect(() => parseRunArgs(['--home'], {})).toThrow('needs a value');
+    expect(parseRunArgs(['--course', 'bug-report'], {}).course).toBe('bug-report');
+  });
+});
+
+describe('one course per runner (R-BTN-131)', () => {
+  const two = [{ course: 'create-pr', version: 1 }, { course: 'bug-report', version: 2 }];
+  it('runnerCourse: --course picks one of the declared; without it, exactly one must be declared', () => {
+    expect(runnerCourse(two, 'bug-report')).toEqual({ course: 'bug-report', version: 2 });
+    expect(runnerCourse([two[0]])).toEqual(two[0]);
+    expect(() => runnerCourse(two)).toThrow('runs 2 courses (create-pr, bug-report); baton run serves one — pass --course <id>');
+    expect(() => runnerCourse(two, 'decision')).toThrow('--course decision: the home checkout declares create-pr, bug-report');
+  });
+  it('courseOf at the claim\'s snapshot loads the runner\'s course of several, and refuses one the snapshot no longer carries', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
+    try {
+      const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+      git('init', '-q', '-b', 'main');
+      mkdirSync(join(dir, '.baton'));
+      writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ courses: [{ id: 'create-pr', version: 1 }, { id: 'bug-report', version: 1 }] }));
+      git('add', '-A');
+      git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'two courses');
+      const sha = git('rev-parse', 'HEAD');
+      expect(courseOf(dir, sha, 'bug-report')).toBe('bug-report');
+      expect(() => courseOf(dir, sha)).toThrow('names 2 courses: create-pr, bug-report');
+      expect(() => courseOf(dir, sha, 'decision')).toThrow('carries no course decision');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

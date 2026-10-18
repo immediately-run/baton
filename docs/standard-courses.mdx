@@ -33,6 +33,14 @@ one Markdown file of instructions per leg. It also adds the course to `.baton/ba
 ticket picks its course with `course:` in its frontmatter, and the repository's `default_course`
 covers the rest.
 
+A runner serves one course, since a claim does not say which course its ticket is on. A
+repository on several courses runs one runner for each:
+
+```
+npx baton run --course create-pr
+npx baton run --course bug-report
+```
+
 ## How each course finds where a ticket is
 
 - **`create-pr` and `review-pr` read the forge.** A ticket's PRs are the ones its branch pattern
@@ -44,8 +52,10 @@ covers the rest.
   default branch, and each leg's `close` appends a line to `.baton/markers.jsonl` saying where the
   ticket got to and which leg comes next. The sync reads that file, so these courses need no forge
   token at all.
-- **`decision` waits on the owner.** After `prepare` writes the packet into the ticket, `carry-out`
-  waits until the owner sets the ticket's `answer:` to their letter.
+- **`decision` waits on the owner.** After `prepare` writes the packet into the ticket, the claim
+  ends and `carry-out` waits until the owner sets the ticket's `answer:` to their letter. Nothing
+  answers for them. `review-pr` waits the same way on the author after asking for changes, and
+  `create-pr` on the owner after an `owner` adjudication.
 
 ## Changing one
 

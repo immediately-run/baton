@@ -28,7 +28,10 @@ export interface Ask {
 }
 
 /** One leg's stub: what it asks the agent for, and the position it returns — a JavaScript
- * expression over `answer` (the agent's last line, checked against `ask.values`). */
+ * expression over `answer` (the agent's last line, checked against `ask.values`). A position
+ * whose next leg waits on someone outside the claim (the owner, the PR's author) carries
+ * `suspend: true`: the runner closes the leg and ends the claim there, rather than starting a
+ * next leg on a board that cannot yet show the wait (§6.13). */
 export interface LegStub {
   ask?: Ask;
   position: string;
@@ -127,8 +130,9 @@ const CREATE_PR: BuiltIn = {
     // fixes run out the sync queues adjudicate instead, and a refused fix suspends the claim).
     review: { ask: VERDICT, position: "{ reached: 'reviewed', next: answer === 'approve' ? 'merge' : 'fix', verdict: answer }" },
     fix: { position: "{ reached: 'fixed', next: 'review' }" },
-    // `merge`: no open blocking finding reproduced; `owner`: one did, and the owner decides.
-    adjudicate: { ask: { name: 'adjudication', values: ['merge', 'owner'] }, position: "{ reached: 'adjudicated', next: 'merge', adjudication: answer }" },
+    // `merge`: no open blocking finding reproduced; `owner`: one did, and the owner decides —
+    // the claim suspends until they do.
+    adjudicate: { ask: { name: 'adjudication', values: ['merge', 'owner'] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
     merge: { position: "{ reached: 'merged', next: null }" },
   },
   skill: 'baton-create-pr',
@@ -141,9 +145,10 @@ export const BUILT_INS: BuiltIn[] = [
     summary: "review a PR someone else opened, in rounds, and conclude with a summary",
     course: REVIEW_PR_COURSE,
     reads: 'prs',
-    stations: (ctx) => stationsReviewPr({ tickets: ctx.tickets, facts: ctx.facts, closed: ctx.closed, repository: ctx.repository, graph: ctx.graph as PrGraph }),
+    stations: (ctx) => stationsReviewPr({ tickets: ctx.tickets, facts: ctx.facts, closed: ctx.closed, done: ctx.done, repository: ctx.repository, graph: ctx.graph as PrGraph }),
     legs: {
-      review: { ask: VERDICT, position: "{ reached: answer === 'approve' ? 'approved' : 'changes-requested', next: answer === 'approve' ? null : 'review', verdict: answer }" },
+      // Changes: the next round waits on the author's push, so the claim suspends.
+      review: { ask: VERDICT, position: "{ ...(answer === 'approve' ? {} : { suspend: true }), reached: answer === 'approve' ? 'approved' : 'changes-requested', next: answer === 'approve' ? null : 'review', verdict: answer }" },
       conclude: { position: "{ reached: 'concluded', next: null }" },
     },
     skill: 'baton-review-pr',
@@ -185,7 +190,8 @@ export const BUILT_INS: BuiltIn[] = [
     // `carry-out` waits on the owner until the ticket's `answer:` is set.
     stations: markers((t, leg) => (leg === 'carry-out' && !answered(t) ? 'owner' : null)),
     legs: {
-      prepare: { position: "{ reached: 'asked', next: 'carry-out' }" },
+      // The packet is written; carry-out waits on the owner's answer, so the claim suspends.
+      prepare: { position: "{ suspend: true, reached: 'asked', next: 'carry-out' }" },
       'carry-out': { position: "{ reached: 'decided', next: null }" },
     },
     skill: 'baton-decision',

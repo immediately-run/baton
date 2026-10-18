@@ -5,9 +5,9 @@
 // sync reads the file as the checkout it posts has it. Pure over the parsed lines and the course
 // file, so a repository can eject it like the `create-pr` default. Course code in the CLI, never
 // core (§2b).
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import type { PostedStation } from '../core/board';
 import type { Step } from '../core/graph';
 import type { SourceTicket } from './tickets-markdown';
@@ -98,7 +98,8 @@ export function stationsMarkers(ctx: MarkersCtx): StationsResult {
     const path: Step[] = [];
     const runs = new Map<string, number>();
     for (const m of byTicket.get(t.id) ?? []) {
-      const leg = ctx.graph.legs[m.leg];
+      // Own keys only: a marker's leg is text from git, and `constructor` is no leg.
+      const leg = Object.hasOwn(ctx.graph.legs, m.leg) ? ctx.graph.legs[m.leg] : undefined;
       if (leg == null || !leg.from.includes(station) || !tosOf(leg.to).includes(m.reached)) continue;
       if (leg.max_runs != null && (runs.get(m.leg) ?? 0) >= leg.max_runs) continue;
       runs.set(m.leg, (runs.get(m.leg) ?? 0) + 1);
@@ -133,26 +134,80 @@ export function stationsMarkers(ctx: MarkersCtx): StationsResult {
 export type Exec = (cmd: 'git', args: string[], cwd: string) => string;
 const exec: Exec = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: 'utf8' }).trim();
 
+/** Appends one marker line to `.baton/markers.jsonl` and commits that file alone, as
+ * `baton:close <ticket> <leg>` — the one way every standard course writes a marker line. */
+export function commitMarker(checkout: string, line: Marker, run: Exec = exec): void {
+  appendFileSync(join(checkout, MARKERS_FILE), `${JSON.stringify(line)}\n`);
+  run('git', ['add', MARKERS_FILE], checkout);
+  run('git', ['commit', '--no-gpg-sign', '-m', `baton:close ${line.ticket} ${line.leg}`], checkout);
+}
+
+/** The bare ticket id a marker names: the sync reads ids as the repository's ticket files carry
+ * them (`B-1`), while a claim's `ctx.ticket.id` is repository-qualified (`docs:B-1`, R-BTN-51). */
+export function bareTicketId(ticket: { id: string; home?: string | null }): string {
+  if (ticket.home && ticket.id.startsWith(`${ticket.home}:`)) return ticket.id.slice(ticket.home.length + 1);
+  const colon = ticket.id.indexOf(':');
+  return colon < 0 ? ticket.id : ticket.id.slice(colon + 1);
+}
+
+/** How many times a close re-applies its marker over a remote that moved before it gives up. */
+export const MARKER_PUSH_TRIES = 3;
+
+/** A push the remote refused because the branch moved — the one failure a rebase can fix. */
+const movedOnRemote = (e: unknown): boolean => {
+  const err = e as { stderr?: unknown; message?: unknown };
+  return /\[rejected\]|non-fast-forward|fetch first|failed to push some refs/.test(`${String(err?.stderr ?? '')}\n${String(err?.message ?? '')}`);
+};
+
 /** The marker courses' `close` (R-BTN-83): one line in `.baton/markers.jsonl`, committed and
  * pushed to the branch the checkout is on — the default branch, where these courses' legs commit
- * their work — so the next sync places the ticket. A push the remote refuses because it moved is
- * rebased once and pushed again; a second refusal throws, and the runner reports the leg failed.
- * Returns the commit's sha, the marker's evidence. */
+ * their work — so the next sync places the ticket. The checkout's own `info/attributes` merges the
+ * file by union, so two closes racing on it rebase cleanly: each keeps both lines. Only a push the
+ * remote refused because the branch moved is rebased and retried, up to `MARKER_PUSH_TRIES`; a
+ * rebase that still stops is aborted, leaving the checkout as it was, and any other failure throws
+ * at once — the runner reports the leg failed. Returns the commit's sha, the marker's evidence. */
 export async function markerClose(
-  ctx: { checkout: string; ticket: { id: string }; leg: string; claim?: { nonce?: string } },
+  ctx: { checkout: string; ticket: { id: string; home?: string | null }; leg: string; claim?: { nonce?: string } },
   result: { reached?: string; next?: string | null },
   run: Exec = exec,
 ): Promise<string> {
   if (typeof result?.reached !== 'string' || result.reached === '') throw new Error(`the ${ctx.leg} leg returned no station reached`);
-  const line: Marker = { ticket: ctx.ticket.id, leg: ctx.leg, reached: result.reached, next: result.next ?? null, claim: ctx.claim?.nonce ?? null };
-  appendFileSync(join(ctx.checkout, MARKERS_FILE), `${JSON.stringify(line)}\n`);
-  run('git', ['add', MARKERS_FILE], ctx.checkout);
-  run('git', ['commit', '--no-gpg-sign', '-m', `baton:close ${ctx.ticket.id} ${ctx.leg}`], ctx.checkout);
-  try {
-    run('git', ['push', 'origin', 'HEAD'], ctx.checkout);
-  } catch {
-    run('git', ['pull', '--rebase', 'origin', run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], ctx.checkout)], ctx.checkout);
-    run('git', ['push', 'origin', 'HEAD'], ctx.checkout);
+  const id = bareTicketId(ctx.ticket);
+  const line: Marker = { ticket: id, leg: ctx.leg, reached: result.reached, next: result.next ?? null, claim: ctx.claim?.nonce ?? null };
+  unionMerge(ctx.checkout, run);
+  commitMarker(ctx.checkout, line, run);
+  for (let tries = 1; ; tries++) {
+    try {
+      run('git', ['push', 'origin', 'HEAD'], ctx.checkout);
+      break;
+    } catch (e) {
+      if (!movedOnRemote(e) || tries >= MARKER_PUSH_TRIES) throw e;
+    }
+    const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], ctx.checkout);
+    try {
+      run('git', ['pull', '--rebase', 'origin', branch], ctx.checkout);
+    } catch (e) {
+      try {
+        run('git', ['rebase', '--abort'], ctx.checkout);
+      } catch {
+        // No rebase in progress: the pull failed before starting one.
+      }
+      throw e;
+    }
   }
   return run('git', ['rev-parse', 'HEAD'], ctx.checkout);
+}
+
+/** The line that makes git merge the markers file by union (gitattributes(5), `merge=union`). */
+export const MARKERS_ATTRIBUTE = `/${MARKERS_FILE} merge=union`;
+
+/** Writes `MARKERS_ATTRIBUTE` into the checkout's own `info/attributes` once — local to the
+ * checkout, never committed, so the repository's tree is untouched. */
+function unionMerge(checkout: string, run: Exec): void {
+  const rel = run('git', ['rev-parse', '--git-path', 'info/attributes'], checkout);
+  const file = isAbsolute(rel) ? rel : join(checkout, rel);
+  const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  if (text.split('\n').includes(MARKERS_ATTRIBUTE)) return;
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, `${text === '' || text.endsWith('\n') ? '' : '\n'}${MARKERS_ATTRIBUTE}\n`);
 }

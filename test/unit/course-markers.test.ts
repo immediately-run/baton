@@ -3,11 +3,12 @@
 // edge is ignored; the queued leg is the last marker's `next` when it leaves the station; the
 // decision course waits on the owner's answer; `markerClose` writes, commits and pushes one line.
 import { describe, it, expect } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PostedTicket } from '../../src/core/board';
-import { MARKERS_FILE, markerClose, parseMarkers, stationsMarkers, type Marker } from '../../src/defaults/course-markers';
+import { MARKERS_ATTRIBUTE, MARKERS_FILE, MARKER_PUSH_TRIES, bareTicketId, markerClose, parseMarkers, stationsMarkers, type Marker } from '../../src/defaults/course-markers';
 import { BUG_REPORT_COURSE, DECISION_COURSE, builtIn } from '../../src/defaults/courses';
 
 const ticket = (id: string, over: Partial<PostedTicket> & { course?: Record<string, unknown> } = {}) =>
@@ -39,6 +40,8 @@ describe('stationsMarkers (R-BTN-131)', () => {
       m('B-1', 'origin', 'explained'), // origin does not leave `reported`
       m('B-1', 'trace', 'closed'), // trace cannot reach `closed`
       m('B-2', 'trace', 'traced'), // another ticket's
+      m('B-1', 'constructor', 'traced'), // an inherited name is no leg
+      m('B-1', '__proto__', 'traced'),
       m('B-1', 'trace', 'traced', 'origin'),
     ])['B-1'];
     expect(at.path).toEqual([{ leg: 'trace', reached: 'traced' }]);
@@ -87,23 +90,97 @@ describe('parseMarkers', () => {
 });
 
 describe('markerClose', () => {
-  it('appends the marker, commits it alone and pushes; a refused push is rebased and pushed once more', async () => {
+  const git = (dir: string, ...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+  /** A bare remote with one commit carrying `.baton/`, and `n` clones of it. */
+  const remote = (n: number) => {
+    const root = mkdtempSync(join(tmpdir(), 'baton-mclose-'));
+    const bare = join(root, 'remote.git');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]);
+    const seed = join(root, 'seed');
+    execFileSync('git', ['clone', '-q', bare, seed], { stdio: 'ignore' });
+    mkdirSync(join(seed, '.baton'));
+    writeFileSync(join(seed, '.baton', 'baton.json'), '{}\n');
+    git(seed, 'config', 'user.email', 't@t');
+    git(seed, 'config', 'user.name', 't');
+    git(seed, 'add', '-A');
+    git(seed, 'commit', '-qm', 'seed');
+    git(seed, 'push', '-q', 'origin', 'main');
+    const clones = Array.from({ length: n }, (_, i) => {
+      const c = join(root, `c${i}`);
+      execFileSync('git', ['clone', '-q', bare, c], { stdio: 'ignore' });
+      git(c, 'config', 'user.email', 't@t');
+      git(c, 'config', 'user.name', 't');
+      return c;
+    });
+    return { root, bare, seed, clones };
+  };
+
+  it('writes the bare ticket id of a claim-shaped (repository-qualified) id, commits the file alone and pushes; the sync then places the ticket', async () => {
+    const { root, seed, clones: [c] } = remote(1);
+    try {
+      const sha = await markerClose({ checkout: c, ticket: { id: 'docs:B-1', home: 'docs' }, leg: 'trace', claim: { nonce: 'n9' } }, { reached: 'traced', next: 'origin' });
+      expect(sha).toBe(git(c, 'rev-parse', 'HEAD'));
+      git(seed, 'pull', '-q', 'origin', 'main');
+      const markers = parseMarkers(readFileSync(join(seed, MARKERS_FILE), 'utf8'));
+      expect(markers).toEqual([{ ticket: 'B-1', leg: 'trace', reached: 'traced', next: 'origin', claim: 'n9' }]);
+      expect(git(seed, 'log', '-1', '--format=%s')).toBe('baton:close B-1 trace');
+      expect(git(seed, 'show', '--name-only', '--format=', 'HEAD')).toBe(MARKERS_FILE);
+      // What the close wrote is what the station function reads.
+      expect(place(markers)['B-1']).toMatchObject({ station: 'traced', next_leg: 'origin' });
+      expect(bareTicketId({ id: 'B-1' })).toBe('B-1');
+      expect(bareTicketId({ id: 'ops:B-1' })).toBe('B-1');
+      await expect(markerClose({ checkout: c, ticket: { id: 'B-1' }, leg: 'trace' }, {})).rejects.toThrow('the trace leg returned no station reached');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('two closes racing on one remote both land: the loser rebases with the file merged by union, keeping both lines', async () => {
+    const { root, seed, clones: [a, b] } = remote(2);
+    try {
+      await markerClose({ checkout: a, ticket: { id: 'docs:B-1', home: 'docs' }, leg: 'trace', claim: { nonce: 'a' } }, { reached: 'traced', next: 'origin' });
+      // b has not fetched a's marker: its push is refused, and its rebase must not conflict.
+      await markerClose({ checkout: b, ticket: { id: 'docs:B-2', home: 'docs' }, leg: 'trace', claim: { nonce: 'b' } }, { reached: 'traced', next: 'origin' });
+      expect(git(b, 'status', '--porcelain')).toBe('');
+      git(seed, 'pull', '-q', 'origin', 'main');
+      expect(parseMarkers(readFileSync(join(seed, MARKERS_FILE), 'utf8')).map((x) => x.ticket)).toEqual(['B-1', 'B-2']);
+      // The attribute lives in the checkout's own git dir, never in the repository's tree.
+      expect(readFileSync(join(b, '.git', 'info', 'attributes'), 'utf8')).toContain(MARKERS_ATTRIBUTE);
+      expect(git(seed, 'ls-files')).not.toContain('.gitattributes');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('only a refused push is retried, at most MARKER_PUSH_TRIES times; a rebase that stops is aborted; any other failure throws at once', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-mclose-'));
     mkdirSync(join(dir, '.baton'));
-    try {
+    const refused = Object.assign(new Error('Command failed: git push origin HEAD'), { stderr: ' ! [rejected]        HEAD -> main (fetch first)\nerror: failed to push some refs' });
+    const fake = (onPush: () => void, onPull: () => void = () => {}) => {
       const calls: string[] = [];
-      let pushes = 0;
       const run = (_cmd: 'git', args: string[]) => {
-        calls.push(args.join(' '));
-        if (args[0] === 'push' && pushes++ === 0) throw new Error('rejected');
-        if (args[0] === 'rev-parse') return args[1] === '--abbrev-ref' ? 'main' : 'abc123';
+        calls.push(args[0] === 'rev-parse' ? args.join(' ') : args[0] + (args[1] === '--abort' ? ' --abort' : ''));
+        if (args[0] === 'push') onPush();
+        if (args[0] === 'pull') onPull();
+        if (args[0] === 'rev-parse') return args[1] === '--git-path' ? '.git/info/attributes' : args[1] === '--abbrev-ref' ? 'main' : 'abc123';
         return '';
       };
-      const sha = await markerClose({ checkout: dir, ticket: { id: 'B-1' }, leg: 'trace', claim: { nonce: 'n9' } }, { reached: 'traced', next: 'origin' }, run);
-      expect(sha).toBe('abc123');
-      expect(parseMarkers(readFileSync(join(dir, MARKERS_FILE), 'utf8'))).toEqual([{ ticket: 'B-1', leg: 'trace', reached: 'traced', next: 'origin', claim: 'n9' }]);
-      expect(calls).toEqual([`add ${MARKERS_FILE}`, 'commit --no-gpg-sign -m baton:close B-1 trace', 'push origin HEAD', 'rev-parse --abbrev-ref HEAD', 'pull --rebase origin main', 'push origin HEAD', 'rev-parse HEAD']);
-      await expect(markerClose({ checkout: dir, ticket: { id: 'B-1' }, leg: 'trace' }, {}, run)).rejects.toThrow('the trace leg returned no station reached');
+      return { calls, run };
+    };
+    const close = (run: (cmd: 'git', args: string[]) => string) => markerClose({ checkout: dir, ticket: { id: 'B-1' }, leg: 'trace' }, { reached: 'traced' }, run);
+    try {
+      const always = fake(() => { throw refused; });
+      await expect(close(always.run)).rejects.toThrow('git push');
+      expect(always.calls.filter((c) => c === 'push')).toHaveLength(MARKER_PUSH_TRIES);
+      expect(always.calls.filter((c) => c === 'pull')).toHaveLength(MARKER_PUSH_TRIES - 1);
+
+      const other = fake(() => { throw Object.assign(new Error('Command failed'), { stderr: 'fatal: could not read from remote repository' }); });
+      await expect(close(other.run)).rejects.toThrow('Command failed');
+      expect(other.calls.filter((c) => c === 'push' || c === 'pull')).toEqual(['push']);
+
+      const stops = fake(() => { throw refused; }, () => { throw new Error('could not apply'); });
+      await expect(close(stops.run)).rejects.toThrow('could not apply');
+      expect(stops.calls.slice(-2)).toEqual(['pull', 'rebase --abort']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

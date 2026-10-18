@@ -26,27 +26,35 @@ export interface CourseLoad {
 
 /** The course id the home repository runs, from the snapshot's `.baton/baton.json`: the spec's
  * `courses: [{id, …}]` (§2c/R-BTN-51) when it lists one; docs' interim `{course}` key; else —
- * no baton.json at all yet — the one course under `.baton/courses/`. Several courses with no
- * disambiguation are refused loudly, never guessed at: the claim response names no course. */
-export function courseOf(home: string, sha: string): string {
+ * no baton.json at all yet — the one course under `.baton/courses/`. `want` is the course the
+ * runner serves (R-BTN-131), which the snapshot must still carry; with no `want`, several courses
+ * are refused loudly, never guessed at: the claim response names no course. */
+export function courseOf(home: string, sha: string, want?: string): string {
+  const at = sha.slice(0, 10);
+  const pick = (ids: string[], where: string): string => {
+    if (want != null) {
+      if (!ids.includes(want)) throw new Error(`${where} at ${at} carries no course ${want}: ${ids.join(', ') || '(none)'}`);
+      return want;
+    }
+    if (ids.length !== 1) throw new Error(`${where} at ${at} names ${ids.length} courses: ${ids.join(', ') || '(none)'} — the runner takes exactly one`);
+    return ids[0];
+  };
   const batonJson = readAt(home, sha, '.baton/baton.json');
   if (batonJson != null) {
     const parsed = JSON.parse(batonJson) as { courses?: { id?: unknown }[]; course?: unknown };
     if (Array.isArray(parsed.courses) && parsed.courses.length) {
       const ids = parsed.courses.map((c) => c.id).filter((id): id is string => typeof id === 'string' && /^[a-z][a-z0-9-]{0,39}$/.test(id));
-      if (ids.length !== parsed.courses.length || ids.length !== 1) throw new Error(`.baton/baton.json at ${sha.slice(0, 10)} names ${ids.length} courses: ${ids.join(', ')} — the runner takes exactly one`);
-      return ids[0];
+      if (ids.length !== parsed.courses.length) throw new Error(`.baton/baton.json at ${at} names a course that is not an id: ${JSON.stringify(parsed.courses.map((c) => c.id))}`);
+      return pick(ids, '.baton/baton.json');
     }
-    if (typeof parsed.course === 'string' && /^[a-z][a-z0-9-]{0,39}$/.test(parsed.course)) return parsed.course;
-    throw new Error(`.baton/baton.json at ${sha.slice(0, 10)} names no course`);
+    if (typeof parsed.course === 'string' && /^[a-z][a-z0-9-]{0,39}$/.test(parsed.course)) return pick([parsed.course], '.baton/baton.json');
+    throw new Error(`.baton/baton.json at ${at} names no course`);
   }
   // The same test the startup declaration uses: a course is a directory carrying course.json
   // (a README beside them is not a course). `-d` lists trees only — `--name-only` prints their
   // names bare, with no trailing slash to filter on.
   const names = git(home, ['ls-tree', '-d', '--name-only', `${sha}:.baton/courses/`]).split('\n').filter(Boolean);
-  const courses = names.filter((n) => readAt(home, sha, `.baton/courses/${n}/course.json`) != null);
-  if (courses.length !== 1) throw new Error(`the home repository runs ${courses.length} courses and .baton/baton.json names none: ${courses.join(', ') || '(none)'}`);
-  return courses[0];
+  return pick(names.filter((n) => readAt(home, sha, `.baton/courses/${n}/course.json`) != null), '.baton/courses/');
 }
 
 /** A file's bytes at `sha`, or null when the snapshot does not have it. */

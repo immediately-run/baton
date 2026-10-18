@@ -279,10 +279,12 @@ export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; bran
  * - no PR found: `requested`, `review` waiting on `pr`;
  * - concluded, or the last verdict approves: that end;
  * - the PR merged or closed, or the course's review rounds spent: `conclude` ready;
- * - otherwise `review` — waiting on ci while the head's checks run, and after a verdict asking for
- *   changes, waiting on the `author` until a push lands after it. */
-export function stationsReviewPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; closed: Set<string>; repository?: string | null; graph?: PrGraph }): StationsResult {
+ * - otherwise `review` — before its first round waiting while a dependency is not closed done or
+ *   an open child blocks it; waiting on ci while the head's checks run; and after a verdict asking
+ *   for changes, waiting on the `author` until a push lands after it. */
+export function stationsReviewPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; closed: Set<string>; done?: Set<string>; repository?: string | null; graph?: PrGraph }): StationsResult {
   const rounds = ctx.graph?.legs?.review?.max_runs ?? 3;
+  const done = ctx.done ?? ctx.closed;
   const stations: Record<string, PostedStation> = {};
   for (const t of ctx.tickets) {
     if (ctx.closed.has(t.id)) continue;
@@ -309,7 +311,10 @@ export function stationsReviewPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]
       continue;
     }
     const pushes = fact.pushes?.length ? fact.pushes : [fact.pushedAt];
-    const wait = station === 'changes-requested' && !pushes.some((p) => p > lastVerdict) ? 'author' : checksDone(fact) ? null : 'ci';
+    // The first round waits like any course's start leg: on a dependency not closed done, then on
+    // an open child (R-BTN-74).
+    const before = path.length ? null : t.depends_on.some((d) => !done.has(d)) ? 'dependencies' : t.blocked_by.length ? 'children' : null;
+    const wait = before ?? (station === 'changes-requested' && !pushes.some((p) => p > lastVerdict) ? 'author' : checksDone(fact) ? null : 'ci');
     stations[t.id] = at(station, path, [
       { leg: 'review', state: wait ? 'waiting' : 'ready', waiting_on: wait },
       { leg: 'conclude', state: 'ready', waiting_on: null },

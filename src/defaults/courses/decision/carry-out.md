@@ -13,7 +13,6 @@ ticket is closed.
   names. Check the state first; the world may have moved since the packet was written.
 - When it is real work, file it as tickets (the `draft-ticket` course's way, or directly when it
   is small and clear), naming this decision as their origin.
-- When the answer was the default because the deadline passed, say so.
 
 ## Record
 

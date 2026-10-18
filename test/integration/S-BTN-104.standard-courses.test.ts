@@ -4,7 +4,8 @@
 // closing markers to `.baton/markers.jsonl`; the decision's owner answers in the ticket's
 // `answer:`. Must hold: each ticket starts at its course's start with its start leg queued; the
 // bug report follows its markers to `closed` (a marker that is not an edge, and a malformed line,
-// change nothing), its queued leg the marker's `next`; the decision's `carry-out` waits on the
+// change nothing; the first marker written by the real close from a claim-shaped ticket id), its
+// queued leg the marker's `next`; the decision's `carry-out` waits on the
 // owner until `answer:` is set; a repository on the marker courses alone syncs with no forge
 // facts at all. Node only: it writes a real repository and runs git.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -14,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
+import { markerClose } from '../../src/defaults/course-markers';
 import { ORIGIN, rows, setClock, syncToken } from '../helpers';
 
 const T0 = Date.parse('2026-10-18T12:00:00Z');
@@ -22,8 +24,11 @@ const init = (root: string, ...argv: string[]) => initMain([...argv, ...PIN], { 
 
 class Repo {
   readonly dir = mkdtempSync(join(tmpdir(), 'baton-s104-'));
+  /** The remote a leg's close pushes its marker to. */
+  readonly remote = mkdtempSync(join(tmpdir(), 'baton-s104-remote-'));
   constructor() {
-    for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's104@test'], ['config', 'user.name', 's104']]) execFileSync('git', ['-C', this.dir, ...a], { stdio: 'ignore' });
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', this.remote], { stdio: 'ignore' });
+    for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's104@test'], ['config', 'user.name', 's104'], ['remote', 'add', 'origin', this.remote]]) execFileSync('git', ['-C', this.dir, ...a], { stdio: 'ignore' });
     mkdirSync(join(this.dir, 'tickets'), { recursive: true });
   }
   write(path: string, text: string): void {
@@ -60,7 +65,10 @@ beforeEach(async () => {
   await setClock(T0);
   repo = new Repo();
 });
-afterEach(() => rmSync(repo.dir, { recursive: true, force: true }));
+afterEach(() => {
+  rmSync(repo.dir, { recursive: true, force: true });
+  rmSync(repo.remote, { recursive: true, force: true });
+});
 
 type StationRow = { station: string; next_leg: string | null; next_source: string; path_len: number };
 const stationOf = async (id: string): Promise<StationRow> => (await rows<StationRow>('SELECT station, next_leg, next_source, path_len FROM ticket_stations WHERE ticket_id = ?', `docs:${id}`))[0];
@@ -83,8 +91,10 @@ describe('S-BTN-104 the standard courses', () => {
     expect(await stationOf('B-1')).toMatchObject({ station: 'reported', next_leg: 'trace', next_source: 'course', path_len: 0 });
     expect(await stationOf('D-1')).toMatchObject({ station: 'raised', next_leg: 'prepare' });
 
-    // The bug report's first two legs close; a marker that is no edge and a malformed line follow.
-    repo.marker('B-1', 'trace', 'traced', 'origin');
+    // The bug report's first two legs close — the first through the real close, with the claim's
+    // repository-qualified id — then a marker that is no edge and a malformed line.
+    execFileSync('git', ['-C', repo.dir, 'push', '-q', 'origin', 'main'], { stdio: 'ignore' });
+    await markerClose({ checkout: repo.dir, ticket: { id: 'docs:B-1', home: 'docs' }, leg: 'trace', claim: { nonce: 'n1' } }, { reached: 'traced', next: 'origin' });
     repo.marker('B-1', 'origin', 'explained', 'dedupe');
     repo.marker('B-1', 'prevent', 'closed', null); // prevent does not leave `explained`
     appendFileSync(join(repo.dir, '.baton', 'markers.jsonl'), 'not a marker\n');

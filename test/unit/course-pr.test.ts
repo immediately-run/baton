@@ -222,6 +222,15 @@ describe('review-pr', () => {
     expect(place([fact({ pushes: [T0 - 1000, T0 + 5], reviews: [verdict(T0, false)] })]).next[0]).toMatchObject({ leg: 'review', state: 'ready' });
   });
 
+  it('the first round waits on a dependency not closed done, then on an open child; a later round does not', () => {
+    const of = (over: Parameters<typeof ticket>[1], done = new Set<string>(), reviews: PrFact['reviews'] = []) =>
+      stationsReviewPr({ tickets: [ticket('R', { course_id: 'review-pr', course: { prs: ['5'] }, ...over })], facts: [fact({ pushes: [T0 + 5], reviews })], closed: done, done, graph: REVIEW_PR_COURSE }).stations.R.next[0];
+    expect(of({ depends_on: ['A'] })).toMatchObject({ leg: 'review', state: 'waiting', waiting_on: 'dependencies' });
+    expect(of({ depends_on: ['A'] }, new Set(['A']))).toMatchObject({ leg: 'review', state: 'ready' });
+    expect(of({ blocked_by: ['C'] })).toMatchObject({ leg: 'review', state: 'waiting', waiting_on: 'children' });
+    expect(of({ depends_on: ['A'] }, new Set(), [verdict(T0, false)])).toMatchObject({ leg: 'review', state: 'ready' });
+  });
+
   it('approved is the end; three rounds spent, or the PR merged or closed, queues conclude alone; a concluded comment is the other end', () => {
     expect(place([fact({ reviews: [verdict(T0, false), verdict(T0 + 10, true)] })])).toMatchObject({ station: 'approved', next_leg: null, next: [] });
     const spent = place([fact({ pushes: [T0 + 5, T0 + 15, T0 + 25], reviews: [verdict(T0, false), verdict(T0 + 10, false), verdict(T0 + 20, false)] })]);

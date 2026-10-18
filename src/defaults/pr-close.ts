@@ -6,11 +6,11 @@
 //   `<!-- baton:concluded -->` — each as a comment on the checkout branch's PR, the lines the
 //   station functions read, written by `close` from the result the agent returned, not by the
 //   agent (R-BTN-83). Its URL is the evidence.
-// - every other leg: a JSON line in `.baton/markers.jsonl`, committed; its sha is the evidence.
+// - every other leg: a JSON line in `.baton/markers.jsonl`, committed (`commitMarker`, shared
+//   with the marker courses); its sha is the evidence.
 // `baton repo init` bundles this into each leg stub, so a stub imports nothing at run time.
-import { appendFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { bareTicketId, commitMarker } from './course-markers';
 
 /** What `close` runs: `git` or `gh`, in the checkout, answering stdout. Tests inject it. */
 export type Exec = (cmd: 'git' | 'gh', args: string[], cwd: string) => string;
@@ -18,7 +18,7 @@ const exec: Exec = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: 
 
 export interface CloseCtx {
   checkout: string;
-  ticket: { id: string; path?: string | null };
+  ticket: { id: string; path?: string | null; home?: string | null };
   leg: string;
   claim?: { nonce?: string };
 }
@@ -46,16 +46,14 @@ function commentLine(leg: string, result: { verdict?: unknown; adjudication?: un
 }
 
 /** Write the closing marker and return its evidence: the comment's URL or the commit's sha. */
-export async function prClose(ctx: CloseCtx, result: { reached?: string; verdict?: unknown; adjudication?: unknown }, run: Exec = exec): Promise<string> {
+export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: string | null; verdict?: unknown; adjudication?: unknown }, run: Exec = exec): Promise<string> {
   const line = commentLine(ctx.leg, result);
   if (line != null) {
     const body = `${line}\nbaton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? '?'}`;
     // `gh pr comment` with no number comments on the PR of the checkout's current branch.
     return run('gh', ['pr', 'comment', '--body', body], ctx.checkout);
   }
-  const markers = join('.baton', 'markers.jsonl');
-  appendFileSync(join(ctx.checkout, markers), `${JSON.stringify({ ticket: ctx.ticket.id, leg: ctx.leg, ...(result?.reached ? { reached: result.reached } : {}), claim: ctx.claim?.nonce ?? null })}\n`);
-  run('git', ['add', markers], ctx.checkout);
-  run('git', ['commit', '--no-gpg-sign', '-m', `baton:close ${ctx.ticket.id} ${ctx.leg}`], ctx.checkout);
+  if (typeof result?.reached !== 'string' || result.reached === '') throw new Error(`the ${ctx.leg} leg returned no station reached`);
+  commitMarker(ctx.checkout, { ticket: bareTicketId(ctx.ticket), leg: ctx.leg, reached: result.reached, next: result.next ?? null, claim: ctx.claim?.nonce ?? null }, run);
   return run('git', ['rev-parse', 'HEAD'], ctx.checkout);
 }

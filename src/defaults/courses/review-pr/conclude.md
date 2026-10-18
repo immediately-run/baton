@@ -2,8 +2,8 @@
 
 You are running the `conclude` leg of the `review-pr` course. The review rounds have run out, or
 the PR was merged or closed before it was approved. The ticket's file is `$BATON_TICKET_FILE`, and
-its `prs:` names the PR. When you finish, the PR carries one summary comment and the ticket is
-closed.
+its `prs:` names the PR. When you finish, the PR carries one summary comment; Baton writes the
+conclusion line after it, and the ticket is then at its end station.
 
 ## Write the summary
 
@@ -18,10 +18,8 @@ the PR of the branch you leave checked out. Then write one comment:
 
 Keep it to one screen. The author and the maintainers read it in place of the threads.
 
-## Close the ticket
-
-Set the ticket file's `status:` to `done` and commit that to the default branch, unless the
-repository closes tickets another way.
+Leave the PR's branch checked out when you finish. Do not commit to the default branch or
+change the ticket's `status:`: the conclusion line is what ends the ticket.
 
 ## Do not
 

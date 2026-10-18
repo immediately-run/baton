@@ -842,11 +842,17 @@ offers a sane default.)*
     ticket's `prs:` (no branch pattern finds it): each verdict line is a round reaching
     `approved` or `changes-requested`; after changes the next round waits on the `author` until
     a push lands after the verdict; when the PR closes, or the rounds run out, `conclude` is
-    queued, and a `<!-- baton:concluded -->` comment is that leg. `close` writes each line on the
-    PR from the result the agent returned.
+    queued, and a `<!-- baton:concluded -->` comment is that leg. Its first round waits like
+    `implement`. The forge adapter reads a closed unmerged PR a live ticket owns, which
+    `create-pr` counts as none and `review-pr` concludes on. `close` writes each line on the PR
+    from the result the agent returned.
   - **The marker courses** open no PR. Each leg commits its work to the default branch, and its
-    `close` appends one line to `.baton/markers.jsonl` — `{ticket, leg, reached, next, claim}` —
-    commits it and pushes, rebasing once when the push loses a race. The station function reads
+    `close` appends one line to `.baton/markers.jsonl` — `{ticket, leg, reached, next, claim}`,
+    the ticket named by its bare id as its file carries it, never the claim's
+    repository-qualified one — commits it and pushes. Only a push refused because the branch
+    moved is rebased and retried, at most three times; the checkout's own `info/attributes`
+    merges the file by union, so racing closes keep both lines, and a rebase that still stops
+    is aborted. The station function reads
     the file as the posted checkout has it: a ticket's path is its markers in order, skipping one
     whose pair is not an edge from where the ticket stood or whose leg is past its `max_runs`, as
     `locate` does (R-BTN-83); its queued leg is the last marker's `next` when that leaves the
@@ -855,7 +861,13 @@ offers a sane default.)*
     `implement`. A repository on these courses alone needs no forge facts.
   - **The owner's answer.** Until person legs are built (R-BTN-116), `decision`'s `carry-out`
     waits on `owner` until the ticket's `answer:` is set and is not `open`; the markdown source
-    carries `answer` in the opaque `course` fields.
+    carries `answer` in the opaque `course` fields. Nothing applies an answer the owner did not
+    give.
+  - **A wait outside the claim suspends.** A leg whose next leg waits on someone the claim
+    cannot wait for returns `suspend: true` with its pair, so the runner closes it and ends the
+    claim there rather than start a leg the board does not yet show waiting (§6.13):
+    `decision`'s `prepare`, `review-pr`'s `review` asking for changes, and `create-pr`'s
+    `adjudicate` answering `owner`.
   - **The stubs and instructions.** Each leg's stub runs `agent_command` (R-BTN-74) with
     `BATON_COURSE`, `BATON_LEG`, `BATON_TICKET_FILE` and `BATON_INSTRUCTIONS` — a copy of
     `.baton/courses/<id>/legs/<leg>.md` read at the claim's snapshot, never the working tree. A
@@ -864,10 +876,16 @@ offers a sane default.)*
     instructions are the repository's once scaffolded: it edits or deletes them, and a CLI
     release does not touch them.
   - **Scaffolding.** `baton repo init --course <id>` writes the course's files and adds its entry
-    to an existing `.baton/baton.json`, so courses sit side by side. With no `--course` it takes
+    to an existing `.baton/baton.json`, so courses sit side by side; `--force` rewrites that
+    course's files and its entry, never the rest of the file. With no `--course` it takes
     the repository's `default_course`, else `create-pr`. `--course pr` is refused, naming
     `create-pr`. A repository still on `pr` keeps its files, and `init` without `--course` moves
     only its pin.
+  - **One course per runner.** The claim response names no course, so `baton run` serves one: a
+    home checkout declaring several runs one runner for each, `baton run --course <id>`. The
+    runner declares only that course in its heartbeat — rule 9 then hands it tickets on that
+    course alone — and loads it at each claim's snapshot. With no `--course`, a checkout
+    declaring several courses is refused at startup, naming the flag.
 
   Course code in the CLI, never core (§2b). S-BTN-104, G-BTN-123.
 

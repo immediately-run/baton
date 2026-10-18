@@ -333,10 +333,12 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   const out: PrFact[] = [];
   for (const pr of await all<any>(`/repos/${slug}/pulls?state=all`)) {
     const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
-    // Only a PR a live ticket owns needs its detail read: a closed unmerged PR counts as none
-    // (R-BTN-74), and any other PR places no ticket. Those are recorded from the list alone,
-    // so the requests a run makes grow with the live tickets, not with the repository's history.
-    if (state === 'closed' || !owns({ number: pr.number, head: pr.head.ref })) {
+    // Only a PR a live ticket owns needs its detail read; any other PR places no ticket and is
+    // recorded from the list alone, so the requests a run makes grow with the live tickets, not
+    // with the repository's history. A closed unmerged PR a live ticket owns is read too:
+    // `create-pr` counts it as none (R-BTN-74), but `review-pr` concludes on it, and reads its
+    // conclusion line from its comments.
+    if (!owns({ number: pr.number, head: pr.head.ref })) {
       out.push({ number: pr.number, head: pr.head.ref, state, pushedAt: 0, checks: [], reviews: [] });
       continue;
     }
@@ -416,7 +418,7 @@ function stubSource(b: BuiltIn, course: string, leg: string): string {
   const closeFrom = b.reads === 'prs' ? ['prClose', 'pr-close.ts'] : ['markerClose', 'course-markers.ts'];
   const values = ask ? ask.values.join(' or ') : '';
   return `import { execFile, execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};
@@ -433,22 +435,26 @@ export async function run(ctx) {
   const show = (rel) => execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} });
   const settings = JSON.parse(show('.baton/baton.json'));
   if (typeof settings.agent_command !== 'string' || settings.agent_command === '') throw new Error('.baton/baton.json names no agent_command');
-  // The instructions, when the repository still has them; it owns them and may delete them.
-  let instructions = '';
+  // The instructions, when the repository still has them; it owns them and may delete them. Only
+  // a path the snapshot lacks means deleted — any other failure stops the leg.
+  let text = null;
   try {
-    const text = show(${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)});
-    instructions = join(mkdtempSync(join(tmpdir(), 'baton-leg-')), ${JSON.stringify(`${leg}.md`)});
-    writeFileSync(instructions, text);
-  } catch {
-    instructions = '';
+    text = show(${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)});
+  } catch (e) {
+    if (!/does not exist in|exists on disk, but not in/.test(String(e?.stderr ?? e?.message ?? e))) throw e;
   }
+  const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
+  const instructions = dir == null ? '' : join(dir, ${JSON.stringify(`${leg}.md`)});
+  if (dir != null) writeFileSync(instructions, text);
   const out = await new Promise((resolve, reject) => execFile('sh', ['-c', settings.agent_command + ' "$@"', 'agent', ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout], {
     cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX},
     env: {
       ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.path ?? '',${ask ? `
       BATON_ANSWER: ${JSON.stringify(`print ${values} as your last line`)},${ask.name === 'verdict' ? ` BATON_VERDICT: ${JSON.stringify(`print ${values} as your last line`)},` : ''}` : ''}
     },
-  }, (e, stdout) => (e ? reject(e) : resolve(String(stdout)))));${ask ? `
+  }, (e, stdout) => (e ? reject(e) : resolve(String(stdout))))).finally(() => {
+    if (dir != null) rmSync(dir, { recursive: true, force: true });
+  });${ask ? `
   const answer = out.trim().split('\\n').at(-1)?.trim();
   if (!${JSON.stringify(ask.values)}.includes(answer)) throw new Error(${JSON.stringify(`the ${leg} agent printed no ${ask.name} (${values}) as its last line`)});` : `
   void out;`}
@@ -481,7 +487,8 @@ function cliPin(): string {
 /** `baton repo init [--course <standard course>] [--eject tickets|stations] [--pin owner/name@commit] [--force]`
  * (R-BTN-74, R-BTN-131). A file the repository already has is kept — re-running init to move the
  * pin rewrites only the workflow — unless `--force`. Run again with another `--course`, it adds
- * that course beside the first: its files, and its entry in `.baton/baton.json`'s `courses`. With
+ * that course beside the first: its files, and its entry in `.baton/baton.json`'s `courses`;
+ * `--force` rewrites that course's files and entry and leaves the rest of the file alone. With
  * no `--course` it takes the repository's `default_course`, else `create-pr`; a repository still
  * on `pr`, the name `create-pr` replaced, keeps its files and gets the new pin only. */
 export async function initMain(argv: string[], io: { root?: string; log?: (l: string) => void } = {}): Promise<number> {
@@ -556,12 +563,14 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   };
   const legs = Object.keys(b.course.legs);
   const entry = { ...courseEntry(b.id, legs), skill: b.skill };
-  if (existing && !force) {
-    // A second course joins the first: its entry is added, everything else in the file kept.
-    if (!(existing.courses ?? []).some((c) => c.id === b.id)) {
-      const courses = existing.courses ?? [{ id: existing.default_course ?? DEFAULT_COURSE, version: 1 }];
-      writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: [...courses, entry] }, null, 2)}\n`);
-      log(`baton: .baton/baton.json lists course ${b.id} now`);
+  if (existing) {
+    // A second course joins the first: its entry is added, everything else in the file kept. With
+    // `--force` this course's own entry is replaced — never the file, which holds the others.
+    const courses = existing.courses ?? [{ id: existing.default_course ?? DEFAULT_COURSE, version: 1 }];
+    const listed = courses.some((c) => c.id === b.id);
+    if (!listed || force) {
+      writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: listed ? courses.map((c) => (c.id === b.id ? entry : c)) : [...courses, entry] }, null, 2)}\n`);
+      log(`baton: .baton/baton.json lists course ${b.id} ${listed ? 'afresh' : 'now'}`);
     } else kept.push('.baton/baton.json');
   } else {
     const settings: BatonJson = { baton_url: process.env.BATON_URL ?? DEFAULT_URL, items: 'tickets', default_course: b.id, repos: {}, agent_command: 'echo', courses: [entry] };
