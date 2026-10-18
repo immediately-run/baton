@@ -17,4 +17,41 @@ depends_on:
   - B-31
 ---
 
-_(filed; the body follows.)_
+**Brief:** the owner, 2026-10-18: docs' work moves from its skills onto Baton's standard courses (B-31), and the scaffolded instructions are the repository's to write (R-BTN-131).
+**Spec:** `spec/BATON_SPEC.md` R-BTN-131 (the instructions are the repository's; `init` never rewrites them), R-BTN-74; docs' skills `next-roadmap-item`, `review-gate`, `bug-report`, `draft-roadmap-item`, `prepare-decision-packet` and `process-decision-packets`.
+**Depends on:** B-31 (done: docs carries the five courses by source, in shadow).
+
+### Requires
+
+None: docs' checkout. Nothing runs a leg until R3-1216's cutover.
+
+### Scope, settled at claim (2026-10-18)
+
+- **The skills are not retired here.** docs is in shadow: its live sync and every session still claim through `claim.sh`, `next-available.sh` and the skills, so retiring their steps now would break the live workflow. The instructions are written so that the cutover (R3-1216) retires those steps by deleting them, with nothing left to move. Retiring them is the cutover's work, recorded there, not this ticket's.
+- **One home.** A leg's instructions keep the course's contract: what the leg must leave behind and its answer line. For docs' conventions they point at the skill section that owns them, never a copy. Copying the 712-line `next-roadmap-item` and the review gate into 18 files would make two homes that drift, the failure docs' memory audit measured.
+
+### What to build (in docs, committed to its main)
+
+For each leg of the five courses, `.baton/courses/<course>/legs/<leg>.md` rewritten for docs:
+1. **create-pr:**
+   - `implement`: ways of working, the repo legend, a branch per code repository, the PRs recorded in the item's `prs:`, the exit criteria checked;
+   - `review`: the seat from `BATON_REVIEWER`; round one's two blind reviewers and the matcher; the gate record, the findings log and provenance;
+   - `fix`: replies before the push, the escaped rows, every PR's push;
+   - `adjudicate`: the decision packet and the owner inbox;
+   - `merge`: delivery by ancestry, findings rows, archive, and the review override's `merged is not delivered` check.
+2. **bug-report:** the bug-report skill's trace, origin (ORIGINS), dedupe, file, fold and prevention.
+3. **draft-ticket:** draft-roadmap-item: id allocation, the body's sections in order, `Requires`.
+4. **decision:** prepare-decision-packet and process-decision-packets: the packet's fields, the inbox cap, carrying the answer out.
+5. **review-pr:** `next-roadmap-item/review-pr.md`: the rubric, origin, the gate record.
+
+### Tests
+
+- Every leg file exists and names its answer exactly as the course's `ask` does (the standard stub checks the last line).
+- Every skill section a leg file cites exists, so a renamed heading fails a test rather than leaving a dead pointer.
+- `baton test-course` passes all five courses, and docs' `npm run verify` steps pass.
+
+### Exit criteria
+
+- [ ] the 18 leg instructions rewritten for docs, each pointing at the section that owns each convention
+- [ ] the pointer test in docs' `test:scripts`, green
+- [ ] the skills untouched; their retirement recorded as R3-1216's
