@@ -1,0 +1,64 @@
+---
+title: "B-35 — The GitHub adapter fits docs' board: conditional reads, so a sync's requests grow with change, not history"
+id: B-35
+project: baton
+status: in-review
+updated: 2026-10-18
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "docs' board under create-pr needs about 360 requests a sync against R-BTN-96's 200 (B-31's measurement: 35 repositories, at least 79 owned PRs); conditional requests with ETags (a 304 does not count), detail read only while it can matter, or GraphQL — weighed in an R-BTN-96 amendment. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/53
+depends_on:
+  - B-29
+---
+
+**Brief:** found by B-31 (2026-10-18), measuring docs' board against B-29's adapter before cutover.
+**Spec:** `spec/BATON_SPEC.md` R-BTN-96 (the GitHub adapter, its one budget), R-BTN-74, §7.1 (the sync's cadence).
+**Depends on:** B-29 (done).
+
+### Requires
+
+None: recorded GitHub responses in every test.
+
+### Why
+
+docs' live board under `create-pr` (B-31's `.baton/tickets.mjs`, 131 live tickets) names 35 repositories in `repos:`. A live sync of it would make about 48 list requests (site-main alone is 8 pages of 100 PRs), plus four detail requests (check runs, commits, reviews, comments) for every owned PR. The 79 PRs the tickets' `prs:` name already make 316, and branch-matched earlier attempts add more. That is about 360 or more against `MAX_REQUESTS` = 200, so every docs sync would refuse. The token's own limit matters too: the Actions `GITHUB_TOKEN` gets 1,000 requests an hour per repository, and docs syncs on every push plus every 15 minutes. Raising the constant alone would spend that hourly allowance within a few syncs.
+
+### What to build (to be settled in the amendment)
+
+The adapter reads only what changed since the last sync, so its requests grow with activity, not with history. Candidates, to be weighed in the R-BTN-96 amendment:
+- **Conditional requests.** Keep each response's `ETag` in the sync's state and send `If-None-Match`. GitHub does not count a 304 against the primary rate limit, and an unchanged PR then costs nothing. The open question is where the state lives between workflow runs: an Actions cache, or a git ref the sync owns.
+- **Detail only while it can matter.** A merged or closed PR whose ticket's station already reflects it needs no re-read on every sync.
+- **GraphQL**, one query per repository for PRs with their reviews, comments, commit dates and check rollup, if its point cost fits.
+
+### Decided at claim (2026-10-18)
+
+docs' real board was measured against GitHub on 2026-10-18 (47 of 61 list pages read; the 14 repositories this session cannot read counted at one page each):
+- about **61 list pages**;
+- **49 owned PRs**, of which 26 are open, across 16 tickets: four detail requests each is **196**.
+
+That makes about 257 requests in all. Reading detail only for tickets with an open PR gives about 185, which leaves no headroom.
+
+**Taken: batch the detail over GraphQL.** The REST lists stay. The PRs a live ticket owns are read in one GraphQL query per repository, up to 25 PRs a query: each PR's head-commit check runs, commits, reviews and issue comments, mapped to the same facts as before. That is about 61 + 16 = 77 requests for docs. A PR whose connection overflows its first page (more than 100 reviews, comments, commits or check runs) is read for that connection over REST, as today, so nothing is cut off. A batch is one request against the budget.
+
+**Not taken:**
+- **ETags.** They need state kept between workflow runs, which a sync with read-only contents has nowhere to keep. Revisit if lists come to dominate.
+- **Detail only for tickets with an open PR.** It changes which facts a PR carries depending on its siblings, and saves little once detail is batched.
+
+### Tests
+
+- Against a recorded GitHub, a board shaped like docs' (35 repositories, about 80 owned PRs) syncs within the budget on its second run, where nothing changed, and on a run where one PR changed.
+- A 304 is read from the cache; a stale cache entry is refreshed.
+
+### Exit criteria
+
+- [ ] docs' board, measured as B-31 did, fits the budget with headroom for the push-plus-15-minute cadence
+- [ ] the R-BTN-96 amendment merged, `npm test` green, merged under the review gate
+
+Also found: R3-44 names `devices` in `repos:`, and `immediately-run/devices` does not exist. A live sync would fail on it, naming R3-44, as B-29 designed. That is docs' data to fix before cutover, not this ticket's.

@@ -49,6 +49,14 @@ npx baton run --course bug-report --home ~/src/repo-bug-report
   `<!-- baton:verdict approve -->` or `<!-- baton:verdict changes -->`. `create-pr`'s adjudication
   and `review-pr`'s conclusion are comment lines of the same kind. The leg's `close` writes each
   of these lines from the agent's answer, so the agent never writes them itself.
+- **A ticket's PRs may be in other repositories.** A ticket that names repositories in its
+  `repos:` (docs' roadmap items name the code repositories they change) gets one PR in each, on
+  a branch of the same name; its home may get none. The sync reads every repository a live
+  ticket names, and reads the ticket's PRs together, as one change: a verdict on any of them
+  stands for all of them, and the ticket is merged when every PR is. A leg whose line goes on a
+  PR names it after its answer (`approve https://github.com/<owner>/<name>/pull/<n>`) when the
+  checkout's branch has none. The workflow's token reads public repositories; a private one
+  needs a token that can read it.
 - **`bug-report`, `draft-ticket` and `decision` open no PR.** Their legs commit their work to the
   default branch, and each leg's `close` appends a line to `.baton/markers.jsonl` saying where the
   ticket got to and which leg comes next. The sync reads that file, so these courses need no forge

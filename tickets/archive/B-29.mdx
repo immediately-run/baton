@@ -2,7 +2,7 @@
 title: "B-29 — Baton's create-pr across repositories: a ticket's PRs in every repository its repos names"
 id: B-29
 project: baton
-status: in-review
+status: done
 updated: 2026-10-18
 repos:
   - immediately-run/baton
@@ -110,3 +110,11 @@ branch, which for a docs item does not exist.
 
 ## Status
 
+Delivered by https://github.com/immediately-run/baton/pull/51 (merged 4a814b8, 2026-10-18), after
+three review rounds with 12 distinct findings, all closed; the rows are in
+`docs/review/pr-findings.mdx`. Both exit criteria hold: `npm test` green apart from the two
+`ssh-keygen` tests (no `ssh-keygen` in the container), with S-BTN-106, G-BTN-125 and the
+R-BTN-74/R-BTN-96/R-BTN-131 amendments in the spec; `src/core/` unchanged. Beyond the item, the
+review added two things. `review-pr` reads only the repositories its ticket names (a `prs:` URL
+into another finds no PR). A named repository whose PR list GitHub refuses (403 or 404, not a
+rate limit) fails the sync with an error naming the tickets whose `repos:` name it.

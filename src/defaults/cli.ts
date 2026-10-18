@@ -14,7 +14,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, type Auth, type Transport } from '../runner/api';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { DEFAULT_BRANCH_PATTERN, matchPatterns, ticketOwns, type PrFact, type StationsResult } from './course-pr';
+import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type PrFact, type StationsResult } from './course-pr';
+import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
 import { MARKERS_FILE, parseMarkers, type Marker } from './course-markers';
@@ -172,13 +173,28 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     patterns: matchPatterns([c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])]),
     tickets: result.tickets.filter((t) => t.course_id === c.id && !closedIds.has(t.id)),
   }));
-  const owns = (pr: { number: number; head: string }) => owners.some((o) => o.tickets.some((t) => ticketOwns(t, pr, o.patterns, repository)));
+  const owns = (pr: { number: number; head: string; repository?: string }) => owners.some((o) => o.tickets.some((t) => ticketOwns(t, pr, o.patterns, repository)));
   const syncMjsOf = (id: string): string => join(root, '.baton', 'courses', id, 'sync.mjs');
   // The forge is read only when a course reads PRs: a repository on the marker courses alone
   // (bug-report, draft-ticket, decision) needs no forge token. A course's own sync.mjs may read
   // them, so it gets them too.
-  const readsPrs = courses.some((c) => existsSync(syncMjsOf(c.id)) || builtIn(c.id)?.reads === 'prs');
-  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns) : [];
+  const readsPrsOf = (c: CourseEntry): boolean => existsSync(syncMjsOf(c.id)) || builtIn(c.id)?.reads === 'prs';
+  const readsPrs = courses.some(readsPrsOf);
+  // The other repositories a live ticket on a PR-reading course names in `repos:` (B-29): its PRs
+  // may be there, and a home with none (docs) is the usual case.
+  // Each with the tickets naming it, so a repository the token cannot read is named with them.
+  const siblings = new Map<string, { repository: string; tickets: string[] }>();
+  for (const c of courses.filter(readsPrsOf)) {
+    for (const t of result.tickets.filter((x) => x.course_id === c.id && !closedIds.has(x.id))) {
+      for (const r of t.repos ?? []) {
+        if (repository != null && sameRepoName(r, repository)) continue;
+        const s = siblings.get(r.toLowerCase()) ?? { repository: r, tickets: [] };
+        s.tickets.push(t.id);
+        siblings.set(r.toLowerCase(), s);
+      }
+    }
+  }
+  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()]) : [];
   // The closing markers the marker courses' legs committed (R-BTN-83), as the checkout has them.
   const markersFile = join(root, MARKERS_FILE);
   const markerLines: Marker[] = existsSync(markersFile)
@@ -339,7 +355,7 @@ const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
  * commits' dates, their reviews and their comments, mapped to PrFact. Every list is read to its
  * end (GitHub's `Link: rel="next"`), so a long-lived repository or a long thread is never cut
  * off. Live forge access — the tests inject recorded facts instead. */
-export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string }) => boolean): Promise<PrFact[]> {
+export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = []): Promise<PrFact[]> {
   const slug = remoteSlug(root);
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   const token = process.env.GITHUB_TOKEN;
@@ -348,7 +364,9 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   const get = async (url: string): Promise<Response> => {
     if (++requests > MAX_REQUESTS) throw new Error(`GitHub: this sync would need more than ${MAX_REQUESTS} requests — refusing before the token's hourly budget is spent`);
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    if (!res.ok) throw new Error(`GitHub ${url}: ${res.status}`);
+    // A rate limit is GitHub's 403 or 429 with no requests left, or a secondary limit's retry-after.
+    const limited = res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after');
+    if (!res.ok) throw Object.assign(new Error(`GitHub ${url}: ${res.status}${limited ? ' (rate limited)' : ''}`), { status: res.status, limited });
     return res;
   };
   /** Every item of a paged list; `pick` takes a page's items from its body. */
@@ -364,35 +382,60 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     return out;
   };
   const out: PrFact[] = [];
-  for (const pr of await all<any>(`/repos/${slug}/pulls?state=all`)) {
-    const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
-    // Only a PR a live ticket owns needs its detail read; any other PR places no ticket and is
-    // recorded from the list alone, so the requests a run makes grow with the live tickets, not
-    // with the repository's history. A closed unmerged PR a live ticket owns is read too:
-    // `create-pr` counts it as none (R-BTN-74), but `review-pr` concludes on it, and reads its
-    // conclusion line from its comments.
-    if (!owns({ number: pr.number, head: pr.head.ref })) {
-      out.push({ number: pr.number, head: pr.head.ref, state, pushedAt: 0, checks: [], reviews: [] });
-      continue;
-    }
-    const checks = (await all<any>(`/repos/${slug}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null);
-    // A push is read from its commits' own dates, never `updated_at`, which a comment moves.
-    const pushes = (await all<any>(`/repos/${slug}/pulls/${pr.number}/commits`)).map((c) => Date.parse(c.commit.committer.date));
-    // A verdict counts only from someone with a say over the repository — its owner, a member
-    // or a collaborator (GitHub's author_association) — never a drive-by comment on a public PR.
-    const reviews = (await all<any>(`/repos/${slug}/pulls/${pr.number}/reviews`))
-      .filter((r) => TRUSTED.has(r.author_association))
-      .map((r) => ({ author: r.user?.login ?? '?', state: r.state, submittedAt: Date.parse(r.submitted_at), body: r.body ?? '' }));
-    const comments = (await all<any>(`/repos/${slug}/issues/${pr.number}/comments`))
-      .filter((c) => TRUSTED.has(c.author_association))
-      .map((c) => ({ author: c.user?.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.created_at), body: c.body ?? '' }));
-    out.push({
-      number: pr.number, head: pr.head.ref, state,
-      pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments],
-    });
+  // The home, then each other repository a live ticket names in `repos:` (B-29), under the one
+  // budget: a sync that would exceed it refuses rather than post a partial reading.
+  for (const { repository: repo, tickets } of [{ repository: slug, tickets: [] as string[] }, ...siblings.filter((s) => !sameRepoName(s.repository, slug))]) {
+    const before = out.length;
+    out.push(...(await repoFacts(repo, tickets)));
+    log(`baton: read ${out.length - before} PRs of ${repo} from GitHub`);
   }
-  log(`baton: read ${out.length} PRs of ${slug} from GitHub in ${requests} requests`);
+  log(`baton: ${requests} requests in all`);
   return out;
+
+  async function repoFacts(repo: string, tickets: string[]): Promise<PrFact[]> {
+    const out: PrFact[] = [];
+    for (const pr of await list(repo, tickets)) {
+      const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
+      // Only a PR a live ticket owns needs its detail read; any other PR places no ticket and is
+      // recorded from the list alone, so the requests a run makes grow with the live tickets, not
+      // with the repository's history. A closed unmerged PR a live ticket owns is read too:
+      // `create-pr` counts it as none (R-BTN-74), but `review-pr` concludes on it, and reads its
+      // conclusion line from its comments.
+      if (!owns({ number: pr.number, head: pr.head.ref, repository: repo })) {
+        out.push({ number: pr.number, head: pr.head.ref, state, pushedAt: 0, checks: [], reviews: [], repository: repo });
+        continue;
+      }
+      const checks = (await all<any>(`/repos/${repo}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null);
+      // A push is read from its commits' own dates, never `updated_at`, which a comment moves.
+      const pushes = (await all<any>(`/repos/${repo}/pulls/${pr.number}/commits`)).map((c) => Date.parse(c.commit.committer.date));
+      // A verdict counts only from someone with a say over the repository — its owner, a member
+      // or a collaborator (GitHub's author_association) — never a drive-by comment on a public PR.
+      const reviews = (await all<any>(`/repos/${repo}/pulls/${pr.number}/reviews`))
+        .filter((r) => TRUSTED.has(r.author_association))
+        .map((r) => ({ author: r.user?.login ?? '?', state: r.state, submittedAt: Date.parse(r.submitted_at), body: r.body ?? '' }));
+      const comments = (await all<any>(`/repos/${repo}/issues/${pr.number}/comments`))
+        .filter((c) => TRUSTED.has(c.author_association))
+        .map((c) => ({ author: c.user?.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.created_at), body: c.body ?? '' }));
+      out.push({
+        number: pr.number, head: pr.head.ref, state,
+        pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments], repository: repo,
+      });
+    }
+    return out;
+  }
+
+  /** A repository's PRs. A named repository whose list GitHub refuses (403) or does not find
+   * (404) fails the whole sync — no partial reading — naming the tickets whose `repos:` name it;
+   * any other failure, as a timeout, a 5xx, a rate limit or the budget, is passed through as it is. */
+  async function list(repo: string, tickets: string[]): Promise<any[]> {
+    try {
+      return await all<any>(`/repos/${repo}/pulls?state=all`);
+    } catch (e) {
+      const { status, limited } = e as { status?: number; limited?: boolean };
+      if (!tickets.length || limited || (status !== 403 && status !== 404)) throw e;
+      throw new Error(`${(e as Error).message} — ${repo} is named in repos: by ${tickets.join(', ')}; the sync's token cannot read it, or it does not exist`);
+    }
+  }
 }
 
 /** Bundle `entrySource` (a module importing the defaults by absolute path) into one standalone
@@ -448,6 +491,9 @@ const AGENT_OUTPUT_MAX = 64 * 1024 * 1024;
  * closing marker where the course's convention puts it. */
 function stubSource(b: BuiltIn, course: string, leg: string): string {
   const { ask, position } = b.legs[leg];
+  // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
+  // PRs may sit in other repositories, and its home may have none.
+  const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
   const closeFrom = b.reads === 'prs' ? ['prClose', 'pr-close.ts'] : ['markerClose', 'course-markers.ts'];
   const values = ask ? ask.values.join(' or ') : '';
   return `import { execFile, execFileSync } from 'node:child_process';
@@ -503,20 +549,32 @@ async function standard(ctx) {
     cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX},
     env: {
       ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.path ?? '',${ask ? `
-      BATON_ANSWER: ${JSON.stringify(`print ${values} as your last line`)},${ask.name === 'verdict' ? ` BATON_VERDICT: ${JSON.stringify(`print ${values} as your last line`)},` : ''}` : ''}
+      BATON_ANSWER: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},${ask.name === 'verdict' ? ` BATON_VERDICT: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},` : ''}` : ''}
     },
   }, (e, stdout) => (e ? reject(e) : resolve(String(stdout))))).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
-  });${ask ? `
+  });${names ? `
+  // The last line: the answer, then — optionally — the PR its line goes on. A leg with no answer
+  // names its PR by a last line that is a PR URL alone; any other last line names none.
+  const last = (out.trim().split('\\n').at(-1) ?? '').trim();${ask ? '' : `
+  const on = ${PR_URL}.test(last) ? last : null;`}${ask ? `
+  const [answer, pr, ...rest] = last.split(/\\s+/);
+  if (!${JSON.stringify(ask.values)}.includes(answer)) throw new Error(${JSON.stringify(`the ${leg} agent printed no ${ask.name} (${values}) as its last line`)});
+  if (rest.length || (pr != null && !${PR_URL}.test(pr))) throw new Error(${JSON.stringify(`the ${leg} agent's last line names no PR URL after its ${ask.name}`)});
+  const on = pr ?? null;` : ''}
+  return { ...(${position}), ...(on ? { pr: on } : {}) };` : `${ask ? `
   const answer = out.trim().split('\\n').at(-1)?.trim();
   if (!${JSON.stringify(ask.values)}.includes(answer)) throw new Error(${JSON.stringify(`the ${leg} agent printed no ${ask.name} (${values}) as its last line`)});` : `
   void out;`}
-  return ${position};
+  return ${position};`}
 }
 export const close = ${closeFrom[0]};
 export async function handoff() { return null; }
 `;
 }
+
+/** pr-close.ts's PR URL, as a regular-expression literal for the stubs (B-29). */
+const PR_URL = `/${PR_URL_RE.source}/`;
 
 /** A repository's replacement for one leg's `run` (R-BTN-131): `legs/<leg>.run.mjs`. */
 const OVERRIDE_SUFFIX = '.run.mjs';

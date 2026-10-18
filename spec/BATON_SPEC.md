@@ -785,8 +785,13 @@ offers a sane default.)*
     `review` (`pr-open` or `fixed` → `reviewed`, `max_runs` 4), `fix` (`reviewed` → `fixed`,
     `max_runs` 3), `merge` (`reviewed` → `merged`); `short_waits: ["ci"]`. It reads its forge through the CLI's fact adapter (R-BTN-96): the facts below are GitHub's, and GitLab's and Gitea's are mapped to the same ones; a `git` repository uses the `branch` course instead. On GitHub it reads GitHub
     alone. A ticket's PRs are its `prs:` and every PR, **open or merged**, whose head branch
-    matches the course's current or previous `branch_pattern`; with several, the ticket is
-    where its least advanced PR is, and every PR merged is `merged` — the end station, so the
+    matches the course's current or previous `branch_pattern`, in its home repository or in one
+    its `repos:` names *(amended 2026-10-18, B-29)*; a bare `prs:` number is a home PR, a URL
+    names its repository, and a PR is matched by repository and number. Several PRs are **one
+    change**, read together *(amended 2026-10-18, B-29: they were placed by the least
+    advanced, which assumed each leg's line was written on every PR; `close` writes it on
+    one)*: their verdict lines, adjudication lines and pushes form one timeline, `review` waits
+    on `ci` until every open PR's checks finish, and every PR merged is `merged` — the end station, so the
     ticket is done for Baton (R-BTN-70) whether or not its file says `done` yet, which the
     `merge` leg's script also writes *(review gate round 3)*, and a closed unmerged PR counts as none.
     No PR is `filed`, with `implement` ready once its dependencies are done. An open PR is
@@ -800,7 +805,7 @@ offers a sane default.)*
     approving makes `reviewed` with `merge` ready; asking for changes makes `reviewed` with
     `fix` ready, or, once `fix` has run three times, `merge` waiting on `owner` (listed under
     **Needs you**, §14); a comment-only review with no verdict line changes nothing; a push
-    after the verdict is `fixed`. The path is the least advanced PR's timeline in order, so a leg done on several PRs at once is one step of the path and counts once toward `max_runs` *(after the round-3 adjudication)*. No seats or bars — a
+    after the verdict is `fixed`. The path is the change's timeline in order, so a leg done on several PRs at once is one step of the path and counts once toward `max_runs` *(after the round-3 adjudication; B-29)*. No seats or bars — a
     repository that needs independence or hand-off markers writes its own course, as docs did;
   - **no default leg scripts.** Leg scripts run the repository's own agents (R-BTN-72), so
     `baton repo init` writes stubs, one per leg, that run a command the repository names in
@@ -880,6 +885,13 @@ offers a sane default.)*
     claim there rather than start a leg the board does not yet show waiting (§6.13):
     `decision`'s `prepare`, `review-pr`'s `review` asking for changes, and `create-pr`'s
     `adjudicate` answering `owner`.
+  - **A ticket's PRs across repositories** *(B-29)*. `create-pr` and `review-pr` read the PRs of
+    every repository a ticket names in `repos:` (R-BTN-74, R-BTN-96), and of no other: a `prs:`
+    URL into a repository the ticket does not name finds no PR; a home with no PR, as a docs
+    ticket's, is placed from the others. A commenting leg — `review`, `adjudicate`,
+    `conclude` — may name the PR its line goes on: its answer line is `<answer> <PR URL>`, and
+    `conclude`'s is the URL alone; the stub refuses anything else after the answer, and `close`
+    comments on that PR, else on the checkout branch's.
   - **The stubs and instructions.** Each leg's stub runs `agent_command` (R-BTN-74) with
     `BATON_COURSE`, `BATON_LEG`, `BATON_TICKET_FILE` and `BATON_INSTRUCTIONS` — a copy of
     `.baton/courses/<id>/legs/<leg>.md` read at the claim's snapshot, never the working tree. A
@@ -938,7 +950,7 @@ offers a sane default.)*
     repository's — the leg instructions, the overrides, the tickets README — are written only
     when missing, never over its edits.
 
-  Course code in the CLI, never core (§2b). S-BTN-104, S-BTN-105, G-BTN-123, G-BTN-124.
+  Course code in the CLI, never core (§2b). S-BTN-104, S-BTN-105, S-BTN-106, G-BTN-123, G-BTN-124, G-BTN-125.
 
 ## 2g. Blocks: why a ticket cannot move, answered from an index *(amendment 2026-10-15, owner direction; proposal)*
 
@@ -2020,7 +2032,13 @@ place; this paragraph covers the rest.
   reviews, GitLab merge requests and approvals, Gitea pull requests and reviews — each mapped to
   the same facts (a PR's head branch, state, head checks, verdicts on the head), so the station
   rules are written once. The verdict line `<!-- baton:verdict approve|changes -->` works on
-  every forge. For a `git` repository, `baton repo init --course branch` writes the built-in
+  every forge. *(Amended 2026-10-18, B-29.)* The GitHub adapter reads the home repository and
+  every other repository a live ticket on a PR-reading course names in `repos:` (deduplicated,
+  names compared without case), under the one request budget, refusing rather than posting a
+  partial reading; each fact records its `repository`. A private sibling repository needs a
+  token that can read it; a named repository the token cannot read, or that does not exist,
+  fails the sync — posting nothing, as any partial reading — with an error naming the tickets
+  whose `repos:` names it. For a `git` repository, `baton repo init --course branch` writes the built-in
   **`branch`** course, whose station function the CLI provides (R-BTN-74, as it does `pr`'s)
   and whose facts come from git alone:
   - stations `filed` → `pushed` → `reviewed` → `merged`, with `fixed` between `reviewed` and
@@ -3810,6 +3828,7 @@ attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refr
   | S-BTN-101 Baton's MCP endpoint | *(2026-10-18, R-BTN-151: the second key also sends `ticket_hold` with `{hold:false}`, which is `invalid-params`, and `--actions ticket.expedite` is refused at minting)* an owner mints `--actions read` and `--actions leg.stop,ticket.hold`, and tries `--actions owner.owners.add`; a dashboard session tries to mint one; a request after `initialize` carries no `MCP-Protocol-Version` while `MCP_VERSIONS` lacks `2025-03-26`; an agent initializes, sends `notifications/initialized` and `ping`, lists and calls tools with each key; calls `leg_stop` without `confirm`; calls `leg_stop` with the read-only key; names a ticket of another repository; calls an unknown tool; sends a batch, a `GET` and an unlisted protocol version; a request carries a foreign `Origin`; it sends 61 calls in a minute; a list exceeds one page; the key is presented on `POST /v1/owner/{repository}/overrides/{ticket}` | the third mint is refused, and a dashboard session's mint is `forbidden`; the notification is `202` and `ping` answers; the first key lists only read tools, the second adds `leg_stop` and `ticket_hold`; `leg_stop` without `confirm` is `confirm-required`; the read-only key's `leg_stop`, the other repository's ticket and the unknown tool all answer the same `forbidden`; the batch is `-32600`, the `GET` `405`, the unlisted and the absent versions `400`, the `Origin` `403`; the 61st call is `rate-limited` with `retry_after_s`; the page returns a `next_cursor` that another key cannot use; the REST call is `unauthenticated`; a ticket title carrying instructions comes back as a JSON value |
   | S-BTN-102 the same action, three ways | `leg.stop` on one running leg through `POST /v1/owner/{repository}/tickets/{ticket}/release`, `baton leg stop` and the MCP tool `leg_stop`, each with `confirm` by a key allowed it, then by one that is not | the three allowed calls send the same release through the same core function and return the same output, the MCP one recorded as `mcp:<name>`; the three refusals carry the same code from the same `authorize` call |
   | S-BTN-103 an MCP key's life | a key minted with `--ttl 120`; a key minted with `read` before a release adds a new read action; a key unused for 8 days; a key whose minting owner key is then revoked; the repository's owners set `api_keys: false`; an owner revokes a key by name without `confirm`, then with it | the 120-day mint is refused; the older key never lists the new action; the idle and orphaned keys are dead and refused `401`; under `api_keys: false` the key is refused `401` and works again once the setting is `true`; the revoke without `confirm` is `confirm-required`, with it the key is dead |
+  | S-BTN-106 a ticket's PRs in other repositories (R-BTN-74, R-BTN-96, R-BTN-131; B-29) | a repository whose ticket names two other repositories in `repos:` — its home gets no PR — syncs against a recorded GitHub; a closed ticket names a third; the review's verdict line lands on one PR; then one PR merges, then the other | the sync reads the home and the two repositories the live ticket names, never the closed ticket's; the ticket is `pr-open` from their PRs; the verdict on one PR makes the change `reviewed` with `merge` queued; one merged leaves it there; both merged is `merged` |
   | S-BTN-105 a course from its source, one leg overridden (R-BTN-131, B-33) | a repository runs `baton repo init --override review`: its `create-pr` names `github/<owner>/<name>/<commit>/create-pr` at the CLI's commit, and `legs/review.run.mjs` replaces the review's run; a claim's `review` runs the override at the snapshot; then, one at a time, the course file edited, the source at another commit, the source in another repository, and a `sync.mjs` beside the source | the sync posts the course and places the ticket at `pr-open`; the override runs and the standard `close` writes the verdict line, which moves the ticket to `reviewed` with `fix` queued; each of the four is refused, naming what to do, and nothing is posted until the last is undone |
   | S-BTN-104 the standard courses (R-BTN-131, B-28) | a fresh repository runs `baton repo init`, then `--course bug-report` and `--course decision`, with a ticket on each; the bug report's legs commit closing markers to `.baton/markers.jsonl` (with a marker that is no edge and a malformed line among them); the decision's owner sets `answer:`; a second repository runs on `draft-ticket` alone with no forge facts and no token | each ticket starts at its course's start with its start leg queued; the bug report follows its markers to `closed`, the marker that is no edge and the malformed line changing nothing, its queued leg the marker's `next`; `carry-out` waits on `owner` until `answer:` is set, then is ready; the second repository syncs and places its ticket at `requested` |
 
@@ -3852,6 +3871,7 @@ attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refr
   | An MCP key reaches only its stored, still-allowlisted ids on its one repository, accepted only on `POST /v1/mcp`; it never reaches an administrator action, a machine protocol, a credential or owner change, or an R-BTN-66 write; out-of-scope, unlisted and unknown targets answer alike; the transport, rate and page rules hold | G-BTN-121 (S-BTN-101) |
   | An MCP key's ids are fixed at minting; it dies with its expiry, 7 idle days, its minting owner key or its revocation, and is refused while `api_keys` is `false` | G-BTN-122 (S-BTN-103) |
   | A standard course needs no course code of its own: each ticket is placed from its PRs or its committed markers, a marker that is no edge or a malformed line moves nothing, and a stub hands its agent instructions read at the claim's snapshot, never the working tree | G-BTN-123 (S-BTN-104) |
+  | A ticket's PRs in every repository it names are read under one budget, matched by repository and number, and read together as one change: a verdict on any of them stands for all, and it is merged when every one is | G-BTN-125 (S-BTN-106) |
   | A course named by its source runs the source's graph exactly — the sync refuses a course file that differs, a source at another commit or repository, and a `sync.mjs` beside it — and a repository's `<leg>.run.mjs` replaces that leg's run, read at the snapshot, never its close | G-BTN-124 (S-BTN-105) |
 
 ## 3. The service *(proposal)*

@@ -29,8 +29,9 @@ return; do not write it.
 
 ## 3. Open the PR
 
-Open one PR per repository the ticket touches, its title starting with the ticket's id. The body,
-in this order:
+Open one PR per repository the ticket touches, its title starting with the ticket's id. The
+ticket's `repos:` lists the repositories besides this one; each gets its PR from a branch of the
+same name, in its own checkout. This repository may get none. The body, in this order:
 
 - **What** — three lines.
 - **Architecture decisions taken**, and **Deviations** from the ticket, if any, each with why.
@@ -39,7 +40,8 @@ in this order:
 - **Exit criteria** — each of the ticket's, with how it was checked (the test, the command, the
   output).
 
-Then add the PR's URL to the ticket's `prs:` list if the ticket keeps one.
+Then add every PR's URL to the ticket's `prs:` list if the ticket keeps one. Baton reads the PRs
+of every repository the ticket names, and reads them together, as one change.
 
 ## Do not
 

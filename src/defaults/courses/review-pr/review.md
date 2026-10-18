@@ -3,7 +3,9 @@
 You are running the `review` leg of the `review-pr` course: one review round of a PR someone else
 opened. The ticket's file is `$BATON_TICKET_FILE`, and its `prs:` names the PR. You will not fix
 the PR. **Print your verdict as your last line, alone: `approve` or `changes`.** Baton writes the
-verdict line on the PR from it.
+verdict line on the PR from it. If the PR is in another repository (named in the ticket's
+`repos:`, its `prs:` entry a URL), follow the verdict with the PR's URL on the same line:
+`changes https://github.com/<owner>/<name>/pull/<n>`.
 
 ## Before reading
 
