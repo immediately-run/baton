@@ -1,0 +1,105 @@
+---
+title: "B-34 — tenancy seams: a tenant is a Baton named by its origin, served only there; per-tenant object names, refusal handling, runner origins and forge ids, so many tenants later is a router"
+id: B-34
+project: baton
+status: available
+updated: 2026-10-18
+repos:
+  - immediately-run/baton
+tags:
+  - roadmap-item
+description: "Owner, 2026-10-18: build Baton single-tenant now so that one deployment can later serve parties who do not trust each other with no interface changed and no trust promise taken back. Builds BATON_SPEC §3b (R-BTN-132 to R-BTN-135): the Worker serves only its origin, every Durable Object is named under its tenant, clients handle rate-limited and quota on every route, a runner serves one origin, the CLI's keys and secret sink are per origin, signed forge-check notices name their tenant, and forge repositories are identified by their immutable ids."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** BATON_SPEC §3b — R-BTN-132, R-BTN-133, R-BTN-134 and R-BTN-135 (new), and the rules
+they amend; S-BTN-106 to S-BTN-109; G-BTN-125 to G-BTN-129.
+**Depends on:** nothing. R-BTN-118's stream, R-BTN-114's notice and R-BTN-117's credentials
+take the naming and fields below when they are built, wherever they are built first.
+
+### Requires
+
+A checkout and a terminal for everything but one exit criterion. That one needs a GitHub
+repository and an Actions run, to read a real OIDC token's `repository_id`.
+
+### Why
+
+The owner, 2026-10-18: "My goal is to build baton single tenant for now which makes it
+possible to later build multi tenant support without breaking interfaces or the trust model."
+§3b settles what would otherwise break when a second tenant arrives. Each item below is cheap
+today and an interface change or a broken promise later.
+
+### What to build
+
+1. **Served only at its origin** (R-BTN-132). The Worker answers `404` to a URL host that is
+   not `BATON_ORIGIN`'s authority (lowercased, default port elided), before any object.
+   `wrangler.toml` sets `workers_dev = false` and `preview_urls = false`, for both
+   environments.
+2. **Object names** (R-BTN-132). The tenant object stays `idFromName('baton')`. Every other
+   Durable Object is `idFromName('baton/<kind>/<key>')`; a stream is
+   `baton/stream/<claim id>`. The shell passes the tenant id. The object writes
+   `baton_settings.tenant_id` at its first request and refuses another id with `forbidden`,
+   logged `tenant-mismatch`.
+3. **Rate limits** (§3 as amended). The per-credential counter is keyed by tenant and
+   credential, and counts only requests the object verified. The per-IP rule is keyed by host
+   and IP.
+4. **Refusals every client handles** (R-BTN-132). The runner, sidecar, CLI, couriers, sync,
+   mirror and dashboard each handle `rate-limited` and `quota` on every route:
+   - periodic loops back off, honouring `retry_after_s`, and keep their lease;
+   - one-shot commands exit non-zero naming the code within 60 seconds;
+   - a retry is re-signed;
+   - neither code marks a lease lost (§6.3);
+   - `too-large` is reported and never retried.
+5. **A runner's origin** (R-BTN-134).
+   - `runner.json` gains `origin`.
+   - The runner and sidecar refuse a checkout whose `baton_url` names another origin.
+   - `runner register` and `runner start` keep `~/.config/baton/origins.json`, and `start`
+     refuses a key listed for another origin.
+   - `keys.json` maps each origin to its roles.
+6. **The secret sink** (R-BTN-133). `github-app create`, admin-key rotation and forge-secret
+   entries write through a sink chosen by configuration: `wrangler` or `file`.
+7. **Signed notices** (R-BTN-133). `forge-check` notices carry and sign `origin` and
+   `forge_repo_id`. `GET /v1/keys/signing` returns its `{keys: [...]}` list.
+8. **Forge ids** (R-BTN-135).
+   - A migration adds `forge_repo_id`, `forge_owner_id`, `forge_host` and the unique index.
+   - Registration requires the ids for a forge repository. `repo add` reads them from the
+     forge API, or from `--forge-ids`.
+   - `baton admin repo identify` sets them on the change body, and replacing them needs
+     `confirm`.
+   - Verification:
+     - OIDC and GitLab tokens are checked by id once ids are stored;
+     - App deliveries and notifications map by id, and a path match with another id is
+       logged `forge-id-mismatch`;
+     - a verified rename updates the stored path (`repo-renamed`).
+   - A repository without ids is listed under Needs you.
+   - Every registered repository having its ids is a cutover precondition.
+
+### Architecture
+
+- **Core stays tenant-blind.** No `src/core/` function takes a tenant id. The tenant id lives
+  in the Cloudflare shell and in `baton_settings`, and the local host's shell passes its own.
+  A static check fails the build if `src/core/` names `tenant` outside comments.
+- **No router.** This item builds no host table, no tenant record and no `operator` sink.
+  Those are the multi-tenant work, and §3b says they change nothing built here.
+- **Ids are strings.** GitHub's numeric ids are compared as decimal strings, so no float ever
+  touches them.
+
+### Tests
+
+- S-BTN-106 to S-BTN-109 in `test/integration/`, on both hosts.
+- Unit tests for the Cloudflare shell's host check and object names (G-BTN-126). The static
+  check on `src/core/` runs in `npm test`.
+- Unit tests for OIDC, GitLab and webhook verification with matching and mismatched ids,
+  using fixtures from real token and payload shapes.
+
+### Exit criteria
+
+- `npm test` and `npm run typecheck` green, with S-BTN-106 to S-BTN-109 and G-BTN-125 to
+  G-BTN-129 passing.
+- One real GitHub Actions OIDC token, from a workflow in a scratch repository, verified by id
+  against a local Baton.
+- `wrangler.toml` serves no `workers.dev` or preview URL.
