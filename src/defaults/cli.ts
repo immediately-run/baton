@@ -340,6 +340,8 @@ function bearerAuth(token: string | null): Auth {
   return (_m, _u, _b, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
 }
 
+/** GitHub's API origin, REST and GraphQL alike. */
+const GITHUB_API = 'https://api.github.com';
 /** How long one GitHub or token call may take before the sync fails (§6.3's bound). */
 const FETCH_TIMEOUT_MS = 30_000;
 /** The most pages of 100 one list may span; beyond it the sync fails rather than truncate. */
@@ -350,29 +352,73 @@ const MAX_PAGES = 50;
 const MAX_REQUESTS = 200;
 /** The `author_association` values whose reviews and comments carry a verdict. */
 const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+/** The most PRs one GraphQL query reads (B-35). One PR asks for up to 10 check suites of 100 runs
+ * and 100 each of commits, reviews and comments — 15 connection requests, so a full batch is 375,
+ * about 4 of the token's GraphQL points an hour, and some 32,500 nodes, far inside GitHub's
+ * 500,000 a query; 25 keeps a query's cost and answer small while one query serves most
+ * repositories' owned PRs. */
+const GRAPHQL_BATCH = 25;
+
+/** The detail of one PR that a GraphQL batch asks for (B-35): the head commit's check runs, the
+ * commits' dates, the reviews and the issue comments — the four REST lists it replaces, each a
+ * first page (10 check suites of 100 runs; 100 commits, reviews, comments) with `hasNextPage`,
+ * so an overflowing one is read over REST in full. The
+ * check runs come through the head's check suites (the latest run of each check, as REST's
+ * check-runs list gives them), never `statusCheckRollup`, which takes in commit statuses too and
+ * so may need a permission the sync workflow does not grant: `checks: read` covers this, as it
+ * covered the REST read. */
+const PR_DETAIL = `fragment D on PullRequest {
+  head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
+  commits(first: 100) { pageInfo { hasNextPage } nodes { commit { committedDate } } }
+  reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body } }
+  comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation createdAt body } }
+}`;
+
+/** The GraphQL query reading `numbers`' detail in one repository, each PR under alias `p<n>`. */
+const detailQuery = (numbers: number[]): string =>
+  `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${numbers.map((n) => `p${n}: pullRequest(number: ${n}) { ...D }`).join(' ')} } }\n${PR_DETAIL}`;
 
 /** R-BTN-96's fact adapter, GitHub half: the repository's PRs with their head's checks, their
- * commits' dates, their reviews and their comments, mapped to PrFact. Every list is read to its
- * end (GitHub's `Link: rel="next"`), so a long-lived repository or a long thread is never cut
- * off. Live forge access — the tests inject recorded facts instead. */
+ * commits' dates, their reviews and their comments, mapped to PrFact. The PR lists are read over
+ * REST, each to its end (GitHub's `Link: rel="next"`); the PRs a live ticket owns are read over
+ * GraphQL, GRAPHQL_BATCH to a query (B-35), with any connection that overflows its first page read
+ * over REST in full, so a long-lived repository or a long thread is never cut off. Live forge
+ * access — the tests inject recorded facts instead. */
 export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = []): Promise<PrFact[]> {
   const slug = remoteSlug(root);
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error('no GITHUB_TOKEN to read GitHub — pass --facts <file> for recorded facts');
   let requests = 0;
-  const get = async (url: string): Promise<Response> => {
+  /** One request of the budget, REST or GraphQL alike: past it the sync refuses. */
+  const spend = (): void => {
     if (++requests > MAX_REQUESTS) throw new Error(`GitHub: this sync would need more than ${MAX_REQUESTS} requests — refusing before the token's hourly budget is spent`);
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    // A rate limit is GitHub's 403 or 429 with no requests left, or a secondary limit's retry-after.
+  };
+  /** `res`, or the error a failed one is: its status, and whether it is a rate limit — GitHub's
+   * 403 or 429 with no requests left, or a secondary limit's retry-after — which `list` reads. */
+  const checked = (res: Response, what: string): Response => {
     const limited = res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after');
-    if (!res.ok) throw Object.assign(new Error(`GitHub ${url}: ${res.status}${limited ? ' (rate limited)' : ''}`), { status: res.status, limited });
+    if (!res.ok) throw Object.assign(new Error(`GitHub ${what}: ${res.status}${limited ? ' (rate limited)' : ''}`), { status: res.status, limited });
     return res;
+  };
+  const get = async (url: string): Promise<Response> => {
+    spend();
+    return checked(await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), url);
+  };
+  /** One GraphQL query, one request of the budget (B-35). An answer carrying `errors` fails the
+   * sync, as a failed REST read does: no partial reading is posted. */
+  const graphql = async (query: string, variables: Record<string, unknown>): Promise<any> => {
+    spend();
+    const url = `${GITHUB_API}/graphql`;
+    const res = checked(await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'baton-sync' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), `${url} (${String(variables.owner)}/${String(variables.name)})`);
+    const body = (await res.json()) as { data?: any; errors?: { message?: string }[] };
+    if (body.errors?.length) throw new Error(`GitHub GraphQL (${String(variables.owner)}/${String(variables.name)}): ${body.errors.map((e) => e.message ?? '?').join('; ')}`);
+    return body.data;
   };
   /** Every item of a paged list; `pick` takes a page's items from its body. */
   const all = async <T>(path: string, pick: (body: any) => T[] = (b) => b as T[]): Promise<T[]> => {
     const out: T[] = [];
-    let url: string | null = `https://api.github.com${path}${path.includes('?') ? '&' : '?'}per_page=100`;
+    let url: string | null = `${GITHUB_API}${path}${path.includes('?') ? '&' : '?'}per_page=100`;
     for (let page = 0; url != null; page++) {
       if (page === MAX_PAGES) throw new Error(`GitHub ${path}: more than ${MAX_PAGES * 100} items — the sync will not post a truncated reading`);
       const res = await get(url);
@@ -393,35 +439,55 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   return out;
 
   async function repoFacts(repo: string, tickets: string[]): Promise<PrFact[]> {
-    const out: PrFact[] = [];
-    for (const pr of await list(repo, tickets)) {
-      const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
-      // Only a PR a live ticket owns needs its detail read; any other PR places no ticket and is
-      // recorded from the list alone, so the requests a run makes grow with the live tickets, not
-      // with the repository's history. A closed unmerged PR a live ticket owns is read too:
-      // `create-pr` counts it as none (R-BTN-74), but `review-pr` concludes on it, and reads its
-      // conclusion line from its comments.
-      if (!owns({ number: pr.number, head: pr.head.ref, repository: repo })) {
-        out.push({ number: pr.number, head: pr.head.ref, state, pushedAt: 0, checks: [], reviews: [], repository: repo });
-        continue;
-      }
-      const checks = (await all<any>(`/repos/${repo}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null);
-      // A push is read from its commits' own dates, never `updated_at`, which a comment moves.
-      const pushes = (await all<any>(`/repos/${repo}/pulls/${pr.number}/commits`)).map((c) => Date.parse(c.commit.committer.date));
-      // A verdict counts only from someone with a say over the repository — its owner, a member
-      // or a collaborator (GitHub's author_association) — never a drive-by comment on a public PR.
-      const reviews = (await all<any>(`/repos/${repo}/pulls/${pr.number}/reviews`))
-        .filter((r) => TRUSTED.has(r.author_association))
-        .map((r) => ({ author: r.user?.login ?? '?', state: r.state, submittedAt: Date.parse(r.submitted_at), body: r.body ?? '' }));
-      const comments = (await all<any>(`/repos/${repo}/issues/${pr.number}/comments`))
-        .filter((c) => TRUSTED.has(c.author_association))
-        .map((c) => ({ author: c.user?.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.created_at), body: c.body ?? '' }));
-      out.push({
-        number: pr.number, head: pr.head.ref, state,
-        pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments], repository: repo,
-      });
+    const listed = await list(repo, tickets);
+    // Only a PR a live ticket owns needs its detail read; any other PR places no ticket and is
+    // recorded from the list alone, so the requests a run makes grow with the live tickets, not
+    // with the repository's history. A closed unmerged PR a live ticket owns is read too:
+    // `create-pr` counts it as none (R-BTN-74), but `review-pr` concludes on it, and reads its
+    // conclusion line from its comments.
+    const owned = listed.filter((pr) => owns({ number: pr.number, head: pr.head.ref, repository: repo }));
+    const detail = new Map<number, Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>>();
+    // The owned PRs' detail, GRAPHQL_BATCH to a query (B-35): one request where REST took four a PR.
+    for (let i = 0; i < owned.length; i += GRAPHQL_BATCH) {
+      const batch = owned.slice(i, i + GRAPHQL_BATCH);
+      const [owner, name] = repo.split('/');
+      const data = await graphql(detailQuery(batch.map((pr) => pr.number)), { owner, name });
+      for (const pr of batch) detail.set(pr.number, await detailOf(repo, pr, data?.repository?.[`p${pr.number}`]));
     }
-    return out;
+    return listed.map((pr) => {
+      const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
+      return { number: pr.number, head: pr.head.ref, state, ...(detail.get(pr.number) ?? { pushedAt: 0, checks: [], reviews: [] }), repository: repo };
+    });
+  }
+
+  /** One PR's facts from its GraphQL node, mapped exactly as the REST lists are; a connection
+   * whose first page overflows, or a head the batch read at another commit, is read over REST. */
+  async function detailOf(repo: string, pr: any, node: any): Promise<Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>> {
+    if (node == null) throw new Error(`GitHub GraphQL (${repo}): no pull request #${pr.number}, though the list has it`);
+    const head = node.head?.nodes?.[0]?.commit;
+    const suites = head?.checkSuites;
+    const overflow = suites?.pageInfo?.hasNextPage || (suites?.nodes ?? []).some((cs: any) => cs?.checkRuns?.pageInfo?.hasNextPage);
+    const checks = head?.oid !== pr.head.sha || overflow
+      ? (await all<any>(`/repos/${repo}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null)
+      // A run not yet completed has no conclusion: null, as the REST list gives it.
+      : (suites?.nodes ?? []).flatMap((cs: any) => cs?.checkRuns?.nodes ?? []).map((c: any) => (c.status === 'COMPLETED' && c.conclusion ? String(c.conclusion).toLowerCase() : null));
+    // A push is read from its commits' own dates, never `updated_at`, which a comment moves.
+    const pushes = node.commits.pageInfo.hasNextPage
+      ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/commits`)).map((c) => Date.parse(c.commit.committer.date))
+      : node.commits.nodes.map((c: any) => Date.parse(c.commit.committedDate));
+    // A verdict counts only from someone with a say over the repository — its owner, a member
+    // or a collaborator (GitHub's author_association) — never a drive-by comment on a public PR.
+    const reviews = (node.reviews.pageInfo.hasNextPage
+      ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
+      : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body })))
+      .filter((r: any) => TRUSTED.has(r.association))
+      .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '' }));
+    const comments = (node.comments.pageInfo.hasNextPage
+      ? (await all<any>(`/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, association: c.author_association, at: c.created_at, body: c.body }))
+      : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body })))
+      .filter((c: any) => TRUSTED.has(c.association))
+      .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
+    return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments] };
   }
 
   /** A repository's PRs. A named repository whose list GitHub refuses (403) or does not find
