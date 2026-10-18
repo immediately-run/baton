@@ -3,7 +3,7 @@ title: "B-8 — Baton registration tokens and API keys beside SSH keys"
 id: B-8
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-18
 repos:
   - baton
 tags:
@@ -31,6 +31,8 @@ depends_on: []
 2. API keys in `Authorization` on every call, including the push and stream upgrades; 7 days idle ends one; refused in any other role.
 3. `api_keys: false` refuses an API-key worker at its next call.
 4. The migration: grant each legacy key what it declared on repositories it used in 30 days, each listed under **Needs you**.
+
+- **Pending grants** *(added 2026-10-18 by BATON_SPEC R-BTN-143)*: the grants this migration writes for `BATON_KEYS` seed keys are written with `accepted_at` set to the migration's time, so no migrated machine stops; a seed key migrated onto two or more repositories lands at span 2, with sync and courier off, and the release notes say so.
 
 ### Do not
 

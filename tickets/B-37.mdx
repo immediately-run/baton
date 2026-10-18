@@ -98,7 +98,13 @@ Split into reviewed PRs along §10.7's four parts. Each is independent.
    - the sign-in eviction order;
    - bearer refusal by peer on an `http` listener, `--trusted-proxy`, and the Cloudflare
      host's refusal on plain `http`;
-   - the tainted-branch `pre-push` hook.
+   - the tainted-branch `pre-push` hook;
+   - round 4's (§10.7 fourth look): the settlement outcome table; `check_head_ref` in the claim
+     response and a sync want on a moved head; `pending_grants` in the heartbeat and the
+     runner's hint; API-key and migrated grants active at once; decline returning an active
+     grant to pending, logged; a hostname binding at first acceptance; the confirmation set
+     without Stop or setting a hold; clients refusing to send bearers over non-loopback `http`
+     and the server revoking any that arrive.
 
 ### Architecture
 

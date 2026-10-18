@@ -126,6 +126,15 @@ today and an interface change or a broken promise later.
    - A repository without ids is listed under Needs you.
    - Every registered repository having its ids is a cutover precondition.
 
+8. **Round 5's additions** *(§3b fifth look)*: session and sign-in cookies carry an id
+   (`bds_`, `bps_`); CI tokens, deliveries and notifications count in no failure bucket; a
+   miss forwarded within one a second per bucket while the snapshot re-fetch waits; the
+   snapshot keyed by origin; per-claim upkeep buckets and uncoalesced `release` rings;
+   former paths matched only while no live repository holds them, with
+   `former_paths_remove`; `code_repos` entries' own former paths; renames from deliveries
+   and notifications; identify storing unconfirmed ids only when they equal first and
+   latest; `conflict`'s `seen` body.
+
 ### Architecture
 
 - **Core stays tenant-blind.** No `src/core/` function takes a tenant id. The tenant id lives

@@ -50,7 +50,7 @@ R-BTN-129 and R-BTN-130 are specified. This ticket builds them.
    - A key dies with its minter, and is refused (not killed) while `api_keys: false`.
    - `CursorKey` is wired on both hosts: the Worker secret `BATON_CURSOR_KEY`, or `--cursor-key <file>` locally.
 
-- **Hardening** *(added 2026-10-18 by BATON_SPEC §10.7)*: the overrides route serves `ticket.hold`, `ticket.unhold`, `ticket.expedite` and `ticket.cancel` told apart by field and value (R-BTN-129, R-BTN-151); register `ui.logout`, `admin.sessions.revoke` (destructive), `admin.confirm`, `owner.grants.list`, `owner.grants.flags`, `owner.code-repo.consent`, `owner.bars.follow` and `runner.grant.accept` (R-BTN-137 to R-BTN-152).
+- **Hardening** *(added 2026-10-18 by BATON_SPEC §10.7)*: the overrides route serves `ticket.hold`, `ticket.unhold`, `ticket.expedite` and `ticket.cancel` told apart by field and value (R-BTN-129, R-BTN-151); register `ui.logout`, `admin.sessions.revoke` (destructive), `admin.confirm`, `owner.grants.list`, `owner.grants.flags`, `owner.code-repo.consent`, `owner.bars.follow`, `runner.grant.accept` and `runner.grant.decline` (R-BTN-137 to R-BTN-152).
 
 ### Do not
 

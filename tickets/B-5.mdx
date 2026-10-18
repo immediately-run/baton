@@ -34,7 +34,7 @@ depends_on:
 4. **Read-back.** The sync reads the check runs; a run Baton did not issue is logged `check-mismatch`.
 5. **Tenancy** *(added 2026-10-18 by BATON_SPEC §3b, R-BTN-133)*: the notice also carries and signs `origin` and `forge_repo_id` (null while the repository has no ids); `GET /v1/keys/signing` returns `{keys: [{kid, alg, public_key, retired_at?}]}`; the forge courier refuses a notice whose `origin` is not its configured origin or whose `forge_repo_id` is not the target repository's id.
 
-6. **Hardening** *(added 2026-10-18 by BATON_SPEC §10.7, R-BTN-150)*: a check ticket's head is the core field `check: {sha, head_repo_id}`, a fork's dropped and every check dropped while the repository has no ids; a claim binds `check_sha` and refuses an `advance` without it (`head-moved`); a concluding notice only for a confirmed `done` of an ordinary check-runner claim, mapped from the end's own `reached`; the verdict leg runs `check_command` first through the session provider's `exec` in a fresh sandbox at `check_sha`, after checking `check_sha` is `check.head_ref`'s head (else `released:stale-board`), and an `advance` or end reaching a success station carries `exit_status: 0`; `process` and `attached` workers take no verdict leg (R-BTN-114's `isolation: session` floor); an agent reaches only failure or neutral stations; never open-world; `courier add --delivers forge-check` refuses an App installed on others' repositories; S-BTN-119, G-BTN-139.
+6. **Hardening** *(added 2026-10-18 by BATON_SPEC §10.7, R-BTN-150)*: a check ticket's head is the core field `check: {sha, head_repo_id, head_ref}`, and the claim response carries `check_sha` and `check_head_ref`, a fork's dropped and every check dropped while the repository has no ids; a claim binds `check_sha` and refuses an `advance` without it (`head-moved`); a concluding notice only for a confirmed `done` of an ordinary check-runner claim, mapped from the end's own `reached`; the verdict leg runs `check_command` first through the session provider's `exec` in a fresh sandbox at `check_sha`, after checking `check_sha` is `check.head_ref`'s head (else `released:stale-board`, with a sync want); add `exec` to the Claude session provider, without which no check passes on any runner, and an `advance` or end reaching a success station carries `exit_status: 0`; `process` and `attached` workers take no verdict leg (R-BTN-114's `isolation: session` floor); an agent reaches only failure or neutral stations; never open-world; `courier add --delivers forge-check` refuses an App installed on others' repositories; S-BTN-119, G-BTN-139.
 
 ### Do not
 
@@ -42,7 +42,7 @@ depends_on:
 
 ### Tests
 
-- S-BTN-68, S-BTN-81; G-BTN-93, G-BTN-103.
+- S-BTN-68, S-BTN-81, S-BTN-119; G-BTN-93, G-BTN-103, G-BTN-139.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green.
 
 ### Exit criteria
