@@ -19,4 +19,48 @@ depends_on:
   - B-33
 ---
 
-_(filed; the body follows.)_
+**Brief:** the owner, 2026-10-18: "To prove Baton is complete, the goal is to adopt Baton's built-in courses for work on immediately run, which has previously been implemented by skills in the docs repo"; and, for B-33, "the docs repo to refer to the Baton repo's create-pr course and only override the legs that are specific to the docs repo in implementation, keeping the exact same course graph."
+**Spec:** `spec/BATON_SPEC.md` R-BTN-74 (the ticket source, `.baton/tickets.mjs`), R-BTN-131 (standard courses, sources and overrides), R-BTN-96 and B-29's reading of a ticket's PRs across repositories, §7.1 (the sync workflow).
+**Depends on:** B-28, B-29, B-33 (all done).
+
+### Requires
+
+None: a checkout of docs and of this repository. Nothing here posts to Baton.
+
+### Found at claim (2026-10-18)
+
+- **docs' legacy sync is live.** `.github/workflows/baton-sync.yml` runs `scripts/baton-sync.mjs` with `BATON_ENABLED` on: its runs execute every step and post the legacy board (`registry`, `state.items`, `ready`) for the `roadmap-pr` course. The description's "the sync workflow in shadow (BATON_ENABLED off)" assumed otherwise. `baton repo init` always writes `.github/workflows/baton-sync.yml`, so running it in docs as is would replace the live sync with one posting a different board.
+- **Roadmap `repos:` entries are short names** (`site-main`, `sdk`, `backend`, …) and `owner/name` forms; the markdown default resolves short names only through `baton.json`'s `repos` map.
+- **The board is large.** 131 live items on create-pr name about 40 repositories between them. B-29's one budget (200 requests, `MAX_REQUESTS`) may not cover docs' sibling reads (a list per repository, four detail requests per owned PR). To be measured, never discovered at cutover.
+
+### What to build (in docs, committed to its main, no PR)
+
+1. **The scaffold, by source.** `baton repo init` for `create-pr`, `bug-report`, `draft-ticket`, `decision` and `review-pr`, run from this repository's checkout at main, so each entry in `.baton/baton.json` names `github/immediately-run/baton/<commit>/<course>` and its course file is byte-equal to that commit's. `--override review` and `--override merge` on create-pr; every other leg is the standard stub with the scaffolded instructions, which B-32 rewrites.
+2. **The live sync untouched (shadow).** docs' `baton-sync.yml` and `scripts/baton-sync.mjs` stay as they are. The CLI's workflow is kept as `.github/workflows/baton-cli-sync.yml`, gated on its own variable, `vars.BATON_CLI_ENABLED == 'true'` (unset, so off), until R3-1216's cutover swaps the two. `.baton/courses/roadmap-pr/` stays, read by the legacy sync.
+3. **`.baton/tickets.mjs` over `content/roadmap`**, wrapping `computeState` (factory-state) at the checkout's HEAD:
+   - every live item is a ticket on `create-pr`: `title`, `tier`, `rank` from `order`, `requires` expanded through docs' roles (`capabilitiesOf`), `operator_only` from `OP`, `expedite` from `EXPEDITE`, `depends_on`, `repos` resolved to `owner/name` (`baton.json`'s `repos` map from the conventions' legend, else `immediately-run/<name>`), `display.status` and `display.project`;
+   - its course fields: `prs` from the item's `prs:`, and `answer` from a `## Decision needed` packet's `**Answer:**` line when the item has one;
+   - closed: archived items `done`; `superseded`, `deferred` and `deprioritized` items `withdrawn` (as the markdown default treats `deferred`).
+4. **The two overrides** (`.baton/courses/create-pr/legs/<leg>.run.mjs`, each `run(ctx, standard)`):
+   - **`review`:** round 1 (`ctx.run === 1`) runs the standard leg twice, once per blind reviewer (`BATON_REVIEWER=A`, then `B`), and later rounds once (`r<run>`). The change's verdict is `changes` when either asks for changes. Which model sits in which seat, and the matcher, are the agent command's and B-32's instructions.
+   - **`merge`:** runs the standard leg, then checks that every PR the item's `prs:` names is merged and its merge commit is an ancestor of its repository's default branch (GitHub's compare API). A PR merged but not delivered fails the leg rather than reporting `merged`: merged is not delivered.
+5. **`agent_command`**, a docs script that runs the harness on the leg's instructions and ticket file; B-32 owns its prompts.
+
+### Architecture
+
+- **No Baton change.** Everything is docs' repository code that R-BTN-74 and R-BTN-131 already provide for: the ticket source, overrides and instructions. If B-29's budget does not fit docs, that is a Baton ticket of its own, not a change folded in here.
+- **docs' own tests**, under docs' `npm test` (`node --test`): the ticket source over the real roadmap and over fixtures, and each override against a fake `standard`.
+
+### Tests
+
+- `tickets.mjs`: every live item becomes a ticket with a resolvable course and `owner/name` repos; statuses close as above; `requires` expands roles; a packet's Answer becomes `answer`; an unreadable `repos:` entry fails, naming the item.
+- `review.run.mjs`: two standard runs in round 1, one later; `changes` when either asks for changes; the PR named by either kept.
+- `merge.run.mjs`: a PR merged and delivered passes; merged but not an ancestor fails; not merged fails.
+- `baton test-course` passes on docs' create-pr with its overrides; `check:ci`-equivalent `npm run verify` green in docs.
+- Measured, not asserted: the requests a live sync of docs would make under B-29's budget.
+
+### Exit criteria
+
+- [ ] docs carries the five courses by source, the ticket source and the two overrides, with its tests green
+- [ ] the live legacy sync unchanged, and the CLI's workflow present but off
+- [ ] the budget measured, and a Baton ticket filed if it does not fit
