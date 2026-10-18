@@ -654,3 +654,5 @@ The columns:
 | 2026-10-18 | baton | 54 | R3 | should-fix | (B) a malformed entry in the heartbeat's couriers refused the whole heartbeat, stopping last_seen_at so a live worker is reaped | fixed — 961edf0 (an entry is refused and reported in refused_couriers, as uses; only a list that is none or over 16 refuses) | spec-silent | — | — |
 | 2026-10-18 | baton | 54 | R9 | nit | (B) the dashboard rounded remind_after to whole hours | fixed — 961edf0 (minutes when not whole hours) | impl | — | — |
 | 2026-10-18 | baton | 54 | R17 | nit | (B) baton decision list --watch ended on the first failed pass | fixed — 961edf0 (reported on stderr; the next minute tries again; test) | impl | — | — |
+| 2026-10-18 | baton | 54 | R9 | should-fix | (r2) the heartbeat's refused_couriers, and the rule that refuses an entry and not the heartbeat, were in no spec contract | fixed — 12e357b (§11's heartbeat row and R-BTN-103 amended) | spec-silent | — | 961edf0 |
+| 2026-10-18 | baton | 54 | R10 | should-fix | (r2) the PR body still said notices.created_at is the basis of the pool's hour unclaimed | fixed — PR body edited (the hour counts from updated_at) | impl | — | — |
