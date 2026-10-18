@@ -1,7 +1,7 @@
 // model-report.test.ts — R3-1254 round 1 (1-A-2, 1-A-3): the model:full report is written on the
 // author's machine and checked in CI against the PR's head (R-BTN-68, amended 2026-10-17).
 import { describe, it, expect } from 'vitest';
-import { CHECKS, needsReport, renderReport, reportProblem } from '../../scripts/model-report.mjs';
+import { CHECKS, needsReport, renderReport, reportProblem, stepEnv } from '../../scripts/model-report.mjs';
 
 const HEAD = 'a'.repeat(40);
 const passing: [string, boolean, number][] = [['npm run model (10000 samples)', true, 6], ['model-based tests (1000 traces)', true, 9], ['npm run model:verify (depth 5)', true, 20]];
@@ -66,5 +66,11 @@ describe('needsReport: what the model checks read', () => {
     for (const f of ['src/shared/vocabulary.mjs', 'src/migrations/0016_blocks.sql', 'test/helpers.ts', 'test/lib/sshKeys.mjs', 'package-lock.json']) expect(needsReport([f])).toBe(true);
     expect(needsReport(['tickets/R3-1254.mdx', 'src/defaults/cli.ts', 'test/integration/S-BTN-43.defaults.test.ts', 'CHANGELOG.md'])).toBe(false);
     expect(needsReport([])).toBe(false);
+  });
+});
+
+describe('stepEnv: what each model:full step runs with (baton#48 round 3, 3-r3-0)', () => {
+  it('drops REPLAY_ONLY, which would replay a subset under the full-size label; keeps the rest and sets the step\'s sizes', () => {
+    expect(stepEnv({ PATH: '/bin', REPLAY_ONLY: 'rlegs_5', REPLAY_TRACES: '5' }, { REPLAY_TRACES: '1000' })).toEqual({ PATH: '/bin', REPLAY_TRACES: '1000' });
   });
 });

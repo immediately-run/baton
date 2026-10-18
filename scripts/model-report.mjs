@@ -20,6 +20,14 @@ export const CHECKS = labels(SIZES);
 // and with it Apalache (round 2, 2-r2-0)
 const CHECKED = /^(model\/|src\/core\/|src\/shared\/|src\/migrations\/|test\/model\/|test\/helpers\.ts$|test\/lib\/|test\/integration\/trace\.ts$|scripts\/check-traces\.mjs$|package-lock\.json$)/;
 
+/** The environment each `model:full` step runs in: the caller's, less the knobs that would cut a
+ * step down without its label saying so — `REPLAY_ONLY`, which replays only the traces it names
+ * and skips the coverage floor (baton#48 round 3, 3-r3-0) — plus the step's own sizes. */
+export const stepEnv = (env, own) => {
+  const { REPLAY_ONLY: _only, ...base } = env;
+  return { ...base, ...own };
+};
+
 /** Whether a PR changing `files` must carry a report. */
 export const needsReport = (files) => files.some((f) => CHECKED.test(f));
 
