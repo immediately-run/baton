@@ -52,6 +52,14 @@ For each leg of the five courses, `.baton/courses/<course>/legs/<leg>.md` rewrit
 
 ### Exit criteria
 
-- [ ] the 18 leg instructions rewritten for docs, each pointing at the section that owns each convention
-- [ ] the pointer test in docs' `test:scripts`, green
-- [ ] the skills untouched; their retirement recorded as R3-1216's
+- [x] the 18 leg instructions rewritten for docs, each pointing at the section that owns each convention
+- [x] the pointer test in docs' `test:scripts`, green
+- [x] the skills untouched; their retirement recorded as R3-1216's
+
+## Status
+
+Delivered by docs fb9f69a, 62c296e and 0b605c6 (2026-10-18), committed to docs' main. There is no PR, so no review gate ran.
+- **The instructions.** All 18 leg instructions are rewritten for docs. Each keeps its course's contract and answer line, and cites the skill sections that own docs' conventions as `` `<path>` § "<heading>" ``.
+- **Tests.** `scripts/baton-courses.test.mjs` (in `test:scripts`) fails on any cited heading that does not exist, and on any asking leg that does not name every value its script accepts. It passes, and `baton test-course` passes all five courses.
+- **Scope.** The skills are untouched. Retiring their steps, and the contract gaps the leg writers found, are recorded on R3-1216.
+
