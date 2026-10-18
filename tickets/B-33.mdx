@@ -134,3 +134,13 @@ archive).
 - `baton repo init --course create-pr --override review` in a scratch repository, then
   `baton test-course`, passes.
 - `src/core/` unchanged.
+
+## Status
+
+Delivered by https://github.com/immediately-run/baton/pull/50 (merged 4d16a39, 2026-10-18), after
+three review rounds with 17 findings, all closed; the rows are in `docs/review/pr-findings.mdx`.
+All three exit criteria hold: `npm test` green apart from the two `ssh-keygen` tests (no
+`ssh-keygen` in the container); the exit run passes in `defaults-cli.test.ts`; `src/core/`
+unchanged. Beyond the item, the review added two things. `init` refuses a `--pin` of another
+repository or commit while a source is named. The test kit fails an override whose leg script,
+read from this course's own path, does not load it.
