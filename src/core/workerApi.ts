@@ -48,6 +48,9 @@ export interface Ctx {
   /** R-BTN-76: store the instances a heartbeat says it uses (`repos`: those its key works on, null
    *  for every one), returning whether that changed and what was refused. */
   uses?: (workerId: number, repos: string[] | null, names: string[]) => { changed: boolean; refused: { instance: string; code: string }[] };
+  /** R-BTN-103: store the repositories and `asks` a heartbeat delivers notices for (`granted`: the
+   *  repositories a machine key works on, null for any other key), returning what was refused. */
+  couriers?: (workerId: number, granted: string[] | null, entries: { repository: string; asks: string[] }[]) => { repository: string; code: string }[];
   /** R-BTN-75, R-BTN-76: a worker became live or changed what it declares or uses. */
   fleetChanged?: () => void;
   /** R-BTN-75: a shadow report's claim holds its ticket, or no longer does. */
@@ -362,10 +365,14 @@ export class WorkerApi {
     const storedHash = `${settingsHash}:${fnv1a(known)}`;
     const rewrote = storedHash !== w.settings_hash || rekeyed;
     if (rewrote) this.rewriteSettings(w.id, hb, knownAccounts, storedHash);
-    // R-BTN-76: the instances it uses, each it may use; a refused one never refuses the heartbeat.
-    const uses = this.c.uses?.(w.id, cred.granted
+    const granted = cred.granted
       ? this.rows<{ repository_id: string }>('SELECT repository_id FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', cred.id).map((r) => r.repository_id)
-      : null, hb.uses.names) ?? { changed: false, refused: [] };
+      : null;
+    // R-BTN-76: the instances it uses, each it may use; a refused one never refuses the heartbeat.
+    const uses = this.c.uses?.(w.id, granted, hb.uses.names) ?? { changed: false, refused: [] };
+    // R-BTN-103: the notices it delivers as a worker courier — a machine key's, on repositories it
+    // is granted on; a refused entry never refuses the heartbeat either.
+    const refusedCouriers = this.c.couriers?.(w.id, cred.kind === 'worker' ? granted : null, hb.couriers) ?? [];
     const refusedUses = [...hb.uses.refused, ...uses.refused];
     if (!was?.live || rewrote || uses.changed) this.c.fleetChanged?.();
     const refused = hb.transcript_refusals;
@@ -393,6 +400,7 @@ export class WorkerApi {
       server_time: now,
       ...(refused.length ? { transcripts_refused: refused } : {}),
       ...(refusedUses.length ? { refused_uses: refusedUses } : {}),
+      ...(refusedCouriers.length ? { refused_couriers: refusedCouriers } : {}),
       ...(unlinked.length ? { transcripts_unlinked: unlinked } : {}),
     };
   }

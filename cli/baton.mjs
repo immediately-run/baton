@@ -31,7 +31,12 @@
 //   baton owner -i KEY bar lift REPO ID
 //   baton owner -i KEY settings REPO [--required-bar LEG|'*' --course C|'*' [--except a,b] --tag-prefix P]… | --no-required-bars
 //                [--retry 1h,4h --max-failed 3 | --retry default] [--transcript-repos a,b]
-//                [--unblocked-workflow .github/workflows/F.yml | --unblocked-workflow none]
+//                [--unblocked-workflow .github/workflows/F.yml | --unblocked-workflow none] [--remind-after 24h]
+//   baton owner -i KEY courier add REPO --key PUB --asks owner[,…]      (R-BTN-80: a personal courier)
+//   baton owner -i KEY courier revoke REPO FINGERPRINT
+//   baton decision list -i KEY [--watch | --all]
+//                — the CLI courier (R-BTN-80): claims the key's notices, prints them as text and
+//                marks them sent; --watch asks once a minute; --all lists every open decision it delivers
 //
 //   baton test-course <repository root> <course> [--base REF] [--board FILE]
 //                — the course test kit (§2d, R-BTN-64/-65; R3-1248): the working tree's .baton/ is
@@ -225,7 +230,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       } };
     }
     if (cmd === 'settings') {
-      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow'], 1);
+      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after'], 1);
       const body = {};
       if (flags['no-required-bars']) {
         if (groups.length) throw new Error('--no-required-bars clears them: name no --required-bar beside it');
@@ -241,10 +246,20 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       // R-BTN-77's trigger: a workflow path on GitHub, or `none` to clear it.
       if (flags['unblocked-workflow'] === 'none') body.unblocked_trigger = null;
       else if (flags['unblocked-workflow']) body.unblocked_trigger = { kind: 'github-app', workflow: flags['unblocked-workflow'] };
+      // R-BTN-80: how long a sent notice waits for its decision before it is queued again, in seconds.
+      if (flags['remind-after']) body.remind_after = Math.round(duration(flags['remind-after']) / 1000);
       if (!Object.keys(body).length) throw new Error('baton owner settings REPO names at least one setting');
       return { method: 'PUT', path: `/v1/owner/${need(positional[0], 'the repository id')}/settings`, body };
     }
-    throw new Error('baton owner grant|revoke|owners|bar|settings');
+    if (cmd === 'courier' && rest[0] === 'add') {
+      const { flags, positional } = parseArgs(rest.slice(1), [], ['key', 'asks'], 1);
+      return { method: 'POST', path: `/v1/owner/${need(positional[0], 'the repository id')}/couriers`, body: { public_key: readKey(need(flags.key, '--key')), asks: need(list(flags.asks), '--asks') } };
+    }
+    if (cmd === 'courier' && rest[0] === 'revoke') {
+      parseArgs(rest.slice(3), [], [], 0);
+      return { method: 'POST', path: `/v1/owner/${need(rest[1], 'the repository id')}/couriers`, body: { fingerprint: need(rest[2], 'the key fingerprint'), revoke: true } };
+    }
+    throw new Error('baton owner grant|revoke|owners|bar|settings|courier');
   }
   throw new Error('baton admin … | baton owner …');
 }
@@ -333,8 +348,26 @@ async function testCourse(argv) {
   return violations.length ? 1 : 0;
 }
 
+/** `baton decision list` (R-BTN-80): the CLI courier, each request signed with the key `-i` names. */
+async function decisionList(argv) {
+  const { flags } = parseArgs(argv, ['watch', 'all'], ['identity', 'url'], 0);
+  if (flags.watch && flags.all) throw new Error('--watch claims notices as they come; --all lists the open decisions once: name one');
+  const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+  const keyFile = need(flags.identity, '-i KEY (your courier key file)');
+  const request = (method, path, body) => send(url, { method, path, body }, keyFile);
+  const write = (text) => process.stdout.write(`${text}\n`);
+  const { listOnce, watch } = await import('./decisions.mjs');
+  if (flags.watch) await watch(request, write);
+  else await listOnce(request, write, { all: !!flags.all });
+  return 0;
+}
+
 async function main(argv) {
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
+  if (argv[0] === 'decision') {
+    if (argv[1] !== 'list') throw new Error('baton decision list -i KEY [--watch | --all]');
+    return decisionList(argv.slice(2));
+  }
   if (argv[0] === 'run') {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.

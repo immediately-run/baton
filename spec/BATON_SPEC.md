@@ -4600,7 +4600,9 @@ CREATE TABLE notices (                            -- R-BTN-80: requests for peop
   id            TEXT PRIMARY KEY,                  -- random; a courier's dedupe key
   credential_id TEXT NOT NULL REFERENCES credentials(id),
   repository_id TEXT NOT NULL REFERENCES repositories(id),
-  ticket_id     TEXT REFERENCES tickets(id) ON DELETE CASCADE,  -- NULL for 'queue-over'
+  ticket_id     TEXT,                              -- NULL for 'queue-over'; no cascade (R3-1256, 2026-10-18): a ticket
+                                                 -- that leaves the board is deleted, and its closed notices outlive it
+                                                 -- by their 7 days, so a late mark is answered `closed` (R-BTN-80)
   kind          TEXT NOT NULL CHECK (kind IN ('decision','queue-over')),
   ref           TEXT NOT NULL,                     -- the decision id, or the over-bound leg (course:leg)
   state         TEXT NOT NULL CHECK (state IN ('queued','claimed','sent','closed')),
@@ -4610,10 +4612,12 @@ CREATE TABLE notices (                            -- R-BTN-80: requests for peop
   sent_at       INTEGER,
   channel       TEXT,                              -- the courier's label for how it delivered
   payload_json  TEXT,                              -- 'queue-over': {leg, depth, max_queue, intake}; ≤ 512 bytes
-  updated_at    INTEGER NOT NULL
+  updated_at    INTEGER NOT NULL,
+  created_at    INTEGER NOT NULL                   -- R3-1256 (2026-10-18): the notice's `created_at` (R-BTN-80)
 );
 CREATE INDEX notices_due ON notices(credential_id, state, not_before);   -- a courier's claim
 CREATE INDEX notices_alarm ON notices(state, not_before);                 -- the alarm: lapsed leases, reminders, deletion
+CREATE INDEX notices_by_ref ON notices(ticket_id, ref);                   -- R3-1256: a decision's notices, to close them
 CREATE TABLE fleet_capabilities (                -- R-BTN-75: live workers granted and declaring each capability
   repository_id TEXT NOT NULL REFERENCES repositories(id),
   capability    TEXT NOT NULL,
