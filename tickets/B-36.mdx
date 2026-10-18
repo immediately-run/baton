@@ -1,0 +1,59 @@
+---
+title: "B-36 — Tickets assigned to a person or a group: their questions, interactive legs and notices go to the assignee"
+id: B-36
+project: baton
+status: available
+updated: 2026-10-18
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "An `assignee` ticket field (`github:<login>` or `group:<name>`, groups in `.baton/baton.json`), unset meaning anyone with access: an assigned ticket's decisions and person legs notify the assignee's channels, its interactive legs run only as the assignee (a group's first taker holds the rest), and personal couriers register for people and groups with per-channel routing settings (amends BATON_SPEC R-BTN-78, R-BTN-80, R-BTN-103, R-BTN-116). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-7
+---
+
+**Brief:** the owner, 2026-10-18 (this session): "a whole ticket should be assigned to a user so that they can carry out all the human-in-the-loop requests and interactive legs because they are working on the particular ticket"; "the default should be anybody with access to the given repository"; "it should be assignable to a person or a group"; and channel-specific courier configuration.
+**Spec:** `spec/BATON_SPEC.md` R-BTN-78 (decisions), R-BTN-80 and R-BTN-103 (notices, personal channels, the pool), R-BTN-116 (person legs), R-BTN-86 (children), §7.1 (the ticket's posted fields). This ticket amends them; the amendment is its first deliverable.
+**Depends on:** B-7 (person legs, decisions and notices).
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+A course's person legs, decisions and B-34's interactive legs are addressed today by a role label (`asks: owner`) and delivered to whichever couriers registered for it. Nothing says which person is carrying a given ticket. In a product build (brief → spec → roadmap → build), the person who defines the product should get every question that ticket raises, and should be the one whose session runs its interactive legs.
+
+### What to build
+
+1. **`assignee` on a ticket** (§7.1's generic fields), set in git by the ticket source: `github:<login>` for a person, `group:<name>` for a group. Unset is the default and changes nothing: anyone with access to the repository may answer, and notices go to the couriers registered for the question's `asks` label.
+2. **Groups in git:** `.baton/baton.json` `groups: {"<name>": ["github:<login>", …]}`, versioned and reviewed like the rest of the repository's settings. An unknown group or a malformed member fails the sync, naming the ticket. Forge teams (`github:@org/team`) are later work: resolving them needs a token that can read the organisation.
+3. **Routing for an assigned ticket.** Its decisions and person legs notify the assignee's channels: a person's own, or every member's plus any channel registered for the group. The `asks` label still names the kind of question. **Needs you** lists an assigned ticket with an open question that no channel delivers to its assignee.
+4. **Interactive legs (B-34).** On an assigned ticket, only a runner that starts sessions as the assignee may take an interactive leg (a member, for a group). The member whose session takes the ticket's first interactive leg holds its later ones, unless the ticket is reassigned.
+5. **Courier routing per channel.** A personal courier is registered for people and groups as well as labels: `baton owner courier add <key> --for github:alice | group:product`. Each registration carries its own routing settings: a minimum severity (R-BTN-125), immediate or daily digest, its own `remind_after`, and a renderer (R-BTN-112). The channel's own details (a Slack channel, an email address, a push token) stay in the courier's configuration. Baton holds routing, never third-party credentials.
+6. **Reassignment is a git edit.** Open notices are queued for the new assignee from the snapshot that posts it. A running leg keeps its claim.
+7. **Who answered.** Routing only, in v1: anyone with access may still answer, and the answer's `answered_by` is recorded. Enforcing that only the assignee answers is left for later, as a filter (R-BTN-46), not a boundary.
+
+### Open, to settle in the amendment
+
+- **Children.** A child inherits its parent's assignee unless it sets its own (recommended).
+- **Baton's own decisions** (`baton:retries`, `baton:contract`, `baton:stalled`) on an assigned ticket. Recommended: they go to the assignee, with the owner in copy.
+
+### Tests
+
+- A ticket assigned to a person, and one to a group: their decisions' notices reach exactly the assignee's channels (a member's, a group's own), with an unassigned ticket's going to the `asks` couriers as today.
+- An unknown group fails the sync, naming the ticket. Reassignment queues notices for the new assignee.
+- An interactive leg on an assigned ticket refuses a runner of anyone else. A group's second interactive leg goes to the member who took the first.
+- A courier's routing settings filter by severity and batch a digest.
+- A scenario (next free S-BTN number) through the local host, with its G-BTN row.
+
+### Exit criteria
+
+- [ ] the spec amendment merged under the review gate
+- [ ] the scenario passes on both hosts, its trace replayed through the model where it touches the core
+- [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green, merged under the review gate
