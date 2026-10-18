@@ -364,7 +364,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   const get = async (url: string): Promise<Response> => {
     if (++requests > MAX_REQUESTS) throw new Error(`GitHub: this sync would need more than ${MAX_REQUESTS} requests — refusing before the token's hourly budget is spent`);
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    if (!res.ok) throw new Error(`GitHub ${url}: ${res.status}`);
+    if (!res.ok) throw Object.assign(new Error(`GitHub ${url}: ${res.status}`), { status: res.status });
     return res;
   };
   /** Every item of a paged list; `pick` takes a page's items from its body. */
@@ -382,24 +382,17 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   const out: PrFact[] = [];
   // The home, then each other repository a live ticket names in `repos:` (B-29), under the one
   // budget: a sync that would exceed it refuses rather than post a partial reading.
-  // A repository the token cannot read fails the whole sync (no partial reading), naming the
-  // tickets whose `repos:` names it.
   for (const { repository: repo, tickets } of [{ repository: slug, tickets: [] as string[] }, ...siblings.filter((s) => !sameRepoName(s.repository, slug))]) {
     const before = out.length;
-    try {
-      out.push(...(await repoFacts(repo)));
-    } catch (e) {
-      if (!tickets.length || /more than \d+ (requests|items)/.test(String((e as Error).message))) throw e;
-      throw new Error(`${(e as Error).message} — ${repo} is named in repos: by ${tickets.join(', ')}; the sync's token cannot read it, or it does not exist`);
-    }
+    out.push(...(await repoFacts(repo, tickets)));
     log(`baton: read ${out.length - before} PRs of ${repo} from GitHub`);
   }
   log(`baton: ${requests} requests in all`);
   return out;
 
-  async function repoFacts(repo: string): Promise<PrFact[]> {
+  async function repoFacts(repo: string, tickets: string[]): Promise<PrFact[]> {
     const out: PrFact[] = [];
-    for (const pr of await all<any>(`/repos/${repo}/pulls?state=all`)) {
+    for (const pr of await list(repo, tickets)) {
       const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
       // Only a PR a live ticket owns needs its detail read; any other PR places no ticket and is
       // recorded from the list alone, so the requests a run makes grow with the live tickets, not
@@ -427,6 +420,19 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
       });
     }
     return out;
+  }
+
+  /** A repository's PRs. A named repository whose list GitHub refuses (403) or does not find
+   * (404) fails the whole sync — no partial reading — naming the tickets whose `repos:` name it;
+   * any other failure, as a timeout, a 5xx or the budget, is passed through as it is. */
+  async function list(repo: string, tickets: string[]): Promise<any[]> {
+    try {
+      return await all<any>(`/repos/${repo}/pulls?state=all`);
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      if (!tickets.length || (status !== 403 && status !== 404)) throw e;
+      throw new Error(`${(e as Error).message} — ${repo} is named in repos: by ${tickets.join(', ')}; the sync's token cannot read it, or it does not exist`);
+    }
   }
 }
 

@@ -423,7 +423,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
   });
 
   it('the home and the repositories a ticket names share the one budget; an unreadable one fails the sync naming its tickets (B-29)', async () => {
-    // 30 owned PRs in each repository: 4 + 121 requests apiece, 250 together — over 200, though neither alone is.
+    // 30 owned PRs in each repository: 1 + 30 × 4 = 121 requests apiece, 242 together — over 200, though neither alone is.
     const routes: Record<string, unknown> = {};
     for (const repo of ['o/r', 'o/site']) {
       const many = Array.from({ length: 30 }, (_, i) => pr(i + 1, `claude/A-${i + 1}-x`, 'open'));
@@ -442,6 +442,11 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     serve({ '/repos/o/r/pulls?state=all': [] });
     await expect(githubFacts(dir, () => {}, () => true, [{ repository: 'o/private', tickets: ['A-1', 'B-2'] }]))
       .rejects.toThrow("GitHub https://api.github.com/repos/o/private/pulls?state=all&per_page=100: 404 — o/private is named in repos: by A-1, B-2; the sync's token cannot read it, or it does not exist");
+    // Only the list's 403 or 404 says so: a failure reading a listed PR's detail is passed through as it is.
+    serve({ '/repos/o/r/pulls?state=all': [], '/repos/o/site/pulls?state=all': [pr(7, 'claude/A-1-x', 'open')] });
+    const detail = githubFacts(dir, () => {}, () => true, [{ repository: 'o/site', tickets: ['A-1'] }]);
+    await expect(detail).rejects.toThrow('GitHub https://api.github.com/repos/o/site/commits/s7/check-runs?per_page=100: 404');
+    await expect(detail).rejects.not.toThrow('named in repos:');
   });
 });
 
