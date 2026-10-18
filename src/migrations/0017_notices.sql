@@ -30,8 +30,9 @@ CREATE TABLE notices (                            -- R-BTN-80: requests for peop
   channel       TEXT,                              -- the courier's label for how it delivered
   payload_json  TEXT,                              -- 'queue-over': {leg, depth, max_queue, intake}; ≤ 512 bytes
   updated_at    INTEGER NOT NULL,
-  -- Spec-silent (recorded on R3-1256): a notice carries `created_at` (R-BTN-80's shape), and the
-  -- pool's hour unclaimed is counted from it (R-BTN-103).
+  -- Spec-silent (recorded on R3-1256): a notice carries `created_at` (R-BTN-80's shape). The
+  -- pool's hour unclaimed (R-BTN-103) is counted from `updated_at`, the copy's last return to
+  -- the queue, so a lapse or a failed mark starts the hour again.
   created_at    INTEGER NOT NULL,
   claimed_by    TEXT                               -- R-BTN-103: the fingerprint of the key that last claimed it
 );

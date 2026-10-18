@@ -109,8 +109,9 @@ export interface Heartbeat {
   transcript_refusals: { index: number; code: string; message: string }[];
   /** R-BTN-76: the account instances it uses (absent declares none), and the strings refused as names. */
   uses: { names: string[]; refused: { instance: string; code: string }[] };
-  /** R-BTN-103: the repositories and `asks` this session delivers notices for, as a worker courier. */
-  couriers: { repository: string; asks: string[] }[];
+  /** R-BTN-103: the repositories and `asks` this session delivers notices for, as a worker courier,
+   *  and the entries refused as malformed. */
+  couriers: { entries: { repository: string; asks: string[] }[]; refused: { repository: string; code: string }[] };
 }
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number }
@@ -664,21 +665,33 @@ export const CLAIM_MAX = 50;
 /** A courier's label for how it delivered (§10.4: text, short). */
 const CHANNEL = /^[A-Za-z0-9][A-Za-z0-9 ._:@/-]{0,63}$/;
 
-/** A heartbeat's `couriers` (R-BTN-103): `[{repository, asks: [<label>]}]`, absent for none. A
- *  malformed list refuses the heartbeat, as a malformed `courses` does. */
-export function checkCouriers(v: unknown): { repository: string; asks: string[] }[] {
-  if (v === undefined) return [];
+/** A heartbeat's `couriers` (R-BTN-103): `[{repository, asks: [<label>]}]`, absent for none. As
+ *  with `uses`, a list that is not one, or is over its bound, refuses the heartbeat; an entry that
+ *  fails its own check — a repository id, a label, a repeat — is returned refused and reported,
+ *  never refusing the heartbeat, which would stop `last_seen_at` and get a live worker reaped. */
+export function checkCouriers(v: unknown): { entries: { repository: string; asks: string[] }[]; refused: { repository: string; code: string }[] } {
+  if (v === undefined) return { entries: [], refused: [] };
   if (!Array.isArray(v) || v.length > COURIERS_MAX) bad('couriers', `must be a list of at most ${COURIERS_MAX}`);
   const seen = new Set<string>();
-  return (v as unknown[]).map((x, i) => {
-    if (!isObj(x)) bad(`couriers[${i}]`, 'must be an object');
-    const e = x as Record<string, unknown>;
-    for (const k of Object.keys(e)) if (k !== 'repository' && k !== 'asks') bad(`couriers[${i}].${k}`, 'unknown field');
-    const repository = checkRepositoryId(e.repository, `couriers[${i}].repository`);
-    if (seen.has(repository)) bad(`couriers[${i}]`, `repeats ${repository}`);
-    seen.add(repository);
-    return { repository, asks: checkAsks(e.asks, `couriers[${i}].asks`) };
-  });
+  const entries: { repository: string; asks: string[] }[] = [];
+  const refused: { repository: string; code: string }[] = [];
+  for (const x of v as unknown[]) {
+    const named = isObj(x) && typeof x.repository === 'string' ? x.repository.slice(0, 100) : '';
+    try {
+      if (!isObj(x)) bad('couriers[]', 'must be an object');
+      const e = x as Record<string, unknown>;
+      for (const k of Object.keys(e)) if (k !== 'repository' && k !== 'asks') bad(`couriers[].${k}`, 'unknown field');
+      const repository = checkRepositoryId(e.repository, 'couriers[].repository');
+      if (seen.has(repository)) bad('couriers[]', `repeats ${repository}`);
+      entries.push({ repository, asks: checkAsks(e.asks, 'couriers[].asks') });
+      seen.add(repository);
+    } catch (err) {
+      // Only a field check's refusal is an entry's; anything else is a bug and goes up.
+      if (!(err instanceof BatonError) || err.code !== 'invalid-params') throw err;
+      refused.push({ repository: named, code: 'invalid-params' });
+    }
+  }
+  return { entries, refused };
 }
 
 /** A courier's `asks` (R-BTN-80): 1 to 8 labels, each `ASKS`. */

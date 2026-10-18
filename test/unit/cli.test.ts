@@ -219,16 +219,20 @@ describe('baton decision list: the CLI courier (R-BTN-80)', () => {
     const stop = new AbortController();
     const waits: number[] = [];
     let passes = 0;
+    const warned: string[] = [];
     const request = async () => {
       passes++;
+      // The second pass finds Baton unreachable: reported, and the watch goes on.
+      if (passes === 2) throw new Error('fetch failed');
       return { status: 200, json: { notices: [] } };
     };
     const sleep = async (ms: number) => {
       waits.push(ms);
       if (waits.length === 3) stop.abort();
     };
-    await watch(request, () => {}, { signal: stop.signal, sleep });
+    await watch(request, () => {}, { signal: stop.signal, sleep, warn: (t: string) => warned.push(t) });
     expect(passes).toBe(3);
+    expect(warned).toEqual(['baton decision list: fetch failed; trying again in a minute']);
     expect(waits).toEqual([WATCH_EVERY_MS, WATCH_EVERY_MS, WATCH_EVERY_MS]);
     expect(WATCH_EVERY_MS).toBe(60_000);
   });

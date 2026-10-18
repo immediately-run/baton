@@ -333,6 +333,10 @@ export class Admin {
       // `revoked_by` keeps an administrator's revoke through a later CREDENTIALS/TOKEN_HASHES edit (round 2, 2-A-2).
       this.exec('UPDATE credentials SET revoked_at = ?, revoked_by = ? WHERE id = ? AND revoked_at IS NULL', now, actor, fingerprint);
       let changed = this.changed();
+      // A credential already revoked otherwise — a courier key whose last registration its owners
+      // ended — becomes the administrator's revoke too, so no owner can bring it back (R-BTN-80).
+      this.exec(`UPDATE credentials SET revoked_by = ? WHERE id = ? AND revoked_at IS NOT NULL AND (revoked_by IS NULL OR revoked_by NOT LIKE 'admin:%')`, actor, fingerprint);
+      changed += this.changed();
       this.exec('UPDATE worker_grants SET revoked_at = ? WHERE credential_id = ? AND revoked_at IS NULL', now, fingerprint);
       this.exec('UPDATE sync_keys SET revoked_at = ? WHERE fingerprint = ? AND revoked_at IS NULL', now, fingerprint);
       changed += this.changed();

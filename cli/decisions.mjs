@@ -52,10 +52,15 @@ export async function listOnce(request, write, { all = false } = {}) {
   return res.json.notices.length;
 }
 
-/** `--watch`: a pass now and then once a minute, until `signal` aborts. */
-export async function watch(request, write, { signal, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+/** `--watch`: a pass now and then once a minute, until `signal` aborts. A pass that fails — Baton
+ *  unreachable, a refusal — is reported through `warn` and the next minute's pass tries again. */
+export async function watch(request, write, { signal, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), warn = (text) => write(text) } = {}) {
   while (!signal?.aborted) {
-    await listOnce(request, write);
+    try {
+      await listOnce(request, write);
+    } catch (e) {
+      warn(`baton decision list: ${e instanceof Error ? e.message : String(e)}; trying again in a minute`);
+    }
     if (signal?.aborted) return;
     await sleep(WATCH_EVERY_MS);
   }

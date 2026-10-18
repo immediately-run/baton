@@ -357,7 +357,7 @@ async function decisionList(argv) {
   const request = (method, path, body) => send(url, { method, path, body }, keyFile);
   const write = (text) => process.stdout.write(`${text}\n`);
   const { listOnce, watch } = await import('./decisions.mjs');
-  if (flags.watch) await watch(request, write);
+  if (flags.watch) await watch(request, write, { warn: (text) => process.stderr.write(`${text}\n`) });
   else await listOnce(request, write, { all: !!flags.all });
   return 0;
 }

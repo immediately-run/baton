@@ -179,6 +179,13 @@ describe('R-BTN-80: registration', () => {
     expect((await keyCall(admin, '/v1/admin/keys/pool/revoke', {})).json.code).toBe('invalid-params');
   });
 
+  it('an administrator’s revoke of a key its owners already ended is final too', async () => {
+    expect((await keyCall(owner, '/v1/owner/docs/couriers', { fingerprint: cli.fingerprint, revoke: true })).status).toBe(200);
+    expect((await keyCall(admin, `/v1/admin/keys/${encodeURIComponent(cli.fingerprint)}/revoke`, {})).status).toBe(200);
+    expect((await rows<{ revoked_by: string }>('SELECT revoked_by FROM credentials WHERE id = ?', cli.fingerprint))[0].revoked_by).toBe(`admin:${admin.fingerprint}`);
+    expect((await addCourier(cli, ['owner'])).json.code).toBe('conflict');
+  });
+
   it('one role per key: an owner, worker or probe key is refused as a courier, a courier key as a worker', async () => {
     expect((await addCourier(owner, ['owner'])).json.code).toBe('conflict');
     const probe = await makeKey('ssh-ed25519', 'probe');
@@ -217,7 +224,12 @@ describe('R-BTN-103: the pool', () => {
     // A heartbeat that stops declaring them drops them; a malformed list refuses the heartbeat.
     await w.beat({ couriers: [] });
     expect(await rows('SELECT 1 FROM worker_couriers')).toEqual([]);
-    expect((await w.beat({ couriers: [{ repository: 'docs', asks: [] }] })).json.code).toBe('invalid-params');
+    // A malformed entry is refused and reported, never the heartbeat; an over-long list is.
+    const mixed = await w.beat({ couriers: [{ repository: 'docs', asks: [] }, { repository: 'docs', asks: ['owner'] }, { repository: 'docs', asks: ['legal'] }] });
+    expect(mixed.status).toBe(200);
+    expect(mixed.json.refused_couriers).toEqual([{ repository: 'docs', code: 'invalid-params' }, { repository: 'docs', code: 'invalid-params' }]);
+    expect(await rows('SELECT asks FROM worker_couriers')).toEqual([{ asks: 'owner' }]);
+    expect((await w.beat({ couriers: Array.from({ length: 17 }, (_, i) => ({ repository: `r${i}`, asks: ['owner'] })) })).json.code).toBe('invalid-params');
   });
 
   it('a pool copy goes to the first claimer; another worker’s mark is forbidden; a lapse returns it', async () => {
@@ -249,12 +261,16 @@ describe('R-BTN-103: the pool', () => {
 
 describe('the checks before any write (§10.4)', () => {
   it('couriers, asks, a mark and a claim', () => {
-    expect(checkCouriers(undefined)).toEqual([]);
-    expect(checkCouriers([{ repository: 'docs', asks: ['owner', 'owner', 'legal'] }])).toEqual([{ repository: 'docs', asks: ['legal', 'owner'] }]);
-    for (const bad of [{}, [{ repository: 'docs' }], [{ repository: 'docs', asks: ['owner'] }, { repository: 'docs', asks: ['x'] }], [{ repository: 'Docs!', asks: ['owner'] }],
-      [{ repository: 'docs', asks: ['owner'], extra: 1 }], Array.from({ length: 17 }, (_, i) => ({ repository: `r${i}`, asks: ['owner'] }))]) {
-      expect(() => checkCouriers(bad)).toThrow();
-    }
+    expect(checkCouriers(undefined)).toEqual({ entries: [], refused: [] });
+    expect(checkCouriers([{ repository: 'docs', asks: ['owner', 'owner', 'legal'] }])).toEqual({ entries: [{ repository: 'docs', asks: ['legal', 'owner'] }], refused: [] });
+    // The list's own shape and bound refuse; each entry's check refuses only that entry.
+    for (const bad of [{}, 'docs', Array.from({ length: 17 }, (_, i) => ({ repository: `r${i}`, asks: ['owner'] }))]) expect(() => checkCouriers(bad)).toThrow();
+    expect(checkCouriers([{ repository: 'docs' }, { repository: 'docs', asks: ['owner'] }, { repository: 'docs', asks: ['x'] }, { repository: 'Docs!', asks: ['owner'] },
+      { repository: 'ops', asks: ['owner'], extra: 1 }, 7, { repository: 'x'.repeat(200), asks: ['Owner'] }])).toEqual({
+      entries: [{ repository: 'docs', asks: ['owner'] }],
+      refused: [{ repository: 'docs', code: 'invalid-params' }, { repository: 'docs', code: 'invalid-params' }, { repository: 'Docs!', code: 'invalid-params' },
+        { repository: 'ops', code: 'invalid-params' }, { repository: '', code: 'invalid-params' }, { repository: 'x'.repeat(100), code: 'invalid-params' }],
+    });
     expect(() => checkAsks([])).toThrow();
     expect(() => checkAsks(Array.from({ length: 9 }, (_, i) => `a${i}`))).toThrow();
     expect(() => checkAsks(['Owner'])).toThrow();

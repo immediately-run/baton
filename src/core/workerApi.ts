@@ -372,7 +372,7 @@ export class WorkerApi {
     const uses = this.c.uses?.(w.id, granted, hb.uses.names) ?? { changed: false, refused: [] };
     // R-BTN-103: the notices it delivers as a worker courier — a machine key's, on repositories it
     // is granted on; a refused entry never refuses the heartbeat either.
-    const refusedCouriers = this.c.couriers?.(w.id, cred.kind === 'worker' ? granted : null, hb.couriers) ?? [];
+    const refusedCouriers = [...hb.couriers.refused, ...(this.c.couriers?.(w.id, cred.kind === 'worker' ? granted : null, hb.couriers.entries) ?? [])];
     const refusedUses = [...hb.uses.refused, ...uses.refused];
     if (!was?.live || rewrote || uses.changed) this.c.fleetChanged?.();
     const refused = hb.transcript_refusals;
