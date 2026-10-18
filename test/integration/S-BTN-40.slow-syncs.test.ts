@@ -42,7 +42,8 @@ describe('S-BTN-40 slow and stale syncs, end to end', () => {
       expect([body.leg, (await advance('vm-a', w1.secret, c.claim_id, body)).status]).toEqual([body.leg, 200]);
       if (!lagging) continue;
       const station = lagging.length ? lagging[lagging.length - 1][1] : 'filed';
-      git.place('T-1', placed(station, lagging, []));
+      // a sync always queues a leg short of an end (R-BTN-83): here the one the claim took next
+      git.place('T-1', placed(station, lagging, [[String(run[lagging.length][0].leg), 'ready']]));
       expect(await git.refresh()).toMatchObject({ status: 200, stale_released: 0 });
       await never();
     }

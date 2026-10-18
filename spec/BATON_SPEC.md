@@ -6337,8 +6337,9 @@ integration suite that drives them together, on a controllable clock, proves the
   eventually taken), and every integration scenario's event log is checked against it
   (R3-1243, R3-1244). Both are cutover preconditions (§13). A spec change to a requirement
   the model cites changes the model in the same baton PR. The checking runs on the author's
-  machine, not on hosted CI runners, whose time limits it outgrew: a PR that changes the
-  model, the core, the replay or the trace check carries `npm run model:full`'s report for its
+  machine, not on hosted CI runners, whose time limits it outgrew: a PR that changes what the
+  checks read — the model, the core and what it imports, the replay and its helpers, the trace
+  check, or the Quint version — carries `npm run model:full`'s report for its
   head — simulation, witnesses, the model-drawn traces driving the core, and the proof — and a
   CI job that runs no model reads the PR body and fails until that report is there, names the
   PR's head and passes (`model-report`). CI runs the deterministic part on every change: the

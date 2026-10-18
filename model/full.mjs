@@ -1,6 +1,6 @@
 // npm run model:full: every model check, on the author's machine (R-BTN-68, amended 2026-10-17:
 // model checking does not run on hosted CI runners, whose time limits it outgrew). A pull request
-// that changes model/, src/core/, the replay or the trace check pastes this report into its body,
+// that changes what the checks read (scripts/model-report.mjs lists it) pastes this report into its body,
 // and CI checks it names the PR's head and passes (scripts/model-report.mjs). It runs, in order:
 //   1. npm run model — typecheck, regression runs, MODEL_SAMPLES (10,000) runs of `step` and
 //      30% as many of `progressStep`, and the witnesses;
@@ -10,7 +10,7 @@
 // Markdown on stdout; each step's own output goes to stderr.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { renderReport } from '../scripts/model-report.mjs';
+import { SIZES, labels, renderReport } from '../scripts/model-report.mjs';
 
 const git = (...args) => spawnSync('git', args, { encoding: 'utf8' }).stdout.trim();
 const head = git('rev-parse', 'HEAD');
@@ -19,13 +19,18 @@ const head = git('rev-parse', 'HEAD');
 const dirty = git('status', '--porcelain');
 const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
 const quintVersion = lock.packages?.['node_modules/@informalsystems/quint']?.version ?? 'unknown';
-const samples = process.env.MODEL_SAMPLES ?? '10000';
-const traces = process.env.REPLAY_TRACES ?? '1000';
+// the sizes may be lowered to try a change; the report then says it is no report for a PR
+const sizes = {
+  samples: process.env.MODEL_SAMPLES ?? SIZES.samples,
+  traces: process.env.REPLAY_TRACES ?? SIZES.traces,
+  depth: process.env.MODEL_VERIFY_DEPTH ?? SIZES.depth,
+};
+const [modelLabel, replayLabel, verifyLabel] = labels(sizes);
 
 const steps = [
-  [`npm run model (${samples} samples)`, 'npm', ['run', 'model'], { MODEL_SAMPLES: samples }],
-  [`model-based tests (${traces} traces)`, 'npx', ['vitest', 'run', '--project', 'local', 'test/model/replay.test.ts'], { REPLAY_TRACES: traces }],
-  ['npm run model:verify', 'npm', ['run', 'model:verify'], {}],
+  [modelLabel, 'npm', ['run', 'model'], { MODEL_SAMPLES: sizes.samples }],
+  [replayLabel, 'npx', ['vitest', 'run', '--project', 'local', 'test/model/replay.test.ts'], { REPLAY_TRACES: sizes.traces }],
+  [verifyLabel, 'npm', ['run', 'model:verify'], { MODEL_VERIFY_DEPTH: sizes.depth }],
 ];
 const rows = [];
 for (const [label, cmd, args, env] of steps) {

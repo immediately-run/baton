@@ -694,13 +694,14 @@ module baton {
   }
   // The course's sync reads git and computes any barred tags consistent with it (here, any
   // set of families on the writing legs — course logic is nondeterministic, R-BTN-50) and each
-  // ticket's queued leg: one of the legs leaving the station git shows, or none (""). None is
-  // what a sync posts at an end, where max_runs leaves no leg, and where it queues nothing yet —
-  // S-BTN-40's syncs post none mid-course; Baton then offers the ticket nothing until a post
-  // queues a leg, which `noStuckTicket` counts as waiting on the sync. Which leg is the course's
-  // to say (R-BTN-83: the holder's `next`, a re-route or the start leg).
+  // ticket's queued leg: one of the legs leaving the station git shows, or none ("") exactly
+  // when no leg leaves it — at an end, or where max_runs leaves none. R-BTN-83 requires a `next`
+  // at every station but an end, and `locate` infers one for work without a pair; what core does
+  // with a post that breaks this is not yet specified (round 2, 2-r2-4; ticket B-27).
+  // Which leg is the course's to say (R-BTN-83: the holder's `next`, a re-route or the start leg).
   pure def queuedValid(git: str -> List[str], queued: str -> str): bool =
-    git.keys().forall(t => queued.get(t) == "" or nextLegs(git.get(t)).contains(queued.get(t)))
+    git.keys().forall(t => if (nextLegs(git.get(t)).size() == 0) queued.get(t) == ""
+                           else nextLegs(git.get(t)).contains(queued.get(t)))
   // @impl external — the repository's sync reads git and computes the bars and queued legs
   action syncRead(s: int, bars: str -> Set[str], queued: str -> str): bool = all {
     st.syncs.get(s).phase == "numbered", queuedValid(st.gitPath, queued),
