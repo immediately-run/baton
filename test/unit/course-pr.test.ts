@@ -4,7 +4,7 @@
 // review with and without a verdict line, one identity authoring and reviewing — and the
 // three-fix limit. Pure and host-neutral.
 import { describe, it, expect } from 'vitest';
-import { branchMatches, prNumbers, stationsPr, type PrFact } from '../../src/defaults/course-pr';
+import { CREATE_PR_COURSE, REVIEW_PR_COURSE, branchMatches, prNumbers, stationsPr, stationsReviewPr, type PrFact } from '../../src/defaults/course-pr';
 import type { SourceTicket as PostedTicket } from '../../src/defaults/tickets-markdown';
 
 const T0 = 1_000_000;
@@ -158,5 +158,76 @@ describe('branchMatches', () => {
     expect(branchMatches('*', 'anything')).toBe(true);
     expect(branchMatches('claude/*/*', 'claude/a/b')).toBe(true);
     expect(branchMatches('fixed', 'fixed')).toBe(true);
+  });
+});
+
+// B-28 (R-BTN-131): `create-pr`, which replaced `pr`, reads its own course file's bounds — review
+// three rounds, fix twice — and adjudicates what the third round leaves open.
+describe('create-pr: three rounds, then adjudicate', () => {
+  const graph = CREATE_PR_COURSE;
+  const v = (at: number, verdict: 'approve' | 'changes', author = 'r') => ({ author, state: (verdict === 'approve' ? 'APPROVED' : 'CHANGES_REQUESTED') as 'APPROVED' | 'CHANGES_REQUESTED', submittedAt: at });
+  const note = (at: number, body: string) => ({ author: 'a', state: 'COMMENTED' as const, submittedAt: at, body });
+  const three = [v(T0, 'changes'), v(T0 + 20, 'changes'), v(T0 + 40, 'changes')];
+  const pushes = [T0 - 1000, T0 + 10, T0 + 30];
+  const place = (reviews: PrFact['reviews'], over: Partial<PrFact> = {}) =>
+    stationsPr({ tickets: [ticket('A')], facts: [pr({ number: 1, pushes, pushedAt: T0 + 30, reviews, ...over })], closed: new Set(), graph }).stations.A;
+
+  it('a third round asking for changes queues adjudicate, not a fix and not the owner', () => {
+    const at = place(three);
+    expect(at).toMatchObject({ station: 'reviewed', next_leg: 'adjudicate', next: [{ leg: 'adjudicate', state: 'ready', waiting_on: null }] });
+    expect(at.path.map((s) => s.leg)).toEqual(['implement', 'review', 'fix', 'review', 'fix', 'review']);
+    // A second round asking for changes, not yet fixed, still queues the fix.
+    expect(place(three.slice(0, 2), { pushes: [T0 - 1000, T0 + 10], pushedAt: T0 + 10 })).toMatchObject({ station: 'reviewed', next_leg: 'fix' });
+  });
+
+  it('adjudicated merge: merge ready; adjudicated owner: merge waiting on the owner; an adjudication before the last verdict counts for nothing', () => {
+    expect(place([...three, note(T0 + 50, '<!-- baton:adjudicated merge -->\nnothing reproduced')])).toMatchObject({
+      station: 'adjudicated', next_leg: 'merge', next: [{ leg: 'merge', state: 'ready', waiting_on: null }],
+    });
+    const owner = place([...three, note(T0 + 50, '<!-- baton:adjudicated owner -->')]);
+    expect(owner).toMatchObject({ station: 'adjudicated', next: [{ leg: 'merge', state: 'waiting', waiting_on: 'owner' }] });
+    expect(owner.path.at(-1)).toEqual({ leg: 'adjudicate', reached: 'adjudicated' });
+    expect(place([three[0], three[1], note(T0 + 35, '<!-- baton:adjudicated merge -->'), three[2]])).toMatchObject({ station: 'reviewed', next_leg: 'adjudicate' });
+  });
+
+  it('merged after adjudication: the path ends adjudicate, merge', () => {
+    const at = place([...three, note(T0 + 50, '<!-- baton:adjudicated merge -->')], { state: 'merged' });
+    expect(at.station).toBe('merged');
+    expect(at.path.slice(-2)).toEqual([{ leg: 'adjudicate', reached: 'adjudicated' }, { leg: 'merge', reached: 'merged' }]);
+  });
+
+  it('a pr course file (fix three, no adjudicate) keeps the three-fix limit and the owner wait', () => {
+    const prGraph = { legs: { review: { max_runs: 4 }, fix: { max_runs: 3 } } };
+    const out = stationsPr({ tickets: [ticket('A')], facts: [pr({ number: 1, pushes, pushedAt: T0 + 30, reviews: three })], closed: new Set(), graph: prGraph }).stations.A;
+    expect(out).toMatchObject({ next_leg: 'fix' }); // two fixes so far, three allowed
+  });
+});
+
+// B-28 (R-BTN-131): `review-pr` reviews a PR someone else opened, named in the ticket's `prs:`.
+describe('review-pr', () => {
+  const t = (prs: string[] = ['5']) => ticket('R', { course_id: 'review-pr', course: { prs } });
+  const place = (facts: PrFact[], prs?: string[]) => stationsReviewPr({ tickets: [t(prs)], facts, closed: new Set(), graph: REVIEW_PR_COURSE }).stations.R;
+  const fact = (over: Partial<PrFact> = {}) => pr({ number: 5, head: 'someone/feature', ...over });
+  const verdict = (at: number, approve: boolean) => ({ author: 'r', state: 'COMMENTED' as const, submittedAt: at, body: `<!-- baton:verdict ${approve ? 'approve' : 'changes'} -->` });
+
+  it('no PR found: requested, review waiting on the pr; found, review ready once checks finish', () => {
+    expect(place([], ['9'])).toMatchObject({ station: 'requested', next_leg: 'review', next: [{ leg: 'review', state: 'waiting', waiting_on: 'pr' }] });
+    expect(place([fact({ checks: [null] })]).next[0]).toMatchObject({ leg: 'review', state: 'waiting', waiting_on: 'ci' });
+    expect(place([fact()])).toMatchObject({ station: 'requested', next_leg: 'review', next: [{ leg: 'review', state: 'ready', waiting_on: null }, { leg: 'conclude', state: 'ready', waiting_on: null }] });
+  });
+
+  it('changes requested: the next round waits on the author until a push lands after the verdict', () => {
+    const waiting = place([fact({ pushes: [T0 - 1000], reviews: [verdict(T0, false)] })]);
+    expect(waiting).toMatchObject({ station: 'changes-requested', path: [{ leg: 'review', reached: 'changes-requested' }], next: [{ leg: 'review', state: 'waiting', waiting_on: 'author' }, { leg: 'conclude', state: 'ready' }] });
+    expect(place([fact({ pushes: [T0 - 1000, T0 + 5], reviews: [verdict(T0, false)] })]).next[0]).toMatchObject({ leg: 'review', state: 'ready' });
+  });
+
+  it('approved is the end; three rounds spent, or the PR merged or closed, queues conclude alone; a concluded comment is the other end', () => {
+    expect(place([fact({ reviews: [verdict(T0, false), verdict(T0 + 10, true)] })])).toMatchObject({ station: 'approved', next_leg: null, next: [] });
+    const spent = place([fact({ pushes: [T0 + 5, T0 + 15, T0 + 25], reviews: [verdict(T0, false), verdict(T0 + 10, false), verdict(T0 + 20, false)] })]);
+    expect(spent).toMatchObject({ station: 'changes-requested', next_leg: 'conclude', next: [{ leg: 'conclude', state: 'ready', waiting_on: null }] });
+    expect(place([fact({ state: 'closed' })])).toMatchObject({ station: 'requested', next_leg: 'conclude' });
+    const done = place([fact({ state: 'merged', reviews: [verdict(T0, false), { author: 'r', state: 'COMMENTED', submittedAt: T0 + 9, body: '<!-- baton:concluded -->\nsummary' }] })]);
+    expect(done).toMatchObject({ station: 'concluded', next: [], path: [{ leg: 'review', reached: 'changes-requested' }, { leg: 'conclude', reached: 'concluded' }] });
   });
 });

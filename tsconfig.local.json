@@ -40,6 +40,9 @@
     "test/unit/stats-size.test.ts",
     "test/model/replay.test.ts",
     "test/integration/S-BTN-43.defaults.test.ts",
-    "test/unit/defaults-cli.test.ts"
+    "test/unit/defaults-cli.test.ts",
+    "test/unit/standard-courses.test.ts",
+    "test/unit/course-markers.test.ts",
+    "test/integration/S-BTN-104.standard-courses.test.ts"
   ]
 }

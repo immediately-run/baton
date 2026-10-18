@@ -16,4 +16,78 @@ prs: []
 depends_on: []
 ---
 
-_(filed; the body follows.)_
+**Spec:** BATON_SPEC R-BTN-131 (new), R-BTN-74 (amended), R-BTN-83, R-BTN-69, R-BTN-127's
+command table. **Depends on:** nothing.
+
+### Requires
+
+None: a checkout and a terminal. No exit criterion needs a forge, a browser or a person.
+
+### Why
+
+The owner, 2026-10-18: "create standard courses which are in the baton repo such as create-pr
+and bug-report, use existing docs repo skills as a starting point". The CLI shipped one course,
+`pr`, wired in by name in six places, with no instructions for what its legs should do. A
+repository adopting Baton had to write every leg's agent prompt itself, and any route other than
+implement → review → merge meant writing a course from scratch. The owner's choices, asked the
+same day: `create-pr` replaces `pr`; `bug-report` triages and ends in a fix ticket; the leg
+instructions ship with the CLI and are the repository's once scaffolded; `draft-ticket`,
+`review-pr` and `decision` ship too.
+
+### What to build
+
+1. A registry of standard courses, `src/defaults/courses.ts`, replacing the six places `pr` was
+   wired in by name: each course's file, the facts its station function reads, its leg stubs'
+   positions, and its skill.
+2. `create-pr`, replacing `pr`: implement → review (three rounds) → fix (twice) → adjudicate →
+   merge. The station function reads the repository's course file, so a `pr` repository keeps
+   its behaviour.
+3. `review-pr`: rounds of review on a PR someone else opened, and a conclusion.
+4. A station function and `close` over committed closing markers, for the three courses that
+   open no PR: `bug-report`, `draft-ticket` and `decision`.
+5. Markdown instructions for every leg, adapted from the docs skills with the docs-specific
+   parts left out, scaffolded by `baton repo init --course <id>`.
+6. `init --course` adds a course beside the first; `--course pr` names `create-pr`.
+
+### Architecture
+
+- **Course code in the CLI, never core** (§2b): everything lives in `src/defaults/`; `src/core/`
+  gains no line.
+- **One registry.** `courses.ts` is the only place a course is named. `readBoard`, `init`,
+  `--eject` and the stubs read it.
+- **`create-pr` reuses `stationsPr`**, generalised to read the course file's bounds: once the
+  fixes run out, it queues `adjudicate` when the file has that leg, else `merge` waiting on the
+  owner. Adjudication and conclusion are comment lines, as the verdict is.
+- **Markers, not a new mechanism.** The PR-less courses use R-BTN-83's closing markers in
+  `.baton/markers.jsonl`, committed and pushed by `close`, and `locate`'s rule of ignoring a
+  marker that is no edge. A malformed line is skipped, never fatal.
+- **Instructions read at the snapshot**, like `agent_command`, so a branch under review cannot
+  rewrite its reviewer's instructions. They are handed over as a file in `BATON_INSTRUCTIONS`.
+- **The decision's answer is a frontmatter field** (`answer:`) until person legs (R-BTN-116)
+  exist, so no core change is needed.
+- **Do not** add a key `validateCourse` refuses: the new course files use R-BTN-69's original
+  keys only.
+
+### Tests
+
+- `test/unit/standard-courses.test.ts`: every course file passes `validateCourse`; every leg has a
+  stub and instructions; every stub position is an edge for every answer; no docs machinery in
+  the instructions; `pr` names `create-pr`.
+- `test/unit/course-markers.test.ts`: placement from markers, non-edge and past-`max_runs`
+  markers ignored, `next` from the marker or the course file, the decision's owner wait,
+  `parseMarkers`, and `markerClose`'s commit, push and retry.
+- `test/unit/course-pr.test.ts`: `create-pr`'s adjudication; `review-pr`'s stations.
+- `test/unit/defaults-cli.test.ts`: `init --course` for each course, the stubs' instructions and
+  outcome checks, the refusals, and a `pr` repository's pin move.
+- `test/integration/S-BTN-104.standard-courses.test.ts`: the scenario, through the local host.
+
+### Exit criteria
+
+- [ ] `npm test` green, with S-BTN-104 and G-BTN-123 in the spec
+- [ ] `baton repo init --course <id>` scaffolds each of the five courses, and `baton test-course`
+  passes on each scaffolded course
+- [ ] `src/core/` unchanged (`git diff --stat origin/main -- src/core` empty)
+
+## Status
+
+_(filed 2026-10-18)_

@@ -8,7 +8,7 @@ import type { PostedTicket } from '../core/board';
 export interface MarkdownSettings {
   /** Where ticket files live, relative to the repository root (default `tickets/`). */
   items?: string;
-  /** The course a ticket names none for (default `pr`). */
+  /** The course a ticket names none for (default `create-pr`, R-BTN-131). */
   default_course?: string;
   /** Short repository names a ticket's `repos` may use, mapped to `owner/name`. */
   repos?: Record<string, string>;
@@ -79,7 +79,7 @@ const CLOSED: Record<string, 'done' | 'withdrawn'> = { done: 'done', withdrawn: 
  * posted. Unknown frontmatter fields are ignored, so an existing wiki needs no rewrite. */
 export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSettings = {}): TicketsResult {
   const itemsDir = settings.items ?? 'tickets';
-  const defaultCourse = settings.default_course ?? 'pr';
+  const defaultCourse = settings.default_course ?? 'create-pr';
   const tickets: SourceTicket[] = [];
   const closed: { id: string; as: 'done' | 'withdrawn' }[] = [];
   const byId = new Map<string, string>(); // id → file, for duplicate detection
@@ -127,8 +127,9 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
       blocked_by: [],
       repos: resolved as string[],
       rank: order != null ? Math.max(0, Math.round(order)) : null,
-      // Opaque to Baton, read by the course's own code (§2b): the PR list the pr course reads.
-      course: { ...(strList(fm.prs).length ? { prs: strList(fm.prs) } : {}) },
+      // Opaque to Baton, read by the course's own code (§2b): the PR list the PR courses read,
+      // and the owner's `answer:` the decision course waits on (R-BTN-131).
+      course: { ...(strList(fm.prs).length ? { prs: strList(fm.prs) } : {}), ...(str(fm.answer) != null ? { answer: str(fm.answer)! } : {}) },
       ...(parent != null ? { parent } : {}),
       ...(fm.not_before != null ? { not_before: fm.not_before } : {}),
       ...(str(fm.status) != null ? { display: { status: str(fm.status)! } } : {}),

@@ -27,6 +27,9 @@ const WITHOUT_ADJUDICATE = { ...roadmapPr, stations: stationsWithout, legs: { ..
 describe('baton test-course', () => {
   it('docs’ roadmap-pr passes: the core accepts it, and a ticket runs its shortest route to a confirmed done', async () => {
     expect(shortestRoute(graphOf(roadmapPr))!.map((s) => s.leg)).toEqual(['implement', 'review', 'merge']);
+    // The route starts with the start leg, though another leg reaches an end sooner (R-BTN-83).
+    const shortcut = { start: 'a', start_leg: 'long', end: ['z'], stations: { a: {}, b: {}, z: {} }, legs: { long: { from: ['a'], to: 'b' }, skip: { from: ['a'], to: 'z' }, finish: { from: ['b'], to: 'z' } } };
+    expect(shortestRoute(graphOf(shortcut))!.map((s) => s.leg)).toEqual(['long', 'finish']);
     expect(await checkCourse(input({ live: [{ id: 'T-1', path: [{ leg: 'implement', reached: 'pr-open' }] }] }))).toEqual([]);
   }, 60_000);
 

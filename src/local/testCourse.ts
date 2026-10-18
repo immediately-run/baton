@@ -110,10 +110,17 @@ export function replayViolations(proposed: unknown, live: KitInput['live']): Kit
   }));
 }
 
-/** The shortest route from the start to an end, as steps (breadth-first over every leg's outcomes). */
+/** The shortest route from the start to an end, as steps (breadth-first over every leg's outcomes),
+ * its first step the course's `start_leg`: a new ticket's queued leg, the only one its first
+ * advance may take (R-BTN-83, `not-queued`). Found by B-28's `review-pr`, whose shortest route
+ * from `requested` was its other leg. */
 export function shortestRoute(g: Graph): Step[] | null {
+  if (g.ends.has(g.start)) return [];
+  const first = g.legs.get(g.startLeg);
+  if (!first) return null;
   const prev = new Map<string, { from: string; step: Step } | null>([[g.start, null]]);
-  let frontier = [g.start];
+  let frontier: string[] = [];
+  for (const to of first.to) if (!prev.has(to)) { prev.set(to, { from: g.start, step: { leg: g.startLeg, reached: to } }); frontier.push(to); }
   while (frontier.length) {
     const next: string[] = [];
     for (const s of frontier) {
