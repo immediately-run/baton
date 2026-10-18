@@ -61,6 +61,19 @@ None: a checkout of docs and of this repository. Nothing here posts to Baton.
 
 ### Exit criteria
 
-- [ ] docs carries the five courses by source, the ticket source and the two overrides, with its tests green
-- [ ] the live legacy sync unchanged, and the CLI's workflow present but off
-- [ ] the budget measured, and a Baton ticket filed if it does not fit
+- [x] docs carries the five courses by source, the ticket source and the two overrides, with its tests green
+- [x] the live legacy sync unchanged, and the CLI's workflow present but off
+- [x] the budget measured, and a Baton ticket filed if it does not fit
+
+## Status
+
+Delivered by docs 02bd594 (2026-10-18), committed to docs' main as docs takes all its work. There is no PR, so no review gate ran.
+- **Scaffold.** The five courses are in docs by source `github/immediately-run/baton/dd780cb…/<course>`, and create-pr overrides `review` and `merge`.
+- **Ticket source.** `.baton/tickets.mjs` reads the roadmap through factory-state: 131 live tickets; archived items close `done`, parked ones `withdrawn`.
+- **Shadow.** docs' live legacy sync is untouched. The CLI's workflow is `baton-cli-sync.yml`, off until `BATON_CLI_ENABLED` is set, and its first run on 02bd594 was skipped as intended.
+- **Checked:**
+  - Baton's `test-course` passes all five courses.
+  - A trial sync of the tree against Baton's local host was accepted: the sources were checked and 131 tickets were posted.
+  - `scripts/baton-courses.test.mjs` passes, as does each step of docs' `npm run verify`, apart from what this container cannot run: `check:instrument` needs the history a shallow clone lacks, and Baton's two `ssh-keygen` tests need `ssh-keygen`.
+- **Budget.** A live sync of docs needs about 360 requests against the 200 budget, so **B-35** is filed. It also found that R3-44 names a repository that does not exist (`devices`), which docs must fix before cutover.
+
