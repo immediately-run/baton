@@ -51,11 +51,17 @@ today and an interface change or a broken promise later.
    - The per-credential counter is keyed by origin and credential, and counts only requests
      the object verified.
    - Lease upkeep has its own bucket.
-   - Failed verifications get a bucket by origin, keyid and IP. Beyond 60 a minute the
-     Worker verifies that bucket's requests itself, against a 60-second cache of the keyid's
-     public key, and refuses only the ones that fail. A verifying request is never refused.
-   - Lease upkeep's bucket is 30 a minute plus 30 per live claim. An upkeep call's payload
-     over a cap is dropped and logged `payload-dropped`, while its lease part is accepted.
+   - Failures are counted in two buckets: by origin, credential id (an SSH keyid or a
+     bearer's `<id>`) and IP; and by origin and IP across all ids.
+   - Beyond 60 failures a minute in either bucket, the Worker checks requests against a
+     snapshot of the tenant's whole active credential set. It fetches the snapshot at most
+     once a minute, and again at most every 5 seconds on a miss, and refuses only the
+     requests that fail.
+   - A verifying request is never refused by these buckets. The object still verifies every
+     forwarded request in full.
+   - Lease upkeep has its own bucket: 30 a minute, plus 1 per live session and 30 per live
+     claim. No cap refuses an upkeep call or drops anything it carries. Ring-triggered
+     heartbeats are coalesced to one every 10 seconds per session.
    - The per-IP rule is a Workers rate-limit binding keyed `<host>|<ip>`.
 4. **Refusals every client handles** (R-BTN-132). The runner, sidecar, CLI, couriers, sync,
    mirror and dashboard each handle `rate-limited` and `quota` on every route:
@@ -89,23 +95,34 @@ today and an interface change or a broken promise later.
      listed under Needs you. The course kit's seeds carry them.
    - Registration requires the ids for a forge repository. `repo add` reads them from the
      forge API, or from `--forge-ids`.
-   - `baton admin repo identify` resolves candidate ids through the forge (by the seen id
-     where Needs you shows one, else by path) and shows the forge's full name and creation
-     date. On confirmation it sends the explicit ids, which Baton stores only if they equal the
-     latest seen ids, when there are any (else `conflict`). Replacing stored ids needs
-     `confirm`.
+   - `baton admin repo identify`:
+     - it resolves ids by path and shows the forge's full name and creation date;
+     - Baton stores them if they equal the latest seen ids, or if none were seen;
+     - otherwise Baton refuses with `conflict`, naming the seen ids, which the command
+       resolves by id and shows beside the first; the administrator's choice is then sent
+       with `confirm: true`;
+     - a `confirm`ed path change clears the seen ids;
+     - replacing stored ids needs `confirm`.
    - Verification:
      - OIDC and GitLab tokens are checked by id once ids are stored;
-     - App deliveries and notifications map by id, and a path match with another id is
-       logged `forge-id-mismatch`;
+     - App deliveries and notifications map by id; a path match with another id is ignored,
+       and counted in `forge_ids_seen.mismatch` at most once a minute, with no row per
+       request;
      - a GitHub `job_workflow_ref` is checked against the token's own repository claim;
      - a verified rename updates the path, `web_base` and a derived `remote` (`repo-renamed`);
-     - a rename onto a live repository's path keeps the old path, is listed under Needs you,
-       and holds the repository's tickets (rule `rename-held`) until an administrator's
-       `confirm`ed path change applies the same rewrite;
-     - `?repo=` resolves former paths, for the fence only;
-     - renames, path changes and identifies are `admin` events with `detail.action`, and a
-       mismatch is a `discrepancy`.
+     - a rename onto a live repository's path keeps the old path and is listed under Needs
+       you; §7.2 rule 13 (`not-eligible`, rule `rename-held`) refuses claims on tickets whose
+       home or `repos:` has a held rename, and their active claims are sent a `requested`
+       release, until an administrator's `confirm`ed path change applies the same rewrite or
+       a later rename no longer collides;
+     - for the fence only, `?repo=` and tickets' `repos:` match current and former paths
+       (the latest 10, deduplicated), and several matches fail safe;
+     - retiring tombstones `github` as `~retired/<id>`, accepted by the validator and import
+       only on a retired row, and the migration rewrites rows already retired;
+     - renames, path changes and identifies are `admin` events with `detail.action` (actor
+       `sync` for a verified rename).
+   - `baton repo *` reads `baton_url` at the synced commit, and a runner's or worker's sync
+     is skipped when it differs from the runner's origin.
    - A repository without ids is listed under Needs you.
    - Every registered repository having its ids is a cutover precondition.
 
