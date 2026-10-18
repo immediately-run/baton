@@ -27,17 +27,22 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 
 **Where the checks run (R-BTN-68, amended 2026-10-17).** Model checking runs on the
 author's machine, not on hosted CI runners, whose time limits it outgrew. A pull request that
-changes `model/`, `src/core/`, the replay or the trace check carries `npm run model:full`'s
-report in its body. CI's `model-report` workflow (`scripts/model-report.mjs`) runs no model: it
-reads the body, and fails until the report is there, names the PR's head and shows every check
-passing; editing the body re-runs it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick`, the scenario traces
+changes what the checks read — `model/`, `src/core/` with the `src/shared/` modules and
+`src/migrations/` it imports, the replay and its helpers (`test/model/`, `test/helpers.ts`,
+`test/lib/`), the trace check, or `package-lock.json`, which pins Quint and Apalache — carries
+`npm run model:full`'s report in its body. CI's `model-report` workflow
+(`scripts/model-report.mjs`) runs no model: it reads the body, and fails until the report is
+there, names the PR's head and shows every check passing at full size; editing the body re-runs
+it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick`, the scenario traces
 (`npm run traces`), the links (`npm run model:links`) and 200 model-drawn traces driving the core.
 
-- `npm run model:full` — every check below, in order: `npm run model`, the model-based tests
-  with 1,000 traces, and `npm run model:verify`. It runs every step even after a failure and
-  prints a Markdown report on stdout: the commit (flagged when the tree has uncommitted changes
-  to the files the checks read), the Quint version, and each check's result and minutes. Paste
-  it into the PR. Needs Java for the last step.
+- `npm run model:full` — every check below, in order: `npm run model` with 10,000 samples, the
+  model-based tests with 1,000 traces, and `npm run model:verify` to depth 5. It runs every step
+  even after a failure and prints a Markdown report on stdout: the commit (flagged when the
+  working tree has any uncommitted or untracked change), the Quint version, and each check's
+  result and minutes. `MODEL_SAMPLES`, `REPLAY_TRACES` and `MODEL_VERIFY_DEPTH` lower the sizes
+  to try a change, and the report then says it is a reduced run, which `model-report` refuses.
+  Paste it into the PR. Needs Java for the last step; about two hours on 4 CPUs.
 - `npm run model` — typecheck, the 28 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
