@@ -21,6 +21,17 @@ module regressions {
     syncNumber(1).then(syncRead(1, TICKETS.mapBy(t => Set("family:b")), queuedFor(st.gitPath, TICKETS.mapBy(_ => "")))).then(syncPost(1))
   action read(s: int, bars: Set[str]): bool = syncRead(s, TICKETS.mapBy(t => bars), queuedFor(st.gitPath, TICKETS.mapBy(_ => "")))
 
+  // R3-1254: at the bound on time, `timeUp` is enabled and changes nothing, so `step` always
+  // has an action. A run whose workers are all dead or fenced, holding claims whose leases have
+  // not expired when time reaches MAX_TIME, has no other: the alarm needs time to pass, and a
+  // dead worker holding a claim does not restart. Quint's simulator then re-drew that step
+  // forever (seed 1, run 2,938–2,952 of `npm run model`'s 10,000).
+  run timeUpIdlesAtTheBoundTest =
+    start.then(claim("w1", "t1")).then(crash("w1")).then(MAX_TIME.reps(_ => tick))
+      .expect(st.now == MAX_TIME)
+      .then(timeUp).expect(st.now == MAX_TIME and workerClaim("w1").size() == 1)
+  run timeUpWaitsForTheBoundTest = start.then(timeUp).fail()
+
   // The fifth review's B3 (a claim hook as an await, R-BTN-52) and its fallback runs went with
   // R-BTN-98, which retired the hook: a claim is one transaction (R3-1254).
 

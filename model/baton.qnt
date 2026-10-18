@@ -520,6 +520,16 @@ module baton {
     st.now < MAX_TIME,
     st' = st.with("now", st.now + 1),
   }
+  // The run's time is up: it idles (a stutter, R3-1254). Bounding time is the model's, not
+  // Baton's. Without it a run whose workers all crashed holding claims when time reached
+  // MAX_TIME has no enabled action — the alarm cannot reap a lease without time passing, and a
+  // dead worker does not restart while it holds a claim — and Quint's simulator re-draws that
+  // step forever instead of ending the run (a 10,000-run `npm run model` that never finished).
+  // @impl external — the model's bound on time
+  action timeUp: bool = all {
+    st.now >= MAX_TIME,
+    st' = st,
+  }
   // §6.3: the sidecar's heartbeat renews the lease, and tells the worker what it holds.
   // @impl src/core/workerApi.ts#heartbeat
   // @impl src/core/claims.ts#fenced
@@ -805,7 +815,7 @@ module baton {
     any {
       claim(w, t),
       pushEvidence(w, b), advance(w, leg, holderBars), endClaim(w, kind, b), endBlocked(w, blockKind, d),
-      heartbeat(w), sleep(w), wake(w), tick, alarmReap(i),
+      heartbeat(w), sleep(w), wake(w), tick, timeUp, alarmReap(i),
       crash(w), reapDead(w), forceReap(w), fenceCleared(w), fenceTimeout(i),
       setHold(t, b), setOwnerBar(tag, applies), liftOwnerBars, ownerResolve(i),
       foreignPush(t, leg), regress(t), withdraw(t), gitDepends(t, d, b), gitDecides(t, decisionLeg, b),
