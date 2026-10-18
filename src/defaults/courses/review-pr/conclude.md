@@ -37,7 +37,9 @@ git worktree remove --force "$d"
 
 The worktree is this run's own, in a fresh temporary directory. Remove it even when a step fails.
 
-Leave the PR's branch checked out when you finish.
+Leave the PR's branch checked out when you finish. If the PR is in another repository (named in
+the ticket's `repos:`), print its URL alone as your last line instead: Baton writes the
+conclusion line there.
 
 ## Do not
 

@@ -4,7 +4,7 @@
 // review with and without a verdict line, one identity authoring and reviewing — and the
 // three-fix limit. Pure and host-neutral.
 import { describe, it, expect } from 'vitest';
-import { CREATE_PR_COURSE, REVIEW_PR_COURSE, branchMatches, prNumbers, stationsPr, stationsReviewPr, type PrFact } from '../../src/defaults/course-pr';
+import { CREATE_PR_COURSE, REVIEW_PR_COURSE, branchMatches, matchPatterns, prRefs, stationsPr, stationsReviewPr, ticketOwns, type PrFact } from '../../src/defaults/course-pr';
 import type { SourceTicket as PostedTicket } from '../../src/defaults/tickets-markdown';
 
 const T0 = 1_000_000;
@@ -101,6 +101,42 @@ describe('an open PR', () => {
   });
 });
 
+describe('a ticket\'s PRs in other repositories (B-29)', () => {
+  const home = 'o/docs';
+  const sib = (over: Partial<PrFact> & { number: number }) => pr({ repository: 'o/site', ...over });
+  const placed = (t: PostedTicket, facts: PrFact[]) => run([t], facts, new Set(), { repository: home }).A;
+
+  it('a PR in a repository the ticket names is its own, by branch or by URL; one in a repository it does not name is not', () => {
+    const named = ticket('A', { repos: ['o/site'] });
+    expect(placed(named, [sib({ number: 3, head: 'claude/A-x' })])).toMatchObject({ station: 'pr-open' });
+    expect(placed(ticket('A', { repos: ['O/Site'], course: { prs: ['https://github.com/o/site/pull/9'] } }), [sib({ number: 9, head: 'feature/x' })])).toMatchObject({ station: 'pr-open' });
+    expect(placed(ticket('A'), [sib({ number: 3, head: 'claude/A-x' })])).toMatchObject({ station: 'filed' });
+    // A bare prs: number is the home's: never another repository's PR of that number.
+    expect(placed(ticket('A', { repos: ['o/site'], course: { prs: ['9'] } }), [sib({ number: 9, head: 'feature/x' })])).toMatchObject({ station: 'filed' });
+  });
+
+  it('a home with no PR is placed from the others: a verdict on one moves the change; it is merged when every PR is', () => {
+    const t = ticket('A', { repos: ['o/site', 'o/sdk'] });
+    const verdict = { author: 'r', state: 'COMMENTED' as const, submittedAt: T0, body: '<!-- baton:verdict approve -->' };
+    expect(placed(t, [sib({ number: 3, head: 'claude/A-x' }), pr({ number: 3, head: 'claude/A-x', repository: 'o/sdk', reviews: [verdict] })])).toMatchObject({ station: 'reviewed', next_leg: 'merge' });
+    expect(placed(t, [sib({ number: 3, head: 'claude/A-x', state: 'merged', reviews: [verdict] }), pr({ number: 3, head: 'claude/A-x', repository: 'o/sdk' })])).toMatchObject({ station: 'reviewed', next_leg: 'merge' });
+    expect(placed(t, [sib({ number: 3, head: 'claude/A-x', state: 'merged', reviews: [verdict] }), pr({ number: 3, head: 'claude/A-x', repository: 'o/sdk', state: 'merged' })])).toMatchObject({ station: 'merged', next: [] });
+  });
+
+  it('review-pr finds its PR by repository and number, never by number alone', () => {
+    const t = (prs: string[]) => ticket('R', { course_id: 'review-pr', repos: ['o/site'], course: { prs } });
+    const review = (prs: string[], facts: PrFact[]) => stationsReviewPr({ tickets: [t(prs)], facts, closed: new Set(), repository: home, graph: REVIEW_PR_COURSE }).stations.R;
+    const facts = [pr({ number: 5, head: 'x', repository: home, checks: [null] }), sib({ number: 5, head: 'y' })];
+    expect(review(['https://github.com/o/site/pull/5'], facts).next[0]).toMatchObject({ leg: 'review', state: 'ready' }); // the sibling's, checks done
+    expect(review(['5'], facts).next[0]).toMatchObject({ leg: 'review', state: 'waiting', waiting_on: 'ci' }); // the home's
+    // A repository the ticket does not name is not read for it: the URL finds nothing there,
+    // as the adapter, which records that repository's PRs without reviews for this ticket.
+    const unnamed = ticket('R', { course_id: 'review-pr', course: { prs: ['https://github.com/o/site/pull/5'] } });
+    expect(stationsReviewPr({ tickets: [unnamed], facts, closed: new Set(), repository: home, graph: REVIEW_PR_COURSE }).stations.R.next[0]).toMatchObject({ leg: 'review', state: 'waiting', waiting_on: 'pr' });
+    expect(ticketOwns(unnamed, sib({ number: 5, head: 'y' }), matchPatterns(), home)).toBe(false);
+  });
+});
+
 describe('several PRs, and merged ones', () => {
   it('every PR merged is merged — the end station, before the file says done', () => {
     const out = run([ticket('A')], [pr({ number: 1, state: 'merged' }), pr({ number: 2, state: 'merged' })], new Set());
@@ -115,12 +151,21 @@ describe('several PRs, and merged ones', () => {
     expect(out).toMatchObject({ markers: [], course_data: {} });
   });
 
-  it('the least advanced open PR decides; a merged sibling does not outrank it', () => {
+  it('several PRs are one change: a merged sibling does not end it; a verdict on any of them stands for all (B-29)', () => {
     const out = run([ticket('A')], [
       pr({ number: 1, state: 'merged' }),
       pr({ number: 2, reviews: [{ author: 'r', state: 'CHANGES_REQUESTED', submittedAt: T0 - 10 }] }),
     ]);
     expect(out.A).toMatchObject({ station: 'reviewed', next_leg: 'fix' });
+    // close writes one verdict line on one PR: the other open PR does not hold the change at pr-open.
+    const one = run([ticket('A')], [pr({ number: 1 }), pr({ number: 2, reviews: [{ author: 'r', state: 'COMMENTED', submittedAt: T0, body: '<!-- baton:verdict approve -->' }] })]);
+    expect(one.A).toMatchObject({ station: 'reviewed', next_leg: 'merge' });
+    // A push on either PR after the verdict is the change's fix.
+    const fixed = run([ticket('A')], [pr({ number: 1, pushes: [T0 - 1000, T0 + 5] }), pr({ number: 2, reviews: [{ author: 'r', state: 'COMMENTED', submittedAt: T0, body: '<!-- baton:verdict changes -->' }] })]);
+    expect(fixed.A).toMatchObject({ station: 'fixed', next_leg: 'review' });
+    // review waits on ci while any open PR's checks run; a merged PR's checks no longer count.
+    expect(run([ticket('A')], [pr({ number: 1 }), pr({ number: 2, checks: [null] })]).A.next[0]).toMatchObject({ leg: 'review', state: 'waiting', waiting_on: 'ci' });
+    expect(run([ticket('A')], [pr({ number: 1, state: 'merged', checks: [null] }), pr({ number: 2 })]).A.next[0]).toMatchObject({ leg: 'review', state: 'ready' });
   });
 
   it("a ticket's own prs list counts, and the branch pattern matches any of its PRs", () => {
@@ -133,8 +178,11 @@ describe('several PRs, and merged ones', () => {
   });
 
   it("prs: takes numbers and this repository's pull-request URLs, never another repository's", () => {
-    expect(prNumbers(['#6', 7, '8', 'https://github.com/o/r/pull/9', 'https://github.com/o/r/pull/10/files', 'https://github.com/x/y/pull/11', 'junk'], 'o/r')).toEqual(['6', '7', '8', '9', '10']);
-    expect(prNumbers(['https://github.com/x/y/pull/11'])).toEqual(['11']); // the repository unknown: recorded facts
+    // Each entry as its repository and number: a bare number is the home's, a URL names its own (B-29).
+    expect(prRefs(['#6', 7, 'https://github.com/o/r/pull/10/files', 'https://github.com/x/y/pull/11', 'junk'], 'o/r')).toEqual([
+      { repository: 'o/r', number: '6' }, { repository: 'o/r', number: '7' }, { repository: 'o/r', number: '10' }, { repository: 'x/y', number: '11' },
+    ]);
+    expect(prRefs(['8'])).toEqual([{ repository: null, number: '8' }]); // the repository unknown: recorded facts
     const byUrl = run([ticket('A', { course: { prs: ['https://github.com/o/r/pull/9'] } })], [pr({ number: 9, head: 'feature/unrelated' })], new Set(), { repository: 'O/R' });
     expect(byUrl.A).toMatchObject({ station: 'pr-open' });
     const foreign = run([ticket('A', { course: { prs: ['https://github.com/x/y/pull/9'] } })], [pr({ number: 9, head: 'feature/unrelated' })], new Set(), { repository: 'o/r' });

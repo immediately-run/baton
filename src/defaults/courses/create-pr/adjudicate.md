@@ -8,7 +8,7 @@ line, alone:**
 - **`merge`**: none of the open blocking findings reproduces at the PR's head;
 - **`owner`**: at least one does, and the owner decides.
 
-Baton writes the adjudication line on the PR from it.
+Baton writes the adjudication line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on the same line: `merge https://github.com/<owner>/<name>/pull/<n>`.
 
 ## Work from a fresh context
 

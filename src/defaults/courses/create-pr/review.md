@@ -3,7 +3,7 @@
 You are running the `review` leg of the `create-pr` course: one review round of the ticket's PR.
 The ticket's file is `$BATON_TICKET_FILE`. You did not write this PR, and you will not fix it.
 Your output is a set of verified findings and a verdict. **Print the verdict as your last line,
-alone: `approve` or `changes`.** Baton writes the verdict line on the PR from it.
+alone: `approve` or `changes`.** Baton writes the verdict line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on the same line: `changes https://github.com/<owner>/<name>/pull/<n>`. The ticket's PRs are one change: review them together, and post your review once, on that PR.
 
 ## The round
 
@@ -14,8 +14,9 @@ alone: `approve` or `changes`.** Baton writes the verdict line on the PR from it
 - **Later rounds get one fresh reviewer**, who reads the earlier reviews and their replies and
   re-checks only what is still open plus the new diff. A finding a reply closed is not posted
   again, unless the reply is wrong; then say why, once.
-- Check out the PR's branch, and read the ticket's sections first: they are the contract. Then
-  read the whole diff against the default branch.
+- Check out each of the ticket's PRs' branches (one per repository its `repos:` names, besides
+  this one), and read the ticket's sections first: they are the contract. Then read the whole
+  change, every PR's diff against its default branch.
 
 ## Finding defects
 

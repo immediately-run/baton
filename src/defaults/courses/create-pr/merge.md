@@ -21,6 +21,8 @@ the PR's change is on the default branch and the ticket is closed.
   (`git merge-base --is-ancestor <merge commit> origin/<default branch>`). A PR merged into
   another feature branch reports merged and is nowhere near the default branch.
 - Stacked PRs: retarget each to the default branch and merge from the bottom up.
+- A ticket with PRs in several repositories (its `repos:`) merges every one, each delivered to
+  its own default branch; the ticket is merged only when all are.
 
 ## Close the ticket
 
