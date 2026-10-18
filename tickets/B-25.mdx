@@ -3,7 +3,7 @@ title: "B-25 — Baton action registry and MCP endpoint: one authorize behind ev
 id: B-25
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-18
 repos:
   - baton
 tags:
@@ -40,7 +40,7 @@ R-BTN-129 and R-BTN-130 are specified. This ticket builds them.
 5. **Destructive actions.** The listed destructive ids require `confirm: true` on their routes, and the refusal code is `confirm-required`.
 6. **`POST /v1/mcp`.**
    - stateless transport, with `initialize` and the `MCP-Protocol-Version` rule;
-   - the closed allowlist: owner reads, plus `ticket.expedite`, `ticket.hold` and `leg.stop`;
+   - the closed allowlist: owner reads, plus `ticket.hold` (`hold: true` only) and `leg.stop` *(amended 2026-10-18, BATON_SPEC R-BTN-151: `ticket.expedite` is not MCP's, and `ticket.unhold` is owner or dashboard only)*;
    - no upgrades;
    - pages of at most 256 KB, with `CursorKey`-signed cursors;
    - rate and size bounds;
@@ -49,6 +49,8 @@ R-BTN-129 and R-BTN-130 are specified. This ticket builds them.
    - The `mcp_keys` table holds `bmcp_` keys. Ids are fixed at minting, and only an `[owner]` key can mint one.
    - A key dies with its minter, and is refused (not killed) while `api_keys: false`.
    - `CursorKey` is wired on both hosts: the Worker secret `BATON_CURSOR_KEY`, or `--cursor-key <file>` locally.
+
+- **Hardening** *(added 2026-10-18 by BATON_SPEC §10.7)*: the overrides route serves `ticket.hold`, `ticket.unhold`, `ticket.expedite` and `ticket.cancel` told apart by field and value (R-BTN-129, R-BTN-151); register `ui.logout`, `admin.sessions.revoke` (destructive), `admin.confirm`, `owner.grants.list`, `owner.grants.flags`, `owner.code-repo.consent` and `owner.bars.follow` (R-BTN-137 to R-BTN-152).
 
 ### Do not
 

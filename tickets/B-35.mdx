@@ -19,9 +19,9 @@ depends_on:
 
 **Spec:** BATON_SPEC §10.7 — R-BTN-136 to R-BTN-155 (new) and the rules they amend;
 S-BTN-110 to S-BTN-120; G-BTN-130 to G-BTN-140.
-**Depends on:** B-34 for the origin rules R-BTN-155 cites. Check courses (B-5), streams and
-Stop (B-9) and MCP (R-BTN-130's ticket) take their parts of §10.7 wherever they are built
-first; this item builds the rest and their tests.
+**Depends on:** B-34 for the origin rules R-BTN-155 cites. Check courses (B-5, R-BTN-150),
+streams and Stop (B-9, R-BTN-142) and the action registry and MCP (B-25, R-BTN-151) take their
+parts of §10.7, which their tickets name; this item builds the rest and their tests.
 
 ### Requires
 
@@ -46,7 +46,9 @@ Split into reviewed PRs along §10.7's four parts. Each is independent.
    - `code_repos`.
    - The branch-pattern grammar, and branch-holder scoping.
    - Literal bars and `renamed_from` collisions, with `baton owner bars follow`.
-2. **Runners** (R-BTN-140 to R-BTN-142). In `src/runner/`:
+2. **Runners** (R-BTN-140 to R-BTN-142). Server side: `default_branch`, `rewrite_held` and
+   `tainted_branches` in the claim response; the `off-branch` end, its Needs-you entry and its
+   sync want. In `src/runner/`:
    - the ancestry check and the verified-sha cache, fetching the registered branch, not
      `main` (`home.ts`, `main.ts`);
    - `close` and `handoff` in a child;
@@ -74,6 +76,10 @@ Split into reviewed PRs along §10.7's four parts. Each is independent.
    - Import re-validation and the pre-seal refusal.
    - The signature profile, the headers, `trigger_workflows`, foreign claims after cutover,
      the fence per incarnation, and courier `asks`.
+
+5. **The migration.** One new numbered migration with §4's 2026-10-18 §10.7 block: the
+   columns, `tainted_branches`, `open_world_bars` and `login_codes` (migrations are
+   append-only, so `login_links` stays, unwritten).
 
 ### Architecture
 

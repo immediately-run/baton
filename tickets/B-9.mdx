@@ -35,6 +35,8 @@ depends_on:
 4. **Stop leg** on the dashboard sends the release message; the runner stops the group within 30 s and ends `released:requested`.
 5. **Tenancy** *(added 2026-10-18 by BATON_SPEC §3b, R-BTN-132)*: a stream's Durable Object is named through B-34's helper, `idFromName('baton/stream/<claim id>')`, never by the claim id alone, since claim ids repeat across tenants.
 
+6. **Hardening** *(added 2026-10-18 by BATON_SPEC §10.7, R-BTN-142)*: each leg starts with `IR_BATON_LEG=<claim id>.<leg>.<run>`; stopping it also signals every visible process carrying exactly that tag (start time checked against pid reuse), in a systemd scope where available, all gone within 30 seconds; S-BTN-114.
+
 ### Do not
 
 - Write a frame to storage or logs.
