@@ -16,6 +16,7 @@ prs: []
 depends_on:
   - B-2
   - B-7
+  - B-36
 ---
 
 **Brief:** the owner, 2026-10-18 (this session): a course's leg can be an interactive agent session, launched with a prompt, that delivers the leg's result (a product definition, a feature specification) and may plan as it goes. Steps toward the end-to-end application course: brief → specification → roadmap → build → test → deploy.
@@ -62,3 +63,8 @@ Today a leg is either an agent's, run headlessly to its last output line (the st
 - [ ] the scenario above passes on both hosts, with its trace replayed through the model where it touches the core
 - [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green
 - [ ] merged under the review gate
+
+## Status
+
+2026-10-18: the owner refined who the "asked person" is. It is the ticket's **assignee**, a person or a group, which B-36 adds. This ticket's claim rule reads it: an interactive leg on an assigned ticket runs only as the assignee, and for a group the member whose session takes the first interactive leg holds the rest. B-34 now depends on B-36.
+
