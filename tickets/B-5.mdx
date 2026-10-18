@@ -3,7 +3,7 @@ title: "B-5 — Baton check courses: check-runner keys, owner-held conclusions a
 id: B-5
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-18
 repos:
   - baton
 tags:
@@ -32,6 +32,7 @@ depends_on:
 2. **The notice.** Queued only after a sync confirms the end and its entry; conclusion from the owners' `checks` setting; signed (Ed25519, `BATON_SIGNING_KEY`, `kid`); retired keys still listed.
 3. **The forge courier.** Its own credential kind, never a machine key, never the pool; `?delivers=forge-check`; `check_id` on `sent`; an unsent notice listed after 15 minutes.
 4. **Read-back.** The sync reads the check runs; a run Baton did not issue is logged `check-mismatch`.
+5. **Tenancy** *(added 2026-10-18 by BATON_SPEC §3b, R-BTN-133)*: the notice also carries and signs `origin` and `forge_repo_id` (null while the repository has no ids); `GET /v1/keys/signing` returns `{keys: [{kid, alg, public_key, retired_at?}]}`; the forge courier refuses a notice whose `origin` is not its configured origin or whose `forge_repo_id` is not the target repository's id.
 
 ### Do not
 

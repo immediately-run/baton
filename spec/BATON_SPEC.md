@@ -3893,9 +3893,10 @@ attempt counts per ticket and leg (§2m.6a); a leg's `max_context` and `max_refr
   `POST /v1/github/webhook`, whose deliveries all come from GitHub's few hook addresses — its
   signature check is its limit *(after the sixth review)*. Authenticated
   calls are limited per credential in the Worker (600 a minute). *(Amended 2026-10-18 by §3b,
-  R-BTN-132: the per-credential counter is keyed by tenant and credential and counts only
+  R-BTN-132: the per-credential counter is keyed by origin and credential and counts only
   requests the object verified, so junk carrying a key's public fingerprint spends none of its
-  budget; the per-IP rule is keyed by host and IP.)*
+  budget; failed verifications have their own bucket by origin, keyid and IP; lease upkeep has
+  its own; the per-IP rule is keyed by host and IP.)*
 
 ## 3a. Hosting: one codebase, two hosts *(amendment 2026-10-14, owner direction; proposal)*
 
@@ -3960,11 +3961,13 @@ otherwise break when a second tenant arrives.
 - two fields to a repository's registration and change bodies;
 - one CLI command for an existing action, `baton admin repo identify`, and one flag,
   `--forge-ids` (R-BTN-135);
+- two CLI commands that write whole secret values through the sink, `baton admin keys set`
+  and `baton admin forge-secrets set` (R-BTN-133);
 - `origin` in the runner's configuration, per-origin keys in the CLI's, a machine's
   `origins.json`, and `BATON_URL` beside a cloud environment's key (R-BTN-134);
 - two signed fields of the `forge-check` notice (R-BTN-133);
 - the CLI's secret sink (R-BTN-133);
-- three `repositories` columns and a `baton_settings` key (§4).
+- four `repositories` columns and a `baton_settings` key (§4).
 
 - **R-BTN-132 (a tenant is a Baton, named by its origin).**
   - **What a tenant is.** A tenant is everything one Baton holds — its repositories and their
@@ -3974,9 +3977,11 @@ otherwise break when a second tenant arrives.
   - **Where it is served.** A tenant is served at one origin, its `BATON_ORIGIN` (R-BTN-55),
     and nowhere else. An origin is `https://<host>[:<port>]` with no path; a local host's is
     `http://127.0.0.1:<port>`.
-  - **Tenants differ by authority.** `@authority` covers host and port, not scheme (RFC 9421
-    §2.2.3). So no two tenants share an authority, and a deployment that serves more than one
-    tenant serves `https` only.
+  - **Tenants differ by host.** `@authority` covers host and port, not scheme (RFC 9421
+    §2.2.3), and a host-only cookie is sent to every port of its host (RFC 6265 §8.5). So no
+    two tenants share a host: two local hosts on one machine use different hostnames
+    (`127.0.0.1` and `127.0.0.2`, never two ports of one). A deployment that serves more than
+    one tenant serves `https` only.
   - **How it relates to the platform's tenant.** It is Baton's own partition, not the
     platform's tenant (`TENANCY_SPEC`; Baton has no platform identity). It keeps that spec's
     principle in Baton's terms: a request is routed by its URL's host, and every credential
@@ -4019,7 +4024,9 @@ otherwise break when a second tenant arrives.
     - Two things belong to the deployment, and both protect only capacity or hold public
       data:
       - the Cloudflare per-IP rule, keyed by host and IP (§3, as amended);
-      - caches of public data scoped to an issuer, such as a CI issuer's key set.
+      - caches of public data, each keyed by the exact URL it was fetched from — a CI
+        issuer's key set by its key-set URL, never by the issuer's name — so no tenant's
+        configuration can place keys under another tenant's lookup.
   - **Core is tenant-blind.** No function in `src/core/` takes a tenant id. The host shell
     hands the object its tenant's ports, and core reads only those:
     - every R-BTN-55 interface: `Origin`, `AdminKeys`, `ForgeSecrets`, `GitHubApp`,
@@ -4034,9 +4041,14 @@ otherwise break when a second tenant arrives.
       moves. Its streams are named `baton/stream/<claim id>` from the start.
     - A tenant id matches `^[a-z][a-z0-9-]{0,31}$`, is never reused, and retiring a tenant
       deletes its objects' storage.
-    - The shell gives the object its tenant id with each request. The object records the id
-      in `baton_settings` (`tenant_id`) at its first request, and refuses with `forbidden`,
-      logged `tenant-mismatch`, a request forwarded for another tenant. The alarm reads the recorded id.
+    - The shell gives the object its tenant id with each request, in the internal header
+      `x-baton-tenant`. The shell removes any client-supplied header of that name first, so
+      no request selects its tenant. The object records the id in `baton_settings`
+      (`tenant_id`) at its first request. It refuses with `forbidden`, logged
+      `tenant-mismatch`, a request whose id differs or is absent. The alarm reads the
+      recorded id.
+    - A local host's tenant id is `baton` too. The handshake is shared shell code
+      (`src/shell/`), never core, so it runs on both hosts.
   - **Many tenants later is a router, not a change to Baton.**
     - A deployment may later serve several tenants from one Worker. The Worker maps each
       request's host, one to one, to a **tenant record** — the tenant's id, origin and
@@ -4051,16 +4063,25 @@ otherwise break when a second tenant arrives.
       `SameSite=Strict` separates their dashboards. R-BTN-16's rules hold on any domain
       regardless.
   - **Capacity is per tenant, and Baton's clients already handle a refusal.**
-    - **Every limit counts within one tenant.** The per-credential limit is keyed by tenant
-      and credential, and counts only verified requests (§3, as amended).
+    - **Every limit counts within one tenant.** Each limit is keyed by origin.
+      - The per-credential limit is keyed by origin and credential, and counts only requests
+        the object verified (§3, as amended).
+      - Failed verifications are counted separately, by origin, keyid and client IP. Beyond 60
+        a minute, that bucket is refused `rate-limited` in the Worker for the rest of the
+        minute. So a flood of junk carrying a published fingerprint neither spends the key's
+        budget nor reaches the object unbounded.
+      - Per-tenant caps count only verified requests.
     - **Caps a shared deployment adds, and how they refuse.** A deployment serving several
       tenants adds hard per-tenant caps:
       - a request cap, refused `rate-limited` with `retry_after_s`;
       - row-write and storage caps, refused `quota` (§11) until the day turns or space is
         freed.
-    - **Caps never decide a lease.** They never apply to lease upkeep — heartbeats, `advance`,
-      `end` and release acknowledgements — and the alarm does not reap a tenant's claims while
-      that tenant is capped (P5: capacity never decides authority).
+    - **Caps never decide a lease.** Lease upkeep — heartbeats, `advance`, `end` and release
+      acknowledgements — has its own per-credential bucket, which no other call spends, and no
+      per-tenant cap applies to it (P5: capacity never decides authority). A heartbeat
+      refused for any reason was still not accepted: it counts toward the sidecar's
+      `timeout − 4 min` (G-BTN-4), after which the lease is lost locally, while the alarm
+      reaps at the timeout as always.
     - **A refused request had no effect.** A retry is a new request, re-signed with a fresh
       `created` and `nonce` (R-BTN-13), and keeps its `request_id` where its route takes one.
     - **What Baton's own clients do, from today.** The CLI, the runner and sidecar, couriers,
@@ -4068,7 +4089,8 @@ otherwise break when a second tenant arrives.
       answers to every route:
       - a periodic loop backs off, honouring `retry_after_s`, and keeps its lease;
       - a one-shot command waits at most 60 seconds, then exits non-zero naming the code;
-      - neither code marks a lease lost (§6.3, as amended);
+      - neither code marks a lease lost at once (§6.3, as amended), but an unanswered
+        heartbeat still runs the lease's clock (G-BTN-4);
       - `too-large` keeps its meaning — one item too large — and is reported, never retried.
     - **Callers outside Baton.** Third-party MCP clients and forges' webhooks are not bound by
       this. A capped webhook is a lost trigger, which the sync's schedule covers (R-BTN-73).
@@ -4108,6 +4130,9 @@ otherwise break when a second tenant arrives.
     signed fields, `origin` and `forge_repo_id` (R-BTN-135). A check run therefore says which
     tenant and which forge repository issued it, and a notice signed for one tenant never
     reads as another's.
+    - `forge_repo_id` is null while the repository has no ids (the path-only window). A forge
+      courier refuses a notice whose `origin` is not its configured origin, or whose
+      `forge_repo_id` is not the target repository's id.
     - `GET /v1/keys/signing` is the tenant's: it lists the current key and every retired one
       by `kid` (§11, corrected).
     - A check App is the repository owners' (R-BTN-115) and serves one tenant. A check App
@@ -4115,14 +4140,22 @@ otherwise break when a second tenant arrives.
       branch protection, and the owners prevent that, not Baton.
   - **Secrets are written through one sink.**
     - Every CLI command that writes a deployment secret writes it through one **secret
-      sink**, chosen by the CLI's configuration, never by the command. Those commands are
-      `baton admin github-app create` (R-BTN-57), rotating `BATON_ADMIN_KEYS`, and adding a
-      repository's `BATON_FORGE_SECRETS` entry (R-BTN-95).
+      sink**, chosen by the CLI's configuration, never by the command. There are three such
+      commands:
+      - `baton admin github-app create` (R-BTN-57);
+      - `baton admin keys set --file <path>`, which writes `BATON_ADMIN_KEYS`;
+      - `baton admin forge-secrets set --file <path>`, which writes `BATON_FORGE_SECRETS`
+        (R-BTN-95).
+    - Every write is a **whole value** from a file the administrator keeps. Secrets are
+      write-only on Cloudflare, so no command reads a secret back to merge into it.
     - Today there are two sinks: `wrangler` (the Worker's secrets, the default on
       Cloudflare) and `file` (a local host's files).
-    - A deployment serving several tenants adds `operator`: the operator's store, which
-      accepts a tenant administrator's signed write (R-BTN-13, with the administrator key) to
-      that tenant's record only.
+    - A deployment serving several tenants adds `operator`: the operator's store for that
+      tenant's record only. It authenticates the tenant's **account** at the operator — a
+      login with a second factor, the analogue of the Cloudflare account — **never** a Baton
+      administrator key.
+    - So in every deployment no Baton credential adds an administrator or rewrites a secret,
+      and a stolen administrator key cannot make itself permanent (R-BTN-57).
     - The commands, their flags and the administrator's powers stay as they are; only where
       the bytes go changes. `wrangler` access to a shared deployment is every tenant's
       secrets, so no tenant administrator holds it there.
@@ -4161,9 +4194,15 @@ otherwise break when a second tenant arrives.
   - **A runner's origin is its own configuration, never the repository's.**
     - `runner.json` (R-BTN-121) gains `origin`. `--url` and `BATON_URL` override it. A cloud
       environment sets `BATON_URL` beside `IR_BATON_KEY`, so the key names one origin.
-    - The runner and the sidecar talk only to that origin. They refuse to serve a checkout
-      whose `.baton/baton.json` `baton_url` names another origin (R-BTN-56). This stops a
-      pusher pointing a machine's signatures at another tenant.
+    - **No default origin.** The runner, the sidecar and the CLI have none. With no `--url`,
+      `BATON_URL`, `runner.json` `origin` or a single origin in `keys.json`, a command exits 2,
+      so a registration token or API key is never sent to a Baton nobody chose (today's
+      default, `https://baton.immediately.run`, is withdrawn).
+    - The runner and the sidecar talk only to their origin. They refuse to serve a ticket
+      whose **home** checkout's `.baton/baton.json` `baton_url` names another origin
+      (R-BTN-56); a code repository in `repos:` may belong to another Baton. This stops a
+      checkout redirecting the runner. It does not stop a leg script that edits `runner.json`
+      or signs through the agent, which is the cost stated above.
     - `baton runner register` and `baton runner start` record each origin and key
       fingerprint they use in the machine's `~/.config/baton/origins.json`. `start` refuses,
       exiting 2 and naming both origins, a key that file lists for another origin. This
@@ -4197,15 +4236,37 @@ otherwise break when a second tenant arrives.
     - `baton admin repo add` reads the ids from the forge's API, with `GITHUB_TOKEN`,
       `GITLAB_TOKEN` or `GITEA_TOKEN` from its environment when the repository is private.
     - `--forge-ids <repo>,<owner>` gives them where the forge is unreachable from the CLI.
-    - The ids are unique among a tenant's live repositories on one forge host.
+    - Ids match `^[1-9][0-9]{0,19}$`. A webhook's numeric id is converted only when
+      `Number.isSafeInteger` holds, else the delivery is ignored and logged.
+    - The ids are unique among a tenant's live repositories on one forge host. A duplicate is
+      refused `conflict`.
   - **Once stored, the ids decide.** A CI token or delivery whose ids match passes whatever
-    path it carries; one whose ids differ is refused whatever path it carries. Baton then
-    takes a verified token's new path as the repository's stored path, logged `repo-renamed`,
-    so links follow a rename. A rename onto a path a retired row still holds is refused and
-    listed under **Needs you**.
+    path it carries; one whose ids differ is refused whatever path it carries.
+    - A GitHub token's `job_workflow_ref` must equal `<the token's repository claim>/<sync_workflow>@refs/heads/<default_branch>`
+      (or the mirror's), where that repository claim has matched by id (R-BTN-15).
+  - **A verified rename.** A verified token whose path differs is a rename.
+    - In one transaction Baton rewrites the stored path and `web_base`'s path. It also
+      rewrites `remote` when `remote` was `web_base` + `.git`; otherwise `remote` is listed
+      under **Needs you**. The rename is logged `repo-renamed`. So no link, clone or URL rule
+      keeps the old path, which someone else could then take.
+    - Tickets' `repos:` and the branch-holder query's `?repo=` name code repositories by
+      path, and keep resolving only once their files say the new path.
+    - A rename whose new path any other row holds — live or retired, on any host (the
+      column's `UNIQUE`, §4) — keeps the old path. The token still passes, and the repository
+      is listed under **Needs you**.
+    - An administrator resolves a held rename by changing a row's path on the change body
+      with `confirm: true` (`github`, logged `repo-path-changed`). That row may be a retired
+      one, freeing its path.
   - **Re-identifying.** A transfer changes the owner's id. An administrator re-identifies with
     the change body's `forge_repo_id` and `forge_owner_id` and `confirm: true`, logged
     `repo-identified` with the old and new ids.
+  - **Where `repo identify` takes the ids from** *(review gate round 2)*:
+    - from the ids of the last CI token that verified by path, which Baton records in
+      `repositories.forge_ids_seen` while the ids are NULL. `repo identify` sends
+      `forge_ids_from_seen: true` on the change body, and Baton stores those ids;
+    - else from the forge's API by the current path. The command then shows the forge's full
+      name and creation date, and stores the ids only when the administrator confirms. So a
+      squatted path is not recorded for good unseen.
   - **Where each surface checks them:**
     - a GitHub Actions OIDC token's `repository_id` and `repository_owner_id` (R-BTN-15);
     - a GitLab `id_tokens` JWT's `project_id` and `namespace_id` (R-BTN-93);
@@ -4220,6 +4281,9 @@ otherwise break when a second tenant arrives.
       authentication failure, and it is never matched by path instead.
     - A delivery for a code repository named only in tickets' `repos:` still matches by path,
       because it can only trigger a sync.
+  - **Seeds.** A `BATON_REPOSITORIES` seed entry (a transitional and test variable, R-BTN-133)
+    may carry `forge_repo_id` and `forge_owner_id`. A seeded forge repository without them is
+    treated as registered before the rule: path-only, and listed under Needs you.
   - **Existing registrations** gain their ids through `baton admin repo identify
     <repository>`. It runs the same lookup and sends the ids on the change body, settable
     without `confirm` while they are NULL; it is the change action's command (R-BTN-129).
@@ -4239,20 +4303,20 @@ otherwise break when a second tenant arrives.
 
   | Scenario | Setup | Outcome |
   |---|---|---|
-  | S-BTN-106 tenants share nothing | two local hosts with different `--origin`s, each registering a repository `docs` and granting one SSH key under one hostname; a request signed for the first is sent to the second; the first's API key, MCP key and dashboard session are presented to the second, beside a random API key and a random session; a request reaches the first with a URL host that is not its origin's | both registrations and grants succeed; the signed request is `unauthenticated` (`@authority`); the first's API key and MCP key are refused exactly as the random key is, and the first's session exactly as the random session is; the request with a foreign host is `404`; the second host's views, counters, events and Needs you are unchanged by everything sent to it |
-  | S-BTN-107 one origin per runner and key | a runner configured for one origin is started in a checkout whose `baton_url` names another; a second runner is started with the first's key for a second origin | the first refuses to serve the checkout, naming both origins; the second exits 2 naming the key and both origins |
-  | S-BTN-108 forge ids | a GitHub repository registered with its ids; an OIDC token whose `repository` matches and whose `repository_id` does not; an App delivery whose `full_name` matches and whose `repository.id` does not; a GitLab token whose `project_path` matches and whose `project_id` does not; a token whose ids match and whose `repository` is a new path; a forge registration without ids; a repository registered before this rule, then `repo identify` on it; a re-identify without `confirm` | both mismatched tokens are `unauthenticated`; the delivery triggers no sync and logs `forge-id-mismatch`; the renamed token passes and the stored path becomes the new one, logged `repo-renamed`; the registration without ids is `invalid-params`; the older registration verifies by path and is listed under Needs you until `repo identify` stores its ids, then is checked by id; the re-identify is `confirm-required` |
-  | S-BTN-109 refusals Baton's clients handle | a host answers each route the runner, sidecar, CLI, courier and sync call with `rate-limited` (`retry_after_s: 2`), then `quota`, then `too-large`, while one runner holds a claim | the runner and sidecar retry no sooner than 2 seconds later with a fresh signature and keep the lease; a one-shot command exits non-zero naming the code within 60 seconds; `too-large` is reported and not retried; no claim is lost |
+  | S-BTN-106 tenants share nothing | two local hosts on different hostnames (`127.0.0.1` and `127.0.0.2`), each registering a repository `docs` and granting one SSH key under one hostname; a request signed for the first is sent to the second; the first's API key, MCP key and dashboard session are presented to the second, beside a random API key and a random session; a request reaches the first with a URL host that is not its origin's | both registrations and grants succeed; the signed request is `unauthenticated` (`@authority`); the first's API key and MCP key are refused exactly as the random key is, and the first's session exactly as the random session is; the request with a foreign host is `404`; the second host's views, counters, events and Needs you are unchanged by everything sent to it |
+  | S-BTN-107 one origin per runner and key | a runner configured for one origin is offered a ticket whose home checkout's `baton_url` names another, and one whose `repos:` names another Baton's repository; a second runner is started with the first's key for a second origin; `baton runner register --token …` runs with no origin configured | the first refuses the first ticket, naming both origins, and serves the second; the second runner exits 2 naming the key and both origins; the registration exits 2 naming the missing origin, sending nothing |
+  | S-BTN-108 forge ids | a GitHub repository registered with its ids, and a retired repository holding the path `acme/old`; an OIDC token whose `repository` matches and whose `repository_id` does not; an App delivery whose `full_name` matches and whose `repository.id` does not; a GitLab token whose `project_path` matches and whose `project_id` does not; a token whose ids match and whose `repository` is a new path; a forge registration without ids; a repository registered before this rule, then `repo identify` on it; a re-identify without `confirm` | both mismatched tokens are `unauthenticated`; the delivery triggers no sync and logs `forge-id-mismatch`; the renamed token passes, and the stored path, `web_base` and a derived `remote` become the new one, logged `repo-renamed`; a later token renaming it to `acme/old` passes with the path kept and the repository listed under Needs you; the registration without ids is `invalid-params`; the older registration verifies by path and is listed under Needs you until `repo identify` stores its ids, then is checked by id; the re-identify is `confirm-required` |
+  | S-BTN-109 refusals Baton's clients handle | a host answers each route the runner, sidecar, CLI, courier and sync call with `rate-limited` (`retry_after_s: 2`), then `quota`, then `too-large`, while one runner holds a claim; then it answers every heartbeat `rate-limited` past `timeout − 4 min`; a script floods junk signatures with the runner's keyid | the runner and sidecar retry no sooner than 2 seconds later with a fresh signature and keep the lease while heartbeats are accepted; a one-shot command exits non-zero naming the code within 60 seconds; `too-large` is reported and not retried; under the endless refusal the sidecar marks the lease lost at `timeout − 4 min`, before the alarm reaps; the flood is refused in the Worker after 60 failures and the runner's own calls keep their budget |
 
 - **New gates** (Must-establish, §16):
 
   | Gate | Proved by |
   |---|---|
   | A request is served only at its origin's host and authenticated only against its own tenant's state; nothing one tenant stores is read, counted or checked for uniqueness by another | G-BTN-125 (S-BTN-106) |
-  | No function in `src/core/` takes a tenant id; the Cloudflare host opens its first tenant's object as `idFromName('baton')` and a claim's stream as `idFromName('baton/stream/<claim id>')` | G-BTN-126 (a static check on `src/core/` and a unit test of the Cloudflare shell) |
+  | No function in `src/core/` takes a tenant id; the Cloudflare shell names every object through one helper — the tenant's as `idFromName('baton')`, any other as `'baton/<kind>/<key>'` — and strips an inbound `x-baton-tenant` | G-BTN-126 (a static check on `src/core/` and unit tests of the shell's helper and handshake) |
   | A runner serves only its configured origin and refuses one key configured for two | G-BTN-127 (S-BTN-107) |
   | Once a repository's forge ids are stored, every CI token, delivery and notification for it is checked against them, never by path instead; a forge registration carries its ids | G-BTN-128 (S-BTN-108) |
-  | Baton's clients back off on `rate-limited` and `quota` on every route, keep their leases, and report `too-large`; a cap never applies to lease upkeep | G-BTN-129 (S-BTN-109) |
+  | Baton's clients back off on `rate-limited` and `quota` on every route and report `too-large`; an unaccepted heartbeat still runs the lease's clock; lease upkeep has its own bucket and no cap; failed verifications are bounded per origin, keyid and IP | G-BTN-129 (S-BTN-109) |
 
 ## 4. Data model *(proposal)*
 
@@ -4947,6 +5011,7 @@ CREATE TABLE unblocked_dispatch (                 -- R-BTN-77: each repository's
 ALTER TABLE repositories ADD COLUMN forge_repo_id TEXT;
 ALTER TABLE repositories ADD COLUMN forge_owner_id TEXT;
 ALTER TABLE repositories ADD COLUMN forge_host TEXT;      -- web_base's host, lowercased, as R-BTN-92 compares it; set with the ids
+ALTER TABLE repositories ADD COLUMN forge_ids_seen TEXT;  -- JSON {repo_id, owner_id, at}: the last path-verified CI token's, while the ids are NULL
 CREATE UNIQUE INDEX repositories_forge_ids ON repositories (forge, forge_host, forge_repo_id)
   WHERE forge_repo_id IS NOT NULL AND retired_at IS NULL;
 -- baton_settings gains the key `tenant_id` (R-BTN-132), written once at the object's first request.
@@ -5130,8 +5195,9 @@ and caps what a forged snapshot can do (§10.3).
   stops.
 - **Any refused heartbeat** (`session-taken`, `worker-reaped`, `forbidden`) marks the lease
   lost locally, exactly as a missed timeout does. *(Amended 2026-10-18 by §3b: `rate-limited`
-  and `quota` are not refusals of the lease — the sidecar backs off and keeps it, and no cap
-  applies to heartbeats, R-BTN-132.)*
+  and `quota` do not mark the lease lost at once — the sidecar backs off and retries — but an
+  unaccepted heartbeat still counts toward `timeout − 4 min` (G-BTN-4); lease upkeep has its
+  own bucket and no per-tenant cap, R-BTN-132.)*
 - **R-BTN-7 (status writes are fenced against holders).** After cutover, `claim.sh set
   --status` asks Baton who holds the ticket and is refused (exit 10,
   `not-holder`) **only when an active claim of another, non-legacy worker holds it, or a
@@ -6470,7 +6536,7 @@ round 3)*.
 | `POST /v1/ui/overrides/{ticket}` | `{expedite?, hold?}` | `{ok: true}` |
 | `POST /v1/github/webhook` | a GitHub App delivery, authenticated only by `X-Hub-Signature-256` (R-BTN-73) | `204`; only R-BTN-73's fields are read; repeated delivery ids and the sync's and mirror's own events are ignored |
 | `POST /v1/probe/readings` | `{readings: [{instance, available, until?, valid_for?, detail?}]}` — signed by a probe key, each instance in its `allowed_instances` (R-BTN-53, R-BTN-76) | `{ok: true, refused: [{instance, code}]}` |
-| `POST /v1/admin/repositories` | signed by an administrator key (R-BTN-57): `{id, github, forge, remote, web_base?, ci_identity?, dispatch?, sync_keys?: [{public_key, role}], default_branch, sync_workflow?, mirror_workflow?, weight?, tiers?, cut_over?, owner_keys[], forge_repo_id, forge_owner_id}` (the ids required for every forge but `git`, R-BTN-135), `{id, weight?, tiers?, remote?, web_base?, ci_identity?, dispatch?, sync_workflow?, mirror_workflow?, sync_keys_add?: [{public_key, role}], sync_keys_remove?: [<fingerprint>], forge_repo_id?, forge_owner_id?, confirm?}` to change an existing one (never its `forge`; its forge path only by a verified rename, R-BTN-92, R-BTN-135; the ids settable while NULL, and replaced only with `confirm: true`), or `{id, retire: true}` — `cut_over: true` registers a repository with no git claim protocol as already cut over (R-BTN-28) | `{ok: true}` (R-BTN-47, R-BTN-66) |
+| `POST /v1/admin/repositories` | signed by an administrator key (R-BTN-57): `{id, github, forge, remote, web_base?, ci_identity?, dispatch?, sync_keys?: [{public_key, role}], default_branch, sync_workflow?, mirror_workflow?, weight?, tiers?, cut_over?, owner_keys[], forge_repo_id, forge_owner_id}` (the ids required for every forge but `git`, R-BTN-135), `{id, weight?, tiers?, remote?, web_base?, ci_identity?, dispatch?, sync_workflow?, mirror_workflow?, sync_keys_add?: [{public_key, role}], sync_keys_remove?: [<fingerprint>], forge_repo_id?, forge_owner_id?, confirm?}` to change an existing one (never its `forge`; its forge path, `github`, by a verified rename or with `confirm: true`, R-BTN-92, R-BTN-135; the ids settable while NULL, and replaced only with `confirm: true`; body fields also `github?` and `forge_ids_from_seen?`), or `{id, retire: true}` — `cut_over: true` registers a repository with no git claim protocol as already cut over (R-BTN-28) | `{ok: true}` (R-BTN-47, R-BTN-66) |
 | `POST /v1/admin/probes`, `POST /v1/admin/grants`, `POST /v1/admin/keys/{fingerprint}/revoke`, `POST /v1/admin/login-links` | an administrator: register a probe key `{public_key, label, instances[]}` (the instances it may report on, R-BTN-53, R-BTN-76); make or change a grant, `human-operator` included, or a key's hostname; revoke any key at once; mint a one-time dashboard link | `{ok: true}` / `{url}` |
 | `POST /v1/login` | `{token}` from a login link's fragment (unsigned; the token is the credential) | sets the dashboard session cookie (R-BTN-57) |
 | `POST /v1/owner/{repository}/grants`, `…/grants/{fingerprint}/revoke`, `…/owners` | an owner of that repository (SSH-signed): `{public_key, hostname (for an unknown key), label?, capabilities[], max_tier?}` (roles expanded by the CLI); revoke; add or remove an owner key | `{ok: true}` or `conflict` (R-BTN-58) |
@@ -8137,3 +8203,27 @@ consistency): 35 findings (5 blocking, 17 should-fix, 13 nit). Resolved:)*
 | 1-A-10 account-wide usage on the dashboard | per-tenant counters only, and Workers Paid, when several tenants share (R-BTN-132) |
 | 1-A-12 S-BTN-106 read like an oracle | refused exactly as a random key and a random session are |
 | 1-A-14 "no cache" forbade sharing an issuer's key set | public, issuer-scoped caches excepted |
+
+*(2026-10-18 — §3b tenancy, review gate round 2 on `b8f2735` (ids 2-A-n): every round-1
+resolution verified in the text; 19 findings (3 blocking, 9 should-fix, 7 nit). Resolved:)*
+
+| Finding | Resolution |
+|---|---|
+| 2-A-0 (blocking) the `operator` sink let an administrator key add administrators | the operator's store authenticates the tenant's account (login and second factor), never a Baton key; no Baton credential adds an administrator in any deployment (R-BTN-133) |
+| 2-A-1 (blocking) "keeps its lease" against G-BTN-4 and the alarm | an unaccepted heartbeat still runs `timeout − 4 min`; lease upkeep has its own bucket and no cap; the reaping suspension withdrawn (R-BTN-132, §6.3) |
+| 2-A-2 (blocking) the sink's commands did not exist; write-only secrets cannot be merged | `baton admin keys set --file` and `baton admin forge-secrets set --file`, whole values from a file the administrator keeps (R-BTN-133) |
+| 2-A-3 a rename left `web_base` and `remote` on a takeable path | rewritten in the rename's transaction; a non-derived `remote` listed under Needs you (R-BTN-135) |
+| 2-A-4 rename collisions contradicted the "passes" rule and had no way out | the token passes with the old path kept and the repository listed; an administrator's `confirm`ed path change, on any row, resolves it (R-BTN-135, §11) |
+| 2-A-5 `job_workflow_ref` after a rename | checked against the token's own repository claim, matched by id (R-BTN-135) |
+| 2-A-6 cookies ignore ports | tenants differ by host; two local hosts use two hostnames; S-BTN-106 runs on `127.0.0.1` and `127.0.0.2` (R-BTN-132) |
+| 2-A-7 an issuer-keyed cache could be poisoned by one tenant's key-set URL | caches keyed by the exact URL fetched (R-BTN-132) |
+| 2-A-8 signed junk escaped every limit | a failure bucket by origin, keyid and IP, refused in the Worker beyond 60 a minute; per-tenant caps count only verified requests (R-BTN-132, §3) |
+| 2-A-9 the CLI and runner default to immediately.run's Baton | no default origin; exit 2 without one (R-BTN-134, S-BTN-107) |
+| 2-A-10 B-34 built pieces of B-5 and B-9 | B-34 ships the naming helper; B-5 and B-9 gain the notice fields and the stream name |
+| 2-A-11 seeds without ids | a seed may carry them; one without is path-only and listed (R-BTN-135) |
+| 2-A-12, 2-A-13 the handshake's home, header and local id | `src/shell/`, `x-baton-tenant` stripped then set, absent refused, the local id `baton` (R-BTN-132) |
+| 2-A-14 reaping suspended while capped | withdrawn with 2-A-1 |
+| 2-A-15 id hygiene | `^[1-9][0-9]{0,19}$`, `Number.isSafeInteger`, duplicates `conflict` (R-BTN-135) |
+| 2-A-16 the `baton_url` refusal's scope and claim | the home checkout only; reworded to what it stops (R-BTN-134) |
+| 2-A-17 `repo identify` could record a squatter's ids | ids from the last path-verified token (`forge_ids_seen`), else the forge's full name and creation date confirmed (R-BTN-135, §4) |
+| 2-A-18 the notice fields' null case and the courier's check | null in the path-only window; the courier refuses a foreign `origin` or a mismatched id (R-BTN-133) |

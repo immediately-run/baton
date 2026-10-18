@@ -3,7 +3,7 @@ title: "B-9 — Baton leg streams and Stop leg: a running leg's output over wss,
 id: B-9
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-18
 repos:
   - baton
 tags:
@@ -32,6 +32,7 @@ depends_on:
 2. Runner upgrade: only the claim's holder, after `watch`; a second connection replaces the first.
 3. The channel enforces 8 KB frames and 64 KB/s, counting drops in `gap`; nothing stored, logged or exported.
 4. **Stop leg** on the dashboard sends the release message; the runner stops the group within 30 s and ends `released:requested`.
+5. **Tenancy** *(added 2026-10-18 by BATON_SPEC §3b, R-BTN-132)*: a stream's Durable Object is named through B-34's helper, `idFromName('baton/stream/<claim id>')`, never by the claim id alone, since claim ids repeat across tenants.
 
 ### Do not
 

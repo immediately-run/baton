@@ -18,8 +18,9 @@ depends_on: []
 
 **Spec:** BATON_SPEC §3b — R-BTN-132, R-BTN-133, R-BTN-134 and R-BTN-135 (new), and the rules
 they amend; S-BTN-106 to S-BTN-109; G-BTN-125 to G-BTN-129.
-**Depends on:** nothing. R-BTN-118's stream, R-BTN-114's notice and R-BTN-117's credentials
-take the naming and fields below when they are built, wherever they are built first.
+**Depends on:** nothing. *(Amended 2026-10-18, §3b review gate round 2: a stream's object name
+and the `forge-check` notice's signed `origin` and `forge_repo_id` are B-9's and B-5's to build,
+through this item's naming helper; both tickets say so.)*
 
 ### Requires
 
@@ -39,20 +40,27 @@ today and an interface change or a broken promise later.
    not `BATON_ORIGIN`'s authority (lowercased, default port elided), before any object.
    `wrangler.toml` sets `workers_dev = false` and `preview_urls = false`, for both
    environments.
-2. **Object names** (R-BTN-132). The tenant object stays `idFromName('baton')`. Every other
-   Durable Object is `idFromName('baton/<kind>/<key>')`; a stream is
-   `baton/stream/<claim id>`. The shell passes the tenant id. The object writes
-   `baton_settings.tenant_id` at its first request and refuses another id with `forbidden`,
-   logged `tenant-mismatch`.
-3. **Rate limits** (§3 as amended). The per-credential counter is keyed by tenant and
-   credential, and counts only requests the object verified. The per-IP rule is keyed by host
-   and IP.
+2. **Object names and the handshake** (R-BTN-132).
+   - One helper in `src/shell/` names every object: the tenant's `idFromName('baton')`, any
+     other `idFromName('baton/<kind>/<key>')`.
+   - The shell strips an inbound `x-baton-tenant`, then sets it.
+   - The object writes `baton_settings.tenant_id` at its first request, and refuses a
+     different or absent id with `forbidden`, logged `tenant-mismatch`.
+   - The local host's id is `baton` too.
+3. **Rate limits** (§3 as amended).
+   - The per-credential counter is keyed by origin and credential, and counts only requests
+     the object verified.
+   - Lease upkeep has its own bucket.
+   - Failed verifications get a bucket by origin, keyid and IP, refused in the Worker beyond
+     60 a minute.
+   - The per-IP rule is keyed by host and IP.
 4. **Refusals every client handles** (R-BTN-132). The runner, sidecar, CLI, couriers, sync,
    mirror and dashboard each handle `rate-limited` and `quota` on every route:
    - periodic loops back off, honouring `retry_after_s`, and keep their lease;
    - one-shot commands exit non-zero naming the code within 60 seconds;
    - a retry is re-signed;
-   - neither code marks a lease lost (§6.3);
+   - neither code marks a lease lost at once (§6.3), but an unaccepted heartbeat still runs
+     `timeout − 4 min` (G-BTN-4);
    - `too-large` is reported and never retried.
 5. **A runner's origin** (R-BTN-134).
    - `runner.json` gains `origin`.
@@ -60,21 +68,33 @@ today and an interface change or a broken promise later.
    - `runner register` and `runner start` keep `~/.config/baton/origins.json`, and `start`
      refuses a key listed for another origin.
    - `keys.json` maps each origin to its roles.
-6. **The secret sink** (R-BTN-133). `github-app create`, admin-key rotation and forge-secret
-   entries write through a sink chosen by configuration: `wrangler` or `file`.
-7. **Signed notices** (R-BTN-133). `forge-check` notices carry and sign `origin` and
-   `forge_repo_id`. `GET /v1/keys/signing` returns its `{keys: [...]}` list.
-8. **Forge ids** (R-BTN-135).
-   - A migration adds `forge_repo_id`, `forge_owner_id`, `forge_host` and the unique index.
+   - There is no default origin: the CLI, the runner and the sidecar exit 2 without one,
+     replacing today's `https://baton.immediately.run` default (`cli/baton.mjs`,
+     `src/runner/main.ts`).
+   - The `baton_url` refusal applies to the ticket's home checkout only.
+6. **The secret sink** (R-BTN-133). `baton admin github-app create`, `baton admin keys set
+   --file` and `baton admin forge-secrets set --file` write whole values through a sink chosen
+   by configuration: `wrangler` or `file`.
+7. **Forge ids** (R-BTN-135).
+   - A migration adds `forge_repo_id`, `forge_owner_id`, `forge_host`, `forge_ids_seen` and
+     the unique index.
+   - Ids are validated as `^[1-9][0-9]{0,19}$`, and a webhook's numeric id only when
+     `Number.isSafeInteger` holds. A duplicate is refused `conflict`.
+   - `BATON_REPOSITORIES` seed entries may carry the ids; one without them is path-only and
+     listed under Needs you. The course kit's seeds carry them.
    - Registration requires the ids for a forge repository. `repo add` reads them from the
      forge API, or from `--forge-ids`.
-   - `baton admin repo identify` sets them on the change body, and replacing them needs
-     `confirm`.
+   - `baton admin repo identify` sets them on the change body: from `forge_ids_from_seen`
+     when a path-verified token was seen, else from the forge API after the administrator
+     confirms the forge's full name and creation date. Replacing stored ids needs `confirm`.
    - Verification:
      - OIDC and GitLab tokens are checked by id once ids are stored;
      - App deliveries and notifications map by id, and a path match with another id is
        logged `forge-id-mismatch`;
-     - a verified rename updates the stored path (`repo-renamed`).
+     - a GitHub `job_workflow_ref` is checked against the token's own repository claim;
+     - a verified rename updates the path, `web_base` and a derived `remote` (`repo-renamed`);
+     - a rename onto a path any other row holds keeps the old path and is listed under Needs
+       you, and an administrator's `confirm`ed path change resolves it.
    - A repository without ids is listed under Needs you.
    - Every registered repository having its ids is a cutover precondition.
 
@@ -91,7 +111,7 @@ today and an interface change or a broken promise later.
 ### Tests
 
 - S-BTN-106 to S-BTN-109 in `test/integration/`, on both hosts.
-- Unit tests for the Cloudflare shell's host check and object names (G-BTN-126). The static
+- Unit tests for the shell's host check, naming helper and handshake (G-BTN-126). The static
   check on `src/core/` runs in `npm test`.
 - Unit tests for OIDC, GitLab and webhook verification with matching and mismatched ids,
   using fixtures from real token and payload shapes.
