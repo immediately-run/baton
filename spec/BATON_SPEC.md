@@ -1507,7 +1507,7 @@ exportable.)*
     `GET …/tickets/{ticket}/children` with open and closed children, logs a `spawned` history
     row on the parent (R-BTN-81) when a child first appears, and draws the tree on the dashboard.
     A `parent` that is not a local id of the repository, names the ticket itself, would close a
-    cycle, or makes a chain longer than 5 edges is **dropped from that ticket** (stored as none)
+    cycle, or makes a chain longer than 5 edges *(2026-10-18, R-BTN-146: 4 generations below a root)* is **dropped from that ticket** (stored as none)
     and logged `parent-invalid` with the reason; one naming no live or closed ticket is stored
     and drawn as orphaned. No snapshot is refused for a parent, so one bad file never stalls a
     board. What closing or withdrawing a parent means for its open children is the course's and
@@ -4158,8 +4158,10 @@ otherwise break when a second tenant arrives.
       - a request cap, refused `rate-limited` with `retry_after_s`;
       - row-write and storage caps, refused `quota` (§11) until the day turns or space is
         freed.
-    - **Caps never decide a lease** *(review gate rounds 2 to 4)*. Lease upkeep — heartbeats,
-      `advance`, `end` and release acknowledgements — is never refused by a per-tenant cap,
+    - **Caps never decide a lease** *(review gate rounds 2 to 4)*. Lease upkeep — heartbeats
+      of an existing session, `advance`, `end` and release acknowledgements — is never refused
+      by a per-tenant cap (a first heartbeat, which creates a session and holds no lease, is
+      not upkeep, *2026-10-18, R-BTN-146*),
       payload included (P5: capacity never decides authority). Nothing an upkeep call carries
       is ever dropped, so an accepted call stored everything it carried.
       - Upkeep is bounded instead by its own per-credential bucket, which no other call
@@ -5163,7 +5165,7 @@ CREATE UNIQUE INDEX repositories_forge_ids ON repositories (forge, forge_host, f
 
 -- *(2026-10-18, §10.7)* Hardening within a tenant. New columns and tables; no CHECK changes —
 -- the new events are `admin` events with `detail.action` (span-changed, head-replaced,
--- renumbered, held-dropped, token-registered), and the new end reasons live in `claims.kind`'s text.
+-- renumbered, held-dropped, token-registered), and the new end reasons live in `claims.end_reason`'s text.
 ALTER TABLE repositories ADD COLUMN trusted_identities TEXT NOT NULL DEFAULT '[]'; -- R-BTN-136: forge user ids
 ALTER TABLE repositories ADD COLUMN code_repos TEXT NOT NULL DEFAULT '[]';         -- R-BTN-137: [{path, repo_id, consented_at?}]
 ALTER TABLE repositories ADD COLUMN trigger_workflows TEXT NOT NULL DEFAULT '[]';  -- §10.7.5: set by the administrator
@@ -5190,6 +5192,19 @@ CREATE TABLE login_codes (                        -- R-BTN-152: replaces login_l
   id INTEGER PRIMARY KEY, code_hash TEXT NOT NULL, pending_hash TEXT NOT NULL, client_addr TEXT NOT NULL,
   admin_key TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,  -- created + 2 minutes
   bound_at INTEGER, used_at INTEGER
+);
+ALTER TABLE worker_grants ADD COLUMN accepted_at INTEGER;                          -- R-BTN-143: NULL while pending
+CREATE TABLE write_budgets (                      -- R-BTN-146: non-upkeep row writes per credential per repository per UTC day
+  credential_id TEXT NOT NULL, repository_id TEXT NOT NULL, day TEXT NOT NULL, writes INTEGER NOT NULL,
+  PRIMARY KEY (credential_id, repository_id, day)
+);
+CREATE TABLE observation_lapses (                 -- R-BTN-147: numbers a credential let lapse unposted
+  credential_id TEXT NOT NULL, repository_id TEXT NOT NULL, number INTEGER NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (repository_id, number)
+);
+CREATE TABLE action_confirmations (               -- R-BTN-152: a destructive dashboard action awaiting a signed confirm
+  code_hash TEXT PRIMARY KEY, session_id TEXT NOT NULL, action TEXT NOT NULL, params TEXT NOT NULL,
+  created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER
 );
 -- dashboard_sessions: a session lives at most 4 hours (R-BTN-152). Registration tokens (R-BTN-117) record
 -- `uses_left` (default 1, at most 100) and an expiry at most 30 days on (R-BTN-154).
@@ -5916,7 +5931,7 @@ loses a prerequisite mid-run ends `released:blocked` after the release steps bel
 
 ### 7.1 Board sync
 
-*(Amended 2026-10-18 by §10.7: the post takes `head_unfounded` and a ticket's `check`; the sync proves its head is founded before choosing `parent_sha` (step 4 applies to a founded head only); it posts no untrusted marker; a post over the caps is `too-large` — R-BTN-136, R-BTN-144, R-BTN-146, R-BTN-150)*
+*(Amended 2026-10-18 by §10.7: the post takes `head_unfounded`, `source: {kind, cli}` and a ticket's `check`; the sync proves its head is founded before choosing `parent_sha` (step 4 applies to a founded head only); it posts no untrusted marker; a post over the caps is `too-large` — R-BTN-136, R-BTN-144, R-BTN-146, R-BTN-150)*
 
 
 *(Amended 2026-10-17 by §2m: each posted ticket may carry `depends_at: [{ticket, at | reached | done, leg?}]` (R-BTN-120), and each output a sync posts carries its validity (R-BTN-109); the course file travels with its schemas (R-BTN-108).)*
@@ -6087,7 +6102,7 @@ The server materializes each accepted snapshot into `tickets` (R-BTN-33), upsert
 rows whose `row_hash` changed and deleting rows for tickets no longer live; most pushes change
 a handful of rows, so the write budget (§3) holds.
 
-**R-BTN-11 (snapshots advance by compare-and-set on ancestry).** *(Amended 2026-10-18 by §10.7: a machine-key head absent from the remote is replaced at once, a held post may only tighten, and runners on a held head rely on R-BTN-140's verified-sha cache — R-BTN-144.)* Per registered repository
+**R-BTN-11 (snapshots advance by compare-and-set on ancestry).** *(Amended 2026-10-18 by §10.7: a machine-key head unfounded on the default branch is replaced at once, a held post may only tighten, and runners on a held head rely on R-BTN-140's verified-sha cache — R-BTN-144.)* Per registered repository
 (R-BTN-47), the server accepts a
 snapshot only if `parent_sha` equals its current head (a refresh: both equal the head) and
 its observation is newer (R-BTN-62), then moves the head; the very first
@@ -6725,10 +6740,11 @@ Owner decisions, 2026-10-18:
     marker, whether in a comment, a review or a PR body. The text counts only when its author
     **and every editor** are trusted *(review gate round 1)*:
     - GitHub reports a text's editors in GraphQL `userContentEdits`.
-    - On GitLab and Gitea, which report no editors, edited text counts only when it is
-      unedited, or when its author is trusted and the forge's `updated_by`, where it has one,
-      is the author.
-    - When the editors cannot be read, the text does not count.
+    - GitLab and Gitea report no list of editors. There, an edited text counts when its author
+      is trusted and the forge's `updated_by`, where it has one, is the author. Only pushers
+      can edit another's text there.
+    - An editors read that errors aborts the run, as a permission read does (below). Only a
+      known lack of scope means the text does not count.
 
     A person is trusted when:
     - their immutable forge user id is in the owner setting `trusted_identities` (R-BTN-66),
@@ -6750,7 +6766,8 @@ Owner decisions, 2026-10-18:
       nothing, so a transient failure never drops verdicts.
     - Only a token the sync knows lacks the scope degrades to `trusted_identities`, failing
       closed and listed under **Needs you**.
-    - The sync caches each author's permission for the run.
+    - The sync caches each author's permission for the run. On GitLab and Gitea it reads the
+      member list once per run, so many commenters cost one read.
     - `repo init --forge gitlab` provisions a `read_api` token for the lookup, since
       `CI_JOB_TOKEN` cannot make it. Permissions are read at each sync, so a verdict whose author has since
     lost push stops counting. The backward path that leaves is a regression (§2e), flagged and
@@ -6773,7 +6790,10 @@ Owner decisions, 2026-10-18:
       consent, judged by id, never by spelling (R-BTN-58). That consent is
       `POST /v1/owner/{B}/code-repo-consents {repository: A}`, signed by B's owner, or an
       administrator's addition.
-    - Until consent, the entry is held and has no reach.
+    - Until consent, the entry is held and has no reach. Consent is judged at every use, not
+      only when the entry is added: an entry whose id later becomes a live registered
+      repository with no consent loses its reach and is listed.
+    - The consenting owners may withdraw consent the same way, with `withdraw: true`.
   - **What `repos:` may still do.** A ticket's `repos:` stay filter fields needing no
     registration. An entry gains reach only when it resolves to an id in `code_repos`. A path
     is first mapped to its current one by id, so a former path a squatter re-created never
@@ -6845,10 +6865,12 @@ Owner decisions, 2026-10-18:
   - **The ref.** The runner fetches the registered branch into its own ref,
     `refs/baton/<repository>/default`, and checks against that ref, never against the
     checkout's `origin` configuration, which a leg can rewrite.
-  - **No rollback** *(review gate round 1)*. The runner keeps, per repository, the newest sha it
-    verified. It refuses (`off-branch`) a snapshot that is a strict ancestor of that sha, so a
-    post cannot send runners back to default-branch code from before a fix. Snapshots only
-    advance (R-BTN-11), so no honest claim meets this.
+  - **Older default-branch code, stated** *(review gate round 2: a watermark refusing older
+    snapshots refused honest claims, and is withdrawn)*. Any commit on the default branch
+    passes. A post can therefore point runners at an older default-branch commit, from before a
+    fix to course code, until the next honest sync replaces the head. That code is still code
+    the repository's pushers merged (R-BTN-66), and R-BTN-144's tighten-only held posts and
+    Needs-you items show the post.
   - **The held-rewrite cache.** While R-BTN-11 holds a rewrite, the claim response says so
     (`rewrite_held: true`) and names the head it was held against. Only then does the runner
     accept that exact sha from its cache of shas it verified before. It flushes the cache when
@@ -6931,29 +6953,36 @@ Owner decisions, 2026-10-18:
 - **R-BTN-143 (a key granted on several repositories syncs and delivers only where each opts
   in).** *(Owner, 2026-10-18. Amends R-BTN-58, R-BTN-93, R-BTN-97, R-BTN-102, R-BTN-103 and
   R-BTN-105.)*
-  - **A key's span** is the number of this tenant's repositories on which it holds an
-    unrevoked grant **and** whose course it has declared in a heartbeat in the last 7 days.
-    Those are the repositories whose code it actually runs. A key of span 1 keeps R-BTN-102
-    exactly.
-    - So another repository's owners, by granting a key, change nothing on A until the key's
-      holder actually serves them (R-BTN-58) *(review gate round 1)*.
+  - **A grant takes effect when the key's holder accepts it** *(review gate round 2)*.
+    - A grant to a key that already holds an accepted grant elsewhere in the tenant is
+      **pending**, and gives the key nothing on that repository: no work, no sync, no delivery.
+      It becomes active when the key's holder accepts it: `baton runner accept-grant
+      <repository>`, signed by the key, action `runner.grant.accept`.
+    - So no repository's owners change what a key does on another repository by granting it
+      (R-BTN-58).
+  - **A key's span** is the number of this tenant's repositories on which it holds an active
+    grant. A key of span 1 keeps R-BTN-102 exactly.
   - **At span 2 or more,** a key syncs a repository (`/v1/sync/*`) only when its grant there
     has `sync: true`, and claims that repository's pool copies (R-BTN-103) only with
-    `courier: true`. Both are new grant fields, default `false`, set by that repository's
-    owners.
-    - Otherwise the sync is `forbidden` (the event names the reason, `span`), and the heartbeat's courier entry is
-      returned in `refused_couriers`.
-    - Work, readings and the views still follow the grant alone.
+    `courier: true`. Both are grant fields, default `false`, set by that repository's owners.
+    - This holds on **every** repository of the key, the first included. A key that never
+      heartbeats, such as one used only to sync, is judged the same way.
+    - Otherwise the sync is `forbidden` (the event names the reason, `span`), and the
+      heartbeat's courier entry is returned in `refused_couriers`.
+    - Work, readings and the views follow the active grant alone.
   - **When the span changes.**
-    - A heartbeat that raises a key's span from 1 to 2 sets the first repository's implicit
-      flags to `false` in the same transaction. It logs `span-changed` on every repository the key is
-      granted on, and lists each under **Needs you** until one of its owners sets or confirms
-      the flags.
-    - A revoke back to span 1 restores R-BTN-102's defaults.
+    - An acceptance that raises a key's span from 1 to 2 leaves the first repository's grant
+      with whatever flags its owners set explicitly. If they set none, both read `false`. It
+      logs an `admin` event (`detail.action: span-changed`) on every repository the key is
+      granted on, and lists each under **Needs you** until one of its owners confirms the
+      flags.
+    - A revoke back to span 1 restores R-BTN-102's defaults on the remaining repository.
+      Explicitly set flags stay as set.
   - **Owners see a key's span.** The grant response and a new `GET
     /v1/owner/{repository}/grants` list each key's hostname, span and the ids of the other
-    repositories it is granted on — ids only. `baton owner key grant` prints the span, and
-    needs `--confirm-span` when the grant takes it to 2 or more.
+    repositories it is granted on — ids only, pending grants marked. `baton owner key grant`
+    prints the key's span and its other repositories, and needs `--confirm-span` when the key
+    already holds a grant elsewhere.
   - **Why.**
     - R-BTN-93 limits a sync key to one repository, because a key serving several sits where
       each one's code runs (§2k round 3, 3-A-0). R-BTN-134 applies the same reasoning across
@@ -6969,7 +6998,8 @@ Owner decisions, 2026-10-18:
     `baton repo sync` checks Baton's head the way R-BTN-140 checks a claim's sha: is it a
     commit reachable from `origin/<default_branch>`?
     - When it is not — absent, or a real commit on some other branch — the sync posts
-      `force: true, head_unfounded: true`.
+      `force: true, head_unfounded: true`. Before declaring a head absent, it fetches that sha
+      once by name, so a lagging replica is not mistaken for a forged head.
     - §7.1 step 4's "Baton's head is a strict ancestor: post nothing" applies only to a
       founded head.
   - **Baton's answer.**
@@ -7019,8 +7049,12 @@ Owner decisions, 2026-10-18:
     - the post came from the repository's sync key or CI identity, or from the claimant's own
       credential. A post by another machine key may be hostile: it ends the claim
       `stale-board`, listed under **Needs you**, with no penalty;
-    - the ticket's source is commit-determined: the markdown source, read by the CLI version
-      the request declared (`declared.cli`), equal to the posting sync's.
+    - the ticket's source is commit-determined: the board post names its source (`source:
+      {kind: 'markdown' | 'custom', cli}`, §7.1), and it is the markdown source.
+
+    At the claim, Baton refuses `invalid-params` a `declared.cli` that is not the `cli` of the
+    repository's last accepted post, so a claimant cannot dodge the test by naming another
+    version *(review gate round 2)*.
 
     Then the claim:
     - ends `released:misdeclared`, which counts as a failed attempt with its backoff;
@@ -7036,8 +7070,9 @@ Owner decisions, 2026-10-18:
     - R-BTN-25's next claimant never continues a tainted branch. It starts a fresh `-2` branch
       and leaves the old one for the owner, listed under **Needs you**.
     - The claim response and the fleet view carry the ticket's tainted branches.
-    - The standard station functions ignore PRs whose head is a tainted branch, and the
-      runner's `merge` and `fix` legs refuse a tainted head *(review gate round 1)*.
+    - The standard station functions ignore PRs whose head is a tainted branch. The runner
+      refuses, for any leg, to check out or push a branch listed in the claim response's
+      `tainted_branches` *(review gate rounds 1 and 2)*.
   - **The cost, stated.** A worker that misdeclares and posts a board agreeing with its
     declaration at that sha is R-BTN-102's self-loosening post: noticed, not stopped
     (2026-10-16).
@@ -7051,7 +7086,8 @@ Owner decisions, 2026-10-18:
     - At most 64 live worker rows per credential; a 65th first heartbeat is `quota`. A first
       heartbeat creates a worker row and holds no lease, so it is not upkeep (R-BTN-132, as
       amended).
-    - At most 200 new sessions a day per credential, since cloud-session keys start many.
+    - At most 200 new sessions a day per credential, since cloud-session keys start many. The
+      201st first heartbeat is `quota`.
     - Rows unseen for 30 days lose their capability, tag, course and report rows.
   - **Held snapshots.** At most 4 per posting credential per repository. A fifth from the same
     credential drops that credential's own oldest, logged as an `admin` event with
@@ -7073,8 +7109,12 @@ Owner decisions, 2026-10-18:
 - **R-BTN-147 (an outstanding observation number can be taken over).** *(Amends R-BTN-62.)*
   - An outstanding number records its credential.
   - **Renewing.** The holder may renew its number while it reads, at most every 2 minutes:
-    `POST /v1/sync/observation {renew: <number>}`, which resets the number's age. So a slow
-    honest read is never voided.
+    `POST /v1/sync/observation {renew: <number>}`. Renewing resets the number's idle age, so a
+    slow honest read is never voided.
+    - A number's total life is at most 30 minutes from issue, renewals included.
+    - The repository's sync key or CI identity may void another credential's number at once
+      *(review gate round 2)*.
+    - A number held past 15 minutes is listed under **Needs you**.
   - **Takeover.** Another credential's request voids a number not renewed for over 5 minutes;
     the same credential's still waits 10. A post bearing a voided number is
     `stale-observation`.
@@ -7133,16 +7173,22 @@ Owner decisions, 2026-10-18:
     course's leg that can reach a station mapped to `success`.
     - **The command.** It is the verdict leg's `check_command` in the course file
       (R-BTN-69): an argv, with `timeout_s` (default 1800, at most 7200).
-    - **How it runs.** The runner runs it through the session provider's `exec(argv, {cwd,
-      timeout_s}) → {status}`, a method R-BTN-107's provider contract gains. It runs **first**,
+    - **How it runs.** The runner runs it through `exec(argv, {cwd, timeout_s}) → {status}`.
+      - In `session` mode, `exec` is a method R-BTN-107's provider contract gains.
+      - In `process` mode, the runner itself runs the command in a fresh clone at
+        `claims.check_sha`, with R-BTN-141's environment.
+      - An `attached` worker takes no verdict leg (rule `isolation`), since its agent's
+        container started the runner *(review gate round 2)*. It runs **first**,
       in a fresh sandbox checked out at `claims.check_sha`, before any agent touches that
       sandbox. So no earlier step can shim what the command runs *(review gate round 1)*.
     - **Mapping the status.**
       - Status 0 reaches the station the course maps to `success`.
       - Any other status reaches the one mapped to `failure`.
       - A timeout, or an `exec` error, reaches the one mapped to `neutral`.
-    - **Evidence on the end.** An end at a success-mapped station carries `exit_status: 0`
-      from `exec`, which Baton requires. A check course's `min_worker_version` is at least the
+    - **Evidence on the move.** An `advance` or an end that reaches a success-mapped station
+      carries `exit_status: 0` from `exec`, which Baton requires. Before `exec`, the runner
+      checks that `check_sha` is the head of the change's `refs/heads/*` branch, so a
+      `refs/pull/*` commit cannot be passed off as one. A check course's `min_worker_version` is at least the
       runner release that implements this rule.
     - **Agents.** In a check course, an agent's `baton-leg-result` or channel `done`
       (R-BTN-106, R-BTN-107) may reach only `failure` or `neutral` stations.
@@ -7158,7 +7204,8 @@ Owner decisions, 2026-10-18:
   - **One check App per repository** *(review gate round 1)*. A forge courier holding a check
     App's key can post `success` wherever the App is installed. So `baton owner courier add
     --delivers forge-check` lists the App's installed repositories, using the App's key, and
-    refuses when any is not a repository these owners own.
+    refuses when any is not a repository these owners own, or when the installation covers
+    "All repositories". The courier re-checks at each delivery *(review gate round 2)*.
   - **The trust, stated.** A check is as trustworthy as the check-runner keys, their legs'
     isolation and the check command on the default branch. The change under test decides its
     command's exit status, which is what a test is. It cannot print its way to `success`.
@@ -7178,7 +7225,7 @@ Owner decisions, 2026-10-18:
   browser's user, which is §10.2's threat.
   - **The flow.**
     1. `baton admin open` opens `https://<origin>/login`, which carries nothing.
-    2. The page sends `POST /v1/login {}` under R-BTN-16's rule. Baton writes a `login_links`
+    2. The page sends `POST /v1/login {}` under R-BTN-16's rule. Baton writes a `login_codes`
        row, sets the pending cookie `__Host-baton-pending` (host-only, `Secure`, `HttpOnly`,
        `SameSite=Strict`, two minutes), and answers `{code}`: eight Crockford base32
        characters, which the page shows.
@@ -7192,15 +7239,25 @@ Owner decisions, 2026-10-18:
     becomes a session. A process that asks for a code of its own gets nothing unless the
     administrator types that code, which they read from Baton's own page.
   - **Limits.** At most five unbound rows per client address, each living two minutes. A
-    sixth drops the oldest, never refuses, so no process sharing the address can lock the
-    administrator out *(review gate round 1)*.
+    sixth drops the oldest whose pending cookie has never polled, and never refuses
+    *(review gate rounds 1 and 2)*.
+    - **The cost, stated:** a same-address process creating rows in a loop can still evict a
+      browser's row before it polls.
+    - On a `not-found` bind, the CLI reports how many rows the address made and lost in the
+      last 2 minutes, and bursts are listed under **Needs you**.
     - The client address is the connection's, or a forwarded one only from a front the
       operator names (`--trusted-proxy`, R-BTN-155).
     - The CLI shows the row's address and age before it binds.
   - **Sessions.** A session lives at most 4 hours.
-    - Destructive dashboard actions — cutover, force-reap, accepting a history, revoking —
-      need a fresh confirmation. The dashboard shows a code, and the administrator confirms
-      it with `baton admin confirm <code>` (`POST /v1/admin/confirm`, signed).
+    - **Destructive dashboard actions need a fresh confirmation:** cutover
+      (`POST /v1/ui/cutover`), force-reap (`POST /v1/ui/claims/{id}/reap`) and accepting a
+      history (`POST /v1/ui/board/accept`).
+      - Such a request answers `202 {confirm_code}`: eight Crockford base32 characters,
+        living two minutes and used once, bound to the session, the action and its
+        parameters (`action_confirmations`, §4).
+      - The administrator runs `baton admin confirm <code>`. It fetches and prints the action
+        and its target, then signs `POST /v1/admin/confirm {code}`, which performs it
+        *(review gate round 2)*.
     - **The cost, stated:** a same-user process can read a browser's cookie jar after a
       legitimate sign-in, so a session is the browser's profile's, and the confirmation is
       what keeps a stolen session from a destructive act.
@@ -7276,9 +7333,11 @@ Owner decisions, 2026-10-18:
       terminates it, and `--origin` names the front's origin. R-BTN-132's host check holds
       against that origin.
     - An `http` origin that is not loopback gets no dashboard, since its cookie is `Secure`.
-      It also refuses every bearer credential — API keys, MCP keys, registration tokens — as
-      `unauthenticated`, and accepts SSH-signed requests only, so no reusable secret crosses
-      the network in clear *(review gate round 1)*.
+    - **Bearer credentials over `http`.** On an `http` listener the server refuses every bearer
+      credential — API keys, MCP keys, registration tokens, the dashboard cookie — as
+      `unauthenticated` whenever the connection's peer is neither loopback nor the
+      `--trusted-proxy`, whatever the origin says. It accepts SSH-signed requests from any peer.
+      So no reusable secret crosses the network in clear *(review gate rounds 1 and 2)*.
     - `--trusted-proxy <address>` names the front whose forwarded client address the sign-in
       limits read (R-BTN-152).
     - At start it refuses (exit 2) a group- or world-writable `--db`, secret file or
@@ -7334,7 +7393,8 @@ Owner decisions, 2026-10-18:
       which the model takes as any git state;
     - an `off-branch` or `misdeclared` end is one of `endClaim`'s releases;
     - a dropped ticket's claim ending `stale-board` is the model's withdrawal;
-    - observation takeover is `syncVoid` then `syncNumber`;
+    - observation takeover is `syncVoid` then `syncNumber`, and renewal and the 30-minute
+      cap are `syncVoid` not happening, or happening;
     - a fence clearing per incarnation is the model's fence, which has no re-key;
     - literal bars and `renamed_from` collisions are course changes, which the model
       abstracts (R-BTN-64);
@@ -7353,7 +7413,7 @@ Owner decisions, 2026-10-18:
   | S-BTN-112 bars and renames (R-BTN-139) | an owner bar on `implement` and a required bar `*` with `except: [review]`; files that drop `implement`, swap `fix`→`review` and `review`→`peer`, give two legs `renamed_from: review`, and drop `review` before a later file adds a new one | the first two are held under Needs you until `bars follow`; the third is refused; the fourth's drop deletes `review` from the stored `except`, and the new `review` is barred |
   | S-BTN-113 off-branch code never runs (R-BTN-140) | a machine key posts a board whose `sha` is a feature-branch commit with changed leg scripts, override, instructions and `agent_command`; W1 claims on it; then the default branch's rewrite is held while W1 (which verified the old head) and a fresh W2 claim on it | W1 fetches once, reads nothing and ends `released:off-branch`, not a failed attempt; Needs you lists the sha and its poster and a want is raised; on the held rewrite W1 passes from its cache and W2 ends `off-branch` |
   | S-BTN-114 a leg's environment and masking (R-BTN-141, R-BTN-142) | a runner with `IR_BATON_KEY`, `credential:DEPLOY_TOKEN` and `credential:DB_RO`; leg `deploy` requires `DEPLOY_TOKEN`, `review` none; each prints its environment and the values, a `bak_`, `brt_` and `bmcp_` token and a split private-key block; a leg's child calls `setsid`; Stop is pressed; replay runs with `replay_env: [ANTHROPIC_API_KEY]` | `deploy` sees `DEPLOY_TOKEN` only, `review` neither, nobody `IR_BATON_KEY`; every value, token and the key block are `***` in stream and archive; the daemonized child is gone within 30 seconds; the replayed leg sees only the allowlist and the model key |
-  | S-BTN-115 a key's span (R-BTN-143) | W1 is granted on `docs`, then on `ops` with no flags; W1 posts `ops`' board and heartbeats an `ops` courier entry; `ops` sets `sync: true`; then the `ops` grant is revoked | the post is `forbidden` and the courier entry is in `refused_couriers`; both repositories log `span-changed` and are listed; the grant response shows the other id; with the flag the post is accepted; after the revoke `docs` syncs by default |
+  | S-BTN-115 a key's span (R-BTN-143) | W1 is granted on `docs`, then on `ops` with no flags; W1 claims on `ops` before accepting, then accepts; W1 posts `ops`' and `docs`' boards and heartbeats an `ops` courier entry; `ops` sets `sync: true`; then the `ops` grant is revoked | the claim before acceptance is `forbidden`; after it both posts are `forbidden` and the courier entry is in `refused_couriers`; both repositories log `span-changed` and are listed; the grant response shows the other id; with the flag the post is accepted; after the revoke `docs` syncs by default |
   | S-BTN-116 heads, held posts and open-world claims (R-BTN-144, R-BTN-145) | W1 posts a random `sha` on the head, then an honest sync; later W1 posts the head of a pushed PR branch based on `main`'s tip, then an honest sync; a held force post raises one tier and lowers another; a machine-key post lowers `min_worker_version`, jumps a station, renumbers a held ticket and drops a claimed one; a routine key claims an unknown critical ticket, an `[OP]` ticket and an `isolation: session` leg from a `process` worker; a claim declares `routine` where the commit says `critical` | both honest posts are `head_unfounded`, accepted at once, `head-replaced` listed, and no runner meets `off-branch` after them; only the raised tier applies; the four are listed, the hold and backoff follow the new id, the dropped ticket's claim ends `stale-board`; the three claims are refused at the claim; the misdeclared one ends `released:misdeclared`, a failed attempt with a 24-hour bar, its branch tainted, and the next claimant starts `-2` |
   | S-BTN-117 caps, observations and readings (R-BTN-146 to R-BTN-148) | a 10,001-ticket post; a fifth-generation child; `((a{1000}){1000}){1000}`; a 65th session; repeated `leg_finished`; `extend_to` 8 days on; W1 takes a number and never posts while W2 asks at 4 and 6 minutes; 9 sessions of one key post measures; a bill outside `uses` and one with `n: 17` | `too-large`; `parent-invalid`; a schema error; `quota`; one re-arm; `invalid-params`; W2 is `sync-busy` at 4 and numbered at 6, W1's post `stale-observation`; 8 measures kept, an administrator's clear ends them; both bills refused |
   | S-BTN-118 a forged check (R-BTN-150) | a check-runner ends `done` at `failed` while a machine-key post shows `passed`; a post shows `passed` with no claim; a check-runner ends `passed` on head A and a post moves `check.sha` to B before confirmation; a work key claims `check.ci.43` open-world; a post carries a fork's `head_repo_id`; a verdict leg's `exec` exits 1 while the agent reports `passed`, then exits 0, then times out; an end at `passed` without `exit_status` | no notice for the first two, listed `check-unattested`; no conclusion for A, and the ticket restarts at its start station on B; `not-eligible`, rule `check-runner`; the fork ticket is dropped; the channel move is refused and the leg reaches `failed`, then `passed` on exit 0, then `neutral`; the end without `exit_status` is refused |
@@ -7367,10 +7427,10 @@ Owner decisions, 2026-10-18:
   | A default station function counts no fork PR found by pattern and no verdict, approval or marker from an author who cannot push and is not listed, failing closed | G-BTN-130 (S-BTN-110) |
   | Fetches, PR search, `prs:` and fences beyond the home reach only `code_repos`; a pattern outside the grammar is refused; every input's digest is verified before a leg runs | G-BTN-131 (S-BTN-111) |
   | Bars name legs literally; removing or renaming a barred or exempt leg holds the file; `renamed_from` collisions are refused | G-BTN-132 (S-BTN-112) |
-  | A runner reads nothing at a sha that is not on `origin/<default_branch>` after one fetch, unless it once verified it; `close` and `handoff` run in a child | G-BTN-133 (S-BTN-113) |
+  | A runner reads nothing at a sha that is not on the registered default branch after one fetch, unless it is a held rewrite's head it verified before; `close` and `handoff` run in a child | G-BTN-133 (S-BTN-113) |
   | No leg inherits the runner's Baton credentials; a leg gets only the `credential:` variables it requires; the masked set covers the runner's credentials, credential values, Baton tokens and key blocks; a stopped leg's tagged processes are gone in 30 seconds; replay runs from an allowlist | G-BTN-134 (S-BTN-114) |
   | A key of span 2 or more syncs and delivers only where its grant opts in, and owners see its span | G-BTN-135 (S-BTN-115) |
-  | A machine-key head absent from the remote is replaced at once; a held post only tightens; an open-world claim meets every credential gate at the claim, and a misdeclaration is a failed attempt that taints the branch | G-BTN-136 (S-BTN-116) |
+  | A machine-key head unfounded on the default branch is replaced at once; a held post only tightens; an open-world claim meets every credential gate at the claim, and a misdeclaration is a failed attempt that taints the branch | G-BTN-136 (S-BTN-116) |
   | Per-repository caps refuse oversize items and never refuse upkeep; observation numbers can be taken over; readings and bills are bounded and clearable | G-BTN-137 (S-BTN-117) |
   | A concluding `forge-check` notice comes only from a confirmed end of an ordinary check-runner claim, for its bound sha, mapped from the end's own `reached`; no post alone, work key, fork or agent report produces `success` | G-BTN-138 (S-BTN-118) |
   | MCP never lifts a hold or changes expedite; a session is issued only to the browser holding a pending cookie an administrator key bound, and every session can be ended; tokens are single-use by default, at most 100 uses and 30 days, worker or courier only | G-BTN-139 (S-BTN-119) |
@@ -7386,6 +7446,9 @@ Owner decisions, 2026-10-18:
 - `branch-holder` names only granted repositories' tickets (R-BTN-138).
 - `POST /v1/sync/board` takes `head_unfounded` and a ticket's `check: {sha, head_repo_id}`, and refuses an oversize post `too-large` (R-BTN-144, R-BTN-146, R-BTN-150).
 - `POST /v1/sync/observation` takes `{renew}` (R-BTN-147).
+- `POST /v1/sync/board` also takes `source: {kind, cli}` (R-BTN-145).
+- `POST /v1/ui/cutover`, `POST /v1/ui/claims/{id}/reap` and `POST /v1/ui/board/accept` answer `202 {confirm_code}` until `baton admin confirm` performs them (R-BTN-152).
+- New route `POST /v1/runner/grants/{repository}/accept`, action `runner.grant.accept`, signed by the key: it activates a pending grant (R-BTN-143).
 - `POST /v1/admin/readings` takes `{instance, clear: {source?}}` (R-BTN-148).
 - `POST /v1/admin/repositories` takes `trigger_workflows` (§10.7.5) and the ids (R-BTN-135).
 - The tokens row's `uses` defaults to 1 and is at most 100, and its `ttl` is at most 30 days (R-BTN-154).
@@ -9252,3 +9315,25 @@ consistency): 44 findings (3 blocking, 31 should-fix, 10 nit). Resolved:)*
 | 1-B-13 S-BTN-118 against R-BTN-114 | the ticket restarts on the new head |
 | 1-B-14 sibling tickets | B-5, B-9 and B-25 amended; B-35 names B-25, the server pieces and the migration |
 | 1-B-15 to 1-B-18 nits | R-BTN-67's "silently"; R-BTN-129 by value, `forbidden` without a rule; the §2k 2-A-1 row qualified and noted; `claim.sh`'s list, G-BTN-140's GitLab sources, editors, ids, the clone credential |
+
+*(2026-10-18 — §10.7 hardening, review gate round 2 on `589d7d8` (ids 2-A-n, 2-B-n): every
+round-1 resolution checked in the text, three not holding; 21 findings (3 blocking, 11
+should-fix, 7 nit). Where a round-1 mechanism drew the finding, the fix replaces it with a
+simpler rule. Resolved:)*
+
+| Finding | Resolution |
+|---|---|
+| 2-A-0 (blocking) span by declared courses let a key sync every repository it held a grant for, unflagged | withdrawn: a grant to a key already granted elsewhere is pending until the key's holder accepts it (`runner.grant.accept`); span counts active grants; at span 2 or more the flags bind on every repository, the first included and keys that never heartbeat (R-BTN-143) |
+| 2-A-1 (blocking) the no-rollback watermark refused honest claims | withdrawn; older default-branch code until the next honest sync is a stated cost (R-BTN-140) |
+| 2-A-2 (blocking) renewal let a holder keep a number for ever | a 30-minute total life; the sync key or CI voids another's number at once; held past 15 minutes is listed (R-BTN-147) |
+| 2-A-3 misdeclaration needed facts no post carried, and a fake `cli` dodged it | the post names `source: {kind, cli}`; a `declared.cli` other than the last accepted post's is `invalid-params` (R-BTN-145, §7.1, §11) |
+| 2-A-4 an editors read error dropped verdicts | it aborts the run, as a permission read does; the GitLab/Gitea wording fixed; member lists read once per run (R-BTN-136) |
+| 2-A-5 eviction still locked the administrator out | a row whose cookie has polled is never evicted; the cost stated; the CLI reports evictions; bursts listed (R-BTN-152) |
+| 2-A-6 the bearer refusal keyed on the origin | keyed on the connection's peer: neither loopback nor the trusted proxy (R-BTN-155) |
+| 2-A-7 `exec` only for cloud sessions | `process` mode runs the command itself in a fresh clone at `check_sha`; `attached` takes no verdict leg; an `advance` into success needs `exit_status` too (R-BTN-150) |
+| 2-A-8 confirmation codes underspecified | 8 characters, two minutes, single use, bound to session, action and parameters, `action_confirmations`; the three `/v1/ui` routes answer `202 {confirm_code}`; the CLI prints the action first (R-BTN-152, §4, §11) |
+| 2-A-9 R-BTN-132 still said heartbeats were never refused | a first heartbeat is not upkeep there too; the 201st is `quota` (R-BTN-132, R-BTN-146) |
+| 2-A-10 the runner cannot know `merge` and `fix` | it refuses to check out or push a tainted branch for any leg (R-BTN-145) |
+| 2-A-11 consent judged only at addition | judged at every use; withdrawable (R-BTN-137) |
+| 2-B-0 §4 and prose disagreed, with gaps | `login_codes` in the flow; `end_reason`; `worker_grants.accepted_at`, `write_budgets`, `observation_lapses`, `action_confirmations` |
+| 2-B-1, 2-B-2, 2-A-12 to 2-A-15 nits | `head_unfounded` in B-35, R-BTN-11's note and G-BTN-136; R-BTN-86's body; "selected repositories" and a re-check per delivery; one fetch by sha before declaring a head absent; `check_sha` must be the change's `refs/heads/*` head; GitLab and Gitea member lists once per run |
