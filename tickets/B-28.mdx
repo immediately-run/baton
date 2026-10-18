@@ -83,11 +83,17 @@ instructions ship with the CLI and are the repository's once scaffolded; `draft-
 
 ### Exit criteria
 
-- [ ] `npm test` green, with S-BTN-104 and G-BTN-123 in the spec
-- [ ] `baton repo init --course <id>` scaffolds each of the five courses, and `baton test-course`
+- [x] `npm test` green, with S-BTN-104 and G-BTN-123 in the spec
+- [x] `baton repo init --course <id>` scaffolds each of the five courses, and `baton test-course`
   passes on each scaffolded course
-- [ ] `src/core/` unchanged (`git diff --stat origin/main -- src/core` empty)
+- [x] `src/core/` unchanged (`git diff --stat origin/main -- src/core` empty)
 
 ## Status
 
 _(filed 2026-10-18)_
+
+Delivered by https://github.com/immediately-run/baton/pull/49 (merged d6a4811, 2026-10-18) after
+three review rounds: 24 findings, all fixed, rows in `docs/review/pr-findings.mdx`. The review
+added three behaviours beyond the item: legs that wait on someone outside the claim suspend it;
+`baton run --course` serves one course of several, one runner per clone, with a home lock; and
+`markerClose` merges racing markers by union and retries only a non-fast-forward push.
