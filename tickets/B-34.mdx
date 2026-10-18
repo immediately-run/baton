@@ -1,0 +1,64 @@
+---
+title: "B-34 — Interactive legs: a cloud session launched as the asked person, with a prompt, delivering the leg's typed output"
+id: B-34
+project: baton
+status: available
+updated: 2026-10-18
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "`kind: interactive` legs with `asks`: claimed only by a session-mode runner that creates sessions as the asked person (rule `interactive`), launched with the leg's prompt, its link delivered by courier, idle suspension with a hand-off, the person's confirmation attested by the runner, children spawned mid-conversation (amends BATON_SPEC R-BTN-107, R-BTN-116, R-BTN-86). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-2
+  - B-7
+---
+
+**Brief:** the owner, 2026-10-18 (this session): a course's leg can be an interactive agent session, launched with a prompt, that delivers the leg's result (a product definition, a feature specification) and may plan as it goes. Steps toward the end-to-end application course: brief → specification → roadmap → build → test → deploy.
+**Spec:** `spec/BATON_SPEC.md` R-BTN-107 (session mode), R-BTN-116 (person legs), R-BTN-86 (child tickets), R-BTN-113 (session links), R-BTN-123 (fresh sessions), R-BTN-44 (hand-off), R-BTN-109 (entry requirements). This ticket amends them; the amendment is its first deliverable.
+**Depends on:** B-2 (the runner's channel and `session` mode), B-7 (person legs, `asks`, decisions and their notices).
+
+### Requires
+
+None: the session provider is faked in every test. No exit criterion needs a forge, a browser or a person.
+
+### Why
+
+Today a leg is either an agent's, run headlessly to its last output line (the standard stubs), or a person's, answered in git (R-BTN-116). An interactive leg is neither. The agent does the work, but a person shapes it in conversation and approves the result. The owner's decisions, 2026-10-18:
+
+- **First, sessions on claude.ai (option B):** the runner launches one cloud session per interactive leg, with the leg's prompt, and sends the person its link.
+- **Then, a surface inside immediately.run (option C):** a person leg whose tool is an agent pane beside the live preview. That is a later ticket, filed when this amendment settles the leg's contract. It needs nothing new from Baton beyond B-7.
+- **An interactive leg may spawn children during the conversation**, so planning happens while the person is there.
+
+### What to build
+
+1. **Spec amendment (first, by pull request):** an interactive leg kind, its claim rule, its life cycle and its result, as below.
+2. **`"kind": "interactive"` with `"asks": <label>`.** It is an agent leg a person joins. A worker claims it like an agent leg, but only a runner in `session` mode whose session provider creates sessions as a person the `asks` label maps to; the runner declares this as a capability of its registration. Any other worker is refused (rule `interactive`), and the leg is never offered to one.
+3. **Launch.** The runner starts the session with the leg's brief (R-BTN-107) and the course's instructions for the leg. Interactive instructions say: interview the person, write the output to git, have the person confirm it, then end with the `baton-leg-result` block. The heartbeat carries the session's link (R-BTN-113).
+4. **The link reaches the person.** Queuing the leg opens its decision (R-BTN-116's machinery). Once the session exists, the notice carries its link, and couriers deliver it. The leg waits on its result, never on a delivery.
+5. **Absence.** A leg's `"idle": <seconds>`: the session adapter reports the person's last activity, and past the limit the runner suspends the leg with a hand-off document (R-BTN-44). Resuming launches a new session from the hand-off. R-BTN-123's context refresh is off for interactive legs unless the leg sets `max_context`.
+6. **The person's confirmation is the runner's word, not the agent's.** From the provider's session events, the runner records that a message from the person's account came after the output's last write. It reports this as `confirmed_by` on the leg's end. A result without it is a contract failure (`released:cannot-finish:contract-output`). A course that wants stronger proof follows the leg with a person leg answered in git.
+7. **Spawning during the conversation.** Children the session writes git-first become live at the next snapshot. They may be claimed while the session continues: R-BTN-86 allows a parent and its children to be held at once. The result block lists them as `spawned`, and fan-in blocks the parent's next leg, not the running one. Open: should the session see its children's progress read-only? Today the session never talks to Baton. The amendment decides.
+
+### Architecture
+
+- **Runner code and course code, never core rules beyond the claim gate.** Core gains the `interactive` kind, its claim rule and `confirmed_by` on an end. Launching, links, idling and attestation are the runner's and its session adapter's (R-BTN-107: "core knows only the mode's name").
+- **The person's credentials stay with the runner.** The session provider runs as the person: the runner holds their session-API credential, and the session gets none, as in R-BTN-107.
+- **Rejected for v1:** a terminal attached to a `process`-mode leg. It needs a TTY hand-over the runner does not have. `attached` mode already gives a person already in a session the same thing (`baton leg next`).
+
+### Tests
+
+- A fake session provider: launch with the brief, link on the heartbeat and in the notice, idle → suspend → resume with the hand-off, `confirmed_by` from the person's message, a result without it refused, children spawned mid-session posted and blocking the next leg.
+- Rule `interactive`: a `process` or `attached` runner, or a session runner for another person, is refused and is never offered the leg.
+- A scenario (next free S-BTN number) through the local host, with its G-BTN row.
+
+### Exit criteria
+
+- [ ] the spec amendment merged under the review gate
+- [ ] the scenario above passes on both hosts, with its trace replayed through the model where it touches the core
+- [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green
+- [ ] merged under the review gate
