@@ -644,11 +644,6 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   // The source every course scaffolded here names: this CLI's repository at this CLI's commit.
   const own = cliSelf();
   const pinned = pin ? parsePin(pin) : null;
-  if (own && pinned && pinned.sha !== own.sha) {
-    // The sources name this CLI's commit, the one whose registry writes the files; a workflow
-    // pinned elsewhere would run a CLI that refuses them (checkSource). Refused before any write.
-    throw new Error(`--pin names ${pinned.sha.slice(0, 10)}, but this CLI is at ${own.sha.slice(0, 10)}, the commit its courses' sources name — run \`baton repo init\` with the CLI at ${pinned.sha.slice(0, 10)}, or without --pin`);
-  }
   const self = own ?? pinned;
   const sourceOf = (id: string): string | null => (self ? printSource({ provider: 'github', namespace: self.namespace, repository: self.repository, ref: self.sha, course: id }) : null);
   const kept: string[] = [];
@@ -704,6 +699,13 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     else kept.push('.baton/baton.json');
   } else {
     settings = { baton_url: process.env.BATON_URL ?? DEFAULT_URL, items: 'tickets', default_course: b.id, repos: {}, agent_command: 'echo', courses: [entry] };
+  }
+  // The sources name this CLI's repository at its commit, whose registry writes the files; a
+  // workflow pinned to another repository or commit would run a CLI that refuses them
+  // (checkSource). So a --pin that differs is refused — before any write — whenever the settings
+  // name a source; a repository with none moves its pin freely.
+  if (own && pinned && !(sameRepo(pinned, own) && pinned.sha === own.sha) && (settings.courses ?? []).some((c) => c.source)) {
+    throw new Error(`--pin names ${pinned.namespace}/${pinned.repository}@${pinned.sha.slice(0, 10)}, but this CLI is ${own.namespace}/${own.repository}@${own.sha.slice(0, 10)}, which the courses' sources name — run \`baton repo init\` with the CLI checked out at the pin, or without --pin`);
   }
   if (!kept.includes('.baton/baton.json')) {
     mkdirSync(dirname(settingsPath), { recursive: true });

@@ -591,10 +591,26 @@ export async function run(ctx, standard) {
     }
   }, 120_000);
 
-  it('a --pin other than this CLI’s commit is refused before anything is written: the workflow’s sync would refuse the sources', () => {
-    const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
-    expect(() => baton(root, 'repo', 'init', '--pin', OTHER_PIN)).toThrow(`--pin names ${'ab'.repeat(5)}, but this CLI is at ${SELF.sha.slice(0, 10)}, the commit its courses' sources name`);
-    expect(readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8')).toBe(workflow);
+  it('a --pin other than this CLI’s repository at its commit is refused before anything is written while a course names a source; with none, the pin moves', () => {
+    const workflowFile = join(root, '.github', 'workflows', 'baton-sync.yml');
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const workflow = readFileSync(workflowFile, 'utf8');
+    const settings = readFileSync(settingsFile, 'utf8');
+    expect(() => baton(root, 'repo', 'init', '--pin', OTHER_PIN)).toThrow(`--pin names immediately-run/baton@${'ab'.repeat(5)}, but this CLI is ${SELF.slug}@${SELF.sha.slice(0, 10)}, which the courses' sources name`);
+    // Another repository at this very commit — a fork's pin — is refused just the same.
+    expect(() => baton(root, 'repo', 'init', '--pin', `Fork-Owner/baton@${SELF.sha}`)).toThrow(`--pin names Fork-Owner/baton@${SELF.sha.slice(0, 10)}`);
+    expect(readFileSync(workflowFile, 'utf8')).toBe(workflow);
+    expect(readFileSync(settingsFile, 'utf8')).toBe(settings);
+    try {
+      // A repository whose courses name no source: its sync checks none, so its pin moves freely.
+      const parsed = JSON.parse(settings);
+      writeFileSync(settingsFile, JSON.stringify({ ...parsed, courses: parsed.courses.map(({ source: _s, ...c }: { source?: string }) => c) }, null, 2));
+      baton(root, 'repo', 'init', '--pin', OTHER_PIN);
+      expect(readFileSync(workflowFile, 'utf8')).toContain(`ref: ${'ab'.repeat(20)}`);
+    } finally {
+      writeFileSync(settingsFile, settings);
+      writeFileSync(workflowFile, workflow);
+    }
   }, 120_000);
 
   it('--override replaces an older leg script, which could not load the override, even on a course with no source', () => {

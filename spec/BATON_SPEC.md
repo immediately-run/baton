@@ -903,9 +903,10 @@ offers a sane default.)*
     `github/<owner>/<name>/<commit>/<course>` — `github/immediately-run/baton/<commit>/create-pr`.
     The commit is all 40 hex characters, so a name means one graph forever; `github` is the only
     provider, and another is refused by name. `init` writes the source: the CLI's own repository
-    at the CLI's own commit, the one whose registry wrote the files; a `--pin` naming another
-    commit is refused before anything is written, since the workflow's sync would then refuse
-    the sources. GitHub's owner and repository names compare without case. The short `id` stays the name tickets, core's rows, rule 9 and branch patterns use,
+    at the CLI's own commit, the one whose registry wrote the files; while the settings name a
+    source, a `--pin` naming another repository or commit is refused before anything is
+    written, since the workflow's sync would then refuse the sources (a repository with none
+    moves its pin freely). GitHub's owner and repository names compare without case. The short `id` stays the name tickets, core's rows, rule 9 and branch patterns use,
     and equals the source's course. The sync holds a sourced course to its source, posting
     nothing otherwise: the source names this CLI's repository at this CLI's commit (the
     workflow's pin); the repository's `course.json` is byte-equal to the one that commit
@@ -921,7 +922,8 @@ offers a sane default.)*
     the position the override returns must be an edge, as every leg's must (R-BTN-83). The file
     is loaded alone, so it imports only Node built-ins. The test kit fails an override that
     names no leg of the course, exports no `run`, or sits beside a leg script that does not load
-    it (one from before overrides: `--override` rewrites the leg's script). The kit does not run
+    it from this course's own path (one from before overrides, or copied from another course:
+    `--override` rewrites the leg's script). The kit does not run
     an override, which does a leg's real work; a position that is no edge is refused by the
     runner's decision before `close` writes anything (§6.13). An override keeps the leg's
     `leg_version`, the version of its inputs and outputs (R-BTN-82, §4); the claim's

@@ -290,7 +290,8 @@ export async function readInputs(root: string, course: string, opts: { base?: st
       const into = override ? overrides : legScripts;
       try {
         // An override runs only through a leg script that looks it up: one from before overrides does not.
-        const loaded = override ? (existsSync(join(legsDir, `${name}.mjs`)) && readFileSync(join(legsDir, `${name}.mjs`), 'utf8').includes(`${name}.run.mjs`)) : undefined;
+        // The script must name this course's own override path: a copy of another course's reads that one's.
+        const loaded = override ? (existsSync(join(legsDir, `${name}.mjs`)) && readFileSync(join(legsDir, `${name}.mjs`), 'utf8').includes(`.baton/courses/${course}/legs/${name}.run.mjs`)) : undefined;
         into.push({ name, exports: legExports(await import(pathToFileURL(join(legsDir, f)).href)), ...(override ? { loaded } : {}) });
       } catch (e) {
         into.push({ name, exports: [], error: (e as Error).message.split('\n')[0] });
