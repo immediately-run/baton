@@ -631,16 +631,6 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
     writeFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), workflow);
   };
-  if (named == null && standard && standard.id !== course) {
-    if (overrides.length) throw new Error(`--override: course ${course} is now ${standard.id} — \`baton repo init --course ${standard.id}\` scaffolds it first`);
-    writeWorkflow();
-    log(`baton: the workflow's pin moved; course ${course} is now ${standard.id} — its files are kept, and \`baton repo init --course ${standard.id}\` scaffolds the new one`);
-    return 0;
-  }
-  const b = scaffoldable(course);
-  for (const leg of overrides) {
-    if (!Object.hasOwn(b.course.legs, leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${Object.keys(b.course.legs).join(', ')}`);
-  }
   // The source every course scaffolded here names: this CLI's repository at this CLI's commit.
   const own = cliSelf();
   const pinned = pin ? parsePin(pin) : null;
@@ -668,7 +658,6 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
       await put(`.baton/courses/${bi.id}/legs/${leg}.md`, (abs) => writeFileSync(abs, instructionsOf(bi.id, leg)));
     }
   };
-  const entry = { ...courseEntry(b.id, Object.keys(b.course.legs)), skill: b.skill, ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
   // The courses whose source this CLI's commit moves: those naming this CLI's repository at
   // another commit. Their entries take the new source; their files are Baton's to rewrite.
   const moves = (c: CourseEntry): boolean => {
@@ -677,7 +666,38 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     // An entry whose source names another course than its id is the sync's to refuse, not init's to move.
     return sameRepo(src, self) && src.ref !== self.sha && src.course === c.id && builtIn(src.course) != null;
   };
+  /** The sources name this CLI's repository at its commit, whose registry writes the files; a
+   * workflow pinned to another repository or commit would run a CLI that refuses them
+   * (checkSource). So a --pin that differs is refused — before any write — whenever the courses
+   * name a source; a repository with none moves its pin freely. */
+  const refusePin = (courses: CourseEntry[]): void => {
+    if (own && pinned && !(sameRepo(pinned, own) && pinned.sha === own.sha) && courses.some((c) => c.source)) {
+      throw new Error(`--pin names ${pinned.namespace}/${pinned.repository}@${pinned.sha.slice(0, 10)}, but this CLI is ${own.namespace}/${own.repository}@${own.sha.slice(0, 10)}, which the courses' sources name — run \`baton repo init\` with the CLI checked out at the pin, or without --pin`);
+    }
+  };
+  if (named == null && standard && standard.id !== course) {
+    if (overrides.length) throw new Error(`--override: course ${course} is now ${standard.id} — \`baton repo init --course ${standard.id}\` scaffolds it first`);
+    // A repository still on `pr` may list sourced courses beside it: the pin and their sources
+    // move together here too, as on every init.
+    const courses = existing?.courses ?? [];
+    refusePin(courses);
+    const movedHere = courses.filter(moves).map((c) => c.id);
+    if (movedHere.length) {
+      writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: courses.map((c) => (moves(c) ? { ...c, source: sourceOf(c.id)! } : c)) }, null, 2)}\n`);
+      for (const id of movedHere) await scaffold(builtIn(id)!, true);
+      log(`baton: ${movedHere.join(', ')} now from ${self!.sha.slice(0, 10)}`);
+    }
+    writeWorkflow();
+    log(`baton: the workflow's pin moved; course ${course} is now ${standard.id} — its files are kept, and \`baton repo init --course ${standard.id}\` scaffolds the new one`);
+    return 0;
+  }
+  const b = scaffoldable(course);
+  for (const leg of overrides) {
+    if (!Object.hasOwn(b.course.legs, leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${Object.keys(b.course.legs).join(', ')}`);
+  }
+  const entry = { ...courseEntry(b.id, Object.keys(b.course.legs)), skill: b.skill, ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
   let settings: BatonJson;
+  let changed: string | null = null;
   let rewriteNamed = force;
   const moved: string[] = [];
   if (existing) {
@@ -695,18 +715,13 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
       return c;
     });
     settings = { ...existing, courses: listed ? next : [...next, entry] };
-    if (!listed || force || moved.length) log(`baton: .baton/baton.json lists course ${b.id}${listed ? (force ? ' afresh' : '') : ' now'}${moved.length ? `; ${moved.join(', ')} now from ${self!.sha.slice(0, 10)}` : ''}`);
+    if (!listed || force || moved.length) changed = `baton: .baton/baton.json lists course ${b.id}${listed ? (force ? ' afresh' : '') : ' now'}${moved.length ? `; ${moved.join(', ')} now from ${self!.sha.slice(0, 10)}` : ''}`;
     else kept.push('.baton/baton.json');
   } else {
     settings = { baton_url: process.env.BATON_URL ?? DEFAULT_URL, items: 'tickets', default_course: b.id, repos: {}, agent_command: 'echo', courses: [entry] };
   }
-  // The sources name this CLI's repository at its commit, whose registry writes the files; a
-  // workflow pinned to another repository or commit would run a CLI that refuses them
-  // (checkSource). So a --pin that differs is refused — before any write — whenever the settings
-  // name a source; a repository with none moves its pin freely.
-  if (own && pinned && !(sameRepo(pinned, own) && pinned.sha === own.sha) && (settings.courses ?? []).some((c) => c.source)) {
-    throw new Error(`--pin names ${pinned.namespace}/${pinned.repository}@${pinned.sha.slice(0, 10)}, but this CLI is ${own.namespace}/${own.repository}@${own.sha.slice(0, 10)}, which the courses' sources name — run \`baton repo init\` with the CLI checked out at the pin, or without --pin`);
-  }
+  refusePin(settings.courses ?? []);
+  if (changed) log(changed);
   if (!kept.includes('.baton/baton.json')) {
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);

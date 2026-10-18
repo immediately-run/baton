@@ -490,6 +490,34 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
   }, 60_000);
 });
 
+describe('a repository still on pr beside a sourced course (B-33)', () => {
+  it('init with no --course refuses a --pin its sources do not name, and otherwise moves their sources with the pin', () => {
+    const legacy = mkdtempSync(join(tmpdir(), 'baton-legacy-'));
+    try {
+      gitInit(legacy);
+      baton(legacy, 'repo', 'init', '--course', 'create-pr');
+      const settingsFile = join(legacy, '.baton', 'baton.json');
+      const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+      const old = `github/${SELF.slug}/${'3'.repeat(40)}/create-pr`;
+      // `pr` is the default, as a repository scaffolded before create-pr keeps it; create-pr's source is older.
+      writeFileSync(settingsFile, JSON.stringify({ ...settings, default_course: 'pr', courses: [{ id: 'pr', version: 1 }, { ...settings.courses[0], source: old }] }, null, 2));
+      const before = readFileSync(settingsFile, 'utf8');
+      const workflow = readFileSync(join(legacy, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
+      expect(() => baton(legacy, 'repo', 'init', '--pin', OTHER_PIN)).toThrow(`--pin names immediately-run/baton@${'ab'.repeat(5)}`);
+      expect(readFileSync(settingsFile, 'utf8')).toBe(before);
+      expect(readFileSync(join(legacy, '.github', 'workflows', 'baton-sync.yml'), 'utf8')).toBe(workflow);
+      const script = join(legacy, '.baton', 'courses', 'create-pr', 'legs', 'review.mjs');
+      writeFileSync(script, '// an older release\n');
+      expect(baton(legacy, 'repo', 'init')).toContain(`create-pr now from ${SELF.sha.slice(0, 10)}`);
+      const moved = JSON.parse(readFileSync(settingsFile, 'utf8'));
+      expect(moved).toMatchObject({ default_course: 'pr', courses: [{ id: 'pr' }, { id: 'create-pr', source: sourceOf('create-pr') }] });
+      expect(readFileSync(script, 'utf8')).toContain('.baton/courses/create-pr/legs/review.run.mjs');
+    } finally {
+      rmSync(legacy, { recursive: true, force: true });
+    }
+  }, 120_000);
+});
+
 // B-33 (R-BTN-131, R-BTN-51): a course named by its source runs the source's graph exactly, and
 // a repository replaces only the run of the legs it implements differently.
 describe('course sources and leg overrides (B-33)', () => {
@@ -597,6 +625,14 @@ export async function run(ctx, standard) {
     const workflow = readFileSync(workflowFile, 'utf8');
     const settings = readFileSync(settingsFile, 'utf8');
     expect(() => baton(root, 'repo', 'init', '--pin', OTHER_PIN)).toThrow(`--pin names immediately-run/baton@${'ab'.repeat(5)}, but this CLI is ${SELF.slug}@${SELF.sha.slice(0, 10)}, which the courses' sources name`);
+    // A refused init reports no change it did not make.
+    let said = '';
+    try {
+      baton(root, 'repo', 'init', '--course', 'bug-report', '--pin', OTHER_PIN);
+    } catch (e) {
+      said = String((e as { stdout?: unknown }).stdout);
+    }
+    expect(said).not.toContain('lists course bug-report');
     // Another repository at this very commit — a fork's pin — is refused just the same.
     expect(() => baton(root, 'repo', 'init', '--pin', `Fork-Owner/baton@${SELF.sha}`)).toThrow(`--pin names Fork-Owner/baton@${SELF.sha.slice(0, 10)}`);
     expect(readFileSync(workflowFile, 'utf8')).toBe(workflow);
