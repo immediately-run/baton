@@ -37,7 +37,7 @@ module liveness {
   // them — becomes claimable by some worker once they lift, unless git or the posted bars
   // change it meanwhile (round 2, 2-A-1: the consequent is claimability, not the lift).
   def claimableButForOwner(t: str, w: str): bool =
-    ticketClaimable(t) and readyLegs(t).exists(l => postedBarsOf(t, l).intersect(TAGS.get(w)).size() == 0)
+    ticketClaimable(t) and postedBarsOf(t, st.queued.get(t)).intersect(TAGS.get(w)).size() == 0
   temporal barsLiftClaimable =
     weakFair(liftOwnerBars, st) implies
       always(TICKETS.forall(t =>
@@ -45,12 +45,11 @@ module liveness {
           implies eventually(WORKERS.exists(w => claimableBy(t, w))
                              or not(WORKERS.exists(w => claimableButForOwner(t, w))))))
   // R-BTN-45: a free worker able to claim a ticket — with claim ids left — sees it claimed
-  // (by itself or another), stop being claimable, or the worker sleeps or dies. Strong
-  // fairness of the hook's ordering finish, because a refusing finish disables it in between
-  // (round 3, 3-A-1: the round-2 form was implied by claimStart alone and false at the bound).
+  // (by itself or another), stop being claimable, or the worker sleeps or dies. A claim is one
+  // step since R-BTN-98 retired the hook, so weak fairness of it is enough (R3-1254; it was
+  // strong fairness of the hook's ordering finish, baton#10 round 3, 3-A-1).
   temporal readyIsClaimed =
-    WORKERS.forall(w => TICKETS.forall(t =>
-      weakFair(claimStart(w, t), st) and strongFair(claimFinish(w, "order"), st))) implies
+    WORKERS.forall(w => TICKETS.forall(t => weakFair(claim(w, t), st))) implies
       TICKETS.forall(t => WORKERS.forall(w =>
         always((workerFree(w) and claimableBy(t, w) and st.nextId <= MAX_CLAIMS) implies
           eventually(activeOf(t).size() > 0 or not(claimableBy(t, w))

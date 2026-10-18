@@ -1,4 +1,7 @@
-// npm run model: the formal model's fast checks (R3-1243), no JVM needed.
+// npm run model: the formal model's checks short of Apalache's proof (R3-1243), no JVM needed.
+// `--quick` (npm run model:quick, in npm test and so in CI) stops after step 2: the simulation
+// and the witnesses run on the author's machine, in npm run model:full (R-BTN-68, amended
+// 2026-10-17: model checking does not run on hosted CI runners).
 //   1. typecheck every module;
 //   2. the regression runs (model/regressions.qnt) — one per defect the reviews found;
 //   3. random simulation of `safety` on the `sim` instance (instances.qnt): with the full
@@ -27,6 +30,7 @@ for (const f of ['baton', 'properties', 'instances', 'regressions', 'witnesses',
 }
 const t = quint(['test', 'model/regressions.qnt', '--main=regressions', '--backend=typescript']);
 check('regression runs', t.status === 0, t.stdout + t.stderr);
+if (process.argv.includes('--quick')) process.exit(failed ? 1 : 0);
 const s = quint(['run', ...sim('pstep'), '--invariant=safety', '--max-steps=40', `--max-samples=${samples}`]);
 check(`safety, ${samples} random runs of 40 steps of step`, s.status === 0, s.stdout.slice(-4000) + s.stderr);
 const sp = quint(['run', ...sim('pprogress'), '--invariant=safety', '--max-steps=40', `--max-samples=${progressSamples}`]);

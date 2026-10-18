@@ -12,3 +12,4 @@ declare module '*/cli/baton.mjs';
 declare module '*/cli/sign.mjs';
 declare module '*/scripts/check-traces.mjs';
 declare module '*/scripts/check-model-links.mjs';
+declare module '*/scripts/model-report.mjs';
