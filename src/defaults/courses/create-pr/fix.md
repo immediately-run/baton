@@ -1,8 +1,10 @@
 # create-pr · fix — close every finding the last round posted
 
 You are running the `fix` leg of the `create-pr` course. The last review round asked for changes
-on the ticket's PR. The ticket's file is `$BATON_TICKET_FILE`. When you finish, every finding of
-that round is closed: fixed in a pushed commit, or answered on its own thread.
+on the ticket's PRs: one per repository its `repos:` names, besides this one, and the review may
+have posted its findings on any of them. The ticket's file is `$BATON_TICKET_FILE`. When you
+finish, every finding of that round is closed: fixed in a pushed commit, or answered on its own
+thread.
 
 ## For each finding, most severe first
 
@@ -18,7 +20,8 @@ that round is closed: fixed in a pushed commit, or answered on its own thread.
 
 - Run the repository's own checks, the same ones CI runs.
 - Re-read your diff as a hostile reviewer would: what would make the next round reject it?
-- Make one push carrying every fix, not one push per finding.
+- Make one push per repository carrying every fix there, not one push per finding: each
+  repository's PR branch, of the same name, in its own checkout.
 - Reply on the threads you fixed, naming the commit.
 
 ## Do not

@@ -14,8 +14,9 @@ alone: `approve` or `changes`.** Baton writes the verdict line on the PR from it
 - **Later rounds get one fresh reviewer**, who reads the earlier reviews and their replies and
   re-checks only what is still open plus the new diff. A finding a reply closed is not posted
   again, unless the reply is wrong; then say why, once.
-- Check out the PR's branch, and read the ticket's sections first: they are the contract. Then
-  read the whole diff against the default branch.
+- Check out each of the ticket's PRs' branches (one per repository its `repos:` names, besides
+  this one), and read the ticket's sections first: they are the contract. Then read the whole
+  change, every PR's diff against its default branch.
 
 ## Finding defects
 

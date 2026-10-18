@@ -207,7 +207,7 @@ export function branchMatches(pattern: string, branch: string): boolean {
 }
 
 /** GitHub's owner and repository names ignore case. */
-const sameRepo = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+export const sameRepo = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 
 /** The PRs a ticket's `prs:` names, each as its repository and number: a bare number or `#n` is
  * the home repository's (`home`, `owner/name`, null when unknown); a pull-request URL —
@@ -223,12 +223,6 @@ export function prRefs(prs: unknown[], home?: string | null): { repository: stri
   return out;
 }
 
-/** The PR numbers a ticket's `prs:` names in repository `repository` (`owner/name`, when known;
- * a URL naming another repository is not one of its PRs): `prRefs`, narrowed to one repository. */
-export function prNumbers(prs: unknown[], repository?: string | null): string[] {
-  return prRefs(prs, repository).filter((r) => repository == null || r.repository == null || sameRepo(r.repository, repository)).map((r) => r.number);
-}
-
 /** Whether `ref` names fact `f`: the same number in the same repository, a fact with no
  * `repository` being the home's (`home`); with the home unknown, any repository's (B-29). */
 const refNames = (ref: { repository: string | null; number: string }, f: { number: number; repository?: string }, home?: string | null): boolean => {
@@ -238,18 +232,27 @@ const refNames = (ref: { repository: string | null; number: string }, f: { numbe
 };
 
 /** The course's branch patterns ready to match (R-BTN-51): the current and previous ones, the
- * default when it names none. `{repository}` matches anything: the facts are this repository's
- * own PRs, so it can only ever name this repository. */
+ * default when it names none. `{repository}` names the ticket's home repository (its Baton id),
+ * whichever repository the branch is in — a sibling's PR branch carries the home's name too
+ * (B-29) — so it matches anything: which repositories are read at all is `ticketOwns`'s
+ * `repos:` check. */
 export const matchPatterns = (branchPatterns?: string[]): string[] =>
   (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, '*'));
+
+/** Whether fact `f` is in a repository ticket `t` reads: its home (`home`; a fact with no
+ * `repository` is the home's), or one its `repos:` names (B-29). The adapter reads a sibling's
+ * reviews and checks only for a ticket naming it, so a match outside these is a list-only fact. */
+const readsRepo = (t: SourceTicket, f: { repository?: string }, home?: string | null): boolean => {
+  const repo = f.repository ?? home ?? null;
+  return repo == null || home == null || sameRepo(repo, home) || (t.repos ?? []).some((r) => sameRepo(r, repo));
+};
 
 /** Whether PR `number` on head branch `head`, in `pr.repository` (absent, the home, `repository`),
  * is one of ticket `t`'s: listed in its `prs:`, or on a branch one of `patterns` (from
  * `matchPatterns`) maps to it. A PR in another repository is the ticket's only when the ticket
  * names that repository in `repos:` (B-29). */
 export function ticketOwns(t: SourceTicket, pr: { number: number; head: string; repository?: string }, patterns: string[], repository?: string | null): boolean {
-  const repo = pr.repository ?? repository ?? null;
-  if (repo != null && repository != null && !sameRepo(repo, repository) && !(t.repos ?? []).some((r) => sameRepo(r, repo))) return false;
+  if (!readsRepo(t, pr, repository)) return false;
   return prRefs((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], repository).some((r) => refNames(r, pr, repository))
     || patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), pr.head));
 }
@@ -316,9 +319,10 @@ export function stationsReviewPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]
   const stations: Record<string, PostedStation> = {};
   for (const t of ctx.tickets) {
     if (ctx.closed.has(t.id)) continue;
-    // By repository and number: two repositories may both have a PR #7 (B-29).
+    // By repository and number: two repositories may both have a PR #7; and only in a
+    // repository the ticket reads, as `ticketOwns` (B-29).
     const refs = prRefs((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], ctx.repository);
-    const fact = ctx.facts.find((f) => refs.some((r) => refNames(r, f, ctx.repository)));
+    const fact = ctx.facts.find((f) => readsRepo(t, f, ctx.repository) && refs.some((r) => refNames(r, f, ctx.repository)));
     if (!fact) {
       stations[t.id] = at('requested', [], [{ leg: 'review', state: 'waiting', waiting_on: 'pr' }]);
       continue;

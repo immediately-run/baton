@@ -4,7 +4,7 @@
 // review with and without a verdict line, one identity authoring and reviewing — and the
 // three-fix limit. Pure and host-neutral.
 import { describe, it, expect } from 'vitest';
-import { CREATE_PR_COURSE, REVIEW_PR_COURSE, branchMatches, prNumbers, stationsPr, stationsReviewPr, type PrFact } from '../../src/defaults/course-pr';
+import { CREATE_PR_COURSE, REVIEW_PR_COURSE, branchMatches, matchPatterns, prRefs, stationsPr, stationsReviewPr, ticketOwns, type PrFact } from '../../src/defaults/course-pr';
 import type { SourceTicket as PostedTicket } from '../../src/defaults/tickets-markdown';
 
 const T0 = 1_000_000;
@@ -129,6 +129,11 @@ describe('a ticket\'s PRs in other repositories (B-29)', () => {
     const facts = [pr({ number: 5, head: 'x', repository: home, checks: [null] }), sib({ number: 5, head: 'y' })];
     expect(review(['https://github.com/o/site/pull/5'], facts).next[0]).toMatchObject({ leg: 'review', state: 'ready' }); // the sibling's, checks done
     expect(review(['5'], facts).next[0]).toMatchObject({ leg: 'review', state: 'waiting', waiting_on: 'ci' }); // the home's
+    // A repository the ticket does not name is not read for it: the URL finds nothing there,
+    // as the adapter, which records that repository's PRs without reviews for this ticket.
+    const unnamed = ticket('R', { course_id: 'review-pr', course: { prs: ['https://github.com/o/site/pull/5'] } });
+    expect(stationsReviewPr({ tickets: [unnamed], facts, closed: new Set(), repository: home, graph: REVIEW_PR_COURSE }).stations.R.next[0]).toMatchObject({ leg: 'review', state: 'waiting', waiting_on: 'pr' });
+    expect(ticketOwns(unnamed, sib({ number: 5, head: 'y' }), matchPatterns(), home)).toBe(false);
   });
 });
 
@@ -173,8 +178,11 @@ describe('several PRs, and merged ones', () => {
   });
 
   it("prs: takes numbers and this repository's pull-request URLs, never another repository's", () => {
-    expect(prNumbers(['#6', 7, '8', 'https://github.com/o/r/pull/9', 'https://github.com/o/r/pull/10/files', 'https://github.com/x/y/pull/11', 'junk'], 'o/r')).toEqual(['6', '7', '8', '9', '10']);
-    expect(prNumbers(['https://github.com/x/y/pull/11'])).toEqual(['11']); // the repository unknown: recorded facts
+    // Each entry as its repository and number: a bare number is the home's, a URL names its own (B-29).
+    expect(prRefs(['#6', 7, 'https://github.com/o/r/pull/10/files', 'https://github.com/x/y/pull/11', 'junk'], 'o/r')).toEqual([
+      { repository: 'o/r', number: '6' }, { repository: 'o/r', number: '7' }, { repository: 'o/r', number: '10' }, { repository: 'x/y', number: '11' },
+    ]);
+    expect(prRefs(['8'])).toEqual([{ repository: null, number: '8' }]); // the repository unknown: recorded facts
     const byUrl = run([ticket('A', { course: { prs: ['https://github.com/o/r/pull/9'] } })], [pr({ number: 9, head: 'feature/unrelated' })], new Set(), { repository: 'O/R' });
     expect(byUrl.A).toMatchObject({ station: 'pr-open' });
     const foreign = run([ticket('A', { course: { prs: ['https://github.com/x/y/pull/9'] } })], [pr({ number: 9, head: 'feature/unrelated' })], new Set(), { repository: 'o/r' });

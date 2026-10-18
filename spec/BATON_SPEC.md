@@ -882,8 +882,9 @@ offers a sane default.)*
     `decision`'s `prepare`, `review-pr`'s `review` asking for changes, and `create-pr`'s
     `adjudicate` answering `owner`.
   - **A ticket's PRs across repositories** *(B-29)*. `create-pr` and `review-pr` read the PRs of
-    every repository a ticket names in `repos:` (R-BTN-74, R-BTN-96); a home with no PR, as a
-    docs ticket's, is placed from the others. A commenting leg — `review`, `adjudicate`,
+    every repository a ticket names in `repos:` (R-BTN-74, R-BTN-96), and of no other: a `prs:`
+    URL into a repository the ticket does not name finds no PR; a home with no PR, as a docs
+    ticket's, is placed from the others. A commenting leg — `review`, `adjudicate`,
     `conclude` — may name the PR its line goes on: its answer line is `<answer> <PR URL>`, and
     `conclude`'s is the URL alone; the stub refuses anything else after the answer, and `close`
     comments on that PR, else on the checkout branch's.
@@ -2030,7 +2031,9 @@ place; this paragraph covers the rest.
   every other repository a live ticket on a PR-reading course names in `repos:` (deduplicated,
   names compared without case), under the one request budget, refusing rather than posting a
   partial reading; each fact records its `repository`. A private sibling repository needs a
-  token that can read it. For a `git` repository, `baton repo init --course branch` writes the built-in
+  token that can read it; a named repository the token cannot read, or that does not exist,
+  fails the sync — posting nothing, as any partial reading — with an error naming the tickets
+  whose `repos:` names it. For a `git` repository, `baton repo init --course branch` writes the built-in
   **`branch`** course, whose station function the CLI provides (R-BTN-74, as it does `pr`'s)
   and whose facts come from git alone:
   - stations `filed` → `pushed` → `reviewed` → `merged`, with `fixed` between `reviewed` and

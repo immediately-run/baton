@@ -401,7 +401,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
       '/repos/o/site/pulls/7/reviews': [],
       '/repos/o/site/issues/7/comments': [who('MEMBER', '<!-- baton:verdict approve -->', '2026-10-05T00:00:00Z')],
     });
-    const facts = await githubFacts(dir, () => {}, (p) => p.repository === 'o/site' && p.head.startsWith('claude/A-1-'), ['o/site', 'O/R']);
+    const facts = await githubFacts(dir, () => {}, (p) => p.repository === 'o/site' && p.head.startsWith('claude/A-1-'), [{ repository: 'o/site', tickets: ['A-1'] }, { repository: 'O/R', tickets: ['A-1'] }]);
     expect(facts.map((f) => [f.repository, f.number])).toEqual([['o/site', 7], ['o/site', 8]]);
     expect(facts[0].reviews.map((r) => r.body)).toEqual(['<!-- baton:verdict approve -->']);
     // The home in another case is no sibling; the unowned sibling PR costs no request beyond the list.
@@ -420,6 +420,28 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     }
     serve(routes);
     await expect(githubFacts(dir, () => {}, () => true)).rejects.toThrow('more than 200 requests');
+  });
+
+  it('the home and the repositories a ticket names share the one budget; an unreadable one fails the sync naming its tickets (B-29)', async () => {
+    // 30 owned PRs in each repository: 4 + 121 requests apiece, 250 together — over 200, though neither alone is.
+    const routes: Record<string, unknown> = {};
+    for (const repo of ['o/r', 'o/site']) {
+      const many = Array.from({ length: 30 }, (_, i) => pr(i + 1, `claude/A-${i + 1}-x`, 'open'));
+      routes[`/repos/${repo}/pulls?state=all`] = many;
+      for (const p of many) {
+        routes[`/repos/${repo}/commits/s${p.number}/check-runs`] = { check_runs: [] };
+        routes[`/repos/${repo}/pulls/${p.number}/commits`] = [];
+        routes[`/repos/${repo}/pulls/${p.number}/reviews`] = [];
+        routes[`/repos/${repo}/issues/${p.number}/comments`] = [];
+      }
+    }
+    serve(routes);
+    expect((await githubFacts(dir, () => {}, () => true)).length).toBe(30); // the home alone fits
+    await expect(githubFacts(dir, () => {}, () => true, [{ repository: 'o/site', tickets: ['A-1'] }])).rejects.toThrow('more than 200 requests');
+    // A repository the token cannot read (or a typo) stops the sync, and says which ticket named it.
+    serve({ '/repos/o/r/pulls?state=all': [] });
+    await expect(githubFacts(dir, () => {}, () => true, [{ repository: 'o/private', tickets: ['A-1', 'B-2'] }]))
+      .rejects.toThrow("GitHub https://api.github.com/repos/o/private/pulls?state=all&per_page=100: 404 — o/private is named in repos: by A-1, B-2; the sync's token cannot read it, or it does not exist");
   });
 });
 

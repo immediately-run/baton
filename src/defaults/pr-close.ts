@@ -22,8 +22,12 @@ export interface CloseCtx {
   claim?: { nonce?: string };
 }
 
-/** A pull-request URL a leg may name for its line (B-29). */
-const PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
+/** A pull-request URL a leg may name for its line (B-29); the stubs build their check from its
+ * source. (`prRefs` reads `prs:` entries more loosely: a `/files` or `#…` tail is still the PR.) */
+export const PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
+
+/** The legs whose close writes a line on a PR — `commentLine`'s — and so may name the PR. */
+export const COMMENTING_LEGS: ReadonlySet<string> = new Set(['review', 'adjudicate', 'conclude']);
 
 /** The verdict line a review's comment opens with (R-BTN-74). */
 export const verdictLine = (verdict: 'approve' | 'changes'): string => `<!-- baton:verdict ${verdict} -->`;
