@@ -40,12 +40,15 @@ out. From the checkout:
 
 ```
 git fetch origin <default branch>
-git worktree add --detach ../baton-close origin/<default branch>
-# in ../baton-close: set the ticket file's status: to done, then
-git -C ../baton-close commit -am "close <ticket>"
-git -C ../baton-close push origin HEAD:<default branch>
-git worktree remove ../baton-close
+d="$(mktemp -d)/close"
+git worktree add --detach "$d" origin/<default branch>
+# in "$d": set the ticket file's status: to done, then
+git -C "$d" commit -am "close <ticket>"
+git -C "$d" push origin HEAD:<default branch>
+git worktree remove --force "$d"
 ```
+
+The worktree is this run's own, in a fresh temporary directory. Remove it even when a step fails.
 
 ## Do not
 

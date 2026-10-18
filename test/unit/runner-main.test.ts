@@ -42,7 +42,7 @@ describe('one runner per home checkout (R-BTN-131)', () => {
       const release = holdHome(dir);
       expect(readFileSync(lock, 'utf8').trim()).toBe(String(process.pid));
       // Another live process holds it: this test's parent stands in for a second runner's view.
-      expect(() => holdHome(dir, process.ppid)).toThrow(`held by another runner (pid ${process.pid}): each runner needs its own clone`);
+      expect(() => holdHome(dir, process.ppid)).toThrow(`held by another runner (pid ${process.pid}): each runner needs its own clone — pass --home <another clone>; if no runner is running there, remove ${lock}`);
       release();
       expect(existsSync(lock)).toBe(false);
       // A stale lock — its pid is no process — is taken over.

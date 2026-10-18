@@ -149,7 +149,7 @@ export function holdHome(home: string, pid: number = process.pid): () => void {
     if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
     const holder = Number(readFileSync(file, 'utf8').trim());
     if (Number.isInteger(holder) && holder > 0 && holder !== pid && alive(holder)) {
-      throw new Error(`${home} is held by another runner (pid ${holder}): each runner needs its own clone — pass --home <another clone>`);
+      throw new Error(`${home} is held by another runner (pid ${holder}): each runner needs its own clone — pass --home <another clone>; if no runner is running there, remove ${file}`);
     }
     writeFileSync(file, `${pid}\n`);
   }

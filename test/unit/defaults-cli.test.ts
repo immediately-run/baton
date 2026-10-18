@@ -140,7 +140,7 @@ describe('baton repo init, through the built CLI', () => {
     }
   });
 
-  it('the stub hands the agent its instructions in a temp file it removes; deleted instructions run with none; any other failure stops the leg', async () => {
+  it('the stub hands the agent its instructions in a temp file it removes; deleted instructions run with none; any other failure — the temp dir, the probe — stops the leg', async () => {
     const agent = join(root, 'agent.sh');
     writeFileSync(agent, '#!/bin/sh\necho "$BATON_INSTRUCTIONS" > "$(dirname "$0")/agent.instr"\ntest -z "$BATON_INSTRUCTIONS" || head -1 "$BATON_INSTRUCTIONS" >> "$(dirname "$0")/agent.instr"\n');
     chmodSync(agent, 0o755);
@@ -162,6 +162,19 @@ describe('baton repo init, through the built CLI', () => {
       await expect((await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).rejects.toThrow(/ENOENT/);
       if (tmp == null) delete process.env.TMPDIR;
       else process.env.TMPDIR = tmp;
+      // The probe itself failing — not the path missing — stops the leg too.
+      const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegit-'));
+      const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+      writeFileSync(join(fakeBin, 'git'), `#!/bin/sh\nfor a in "$@"; do [ "$a" = ls-tree ] && exit 128; done\nexec ${realGit} "$@"\n`);
+      chmodSync(join(fakeBin, 'git'), 0o755);
+      const path = process.env.PATH;
+      process.env.PATH = `${fakeBin}:${path}`;
+      try {
+        await expect((await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).rejects.toThrow(/ls-tree/);
+      } finally {
+        process.env.PATH = path;
+        rmSync(fakeBin, { recursive: true, force: true });
+      }
       // The repository deleted the instructions: the agent runs with none.
       rmSync(instructions);
       snapshot = { sha: commitAll(root) };

@@ -161,8 +161,15 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // One course per runner (the claim response names no course): refused at startup, loudly, not
   // per claim.
   const course = runnerCourse(declareCourses(a.home), a.course);
-  // One runner per home checkout: its legs run in the working tree (R-BTN-131).
+  // One runner per home checkout: its legs run in the working tree (R-BTN-131). Node's default
+  // SIGINT/SIGTERM exit skips \`finally\`, so the lock is released on those signals too.
   const release = holdHome(a.home);
+  const onSignal = (signal: NodeJS.Signals) => {
+    release();
+    process.exit(signal === 'SIGINT' ? 130 : 143);
+  };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
   const runner = new Runner({
     api: new BatonApi({ url: a.url, transport: (req) => fetch(req), auth }, log),
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
@@ -175,6 +182,8 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   try {
     await runner.work();
   } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
     release();
   }
   return 0;

@@ -436,15 +436,11 @@ export async function run(ctx) {
   const settings = JSON.parse(show('.baton/baton.json'));
   if (typeof settings.agent_command !== 'string' || settings.agent_command === '') throw new Error('.baton/baton.json names no agent_command');
   // The instructions, when the repository still has them; it owns them and may delete them. Only
-  // a path the snapshot lacks means deleted — asked by exit code, since git translates its
-  // messages — and any other failure stops the leg.
+  // a path the snapshot lacks means deleted: \`ls-tree\` lists nothing for it and succeeds (git
+  // translates its messages, and \`cat-file -e\` exits 128 for every failure alike), so any
+  // failure of the probe itself stops the leg.
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
-  let present = true;
-  try {
-    execFileSync('git', ['-C', ctx.checkout, 'cat-file', '-e', sha + ':' + rel], { stdio: 'ignore' });
-  } catch {
-    present = false;
-  }
+  const present = execFileSync('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel], { encoding: 'utf8' }).trim() !== '';
   const text = present ? show(rel) : null;
   const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
   const instructions = dir == null ? '' : join(dir, ${JSON.stringify(`${leg}.md`)});
