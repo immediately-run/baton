@@ -269,15 +269,17 @@ module baton {
   // logs `blocked` or `unblocked` — an end that leaves the ticket blocked logs `blocked` (R-BTN-75
   // as amended by R3-1254: the model found an end blocking silently and the backoff's `unblocked`
   // following with no `blocked` before it)
-  pure def settle(s: State, silent: Set[str]): State =
-    TICKETS.fold(s, (a, t) => {
-      val b = blockedIn(a, t)
-      if (b == a.blocked.get(t)) a
-      else if (silent.contains(t)) a.with("blocked", a.blocked.set(t, b))
-      else a.with("blocked", a.blocked.set(t, b))
-             .with("unpairedUnblock", a.unpairedUnblock or (not(b) and a.lastEvent.get(t) != "blocked"))
-             .with("lastEvent", a.lastEvent.set(t, if (b) "blocked" else "unblocked"))
-    })
+  // Not a fold over the tickets: each ticket's update is its own, and Apalache's checker loses a
+  // binding when `blockedIn`'s quantifiers sit inside a fold (key not found: $C$25 in
+  // `model:verify`, R3-1254). `flips` are the tickets whose blocked state changes; `loud` those
+  // of them whose change is logged.
+  pure def settle(s: State, silent: Set[str]): State = {
+    val flips = TICKETS.filter(t => blockedIn(s, t) != s.blocked.get(t))
+    val loud = flips.exclude(silent)
+    s.with("blocked", TICKETS.mapBy(t => if (flips.contains(t)) not(s.blocked.get(t)) else s.blocked.get(t)))
+     .with("unpairedUnblock", s.unpairedUnblock or loud.filter(t => s.blocked.get(t) and s.lastEvent.get(t) != "blocked") != Set())
+     .with("lastEvent", TICKETS.mapBy(t => if (loud.contains(t)) (if (s.blocked.get(t)) "unblocked" else "blocked") else s.lastEvent.get(t)))
+  }
   // the leg a claim is on: the one it runs, else the one it was offered
   pure def legOf(c: Claim): str = if (c.leg != "") c.leg else c.offered
   // R-BTN-122: a failed attempt on leg l of t — counted per ticket and leg; a backoff row until
