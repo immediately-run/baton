@@ -1,5 +1,5 @@
 ---
-title: "B-35 — The GitHub adapter fits docs' board: conditional reads, so a sync's requests grow with change, not history"
+title: "B-35 — The GitHub adapter fits docs' board: owned PRs' detail read over GraphQL, in batches"
 id: B-35
 project: baton
 status: in-review
@@ -58,7 +58,16 @@ That makes about 257 requests in all. Reading detail only for tickets with an op
 
 ### Exit criteria
 
-- [ ] docs' board, measured as B-31 did, fits the budget with headroom for the push-plus-15-minute cadence
-- [ ] the R-BTN-96 amendment merged, `npm test` green, merged under the review gate
+- [x] docs' board, measured as B-31 did, fits the budget with headroom for the push-plus-15-minute cadence
+- [x] the R-BTN-96 amendment merged, `npm test` green, merged under the review gate
 
 Also found: R3-44 names `devices` in `repos:`, and `immediately-run/devices` does not exist. A live sync would fail on it, naming R3-44, as B-29 designed. That is docs' data to fix before cutover, not this ticket's.
+
+## Status
+
+Delivered by https://github.com/immediately-run/baton/pull/53 (merged f12d2e0, 2026-10-18), after three review rounds with 9 distinct findings, none blocking, all closed; the rows are in `docs/review/pr-findings.mdx`.
+- **Requests.** The owned PRs' detail is read over GraphQL, in queries of up to 25 PRs each, per repository. A docs-shaped board takes 77 requests against the 200 budget, down from about 257.
+- **Permissions.** Check runs come through check suites, so `checks: read` still covers them.
+- **Tests.** The ETag tests this ticket named were not built, because ETags were not taken ("Decided at claim"). The docs-shaped test asserts the cost instead.
+- **Live check.** The query has never run live: GraphQL is blocked from these sessions. R3-1216 records the live check under the sync workflow's permissions, on docs' first enabled sync.
+
