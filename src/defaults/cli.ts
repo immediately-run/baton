@@ -15,6 +15,8 @@ import { BatonApi, BatonRefusal, type Auth, type Transport } from '../runner/api
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, ticketOwns, type PrFact, type StationsResult } from './course-pr';
+import { GIT_SHA } from '../core/validate';
+import { parseSource, printSource } from './course-source';
 import { MARKERS_FILE, parseMarkers, type Marker } from './course-markers';
 import { DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
 import { readItems } from './read-items';
@@ -23,7 +25,7 @@ import { ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './ti
 const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8' }).trim();
 /** `owner/name` of a checkout's `origin` remote (an SSH or HTTPS URL, or the proxy's
  * `…/git/owner/name` form), or null when it has none. */
-function remoteSlug(root: string): string | null {
+export function remoteSlug(root: string): string | null {
   try {
     // The proxy's `…/git/owner/name` form drops its `git/` — only when `owner/name` follows, so an
     // owner named `git` keeps its name.
@@ -57,6 +59,10 @@ interface CourseEntry {
   branch_pattern?: string;
   previous_branch_pattern?: string;
   protocol_files?: string[];
+  /** Where the course comes from (B-33): `github/<owner>/<name>/<commit>/<course>`. The sync holds
+   * the repository's course file to the source's, and places its tickets with the source's
+   * station function. */
+  source?: string;
 }
 
 /** `.baton/baton.json`'s shape (R-BTN-51): the settings these commands read. */
@@ -74,7 +80,7 @@ const defaultSkill = (course: string): string => `baton-${course}`;
 
 /** The `courses` entry `baton repo init` writes: every R-BTN-51 field, so a repository edits
  * them where the spec says rather than discovering them. */
-function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern'>> {
+function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source'>> {
   return { id: course, version: 1, min_worker_version: 1, skill: defaultSkill(course), step_kinds: legs, report_horizon_h: 6, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
@@ -192,6 +198,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     const branchPatterns = [c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])];
     const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, markers: markerLines, branchPatterns, graph: course };
     const syncMjs = syncMjsOf(c.id);
+    if (c.source) checkSource(c, readFileSync(courseFile, 'utf8'), existsSync(syncMjs));
     const standard = builtIn(c.id);
     let fn: StationFn;
     if (existsSync(syncMjs)) {
@@ -218,6 +225,32 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     payload: { registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData },
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };
+}
+
+/** A sourced course (B-33, R-BTN-131) is the source's exactly, or the sync posts nothing: the
+ * source names this CLI's repository at this CLI's commit (the workflow's pin) and a standard
+ * course of the same id, the repository's course file is byte-equal to the one that commit
+ * scaffolds, and no `sync.mjs` replaces the source's station function. Each refusal names what
+ * to do. Other repositories' courses are not resolved yet: running their station code at sync
+ * time needs its own design. */
+function checkSource(c: CourseEntry, courseText: string, ownSyncMjs: boolean): void {
+  const src = parseSource(c.source!);
+  const self = cliSelf();
+  const at = `.baton/baton.json: course ${c.id}'s source ${c.source}`;
+  if (src.course !== c.id) throw new Error(`${at} names course ${src.course}; a source names the course of its own id`);
+  if (!self) throw new Error(`${at}: this CLI is not a git checkout with an origin, so it cannot tell its own commit`);
+  if (!sameRepo(src, self)) {
+    throw new Error(`${at}: a course from ${src.namespace}/${src.repository} is not supported yet — only this CLI's repository, ${self.namespace}/${self.repository}`);
+  }
+  if (src.ref !== self.sha) {
+    throw new Error(`${at} is at ${src.ref.slice(0, 10)}, and this CLI is at ${self.sha.slice(0, 10)} — re-run \`baton repo init\` with the CLI at the workflow's pin, which moves both`);
+  }
+  const b = builtIn(src.course);
+  if (!b || b.id !== src.course) throw new Error(`${at}: ${src.course} is not a standard course of ${self.namespace}/${self.repository} at ${self.sha.slice(0, 10)}`);
+  if (ownSyncMjs) throw new Error(`${at}: .baton/courses/${c.id}/sync.mjs would replace the source's station function — remove it, or remove \`source\` to own the course`);
+  if (courseText !== courseFileText(b)) {
+    throw new Error(`${at}: .baton/courses/${c.id}/course.json differs from the source's — a sourced course keeps its graph exactly; \`baton repo init --course ${c.id} --force\` restores it, and legs/<leg>${OVERRIDE_SUFFIX} changes a leg's run`);
+  }
 }
 
 /** A Baton call through the vendored sync's `{ok, code}` shape: a refusal is its code, never a throw. */
@@ -421,6 +454,7 @@ function stubSource(b: BuiltIn, course: string, leg: string): string {
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};
 // The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
 // repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the
@@ -429,7 +463,27 @@ import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};
 // from, never the working tree an agent may have changed (so a branch under review cannot pick
 // its reviewer or rewrite the reviewer's instructions).${ask ? `
 // The agent's last line of output must be its ${ask.name}: ${values}.` : ''}
+// The repository may replace this leg's run, never its close: \`${leg}.run.mjs\` beside this file
+// (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131).
 export async function run(ctx) {
+  const sha = ctx.snapshot?.sha;
+  if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
+  const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
+  // As with the instructions below: only an empty listing means there is no override.
+  if (execFileSync('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel], { encoding: 'utf8' }).trim() === '') return standard(ctx);
+  const dir = mkdtempSync(join(tmpdir(), 'baton-override-'));
+  try {
+    const file = join(dir, ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)});
+    writeFileSync(file, execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} }));
+    const mod = await import(pathToFileURL(file).href);
+    if (typeof mod.run !== 'function') throw new Error(rel + ' exports no run(ctx, standard)');
+    return await mod.run(ctx, standard);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+/** The course's own run of this leg: what \`run\` does with no override, and what an override may call. */
+async function standard(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
   const show = (rel) => execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} });
@@ -464,6 +518,31 @@ export async function handoff() { return null; }
 `;
 }
 
+/** A repository's replacement for one leg's `run` (R-BTN-131): `legs/<leg>.run.mjs`. */
+const OVERRIDE_SUFFIX = '.run.mjs';
+
+/** The file `init --override <leg>` seeds: a `run` that calls the course's own, which the
+ * repository then edits. It owns the file; init never rewrites it. */
+function overrideSource(b: BuiltIn, leg: string): string {
+  const { ask, position } = b.legs[leg];
+  return `// The \`${leg}\` leg of the \`${b.id}\` course as this repository implements it (BATON_SPEC R-BTN-131).
+// \`baton repo init --override ${leg}\` wrote it; it is yours, and init never rewrites it. The standard
+// leg script beside it (${leg}.mjs) loads this file from the claim's snapshot and calls its \`run\` in
+// place of its own, keeping its own \`close\`, so the closing marker the course reads is always the
+// standard one.
+//
+// run(ctx, standard): \`ctx\` is the leg's context (ticket, checkout, snapshot, leg, claim, …);
+// \`standard\` is the course's own run — the repository's agent_command with the leg's instructions.
+// Return a position that is an edge of the course, the shape \`standard\` returns:
+//   ${position}${ask ? `
+// where \`answer\` is the ${ask.name}: ${ask.values.join(' or ')}.` : ''}
+// This file is loaded alone, from the snapshot: import only node: built-ins.
+export async function run(ctx, standard) {
+  return standard(ctx);
+}
+`;
+}
+
 /** The instructions shipped for one leg of a standard course (R-BTN-131), the Markdown `init`
  * copies into the repository, which owns them from then on. */
 const instructionsOf = (course: string, leg: string): string => readFileSync(join(packageRoot(), 'src', 'defaults', 'courses', course, `${leg}.md`), 'utf8');
@@ -483,19 +562,27 @@ function cliPin(): string {
   return `${slug}@${sha}`;
 }
 
-/** `baton repo init [--course <standard course>] [--eject tickets|stations] [--pin owner/name@commit] [--force]`
- * (R-BTN-74, R-BTN-131). A file the repository already has is kept — re-running init to move the
- * pin rewrites only the workflow — unless `--force`. Run again with another `--course`, it adds
- * that course beside the first: its files, and its entry in `.baton/baton.json`'s `courses`;
- * `--force` rewrites that course's files and entry and leaves the rest of the file alone. With
- * no `--course` it takes the repository's `default_course`, else `create-pr`; a repository still
- * on `pr`, the name `create-pr` replaced, keeps its files and gets the new pin only. */
+/** `baton repo init [--course <standard course>] [--override <leg>]… [--eject tickets|stations] [--pin owner/name@commit] [--force]`
+ * (R-BTN-74, R-BTN-131). Run again with another `--course`, it adds that course beside the first:
+ * its files, and its entry in `.baton/baton.json`'s `courses`. With no `--course` it takes the
+ * repository's `default_course`, else `create-pr`; a repository still on `pr`, the name
+ * `create-pr` replaced, keeps its files and gets the new pin only.
+ *
+ * Each standard course's entry names its `source`, `github/<owner>/<name>/<commit>/<course>`: the
+ * CLI's own repository at the commit that wrote the files, which the sync holds the course file to
+ * (B-33). Files are Baton's or the repository's. Baton's — the course file and the leg scripts —
+ * are written when missing, under `--force`, and whenever a course's source moves to this CLI's
+ * commit, which every init does for every course from this repository, as it moves the workflow's
+ * pin. The repository's — the leg instructions, `--override`'s `legs/<leg>.run.mjs`, the tickets
+ * README — are written only when missing, never over its edits. `--force` also rewrites the named
+ * course's entry, never the rest of the file. */
 export async function initMain(argv: string[], io: { root?: string; log?: (l: string) => void } = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   let named: string | null = null;
   let eject: 'tickets' | 'stations' | null = null;
   let pin: string | null = null;
   let force = false;
+  const overrides: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = (): string => {
@@ -506,6 +593,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     if (a === '--course') named = value();
     else if (a === '--pin') pin = value();
     else if (a === '--force') force = true;
+    else if (a === '--override') overrides.push(value());
     else if (a === '--eject') {
       const v = value();
       if (v !== 'tickets' && v !== 'stations') throw new Error('--eject: tickets or stations');
@@ -527,6 +615,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   }
   if (eject === 'stations') {
     if (!standard) throw new Error(`--eject stations: ${course} is not a standard course, so there is no default to copy`);
+    if (existing?.courses?.some((c) => c.id === course && c.source)) {
+      throw new Error(`--eject stations: course ${course} names a source, whose station function places its tickets — remove its \`source\` from .baton/baton.json to own the course`);
+    }
     const to = join(root, '.baton', 'courses', course, 'sync.mjs');
     if (existsSync(to) && !force) throw new Error(`${relative(root, to)} already exists — it may hold your edits; --force overwrites it`);
     mkdirSync(dirname(to), { recursive: true });
@@ -540,54 +631,137 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
     writeFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), workflow);
   };
-  if (named == null && standard && standard.id !== course) {
-    writeWorkflow();
-    log(`baton: the workflow's pin moved; course ${course} is now ${standard.id} — its files are kept, and \`baton repo init --course ${standard.id}\` scaffolds the new one`);
-    return 0;
-  }
-  const b = scaffoldable(course);
-  // Scaffold: the settings, the course file (in git — the sync posts and `baton runner start`
-  // load the same file, R-BTN-69/-72), the leg stubs and their instructions, the pinned sync
-  // workflow, the tickets dir.
+  // The source every course scaffolded here names: this CLI's repository at this CLI's commit.
+  const own = cliSelf();
+  const pinned = pin ? parsePin(pin) : null;
+  const self = own ?? pinned;
+  const sourceOf = (id: string): string | null => (self ? printSource({ provider: 'github', namespace: self.namespace, repository: self.repository, ref: self.sha, course: id }) : null);
   const kept: string[] = [];
-  /** Write `rel` unless the repository already has it (and `--force` is not given). */
-  const put = async (rel: string, write: (abs: string) => void | Promise<void>): Promise<void> => {
+  /** Write `rel` when it is missing, or when `rewrite` (Baton's file, and its course is being
+   * rewritten); otherwise it is kept. */
+  const put = async (rel: string, write: (abs: string) => void | Promise<void>, rewrite = false): Promise<void> => {
     const abs = join(root, rel);
-    if (existsSync(abs) && !force) {
+    if (existsSync(abs) && !rewrite) {
       kept.push(rel);
       return;
     }
     mkdirSync(dirname(abs), { recursive: true });
     await write(abs);
   };
-  const legs = Object.keys(b.course.legs);
-  const entry = { ...courseEntry(b.id, legs), skill: b.skill };
+  /** One standard course's files; `rewrite` rewrites Baton's (the course file, the leg scripts). */
+  const scaffold = async (bi: BuiltIn, rewrite: boolean): Promise<void> => {
+    await put(`.baton/courses/${bi.id}/course.json`, (abs) => writeFileSync(abs, courseFileText(bi)), rewrite);
+    for (const leg of Object.keys(bi.course.legs)) {
+      // Each stub is bundled with its `close`, so it imports nothing the runner's scratch copy lacks.
+      await put(`.baton/courses/${bi.id}/legs/${leg}.mjs`, (abs) => bundleSource(stubSource(bi, bi.id, leg), abs), rewrite);
+      // The leg's instructions: shipped with the CLI, the repository's to edit from here on.
+      await put(`.baton/courses/${bi.id}/legs/${leg}.md`, (abs) => writeFileSync(abs, instructionsOf(bi.id, leg)));
+    }
+  };
+  // The courses whose source this CLI's commit moves: those naming this CLI's repository at
+  // another commit. Their entries take the new source; their files are Baton's to rewrite.
+  const moves = (c: CourseEntry): boolean => {
+    if (!c.source || !self) return false;
+    const src = parseSource(c.source);
+    // An entry whose source names another course than its id is the sync's to refuse, not init's to move.
+    return sameRepo(src, self) && src.ref !== self.sha && src.course === c.id && builtIn(src.course) != null;
+  };
+  /** The sources name this CLI's repository at its commit, whose registry writes the files; a
+   * workflow pinned to another repository or commit would run a CLI that refuses them
+   * (checkSource). So a --pin that differs is refused — before any write — whenever the courses
+   * name a source; a repository with none moves its pin freely. */
+  const refusePin = (courses: CourseEntry[]): void => {
+    if (own && pinned && !(sameRepo(pinned, own) && pinned.sha === own.sha) && courses.some((c) => c.source)) {
+      throw new Error(`--pin names ${pinned.namespace}/${pinned.repository}@${pinned.sha.slice(0, 10)}, but this CLI is ${own.namespace}/${own.repository}@${own.sha.slice(0, 10)}, which the courses' sources name — run \`baton repo init\` with the CLI checked out at the pin, or without --pin`);
+    }
+  };
+  if (named == null && standard && standard.id !== course) {
+    if (overrides.length) throw new Error(`--override: course ${course} is now ${standard.id} — \`baton repo init --course ${standard.id}\` scaffolds it first`);
+    // A repository still on `pr` may list sourced courses beside it: the pin and their sources
+    // move together here too, as on every init.
+    const courses = existing?.courses ?? [];
+    refusePin(courses);
+    const movedHere = courses.filter(moves).map((c) => c.id);
+    if (movedHere.length) {
+      writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: courses.map((c) => (moves(c) ? { ...c, source: sourceOf(c.id)! } : c)) }, null, 2)}\n`);
+      for (const id of movedHere) await scaffold(builtIn(id)!, true);
+      log(`baton: ${movedHere.join(', ')} now from ${self!.sha.slice(0, 10)}`);
+    }
+    writeWorkflow();
+    log(`baton: the workflow's pin moved; course ${course} is now ${standard.id} — its files are kept, and \`baton repo init --course ${standard.id}\` scaffolds the new one`);
+    return 0;
+  }
+  const b = scaffoldable(course);
+  for (const leg of overrides) {
+    if (!Object.hasOwn(b.course.legs, leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${Object.keys(b.course.legs).join(', ')}`);
+  }
+  const entry = { ...courseEntry(b.id, Object.keys(b.course.legs)), skill: b.skill, ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
+  let settings: BatonJson;
+  let changed: string | null = null;
+  let rewriteNamed = force;
+  const moved: string[] = [];
   if (existing) {
     // A second course joins the first: its entry is added, everything else in the file kept. With
     // `--force` this course's own entry is replaced — never the file, which holds the others.
     const courses = existing.courses ?? [{ id: existing.default_course ?? DEFAULT_COURSE, version: 1 }];
     const listed = courses.some((c) => c.id === b.id);
-    if (!listed || force) {
-      writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: listed ? courses.map((c) => (c.id === b.id ? entry : c)) : [...courses, entry] }, null, 2)}\n`);
-      log(`baton: .baton/baton.json lists course ${b.id} ${listed ? 'afresh' : 'now'}`);
-    } else kept.push('.baton/baton.json');
+    const next = courses.map((c) => {
+      if (c.id === b.id && force) return entry;
+      if (moves(c)) {
+        moved.push(c.id);
+        if (c.id === b.id) rewriteNamed = true;
+        return { ...c, source: sourceOf(parseSource(c.source!).course)! };
+      }
+      return c;
+    });
+    settings = { ...existing, courses: listed ? next : [...next, entry] };
+    if (!listed || force || moved.length) changed = `baton: .baton/baton.json lists course ${b.id}${listed ? (force ? ' afresh' : '') : ' now'}${moved.length ? `; ${moved.join(', ')} now from ${self!.sha.slice(0, 10)}` : ''}`;
+    else kept.push('.baton/baton.json');
   } else {
-    const settings: BatonJson = { baton_url: process.env.BATON_URL ?? DEFAULT_URL, items: 'tickets', default_course: b.id, repos: {}, agent_command: 'echo', courses: [entry] };
+    settings = { baton_url: process.env.BATON_URL ?? DEFAULT_URL, items: 'tickets', default_course: b.id, repos: {}, agent_command: 'echo', courses: [entry] };
+  }
+  refusePin(settings.courses ?? []);
+  if (changed) log(changed);
+  if (!kept.includes('.baton/baton.json')) {
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
   }
-  await put(`.baton/courses/${b.id}/course.json`, (abs) => writeFileSync(abs, `${JSON.stringify(b.course, null, 2)}\n`));
-  for (const leg of legs) {
-    // Each stub is bundled with its `close`, so it imports nothing the runner's scratch copy lacks.
-    await put(`.baton/courses/${b.id}/legs/${leg}.mjs`, (abs) => bundleSource(stubSource(b, b.id, leg), abs));
-    // The leg's instructions: shipped with the CLI, the repository's to edit from here on.
-    await put(`.baton/courses/${b.id}/legs/${leg}.md`, (abs) => writeFileSync(abs, instructionsOf(b.id, leg)));
+  await scaffold(b, rewriteNamed || !existing);
+  for (const id of moved.filter((m) => m !== b.id)) await scaffold(builtIn(id)!, true);
+  for (const leg of overrides) {
+    // The leg script is what loads the override, so an older one (from before overrides) is
+    // replaced: it is Baton's file.
+    await put(`.baton/courses/${b.id}/legs/${leg}.mjs`, (abs) => bundleSource(stubSource(b, b.id, leg), abs), true);
+    await put(`.baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX}`, (abs) => writeFileSync(abs, overrideSource(b, leg)));
+    log(`baton: .baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX} — this repository's run of ${leg}; edit it, and the leg script runs it in place of its own`);
   }
   writeWorkflow();
   await put('tickets/README.md', (abs) => writeFileSync(abs, '# Tickets\n\nOne `*.md` file per ticket; `baton repo init` wrote this directory.\n'));
-  if (kept.length) log(`baton: kept ${kept.join(', ')} (already there; --force overwrites)`);
+  if (kept.length) log(`baton: kept ${kept.join(', ')} (already there; --force rewrites Baton's files, never your instructions or overrides)`);
   log(`baton: .baton/ scaffolded (course ${b.id}: ${b.summary}) — commit it, add tickets/*.md, and the workflow does the rest`);
   return 0;
+}
+
+/** A standard course's file as init writes it, and as the sync holds a sourced course to. */
+const courseFileText = (b: BuiltIn): string => `${JSON.stringify(b.course, null, 2)}\n`;
+
+/** This CLI's repository and commit, or null outside a git checkout with a GitHub origin. */
+function cliSelf(): { namespace: string; repository: string; sha: string } | null {
+  try {
+    return parsePin(cliPin());
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a source names this CLI's repository: GitHub's owner and repository names ignore case. */
+const sameRepo = (src: { namespace: string; repository: string }, self: { namespace: string; repository: string }): boolean =>
+  `${src.namespace}/${src.repository}`.toLowerCase() === `${self.namespace}/${self.repository}`.toLowerCase();
+
+/** A pin, `owner/name@<commit>` — the workflow's and a source's parts — or null when it is not one. */
+function parsePin(at: string): { namespace: string; repository: string; sha: string } | null {
+  const m = /^([\w.-]+)\/([\w.-]+)@(.*)$/.exec(at);
+  return m && GIT_SHA.test(m[3]) ? { namespace: m[1], repository: m[2], sha: m[3] } : null;
 }
 
 /** The sync workflow `baton repo init` writes: pinned to the CLI's version — the baton
@@ -596,11 +770,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
  * the workflow checks the pinned commit out and installs it (its esbuild bundles the defaults).
  * The CLI mints the run's OIDC token itself (`id-token: write`, R-BTN-15). */
 export function syncWorkflow(pin: string): string {
-  const at = pin.lastIndexOf('@');
-  if (at < 1 || !/^[\w.-]+\/[\w.-]+$/.test(pin.slice(0, at)) || !/^[0-9a-f]{40}$/.test(pin.slice(at + 1))) {
-    // A full sha: actions/checkout fetches a 40-hex ref as a commit, never a short one.
-    throw new Error(`--pin ${pin}: must be owner/name@<commit sha>, all 40 hex characters — the baton repository at one commit`);
-  }
+  // A full sha: actions/checkout fetches a 40-hex ref as a commit, never a short one.
+  const at = parsePin(pin);
+  if (!at) throw new Error(`--pin ${pin}: must be owner/name@<commit sha>, all 40 hex characters — the baton repository at one commit`);
   return `name: baton sync
 on:
   push:
@@ -634,8 +806,8 @@ jobs:
       # The CLI's version is pinned: a release changes nothing here until this ref moves.
       - uses: actions/checkout@v4
         with:
-          repository: ${pin.slice(0, at)}
-          ref: ${pin.slice(at + 1)}
+          repository: ${at.namespace}/${at.repository}
+          ref: ${at.sha}
           path: .baton-cli
       - run: npm ci --prefix .baton-cli
       # --latest main: after its observation number the run reads the newest main, so a slow

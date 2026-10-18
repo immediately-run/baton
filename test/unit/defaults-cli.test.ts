@@ -10,7 +10,9 @@ import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { githubFacts, parseSyncArgs, syncWorkflow } from '../../src/defaults/cli';
+import { githubFacts, parseSyncArgs, remoteSlug, syncWorkflow } from '../../src/defaults/cli';
+import { graphOf } from '../../src/core/graph';
+import { decide } from '../../src/runner/protocol';
 import { CREATE_PR_COURSE, stationsPr, stationsReviewPr, type PrFact } from '../../src/defaults/course-pr';
 import { prClose, verdictLine, type Exec } from '../../src/defaults/pr-close';
 import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
@@ -31,7 +33,15 @@ const commitAll = (dir: string): string => {
 };
 const at = (dir: string) => ({ sha: execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() });
 /** A fresh import of an ejected or scaffolded module (the query defeats the module cache). */
-const PIN = 'immediately-run/baton@abababababababababababababababababababab';
+/** The source init writes for `course` (B-33): this CLI's repository at this CLI's commit — not
+ * `--pin`'s, which only pins the workflow. */
+const SELF = { slug: remoteSlug(ROOT), sha: execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() };
+/** The pin of this CLI's own commit: init refuses a --pin naming any other once a course names
+ * its source (B-33). */
+const PIN = `${SELF.slug}@${SELF.sha}`;
+/** A pin of another commit: refused for a scaffold, taken by the legacy `pr` path, which writes no source. */
+const OTHER_PIN = 'immediately-run/baton@abababababababababababababababababababab';
+const sourceOf = (course: string) => `github/${SELF.slug}/${SELF.sha}/${course}`;
 const load = async (file: string) => import(`${pathToFileURL(file).href}?t=${Math.random()}`);
 
 describe('parseSyncArgs', () => {
@@ -57,12 +67,12 @@ describe('baton repo init, through the built CLI', () => {
   it('writes the settings with every R-BTN-51 course field, the course file, the pinned workflow and the tickets directory', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr', agent_command: 'echo' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'review', 'fix', 'adjudicate', 'merge'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [] }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'review', 'fix', 'adjudicate', 'merge'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
     // The pinned commit is checked out and run: the CLI is not published to a registry.
-    expect(workflow).toContain(`repository: immediately-run/baton\n          ref: ${'ab'.repeat(20)}\n          path: .baton-cli`);
+    expect(workflow).toContain(`repository: ${SELF.slug}\n          ref: ${SELF.sha}\n          path: .baton-cli`);
     // §7.1: the newest main read after the number, one run at a time, off until registered,
     // and a 15-minute backstop.
     expect(workflow).toContain('- run: node .baton-cli/cli/baton.mjs repo sync --latest main');
@@ -198,15 +208,16 @@ describe('baton repo init, through the built CLI', () => {
     try {
       writeFileSync(settingsFile, settings.replace('"repos": {}', '"repos": { "docs": "o/docs" }'));
       writeFileSync(stub, `${stubText}\n// edited by hand\n`);
-      const other = `immediately-run/baton@${'cd'.repeat(20)}`;
-      expect(baton(root, 'repo', 'init', '--pin', other)).toContain('kept .baton/baton.json');
+      const workflowFile = join(root, '.github', 'workflows', 'baton-sync.yml');
+      writeFileSync(workflowFile, 'an older pin\n');
+      expect(baton(root, 'repo', 'init')).toContain('kept .baton/baton.json');
       expect(readFileSync(settingsFile, 'utf8')).toContain('"docs": "o/docs"');
       expect(readFileSync(stub, 'utf8')).toContain('// edited by hand');
-      expect(readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8')).toContain(`ref: ${'cd'.repeat(20)}`);
+      expect(readFileSync(workflowFile, 'utf8')).toContain(`ref: ${SELF.sha}`);
       // --force rewrites the course's files and its own entry; the repository's settings stay.
       const edited = JSON.parse(readFileSync(settingsFile, 'utf8'));
       writeFileSync(settingsFile, JSON.stringify({ ...edited, agent_command: 'my-agent', courses: [{ ...edited.courses[0], version: 9 }, { id: 'bug-report', version: 1 }] }));
-      baton(root, 'repo', 'init', '--pin', other, '--force');
+      baton(root, 'repo', 'init', '--pin', PIN, '--force');
       const forced = JSON.parse(readFileSync(settingsFile, 'utf8'));
       expect(forced).toMatchObject({ repos: { docs: 'o/docs' }, agent_command: 'my-agent', default_course: 'create-pr' });
       expect(forced.courses.map((c: { id: string; version: number }) => [c.id, c.version])).toEqual([['create-pr', 1], ['bug-report', 1]]);
@@ -237,7 +248,12 @@ describe('baton repo init, through the built CLI', () => {
     expect([...text.matchAll(/^import .* from ["']([^"']+)["']/gm)].every((m) => m[1].startsWith('node:'))).toBe(true);
   }, 120_000);
 
-  it('--eject stations writes a standalone function returning {stations, markers, course_data}, the default’s answer', async () => {
+  it('--eject stations writes a standalone function returning {stations, markers, course_data}, the default’s answer — for a course that names no source', async () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    // A sourced course is placed by its source's function: ejecting it is refused (B-33).
+    expect(() => baton(root, 'repo', 'init', '--eject', 'stations')).toThrow(/names a source, whose station function places its tickets/);
+    const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+    writeFileSync(settingsFile, JSON.stringify({ ...settings, courses: settings.courses.map(({ source: _source, ...c }: { source?: string }) => c) }, null, 2));
     baton(root, 'repo', 'init', '--eject', 'stations');
     const tickets = ticketsMarkdown([{ path: 'a.md', text: '---\nid: A-1\n---\n' }]).tickets;
     const facts: PrFact[] = [{ number: 1, head: 'claude/A-1-x', state: 'open', pushedAt: 1, checks: [], reviews: [] }];
@@ -404,7 +420,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     expect(settings.default_course).toBe('create-pr');
     expect(settings.courses.map((c: { id: string }) => c.id)).toEqual(['create-pr', 'bug-report', 'decision', 'review-pr', 'draft-ticket']);
-    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_worker_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [] });
+    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_worker_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('bug-report') });
     for (const [course, legs] of [['bug-report', 6], ['decision', 2], ['review-pr', 2], ['draft-ticket', 3]] as const) {
       expect(readdirSync(join(root, '.baton', 'courses', course, 'legs')).length, course).toBe(legs * 2);
     }
@@ -462,7 +478,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       const settings = { default_course: 'pr', courses: [{ id: 'pr', version: 1 }] };
       writeFileSync(join(legacy, '.baton', 'baton.json'), JSON.stringify(settings));
       writeFileSync(join(legacy, '.baton', 'courses', 'pr', 'course.json'), '{"kept":true}');
-      const out = baton(legacy, 'repo', 'init', '--pin', PIN);
+      const out = baton(legacy, 'repo', 'init', '--pin', OTHER_PIN);
       expect(out).toMatch(/course pr is now create-pr — its files are kept/);
       expect(JSON.parse(readFileSync(join(legacy, '.baton', 'baton.json'), 'utf8'))).toEqual(settings);
       expect(readFileSync(join(legacy, '.baton', 'courses', 'pr', 'course.json'), 'utf8')).toBe('{"kept":true}');
@@ -472,4 +488,239 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       rmSync(legacy, { recursive: true, force: true });
     }
   }, 60_000);
+});
+
+describe('a repository still on pr beside a sourced course (B-33)', () => {
+  it('init with no --course refuses a --pin its sources do not name, and otherwise moves their sources with the pin', () => {
+    const legacy = mkdtempSync(join(tmpdir(), 'baton-legacy-'));
+    try {
+      gitInit(legacy);
+      baton(legacy, 'repo', 'init', '--course', 'create-pr');
+      const settingsFile = join(legacy, '.baton', 'baton.json');
+      const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+      const old = `github/${SELF.slug}/${'3'.repeat(40)}/create-pr`;
+      // `pr` is the default, as a repository scaffolded before create-pr keeps it; create-pr's source is older.
+      writeFileSync(settingsFile, JSON.stringify({ ...settings, default_course: 'pr', courses: [{ id: 'pr', version: 1 }, { ...settings.courses[0], source: old }] }, null, 2));
+      const before = readFileSync(settingsFile, 'utf8');
+      const workflow = readFileSync(join(legacy, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
+      expect(() => baton(legacy, 'repo', 'init', '--pin', OTHER_PIN)).toThrow(`--pin names immediately-run/baton@${'ab'.repeat(5)}`);
+      expect(readFileSync(settingsFile, 'utf8')).toBe(before);
+      expect(readFileSync(join(legacy, '.github', 'workflows', 'baton-sync.yml'), 'utf8')).toBe(workflow);
+      const script = join(legacy, '.baton', 'courses', 'create-pr', 'legs', 'review.mjs');
+      writeFileSync(script, '// an older release\n');
+      expect(baton(legacy, 'repo', 'init')).toContain(`create-pr now from ${SELF.sha.slice(0, 10)}`);
+      const moved = JSON.parse(readFileSync(settingsFile, 'utf8'));
+      expect(moved).toMatchObject({ default_course: 'pr', courses: [{ id: 'pr' }, { id: 'create-pr', source: sourceOf('create-pr') }] });
+      expect(readFileSync(script, 'utf8')).toContain('.baton/courses/create-pr/legs/review.run.mjs');
+    } finally {
+      rmSync(legacy, { recursive: true, force: true });
+    }
+  }, 120_000);
+});
+
+// B-33 (R-BTN-131, R-BTN-51): a course named by its source runs the source's graph exactly, and
+// a repository replaces only the run of the legs it implements differently.
+describe('course sources and leg overrides (B-33)', () => {
+  let root: string;
+  const legs = () => join(root, '.baton', 'courses', 'create-pr', 'legs');
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'baton-override-'));
+    gitInit(root);
+    baton(root, 'repo', 'init', '--pin', PIN, '--override', 'review');
+    commitAll(root);
+  }, 120_000);
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it('--override seeds legs/<leg>.run.mjs calling the course’s own run; a leg the course lacks is refused before anything is written', () => {
+    const seeded = readFileSync(join(legs(), 'review.run.mjs'), 'utf8');
+    expect(seeded).toContain('export async function run(ctx, standard) {\n  return standard(ctx);\n}');
+    expect(seeded).toContain("{ reached: 'reviewed', next: answer === 'approve' ? 'merge' : 'fix', verdict: answer }");
+    expect(() => baton(root, 'repo', 'init', '--pin', PIN, '--override', 'deploy')).toThrow(/--override deploy: create-pr has no such leg — its legs are implement, review, fix, adjudicate, merge/);
+    expect(existsSync(join(legs(), 'deploy.run.mjs'))).toBe(false);
+  });
+
+  it('--force rewrites Baton’s files — the leg scripts, the course file — never the repository’s instructions or overrides', () => {
+    const stub = join(legs(), 'merge.mjs');
+    const md = join(legs(), 'merge.md');
+    const override = join(legs(), 'review.run.mjs');
+    const before = [stub, md, override].map((f) => readFileSync(f, 'utf8'));
+    try {
+      writeFileSync(stub, `${before[0]}\n// edited\n`);
+      writeFileSync(md, `${before[1]}\n<!-- ours -->\n`);
+      writeFileSync(override, `${before[2]}\n// ours\n`);
+      baton(root, 'repo', 'init', '--pin', PIN, '--course', 'create-pr', '--force', '--override', 'review');
+      expect(readFileSync(stub, 'utf8')).not.toContain('// edited');
+      expect(readFileSync(md, 'utf8')).toContain('<!-- ours -->');
+      expect(readFileSync(override, 'utf8')).toContain('// ours');
+    } finally {
+      [stub, md, override].forEach((f, i) => writeFileSync(f, before[i]));
+    }
+  }, 120_000);
+
+  it('init moves a course’s source to this CLI’s commit, rewriting its course file and leg scripts and keeping the repository’s files', () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const stub = join(legs(), 'fix.mjs');
+    const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+    const old = `github/${SELF.slug}/${'1'.repeat(40)}/create-pr`;
+    writeFileSync(settingsFile, JSON.stringify({ ...settings, agent_command: 'mine', courses: [{ ...settings.courses[0], source: old, version: 4 }] }, null, 2));
+    writeFileSync(stub, '// an older release\n');
+    writeFileSync(join(legs(), 'review.run.mjs'), '// ours\nexport async function run(ctx, standard) { return standard(ctx); }\n');
+    try {
+      expect(baton(root, 'repo', 'init', '--pin', PIN)).toContain(`create-pr now from ${SELF.sha.slice(0, 10)}`);
+      const moved = JSON.parse(readFileSync(settingsFile, 'utf8'));
+      expect(moved).toMatchObject({ agent_command: 'mine', courses: [{ id: 'create-pr', version: 4, source: sourceOf('create-pr') }] });
+      expect(readFileSync(stub, 'utf8')).toContain('.baton/courses/create-pr/legs/fix.run.mjs'); // the current leg script, bundled
+      expect(readFileSync(join(legs(), 'review.run.mjs'), 'utf8')).toContain('// ours');
+    } finally {
+      writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
+      commitAll(root);
+    }
+  }, 120_000);
+
+  it('the leg script runs the override at the claim’s snapshot, keeping its own close; one only in the working tree is not run; one with no run fails the leg', async () => {
+    const agent = join(root, 'agent.sh');
+    writeFileSync(agent, '#!/bin/sh\necho "$VERDICT"\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const override = join(legs(), 'review.run.mjs');
+    const before = [readFileSync(settingsFile, 'utf8'), readFileSync(override, 'utf8')];
+    const script = join(legs(), 'review.mjs');
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before[0]), agent_command: agent }));
+      process.env.VERDICT = 'changes';
+      // A snapshot with no override runs the course's own run — even with one in the working tree.
+      rmSync(override);
+      const plain = { sha: commitAll(root) };
+      writeFileSync(override, 'export async function run() { throw new Error("from the working tree"); }\n');
+      expect(await (await load(script)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: plain, leg: 'review' })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
+      // The override at the snapshot: its own work, then the course's run, its verdict kept.
+      writeFileSync(override, `import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+export async function run(ctx, standard) {
+  writeFileSync(join(ctx.checkout, 'override.ran'), ctx.leg);
+  return { ...(await standard(ctx)), reached: 'reviewed' };
+}
+`);
+      const snapshot = { sha: commitAll(root) };
+      rmSync(join(root, 'override.ran'), { force: true });
+      const stub = await load(script);
+      expect(await stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot, leg: 'review' })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
+      expect(readFileSync(join(root, 'override.ran'), 'utf8')).toBe('review');
+      expect(stub.close.name).toBe('prClose'); // the course's close, whatever the override does
+      // An override exporting no run fails the leg, naming the file.
+      writeFileSync(override, 'export const nothing = 1;\n');
+      const broken = { sha: commitAll(root) };
+      await expect((await load(script)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: broken, leg: 'review' })).rejects.toThrow('.baton/courses/create-pr/legs/review.run.mjs exports no run(ctx, standard)');
+    } finally {
+      delete process.env.VERDICT;
+      writeFileSync(settingsFile, before[0]);
+      writeFileSync(override, before[1]);
+      commitAll(root);
+    }
+  }, 120_000);
+
+  it('a --pin other than this CLI’s repository at its commit is refused before anything is written while a course names a source; with none, the pin moves', () => {
+    const workflowFile = join(root, '.github', 'workflows', 'baton-sync.yml');
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const workflow = readFileSync(workflowFile, 'utf8');
+    const settings = readFileSync(settingsFile, 'utf8');
+    expect(() => baton(root, 'repo', 'init', '--pin', OTHER_PIN)).toThrow(`--pin names immediately-run/baton@${'ab'.repeat(5)}, but this CLI is ${SELF.slug}@${SELF.sha.slice(0, 10)}, which the courses' sources name`);
+    // A refused init reports no change it did not make.
+    let said = '';
+    try {
+      baton(root, 'repo', 'init', '--course', 'bug-report', '--pin', OTHER_PIN);
+    } catch (e) {
+      said = String((e as { stdout?: unknown }).stdout);
+    }
+    expect(said).not.toContain('lists course bug-report');
+    // Another repository at this very commit — a fork's pin — is refused just the same.
+    expect(() => baton(root, 'repo', 'init', '--pin', `Fork-Owner/baton@${SELF.sha}`)).toThrow(`--pin names Fork-Owner/baton@${SELF.sha.slice(0, 10)}`);
+    expect(readFileSync(workflowFile, 'utf8')).toBe(workflow);
+    expect(readFileSync(settingsFile, 'utf8')).toBe(settings);
+    try {
+      // A repository whose courses name no source: its sync checks none, so its pin moves freely.
+      const parsed = JSON.parse(settings);
+      writeFileSync(settingsFile, JSON.stringify({ ...parsed, courses: parsed.courses.map(({ source: _s, ...c }: { source?: string }) => c) }, null, 2));
+      baton(root, 'repo', 'init', '--pin', OTHER_PIN);
+      expect(readFileSync(workflowFile, 'utf8')).toContain(`ref: ${'ab'.repeat(20)}`);
+    } finally {
+      writeFileSync(settingsFile, settings);
+      writeFileSync(workflowFile, workflow);
+    }
+  }, 120_000);
+
+  it('--override replaces an older leg script, which could not load the override, even on a course with no source', () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const settings = readFileSync(settingsFile, 'utf8');
+    const script = join(legs(), 'review.mjs');
+    try {
+      const parsed = JSON.parse(settings);
+      writeFileSync(settingsFile, JSON.stringify({ ...parsed, courses: parsed.courses.map(({ source: _s, ...c }: { source?: string }) => c) }, null, 2));
+      writeFileSync(script, 'export async function run() { return null; } // a leg script from before overrides\n');
+      baton(root, 'repo', 'init', '--pin', PIN, '--override', 'review');
+      expect(readFileSync(script, 'utf8')).toContain('.baton/courses/create-pr/legs/review.run.mjs');
+    } finally {
+      writeFileSync(settingsFile, settings);
+      commitAll(root);
+    }
+  }, 120_000);
+
+  it('init moves every course from this CLI’s repository: a second course’s source and leg scripts move too', () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    try {
+      baton(root, 'repo', 'init', '--pin', PIN, '--course', 'bug-report');
+      const two = JSON.parse(readFileSync(settingsFile, 'utf8'));
+      const old = (c: string) => `github/${SELF.slug}/${'2'.repeat(40)}/${c}`;
+      // A third entry whose source names another course than its id: the sync refuses it; init leaves it.
+      const stray = { id: 'docs-pr', version: 1, source: old('create-pr') };
+      writeFileSync(settingsFile, JSON.stringify({ ...two, courses: [...two.courses.map((c: { id: string }) => ({ ...c, source: old(c.id) })), stray] }, null, 2));
+      const trace = join(root, '.baton', 'courses', 'bug-report', 'legs', 'trace.mjs');
+      writeFileSync(trace, '// an older release\n');
+      expect(baton(root, 'repo', 'init', '--pin', PIN, '--course', 'create-pr')).toContain(`create-pr, bug-report now from ${SELF.sha.slice(0, 10)}`);
+      expect(JSON.parse(readFileSync(settingsFile, 'utf8')).courses.map((c: { source: string }) => c.source)).toEqual([sourceOf('create-pr'), sourceOf('bug-report'), old('create-pr')]);
+      expect(readFileSync(trace, 'utf8')).toContain('.baton/courses/bug-report/legs/trace.run.mjs');
+    } finally {
+      writeFileSync(settingsFile, before);
+      rmSync(join(root, '.baton', 'courses', 'bug-report'), { recursive: true, force: true });
+      commitAll(root);
+    }
+  }, 180_000);
+
+  it('an override whose position is no edge is refused by the runner’s decision, before close writes anything', async () => {
+    const override = join(legs(), 'review.run.mjs');
+    const before = readFileSync(override, 'utf8');
+    try {
+      writeFileSync(override, "export async function run() { return { reached: 'merged', next: null, verdict: 'approve' }; }\n");
+      const snapshot = { sha: commitAll(root) };
+      const result = await (await load(join(legs(), 'review.mjs'))).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, leg: 'review' });
+      // The runner decides on the result before it calls close (runner.ts): a script bug suspends.
+      expect(decide(result, graphOf(CREATE_PR_COURSE), 'review', 'pr-open')).toMatchObject({ bug: true, why: "reached merged, which is not an outcome of review (reviewed)", reached: 'pr-open', next: 'review' });
+    } finally {
+      writeFileSync(override, before);
+      commitAll(root);
+    }
+  }, 120_000);
+
+  it('the course test kit passes a course with an override, and fails one that exports no run or overrides no leg', () => {
+    expect(baton(root, 'test-course', root, 'create-pr', '--base', 'none')).toContain('✓ no violations');
+    const extra = join(legs(), 'deploy.run.mjs');
+    const override = join(legs(), 'review.run.mjs');
+    const before = readFileSync(override, 'utf8');
+    try {
+      writeFileSync(override, 'export const nothing = 1;\n');
+      writeFileSync(extra, 'export async function run(ctx, standard) { return standard(ctx); }\n');
+      let out = '';
+      try {
+        baton(root, 'test-course', root, 'create-pr', '--base', 'none');
+      } catch (e) {
+        out = String((e as { stdout?: unknown }).stdout);
+      }
+      expect(out).toContain('✗ legs-scripts: legs/review.run.mjs exports no run(ctx, standard)');
+      expect(out).toContain('✗ legs-scripts: legs/deploy.run.mjs overrides no leg of the course');
+    } finally {
+      writeFileSync(override, before);
+      rmSync(extra, { force: true });
+    }
+  }, 120_000);
 });

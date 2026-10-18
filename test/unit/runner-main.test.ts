@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { declareCourses, fetchMain, parseRunArgs, runnerCourse } from '../../src/runner/main';
 import { envAuth } from '../../src/runner/api';
-import { courseOf, freshSecret, holdHome } from '../../src/runner/home';
+import { courseOf, dropCourse, freshSecret, holdHome, loadCourse } from '../../src/runner/home';
 
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
@@ -52,6 +52,28 @@ describe('one runner per home checkout (R-BTN-131)', () => {
       again();
       // The tree stays clean: the lock lives in the git dir.
       expect(execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8' })).toBe('');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('loadCourse (R-BTN-72)', () => {
+  it('extracts each leg\'s script and never a repository\'s <leg>.run.mjs override, which the script loads itself (B-33)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
+    try {
+      const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
+      git('init', '-q', '-b', 'main');
+      const legs = join(dir, '.baton', 'courses', 'relay', 'legs');
+      mkdirSync(legs, { recursive: true });
+      writeFileSync(join(dir, '.baton', 'courses', 'relay', 'course.json'), JSON.stringify({ start: 'a', start_leg: 'go', end: ['b'], stations: { a: {}, b: {} }, legs: { go: { from: ['a'], to: 'b' } } }));
+      writeFileSync(join(legs, 'go.mjs'), 'export async function run() {}\n');
+      writeFileSync(join(legs, 'go.run.mjs'), 'export async function run(ctx, standard) { return standard(ctx); }\n');
+      git('add', '-A');
+      git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'relay');
+      const loaded = loadCourse(dir, git('rev-parse', 'HEAD'), 'relay');
+      expect([...loaded.scripts.keys()]).toEqual(['go']);
+      dropCourse(loaded.scratch);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
