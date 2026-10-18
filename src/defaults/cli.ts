@@ -352,12 +352,17 @@ const MAX_PAGES = 50;
 const MAX_REQUESTS = 200;
 /** The `author_association` values whose reviews and comments carry a verdict. */
 const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
-/** The most PRs one GraphQL query reads (B-35): each brings up to 100 nodes of four connections. */
+/** The most PRs one GraphQL query reads (B-35). One PR asks for up to 10 check suites of 100 runs
+ * and 100 each of commits, reviews and comments — 15 connection requests, so a full batch is 375,
+ * about 4 of the token's GraphQL points an hour, and some 32,500 nodes, far inside GitHub's
+ * 500,000 a query; 25 keeps a query's cost and answer small while one query serves most
+ * repositories' owned PRs. */
 const GRAPHQL_BATCH = 25;
 
 /** The detail of one PR that a GraphQL batch asks for (B-35): the head commit's check runs, the
- * commits' dates, the reviews and the issue comments — the four REST lists it replaces, first
- * pages of 100, each with `hasNextPage` so an overflowing one is read over REST in full. The
+ * commits' dates, the reviews and the issue comments — the four REST lists it replaces, each a
+ * first page (10 check suites of 100 runs; 100 commits, reviews, comments) with `hasNextPage`,
+ * so an overflowing one is read over REST in full. The
  * check runs come through the head's check suites (the latest run of each check, as REST's
  * check-runs list gives them), never `statusCheckRollup`, which takes in commit statuses too and
  * so may need a permission the sync workflow does not grant: `checks: read` covers this, as it

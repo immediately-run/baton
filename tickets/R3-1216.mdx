@@ -66,7 +66,7 @@ None to write.
 _(filed 2026-10-13)_
 
 2026-10-18 — **Left for the cutover by B-31 and B-32** (docs on Baton's standard courses, in shadow):
-- **Swap the syncs.** Retire `baton-sync.yml` and `scripts/baton-sync.mjs`, rename `baton-cli-sync.yml`, and set `BATON_CLI_ENABLED`. This waits on **B-35**: a live docs sync needs about 360 requests against the adapter's 200. Fix R3-44's `repos:` too, since it names `devices`, which does not exist.
+- **Swap the syncs.** Retire `baton-sync.yml` and `scripts/baton-sync.mjs`, rename `baton-cli-sync.yml`, and set `BATON_CLI_ENABLED`. B-35 (baton#53) brings a live docs sync from about 257 requests to about 77, against the adapter's 200, by reading the owned PRs' detail over GraphQL. On the first enabled sync, confirm that the GraphQL detail query succeeds under the generated workflow's `contents`, `pull-requests` and `checks: read`. Any GraphQL `errors` fails the whole sync, and the query has never run live: GraphQL is blocked from the sessions that built it. Fix R3-44's `repos:` too, since it names `devices`, which does not exist.
 - **Retire the skill steps Baton then performs:** `claim.sh claim`, `next-available.sh`, and `reconcile-merged-items.mjs`. docs' leg instructions (`.baton/courses/*/legs/*.md`) point at the skill sections that own each convention, so retiring a step is deleting it.
 - **Contract gaps the leg writers found:**
   - a `decision` ticket settled without a packet has no `answer` for Baton to read;
