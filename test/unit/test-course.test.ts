@@ -72,6 +72,14 @@ describe('baton test-course', () => {
     expect(legExports({ run: 'not a function' })).toEqual([]);
   }, 60_000);
 
+  it('an override must name a leg of the course and export run; one that does not load says so (B-33)', async () => {
+    const all = ['run', 'handoff', 'close'];
+    const legs = Object.keys(roadmapPr.legs).map((name) => ({ name, exports: all }));
+    expect(await checkCourse(input({ legScripts: legs, overrides: [{ name: 'review', exports: ['run'] }] }))).toEqual([]);
+    const v = await checkCourse(input({ legScripts: legs, overrides: [{ name: 'deploy', exports: ['run'] }, { name: 'review', exports: [] }, { name: 'fix', exports: [], error: 'Unexpected token' }] }));
+    expect(v.map((x) => x.message)).toEqual(['legs/deploy.run.mjs overrides no leg of the course', 'legs/review.run.mjs exports no run(ctx, standard)', 'legs/fix.run.mjs does not load: Unexpected token']);
+  }, 60_000);
+
   it('a live ticket the proposed file would move back fails, naming it', async () => {
     const live = [{ id: 'T-7', path: [{ leg: 'implement', reached: 'pr-open' }, { leg: 'review', reached: 'reviewed' }, { leg: 'adjudicate', reached: 'adjudicated' }] }];
     const v = await checkCourse(input({ proposed: WITHOUT_ADJUDICATE, proposedVersions: { version: 4, min_worker_version: 4 }, live }));

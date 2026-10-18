@@ -99,7 +99,8 @@ export function loadCourse(home: string, sha: string, course: string): CourseLoa
     listing = [];
   }
   for (const name of listing) {
-    if (!name.endsWith('.mjs')) continue;
+    // A leg's script only: `<leg>.run.mjs` is a repository's override, which the script loads itself.
+    if (!name.endsWith('.mjs') || name.endsWith('.run.mjs')) continue;
     const leg = name.split('/').pop()!.slice(0, -4);
     const bytes = readAt(home, sha, `.baton/courses/${course}/legs/${name}`);
     if (bytes == null) continue;

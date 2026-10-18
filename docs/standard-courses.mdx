@@ -58,6 +58,47 @@ npx baton run --course bug-report --home ~/src/repo-bug-report
   answers for them. `review-pr` waits the same way on the author after asking for changes, and
   `create-pr` on the owner after an `owner` adjudication.
 
+## Where a course comes from
+
+Each course `init` scaffolds names its source in `.baton/baton.json`, in immediately.run's own
+form: provider, owner, repository, commit, then the course.
+
+```
+"source": "github/immediately-run/baton/<commit>/create-pr"
+```
+
+The commit is the CLI's own, the one that wrote the files, so the name always means one graph.
+The sync holds the course to it: if `.baton/courses/create-pr/course.json` differs from that
+commit's, nothing is posted until `npx baton repo init --course create-pr --force` restores it.
+Upgrading is re-running `init` with a newer CLI: it moves the workflow's pin and every course's
+source together, rewriting the course files and leg scripts and keeping your instructions and
+overrides. For now a source names the CLI's own repository; a course from another repository is
+refused as not supported yet.
+
+## Overriding a leg
+
+When your repository does a leg differently in code, not just in prose, replace that leg's run
+and keep everything else:
+
+```
+npx baton repo init --course create-pr --override review
+```
+
+This writes `.baton/courses/create-pr/legs/review.run.mjs`, yours from then on:
+
+```js
+export async function run(ctx, standard) {
+  return standard(ctx); // the course's own run: your agent_command with the leg's instructions
+}
+```
+
+The leg's script loads it from the claim's snapshot and calls it in place of its own run. It
+keeps its own `close`, so the line the course reads (the review's verdict, the adjudication, a
+marker) is always written the standard way, and the course places the ticket as it would without
+the override. Return the same shape `standard` returns; the file's header says what that is for
+the leg. It is loaded alone, so import only Node built-ins. A difference that is only prose
+belongs in the leg's `.md` instead.
+
 ## Changing one
 
 The instructions are yours once scaffolded. Edit `.baton/courses/<course>/legs/<leg>.md` to
@@ -68,4 +109,5 @@ the agent the instructions, read at the claim's snapshot, through `BATON_INSTRUC
 branch under review cannot rewrite its reviewer's instructions.
 
 To change how a course places tickets, `npx baton repo init --course <course> --eject stations`
-copies its station function into `.baton/courses/<course>/sync.mjs`, where you can edit it.
+copies its station function into `.baton/courses/<course>/sync.mjs`, where you can edit it. The
+course is then yours, not the source's: remove its `source` from `.baton/baton.json` first.

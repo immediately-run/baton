@@ -32,6 +32,14 @@ const commitAll = (dir: string): string => {
 const at = (dir: string) => ({ sha: execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() });
 /** A fresh import of an ejected or scaffolded module (the query defeats the module cache). */
 const PIN = 'immediately-run/baton@abababababababababababababababababababab';
+/** The source init writes for `course` (B-33): this CLI's repository at this CLI's commit — not
+ * `--pin`'s, which only pins the workflow. */
+const SELF = (() => {
+  const slug = execFileSync('git', ['-C', ROOT, 'remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim()
+    .replace(/^git@[^:]+:/, '').replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '').replace(/^git\/(?=[^/]+\/[^/]+$)/, '');
+  return { slug, sha: execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() };
+})();
+const sourceOf = (course: string) => `github/${SELF.slug}/${SELF.sha}/${course}`;
 const load = async (file: string) => import(`${pathToFileURL(file).href}?t=${Math.random()}`);
 
 describe('parseSyncArgs', () => {
@@ -57,7 +65,7 @@ describe('baton repo init, through the built CLI', () => {
   it('writes the settings with every R-BTN-51 course field, the course file, the pinned workflow and the tickets directory', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr', agent_command: 'echo' });
-    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'review', 'fix', 'adjudicate', 'merge'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [] }]);
+    expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'review', 'fix', 'adjudicate', 'merge'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
@@ -237,7 +245,12 @@ describe('baton repo init, through the built CLI', () => {
     expect([...text.matchAll(/^import .* from ["']([^"']+)["']/gm)].every((m) => m[1].startsWith('node:'))).toBe(true);
   }, 120_000);
 
-  it('--eject stations writes a standalone function returning {stations, markers, course_data}, the default’s answer', async () => {
+  it('--eject stations writes a standalone function returning {stations, markers, course_data}, the default’s answer — for a course that names no source', async () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    // A sourced course is placed by its source's function: ejecting it is refused (B-33).
+    expect(() => baton(root, 'repo', 'init', '--eject', 'stations')).toThrow(/names a source, whose station function places its tickets/);
+    const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+    writeFileSync(settingsFile, JSON.stringify({ ...settings, courses: settings.courses.map(({ source: _source, ...c }: { source?: string }) => c) }, null, 2));
     baton(root, 'repo', 'init', '--eject', 'stations');
     const tickets = ticketsMarkdown([{ path: 'a.md', text: '---\nid: A-1\n---\n' }]).tickets;
     const facts: PrFact[] = [{ number: 1, head: 'claude/A-1-x', state: 'open', pushedAt: 1, checks: [], reviews: [] }];
@@ -404,7 +417,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     expect(settings.default_course).toBe('create-pr');
     expect(settings.courses.map((c: { id: string }) => c.id)).toEqual(['create-pr', 'bug-report', 'decision', 'review-pr', 'draft-ticket']);
-    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_worker_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [] });
+    expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_worker_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('bug-report') });
     for (const [course, legs] of [['bug-report', 6], ['decision', 2], ['review-pr', 2], ['draft-ticket', 3]] as const) {
       expect(readdirSync(join(root, '.baton', 'courses', course, 'legs')).length, course).toBe(legs * 2);
     }
@@ -472,4 +485,128 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       rmSync(legacy, { recursive: true, force: true });
     }
   }, 60_000);
+});
+
+// B-33 (R-BTN-131, R-BTN-51): a course named by its source runs the source's graph exactly, and
+// a repository replaces only the run of the legs it implements differently.
+describe('course sources and leg overrides (B-33)', () => {
+  let root: string;
+  const legs = () => join(root, '.baton', 'courses', 'create-pr', 'legs');
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'baton-override-'));
+    gitInit(root);
+    baton(root, 'repo', 'init', '--pin', PIN, '--override', 'review');
+    commitAll(root);
+  }, 120_000);
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  it('--override seeds legs/<leg>.run.mjs calling the course’s own run; a leg the course lacks is refused before anything is written', () => {
+    const seeded = readFileSync(join(legs(), 'review.run.mjs'), 'utf8');
+    expect(seeded).toContain('export async function run(ctx, standard) {\n  return standard(ctx);\n}');
+    expect(seeded).toContain("{ reached: 'reviewed', next: answer === 'approve' ? 'merge' : 'fix', verdict: answer }");
+    expect(() => baton(root, 'repo', 'init', '--pin', PIN, '--override', 'deploy')).toThrow(/--override deploy: create-pr has no such leg — its legs are implement, review, fix, adjudicate, merge/);
+    expect(existsSync(join(legs(), 'deploy.run.mjs'))).toBe(false);
+  });
+
+  it('--force rewrites Baton’s files — the leg scripts, the course file — never the repository’s instructions or overrides', () => {
+    const stub = join(legs(), 'merge.mjs');
+    const md = join(legs(), 'merge.md');
+    const override = join(legs(), 'review.run.mjs');
+    const before = [stub, md, override].map((f) => readFileSync(f, 'utf8'));
+    try {
+      writeFileSync(stub, `${before[0]}\n// edited\n`);
+      writeFileSync(md, `${before[1]}\n<!-- ours -->\n`);
+      writeFileSync(override, `${before[2]}\n// ours\n`);
+      baton(root, 'repo', 'init', '--pin', PIN, '--course', 'create-pr', '--force', '--override', 'review');
+      expect(readFileSync(stub, 'utf8')).not.toContain('// edited');
+      expect(readFileSync(md, 'utf8')).toContain('<!-- ours -->');
+      expect(readFileSync(override, 'utf8')).toContain('// ours');
+    } finally {
+      [stub, md, override].forEach((f, i) => writeFileSync(f, before[i]));
+    }
+  }, 120_000);
+
+  it('init moves a course’s source to this CLI’s commit, rewriting its course file and leg scripts and keeping the repository’s files', () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const stub = join(legs(), 'fix.mjs');
+    const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+    const old = `github/${SELF.slug}/${'1'.repeat(40)}/create-pr`;
+    writeFileSync(settingsFile, JSON.stringify({ ...settings, agent_command: 'mine', courses: [{ ...settings.courses[0], source: old, version: 4 }] }, null, 2));
+    writeFileSync(stub, '// an older release\n');
+    writeFileSync(join(legs(), 'review.run.mjs'), '// ours\nexport async function run(ctx, standard) { return standard(ctx); }\n');
+    try {
+      expect(baton(root, 'repo', 'init', '--pin', PIN)).toContain(`create-pr now from ${SELF.sha.slice(0, 10)}`);
+      const moved = JSON.parse(readFileSync(settingsFile, 'utf8'));
+      expect(moved).toMatchObject({ agent_command: 'mine', courses: [{ id: 'create-pr', version: 4, source: sourceOf('create-pr') }] });
+      expect(readFileSync(stub, 'utf8')).toContain('.baton/courses/create-pr/legs/fix.run.mjs'); // the current leg script, bundled
+      expect(readFileSync(join(legs(), 'review.run.mjs'), 'utf8')).toContain('// ours');
+    } finally {
+      writeFileSync(settingsFile, `${JSON.stringify(settings, null, 2)}\n`);
+      commitAll(root);
+    }
+  }, 120_000);
+
+  it('the leg script runs the override at the claim’s snapshot, keeping its own close; one only in the working tree is not run; one with no run fails the leg', async () => {
+    const agent = join(root, 'agent.sh');
+    writeFileSync(agent, '#!/bin/sh\necho "$VERDICT"\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const override = join(legs(), 'review.run.mjs');
+    const before = [readFileSync(settingsFile, 'utf8'), readFileSync(override, 'utf8')];
+    const script = join(legs(), 'review.mjs');
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before[0]), agent_command: agent }));
+      process.env.VERDICT = 'changes';
+      // A snapshot with no override runs the course's own run — even with one in the working tree.
+      rmSync(override);
+      const plain = { sha: commitAll(root) };
+      writeFileSync(override, 'export async function run() { throw new Error("from the working tree"); }\n');
+      expect(await (await load(script)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: plain, leg: 'review' })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
+      // The override at the snapshot: its own work, then the course's run, its verdict kept.
+      writeFileSync(override, `import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+export async function run(ctx, standard) {
+  writeFileSync(join(ctx.checkout, 'override.ran'), ctx.leg);
+  return { ...(await standard(ctx)), reached: 'reviewed' };
+}
+`);
+      const snapshot = { sha: commitAll(root) };
+      rmSync(join(root, 'override.ran'), { force: true });
+      const stub = await load(script);
+      expect(await stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot, leg: 'review' })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
+      expect(readFileSync(join(root, 'override.ran'), 'utf8')).toBe('review');
+      expect(stub.close.name).toBe('prClose'); // the course's close, whatever the override does
+      // An override exporting no run fails the leg, naming the file.
+      writeFileSync(override, 'export const nothing = 1;\n');
+      const broken = { sha: commitAll(root) };
+      await expect((await load(script)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: broken, leg: 'review' })).rejects.toThrow('.baton/courses/create-pr/legs/review.run.mjs exports no run(ctx, standard)');
+    } finally {
+      delete process.env.VERDICT;
+      writeFileSync(settingsFile, before[0]);
+      writeFileSync(override, before[1]);
+      commitAll(root);
+    }
+  }, 120_000);
+
+  it('the course test kit passes a course with an override, and fails one that exports no run or overrides no leg', () => {
+    expect(baton(root, 'test-course', root, 'create-pr', '--base', 'none')).toContain('✓ no violations');
+    const extra = join(legs(), 'deploy.run.mjs');
+    const override = join(legs(), 'review.run.mjs');
+    const before = readFileSync(override, 'utf8');
+    try {
+      writeFileSync(override, 'export const nothing = 1;\n');
+      writeFileSync(extra, 'export async function run(ctx, standard) { return standard(ctx); }\n');
+      let out = '';
+      try {
+        baton(root, 'test-course', root, 'create-pr', '--base', 'none');
+      } catch (e) {
+        out = String((e as { stdout?: unknown }).stdout);
+      }
+      expect(out).toContain('✗ legs-scripts: legs/review.run.mjs exports no run(ctx, standard)');
+      expect(out).toContain('✗ legs-scripts: legs/deploy.run.mjs overrides no leg of the course');
+    } finally {
+      writeFileSync(override, before);
+      rmSync(extra, { force: true });
+    }
+  }, 120_000);
 });
