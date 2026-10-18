@@ -67,8 +67,11 @@ archive).
 5. **Who owns which file.** `init --force` rewrites the stubs and the course copy, never a
    `*.run.mjs` or an edited `legs/<leg>.md`.
 6. **A test-kit check.** `baton test-course` accepts a course with overrides: each
-   `<leg>.run.mjs` exports `run`, names a leg of the course, and returns an edge on the kit's
-   generic run.
+   `<leg>.run.mjs` exports `run`, names a leg of the course, and sits beside a leg script that
+   loads it. *(Amended 2026-10-18, baton#50 round 1: the kit does not run an override, which does
+   a leg's real work — agents, git, the forge — that the kit cannot supply. A position that is no
+   edge is refused by the runner's decision before `close` writes anything, which a test drives
+   with an override's real result.)*
 7. **Docs uses it** (B-31): `create-pr` from `github/immediately-run/baton/<commit>/create-pr`.
    Only the legs whose mechanics differ in docs are overridden; the rest run the standard stubs
    with docs' instructions (B-32). The test for a leg: does docs need different code, or only
@@ -97,9 +100,11 @@ archive).
   re-run with a newer CLI rewrites `source`, the course copy and the stubs, and keeps the
   overrides. A changed graph is a course change (R-BTN-22's `course-changed`), so the release
   notes say when a standard course's graph changes.
-- **Versions.** An override changes what a leg does, so the leg's version (R-BTN-51,
-  `leg_version` in history) is the hash of the stub plus its `<leg>.run.mjs`. Replay and history
-  can then tell which implementation ran.
+- **Versions.** *(Amended 2026-10-18, baton#50 round 1: the bullet first made `leg_version` a
+  hash of the stub and its override. The spec defines `leg_version` as the integer version of a
+  leg's inputs and outputs, which R-BTN-82 checks (§4), and nothing computes it yet.)* An override
+  keeps the leg's `leg_version`: it keeps the leg's position and close, so its contract. The
+  claim's `snapshot_sha`, already in history, names the bytes of the implementation that ran.
 
 ### Tests
 
