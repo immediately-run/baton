@@ -1,0 +1,71 @@
+---
+title: The standard courses
+description: The five courses Baton's CLI ships — create-pr, review-pr, bug-report, draft-ticket and decision — what each does, and how a repository adopts and changes one.
+tags: [concepts]
+order: 15
+---
+
+A course is the route a ticket takes: its stations, and the legs an agent runs between them. A
+repository can write its own, as the docs repository did with `roadmap-pr`, but most need one of
+a handful of routes. Baton's CLI ships five, and a repository adopts each with one command. They
+are specified in BATON_SPEC R-BTN-131 and started from the docs repository's skills.
+
+| course | what it does | legs | where it ends |
+|---|---|---|---|
+| `create-pr` | builds a ticket in a PR, reviews it in up to three rounds, fixes, adjudicates what the last round leaves open, merges | implement, review, fix, adjudicate, merge | `merged` |
+| `review-pr` | reviews a PR someone else opened, in rounds, and concludes with a summary | review, conclude | `approved` or `concluded` |
+| `bug-report` | traces a reported bug to its cause and the artifact that seeded it, dedupes it by cause, files the fix ticket or folds the report into the one that covers it, weighs prevention | trace, origin, dedupe, file or fold, prevent | `closed` |
+| `draft-ticket` | researches, drafts and files a ticket that prescribes its architecture, tests and requirements | research, draft, check | `filed` |
+| `decision` | turns a question only the owner can settle into a one-letter packet, then carries the answer out | prepare, carry-out | `decided` |
+
+`create-pr` is the default. It replaced the `pr` course, which a repository scaffolded before
+keeps until it switches.
+
+## Adopting one
+
+```
+npx baton repo init                       # create-pr, the settings and the sync workflow
+npx baton repo init --course bug-report   # a second course beside the first
+```
+
+Each `init --course` writes `.baton/courses/<course>/`: the course file, one stub per leg, and
+one Markdown file of instructions per leg. It also adds the course to `.baton/baton.json`. A
+ticket picks its course with `course:` in its frontmatter, and the repository's `default_course`
+covers the rest.
+
+A runner serves one course, since a claim does not say which course its ticket is on. A
+repository on several courses runs one runner for each, each in its own clone, because a
+runner's legs work in its checkout's working tree (a second runner on a checkout is refused):
+
+```
+npx baton run --course create-pr  --home ~/src/repo
+npx baton run --course bug-report --home ~/src/repo-bug-report
+```
+
+## How each course finds where a ticket is
+
+- **`create-pr` and `review-pr` read the forge.** A ticket's PRs are the ones its branch pattern
+  or its `prs:` names. Each review's verdict is a review state or a comment whose first line is
+  `<!-- baton:verdict approve -->` or `<!-- baton:verdict changes -->`. `create-pr`'s adjudication
+  and `review-pr`'s conclusion are comment lines of the same kind. The leg's `close` writes each
+  of these lines from the agent's answer, so the agent never writes them itself.
+- **`bug-report`, `draft-ticket` and `decision` open no PR.** Their legs commit their work to the
+  default branch, and each leg's `close` appends a line to `.baton/markers.jsonl` saying where the
+  ticket got to and which leg comes next. The sync reads that file, so these courses need no forge
+  token at all.
+- **`decision` waits on the owner.** After `prepare` writes the packet into the ticket, the claim
+  ends and `carry-out` waits until the owner sets the ticket's `answer:` to their letter. Nothing
+  answers for them. `review-pr` waits the same way on the author after asking for changes, and
+  `create-pr` on the owner after an `owner` adjudication.
+
+## Changing one
+
+The instructions are yours once scaffolded. Edit `.baton/courses/<course>/legs/<leg>.md` to
+match how your repository works: its checks, its review rubric, where its tickets live. A
+release of the CLI never touches them. Each leg's stub runs the command `.baton/baton.json`
+names in `agent_command`, with the ticket, the leg and the checkout as its arguments. It hands
+the agent the instructions, read at the claim's snapshot, through `BATON_INSTRUCTIONS`, so a
+branch under review cannot rewrite its reviewer's instructions.
+
+To change how a course places tickets, `npx baton repo init --course <course> --eject stations`
+copies its station function into `.baton/courses/<course>/sync.mjs`, where you can edit it.
