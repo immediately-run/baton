@@ -15,6 +15,7 @@ import { BatonApi, BatonRefusal, type Auth, type Transport } from '../runner/api
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, ticketOwns, type PrFact, type StationsResult } from './course-pr';
+import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
 import { MARKERS_FILE, parseMarkers, type Marker } from './course-markers';
 import { DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
@@ -24,7 +25,7 @@ import { ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './ti
 const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8' }).trim();
 /** `owner/name` of a checkout's `origin` remote (an SSH or HTTPS URL, or the proxy's
  * `…/git/owner/name` form), or null when it has none. */
-function remoteSlug(root: string): string | null {
+export function remoteSlug(root: string): string | null {
   try {
     // The proxy's `…/git/owner/name` form drops its `git/` — only when `owner/name` follows, so an
     // owner named `git` keeps its name.
@@ -238,7 +239,7 @@ function checkSource(c: CourseEntry, courseText: string, ownSyncMjs: boolean): v
   const at = `.baton/baton.json: course ${c.id}'s source ${c.source}`;
   if (src.course !== c.id) throw new Error(`${at} names course ${src.course}; a source names the course of its own id`);
   if (!self) throw new Error(`${at}: this CLI is not a git checkout with an origin, so it cannot tell its own commit`);
-  if (`${src.namespace}/${src.repository}` !== `${self.namespace}/${self.repository}`) {
+  if (!sameRepo(src, self)) {
     throw new Error(`${at}: a course from ${src.namespace}/${src.repository} is not supported yet — only this CLI's repository, ${self.namespace}/${self.repository}`);
   }
   if (src.ref !== self.sha) {
@@ -466,7 +467,7 @@ import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};
 // (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131).
 export async function run(ctx) {
   const sha = ctx.snapshot?.sha;
-  if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
+  if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
   // As with the instructions below: only an empty listing means there is no override.
   if (execFileSync('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel], { encoding: 'utf8' }).trim() === '') return standard(ctx);
@@ -641,7 +642,14 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     if (!Object.hasOwn(b.course.legs, leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${Object.keys(b.course.legs).join(', ')}`);
   }
   // The source every course scaffolded here names: this CLI's repository at this CLI's commit.
-  const self = cliSelf() ?? (pin ? pinSelf(pin) : null);
+  const own = cliSelf();
+  const pinned = pin ? parsePin(pin) : null;
+  if (own && pinned && pinned.sha !== own.sha) {
+    // The sources name this CLI's commit, the one whose registry writes the files; a workflow
+    // pinned elsewhere would run a CLI that refuses them (checkSource). Refused before any write.
+    throw new Error(`--pin names ${pinned.sha.slice(0, 10)}, but this CLI is at ${own.sha.slice(0, 10)}, the commit its courses' sources name — run \`baton repo init\` with the CLI at ${pinned.sha.slice(0, 10)}, or without --pin`);
+  }
+  const self = own ?? pinned;
   const sourceOf = (id: string): string | null => (self ? printSource({ provider: 'github', namespace: self.namespace, repository: self.repository, ref: self.sha, course: id }) : null);
   const kept: string[] = [];
   /** Write `rel` when it is missing, or when `rewrite` (Baton's file, and its course is being
@@ -671,7 +679,8 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   const moves = (c: CourseEntry): boolean => {
     if (!c.source || !self) return false;
     const src = parseSource(c.source);
-    return `${src.namespace}/${src.repository}` === `${self.namespace}/${self.repository}` && src.ref !== self.sha && builtIn(src.course) != null;
+    // An entry whose source names another course than its id is the sync's to refuse, not init's to move.
+    return sameRepo(src, self) && src.ref !== self.sha && src.course === c.id && builtIn(src.course) != null;
   };
   let settings: BatonJson;
   let rewriteNamed = force;
@@ -703,6 +712,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   await scaffold(b, rewriteNamed || !existing);
   for (const id of moved.filter((m) => m !== b.id)) await scaffold(builtIn(id)!, true);
   for (const leg of overrides) {
+    // The leg script is what loads the override, so an older one (from before overrides) is
+    // replaced: it is Baton's file.
+    await put(`.baton/courses/${b.id}/legs/${leg}.mjs`, (abs) => bundleSource(stubSource(b, b.id, leg), abs), true);
     await put(`.baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX}`, (abs) => writeFileSync(abs, overrideSource(b, leg)));
     log(`baton: .baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX} — this repository's run of ${leg}; edit it, and the leg script runs it in place of its own`);
   }
@@ -719,17 +731,20 @@ const courseFileText = (b: BuiltIn): string => `${JSON.stringify(b.course, null,
 /** This CLI's repository and commit, or null outside a git checkout with a GitHub origin. */
 function cliSelf(): { namespace: string; repository: string; sha: string } | null {
   try {
-    const at = cliPin();
-    return pinSelf(at);
+    return parsePin(cliPin());
   } catch {
     return null;
   }
 }
 
-/** `owner/name@commit` as a source's parts. */
-function pinSelf(at: string): { namespace: string; repository: string; sha: string } | null {
-  const m = /^([\w.-]+)\/([\w.-]+)@([0-9a-f]{40})$/.exec(at);
-  return m ? { namespace: m[1], repository: m[2], sha: m[3] } : null;
+/** Whether a source names this CLI's repository: GitHub's owner and repository names ignore case. */
+const sameRepo = (src: { namespace: string; repository: string }, self: { namespace: string; repository: string }): boolean =>
+  `${src.namespace}/${src.repository}`.toLowerCase() === `${self.namespace}/${self.repository}`.toLowerCase();
+
+/** A pin, `owner/name@<commit>` — the workflow's and a source's parts — or null when it is not one. */
+function parsePin(at: string): { namespace: string; repository: string; sha: string } | null {
+  const m = /^([\w.-]+)\/([\w.-]+)@(.*)$/.exec(at);
+  return m && GIT_SHA.test(m[3]) ? { namespace: m[1], repository: m[2], sha: m[3] } : null;
 }
 
 /** The sync workflow `baton repo init` writes: pinned to the CLI's version — the baton
@@ -738,11 +753,9 @@ function pinSelf(at: string): { namespace: string; repository: string; sha: stri
  * the workflow checks the pinned commit out and installs it (its esbuild bundles the defaults).
  * The CLI mints the run's OIDC token itself (`id-token: write`, R-BTN-15). */
 export function syncWorkflow(pin: string): string {
-  const at = pin.lastIndexOf('@');
-  if (at < 1 || !/^[\w.-]+\/[\w.-]+$/.test(pin.slice(0, at)) || !/^[0-9a-f]{40}$/.test(pin.slice(at + 1))) {
-    // A full sha: actions/checkout fetches a 40-hex ref as a commit, never a short one.
-    throw new Error(`--pin ${pin}: must be owner/name@<commit sha>, all 40 hex characters — the baton repository at one commit`);
-  }
+  // A full sha: actions/checkout fetches a 40-hex ref as a commit, never a short one.
+  const at = parsePin(pin);
+  if (!at) throw new Error(`--pin ${pin}: must be owner/name@<commit sha>, all 40 hex characters — the baton repository at one commit`);
   return `name: baton sync
 on:
   push:
@@ -776,8 +789,8 @@ jobs:
       # The CLI's version is pinned: a release changes nothing here until this ref moves.
       - uses: actions/checkout@v4
         with:
-          repository: ${pin.slice(0, at)}
-          ref: ${pin.slice(at + 1)}
+          repository: ${at.namespace}/${at.repository}
+          ref: ${at.sha}
           path: .baton-cli
       - run: npm ci --prefix .baton-cli
       # --latest main: after its observation number the run reads the newest main, so a slow

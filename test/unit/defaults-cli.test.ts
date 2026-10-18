@@ -10,7 +10,9 @@ import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { githubFacts, parseSyncArgs, syncWorkflow } from '../../src/defaults/cli';
+import { githubFacts, parseSyncArgs, remoteSlug, syncWorkflow } from '../../src/defaults/cli';
+import { graphOf } from '../../src/core/graph';
+import { decide } from '../../src/runner/protocol';
 import { CREATE_PR_COURSE, stationsPr, stationsReviewPr, type PrFact } from '../../src/defaults/course-pr';
 import { prClose, verdictLine, type Exec } from '../../src/defaults/pr-close';
 import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
@@ -31,14 +33,14 @@ const commitAll = (dir: string): string => {
 };
 const at = (dir: string) => ({ sha: execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() });
 /** A fresh import of an ejected or scaffolded module (the query defeats the module cache). */
-const PIN = 'immediately-run/baton@abababababababababababababababababababab';
 /** The source init writes for `course` (B-33): this CLI's repository at this CLI's commit — not
  * `--pin`'s, which only pins the workflow. */
-const SELF = (() => {
-  const slug = execFileSync('git', ['-C', ROOT, 'remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim()
-    .replace(/^git@[^:]+:/, '').replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '').replace(/^git\/(?=[^/]+\/[^/]+$)/, '');
-  return { slug, sha: execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() };
-})();
+const SELF = { slug: remoteSlug(ROOT), sha: execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() };
+/** The pin of this CLI's own commit: init refuses a --pin naming any other once a course names
+ * its source (B-33). */
+const PIN = `${SELF.slug}@${SELF.sha}`;
+/** A pin of another commit: refused for a scaffold, taken by the legacy `pr` path, which writes no source. */
+const OTHER_PIN = 'immediately-run/baton@abababababababababababababababababababab';
 const sourceOf = (course: string) => `github/${SELF.slug}/${SELF.sha}/${course}`;
 const load = async (file: string) => import(`${pathToFileURL(file).href}?t=${Math.random()}`);
 
@@ -70,7 +72,7 @@ describe('baton repo init, through the built CLI', () => {
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
     expect(workflow).toBe(syncWorkflow(PIN));
     // The pinned commit is checked out and run: the CLI is not published to a registry.
-    expect(workflow).toContain(`repository: immediately-run/baton\n          ref: ${'ab'.repeat(20)}\n          path: .baton-cli`);
+    expect(workflow).toContain(`repository: ${SELF.slug}\n          ref: ${SELF.sha}\n          path: .baton-cli`);
     // §7.1: the newest main read after the number, one run at a time, off until registered,
     // and a 15-minute backstop.
     expect(workflow).toContain('- run: node .baton-cli/cli/baton.mjs repo sync --latest main');
@@ -206,15 +208,16 @@ describe('baton repo init, through the built CLI', () => {
     try {
       writeFileSync(settingsFile, settings.replace('"repos": {}', '"repos": { "docs": "o/docs" }'));
       writeFileSync(stub, `${stubText}\n// edited by hand\n`);
-      const other = `immediately-run/baton@${'cd'.repeat(20)}`;
-      expect(baton(root, 'repo', 'init', '--pin', other)).toContain('kept .baton/baton.json');
+      const workflowFile = join(root, '.github', 'workflows', 'baton-sync.yml');
+      writeFileSync(workflowFile, 'an older pin\n');
+      expect(baton(root, 'repo', 'init')).toContain('kept .baton/baton.json');
       expect(readFileSync(settingsFile, 'utf8')).toContain('"docs": "o/docs"');
       expect(readFileSync(stub, 'utf8')).toContain('// edited by hand');
-      expect(readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8')).toContain(`ref: ${'cd'.repeat(20)}`);
+      expect(readFileSync(workflowFile, 'utf8')).toContain(`ref: ${SELF.sha}`);
       // --force rewrites the course's files and its own entry; the repository's settings stay.
       const edited = JSON.parse(readFileSync(settingsFile, 'utf8'));
       writeFileSync(settingsFile, JSON.stringify({ ...edited, agent_command: 'my-agent', courses: [{ ...edited.courses[0], version: 9 }, { id: 'bug-report', version: 1 }] }));
-      baton(root, 'repo', 'init', '--pin', other, '--force');
+      baton(root, 'repo', 'init', '--pin', PIN, '--force');
       const forced = JSON.parse(readFileSync(settingsFile, 'utf8'));
       expect(forced).toMatchObject({ repos: { docs: 'o/docs' }, agent_command: 'my-agent', default_course: 'create-pr' });
       expect(forced.courses.map((c: { id: string; version: number }) => [c.id, c.version])).toEqual([['create-pr', 1], ['bug-report', 1]]);
@@ -475,7 +478,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       const settings = { default_course: 'pr', courses: [{ id: 'pr', version: 1 }] };
       writeFileSync(join(legacy, '.baton', 'baton.json'), JSON.stringify(settings));
       writeFileSync(join(legacy, '.baton', 'courses', 'pr', 'course.json'), '{"kept":true}');
-      const out = baton(legacy, 'repo', 'init', '--pin', PIN);
+      const out = baton(legacy, 'repo', 'init', '--pin', OTHER_PIN);
       expect(out).toMatch(/course pr is now create-pr — its files are kept/);
       expect(JSON.parse(readFileSync(join(legacy, '.baton', 'baton.json'), 'utf8'))).toEqual(settings);
       expect(readFileSync(join(legacy, '.baton', 'courses', 'pr', 'course.json'), 'utf8')).toBe('{"kept":true}');
@@ -584,6 +587,65 @@ export async function run(ctx, standard) {
       delete process.env.VERDICT;
       writeFileSync(settingsFile, before[0]);
       writeFileSync(override, before[1]);
+      commitAll(root);
+    }
+  }, 120_000);
+
+  it('a --pin other than this CLI’s commit is refused before anything is written: the workflow’s sync would refuse the sources', () => {
+    const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
+    expect(() => baton(root, 'repo', 'init', '--pin', OTHER_PIN)).toThrow(`--pin names ${'ab'.repeat(5)}, but this CLI is at ${SELF.sha.slice(0, 10)}, the commit its courses' sources name`);
+    expect(readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8')).toBe(workflow);
+  }, 120_000);
+
+  it('--override replaces an older leg script, which could not load the override, even on a course with no source', () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const settings = readFileSync(settingsFile, 'utf8');
+    const script = join(legs(), 'review.mjs');
+    try {
+      const parsed = JSON.parse(settings);
+      writeFileSync(settingsFile, JSON.stringify({ ...parsed, courses: parsed.courses.map(({ source: _s, ...c }: { source?: string }) => c) }, null, 2));
+      writeFileSync(script, 'export async function run() { return null; } // a leg script from before overrides\n');
+      baton(root, 'repo', 'init', '--pin', PIN, '--override', 'review');
+      expect(readFileSync(script, 'utf8')).toContain('.baton/courses/create-pr/legs/review.run.mjs');
+    } finally {
+      writeFileSync(settingsFile, settings);
+      commitAll(root);
+    }
+  }, 120_000);
+
+  it('init moves every course from this CLI’s repository: a second course’s source and leg scripts move too', () => {
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    try {
+      baton(root, 'repo', 'init', '--pin', PIN, '--course', 'bug-report');
+      const two = JSON.parse(readFileSync(settingsFile, 'utf8'));
+      const old = (c: string) => `github/${SELF.slug}/${'2'.repeat(40)}/${c}`;
+      // A third entry whose source names another course than its id: the sync refuses it; init leaves it.
+      const stray = { id: 'docs-pr', version: 1, source: old('create-pr') };
+      writeFileSync(settingsFile, JSON.stringify({ ...two, courses: [...two.courses.map((c: { id: string }) => ({ ...c, source: old(c.id) })), stray] }, null, 2));
+      const trace = join(root, '.baton', 'courses', 'bug-report', 'legs', 'trace.mjs');
+      writeFileSync(trace, '// an older release\n');
+      expect(baton(root, 'repo', 'init', '--pin', PIN, '--course', 'create-pr')).toContain(`create-pr, bug-report now from ${SELF.sha.slice(0, 10)}`);
+      expect(JSON.parse(readFileSync(settingsFile, 'utf8')).courses.map((c: { source: string }) => c.source)).toEqual([sourceOf('create-pr'), sourceOf('bug-report'), old('create-pr')]);
+      expect(readFileSync(trace, 'utf8')).toContain('.baton/courses/bug-report/legs/trace.run.mjs');
+    } finally {
+      writeFileSync(settingsFile, before);
+      rmSync(join(root, '.baton', 'courses', 'bug-report'), { recursive: true, force: true });
+      commitAll(root);
+    }
+  }, 180_000);
+
+  it('an override whose position is no edge is refused by the runner’s decision, before close writes anything', async () => {
+    const override = join(legs(), 'review.run.mjs');
+    const before = readFileSync(override, 'utf8');
+    try {
+      writeFileSync(override, "export async function run() { return { reached: 'merged', next: null, verdict: 'approve' }; }\n");
+      const snapshot = { sha: commitAll(root) };
+      const result = await (await load(join(legs(), 'review.mjs'))).run({ ticket: { id: 'A-1' }, checkout: root, snapshot, leg: 'review' });
+      // The runner decides on the result before it calls close (runner.ts): a script bug suspends.
+      expect(decide(result, graphOf(CREATE_PR_COURSE), 'review', 'pr-open')).toMatchObject({ bug: true, why: "reached merged, which is not an outcome of review (reviewed)", reached: 'pr-open', next: 'review' });
+    } finally {
+      writeFileSync(override, before);
       commitAll(root);
     }
   }, 120_000);

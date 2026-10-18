@@ -885,7 +885,8 @@ offers a sane default.)*
     release does not touch them.
   - **Scaffolding.** `baton repo init --course <id>` writes the course's files and adds its entry
     to an existing `.baton/baton.json`, so courses sit side by side; `--force` rewrites that
-    course's files and its entry, never the rest of the file. With no `--course` it takes
+    course's entry and Baton's files of it (see *Whose files* below), never the rest of the
+    file and never the repository's. With no `--course` it takes
     the repository's `default_course`, else `create-pr`. `--course pr` is refused, naming
     `create-pr`. A repository still on `pr` keeps its files, and `init` without `--course` moves
     only its pin.
@@ -902,8 +903,9 @@ offers a sane default.)*
     `github/<owner>/<name>/<commit>/<course>` — `github/immediately-run/baton/<commit>/create-pr`.
     The commit is all 40 hex characters, so a name means one graph forever; `github` is the only
     provider, and another is refused by name. `init` writes the source: the CLI's own repository
-    at the CLI's own commit, the one whose registry wrote the files (`--pin` pins the workflow
-    only). The short `id` stays the name tickets, core's rows, rule 9 and branch patterns use,
+    at the CLI's own commit, the one whose registry wrote the files; a `--pin` naming another
+    commit is refused before anything is written, since the workflow's sync would then refuse
+    the sources. GitHub's owner and repository names compare without case. The short `id` stays the name tickets, core's rows, rule 9 and branch patterns use,
     and equals the source's course. The sync holds a sourced course to its source, posting
     nothing otherwise: the source names this CLI's repository at this CLI's commit (the
     workflow's pin); the repository's `course.json` is byte-equal to the one that commit
@@ -918,7 +920,12 @@ offers a sane default.)*
     `close`, so the closing marker the station function reads is always the standard one, and
     the position the override returns must be an edge, as every leg's must (R-BTN-83). The file
     is loaded alone, so it imports only Node built-ins. The test kit fails an override that
-    names no leg of the course or exports no `run`.
+    names no leg of the course, exports no `run`, or sits beside a leg script that does not load
+    it (one from before overrides: `--override` rewrites the leg's script). The kit does not run
+    an override, which does a leg's real work; a position that is no edge is refused by the
+    runner's decision before `close` writes anything (§6.13). An override keeps the leg's
+    `leg_version`, the version of its inputs and outputs (R-BTN-82, §4); the claim's
+    `snapshot_sha` already names the bytes of the implementation that ran.
   - **Whose files.** Baton's — the course file and the leg scripts — are written when missing,
     under `--force`, and whenever init moves a course's source to its own commit, which every
     init does for every course from its repository as it moves the workflow's pin. The
@@ -5281,6 +5288,7 @@ loses a prerequisite mid-run ends `released:blocked` after the release steps bel
     sync.mjs           # in the repository's CI (§7.1)
     hooks.js           # inside Baton (R-BTN-52) — retired 2026-10-16; rank.mjs, on the worker (R-BTN-98)
     legs/<leg>.mjs     # on the worker: one script per leg of course.json, run by `baton runner start`
+    legs/<leg>.run.mjs # optional: a repository's replacement for that leg's run, loaded by its script (R-BTN-131) — no leg of its own
   ```
 
   - **One script per leg**, named for it: the test kit (§2d) fails a course whose file names a

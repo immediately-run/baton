@@ -5,7 +5,9 @@
 // places the ticket; a claim's review runs the override at the snapshot and the standard close
 // writes the verdict line, which moves the ticket to `reviewed` with `fix` queued; a course file
 // that differs from the source's, a source at another commit or in another repository, and a
-// `sync.mjs` beside a source are each refused, nothing posted. Node only: it writes a real
+// `sync.mjs` beside a source are each refused, nothing posted; so are a source naming another
+// course than its id and one naming no standard course; the repository's name in another case is
+// the same repository. Node only: it writes a real
 // repository and runs git.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -18,7 +20,6 @@ import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import { ORIGIN, rows, setClock, syncToken } from '../helpers';
 
 const T0 = Date.parse('2026-10-18T12:00:00Z');
-const PIN = ['--pin', `immediately-run/baton@${'0'.repeat(40)}`];
 const ROOT = resolve(import.meta.dirname, '../..');
 const SHA = execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 
@@ -45,7 +46,7 @@ beforeEach(async () => {
   await setClock(T0);
   dir = mkdtempSync(join(tmpdir(), 'baton-s105-'));
   for (const a of [['init', '-q', '-b', 'main'], ['config', 'user.email', 's105@test'], ['config', 'user.name', 's105']]) git(...a);
-  expect(await initMain(['--override', 'review', ...PIN], { root: dir, log: () => {} })).toBe(0);
+  expect(await initMain(['--override', 'review'], { root: dir, log: () => {} })).toBe(0);
   mkdirSync(join(dir, 'tickets'), { recursive: true });
   writeFileSync(join(dir, 'tickets', 't1.md'), '---\nid: T-1\ntitle: Build it\n---\n');
   writeFileSync(facts, JSON.stringify([{ number: 7, head: 'claude/T-1-x', state: 'open', pushedAt: T0, pushes: [T0], checks: ['success'], reviews: [] }]));
@@ -122,6 +123,18 @@ export async function run(ctx, standard) {
     commit();
     await expect(sync()).rejects.toThrow('a course from someone/else is not supported yet');
 
+    withSource(source.replace(/\/create-pr$/, '/review-pr'));
+    commit();
+    await expect(sync()).rejects.toThrow('names course review-pr; a source names the course of its own id');
+
+    // A course of the CLI's repository that is no standard course of it.
+    mkdirSync(join(dir, '.baton', 'courses', 'mine'), { recursive: true });
+    writeFileSync(join(dir, '.baton', 'courses', 'mine', 'course.json'), graph);
+    writeFileSync(settingsFile(), JSON.stringify({ ...settings, courses: [...settings.courses, { id: 'mine', version: 1, source: source.replace(/\/create-pr$/, '/mine') }] }, null, 2));
+    commit();
+    await expect(sync()).rejects.toThrow(/mine is not a standard course of .+ at /);
+    rmSync(join(dir, '.baton', 'courses', 'mine'), { recursive: true, force: true });
+
     withSource(source);
     writeFileSync(join(dir, '.baton', 'courses', 'create-pr', 'sync.mjs'), 'export default { async stations() { return { stations: {}, markers: [], course_data: {} }; } };\n');
     commit();
@@ -132,5 +145,11 @@ export async function run(ctx, standard) {
     commit();
     await sync();
     expect(await rows('SELECT ticket_id FROM ticket_stations')).toEqual([{ ticket_id: 'docs:T-1' }]);
+
+    // GitHub's names ignore case: the same repository in another case is no other repository.
+    const [provider, owner, name, ...rest] = source.split('/');
+    withSource([provider, owner.toUpperCase(), name.toUpperCase(), ...rest].join('/'));
+    commit();
+    await sync();
   }, 120_000);
 });

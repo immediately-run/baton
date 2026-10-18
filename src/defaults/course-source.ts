@@ -6,6 +6,7 @@
 // beside it stays the name tickets, core's rows and branch patterns use. Pure: parsing and
 // printing only; what a source may name is the sync's check (cli.ts).
 import { COURSE_ID } from '../core/course';
+import { GIT_SHA } from '../core/validate';
 
 export interface CourseSource {
   provider: string;
@@ -31,7 +32,7 @@ export function parseSource(s: string): CourseSource {
   for (const [what, v] of [['namespace', namespace], ['repository', repository]] as const) {
     if (!NAME.test(v) || v === '.' || v === '..') throw new Error(`${s}: ${what} ${v || '(none)'} is not a repository name`);
   }
-  if (!/^[0-9a-f]{40}$/.test(ref)) throw new Error(`${s}: ${ref || '(none)'} is not a full commit — a source names all 40 hex characters`);
+  if (!GIT_SHA.test(ref)) throw new Error(`${s}: ${ref || '(none)'} is not a full commit — a source names all 40 hex characters`);
   if (!COURSE_ID.test(course)) throw new Error(`${s}: ${course || '(none)'} is not a course id`);
   return { provider, namespace, repository, ref, course };
 }

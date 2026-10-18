@@ -78,6 +78,8 @@ describe('baton test-course', () => {
     expect(await checkCourse(input({ legScripts: legs, overrides: [{ name: 'review', exports: ['run'] }] }))).toEqual([]);
     const v = await checkCourse(input({ legScripts: legs, overrides: [{ name: 'deploy', exports: ['run'] }, { name: 'review', exports: [] }, { name: 'fix', exports: [], error: 'Unexpected token' }] }));
     expect(v.map((x) => x.message)).toEqual(['legs/deploy.run.mjs overrides no leg of the course', 'legs/review.run.mjs exports no run(ctx, standard)', 'legs/fix.run.mjs does not load: Unexpected token']);
+    const stale = await checkCourse(input({ legScripts: legs, overrides: [{ name: 'review', exports: ['run'], loaded: false }] }));
+    expect(stale.map((x) => x.message)).toEqual(['legs/review.mjs does not load legs/review.run.mjs, so the override never runs — `baton repo init --course roadmap-pr --override review` rewrites it']);
   }, 60_000);
 
   it('a live ticket the proposed file would move back fails, naming it', async () => {

@@ -38,8 +38,9 @@ export interface KitInput {
    *  and `close` it exports — or null when the course has no `legs/`. */
   legScripts: { name: string; exports: string[]; error?: string }[] | null;
   /** The repository's leg overrides, `legs/<leg>.run.mjs` (R-BTN-131, B-33): each leg name and
-   *  whether its module exports `run`. Absent or empty when there are none. */
-  overrides?: { name: string; exports: string[]; error?: string }[];
+   *  whether its module exports `run`, and whether `legs/<leg>.mjs` loads it (`loaded`; a leg
+   *  script from before overrides does not). Absent or empty when there are none. */
+  overrides?: { name: string; exports: string[]; error?: string; loaded?: boolean }[];
   /** Live tickets and where the sync placed them under the course in force; null when none were
    *  given (no board), so the replay did not run. */
   live: { id: string; path: Step[] }[] | null;
@@ -94,6 +95,7 @@ export function staticViolations(k: KitInput): KitViolation[] {
     if (!Object.hasOwn(asRecord(asRecord(k.proposed).legs), o.name)) out.push({ rule: 'legs-scripts', message: `${file} overrides no leg of the course` });
     else if (o.error) out.push({ rule: 'legs-scripts', message: `${file} does not load: ${o.error}` });
     else if (!o.exports.includes('run')) out.push({ rule: 'legs-scripts', message: `${file} exports no run(ctx, standard)` });
+    else if (o.loaded === false) out.push({ rule: 'legs-scripts', message: `legs/${o.name}.mjs does not load ${file}, so the override never runs — \`baton repo init --course ${k.course} --override ${o.name}\` rewrites it` });
   }
   if (k.base) {
     const r = removed(k.base, k.proposed);
@@ -287,7 +289,9 @@ export async function readInputs(root: string, course: string, opts: { base?: st
       const name = f.slice(0, override ? -'.run.mjs'.length : -'.mjs'.length);
       const into = override ? overrides : legScripts;
       try {
-        into.push({ name, exports: legExports(await import(pathToFileURL(join(legsDir, f)).href)) });
+        // An override runs only through a leg script that looks it up: one from before overrides does not.
+        const loaded = override ? (existsSync(join(legsDir, `${name}.mjs`)) && readFileSync(join(legsDir, `${name}.mjs`), 'utf8').includes(`${name}.run.mjs`)) : undefined;
+        into.push({ name, exports: legExports(await import(pathToFileURL(join(legsDir, f)).href)), ...(override ? { loaded } : {}) });
       } catch (e) {
         into.push({ name, exports: [], error: (e as Error).message.split('\n')[0] });
       }
