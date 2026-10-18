@@ -364,7 +364,9 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   const get = async (url: string): Promise<Response> => {
     if (++requests > MAX_REQUESTS) throw new Error(`GitHub: this sync would need more than ${MAX_REQUESTS} requests — refusing before the token's hourly budget is spent`);
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    if (!res.ok) throw Object.assign(new Error(`GitHub ${url}: ${res.status}`), { status: res.status });
+    // A rate limit is GitHub's 403 or 429 with no requests left, or a secondary limit's retry-after.
+    const limited = res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after');
+    if (!res.ok) throw Object.assign(new Error(`GitHub ${url}: ${res.status}${limited ? ' (rate limited)' : ''}`), { status: res.status, limited });
     return res;
   };
   /** Every item of a paged list; `pick` takes a page's items from its body. */
@@ -424,13 +426,13 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
 
   /** A repository's PRs. A named repository whose list GitHub refuses (403) or does not find
    * (404) fails the whole sync — no partial reading — naming the tickets whose `repos:` name it;
-   * any other failure, as a timeout, a 5xx or the budget, is passed through as it is. */
+   * any other failure, as a timeout, a 5xx, a rate limit or the budget, is passed through as it is. */
   async function list(repo: string, tickets: string[]): Promise<any[]> {
     try {
       return await all<any>(`/repos/${repo}/pulls?state=all`);
     } catch (e) {
-      const status = (e as { status?: number }).status;
-      if (!tickets.length || (status !== 403 && status !== 404)) throw e;
+      const { status, limited } = e as { status?: number; limited?: boolean };
+      if (!tickets.length || limited || (status !== 403 && status !== 404)) throw e;
       throw new Error(`${(e as Error).message} — ${repo} is named in repos: by ${tickets.join(', ')}; the sync's token cannot read it, or it does not exist`);
     }
   }

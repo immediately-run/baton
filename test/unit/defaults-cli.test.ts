@@ -447,6 +447,13 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     const detail = githubFacts(dir, () => {}, () => true, [{ repository: 'o/site', tickets: ['A-1'] }]);
     await expect(detail).rejects.toThrow('GitHub https://api.github.com/repos/o/site/commits/s7/check-runs?per_page=100: 404');
     await expect(detail).rejects.not.toThrow('named in repos:');
+    // A rate-limit 403 on the list is the token's budget, not the repository: passed through too.
+    vi.stubGlobal('fetch', async (url: string) => url.includes('/repos/o/r/')
+      ? new Response('[]')
+      : new Response('{}', { status: 403, headers: { 'x-ratelimit-remaining': '0' } }));
+    const limited = githubFacts(dir, () => {}, () => true, [{ repository: 'o/site', tickets: ['A-1'] }]);
+    await expect(limited).rejects.toThrow('GitHub https://api.github.com/repos/o/site/pulls?state=all&per_page=100: 403 (rate limited)');
+    await expect(limited).rejects.not.toThrow('named in repos:');
   });
 });
 
