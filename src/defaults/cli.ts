@@ -436,13 +436,16 @@ export async function run(ctx) {
   const settings = JSON.parse(show('.baton/baton.json'));
   if (typeof settings.agent_command !== 'string' || settings.agent_command === '') throw new Error('.baton/baton.json names no agent_command');
   // The instructions, when the repository still has them; it owns them and may delete them. Only
-  // a path the snapshot lacks means deleted — any other failure stops the leg.
-  let text = null;
+  // a path the snapshot lacks means deleted — asked by exit code, since git translates its
+  // messages — and any other failure stops the leg.
+  const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
+  let present = true;
   try {
-    text = show(${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)});
-  } catch (e) {
-    if (!/does not exist in|exists on disk, but not in/.test(String(e?.stderr ?? e?.message ?? e))) throw e;
+    execFileSync('git', ['-C', ctx.checkout, 'cat-file', '-e', sha + ':' + rel], { stdio: 'ignore' });
+  } catch {
+    present = false;
   }
+  const text = present ? show(rel) : null;
   const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
   const instructions = dir == null ? '' : join(dir, ${JSON.stringify(`${leg}.md`)});
   if (dir != null) writeFileSync(instructions, text);

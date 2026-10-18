@@ -34,11 +34,12 @@ ticket picks its course with `course:` in its frontmatter, and the repository's 
 covers the rest.
 
 A runner serves one course, since a claim does not say which course its ticket is on. A
-repository on several courses runs one runner for each:
+repository on several courses runs one runner for each, each in its own clone, because a
+runner's legs work in its checkout's working tree (a second runner on a checkout is refused):
 
 ```
-npx baton run --course create-pr
-npx baton run --course bug-report
+npx baton run --course create-pr  --home ~/src/repo
+npx baton run --course bug-report --home ~/src/repo-bug-report
 ```
 
 ## How each course finds where a ticket is

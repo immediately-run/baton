@@ -155,7 +155,7 @@ describe('markerClose', () => {
   it('only a refused push is retried, at most MARKER_PUSH_TRIES times; a rebase that stops is aborted; any other failure throws at once', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-mclose-'));
     mkdirSync(join(dir, '.baton'));
-    const refused = Object.assign(new Error('Command failed: git push origin HEAD'), { stderr: ' ! [rejected]        HEAD -> main (fetch first)\nerror: failed to push some refs' });
+    const refused = Object.assign(new Error('Command failed: git push origin HEAD'), { stderr: ' ! [rejected]        HEAD -> main (fetch first)\nerror: failed to push some refs to \'origin\'' });
     const fake = (onPush: () => void, onPull: () => void = () => {}) => {
       const calls: string[] = [];
       const run = (_cmd: 'git', args: string[]) => {
@@ -177,6 +177,11 @@ describe('markerClose', () => {
       const other = fake(() => { throw Object.assign(new Error('Command failed'), { stderr: 'fatal: could not read from remote repository' }); });
       await expect(close(other.run)).rejects.toThrow('Command failed');
       expect(other.calls.filter((c) => c === 'push' || c === 'pull')).toEqual(['push']);
+
+      // A hook or protected branch refuses: `[remote rejected]`, with git's summary line after it.
+      const declined = fake(() => { throw Object.assign(new Error('Command failed: git push origin HEAD'), { stderr: ' ! [remote rejected] HEAD -> main (pre-receive hook declined)\nerror: failed to push some refs to \'origin\'' }); });
+      await expect(close(declined.run)).rejects.toThrow('git push');
+      expect(declined.calls.filter((c) => c === 'push' || c === 'pull')).toEqual(['push']);
 
       const stops = fake(() => { throw refused; }, () => { throw new Error('could not apply'); });
       await expect(close(stops.run)).rejects.toThrow('could not apply');

@@ -132,7 +132,8 @@ export function stationsMarkers(ctx: MarkersCtx): StationsResult {
 
 /** What `close` runs: `git`, in the checkout, answering stdout. Tests inject it. */
 export type Exec = (cmd: 'git', args: string[], cwd: string) => string;
-const exec: Exec = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: 'utf8' }).trim();
+/** The real command runner every standard course's `close` uses; tests inject their own. */
+export const exec = (cmd: string, args: string[], cwd: string): string => execFileSync(cmd, args, { cwd, encoding: 'utf8' }).trim();
 
 /** Appends one marker line to `.baton/markers.jsonl` and commits that file alone, as
  * `baton:close <ticket> <leg>` — the one way every standard course writes a marker line. */
@@ -153,10 +154,12 @@ export function bareTicketId(ticket: { id: string; home?: string | null }): stri
 /** How many times a close re-applies its marker over a remote that moved before it gives up. */
 export const MARKER_PUSH_TRIES = 3;
 
-/** A push the remote refused because the branch moved — the one failure a rebase can fix. */
+/** A push the remote refused because the branch moved — the one failure a rebase can fix. Not
+ * git's summary line (`failed to push some refs`), which every refusal prints: a hook or a
+ * protected branch says `[remote rejected]`, and no rebase fixes that. */
 const movedOnRemote = (e: unknown): boolean => {
   const err = e as { stderr?: unknown; message?: unknown };
-  return /\[rejected\]|non-fast-forward|fetch first|failed to push some refs/.test(`${String(err?.stderr ?? '')}\n${String(err?.message ?? '')}`);
+  return /! \[rejected\]|non-fast-forward|\(fetch first\)/.test(`${String(err?.stderr ?? '')}\n${String(err?.message ?? '')}`);
 };
 
 /** The marker courses' `close` (R-BTN-83): one line in `.baton/markers.jsonl`, committed and

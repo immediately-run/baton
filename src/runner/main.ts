@@ -11,6 +11,7 @@ import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { BatonApi, envAuth } from './api';
+import { holdHome } from './home';
 import { Runner } from './runner';
 
 export interface RunArgs {
@@ -160,6 +161,8 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // One course per runner (the claim response names no course): refused at startup, loudly, not
   // per claim.
   const course = runnerCourse(declareCourses(a.home), a.course);
+  // One runner per home checkout: its legs run in the working tree (R-BTN-131).
+  const release = holdHome(a.home);
   const runner = new Runner({
     api: new BatonApi({ url: a.url, transport: (req) => fetch(req), auth }, log),
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
@@ -169,6 +172,10 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     beatEvery: a.beatEvery, log,
     fetch: io.fetch ?? ((home) => fetchMain(home, log)),
   });
-  await runner.work();
+  try {
+    await runner.work();
+  } finally {
+    release();
+  }
   return 0;
 }

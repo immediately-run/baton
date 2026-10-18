@@ -6,7 +6,7 @@
 // restart and the fresh `import()` the wrapper does is of the snapshot's bytes.
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { graphOf, type Graph } from '../core/graph';
@@ -124,4 +124,40 @@ export function claimScratch(): string {
  * R-BTN-14's random 256-bit value. */
 export function freshSecret(): string {
   return randomBytes(32).toString('hex');
+}
+
+/** Whether a process is alive: signal 0 checks without sending; EPERM means it is, under another user. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** One runner per home checkout (R-BTN-131): every leg runs in its working tree, so a second
+ * runner there would switch branches and push under the first. The holder's pid goes in
+ * `baton-runner.lock` in the checkout's git dir — never the tree. A lock whose pid is dead is
+ * stale and taken over. Returns the release, which removes the lock only while it is still this
+ * process's. */
+export function holdHome(home: string, pid: number = process.pid): () => void {
+  const file = join(git(home, ['rev-parse', '--absolute-git-dir']).trim(), 'baton-runner.lock');
+  try {
+    writeFileSync(file, `${pid}\n`, { flag: 'wx' });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    const holder = Number(readFileSync(file, 'utf8').trim());
+    if (Number.isInteger(holder) && holder > 0 && holder !== pid && alive(holder)) {
+      throw new Error(`${home} is held by another runner (pid ${holder}): each runner needs its own clone — pass --home <another clone>`);
+    }
+    writeFileSync(file, `${pid}\n`);
+  }
+  return () => {
+    try {
+      if (readFileSync(file, 'utf8').trim() === String(pid)) rmSync(file);
+    } catch {
+      // Already gone.
+    }
+  };
 }

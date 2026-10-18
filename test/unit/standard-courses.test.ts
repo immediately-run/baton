@@ -44,6 +44,16 @@ describe('the standard courses (R-BTN-131)', () => {
         }
       });
 
+      it('every leg that can reach an end tells its agent to close the ticket: the sync reads only status: done (R-BTN-74)', () => {
+        for (const [leg, stub] of Object.entries(b.legs)) {
+          const ends = (stub.ask?.values ?? [undefined]).some((answer) => {
+            const pos = new Function('answer', `return (${stub.position});`)(answer) as { reached: string };
+            return b.course.end.includes(pos.reached);
+          });
+          if (ends) expect(readFileSync(join(instructionsDir(b.id), `${leg}.md`), 'utf8'), `${b.id}/${leg}`).toMatch(/`?status:`? to `?done`?/);
+        }
+      });
+
       it('its instructions carry none of the docs repository\'s machinery (§2a, R-BTN-50)', () => {
         for (const f of readdirSync(instructionsDir(b.id))) {
           const text = readFileSync(join(instructionsDir(b.id), f), 'utf8');

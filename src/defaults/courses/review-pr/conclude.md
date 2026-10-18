@@ -18,8 +18,23 @@ the PR of the branch you leave checked out. Then write one comment:
 
 Keep it to one screen. The author and the maintainers read it in place of the threads.
 
-Leave the PR's branch checked out when you finish. Do not commit to the default branch or
-change the ticket's `status:`: the conclusion line is what ends the ticket.
+## Close the ticket
+
+The ticket is finished, and only its file's `status:` says so to the sync: until it is `done`,
+tickets that depend on it are not ready, and Baton keeps reading the PR. Close it without
+leaving the PR's branch, since Baton writes its line on the PR of the branch you leave checked
+out. From the checkout:
+
+```
+git fetch origin <default branch>
+git worktree add --detach ../baton-close origin/<default branch>
+# in ../baton-close: set the ticket file's status: to done, then
+git -C ../baton-close commit -am "close <ticket>"
+git -C ../baton-close push origin HEAD:<default branch>
+git worktree remove ../baton-close
+```
+
+Leave the PR's branch checked out when you finish.
 
 ## Do not
 

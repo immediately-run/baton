@@ -3,12 +3,12 @@
 // the worker secret's shape. Node only: it writes temp checkouts and runs ssh-keygen.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { declareCourses, fetchMain, parseRunArgs, runnerCourse } from '../../src/runner/main';
 import { envAuth } from '../../src/runner/api';
-import { courseOf, freshSecret } from '../../src/runner/home';
+import { courseOf, freshSecret, holdHome } from '../../src/runner/home';
 
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
@@ -30,6 +30,31 @@ describe('parseRunArgs', () => {
     expect(() => parseRunArgs(['--beat-every', '10'], {})).toThrow('at least 50 ms');
     expect(() => parseRunArgs(['--home'], {})).toThrow('needs a value');
     expect(parseRunArgs(['--course', 'bug-report'], {}).course).toBe('bug-report');
+  });
+});
+
+describe('one runner per home checkout (R-BTN-131)', () => {
+  it('a second runner on a held home is refused; a dead holder\'s lock is taken over; release frees it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
+    try {
+      execFileSync('git', ['-C', dir, 'init', '-q']);
+      const lock = join(dir, '.git', 'baton-runner.lock');
+      const release = holdHome(dir);
+      expect(readFileSync(lock, 'utf8').trim()).toBe(String(process.pid));
+      // Another live process holds it: this test's parent stands in for a second runner's view.
+      expect(() => holdHome(dir, process.ppid)).toThrow(`held by another runner (pid ${process.pid}): each runner needs its own clone`);
+      release();
+      expect(existsSync(lock)).toBe(false);
+      // A stale lock — its pid is no process — is taken over.
+      writeFileSync(lock, '2147483646\n');
+      const again = holdHome(dir);
+      expect(readFileSync(lock, 'utf8').trim()).toBe(String(process.pid));
+      again();
+      // The tree stays clean: the lock lives in the git dir.
+      expect(execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8' })).toBe('');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

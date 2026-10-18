@@ -9,12 +9,10 @@
 // - every other leg: a JSON line in `.baton/markers.jsonl`, committed (`commitMarker`, shared
 //   with the marker courses); its sha is the evidence.
 // `baton repo init` bundles this into each leg stub, so a stub imports nothing at run time.
-import { execFileSync } from 'node:child_process';
-import { bareTicketId, commitMarker } from './course-markers';
+import { bareTicketId, commitMarker, exec } from './course-markers';
 
 /** What `close` runs: `git` or `gh`, in the checkout, answering stdout. Tests inject it. */
 export type Exec = (cmd: 'git' | 'gh', args: string[], cwd: string) => string;
-const exec: Exec = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: 'utf8' }).trim();
 
 export interface CloseCtx {
   checkout: string;

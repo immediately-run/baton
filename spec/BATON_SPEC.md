@@ -881,11 +881,14 @@ offers a sane default.)*
     the repository's `default_course`, else `create-pr`. `--course pr` is refused, naming
     `create-pr`. A repository still on `pr` keeps its files, and `init` without `--course` moves
     only its pin.
-  - **One course per runner.** The claim response names no course, so `baton run` serves one: a
-    home checkout declaring several runs one runner for each, `baton run --course <id>`. The
-    runner declares only that course in its heartbeat — rule 9 then hands it tickets on that
-    course alone — and loads it at each claim's snapshot. With no `--course`, a checkout
-    declaring several courses is refused at startup, naming the flag.
+  - **One course per runner, one runner per checkout.** The claim response names no course, so
+    `baton runner start` (spelled `baton run` until R-BTN-127's rename is built) serves one: a
+    repository on several courses runs one runner for each, `--course <id>`, each in its own
+    clone (`--home`), since every leg runs in its runner's working tree. The runner declares only
+    that course in its heartbeat — rule 9 then hands it tickets on that course alone — and loads
+    it at each claim's snapshot. With no `--course`, a checkout declaring several courses is
+    refused at startup, naming the flag; a checkout another live runner holds (its pid in
+    `baton-runner.lock` in the checkout's git dir) is refused too.
 
   Course code in the CLI, never core (§2b). S-BTN-104, G-BTN-123.
 
@@ -3367,7 +3370,7 @@ output now, and to rename the old commands outright, with no aliases.)*
   | `repo init [--course create-pr\|review-pr\|bug-report\|draft-ticket\|decision\|branch\|epic] [--forge …] [--eject tickets\|stations]` | none: writes files | — | `baton init` |
   | `repo sync [--if-wanted] [--defaults-only]`, `repo mirror [--if-wanted]` | `/v1/sync/*` (§7.1, R-BTN-93) | a CI identity token, sync (or mirror), or worker (R-BTN-102) |
   | `repo spool <repository>` | none: touches the spool file the sync account watches (R-BTN-105) | — (it runs as the pusher, who never reads the sync key) | `baton sync`, `baton mirror`, `baton spool` |
-  | `runner start [--legs …] [--max-legs <n>] [--until <t>] [--attached] [--sessions <provider>]` | `/v1/runner/*` (§6.13) | worker | `baton run` |
+  | `runner start [--legs …] [--max-legs <n>] [--until <t>] [--attached] [--sessions <provider>] [--course <id>]` | `/v1/runner/*` (§6.13) | worker | `baton run` |
   | `runner register --token <t> --name <name> [--key ssh\|api]` | as R-BTN-117 | the token | `baton register` |
   | `decision list [--all]` | `/v1/courier/*` (the CLI courier, R-BTN-80) | courier | `baton inbox` |
   | `server start --db <file> --admin-keys …` | none: starts the local host (§3a) | — | `baton start` |
