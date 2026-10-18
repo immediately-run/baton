@@ -1,6 +1,6 @@
 ---
-title: "B-34 — tenancy seams: a tenant is a Baton named by its origin, served only there; per-tenant object names, refusal handling, runner origins and forge ids, so many tenants later is a router"
-id: B-34
+title: "B-36 — tenancy seams: a tenant is a Baton named by its origin, served only there; per-tenant object names, refusal handling, runner origins and forge ids, so many tenants later is a router"
+id: B-36
 project: baton
 status: available
 updated: 2026-10-18
@@ -17,7 +17,7 @@ depends_on: []
 ---
 
 **Spec:** BATON_SPEC §3b — R-BTN-132, R-BTN-133, R-BTN-134 and R-BTN-135 (new), and the rules
-they amend; S-BTN-106 to S-BTN-109; G-BTN-125 to G-BTN-129.
+they amend; S-BTN-107 to S-BTN-110; G-BTN-126 to G-BTN-130.
 **Depends on:** nothing. *(Amended 2026-10-18, §3b review gate round 2: a stream's object name
 and the `forge-check` notice's signed `origin` and `forge_repo_id` are B-9's and B-5's to build,
 through this item's naming helper; both tickets say so.)*
@@ -138,16 +138,16 @@ today and an interface change or a broken promise later.
 
 ### Tests
 
-- S-BTN-106 to S-BTN-109 in `test/integration/`, on both hosts.
-- Unit tests for the shell's host check, naming helper and handshake (G-BTN-126). The static
+- S-BTN-107 to S-BTN-110 in `test/integration/`, on both hosts.
+- Unit tests for the shell's host check, naming helper and handshake (G-BTN-127). The static
   check on `src/core/` runs in `npm test`.
 - Unit tests for OIDC, GitLab and webhook verification with matching and mismatched ids,
   using fixtures from real token and payload shapes.
 
 ### Exit criteria
 
-- `npm test` and `npm run typecheck` green, with S-BTN-106 to S-BTN-109 and G-BTN-125 to
-  G-BTN-129 passing.
+- `npm test` and `npm run typecheck` green, with S-BTN-107 to S-BTN-110 and G-BTN-126 to
+  G-BTN-130 passing.
 - One real GitHub Actions OIDC token, from a workflow in a scratch repository, verified by id
   against a local Baton.
 - `wrangler.toml` serves no `workers.dev` or preview URL.
