@@ -8,7 +8,7 @@ repos:
   - baton
 tags:
   - roadmap-item
-description: "An `assignee` ticket field (`github:<login>` or `group:<name>`, groups in `.baton/baton.json`), unset meaning anyone with access: an assigned ticket's decisions and person legs notify the assignee's channels, its interactive legs run only as the assignee (a group's first taker holds the rest), and personal couriers register for people and groups with per-channel routing settings (amends BATON_SPEC R-BTN-78, R-BTN-80, R-BTN-103, R-BTN-116). Requires: none."
+description: "An `assignee` ticket field, a typed identity (`github:user:<login>`, a forge team `github:group:<team>`, or `baton:group:<name>` recorded in `.baton/baton.json`), unset meaning anyone with access: an assigned ticket's decisions and person legs notify the assignee's channels, its interactive legs run only as the assignee (a group's first taker holds the rest), and personal couriers register for people and groups with per-channel routing settings (amends BATON_SPEC R-BTN-78, R-BTN-80, R-BTN-103, R-BTN-116). Requires: none."
 topics:
   - baton
 owns: {}
@@ -31,11 +31,21 @@ A course's person legs, decisions and B-34's interactive legs are addressed toda
 
 ### What to build
 
-1. **`assignee` on a ticket** (§7.1's generic fields), set in git by the ticket source: `github:<login>` for a person, `group:<name>` for a group. Unset is the default and changes nothing: anyone with access to the repository may answer, and notices go to the couriers registered for the question's `asks` label.
-2. **Groups in git:** `.baton/baton.json` `groups: {"<name>": ["github:<login>", …]}`, versioned and reviewed like the rest of the repository's settings. An unknown group or a malformed member fails the sync, naming the ticket. Forge teams (`github:@org/team`) are later work: resolving them needs a token that can read the organisation.
+1. **`assignee` on a ticket** (§7.1's generic fields), set in git by the ticket source. An identity is typed, `<provider>:user:<name>` or `<provider>:group:<name>`, so a person and a team never collide:
+   - `github:user:joe`: a forge user;
+   - `github:group:wiki-editors`: a forge team, in the organization that owns the ticket's home repository, or `github:group:<org>/<team>` to name another;
+   - `baton:group:product`: a group recorded in git (2 below).
+
+   Unset is the default and changes nothing: anyone with access to the repository may answer, and notices go to the couriers registered for the question's `asks` label.
+2. **Groups, two kinds, both first-class.**
+   - **In git:** `.baton/baton.json` `groups: {"<name>": ["github:user:<login>", …]}`, versioned and reviewed like the repository's other settings. A group's members are users, never other groups in v1. An unknown group or a malformed member fails the sync, naming the ticket.
+   - **Forge-native teams:** the sync resolves a `github:group:…` assignee's members through the forge, as it reads PRs (R-BTN-96), and posts them with the ticket, so Baton itself still calls no forge.
+     - Reading a team's members needs a token with organization read (a GitHub App's `members: read`, or a fine-grained token). The workflow's default `GITHUB_TOKEN` cannot read it.
+     - A team the sync cannot read does not fail the board. The assignee is posted unresolved, its notices go only to channels registered for the group itself, and **Needs you** lists it with the reason.
+     - Membership is read on every sync, so a change of team takes effect at the next one.
 3. **Routing for an assigned ticket.** Its decisions and person legs notify the assignee's channels: a person's own, or every member's plus any channel registered for the group. The `asks` label still names the kind of question. **Needs you** lists an assigned ticket with an open question that no channel delivers to its assignee.
 4. **Interactive legs (B-34).** On an assigned ticket, only a runner that starts sessions as the assignee may take an interactive leg (a member, for a group). The member whose session takes the ticket's first interactive leg holds its later ones, unless the ticket is reassigned.
-5. **Courier routing per channel.** A personal courier is registered for people and groups as well as labels: `baton owner courier add <key> --for github:alice | group:product`. Each registration carries its own routing settings: a minimum severity (R-BTN-125), immediate or daily digest, its own `remind_after`, and a renderer (R-BTN-112). The channel's own details (a Slack channel, an email address, a push token) stay in the courier's configuration. Baton holds routing, never third-party credentials.
+5. **Courier routing per channel.** A personal courier is registered for people and groups as well as labels: `baton owner courier add <key> --for github:user:alice | github:group:wiki-editors | baton:group:product`. Each registration carries its own routing settings: a minimum severity (R-BTN-125), immediate or daily digest, its own `remind_after`, and a renderer (R-BTN-112). The channel's own details (a Slack channel, an email address, a push token) stay in the courier's configuration. Baton holds routing, never third-party credentials.
 6. **Reassignment is a git edit.** Open notices are queued for the new assignee from the snapshot that posts it. A running leg keeps its claim.
 7. **Who answered.** Routing only, in v1: anyone with access may still answer, and the answer's `answered_by` is recorded. Enforcing that only the assignee answers is left for later, as a filter (R-BTN-46), not a boundary.
 
@@ -47,7 +57,7 @@ A course's person legs, decisions and B-34's interactive legs are addressed toda
 ### Tests
 
 - A ticket assigned to a person, and one to a group: their decisions' notices reach exactly the assignee's channels (a member's, a group's own), with an unassigned ticket's going to the `asks` couriers as today.
-- An unknown group fails the sync, naming the ticket. Reassignment queues notices for the new assignee.
+- A forge team's members are resolved by the sync and posted with the ticket. A team the sync's token cannot read is posted unresolved and listed under **Needs you**, and the board still posts. An unknown `baton:` group fails the sync, naming the ticket. Reassignment queues notices for the new assignee.
 - An interactive leg on an assigned ticket refuses a runner of anyone else. A group's second interactive leg goes to the member who took the first.
 - A courier's routing settings filter by severity and batch a digest.
 - A scenario (next free S-BTN number) through the local host, with its G-BTN row.
