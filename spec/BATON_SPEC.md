@@ -4444,7 +4444,7 @@ otherwise break when a second tenant arrives.
       under **Needs you** (§14);
     - every registered forge repository having its ids is a cutover precondition (§13), so the
       path-only window closes before cutover.
-  - **R-BTN-56 is the repository's own promise.** Two tenants may each register the same
+  - **One Baton per repository is the repository's own promise (R-BTN-56).** Two tenants may each register the same
     forge repository; Baton cannot see that, by R-BTN-132. "One Baton per repository" is kept
     by the repository's `baton_url` and the audience its tokens carry, and by its owners. It is
     not checked by Baton across tenants.
@@ -6727,7 +6727,7 @@ touch. This section closes them, at four seams:
 - one repository's machine key, posts and claims reaching past their grants (§10.7.3);
 - merge checks, MCP, sign-in and the administrative surfaces (§10.7.4).
 
-**R-BTN-66 stands.** Whoever can push to a registered repository is a legitimate user of it,
+**Pushers stay legitimate (R-BTN-66).** Whoever can push to a registered repository is a legitimate user of it,
 and Baton does not fortify git. These rules make sure that people **without** push gain
 nothing. Baton checks no signature and needs no per-worker identity (R-BTN-46, rejected
 2026-10-14). The rules are cooperative hardening, not a sandbox: a leg runs as the runner's OS
