@@ -2,19 +2,111 @@
 title: "B-29 — Baton's create-pr across repositories: a ticket's PRs in every repository its repos names"
 id: B-29
 project: baton
-status: available
+status: in-review
 updated: 2026-10-18
 repos:
   - immediately-run/baton
 tags:
   - roadmap-item
-description: "create-pr reads only the home repository's PRs, and prs URLs naming a sibling repository are dropped; a docs roadmap item opens PRs in site-main, sandbox and sdk. The fact adapter reads each repository a live create-pr ticket names in repos (bounded, the same request budget), prs URLs to those repositories count, and the least advanced PR across them places the ticket; the leg instructions name every checkout. Needed for immediately.run's own work to run on create-pr (owner, 2026-10-18). Requires: none."
+description: "create-pr reads only the home repository's PRs, and prs URLs naming a sibling repository are dropped; a docs roadmap item opens PRs in site-main, sandbox and sdk. The fact adapter reads each repository a live create-pr ticket names in repos (bounded, the same request budget), prs URLs to those repositories count, and the ticket's PRs are read together, as one change (a verdict on any of them stands for it), since close writes one line on one PR; the leg instructions name every checkout. Needed for immediately.run's own work to run on create-pr (owner, 2026-10-18). Requires: none."
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/51
 depends_on:
   - B-28
 ---
 
-_(filed; the body follows.)_
+**Spec:** BATON_SPEC R-BTN-74 (amended), R-BTN-96 (amended), R-BTN-131 (amended), R-BTN-83.
+**Depends on:** B-28 (the standard courses).
+
+### Requires
+
+None: a checkout and a terminal. No exit criterion needs a forge, a browser or a person.
+
+### Why
+
+The owner, 2026-10-18: immediately.run's own work moves onto Baton's `create-pr` (B-31). A docs
+roadmap item names the code repositories it changes in `repos:` (site-main, sandbox, the SDK…)
+and opens one PR in each; docs itself, the ticket's home, never gets a PR. Today `create-pr`
+reads only the home repository's PRs, drops a `prs:` URL that names another repository, and
+writes its review and adjudication lines with `gh pr comment` on the PR of the home checkout's
+branch, which for a docs item does not exist.
+
+### What to build
+
+1. **The facts of every repository a ticket names.** The fact adapter reads the home
+   repository's PRs and those of each repository a live ticket on a PR-reading course names
+   in `repos:` (deduplicated, the home excluded), under the one request budget the sync
+   already has. Each fact records its `repository` (`owner/name`); a recorded fact with none
+   is the home's.
+2. **A ticket's PRs, across repositories.** A PR in the home is the ticket's as before. A PR
+   in another repository is the ticket's when the ticket names that repository in `repos:`
+   and either its branch matches the course's pattern or the ticket's `prs:` names it by URL.
+   A bare `prs:` number is a home PR.
+3. **One change, read together.** A ticket's PRs are one change. Their verdict lines,
+   adjudication lines, pushes and checks are read together as one timeline. `review` waits on
+   `ci` until every open PR's checks finish. The ticket is `merged` when every PR is merged,
+   and a closed unmerged PR counts as none, as before.
+4. **`close` writes its line on a PR it is told.** A leg's answer line may name the PR its line
+   goes on: `approve https://github.com/o/r/pull/7`. `close` comments there, and on the home
+   checkout's branch's PR when none is named. The stub checks that what follows the answer is
+   a pull-request URL.
+5. **`review-pr` likewise.** It accepts a `prs:` URL to a repository the ticket names, and
+   matches facts by repository and number, never by number alone.
+6. **The instructions name every checkout.** `create-pr`'s and `review-pr`'s leg instructions
+   say that the ticket's `repos:` lists the repositories, that each gets its PR on the same
+   branch name, recorded in `prs:`, and that the answer line names the PR to write on when the
+   home has none.
+
+### Architecture
+
+- **Course code in the CLI, never core** (§2b): `course-pr.ts`, `pr-close.ts`, `cli.ts`'s
+  adapter and stub. `src/core/` gains no line.
+- **Read together, not the least advanced.** R-BTN-74 placed a ticket with several PRs where its
+  least advanced PR is, and assumed each leg was done on every PR at once. But `close` writes
+  one line on one PR, so every other PR would never see a verdict and the ticket would never
+  advance. That holds for two open PRs in one repository today, and for every multi-repository
+  ticket. Reading the PRs as one timeline lets a verdict on any of them stand for the change.
+  Verdicts on several PRs with no push between them are one review, as `timelineOf` already
+  treats them. R-BTN-74 is amended to say so.
+- **Facts carry their repository.** Two repositories have PR #7: every match is by
+  `(repository, number)`, never by number alone.
+- **One budget.** The sibling repositories share `MAX_REQUESTS` and `MAX_PAGES` with the home.
+  A sync that would exceed them refuses, as today, rather than post a partial reading.
+- **The token.** The workflow's `GITHUB_TOKEN` reads its own repository and public ones. The
+  docs page says a private sibling repository needs a token that can read it.
+
+### Tests
+
+- Unit (`course-pr.test.ts`):
+  - a sibling PR is owned through `repos:` and the branch pattern, or through a `prs:` URL,
+    and is not owned when the ticket does not name its repository;
+  - a bare `prs:` number never matches a sibling's PR of that number;
+  - a verdict on one PR places the whole ticket;
+  - a push on any PR after the verdict is `fixed`;
+  - `review` waits on `ci` while any open PR's checks run;
+  - `merged` only when every PR is merged;
+  - review-pr finds its PR by URL in a named repository.
+- `defaults-cli.test.ts`:
+  - `githubFacts` against a recorded GitHub reads the home and a sibling repository named by a
+    live ticket, and only those, tagging each fact, under one budget;
+  - `prClose` comments on the named PR;
+  - the stub accepts `changes <PR URL>` and refuses an answer followed by something that is not
+    one.
+- Scenario `S-BTN-106` through the local host:
+  - a ticket whose home has no PR and whose `repos:` names two repositories is placed from
+    their PRs;
+  - a verdict written on one PR moves it to `reviewed`;
+  - one PR merged leaves it short of `merged`;
+  - both merged ends it.
+
+### Exit criteria
+
+- `npm test` green, with S-BTN-106 and its G-BTN row and the R-BTN-74/R-BTN-96/R-BTN-131
+  amendments in the spec.
+- `src/core/` unchanged.
+
+## Status
+

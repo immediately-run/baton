@@ -19,7 +19,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
-const init = (root: string, ...argv: string[]) => initMain([...argv, ...(argv.includes('--eject') ? [] : ['--pin', 'immediately-run/baton@'+'0'.repeat(40)])], { root, log: () => {} });
+// No --pin: the CLI pins its own commit, the one its courses' sources name (B-33).
+const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: () => {} });
 import type { PrFact } from '../../src/defaults/course-pr';
 import { ORIGIN, rows, setClock, syncToken } from '../helpers';
 

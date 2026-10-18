@@ -19,8 +19,8 @@ import { markerClose } from '../../src/defaults/course-markers';
 import { ORIGIN, rows, setClock, syncToken } from '../helpers';
 
 const T0 = Date.parse('2026-10-18T12:00:00Z');
-const PIN = ['--pin', `immediately-run/baton@${'0'.repeat(40)}`];
-const init = (root: string, ...argv: string[]) => initMain([...argv, ...PIN], { root, log: () => {} });
+// No --pin: the CLI pins its own commit, the one its courses' sources name (B-33).
+const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: () => {} });
 
 class Repo {
   readonly dir = mkdtempSync(join(tmpdir(), 'baton-s104-'));

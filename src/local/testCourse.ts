@@ -37,6 +37,10 @@ export interface KitInput {
   /** The leg scripts in `legs/` — each name without `.mjs`, and which of §6.13's `run`, `handoff`
    *  and `close` it exports — or null when the course has no `legs/`. */
   legScripts: { name: string; exports: string[]; error?: string }[] | null;
+  /** The repository's leg overrides, `legs/<leg>.run.mjs` (R-BTN-131, B-33): each leg name and
+   *  whether its module exports `run`, and whether `legs/<leg>.mjs` loads it (`loaded`; a leg
+   *  script from before overrides does not). Absent or empty when there are none. */
+  overrides?: { name: string; exports: string[]; error?: string; loaded?: boolean }[];
   /** Live tickets and where the sync placed them under the course in force; null when none were
    *  given (no board), so the replay did not run. */
   live: { id: string; path: Step[] }[] | null;
@@ -84,6 +88,14 @@ export function staticViolations(k: KitInput): KitViolation[] {
       const missing = LEG_EXPORTS.filter((e) => !x.exports.includes(e));
       if (missing.length) out.push({ rule: 'legs-scripts', message: `legs/${x.name}.mjs exports no ${missing.join(', ')} (§6.13: run, handoff and close)` });
     }
+  }
+  // An override replaces one leg's run, never its close: it must name a leg and export run.
+  for (const o of k.overrides ?? []) {
+    const file = `legs/${o.name}.run.mjs`;
+    if (!Object.hasOwn(asRecord(asRecord(k.proposed).legs), o.name)) out.push({ rule: 'legs-scripts', message: `${file} overrides no leg of the course` });
+    else if (o.error) out.push({ rule: 'legs-scripts', message: `${file} does not load: ${o.error}` });
+    else if (!o.exports.includes('run')) out.push({ rule: 'legs-scripts', message: `${file} exports no run(ctx, standard)` });
+    else if (o.loaded === false) out.push({ rule: 'legs-scripts', message: `legs/${o.name}.mjs does not load ${file}, so the override never runs — \`baton repo init --course ${k.course} --override ${o.name}\` rewrites it` });
   }
   if (k.base) {
     const r = removed(k.base, k.proposed);
@@ -269,13 +281,20 @@ export async function readInputs(root: string, course: string, opts: { base?: st
   }
   const legsDir = join(dir, 'legs');
   let legScripts: KitInput['legScripts'] = null;
+  const overrides: NonNullable<KitInput['overrides']> = [];
   if (existsSync(legsDir)) {
     legScripts = [];
     for (const f of readdirSync(legsDir).filter((x) => x.endsWith('.mjs')).sort()) {
+      const override = f.endsWith('.run.mjs');
+      const name = f.slice(0, override ? -'.run.mjs'.length : -'.mjs'.length);
+      const into = override ? overrides : legScripts;
       try {
-        legScripts.push({ name: f.slice(0, -4), exports: legExports(await import(pathToFileURL(join(legsDir, f)).href)) });
+        // An override runs only through a leg script that looks it up: one from before overrides does not.
+        // The script must name this course's own override path: a copy of another course's reads that one's.
+        const loaded = override ? (existsSync(join(legsDir, `${name}.mjs`)) && readFileSync(join(legsDir, `${name}.mjs`), 'utf8').includes(`.baton/courses/${course}/legs/${name}.run.mjs`)) : undefined;
+        into.push({ name, exports: legExports(await import(pathToFileURL(join(legsDir, f)).href)), ...(override ? { loaded } : {}) });
       } catch (e) {
-        legScripts.push({ name: f.slice(0, -4), exports: [], error: (e as Error).message.split('\n')[0] });
+        into.push({ name, exports: [], error: (e as Error).message.split('\n')[0] });
       }
     }
   }
@@ -286,5 +305,5 @@ export async function readInputs(root: string, course: string, opts: { base?: st
     live = Object.entries(asRecord(b.stations)).filter(([id]) => (courseOf.get(id) ?? course) === course)
       .map(([id, st]) => ({ id, path: (asRecord(st).path as Step[] | undefined) ?? [] }));
   }
-  return { course, proposed, base, proposedVersions, baseVersions, legScripts, live };
+  return { course, proposed, base, proposedVersions, baseVersions, legScripts, overrides, live };
 }
