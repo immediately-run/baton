@@ -79,6 +79,10 @@
     "at": 3,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   },
+  "S-BTN-63.no-chain › S-BTN-63 no review by its author’s key > a course file that drops its list, or renames the leg the owners key on, loosens nothing": {
+    "at": 3,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
   "S-BTN-63.no-chain › S-BTN-63 no review by its author’s key > the course file’s no_chain_from refuses the advance and a second claim by the same key; another key takes review": {
     "at": 3,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
