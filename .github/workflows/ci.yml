@@ -21,8 +21,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     # npm test replays every scenario trace through the model, one Quint run each; since 2026-10-19
-    # (R3-1254 part 2b's fleet, more scenarios) it takes over 25 minutes on a hosted runner. B-48
-    # brings it back down.
+    # (R3-1254 part 2b's fleet, more scenarios) it takes 20 to over 25 minutes on a hosted runner
+    # (baton#65's run 19 m 48 s; main's two runs cancelled at 25). B-48 brings it back down.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4

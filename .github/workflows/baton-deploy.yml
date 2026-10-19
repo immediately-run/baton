@@ -25,7 +25,8 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # npm test as in ci.yml: over 25 minutes since 2026-10-19 (B-48 brings it back down)
+    # npm test as in ci.yml: 20 to over 25 minutes since 2026-10-19, and already past 15 before then
+    # (B-48 brings it back down)
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
