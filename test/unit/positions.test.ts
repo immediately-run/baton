@@ -2,7 +2,8 @@
 // R3-1257): a renamed queued leg is read through `renamed_from`, both when the course file is
 // accepted and when a snapshot still posts the old name; a queued leg the file no longer has
 // leaving the station waits on `course-changed` from the file's acceptance, before any snapshot
-// posts it, and the wait ends when a later file has the leg again. Confirmation, replacement and
+// posts it, and the wait ends when a later file has the leg again; a wait git posts then starts
+// afresh (R-BTN-78). Confirmation, replacement and
 // the owner's re-route are B-38's.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Git, course, placed, rows, setClock, withCore } from '../helpers';
@@ -64,5 +65,22 @@ describe('R-BTN-83: the queued leg across course changes', () => {
     git.registry = [course(5, 3)];
     expect((await git.post()).status).toBe(200);
     expect(await nextLegs('J')).toEqual([{ leg: 'adjudicate', state: 'ready', waiting_on: null }]);
+  });
+
+  it('a wait git posts after Baton’s own course-changed one starts afresh: no baton:stalled before 72 hours of it', async () => {
+    const { adjudicate: _a, ...legs } = roadmapPr.legs;
+    const { adjudicated: _s, ...stations } = roadmapPr.stations;
+    const REMOVED = { ...roadmapPr, stations, legs: { ...legs, merge: { ...legs.merge, from: ['reviewed'] } } };
+    git.registry = [course(4, 3, { course: REMOVED })];
+    expect((await git.post()).status).toBe(200);
+    expect(await nextLegs('J')).toEqual([{ leg: 'adjudicate', state: 'waiting', waiting_on: 'course-changed' }]);
+    // 73 hours on the leg is back, and git posts it waiting on ci.
+    const later = T0 + 73 * 3_600_000;
+    await setClock(later);
+    git.registry = [course(5, 3)];
+    git.place('J', placed('reviewed', REVIEWED, [['adjudicate', 'waiting', 'ci']]));
+    expect((await git.post()).status).toBe(200);
+    expect(await rows(`SELECT waiting_on, waiting_since FROM ticket_next_legs WHERE ticket_id = 'docs:J'`)).toEqual([{ waiting_on: 'ci', waiting_since: later }]);
+    expect(await withCore((core) => core.blocks.raiseStalled(later))).toBe(0);
   });
 });

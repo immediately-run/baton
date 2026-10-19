@@ -11,6 +11,7 @@ import type { Store } from './ports';
 import { meetsRequiredBar, requiredBarCovers, type RequiredBar } from './admin';
 import { qualify } from './validate';
 import type { History } from './history';
+import { BATON_WAITS } from './blocks';
 
 /** What one snapshot showed of one ticket, against the previous accepted one. */
 export interface Seen {
@@ -19,6 +20,11 @@ export interface Seen {
   /** The previous accepted snapshot's path, or null when it placed the ticket nowhere. */
   prev: Step[] | null;
   bars: Record<string, string[]>;
+}
+
+/** A wait Baton stores itself (R-BTN-78's `BATON_WAITS`), not one a sync posts. */
+function batonWait(on: string | null | undefined): boolean {
+  return on != null && (BATON_WAITS as readonly string[]).includes(on);
 }
 
 export class Stations {
@@ -208,9 +214,12 @@ export class Stations {
       const n = unmet ? { leg: posted.leg, state: 'waiting' as const, waiting_on: 'policy' } : posted;
       const b = before.get(n.leg);
       // Age (the default order's fourth key) runs from the first snapshot that showed the leg
-      // ready, and an unbroken wait from the first that showed it waiting.
+      // ready, and an unbroken wait from the first that showed it waiting. A wait git posts never
+      // inherits the start of one Baton stored itself, nor the reverse: `baton:stalled` counts
+      // posted waits only (R-BTN-78).
       const readySince = n.state === 'ready' ? (b?.state === 'ready' ? b.ready_since : at) : null;
-      const waitingSince = n.state === 'waiting' ? (b?.state === 'waiting' ? b.waiting_since : at) : null;
+      const unbroken = b?.state === 'waiting' && batonWait(b.waiting_on) === batonWait(n.waiting_on ?? null);
+      const waitingSince = n.state === 'waiting' ? (unbroken ? b.waiting_since : at) : null;
       this.exec('INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, ready_since, waiting_since) VALUES (?, ?, ?, ?, ?, ?)',
         id, n.leg, n.state, n.waiting_on, readySince, waitingSince);
     }
