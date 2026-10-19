@@ -34,6 +34,8 @@
 //                [--unblocked-workflow .github/workflows/F.yml | --unblocked-workflow none] [--remind-after 24h]
 //   baton owner -i KEY courier add REPO --key PUB --asks owner[,…]      (R-BTN-80: a personal courier)
 //   baton owner -i KEY courier revoke REPO FINGERPRINT
+//   baton owner -i KEY resolve REPO TICKET baton:retries|baton:stalled retry|park   (R-BTN-78)
+//   baton ticket -i KEY history TICKET [--before ID] [--limit N]                    (R-BTN-81)
 //   baton decision list -i KEY [--watch | --all]
 //                — the CLI courier (R-BTN-80): claims the key's notices, prints them as text and
 //                marks them sent; --watch asks once a minute; --all lists every open decision it delivers
@@ -123,6 +125,17 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     const i = ticket.indexOf(':');
     if (i < 1) throw new Error('the ticket is <repository>:<id>');
     return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(ticket.slice(0, i))}/tickets/${encodeURIComponent(ticket.slice(i + 1))}/blocks` };
+  }
+  if (role === 'ticket') {
+    // R-BTN-81: a ticket's history, newest first — signed by an owner, an administrator or a key
+    // granted on its repository, the principals of its blocks.
+    if (cmd !== 'history') throw new Error('baton ticket history TICKET [--before ID] [--limit N]');
+    const { flags, positional } = parseArgs(rest, [], ['before', 'limit'], 1);
+    const ticket = need(positional[0], 'the ticket, <repository>:<id>');
+    const i = ticket.indexOf(':');
+    if (i < 1) throw new Error('the ticket is <repository>:<id>');
+    const q = new URLSearchParams({ ...(flags.before ? { before: flags.before } : {}), ...(flags.limit ? { limit: flags.limit } : {}) });
+    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(ticket.slice(0, i))}/tickets/${encodeURIComponent(ticket.slice(i + 1))}/history${q.size ? `?${q}` : ''}` };
   }
   if (role === 'admin') {
     if (cmd === 'repo') {
@@ -259,7 +272,15 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       parseArgs(rest.slice(3), [], [], 0);
       return { method: 'POST', path: `/v1/owner/${need(rest[1], 'the repository id')}/couriers`, body: { fingerprint: need(rest[2], 'the key fingerprint'), revoke: true } };
     }
-    throw new Error('baton owner grant|revoke|owners|bar|settings|courier');
+    if (cmd === 'resolve') {
+      // R-BTN-78: an owner's answer to one of Baton's own decisions on a ticket.
+      const { positional } = parseArgs(rest, [], [], 4);
+      const [repo, ticket, decision, answer] = positional;
+      const local = need(ticket, 'the ticket');
+      return { method: 'POST', path: `/v1/owner/${encodeURIComponent(need(repo, 'the repository id'))}/tickets/${encodeURIComponent(local.includes(':') ? local : `${repo}:${local}`)}/resolve`,
+        body: { decision: need(decision, 'the decision (baton:retries or baton:stalled)'), answer: need(answer, 'the answer (retry or park)') } };
+    }
+    throw new Error('baton owner grant|revoke|owners|bar|settings|courier|resolve');
   }
   throw new Error('baton admin … | baton owner …');
 }

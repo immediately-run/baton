@@ -102,6 +102,20 @@ function renderBlocked() {
   if (!box.children.length) box.append(el('li', { text: 'No ticket is blocked.', cls: 'muted' }));
 }
 
+/** R-BTN-85: where an accepted snapshot overrode what Baton held, the last 7 days — a count per
+ *  kind, then each with Baton's value and git's, as text. */
+function renderDiscrepancies() {
+  const box = document.getElementById('discrepancies');
+  box.replaceChildren();
+  const d = state.discrepancies ?? { by_kind: {}, rows: [] };
+  const kinds = Object.entries(d.by_kind).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, n]) => `${k} ${n}`).join(' · ');
+  if (kinds) box.append(el('li', { text: `Last 7 days: ${kinds}` }));
+  for (const r of d.rows) {
+    box.append(el('li', { text: `${r.ticket_id}: ${r.sub} at ${fmtTime(r.at)} — Baton ${JSON.stringify(r.baton)}; git ${JSON.stringify(r.git)}${r.observation != null ? ` (observation ${r.observation})` : ''}` }));
+  }
+  if (!d.rows.length) box.append(el('li', { text: 'No discrepancy in the last 7 days.', cls: 'muted' }));
+}
+
 /** R-BTN-76: the external resources' instances and their states. */
 function renderResources() {
   const box = document.getElementById('resources');
@@ -392,6 +406,8 @@ function renderNeeds() {
   // needs that no instrument has reported on for a day.
   for (const b of n.blocked_capability ?? []) list.append(el('li', { text: `${b.ticket_id}: blocked since ${fmtTime(b.since)} on ${b.capability}, which no live worker declares` }));
   for (const i of n.instances_unknown ?? []) list.append(el('li', { text: `${i.instance}: unknown since ${fmtTime(i.since)} while a posted leg needs it — no reading in force` }));
+  // R-BTN-83: a queued leg the course file in force no longer has leaving its station.
+  for (const t of n.course_changed ?? []) list.append(el('li', { text: `${t.ticket_id}: queued for ${t.leg}, which the course no longer has here — waiting on course-changed since ${fmtTime(t.waiting_since)}` }));
   // R-BTN-103: a pool copy no worker courier took for an hour; owner decisions no person hears of.
   for (const p of n.pool_unclaimed ?? []) list.append(el('li', { text: `${p.ticket_id}: decision ${p.decision}'s pool copy unclaimed since ${fmtTime(p.since)} — no worker courier is delivering ${p.repository_id}` }));
   for (const r of n.no_owner_channel ?? []) list.append(el('li', { text: `${r.repository_id}: ${r.decisions} owner decision${r.decisions === 1 ? '' : 's'} open and no personal courier for owner — baton owner courier add` }));
@@ -490,6 +506,7 @@ function render() {
   renderHead();
   renderReady();
   renderBlocked();
+  renderDiscrepancies();
   renderResources();
   renderProviders();
   renderMode();
