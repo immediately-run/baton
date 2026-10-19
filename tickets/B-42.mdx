@@ -19,9 +19,10 @@ depends_on: []
 **Brief:** the owner, 2026-10-19: "a user's legs should be typescript, mjs or regular non-module
 js. Node should perform module resolution (dependencies should be declared in the repo's
 package.json)", then "please make the spec amendment, this is important".
-**Spec:** `spec/BATON_SPEC.md` §2o (R-BTN-133), amending R-BTN-51, R-BTN-72, R-BTN-119,
-R-BTN-131 and §2d's test kit. The amendment lands in the PR that names this ticket; this ticket
-builds it.
+**Spec:** `spec/BATON_SPEC.md` §2o (R-BTN-133), as merged from PR 57 after three adversarial
+review rounds. It amends R-BTN-5, -34, -51, -65, -72, -105, -119, -121, -131, §2d and §7.2 rule
+4. This ticket builds it. The owner's two rulings in it are settled: install roots are only
+the course directory and `.baton/`, never the repository root.
 
 ### Requires
 
@@ -29,29 +30,71 @@ None: a checkout and a terminal.
 
 ### Why
 
-The runner extracts each `legs/<leg>.mjs` into a scratch directory (`src/runner/home.ts`
-`loadCourse`), so a leg can only be `.mjs` and can import only Node built-ins. Courses written
-in TypeScript, or needing a library, cannot be expressed.
+Today the runner copies each `legs/<leg>.mjs` into a scratch directory (`src/runner/home.ts`
+`loadCourse`). A leg can therefore only be `.mjs`, and can import only Node built-ins. A course
+written in TypeScript, or one that needs a library, cannot be expressed.
 
 ### What to build
 
-1. `src/runner/home.ts`: replace the scratch extraction with a detached worktree per
-   (repository, commit) under the runner's state directory; reuse, keep three per repository,
-   remove others at claim end; `<commit>.ready` stamp; clear write bits after install.
-2. The install: install root as R-BTN-133 orders it; one lockfile picks `npm ci`, `pnpm install
-   --frozen-lockfile` or `yarn install --immutable`; spawned detached in its own process group
-   under the fence; `--install-timeout` (default 15 min); the `spec` and `transient` ends.
-3. `src/runner/runner.ts` / `legProcess.mjs`: spawn the wrapper with the tree as cwd, importing
-   the script in place; accept `mjs`, `js`, `cjs`, `mts`, `ts`, `cts`; named exports else
-   default; refuse two scripts for one leg. Refuse to start under Node < 22.18; `engines`.
-4. `ctx.snapshot.tree` and `ctx.course.dir`; stubs (`src/defaults/cli.ts` `stubSource`) import
-   their override from the tree in place.
-5. Test kit (`src/local/testCourse.ts`): the extension set, two-scripts failure, imports with
-   Node's resolution from the given root.
-6. S-BTN-109 (`test/integration/`), G-BTN-128.
+1. **The ancestry check** (`src/runner/home.ts` `ensureSha`):
+   - On every claim, fetch the default branch and check `snapshot_sha` with `merge-base
+     --is-ancestor`.
+   - A commit that fails the check releases `stale-board`; a failed fetch is `transient`.
+   - After that release, make no further claim on the repository while Baton's head is that sha.
+2. **Leg trees:**
+   - Sparse (non-cone) detached worktrees keyed by (repository, commit, path), stored under
+     `<git dir>/baton/trees/`, each with a `.ready` stamp beside it.
+   - Write the stop file `<git dir>/baton/package.json`.
+   - Pass `-c core.hooksPath=/dev/null -c core.fsmonitor=false` on every git call.
+   - Verify a tree on every reuse: stamp, ancestry, and `git status --porcelain
+     --ignored=matching --untracked-files=all`. Refuse symlink escapes and submodules.
+   - Keep three trees per repository.
+3. **Install:**
+   - npm only: `npm ci --omit=dev --no-audit --no-fund`, at the course directory and `.baton/`
+     (each only when it declares dependencies).
+   - Refuse a pnpm or yarn lockfile, a missing lockfile, `workspaces`, and `file:` directories.
+   - Dependency cache keyed by digest (lockfile, `package.json`, ABI, platform, arch, npm
+     version), made read-only and stamped. Re-check it before each leg; collect it with the last
+     tree that links it.
+   - Classify failures by npm error: `EUSAGE` is `spec`, `ENOSPC` is `capability`, anything
+     else is `transient`.
+4. **Preparation:** every step runs as an asynchronous child in its own process group, under
+   the fence, stopped by R-BTN-119's sequence and bounded by `--prepare-timeout` (default 15
+   minutes). A claim stopped in preparation gets no `close` and no `handoff`.
+5. **The wrapper** (`src/runner/legProcess.mjs`):
+   - Call form `node legProcess.mjs <call> <script> <ctx.json> <out.json>`, where `<call>` is
+     `run`, `close`, `handoff`, `tickets`, `stations` or `rank`, and `out.json` carries `{ok,
+     result|ref|url, error?, aborted?}`.
+   - Working directory `ctx.checkout` for leg calls, and the whole-commit tree for `tickets`,
+     `stations` and `rank`.
+   - Clear `NODE_OPTIONS` and `NODE_PATH`.
+   - A `module.registerHooks` resolve hook that serves `@immediately-run/baton/leg` and refuses
+     anything outside the trees, the digests and `imports` paths. `imports` resolve only for
+     `tickets`, `stations` and `rank`.
+   - Bound `close` and `handoff` at 2 minutes each, and move both (and `rank.mjs`) out of the
+     runner's process.
+6. **Extensions:** `mjs`, `js`, `cjs`, `mts`, `ts` and `cts`; refuse two scripts for one leg.
+   The runner refuses to start under Node < 22.18; set `engines` to `>=22.18`.
+7. **The leg module** `@immediately-run/baton/leg`: `LegError` (identified by brand), `writeMarker`,
+   `commentOnPr`, `yieldContext`, `nextFire`, `writeSuccessor`, `NOT_BEFORE_HORIZON_DAYS` and
+   `CLI_VERSION`. `build:cli` (PR 58) ships it in `dist/`.
+8. **The `runner:` capability:**
+   - Built-in type `runner` with values `leg-trees`, treated as granted in core's rule 4: the
+     `isEligible` list, the claim SQL, `fleet_capabilities` and the prerequisites answer.
+   - The runner declares it from its own code, and so does an interactive sidecar. The kit and
+     the sync refuse unknown values, and courses may not define the type.
+9. **The test kit** (`src/local/testCourse.ts`): installs with the runner's command into its own
+   cache and resolves through the same wrapper and hook. It enforces the extension rules and the
+   `runner:leg-trees` requirement.
+10. **Tests:** S-BTN-109 (`test/integration/`), G-BTN-128. Add cases for every extension, Node
+   22.17's refusal, injected stop timers, ancestry, the digest cache's reuse and re-check, and
+   the interactive sidecar's declaration.
 
 ### Exit criteria
 
-S-BTN-109 passes on the local project; `npm test` and `npm run typecheck` green; a course with
-a `.ts` leg importing a dependency from `.baton/package.json` runs end to end under `baton
-runner start` from both a checkout and `dist/baton.mjs`.
+- S-BTN-109 passes on the local project, and `npm test` and `npm run typecheck` are green.
+- A course with a `.ts` leg that imports a dependency from `.baton/package.json` runs end to end
+  under `baton runner start`, both from a checkout and from `dist/baton.mjs`.
+- Carried from review round 3, to settle while building:
+  - how `session`-mode runners and check-runners prepare trees (S-6);
+  - the rollback limit stays as stated (R3-4).
