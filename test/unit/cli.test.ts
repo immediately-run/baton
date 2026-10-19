@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { duration, parseArgs, plan, send } from '../../cli/baton.mjs';
+import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
 import { ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
@@ -47,6 +48,18 @@ describe('plan: one request per command', () => {
       .toEqual({ unblocked_trigger: { kind: 'github-app', workflow: '.github/workflows/unblocked.yml' } });
     expect(() => plan('owner', ['settings', 'docs', '--no-required-bars', '--required-bar', '*', '--course', 'c', '--tag-prefix', 'p'], key)).toThrow('clears them');
     expect(() => plan('owner', ['settings', 'docs'], key)).toThrow('at least one setting');
+    // R-BTN-80: remind_after in seconds, from a duration.
+    expect(plan('owner', ['settings', 'docs', '--remind-after', '6h'], key).body).toEqual({ remind_after: 21_600 });
+  });
+
+  it('owner courier commands (R-BTN-80)', () => {
+    expect(plan('owner', ['courier', 'add', 'docs', '--key', PUB, '--asks', 'owner,legal'], key))
+      .toEqual({ method: 'POST', path: '/v1/owner/docs/couriers', body: { public_key: PUB, asks: ['owner', 'legal'] } });
+    expect(plan('owner', ['courier', 'revoke', 'docs', 'SHA256:abc'], key))
+      .toEqual({ method: 'POST', path: '/v1/owner/docs/couriers', body: { fingerprint: 'SHA256:abc', revoke: true } });
+    expect(() => plan('owner', ['courier', 'add', 'docs', '--key', PUB], key)).toThrow('--asks is required');
+    expect(() => plan('owner', ['courier', 'revoke', 'docs'], key)).toThrow('the key fingerprint is required');
+    expect(() => plan('owner', ['courier', 'add', 'docs', '--key', PUB, '--asks', 'owner', '--severity', 'high'], key)).toThrow('not a flag');
     expect(() => plan('owner', ['bar', 'docs', '--course', '*', '--tag', 't', '--applies', 'claim', '--starts-at', 'soon', '--reason', 'r'], key)).toThrow('not a date');
   });
 
@@ -151,4 +164,76 @@ describe('baton test-course: the command (R3-1248)', () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 120_000);
+});
+
+describe('baton decision list: the CLI courier (R-BTN-80)', () => {
+  const notice = (id: string, title: string, url?: string) => ({ notice_id: id, kind: 'decision', repository: 'docs', ticket: `docs:${id}`, title,
+    decision: { id: `${id}-1`, asks: 'owner', ...(url ? { url } : {}) }, unblocks: [`docs:${id}`], created_at: 1 });
+
+  it('prints control characters as U+FFFD, never as terminal instructions', () => {
+    expect(plain('a\u001b]0;pwned\u0007b\nc\u2028d\u009be')).toBe('a\uFFFD]0;pwned\uFFFDb\uFFFDc\uFFFDd\uFFFDe');
+    expect(formatDecision({ ticket: 'docs:E', title: 'Ship \u001b[31mit', decision: { id: 'E-1', asks: 'owner' } }))
+      .toBe('docs:E — Ship \uFFFD[31mit\n  decision E-1 (asks owner)');
+  });
+
+  it('claims, prints each, then marks it sent; an answered one is no error; another refusal is', async () => {
+    const calls: [string, string, unknown][] = [];
+    const out: string[] = [];
+    const replies: Record<string, { status: number; json: Record<string, unknown> }> = {
+      'POST /v1/courier/notices/claim': { status: 200, json: { notices: [notice('A', 'First', 'https://github.com/o/r/pull/1'), notice('B', 'Second')] } },
+      'POST /v1/courier/notices/A': { status: 200, json: { ok: true } },
+      'POST /v1/courier/notices/B': { status: 409, json: { ok: false, code: 'closed', message: 'answered' } },
+    };
+    const request = async (method: string, path: string, body?: unknown) => {
+      calls.push([method, path, body]);
+      // Each notice is written before it is marked.
+      if (path.endsWith('/A') && calls.length === 2) expect(out).toHaveLength(1);
+      return replies[`${method} ${path}`];
+    };
+    expect(await listOnce(request, (t: string) => out.push(t))).toBe(2);
+    expect(out).toEqual(['docs:A — First\n  decision A-1 (asks owner)\n  https://github.com/o/r/pull/1', 'docs:B — Second\n  decision B-1 (asks owner)']);
+    expect(calls.map(([m, p, b]) => [m, p, b])).toEqual([
+      ['POST', '/v1/courier/notices/claim', {}],
+      ['POST', '/v1/courier/notices/A', { state: 'sent', channel: 'cli' }],
+      ['POST', '/v1/courier/notices/B', { state: 'sent', channel: 'cli' }],
+    ]);
+    replies['POST /v1/courier/notices/B'] = { status: 403, json: { ok: false, code: 'forbidden', message: 'another courier' } };
+    await expect(listOnce(request, () => {})).rejects.toThrow('marking B sent: 403 forbidden');
+    replies['POST /v1/courier/notices/claim'] = { status: 401, json: { ok: false, code: 'unauthenticated', message: 'revoked' } };
+    await expect(listOnce(request, () => {})).rejects.toThrow('401 unauthenticated revoked');
+  });
+
+  it('--all reads the open decisions once and claims nothing', async () => {
+    const out: string[] = [];
+    const paths: string[] = [];
+    const request = async (method: string, path: string) => {
+      paths.push(`${method} ${path}`);
+      return { status: 200, json: { decisions: [{ ...notice('E', 'Open'), notice_state: null }] } };
+    };
+    expect(await listOnce(request, (t: string) => out.push(t), { all: true })).toBe(1);
+    expect(paths).toEqual(['GET /v1/courier/decisions']);
+    expect(out).toEqual(['docs:E — Open\n  decision E-1 (asks owner)\n  notice: none']);
+  });
+
+  it('--watch asks once a minute until stopped', async () => {
+    const stop = new AbortController();
+    const waits: number[] = [];
+    let passes = 0;
+    const warned: string[] = [];
+    const request = async () => {
+      passes++;
+      // The second pass finds Baton unreachable: reported, and the watch goes on.
+      if (passes === 2) throw new Error('fetch failed');
+      return { status: 200, json: { notices: [] } };
+    };
+    const sleep = async (ms: number) => {
+      waits.push(ms);
+      if (waits.length === 3) stop.abort();
+    };
+    await watch(request, () => {}, { signal: stop.signal, sleep, warn: (t: string) => warned.push(t) });
+    expect(passes).toBe(3);
+    expect(warned).toEqual(['baton decision list: fetch failed; trying again in a minute']);
+    expect(waits).toEqual([WATCH_EVERY_MS, WATCH_EVERY_MS, WATCH_EVERY_MS]);
+    expect(WATCH_EVERY_MS).toBe(60_000);
+  });
 });

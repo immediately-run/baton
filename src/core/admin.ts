@@ -9,7 +9,8 @@ import { BatonError, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { KEY_FINGERPRINT, parseSshKey, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkRepositoryId } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId } from './validate';
+import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkRegistration, tierPosition, type Registration, type Registry } from './registry';
 import { graphOf, resolveLeg, type Graph } from './graph';
@@ -109,6 +110,8 @@ export class Admin {
     dispatchSync: (repository: string) => void;
     /** R-BTN-75, R-BTN-76: a grant made, changed or revoked moves the fleet's counts. */
     fleetChanged?: () => void;
+    /** R-BTN-80: a courier registered or revoked queues or closes its notices. */
+    notices?: Notices;
   }) {}
 
   private rows<T = Record<string, unknown>>(q: string, ...p: unknown[]): T[] {
@@ -323,16 +326,25 @@ export class Admin {
   revokeKey(actor: string, raw: string) {
     // A key's fingerprint, or a bearer-token credential's id while tokens serve (R3-1239).
     const fingerprint = KEY_FINGERPRINT.test(raw) || TOKEN_CREDENTIAL.test(raw) ? raw : bad('fingerprint', 'must be a key fingerprint, SHA256:…, or a token credential’s id');
+    // The pool's reserved credential has no key to revoke (R-BTN-103).
+    if (fingerprint === 'pool') bad('fingerprint', 'pool is reserved for worker couriers’ pool copies, not a key');
     return this.c.store.transaction(() => {
       const now = this.c.now();
       // `revoked_by` keeps an administrator's revoke through a later CREDENTIALS/TOKEN_HASHES edit (round 2, 2-A-2).
       this.exec('UPDATE credentials SET revoked_at = ?, revoked_by = ? WHERE id = ? AND revoked_at IS NULL', now, actor, fingerprint);
       let changed = this.changed();
+      // A credential already revoked otherwise — a courier key whose last registration its owners
+      // ended — becomes the administrator's revoke too, so no owner can bring it back (R-BTN-80).
+      this.exec(`UPDATE credentials SET revoked_by = ? WHERE id = ? AND revoked_at IS NOT NULL AND (revoked_by IS NULL OR revoked_by NOT LIKE 'admin:%')`, actor, fingerprint);
+      changed += this.changed();
       this.exec('UPDATE worker_grants SET revoked_at = ? WHERE credential_id = ? AND revoked_at IS NULL', now, fingerprint);
       this.exec('UPDATE sync_keys SET revoked_at = ? WHERE fingerprint = ? AND revoked_at IS NULL', now, fingerprint);
       changed += this.changed();
       this.exec('UPDATE repository_owners SET removed_at = coalesce(removed_at, ?), revoked_at = ? WHERE fingerprint = ? AND revoked_at IS NULL', now, now, fingerprint);
       changed += this.changed();
+      // A courier key's registrations go with it, and its notices close (R-BTN-80).
+      this.exec('DELETE FROM couriers WHERE credential_id = ?', fingerprint);
+      this.c.notices?.revoked(fingerprint, null);
       if (!changed && !this.rows('SELECT 1 FROM credentials WHERE id = ? UNION SELECT 1 FROM sync_keys WHERE fingerprint = ? UNION SELECT 1 FROM repository_owners WHERE fingerprint = ?', fingerprint, fingerprint, fingerprint).length) {
         throw new BatonError('not-found', 'no key with that fingerprint');
       }
@@ -489,6 +501,58 @@ export class Admin {
     });
   }
 
+  // ── couriers (R-BTN-80) ─────────────────────────────────────────────────────────────────
+
+  /**
+   * `POST /v1/owner/{repository}/couriers`: `{public_key, asks}` registers a personal courier on
+   * this repository for those `asks` (replacing its asks here), `{fingerprint, revoke: true}`
+   * ends its registration here. A key in another role is `conflict` (R-BTN-57); a courier key
+   * another repository registered may be added — one person's CLI serves every repository they
+   * own. Revoking closes its notices here, and the credential goes with its last registration;
+   * one an administrator revoked never comes back.
+   */
+  async couriers(actor: string, repository: string, body: unknown) {
+    if (!isObj(body)) bad('body', 'must be a JSON object');
+    const b = body as Record<string, unknown>;
+    if (b.revoke === true) {
+      only(b, ['fingerprint', 'revoke'], 'body');
+      const fp = fingerprintOf(b.fingerprint, 'fingerprint');
+      return this.c.store.transaction(() => {
+        this.exec('DELETE FROM couriers WHERE credential_id = ? AND repository_id = ?', fp, repository);
+        if (!this.changed()) throw new BatonError('not-found', `${fp} is no courier of ${repository}`);
+        this.c.notices?.revoked(fp, repository);
+        if (!this.rows('SELECT 1 FROM couriers WHERE credential_id = ?', fp).length) {
+          this.exec('UPDATE credentials SET revoked_at = ?, revoked_by = ? WHERE id = ? AND revoked_at IS NULL', this.c.now(), actor, fp);
+        }
+        this.event(actor, { act: 'courier-revoked', key: fp, repository }, repository);
+        return { ok: true };
+      });
+    }
+    only(b, ['public_key', 'asks'], 'body');
+    const key = await this.parseKey(b.public_key, 'public_key');
+    const asks = checkAsks(b.asks);
+    const admins = await this.adminFingerprints();
+    return this.c.store.transaction(() => {
+      const role = this.roleOf(key.fingerprint, admins);
+      if (role && role !== 'courier') throw new BatonError('conflict', `this key is already a ${role} key (R-BTN-57: one role per key)`);
+      const cred = this.rows<{ revoked_at: number | null; revoked_by: string | null }>('SELECT revoked_at, revoked_by FROM credentials WHERE id = ?', key.fingerprint)[0];
+      if (!cred) {
+        this.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, ?, '[]', 'courier', ?, ?)`,
+          key.fingerprint, `courier:${key.fingerprint}`, key.line, actor);
+      } else if (cred.revoked_at != null) {
+        // An owner's revoke of its last registration ends the credential, and another
+        // registration brings it back; an administrator's revoke is final.
+        if (cred.revoked_by?.startsWith('admin:')) throw new BatonError('conflict', 'this courier key was revoked by an administrator; its holder needs a new key');
+        this.exec('UPDATE credentials SET revoked_at = NULL, revoked_by = NULL WHERE id = ?', key.fingerprint);
+      }
+      this.exec('DELETE FROM couriers WHERE credential_id = ? AND repository_id = ?', key.fingerprint, repository);
+      for (const a of asks) this.exec('INSERT INTO couriers (credential_id, repository_id, asks) VALUES (?, ?, ?)', key.fingerprint, repository, a);
+      this.c.notices?.registered(key.fingerprint, repository);
+      this.event(actor, { act: 'courier-added', key: key.fingerprint, repository, asks }, repository);
+      return { ok: true, fingerprint: key.fingerprint };
+    });
+  }
+
   private insertOwner(repository: string, key: { fingerprint: string; line: string }, actor: string) {
     this.exec(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES (?, ?, ?, ?, ?)
                ON CONFLICT (repository_id, public_key) DO UPDATE SET removed_at = NULL, added_by = excluded.added_by, added_at = excluded.added_at`,
@@ -549,11 +613,11 @@ export class Admin {
   }
 
   /** `PUT /v1/owner/{repository}/settings`: `required_bars`, `retry`, `transcript_repos`,
-   *  `unblocked_trigger` — each given replaces that setting whole. */
+   *  `unblocked_trigger`, `remind_after` (seconds, R-BTN-80) — each given replaces that setting whole. */
   setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     const sets: [string, string | null][] = [];
     if (b.required_bars !== undefined) sets.push(['required_bars', JSON.stringify(this.checkRequiredBars(repository, b.required_bars))]);
@@ -564,9 +628,14 @@ export class Admin {
       sets.push(['transcript_repos', JSON.stringify(t)]);
     }
     if (b.unblocked_trigger !== undefined) sets.push(['unblocked_trigger', b.unblocked_trigger === null ? null : JSON.stringify(checkTrigger(b.unblocked_trigger))]);
+    if (b.remind_after !== undefined) {
+      const r = Number.isInteger(b.remind_after) && (b.remind_after as number) >= REMIND_AFTER_S.min && (b.remind_after as number) <= REMIND_AFTER_S.max
+        ? (b.remind_after as number) : bad('remind_after', `must be whole seconds from ${REMIND_AFTER_S.min} to ${REMIND_AFTER_S.max}`);
+      sets.push(['remind_after_s', JSON.stringify(r)]);
+    }
     return this.c.store.transaction(() => {
       for (const [k, v] of sets) this.exec(`UPDATE repositories SET ${k} = ? WHERE id = ?`, v, repository);
-      this.event(actor, { act: 'settings', repository, ...Object.fromEntries(sets.map(([k, v]) => [k, v == null ? null : JSON.parse(v)])) }, repository);
+      this.event(actor, { act: 'settings', repository, ...Object.fromEntries(sets.map(([k, v]) => [k === 'remind_after_s' ? 'remind_after' : k, v == null ? null : JSON.parse(v)])) }, repository);
       // Required bars are applied as a snapshot's legs are stored: the next sync re-stores them
       // now rather than at the schedule (round 1, 1-A-8).
       if (b.required_bars !== undefined) this.c.dispatchSync(repository);
@@ -635,7 +704,9 @@ export class Admin {
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
-      settings: this.rows('SELECT id AS repository_id, required_bars, retry, transcript_repos, unblocked_trigger FROM repositories WHERE retired_at IS NULL ORDER BY id'),
+      settings: this.rows('SELECT id AS repository_id, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after FROM repositories WHERE retired_at IS NULL ORDER BY id'),
+      // R-BTN-80: the personal channels, by repository.
+      couriers: this.c.notices?.couriers() ?? [],
     };
   }
 
