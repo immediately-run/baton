@@ -74,5 +74,9 @@
   "S-BTN-40.slow-syncs › S-BTN-40 slow and stale syncs, end to end > a closure reported before the claim’s latest advance does not confirm a later done: only a newer one does": {
     "at": 7,
     "reason": "the harness wrote a claim (a state Baton did not reach)"
+  },
+  "S-BTN-47.positions-decisions › S-BTN-47 positions, course changes and the dead-ticket queue > a leg added later changes no queued leg; a removed queued leg waits on course-changed under Needs you": {
+    "at": 3,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   }
 }

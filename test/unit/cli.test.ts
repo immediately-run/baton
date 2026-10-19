@@ -52,6 +52,18 @@ describe('plan: one request per command', () => {
     expect(plan('owner', ['settings', 'docs', '--remind-after', '6h'], key).body).toEqual({ remind_after: 21_600 });
   });
 
+  it('owner resolve and ticket history (R-BTN-78, R-BTN-81)', () => {
+    expect(plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries', 'retry'], key))
+      .toEqual({ method: 'POST', path: '/v1/owner/docs/tickets/docs%3AR3-1/resolve', body: { decision: 'baton:retries', answer: 'retry' } });
+    expect(plan('owner', ['resolve', 'docs', 'docs:R3-1', 'baton:stalled', 'park'], key).path).toBe('/v1/owner/docs/tickets/docs%3AR3-1/resolve');
+    expect(() => plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries'], key)).toThrow('the answer (retry or park) is required');
+    expect(() => plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries', 'retry', 'extra'], key)).toThrow('no further argument');
+    expect(plan('ticket', ['history', 'docs:R3-1'], key)).toEqual({ method: 'GET', path: '/v1/repositories/docs/tickets/R3-1/history' });
+    expect(plan('ticket', ['history', 'docs:R3-1', '--before', '40', '--limit', '20'], key).path).toBe('/v1/repositories/docs/tickets/R3-1/history?before=40&limit=20');
+    expect(() => plan('ticket', ['history', 'R3-1'], key)).toThrow('<repository>:<id>');
+    expect(() => plan('ticket', ['show', 'docs:R3-1'], key)).toThrow('baton ticket history');
+  });
+
   it('owner courier commands (R-BTN-80)', () => {
     expect(plan('owner', ['courier', 'add', 'docs', '--key', PUB, '--asks', 'owner,legal'], key))
       .toEqual({ method: 'POST', path: '/v1/owner/docs/couriers', body: { public_key: PUB, asks: ['owner', 'legal'] } });
