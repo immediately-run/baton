@@ -1,0 +1,54 @@
+---
+title: "B-44 — A force-reap recounts the fleet: capability and resource rows follow the reaped worker at once"
+id: B-44
+project: baton
+status: available
+updated: 2026-10-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "Claims.forceReap sets the worker's reaped_at but does not recount fleet_capabilities or resource_fleet, so the capability and resource rows that worker held up stay wrong until the next alarm tick notices (up to a minute). R-BTN-75 changes the counts when a worker is reaped. Recount in the force-reap's transaction and test it. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** BATON_SPEC R-BTN-75 (`capability` rows: the counts change when a worker "stops being
+live (the alarm, §3) or is reaped"), R-BTN-76 (the resource fleet answer).
+**Found by:** R3-1254 part 2b's map of core before modelling capabilities (2026-10-19).
+
+### Requires
+
+None.
+
+### Why
+
+`Claims.forceReap` (`src/core/claims.ts`) sets the worker's `reaped_at` and does not call
+`Blocks.recount`. The heartbeat, the alarm (`liveChanged`), grants and instance changes all
+recount; a force-reap waits for the next alarm tick to notice the worker left the live set. Until
+then a ticket whose only capable worker was just force-reaped shows no `capability` row and is
+not blocked, and a `resource` row the reaped worker's instances answered stays as it was, so
+`blocked_since` and its events trail the reap by up to a minute.
+
+### What to build
+
+1. Recount in `forceReap`'s transaction, as the alarm does after `claims.alarm()`: call the
+   `fleetChanged` path (or `blocks.recount()` and the writes it returns), so the rows and
+   `blocked_since` change with the reap.
+2. Re-stamp `forceReap`'s `@model` hash and drop the model's `@impl pending` note on
+   `forceReap` that names this ticket (R3-1254 part 2b).
+
+### Tests
+
+- A unit or integration test: two workers, one declaring the capability a ticket requires;
+  force-reap it; the ticket gets its `capability` row and logs `blocked` in the same request,
+  before any alarm tick.
+- The S-BTN scenario that covers force-reaps still passes on both hosts.
+
+### Exit criteria
+
+- [ ] a force-reap recounts the fleet in its own transaction, with a test that fails without it
+- [ ] merged under the review gate
