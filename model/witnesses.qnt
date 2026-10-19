@@ -7,7 +7,11 @@ module witnesses {
                MAX_CLAIMS = 6, GIT_BUDGET = 2, OWNER_BUDGET = 2,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
                REQUIRED = Set("fix", "merge"), MAX_TIME = 12,
-               MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1).* from "./baton"
+               MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1,
+               DECLARED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp", "db:orders:rw"), "w3" -> Set("db:orders:rw")),
+               GRANTED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp"), "w3" -> Set("vpn:corp", "db:orders:rw")),
+               REQUIRES = Map("t1" -> Set("vpn:corp"), "t2" -> Set("db:orders:rw")),
+               RESOURCES = Set("llm"), NEEDS = Map("implement" -> Set("llm"), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())).* from "./baton"
   action winit = init
   action wstep = step
   action wprogress = progressStep
@@ -29,6 +33,11 @@ module witnesses {
   val noProvisionalRow = st.provs.size() == 0
   val noRetryRow = TICKETS.forall(t => st.retryRows.get(t).size() == 0)
   val noUnblockedEvent = TICKETS.forall(t => st.lastEvent.get(t) != "unblocked")
+  // R3-1254 part 2b: the fleet's rows and a lost answer
+  val noCapabilityRow = TICKETS.forall(t => st.capRows.get(t) == Set())
+  val noResourceRow = TICKETS.forall(t => st.resRows.get(t) == Set())
+  // reached deterministically by regressions.qnt (answerLostIsSilentThenReblocksTest)
+  val noAnswerLost = TICKETS.forall(t => st.lost.get(t) == Set())
   val noAlarmReap = st.claims.keys().forall(i =>
     not(st.claims.get(i).kind == "reap" and not(st.claims.get(i).fencePending) and st.up.get(st.claims.get(i).worker)))
 }

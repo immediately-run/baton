@@ -18,7 +18,7 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 | `liveness.qnt` | the liveness properties under weak fairness, over `small` (kept apart: their fairness terms made Apalache's input too large) |
 | `witnesses.qnt` | the reachability witnesses, each an invariant that must fail |
 | `instances.qnt` | `sim` (R3-1243's bounds: 3 workers, 2 tickets, 2 overlapping sync runs) and `small` (2 workers, 1 ticket, 1 sync run, for Apalache) |
-| `regressions.qnt` | one deterministic run per defect the reviews found (50), each asserting the merged spec does not reach it |
+| `regressions.qnt` | one deterministic run per defect the reviews found (63), each asserting the merged spec does not reach it |
 | `replay.qnt` | the traces `test/model/replay.test.ts` drives the core with (R3-1244): `sim`'s instance, every action the harness can make the core take |
 | `check.mjs` | `npm run model` and `npm run model:quick` |
 | `full.mjs` | `npm run model:full`: every check, with a report for the PR |
@@ -44,10 +44,10 @@ it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick
   result and minutes. `MODEL_SAMPLES`, `REPLAY_TRACES` and `MODEL_VERIFY_DEPTH` lower the sizes
   to try a change, and the report then says it is a reduced run, which `model-report` refuses.
   Paste it into the PR. Needs Java for the last step; about two hours on 4 CPUs.
-- `npm run model` — typecheck, the 50 regression runs, 10,000 random runs of 40 steps of `sim`
+- `npm run model` — typecheck, the 63 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
-  twelve reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
+  fourteen reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
   and scales the `progressStep` runs (30%).
 - `npm run model:quick` — the typecheck and the regression runs alone; `npm test` runs it.
 - `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 4: about 47
@@ -175,9 +175,8 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
 - **Blocks** (R-BTN-75, R-BTN-77): `blocked_since` is set when the ticket is not held (an active
   claim, an unconfirmed completion, a fence-pending reap), has a queued leg, and a confirmed row
   on it or the ticket, re-evaluated in every transaction that changes one of those. A claim's
-  start changes it silently (a branch no state reaches yet: a claim is granted only with no
-  confirmed row on its queued leg, so its start never flips the ticket; advice-only `resource`
-  rows, part 2b, make it reachable, and a run comes with them); every other change logs `blocked` or `unblocked` — an end that
+  start changes it silently (a claim into a leg with only a `resource` row, advice, reaches it:
+  `resourceRowIsAdviceTest`); every other change logs `blocked` or `unblocked` — an end that
   leaves the ticket blocked logs `blocked` (R-BTN-75 as amended by R3-1254, which this model
   found: see *What found something*).
 - **Retries per leg** (R-BTN-122): a `fail` end (`cannot-finish:transient`) and an alarm reap are
@@ -191,7 +190,30 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   contains that commit (git's version at the read, not its observation number) replaces it
   with what it posts; one no such snapshot replaces within `PROV_TTL` lapses
   (`provisionalLapses`). Blocked ends are no attempts; past `MAX_BLOCKED` the next holds the
-  ticket. `resource` and `capability` blocked ends are R3-1254's part 2b.
+  ticket. `resource` and `capability` blocked ends are `endBlockedOn` (*The fleet*, below).
+
+- **The fleet** (R3-1254 part 2b; R-BTN-75, R-BTN-76, R-BTN-121, §7.2 rule 4): Baton records
+  each worker's last heartbeat (an idle worker heartbeats too) and what it declares; a worker is
+  live while its last heartbeat is within `TIMEOUT`. **Rule 4**: a claim, and each advance,
+  needs the ticket's `requires` within what the worker declares and is granted. A **`capability`
+  row** stands on the whole ticket for a capability no live worker both declares and is granted;
+  the rows are stored and rewritten where R-BTN-75 says the counts change — a heartbeat from a
+  worker that was not live or whose declared set changed (`declare`: its check failed, or passes
+  again), the alarm finding the live set changed (`alarmLive`), and a `capability` blocked end
+  (`endBlockedOn`), which drops the capability from the runner's declared set in its
+  transaction. A force-reap changes no worker's liveness (core marks only a worker already silent
+  past its lease reaped), so it recounts nothing. **Resources**: each is one `service` instance,
+  `unavailable` for `READING_TTL` ticks after a reading (`reading`) or a `resource` blocked end,
+  until an `available` reading or the lapse (`readingLapses`); a leg's needs are the course's and
+  the sync's, plus a `resource` end's `end`-sourced need. A **`resource` row** stands on a leg
+  that needs an `unavailable` resource while some worker is live to answer; it counts toward
+  `blocked_since` and gates nothing — advice (R-BTN-45): a claim into it is granted.
+  **`answer_lost`** (R-BTN-77 as amended by R3-1251): a recount whose fleet is empty drops the
+  `resource` rows, silently, and the ticket remembers them; blocked again on exactly those rows,
+  silently; on anything else, logged (the owed `unblocked` first, logged only); settled — every
+  lost need gone or the fleet back — the owed `unblocked` is logged if the ticket is unblocked,
+  unheld and has a queued leg. A ghost, `events`, counts what is logged, so a run can tell the
+  silent transitions from the logged ones.
 
 ## Properties (`safety`)
 
@@ -206,11 +228,13 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
 | `regressedOnlyWhenGitRegressed` — lag is never a regression | §2e |
 | `boundedLoops` — no claim runs a leg past its `max_runs` | R-BTN-63, R-BTN-69 |
 | `writingLegsBarred` — every writing leg started under the required bar, by a worker of no barred family | R-BTN-45, R-BTN-60, R-BTN-67 |
-| `gatesHeld` — every claim and advance was granted with every gate in force holding (hold, barred tags, required bar, the queued leg, and the leg's rows: an unmet prerequisite at a claim, an open decision, a retry backoff, a provisional row), recorded at the grant apart from the guard | R-BTN-45, R-BTN-83, R-BTN-120, R-BTN-122, R-BTN-126, rules 1, 3, 8 |
+| `gatesHeld` — every claim and advance was granted with every gate in force holding (hold, barred tags, required bar, rule 4, the queued leg, and the leg's rows: an unmet prerequisite at a claim, an open decision, a retry backoff, a provisional row), recorded at the grant apart from the guard | R-BTN-45, R-BTN-83, R-BTN-120, R-BTN-122, R-BTN-126, rules 1, 3, 8 |
 | `noActAfterLoss` — no worker pushes for a claim the alarm reaped (unfenced) | R-BTN-6, R-BTN-26 |
 | `noStuckTicket` — no deadlock: a ticket git has not finished or withdrawn, once the syncs are idle and the head matches git, is held, fenced, owner-held, its queued leg waiting on `policy`, blocked (a row, listed by R-BTN-75) or held off by a provisional row (R-BTN-126), flagged, or claimable | §6.7, R-BTN-10, R-BTN-35, R-BTN-67, R-BTN-75, R-BTN-83, R-BTN-126 |
 | `blockedIsStored` — `blocked_since` is what the rows, the queued leg and the held state say, after every transaction | R-BTN-75 |
 | `unblockedFollowsBlocked` — every `unblocked` event follows a `blocked` one | R-BTN-77, R-BTN-75 as amended by R3-1254 |
+| `capabilityRowsCounted` — the `capability` rows are what the live set and the declared sets Baton last counted say: no change to either leaves them behind | R-BTN-75, R-BTN-121 |
+| `answerLostOwesUnblocked` — a lost answer is remembered only while the ticket is unblocked with its `blocked` still open, the `unblocked` it is owed | R-BTN-77 as amended by R3-1251 |
 | `attemptsBounded`, `blockedEndsBounded` — at most `MAX_ATTEMPTS` failed attempts, and `MAX_BLOCKED` blocked ends and the one that holds, per ticket and leg between hold lifts | R-BTN-122, R-BTN-126 |
 
 **Liveness** — `fencesClear`, `endsResolveWithOwner` (implied by the owner's fairness alone, by design: §6.7), `barsLiftClaimable`, `readyIsClaimed` — is stated
@@ -254,7 +278,16 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
   `backoffWaitsForRetryAfterTest`; a provisional row that lapses before its hour fails
   `provisionalRowWaitsForTheHourTest`; an alarm reap that counts no attempt fails
   `alarmReapIsAFailedAttemptTest`; a lift that keeps the backoff fails `liftClearsTheBackoffTest`;
-  an advance refused on a `ticket` row fails `ticketRowBindsNoAdvanceTest`; a course whose end is not terminal passes
+  an advance refused on a `ticket` row fails `ticketRowBindsNoAdvanceTest`;
+- R3-1254 part 2b, the fleet: a claim, or an advance, without rule 4 fails
+  `rule4RefusesTheClaimTest`, `rule4RefusesTheAdvanceTest`; a heartbeat that changes what is
+  declared without recounting fails `capabilityRowFollowsTheFleetTest`; an alarm that does not
+  recount fails `lapsedFleetWritesTheRowTest`; a `capability` end that keeps the capability
+  declared fails `capabilityEndDropsItTest`; a `resource` row that gates fails
+  `resourceRowIsAdviceTest`, as does a claim's start that logs its unblocking; a `resource` end with no `end`-sourced need fails
+  `resourceEndStoresReadingAndNeedTest`; a reading that lapses early fails
+  `readingWaitsOutItsTimeTest`; a lost answer logged, a reblock logged, or an owed `unblocked`
+  never logged fails `answerLostIsSilentThenReblocksTest` or `answerLostOwesTheUnblockedTest`; a course whose end is not terminal passes
   `courseOk` and fails `courseRulesRefuseTest`;
 - `MAX_DRIFT = 3`, above `MARGIN = 2`, lets a reaped worker push (`noActAfterLoss`); at
   `MAX_DRIFT = 2` it cannot — the spec's assumption is drift ≤ the margin.
@@ -263,10 +296,10 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
 
 | Check | Instance | Result |
 |---|---|---|
-| 50 regression runs | `sim` sizes, zero drift | pass |
+| 63 regression runs | `sim` sizes, zero drift | pass |
 | `safety`, 10,000 × 40 steps of `step`; 3,000 × 40 of `progressStep` | `sim` | no violation |
-| witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap, a blocked ticket, a provisional row, a backoff, an `unblocked` event; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all 12 reached |
-| a second review | — | reached by a regression run only (`maxRunsSurviveResumptionTest`) |
+| witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap, a blocked ticket, a provisional row, a backoff, an `unblocked` event, a `capability` row, a `resource` row; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all 14 reached |
+| a second review; a lost answer | — | reached by a regression run only (`maxRunsSurviveResumptionTest`; `answerLostIsSilentThenReblocksTest` — every worker silent through a lease while a `resource` row stands) |
 | Apalache, `safety` | `small`, depth 4 | no violation; about 47 min on 4 CPUs at R3-1254 part 2. Depth 5: 15 min 29 s before R3-1254, 49–59 min with its queued leg, about 10 h with part 2's prerequisites (B-37 brings it back). Each model PR's `model:full` report carries the figure for its head (R-BTN-68) |
 | liveness, `fencesClear` | `small`, TLC (Apalache cannot check fairness) | **at `b76af9c`, the pre-round-2 formula and model**: no violation in 8,187 distinct states before a 28-minute cap, not exhaustive. The current formulas (rounds 2–3) have not been run; R3-1254 runs them to completion on a narrowed instance |
 
@@ -278,7 +311,10 @@ its provisional row. It does not reach:
   clearing, 5 steps, and answering a decision needs a second git event, which `small` lacks;
   so `unblockedFollowsBlocked` is not exercised by the proof;
 - a prerequisite on another ticket, at any depth: `small` has one ticket, so `gitDepends` and a
-  blocked end on a `ticket` are never enabled.
+  blocked end on a `ticket` are never enabled;
+- the fleet's rows, at any depth: `small` requires no capability and needs no resource, so no
+  `capability` or `resource` row, and no lost answer, is ever written (R3-1254 part 2b keeps the
+  proof's cost where B-37 measured it).
 
 For those, the evidence is the simulation and the regression runs, not the proof. B-37 brings
 depth 5 back, and with it the `unblocked` event.
@@ -289,7 +325,9 @@ depth 5 back, and with it the `unblocked` event.
   6 claims, 2 git events and 2 owner acts per run; `MAX_ATTEMPTS = 2`, `BACKOFF = 2` ticks,
   `MAX_BLOCKED = 1`, `PROV_TTL = 4` ticks; each ticket's source may name the other ticket `at`
   `reviewed`, having `reached` `pr-open`, or `done`, on the whole ticket or on `merge`. `small`: 2 workers, 1 ticket, 1 sync run, 3
-  claims, 1 git event, 1 owner act.
+  claims, 1 git event, 1 owner act. The fleet: on `sim`, `t1` requires `vpn:corp` (declared and
+  granted to `w1` and `w2`), `t2` `db:orders:rw` (declared by `w2`, which is not granted it, and by
+  `w3`, which is), and `implement` needs the resource `llm`; `small` has none of it.
 - **Time** is abstract ticks: `TIMEOUT = 4`, `MARGIN = 2`, `MAX_DRIFT = 1`, at most 12 ticks
   a run. The 30-minute regression flag and the 6-hour unconfirmed flag are "eventually".
   **The drift assumption**, checked: R-BTN-6's fence holds while the worker's lag is at most
@@ -312,8 +350,18 @@ depth 5 back, and with it the `unblocked` event.
   for the policy in force. The instances that drive the core (the scenario traces and the
   model-based tests) set `BACKOFF = 0` and the counts to 100000 or 1000: the core keeps §6.10's
   per-ticket policy until B-11 builds R-BTN-122, and holds it makes are carried as the owner's.
-- **Tiers, grants and requires** (rules 4–7): column comparisons with no interleaving of their
-  own; matching tests cover them (G-BTN-40).
+- **Tiers and grants beyond rule 4** (rules 5–7): column comparisons with no interleaving of
+  their own; matching tests cover them (G-BTN-40). Rule 4 is modelled (R3-1254 part 2b).
+- **A leg's own `requires.capabilities`** (R-BTN-120) and **course `capability_types` and
+  roles** (R-BTN-121): core has not built them (B-10); a leg's list joins the ticket's for that
+  leg, the same check, and types and roles are the course file's acceptance (`baton course
+  test`), not an interleaving.
+- **Resources' scopes, instances and readings' precedence** (R-BTN-76, R-BTN-101): each resource
+  is one `service` instance. Account and worker instances, `uses`, the administrator's reading
+  over an instrument's, `unknown` and the per-worker answer each choose which reading is in
+  force, with no interleaving of their own; the fleet's answer is still "a live worker could use
+  an instance that is not `unavailable`". An `end`-sourced need is never dropped (its drop at the
+  leg's next other end, and after 7 days, only removes rows).
 - **R-BTN-39** (where a ticket is, replayed from git) is the sync's `syncRead` taking any git
   state as given; **R-BTN-40** (suspend rather than wait on the lease) is a worker's choice, so
   `endClaim(…, "suspended", …)` may happen at any point — both are modelled as nondeterminism,
@@ -324,10 +372,7 @@ depth 5 back, and with it the `unblocked` event.
   spec's does, but writes no whole-ticket decision row, so it leaves `blocked_since` clear and
   logs nothing where the spec logs `blocked`, and the lift logs no `unblocked`. R3-1254's part 3
   models them (its Status names them; round 3, 3-r3-0).
-- **The rest of §2g–§2m, still R3-1254's.** Next, in its own pull request (the ticket's part 2b): the capability and
-  resource prerequisites — a runner's capabilities and their loss mid-leg (rule 4, R-BTN-126),
-  the fleet's resource answer and the answer lost when no one can give it (R-BTN-76, R-BTN-77).
-  After it: open-world claims (R-BTN-104), sync wants
+- **The rest of §2g–§2m, still R3-1254's** (part 3): open-world claims (R-BTN-104), sync wants
   (R-BTN-94), `no_chain_from` (R-BTN-106), child tickets' spawned rows (R-BTN-86), `not_before`
   and leg deadlines (R-BTN-89, R-BTN-90; R3-1259 names the deadline's model change), the
   holder's reported `next` (R-BTN-83's provisional queued leg), and exhaustive liveness on a

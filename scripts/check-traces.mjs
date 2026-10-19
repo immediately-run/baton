@@ -154,6 +154,13 @@ export function translate(trace) {
     MAX_ATTEMPTS: 100000,
     BACKOFF: 0,
     MAX_BLOCKED: 100000,
+    // the fleet (R3-1254 part 2b): no capability requirements and no needs — the traces carry
+    // neither, so the model counts no capability or resource rows for them
+    DECLARED: `Map(${WS.map((w) => `${q(w)} -> Set()`).join(', ')})`,
+    GRANTED: `Map(${WS.map((w) => `${q(w)} -> Set()`).join(', ')})`,
+    REQUIRES: `Map(${T.map((t) => `${q(t)} -> Set()`).join(', ')})`,
+    RESOURCES: 'Set()',
+    NEEDS: 'Map("implement" -> Set(), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())',
   };
 
   // The environment the model has and Baton cannot see: git, each sync run's phase, the claim
