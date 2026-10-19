@@ -302,9 +302,9 @@ module baton {
   // An instance with no capability requirements and no resources has no fleet rows to count, so
   // it never recounts — `small`, which keeps the proof's input small (round 1, 1-B-7).
   val FLEET: bool = TICKETS.exists(t => REQUIRES.get(t) != Set()) or RESOURCES != Set()
-  // §5: live while its last authenticated call — a heartbeat, a claim, an advance, an end, a
-  // fence report — is within its lease timeout. Only a heartbeat recounts; a call that revives a
-  // lapsed worker waits for the alarm's check (`alarmLive`), as in core.
+  // §5: live while its last authenticated call — a heartbeat (a fence report rides one), a claim,
+  // an advance, an end — is within its lease timeout. Only a heartbeat recounts; any other call
+  // that revives a lapsed worker waits for the alarm's check (`alarmLive`), as in core.
   pure def liveIn(s: State): Set[str] = WORKERS.filter(w => s.now < s.lastSeen.get(w) + TIMEOUT)
   // R-BTN-75: a capability no live worker both declares and is granted
   pure def capRowsFor(s: State, live: Set[str], t: str): Set[str] =
@@ -332,7 +332,10 @@ module baton {
   // logged — the owed `unblocked` first, logged only (counted in `events`; `lastEvent` keeps the
   // `blocked`); settled — each lost need gone (its leg no longer the queued leg, the leg moved past)
   // or answerable again — it logs the owed `unblocked` if the ticket is unblocked, unheld and has
-  // a queued leg. Any logged transition ends it.
+  // a queued leg. Any logged transition ends it. The model judges both on the queued leg — its
+  // needs are per leg, every leg's at once, where core's `leg_needs` are the next legs' — so a row
+  // added on another next leg, or a lost need on one, is not weighed as core weighs it (*Not
+  // modelled*; answerLostJudgedOnTheQueuedLegTest pins the choice).
   pure def settle(s: State, silent: Set[str]): State = settleLost(s, silent, TICKETS.mapBy(t => Set()))
   pure def settleLost(s: State, silent: Set[str], lostNow: str -> Set[Need]): State = {
     val flips = TICKETS.filter(t => blockedIn(s, t) != s.blocked.get(t))
@@ -346,7 +349,7 @@ module baton {
     // no flip, the record settled: the owed `unblocked`
     val owed = TICKETS.exclude(flips).filter(t => and {
       s.lost.get(t) != Set(), lostNow.get(t) == Set(),
-      s.lost.get(t).forall(n => n.leg != s.queued.get(t) or not(needsOf(s, t).contains(n)) or s.fleetLive != Set()),
+      s.lost.get(t).forall(n => n.leg != s.queued.get(t) or s.fleetLive != Set()),
     })
     val owedLoud = owed.filter(t => not(s.blocked.get(t)) and not(heldIn(s, t)) and s.queued.get(t) != "")
     s.with("blocked", TICKETS.mapBy(t => if (flips.contains(t)) not(s.blocked.get(t)) else s.blocked.get(t)))
@@ -365,7 +368,7 @@ module baton {
   // whose fleet is empty drops each `resource` row because no one is left to answer (R-BTN-77).
   pure def recount(s: State): State = {
     val live = liveIn(s)
-    val lostNow = TICKETS.mapBy(t => if (live == Set()) s.resRows.get(t).filter(n => needsOf(s, t).contains(n)) else Set())
+    val lostNow = TICKETS.mapBy(t => if (live == Set()) s.resRows.get(t) else Set())
     settleLost(s.with("fleetLive", live).with("capRows", TICKETS.mapBy(t => capRowsFor(s, live, t)))
                 .with("resRows", TICKETS.mapBy(t => resRowsFor(s, live, t))), Set(), lostNow)
   }
@@ -777,13 +780,16 @@ module baton {
   }
   // R-BTN-6, R-BTN-26: the worker learns its lease is lost, kills its tool calls and reports.
   // @impl src/core/claims.ts#fenced
+  // In core the report is the heartbeat's `fenced` field, so a worker that was not live is
+  // recounted in the same call (round 1 of baton#60, 1-A-1/1-B-1).
   action fenceCleared(w: str): bool = all {
     st.up.get(w), not(st.asleep.get(w)), workerFenced(w),
-    st' = settle(st.with("claims", st.claims.keys().mapBy(i => {
+    val s = st.with("claims", st.claims.keys().mapBy(i => {
               val c = st.claims.get(i)
               if (c.worker == w and c.fencePending) c.with("fencePending", false) else c }))
             .with("localClaim", st.localClaim.set(w, 0))
-            .with("lastSeen", st.lastSeen.set(w, st.now)), Set()),
+            .with("lastSeen", st.lastSeen.set(w, st.now))
+    st' = if (FLEET and st.now >= st.lastSeen.get(w) + TIMEOUT) recount(s) else settle(s, Set()),
   }
 
   // ---- the owner (§8, R-BTN-67, §6.7) ----

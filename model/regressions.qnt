@@ -10,7 +10,7 @@ module regressions {
                // w3 declares vpn:corp without a grant: it counts toward no row (round 1, 1-B-3)
                GRANTED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp"), "w3" -> Set()),
                REQUIRES = Map("t1" -> Set(), "t2" -> Set("vpn:corp")),
-               RESOURCES = Set("llm", "gpu"), NEEDS = Map("implement" -> Set("llm", "gpu"), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())).* from "./baton"
+               RESOURCES = Set("llm", "gpu", "disk"), NEEDS = Map("implement" -> Set("llm", "gpu"), "review" -> Set("disk"), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())).* from "./baton"
 
   val c1 = st.claims.get(1)
   val c2 = st.claims.get(2)
@@ -548,6 +548,31 @@ module regressions {
     fleetEmptiedWhileBlocked.then(wake("w1")).then(claim("w1", "t1")).then(alarmLive)
       .expect(st.fleetLive == Set("w1") and st.lost.get("t1") == Set() and not(st.blocked.get("t1"))
               and st.events == 2)
+  // ... judged on the queued leg: a row the fleet's return adds on another leg, never lost, does
+  // not stop a silent reblock — core, weighing every added row, would log two events here
+  // (*Not modelled*, "Which next legs a need is on"; round 1 of baton#60, 1-B-3).
+  run answerLostJudgedOnTheQueuedLegTest =
+    fleetEmptiedWhileBlocked.then(reading("disk", false)).then(wake("w1")).then(heartbeat("w1"))
+      .expect(st.resRows.get("t1").contains({ leg: "review", res: "disk" }) and st.blocked.get("t1")
+              and st.lost.get("t1") == Set() and st.events == 2)
+  // Each call keeps a worker live, not only the claim: a lapsed fleet's one caller is counted at
+  // the alarm's next check (round 1 of baton#60, 1-B-2). w1 claims at tick 2, calls at 3; at tick
+  // 6 only that call is within TIMEOUT.
+  action claimAtTwo: bool = start.then(tick).then(tick).then(claim("w1", "t1")).then(tick)
+  run anAdvanceKeepsItLiveTest =
+    claimAtTwo.then(advance("w1", "implement", NONE)).then(tick).then(tick).then(tick).then(alarmLive)
+      .expect(st.fleetLive == Set("w1"))
+  run anEndKeepsItLiveTest =
+    claimAtTwo.then(endClaim("w1", "release", false)).then(tick).then(tick).then(tick).then(alarmLive)
+      .expect(st.fleetLive == Set("w1"))
+  run aBlockedEndKeepsItLiveTest =
+    claimAtTwo.then(endBlocked("w1", "decision", T2_DONE)).then(tick).then(tick).then(tick).then(alarmLive)
+      .expect(st.fleetLive == Set("w1"))
+  // ... and a fence report is a heartbeat: from a lapsed worker it recounts at once.
+  run aFenceReportRecountsTest =
+    start.then(claim("w1", "t1")).then(forceReap("w1")).then(tick).then(tick).then(tick).then(tick)
+      .then(alarmLive).expect(st.fleetLive == Set())
+      .then(fenceCleared("w1")).expect(st.fleetLive == Set("w1"))
   // R-BTN-126: a `resource` end stores its reading and an `end`-sourced need on the leg.
   run resourceEndStoresReadingAndNeedTest =
     start.then(claim("w1", "t1")).then(endBlockedOn("w1", "resource", "gpu"))

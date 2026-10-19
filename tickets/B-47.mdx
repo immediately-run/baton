@@ -49,8 +49,9 @@ D was never claimable.
 2. Keep R3-1251's `answer_lost` semantics, which the model now pins (`settleLost`): a row lost to an
    empty fleet clears silently; blocked again only on rows it lost, silently; otherwise logged,
    with the owed `unblocked` first.
-3. Drop the `@impl pending — one evaluation per recount (R-BTN-75, B-47)` notes on the model's
-   `declare`, `alarmLive`, `reading` and `readingLapses`, and re-stamp.
+3. Drop the `@impl pending — one evaluation per recount … (R-BTN-75, B-47)` notes on the model's
+   `heartbeat`, `declare`, `alarmLive`, `reading` and `readingLapses` (`npm run model:links` lists
+   them), and re-stamp.
 
 ### Tests
 

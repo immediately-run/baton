@@ -18,7 +18,7 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 | `liveness.qnt` | the liveness properties under weak fairness, over `small` (kept apart: their fairness terms made Apalache's input too large) |
 | `witnesses.qnt` | the reachability witnesses, each an invariant that must fail |
 | `instances.qnt` | `sim` (R3-1243's bounds: 3 workers, 2 tickets, 2 overlapping sync runs) and `small` (2 workers, 1 ticket, 1 sync run, for Apalache) |
-| `regressions.qnt` | one deterministic run per defect the reviews found (70), each asserting the merged spec does not reach it |
+| `regressions.qnt` | one deterministic run per defect the reviews found (75), each asserting the merged spec does not reach it |
 | `replay.qnt` | the traces `test/model/replay.test.ts` drives the core with (R3-1244): `sim`'s instance, every action the harness can make the core take |
 | `check.mjs` | `npm run model` and `npm run model:quick` |
 | `full.mjs` | `npm run model:full`: every check, with a report for the PR |
@@ -44,7 +44,7 @@ it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick
   result and minutes. `MODEL_SAMPLES`, `REPLAY_TRACES` and `MODEL_VERIFY_DEPTH` lower the sizes
   to try a change, and the report then says it is a reduced run, which `model-report` refuses.
   Paste it into the PR. Needs Java for the last step; about two hours on 4 CPUs.
-- `npm run model` — typecheck, the 70 regression runs, 10,000 random runs of 40 steps of `sim`
+- `npm run model` — typecheck, the 75 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
   fifteen reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
@@ -193,10 +193,10 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   ticket. `resource` and `capability` blocked ends are `endBlockedOn` (*The fleet*, below).
 
 - **The fleet** (R3-1254 part 2b; R-BTN-75, R-BTN-76, R-BTN-121, §7.2 rule 4): Baton records
-  each worker's last authenticated call — a heartbeat (an idle worker heartbeats too), a claim, an
-  advance, an end, a fence report (§5, §11) — and what it declares; a worker is live while that
-  call is within `TIMEOUT`. Only a heartbeat recounts: a call that revives a lapsed worker waits
-  for the alarm's check, as in core. **Rule 4**: a claim, and each advance,
+  each worker's last authenticated call — a heartbeat (an idle worker heartbeats too; a fence
+  report rides one), a claim, an advance, an end (§5, §11) — and what it declares; a worker is
+  live while that call is within `TIMEOUT`. Only a heartbeat recounts, the fence report's
+  included: any other call that revives a lapsed worker waits for the alarm's check, as in core. **Rule 4**: a claim, and each advance,
   needs the ticket's `requires` within what the worker declares and is granted. A **`capability`
   row** stands on the whole ticket for a capability no live worker both declares and is granted;
   the rows are stored and rewritten where R-BTN-75 says the counts change — a heartbeat from a
@@ -302,7 +302,11 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
   `answerLostBackOnMoreThanItLostIsLoggedTest`; the owed `unblocked` logged while a claim holds
   the ticket fails `answerLostSettledSilentlyWhileHeldTest`; a lost need never gone fails
   `answerLostSettlesWhenTheLegMovesPastTest`; a row counting a worker that declares a
-  capability without a grant fails `capabilityRowFollowsTheFleetTest`; a course whose end is not terminal passes
+  capability without a grant fails `capabilityRowFollowsTheFleetTest`;
+  an advance, an end or a blocked end that does not count as a call fails
+  `anAdvanceKeepsItLiveTest`, `anEndKeepsItLiveTest` or `aBlockedEndKeepsItLiveTest`; a fence report
+  that does not recount fails `aFenceReportRecountsTest`; a reblock weighed on every leg, as core
+  weighs it, fails `answerLostJudgedOnTheQueuedLegTest` (the model's choice, *Not modelled*); a course whose end is not terminal passes
   `courseOk` and fails `courseRulesRefuseTest`;
 - `MAX_DRIFT = 3`, above `MARGIN = 2`, lets a reaped worker push (`noActAfterLoss`); at
   `MAX_DRIFT = 2` it cannot — the spec's assumption is drift ≤ the margin.
@@ -311,7 +315,7 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
 
 | Check | Instance | Result |
 |---|---|---|
-| 70 regression runs | `sim` sizes, zero drift | pass |
+| 75 regression runs | `sim` sizes, zero drift | pass |
 | `safety`, 10,000 × 40 steps of `step`; 3,000 × 40 of `progressStep` | `sim` | no violation |
 | witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap, a blocked ticket, a provisional row, a backoff, an `unblocked` event, a `capability` row, a `resource` row, a lost answer; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all 15 reached |
 | a second review | — | reached by a regression run only (`maxRunsSurviveResumptionTest`) |
@@ -379,6 +383,14 @@ depth 5 back, and with it the `unblocked` event.
   an instance that is not `unavailable`". The needs are constant per leg, and an `end`-sourced
   need is never dropped (at the leg's next other end, or after 7 days): a lost need is gone
   when its leg is no longer the queued leg, which is how a moved ticket settles its record.
+- **Which next legs a need is on** (R-BTN-76, R-BTN-77): core's `leg_needs` hold the needs of the
+  station's next legs, and a reblock weighs every row the recount adds; the model's needs are per
+  leg, every leg's at once, so it judges a lost answer on the queued leg — a reblock when the
+  queued leg's rows were all lost, a lost need gone when its leg is no longer the queued leg. A
+  row added on another next leg that was not lost, or a lost need on one, is where the two part:
+  core logs the owed `unblocked` and a `blocked` where the model is silent, and keeps a lost need
+  on another next leg pending where the model settles it (`answerLostJudgedOnTheQueuedLegTest`
+  pins the model's choice).
 - **Other causes of a recount** (R-BTN-75, R-BTN-58): a worker registering, a grant made,
   changed or revoked, a credential revoked (`LIVE` drops it), and a post changing a ticket's
   `requires` or needs. Each is fixed here — `GRANTED`, `REQUIRES` and `NEEDS` are constants, every
