@@ -11,12 +11,15 @@ const ROOT = resolve(import.meta.dirname, '..');
 const OUT = join(ROOT, '.local');
 
 /** The dashboard's ES module is served to the browser, never run here: load it as text. */
-const uiScriptAsText = {
+export const uiScriptAsText = {
   name: 'ui-script-as-text',
   setup(b) {
     b.onLoad({ filter: /[\\/]ui[\\/]app\.js$/ }, async (args) => ({ contents: await readFile(args.path, 'utf8'), loader: 'text' }));
   },
 };
+
+/** The schema migrations and the dashboard load as text, as wrangler's Text rule does. */
+export const LOCAL_LOADERS = { '.sql': 'text', '.html': 'text', '.css': 'text' };
 
 /** Bundle `entry` (relative to the repository root) to .local/`name` and import it. */
 export async function bundleLocal(entry, name) {
@@ -30,7 +33,7 @@ export async function bundleLocal(entry, name) {
     format: 'esm',
     target: 'node22',
     packages: 'external',
-    loader: { '.sql': 'text', '.html': 'text', '.css': 'text' },
+    loader: LOCAL_LOADERS,
     plugins: [uiScriptAsText],
     logLevel: 'warning',
   });
