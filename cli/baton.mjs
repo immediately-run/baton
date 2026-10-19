@@ -332,7 +332,7 @@ async function testCourse(argv) {
   // A base that does not resolve fails the run, never skips a rule unseen (round 1, 1-A-3).
   const base = flags.base === 'none' ? null : flags.base ?? defaultBase(root);
   if (base === null && flags.base !== 'none') throw new Error(`no origin/HEAD or origin/main in ${root}: pass --base REF (fetch the base first), or --base none to skip the removal rule`);
-  const { bundleLocal } = await import(new URL('../scripts/bundle.mjs', import.meta.url).href);
+  const { bundleLocal } = await import('../scripts/bundle.mjs');
   const kit = await bundleLocal('src/local/testCourse.ts', 'test-course.mjs');
   const input = await kit.readInputs(root, positional[1], { base, board: flags.board ?? null });
   const violations = await kit.checkCourse(input);
