@@ -9,8 +9,9 @@ import { fileURLToPath } from 'node:url';
 export const HEADING = '### Model checks (`npm run model:full`)';
 // the checks a report must show passing, in model/full.mjs's order, each at the size R-BTN-68
 // promises: a run with fewer samples, fewer traces or a shallower proof is no report for a PR
-// (round 2, 2-r2-1)
-export const SIZES = { samples: '10000', traces: '1000', depth: '5' };
+// (round 2, 2-r2-1). The proof is at depth 4 since R3-1254 part 2 (owner, 2026-10-19): with a
+// leg's prerequisites, depth 5 on `small` takes about 10 hours; B-37 brings 5 back.
+export const SIZES = { samples: '10000', traces: '1000', depth: '4' };
 export const labels = ({ samples, traces, depth }) =>
   [`npm run model (${samples} samples)`, `model-based tests (${traces} traces)`, `npm run model:verify (depth ${depth})`];
 export const CHECKS = labels(SIZES);

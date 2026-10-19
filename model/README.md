@@ -38,7 +38,7 @@ it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick
 (`npm run traces`), the links (`npm run model:links`) and 200 model-drawn traces driving the core.
 
 - `npm run model:full` — every check below, in order: `npm run model` with 10,000 samples, the
-  model-based tests with 1,000 traces, and `npm run model:verify` to depth 5. It runs every step
+  model-based tests with 1,000 traces, and `npm run model:verify` to depth 4. It runs every step
   even after a failure and prints a Markdown report on stdout: the commit (flagged when the
   working tree has any uncommitted or untracked change), the Quint version, and each check's
   result and minutes. `MODEL_SAMPLES`, `REPLAY_TRACES` and `MODEL_VERIFY_DEPTH` lower the sizes
@@ -50,9 +50,10 @@ it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick
   eight reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
   and scales the `progressStep` runs (30%).
 - `npm run model:quick` — the typecheck and the regression runs alone; `npm test` runs it.
-- `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 5: about
-  15 minutes on 4 CPUs on `main` before R3-1254, 49 minutes with its queued leg (measured beside
-  another model run). Needs Java; the first run downloads Apalache. `model/verify.mjs` compiles
+- `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 4: about 47
+  minutes on 4 CPUs. Depth 5 took 15 minutes before R3-1254 and 49 with its queued leg. With part
+  2's prerequisites it takes about 23 minutes per enabled transition, roughly 10 hours, so the
+  proof is at depth 4 for now (owner, 2026-10-19), and B-37 brings depth 5 back. Needs Java; the first run downloads Apalache. `model/verify.mjs` compiles
   the model to Quint's JSON IR in a file and runs Apalache's command line on it: `quint verify`
   sends the model to an Apalache server in one request, whose reader refuses a string over 20 MB,
   and `small` compiles to just over that since R3-1254 (19.8 MB before it).
@@ -250,7 +251,7 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
 | `safety`, 10,000 × 40 steps of `step`; 3,000 × 40 of `progressStep` | `sim` | no violation |
 | witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap, a blocked ticket, a provisional row, a backoff, an `unblocked` event; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all 12 reached |
 | a second review | — | reached by a regression run only (`maxRunsSurviveResumptionTest`) |
-| Apalache, `safety` | `small`, depth 5 | no violation. 15 min 29 s on 4 CPUs before R3-1254; 49–59 min with its queued leg, measured beside another model run. Each model PR's `model:full` report carries the figure for its head (R-BTN-68) |
+| Apalache, `safety` | `small`, depth 4 | no violation; about 47 min on 4 CPUs at R3-1254 part 2. Depth 5: 15 min 29 s before R3-1254, 49–59 min with its queued leg, about 10 h with part 2's prerequisites (B-37 brings it back). Each model PR's `model:full` report carries the figure for its head (R-BTN-68) |
 | liveness, `fencesClear` | `small`, TLC (Apalache cannot check fairness) | **at `b76af9c`, the pre-round-2 formula and model**: no violation in 8,187 distinct states before a 28-minute cap, not exhaustive. The current formulas (rounds 2–3) have not been run; R3-1254 runs them to completion on a narrowed instance |
 
 Depth 5 on `small` reaches claims, advances, pushes and a sync; it does not reach a judged
