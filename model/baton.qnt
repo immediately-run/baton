@@ -474,7 +474,7 @@ module baton {
   // that commit), and the end writes a provisional row on the leg, which refuses a claim or
   // advance into it but is no block. Not a failed attempt, not a run, no backoff: counted, and
   // past MAX_BLOCKED the end holds the ticket (`blocked-exhausted`). (`resource` and
-  // `capability` blocked ends are R3-1254's next part.)
+  // `capability` blocked ends are R3-1254's part 2b.)
   // @impl pending — `released:blocked` for ticket and decision prerequisites (R-BTN-126, B-21)
   action endBlocked(w: str, kind: str, d: Dep): bool = all {
     workerCanAct(w), workerClaim(w).size() == 1, not(st.pushed.get(w)),

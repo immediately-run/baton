@@ -332,6 +332,10 @@ module regressions {
       .expect(st.held.get("t1") and st.attempts.get("t1").get("implement") == 2)
       .then(setHold("t1", false))
       .expect(st.attempts.get("t1").get("implement") == 0)
+  // ... and not before its time: one tick into a two-tick backoff, the row may not clear.
+  run backoffWaitsForRetryAfterTest =
+    start.then(claim("w1", "t1")).then(endClaim("w1", "fail", false))
+      .then(tick).then(retryElapse("t1", "implement")).fail()
 
   // R-BTN-122: the backoff refuses an advance into its leg too (backing-off): review fails and
   // backs off; the next claim's fix may not advance into review until the alarm clears it.
@@ -368,6 +372,10 @@ module regressions {
       .expect(st.provs.size() == 1 and st.gitDeps.get("t1") == Set(AT_REVIEWED.with("leg", "implement")))
       .then(tick).then(tick).then(tick).then(tick).then(provisionalLapses("t1", "implement"))
       .expect(st.provs.size() == 0)
+  // ... and not before the hour is up.
+  run provisionalRowWaitsForTheHourTest =
+    start.then(claim("w1", "t1")).then(endBlocked("w1", "ticket", AT_REVIEWED))
+      .then(tick).then(tick).then(tick).then(provisionalLapses("t1", "implement")).fail()
 
   // R-BTN-126: a blocked end is not a failed attempt; past MAX_BLOCKED the next one holds the ticket.
   run blockedEndsHoldPastMaxBlockedTest =
@@ -377,6 +385,16 @@ module regressions {
       .expect(not(st.blocked.get("t1")) and ticketClaimable("t1"))
       .then(claim("w2", "t1")).then(endBlocked("w2", "decision", T2_DONE))
       .expect(st.held.get("t1") and st.blockedEnds.get("t1").get("implement") == 2)
+  // ... and lifting that hold resets the count, so the next blocked end does not hold again.
+  run liftResetsBlockedEndsTest =
+    start.then(claim("w1", "t1")).then(endBlocked("w1", "decision", T2_DONE))
+      .then(sync1).then(gitDecides("t1", "implement", false)).then(sync1)
+      .then(claim("w2", "t1")).then(endBlocked("w2", "decision", T2_DONE))
+      .then(setHold("t1", false))
+      .expect(not(st.held.get("t1")) and st.blockedEnds.get("t1").get("implement") == 0)
+      .then(sync1).then(gitDecides("t1", "implement", false)).then(sync1)
+      .then(claim("w1", "t1")).then(endBlocked("w1", "decision", T2_DONE))
+      .expect(not(st.held.get("t1")) and st.blockedEnds.get("t1").get("implement") == 1)
 
   // R-BTN-75 as amended by R3-1254: a decision posted while the ticket is held blocks nothing;
   // the end that leaves it blocked logs `blocked`, so the answer's `unblocked` follows one.
@@ -389,9 +407,11 @@ module regressions {
       .expect(not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked" and not(st.unpairedUnblock))
 
   // R-BTN-69 (R3-1254, owner: "exactly one start and at least one terminal station for each
-  // course"): the model's course passes the acceptance rules, and each rule refuses a course that
-  // breaks it alone — a leg leaving an end, no end, a cycle of unbounded legs, a start_leg not
-  // leaving start, a station nothing reaches, a station with no way on.
+  // course"): the model's course passes the acceptance rules, and each case below breaks one —
+  // a leg leaving an end, no end, a cycle of unbounded legs, a start_leg not leaving start, a
+  // station nothing reaches, a station with no way on. No end also fails "an end reachable from
+  // every station"; `courseOk` keeps its explicit `ends != Set()` so the rule reads as R-BTN-69
+  // states it.
   run courseIsAcceptedTest = start.expect(courseWellFormed)
   run courseRulesRefuseTest = start.expect(and {
     not(courseOk(START, START_LEG, ENDS, LEGS.union(Set("reopen")), FROM.put("reopen", Set("merged")),

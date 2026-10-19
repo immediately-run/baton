@@ -18,7 +18,7 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 | `liveness.qnt` | the liveness properties under weak fairness, over `small` (kept apart: their fairness terms made Apalache's input too large) |
 | `witnesses.qnt` | the reachability witnesses, each an invariant that must fail |
 | `instances.qnt` | `sim` (R3-1243's bounds: 3 workers, 2 tickets, 2 overlapping sync runs) and `small` (2 workers, 1 ticket, 1 sync run, for Apalache) |
-| `regressions.qnt` | one deterministic run per defect the reviews found (42), each asserting the merged spec does not reach it |
+| `regressions.qnt` | one deterministic run per defect the reviews found (47), each asserting the merged spec does not reach it |
 | `replay.qnt` | the traces `test/model/replay.test.ts` drives the core with (R3-1244): `sim`'s instance, every action the harness can make the core take |
 | `check.mjs` | `npm run model` and `npm run model:quick` |
 | `full.mjs` | `npm run model:full`: every check, with a report for the PR |
@@ -44,10 +44,10 @@ it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick
   result and minutes. `MODEL_SAMPLES`, `REPLAY_TRACES` and `MODEL_VERIFY_DEPTH` lower the sizes
   to try a change, and the report then says it is a reduced run, which `model-report` refuses.
   Paste it into the PR. Needs Java for the last step; about two hours on 4 CPUs.
-- `npm run model` — typecheck, the 42 regression runs, 10,000 random runs of 40 steps of `sim`
+- `npm run model` — typecheck, the 47 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
-  eight reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
+  twelve reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
   and scales the `progressStep` runs (30%).
 - `npm run model:quick` — the typecheck and the regression runs alone; `npm test` runs it.
 - `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 4: about 47
@@ -166,7 +166,9 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
 - **Blocks** (R-BTN-75, R-BTN-77): `blocked_since` is set when the ticket is not held (an active
   claim, an unconfirmed completion, a fence-pending reap), has a queued leg, and a confirmed row
   on it or the ticket, re-evaluated in every transaction that changes one of those. A claim's
-  start changes it silently; every other change logs `blocked` or `unblocked` — an end that
+  start changes it silently (a branch no state reaches yet: a claim is granted only with no
+  confirmed row on its queued leg, so its start never flips the ticket; advice-only `resource`
+  rows, part 2b, make it reachable, and a run comes with them); every other change logs `blocked` or `unblocked` — an end that
   leaves the ticket blocked logs `blocked` (R-BTN-75 as amended by R3-1254, which this model
   found: see *What found something*).
 - **Retries per leg** (R-BTN-122): a `fail` end (`cannot-finish:transient`) and an alarm reap are
@@ -180,7 +182,7 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   contains that commit (git's version at the read, not its observation number) replaces it
   with what it posts; one no such snapshot replaces within `PROV_TTL` lapses
   (`provisionalLapses`). Blocked ends are no attempts; past `MAX_BLOCKED` the next holds the
-  ticket. `resource` and `capability` blocked ends are R3-1254's next part.
+  ticket. `resource` and `capability` blocked ends are R3-1254's part 2b.
 
 ## Properties (`safety`)
 
@@ -195,7 +197,7 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
 | `regressedOnlyWhenGitRegressed` — lag is never a regression | §2e |
 | `boundedLoops` — no claim runs a leg past its `max_runs` | R-BTN-63, R-BTN-69 |
 | `writingLegsBarred` — every writing leg started under the required bar, by a worker of no barred family | R-BTN-45, R-BTN-60, R-BTN-67 |
-| `gatesHeld` — every claim and advance was granted with every gate in force holding (hold, barred tags, required bar, the queued leg), recorded at the grant apart from the guard | R-BTN-45, R-BTN-83, rules 1, 3, 8 |
+| `gatesHeld` — every claim and advance was granted with every gate in force holding (hold, barred tags, required bar, the queued leg, and the leg's rows: an unmet prerequisite, an open decision, a retry backoff, a provisional row), recorded at the grant apart from the guard | R-BTN-45, R-BTN-83, R-BTN-120, R-BTN-122, R-BTN-126, rules 1, 3, 8 |
 | `noActAfterLoss` — no worker pushes for a claim the alarm reaped (unfenced) | R-BTN-6, R-BTN-26 |
 | `noStuckTicket` — no deadlock: a ticket git has not finished or withdrawn, once the syncs are idle and the head matches git, is held, fenced, owner-held, its queued leg waiting on `policy` or blocked (a row, listed by R-BTN-75), flagged, or claimable | §6.7, R-BTN-10, R-BTN-35, R-BTN-67, R-BTN-75, R-BTN-83 |
 | `blockedIsStored` — `blocked_since` is what the rows, the queued leg and the held state say, after every transaction | R-BTN-75 |
@@ -238,7 +240,10 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
   fails `decisionOnAnUnpostedLegIsOnTheTicketTest`; a withdrawn ticket meeting prerequisites
   fails `withdrawnMeetsNothingTest`; `reached` read as `at` fails
   `reachedPrerequisiteStaysMetTest`; no hold at `max_blocked` fails
-  `blockedEndsHoldPastMaxBlockedTest`; a course whose end is not terminal passes
+  `blockedEndsHoldPastMaxBlockedTest`; a lift that keeps the blocked-end count fails
+  `liftResetsBlockedEndsTest`; a backoff that clears before `retry_after` fails
+  `backoffWaitsForRetryAfterTest`; a provisional row that lapses before its hour fails
+  `provisionalRowWaitsForTheHourTest`; a course whose end is not terminal passes
   `courseOk` and fails `courseRulesRefuseTest`;
 - `MAX_DRIFT = 3`, above `MARGIN = 2`, lets a reaped worker push (`noActAfterLoss`); at
   `MAX_DRIFT = 2` it cannot — the spec's assumption is drift ≤ the margin.
@@ -247,16 +252,25 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
 
 | Check | Instance | Result |
 |---|---|---|
-| 42 regression runs | `sim` sizes, zero drift | pass |
+| 47 regression runs | `sim` sizes, zero drift | pass |
 | `safety`, 10,000 × 40 steps of `step`; 3,000 × 40 of `progressStep` | `sim` | no violation |
 | witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap, a blocked ticket, a provisional row, a backoff, an `unblocked` event; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all 12 reached |
 | a second review | — | reached by a regression run only (`maxRunsSurviveResumptionTest`) |
 | Apalache, `safety` | `small`, depth 4 | no violation; about 47 min on 4 CPUs at R3-1254 part 2. Depth 5: 15 min 29 s before R3-1254, 49–59 min with its queued leg, about 10 h with part 2's prerequisites (B-37 brings it back). Each model PR's `model:full` report carries the figure for its head (R-BTN-68) |
 | liveness, `fencesClear` | `small`, TLC (Apalache cannot check fairness) | **at `b76af9c`, the pre-round-2 formula and model**: no violation in 8,187 distinct states before a 28-minute cap, not exhaustive. The current formulas (rounds 2–3) have not been run; R3-1254 runs them to completion on a narrowed instance |
 
-Depth 5 on `small` reaches claims, advances, pushes and a sync; it does not reach a judged
-snapshot (a confirmation, a stale release or a regression needs 6–8 steps), so for those
-invariants the evidence is the simulation and the regression runs, not the proof.
+Depth 4 on `small` reaches claims, advances, pushes and a sync; a fail end's backoff and the
+`blocked` it logs; a decision posted and the block it makes; a blocked end on a decision and
+its provisional row. It does not reach:
+- a judged snapshot (a confirmation, a stale release or a regression needs 6–8 steps);
+- an `unblocked` event: the shortest route is a claim, a fail end, two ticks and the backoff
+  clearing, 5 steps, and answering a decision needs a second git event, which `small` lacks;
+  so `unblockedFollowsBlocked` is not exercised by the proof;
+- a prerequisite on another ticket, at any depth: `small` has one ticket, so `gitDepends` and a
+  blocked end on a `ticket` are never enabled.
+
+For those, the evidence is the simulation and the regression runs, not the proof. B-37 brings
+depth 5 back, and with it the `unblocked` event.
 
 ## Bounds and assumptions
 
@@ -293,7 +307,7 @@ invariants the evidence is the simulation and the regression runs, not the proof
   state as given; **R-BTN-40** (suspend rather than wait on the lease) is a worker's choice, so
   `endClaim(…, "suspended", …)` may happen at any point — both are modelled as nondeterminism,
   not as rules of their own.
-- **The rest of §2g–§2m, still R3-1254's.** Next, in its own pull request: the capability and
+- **The rest of §2g–§2m, still R3-1254's.** Next, in its own pull request (the ticket's part 2b): the capability and
   resource prerequisites — a runner's capabilities and their loss mid-leg (rule 4, R-BTN-126),
   the fleet's resource answer and the answer lost when no one can give it (R-BTN-76, R-BTN-77).
   After it: open-world claims (R-BTN-104), sync wants

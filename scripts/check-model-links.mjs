@@ -140,6 +140,17 @@ export function check(root = ROOT) {
   return { errors, actions };
 }
 
+/** The run's listing of the model ahead of the code: one line per pending note, `not built` when
+ *  the action names no implementing function, `partly built` when it names one beside the note. */
+export function pendingLines(actions) {
+  const out = [];
+  for (const [n, a] of actions) {
+    const built = a.impls.some((im) => im.file);
+    for (const im of a.impls.filter((x) => x.pending)) out.push(`${n}: ${built ? 'partly built' : 'not built'} — ${im.pending}`);
+  }
+  return out;
+}
+
 function listSources(root) {
   const out = new Set(readdirSync(join(root, 'src/core')).filter((f) => f.endsWith('.ts')).map((f) => `src/core/${f}`));
   for (const a of modelActions(readFileSync(join(root, MODEL), 'utf8')).values()) for (const im of a.impls) if (im.file) out.add(im.file);
@@ -151,10 +162,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   if (process.argv.includes('--stamp')) for (const [n, a] of actions) console.log(`${n}: @model ${n} sha256:${hashOf(a.text)}  (${a.impls.map((i) => (i.external ? 'external' : i.pending ? `pending — ${i.pending}` : `${i.file}#${i.fn}`)).join(', ')})`);
   for (const e of errors) console.log(`✗ ${e}`);
   const pending = [...actions].filter(([, a]) => a.impls.some((im) => im.pending));
-  for (const [n, a] of pending) {
-    const built = a.impls.some((im) => im.file);
-    for (const im of a.impls.filter((x) => x.pending)) console.log(`… ${n}: ${built ? 'partly built' : 'not built'} — ${im.pending}`);
-  }
+  for (const line of pendingLines(actions)) console.log(`… ${line}`);
   if (!errors.length) console.log(`✓ every action of ${MODEL} and its implementation name each other; hashes current (${actions.size} actions, ${pending.length} ahead of the code)`);
   process.exit(errors.length ? 1 : 0);
 }
