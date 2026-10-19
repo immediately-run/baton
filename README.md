@@ -144,19 +144,28 @@ After the first heartbeat a worker also presents the per-session secret it regis
 ## Administrators and owners
 
 Whoever deploys Baton is its administrator (R-BTN-57): the secret `BATON_ADMIN_KEYS` (locally
-`--admin-keys`) lists their SSH public keys, one per line, read on every request. Owners are per
-repository (R-BTN-58), named by an administrator when it registers the repository. Every
-management request is signed like a worker's, and the CLI is the one path:
+`--admin-keys`) lists their keys, one per line, read on every request. Owners are per
+repository (R-BTN-58), named by an administrator when it registers the repository. People use
+API keys (R-BTN-159); workers and syncs sign with SSH keys. `baton key create FILE` makes one on
+your machine: `FILE` holds the key (`-i FILE`), `FILE.pub` its public line, which goes in
+`BATON_ADMIN_KEYS` or after `--owner-key` as an SSH public key would. An SSH key still works for
+an administrator or owner, and its requests are signed. The CLI is the one path:
 
 ```
-baton admin -i ~/.ssh/baton_admin repo add immediately-run/ops --id ops --owner-key ops-owner.pub
-baton admin -i ~/.ssh/baton_admin repo set docs --weight 2        # or --tiers routine,judgement,critical
-baton admin -i ~/.ssh/baton_admin grant docs --key op.pub --hostname op-mac --capabilities human-operator
-baton admin -i ~/.ssh/baton_admin revoke SHA256:…                 # any key, at once
-baton admin -i ~/.ssh/baton_admin open                            # a one-time dashboard link (5 minutes)
-baton owner -i ~/.ssh/docs_owner grant docs --key vm.pub --hostname vm-a --capabilities agent-venue --max-tier judgement
-baton owner -i ~/.ssh/docs_owner bar docs --course '*' --tag account:go_plus --applies claim --starts-at 2026-10-17T00:00:00Z --reason go-quota
-baton owner -i ~/.ssh/docs_owner settings docs --required-bar '*' --course roadmap-pr --except implement,review,adjudicate --tag-prefix family: \
+baton key create ~/.config/baton/admin --comment "admin"          # once; then:
+npx wrangler secret put BATON_ADMIN_KEYS < ~/.config/baton/admin.pub
+baton key create ~/.config/baton/ops_owner                        # the owner's own machine
+```
+
+```
+baton admin -i ~/.config/baton/admin repo add immediately-run/ops --id ops --owner-key ops_owner.pub
+baton admin -i ~/.config/baton/admin repo set docs --weight 2        # or --tiers routine,judgement,critical
+baton admin -i ~/.config/baton/admin grant docs --key op.pub --hostname op-mac --capabilities human-operator
+baton admin -i ~/.config/baton/admin revoke SHA256:…|bak_…           # any key, at once
+baton admin -i ~/.config/baton/admin open                            # a one-time dashboard link (5 minutes)
+baton owner -i ~/.config/baton/docs_owner grant docs --key vm.pub --hostname vm-a --capabilities agent-venue --max-tier judgement
+baton owner -i ~/.config/baton/docs_owner bar docs --course '*' --tag account:go_plus --applies claim --starts-at 2026-10-17T00:00:00Z --reason go-quota
+baton owner -i ~/.config/baton/docs_owner settings docs --required-bar '*' --course roadmap-pr --except implement,review,adjudicate --tag-prefix family: \
                                                --retry 1h,4h --max-failed 3
 ```
 

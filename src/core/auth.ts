@@ -222,6 +222,38 @@ const LABEL_AND_PARAMS = /^([a-z][a-z0-9_-]{0,31})=(\("@method" "@authority" "@p
 const PARAM = /;([a-z]+)=(?:"([\x20\x21\x23-\x5b\x5d-\x7e]*)"|([0-9]{1,15}))/g;
 const NONCE = /^[A-Za-z0-9+/_=-]{22,64}$/;
 export const KEY_FINGERPRINT = /^SHA256:[A-Za-z0-9+/]{43}$/;
+
+/** A person's API key (R-BTN-159): `bak_<id>_<secret>`, 64 random bits of id and 256 of secret,
+ *  hex. Its public half — the line an administrator lists in BATON_ADMIN_KEYS, or registers as
+ *  an owner key — is `bak_<id> sha256:<SHA-256 of the whole key>`, with an optional comment; its
+ *  fingerprint is `bak_<id>`. Administrators and owners only: a worker, sync, probe or courier
+ *  key stays an SSH key, so no API key is ever accepted on their routes. */
+export const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
+export const API_KEY_FINGERPRINT = /^bak_[0-9a-f]{16}$/;
+const API_KEY_LINE = /^(bak_[0-9a-f]{16}) sha256:([0-9a-f]{64})(?: [\x20-\x7e]{0,200})?$/;
+
+/** An API key's public line, or null when `line` is not one. */
+export function parseApiKeyLine(line: string): { fingerprint: string; hash: string; line: string } | null {
+  const m = API_KEY_LINE.exec(line.trim());
+  return m ? { fingerprint: m[1], hash: m[2], line: `${m[1]} sha256:${m[2]}` } : null;
+}
+
+/** R-BTN-159: an administrator's or owner's bearer API key, checked against the public line
+ *  `lookup` holds for its fingerprint. Returns the fingerprint. */
+export async function verifyApiKey(token: string, lookup: (fingerprint: string) => string | null): Promise<string> {
+  if (!API_KEY.test(token)) throw unauthenticated('an API key is bak_<id>_<secret>');
+  const fingerprint = token.slice(0, 20);
+  const line = lookup(fingerprint);
+  const known = line == null ? null : parseApiKeyLine(line);
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)));
+  const hash = [...digest].map((b) => b.toString(16).padStart(2, '0')).join('');
+  // Every byte compared, whatever the first difference, so the time says nothing of the hash.
+  let diff = known ? 0 : 1;
+  const want = known?.hash ?? '0'.repeat(64);
+  for (let i = 0; i < 64; i++) diff |= want.charCodeAt(i) ^ hash.charCodeAt(i);
+  if (diff !== 0) throw unauthenticated('the API key is not registered or is revoked');
+  return fingerprint;
+}
 const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const SSHSIG_MAGIC = new TextEncoder().encode('SSHSIG');
 

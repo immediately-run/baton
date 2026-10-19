@@ -7,7 +7,7 @@
 // sync key. Each act is an `admin` event; a bar change also dispatches the repository's sync.
 import { BatonError, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
-import { KEY_FINGERPRINT, parseSshKey, type SshKey } from './auth';
+import { API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
@@ -67,7 +67,7 @@ const bad = (field: string, why: string): never => {
   throw new BatonError('invalid-params', `${field}: ${why}`);
 };
 /** A key's fingerprint as a path or body names it, checked before any SQL (§10.4; round 2, 2-A-3). */
-const fingerprintOf = (v: unknown, field: string): string => (typeof v === 'string' && KEY_FINGERPRINT.test(v) ? v : bad(field, 'must be a key fingerprint, SHA256:…'));
+const fingerprintOf = (v: unknown, field: string): string => (typeof v === 'string' && (KEY_FINGERPRINT.test(v) || API_KEY_FINGERPRINT.test(v)) ? v : bad(field, 'must be a key fingerprint, SHA256:… or bak_…'));
 /** A bearer-token credential's id (CREDENTIALS' keys). */
 const TOKEN_CREDENTIAL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -134,6 +134,12 @@ export class Admin {
   async adminFingerprints(): Promise<Map<string, string>> {
     const out = new Map<string, string>();
     for (const line of this.c.adminKeys()) {
+      // An API key's public line (R-BTN-159) or an OpenSSH public key.
+      const api = parseApiKeyLine(line);
+      if (api) {
+        out.set(api.fingerprint, api.line);
+        continue;
+      }
       try {
         const k = await parseSshKey(line);
         out.set(k.fingerprint, lineOf(k, line));
@@ -718,9 +724,15 @@ export class Admin {
     return { fingerprint: key.fingerprint, line: lineOf(key, v as string) };
   }
 
+  /** An owner's key: an OpenSSH public key, or an API key's public line (R-BTN-159). */
+  private async parseOwnerKey(v: unknown, field: string): Promise<{ fingerprint: string; line: string }> {
+    const api = typeof v === 'string' ? parseApiKeyLine(v) : null;
+    return api ? { fingerprint: api.fingerprint, line: api.line } : this.parseKey(v, field);
+  }
+
   private async ownerKeys(v: unknown, field: string): Promise<{ fingerprint: string; line: string }[]> {
     if (!Array.isArray(v) || v.length > OWNERS_MAX) bad(field, `must be a list of at most ${OWNERS_MAX} public keys`);
-    const keys = await Promise.all((v as unknown[]).map((k, i) => this.parseKey(k, `${field}[${i}]`)));
+    const keys = await Promise.all((v as unknown[]).map((k, i) => this.parseOwnerKey(k, `${field}[${i}]`)));
     if (new Set(keys.map((k) => k.fingerprint)).size !== keys.length) bad(field, 'names a key twice');
     return keys;
   }

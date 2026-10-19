@@ -14,7 +14,7 @@ import { priceFor } from '../shared/sessionUsage.mjs';
 import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { WorkerApi } from './workerApi';
-import { parseSshKey, verifyRequest, withBody, type SyncCredential } from './auth';
+import { parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
 import { Cutover } from './cutover';
 import { Mirror } from './mirror';
@@ -594,9 +594,12 @@ export class BatonCore {
    * does not know is `unauthenticated`; a known key outside its role or repository `forbidden`.
    */
   private async adminRoute(req: Request, url: URL): Promise<Response> {
-    if (!req.headers.has('X-Baton-Signed')) throw new BatonError('unauthenticated', 'sign with an administrator or owner key');
+    const apiKey = req.headers.get('X-Baton-Api-Key');
+    if (!req.headers.has('X-Baton-Signed') && apiKey == null) throw new BatonError('unauthenticated', 'sign with an administrator or owner key, or send its API key');
     const admins = await this.admin.adminFingerprints();
-    const signed = await this.verifySigned(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp));
+    const lookup = (fp: string) => admins.get(fp) ?? this.admin.ownerKey(fp);
+    // R-BTN-159: a person's API key, checked against its public line, in place of a signature.
+    const signed = apiKey != null ? { req, cred: await verifyApiKey(apiKey, lookup) } : await this.verifySigned(req, lookup);
     const fp = signed.cred;
     const p = url.pathname;
     const m = req.method;
