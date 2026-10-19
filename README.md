@@ -11,6 +11,20 @@ an item says `infra/baton/<path>`, it means `<path>` in this repository (BATON_S
 How Baton differs from a durable-execution engine such as Temporal, and where each fits:
 [`docs/compared-to-temporal.mdx`](docs/compared-to-temporal.mdx).
 
+## The CLI on npm
+
+`@immediately-run/baton` is the `baton` command, published from this repository:
+
+```sh
+npx --yes @immediately-run/baton@0.1.0 run   # a runner (§6.13), with IR_BATON_KEY_FILE set
+```
+
+From the package, `baton run`, `baton decision list` and the `baton admin|owner|worker …` API
+client work. `baton repo init` and `baton repo sync` still need a checkout of this repository:
+they pin the CLI to its own git commit and build leg stubs from `src/` with esbuild, which a
+published package has neither of, until B-43 moves the standard courses out of the CLI. In a
+checkout, run the CLI as `node cli/baton.mjs`.
+
 ## Layout
 
 | Path | What |
@@ -59,7 +73,7 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 - `npm test` (alias `npm run test:baton`) — the suite on both hosts, with a fake clock; `npx vitest --project local`
   (or `cloudflare`) runs one.
 - `npm run start:local -- --db <path> --port <n>` — Baton as a local process (below).
-- `npx baton test-course <repository root> <course> [--base REF|none] [--board FILE]` — the course test kit
+- `node cli/baton.mjs test-course <repository root> <course> [--base REF|none] [--board FILE]` — the course test kit
   (§2d, R-BTN-64/-65): the working tree's `.baton/` against REF's (default `origin/HEAD`, else
   `origin/main`; none resolving is an error, `--base none` skips the removal rule), run on a local
   Baton — the core accepts the file, the live tickets FILE places keep their paths, a removal raised
@@ -245,6 +259,18 @@ on the account, plus Zone: Read and Workers Routes: Edit on the `immediately.run
 
 With a sibling docs checkout present, the suite also fails when `src/shared/` or the board
 fixtures have drifted from docs.
+
+## Releasing the CLI
+
+A release is a PR that bumps `version` in `package.json` (and its two copies at the root of
+`package-lock.json`: `npm install --package-lock-only`), merged to `main`. `ci.yml`'s `release`
+job then waits for a reviewer's approval in the `npm` environment, tags `v<version>`, and runs
+`npm publish` by OIDC trusted publishing, with provenance; no npm token exists. A version npm
+already has is skipped, so a merge without a bump publishes nothing. `npm run check:package`
+(in CI on every PR) packs the tarball, installs it in an empty directory and runs its `baton`.
+
+The package's first version was published once by hand, because npm's trusted-publishing
+setting exists only for a package that exists.
 
 ## License
 
