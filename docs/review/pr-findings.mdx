@@ -690,3 +690,6 @@ The columns:
 | 2026-10-19 | baton | 65 | R7 | nit | (B) the timing claims rested on single samples; this PR's own run took 19 m 48 s | fixed — c3533df (the spread; B-48's criterion over at least three runs) | impl | — | — |
 | 2026-10-19 | baton | 65 | R6 | nit | (B) the literal `240_000` was spelled three times | fixed — c3533df (`QUINT_CASE_MS`) | impl | — | — |
 | 2026-10-19 | baton | 65 | R10 | nit | (r2) the body's pre-#59 baseline (13–16 min) was wrong, and B-48's deploy-timeout history started at bbc525a rather than 485ca9e (2026-10-18) | fixed — the PR body, and B-48's *Found by* in the tickets commit after the merge | impl | — | — |
+| 2026-10-19 | baton | 66 | R1 | blocking | (A) a course file could loosen the owners' required_independence by renaming the keyed leg: the key was looked up by the leg's current name only | fixed — 41cbfe9 (every key resolves through renamed_from; S-BTN-63 case, fails without it) | impl | — | — |
+| 2026-10-19 | baton | 66 | R2 | nit | (A) the S-BTN-63 case named "with the list dropped from git" dropped no list | fixed — 41cbfe9 (renamed for what it tests; a new case posts the list, then drops it and renames the leg) | impl | — | — |
+| 2026-10-19 | baton | 66 | R1 | nit | (B) the dashboard's Settings list omitted required_independence | fixed — 6c978a0 (shown per leg) | impl | — | — |
