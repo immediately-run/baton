@@ -450,7 +450,7 @@ export class Runner {
       if (!ensureSha(this.o.home, claim.snapshot_sha, () => this.o.fetch?.(this.o.home))) {
         return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
       }
-      course = loadCourse(this.o.home, claim.snapshot_sha, courseOf(this.o.home, claim.snapshot_sha));
+      course = loadCourse(this.o.home, claim.snapshot_sha, courseOf(this.o.home, claim.snapshot_sha, this.o.courses.length === 1 ? this.o.courses[0].course : undefined));
     } catch (e) {
       this.log(`baton: the claim's course would not load (${msg(e)})`);
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);

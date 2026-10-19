@@ -1,8 +1,9 @@
-// cli.ts — `baton repo sync` and `baton repo init` (BATON_SPEC §2f R-BTN-74, §7.1, R-BTN-127's
-// names): the defaults a repository with no course code runs. `sync` builds the board post from
-// `.baton/tickets.mjs` and each course's `sync.mjs`, falling back to the markdown ticket source
-// and the `pr` course's station function; `init` scaffolds `.baton/` (the settings, the course
-// file, the leg stubs, the pinned sync workflow), and `--eject` copies a default out to edit.
+// cli.ts — `baton repo sync` and `baton repo init` (BATON_SPEC §2f R-BTN-74, R-BTN-131, §7.1,
+// R-BTN-127's names): the defaults a repository with no course code runs. `sync` builds the board
+// post from `.baton/tickets.mjs` and each course's `sync.mjs`, falling back to the markdown ticket
+// source and the standard courses' station functions (courses.ts); `init` scaffolds `.baton/`
+// (the settings, a standard course's file, its leg stubs and instructions, the pinned sync
+// workflow), and `--eject` copies a default out to edit.
 // Course code in the CLI, never core (§2b). Reached through the esbuild bundle
 // (scripts/baton-cli.mjs), the way `baton run` reaches src/runner.
 import { execFileSync } from 'node:child_process';
@@ -13,14 +14,19 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, type Auth, type Transport } from '../runner/api';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { DEFAULT_BRANCH_PATTERN, PR_COURSE, matchPatterns, stationsPr, ticketOwns, type PrFact, type StationsResult } from './course-pr';
+import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type PrFact, type StationsResult } from './course-pr';
+import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
+import { GIT_SHA } from '../core/validate';
+import { parseSource, printSource } from './course-source';
+import { MARKERS_FILE, parseMarkers, type Marker } from './course-markers';
+import { DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
 import { readItems } from './read-items';
 import { ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
 const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8' }).trim();
 /** `owner/name` of a checkout's `origin` remote (an SSH or HTTPS URL, or the proxy's
  * `…/git/owner/name` form), or null when it has none. */
-function remoteSlug(root: string): string | null {
+export function remoteSlug(root: string): string | null {
   try {
     // The proxy's `…/git/owner/name` form drops its `git/` — only when `owner/name` follows, so an
     // owner named `git` keeps its name.
@@ -54,6 +60,10 @@ interface CourseEntry {
   branch_pattern?: string;
   previous_branch_pattern?: string;
   protocol_files?: string[];
+  /** Where the course comes from (B-33): `github/<owner>/<name>/<commit>/<course>`. The sync holds
+   * the repository's course file to the source's, and places its tickets with the source's
+   * station function. */
+  source?: string;
 }
 
 /** `.baton/baton.json`'s shape (R-BTN-51): the settings these commands read. */
@@ -66,12 +76,12 @@ interface BatonJson {
   agent_command?: string;
 }
 
-/** The skill a course entry names when its file names none: the course's own (`baton-pr`). */
+/** The skill a course entry names when its file names none: the course's own (`baton-create-pr`). */
 const defaultSkill = (course: string): string => `baton-${course}`;
 
 /** The `courses` entry `baton repo init` writes: every R-BTN-51 field, so a repository edits
  * them where the spec says rather than discovering them. */
-function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern'>> {
+function courseEntry(course: string, legs: string[]): Required<Omit<CourseEntry, 'previous_branch_pattern' | 'source'>> {
   return { id: course, version: 1, min_worker_version: 1, skill: defaultSkill(course), step_kinds: legs, report_horizon_h: 6, branch_pattern: DEFAULT_BRANCH_PATTERN, protocol_files: [] };
 }
 
@@ -151,7 +161,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
 
   // Every live ticket's course must be one this repository lists (R-BTN-74: a ticket on a course
   // with no station function fails the sync — nothing is posted).
-  const courses = batonJson.courses ?? [{ id: batonJson.default_course ?? 'pr', version: 1 }];
+  const courses = batonJson.courses ?? [{ id: batonJson.default_course ?? DEFAULT_COURSE, version: 1 }];
   const listed = new Set(courses.map((c) => c.id));
   const stray = result.tickets.find((t) => !closedIds.has(t.id) && !listed.has(t.course_id));
   if (stray) throw new Error(`ticket ${stray.id} is on course ${stray.course_id}, which .baton/baton.json's courses do not list`);
@@ -163,11 +173,36 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     patterns: matchPatterns([c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])]),
     tickets: result.tickets.filter((t) => t.course_id === c.id && !closedIds.has(t.id)),
   }));
-  const owns = (pr: { number: number; head: string }) => owners.some((o) => o.tickets.some((t) => ticketOwns(t, pr, o.patterns, repository)));
-  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : await githubFacts(root, log, owns);
+  const owns = (pr: { number: number; head: string; repository?: string }) => owners.some((o) => o.tickets.some((t) => ticketOwns(t, pr, o.patterns, repository)));
+  const syncMjsOf = (id: string): string => join(root, '.baton', 'courses', id, 'sync.mjs');
+  // The forge is read only when a course reads PRs: a repository on the marker courses alone
+  // (bug-report, draft-ticket, decision) needs no forge token. A course's own sync.mjs may read
+  // them, so it gets them too.
+  const readsPrsOf = (c: CourseEntry): boolean => existsSync(syncMjsOf(c.id)) || builtIn(c.id)?.reads === 'prs';
+  const readsPrs = courses.some(readsPrsOf);
+  // The other repositories a live ticket on a PR-reading course names in `repos:` (B-29): its PRs
+  // may be there, and a home with none (docs) is the usual case.
+  // Each with the tickets naming it, so a repository the token cannot read is named with them.
+  const siblings = new Map<string, { repository: string; tickets: string[] }>();
+  for (const c of courses.filter(readsPrsOf)) {
+    for (const t of result.tickets.filter((x) => x.course_id === c.id && !closedIds.has(x.id))) {
+      for (const r of t.repos ?? []) {
+        if (repository != null && sameRepoName(r, repository)) continue;
+        const s = siblings.get(r.toLowerCase()) ?? { repository: r, tickets: [] };
+        s.tickets.push(t.id);
+        siblings.set(r.toLowerCase(), s);
+      }
+    }
+  }
+  const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()]) : [];
+  // The closing markers the marker courses' legs committed (R-BTN-83), as the checkout has them.
+  const markersFile = join(root, MARKERS_FILE);
+  const markerLines: Marker[] = existsSync(markersFile)
+    ? parseMarkers(readFileSync(markersFile, 'utf8'), (line, why) => log(`baton: ${MARKERS_FILE}:${line} skipped — ${why}`))
+    : [];
 
-  // Each course's stations, markers and course data: its own sync.mjs, else the default only
-  // `pr` has. The function sees its own course's tickets alone.
+  // Each course's stations, markers and course data: its own sync.mjs, else its standard
+  // course's default (courses.ts). The function sees its own course's tickets alone.
   const stations: StationsResult['stations'] = {};
   const markers: StationsResult['markers'] = [];
   const courseData: Record<string, unknown> = {};
@@ -177,19 +212,21 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     if (!existsSync(courseFile)) throw new Error(`.baton/courses/${c.id}/course.json is missing — run \`baton repo init --course ${c.id}\``);
     const course = JSON.parse(readFileSync(courseFile, 'utf8')) as { legs?: Record<string, unknown> };
     const branchPatterns = [c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])];
-    const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, branchPatterns };
-    const syncMjs = join(root, '.baton', 'courses', c.id, 'sync.mjs');
+    const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, markers: markerLines, branchPatterns, graph: course };
+    const syncMjs = syncMjsOf(c.id);
+    if (c.source) checkSource(c, readFileSync(courseFile, 'utf8'), existsSync(syncMjs));
+    const standard = builtIn(c.id);
     let fn: StationFn;
     if (existsSync(syncMjs)) {
       const mod = (await import(`${pathToFileURL(syncMjs).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default?: { stations?: StationFn } };
       if (typeof mod.default?.stations !== 'function') throw new Error(`.baton/courses/${c.id}/sync.mjs default-exports no stations(ctx)`);
       fn = mod.default.stations;
-    } else if (c.id === 'pr') {
-      fn = stationsPr as unknown as StationFn;
+    } else if (standard) {
+      fn = standard.stations as unknown as StationFn;
     } else {
-      throw new Error(`course ${c.id} has no sync.mjs and the CLI's default serves only \`pr\` — add .baton/courses/${c.id}/sync.mjs`);
+      throw new Error(`course ${c.id} has no sync.mjs and is not a standard course — add .baton/courses/${c.id}/sync.mjs`);
     }
-    const out = stationsResult(await fn(fnCtx), existsSync(syncMjs) ? `.baton/courses/${c.id}/sync.mjs` : 'the pr default');
+    const out = stationsResult(await fn(fnCtx), existsSync(syncMjs) ? `.baton/courses/${c.id}/sync.mjs` : `the ${standard!.id} default`);
     Object.assign(stations, out.stations);
     markers.push(...out.markers);
     courseData[c.id] = out.course_data;
@@ -204,6 +241,32 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     payload: { registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData },
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };
+}
+
+/** A sourced course (B-33, R-BTN-131) is the source's exactly, or the sync posts nothing: the
+ * source names this CLI's repository at this CLI's commit (the workflow's pin) and a standard
+ * course of the same id, the repository's course file is byte-equal to the one that commit
+ * scaffolds, and no `sync.mjs` replaces the source's station function. Each refusal names what
+ * to do. Other repositories' courses are not resolved yet: running their station code at sync
+ * time needs its own design. */
+function checkSource(c: CourseEntry, courseText: string, ownSyncMjs: boolean): void {
+  const src = parseSource(c.source!);
+  const self = cliSelf();
+  const at = `.baton/baton.json: course ${c.id}'s source ${c.source}`;
+  if (src.course !== c.id) throw new Error(`${at} names course ${src.course}; a source names the course of its own id`);
+  if (!self) throw new Error(`${at}: this CLI is not a git checkout with an origin, so it cannot tell its own commit`);
+  if (!sameRepo(src, self)) {
+    throw new Error(`${at}: a course from ${src.namespace}/${src.repository} is not supported yet — only this CLI's repository, ${self.namespace}/${self.repository}`);
+  }
+  if (src.ref !== self.sha) {
+    throw new Error(`${at} is at ${src.ref.slice(0, 10)}, and this CLI is at ${self.sha.slice(0, 10)} — re-run \`baton repo init\` with the CLI at the workflow's pin, which moves both`);
+  }
+  const b = builtIn(src.course);
+  if (!b || b.id !== src.course) throw new Error(`${at}: ${src.course} is not a standard course of ${self.namespace}/${self.repository} at ${self.sha.slice(0, 10)}`);
+  if (ownSyncMjs) throw new Error(`${at}: .baton/courses/${c.id}/sync.mjs would replace the source's station function — remove it, or remove \`source\` to own the course`);
+  if (courseText !== courseFileText(b)) {
+    throw new Error(`${at}: .baton/courses/${c.id}/course.json differs from the source's — a sourced course keeps its graph exactly; \`baton repo init --course ${c.id} --force\` restores it, and legs/<leg>${OVERRIDE_SUFFIX} changes a leg's run`);
+  }
 }
 
 /** A Baton call through the vendored sync's `{ok, code}` shape: a refusal is its code, never a throw. */
@@ -277,6 +340,8 @@ function bearerAuth(token: string | null): Auth {
   return (_m, _u, _b, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
 }
 
+/** GitHub's API origin, REST and GraphQL alike. */
+const GITHUB_API = 'https://api.github.com';
 /** How long one GitHub or token call may take before the sync fails (§6.3's bound). */
 const FETCH_TIMEOUT_MS = 30_000;
 /** The most pages of 100 one list may span; beyond it the sync fails rather than truncate. */
@@ -287,27 +352,73 @@ const MAX_PAGES = 50;
 const MAX_REQUESTS = 200;
 /** The `author_association` values whose reviews and comments carry a verdict. */
 const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+/** The most PRs one GraphQL query reads (B-35). One PR asks for up to 10 check suites of 100 runs
+ * and 100 each of commits, reviews and comments — 15 connection requests, so a full batch is 375,
+ * about 4 of the token's GraphQL points an hour, and some 32,500 nodes, far inside GitHub's
+ * 500,000 a query; 25 keeps a query's cost and answer small while one query serves most
+ * repositories' owned PRs. */
+const GRAPHQL_BATCH = 25;
+
+/** The detail of one PR that a GraphQL batch asks for (B-35): the head commit's check runs, the
+ * commits' dates, the reviews and the issue comments — the four REST lists it replaces, each a
+ * first page (10 check suites of 100 runs; 100 commits, reviews, comments) with `hasNextPage`,
+ * so an overflowing one is read over REST in full. The
+ * check runs come through the head's check suites (the latest run of each check, as REST's
+ * check-runs list gives them), never `statusCheckRollup`, which takes in commit statuses too and
+ * so may need a permission the sync workflow does not grant: `checks: read` covers this, as it
+ * covered the REST read. */
+const PR_DETAIL = `fragment D on PullRequest {
+  head: commits(last: 1) { nodes { commit { oid checkSuites(first: 10) { pageInfo { hasNextPage } nodes { checkRuns(first: 100, filterBy: { checkType: LATEST }) { pageInfo { hasNextPage } nodes { status conclusion } } } } } } }
+  commits(first: 100) { pageInfo { hasNextPage } nodes { commit { committedDate } } }
+  reviews(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation state submittedAt body } }
+  comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } authorAssociation createdAt body } }
+}`;
+
+/** The GraphQL query reading `numbers`' detail in one repository, each PR under alias `p<n>`. */
+const detailQuery = (numbers: number[]): string =>
+  `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${numbers.map((n) => `p${n}: pullRequest(number: ${n}) { ...D }`).join(' ')} } }\n${PR_DETAIL}`;
 
 /** R-BTN-96's fact adapter, GitHub half: the repository's PRs with their head's checks, their
- * commits' dates, their reviews and their comments, mapped to PrFact. Every list is read to its
- * end (GitHub's `Link: rel="next"`), so a long-lived repository or a long thread is never cut
- * off. Live forge access — the tests inject recorded facts instead. */
-export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string }) => boolean): Promise<PrFact[]> {
+ * commits' dates, their reviews and their comments, mapped to PrFact. The PR lists are read over
+ * REST, each to its end (GitHub's `Link: rel="next"`); the PRs a live ticket owns are read over
+ * GraphQL, GRAPHQL_BATCH to a query (B-35), with any connection that overflows its first page read
+ * over REST in full, so a long-lived repository or a long thread is never cut off. Live forge
+ * access — the tests inject recorded facts instead. */
+export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = []): Promise<PrFact[]> {
   const slug = remoteSlug(root);
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error('no GITHUB_TOKEN to read GitHub — pass --facts <file> for recorded facts');
   let requests = 0;
-  const get = async (url: string): Promise<Response> => {
+  /** One request of the budget, REST or GraphQL alike: past it the sync refuses. */
+  const spend = (): void => {
     if (++requests > MAX_REQUESTS) throw new Error(`GitHub: this sync would need more than ${MAX_REQUESTS} requests — refusing before the token's hourly budget is spent`);
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    if (!res.ok) throw new Error(`GitHub ${url}: ${res.status}`);
+  };
+  /** `res`, or the error a failed one is: its status, and whether it is a rate limit — GitHub's
+   * 403 or 429 with no requests left, or a secondary limit's retry-after — which `list` reads. */
+  const checked = (res: Response, what: string): Response => {
+    const limited = res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after');
+    if (!res.ok) throw Object.assign(new Error(`GitHub ${what}: ${res.status}${limited ? ' (rate limited)' : ''}`), { status: res.status, limited });
     return res;
+  };
+  const get = async (url: string): Promise<Response> => {
+    spend();
+    return checked(await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'baton-sync' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), url);
+  };
+  /** One GraphQL query, one request of the budget (B-35). An answer carrying `errors` fails the
+   * sync, as a failed REST read does: no partial reading is posted. */
+  const graphql = async (query: string, variables: Record<string, unknown>): Promise<any> => {
+    spend();
+    const url = `${GITHUB_API}/graphql`;
+    const res = checked(await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'baton-sync' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }), `${url} (${String(variables.owner)}/${String(variables.name)})`);
+    const body = (await res.json()) as { data?: any; errors?: { message?: string }[] };
+    if (body.errors?.length) throw new Error(`GitHub GraphQL (${String(variables.owner)}/${String(variables.name)}): ${body.errors.map((e) => e.message ?? '?').join('; ')}`);
+    return body.data;
   };
   /** Every item of a paged list; `pick` takes a page's items from its body. */
   const all = async <T>(path: string, pick: (body: any) => T[] = (b) => b as T[]): Promise<T[]> => {
     const out: T[] = [];
-    let url: string | null = `https://api.github.com${path}${path.includes('?') ? '&' : '?'}per_page=100`;
+    let url: string | null = `${GITHUB_API}${path}${path.includes('?') ? '&' : '?'}per_page=100`;
     for (let page = 0; url != null; page++) {
       if (page === MAX_PAGES) throw new Error(`GitHub ${path}: more than ${MAX_PAGES * 100} items — the sync will not post a truncated reading`);
       const res = await get(url);
@@ -317,33 +428,80 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     return out;
   };
   const out: PrFact[] = [];
-  for (const pr of await all<any>(`/repos/${slug}/pulls?state=all`)) {
-    const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
-    // Only a PR a live ticket owns needs its detail read: a closed unmerged PR counts as none
-    // (R-BTN-74), and any other PR places no ticket. Those are recorded from the list alone,
-    // so the requests a run makes grow with the live tickets, not with the repository's history.
-    if (state === 'closed' || !owns({ number: pr.number, head: pr.head.ref })) {
-      out.push({ number: pr.number, head: pr.head.ref, state, pushedAt: 0, checks: [], reviews: [] });
-      continue;
+  // The home, then each other repository a live ticket names in `repos:` (B-29), under the one
+  // budget: a sync that would exceed it refuses rather than post a partial reading.
+  for (const { repository: repo, tickets } of [{ repository: slug, tickets: [] as string[] }, ...siblings.filter((s) => !sameRepoName(s.repository, slug))]) {
+    const before = out.length;
+    out.push(...(await repoFacts(repo, tickets)));
+    log(`baton: read ${out.length - before} PRs of ${repo} from GitHub`);
+  }
+  log(`baton: ${requests} requests in all`);
+  return out;
+
+  async function repoFacts(repo: string, tickets: string[]): Promise<PrFact[]> {
+    const listed = await list(repo, tickets);
+    // Only a PR a live ticket owns needs its detail read; any other PR places no ticket and is
+    // recorded from the list alone, so the requests a run makes grow with the live tickets, not
+    // with the repository's history. A closed unmerged PR a live ticket owns is read too:
+    // `create-pr` counts it as none (R-BTN-74), but `review-pr` concludes on it, and reads its
+    // conclusion line from its comments.
+    const owned = listed.filter((pr) => owns({ number: pr.number, head: pr.head.ref, repository: repo }));
+    const detail = new Map<number, Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>>();
+    // The owned PRs' detail, GRAPHQL_BATCH to a query (B-35): one request where REST took four a PR.
+    for (let i = 0; i < owned.length; i += GRAPHQL_BATCH) {
+      const batch = owned.slice(i, i + GRAPHQL_BATCH);
+      const [owner, name] = repo.split('/');
+      const data = await graphql(detailQuery(batch.map((pr) => pr.number)), { owner, name });
+      for (const pr of batch) detail.set(pr.number, await detailOf(repo, pr, data?.repository?.[`p${pr.number}`]));
     }
-    const checks = (await all<any>(`/repos/${slug}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null);
-    // A push is read from its commits' own dates, never `updated_at`, which a comment moves.
-    const pushes = (await all<any>(`/repos/${slug}/pulls/${pr.number}/commits`)).map((c) => Date.parse(c.commit.committer.date));
-    // A verdict counts only from someone with a say over the repository — its owner, a member
-    // or a collaborator (GitHub's author_association) — never a drive-by comment on a public PR.
-    const reviews = (await all<any>(`/repos/${slug}/pulls/${pr.number}/reviews`))
-      .filter((r) => TRUSTED.has(r.author_association))
-      .map((r) => ({ author: r.user?.login ?? '?', state: r.state, submittedAt: Date.parse(r.submitted_at), body: r.body ?? '' }));
-    const comments = (await all<any>(`/repos/${slug}/issues/${pr.number}/comments`))
-      .filter((c) => TRUSTED.has(c.author_association))
-      .map((c) => ({ author: c.user?.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.created_at), body: c.body ?? '' }));
-    out.push({
-      number: pr.number, head: pr.head.ref, state,
-      pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments],
+    return listed.map((pr) => {
+      const state: PrFact['state'] = pr.merged_at ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
+      return { number: pr.number, head: pr.head.ref, state, ...(detail.get(pr.number) ?? { pushedAt: 0, checks: [], reviews: [] }), repository: repo };
     });
   }
-  log(`baton: read ${out.length} PRs of ${slug} from GitHub in ${requests} requests`);
-  return out;
+
+  /** One PR's facts from its GraphQL node, mapped exactly as the REST lists are; a connection
+   * whose first page overflows, or a head the batch read at another commit, is read over REST. */
+  async function detailOf(repo: string, pr: any, node: any): Promise<Omit<PrFact, 'number' | 'head' | 'state' | 'repository'>> {
+    if (node == null) throw new Error(`GitHub GraphQL (${repo}): no pull request #${pr.number}, though the list has it`);
+    const head = node.head?.nodes?.[0]?.commit;
+    const suites = head?.checkSuites;
+    const overflow = suites?.pageInfo?.hasNextPage || (suites?.nodes ?? []).some((cs: any) => cs?.checkRuns?.pageInfo?.hasNextPage);
+    const checks = head?.oid !== pr.head.sha || overflow
+      ? (await all<any>(`/repos/${repo}/commits/${pr.head.sha}/check-runs`, (b) => b.check_runs)).map((c) => c.conclusion ?? null)
+      // A run not yet completed has no conclusion: null, as the REST list gives it.
+      : (suites?.nodes ?? []).flatMap((cs: any) => cs?.checkRuns?.nodes ?? []).map((c: any) => (c.status === 'COMPLETED' && c.conclusion ? String(c.conclusion).toLowerCase() : null));
+    // A push is read from its commits' own dates, never `updated_at`, which a comment moves.
+    const pushes = node.commits.pageInfo.hasNextPage
+      ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/commits`)).map((c) => Date.parse(c.commit.committer.date))
+      : node.commits.nodes.map((c: any) => Date.parse(c.commit.committedDate));
+    // A verdict counts only from someone with a say over the repository — its owner, a member
+    // or a collaborator (GitHub's author_association) — never a drive-by comment on a public PR.
+    const reviews = (node.reviews.pageInfo.hasNextPage
+      ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
+      : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body })))
+      .filter((r: any) => TRUSTED.has(r.association))
+      .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '' }));
+    const comments = (node.comments.pageInfo.hasNextPage
+      ? (await all<any>(`/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, association: c.author_association, at: c.created_at, body: c.body }))
+      : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body })))
+      .filter((c: any) => TRUSTED.has(c.association))
+      .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
+    return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments] };
+  }
+
+  /** A repository's PRs. A named repository whose list GitHub refuses (403) or does not find
+   * (404) fails the whole sync — no partial reading — naming the tickets whose `repos:` name it;
+   * any other failure, as a timeout, a 5xx, a rate limit or the budget, is passed through as it is. */
+  async function list(repo: string, tickets: string[]): Promise<any[]> {
+    try {
+      return await all<any>(`/repos/${repo}/pulls?state=all`);
+    } catch (e) {
+      const { status, limited } = e as { status?: number; limited?: boolean };
+      if (!tickets.length || limited || (status !== 403 && status !== 404)) throw e;
+      throw new Error(`${(e as Error).message} — ${repo} is named in repos: by ${tickets.join(', ')}; the sync's token cannot read it, or it does not exist`);
+    }
+  }
 }
 
 /** Bundle `entrySource` (a module importing the defaults by absolute path) into one standalone
@@ -362,8 +520,8 @@ async function bundleSource(entrySource: string, outfile: string): Promise<void>
 
 /** The wrappers an ejection bundles: a working file calling the CLI's default through the same
  * interface the sync calls a repository's own file with, ready to edit (the bundle's top is the
- * default's own source). */
-const WRAPPERS: Record<'tickets' | 'stations', () => string> = {
+ * default's own source). The stations wrapper is the course's own standard course's. */
+const WRAPPERS: Record<'tickets' | 'stations', (course: string) => string> = {
   tickets: () => `import { readItems } from ${JSON.stringify(source('read-items.ts'))};
 import { ticketsMarkdown } from ${JSON.stringify(source('tickets-markdown.ts'))};
 export default {
@@ -374,62 +532,144 @@ export default {
   },
 };
 `,
-  stations: () => `import { stationsPr } from ${JSON.stringify(source('course-pr.ts'))};
+  stations: (course) => `import { builtIn } from ${JSON.stringify(source('courses.ts'))};
 export default {
-  // The same signature the sync calls a repository's own function with: edit freely. Returns
+  // The same signature the sync calls a repository's own function with: edit freely. ctx carries
+  // the course's tickets, the PR facts, the closing markers and the course file. Returns
   // {stations, markers, course_data} (R-BTN-74).
   async stations(ctx) {
-    return stationsPr({ tickets: ctx.tickets, facts: ctx.facts, closed: ctx.closed, done: ctx.done, branchPatterns: ctx.branchPatterns, repository: ctx.repository });
+    return builtIn(${JSON.stringify(course)}).stations(ctx);
   },
 };
 `,
 };
 
-/** Where each leg rests and the leg it queues when its run finishes (R-BTN-83), for the stubs. */
-const STUB_POSITION: Record<string, string> = {
-  implement: "{ reached: 'pr-open', next: 'review' }",
-  // The verdict decides what the review queues: fix for changes, merge for approve.
-  review: "{ reached: 'reviewed', next: verdict === 'approve' ? 'merge' : 'fix', verdict }",
-  fix: "{ reached: 'fixed', next: 'review' }",
-  merge: "{ reached: 'merged', next: null }",
-};
-
 /** The most output a stub keeps from its agent (the review reads only the last line). */
 const AGENT_OUTPUT_MAX = 64 * 1024 * 1024;
 
-/** One leg stub's source (R-BTN-74): run the `agent_command` that `.baton/baton.json` names at
- * the claim's snapshot (`ctx.snapshot.sha`, the commit the runner loads the leg scripts from), through the shell (so it may carry arguments), with the ticket, the
- * leg and the checkout as its arguments. The review stub asks the agent for a verdict and
- * returns it, and the bundled `close` writes it as the verdict line. */
-function stubSource(leg: string): string {
-  const review = leg === 'review';
+/** One leg stub's source (R-BTN-74, R-BTN-131): run the `agent_command` that
+ * `.baton/baton.json` names at the claim's snapshot (`ctx.snapshot.sha`, the commit the runner
+ * loads the leg scripts from), through the shell (so it may carry arguments), with the ticket,
+ * the leg and the checkout as its arguments, and the leg's instructions — its
+ * `.baton/courses/<id>/legs/<leg>.md`, read at the same snapshot — as a file named in
+ * `BATON_INSTRUCTIONS`. A leg whose result depends on the agent (a verdict, an adjudication, an
+ * outcome) asks for it as the agent's last line and checks it; the bundled `close` writes the
+ * closing marker where the course's convention puts it. */
+function stubSource(b: BuiltIn, course: string, leg: string): string {
+  const { ask, position } = b.legs[leg];
+  // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
+  // PRs may sit in other repositories, and its home may have none.
+  const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
+  const closeFrom = b.reads === 'prs' ? ['prClose', 'pr-close.ts'] : ['markerClose', 'course-markers.ts'];
+  const values = ask ? ask.values.join(' or ') : '';
   return `import { execFile, execFileSync } from 'node:child_process';
-import { prClose } from ${JSON.stringify(source('pr-close.ts'))};
-// The \`${leg}\` leg of the \`pr\` course, written by \`baton repo init\`: it runs this repository's
-// agent — \`agent_command\` in .baton/baton.json, read when the leg runs at the claim's snapshot,
-// the commit the runner loaded this script from, never the working tree an agent may have
-// changed (so a branch under review cannot pick its reviewer) — with the ticket, the leg and
-// the checkout as its arguments.${review ? `
-// The review: the agent's last line of output must be its verdict, \`approve\` or \`changes\`;
-// \`close\` writes it on the PR as the verdict line (\`<!-- baton:verdict … -->\`).` : ''}
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};
+// The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
+// repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the
+// checkout as its arguments and the leg's instructions in the file BATON_INSTRUCTIONS names. Both
+// are read when the leg runs at the claim's snapshot, the commit the runner loaded this script
+// from, never the working tree an agent may have changed (so a branch under review cannot pick
+// its reviewer or rewrite the reviewer's instructions).${ask ? `
+// The agent's last line of output must be its ${ask.name}: ${values}.` : ''}
+// The repository may replace this leg's run, never its close: \`${leg}.run.mjs\` beside this file
+// (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131).
 export async function run(ctx) {
   const sha = ctx.snapshot?.sha;
+  if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
+  const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
+  // As with the instructions below: only an empty listing means there is no override.
+  if (execFileSync('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel], { encoding: 'utf8' }).trim() === '') return standard(ctx);
+  const dir = mkdtempSync(join(tmpdir(), 'baton-override-'));
+  try {
+    const file = join(dir, ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)});
+    writeFileSync(file, execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} }));
+    const mod = await import(pathToFileURL(file).href);
+    if (typeof mod.run !== 'function') throw new Error(rel + ' exports no run(ctx, standard)');
+    return await mod.run(ctx, standard);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+/** The course's own run of this leg: what \`run\` does with no override, and what an override may call. */
+async function standard(ctx) {
+  const sha = ctx.snapshot?.sha;
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
-  const settings = JSON.parse(execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':.baton/baton.json'], { encoding: 'utf8' }));
+  const show = (rel) => execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} });
+  const settings = JSON.parse(show('.baton/baton.json'));
   if (typeof settings.agent_command !== 'string' || settings.agent_command === '') throw new Error('.baton/baton.json names no agent_command');
+  // The instructions, when the repository still has them; it owns them and may delete them. Only
+  // a path the snapshot lacks means deleted: \`ls-tree\` lists nothing for it and succeeds (git
+  // translates its messages, and \`cat-file -e\` exits 128 for every failure alike), so any
+  // failure of the probe itself stops the leg.
+  const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
+  const present = execFileSync('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel], { encoding: 'utf8' }).trim() !== '';
+  const text = present ? show(rel) : null;
+  const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
+  const instructions = dir == null ? '' : join(dir, ${JSON.stringify(`${leg}.md`)});
+  if (dir != null) writeFileSync(instructions, text);
   const out = await new Promise((resolve, reject) => execFile('sh', ['-c', settings.agent_command + ' "$@"', 'agent', ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout], {
     cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX},
-    env: { ...process.env, BATON_LEG: ${JSON.stringify(leg)}${review ? ", BATON_VERDICT: 'print approve or changes as your last line'" : ''} },
-  }, (e, stdout) => (e ? reject(e) : resolve(String(stdout)))));${review ? `
-  const verdict = out.trim().split('\\n').at(-1)?.trim();
-  if (verdict !== 'approve' && verdict !== 'changes') throw new Error('the review agent printed no verdict (approve or changes) as its last line');` : `
+    env: {
+      ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.path ?? '',${ask ? `
+      BATON_ANSWER: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},${ask.name === 'verdict' ? ` BATON_VERDICT: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},` : ''}` : ''}
+    },
+  }, (e, stdout) => (e ? reject(e) : resolve(String(stdout))))).finally(() => {
+    if (dir != null) rmSync(dir, { recursive: true, force: true });
+  });${names ? `
+  // The last line: the answer, then — optionally — the PR its line goes on. A leg with no answer
+  // names its PR by a last line that is a PR URL alone; any other last line names none.
+  const last = (out.trim().split('\\n').at(-1) ?? '').trim();${ask ? '' : `
+  const on = ${PR_URL}.test(last) ? last : null;`}${ask ? `
+  const [answer, pr, ...rest] = last.split(/\\s+/);
+  if (!${JSON.stringify(ask.values)}.includes(answer)) throw new Error(${JSON.stringify(`the ${leg} agent printed no ${ask.name} (${values}) as its last line`)});
+  if (rest.length || (pr != null && !${PR_URL}.test(pr))) throw new Error(${JSON.stringify(`the ${leg} agent's last line names no PR URL after its ${ask.name}`)});
+  const on = pr ?? null;` : ''}
+  return { ...(${position}), ...(on ? { pr: on } : {}) };` : `${ask ? `
+  const answer = out.trim().split('\\n').at(-1)?.trim();
+  if (!${JSON.stringify(ask.values)}.includes(answer)) throw new Error(${JSON.stringify(`the ${leg} agent printed no ${ask.name} (${values}) as its last line`)});` : `
   void out;`}
-  return ${STUB_POSITION[leg]};
+  return ${position};`}
 }
-export const close = prClose;
+export const close = ${closeFrom[0]};
 export async function handoff() { return null; }
 `;
 }
+
+/** pr-close.ts's PR URL, as a regular-expression literal for the stubs (B-29). */
+const PR_URL = `/${PR_URL_RE.source}/`;
+
+/** A repository's replacement for one leg's `run` (R-BTN-131): `legs/<leg>.run.mjs`. */
+const OVERRIDE_SUFFIX = '.run.mjs';
+
+/** The file `init --override <leg>` seeds: a `run` that calls the course's own, which the
+ * repository then edits. It owns the file; init never rewrites it. */
+function overrideSource(b: BuiltIn, leg: string): string {
+  const { ask, position } = b.legs[leg];
+  return `// The \`${leg}\` leg of the \`${b.id}\` course as this repository implements it (BATON_SPEC R-BTN-131).
+// \`baton repo init --override ${leg}\` wrote it; it is yours, and init never rewrites it. The standard
+// leg script beside it (${leg}.mjs) loads this file from the claim's snapshot and calls its \`run\` in
+// place of its own, keeping its own \`close\`, so the closing marker the course reads is always the
+// standard one.
+//
+// run(ctx, standard): \`ctx\` is the leg's context (ticket, checkout, snapshot, leg, claim, …);
+// \`standard\` is the course's own run — the repository's agent_command with the leg's instructions.
+// Return a position that is an edge of the course, the shape \`standard\` returns:
+//   ${position}${ask ? `
+// where \`answer\` is the ${ask.name}: ${ask.values.join(' or ')}.` : ''}
+// This file is loaded alone, from the snapshot: import only node: built-ins.
+export async function run(ctx, standard) {
+  return standard(ctx);
+}
+`;
+}
+
+/** The instructions shipped for one leg of a standard course (R-BTN-131), the Markdown `init`
+ * copies into the repository, which owns them from then on. */
+const instructionsOf = (course: string, leg: string): string => readFileSync(join(packageRoot(), 'src', 'defaults', 'courses', course, `${leg}.md`), 'utf8');
 
 /** The CLI's own version, for the workflow's pin: `owner/name@<commit>` of the checkout this
  * CLI runs from. Outside a git checkout, `--pin` must name one. */
@@ -446,15 +686,27 @@ function cliPin(): string {
   return `${slug}@${sha}`;
 }
 
-/** `baton repo init [--course pr] [--eject tickets|stations] [--pin owner/name@commit] [--force]`.
- * A file the repository already has is kept — re-running init to move the pin rewrites only
- * the workflow — unless `--force`. */
+/** `baton repo init [--course <standard course>] [--override <leg>]… [--eject tickets|stations] [--pin owner/name@commit] [--force]`
+ * (R-BTN-74, R-BTN-131). Run again with another `--course`, it adds that course beside the first:
+ * its files, and its entry in `.baton/baton.json`'s `courses`. With no `--course` it takes the
+ * repository's `default_course`, else `create-pr`; a repository still on `pr`, the name
+ * `create-pr` replaced, keeps its files and gets the new pin only.
+ *
+ * Each standard course's entry names its `source`, `github/<owner>/<name>/<commit>/<course>`: the
+ * CLI's own repository at the commit that wrote the files, which the sync holds the course file to
+ * (B-33). Files are Baton's or the repository's. Baton's — the course file and the leg scripts —
+ * are written when missing, under `--force`, and whenever a course's source moves to this CLI's
+ * commit, which every init does for every course from this repository, as it moves the workflow's
+ * pin. The repository's — the leg instructions, `--override`'s `legs/<leg>.run.mjs`, the tickets
+ * README — are written only when missing, never over its edits. `--force` also rewrites the named
+ * course's entry, never the rest of the file. */
 export async function initMain(argv: string[], io: { root?: string; log?: (l: string) => void } = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
-  let course = 'pr';
+  let named: string | null = null;
   let eject: 'tickets' | 'stations' | null = null;
   let pin: string | null = null;
   let force = false;
+  const overrides: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = (): string => {
@@ -462,58 +714,178 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
       if (v === undefined) throw new Error(`${a} needs a value`);
       return v;
     };
-    if (a === '--course') course = value();
+    if (a === '--course') named = value();
     else if (a === '--pin') pin = value();
     else if (a === '--force') force = true;
+    else if (a === '--override') overrides.push(value());
     else if (a === '--eject') {
       const v = value();
       if (v !== 'tickets' && v !== 'stations') throw new Error('--eject: tickets or stations');
       eject = v;
     } else throw new Error(`${a}: not a flag of baton repo init`);
   }
-  if (course !== 'pr') throw new Error(`--course ${course}: the CLI scaffolds only the pr course; write .baton/courses/${course}/ yourself`);
   const root = io.root ?? process.env.BATON_HOME ?? process.cwd();
-  const ejectTo = eject === 'tickets' ? join(root, '.baton', 'tickets.mjs') : eject === 'stations' ? join(root, '.baton', 'courses', course, 'sync.mjs') : null;
-  if (ejectTo && existsSync(ejectTo) && !force) throw new Error(`${relative(root, ejectTo)} already exists — it may hold your edits; --force overwrites it`);
+  const settingsPath = join(root, '.baton', 'baton.json');
+  const existing = existsSync(settingsPath) ? (JSON.parse(readFileSync(settingsPath, 'utf8')) as BatonJson) : null;
+  const course = named ?? existing?.default_course ?? DEFAULT_COURSE;
+  const standard = builtIn(course);
   if (eject === 'tickets') {
+    const to = join(root, '.baton', 'tickets.mjs');
+    if (existsSync(to) && !force) throw new Error(`${relative(root, to)} already exists — it may hold your edits; --force overwrites it`);
     mkdirSync(join(root, '.baton'), { recursive: true });
-    await bundleSource(WRAPPERS.tickets(), join(root, '.baton', 'tickets.mjs'));
+    await bundleSource(WRAPPERS.tickets(course), to);
     log('baton: .baton/tickets.mjs — a standalone bundle of the default; edit it; the sync uses it from the next run');
     return 0;
   }
   if (eject === 'stations') {
-    mkdirSync(join(root, '.baton', 'courses', course), { recursive: true });
-    await bundleSource(WRAPPERS.stations(), join(root, '.baton', 'courses', course, 'sync.mjs'));
+    if (!standard) throw new Error(`--eject stations: ${course} is not a standard course, so there is no default to copy`);
+    if (existing?.courses?.some((c) => c.id === course && c.source)) {
+      throw new Error(`--eject stations: course ${course} names a source, whose station function places its tickets — remove its \`source\` from .baton/baton.json to own the course`);
+    }
+    const to = join(root, '.baton', 'courses', course, 'sync.mjs');
+    if (existsSync(to) && !force) throw new Error(`${relative(root, to)} already exists — it may hold your edits; --force overwrites it`);
+    mkdirSync(dirname(to), { recursive: true });
+    await bundleSource(WRAPPERS.stations(course), to);
     log(`baton: .baton/courses/${course}/sync.mjs — a standalone bundle of the default; edit it; the sync uses it from the next run`);
     return 0;
   }
   const workflow = syncWorkflow(pin ?? cliPin());
-  // Scaffold: the settings, the course file (in git — the sync posts and `baton runner start`
-  // load the same file, R-BTN-69/-72), the leg stubs, the pinned sync workflow, the tickets dir.
+  const writeWorkflow = (): void => {
+    // The workflow carries the pin: always written, so re-running init is how the pin moves.
+    mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
+    writeFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), workflow);
+  };
+  // The source every course scaffolded here names: this CLI's repository at this CLI's commit.
+  const own = cliSelf();
+  const pinned = pin ? parsePin(pin) : null;
+  const self = own ?? pinned;
+  const sourceOf = (id: string): string | null => (self ? printSource({ provider: 'github', namespace: self.namespace, repository: self.repository, ref: self.sha, course: id }) : null);
   const kept: string[] = [];
-  /** Write `rel` unless the repository already has it (and `--force` is not given). */
-  const put = async (rel: string, write: (abs: string) => void | Promise<void>): Promise<void> => {
+  /** Write `rel` when it is missing, or when `rewrite` (Baton's file, and its course is being
+   * rewritten); otherwise it is kept. */
+  const put = async (rel: string, write: (abs: string) => void | Promise<void>, rewrite = false): Promise<void> => {
     const abs = join(root, rel);
-    if (existsSync(abs) && !force) {
+    if (existsSync(abs) && !rewrite) {
       kept.push(rel);
       return;
     }
     mkdirSync(dirname(abs), { recursive: true });
     await write(abs);
   };
-  const legs = Object.keys(PR_COURSE.legs);
-  const settings: BatonJson = { baton_url: process.env.BATON_URL ?? DEFAULT_URL, items: 'tickets', default_course: course, repos: {}, agent_command: 'echo', courses: [courseEntry(course, legs)] };
-  await put('.baton/baton.json', (abs) => writeFileSync(abs, `${JSON.stringify(settings, null, 2)}\n`));
-  await put(`.baton/courses/${course}/course.json`, (abs) => writeFileSync(abs, `${JSON.stringify(PR_COURSE, null, 2)}\n`));
-  // Each stub is bundled with `close`, so it imports nothing the runner's scratch copy lacks.
-  for (const leg of legs) await put(`.baton/courses/${course}/legs/${leg}.mjs`, (abs) => bundleSource(stubSource(leg), abs));
-  // The workflow carries the pin: always written, so re-running init is how the pin moves.
-  mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
-  writeFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), workflow);
+  /** One standard course's files; `rewrite` rewrites Baton's (the course file, the leg scripts). */
+  const scaffold = async (bi: BuiltIn, rewrite: boolean): Promise<void> => {
+    await put(`.baton/courses/${bi.id}/course.json`, (abs) => writeFileSync(abs, courseFileText(bi)), rewrite);
+    for (const leg of Object.keys(bi.course.legs)) {
+      // Each stub is bundled with its `close`, so it imports nothing the runner's scratch copy lacks.
+      await put(`.baton/courses/${bi.id}/legs/${leg}.mjs`, (abs) => bundleSource(stubSource(bi, bi.id, leg), abs), rewrite);
+      // The leg's instructions: shipped with the CLI, the repository's to edit from here on.
+      await put(`.baton/courses/${bi.id}/legs/${leg}.md`, (abs) => writeFileSync(abs, instructionsOf(bi.id, leg)));
+    }
+  };
+  // The courses whose source this CLI's commit moves: those naming this CLI's repository at
+  // another commit. Their entries take the new source; their files are Baton's to rewrite.
+  const moves = (c: CourseEntry): boolean => {
+    if (!c.source || !self) return false;
+    const src = parseSource(c.source);
+    // An entry whose source names another course than its id is the sync's to refuse, not init's to move.
+    return sameRepo(src, self) && src.ref !== self.sha && src.course === c.id && builtIn(src.course) != null;
+  };
+  /** The sources name this CLI's repository at its commit, whose registry writes the files; a
+   * workflow pinned to another repository or commit would run a CLI that refuses them
+   * (checkSource). So a --pin that differs is refused — before any write — whenever the courses
+   * name a source; a repository with none moves its pin freely. */
+  const refusePin = (courses: CourseEntry[]): void => {
+    if (own && pinned && !(sameRepo(pinned, own) && pinned.sha === own.sha) && courses.some((c) => c.source)) {
+      throw new Error(`--pin names ${pinned.namespace}/${pinned.repository}@${pinned.sha.slice(0, 10)}, but this CLI is ${own.namespace}/${own.repository}@${own.sha.slice(0, 10)}, which the courses' sources name — run \`baton repo init\` with the CLI checked out at the pin, or without --pin`);
+    }
+  };
+  if (named == null && standard && standard.id !== course) {
+    if (overrides.length) throw new Error(`--override: course ${course} is now ${standard.id} — \`baton repo init --course ${standard.id}\` scaffolds it first`);
+    // A repository still on `pr` may list sourced courses beside it: the pin and their sources
+    // move together here too, as on every init.
+    const courses = existing?.courses ?? [];
+    refusePin(courses);
+    const movedHere = courses.filter(moves).map((c) => c.id);
+    if (movedHere.length) {
+      writeFileSync(settingsPath, `${JSON.stringify({ ...existing, courses: courses.map((c) => (moves(c) ? { ...c, source: sourceOf(c.id)! } : c)) }, null, 2)}\n`);
+      for (const id of movedHere) await scaffold(builtIn(id)!, true);
+      log(`baton: ${movedHere.join(', ')} now from ${self!.sha.slice(0, 10)}`);
+    }
+    writeWorkflow();
+    log(`baton: the workflow's pin moved; course ${course} is now ${standard.id} — its files are kept, and \`baton repo init --course ${standard.id}\` scaffolds the new one`);
+    return 0;
+  }
+  const b = scaffoldable(course);
+  for (const leg of overrides) {
+    if (!Object.hasOwn(b.course.legs, leg)) throw new Error(`--override ${leg}: ${b.id} has no such leg — its legs are ${Object.keys(b.course.legs).join(', ')}`);
+  }
+  const entry = { ...courseEntry(b.id, Object.keys(b.course.legs)), skill: b.skill, ...(sourceOf(b.id) ? { source: sourceOf(b.id)! } : {}) };
+  let settings: BatonJson;
+  let changed: string | null = null;
+  let rewriteNamed = force;
+  const moved: string[] = [];
+  if (existing) {
+    // A second course joins the first: its entry is added, everything else in the file kept. With
+    // `--force` this course's own entry is replaced — never the file, which holds the others.
+    const courses = existing.courses ?? [{ id: existing.default_course ?? DEFAULT_COURSE, version: 1 }];
+    const listed = courses.some((c) => c.id === b.id);
+    const next = courses.map((c) => {
+      if (c.id === b.id && force) return entry;
+      if (moves(c)) {
+        moved.push(c.id);
+        if (c.id === b.id) rewriteNamed = true;
+        return { ...c, source: sourceOf(parseSource(c.source!).course)! };
+      }
+      return c;
+    });
+    settings = { ...existing, courses: listed ? next : [...next, entry] };
+    if (!listed || force || moved.length) changed = `baton: .baton/baton.json lists course ${b.id}${listed ? (force ? ' afresh' : '') : ' now'}${moved.length ? `; ${moved.join(', ')} now from ${self!.sha.slice(0, 10)}` : ''}`;
+    else kept.push('.baton/baton.json');
+  } else {
+    settings = { baton_url: process.env.BATON_URL ?? DEFAULT_URL, items: 'tickets', default_course: b.id, repos: {}, agent_command: 'echo', courses: [entry] };
+  }
+  refusePin(settings.courses ?? []);
+  if (changed) log(changed);
+  if (!kept.includes('.baton/baton.json')) {
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  }
+  await scaffold(b, rewriteNamed || !existing);
+  for (const id of moved.filter((m) => m !== b.id)) await scaffold(builtIn(id)!, true);
+  for (const leg of overrides) {
+    // The leg script is what loads the override, so an older one (from before overrides) is
+    // replaced: it is Baton's file.
+    await put(`.baton/courses/${b.id}/legs/${leg}.mjs`, (abs) => bundleSource(stubSource(b, b.id, leg), abs), true);
+    await put(`.baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX}`, (abs) => writeFileSync(abs, overrideSource(b, leg)));
+    log(`baton: .baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX} — this repository's run of ${leg}; edit it, and the leg script runs it in place of its own`);
+  }
+  writeWorkflow();
   await put('tickets/README.md', (abs) => writeFileSync(abs, '# Tickets\n\nOne `*.md` file per ticket; `baton repo init` wrote this directory.\n'));
-  if (kept.length) log(`baton: kept ${kept.join(', ')} (already there; --force overwrites)`);
-  log(`baton: .baton/ scaffolded (course ${course}) — commit it, add tickets/*.md, and the workflow does the rest`);
+  if (kept.length) log(`baton: kept ${kept.join(', ')} (already there; --force rewrites Baton's files, never your instructions or overrides)`);
+  log(`baton: .baton/ scaffolded (course ${b.id}: ${b.summary}) — commit it, add tickets/*.md, and the workflow does the rest`);
   return 0;
+}
+
+/** A standard course's file as init writes it, and as the sync holds a sourced course to. */
+const courseFileText = (b: BuiltIn): string => `${JSON.stringify(b.course, null, 2)}\n`;
+
+/** This CLI's repository and commit, or null outside a git checkout with a GitHub origin. */
+function cliSelf(): { namespace: string; repository: string; sha: string } | null {
+  try {
+    return parsePin(cliPin());
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a source names this CLI's repository: GitHub's owner and repository names ignore case. */
+const sameRepo = (src: { namespace: string; repository: string }, self: { namespace: string; repository: string }): boolean =>
+  `${src.namespace}/${src.repository}`.toLowerCase() === `${self.namespace}/${self.repository}`.toLowerCase();
+
+/** A pin, `owner/name@<commit>` — the workflow's and a source's parts — or null when it is not one. */
+function parsePin(at: string): { namespace: string; repository: string; sha: string } | null {
+  const m = /^([\w.-]+)\/([\w.-]+)@(.*)$/.exec(at);
+  return m && GIT_SHA.test(m[3]) ? { namespace: m[1], repository: m[2], sha: m[3] } : null;
 }
 
 /** The sync workflow `baton repo init` writes: pinned to the CLI's version — the baton
@@ -522,11 +894,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
  * the workflow checks the pinned commit out and installs it (its esbuild bundles the defaults).
  * The CLI mints the run's OIDC token itself (`id-token: write`, R-BTN-15). */
 export function syncWorkflow(pin: string): string {
-  const at = pin.lastIndexOf('@');
-  if (at < 1 || !/^[\w.-]+\/[\w.-]+$/.test(pin.slice(0, at)) || !/^[0-9a-f]{40}$/.test(pin.slice(at + 1))) {
-    // A full sha: actions/checkout fetches a 40-hex ref as a commit, never a short one.
-    throw new Error(`--pin ${pin}: must be owner/name@<commit sha>, all 40 hex characters — the baton repository at one commit`);
-  }
+  // A full sha: actions/checkout fetches a 40-hex ref as a commit, never a short one.
+  const at = parsePin(pin);
+  if (!at) throw new Error(`--pin ${pin}: must be owner/name@<commit sha>, all 40 hex characters — the baton repository at one commit`);
   return `name: baton sync
 on:
   push:
@@ -560,8 +930,8 @@ jobs:
       # The CLI's version is pinned: a release changes nothing here until this ref moves.
       - uses: actions/checkout@v4
         with:
-          repository: ${pin.slice(0, at)}
-          ref: ${pin.slice(at + 1)}
+          repository: ${at.namespace}/${at.repository}
+          ref: ${at.sha}
           path: .baton-cli
       - run: npm ci --prefix .baton-cli
       # --latest main: after its observation number the run reads the newest main, so a slow

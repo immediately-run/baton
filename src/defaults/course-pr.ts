@@ -1,8 +1,9 @@
-// course-pr.ts — the `pr` course's default station function (BATON_SPEC §2f R-BTN-74): where
-// each ticket is, from git and PR facts alone. Pure over injected facts (R-BTN-96's fact
-// adapter gathers them from the forge in the sync command), so the same function serves an
-// ejected `.baton/courses/pr/sync.mjs` through its default export. Course code in the CLI,
-// never core (§2b): it may read what a ticket's opaque `course` fields carry.
+// course-pr.ts — the station functions of the standard courses that read PRs (BATON_SPEC §2f
+// R-BTN-74, R-BTN-131): `create-pr` (and `pr`, the name it replaced) and `review-pr` — where each
+// ticket is, from git and PR facts alone. Pure over injected facts (R-BTN-96's fact adapter
+// gathers them from the forge in the sync command), so the same functions serve an ejected
+// `.baton/courses/<id>/sync.mjs` through its default export. Course code in the CLI, never core
+// (§2b): it may read what a ticket's opaque `course` fields carry.
 import type { PostedStation } from '../core/board';
 import type { SourceTicket } from './tickets-markdown';
 import type { Step } from '../core/graph';
@@ -25,6 +26,8 @@ export interface PrFact {
   /** The PR's reviews and its plain comments — a comment is `COMMENTED`, read only for a
    * verdict line (R-BTN-74: "a comment or comment-only review"). */
   reviews: { author: string; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED'; submittedAt: number; body?: string }[];
+  /** The repository the PR is in, `owner/name` (B-29); absent, the home repository's. */
+  repository?: string;
 }
 
 /** What a station function returns (R-BTN-74): the stations, the markers it saw and its
@@ -39,23 +42,58 @@ export interface StationsResult {
 /** R-BTN-51's default `branch_pattern`. */
 export const DEFAULT_BRANCH_PATTERN = 'claude/{ticket}-*';
 
-/** The `pr` course's graph: filed → pr-open → reviewed → merged, with fixed between reviewed
- * and the next review (the course file `baton repo init` writes into git, R-BTN-69). */
-export const PR_COURSE = {
+/** The `create-pr` course's graph (R-BTN-131), the docs workflow's: filed → pr-open → reviewed,
+ * at most three review rounds with a fix between them, then merged — or, when the third round
+ * still asks for changes, adjudicated first (a fresh reader reproduces each open blocking finding)
+ * and merged or handed to the owner. The course file `baton repo init` writes into git (R-BTN-69). */
+export const CREATE_PR_COURSE = {
   start: 'filed',
   start_leg: 'implement',
   end: ['merged'],
   short_waits: ['ci'],
-  stations: { filed: { label: 'Filed, no PR yet' }, 'pr-open': { label: 'PR open' }, reviewed: { label: 'Reviewed' }, fixed: { label: 'Findings addressed' }, merged: { label: 'Merged' } },
-  legs: {
-    implement: { from: ['filed'], to: 'pr-open' },
-    review: { from: ['pr-open', 'fixed'], to: 'reviewed', max_runs: 4 },
-    fix: { from: ['reviewed'], to: 'fixed', max_runs: 3 },
-    merge: { from: ['reviewed'], to: 'merged' },
+  stations: {
+    filed: { label: 'Filed, no PR yet' }, 'pr-open': { label: 'PR open' }, reviewed: { label: 'Reviewed' },
+    fixed: { label: 'Findings addressed' }, adjudicated: { label: 'Open findings adjudicated' }, merged: { label: 'Merged' },
   },
-} as const;
+  legs: {
+    implement: { from: ['filed'], to: 'pr-open', label: 'Implement it and open the PR' },
+    review: { from: ['pr-open', 'fixed'], to: 'reviewed', max_runs: 3, label: 'Review round' },
+    fix: { from: ['reviewed'], to: 'fixed', max_runs: 2, label: 'Fix or answer the findings' },
+    adjudicate: { from: ['reviewed'], to: 'adjudicated', label: 'Reproduce the findings left open' },
+    merge: { from: ['reviewed', 'adjudicated'], to: 'merged', label: 'Merge and close the ticket' },
+  },
+};
+
+/** The `review-pr` course's graph (R-BTN-131): review a PR someone else opened, in rounds — each
+ * round's verdict approves (the end) or asks for changes, after which the next round waits on the
+ * author's push — and conclude with a summary once the rounds run out or the PR closes. */
+export const REVIEW_PR_COURSE = {
+  start: 'requested',
+  start_leg: 'review',
+  end: ['approved', 'concluded'],
+  short_waits: ['ci'],
+  stations: {
+    requested: { label: 'Review requested' }, 'changes-requested': { label: 'Changes requested' },
+    approved: { label: 'Approved' }, concluded: { label: 'Review concluded' },
+  },
+  legs: {
+    review: { from: ['requested', 'changes-requested'], to: ['approved', 'changes-requested'], max_runs: 3, label: 'Review round' },
+    conclude: { from: ['requested', 'changes-requested'], to: 'concluded', label: 'Summarise and stop' },
+  },
+};
+
+/** The part of a course file a PR station function reads: its legs' bounds, and whether it has
+ * an `adjudicate` leg. The `pr` course's own file (review 4, fix 3, no adjudicate) keeps its
+ * behaviour: after its last fix, merge waits on the owner. */
+export interface PrGraph {
+  legs?: Record<string, { max_runs?: number; [key: string]: unknown } | undefined>;
+}
 
 const VERDICT = /^<!--\s*baton:verdict\s+(approve|changes)\s*-->/;
+const ADJUDICATED = /^<!--\s*baton:adjudicated\s+(merge|owner)\s*-->/;
+const CONCLUDED = /^<!--\s*baton:concluded\s*-->/;
+/** A comment's marker line, read like a verdict line: the body's first line. */
+const markerOf = (r: PrFact['reviews'][number], re: RegExp): RegExpExecArray | null => (r.state === 'COMMENTED' ? re.exec((r.body ?? '').trim()) : null);
 /** A review's verdict: its state, or the marker line a comment-only review opens with (GitHub
  * refuses approve/request-changes on one's own PR, so a shared identity still advances). */
 export function verdictOf(r: PrFact['reviews'][number]): 'approve' | 'changes' | null {
@@ -75,8 +113,8 @@ export const checksDone = (f: PrFact): boolean => f.checks.every((c) => c != nul
 /** A PR's verdicts, oldest first. */
 const verdictsOf = (f: PrFact) => [...f.reviews].filter((r) => verdictOf(r) != null).sort((a, b) => a.submittedAt - b.submittedAt);
 
-/** The path one PR's timeline implies (R-BTN-74: "the least advanced PR's timeline in order"):
- * `implement` opened it; each verdict is a `review`; a push after a verdict, before the next
+/** The path a change's timeline implies (R-BTN-74: "the change's timeline in order" — one PR,
+ * or `together`'s several): `implement` opened it; each verdict is a `review`; a push after a verdict, before the next
  * one, was a `fix` (the graph's only way back to `review`), whatever that verdict said, since a
  * verdict is on the head it was given on. Verdicts with no push between them — two reviewers of
  * one head — are one review. */
@@ -94,30 +132,50 @@ function timelineOf(f: PrFact): Step[] {
 
 const fixRunsOf = (path: Step[]): number => path.filter((s) => s.leg === 'fix').length;
 
-/** Where one PR puts the ticket: the end of its timeline, and the queued leg leaving it. */
-function placeOf(fact: PrFact): PostedStation {
-  const at = (station: string, path: Step[], next: PostedStation['next']): PostedStation =>
-    ({ station, path, next_leg: next[0]?.leg ?? null, next_source: 'course', handoff_url: null, next, bars: {} });
+const at = (station: string, path: Step[], next: PostedStation['next']): PostedStation =>
+  ({ station, path, next_leg: next[0]?.leg ?? null, next_source: 'course', handoff_url: null, next, bars: {} });
+
+/** The adjudication after the last verdict, when one was written: `merge` (no open blocking
+ * finding reproduced) or `owner` (one did — the owner decides). */
+function adjudicationOf(fact: PrFact): 'merge' | 'owner' | null {
+  const last = verdictsOf(fact).at(-1)?.submittedAt ?? Number.NEGATIVE_INFINITY;
+  const marks = fact.reviews.filter((r) => r.submittedAt > last && markerOf(r, ADJUDICATED)).sort((a, b) => a.submittedAt - b.submittedAt);
+  const m = marks.length ? markerOf(marks.at(-1)!, ADJUDICATED) : null;
+  return m ? (m[1] === 'merge' ? 'merge' : 'owner') : null;
+}
+
+/** Where one PR puts the ticket: the end of its timeline, and the queued leg leaving it. The
+ * course file's bounds decide what follows a verdict asking for changes once the fixes run out:
+ * the `adjudicate` leg when the course has one (`create-pr`), else merge waiting on the owner
+ * (`pr`). */
+function placeOf(fact: PrFact, graph: PrGraph): PostedStation {
   const path = timelineOf(fact);
+  const adjudicates = graph.legs?.adjudicate != null;
+  const fixes = graph.legs?.fix?.max_runs ?? 3;
+  const adjudication = adjudicates && path.at(-1)!.reached === 'reviewed' ? adjudicationOf(fact) : null;
+  if (adjudication) path.push({ leg: 'adjudicate', reached: 'adjudicated' });
   if (fact.state === 'merged') {
     // Every PR merged is `merged` — the end station: done for Baton (R-BTN-70) whether or not
     // the file says `done` yet, which the merge leg's script also writes. A merge leaves
-    // `reviewed`, so a timeline resting elsewhere was reviewed by the merge itself.
-    if (path.at(-1)!.reached !== 'reviewed') path.push({ leg: 'review', reached: 'reviewed' });
+    // `reviewed` (or `adjudicated`), so a timeline resting elsewhere was reviewed by the merge itself.
+    const last = path.at(-1)!.reached;
+    if (last !== 'reviewed' && last !== 'adjudicated') path.push({ leg: 'review', reached: 'reviewed' });
     return at('merged', [...path, { leg: 'merge', reached: 'merged' }], []);
   }
+  // Adjudicated: merge, ready — or waiting on the owner when a finding reproduced (Needs you, §14).
+  if (adjudication) return at('adjudicated', path, [{ leg: 'merge', state: adjudication === 'merge' ? 'ready' : 'waiting', waiting_on: adjudication === 'merge' ? null : 'owner' }]);
   // `review` waits on ci while the head's checks run, and is ready once they finish.
   const wait = checksDone(fact) ? null : 'ci';
   const last = path.at(-1)!.reached;
   if (last === 'pr-open' || last === 'fixed') return at(last, path, [{ leg: 'review', state: wait ? 'waiting' : 'ready', waiting_on: wait }]);
   if (verdictOf(verdictsOf(fact).at(-1)!) === 'approve') return at('reviewed', path, [{ leg: 'merge', state: 'ready', waiting_on: null }]);
-  // Changes requested: fix, or — once fix has run three times — merge waiting on the owner
-  // (listed under Needs you, §14).
-  if (fixRunsOf(path) >= 3) return at('reviewed', path, [{ leg: 'merge', state: 'waiting', waiting_on: 'owner' }]);
+  // Changes requested: fix, until the course's fixes run out; then adjudicate, or merge waiting
+  // on the owner (listed under Needs you, §14) on a course with no adjudicate leg.
+  if (fixRunsOf(path) >= fixes) {
+    return at('reviewed', path, [adjudicates ? { leg: 'adjudicate', state: 'ready', waiting_on: null } : { leg: 'merge', state: 'waiting', waiting_on: 'owner' }]);
+  }
   return at('reviewed', path, [{ leg: 'fix', state: 'ready', waiting_on: null }]);
 }
-
-const LEAST: Record<string, number> = { filed: 0, 'pr-open': 1, fixed: 2, reviewed: 3, merged: 4 };
 
 /** A wildcard match, not a regex: `*` matches any run of characters (the same walk the core's
  * branch-holder uses, at most |branch| × |pattern| steps — a star never backtracks twice). */
@@ -148,38 +206,78 @@ export function branchMatches(pattern: string, branch: string): boolean {
   return j === p.length;
 }
 
-/** The PR numbers a ticket's `prs:` names: a bare number or `#n`, or a pull-request URL —
- * `https://<host>/<owner>/<name>/pull/<n>` — of this repository (`repository`, `owner/name`,
- * when known; a URL naming another repository is not one of this repository's PRs). */
-export function prNumbers(prs: unknown[], repository?: string | null): string[] {
-  const out: string[] = [];
+/** GitHub's owner and repository names ignore case. */
+export const sameRepo = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+
+/** The PRs a ticket's `prs:` names, each as its repository and number: a bare number or `#n` is
+ * the home repository's (`home`, `owner/name`, null when unknown); a pull-request URL —
+ * `https://<host>/<owner>/<name>/pull/<n>` — names its own (B-29). */
+export function prRefs(prs: unknown[], home?: string | null): { repository: string | null; number: string }[] {
+  const out: { repository: string | null; number: string }[] = [];
   for (const p of prs) {
     const text = String(p).trim();
-    if (/^#?\d+$/.test(text)) out.push(text.replace(/^#/, ''));
+    if (/^#?\d+$/.test(text)) out.push({ repository: home ?? null, number: text.replace(/^#/, '') });
     const m = /^https?:\/\/[^/]+\/([^/]+\/[^/]+)\/pull\/(\d+)(?:[/#?].*)?$/.exec(text);
-    if (m && (repository == null || m[1].toLowerCase() === repository.toLowerCase())) out.push(m[2]);
+    if (m) out.push({ repository: m[1], number: m[2] });
   }
   return out;
 }
 
+/** Whether `ref` names fact `f`: the same number in the same repository, a fact with no
+ * `repository` being the home's (`home`); with the home unknown, any repository's (B-29). */
+const refNames = (ref: { repository: string | null; number: string }, f: { number: number; repository?: string }, home?: string | null): boolean => {
+  if (ref.number !== String(f.number)) return false;
+  const repo = f.repository ?? home ?? null;
+  return ref.repository == null || repo == null || sameRepo(ref.repository, repo);
+};
+
 /** The course's branch patterns ready to match (R-BTN-51): the current and previous ones, the
- * default when it names none. `{repository}` matches anything: the facts are this repository's
- * own PRs, so it can only ever name this repository. */
+ * default when it names none. `{repository}` names the ticket's home repository (its Baton id),
+ * whichever repository the branch is in — a sibling's PR branch carries the home's name too
+ * (B-29) — so it matches anything: which repositories are read at all is `ticketOwns`'s
+ * `repos:` check. */
 export const matchPatterns = (branchPatterns?: string[]): string[] =>
   (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, '*'));
 
-/** Whether PR `number` on head branch `head` is one of ticket `t`'s: listed in its `prs:`, or
- * on a branch one of `patterns` (from `matchPatterns`) maps to it. */
-export function ticketOwns(t: SourceTicket, pr: { number: number; head: string }, patterns: string[], repository?: string | null): boolean {
-  return prNumbers((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], repository).includes(String(pr.number))
+/** Whether fact `f` is in a repository ticket `t` reads: its home (`home`; a fact with no
+ * `repository` is the home's), or one its `repos:` names (B-29). The adapter reads a sibling's
+ * reviews and checks only for a ticket naming it, so a match outside these is a list-only fact. */
+const readsRepo = (t: SourceTicket, f: { repository?: string }, home?: string | null): boolean => {
+  const repo = f.repository ?? home ?? null;
+  return repo == null || home == null || sameRepo(repo, home) || (t.repos ?? []).some((r) => sameRepo(r, repo));
+};
+
+/** Whether PR `number` on head branch `head`, in `pr.repository` (absent, the home, `repository`),
+ * is one of ticket `t`'s: listed in its `prs:`, or on a branch one of `patterns` (from
+ * `matchPatterns`) maps to it. A PR in another repository is the ticket's only when the ticket
+ * names that repository in `repos:` (B-29). */
+export function ticketOwns(t: SourceTicket, pr: { number: number; head: string; repository?: string }, patterns: string[], repository?: string | null): boolean {
+  if (!readsRepo(t, pr, repository)) return false;
+  return prRefs((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], repository).some((r) => refNames(r, pr, repository))
     || patterns.some((p) => branchMatches(p.replace(/\{ticket\}/g, t.id), pr.head));
 }
 
-/** The `pr` course's stations (R-BTN-74): the ticket's PRs are its `course.prs` numbers and
- * every open-or-merged fact whose head branch matches the pattern; with several, the least
- * advanced decides — but every PR merged is `merged`, the end station. No PR is `filed`, with
- * `implement` waiting while a dependency or an open child is not done. */
-export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; branchPatterns?: string[]; closed: Set<string>; done?: Set<string>; repository?: string | null }): StationsResult {
+/** A ticket's PRs as one change (B-29): `close` writes each line on one PR, so a verdict, an
+ * adjudication or a push on any of them is the change's; `review` waits on every open PR's
+ * checks; and the change is merged when every PR is. One PR is itself. */
+function together(facts: PrFact[]): PrFact {
+  if (facts.length === 1) return facts[0];
+  const open = facts.filter((f) => f.state === 'open');
+  const pushes = facts.flatMap((f) => (f.pushes?.length ? f.pushes : [f.pushedAt])).sort((a, b) => a - b);
+  return {
+    number: Math.min(...facts.map((f) => f.number)), head: facts[0].head, repository: facts[0].repository,
+    state: open.length ? 'open' : 'merged', pushedAt: Math.max(...pushes), pushes,
+    checks: open.flatMap((f) => f.checks), reviews: facts.flatMap((f) => f.reviews),
+  };
+}
+
+/** The `create-pr` course's stations (R-BTN-74, R-BTN-131), and the `pr` course's: the
+ * ticket's PRs are its `course.prs` and every open-or-merged fact whose head branch matches the
+ * pattern, in its home or a repository its `repos:` names; several are read together as one
+ * change (`together`, B-29) — and every PR merged is `merged`, the end station. No PR is
+ * `filed`, with `implement` waiting while a dependency or an open child is not done. `graph` is the course file; absent, the `pr` course's bounds. */
+export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; branchPatterns?: string[]; closed: Set<string>; done?: Set<string>; repository?: string | null; graph?: PrGraph }): StationsResult {
+  const graph = ctx.graph ?? {};
   const stations: Record<string, PostedStation> = {};
   const patterns = matchPatterns(ctx.branchPatterns);
   // A dependency counts once it is closed `done` (R-BTN-74); `done` absent, every closed id.
@@ -200,14 +298,60 @@ export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; bran
       };
       continue;
     }
-    if (mine.every((f) => f.state === 'merged')) {
-      stations[t.id] = placeOf(mine[0]);
+    stations[t.id] = placeOf(together(mine), graph);
+  }
+  return { stations, markers: [], course_data: {} };
+}
+
+/** The `review-pr` course's stations (R-BTN-131). The ticket names the PR to review in `prs:`
+ * (it is someone else's, so no branch pattern finds it). Each verdict is a `review` round,
+ * reaching `approved` or `changes-requested`; a `<!-- baton:concluded -->` comment after them is
+ * the `conclude` leg. Placed:
+ * - no PR found: `requested`, `review` waiting on `pr`;
+ * - concluded, or the last verdict approves: that end;
+ * - the PR merged or closed, or the course's review rounds spent: `conclude` ready;
+ * - otherwise `review` — before its first round waiting while a dependency is not closed done or
+ *   an open child blocks it; waiting on ci while the head's checks run; and after a verdict asking
+ *   for changes, waiting on the `author` until a push lands after it. */
+export function stationsReviewPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; closed: Set<string>; done?: Set<string>; repository?: string | null; graph?: PrGraph }): StationsResult {
+  const rounds = ctx.graph?.legs?.review?.max_runs ?? 3;
+  const done = ctx.done ?? ctx.closed;
+  const stations: Record<string, PostedStation> = {};
+  for (const t of ctx.tickets) {
+    if (ctx.closed.has(t.id)) continue;
+    // By repository and number: two repositories may both have a PR #7; and only in a
+    // repository the ticket reads, as `ticketOwns` (B-29).
+    const refs = prRefs((t.course as { prs?: unknown[] } | undefined)?.prs ?? [], ctx.repository);
+    const fact = ctx.facts.find((f) => readsRepo(t, f, ctx.repository) && refs.some((r) => refNames(r, f, ctx.repository)));
+    if (!fact) {
+      stations[t.id] = at('requested', [], [{ leg: 'review', state: 'waiting', waiting_on: 'pr' }]);
       continue;
     }
-    // The least advanced open PR decides, and its timeline is the path.
-    const placed = mine.filter((f) => f.state === 'open').map((f) => ({ f, st: placeOf(f) }));
-    placed.sort((a, b) => (LEAST[a.st.station] ?? 0) - (LEAST[b.st.station] ?? 0) || a.f.number - b.f.number);
-    stations[t.id] = placed[0].st;
+    const verdicts = verdictsOf(fact);
+    const path: Step[] = verdicts.map((v) => ({ leg: 'review', reached: verdictOf(v) === 'approve' ? 'approved' : 'changes-requested' }));
+    const station = path.at(-1)?.reached ?? 'requested';
+    if (station === 'approved') {
+      stations[t.id] = at('approved', path, []);
+      continue;
+    }
+    const lastVerdict = verdicts.at(-1)?.submittedAt ?? Number.NEGATIVE_INFINITY;
+    if (fact.reviews.some((r) => r.submittedAt > lastVerdict && markerOf(r, CONCLUDED))) {
+      stations[t.id] = at('concluded', [...path, { leg: 'conclude', reached: 'concluded' }], []);
+      continue;
+    }
+    if (fact.state !== 'open' || path.length >= rounds) {
+      stations[t.id] = at(station, path, [{ leg: 'conclude', state: 'ready', waiting_on: null }]);
+      continue;
+    }
+    const pushes = fact.pushes?.length ? fact.pushes : [fact.pushedAt];
+    // The first round waits like any course's start leg: on a dependency not closed done, then on
+    // an open child (R-BTN-74).
+    const before = path.length ? null : t.depends_on.some((d) => !done.has(d)) ? 'dependencies' : t.blocked_by.length ? 'children' : null;
+    const wait = before ?? (station === 'changes-requested' && !pushes.some((p) => p > lastVerdict) ? 'author' : checksDone(fact) ? null : 'ci');
+    stations[t.id] = at(station, path, [
+      { leg: 'review', state: wait ? 'waiting' : 'ready', waiting_on: wait },
+      { leg: 'conclude', state: 'ready', waiting_on: null },
+    ]);
   }
   return { stations, markers: [], course_data: {} };
 }

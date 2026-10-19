@@ -19,7 +19,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
-const init = (root: string, ...argv: string[]) => initMain([...argv, ...(argv.includes('--eject') ? [] : ['--pin', 'immediately-run/baton@'+'0'.repeat(40)])], { root, log: () => {} });
+// No --pin: the CLI pins its own commit, the one its courses' sources name (B-33).
+const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: () => {} });
 import type { PrFact } from '../../src/defaults/course-pr';
 import { ORIGIN, rows, setClock, syncToken } from '../helpers';
 
@@ -92,9 +93,9 @@ describe('S-BTN-43 a repository with no course code', () => {
     // Four tickets from five items — the no-id file (and the .txt) are none; the done one is
     // closed as done; the one with an unknown field (T-1) is a ticket like the rest.
     expect(await rows('SELECT id, course_id FROM tickets ORDER BY id')).toEqual([
-      { id: 'docs:T-1', course_id: 'pr' },
-      { id: 'docs:T-2', course_id: 'pr' },
-      { id: 'docs:T-3', course_id: 'pr' },
+      { id: 'docs:T-1', course_id: 'create-pr' },
+      { id: 'docs:T-2', course_id: 'create-pr' },
+      { id: 'docs:T-3', course_id: 'create-pr' },
     ]);
     expect(await rows('SELECT ticket_id, closed_as FROM closed_tickets ORDER BY ticket_id')).toEqual([{ ticket_id: 'docs:T-0', closed_as: 'done' }, { ticket_id: 'docs:T-9', closed_as: 'done' }]);
     // The archived done dependency counts: T-3's implement is ready.
@@ -177,7 +178,7 @@ describe('S-BTN-43 the sync refuses, posting nothing', () => {
   let minutes = 0;
   const later = () => setClock(T0 + (minutes += 11) * 60_000);
 
-  it('a course with no sync.mjs other than pr, a ticket on an unlisted course, a bad stations return, no baton.json', async () => {
+  it('a course with no sync.mjs that is not a standard course, a ticket on an unlisted course, a bad stations return, no baton.json', async () => {
     mkdirSync(join(repo.dir, '.baton')); // the harness keeps its recorded facts there
     await expect(repo.sync()).rejects.toThrow('has no .baton/baton.json — run `baton repo init` first');
     await init(repo.dir);
@@ -191,13 +192,13 @@ describe('S-BTN-43 the sync refuses, posting nothing', () => {
     await expect(repo.sync()).rejects.toThrow('ticket S-1 is on course epic, which .baton/baton.json\'s courses do not list');
     expect(await posted()).toEqual({ n: 0 });
 
-    // A listed course other than pr, with a course file but no sync.mjs.
+    // A listed course that is not a standard one, with a course file but no sync.mjs.
     mkdirSync(join(repo.dir, '.baton', 'courses', 'epic'), { recursive: true });
-    writeFileSync(join(repo.dir, '.baton', 'courses', 'epic', 'course.json'), readFileSync(join(repo.dir, '.baton', 'courses', 'pr', 'course.json')));
+    writeFileSync(join(repo.dir, '.baton', 'courses', 'epic', 'course.json'), readFileSync(join(repo.dir, '.baton', 'courses', 'create-pr', 'course.json')));
     writeFileSync(settingsFile, JSON.stringify({ ...settings, courses: [...settings.courses, { id: 'epic', version: 1 }] }));
     repo.commit();
     await later();
-    await expect(repo.sync()).rejects.toThrow("course epic has no sync.mjs and the CLI's default serves only `pr`");
+    await expect(repo.sync()).rejects.toThrow('course epic has no sync.mjs and is not a standard course');
     expect(await posted()).toEqual({ n: 0 });
 
     // A station function returning a bare map instead of {stations, markers, course_data}.

@@ -1,0 +1,146 @@
+---
+title: "B-33 — qualified course names (github/<namespace>/<repository>/<commit>/<course>) and leg overrides: a repository runs a standard course's exact graph and replaces only the run of the legs it implements differently"
+id: B-33
+project: baton
+status: done
+updated: 2026-10-18
+repos:
+  - immediately-run/baton
+tags:
+  - roadmap-item
+description: "Owner, 2026-10-18: a course's source is named in immediately.run's provider/namespace/repository/ref grammar, so docs can run Baton's create-pr by reference — github/immediately-run/baton/<commit>/create-pr — keeping the exact graph (the sync refuses a copy that differs) and overriding only the legs docs implements differently, through repository-owned legs/<leg>.run.mjs that replace run and never close. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/50
+depends_on:
+  - B-28
+---
+
+**Spec:** BATON_SPEC R-BTN-51 (amended), R-BTN-131 (amended), R-BTN-69, R-BTN-72, R-BTN-74.
+**Depends on:** B-28 (the standard courses).
+
+### Requires
+
+None: a checkout and a terminal. No exit criterion needs a forge, a browser or a person.
+
+### Why
+
+The owner, 2026-10-18: "Fully qualified course names should include the repository using the
+same provider namespace repository git ref format that immediately run also uses. This allows,
+for example, the docs repo to refer to the Baton repo's create-pr course and only override the
+legs that are specific to the docs repo in implementation, keeping the exact same course graph."
+
+Today `baton repo init --course create-pr` copies the course into the repository. The copy
+names its course `create-pr` and nothing says where it came from. It stays in step with Baton's
+only until someone edits it, and nothing checks either way. The only way to change a leg's
+mechanics is to edit the bundled stub, which duplicates the standard `close` inside it and is
+overwritten by `init --force`. Docs needs both things at once: Baton's `create-pr` graph exactly,
+and its own mechanics for the legs where docs differs (its review gate, its delivery check and
+archive).
+
+### What to build
+
+1. **A qualified course name**, in immediately.run's URL grammar
+   (`/<mode>/<provider>/<namespace>/<repository>/<ref>/<path>`, LOCAL_DEVELOPMENT_SPEC §3),
+   with the course id in the path slot:
+   `github/immediately-run/baton/<commit>/create-pr`. `<ref>` is a full 40-hex commit, as the
+   workflow pin already is (R-BTN-74), so the name means one graph forever.
+2. **`baton.json` names each course's source.** A `courses[]` entry gains `source: "<qualified
+   name>"`. `id` stays the short local name that tickets' `course:`, core's rows, branch
+   patterns and rule 9 use. `init --course create-pr` writes
+   `source: github/immediately-run/baton/<the CLI's commit>/create-pr`. A course the repository
+   wrote itself has no `source` (or names its own repository).
+3. **The graph is the source's, exactly.** The sync checks that the repository's
+   `.baton/courses/<id>/course.json` is byte-equal to the source's course file at its commit,
+   and refuses to post when it is not, naming both. `init` writes the copy. The runner keeps
+   loading the copy from the claim's snapshot (R-BTN-72), so a claim never needs the network.
+4. **Leg overrides: `run` only.** `baton repo init --course <id> --override <leg>` writes
+   `.baton/courses/<id>/legs/<leg>.run.mjs`, owned by the repository and seeded with the
+   default's `run`. The standard stub `legs/<leg>.mjs` is unchanged by an override. At run time
+   it looks for `<leg>.run.mjs` at the claim's snapshot (via `git show`, as it already reads the
+   leg's instructions). If the file is there, the stub imports it and calls its `run`; either
+   way the stub keeps its own `close` and its answer check. The overriding `run` must return a
+   position that is an edge, as every leg's must (R-BTN-83). It cannot change the closing
+   marker, so the standard station function keeps placing the ticket.
+5. **Who owns which file.** `init --force` rewrites the stubs and the course copy, never a
+   `*.run.mjs` or an edited `legs/<leg>.md`.
+6. **A test-kit check.** `baton test-course` accepts a course with overrides: each
+   `<leg>.run.mjs` exports `run`, names a leg of the course, and sits beside a leg script that
+   loads it. *(Amended 2026-10-18, baton#50 round 1: the kit does not run an override, which does
+   a leg's real work — agents, git, the forge — that the kit cannot supply. A position that is no
+   edge is refused by the runner's decision before `close` writes anything, which a test drives
+   with an override's real result.)*
+7. **Docs uses it** (B-31): `create-pr` from `github/immediately-run/baton/<commit>/create-pr`.
+   Only the legs whose mechanics differ in docs are overridden; the rest run the standard stubs
+   with docs' instructions (B-32). The test for a leg: does docs need different code, or only
+   different prose? Prose belongs in `<leg>.md`. Expected overrides are `review` (two blind
+   reviewers on different models, the matcher, the gate record) and `merge` (the
+   `merge-base --is-ancestor` delivery check, the archive, the findings rows). `implement`,
+   `fix` and `adjudicate` are expected to need prose only. B-31 settles the list by that test.
+
+### Architecture
+
+- **Course code in the CLI, never core** (§2b). Core's `COURSE_ID` and every row keep the short
+  `id`. The qualified name lives in `baton.json` and the CLI. This is the one decision taken
+  here: making the qualified name core's course id would widen every course column, rule 9's
+  declarations and branch patterns, for no gain within one repository, where short ids are
+  already unique.
+- **One provider today.** The grammar is general, and `github` is the only provider accepted.
+  Another provider is refused by name, not guessed at.
+- **Sources this PR resolves.** A source in the CLI's own repository at the workflow's pin
+  resolves from the registry in place: the course file and the station function are the CLI's
+  own. A source at another commit of the CLI's repository is refused, naming both commits, and
+  `baton repo init` re-run moves the pin and every `source` together. Decoupling them needs the
+  sync to read code at a second commit, and nothing asks for that yet. A source in any other
+  repository is refused with "not supported yet". Fetching and running another repository's
+  station code at sync time needs its own design (trust, pinning, the token's reach).
+- **Upgrading a source moves the pin and the copy together.** `baton repo init --course <id>`
+  re-run with a newer CLI rewrites `source`, the course copy and the stubs, and keeps the
+  overrides. A changed graph is a course change (R-BTN-22's `course-changed`), so the release
+  notes say when a standard course's graph changes.
+- **Versions.** *(Amended 2026-10-18, baton#50 round 1: the bullet first made `leg_version` a
+  hash of the stub and its override. The spec defines `leg_version` as the integer version of a
+  leg's inputs and outputs, which R-BTN-82 checks (§4), and nothing computes it yet.)* An override
+  keeps the leg's `leg_version`: it keeps the leg's position and close, so its contract. The
+  claim's `snapshot_sha`, already in history, names the bytes of the implementation that ran.
+
+### Tests
+
+- Unit:
+  - parsing and printing qualified names: round trip; refusals of a short ref, an unknown
+    provider, a missing course id, `..`, and a path with extra segments;
+  - `init` writes `source` at the CLI's commit;
+  - `--override` seeds `<leg>.run.mjs` and refuses a leg the course lacks;
+  - `init --force` keeps overrides and edited instructions.
+- The graph check: an edited `course.json` copy is refused, naming the source; the unedited
+  copy posts; a source at a commit other than the pin, or in another repository, is refused by
+  name.
+- A stub with an override at the snapshot runs the override's `run` and the standard `close`.
+  An override in the working tree but not at the snapshot is not run. An override returning a
+  non-edge is refused by the advance.
+- The test kit passes a course with an override and fails one whose override exports no
+  `run`.
+- A scenario `S-BTN-n`: a repository whose `create-pr` comes from
+  `github/immediately-run/baton/<commit>/create-pr` with `review` overridden syncs, and a
+  claim's `review` runs the override; the verdict line the standard `close` writes moves the
+  ticket.
+
+### Exit criteria
+
+- `npm test` green with the scenario, its G-BTN row and the R-BTN-51/R-BTN-131 amendments in
+  the spec.
+- `baton repo init --course create-pr --override review` in a scratch repository, then
+  `baton test-course`, passes.
+- `src/core/` unchanged.
+
+## Status
+
+Delivered by https://github.com/immediately-run/baton/pull/50 (merged 4d16a39, 2026-10-18), after
+three review rounds with 17 findings, all closed; the rows are in `docs/review/pr-findings.mdx`.
+All three exit criteria hold: `npm test` green apart from the two `ssh-keygen` tests (no
+`ssh-keygen` in the container); the exit run passes in `defaults-cli.test.ts`; `src/core/`
+unchanged. Beyond the item, the review added two things. `init` refuses a `--pin` of another
+repository or commit while a source is named. The test kit fails an override whose leg script,
+read from this course's own path, does not load it.
