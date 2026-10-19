@@ -26,7 +26,8 @@ import { fileUrl } from './links';
 import { Stats, STATS_WINDOW_MS } from './stats';
 import { Blocks } from './blocks';
 import { Resources } from './resources';
-import { checkBlockedOn } from './validate';
+import { Notices, type Courier } from './notices';
+import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import type { Ports, Row, SqlValue, Store, Workflow } from './ports';
 
@@ -50,6 +51,7 @@ export class BatonCore {
   readonly stats: Stats;
   readonly blocks: Blocks;
   readonly resources: Resources;
+  readonly notices: Notices;
   readonly store: Store;
   /** §12: workflows to dispatch once the current request or alarm has committed, one per
    *  repository and kind. */
@@ -72,10 +74,13 @@ export class BatonCore {
     this.webhooks = new Webhooks({ store, now: () => this.now() });
     const want = (wf: Workflow) => this.pendingDispatch.set(`${wf.repository}:${wf.kind}`, wf);
     // R-BTN-75: the blocks are written with their causes; `fits` is the claim gates' (R-BTN-77).
-    this.blocks = new Blocks({ store, now: () => this.now(), fits: (worker, ticket) => this.claims.fits(worker, ticket) });
+    // R-BTN-80: a decision's notices are queued and closed with it.
+    this.notices = new Notices({ store, now: () => this.now() });
+    this.blocks = new Blocks({ store, now: () => this.now(), fits: (worker, ticket) => this.claims.fits(worker, ticket),
+      decisions: { opened: (ticket, ids) => this.notices.opened(ticket, ids), closed: (ticket, ids) => this.notices.closed(ticket, ids) } });
     this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks });
     this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(), origin: ports.config.BATON_ORIGIN,
-      dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount() });
+      dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices });
     this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo) });
     this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, blocks: this.blocks,
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
@@ -85,6 +90,8 @@ export class BatonCore {
     this.workers = new WorkerApi({ store, config: ports.config, now: () => this.now(), fenced: (w, inc, id) => this.claims.fenced(w, inc, id),
       // R-BTN-76: what a heartbeat declares it uses; the fleet's counts move with the worker.
       uses: (w, repos, names) => this.resources.applyUses(w, repos, names), fleetChanged: () => this.blocks.recount(),
+      // R-BTN-103: what it delivers as a worker courier.
+      couriers: (w, granted, entries) => this.notices.declare(w, granted, entries),
       held: (ticket) => this.blocks.held(ticket, true),
       claimView: (id) => this.claims.holderView(id),
       // A granted key's repositories are its grants' (R-BTN-58); an ungranted one's, every one it may reach.
@@ -234,6 +241,8 @@ export class BatonCore {
         if (this.blocks.liveChanged()) this.blocks.recount();
         this.blocks.expireMessages();
         this.takeUnblocked();
+        // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.
+        this.notices.alarm();
       });
     } catch (e) {
       this.pendingDispatch.clear(); // rolled back: nothing to tell the mirror
@@ -353,6 +362,7 @@ export class BatonCore {
       if (req.method === 'GET' && url.pathname === '/v1/ui/state') return json(this.uiState());
       const read = await this.blocksRoute(req, url);
       if (read) return read;
+      if (url.pathname.startsWith('/v1/courier/')) return await this.courierRoute(req, url);
       if (req.method === 'POST' && url.pathname === '/v1/probe/readings') {
         // R-BTN-53, R-BTN-101: a probe key's readings, on any registered instance.
         if (!req.headers.has('X-Baton-Signed')) throw new BatonError('unauthenticated', 'sign with a probe key');
@@ -620,6 +630,51 @@ export class BatonCore {
     const lift = /^bars\/(\d+)\/lift$/.exec(rest);
     if (m === 'POST' && lift) return json(this.admin.liftBar(actor, repo, Number(lift[1])));
     if (m === 'PUT' && rest === 'settings') return json(this.admin.setSettings(actor, repo, await body()));
+    if (m === 'POST' && rest === 'couriers') return json(await this.admin.couriers(actor, repo, await body()));
+    throw new BatonError('not-found', `no route ${m} ${p}`);
+  }
+
+  /**
+   * `/v1/courier/*` (R-BTN-80, R-BTN-103, §11): signed by a personal courier's key, or by a machine
+   * key naming `?repository=` — granted there, its sessions having declared `couriers` for it within
+   * the day — acting as a worker courier on that repository's pool, with no worker secret. A key in
+   * any other role is `forbidden`.
+   */
+  private async courierRoute(req: Request, url: URL): Promise<Response> {
+    if (!req.headers.has('X-Baton-Signed')) throw new BatonError('unauthenticated', 'sign with a courier key or a machine key (R-BTN-13)');
+    const signed = await this.verifySigned(req);
+    const fp = signed.cred;
+    if ((await this.admin.adminFingerprints()).has(fp)) throw new BatonError('forbidden', 'an administrator key is never a courier key (R-BTN-57)');
+    const cred = this.sql<{ kind: string; created_by: string | null }>('SELECT kind, created_by FROM credentials WHERE id = ?', fp)[0];
+    const raw = url.searchParams.get('repository');
+    let who: Courier;
+    if (cred?.kind === 'courier') {
+      if (raw != null) throw new BatonError('invalid-params', 'repository: only a machine key names one; a courier key claims its own notices');
+      who = { kind: 'personal', fingerprint: fp };
+    } else if (cred?.kind === 'worker') {
+      if (raw == null) throw new BatonError('invalid-params', 'repository: a machine key delivers one repository’s pool at a time (R-BTN-103)');
+      const repository = checkRepositoryId(raw);
+      if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', fp, repository).length) {
+        throw new BatonError('forbidden', `the key is not granted on ${repository} (R-BTN-58)`);
+      }
+      const asks = this.notices.workerAsks(fp, repository);
+      if (!asks.length) throw new BatonError('forbidden', `no session of this key declared couriers for ${repository} within the day (R-BTN-103)`);
+      who = { kind: 'worker', fingerprint: fp, repository, asks };
+    } else throw new BatonError('forbidden', 'only a courier key or a machine key delivers notices (R-BTN-57)');
+    const p = url.pathname;
+    const m = req.method;
+    const tx = <T>(f: () => T): T => this.store.transaction(f);
+    if (m === 'POST' && p === '/v1/courier/notices/claim') {
+      const body = signed.req.headers.get('Content-Length') === '0' || !signed.req.body ? null : await readJson(signed.req);
+      const limit = checkNoticeClaim(body);
+      return json(tx(() => this.notices.claim(who, limit)));
+    }
+    const mark = /^\/v1\/courier\/notices\/([^/]+)$/.exec(p);
+    if (m === 'POST' && mark) {
+      const body = await readJson(signed.req);
+      return json(tx(() => this.notices.mark(who, mark[1], body)));
+    }
+    if (m === 'GET' && p === '/v1/courier/decisions') return json(this.notices.decisions(who));
     throw new BatonError('not-found', `no route ${m} ${p}`);
   }
 
@@ -729,7 +784,7 @@ export class BatonCore {
    * a rewind to a once-accepted history included — is a fresh hold with a fresh row. The 0001
    * schema's "written once" and "the first force post" describe that one hold.
    */
-  // @model syncPost sha256:67e38f2a2bd8
+  // @model syncPost sha256:bdfe0d6e71ff
   async board(repo: Repository, p: BoardPayload) {
     // Course graphs are read per post: a registry applied, or a post refused after applying one,
     // must not leave another request reading a graph that is not in force.
@@ -1072,7 +1127,7 @@ export class BatonCore {
       // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
       limits: this.admin.view(now),
       // R-BTN-69: a refused course file, the previous one staying in force.
-      needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), keys: this.keysNotice() },
+      needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), keys: this.keysNotice() },
       // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.
       blocked: this.blocks.view(),
       resources: this.resources.view(now),

@@ -9,8 +9,9 @@ import { fileURLToPath } from 'node:url';
 export const HEADING = '### Model checks (`npm run model:full`)';
 // the checks a report must show passing, in model/full.mjs's order, each at the size R-BTN-68
 // promises: a run with fewer samples, fewer traces or a shallower proof is no report for a PR
-// (round 2, 2-r2-1)
-export const SIZES = { samples: '10000', traces: '1000', depth: '5' };
+// (round 2, 2-r2-1). The proof is at depth 4 since R3-1254 part 2 (owner, 2026-10-19): with a
+// leg's prerequisites, depth 5 on `small` takes about 10 hours; B-37 brings 5 back.
+export const SIZES = { samples: '10000', traces: '1000', depth: '4' };
 export const labels = ({ samples, traces, depth }) =>
   [`npm run model (${samples} samples)`, `model-based tests (${traces} traces)`, `npm run model:verify (depth ${depth})`];
 export const CHECKS = labels(SIZES);
@@ -19,6 +20,14 @@ export const CHECKS = labels(SIZES);
 // model traces, with its helpers; the scenario-trace check; and the lock file, which pins Quint
 // and with it Apalache (round 2, 2-r2-0)
 const CHECKED = /^(model\/|src\/core\/|src\/shared\/|src\/migrations\/|test\/model\/|test\/helpers\.ts$|test\/lib\/|test\/integration\/trace\.ts$|scripts\/check-traces\.mjs$|package-lock\.json$)/;
+
+/** The environment each `model:full` step runs in: the caller's, less the knobs that would cut a
+ * step down without its label saying so — `REPLAY_ONLY`, which replays only the traces it names
+ * and skips the coverage floor (baton#48 round 3, 3-r3-0) — plus the step's own sizes. */
+export const stepEnv = (env, own) => {
+  const { REPLAY_ONLY: _only, ...base } = env;
+  return { ...base, ...own };
+};
 
 /** Whether a PR changing `files` must carry a report. */
 export const needsReport = (files) => files.some((f) => CHECKED.test(f));

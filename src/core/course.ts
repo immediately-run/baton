@@ -9,7 +9,7 @@
 // and no loop is unbounded.
 
 export type CourseRule =
-  | 'shape' | 'unknown-key' | 'id' | 'unknown-station' | 'start-leg' | 'unreachable' | 'no-end'
+  | 'shape' | 'unknown-key' | 'id' | 'unknown-station' | 'start-leg' | 'unreachable' | 'no-end' | 'terminal'
   | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar';
 
 export interface CourseViolation {
@@ -56,7 +56,8 @@ const own = (o: Record<string, unknown>, k: string) => Object.prototype.hasOwnPr
 /**
  * Every way `json` fails to be a course file, sorted by path then rule (at most 100); empty
  * when it is one. A file passes only if every station is reachable from `start` through any
- * outcome, an end is reachable from every station, every `from` and `to` names a station,
+ * outcome, an end is reachable from every station, no leg leaves an end (an end is terminal:
+ * a ticket at one is done), every `from` and `to` names a station,
  * every cycle contains a leg with `max_runs`, `start_leg` leaves `start`, and every
  * `inputs.from` names a leg and one of its outputs.
  */
@@ -233,6 +234,10 @@ export function validateCourse(json: unknown): CourseViolation[] {
   if (ends) {
     const toEnd = reach(ends.filter((e) => isStation.has(e)), prev);
     for (const s of stationIds) if (!toEnd.has(s)) add('no-end', `stations.${s}`, `no path leads from "${s}" to an end`);
+    // R-BTN-69: one start, at least one end, and every end terminal — a ticket at one is done,
+    // so a leg leaving it could never be offered
+    const isEnd = new Set(ends);
+    for (const [id, { from }] of edges) for (const f of from) if (isEnd.has(f)) add('terminal', `legs.${id}.from`, `"${f}" is an end station: no leg leaves it`);
   }
 
   // Every cycle contains a leg with max_runs: exactly when the graph of the unbounded legs

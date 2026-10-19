@@ -1,0 +1,61 @@
+---
+title: "B-37 — The model's Apalache proof back to depth 5 within an hour: make small cheaper after R3-1254 part 2's prerequisites"
+id: B-37
+project: baton
+status: available
+updated: 2026-10-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "R3-1254 part 2 lowered model:verify to depth 4 (owner, 2026-10-19): with a leg's prerequisites, depth 5 on small takes about 10 hours (about 23 minutes per enabled transition) against 49 minutes before. Measure the cost, make small cheaper without dropping what the invariants need, and restore SIZES.depth to 5. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1254
+---
+
+**Brief:** the owner, 2026-10-19, choosing for R3-1254 part 2: "Depth 4 now, ticket for 5".
+**Spec:** BATON_SPEC R-BTN-68 (the model report a PR carries); `model/README.md` *Checked how*.
+**Depends on:** R3-1254 part 2 (the model with a leg's prerequisites).
+
+### Requires
+
+None: the model and a machine with Java. The proof runs on the author's machine (R-BTN-68).
+
+### Why
+
+Part 2 of R3-1254 added a leg's prerequisites, retries and blocked ends to the model. On its head, Apalache's bounded proof of `safety` on `small` (`npm run model:verify`) is far slower than before:
+
+| Depth | Time, 4 CPUs | Notes |
+|---|---|---|
+| 1–4 | about 47 minutes | |
+| 5 | about 23 minutes per enabled transition | about 26 of them, so roughly 10 hours |
+| 5 on main, before part 2 | 49 minutes | |
+
+Part 2 lowered the proof to depth 4 for now, by the owner's choice. This ticket brings depth 5 back within about an hour.
+
+### What to build
+
+1. **Measure where the depth-5 time goes.** Find which transitions and which invariants cost most: Apalache's per-invariant timestamps, and `--write-intermediate`'s transition list.
+2. **Make `small` cheaper for the proof without dropping a behaviour the invariants need.** Candidates:
+   - fewer prerequisite shapes in `DEP_SHAPES`-style choices on `small` only;
+   - fewer leg choices per step;
+   - the provisional-row and retry state bounded more tightly on `small`;
+   - invariants split so the expensive ones are checked at depth 5 and the rest at 4.
+
+   State the trade-off of each in the README.
+3. **Restore depth 5:** `scripts/model-report.mjs`'s `SIZES.depth`, `model/verify.mjs`'s default, the README and the report's tests.
+
+### Tests
+
+- `npm run model:full` on the head passes at depth 5, with the proof under about 60 minutes on 4 CPUs.
+- The regression runs and the 10,000-run simulation still pass. Each reduction of `small` is named in the README with what it no longer reaches at depth 5.
+- Depth 5 reaches an `unblocked` event on `small` (claim, fail end, two ticks, the backoff clearing), so the proof exercises `unblockedFollowsBlocked` again; a reduction must keep that. `small`'s one ticket keeps a prerequisite on another ticket out of the proof at any depth: say in the README whether this ticket adds a second, and what it costs.
+
+### Exit criteria
+
+- [ ] `SIZES.depth` is 5 again and a passing `model:full` report for the head shows it
+- [ ] merged under the review gate

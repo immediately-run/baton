@@ -6,14 +6,15 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { validateCourse } from '../../src/core/course';
-import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable } from '../../src/defaults/courses';
+import { APPROVAL_STAGES, BUILT_INS, DEFAULT_COURSE, buildAppWaits, builtIn, scaffoldable } from '../../src/defaults/courses';
+import type { SourceTicket } from '../../src/defaults/tickets-markdown';
 
 const instructionsDir = (id: string) => join(__dirname, '..', '..', 'src', 'defaults', 'courses', id);
 const tosOf = (to: string | string[]): string[] => (Array.isArray(to) ? to : [to]);
 
 describe('the standard courses (R-BTN-131)', () => {
-  it('are create-pr, review-pr, bug-report, draft-ticket and decision; create-pr is the default', () => {
-    expect(BUILT_INS.map((b) => b.id)).toEqual(['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision']);
+  it('are create-pr, review-pr, bug-report, draft-ticket, decision and build-app; create-pr is the default', () => {
+    expect(BUILT_INS.map((b) => b.id)).toEqual(['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision', 'build-app']);
     expect(DEFAULT_COURSE).toBe('create-pr');
   });
 
@@ -66,7 +67,10 @@ describe('the standard courses (R-BTN-131)', () => {
   }
 
   it('a leg whose next waits on someone outside the claim suspends it; every other leg goes on', () => {
-    const waits = new Set(['create-pr adjudicate owner', 'review-pr review changes', 'decision prepare']);
+    const waits = new Set([
+      'create-pr adjudicate owner', 'review-pr review changes', 'decision prepare',
+      'build-app define', 'build-app design', 'build-app architect', 'build-app plan', 'build-app file', 'build-app verify building',
+    ]);
     for (const b of BUILT_INS) {
       for (const [leg, stub] of Object.entries(b.legs)) {
         for (const answer of stub.ask?.values ?? [undefined]) {
@@ -86,7 +90,31 @@ describe('the standard courses (R-BTN-131)', () => {
   it('pr names create-pr for a repository scaffolded before, and is no longer scaffolded', () => {
     expect(builtIn('pr')?.id).toBe('create-pr');
     expect(() => scaffoldable('pr')).toThrow('--course pr: renamed create-pr');
-    expect(() => scaffoldable('epic')).toThrow('the CLI scaffolds create-pr, review-pr, bug-report, draft-ticket, decision');
+    expect(() => scaffoldable('epic')).toThrow('the CLI scaffolds create-pr, review-pr, bug-report, draft-ticket, decision, build-app');
     expect(builtIn('epic')).toBeUndefined();
+  });
+
+  describe('build-app waits (B-40)', () => {
+    const ticket = (answer?: string, blocked_by: string[] = []): SourceTicket =>
+      ({ id: 'A-1', course_id: 'build-app', blocked_by, depends_on: [], course: answer == null ? {} : { answer } }) as unknown as SourceTicket;
+
+    it('each drafting leg after define waits on the owner until answer: approves the document it builds on', () => {
+      const gates: [string, string][] = [['design', 'define'], ['architect', 'design'], ['plan', 'architect'], ['file', 'plan']];
+      for (const [leg, gate] of gates) {
+        expect(buildAppWaits(ticket(), leg), `${leg} unanswered`).toBe('owner');
+        expect(buildAppWaits(ticket('open'), leg), `${leg} open`).toBe('owner');
+        for (const a of APPROVAL_STAGES) {
+          const ready = APPROVAL_STAGES.indexOf(a) >= APPROVAL_STAGES.indexOf(gate);
+          expect(buildAppWaits(ticket(a), leg), `${leg} at answer ${a}`).toBe(ready ? null : 'owner');
+        }
+      }
+      expect(buildAppWaits(ticket(' Design '), 'architect')).toBeNull();
+    });
+
+    it('define waits on nothing of its own; verify waits on open children, and on nothing else', () => {
+      expect(buildAppWaits(ticket(), 'define')).toBeNull();
+      expect(buildAppWaits(ticket(), 'verify')).toBeNull();
+      expect(buildAppWaits(ticket('plan', ['A-1-1']), 'verify')).toBe('children');
+    });
   });
 });

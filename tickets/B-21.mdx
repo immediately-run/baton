@@ -56,3 +56,9 @@ R-BTN-126 is specified. This ticket builds it.
 - [ ] merged under the review gate
 
 ## Status
+
+_2026-10-19 — found mapping core for R3-1254 part 2b: today `released:blocked` reaches
+`checkEnd`'s owner-bar branch (`src/core/validate.ts`, since `blocked` matches the course-id
+pattern), and `Claims.end` accepts it as an ordinary owner-bar release whenever an owner bar on
+the repository has the reason `"blocked"`. Building `released:blocked` must route it before that
+branch, and a test should pin that a bar named `blocked` no longer captures it._

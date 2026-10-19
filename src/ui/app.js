@@ -392,6 +392,9 @@ function renderNeeds() {
   // needs that no instrument has reported on for a day.
   for (const b of n.blocked_capability ?? []) list.append(el('li', { text: `${b.ticket_id}: blocked since ${fmtTime(b.since)} on ${b.capability}, which no live worker declares` }));
   for (const i of n.instances_unknown ?? []) list.append(el('li', { text: `${i.instance}: unknown since ${fmtTime(i.since)} while a posted leg needs it — no reading in force` }));
+  // R-BTN-103: a pool copy no worker courier took for an hour; owner decisions no person hears of.
+  for (const p of n.pool_unclaimed ?? []) list.append(el('li', { text: `${p.ticket_id}: decision ${p.decision}'s pool copy unclaimed since ${fmtTime(p.since)} — no worker courier is delivering ${p.repository_id}` }));
+  for (const r of n.no_owner_channel ?? []) list.append(el('li', { text: `${r.repository_id}: ${r.decisions} owner decision${r.decisions === 1 ? '' : 's'} open and no personal courier for owner — baton owner courier add` }));
   for (const fp of n.keys?.revoked_listed ?? []) list.append(el('li', { text: `BATON_KEYS names ${fp}, a revoked key: it stays revoked — give the machine a new key` }));
   for (const h of n.held_items) {
     // §6.10: the owner decides what a hold means — retry (Lift), re-draft, re-tier or park.
@@ -465,6 +468,8 @@ function renderLimits() {
   list('Grants', l.grants.map((g) => `${g.repository_id}: ${g.hostname}${g.label ? ` (${g.label})` : ''} — ${parsed(g.capabilities, []).join(', ') || 'no capabilities'}${g.max_tier != null ? ` · up to ${g.max_tier}` : ''} · by ${g.granted_by}`), 'No key is granted.');
   // R-BTN-101: a probe reports on any registered instance.
   list('Probes', (l.probes ?? []).map((p) => `${p.label}: ${p.fingerprint} · by ${p.created_by}`), 'No probe key.');
+  // R-BTN-80: the personal couriers, by repository.
+  list('Couriers', (l.couriers ?? []).map((c) => `${c.repository_id}: ${c.credential_id} delivers ${c.asks}`), 'No courier is registered.');
   list('Owner bars', l.bars.map((b) => `#${b.id} ${b.repository_id}: ${b.tag} barred from ${b.course === '*' ? 'every course' : b.course}${b.legs.length ? ` (${b.legs.join(', ')})` : ''} at ${b.applies === 'claim' ? 'claims' : 'claims and advances'}, ${fmtTime(b.starts_at)} to ${b.ends_at == null ? 'lifted' : fmtTime(b.ends_at)}${b.release_holders ? ', releasing holders' : ''} — ${b.reason}`), 'No owner bar is in force or scheduled.');
   list('Settings', l.settings.map((s) => {
     const parts = [];
@@ -476,6 +481,7 @@ function renderLimits() {
     if (transcripts) parts.push(`transcripts: ${transcripts.join(', ')}`);
     const trigger = parsed(s.unblocked_trigger, null);
     if (trigger) parts.push(`unblocked trigger: ${trigger.kind}${trigger.workflow ? ` ${trigger.workflow}` : ''}${trigger.ref ? ` @${trigger.ref}` : ''}`);
+    if (s.remind_after != null) parts.push(`reminders after ${s.remind_after % 3600 ? `${Math.round(s.remind_after / 60)} min` : `${s.remind_after / 3600} h`}`);
     return `${s.repository_id}: ${parts.join(' · ')}`;
   }), 'No repository is registered.');
 }

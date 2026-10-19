@@ -109,6 +109,9 @@ export interface Heartbeat {
   transcript_refusals: { index: number; code: string; message: string }[];
   /** R-BTN-76: the account instances it uses (absent declares none), and the strings refused as names. */
   uses: { names: string[]; refused: { instance: string; code: string }[] };
+  /** R-BTN-103: the repositories and `asks` this session delivers notices for, as a worker courier,
+   *  and the entries refused as malformed. */
+  couriers: { entries: { repository: string; asks: string[] }[]; refused: { repository: string; code: string }[] };
 }
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number }
@@ -183,6 +186,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     test_harness: b.test_harness === true,
     fenced: checkFenced(b.fenced),
     uses: checkUses(b.uses),
+    couriers: checkCouriers(b.couriers),
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
@@ -651,4 +655,70 @@ export function checkBlockedOn(v: string): { kind: 'ticket' | 'capability' | 're
   if (!['ticket', 'capability', 'resource', 'decision'].includes(kind)) bad('on', 'must be ticket:, resource:, capability: or decision: and a name');
   if (!(ref === '*' || /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/.test(ref))) bad('on', 'names a malformed ref');
   return { kind: kind as 'ticket', ref };
+}
+
+/** R-BTN-80, R-BTN-103: what one heartbeat's `couriers` or one courier registration may name
+ *  (spec-silent, recorded on R3-1256); a claim takes at most 50 notices. */
+export const COURIERS_MAX = 16;
+export const ASKS_MAX = 8;
+export const CLAIM_MAX = 50;
+/** A courier's label for how it delivered (§10.4: text, short). */
+const CHANNEL = /^[A-Za-z0-9][A-Za-z0-9 ._:@/-]{0,63}$/;
+
+/** A heartbeat's `couriers` (R-BTN-103): `[{repository, asks: [<label>]}]`, absent for none. As
+ *  with `uses`, a list that is not one, or is over its bound, refuses the heartbeat; an entry that
+ *  fails its own check — a repository id, a label, a repeat — is returned refused and reported,
+ *  never refusing the heartbeat, which would stop `last_seen_at` and get a live worker reaped. */
+export function checkCouriers(v: unknown): { entries: { repository: string; asks: string[] }[]; refused: { repository: string; code: string }[] } {
+  if (v === undefined) return { entries: [], refused: [] };
+  if (!Array.isArray(v) || v.length > COURIERS_MAX) bad('couriers', `must be a list of at most ${COURIERS_MAX}`);
+  const seen = new Set<string>();
+  const entries: { repository: string; asks: string[] }[] = [];
+  const refused: { repository: string; code: string }[] = [];
+  for (const x of v as unknown[]) {
+    const named = isObj(x) && typeof x.repository === 'string' ? x.repository.slice(0, 100) : '';
+    try {
+      if (!isObj(x)) bad('couriers[]', 'must be an object');
+      const e = x as Record<string, unknown>;
+      for (const k of Object.keys(e)) if (k !== 'repository' && k !== 'asks') bad(`couriers[].${k}`, 'unknown field');
+      const repository = checkRepositoryId(e.repository, 'couriers[].repository');
+      if (seen.has(repository)) bad('couriers[]', `repeats ${repository}`);
+      entries.push({ repository, asks: checkAsks(e.asks, 'couriers[].asks') });
+      seen.add(repository);
+    } catch (err) {
+      // Only a field check's refusal is an entry's; anything else is a bug and goes up.
+      if (!(err instanceof BatonError) || err.code !== 'invalid-params') throw err;
+      refused.push({ repository: named, code: 'invalid-params' });
+    }
+  }
+  return { entries, refused };
+}
+
+/** A courier's `asks` (R-BTN-80): 1 to 8 labels, each `ASKS`. */
+export function checkAsks(v: unknown, field = 'asks'): string[] {
+  if (!Array.isArray(v) || !v.length || v.length > ASKS_MAX || !v.every((a) => typeof a === 'string' && ASKS.test(a))) {
+    bad(field, `must be 1 to ${ASKS_MAX} labels, each matching ${ASKS}`);
+  }
+  return [...new Set(v as string[])].sort();
+}
+
+/** A mark's body (R-BTN-80): `{state: 'sent'|'failed', channel?}`. */
+export function checkMark(v: unknown): { state: 'sent' | 'failed'; channel: string | null } {
+  if (!isObj(v)) bad('body', 'must be a JSON object');
+  const b = v as Record<string, unknown>;
+  for (const k of Object.keys(b)) if (k !== 'state' && k !== 'channel') bad(`body.${k}`, 'unknown field');
+  if (b.state !== 'sent' && b.state !== 'failed') bad('state', "must be 'sent' or 'failed'");
+  if (b.channel !== undefined && !(typeof b.channel === 'string' && CHANNEL.test(b.channel))) bad('channel', 'must be a short label');
+  return { state: b.state as 'sent' | 'failed', channel: (b.channel as string | undefined) ?? null };
+}
+
+/** A claim's body (R-BTN-80): `{limit?}`, at most 50; absent or empty takes 50. */
+export function checkNoticeClaim(v: unknown): number {
+  if (v == null) return CLAIM_MAX;
+  if (!isObj(v)) bad('body', 'must be a JSON object');
+  const b = v as Record<string, unknown>;
+  for (const k of Object.keys(b)) if (k !== 'limit') bad(`body.${k}`, 'unknown field');
+  if (b.limit === undefined) return CLAIM_MAX;
+  if (!Number.isInteger(b.limit) || (b.limit as number) < 1 || (b.limit as number) > CLAIM_MAX) bad('limit', `must be an integer from 1 to ${CLAIM_MAX}`);
+  return b.limit as number;
 }

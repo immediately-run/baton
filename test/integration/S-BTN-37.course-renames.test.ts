@@ -6,12 +6,13 @@
 // fix resolves to address; W2, still on the old version, keeps claiming. A later file that drops
 // the claim's station shows `station: unknown` on the heartbeat. The removal half (R3-1248): a
 // second change removes the `adjudicate` leg and the `adjudicated` station and raises
-// `min_worker_version`; a third adds a loop with no `max_runs`. Must hold: docs' required bar (`*`
+// `min_worker_version`; a third adds a loop with no `max_runs`; a fourth adds a leg leaving the
+// end station. Must hold: docs' required bar (`*`
 // with an `except` list) still covers the renamed leg and the second file is accepted although
 // the bar's `except` names `adjudicate`; a claim at `adjudicated` gets `station: unknown` and ends
 // `released:course-changed`, no failed attempt; W2, on the old version, is refused `stale-skills`
-// only after the second change; the third file is refused (R-BTN-69) and listed under Needs you,
-// the second staying in force. (`baton test-course` failing the second change without its
+// only after the second change; the third and fourth files are refused (R-BTN-69) and listed
+// under Needs you, the second staying in force. (`baton test-course` failing the second change without its
 // `min_worker_version` raise is test/unit/test-course.test.ts.) Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
@@ -152,5 +153,14 @@ describe('S-BTN-37 a course changes under a claim (renames)', () => {
     expect(await rows(`SELECT version FROM courses WHERE repository_id = 'docs' AND id = 'roadmap-pr'`)).toEqual([{ version: 5 }]);
     const state = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as Record<string, any>;
     expect(state.needs_you.courses_refused).toEqual([expect.objectContaining({ repository_id: 'docs', course_id: 'roadmap-pr', version: 6 })]);
+
+    // A fourth leaves an end: `reopen` from `merged` back to `filed`, bounded, so only the
+    // terminal rule (R-BTN-69, R3-1254) refuses it — a ticket at an end is done.
+    const REOPEN = { ...REMOVED, legs: { ...REMOVED.legs, reopen: { from: ['merged'], to: 'filed', max_runs: 1 } } };
+    git.registry = [course(7, 5, { course: REOPEN })];
+    expect(await git.post()).toMatchObject({ status: 200 });
+    expect(await rows(`SELECT version FROM courses WHERE repository_id = 'docs' AND id = 'roadmap-pr'`)).toEqual([{ version: 5 }]);
+    const after = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as Record<string, any>;
+    expect(after.needs_you.courses_refused).toEqual([expect.objectContaining({ repository_id: 'docs', course_id: 'roadmap-pr', version: 7 })]);
   });
 });
