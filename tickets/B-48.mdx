@@ -17,9 +17,11 @@ depends_on: []
 ---
 
 **Spec:** BATON_SPEC R-BTN-29 to R-BTN-31 (the scenario traces checked against the model), R-BTN-68.
-**Found by:** baton#60's CI, 2026-10-19. `baton-deploy` on main was already cancelled at its 15-minute
-limit before baton#59 merged (bbc525a, 9cfae24, b4314f8, 34f0ef2 and 349694a, with `npm test` at
-14.8–14.9 minutes; the last deploy was eaa585f, `npm test` 13.5 minutes). After baton#59, main's `ci`
+**Found by:** baton#60's CI, 2026-10-19. `baton-deploy` on main has been cancelled at its 15-minute
+limit intermittently since 485ca9e on 2026-10-18 (run 39150220904), well before baton#59 merged, and on
+every push from bbc525a on (bbc525a, 9cfae24, b4314f8, 34f0ef2 and 349694a, with `npm test` at
+14.8–14.9 minutes; the last deploy was eaa585f, `npm test` 13.5 minutes). Main's `ci` ran `npm test` in
+9½–18 minutes before baton#59. After baton#59, main's `ci`
 runs were cancelled at their 25-minute limit too. baton#65 raised both limits to 45 minutes as a
 stopgap. Open baton#62 proposes the other answer, running Quint only for a change to the model; this
 ticket keeps the traces on every change (R-BTN-68) and makes them cheaper instead.
