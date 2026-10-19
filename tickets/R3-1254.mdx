@@ -142,7 +142,8 @@ B-21). The model:_
   clears `blocked_since` silently and is remembered; settled, it logs the owed `unblocked`, or
   is written again silently; any logged transition ends it._
 - _**`small`**, the proof's instance, keeps no capability requirements and no needs, so the
-  depth-4 proof's cost does not grow; `sim` and the regression runs carry them. A core gap the
-  map found — `forceReap` does not recount the fleet, so its rows wait for the next alarm tick —
-  stays the spec's in the model (a force-reap recounts) and is filed as B-44, the action's
-  `@impl pending` note naming it._
+  depth-4 proof's cost does not grow; `sim` and the regression runs carry them. A force-reap
+  changes no worker's liveness — core marks a worker reaped only when it is already silent past
+  its lease, and the alarm's live-set check recounts for that as for any lapse — so it
+  recounts nothing in the model either. (B-44, filed for it on the first reading, was
+  withdrawn.)_
