@@ -3,7 +3,7 @@ title: "R3-1254 — Baton model, remainder of R3-1243: exhaustive liveness on a 
 id: R3-1254
 project: baton
 status: in-progress
-updated: 2026-10-17
+updated: 2026-10-19
 repos:
   - baton
 tags:
@@ -111,3 +111,9 @@ _Item 1's "CI runs it if it stays under 10 minutes, else nightly" is superseded 
 amended 2026-10-17 at the owner's direction, takes model checking off hosted CI runners. The
 liveness run joins `npm run model:full` on the author's machine, and a PR changing the model
 carries its report, which CI's `model-report` job checks against the PR's head._
+
+_2026-10-19 — part 2a delivered: baton#55, merged as `a46b643` after three review rounds (14
+findings, all fixed; logged in `docs/review/pr-findings.mdx`). Its `model:full` report passed
+on the merged head (`ffecbfb`): 10,000 samples, 1,000 model-based traces, Apalache at depth 4
+(the owner's choice; B-37 restores 5). Next: part 2b, the capability and resource
+prerequisites and `answer_lost`; then part 3 and item 1._
