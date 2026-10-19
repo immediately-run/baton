@@ -16,13 +16,14 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 `@immediately-run/baton` is the `baton` command, published from this repository:
 
 ```sh
-npx --yes @immediately-run/baton@0.1.0 run   # a runner (§6.13), with IR_BATON_KEY_FILE set
+npx --yes @immediately-run/baton@0.1.1 run   # a runner (§6.13), with IR_BATON_KEY_FILE set
 ```
 
-From the package, `baton run`, `baton decision list` and the `baton admin|owner|worker …` API
-client work. `baton repo init` and `baton repo sync` still need a checkout of this repository:
-they pin the CLI to its own git commit and build leg stubs from `src/` with esbuild, which a
-published package has neither of, until B-43 moves the standard courses out of the CLI. In a
+From the package, `baton run`, `baton repo init`, `baton decision list` and the
+`baton admin|owner|worker …` API client work. Init names the commit the package was built from
+(`dist/build.json`) as its courses' source and its workflow's pin, and copies the leg stubs and
+instructions `build:cli` prebuilt into `dist/defaults/`, so it needs no checkout and no esbuild.
+`--eject` copies prebuilt defaults the same way. In a
 checkout, run the CLI as `node cli/baton.mjs`.
 
 ## Layout
