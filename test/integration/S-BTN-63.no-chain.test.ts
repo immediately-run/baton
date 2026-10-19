@@ -23,7 +23,6 @@ beforeEach(async () => {
   owner = await makeKey('ssh-ed25519', 'docs-owner');
   await setAdminKeys(admin);
   git = new Git();
-  git.registry = [course(3, 3, { course: CHAINED })];
   git.add('T-1', { rank: 1 });
   await git.post();
   await cutover();
@@ -46,6 +45,8 @@ async function implementAndSuspend() {
 
 describe('S-BTN-63 no review by its author’s key', () => {
   it('the course file’s no_chain_from refuses the advance and a second claim by the same key; another key takes review', async () => {
+    git.registry = [course(3, 3, { course: CHAINED })];
+    await git.post();
     const a = await implementAndSuspend();
     // The same key, in the same session or another, is neither offered nor given review.
     expect(await recommended(a.id)).toEqual([]);
@@ -61,9 +62,9 @@ describe('S-BTN-63 no review by its author’s key', () => {
   });
 
   it('with the list dropped from git, the owners’ required_independence still refuses the first key', async () => {
+    // The course file in force has no list (the model's own file, so this case replays through
+    // the model whole: a refusal is no model action).
     expect((await keyCall(owner, '/v1/owner/docs/settings', { required_independence: { review: ['implement'] } }, 'PUT')).status).toBe(200);
-    git.registry = [course(3, 3)];
-    await git.post();
     const a = await implementAndSuspend();
     expect(await claimItem('vm-a', a.secret, { ticket_id: 'docs:T-1' })).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 'chain' } });
     const b = await register('vm-b');
