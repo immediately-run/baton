@@ -305,8 +305,8 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
   capability without a grant fails `capabilityRowFollowsTheFleetTest`;
   an advance, an end or a blocked end that does not count as a call fails
   `anAdvanceKeepsItLiveTest`, `anEndKeepsItLiveTest` or `aBlockedEndKeepsItLiveTest`; a fence report
-  that does not recount fails `aFenceReportRecountsTest`; a reblock weighed on every leg, as core
-  weighs it, fails `answerLostJudgedOnTheQueuedLegTest` (the model's choice, *Not modelled*); a course whose end is not terminal passes
+  that does not recount fails `aFenceReportRecountsTest`; a reblock weighed on every leg — more than
+  core, which weighs only the next legs — fails `answerLostJudgedOnTheQueuedLegTest`; a course whose end is not terminal passes
   `courseOk` and fails `courseRulesRefuseTest`;
 - `MAX_DRIFT = 3`, above `MARGIN = 2`, lets a reaped worker push (`noActAfterLoss`); at
   `MAX_DRIFT = 2` it cannot — the spec's assumption is drift ≤ the margin.
@@ -389,8 +389,13 @@ depth 5 back, and with it the `unblocked` event.
   queued leg's rows were all lost, a lost need gone when its leg is no longer the queued leg. A
   row added on another next leg that was not lost, or a lost need on one, is where the two part:
   core logs the owed `unblocked` and a `blocked` where the model is silent, and keeps a lost need
-  on another next leg pending where the model settles it (`answerLostJudgedOnTheQueuedLegTest`
-  pins the model's choice).
+  on another next leg pending where the model settles it. No run reaches that case yet: it needs
+  a station with several next legs and a need on one that is not queued.
+- **A worker reaped by the alarm** (`workers.reaped_at`): core's alarm times out a lapsed
+  worker's fence in the same transaction that drops it from the live set, and refuses its later
+  heartbeats until it re-keys. The model's alarm acts in separate steps and keeps no worker
+  record, so it admits a fence report after the live set dropped the worker — a superset of
+  core's interleavings, which the safety properties tolerate.
 - **Other causes of a recount** (R-BTN-75, R-BTN-58): a worker registering, a grant made,
   changed or revoked, a credential revoked (`LIVE` drops it), and a post changing a ticket's
   `requires` or needs. Each is fixed here — `GRANTED`, `REQUIRES` and `NEEDS` are constants, every

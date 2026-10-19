@@ -548,9 +548,11 @@ module regressions {
     fleetEmptiedWhileBlocked.then(wake("w1")).then(claim("w1", "t1")).then(alarmLive)
       .expect(st.fleetLive == Set("w1") and st.lost.get("t1") == Set() and not(st.blocked.get("t1"))
               and st.events == 2)
-  // ... judged on the queued leg: a row the fleet's return adds on another leg, never lost, does
-  // not stop a silent reblock — core, weighing every added row, would log two events here
-  // (*Not modelled*, "Which next legs a need is on"; round 1 of baton#60, 1-B-3).
+  // ... judged on the queued leg: the model's `review`/`disk` row, which the fleet's return adds and
+  // was never lost, does not stop a silent reblock. Core agrees here — t1 sits at `filed`, whose
+  // only next leg is `implement`, so core posts no `review` need — and the mutant that weighs every
+  // leg would log two events core does not. Where they part (a row on another *next* leg) is stated
+  // under *Not modelled*, not pinned (round 2 of baton#60, 2-r2-0).
   run answerLostJudgedOnTheQueuedLegTest =
     fleetEmptiedWhileBlocked.then(reading("disk", false)).then(wake("w1")).then(heartbeat("w1"))
       .expect(st.resRows.get("t1").contains({ leg: "review", res: "disk" }) and st.blocked.get("t1")
@@ -568,10 +570,11 @@ module regressions {
   run aBlockedEndKeepsItLiveTest =
     claimAtTwo.then(endBlocked("w1", "decision", T2_DONE)).then(tick).then(tick).then(tick).then(alarmLive)
       .expect(st.fleetLive == Set("w1"))
-  // ... and a fence report is a heartbeat: from a lapsed worker it recounts at once.
+  // ... and a fence report is a heartbeat: from a lapsed worker it recounts at once. It comes
+  // before the alarm, as in core, whose alarm times the fence out in the same transaction that
+  // drops the worker from the live set (round 2 of baton#60, 2-r2-1).
   run aFenceReportRecountsTest =
     start.then(claim("w1", "t1")).then(forceReap("w1")).then(tick).then(tick).then(tick).then(tick)
-      .then(alarmLive).expect(st.fleetLive == Set())
       .then(fenceCleared("w1")).expect(st.fleetLive == Set("w1"))
   // R-BTN-126: a `resource` end stores its reading and an `end`-sourced need on the leg.
   run resourceEndStoresReadingAndNeedTest =

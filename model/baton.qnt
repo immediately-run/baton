@@ -335,7 +335,7 @@ module baton {
   // a queued leg. Any logged transition ends it. The model judges both on the queued leg — its
   // needs are per leg, every leg's at once, where core's `leg_needs` are the next legs' — so a row
   // added on another next leg, or a lost need on one, is not weighed as core weighs it (*Not
-  // modelled*; answerLostJudgedOnTheQueuedLegTest pins the choice).
+  // modelled*).
   pure def settle(s: State, silent: Set[str]): State = settleLost(s, silent, TICKETS.mapBy(t => Set()))
   pure def settleLost(s: State, silent: Set[str], lostNow: str -> Set[Need]): State = {
     val flips = TICKETS.filter(t => blockedIn(s, t) != s.blocked.get(t))
