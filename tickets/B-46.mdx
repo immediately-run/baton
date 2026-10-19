@@ -1,6 +1,6 @@
 ---
-title: "B-37 — hardening within a tenant: only pushers' forge writes count, runners run default-branch code with scrubbed credentials, a multi-repository key opts in, checks from an exit status, MCP holds that only add, sign-in by a confirmed code"
-id: B-37
+title: "B-46 — hardening within a tenant: only pushers' forge writes count, runners run default-branch code with scrubbed credentials, a multi-repository key opts in, checks from an exit status, MCP holds that only add, sign-in by a confirmed code"
+id: B-46
 project: baton
 status: available
 updated: 2026-10-18
@@ -8,19 +8,19 @@ repos:
   - immediately-run/baton
 tags:
   - roadmap-item
-description: "Owner, 2026-10-18, after the security review: build BATON_SPEC §10.7 (R-BTN-136 to R-BTN-155), which closes the holes inside one tenant that §3b does not touch — outsiders' PRs and verdicts, off-branch leg code, runner secrets in legs and logs, multi-repository machine keys, unfounded heads, open-world gates, missing caps, forged merge checks, MCP lifting holds, the login link, CI-token events, tokens, and the local host."
+description: "Owner, 2026-10-18, after the security review: build BATON_SPEC §10.7 (R-BTN-139 to R-BTN-158), which closes the holes inside one tenant that §3b does not touch — outsiders' PRs and verdicts, off-branch leg code, runner secrets in legs and logs, multi-repository machine keys, unfounded heads, open-world gates, missing caps, forged merge checks, MCP lifting holds, the login link, CI-token events, tokens, and the local host."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
-  - B-36
+  - B-45
 ---
 
-**Spec:** BATON_SPEC §10.7 — R-BTN-136 to R-BTN-155 (new) and the rules they amend;
-S-BTN-111 to S-BTN-121; G-BTN-131 to G-BTN-141.
-**Depends on:** B-36 for the origin rules R-BTN-155 cites. Check courses (B-5, R-BTN-150),
-streams and Stop (B-9, R-BTN-142) and the action registry and MCP (B-25, R-BTN-151) take their
+**Spec:** BATON_SPEC §10.7 — R-BTN-139 to R-BTN-158 (new) and the rules they amend;
+S-BTN-115 to S-BTN-125; G-BTN-135 to G-BTN-145.
+**Depends on:** B-45 for the origin rules R-BTN-158 cites. Check courses (B-5, R-BTN-153),
+streams and Stop (B-9, R-BTN-145) and the action registry and MCP (B-25, R-BTN-154) take their
 parts of §10.7, which their tickets name; this item builds the rest and their tests.
 
 ### Requires
@@ -40,13 +40,13 @@ push".
 
 Split into reviewed PRs along §10.7's four parts. Each is independent.
 
-1. **People without push** (R-BTN-136 to R-BTN-139).
+1. **People without push** (R-BTN-139 to R-BTN-142).
    - The fact adapters' `trusted` flag and fork detection, by ids; `trusted_identities`; the
      default station functions read trusted facts only.
    - `code_repos`.
    - The branch-pattern grammar, and branch-holder scoping.
    - Literal bars and `renamed_from` collisions, with `baton owner bars follow`.
-2. **Runners** (R-BTN-140 to R-BTN-142). Server side: `default_branch`, `rewrite_held` and
+2. **Runners** (R-BTN-143 to R-BTN-145). Server side: `default_branch`, `rewrite_held` and
    `tainted_branches` in the claim response; the `off-branch` end, its Needs-you entry and its
    sync want. In `src/runner/`:
    - the ancestry check and the verified-sha cache, fetching the registered branch, not
@@ -57,14 +57,14 @@ Split into reviewed PRs along §10.7's four parts. Each is independent.
      verification;
    - the `IR_BATON_LEG` tag sweep, with a systemd scope where available;
    - the replay allowlist and `BATON_RESUME`.
-3. **Keys, posts and claims** (R-BTN-143 to R-BTN-149).
+3. **Keys, posts and claims** (R-BTN-146 to R-BTN-152).
    - Span, the grant flags, `GET …/grants` and `--confirm-span`.
    - `head_unfounded`, held posts that only tighten, the new Needs-you items, renumbering, and
      dropped claims.
    - Open-world `declared` gates, `misdeclared`, and tainted branches.
    - The per-repository caps, observation takeover, and readings and bills bounds.
    - `rank` output validation.
-4. **Surfaces** (R-BTN-150 to R-BTN-155 and §10.7.5).
+4. **Surfaces** (R-BTN-153 to R-BTN-158 and §10.7.5).
    - Check heads as core fields, claim-bound shas, confirmed ends, `exec` verdicts.
    - MCP add-only holds and `ticket.unhold`.
    - The sign-in code flow, logout and revoke.
@@ -116,13 +116,13 @@ Split into reviewed PRs along §10.7's four parts. Each is independent.
 
 ### Tests
 
-S-BTN-111 to S-BTN-121 in `test/integration/`, on both hosts, with unit tests for each
+S-BTN-115 to S-BTN-125 in `test/integration/`, on both hosts, with unit tests for each
 adapter's trust and fork mapping from real payload shapes.
 
 ### Exit criteria
 
-- `npm test` and `npm run typecheck` green, with S-BTN-111 to S-BTN-121 and G-BTN-131 to
-  G-BTN-141 passing.
+- `npm test` and `npm run typecheck` green, with S-BTN-115 to S-BTN-125 and G-BTN-135 to
+  G-BTN-145 passing.
 - On a scratch public GitHub repository, an outsider's fork PR and approve comment move
   nothing.
 - A real GitLab `id_tokens` JWT from a merge-request pipeline is refused.

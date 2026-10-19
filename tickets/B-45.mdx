@@ -1,6 +1,6 @@
 ---
-title: "B-36 — tenancy seams: a tenant is a Baton named by its origin, served only there; per-tenant object names, refusal handling, runner origins and forge ids, so many tenants later is a router"
-id: B-36
+title: "B-45 — tenancy seams: a tenant is a Baton named by its origin, served only there; per-tenant object names, refusal handling, runner origins and forge ids, so many tenants later is a router"
+id: B-45
 project: baton
 status: available
 updated: 2026-10-18
@@ -8,7 +8,7 @@ repos:
   - immediately-run/baton
 tags:
   - roadmap-item
-description: "Owner, 2026-10-18: build Baton single-tenant now so that one deployment can later serve parties who do not trust each other with no interface changed and no trust promise taken back. Builds BATON_SPEC §3b (R-BTN-132 to R-BTN-135): the Worker serves only its origin, every Durable Object is named under its tenant, clients handle rate-limited and quota on every route, a runner serves one origin, the CLI's keys and secret sink are per origin, signed forge-check notices name their tenant, and forge repositories are identified by their immutable ids."
+description: "Owner, 2026-10-18: build Baton single-tenant now so that one deployment can later serve parties who do not trust each other with no interface changed and no trust promise taken back. Builds BATON_SPEC §3b (R-BTN-135 to R-BTN-138): the Worker serves only its origin, every Durable Object is named under its tenant, clients handle rate-limited and quota on every route, a runner serves one origin, the CLI's keys and secret sink are per origin, signed forge-check notices name their tenant, and forge repositories are identified by their immutable ids."
 topics:
   - baton
 owns: {}
@@ -16,8 +16,8 @@ prs: []
 depends_on: []
 ---
 
-**Spec:** BATON_SPEC §3b — R-BTN-132, R-BTN-133, R-BTN-134 and R-BTN-135 (new), and the rules
-they amend; S-BTN-107 to S-BTN-110; G-BTN-126 to G-BTN-130.
+**Spec:** BATON_SPEC §3b — R-BTN-135, R-BTN-136, R-BTN-137 and R-BTN-138 (new), and the rules
+they amend; S-BTN-111 to S-BTN-114; G-BTN-130 to G-BTN-134.
 **Depends on:** nothing. *(Amended 2026-10-18, §3b review gate round 2: a stream's object name
 and the `forge-check` notice's signed `origin` and `forge_repo_id` are B-9's and B-5's to build,
 through this item's naming helper; both tickets say so.)*
@@ -36,11 +36,11 @@ today and an interface change or a broken promise later.
 
 ### What to build
 
-1. **Served only at its origin** (R-BTN-132). The Worker answers `404` to a URL host that is
+1. **Served only at its origin** (R-BTN-135). The Worker answers `404` to a URL host that is
    not `BATON_ORIGIN`'s authority (lowercased, default port elided), before any object.
    `wrangler.toml` sets `workers_dev = false` and `preview_urls = false`, for both
    environments.
-2. **Object names and the handshake** (R-BTN-132).
+2. **Object names and the handshake** (R-BTN-135).
    - One helper in `src/shell/` names every object: the tenant's `idFromName('baton')`, any
      other `idFromName('baton/<kind>/<key>')`.
    - The shell strips an inbound `x-baton-tenant`, then sets it.
@@ -63,7 +63,7 @@ today and an interface change or a broken promise later.
      claim. No cap refuses an upkeep call or drops anything it carries. Ring-triggered
      heartbeats are coalesced to one every 10 seconds per session.
    - The per-IP rule is a Workers rate-limit binding keyed `<host>|<ip>`.
-4. **Refusals every client handles** (R-BTN-132). The runner, sidecar, CLI, couriers, sync,
+4. **Refusals every client handles** (R-BTN-135). The runner, sidecar, CLI, couriers, sync,
    mirror and dashboard each handle `rate-limited` and `quota` on every route:
    - periodic loops back off, honouring `retry_after_s`, and keep their lease;
    - one-shot commands exit non-zero naming the code within 60 seconds;
@@ -71,7 +71,7 @@ today and an interface change or a broken promise later.
    - neither code marks a lease lost at once (§6.3), but an unaccepted heartbeat still runs
      `timeout − 4 min` (G-BTN-4);
    - `too-large` is reported and never retried.
-5. **A runner's origin** (R-BTN-134).
+5. **A runner's origin** (R-BTN-137).
    - `runner.json` gains `origin`.
    - The runner and sidecar refuse a checkout whose `baton_url` names another origin.
    - `runner register` and `runner start` keep `~/.config/baton/origins.json`, and `start`
@@ -82,10 +82,10 @@ today and an interface change or a broken promise later.
      `src/runner/main.ts`, `docs/runbooks/register-baton.mdx`, `README.md`). `baton repo *` in
      a checkout takes `.baton/baton.json`'s `baton_url`.
    - The `baton_url` refusal applies to the ticket's home checkout only.
-6. **The secret sink** (R-BTN-133). `baton admin github-app create`, `baton admin keys set
+6. **The secret sink** (R-BTN-136). `baton admin github-app create`, `baton admin keys set
    --file` and `baton admin forge-secrets set --file` write whole values through a sink chosen
    by configuration: `wrangler` or `file`.
-7. **Forge ids** (R-BTN-135).
+7. **Forge ids** (R-BTN-138).
    - A migration adds `forge_repo_id`, `forge_owner_id`, `forge_host`, `forge_ids_seen`,
      `former_paths` and the unique index. Retiring moves a path to `former_paths` and sets
      `github` to `~retired/<id>`.
@@ -147,16 +147,16 @@ today and an interface change or a broken promise later.
 
 ### Tests
 
-- S-BTN-107 to S-BTN-110 in `test/integration/`, on both hosts.
-- Unit tests for the shell's host check, naming helper and handshake (G-BTN-127). The static
+- S-BTN-111 to S-BTN-114 in `test/integration/`, on both hosts.
+- Unit tests for the shell's host check, naming helper and handshake (G-BTN-131). The static
   check on `src/core/` runs in `npm test`.
 - Unit tests for OIDC, GitLab and webhook verification with matching and mismatched ids,
   using fixtures from real token and payload shapes.
 
 ### Exit criteria
 
-- `npm test` and `npm run typecheck` green, with S-BTN-107 to S-BTN-110 and G-BTN-126 to
-  G-BTN-130 passing.
+- `npm test` and `npm run typecheck` green, with S-BTN-111 to S-BTN-114 and G-BTN-130 to
+  G-BTN-134 passing.
 - One real GitHub Actions OIDC token, from a workflow in a scratch repository, verified by id
   against a local Baton.
 - `wrangler.toml` serves no `workers.dev` or preview URL.
