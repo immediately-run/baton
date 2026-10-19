@@ -20,7 +20,10 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 2026-10-19: the suite takes ~9 minutes on a hosted runner and the trace replay
+    # (check-traces, 150 traces through quint, 4 at a time) ~17, after baton#52, #56 and #59
+    # grew both; at 25 every push to main timed out and the release job never ran.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
