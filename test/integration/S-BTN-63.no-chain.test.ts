@@ -61,7 +61,7 @@ describe('S-BTN-63 no review by its author’s key', () => {
     expect((await advance('vm-b', b.secret, c.claim_id, { leg: 'review' })).status).toBe(200);
   });
 
-  it('with the list dropped from git, the owners’ required_independence still refuses the first key', async () => {
+  it('the owners’ required_independence alone, with no list in the course file, refuses the first key', async () => {
     // The course file in force has no list (the model's own file, so this case replays through
     // the model whole: a refusal is no model action).
     expect((await keyCall(owner, '/v1/owner/docs/settings', { required_independence: { review: ['implement'] } }, 'PUT')).status).toBe(200);
@@ -69,5 +69,20 @@ describe('S-BTN-63 no review by its author’s key', () => {
     expect(await claimItem('vm-a', a.secret, { ticket_id: 'docs:T-1' })).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 'chain' } });
     const b = await register('vm-b');
     expect((await claimItem('vm-b', b.secret, { ticket_id: 'docs:T-1' })).json).toMatchObject({ ticket_id: 'docs:T-1', legs: ['review'] });
+  });
+
+  it('a course file that drops its list, or renames the leg the owners key on, loosens nothing', async () => {
+    expect((await keyCall(owner, '/v1/owner/docs/settings', { required_independence: { review: ['implement'] } }, 'PUT')).status).toBe(200);
+    git.registry = [course(3, 3, { course: CHAINED })];
+    await git.post();
+    // The file drops its list and renames review: the owners' key follows renamed_from.
+    const { review, ...legs } = roadmapPr.legs;
+    git.registry = [course(4, 3, { course: { ...roadmapPr, legs: { ...legs, 'peer-review': { ...review, renamed_from: ['review'] } } } })];
+    await git.post();
+    const a = await register('vm-a');
+    const { json: c } = await claimItem('vm-a', a.secret, { ticket_id: 'docs:T-1' });
+    expect((await advance('vm-a', a.secret, c.claim_id, { leg: 'implement' })).status).toBe(200);
+    expect(await advance('vm-a', a.secret, c.claim_id, { reached: 'pr-open', leg: 'peer-review' }))
+      .toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 'chain' } });
   });
 });

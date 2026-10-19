@@ -267,8 +267,9 @@ export class Claims {
     const def = g?.legs.get(leg);
     // The owners' list joins the file's, as required bars join posted ones (R-BTN-67): a file
     // that drops its list loosens nothing the owners hold.
-    const independence = this.c.admin.requiredIndependence(item.repository);
-    const owners = Object.hasOwn(independence, leg) ? independence[leg] : [];
+    // Its keys are followed through `renamed_from` too, so renaming the leg loosens nothing.
+    const owners = Object.entries(this.c.admin.requiredIndependence(item.repository))
+      .filter(([key]) => (g ? resolveLeg(g, key) ?? key : key) === leg).flatMap(([, from]) => from);
     const noChainFrom = [...new Set([...(def?.noChainFrom ?? []), ...owners].map((l) => (g ? resolveLeg(g, l) ?? l : l)))];
     return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...this.ownerBarTags(item, leg, phase)])], noChainFrom, isolation: def?.isolation ?? null };
   }
