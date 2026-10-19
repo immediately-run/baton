@@ -33,6 +33,12 @@ describe('R-BTN-83: the queued leg across course changes', () => {
     expect(await nextLegs('F')).toEqual([{ leg: 'address', state: 'ready', waiting_on: null }]);
   });
 
+  it('a next leg posted with the queued one that does not leave the station waits on course-changed too', async () => {
+    git.place('F', placed('reviewed', REVIEWED, [['fix', 'ready'], ['implement', 'ready']], { next_leg: 'fix' }));
+    expect((await git.post()).status).toBe(200);
+    expect(await nextLegs('F')).toEqual([{ leg: 'fix', state: 'ready', waiting_on: null }, { leg: 'implement', state: 'waiting', waiting_on: 'course-changed' }]);
+  });
+
   it('the file’s acceptance alone sets the wait; a later file with the leg back lets the next snapshot clear it', async () => {
     const { adjudicate: _a, ...legs } = roadmapPr.legs;
     const { adjudicated: _s, ...stations } = roadmapPr.stations;
@@ -47,6 +53,13 @@ describe('R-BTN-83: the queued leg across course changes', () => {
     });
     expect(await nextLegs('J')).toEqual([{ leg: 'adjudicate', state: 'waiting', waiting_on: 'course-changed' }]);
     expect(await nextLegs('F')).toEqual([{ leg: 'fix', state: 'ready', waiting_on: null }]);
+    // Snapshots that go on posting it ready keep the wait's start: Needs you's age is from T0.
+    await setClock(T0 + 60_000);
+    git.registry = [course(4, 3, { course: REMOVED })];
+    expect((await git.post()).status).toBe(200);
+    await setClock(T0 + 120_000);
+    expect((await git.post()).status).toBe(200);
+    expect(await rows(`SELECT waiting_since FROM ticket_next_legs WHERE ticket_id = 'docs:J'`)).toEqual([{ waiting_since: T0 }]);
     // The original file comes back: the next snapshot posts adjudicate ready, and it is ready.
     git.registry = [course(5, 3)];
     expect((await git.post()).status).toBe(200);

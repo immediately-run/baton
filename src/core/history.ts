@@ -110,8 +110,10 @@ export class History {
     const rows = this.rows<{ ticket_id: string; claim_id: number | null; at: number; detail_json: string }>(
       `SELECT ticket_id, claim_id, at, detail_json FROM events WHERE kind = 'discrepancy' AND at > ? ORDER BY seq DESC LIMIT ?`, now - DISCREPANCY_WINDOW_MS, DISCREPANCY_LIST_MAX)
       .map((r) => ({ ticket_id: r.ticket_id, claim_id: r.claim_id, at: r.at, ...(JSON.parse(r.detail_json) as { sub: string } & Record<string, unknown>) }));
-    const by: Record<string, number> = {};
-    for (const r of rows) by[r.sub] = (by[r.sub] ?? 0) + 1;
+    // Counted over the whole window, not the capped list.
+    const by = Object.fromEntries(this.rows<{ sub: string; n: number }>(
+      `SELECT json_extract(detail_json, '$.sub') AS sub, COUNT(*) AS n FROM events WHERE kind = 'discrepancy' AND at > ? GROUP BY sub ORDER BY sub`,
+      now - DISCREPANCY_WINDOW_MS).map((r) => [r.sub, r.n]));
     return { by_kind: by, rows };
   }
 }

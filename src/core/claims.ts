@@ -290,7 +290,8 @@ export class Claims {
       // ticket its hold keeps (rule 3), `baton:stalled` on a queued leg posted waiting (rule 1) — so
       // they are left to those rules, whose refusals name the cause; they stay blocks for asking.
       blocks: this.rows<{ kind: string; leg: string }>(
-        `SELECT kind, leg FROM ticket_blocks WHERE ticket_id = ? AND kind IN ('ticket', 'decision') AND NOT (kind = 'decision' AND ref LIKE 'baton:%')`, item.id),
+        `SELECT b.kind, b.leg FROM ticket_blocks b WHERE b.ticket_id = ? AND b.kind IN ('ticket', 'decision')
+           AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))`, item.id),
     };
     return gatesFor({ declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants }, ticket, this.postedLeg(item, leg, phase), phase, facts);
   }
@@ -1195,7 +1196,7 @@ export class Claims {
         this.event('regressed', 'sync', { observation, path: s.path }, c.ticket_id, c.id);
         // R-BTN-81, R-BTN-85: git's shorter path wins; the claim's reckoning is logged beside it.
         this.c.history?.record(c.ticket_id, { kind: 'regressed', claim_id: c.id, detail: { observation, path: s.path } });
-        this.c.history?.discrepancy(c.ticket_id, 'regressed', { path: s.prev ?? start, source: 'claim' }, { path: s.path }, observation, c.id);
+        this.c.history?.discrepancy(c.ticket_id, 'regressed', { path: this.expectedPath(c.id, c.start_path), source: 'claim' }, { path: s.path }, observation, c.id);
       } else if (!backwards && c.regressed_since != null && extendsPath(g, this.expectedPath(c.id, c.start_path), s.path, g.start)) {
         this.exec('UPDATE claims SET regressed_since = NULL WHERE id = ?', c.id);
       }
@@ -1281,9 +1282,13 @@ export class Claims {
       const why = !it ? (closed === 'done' ? null : closed === 'withdrawn' ? 'withdrawn' : 'gone or archived') : GIT_ENDS.has(it.status) ? it.status
         : !fitsTier(it.tier ?? null, ceiling, ladder) ? `re-tiered ${it.tier ?? 'untiered'}` : null;
       if (!why) continue;
-      // R-BTN-85: a ticket closed, or gone, while a claim is active on it — not the holder's own
-      // `done` (that is no disagreement) — is logged before git wins.
-      if (!it) this.c.history?.discrepancy(c.ticket_id, 'closed-under-claim', { claim_id: c.id, status: 'active', source: 'claim' }, { closed: closed ?? 'gone' }, observation, c.id);
+      // R-BTN-85: a ticket closed, gone or at a status git ends it with, while a claim is active on
+      // it — not the holder's own `done` (no disagreement), nor a re-tier (no closure) — is logged
+      // before git wins.
+      if (!it || GIT_ENDS.has(it.status)) {
+        this.c.history?.discrepancy(c.ticket_id, 'closed-under-claim', { claim_id: c.id, status: 'active', source: 'claim' },
+          it ? { status: it.status } : { closed: closed ?? 'gone' }, observation, c.id);
+      }
       this.finish(c.id, c.ticket_id, 'released', 'released:stale-board', 'sync', {});
       if (c.kind !== 'legacy') {
         this.exec(`INSERT INTO messages (kind, payload_json, from_principal, to_worker_id, sent_at, status) VALUES ('release', ?, 'sync', ?, ?, 'pending')`,

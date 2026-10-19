@@ -125,11 +125,16 @@ export class Stations {
     this.exec('DELETE FROM ticket_bars WHERE ticket_id = ?', id);
   }
 
-  /** Whether a claim on the ticket accounts for its being at `station`: one holds it, or one ended
-   *  there since the previous snapshot was read (R-BTN-81's `git-moved` is the rest). */
+  /** Whether a claim reported the ticket at `station`: an active one is there or ran a leg from or
+   *  to it — a snapshot lagging the holder shows a station it passed — or one ended there since
+   *  the previous snapshot was read. Anything else is R-BTN-81's `git-moved`: someone else's work,
+   *  a person's push during a claim included. */
   private claimMoved(id: string, station: string, prevObservation: number): boolean {
-    return this.rows(`SELECT 1 FROM claims WHERE ticket_id = ? AND (status = 'active' OR (station = ? AND COALESCE(end_observation, 0) >= ?)) LIMIT 1`,
-      id, station, prevObservation).length > 0;
+    return this.rows(
+      `SELECT 1 FROM claims c WHERE c.ticket_id = ? AND (
+         (c.status = 'active' AND (c.station = ? OR EXISTS (SELECT 1 FROM claim_legs l WHERE l.claim_id = c.id AND (l.from_station = ? OR l.to_station = ?))))
+         OR (c.station = ? AND COALESCE(c.end_observation, 0) >= ?)) LIMIT 1`,
+      id, station, station, station, station, prevObservation).length > 0;
   }
 
   /** The station and path a posted station names must be in the course file (§7.1). A queued or
@@ -174,19 +179,21 @@ export class Stations {
     };
   }
 
-  /** The queued leg `leg` of ticket `id` waits on `course-changed`, its unbroken wait kept. */
-  private courseChanged(id: string, leg: string, at: number) {
+  /** Leg `leg` of ticket `id` waits on `course-changed` since `since`; a wait on it already stored
+   *  keeps its own start. */
+  private courseChanged(id: string, leg: string, since: number) {
     this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, ready_since, waiting_since) VALUES (?, ?, 'waiting', 'course-changed', NULL, ?)
                ON CONFLICT (ticket_id, leg) DO UPDATE SET state = 'waiting', waiting_on = 'course-changed', ready_since = NULL,
-                 waiting_since = CASE WHEN ticket_next_legs.state = 'waiting' THEN ticket_next_legs.waiting_since ELSE excluded.waiting_since END`, id, leg, at);
+                 waiting_since = CASE WHEN ticket_next_legs.state = 'waiting' AND ticket_next_legs.waiting_on = 'course-changed'
+                                      THEN ticket_next_legs.waiting_since ELSE excluded.waiting_since END`, id, leg, since);
   }
 
   private write(id: string, g: Graph, given: PostedStation, sha: string, observation: number, at: number, required: RequiredBar[], course: string) {
     // R-BTN-64: legs the snapshot names by an old name are stored under the current one.
     const name = (leg: string) => resolveLeg(g, leg) ?? leg;
     const st = { ...given, next_leg: given.next_leg == null ? null : name(given.next_leg), next: given.next.map((n) => ({ ...n, leg: name(n.leg) })) };
-    const before = new Map(this.rows<{ leg: string; state: string; ready_since: number | null; waiting_since: number | null }>(
-      'SELECT leg, state, ready_since, waiting_since FROM ticket_next_legs WHERE ticket_id = ?', id).map((r) => [r.leg, r]));
+    const before = new Map(this.rows<{ leg: string; state: string; waiting_on: string | null; ready_since: number | null; waiting_since: number | null }>(
+      'SELECT leg, state, waiting_on, ready_since, waiting_since FROM ticket_next_legs WHERE ticket_id = ?', id).map((r) => [r.leg, r]));
     this.exec(`INSERT INTO ticket_stations (ticket_id, station, path, path_len, to_end, next_leg, next_source, handoff_url, snapshot_sha, observation)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (ticket_id) DO UPDATE SET station = excluded.station, path = excluded.path, path_len = excluded.path_len,
@@ -207,9 +214,15 @@ export class Stations {
       this.exec('INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, ready_since, waiting_since) VALUES (?, ?, ?, ?, ?, ?)',
         id, n.leg, n.state, n.waiting_on, readySince, waitingSince);
     }
-    // R-BTN-83: a queued leg that does not leave the station in the course file in force waits
-    // on `course-changed` whatever the snapshot posted for it; the snapshot is not refused.
-    if (st.next_leg != null && !leaves(g, st.next_leg, st.station)) this.courseChanged(id, st.next_leg, at);
+    // R-BTN-83: a queued leg — or any next leg posted with it — that does not leave the station in
+    // the course file in force waits on `course-changed` whatever the snapshot posted for it; the
+    // snapshot is not refused.
+    for (const leg of new Set([...(st.next_leg != null ? [st.next_leg] : []), ...st.next.map((n) => n.leg)])) {
+      if (leaves(g, leg, st.station)) continue;
+      // The wait runs from when Baton first stored it, whatever this snapshot posted (Needs you's age).
+      const b = before.get(leg);
+      this.courseChanged(id, leg, b?.state === 'waiting' && b.waiting_on === 'course-changed' && b.waiting_since != null ? b.waiting_since : at);
+    }
     this.exec('DELETE FROM ticket_bars WHERE ticket_id = ?', id);
     for (const [leg, tags] of Object.entries(st.bars)) for (const tag of tags) this.exec('INSERT OR IGNORE INTO ticket_bars (ticket_id, leg, tag) VALUES (?, ?, ?)', id, leg, tag);
   }

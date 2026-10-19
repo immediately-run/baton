@@ -61,6 +61,20 @@ describe('R-BTN-81: the rows, the reader and the purge', () => {
     expect((await history('B')).rows.map((r: { kind: string }) => r.kind)).toEqual(['git-moved']);
   });
 
+  it('a person moving the ticket during a claim, to a station the claim never reported, is git-moved', async () => {
+    const w = await register('vm-a');
+    const c = (await claimItem('vm-a', w.secret, { ticket_id: 'docs:B' })).json;
+    expect((await advance('vm-a', w.secret, c.claim_id, { leg: 'review' })).status).toBe(200);
+    // A snapshot lagging the holder shows where the claim was: no row.
+    git.place('B', placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]));
+    expect((await git.post()).status).toBe(200);
+    expect((await history('B')).rows.map((r: { kind: string }) => r.kind)).toEqual(['leg-started']);
+    // A person pushes the ticket to `merged` meanwhile: the claim never reported it.
+    git.place('B', placed('merged', [['implement', 'pr-open'], ['review', 'reviewed'], ['merge', 'merged']], []));
+    expect((await git.post()).status).toBe(200);
+    expect((await history('B')).rows.map((r: { kind: string }) => r.kind)).toEqual(['git-moved', 'leg-started']);
+  });
+
   it('pages newest first by id, at most 200; refuses a bad cursor or limit; a worker key not granted is forbidden', async () => {
     await withCore((core) => {
       core.store.transaction(() => {
@@ -112,8 +126,9 @@ describe('R-BTN-85: a discrepancy before git wins', () => {
     expect((await git.post()).status).toBe(200);
     expect(await discrepancies('A')).toEqual([{ sub: 'regressed', baton: { path: [{ leg: 'implement', reached: 'pr-open' }], source: 'claim' }, git: { path: [] }, observation: expect.any(Number) }]);
     expect(await rows(`SELECT kind FROM events WHERE ticket_id = 'docs:A' AND kind IN ('regressed','discrepancy') ORDER BY seq`)).toEqual([{ kind: 'regressed' }, { kind: 'discrepancy' }]);
-    // Newest first; the git-moved row is A's move to pr-open before the claim, which no claim reported.
-    expect((await history('A')).rows.map((r: { kind: string }) => r.kind)).toEqual(['discrepancy', 'regressed', 'git-moved']);
+    // Newest first. Both moves are git's own, not the claim's: A's to pr-open before the claim, and
+    // the regression back to filed, a station the claim never reported.
+    expect((await history('A')).rows.map((r: { kind: string }) => r.kind)).toEqual(['discrepancy', 'regressed', 'git-moved', 'git-moved']);
     expect(c.claim_id).toBeTruthy();
   });
 
@@ -204,6 +219,14 @@ describe('R-BTN-78: Baton’s own decisions', () => {
     expect((await keyCall(owner, '/v1/owner/docs/tickets/B/resolve', { decision: 'baton:stalled', answer: 'park' })).status).toBe(200);
     expect(await decisions('B')).toEqual([]);
     expect(await rows(`SELECT hold, hold_reason FROM ticket_overrides WHERE ticket_id = 'docs:B'`)).toEqual([{ hold: 1, hold_reason: 'parked' }]);
+  });
+
+  it('a decision git posts under a mixed-case Baton: id is git’s, and refuses claims like any other', async () => {
+    git.place('A', placed('filed', [], [['implement', 'ready']], { decisions: [{ id: 'Baton:approve', asks: 'owner' }] }));
+    expect(((await git.post()) as { dropped?: string[] }).dropped ?? []).toEqual([]);
+    expect(await rows(`SELECT decision_id, source FROM ticket_decisions WHERE ticket_id = 'docs:A'`)).toEqual([{ decision_id: 'Baton:approve', source: 'sync' }]);
+    const w = await register('vm-a');
+    expect((await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' })).json).toMatchObject({ code: 'blocked', rule: 1 });
   });
 
   it('resolve refuses a decision that is not open, another repository’s ticket and a malformed answer', async () => {
