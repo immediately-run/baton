@@ -78,5 +78,17 @@
   "S-BTN-47.positions-decisions › S-BTN-47 positions, course changes and the dead-ticket queue > a leg added later changes no queued leg; a removed queued leg waits on course-changed under Needs you": {
     "at": 3,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-63.no-chain › S-BTN-63 no review by its author’s key > the course file’s no_chain_from refuses the advance and a second claim by the same key; another key takes review": {
+    "at": 3,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-64.isolation › S-BTN-64 isolation floors > only the session worker is offered the leg; the others’ claims and advances into it are refused, rule isolation": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-64.isolation › S-BTN-64 isolation floors > the declaration is the worker’s latest heartbeat: one that stops declaring session is refused": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   }
 }
