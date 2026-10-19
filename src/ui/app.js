@@ -497,6 +497,8 @@ function renderLimits() {
     if (transcripts) parts.push(`transcripts: ${transcripts.join(', ')}`);
     const trigger = parsed(s.unblocked_trigger, null);
     if (trigger) parts.push(`unblocked trigger: ${trigger.kind}${trigger.workflow ? ` ${trigger.workflow}` : ''}${trigger.ref ? ` @${trigger.ref}` : ''}`);
+    // R-BTN-106: the legs a key that ran any of the named ones may not take.
+    for (const [leg, from] of Object.entries(parsed(s.required_independence, {}))) parts.push(`${leg}: not by a key that ran ${from.join(', ')}`);
     if (s.remind_after != null) parts.push(`reminders after ${s.remind_after % 3600 ? `${Math.round(s.remind_after / 60)} min` : `${s.remind_after / 3600} h`}`);
     return `${s.repository_id}: ${parts.join(' · ')}`;
   }), 'No repository is registered.');
