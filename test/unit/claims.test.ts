@@ -369,7 +369,8 @@ describe('G-BTN-40: the matching query and gatesFor agree; git overtaking a clai
     const res = await syncCall('/v1/sync/board', overtaken(mutate));
     expect(await res.json()).toMatchObject({ ok: true, stale_released: 1 });
     expect(await claimRow(c.claim_id)).toMatchObject({ status: 'released', end_reason: 'released:stale-board' });
-    expect((await beat('vm-a', secret)).json.messages.filter((m: { kind: string }) => m.kind !== 'unblocked')).toEqual([expect.objectContaining({ kind: 'release', payload: expect.objectContaining({ ticket_id: 'docs:R3-9002', reason: 'stale-board' }) })]);    // R-BTN-85: a closure under the claim is logged before git wins; a re-tier closes nothing.
+    expect((await beat('vm-a', secret)).json.messages.filter((m: { kind: string }) => m.kind !== 'unblocked')).toEqual([expect.objectContaining({ kind: 'release', payload: expect.objectContaining({ ticket_id: 'docs:R3-9002', reason: 'stale-board' }) })]);
+    // R-BTN-85: a closure under the claim is logged before git wins; a re-tier closes nothing.
     const logged = await rows<{ detail_json: string }>(`SELECT detail_json FROM events WHERE kind = 'discrepancy' AND ticket_id = 'docs:R3-9002'`);
     expect(logged.map((r) => JSON.parse(r.detail_json).sub)).toEqual(what.startsWith('re-tiered') ? [] : ['closed-under-claim']);
   });

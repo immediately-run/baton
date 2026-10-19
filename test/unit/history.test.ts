@@ -122,13 +122,16 @@ describe('R-BTN-85: a discrepancy before git wins', () => {
     git.place('A', placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]));
     await git.post();
     const c = (await claimItem('vm-a', w.secret, { ticket_id: 'docs:A' })).json;
+    // The holder goes on past what git last posted: Baton's value is the claim's reckoning.
+    expect((await advance('vm-a', w.secret, c.claim_id, { leg: 'review' })).status).toBe(200);
+    expect((await advance('vm-a', w.secret, c.claim_id, { reached: 'reviewed', leg: 'merge' })).status).toBe(200);
     git.place('A', placed('filed', [], [['implement', 'ready']]));
     expect((await git.post()).status).toBe(200);
-    expect(await discrepancies('A')).toEqual([{ sub: 'regressed', baton: { path: [{ leg: 'implement', reached: 'pr-open' }], source: 'claim' }, git: { path: [] }, observation: expect.any(Number) }]);
+    expect(await discrepancies('A')).toEqual([{ sub: 'regressed', baton: { path: [{ leg: 'implement', reached: 'pr-open' }, { leg: 'review', reached: 'reviewed' }], source: 'claim' }, git: { path: [] }, observation: expect.any(Number) }]);
     expect(await rows(`SELECT kind FROM events WHERE ticket_id = 'docs:A' AND kind IN ('regressed','discrepancy') ORDER BY seq`)).toEqual([{ kind: 'regressed' }, { kind: 'discrepancy' }]);
     // Newest first. Both moves are git's own, not the claim's: A's to pr-open before the claim, and
-    // the regression back to filed, a station the claim never reported.
-    expect((await history('A')).rows.map((r: { kind: string }) => r.kind)).toEqual(['discrepancy', 'regressed', 'git-moved', 'git-moved']);
+    // the regression back to filed, a station the claim never reported; the legs between are the claim's.
+    expect((await history('A')).rows.map((r: { kind: string }) => r.kind)).toEqual(['discrepancy', 'regressed', 'git-moved', 'leg-started', 'leg-finished', 'leg-started', 'git-moved']);
     expect(c.claim_id).toBeTruthy();
   });
 
