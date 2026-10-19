@@ -6,7 +6,11 @@
 // the action back in its own leading comment, with a hash of the action's text:
 // `// @model <action> sha256:<12 hex>`. A missing end, a function that is not there, or a stale
 // hash fails, naming them — so a model change names the functions to re-check, and re-stamping
-// the hash (`--stamp` prints the current ones) is the reviewed step.
+// the hash (`--stamp` prints the current ones) is the reviewed step. Where the spec has gone further
+// than the code, the action says so — `// @impl pending — <what is not built, and the ticket that
+// builds it>` — alone when nothing of it is built, beside its `@impl` functions when part is (their
+// stamp then attests the part that is); every run lists them, so a model ahead of the code is never
+// mistaken for code that matches it (R3-1254).
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
@@ -34,6 +38,7 @@ export function modelActions(src) {
       const im = /@impl (src\/[\w/.-]+\.ts)#(\w+)/.exec(lines[k]);
       if (im) impls.push({ file: im[1], fn: im[2] });
       else if (/@impl external/.test(lines[k])) impls.push({ external: true });
+      else if (/@impl pending — \S/.test(lines[k])) impls.push({ pending: lines[k].replace(/^.*@impl pending — /, '').trim() });
     }
     actions.set(m[1], { text: body.join('\n'), impls, line: i + 1 });
   }
@@ -106,10 +111,10 @@ export function check(root = ROOT) {
     return files.get(f);
   };
   for (const [name, a] of actions) {
-    if (!a.impls.length) { errors.push(`${MODEL}:${a.line}: action ${name} names no implementation (// @impl src/core/<file>.ts#<fn> or // @impl external — <who>)`); continue; }
+    if (!a.impls.length) { errors.push(`${MODEL}:${a.line}: action ${name} names no implementation (// @impl src/core/<file>.ts#<fn>, // @impl external — <who> or // @impl pending — <ticket>)`); continue; }
     const want = `@model ${name} sha256:${hashOf(a.text)}`;
     for (const im of a.impls) {
-      if (im.external) continue;
+      if (im.external || im.pending) continue;
       const src = read(im.file);
       if (src == null) { errors.push(`action ${name}: ${im.file} does not exist`); continue; }
       const comment = leadingComment(src, im.fn);
@@ -135,6 +140,17 @@ export function check(root = ROOT) {
   return { errors, actions };
 }
 
+/** The run's listing of the model ahead of the code: one line per pending note, `not built` when
+ *  the action names no implementing function, `partly built` when it names one beside the note. */
+export function pendingLines(actions) {
+  const out = [];
+  for (const [n, a] of actions) {
+    const built = a.impls.some((im) => im.file);
+    for (const im of a.impls.filter((x) => x.pending)) out.push(`${n}: ${built ? 'partly built' : 'not built'} — ${im.pending}`);
+  }
+  return out;
+}
+
 function listSources(root) {
   const out = new Set(readdirSync(join(root, 'src/core')).filter((f) => f.endsWith('.ts')).map((f) => `src/core/${f}`));
   for (const a of modelActions(readFileSync(join(root, MODEL), 'utf8')).values()) for (const im of a.impls) if (im.file) out.add(im.file);
@@ -143,8 +159,10 @@ function listSources(root) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const { errors, actions } = check();
-  if (process.argv.includes('--stamp')) for (const [n, a] of actions) console.log(`${n}: @model ${n} sha256:${hashOf(a.text)}  (${a.impls.map((i) => (i.external ? 'external' : `${i.file}#${i.fn}`)).join(', ')})`);
+  if (process.argv.includes('--stamp')) for (const [n, a] of actions) console.log(`${n}: @model ${n} sha256:${hashOf(a.text)}  (${a.impls.map((i) => (i.external ? 'external' : i.pending ? `pending — ${i.pending}` : `${i.file}#${i.fn}`)).join(', ')})`);
   for (const e of errors) console.log(`✗ ${e}`);
-  if (!errors.length) console.log(`✓ every action of ${MODEL} and its implementation name each other; hashes current (${actions.size} actions)`);
+  const pending = [...actions].filter(([, a]) => a.impls.some((im) => im.pending));
+  for (const line of pendingLines(actions)) console.log(`… ${line}`);
+  if (!errors.length) console.log(`✓ every action of ${MODEL} and its implementation name each other; hashes current (${actions.size} actions, ${pending.length} ahead of the code)`);
   process.exit(errors.length ? 1 : 0);
 }

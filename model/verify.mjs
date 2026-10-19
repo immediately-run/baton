@@ -1,4 +1,5 @@
-// npm run model:verify: Apalache's bounded proof of `safety` on `small` (R3-1243), to depth 5.
+// npm run model:verify: Apalache's bounded proof of `safety` on `small` (R3-1243), to depth 4 —
+// 5 since R3-1254 part 2 takes about 10 hours (owner, 2026-10-19; B-37 restores it).
 //
 // `quint verify` sends the compiled model to an Apalache server in one request, whose JSON reader
 // refuses a string over 20 MB; the compiled `small` instance reached 19.8 MB on main and passed it
@@ -15,7 +16,7 @@ import { join } from 'node:path';
 const require = createRequire(import.meta.url);
 const { fetchApalache, DEFAULT_APALACHE_VERSION_TAG } = require('@informalsystems/quint/dist/src/apalache.js');
 
-const DEPTH = process.env.MODEL_VERIFY_DEPTH ?? '5';
+const DEPTH = process.env.MODEL_VERIFY_DEPTH ?? '4';
 const dir = mkdtempSync(join(tmpdir(), 'baton-verify-'));
 // the ~20 MB of IR goes with the directory on every way out, a failed compile or fetch included
 const done = (code, message) => {

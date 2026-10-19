@@ -1,0 +1,128 @@
+---
+title: "B-46 — hardening within a tenant: only pushers' forge writes count, runners run default-branch code with scrubbed credentials, a multi-repository key opts in, checks from an exit status, MCP holds that only add, sign-in by a confirmed code"
+id: B-46
+project: baton
+status: available
+updated: 2026-10-18
+repos:
+  - immediately-run/baton
+tags:
+  - roadmap-item
+description: "Owner, 2026-10-18, after the security review: build BATON_SPEC §10.7 (R-BTN-139 to R-BTN-158), which closes the holes inside one tenant that §3b does not touch — outsiders' PRs and verdicts, off-branch leg code, runner secrets in legs and logs, multi-repository machine keys, unfounded heads, open-world gates, missing caps, forged merge checks, MCP lifting holds, the login link, CI-token events, tokens, and the local host."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-45
+---
+
+**Spec:** BATON_SPEC §10.7 — R-BTN-139 to R-BTN-158 (new) and the rules they amend;
+S-BTN-115 to S-BTN-125; G-BTN-135 to G-BTN-145.
+**Depends on:** B-45 for the origin rules R-BTN-158 cites. Check courses (B-5, R-BTN-153),
+streams and Stop (B-9, R-BTN-145) and the action registry and MCP (B-25, R-BTN-154) take their
+parts of §10.7, which their tickets name; this item builds the rest and their tests.
+
+### Requires
+
+A checkout and a terminal for most of it. Two exit criteria need forge access:
+- a public GitHub repository, to exercise fork PRs and permission reads with a real token;
+- a GitLab project, to read real `id_tokens` claims.
+
+### Why
+
+The owner, 2026-10-18, asked that the single-tenant findings of the security review be
+addressed, and settled five choices: a multi-repository key opts in, exit-status verdicts,
+MCP add-only holds, a loopback local host with `--bind`, and Developer as GitLab's "can
+push".
+
+### What to build
+
+Split into reviewed PRs along §10.7's four parts. Each is independent.
+
+1. **People without push** (R-BTN-139 to R-BTN-142).
+   - The fact adapters' `trusted` flag and fork detection, by ids; `trusted_identities`; the
+     default station functions read trusted facts only.
+   - `code_repos`.
+   - The branch-pattern grammar, and branch-holder scoping.
+   - Literal bars and `renamed_from` collisions, with `baton owner bars follow`.
+2. **Runners** (R-BTN-143 to R-BTN-145). Server side: `default_branch`, `rewrite_held` and
+   `tainted_branches` in the claim response; the `off-branch` end, its Needs-you entry and its
+   sync want. In `src/runner/`:
+   - the ancestry check and the verified-sha cache, fetching the registered branch, not
+     `main` (`home.ts`, `main.ts`);
+   - `close` and `handoff` in a child;
+   - a scrubbed leg environment, with `credential:` scoping;
+   - the masking set and patterns; pointer `commit` and `sha256`; `baton leg log`
+     verification;
+   - the `IR_BATON_LEG` tag sweep, with a systemd scope where available;
+   - the replay allowlist and `BATON_RESUME`.
+3. **Keys, posts and claims** (R-BTN-146 to R-BTN-152).
+   - Span, the grant flags, `GET …/grants` and `--confirm-span`.
+   - `head_unfounded`, held posts that only tighten, the new Needs-you items, renumbering, and
+     dropped claims.
+   - Open-world `declared` gates, `misdeclared`, and tainted branches.
+   - The per-repository caps, observation takeover, and readings and bills bounds.
+   - `rank` output validation.
+4. **Surfaces** (R-BTN-153 to R-BTN-158 and §10.7.5).
+   - Check heads as core fields, claim-bound shas, confirmed ends, `exec` verdicts.
+   - MCP add-only holds and `ticket.unhold`.
+   - The sign-in code flow, logout and revoke.
+   - CI-token `event_name`, `workflow_ref`, `ref_protected` and `pipeline_source`; the
+     GitLab protected-variable check in `repo init`; notification binding.
+   - Token limits, role expansion from the snapshot, and links.
+   - The App manifest checks; backticks and the export fence.
+   - The local host's `--bind` and file modes.
+   - Import re-validation and the pre-seal refusal.
+   - The signature profile, the headers, `trigger_workflows`, foreign claims after cutover,
+     the fence per incarnation, and courier `asks`.
+
+5. **The migration.** One new numbered migration with §4's 2026-10-18 §10.7 block.
+   - Columns: the columns listed there, and `worker_grants.accepted_at`, backfilled to each
+     grant's creation time so existing grants stay active.
+   - Tables: `tainted_branches`, `open_world_bars`, `login_codes`, `write_budgets`,
+     `observation_lapses` and `action_confirmations`.
+   - Migrations are append-only, so `login_links` stays, unwritten.
+   - The release notes name the cost: keys already active on two or more repositories lose
+     machine sync and delivery until owners set the grant flags. `baton owner grants list`
+     names them beforehand.
+6. **Rounds 2 and 3's additions** (each with its scenario):
+   - pending grants, with `runner.grant.accept` and `runner.grant.decline` and their routes
+     and commands;
+   - the board post's `source: {kind, cli}`;
+   - observation renewal, the 30-minute age and the sync key's or CI's void;
+   - the observation response's `trusted_identities`, effective `code_repos` and
+     `tainted_branches`;
+   - confirmation codes for the dashboard's authority-changing actions, with `baton admin
+     confirm` (and its `dry_run`);
+   - the sign-in eviction order;
+   - bearer refusal by peer on an `http` listener, `--trusted-proxy`, and the Cloudflare
+     host's refusal on plain `http`;
+   - the tainted-branch `pre-push` hook;
+   - round 4's (§10.7 fourth look): the settlement outcome table; `check_head_ref` in the claim
+     response and a sync want on a moved head; `pending_grants` in the heartbeat and the
+     runner's hint; API-key and migrated grants active at once; decline returning an active
+     grant to pending, logged; a hostname binding at first acceptance; the confirmation set
+     without Stop or setting a hold; clients refusing to send bearers over non-loopback `http`
+     and the server revoking any that arrive.
+
+### Architecture
+
+- **Forge reads stay in the CLI**, never core (§2b). Core learns only the `trusted` result
+  through the posted facts, and the new owner settings.
+- **Fail closed** wherever a forge read is refused: no trusted author, no counted PR, no
+  verdict.
+- **No signatures and no per-worker identities** (R-BTN-46).
+
+### Tests
+
+S-BTN-115 to S-BTN-125 in `test/integration/`, on both hosts, with unit tests for each
+adapter's trust and fork mapping from real payload shapes.
+
+### Exit criteria
+
+- `npm test` and `npm run typecheck` green, with S-BTN-115 to S-BTN-125 and G-BTN-135 to
+  G-BTN-145 passing.
+- On a scratch public GitHub repository, an outsider's fork PR and approve comment move
+  nothing.
+- A real GitLab `id_tokens` JWT from a merge-request pipeline is refused.

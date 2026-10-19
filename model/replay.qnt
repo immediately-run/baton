@@ -18,7 +18,8 @@ module replay {
   import baton(TICKETS = Set("t1", "t2"), WORKERS = Set("w1", "w2", "w3"), SLOTS = Set(1, 2),
                MAX_CLAIMS = 6, GIT_BUDGET = 2, OWNER_BUDGET = 2,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
-               REQUIRED = Set("fix", "merge"), MAX_TIME = 24).* from "./baton"
+               REQUIRED = Set("fix", "merge"), MAX_TIME = 24,
+               MAX_ATTEMPTS = 1000, BACKOFF = 0, MAX_BLOCKED = 1000).* from "./baton"
 
   // the tick of each worker's last authenticated call to Baton
   var seen: str -> int

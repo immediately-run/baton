@@ -3,7 +3,7 @@ title: "R3-1254 — Baton model, remainder of R3-1243: exhaustive liveness on a 
 id: R3-1254
 project: baton
 status: in-progress
-updated: 2026-10-17
+updated: 2026-10-19
 repos:
   - baton
 tags:
@@ -85,10 +85,21 @@ requirement to change the model in the same pull request. Delivered in parts:_
 2. _**A leg's prerequisites** (R-BTN-120): other tickets `at`, `reached` or `done`, capabilities,
    resources, decisions and retry; blocks and `blocked_since` with paired events (R-BTN-75,
    R-BTN-77, R-BTN-78); retries per leg (R-BTN-122); a prerequisite failing during a leg
-   (R-BTN-126: `released:blocked`, provisional rows, `max_blocked`)._
+   (R-BTN-126: `released:blocked`, provisional rows, `max_blocked`). Delivered in two pull
+   requests:_
+   - _**2a**, baton#55: other tickets' prerequisites and decisions, retries per leg, blocks and
+     their paired events, and blocked ends on a `ticket` or `decision`; the course's terminal ends
+     (R-BTN-69, amended there); the proof at depth 4 for now (owner, 2026-10-19; B-37 restores 5)._
+   - _**2b**, next: the capability and resource prerequisites — a runner's capabilities and their
+     loss mid-leg (rule 4, R-BTN-121, R-BTN-126's `capability` and `resource` blocked ends), the
+     fleet's resource answer and the answer lost when no one can give it (`answer_lost`, R-BTN-76,
+     R-BTN-77)._
 3. _The rest, each its own part or ticket: open-world claims (R-BTN-104), sync wants (R-BTN-94),
    `no_chain_from` (R-BTN-106), child tickets' spawned rows (R-BTN-86), `not_before` (R-BTN-89),
-   the holder's reported `next` (R-BTN-83), and item 1 below (liveness on `live`). Leg deadlines
+   the holder's reported `next` (R-BTN-83), Baton-raised decisions (`baton:retries` on an
+   exhaustion hold, `baton:contract`, `baton:stalled`, and the owner's answers: R-BTN-78,
+   R-BTN-122, R-BTN-126 — whole-ticket rows, so `blocked_since` and its events), and item 1
+   below (liveness on `live`). Leg deadlines
    (R-BTN-90) are R3-1259's._
 
 _Items 3 and 4 below changed under the spec since filing: notices gate nothing ("a leg never
@@ -100,3 +111,39 @@ _Item 1's "CI runs it if it stays under 10 minutes, else nightly" is superseded 
 amended 2026-10-17 at the owner's direction, takes model checking off hosted CI runners. The
 liveness run joins `npm run model:full` on the author's machine, and a PR changing the model
 carries its report, which CI's `model-report` job checks against the PR's head._
+
+_2026-10-19 — part 2a delivered: baton#55, merged as `a46b643` after three review rounds (14
+findings, all fixed; logged in `docs/review/pr-findings.mdx`). Its `model:full` report passed
+on the merged head (`ffecbfb`): 10,000 samples, 1,000 model-based traces, Apalache at depth 4
+(the owner's choice; B-37 restores 5). Next: part 2b, the capability and resource
+prerequisites and `answer_lost`; then part 3 and item 1._
+
+_2026-10-19 — part 2b, decided at claim (branch `claude/R3-1254-model-capabilities`). Core's
+side, mapped first: capability rows (`fleet_capabilities`, `Blocks.recount`), rule 4 on the
+ticket's `requires`, resource rows with readings and the fleet answer, and `answer_lost` are
+built (R3-1251); a leg's own `requires.capabilities` and `released:blocked` are not (B-10,
+B-21). The model:_
+- _**Liveness.** Baton records each worker's last heartbeat and a stored live set (core's
+  `fleet_live`); an idle worker heartbeats too. A worker is live while its last heartbeat is
+  within `TIMEOUT`._
+- _**Capability rows** are stored, whole-ticket, and rewritten only where R-BTN-75 says the
+  counts change: a heartbeat that changes what a worker declares (its check failing or passing
+  again), the alarm noticing a worker stop being live, a force-reap, and a `capability` blocked
+  end, which drops the capability from the runner's declared set in its transaction. A leg's own
+  list is not modelled until B-10 builds it: it joins the ticket's for that leg, the same check._
+- _**Rule 4** at the claim and at each advance: the ticket's `requires` within what the worker
+  declares and is granted._
+- _**Resources** as one `service` instance per resource, its reading `unavailable` until a
+  lapse or `available`; account and worker instances, the administrator's precedence and
+  `unknown` are not modelled (each a choice of which reading is in force, with no interleaving
+  of its own). A `resource` row is advice: it counts toward `blocked_since` and gates nothing;
+  a `resource` blocked end stores its reading and an `end`-sourced need._
+- _**`answer_lost`** as R-BTN-77 states it: a row that goes because the live fleet emptied
+  clears `blocked_since` silently and is remembered; settled, it logs the owed `unblocked`, or
+  is written again silently; any logged transition ends it._
+- _**`small`**, the proof's instance, keeps no capability requirements and no needs, so the
+  depth-4 proof's cost does not grow; `sim` and the regression runs carry them. A force-reap
+  changes no worker's liveness — core marks a worker reaped only when it is already silent past
+  its lease, and the alarm's live-set check recounts for that as for any lapse — so it
+  recounts nothing in the model either. (B-44, filed for it on the first reading, was
+  withdrawn.)_

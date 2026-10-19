@@ -8,7 +8,7 @@ import { transcriptUrl } from './links';
 import { isUniqueViolation, logEvent, randomHex } from './db';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
-import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkEnd, checkOverride, checkResolve, isGrantedKey, type End } from './validate';
+import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End } from './validate';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
 import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Step } from './graph';
@@ -16,6 +16,7 @@ import type { Seen, Stations } from './stations';
 import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
 import type { Row, SqlValue, Store } from './ports';
 import type { Blocks } from './blocks';
+import type { History } from './history';
 const EXPEDITE_BOUND = 2; // §7.2 rule 2, advice
 /** §2e: a claim regressed this long is listed under Needs you. */
 export const REGRESSED_FLAG_MS = 30 * 60_000;
@@ -39,6 +40,8 @@ export interface Ctx {
   dispatch?: (kind: 'mirror' | 'sync', ticketId: string) => void;
   /** R-BTN-75: whether a claim holds a ticket moves its blocked state; each change says so. */
   blocks?: Blocks;
+  /** R-BTN-81, R-BTN-85: the ticket's history and Baton's disagreements with git. */
+  history?: History;
 }
 
 interface WorkerFacts {
@@ -283,7 +286,12 @@ export class Claims {
       headObservation: this.rows<{ n: number }>('SELECT observation AS n FROM board_head WHERE repository_id = ?', item.repository)[0]?.n ?? 0,
       lastEndObservation: this.rows<{ n: number | null }>('SELECT MAX(end_observation) AS n FROM claims WHERE ticket_id = ?', item.id)[0]?.n ?? -1,
       holderBars: opts.holderBars,
-      blocks: this.rows<{ kind: string; leg: string }>(`SELECT kind, leg FROM ticket_blocks WHERE ticket_id = ? AND kind IN ('ticket', 'decision')`, item.id),
+      // R-BTN-78: Baton's own decisions refuse nothing advice would not — `baton:retries` sits on a
+      // ticket its hold keeps (rule 3), `baton:stalled` on a queued leg posted waiting (rule 1) — so
+      // they are left to those rules, whose refusals name the cause; they stay blocks for asking.
+      blocks: this.rows<{ kind: string; leg: string }>(
+        `SELECT b.kind, b.leg FROM ticket_blocks b WHERE b.ticket_id = ? AND b.kind IN ('ticket', 'decision')
+           AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))`, item.id),
     };
     return gatesFor({ declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants }, ticket, this.postedLeg(item, leg, phase), phase, facts);
   }
@@ -490,7 +498,7 @@ export class Claims {
 
   /** `POST /v1/runner/claim` (§6.2): idempotent by `request_id`; the lock is the index. The claim
    *  is at the ticket's posted station, running nothing, its path recorded (R-BTN-63). */
-  // @model claim sha256:1761b01d031f
+  // @model claim sha256:3d60a00737df
   claim(workerId: number, body: unknown) {
     const b = checkClaim(body);
     if (!this.anyCutOver()) throw new BatonError('not-cut-over', 'claims go through git until cutover (R-BTN-28)');
@@ -584,6 +592,16 @@ export class Claims {
       'SELECT seq, leg, from_station FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
   }
 
+  /** R-BTN-81: what a leg row of the history carries — the leg's run number on the ticket (its
+   *  runs under any claim, this one included), the claim's snapshot and the course's version. */
+  private legFacts(claimId: number, leg: string) {
+    const c = this.rows<{ ticket_id: string; worker_id: number; snapshot_sha: string; course_id: string | null }>(
+      'SELECT ticket_id, worker_id, snapshot_sha, course_id FROM claims WHERE id = ?', claimId)[0];
+    const run = this.rows<{ n: number }>('SELECT COUNT(*) AS n FROM claim_legs l JOIN claims k ON k.id = l.claim_id WHERE k.ticket_id = ? AND l.leg = ?', c.ticket_id, leg)[0].n;
+    const version = c.course_id ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(c.ticket_id), c.course_id)[0]?.version ?? null : null;
+    return { ticket: c.ticket_id, row: { claim_id: claimId, worker_id: c.worker_id, leg, run, snapshot_sha: c.snapshot_sha, course_version: version } };
+  }
+
   /** An active claim of this worker, for `advance` and `end`. */
   private held(workerId: number, claimId: number) {
     const c = this.rows<HeldClaim>(
@@ -604,7 +622,7 @@ export class Claims {
    * nothing. The answer carries the latest snapshot's next legs and the course's advice (none
    * until the course's hook, R3-1236).
    */
-  // @model advance sha256:b8987ae3821b
+  // @model advance sha256:327b08487cc1
   advance(workerId: number, claimId: number, body: unknown) {
     const b = checkAdvance(body);
     const c = this.held(workerId, claimId);
@@ -656,10 +674,16 @@ export class Claims {
 
     const now = this.c.now();
     const n = this.handedOut(repo);
-    if (run) this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', at, now, b.evidence, claimId, run.seq);
+    if (run) {
+      this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', at, now, b.evidence, claimId, run.seq);
+      const f = this.legFacts(claimId, run.leg);
+      this.c.history?.record(f.ticket, { kind: 'leg-finished', ...f.row, reached: at, next_leg: leg, ...(b.evidence ? { detail: { evidence: b.evidence } } : {}) });
+    }
     const seq = (this.rows<{ s: number | null }>('SELECT MAX(seq) AS s FROM claim_legs WHERE claim_id = ?', claimId)[0].s ?? 0) + 1;
     this.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, bars, started_at, started_observation) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       claimId, seq, leg, at, JSON.stringify(b.bars), now, n);
+    const started = this.legFacts(claimId, leg);
+    this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}) } });
     // R-BTN-62: only a reading numbered above the counter now can judge the claim stale.
     this.exec('UPDATE claims SET station = ?, leg = ?, claim_observation = ? WHERE id = ?', at, leg, n, claimId);
     this.event('advanced', `worker:${workerId}`, { from: station, reached: at, leg, ...(b.bars.length ? { bars: b.bars } : {}), ...(b.evidence ? { evidence: b.evidence } : {}) }, c.ticket_id, claimId);
@@ -668,7 +692,7 @@ export class Claims {
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
-  // @model endClaim sha256:a89a6e67dc71
+  // @model endClaim sha256:0458e7619d2f
   end(workerId: number, claimId: number, body: unknown) {
     const e = checkEnd(body);
     const c = this.held(workerId, claimId);
@@ -748,6 +772,11 @@ export class Claims {
       // A reap, a stale-board release or an end at the leg's `from`: the leg was given up.
       this.exec('UPDATE claim_legs SET abandoned_at = ? WHERE claim_id = ? AND seq = ?', now, claimId, run.seq);
     }
+    if (run) {
+      // R-BTN-81: the run's end, with the position the holder reported (B-38 makes it provisional).
+      const f = this.legFacts(claimId, run.leg);
+      this.c.history?.record(f.ticket, { kind: opts.finished ? 'leg-finished' : 'leg-abandoned', ...f.row, reached, next_leg: opts.next ?? null, detail: { end_reason: reason } });
+    }
     // R-BTN-62: only a reading numbered above the counter's value now can confirm this end. §2e:
     // regressed_since clears with the end; a suspension made while regressed is confirmed by any
     // later snapshot, which `ended_regressed` remembers.
@@ -818,11 +847,19 @@ export class Claims {
       this.exec('UPDATE claims SET failed_attempt = 1 WHERE id = ?', claimId);
       const failed = this.failedAttempts(item);
       const cls = nonRetryableClass(reason);
-      if (cls) return this.hold(item, `non-retryable:${cls}`, 'baton', { claim_id: claimId, attempts: failed });
+      if (cls) {
+        this.hold(item, `non-retryable:${cls}`, 'baton', { claim_id: claimId, attempts: failed });
+        // R-BTN-78: the hold is put to the owner as Baton's own decision (a `contract-input`
+        // class, from B-39, raises `baton:contract` instead).
+        this.c.blocks?.raise(item, 'baton:retries');
+        return;
+      }
       const next = afterFailure(failed.length, this.c.admin.retry(repositoryOf(item)));
       if (next && 'hold' in next) {
         this.event('attempts-exhausted', 'baton', { claim_id: claimId, attempts: failed }, item, claimId);
-        return this.hold(item, next.hold, 'baton', { claim_id: claimId, attempts: failed });
+        this.hold(item, next.hold, 'baton', { claim_id: claimId, attempts: failed });
+        this.c.blocks?.raise(item, 'baton:retries');
+        return;
       }
       if (next) {
         const until = this.c.now() + next.retryAfterMs;
@@ -851,7 +888,7 @@ export class Claims {
 
   /** `POST /v1/ui/overrides/{item}` (§8, §11): `{expedite?, hold?}`. Lifting a hold clears its
    *  reason and any backoff, and resets the attempt count (§6.10). */
-  // @model setHold sha256:75c7600d7cf0
+  // @model setHold sha256:205ca2490e56
   setOverride(owner: string, item: string, body: unknown) {
     const o = checkOverride(body);
     const actor = `owner:${owner}`;
@@ -861,10 +898,40 @@ export class Claims {
       this.event('override', actor, { expedite: o.expedite ? 1 : 0 }, item);
     }
     if (o.hold === true) this.hold(item, 'owner', actor);
-    if (o.hold === false) {
-      this.upsertOverride(item, actor, { hold: 0, hold_reason: null, retry_after: null });
-      this.event('override', actor, { hold: 0 }, item);
+    if (o.hold === false) this.liftHold(item, actor);
+    return { ok: true };
+  }
+
+  /** §8, §6.10: a hold lifted, its reason and backoff cleared and the attempt count reset; any
+   *  owner act that clears the hold under `baton:retries` closes it, so no decision outlives its
+   *  hold (R-BTN-78). */
+  private liftHold(item: string, actor: string) {
+    this.upsertOverride(item, actor, { hold: 0, hold_reason: null, retry_after: null });
+    this.event('override', actor, { hold: 0 }, item);
+    this.c.blocks?.answer(item, 'baton:retries');
+  }
+
+  /**
+   * `POST /v1/owner/{repository}/tickets/{ticket}/resolve` (R-BTN-78, §11): an owner answers one of
+   * Baton's own decisions. `baton:retries`: `retry` lifts the hold and its backoff; `park` closes
+   * the decision and keeps the hold. `baton:stalled`: `retry` closes it and restarts its 72 hours;
+   * `park` holds the ticket (`parked`) and closes it. `route` is B-38's (the owner's re-route).
+   */
+  resolveDecision(owner: string, ticket: string, body: unknown) {
+    const a = checkDecisionAnswer(body);
+    if (!this.c.blocks?.hasDecision(ticket, a.decision)) throw new BatonError('not-found', `${ticket} has no open ${a.decision} decision`);
+    const actor = `owner:${owner}`;
+    if (a.decision === 'baton:retries') {
+      if (a.answer === 'retry') this.liftHold(ticket, actor);
+      else this.c.blocks.answer(ticket, a.decision);
+    } else {
+      if (a.answer === 'retry') {
+        this.exec(`UPDATE ticket_next_legs SET waiting_since = ? WHERE ticket_id = ? AND leg = (SELECT next_leg FROM ticket_stations WHERE ticket_id = ?)`,
+          this.c.now(), ticket, ticket);
+      } else this.hold(ticket, 'parked', actor);
+      this.c.blocks.answer(ticket, a.decision);
     }
+    this.event('admin', actor, { act: 'resolve', decision: a.decision, answer: a.answer }, ticket);
     return { ok: true };
   }
 
@@ -940,8 +1007,8 @@ export class Claims {
 
   /** The heartbeat's `fenced` report (R-BTN-19): clears the fence of a claim reaped while this
    *  worker was alive — only in the incarnation it was reaped in, since a re-key never clears one. */
-  // @model fenceCleared sha256:a597d6234431
-  // @model heartbeat sha256:8b9e14fd6032
+  // @model fenceCleared sha256:2961accfdeca
+  // @model heartbeat sha256:8ee1bafe2bcc
   fenced(workerId: number, incarnation: number, claimId: number) {
     const c = this.rows<{ ticket_id: string }>(
       `SELECT ticket_id FROM claims WHERE id = ? AND worker_id = ? AND status = 'reaped' AND fence_pending = 1 AND fence_incarnation = ?`,
@@ -958,7 +1025,7 @@ export class Claims {
   /** `POST /v1/ui/claims/{id}/reap`: any active claim. A live worker's claim is fence-pending
    *  (R-BTN-19) and the worker is not reaped, so its sidecar can still report the fence; a
    *  silent worker's is reaped as the alarm would. */
-  // @model forceReap sha256:40300c034a20
+  // @model forceReap sha256:47766d432026
   forceReap(owner: string, claimId: number, body: unknown) {
     checkConfirm(body);
     const c = this.rows<{ id: number; ticket_id: string; worker_id: number; status: string }>('SELECT id, ticket_id, worker_id, status FROM claims WHERE id = ?', claimId)[0];
@@ -975,7 +1042,7 @@ export class Claims {
   /** `POST /v1/ui/claims/{id}/resolve` (§6.7): an unconfirmed completion is never confirmed
    *  automatically; the owner confirms it (git does carry it) or releases it (it never landed),
    *  which makes the item claimable again. The commit it named stays in the event. */
-  // @model ownerResolve sha256:2c8939dc2042
+  // @model ownerResolve sha256:06ad2af07f7e
   resolve(owner: string, claimId: number, body: unknown) {
     const { action } = checkResolve(body);
     const c = this.rows<{ ticket_id: string; end_reason: string; ended_at_sha: string }>(
@@ -1091,7 +1158,7 @@ export class Claims {
    * - R-BTN-63: a holder's declared bars the snapshot posts that leg's bars without log
    *   `bars-mismatch`.
    */
-  // @model syncPost sha256:67e38f2a2bd8
+  // @model syncPost sha256:bdfe0d6e71ff
   judge(repo: string, observation: number, seen: Map<string, Seen>) {
     let confirmed = 0;
     // A `done` is also confirmed by a reading numbered after the claim's latest advance that shows
@@ -1127,6 +1194,9 @@ export class Claims {
       if (backwards && c.regressed_since == null) {
         this.exec('UPDATE claims SET regressed_since = ? WHERE id = ?', now, c.id);
         this.event('regressed', 'sync', { observation, path: s.path }, c.ticket_id, c.id);
+        // R-BTN-81, R-BTN-85: git's shorter path wins; the claim's reckoning is logged beside it.
+        this.c.history?.record(c.ticket_id, { kind: 'regressed', claim_id: c.id, detail: { observation, path: s.path } });
+        this.c.history?.discrepancy(c.ticket_id, 'regressed', { path: this.expectedPath(c.id, c.start_path), source: 'claim' }, { path: s.path }, observation, c.id);
       } else if (!backwards && c.regressed_since != null && extendsPath(g, this.expectedPath(c.id, c.start_path), s.path, g.start)) {
         this.exec('UPDATE claims SET regressed_since = NULL WHERE id = ?', c.id);
       }
@@ -1152,7 +1222,10 @@ export class Claims {
         // R-BTN-67: a snapshot that lacks a required bar's prefix for a leg a claim ran on the
         // holder's bars is listed too.
         const policy = l.course_id ? this.c.admin.requiredBars(repo).filter((r) => requiredBarCovers(r, l.course_id!, name, g) && !meetsRequiredBar(r, posted)).map((r) => r.tag_prefix) : [];
-        if (missing.length || policy.length) this.event('bars-mismatch', 'sync', { seq: l.seq, leg: l.leg, declared_only: missing, ...(policy.length ? { policy } : {}), observation }, ticketId, l.claim_id);
+        if (missing.length || policy.length) {
+          this.event('bars-mismatch', 'sync', { seq: l.seq, leg: l.leg, declared_only: missing, ...(policy.length ? { policy } : {}), observation }, ticketId, l.claim_id);
+          this.c.history?.discrepancy(ticketId, 'bars-mismatch', { bars: JSON.parse(l.bars), leg: l.leg, source: 'holder' }, { bars: posted }, observation, l.claim_id);
+        }
       }
     }
     return { confirmed, stale_released: stale };
@@ -1190,7 +1263,7 @@ export class Claims {
    *  or at an interim status that ends the item — ends `released:stale-board`, and the holder is
    *  told. A station that lags the holder's advances is never staleness (§2e). Before cutover git
    *  decides alone and the shadow reports end claims. */
-  // @model syncPost sha256:67e38f2a2bd8
+  // @model syncPost sha256:bdfe0d6e71ff
   private staleBoard(repo: string, observation: number) {
     if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND cutover_at IS NOT NULL', repo).length) return 0;
     const active = this.rows<{ id: number; ticket_id: string; worker_id: number; tier_ceiling: string; tier_ceilings: string; kind: string }>(
@@ -1209,6 +1282,13 @@ export class Claims {
       const why = !it ? (closed === 'done' ? null : closed === 'withdrawn' ? 'withdrawn' : 'gone or archived') : GIT_ENDS.has(it.status) ? it.status
         : !fitsTier(it.tier ?? null, ceiling, ladder) ? `re-tiered ${it.tier ?? 'untiered'}` : null;
       if (!why) continue;
+      // R-BTN-85: a ticket closed, gone or at a status git ends it with, while a claim is active on
+      // it — not the holder's own `done` (no disagreement), nor a re-tier (no closure) — is logged
+      // before git wins.
+      if (!it || GIT_ENDS.has(it.status)) {
+        this.c.history?.discrepancy(c.ticket_id, 'closed-under-claim', { claim_id: c.id, status: 'active', source: 'claim' },
+          it ? { status: it.status } : { closed: closed ?? 'gone' }, observation, c.id);
+      }
       this.finish(c.id, c.ticket_id, 'released', 'released:stale-board', 'sync', {});
       if (c.kind !== 'legacy') {
         this.exec(`INSERT INTO messages (kind, payload_json, from_principal, to_worker_id, sent_at, status) VALUES ('release', ?, 'sync', ?, ?, 'pending')`,
@@ -1221,8 +1301,8 @@ export class Claims {
 
   // ── the alarm's share (§6.6, §7.1, §9) ──────────────────────────────────────────────────
 
-  // @model alarmReap sha256:99a4907a9e83
-  // @model fenceTimeout sha256:7aa3c50f5fbe
+  // @model alarmReap sha256:9c7db9b40610
+  // @model fenceTimeout sha256:f8fa14757974
   alarm() {
     const now = this.c.now();
     this.releaseBarHolders(now);

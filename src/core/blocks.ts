@@ -14,6 +14,7 @@ import { DISPATCH_WINDOW_MS } from './webhook';
 import { isForgePath, underWebBase, type Forge } from './links';
 import type { PostedStation } from './board';
 import type { Store } from './ports';
+import type { History } from './history';
 
 export const BLOCK_KINDS = ['ticket', 'capability', 'resource', 'decision'] as const;
 export type BlockKind = (typeof BLOCK_KINDS)[number];
@@ -42,7 +43,20 @@ export interface Ctx {
   /** R-BTN-80: a ticket's decisions were first stored, or closed — their notices follow, in the
    *  same transaction. */
   decisions?: { opened: (ticket: string, ids: string[]) => void; closed: (ticket: string, ids: string[]) => void };
+  /** R-BTN-81: a logged `blocked` or `unblocked` is a history row too. */
+  history?: History;
 }
+
+/** R-BTN-78: the decisions Baton raises itself, each `asks: owner` on the whole ticket, answered in
+ *  Baton (`resolve`). `baton:contract` arrives with B-39. */
+export const BATON_DECISIONS = ['baton:retries', 'baton:stalled'] as const;
+export type BatonDecision = (typeof BATON_DECISIONS)[number];
+/** R-BTN-78: a queued leg posted `waiting` this long without a break raises `baton:stalled`. */
+export const STALLED_AFTER_MS = 72 * 3_600_000;
+/** The waits Baton stores itself, which raise no `baton:stalled`: each is under Needs you
+ *  already (`policy` R-BTN-67, `course-changed` R-BTN-83; `input-missing`, `input-version` and
+ *  `not-before-invalid` arrive with B-39 and R3-1259), and `time` (R-BTN-89) is a wait by design. */
+export const BATON_WAITS = ['policy', 'course-changed', 'input-missing', 'input-version', 'not-before-invalid', 'time'] as const;
 
 /** A live worker as the counts see it: the repositories its key works on, the capabilities it may
  *  use in each (null: all it declares), what it declares and the account instances it uses. */
@@ -259,11 +273,16 @@ export class Blocks {
       const lostRows = silent ? null : this.rows<{ a: string | null }>('SELECT answer_lost AS a FROM tickets WHERE id = ?', id)[0]?.a;
       if (lostRows) logEvent(this.c.store, now, 'unblocked', 'baton', { ticket: id, cleared: (JSON.parse(lostRows) as LostAnswer).rows }, id);
       this.exec(`UPDATE tickets SET blocked_since = ?${silent ? '' : ', answer_lost = NULL'} WHERE id = ?`, since ?? now, id);
-      if (!silent) logEvent(this.c.store, now, 'blocked', 'baton', { ticket: id, blocks: blocking.map((b) => ({ kind: b.kind, ref: b.ref, ...(b.leg ? { leg: b.leg } : {}) })) }, id);
+      if (!silent) {
+        const blocks = blocking.map((b) => ({ kind: b.kind, ref: b.ref, ...(b.leg ? { leg: b.leg } : {}) }));
+        logEvent(this.c.store, now, 'blocked', 'baton', { ticket: id, blocks }, id);
+        this.c.history?.record(id, { kind: 'blocked', detail: { blocks } });
+      }
     } else if (!blocking.length && t.blocked_since != null) {
       this.exec(`UPDATE tickets SET blocked_since = NULL${silent ? '' : ', answer_lost = NULL'} WHERE id = ?`, id);
       if (!silent) {
         logEvent(this.c.store, now, 'unblocked', 'baton', { ticket: id, cleared }, id);
+        this.c.history?.record(id, { kind: 'unblocked', detail: { cleared } });
         this.unblocked(t.repository_id, id, cleared);
       }
     }
@@ -276,6 +295,61 @@ export class Blocks {
     // Its decisions close with it, and so do their notices (R-BTN-80).
     this.c.decisions?.closed(id, this.rows<{ decision_id: string }>('SELECT decision_id FROM ticket_decisions WHERE ticket_id = ?', id).map((d) => d.decision_id));
     this.exec('DELETE FROM ticket_decisions WHERE ticket_id = ?', id);
+  }
+
+  // ── Baton's own decisions (R-BTN-78) ─────────────────────────────────────────────────────
+
+  /** Whether Baton's decision `id` is open on `ticket`. */
+  hasDecision(ticket: string, id: BatonDecision): boolean {
+    return this.rows(`SELECT 1 FROM ticket_decisions WHERE ticket_id = ? AND decision_id = ? AND source = 'baton'`, ticket, id).length > 0;
+  }
+
+  /** Raise Baton's decision `id` on the whole ticket, `asks: owner`, in the caller's transaction:
+   *  a `decision` block with its notices (R-BTN-78, R-BTN-80). A decision already open is left. */
+  raise(ticket: string, id: BatonDecision): boolean {
+    if (this.hasDecision(ticket, id)) return false;
+    this.exec(`INSERT INTO ticket_decisions (ticket_id, decision_id, leg, asks, url, source) VALUES (?, ?, '', 'owner', NULL, 'baton')`, ticket, id);
+    this.c.decisions?.opened(ticket, [id]);
+    this.write([ticket], ['decision']);
+    return true;
+  }
+
+  /** Close Baton's decision `id` — answered, or its cause gone — and its notices, with the
+   *  `unblocked` its end may bring (R-BTN-77). Returns whether one was open. */
+  answer(ticket: string, id: BatonDecision): boolean {
+    if (!this.hasDecision(ticket, id)) return false;
+    this.exec(`DELETE FROM ticket_decisions WHERE ticket_id = ? AND decision_id = ? AND source = 'baton'`, ticket, id);
+    this.c.decisions?.closed(ticket, [id]);
+    this.write([ticket], ['decision']);
+    return true;
+  }
+
+  /**
+   * The alarm (R-BTN-78): `baton:stalled` on a ticket no hold keeps whose queued leg has been
+   * posted `waiting` for 72 hours without a break. Only the waits a sync posts count: the ones
+   * Baton stores itself are under Needs you already, and `time` (R-BTN-89) is a wait by design.
+   */
+  raiseStalled(now: number) {
+    const stalled = this.rows<{ ticket_id: string }>(
+      `SELECT s.ticket_id FROM ticket_stations s JOIN ticket_next_legs n ON n.ticket_id = s.ticket_id AND n.leg = s.next_leg
+       WHERE n.state = 'waiting' AND n.waiting_since <= ? AND COALESCE(n.waiting_on, '') NOT IN (SELECT value FROM json_each(?))
+         AND NOT EXISTS (SELECT 1 FROM ticket_overrides o WHERE o.ticket_id = s.ticket_id AND o.hold = 1)
+         AND NOT EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = s.ticket_id AND d.decision_id = 'baton:stalled')
+       ORDER BY s.ticket_id`, now - STALLED_AFTER_MS, JSON.stringify(BATON_WAITS));
+    for (const t of stalled) this.raise(t.ticket_id, 'baton:stalled');
+    return stalled.length;
+  }
+
+  /** R-BTN-78: `baton:stalled` closes by itself once its ticket's queued leg is no longer posted
+   *  waiting — run in the transaction that accepts a repository's snapshot. */
+  settleStalled(repo: string) {
+    for (const t of this.rows<{ ticket_id: string }>(
+      `SELECT d.ticket_id FROM ticket_decisions d JOIN tickets t ON t.id = d.ticket_id
+       WHERE d.decision_id = 'baton:stalled' AND d.source = 'baton' AND t.repository_id = ?
+         AND NOT EXISTS (SELECT 1 FROM ticket_stations s JOIN ticket_next_legs n ON n.ticket_id = s.ticket_id AND n.leg = s.next_leg
+                         WHERE s.ticket_id = d.ticket_id AND n.state = 'waiting')`, repo)) {
+      this.answer(t.ticket_id, 'baton:stalled');
+    }
   }
 
   // ── a snapshot's causes: `needs` and `decisions` (R-BTN-76, R-BTN-78) ─────────────────────

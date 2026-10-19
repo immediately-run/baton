@@ -27,6 +27,7 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 | `src/core/cutover.ts` | The one-way cutover (R-BTN-28): `POST /v1/ui/cutover`, the legacy import, adoption on the owner's confirmation |
 | `src/core/blocks.ts` | Why a ticket cannot move (§2g R-BTN-75, -77, -78): the one writer of `ticket_blocks` and `blocked_since`, the fleet counts, the `unblocked` messages and dispatch, and the `blocks` and `blocked` queries |
 | `src/core/notices.ts` | Requests for people (R-BTN-80, R-BTN-103): the one writer of `notices` and `worker_couriers` — a notice per personal courier and one pool copy per open decision, claimed and marked over `/v1/courier/*`, closed with the decision, reminded and deleted by the alarm |
+| `src/core/history.ts` | Each ticket's history and Baton's disagreements with git (R-BTN-81, R-BTN-85): the one writer of `ticket_history`, `GET …/tickets/{ticket}/history`, the 90-day purge, and the `discrepancy` event and row logged before a snapshot's value is adopted |
 | `src/core/resources.ts` | External resources, their account instances, a worker's `uses`, the readings of workers, probes and administrators, and each instance's state (R-BTN-76, R-BTN-101) |
 | `src/core/detailSchema.ts` | Pure: R-BTN-76's JSON Schema subset, interpreted (no code generation), for a reading's `detail` |
 | `src/core/validate.ts` | Pure: every worker- and owner-supplied field checked before any write (§10.4) |
