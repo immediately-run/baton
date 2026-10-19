@@ -286,7 +286,11 @@ export class Claims {
       headObservation: this.rows<{ n: number }>('SELECT observation AS n FROM board_head WHERE repository_id = ?', item.repository)[0]?.n ?? 0,
       lastEndObservation: this.rows<{ n: number | null }>('SELECT MAX(end_observation) AS n FROM claims WHERE ticket_id = ?', item.id)[0]?.n ?? -1,
       holderBars: opts.holderBars,
-      blocks: this.rows<{ kind: string; leg: string }>(`SELECT kind, leg FROM ticket_blocks WHERE ticket_id = ? AND kind IN ('ticket', 'decision')`, item.id),
+      // R-BTN-78: Baton's own decisions refuse nothing advice would not — `baton:retries` sits on a
+      // ticket its hold keeps (rule 3), `baton:stalled` on a queued leg posted waiting (rule 1) — so
+      // they are left to those rules, whose refusals name the cause; they stay blocks for asking.
+      blocks: this.rows<{ kind: string; leg: string }>(
+        `SELECT kind, leg FROM ticket_blocks WHERE ticket_id = ? AND kind IN ('ticket', 'decision') AND NOT (kind = 'decision' AND ref LIKE 'baton:%')`, item.id),
     };
     return gatesFor({ declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants }, ticket, this.postedLeg(item, leg, phase), phase, facts);
   }
