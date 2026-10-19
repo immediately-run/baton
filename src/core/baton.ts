@@ -27,6 +27,7 @@ import { Stats, STATS_WINDOW_MS } from './stats';
 import { Blocks } from './blocks';
 import { Resources } from './resources';
 import { Notices, type Courier } from './notices';
+import { History, HISTORY_PAGE_MAX } from './history';
 import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import type { Ports, Row, SqlValue, Store, Workflow } from './ports';
@@ -52,6 +53,7 @@ export class BatonCore {
   readonly blocks: Blocks;
   readonly resources: Resources;
   readonly notices: Notices;
+  readonly history: History;
   readonly store: Store;
   /** §12: workflows to dispatch once the current request or alarm has committed, one per
    *  repository and kind. */
@@ -74,15 +76,22 @@ export class BatonCore {
     this.webhooks = new Webhooks({ store, now: () => this.now() });
     const want = (wf: Workflow) => this.pendingDispatch.set(`${wf.repository}:${wf.kind}`, wf);
     // R-BTN-75: the blocks are written with their causes; `fits` is the claim gates' (R-BTN-77).
-    // R-BTN-80: a decision's notices are queued and closed with it.
+    // R-BTN-80, R-BTN-81: a decision's notices are queued and closed with it, and its history row written.
     this.notices = new Notices({ store, now: () => this.now() });
-    this.blocks = new Blocks({ store, now: () => this.now(), fits: (worker, ticket) => this.claims.fits(worker, ticket),
-      decisions: { opened: (ticket, ids) => this.notices.opened(ticket, ids), closed: (ticket, ids) => this.notices.closed(ticket, ids) } });
+    this.history = new History({ store, now: () => this.now() });
+    const decisionRows = (ticket: string, ids: string[], kind: 'decision-opened' | 'decision-answered') => {
+      for (const id of ids) this.history.record(ticket, { kind, detail: { decision: id } });
+    };
+    this.blocks = new Blocks({ store, now: () => this.now(), fits: (worker, ticket) => this.claims.fits(worker, ticket), history: this.history,
+      decisions: {
+        opened: (ticket, ids) => { this.notices.opened(ticket, ids); decisionRows(ticket, ids, 'decision-opened'); },
+        closed: (ticket, ids) => { this.notices.closed(ticket, ids); decisionRows(ticket, ids, 'decision-answered'); },
+      } });
     this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks });
     this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(), origin: ports.config.BATON_ORIGIN,
       dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices });
-    this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo) });
-    this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, blocks: this.blocks,
+    this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo), history: this.history });
+    this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store);
@@ -244,6 +253,10 @@ export class BatonCore {
         this.takeUnblocked();
         // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.
         this.notices.alarm();
+        // R-BTN-78: a queued leg posted waiting for 72 hours is put to the owner; R-BTN-81: the
+        // history of tickets closed 90 days ago goes.
+        this.blocks.raiseStalled(this.now());
+        this.history.purge();
       });
     } catch (e) {
       this.pendingDispatch.clear(); // rolled back: nothing to tell the mirror
@@ -632,6 +645,16 @@ export class BatonCore {
     if (m === 'POST' && lift) return json(this.admin.liftBar(actor, repo, Number(lift[1])));
     if (m === 'PUT' && rest === 'settings') return json(this.admin.setSettings(actor, repo, await body()));
     if (m === 'POST' && rest === 'couriers') return json(await this.admin.couriers(actor, repo, await body()));
+    const resolve = /^tickets\/([^/]+)\/resolve$/.exec(rest);
+    if (m === 'POST' && resolve) {
+      // R-BTN-78: an owner answers one of Baton's own decisions on a ticket of this repository.
+      // A local id is this repository's, as the repository reads take it (§11).
+      const raw = seg(resolve[1]);
+      const ticket = raw.includes(':') ? raw : qualify(repo, raw);
+      if (!TICKET_ID.test(ticket) || repositoryOf(ticket) !== repo) throw new BatonError('invalid-params', `ticket: must be a ticket of ${repo}`);
+      const b = await body();
+      return json(this.store.transaction(() => this.claims.resolveDecision(fp, ticket, b)));
+    }
     throw new BatonError('not-found', `no route ${m} ${p}`);
   }
 
@@ -695,7 +718,9 @@ export class BatonCore {
   private async blocksRoute(req: Request, url: URL): Promise<Response | null> {
     const blocks = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/blocks$/.exec(url.pathname);
     const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
-    if (req.method !== 'GET' || (!blocks && !blocked)) return null;
+    // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
+    const history = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/history$/.exec(url.pathname);
+    if (req.method !== 'GET' || (!blocks && !blocked && !history)) return null;
     const seg = (raw: string) => {
       try {
         return decodeURIComponent(raw);
@@ -703,7 +728,7 @@ export class BatonCore {
         throw new BatonError('invalid-params', 'a malformed path segment');
       }
     };
-    const repo = checkRepositoryId(seg((blocks ?? blocked)![1]));
+    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history)![1]));
     if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
     let cred = req.headers.get('X-Baton-Credential');
     let role: 'admin' | 'owner' | 'worker' = 'worker';
@@ -720,6 +745,18 @@ export class BatonCore {
       if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
         throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
       }
+    }
+    if (history) {
+      const raw = seg(history[2]);
+      const id = raw.includes(':') ? raw : qualify(repo, raw);
+      if (!TICKET_ID.test(id) || repositoryOf(id) !== repo) throw new BatonError('invalid-params', `ticket: must be a ticket of ${repo}`);
+      const before = url.searchParams.get('before');
+      const limit = url.searchParams.get('limit');
+      const b = before == null ? null : Number(before);
+      const n = limit == null ? 50 : Number(limit);
+      if (b != null && !(Number.isInteger(b) && b > 0)) throw new BatonError('invalid-params', 'before: must be the next_before a page gave');
+      if (!(Number.isInteger(n) && n >= 1 && n <= HISTORY_PAGE_MAX)) throw new BatonError('invalid-params', `limit: must be an integer from 1 to ${HISTORY_PAGE_MAX}`);
+      return json(this.history.list(id, b, n));
     }
     if (blocks) {
       const raw = seg(blocks[2]);
@@ -976,6 +1013,8 @@ export class BatonCore {
   private applyBlocks(r: string, stations: Map<string, PostedStation>, upserted: string[], legsBefore: Map<string, string | null>, removed = false): string[] {
     const live = this.sql<{ local_id: string }>('SELECT local_id FROM tickets WHERE repository_id = ?', r).map((x) => x.local_id);
     const { changed, dropped } = this.blocks.posted(r, stations, live);
+    // R-BTN-78: a `baton:stalled` whose queued leg the snapshot posts other than waiting closes.
+    this.blocks.settleStalled(r);
     // The counts follow what is needed: a post that changed a ticket — its row (where `requires`
     // lives), its needs or its decisions — or dropped one recounts; a post that changed nothing
     // does not (R-BTN-75, R-BTN-76). Coarser than "what is needed changed", by design: a row's
@@ -996,7 +1035,12 @@ export class BatonCore {
       if (!this.courses.get(r, c)) throw new BatonError('invalid-params', `a ticket's course ${c} is not in ${r}'s registry`);
     }
     // R-BTN-64: a course file accepted with renames carries its active claims over.
-    for (const e of p.registry ?? []) if (!refused.includes(e.id)) this.claims.renameActive(r, e.id);
+    for (const e of p.registry ?? []) {
+      if (refused.includes(e.id)) continue;
+      this.claims.renameActive(r, e.id);
+      // R-BTN-83: a ticket queued for a leg the accepted file no longer has there waits on course-changed.
+      this.stations.recheckCourse(r, e.id);
+    }
     return refused;
   }
 
@@ -1128,9 +1172,11 @@ export class BatonCore {
       // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
       limits: this.admin.view(now),
       // R-BTN-69: a refused course file, the previous one staying in force.
-      needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), keys: this.keysNotice() },
+      needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), keys: this.keysNotice() },
       // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.
       blocked: this.blocks.view(),
+      // R-BTN-85: the disagreements with git of the last 7 days, by kind.
+      discrepancies: this.history.view(now),
       resources: this.resources.view(now),
     };
   }

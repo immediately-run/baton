@@ -107,9 +107,10 @@ async function route(req: Request, env: Config, to: Forward): Promise<Response> 
     if (!isSigned(req)) throw new BatonError('unauthenticated', 'sign with a probe key (R-BTN-13)');
     return forwardSigned(req, env, to);
   }
-  // The repository reads (§11): a course's record and its blocks — any key granted on it; the
-  // blocks also an owner's or an administrator's, whose keys sign, as every key does.
-  if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|tickets\/[^/]+\/blocks)$/.test(pathname)) {
+  // The repository reads (§11): a course's record, its blocks and a ticket's history — any key
+  // granted on it; the blocks and the history also an owner's or an administrator's, whose keys
+  // sign, as every key does.
+  if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|tickets\/[^/]+\/(blocks|history))$/.test(pathname)) {
     if (isSigned(req)) return forwardSigned(req, env, to);
     // The transition (R3-1239): a bearer token still serves until every worker signs.
     const credential = await verifyWorker(req, env);

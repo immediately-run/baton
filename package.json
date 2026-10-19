@@ -1,12 +1,19 @@
 {
   "name": "@immediately-run/baton",
-  "private": true,
   "license": "Apache-2.0",
   "immediately.run": {
     "content": [
       "tickets",
       "docs"
     ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/immediately-run/baton.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "description": "Baton — work-item leases, workers and the factory dashboard, on a Cloudflare Durable Object or as a local Node process (BATON_SPEC §3a).",
@@ -20,6 +27,7 @@
     "test": "rm -rf test/.traces && vitest run && npm run model:links && npm run traces && npm run model:quick",
     "test:baton": "vitest run",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.local.json",
+    "build:cli": "node scripts/build-cli.mjs",
     "vendor": "node scripts/vendor.mjs",
     "fixtures": "node scripts/board-fixtures.mjs",
     "dev": "wrangler dev",

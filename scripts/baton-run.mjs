@@ -4,7 +4,7 @@
 // `runMain`. The bundle lands in `.local/` (gitignored) and is rebuilt on every start, so the
 // runner a checkout runs is always its current source.
 import { build } from 'esbuild';
-import { mkdirSync } from 'node:fs';
+import { copyFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -23,5 +23,8 @@ await build({
   loader: { '.json': 'json' },
   logLevel: 'warning',
 });
+// The runner spawns each leg through legProcess.mjs by path, beside its own module
+// (src/runner/runner.ts LEG_PROCESS): without this copy every leg crashed, writing no result.
+copyFileSync(join(ROOT, 'src/runner/legProcess.mjs'), join(ROOT, '.local', 'legProcess.mjs'));
 
 export const { runMain } = await import(pathToFileURL(OUT).href);

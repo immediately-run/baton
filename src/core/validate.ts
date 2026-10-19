@@ -537,6 +537,21 @@ export function checkResolve(body: unknown): { action: 'confirm' | 'release' } {
   return { action: (body as Record<string, unknown>).action as 'confirm' | 'release' };
 }
 
+/** `POST /v1/owner/{repository}/tickets/{ticket}/resolve` (R-BTN-78, §11): `{decision, answer}`.
+ *  `baton:contract` is raised from B-39 on, and the `route` answer arrives with the owner's
+ *  re-route (B-38); until then each is refused by name rather than accepted and ignored. */
+export function checkDecisionAnswer(body: unknown): { decision: 'baton:retries' | 'baton:stalled'; answer: 'retry' | 'park' } {
+  if (!isObj(body)) bad('body', 'must be a JSON object');
+  const b = body as Record<string, unknown>;
+  for (const k of Object.keys(b)) if (!['decision', 'answer', 'leg'].includes(k)) bad(`body.${k}`, 'unknown field');
+  if (b.decision === 'baton:contract') bad('decision', 'baton:contract is raised with leg contracts (B-39), not yet');
+  if (b.decision !== 'baton:retries' && b.decision !== 'baton:stalled') bad('decision', "must be 'baton:retries' or 'baton:stalled'");
+  if (b.answer === 'route') bad('answer', "route needs the owner's re-route (B-38), not yet: answer retry or park");
+  if (b.answer !== 'retry' && b.answer !== 'park') bad('answer', "must be 'retry' or 'park'");
+  if (b.leg !== undefined) bad('leg', 'only with the route answer');
+  return { decision: b.decision as 'baton:retries' | 'baton:stalled', answer: b.answer as 'retry' | 'park' };
+}
+
 /** §8, §11: `{expedite?, hold?}` — booleans, at least one. */
 export function checkOverride(body: unknown): { expedite?: boolean; hold?: boolean } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
