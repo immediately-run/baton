@@ -36,11 +36,12 @@ written in TypeScript, or one that needs a library, cannot be expressed.
 
 ### What to build
 
-1. **The ancestry check** (`src/runner/home.ts` `ensureSha`):
-   - On every claim, fetch the default branch and check `snapshot_sha` with `merge-base
-     --is-ancestor`.
-   - A commit that fails the check releases `stale-board`; a failed fetch is `transient`.
-   - After that release, make no further claim on the repository while Baton's head is that sha.
+1. **The default-branch check is R-BTN-143's** (`src/runner/home.ts` `ensureSha`), run before
+   any preparation, so an off-branch commit is never checked out or installed. B-46 builds
+   R-BTN-143; if it has not landed, this ticket builds that check exactly as R-BTN-143 states
+   (registered branch, `refs/baton/<repository>/default`, one fetch, `released:off-branch`, the
+   held-rewrite cache) and B-46 reuses it. *(Changed 2026-10-19 when baton#57 merged with
+   §10.7: §2o first defined its own check, ending `stale-board`.)*
 2. **Leg trees:**
    - Sparse (non-cone) detached worktrees keyed by (repository, commit, path), stored under
      `<git dir>/baton/trees/`, each with a `.ready` stamp beside it.
