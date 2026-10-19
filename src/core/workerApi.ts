@@ -250,8 +250,8 @@ export class WorkerApi {
    *  rules (R-BTN-14), the credential's hostname and capability allow-list (R-BTN-13), settings
    *  rewritten only when their hash changes (§3), transcripts, usage and rate limits; the answer
    *  carries the claim, the messages, the suspensions, the stale courses and the mode. */
-  // @model heartbeat sha256:677fc5c9ca46
-  // @model declare sha256:fbc9a5ee6dac
+  // @model heartbeat sha256:6c5f75ab1ce7
+  // @model declare sha256:540b387baa2b
   async heartbeat(credentialId: string, secretHeader: string | null, body: unknown) {
     const hb = checkHeartbeat(body, this.transcriptRepos());
     // R-BTN-66: a per-repository ceiling names a tier of that registered repository's ladder.

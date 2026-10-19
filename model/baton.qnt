@@ -213,7 +213,7 @@ module baton {
     events: int,                     // ghost: `blocked` and `unblocked` events logged, all tickets
     // the fleet (R3-1254 part 2b): R-BTN-75's capability rows, R-BTN-76's resources, R-BTN-77's
     // lost answers
-    lastSeen: str -> int,            // workers.last_seen_at: each worker's last heartbeat (§5)
+    lastSeen: str -> int,            // workers.last_seen_at: each worker's last authenticated call (§5, §11)
     declared: str -> Set[str],       // worker_capabilities: what its last heartbeat declared
     fleetLive: Set[str],             // the live set as Baton last counted it (baton_settings.fleet_live)
     capRows: str -> Set[str],        // `capability` rows, on the whole ticket
@@ -299,7 +299,12 @@ module baton {
     blockRowsIn(s, t, s.queued.get(t)),
   }
   // ---- the fleet (R3-1254 part 2b) ----
-  // §5: live while its last heartbeat is within its lease timeout
+  // An instance with no capability requirements and no resources has no fleet rows to count, so
+  // it never recounts — `small`, which keeps the proof's input small (round 1, 1-B-7).
+  val FLEET: bool = TICKETS.exists(t => REQUIRES.get(t) != Set()) or RESOURCES != Set()
+  // §5: live while its last authenticated call — a heartbeat, a claim, an advance, an end, a
+  // fence report — is within its lease timeout. Only a heartbeat recounts; a call that revives a
+  // lapsed worker waits for the alarm's check (`alarmLive`), as in core.
   pure def liveIn(s: State): Set[str] = WORKERS.filter(w => s.now < s.lastSeen.get(w) + TIMEOUT)
   // R-BTN-75: a capability no live worker both declares and is granted
   pure def capRowsFor(s: State, live: Set[str], t: str): Set[str] =
@@ -323,10 +328,11 @@ module baton {
   // R-BTN-77 as amended by R3-1251, `answer_lost`: `lostNow` holds the `resource` rows a recount
   // just dropped only because no live worker is left to answer (`recount`). A ticket they leave
   // unblocked clears silently and remembers them. While the record stands: blocked again on
-  // exactly those rows, silently; blocked on anything else, logged (the owed `unblocked` first,
-  // logged only — `lastEvent` keeps the `blocked`); settled — every lost need gone or answerable
-  // again — it logs the owed `unblocked` if the ticket is unblocked, unheld and has a queued leg.
-  // Any logged transition ends it.
+  // only rows it lost (core: every row added was lost), silently; blocked on anything else,
+  // logged — the owed `unblocked` first, logged only (counted in `events`; `lastEvent` keeps the
+  // `blocked`); settled — each lost need gone (its leg no longer the queued leg, the leg moved past)
+  // or answerable again — it logs the owed `unblocked` if the ticket is unblocked, unheld and has
+  // a queued leg. Any logged transition ends it.
   pure def settle(s: State, silent: Set[str]): State = settleLost(s, silent, TICKETS.mapBy(t => Set()))
   pure def settleLost(s: State, silent: Set[str], lostNow: str -> Set[Need]): State = {
     val flips = TICKETS.filter(t => blockedIn(s, t) != s.blocked.get(t))
@@ -334,13 +340,13 @@ module baton {
     val lostOff = flips.filter(t => s.blocked.get(t) and lostNow.get(t) != Set())
     // blocked again on exactly what was lost: silent, the record settled
     val reblock = flips.filter(t => not(s.blocked.get(t)) and s.lost.get(t) != Set()
-                                    and s.resRows.get(t) == s.lost.get(t) and s.capRows.get(t) == Set()
-                                    and not(confirmedRowsIn(s, t, s.queued.get(t))))
+                                    and s.resRows.get(t).filter(n => n.leg == s.queued.get(t)).subseteq(s.lost.get(t))
+                                    and s.capRows.get(t) == Set() and not(confirmedRowsIn(s, t, s.queued.get(t))))
     val loud = flips.exclude(silent).exclude(lostOff).exclude(reblock)
     // no flip, the record settled: the owed `unblocked`
     val owed = TICKETS.exclude(flips).filter(t => and {
       s.lost.get(t) != Set(), lostNow.get(t) == Set(),
-      s.lost.get(t).forall(n => not(needsOf(s, t).contains(n)) or s.fleetLive != Set()),
+      s.lost.get(t).forall(n => n.leg != s.queued.get(t) or not(needsOf(s, t).contains(n)) or s.fleetLive != Set()),
     })
     val owedLoud = owed.filter(t => not(s.blocked.get(t)) and not(heldIn(s, t)) and s.queued.get(t) != "")
     s.with("blocked", TICKETS.mapBy(t => if (flips.contains(t)) not(s.blocked.get(t)) else s.blocked.get(t)))
@@ -348,7 +354,8 @@ module baton {
                               or owedLoud.filter(t => s.lastEvent.get(t) != "blocked") != Set())
      .with("lastEvent", TICKETS.mapBy(t => if (loud.contains(t)) (if (s.blocked.get(t)) "unblocked" else "blocked")
                                            else if (owedLoud.contains(t)) "unblocked" else s.lastEvent.get(t)))
-     .with("events", s.events + loud.size() + owedLoud.size())
+     .with("events", s.events + loud.size() + owedLoud.size()
+                     + loud.filter(t => not(s.blocked.get(t)) and s.lost.get(t) != Set()).size())
      .with("lost", TICKETS.mapBy(t => if (lostOff.contains(t)) s.lost.get(t).union(lostNow.get(t))
                                       else if (loud.contains(t) or reblock.contains(t) or owed.contains(t)) Set()
                                       else s.lost.get(t)))
@@ -468,7 +475,8 @@ module baton {
             .with("nextId", st.nextId + 1)
             .with("localClaim", st.localClaim.set(w, st.nextId))
             .with("localLease", st.localLease.set(w, st.now + TIMEOUT))
-            .with("pushed", st.pushed.set(w, false)), Set(t)),
+            .with("pushed", st.pushed.set(w, false))
+            .with("lastSeen", st.lastSeen.set(w, st.now)), Set(t)),
   }
 
   // R-BTN-8: the holder pushes the running leg's evidence. It lands only if the leg leaves
@@ -526,7 +534,8 @@ module baton {
       st' = st.with("claims", st.claims.set(c.id, c.with("station", stn).with("finished", fin)
                 .with("leg", leg).with("startBars", postedBarsOf(c.ticket, leg).union(bars))
                 .with("claimObs", st.counter).with("gateViolation", c.gateViolation or violated)))
-              .with("pushed", st.pushed.set(w, false)),
+              .with("pushed", st.pushed.set(w, false))
+              .with("lastSeen", st.lastSeen.set(w, st.now)),
     },
   }
 
@@ -558,6 +567,7 @@ module baton {
                 .with("confirmObs", if (closedEarly) st.lastAccepted else -1)))
               .with("localClaim", st.localClaim.set(w, 0))
               .with("pushed", st.pushed.set(w, false))
+              .with("lastSeen", st.lastSeen.set(w, st.now))
     all {
       // an end that leaves the ticket blocked logs `blocked` (R-BTN-75 as amended by R3-1254)
       st' = settle(if (kind == "fail") failIn(ended, c.ticket, legOf(c)) else ended, Set()),
@@ -623,6 +633,7 @@ module baton {
      .with("blockedEnds", s.blockedEnds.set(c.ticket, s.blockedEnds.get(c.ticket).set(l, n)))
      .with("held", if (n > MAX_BLOCKED) s.held.set(c.ticket, true) else s.held)
      .with("localClaim", s.localClaim.set(w, 0)).with("pushed", s.pushed.set(w, false))
+     .with("lastSeen", s.lastSeen.set(w, s.now))
   }
 
   // ---- workers dying, and the lease (§6.3, §6.6) ----
@@ -659,6 +670,7 @@ module baton {
   // §6.3: the sidecar's heartbeat renews the lease, and tells the worker what it holds.
   // @impl src/core/workerApi.ts#heartbeat
   // @impl src/core/claims.ts#fenced
+  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-47)
   action heartbeat(w: str): bool = all {
     st.up.get(w), not(st.asleep.get(w)),
     st' = beatOf(w, st.declared.get(w)),
@@ -681,11 +693,12 @@ module baton {
            if (c.worker == w and c.fencePending) c.with("leaseUntil", st.now + TIMEOUT) else c }))
     }
     val s = renewed.with("lastSeen", st.lastSeen.set(w, st.now)).with("declared", st.declared.set(w, decl))
-    if (st.now < st.lastSeen.get(w) + TIMEOUT and decl == st.declared.get(w)) s else recount(s)
+    if (not(FLEET) or (st.now < st.lastSeen.get(w) + TIMEOUT and decl == st.declared.get(w))) s else recount(s)
   }
   // R-BTN-121: a heartbeat declaring a changed set — a capability whose check failed dropped, or
   // one whose check passes again re-declared (the runner runs its checks; Baton runs nothing).
   // @impl src/core/workerApi.ts#heartbeat
+  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-47)
   action declare(w: str, decl: Set[str]): bool = all {
     st.up.get(w), not(st.asleep.get(w)), decl.subseteq(DECLARED.get(w)), decl != st.declared.get(w),
     st' = beatOf(w, decl),
@@ -693,20 +706,23 @@ module baton {
   // R-BTN-75: the alarm finds a worker no longer live — silent past its lease timeout, dead or
   // asleep — and recounts the fleet, as it reaps, in the same tick.
   // @impl src/core/baton.ts#alarm
+  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-47)
   action alarmLive: bool = all {
-    liveIn(st) != st.fleetLive,
+    FLEET, liveIn(st) != st.fleetLive,
     st' = recount(st),
   }
   // R-BTN-76: an instrument's reading of a resource's instance — `unavailable` for READING_TTL,
   // or `available`, which clears a stale `unavailable` early; the instance's state changes and
   // the rows follow.
   // @impl src/core/resources.ts#post
+  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-47)
   action reading(x: str, available: bool): bool = all {
     RESOURCES.contains(x),
     st' = recount(st.with("unavailable", st.unavailable.set(x, if (available) 0 else st.now + READING_TTL))),
   }
   // R-BTN-76: an `unavailable` reading lapses; the alarm drops it and the rows follow.
   // @impl src/core/resources.ts#alarm
+  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-47)
   action readingLapses(x: str): bool = all {
     RESOURCES.contains(x), st.unavailable.get(x) > 0, st.unavailable.get(x) <= st.now,
     st' = recount(st.with("unavailable", st.unavailable.set(x, 0))),
@@ -766,7 +782,8 @@ module baton {
     st' = settle(st.with("claims", st.claims.keys().mapBy(i => {
               val c = st.claims.get(i)
               if (c.worker == w and c.fencePending) c.with("fencePending", false) else c }))
-            .with("localClaim", st.localClaim.set(w, 0)), Set()),
+            .with("localClaim", st.localClaim.set(w, 0))
+            .with("lastSeen", st.lastSeen.set(w, st.now)), Set()),
   }
 
   // ---- the owner (§8, R-BTN-67, §6.7) ----

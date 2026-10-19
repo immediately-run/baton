@@ -18,7 +18,7 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 | `liveness.qnt` | the liveness properties under weak fairness, over `small` (kept apart: their fairness terms made Apalache's input too large) |
 | `witnesses.qnt` | the reachability witnesses, each an invariant that must fail |
 | `instances.qnt` | `sim` (R3-1243's bounds: 3 workers, 2 tickets, 2 overlapping sync runs) and `small` (2 workers, 1 ticket, 1 sync run, for Apalache) |
-| `regressions.qnt` | one deterministic run per defect the reviews found (63), each asserting the merged spec does not reach it |
+| `regressions.qnt` | one deterministic run per defect the reviews found (70), each asserting the merged spec does not reach it |
 | `replay.qnt` | the traces `test/model/replay.test.ts` drives the core with (R3-1244): `sim`'s instance, every action the harness can make the core take |
 | `check.mjs` | `npm run model` and `npm run model:quick` |
 | `full.mjs` | `npm run model:full`: every check, with a report for the PR |
@@ -44,10 +44,10 @@ it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick
   result and minutes. `MODEL_SAMPLES`, `REPLAY_TRACES` and `MODEL_VERIFY_DEPTH` lower the sizes
   to try a change, and the report then says it is a reduced run, which `model-report` refuses.
   Paste it into the PR. Needs Java for the last step; about two hours on 4 CPUs.
-- `npm run model` — typecheck, the 63 regression runs, 10,000 random runs of 40 steps of `sim`
+- `npm run model` — typecheck, the 70 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
-  fourteen reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
+  fifteen reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
   and scales the `progressStep` runs (30%).
 - `npm run model:quick` — the typecheck and the regression runs alone; `npm test` runs it.
 - `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 4: about 47
@@ -193,8 +193,10 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   ticket. `resource` and `capability` blocked ends are `endBlockedOn` (*The fleet*, below).
 
 - **The fleet** (R3-1254 part 2b; R-BTN-75, R-BTN-76, R-BTN-121, §7.2 rule 4): Baton records
-  each worker's last heartbeat (an idle worker heartbeats too) and what it declares; a worker is
-  live while its last heartbeat is within `TIMEOUT`. **Rule 4**: a claim, and each advance,
+  each worker's last authenticated call — a heartbeat (an idle worker heartbeats too), a claim, an
+  advance, an end, a fence report (§5, §11) — and what it declares; a worker is live while that
+  call is within `TIMEOUT`. Only a heartbeat recounts: a call that revives a lapsed worker waits
+  for the alarm's check, as in core. **Rule 4**: a claim, and each advance,
   needs the ticket's `requires` within what the worker declares and is granted. A **`capability`
   row** stands on the whole ticket for a capability no live worker both declares and is granted;
   the rows are stored and rewritten where R-BTN-75 says the counts change — a heartbeat from a
@@ -209,11 +211,17 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   that needs an `unavailable` resource while some worker is live to answer; it counts toward
   `blocked_since` and gates nothing — advice (R-BTN-45): a claim into it is granted.
   **`answer_lost`** (R-BTN-77 as amended by R3-1251): a recount whose fleet is empty drops the
-  `resource` rows, silently, and the ticket remembers them; blocked again on exactly those rows,
-  silently; on anything else, logged (the owed `unblocked` first, logged only); settled — every
-  lost need gone or the fleet back — the owed `unblocked` is logged if the ticket is unblocked,
-  unheld and has a queued leg. A ghost, `events`, counts what is logged, so a run can tell the
-  silent transitions from the logged ones.
+  `resource` rows, silently, and the ticket remembers them; blocked again only on rows it lost
+  (every row the recount adds was lost, as core reads it), silently; on anything else, logged —
+  the owed `unblocked` first, logged only, then the `blocked`; settled — each lost need gone (its
+  leg no longer the queued leg: the leg moved past) or the fleet back — the owed `unblocked` is
+  logged if the ticket is unblocked, unheld and has a queued leg. A ghost, `events`, counts every
+  event logged, the owed `unblocked` included, so a run can tell the silent transitions from the
+  logged ones. **One evaluation per recount** (R-BTN-75 as amended here): core's
+  `Blocks.recount` evaluates after the capability rows and again after the resource rows, so a
+  fleet returning to a ticket that needs both logs an `unblocked` and a `blocked` the model
+  does not; the actions that recount carry `@impl pending` notes naming B-47, which fixes core.
+  An instance with no requirements and no resources (`FLEET` false: `small`) never recounts.
 
 ## Properties (`safety`)
 
@@ -286,8 +294,15 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
   declared fails `capabilityEndDropsItTest`; a `resource` row that gates fails
   `resourceRowIsAdviceTest`, as does a claim's start that logs its unblocking; a `resource` end with no `end`-sourced need fails
   `resourceEndStoresReadingAndNeedTest`; a reading that lapses early fails
-  `readingWaitsOutItsTimeTest`; a lost answer logged, a reblock logged, or an owed `unblocked`
-  never logged fails `answerLostIsSilentThenReblocksTest` or `answerLostOwesTheUnblockedTest`; a course whose end is not terminal passes
+  `readingWaitsOutItsTimeTest`, and one a tick early `readingLapsesNotATickEarlyTest`; a lost
+  answer logged, a reblock logged, or an owed `unblocked` never logged fails
+  `answerLostIsSilentThenReblocksTest` or `answerLostOwesTheUnblockedTest`; a record a logged
+  transition does not end, or an owed `unblocked` left uncounted, fails
+  `answerLostThenAnotherBlockLogsTheOwedFirstTest`; a reblock on rows it did not lose fails
+  `answerLostBackOnMoreThanItLostIsLoggedTest`; the owed `unblocked` logged while a claim holds
+  the ticket fails `answerLostSettledSilentlyWhileHeldTest`; a lost need never gone fails
+  `answerLostSettlesWhenTheLegMovesPastTest`; a row counting a worker that declares a
+  capability without a grant fails `capabilityRowFollowsTheFleetTest`; a course whose end is not terminal passes
   `courseOk` and fails `courseRulesRefuseTest`;
 - `MAX_DRIFT = 3`, above `MARGIN = 2`, lets a reaped worker push (`noActAfterLoss`); at
   `MAX_DRIFT = 2` it cannot — the spec's assumption is drift ≤ the margin.
@@ -296,10 +311,10 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
 
 | Check | Instance | Result |
 |---|---|---|
-| 63 regression runs | `sim` sizes, zero drift | pass |
+| 70 regression runs | `sim` sizes, zero drift | pass |
 | `safety`, 10,000 × 40 steps of `step`; 3,000 × 40 of `progressStep` | `sim` | no violation |
-| witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap, a blocked ticket, a provisional row, a backoff, an `unblocked` event, a `capability` row, a `resource` row; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all 14 reached |
-| a second review; a lost answer | — | reached by a regression run only (`maxRunsSurviveResumptionTest`; `answerLostIsSilentThenReblocksTest` — every worker silent through a lease while a `resource` row stands) |
+| witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap, a blocked ticket, a provisional row, a backoff, an `unblocked` event, a `capability` row, a `resource` row, a lost answer; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all 15 reached |
+| a second review | — | reached by a regression run only (`maxRunsSurviveResumptionTest`) |
 | Apalache, `safety` | `small`, depth 4 | no violation; about 47 min on 4 CPUs at R3-1254 part 2. Depth 5: 15 min 29 s before R3-1254, 49–59 min with its queued leg, about 10 h with part 2's prerequisites (B-37 brings it back). Each model PR's `model:full` report carries the figure for its head (R-BTN-68) |
 | liveness, `fencesClear` | `small`, TLC (Apalache cannot check fairness) | **at `b76af9c`, the pre-round-2 formula and model**: no violation in 8,187 distinct states before a 28-minute cap, not exhaustive. The current formulas (rounds 2–3) have not been run; R3-1254 runs them to completion on a narrowed instance |
 
@@ -313,8 +328,9 @@ its provisional row. It does not reach:
 - a prerequisite on another ticket, at any depth: `small` has one ticket, so `gitDepends` and a
   blocked end on a `ticket` are never enabled;
 - the fleet's rows, at any depth: `small` requires no capability and needs no resource, so no
-  `capability` or `resource` row, and no lost answer, is ever written (R3-1254 part 2b keeps the
-  proof's cost where B-37 measured it).
+  `capability` or `resource` row, and no lost answer, is ever written, and it never recounts
+  (`FLEET`). Its state still carries the fleet's fields, so the proof's input grew with part 2b:
+  the *Checked how* row gives the time measured on the head.
 
 For those, the evidence is the simulation and the regression runs, not the proof. B-37 brings
 depth 5 back, and with it the `unblocked` event.
@@ -325,8 +341,8 @@ depth 5 back, and with it the `unblocked` event.
   6 claims, 2 git events and 2 owner acts per run; `MAX_ATTEMPTS = 2`, `BACKOFF = 2` ticks,
   `MAX_BLOCKED = 1`, `PROV_TTL = 4` ticks; each ticket's source may name the other ticket `at`
   `reviewed`, having `reached` `pr-open`, or `done`, on the whole ticket or on `merge`. `small`: 2 workers, 1 ticket, 1 sync run, 3
-  claims, 1 git event, 1 owner act. The fleet: on `sim`, `t1` requires `vpn:corp` (declared and
-  granted to `w1` and `w2`), `t2` `db:orders:rw` (declared by `w2`, which is not granted it, and by
+  claims, 1 git event, 1 owner act. The fleet: on `sim`, `t1` requires nothing (so an emptied
+  fleet can lose its answer), `t2` `db:orders:rw` (declared by `w2`, which is not granted it, and by
   `w3`, which is), and `implement` needs the resource `llm`; `small` has none of it.
 - **Time** is abstract ticks: `TIMEOUT = 4`, `MARGIN = 2`, `MAX_DRIFT = 1`, at most 12 ticks
   a run. The 30-minute regression flag and the 6-hour unconfirmed flag are "eventually".
@@ -360,8 +376,14 @@ depth 5 back, and with it the `unblocked` event.
   is one `service` instance. Account and worker instances, `uses`, the administrator's reading
   over an instrument's, `unknown` and the per-worker answer each choose which reading is in
   force, with no interleaving of their own; the fleet's answer is still "a live worker could use
-  an instance that is not `unavailable`". An `end`-sourced need is never dropped (its drop at the
-  leg's next other end, and after 7 days, only removes rows).
+  an instance that is not `unavailable`". The needs are constant per leg, and an `end`-sourced
+  need is never dropped (at the leg's next other end, or after 7 days): a lost need is gone
+  when its leg is no longer the queued leg, which is how a moved ticket settles its record.
+- **Other causes of a recount** (R-BTN-75, R-BTN-58): a worker registering, a grant made,
+  changed or revoked, a credential revoked (`LIVE` drops it), and a post changing a ticket's
+  `requires` or needs. Each is fixed here — `GRANTED`, `REQUIRES` and `NEEDS` are constants, every
+  worker registered at the start — so the rows change only through declarations, liveness and
+  the ends above.
 - **R-BTN-39** (where a ticket is, replayed from git) is the sync's `syncRead` taking any git
   state as given; **R-BTN-40** (suspend rather than wait on the lease) is a worker's choice, so
   `endClaim(…, "suspended", …)` may happen at any point — both are modelled as nondeterminism,
