@@ -39,6 +39,9 @@ export interface Ctx {
   now: () => number;
   /** Whether worker `id` would pass the claim gates for the ticket now (R-BTN-77's messages). */
   fits: (workerId: number, ticketId: string) => boolean;
+  /** R-BTN-80: a ticket's decisions were first stored, or closed — their notices follow, in the
+   *  same transaction. */
+  decisions?: { opened: (ticket: string, ids: string[]) => void; closed: (ticket: string, ids: string[]) => void };
 }
 
 /** A live worker as the counts see it: the repositories its key works on, the capabilities it may
@@ -270,6 +273,8 @@ export class Blocks {
   forget(id: string) {
     this.exec('DELETE FROM ticket_blocks WHERE ticket_id = ?', id);
     this.exec('DELETE FROM leg_needs WHERE ticket_id = ?', id);
+    // Its decisions close with it, and so do their notices (R-BTN-80).
+    this.c.decisions?.closed(id, this.rows<{ decision_id: string }>('SELECT decision_id FROM ticket_decisions WHERE ticket_id = ?', id).map((d) => d.decision_id));
     this.exec('DELETE FROM ticket_decisions WHERE ticket_id = ?', id);
   }
 
@@ -328,6 +333,14 @@ export class Blocks {
           this.exec(`INSERT INTO ticket_decisions (ticket_id, decision_id, leg, asks, url, source) VALUES (?, ?, ?, ?, ?, 'sync')
                      ON CONFLICT (ticket_id, decision_id) DO NOTHING`, id, d.id, d.leg, d.asks, d.url);
         }
+        // A decision the snapshot no longer posts is answered — git shows it — and one it posts
+        // for the first time is new: their notices close or are queued here (R-BTN-80). One whose
+        // `asks` changed now goes to other couriers, so it is closed and queued again; one whose
+        // leg or link changed is the same decision, and its notices read it afresh.
+        const before = new Map(haveDecisions.map((d) => [d.decision_id, d.asks]));
+        const after = new Map(decisions.map((d) => [d.id, d.asks]));
+        this.c.decisions?.closed(id, [...before].filter(([x, asks]) => after.get(x) !== asks).map(([x]) => x));
+        this.c.decisions?.opened(id, [...after].filter(([x, asks]) => before.get(x) !== asks).map(([x]) => x));
       }
       if (needsChanged || decisionsChanged) changed.push(id);
     }

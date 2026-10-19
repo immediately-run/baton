@@ -106,6 +106,50 @@ export const DECISION_COURSE = {
   },
 };
 
+/** The `build-app` course (R-BTN-131, B-40): an application from a one-line request to a
+ * verified build. Four drafting legs each write one document under `product/` and leave it to the
+ * owner, who refines it in a conversation of their own and approves it; `file` turns the approved
+ * plan into child tickets (R-BTN-86) on `create-pr`; `verify` waits on them, tests the build
+ * against the product definition's acceptance criteria, and files fix tickets for what fails. It
+ * opens no PR of its own. Until interactive legs are built (B-34), the conversation is the
+ * owner's own session, and the approval is the ticket's `answer:` (`APPROVAL_STAGES`). */
+export const BUILD_APP_COURSE = {
+  start: 'requested',
+  start_leg: 'define',
+  end: ['shipped'],
+  stations: {
+    requested: { label: 'Requested' }, defined: { label: 'Product definition drafted' }, designed: { label: 'Interface designed' },
+    architected: { label: 'Architecture drafted' }, planned: { label: 'Plan drafted' }, building: { label: 'Tickets filed, being built' },
+    shipped: { label: 'Verified against the definition' },
+  },
+  legs: {
+    define: { from: ['requested'], to: 'defined', label: 'Draft the product definition' },
+    design: { from: ['defined'], to: 'designed', label: 'Design the interface and mock it up' },
+    architect: { from: ['designed'], to: 'architected', label: 'Decide the architecture and operations' },
+    plan: { from: ['architected'], to: 'planned', label: 'Plan the tickets' },
+    file: { from: ['planned'], to: 'building', label: 'File the planned tickets' },
+    verify: { from: ['building'], to: ['shipped', 'building'], max_runs: 3, label: 'Verify the build, file fixes' },
+  },
+};
+
+/** The documents the owner approves, in order. A `build-app` ticket's `answer:` names the last
+ * one approved, so each approval opens the next leg and an earlier name holds it. */
+export const APPROVAL_STAGES = ['define', 'design', 'architect', 'plan'];
+
+/** The approval each `build-app` leg waits on: the stage whose document it builds on. */
+const BUILD_APP_GATES: Record<string, string> = { design: 'define', architect: 'design', plan: 'architect', file: 'plan' };
+
+/** What a `build-app` leg waits on: the owner, until the ticket's `answer:` approves the document
+ * it builds on; for `verify`, the open children `file` and earlier verifications filed. */
+export const buildAppWaits = (t: SourceTicket, leg: string): string | null => {
+  if (leg === 'verify') return t.blocked_by.length ? 'children' : null;
+  const gate = BUILD_APP_GATES[leg];
+  if (gate == null) return null;
+  const a = (t.course as { answer?: unknown } | undefined)?.answer;
+  const approved = typeof a === 'string' ? APPROVAL_STAGES.indexOf(a.trim().toLowerCase()) : -1;
+  return approved >= APPROVAL_STAGES.indexOf(gate) ? null : 'owner';
+};
+
 /** The owner's answer to a decision ticket: its `answer:` field, once it is anything but `open`. */
 export const answered = (t: SourceTicket): boolean => {
   const a = (t.course as { answer?: unknown } | undefined)?.answer;
@@ -195,6 +239,25 @@ export const BUILT_INS: BuiltIn[] = [
       'carry-out': { position: "{ reached: 'decided', next: null }" },
     },
     skill: 'baton-decision',
+  },
+  {
+    id: 'build-app',
+    summary: 'define a product, design it, decide its architecture and plan it with the owner, file the tickets, verify the build',
+    course: BUILD_APP_COURSE,
+    reads: 'markers',
+    stations: markers(buildAppWaits),
+    legs: {
+      // Each drafted document waits on the owner's approval, so the claim suspends.
+      define: { position: "{ suspend: true, reached: 'defined', next: 'design' }" },
+      design: { position: "{ suspend: true, reached: 'designed', next: 'architect' }" },
+      architect: { position: "{ suspend: true, reached: 'architected', next: 'plan' }" },
+      plan: { position: "{ suspend: true, reached: 'planned', next: 'file' }" },
+      // The filed tickets are children: verify waits on them.
+      file: { position: "{ suspend: true, reached: 'building', next: 'verify' }" },
+      // `building`: fix tickets were filed, and the next verification waits on them.
+      verify: { ask: { name: 'outcome', values: ['shipped', 'building'] }, position: "{ ...(answer === 'building' ? { suspend: true } : {}), reached: answer, next: answer === 'shipped' ? null : 'verify' }" },
+    },
+    skill: 'baton-build-app',
   },
 ];
 

@@ -1,0 +1,51 @@
+---
+title: "B-38 — Baton positions held by Baton: the holder's provisional queued leg, the owner's re-route and resolve … route (R-BTN-83, from R3-1257)"
+id: B-38
+project: baton
+status: available
+updated: 2026-10-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1091
+tier: critical
+description: "The holder's (reached, next) stored as a provisional queued leg that the next snapshot confirms or replaces (position-replaced), the owner's re-route (route_leg, route_station, route-overridden) and resolve … route, the runner suspending on a bad pair, with the model; S-BTN-47's positions and re-route half. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1254
+---
+
+**Brief:** continues R3-1257 (split 2026-10-19). The owner, 2026-10-15: a leg's completion always names a (station, next leg) pair, and Baton keeps it until git confirms it.
+**Spec:** `spec/BATON_SPEC.md` §2h R-BTN-83 (the pair, git first, the provisional queued leg, the owner's re-route), R-BTN-85 (`position-replaced`, `route-overridden`), R-BTN-78 (`resolve … route <leg>`), §6.13 (the runner suspends at the leg's `from` on a bad pair), §4 (`ticket_overrides.route_leg`, `route_station`); §13a S-BTN-47's positions and re-route half.
+**Depends on:** R3-1254. Its status lists "the holder's reported `next` (R-BTN-83)" as model work still to do. A provisional queued leg and an owner's re-route both change which leg a claim is offered, and the model's `claim` offers `st.queued` alone. Built before the model covers them, every scenario trace that ends a leg or re-routes would be rejected by `npm run traces`, and R-BTN-68 asks the code and the model to change together.
+
+### Requires
+
+- none — every case runs in the integration harness, plus the model change R3-1254 makes.
+
+### What R3-1257 already delivered
+
+- Advances and ends carry `reached`/`next`, checked against the course file's edges (`off-graph`, `not-queued`); `next_source` `course`, `marker`, `inferred` and `holder` as posted (R3-1232).
+- The ticket history (R-BTN-81), discrepancy logging for the triggers that exist (R-BTN-85), the `course-changed` wait, and Baton-raised `baton:retries` and `baton:stalled` decisions with `resolve retry|park` (R3-1257).
+
+### What to build
+
+1. **The provisional queued leg.** An end or a suspension carrying `(reached, next)` stores `next` as the ticket's queued leg with `next_source: holder`, provisional. The next snapshot's posted pair confirms it (a `position-confirmed` history row) or replaces it (a `position-replaced` discrepancy with both values, then git's).
+2. **The owner's re-route.** `POST /v1/owner/{repository}/tickets/{ticket}/route {leg}` and `baton owner route`: a leg leaving the ticket's station, stored in `ticket_overrides.route_leg` and `route_station`. It wins over the posted pair until the station changes. The snapshot or advance that moves the ticket clears it and logs `route-overridden`. History row `re-routed`.
+3. **`resolve … route <leg>`** for `baton:retries` (R-BTN-78), which re-routes and clears the hold.
+4. **The runner:** a leg result whose pair is not an edge suspends at the leg's `from` before Baton is called.
+5. **The model:** the same in `model/baton.qnt`, with `@impl`/`@model` links.
+
+### Tests
+
+- S-BTN-47's positions and re-route cases, on both hosts.
+- `positions.test.ts`: confirmation, replacement, re-route and its clearing.
+
+### Exit criteria
+
+- [ ] S-BTN-47 passes whole on both hosts; G-BTN-73 and G-BTN-75 hold for positions and re-routes
+- [ ] `npm test` (traces included) and `npm run typecheck` green

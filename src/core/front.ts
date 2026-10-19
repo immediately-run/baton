@@ -97,6 +97,11 @@ async function route(req: Request, env: Config, to: Forward): Promise<Response> 
     const ascii = JSON.stringify(d).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
     return forward(new Request(req.url, { method: 'POST' }), to, { 'X-Baton-Webhook': ascii });
   }
+  if (pathname.startsWith('/v1/courier/')) {
+    // R-BTN-80, R-BTN-103: a courier key or a machine key signs; the core checks which.
+    if (!isSigned(req)) throw new BatonError('unauthenticated', 'sign with a courier key or a machine key (R-BTN-13)');
+    return forwardSigned(req, env, to);
+  }
   if (pathname === '/v1/probe/readings') {
     // R-BTN-53, R-BTN-101: a probe key signs; the core checks it is one.
     if (!isSigned(req)) throw new BatonError('unauthenticated', 'sign with a probe key (R-BTN-13)');
