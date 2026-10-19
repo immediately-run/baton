@@ -143,6 +143,13 @@ module regressions {
   run alarmReapClearsRegressedTest =
     regressedClaim.then(sleep("w1")).then(tick).then(tick).then(tick).then(tick).then(alarmReap(1))
       .expect(c1.status == "reaped" and not(c1.regressed) and c1.endedRegressed)
+  // R-BTN-122 (§6.10 counts it): an alarm reap is a failed attempt on the claim's leg, backed off
+  // like a `fail` end, and the backoff's block is logged.
+  run alarmReapIsAFailedAttemptTest =
+    start.then(claim("w1", "t1")).then(sleep("w1")).then(tick).then(tick).then(tick).then(tick).then(alarmReap(1))
+      .expect(c1.status == "reaped" and st.attempts.get("t1").get("implement") == 1
+              and st.retryRows.get("t1").contains("implement") and st.blocked.get("t1")
+              and st.lastEvent.get("t1") == "blocked")
   run forceReapClearsRegressedTest =
     regressedClaim.then(forceReap("w1"))
       .expect(not(c1.regressed) and c1.endedRegressed)

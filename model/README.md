@@ -18,7 +18,7 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 | `liveness.qnt` | the liveness properties under weak fairness, over `small` (kept apart: their fairness terms made Apalache's input too large) |
 | `witnesses.qnt` | the reachability witnesses, each an invariant that must fail |
 | `instances.qnt` | `sim` (R3-1243's bounds: 3 workers, 2 tickets, 2 overlapping sync runs) and `small` (2 workers, 1 ticket, 1 sync run, for Apalache) |
-| `regressions.qnt` | one deterministic run per defect the reviews found (47), each asserting the merged spec does not reach it |
+| `regressions.qnt` | one deterministic run per defect the reviews found (48), each asserting the merged spec does not reach it |
 | `replay.qnt` | the traces `test/model/replay.test.ts` drives the core with (R3-1244): `sim`'s instance, every action the harness can make the core take |
 | `check.mjs` | `npm run model` and `npm run model:quick` |
 | `full.mjs` | `npm run model:full`: every check, with a report for the PR |
@@ -44,7 +44,7 @@ it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick
   result and minutes. `MODEL_SAMPLES`, `REPLAY_TRACES` and `MODEL_VERIFY_DEPTH` lower the sizes
   to try a change, and the report then says it is a reduced run, which `model-report` refuses.
   Paste it into the PR. Needs Java for the last step; about two hours on 4 CPUs.
-- `npm run model` — typecheck, the 47 regression runs, 10,000 random runs of 40 steps of `sim`
+- `npm run model` — typecheck, the 48 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
   twelve reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
@@ -71,7 +71,13 @@ The model checks the design; three checks hold the code to it.
   — and each implementing function names the action back with a hash of the action's text,
   `// @model <action> sha256:<12 hex>`. A model change fails the check, naming the functions to
   re-check; re-stamping the hash (`node scripts/check-model-links.mjs --stamp` prints them) is
-  the reviewed step.
+  the reviewed step. Where the model is ahead of the code, a third form says so —
+  `// @impl pending — <what is not built, and the ticket that builds it>` — alone when nothing of
+  the action is built, beside its `@impl` functions when part is. A pending-only action
+  (`endBlocked`, `retryElapse`, `provisionalLapses` today) is held to no code until its ticket
+  (B-10, B-11, B-21, B-26) lands, so a change to it fails nothing; a partly built one's functions
+  keep their stamps, which attest the part that is built. Every run of `npm run model:links`
+  lists them, `not built` or `partly built`.
 - **Scenario traces** (`npm run traces`, `scripts/check-traces.mjs`, in `npm test`). Every S-BTN
   scenario's run on the local host is recorded, one step per request or alarm tick, with the
   state projection after it (`test/integration/trace.ts`: observation numbers, the model's
@@ -199,7 +205,7 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
 | `writingLegsBarred` — every writing leg started under the required bar, by a worker of no barred family | R-BTN-45, R-BTN-60, R-BTN-67 |
 | `gatesHeld` — every claim and advance was granted with every gate in force holding (hold, barred tags, required bar, the queued leg, and the leg's rows: an unmet prerequisite, an open decision, a retry backoff, a provisional row), recorded at the grant apart from the guard | R-BTN-45, R-BTN-83, R-BTN-120, R-BTN-122, R-BTN-126, rules 1, 3, 8 |
 | `noActAfterLoss` — no worker pushes for a claim the alarm reaped (unfenced) | R-BTN-6, R-BTN-26 |
-| `noStuckTicket` — no deadlock: a ticket git has not finished or withdrawn, once the syncs are idle and the head matches git, is held, fenced, owner-held, its queued leg waiting on `policy` or blocked (a row, listed by R-BTN-75), flagged, or claimable | §6.7, R-BTN-10, R-BTN-35, R-BTN-67, R-BTN-75, R-BTN-83 |
+| `noStuckTicket` — no deadlock: a ticket git has not finished or withdrawn, once the syncs are idle and the head matches git, is held, fenced, owner-held, its queued leg waiting on `policy`, blocked (a row, listed by R-BTN-75) or held off by a provisional row (R-BTN-126), flagged, or claimable | §6.7, R-BTN-10, R-BTN-35, R-BTN-67, R-BTN-75, R-BTN-83, R-BTN-126 |
 | `blockedIsStored` — `blocked_since` is what the rows, the queued leg and the held state say, after every transaction | R-BTN-75 |
 | `unblockedFollowsBlocked` — every `unblocked` event follows a `blocked` one | R-BTN-77, R-BTN-75 as amended by R3-1254 |
 | `attemptsBounded`, `blockedEndsBounded` — at most `MAX_ATTEMPTS` failed attempts, and `MAX_BLOCKED` blocked ends and the one that holds, per ticket and leg between hold lifts | R-BTN-122, R-BTN-126 |
@@ -243,7 +249,8 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
   `blockedEndsHoldPastMaxBlockedTest`; a lift that keeps the blocked-end count fails
   `liftResetsBlockedEndsTest`; a backoff that clears before `retry_after` fails
   `backoffWaitsForRetryAfterTest`; a provisional row that lapses before its hour fails
-  `provisionalRowWaitsForTheHourTest`; a course whose end is not terminal passes
+  `provisionalRowWaitsForTheHourTest`; an alarm reap that counts no attempt fails
+  `alarmReapIsAFailedAttemptTest`; a course whose end is not terminal passes
   `courseOk` and fails `courseRulesRefuseTest`;
 - `MAX_DRIFT = 3`, above `MARGIN = 2`, lets a reaped worker push (`noActAfterLoss`); at
   `MAX_DRIFT = 2` it cannot — the spec's assumption is drift ≤ the margin.
@@ -252,7 +259,7 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
 
 | Check | Instance | Result |
 |---|---|---|
-| 47 regression runs | `sim` sizes, zero drift | pass |
+| 48 regression runs | `sim` sizes, zero drift | pass |
 | `safety`, 10,000 × 40 steps of `step`; 3,000 × 40 of `progressStep` | `sim` | no violation |
 | witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap, a blocked ticket, a provisional row, a backoff, an `unblocked` event; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all 12 reached |
 | a second review | — | reached by a regression run only (`maxRunsSurviveResumptionTest`) |
