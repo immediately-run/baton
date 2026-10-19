@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { toItf, type ClaimView, type Projection, type Step } from '../integration/trace';
 import { checkTrace, scopeErrors } from '../../scripts/check-traces.mjs';
-import { check as checkLinks, closureText, declarations, hashOf } from '../../scripts/check-model-links.mjs';
+import { check as checkLinks, closureText, declarations, hashOf, pendingLines } from '../../scripts/check-model-links.mjs';
 import { readFileSync } from 'node:fs';
 
 const dir = mkdtempSync(join(tmpdir(), 'baton-check-traces-'));
@@ -83,7 +83,9 @@ describe('check-traces rejects what the model forbids, naming the step', () => {
   }, 120_000);
 });
 
-describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1)', () => {
+// each case checks one trace through the model; the first also pays for loading it, which outgrew
+// the default 5 s with R3-1254's prerequisites (the cases above already allow 120 s)
+describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1)', { timeout: 120_000 }, () => {
   const claimed = (over: Partial<ClaimView> = {}) => (p: Projection) => ({ ...p, claims: { 1: claim(over) } });
   const rejected = async (name: string, rest: [Step['origin'], (p: Projection) => Projection][], reason: string) => {
     const r = await check(name, trace(rest));
@@ -166,5 +168,48 @@ describe('model:links matches a stamp to its function, not its file (round 2, 2-
     writeFileSync(file, src.replace(`@model advance sha256:${advance}`, `@model advance sha256:${advance}\n  // @model advance sha256:000000000000`));
     expect(checkLinks(root).errors.some((e: string) => e.includes('stamped 000000000000'))).toBe(true);
     rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('model:links reads `@impl pending` notes (R3-1254 part 2, round 1, 1-B-3)', () => {
+  const copy = () => {
+    const root = mkdtempSync(join(tmpdir(), 'baton-links-'));
+    const repo = join(import.meta.dirname, '../..');
+    cpSync(join(repo, 'model'), join(root, 'model'), { recursive: true });
+    cpSync(join(repo, 'src'), join(root, 'src'), { recursive: true });
+    return root;
+  };
+  it('a pending-only action needs no stamp; beside an @impl the stamp is still checked', () => {
+    const root = copy();
+    const { errors, actions } = checkLinks(root);
+    expect(errors).toEqual([]);
+    expect(actions.get('endBlocked').impls).toEqual([{ pending: expect.stringContaining('B-21') }]);
+    // syncPost is partly built: its implementing functions keep their stamps checked
+    expect(actions.get('syncPost').impls.some((im: { pending?: string }) => im.pending)).toBe(true);
+    const file = join(root, 'src/core/baton.ts');
+    const src = readFileSync(file, 'utf8');
+    writeFileSync(file, src.replace(/@model syncPost sha256:[0-9a-f]{12}/, '@model syncPost sha256:000000000000'));
+    const errors2 = checkLinks(root).errors;
+    expect(errors2.length).toBeGreaterThan(0);
+    expect(errors2.every((e: string) => e.includes('src/core/baton.ts#board: action syncPost changed'))).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+  it('a note without the em dash and its text is no note: the action then names no implementation', () => {
+    const root = copy();
+    const model = join(root, 'model/baton.qnt');
+    const src = readFileSync(model, 'utf8');
+    const note = /\/\/ @impl pending — `released:blocked`[^\n]*/;
+    expect(src).toMatch(note);
+    writeFileSync(model, src.replace(note, (l) => l.replace('pending —', 'pending -')));
+    expect(checkLinks(root).errors).toEqual([expect.stringContaining('action endBlocked names no implementation')]);
+    writeFileSync(model, src.replace(note, '// @impl pending —'));
+    expect(checkLinks(root).errors).toEqual([expect.stringContaining('action endBlocked names no implementation')]);
+    rmSync(root, { recursive: true, force: true });
+  });
+  it('lists a pending-only action as not built and one beside an @impl as partly built', () => {
+    const { actions } = checkLinks(join(import.meta.dirname, '../..'));
+    const lines = pendingLines(actions);
+    expect(lines).toContainEqual(expect.stringMatching(/^endBlocked: not built — /));
+    expect(lines).toContainEqual(expect.stringMatching(/^syncPost: partly built — /));
   });
 });

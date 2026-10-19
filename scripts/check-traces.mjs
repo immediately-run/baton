@@ -149,6 +149,11 @@ export function translate(trace) {
     TAGS: `Map(${WS.map((w) => `${q(w)} -> ${qSet(tags[w.slice(1)] ?? [])}`).join(', ')})`,
     REQUIRED: qSet(REQUIRED),
     MAX_TIME: 100000,
+    // retries per leg (R-BTN-122) and blocked ends (R-BTN-126) are off: the core keeps §6.10's
+    // per-ticket policy, whose holds the traces carry as the owner's (setHold)
+    MAX_ATTEMPTS: 100000,
+    BACKOFF: 0,
+    MAX_BLOCKED: 100000,
   };
 
   // The environment the model has and Baton cannot see: git, each sync run's phase, the claim

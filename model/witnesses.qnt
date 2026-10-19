@@ -6,7 +6,8 @@ module witnesses {
   import baton(TICKETS = Set("t1", "t2"), WORKERS = Set("w1", "w2", "w3"), SLOTS = Set(1, 2),
                MAX_CLAIMS = 6, GIT_BUDGET = 2, OWNER_BUDGET = 2,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
-               REQUIRED = Set("fix", "merge"), MAX_TIME = 12).* from "./baton"
+               REQUIRED = Set("fix", "merge"), MAX_TIME = 12,
+               MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1).* from "./baton"
   action winit = init
   action wstep = step
   action wprogress = progressStep
@@ -23,6 +24,11 @@ module witnesses {
   val noSecondReview = TICKETS.forall(t => runs(st.gitPath.get(t), "review") < 2)
   val noConfirmedDone = st.claims.keys().forall(i =>
     not(st.claims.get(i).confirmed and st.claims.get(i).kind == "done" and st.claims.get(i).confirmObs > 0))
+  // R3-1254: a leg's prerequisites — the states the new invariants are about
+  val noBlockedTicket = TICKETS.forall(t => not(st.blocked.get(t)))
+  val noProvisionalRow = st.provs.size() == 0
+  val noRetryRow = TICKETS.forall(t => st.retryRows.get(t).size() == 0)
+  val noUnblockedEvent = TICKETS.forall(t => st.lastEvent.get(t) != "unblocked")
   val noAlarmReap = st.claims.keys().forall(i =>
     not(st.claims.get(i).kind == "reap" and not(st.claims.get(i).fencePending) and st.up.get(st.claims.get(i).worker)))
 }
