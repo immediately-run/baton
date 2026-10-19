@@ -4,7 +4,8 @@ module regressions {
   import baton(TICKETS = Set("t1", "t2"), WORKERS = Set("w1", "w2", "w3"), SLOTS = Set(1, 2),
                MAX_CLAIMS = 6, GIT_BUDGET = 2, OWNER_BUDGET = 2,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
-               REQUIRED = Set("fix", "merge"), MAX_TIME = 12).* from "./baton"
+               REQUIRED = Set("fix", "merge"), MAX_TIME = 12,
+               MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1).* from "./baton"
 
   val c1 = st.claims.get(1)
   val c2 = st.claims.get(2)
@@ -19,6 +20,17 @@ module regressions {
   action sync1: bool =
     syncNumber(1).then(syncRead(1, TICKETS.mapBy(t => Set("family:b")), queuedFor(st.gitPath, TICKETS.mapBy(_ => "")))).then(syncPost(1))
   action read(s: int, bars: Set[str]): bool = syncRead(s, TICKETS.mapBy(t => bars), queuedFor(st.gitPath, TICKETS.mapBy(_ => "")))
+
+  // R3-1254: at the bound on time, `timeUp` is enabled and changes nothing, so `step` always
+  // has an action. A run whose workers are all dead or fenced, holding claims whose leases have
+  // not expired when time reaches MAX_TIME, has no other: the alarm needs time to pass, and a
+  // dead worker holding a claim does not restart. Quint's simulator then re-drew that step
+  // forever (seed 1, run 2,938–2,952 of `npm run model`'s 10,000).
+  run timeUpIdlesAtTheBoundTest =
+    start.then(claim("w1", "t1")).then(crash("w1")).then(MAX_TIME.reps(_ => tick))
+      .expect(st.now == MAX_TIME)
+      .then(timeUp).expect(st.now == MAX_TIME and workerClaim("w1").size() == 1)
+  run timeUpWaitsForTheBoundTest = start.then(timeUp).fail()
 
   // The fifth review's B3 (a claim hook as an await, R-BTN-52) and its fallback runs went with
   // R-BTN-98, which retired the hook: a claim is one transaction (R3-1254).
@@ -131,6 +143,13 @@ module regressions {
   run alarmReapClearsRegressedTest =
     regressedClaim.then(sleep("w1")).then(tick).then(tick).then(tick).then(tick).then(alarmReap(1))
       .expect(c1.status == "reaped" and not(c1.regressed) and c1.endedRegressed)
+  // R-BTN-122 (§6.10 counts it): an alarm reap is a failed attempt on the claim's leg, backed off
+  // like a `fail` end, and the backoff's block is logged.
+  run alarmReapIsAFailedAttemptTest =
+    start.then(claim("w1", "t1")).then(sleep("w1")).then(tick).then(tick).then(tick).then(tick).then(alarmReap(1))
+      .expect(c1.status == "reaped" and st.attempts.get("t1").get("implement") == 1
+              and st.retryRows.get("t1").contains("implement") and st.blocked.get("t1")
+              and st.lastEvent.get("t1") == "blocked")
   run forceReapClearsRegressedTest =
     regressedClaim.then(forceReap("w1"))
       .expect(not(c1.regressed) and c1.endedRegressed)
@@ -253,4 +272,182 @@ module regressions {
       .then(tick)
       .then(pushEvidence("w1", true))
       .fail()
+
+  // ---- a leg's prerequisites (R3-1254: R-BTN-75, -78, -120, -122, -126) ----
+  pure val AT_REVIEWED: Dep = { leg: "", other: "t2", mode: "at", stations: Set("reviewed") }
+  pure val REACHED_PR: Dep = { leg: "", other: "t2", mode: "reached", stations: Set("pr-open") }
+  pure val T2_DONE: Dep = { leg: "", other: "t2", mode: "done", stations: Set() }
+  // w2 takes t2 to `reviewed` and suspends there; a sync confirms it
+  action t2Reviewed: bool =
+    claim("w2", "t2").then(leg("w2", "implement")).then(leg("w2", "review"))
+      .then(endClaim("w2", "suspended", true)).then(sync1)
+
+  // R-BTN-120: `at` holds while the other ticket is at the station, and blocks again when it moves
+  // on; R-BTN-75, R-BTN-77: blocked_since follows, each change an event, `unblocked` after `blocked`.
+  run atPrerequisiteFollowsTheOtherTicketTest =
+    start.then(gitDepends("t1", AT_REVIEWED, true)).then(sync1)
+      .expect(st.blocked.get("t1") and st.lastEvent.get("t1") == "blocked" and not(ticketClaimable("t1")))
+      .then(t2Reviewed)
+      .expect(not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked" and claimableBy("t1", "w1"))
+      .then(foreignPush("t2", "fix")).then(sync1)
+      .expect(st.blocked.get("t1") and not(ticketClaimable("t1")) and not(st.unpairedUnblock))
+
+  // ... where `reached` stays met once the other ticket has been there.
+  run reachedPrerequisiteStaysMetTest =
+    start.then(gitDepends("t1", REACHED_PR, true)).then(sync1)
+      .expect(st.blocked.get("t1"))
+      .then(t2Reviewed)
+      .expect(not(st.blocked.get("t1")))
+      .then(foreignPush("t2", "fix")).then(sync1)
+      .expect(not(st.blocked.get("t1")) and claimableBy("t1", "w1"))
+
+  // R-BTN-120: a withdrawn ticket meets no prerequisite; the block stands, and is no deadlock
+  // (noStuckTicket counts it: a block is listed, R-BTN-75).
+  run withdrawnMeetsNothingTest =
+    start.then(gitDepends("t1", { leg: "", other: "t2", mode: "at", stations: Set("filed") }, true)).then(sync1)
+      .expect(not(st.blocked.get("t1")) and ticketClaimable("t1"))
+      .then(withdraw("t2")).then(sync1)
+      .expect(st.blocked.get("t1") and st.postedGone.get("t2") and not(ticketClaimable("t1")))
+
+  // R-BTN-78: a decision on a leg refuses the advance into it, not a claim of another leg; one on
+  // a leg that is not a posted next leg sits on the whole ticket.
+  run legDecisionRefusesAdvanceNotClaimTest =
+    start.then(claim("w2", "t1")).then(leg("w2", "implement")).then(leg("w2", "review"))
+      .then(endClaim("w2", "suspended", true))
+      .then(gitDecides("t1", "merge", true))
+      .then(syncNumber(1)).then(syncRead(1, TICKETS.mapBy(t => Set("family:b")), queuedFor(st.gitPath, TICKETS.mapBy(_ => "adjudicate")))).then(syncPost(1))
+      .expect(st.postedDecisions.get("t1") == Set("merge") and not(st.blocked.get("t1")) and claimableBy("t1", "w1"))
+      .then(claim("w1", "t1")).then(leg("w1", "adjudicate"))
+      .then(advance("w1", "merge", Set("family:b")))
+      .fail()
+
+  run decisionOnAnUnpostedLegIsOnTheTicketTest =
+    start.then(gitDecides("t1", "merge", true)).then(sync1)
+      .expect(st.postedDecisions.get("t1") == Set("") and st.blocked.get("t1") and not(ticketClaimable("t1")))
+
+  // R-BTN-122: a failed attempt backs the leg off — a `retry` block; the end that leaves the
+  // ticket blocked logs `blocked` (R-BTN-75 as amended); the alarm clears it at retry_after and
+  // `unblocked` follows; at MAX_ATTEMPTS the ticket is held, and the lift resets the count.
+  run backoffThenHoldTest =
+    start.then(claim("w1", "t1")).then(endClaim("w1", "fail", false))
+      .expect(st.retryRows.get("t1") == Set("implement") and st.blocked.get("t1") and st.lastEvent.get("t1") == "blocked")
+      .then(sync1)
+      .expect(not(ticketClaimable("t1")))
+      .then(tick).then(tick).then(retryElapse("t1", "implement"))
+      .expect(not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked" and ticketClaimable("t1"))
+      .then(claim("w2", "t1")).then(endClaim("w2", "fail", false))
+      .expect(st.held.get("t1") and st.attempts.get("t1").get("implement") == 2)
+      .then(setHold("t1", false))
+      .expect(st.attempts.get("t1").get("implement") == 0)
+  // ... and not before its time: one tick into a two-tick backoff, the row may not clear.
+  run backoffWaitsForRetryAfterTest =
+    start.then(claim("w1", "t1")).then(endClaim("w1", "fail", false))
+      .then(tick).then(retryElapse("t1", "implement")).fail()
+
+  // R-BTN-122: the backoff refuses an advance into its leg too (backing-off): review fails and
+  // backs off; the next claim's fix may not advance into review until the alarm clears it.
+  action reviewBackedOffThenFix: bool =
+    start.then(claim("w1", "t1")).then(leg("w1", "implement")).then(leg("w1", "review"))
+      .then(endClaim("w1", "fail", true))
+      .expect(st.retryRows.get("t1") == Set("review"))
+      .then(sync1).then(claim("w1", "t1")).then(leg("w1", "fix"))
+  run backoffRefusesAdvanceTest =
+    reviewBackedOffThenFix.then(advance("w1", "review", NONE)).fail()
+  run backoffClearedAdvanceTest =
+    reviewBackedOffThenFix.then(tick).then(tick).then(retryElapse("t1", "review")).then(heartbeat("w1"))
+      .then(advance("w1", "review", NONE))
+      .expect(st.claims.get(2).leg == "review")
+
+  // R-BTN-126: a blocked end on a decision writes it to git, then a provisional row that refuses a
+  // claim into the leg but is no block. A snapshot read before the commit keeps the row; the first
+  // that contains it replaces it with what it posts — a confirmed row, so `blocked` is logged then.
+  run provisionalRowUntilASnapshotContainsItTest =
+    start.then(claim("w1", "t1"))
+      .then(syncNumber(1)).then(read(1, Set("family:b")))
+      .then(endBlocked("w1", "decision", T2_DONE))
+      .expect(st.provs.size() == 1 and not(st.blocked.get("t1")) and st.lastEvent.get("t1") == ""
+              and st.gitDecisions.get("t1") == Set("implement"))
+      .then(syncPost(1))
+      .expect(st.provs.size() == 1 and st.postedDecisions.get("t1") == Set() and not(ticketClaimable("t1")))
+      .then(sync1)
+      .expect(st.provs.size() == 0 and st.postedDecisions.get("t1") == Set("implement")
+              and st.blocked.get("t1") and st.lastEvent.get("t1") == "blocked")
+
+  // ... and one no snapshot confirms lapses after the hour (prerequisite-unconfirmed).
+  run provisionalRowLapsesTest =
+    start.then(claim("w1", "t1")).then(endBlocked("w1", "ticket", AT_REVIEWED))
+      .expect(st.provs.size() == 1 and st.gitDeps.get("t1") == Set(AT_REVIEWED.with("leg", "implement")))
+      .then(tick).then(tick).then(tick).then(tick).then(provisionalLapses("t1", "implement"))
+      .expect(st.provs.size() == 0)
+  // ... and not before the hour is up.
+  run provisionalRowWaitsForTheHourTest =
+    start.then(claim("w1", "t1")).then(endBlocked("w1", "ticket", AT_REVIEWED))
+      .then(tick).then(tick).then(tick).then(provisionalLapses("t1", "implement")).fail()
+
+  // R-BTN-126: a blocked end is not a failed attempt; past MAX_BLOCKED the next one holds the ticket.
+  run blockedEndsHoldPastMaxBlockedTest =
+    start.then(claim("w1", "t1")).then(endBlocked("w1", "decision", T2_DONE))
+      .expect(st.attempts.get("t1").get("implement") == 0 and not(st.held.get("t1")))
+      .then(sync1).then(gitDecides("t1", "implement", false)).then(sync1)
+      .expect(not(st.blocked.get("t1")) and ticketClaimable("t1"))
+      .then(claim("w2", "t1")).then(endBlocked("w2", "decision", T2_DONE))
+      .expect(st.held.get("t1") and st.blockedEnds.get("t1").get("implement") == 2)
+  // R-BTN-78's `retry`: a lift clears a running backoff with the counts, and the ticket is
+  // claimable at once; the backoff's block ends with `unblocked` (round 3, 3-r3-1).
+  run liftClearsTheBackoffTest =
+    start.then(claim("w1", "t1")).then(endClaim("w1", "fail", false)).then(sync1)
+      .expect(st.retryRows.get("t1") == Set("implement") and st.blocked.get("t1"))
+      .then(setHold("t1", true)).then(setHold("t1", false))
+      .expect(st.retryRows.get("t1") == Set() and not(st.blocked.get("t1")) and ticketClaimable("t1")
+              and st.lastEvent.get("t1") == "unblocked" and not(st.unpairedUnblock))
+
+  // §7.2, R-BTN-75: a `ticket` row refuses a claim, never a holder's advance — a dependency that
+  // opens mid-claim lets the holder advance, with no gate violation (round 3, 3-r3-2).
+  run ticketRowBindsNoAdvanceTest =
+    start.then(claim("w1", "t1")).then(leg("w1", "implement"))
+      .then(gitDepends("t1", T2_DONE, true)).then(sync1)
+      .expect(st.postedDeps.get("t1") != Set())
+      .then(advance("w1", "review", NONE))
+      .expect(c1.leg == "review" and not(c1.gateViolation))
+
+  // ... and lifting that hold resets the count, so the next blocked end does not hold again.
+  run liftResetsBlockedEndsTest =
+    start.then(claim("w1", "t1")).then(endBlocked("w1", "decision", T2_DONE))
+      .then(sync1).then(gitDecides("t1", "implement", false)).then(sync1)
+      .then(claim("w2", "t1")).then(endBlocked("w2", "decision", T2_DONE))
+      .then(setHold("t1", false))
+      .expect(not(st.held.get("t1")) and st.blockedEnds.get("t1").get("implement") == 0)
+      .then(sync1).then(gitDecides("t1", "implement", false)).then(sync1)
+      .then(claim("w1", "t1")).then(endBlocked("w1", "decision", T2_DONE))
+      .expect(not(st.held.get("t1")) and st.blockedEnds.get("t1").get("implement") == 1)
+
+  // R-BTN-75 as amended by R3-1254: a decision posted while the ticket is held blocks nothing;
+  // the end that leaves it blocked logs `blocked`, so the answer's `unblocked` follows one.
+  run endLeavingTheTicketBlockedLogsBlockedTest =
+    start.then(claim("w1", "t1")).then(gitDecides("t1", "", true)).then(sync1)
+      .expect(not(st.blocked.get("t1")) and st.postedDecisions.get("t1") == Set(""))
+      .then(endClaim("w1", "release", false))
+      .expect(st.blocked.get("t1") and st.lastEvent.get("t1") == "blocked")
+      .then(gitDecides("t1", "", false)).then(sync1)
+      .expect(not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked" and not(st.unpairedUnblock))
+
+  // R-BTN-69 (R3-1254, owner: "exactly one start and at least one terminal station for each
+  // course"): the model's course passes the acceptance rules, and each case below breaks one —
+  // a leg leaving an end, no end, a cycle of unbounded legs, a start_leg not leaving start, a
+  // station nothing reaches, a station with no way on. No end also fails "an end reachable from
+  // every station"; `courseOk` keeps its explicit `ends != Set()` so the rule reads as R-BTN-69
+  // states it.
+  run courseIsAcceptedTest = start.expect(courseWellFormed)
+  run courseRulesRefuseTest = start.expect(and {
+    not(courseOk(START, START_LEG, ENDS, LEGS.union(Set("reopen")), FROM.put("reopen", Set("merged")),
+                 TO.put("reopen", "filed"), MAX_RUNS.put("reopen", 1))),
+    not(courseOk(START, START_LEG, Set(), LEGS, FROM, TO, MAX_RUNS)),
+    not(courseOk(START, START_LEG, ENDS, LEGS, FROM, TO, MAX_RUNS.put("fix", 99).put("review", 99))),
+    courseOk(START, START_LEG, ENDS, LEGS, FROM, TO, MAX_RUNS.put("fix", 99)),
+    not(courseOk(START, "merge", ENDS, LEGS, FROM, TO, MAX_RUNS)),
+    not(courseOk(START, START_LEG, ENDS, LEGS.union(Set("leave")), FROM.put("leave", Set("orphan")),
+                 TO.put("leave", "merged"), MAX_RUNS.put("leave", 99))),
+    not(courseOk(START, START_LEG, ENDS, LEGS.union(Set("wedge")), FROM.put("wedge", Set("pr-open")),
+                 TO.put("wedge", "stuck"), MAX_RUNS.put("wedge", 99))),
+  })
 }

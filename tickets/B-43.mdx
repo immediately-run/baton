@@ -1,0 +1,90 @@
+---
+title: "B-43 — Courses are what their sources name; the CLI ships none (R-BTN-134)"
+id: B-43
+project: baton
+status: available
+updated: 2026-10-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "Build BATON_SPEC §2p (R-BTN-134): a course is a course directory at a full commit reachable from its repository's default branch; sync, runner and kit read it from there; the standard courses move to course directories in the baton repository; the home holds only overrides; the CLI's registry and its own-commit checks go; the workflow pins the CLI's npm version. S-BTN-110, G-BTN-129. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-42
+---
+
+**Brief:** the owner, 2026-10-19: "course files should be loaded from .baton. Any other files
+(such as standard courses) should be referenced from within files under .baton. The CLI should
+not package standard courses", then "the CLI shouldn't include any hardcoded course graphs or
+associated legs. baton CLI should not assume it has the correct version of a course. Using a
+specific commit hash instead of @main is fine."
+**Spec:** `spec/BATON_SPEC.md` §2p (R-BTN-134), as merged from PR 57 after three adversarial
+review rounds. It amends R-BTN-5, -22, -51, -65, -69, -72, -74, -96, -97, -98, -104, -105,
+-124, -131, -133 and §7.1. This ticket builds it. The owner's ruling in it is settled: a
+source's code runs with the sync job's full environment, stated plainly, not sandboxed.
+**Depends on:** B-42 (trees, wrapper, leg module, `runner:` capability), and the CLI's first
+npm release (PR 58 makes the package public; the publish workflow still has to exist), because
+the sync workflow pins `npx --yes @immediately-run/baton@<version>`.
+
+### Requires
+
+Network access to github.com for the source fetch in production; the tests use local bare
+repositories through a test binding.
+
+### Why
+
+The CLI holds the standard courses as a registry (`src/defaults/courses.ts`). The sync also
+holds a source to the CLI's own git commit (`cliSelf`, `checkSource`), which a published CLI
+cannot tell, so `repo sync` and `repo init` fail from the npm package.
+
+### What to build
+
+1. **Source grammar** (`src/defaults/course-source.ts`): the path slot, with no `.` or `..`
+   segments, and a full commit only.
+2. **One source fetcher** for the sync, the runner and the kit:
+   - `ls-remote --symref` for the default branch, then a blobless fetch of that branch;
+     ancestry is checked against the head just fetched, and nothing is ever fetched by id.
+   - B-42's trees and digests.
+   - A `sources` URL mapping for mirrors, read by every reader.
+   - `BATON_SOURCE_TOKEN` as git's credential in CI.
+3. **Course directories** under `src/defaults/courses/<id>/`:
+   - One each for `create-pr`, `review-pr`, `bug-report`, `draft-ticket`, `decision`,
+     `build-app`, `epic`, `branch` and `pr`.
+   - Each holds `course.json`, `sync.mjs`, `entry.json` (with `facts`, and `min_cli` where
+     needed), `legs/*` and the `.md` instructions, and is self-contained. `npm run courses`
+     copies shared code in, and CI checks it is current.
+   - Every leg requires `runner:leg-trees`.
+   - Delete the registry, `cliSelf`, `cliPin` and `checkSource`'s byte-equality.
+4. **Sync:**
+   - Run the ticket source and station functions through the wrapper in a whole-commit tree.
+   - Read `entry.json` and merge it at read time.
+   - Facts by `facts`; `imports` for own courses.
+   - Refuse a home `course.json`, `sync.mjs`, `rank.mjs` or leg script beside a `source`.
+   - Enforce `runner:leg-trees` and `min_cli`.
+   - Log a `Baton-Source` line for each moved source.
+   - Under `--defaults-only`, use `trusted_sources` from the sync's `--config`.
+5. **Runner:**
+   - Course directories from sources, overrides from the home tree.
+   - A course still in B-33's form gets no `version` declaration, plus a one-time log line.
+   - The merged `version`, read at startup and after each home fetch.
+6. **`baton repo init`:**
+   - Flags `--course`, `--source`, `--at`, `--override` and `--instructions`.
+   - Reads sources as data only, never through a symlink, and writes no course file.
+   - Writes `Baton-Source` trailers, and a workflow with `npx --yes
+     @immediately-run/baton@<version>`, the CI cache and the source token.
+   - Retire `--eject stations`; `--eject tickets` copies the file `build:cli` prebuilt.
+   - The one-commit move from B-33's form and from `pr` and `branch`.
+7. **Tests:** S-BTN-110, G-BTN-129. Rewrite S-BTN-104, -105, -107 and S-BTN-54 for the new layout.
+   Add cases for mirrors, `imports`, the merged-entry version and `min_cli`.
+
+### Exit criteria
+
+- S-BTN-110 passes, and `npm test` and `npm run typecheck` are green.
+- `dist/baton.mjs`, run outside any git checkout, scaffolds and syncs a repository on
+  `create-pr` with a local mirror as the source.
+- Carried from review round 3, to settle while building: what a failed source fetch does
+  before an open-world claim exists (C-3).

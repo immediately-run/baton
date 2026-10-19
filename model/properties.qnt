@@ -11,7 +11,8 @@ module properties {
                MAX_CLAIMS = P_MAX_CLAIMS, GIT_BUDGET = P_GIT_BUDGET,
                OWNER_BUDGET = P_OWNER_BUDGET,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
-               REQUIRED = Set("fix", "merge"), MAX_TIME = 12).* from "./baton"
+               REQUIRED = Set("fix", "merge"), MAX_TIME = 12,
+               MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1).* from "./baton"
   action pinit = init
   action pstep = step
   action pprogress = progressStep
@@ -94,12 +95,24 @@ module properties {
     atEnd(st.gitPath.get(t)) or st.withdrawn.get(t) or not(quiescent(t))
       or activeOf(t).size() > 0 or fencedOf(t).size() > 0 or unconfirmedOf(t).size() > 0
       or st.held.get(t) or (st.queued.get(t) != "" and not(readyLegs(t).contains(st.queued.get(t))))
+      or gated(t, st.queued.get(t))
       or ticketClaimable(t) or st.nextId > MAX_CLAIMS)
+
+  // R-BTN-75: blocked_since is what the rows, the queued leg and the held state say — written in
+  // every transaction that changes one of them, never left behind by one.
+  val blockedIsStored = TICKETS.forall(t => st.blocked.get(t) == blockedIn(st, t))
+  // R-BTN-77 (R3-1254 item 2): an `unblocked` event follows a `blocked` one.
+  val unblockedFollowsBlocked = not(st.unpairedUnblock)
+  // R-BTN-122: no ticket and leg spends more than MAX_ATTEMPTS failed attempts between hold lifts;
+  // R-BTN-126: nor more than MAX_BLOCKED blocked ends and the one that holds it.
+  val attemptsBounded = TICKETS.forall(t => LEGS.forall(l => st.attempts.get(t).get(l) <= MAX_ATTEMPTS))
+  val blockedEndsBounded = TICKETS.forall(t => LEGS.forall(l => st.blockedEnds.get(t).get(l) <= MAX_BLOCKED + 1))
 
   val safety = and {
     oneLiveHolderPerTicket, oneClaimPerWorker, observationsIncrease, confirmationAfterEnd,
     confirmedIsInGit, staleOnlyWhenTakenAway, regressedOnlyWhenGitRegressed, boundedLoops,
     writingLegsBarred, gatesHeld, noActAfterLoss, noStuckTicket,
+    blockedIsStored, unblockedFollowsBlocked, attemptsBounded, blockedEndsBounded,
   }
 
   // ---- liveness: in liveness.qnt, so the safety proof does not carry the fairness terms ----

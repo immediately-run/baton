@@ -10,7 +10,7 @@
 // Markdown on stdout; each step's own output goes to stderr.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { SIZES, labels, renderReport } from '../scripts/model-report.mjs';
+import { SIZES, labels, renderReport, stepEnv } from '../scripts/model-report.mjs';
 
 const git = (...args) => spawnSync('git', args, { encoding: 'utf8' }).stdout.trim();
 const head = git('rev-parse', 'HEAD');
@@ -35,7 +35,7 @@ const steps = [
 const rows = [];
 for (const [label, cmd, args, env] of steps) {
   const t0 = Date.now();
-  const r = spawnSync(cmd, args, { stdio: ['ignore', process.stderr, process.stderr], env: { ...process.env, ...env } });
+  const r = spawnSync(cmd, args, { stdio: ['ignore', process.stderr, process.stderr], env: stepEnv(process.env, env) });
   rows.push([label, r.status === 0, Math.round((Date.now() - t0) / 60000)]);
 }
 

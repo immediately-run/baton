@@ -53,6 +53,7 @@ Part 2 lowered the proof to depth 4 for now, by the owner's choice. This ticket 
 
 - `npm run model:full` on the head passes at depth 5, with the proof under about 60 minutes on 4 CPUs.
 - The regression runs and the 10,000-run simulation still pass. Each reduction of `small` is named in the README with what it no longer reaches at depth 5.
+- Depth 5 reaches an `unblocked` event on `small` (claim, fail end, two ticks, the backoff clearing), so the proof exercises `unblockedFollowsBlocked` again; a reduction must keep that. `small`'s one ticket keeps a prerequisite on another ticket out of the proof at any depth: say in the README whether this ticket adds a second, and what it costs.
 
 ### Exit criteria
 

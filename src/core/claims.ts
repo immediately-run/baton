@@ -498,7 +498,7 @@ export class Claims {
 
   /** `POST /v1/runner/claim` (§6.2): idempotent by `request_id`; the lock is the index. The claim
    *  is at the ticket's posted station, running nothing, its path recorded (R-BTN-63). */
-  // @model claim sha256:1761b01d031f
+  // @model claim sha256:3d60a00737df
   claim(workerId: number, body: unknown) {
     const b = checkClaim(body);
     if (!this.anyCutOver()) throw new BatonError('not-cut-over', 'claims go through git until cutover (R-BTN-28)');
@@ -622,7 +622,7 @@ export class Claims {
    * nothing. The answer carries the latest snapshot's next legs and the course's advice (none
    * until the course's hook, R3-1236).
    */
-  // @model advance sha256:b8987ae3821b
+  // @model advance sha256:327b08487cc1
   advance(workerId: number, claimId: number, body: unknown) {
     const b = checkAdvance(body);
     const c = this.held(workerId, claimId);
@@ -692,7 +692,7 @@ export class Claims {
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
-  // @model endClaim sha256:a89a6e67dc71
+  // @model endClaim sha256:0458e7619d2f
   end(workerId: number, claimId: number, body: unknown) {
     const e = checkEnd(body);
     const c = this.held(workerId, claimId);
@@ -888,7 +888,7 @@ export class Claims {
 
   /** `POST /v1/ui/overrides/{item}` (§8, §11): `{expedite?, hold?}`. Lifting a hold clears its
    *  reason and any backoff, and resets the attempt count (§6.10). */
-  // @model setHold sha256:75c7600d7cf0
+  // @model setHold sha256:205ca2490e56
   setOverride(owner: string, item: string, body: unknown) {
     const o = checkOverride(body);
     const actor = `owner:${owner}`;
@@ -1007,8 +1007,8 @@ export class Claims {
 
   /** The heartbeat's `fenced` report (R-BTN-19): clears the fence of a claim reaped while this
    *  worker was alive — only in the incarnation it was reaped in, since a re-key never clears one. */
-  // @model fenceCleared sha256:a597d6234431
-  // @model heartbeat sha256:8b9e14fd6032
+  // @model fenceCleared sha256:2961accfdeca
+  // @model heartbeat sha256:8ee1bafe2bcc
   fenced(workerId: number, incarnation: number, claimId: number) {
     const c = this.rows<{ ticket_id: string }>(
       `SELECT ticket_id FROM claims WHERE id = ? AND worker_id = ? AND status = 'reaped' AND fence_pending = 1 AND fence_incarnation = ?`,
@@ -1025,7 +1025,7 @@ export class Claims {
   /** `POST /v1/ui/claims/{id}/reap`: any active claim. A live worker's claim is fence-pending
    *  (R-BTN-19) and the worker is not reaped, so its sidecar can still report the fence; a
    *  silent worker's is reaped as the alarm would. */
-  // @model forceReap sha256:40300c034a20
+  // @model forceReap sha256:47766d432026
   forceReap(owner: string, claimId: number, body: unknown) {
     checkConfirm(body);
     const c = this.rows<{ id: number; ticket_id: string; worker_id: number; status: string }>('SELECT id, ticket_id, worker_id, status FROM claims WHERE id = ?', claimId)[0];
@@ -1042,7 +1042,7 @@ export class Claims {
   /** `POST /v1/ui/claims/{id}/resolve` (§6.7): an unconfirmed completion is never confirmed
    *  automatically; the owner confirms it (git does carry it) or releases it (it never landed),
    *  which makes the item claimable again. The commit it named stays in the event. */
-  // @model ownerResolve sha256:2c8939dc2042
+  // @model ownerResolve sha256:06ad2af07f7e
   resolve(owner: string, claimId: number, body: unknown) {
     const { action } = checkResolve(body);
     const c = this.rows<{ ticket_id: string; end_reason: string; ended_at_sha: string }>(
@@ -1158,7 +1158,7 @@ export class Claims {
    * - R-BTN-63: a holder's declared bars the snapshot posts that leg's bars without log
    *   `bars-mismatch`.
    */
-  // @model syncPost sha256:67e38f2a2bd8
+  // @model syncPost sha256:bdfe0d6e71ff
   judge(repo: string, observation: number, seen: Map<string, Seen>) {
     let confirmed = 0;
     // A `done` is also confirmed by a reading numbered after the claim's latest advance that shows
@@ -1263,7 +1263,7 @@ export class Claims {
    *  or at an interim status that ends the item — ends `released:stale-board`, and the holder is
    *  told. A station that lags the holder's advances is never staleness (§2e). Before cutover git
    *  decides alone and the shadow reports end claims. */
-  // @model syncPost sha256:67e38f2a2bd8
+  // @model syncPost sha256:bdfe0d6e71ff
   private staleBoard(repo: string, observation: number) {
     if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND cutover_at IS NOT NULL', repo).length) return 0;
     const active = this.rows<{ id: number; ticket_id: string; worker_id: number; tier_ceiling: string; tier_ceilings: string; kind: string }>(
@@ -1301,8 +1301,8 @@ export class Claims {
 
   // ── the alarm's share (§6.6, §7.1, §9) ──────────────────────────────────────────────────
 
-  // @model alarmReap sha256:99a4907a9e83
-  // @model fenceTimeout sha256:7aa3c50f5fbe
+  // @model alarmReap sha256:9c7db9b40610
+  // @model fenceTimeout sha256:f8fa14757974
   alarm() {
     const now = this.c.now();
     this.releaseBarHolders(now);

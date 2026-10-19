@@ -1,13 +1,13 @@
 ---
 title: The standard courses
-description: The five courses Baton's CLI ships — create-pr, review-pr, bug-report, draft-ticket and decision — what each does, and how a repository adopts and changes one.
+description: The six courses Baton's CLI ships — create-pr, review-pr, bug-report, draft-ticket, decision and build-app — what each does, and how a repository adopts and changes one.
 tags: [concepts]
 order: 15
 ---
 
 A course is the route a ticket takes: its stations, and the legs an agent runs between them. A
 repository can write its own, as the docs repository did with `roadmap-pr`, but most need one of
-a handful of routes. Baton's CLI ships five, and a repository adopts each with one command. They
+a handful of routes. Baton's CLI ships six, and a repository adopts each with one command. They
 are specified in BATON_SPEC R-BTN-131 and started from the docs repository's skills.
 
 | course | what it does | legs | where it ends |
@@ -17,6 +17,7 @@ are specified in BATON_SPEC R-BTN-131 and started from the docs repository's ski
 | `bug-report` | traces a reported bug to its cause and the artifact that seeded it, dedupes it by cause, files the fix ticket or folds the report into the one that covers it, weighs prevention | trace, origin, dedupe, file or fold, prevent | `closed` |
 | `draft-ticket` | researches, drafts and files a ticket that prescribes its architecture, tests and requirements | research, draft, check | `filed` |
 | `decision` | turns a question only the owner can settle into a one-letter packet, then carries the answer out | prepare, carry-out | `decided` |
+| `build-app` | takes a one-line request to a verified application: a product definition, a design with mock-ups, an architecture and a plan, each approved by the owner, then the plan's tickets on `create-pr`, and a verification against the definition | define, design, architect, plan, file, verify | `shipped` |
 
 `create-pr` is the default. It replaced the `pr` course, which a repository scaffolded before
 keeps until it switches.
@@ -57,7 +58,7 @@ npx baton run --course bug-report --home ~/src/repo-bug-report
   PR names it after its answer (`approve https://github.com/<owner>/<name>/pull/<n>`) when the
   checkout's branch has none. The workflow's token reads public repositories; a private one
   needs a token that can read it.
-- **`bug-report`, `draft-ticket` and `decision` open no PR.** Their legs commit their work to the
+- **`bug-report`, `draft-ticket`, `decision` and `build-app` open no PR.** Their legs commit their work to the
   default branch, and each leg's `close` appends a line to `.baton/markers.jsonl` saying where the
   ticket got to and which leg comes next. The sync reads that file, so these courses need no forge
   token at all.
@@ -119,3 +120,37 @@ branch under review cannot rewrite its reviewer's instructions.
 To change how a course places tickets, `npx baton repo init --course <course> --eject stations`
 copies its station function into `.baton/courses/<course>/sync.mjs`, where you can edit it. The
 course is then yours, not the source's: remove its `source` from `.baton/baton.json` first.
+
+## `build-app`, step by step
+
+`build-app` is for a whole application, or a large feature of one. Adopt it beside `create-pr`,
+which its tickets run on:
+
+```
+npx baton repo init                       # create-pr
+npx baton repo init --course build-app
+```
+
+A request is one ticket, `course: build-app`, saying what to build, often in a sentence. Each
+of the first four legs drafts one document in `product/<ticket id>/` and stops for the owner:
+
+| leg | writes | the owner approves with |
+|---|---|---|
+| `define` | `PRODUCT.md`: who it is for, the rules, what is in and out, numbered acceptance criteria | `answer: define` |
+| `design` | `DESIGN.md` and a self-contained HTML mock-up of each screen in `mockups/` | `answer: design` |
+| `architect` | `ARCHITECTURE.md`: hosting, state, sign-in, abuse, operations, cost, testing, the walking skeleton | `answer: architect` |
+| `plan` | `PLAN.md`: every ticket, complete, and which acceptance criteria each one makes pass | `answer: plan` |
+
+Each draft ends with its open questions, each with a recommendation, and the ticket gets a
+`## Your turn` section. The owner settles them in a conversation: they open an interactive agent
+session in a checkout and ask it to follow `## The conversation` in that leg's instructions. The
+session asks the questions one at a time, rewrites the document as answers come, and sets
+`answer:` only when the owner says it is right. Nothing moves until then. Then `file` writes the
+plan's tickets as children of the request (`parent:`), each on `create-pr`, and the request waits
+until every one has merged and closed. `verify` then tests every acceptance criterion against
+the running build. It either closes the request, or files a fix ticket per failure and waits
+again, up to three rounds.
+
+Until interactive legs are built (B-34), the conversation is a session the owner starts
+themselves, and `answer:` is the approval.
+

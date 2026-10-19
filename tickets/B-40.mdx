@@ -1,0 +1,75 @@
+---
+title: "B-40 — The build-app standard course: product definition, design, architecture and plan with the owner, then child tickets and verification"
+id: B-40
+project: baton
+status: in-progress
+updated: 2026-10-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "A sixth standard course, `build-app`: `define`, `design`, `architect` and `plan` each draft one document under `product/<ticket id>/` with its open questions and wait on the owner's approval in `answer:`; `file` files the approved plan as child tickets on `create-pr`; `verify` waits on the children, tests every acceptance criterion and files fixes (amends BATON_SPEC R-BTN-131); S-BTN-107, G-BTN-126. Its first trial is an online Blokus. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-19: "an application creator course which records a very high level
+state machine for creating an application, starting with an interactive session where the author
+can discuss with the language model … what the product even is, resulting in a product
+definition document, and then gradually the user interfaces, overall software architecture,
+operations, concerns like where the software should run and how state should be persisted, how
+users should be authenticated … Then tickets created, and finally PRs from those tickets", tested
+on an online version of Blokus.
+**Spec:** `spec/BATON_SPEC.md` R-BTN-131 (the standard courses), R-BTN-86 (children), R-BTN-83
+(markers). This ticket amends R-BTN-131.
+
+### Requires
+
+None: a checkout and a terminal. The trial run on a real application (below) needs a runner and
+a person, and is its own step.
+
+### Why
+
+B-34's brief names the end-to-end application course as the goal of interactive legs. This
+ticket builds the course now, from what Baton already has, so that the course itself, its
+documents and its prompts get tested on a real application while B-34, B-7, B-13 and R3-1258 are
+built underneath it.
+
+### What is built
+
+1. `build-app` in `src/defaults/courses.ts`: the course file, `buildAppWaits` (each drafting
+   leg's successor waits on `owner` until `answer:` names the approved stage; `verify` waits on
+   `children`), and the leg stubs, every one suspending but a `verify` that ships.
+2. One instruction file per leg in `src/defaults/courses/build-app/`. Each drafting leg has two
+   parts: the headless draft, and `## The conversation`, which the owner's own interactive
+   session follows to settle the questions and approve.
+3. R-BTN-131 amended; S-BTN-107 and G-BTN-126; `docs/standard-courses.mdx`.
+
+### The interim, and what replaces it
+
+| today | replaced by |
+|---|---|
+| the conversation is the owner's own session, started by hand from the ticket's `## Your turn` | B-34: the runner launches the session and sends the link |
+| approval is `answer: <stage>` in the ticket, read by the station function | B-7: a person leg whose output is `std:decision@1`; B-3: station entry requiring it |
+| children are the markdown source's `parent:`, and `verify`'s wait on them is the course's own | R3-1258 (children in core) and B-10 (`requires: {tickets: …}`), as the `epic` course (B-13) uses |
+| the documents are found by path convention | B-3: `std:git.file@1` outputs a station requires |
+
+### Tests
+
+- `test/unit/standard-courses.test.ts`: the registry checks every standard course passes, and
+  `buildAppWaits` per stage and answer.
+- `test/integration/S-BTN-107.build-app-course.test.ts`: S-BTN-107, through the local host.
+
+### Exit criteria
+
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+- [ ] one trial run on a fresh application repository (an online Blokus), from request to
+      `shipped` or to the first leg that fails, with what each leg needed recorded here
+
+## Status
+
+_(filed 2026-10-19)_ Pushed straight to `main` at the owner's direction, 2026-10-19, without a PR or the review gate; the trial run is outstanding. The interim forms it uses (`waiting_on: owner` over `answer:`, the parent's `blocked_by` fan-in, `tags: [OP]`) move under B-41 (§2n, R-BTN-132).

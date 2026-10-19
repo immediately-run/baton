@@ -46,6 +46,12 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(only(c, 'no-end').map((v) => v.path)).toEqual(['stations.stuck']);
   });
 
+  it('a leg leaving an end station is terminal: a ticket there is done, so it is never offered', () => {
+    const c = copy();
+    c.legs.reopen = { from: ['merged'], to: 'filed', max_runs: 1 };
+    expect(only(c, 'terminal').map((v) => v.path)).toEqual(['legs.reopen.from']);
+  });
+
   it('a cycle with no max_runs is unbounded, once per cycle; a bounded leg anywhere in it suffices', () => {
     const c = copy();
     delete c.legs.review.max_runs;
