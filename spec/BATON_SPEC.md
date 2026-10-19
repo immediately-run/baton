@@ -3343,7 +3343,8 @@ graph." Then "Go" on the proposal.)*
       ticket source first (a `depends_at` entry, a posted decision) and the end carries
       `commit`, the pushed commit that wrote them. Baton writes a **provisional** row on the
       leg (`ticket_blocks.provisional` that commit). It keeps the leg out of recommendations
-      and refuses a claim or `advance` into that leg (rule 1, as a confirmed row does), but it
+      and refuses a claim or `advance` into that leg (rule 1, as a confirmed `decision` row does; a
+      confirmed `ticket` row refuses a claim only, R-BTN-75, §7.2), but it
       does not count toward `tickets.blocked_since` (R-BTN-75), so writing or dropping it
       fires no `blocked` or `unblocked` event (R-BTN-77); and it raises no notice, decision or
       severity routing. The

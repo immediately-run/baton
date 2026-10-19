@@ -251,6 +251,12 @@ module baton {
     s.postedDecisions.get(t).exists(x => onLeg(x, l)),
     s.retryRows.get(t).contains(l),
   }
+  // §7.2, R-BTN-75: what binds an advance — a `decision` row on the leg or the ticket (R-BTN-78)
+  // and a backoff on the leg (R-BTN-122), never a `ticket` row, which refuses a claim only
+  pure def advanceRowsIn(s: State, t: str, l: str): bool = or {
+    s.postedDecisions.get(t).exists(x => onLeg(x, l)),
+    s.retryRows.get(t).contains(l),
+  }
   // R-BTN-126: a provisional row refuses a claim or advance into its leg, but is not a block
   pure def provisionalIn(s: State, t: str, l: str): bool = s.provs.exists(p => p.ticket == t and p.leg == l)
   // R-BTN-75's held: an active claim, a completion not yet confirmed, a fence-pending reap
@@ -404,7 +410,7 @@ module baton {
   // The first advance is into the leg the claim was offered (R-BTN-83: `not-queued`). No leg
   // state is checked: the holder's word.
   // @impl src/core/claims.ts#advance
-  // @impl pending — prerequisite, backoff and provisional rows as advance gates (R-BTN-120, B-10; R-BTN-122, B-11; R-BTN-126, B-21)
+  // @impl pending — backoff and provisional rows as advance gates (R-BTN-122, B-11; R-BTN-126, B-21)
   action advance(w: str, leg: str, bars: Set[str]): bool = all {
     workerCanAct(w), workerClaim(w).size() == 1,
     val c = theClaim(w)
@@ -414,7 +420,7 @@ module baton {
       not(st.held.get(c.ticket)),
       barred(c.ticket, leg, "advance", bars).intersect(TAGS.get(w)).size() == 0,
       policyOk(c.ticket, leg, bars),
-      not(gated(c.ticket, leg)),                              // rule 1, backing-off (R-BTN-78, -122, -126)
+      not(advanceRowsIn(st, c.ticket, leg)), not(provisionalIn(st, c.ticket, leg)), // decided, backing-off (§7.2; R-BTN-78, -122, -126)
     }
     all {
       c.leg == "" or st.pushed.get(w),                        // git first
@@ -425,7 +431,7 @@ module baton {
       // ghost, written apart from the guard
       val violated = st.held.get(c.ticket) or not(policyOk(c.ticket, leg, bars))
                      or (c.leg == "" and c.finished.length() == 0 and leg != c.offered)
-                     or confirmedRowsIn(st, c.ticket, leg) or provisionalIn(st, c.ticket, leg)
+                     or advanceRowsIn(st, c.ticket, leg) or provisionalIn(st, c.ticket, leg)
                      or TAGS.get(w).exists(g => barred(c.ticket, leg, "advance", bars).contains(g))
       st' = st.with("claims", st.claims.set(c.id, c.with("station", stn).with("finished", fin)
                 .with("leg", leg).with("startBars", postedBarsOf(c.ticket, leg).union(bars))
@@ -611,14 +617,16 @@ module baton {
 
   // ---- the owner (§8, R-BTN-67, §6.7) ----
   // A hold, or its lift — which resets the ticket's attempts and blocked ends (R-BTN-122,
-  // R-BTN-126). A hold is no block: it is listed under `other` (R-BTN-75).
+  // R-BTN-126) and clears its backoff (R-BTN-78's `retry`; core's lift writes `retry_after:
+  // null`), so a lift can log `unblocked`. A hold is no block: it is listed under `other` (R-BTN-75).
   // @impl src/core/claims.ts#setOverride
   // @impl pending — the lift resets per-leg counts (R-BTN-122, B-11) and blocked ends (R-BTN-126, B-21)
   action setHold(t: str, h: bool): bool = all {
     st.ownerBudget > 0, st.held.get(t) != h,
-    st' = st.with("held", st.held.set(t, h)).with("ownerBudget", st.ownerBudget - 1)
+    st' = settle(st.with("held", st.held.set(t, h)).with("ownerBudget", st.ownerBudget - 1)
             .with("attempts", if (h) st.attempts else st.attempts.set(t, LEGS.mapBy(l => 0)))
-            .with("blockedEnds", if (h) st.blockedEnds else st.blockedEnds.set(t, LEGS.mapBy(l => 0))),
+            .with("blockedEnds", if (h) st.blockedEnds else st.blockedEnds.set(t, LEGS.mapBy(l => 0)))
+            .with("retryRows", if (h) st.retryRows else st.retryRows.set(t, Set())), Set()),
   }
   // @impl src/core/admin.ts#setBar
   action setOwnerBar(tag: str, applies: str): bool = all {

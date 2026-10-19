@@ -392,6 +392,24 @@ module regressions {
       .expect(not(st.blocked.get("t1")) and ticketClaimable("t1"))
       .then(claim("w2", "t1")).then(endBlocked("w2", "decision", T2_DONE))
       .expect(st.held.get("t1") and st.blockedEnds.get("t1").get("implement") == 2)
+  // R-BTN-78's `retry`: a lift clears a running backoff with the counts, and the ticket is
+  // claimable at once; the backoff's block ends with `unblocked` (round 3, 3-r3-1).
+  run liftClearsTheBackoffTest =
+    start.then(claim("w1", "t1")).then(endClaim("w1", "fail", false)).then(sync1)
+      .expect(st.retryRows.get("t1") == Set("implement") and st.blocked.get("t1"))
+      .then(setHold("t1", true)).then(setHold("t1", false))
+      .expect(st.retryRows.get("t1") == Set() and not(st.blocked.get("t1")) and ticketClaimable("t1")
+              and st.lastEvent.get("t1") == "unblocked" and not(st.unpairedUnblock))
+
+  // §7.2, R-BTN-75: a `ticket` row refuses a claim, never a holder's advance — a dependency that
+  // opens mid-claim lets the holder advance, with no gate violation (round 3, 3-r3-2).
+  run ticketRowBindsNoAdvanceTest =
+    start.then(claim("w1", "t1")).then(leg("w1", "implement"))
+      .then(gitDepends("t1", T2_DONE, true)).then(sync1)
+      .expect(st.postedDeps.get("t1") != Set())
+      .then(advance("w1", "review", NONE))
+      .expect(c1.leg == "review" and not(c1.gateViolation))
+
   // ... and lifting that hold resets the count, so the next blocked end does not hold again.
   run liftResetsBlockedEndsTest =
     start.then(claim("w1", "t1")).then(endBlocked("w1", "decision", T2_DONE))
