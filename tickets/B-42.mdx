@@ -1,0 +1,57 @@
+---
+title: "B-42 — B-? — Legs run in a checkout of their commit: TypeScript or JavaScript with Node's own resolution (R-BTN-133)"
+id: B-42
+project: baton
+status: available
+updated: 2026-10-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "Build BATON_SPEC §2o (R-BTN-133): each leg runs in place from a read-only worktree at its commit with its lockfile's dependencies installed under the claim's fence; scripts may be mjs, js, cjs, mts, ts or cts; the test kit resolves as Node does. S-BTN-109, G-BTN-128. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-19: "a user's legs should be typescript, mjs or regular non-module
+js. Node should perform module resolution (dependencies should be declared in the repo's
+package.json)", then "please make the spec amendment, this is important".
+**Spec:** `spec/BATON_SPEC.md` §2o (R-BTN-133), amending R-BTN-51, R-BTN-72, R-BTN-119,
+R-BTN-131 and §2d's test kit. The amendment lands in the PR that names this ticket; this ticket
+builds it.
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+The runner extracts each `legs/<leg>.mjs` into a scratch directory (`src/runner/home.ts`
+`loadCourse`), so a leg can only be `.mjs` and can import only Node built-ins. Courses written
+in TypeScript, or needing a library, cannot be expressed.
+
+### What to build
+
+1. `src/runner/home.ts`: replace the scratch extraction with a detached worktree per
+   (repository, commit) under the runner's state directory; reuse, keep three per repository,
+   remove others at claim end; `<commit>.ready` stamp; clear write bits after install.
+2. The install: install root as R-BTN-133 orders it; one lockfile picks `npm ci`, `pnpm install
+   --frozen-lockfile` or `yarn install --immutable`; spawned detached in its own process group
+   under the fence; `--install-timeout` (default 15 min); the `spec` and `transient` ends.
+3. `src/runner/runner.ts` / `legProcess.mjs`: spawn the wrapper with the tree as cwd, importing
+   the script in place; accept `mjs`, `js`, `cjs`, `mts`, `ts`, `cts`; named exports else
+   default; refuse two scripts for one leg. Refuse to start under Node < 22.18; `engines`.
+4. `ctx.snapshot.tree` and `ctx.course.dir`; stubs (`src/defaults/cli.ts` `stubSource`) import
+   their override from the tree in place.
+5. Test kit (`src/local/testCourse.ts`): the extension set, two-scripts failure, imports with
+   Node's resolution from the given root.
+6. S-BTN-109 (`test/integration/`), G-BTN-128.
+
+### Exit criteria
+
+S-BTN-109 passes on the local project; `npm test` and `npm run typecheck` green; a course with
+a `.ts` leg importing a dependency from `.baton/package.json` runs end to end under `baton
+runner start` from both a checkout and `dist/baton.mjs`.
