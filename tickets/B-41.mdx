@@ -1,0 +1,102 @@
+---
+title: "B-41 — One primitive per kind of prerequisite: retire blocked_by, operator_only and the dependencies/children/owner labels through a dual-read window"
+id: B-41
+project: baton
+status: available
+updated: 2026-10-19
+repos:
+  - baton
+  - docs
+tags:
+  - roadmap-item
+description: "Build BATON_SPEC §2n (R-BTN-132): ticket prerequisites reach core only as a leg's `requires.tickets` or a posted `depends_at`; fan-in moves from the parent's `blocked_by` onto the legs that select children, with `spawned`'s provisional rows on those legs; `human-operator` is checked by rule 4 like any capability; a station function's `waiting_on` may not be `dependencies`, `children`, `owner` or `policy`; the standard courses and docs' `tickets.mjs` move; the old forms are read during a dual-read window and refused at cutover. S-BTN-108, G-BTN-127. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-10
+  - B-7
+  - R3-1258
+---
+
+**Brief:** the owner, 2026-10-19 (this session): "Can you please verify that we do not have a set
+of overlapping primitives for legacy reasons in the course schema?", then "file the ticket with
+the spec amendment". The audit found five ways in for a ticket waiting on other tickets, three
+for a person and two for `human-operator`.
+**Spec:** `spec/BATON_SPEC.md` §2n (R-BTN-132), amending R-BTN-69, R-BTN-74, R-BTN-75, R-BTN-86,
+R-BTN-116, R-BTN-120, R-BTN-131 and §7.2 rule 6. The amendment landed with this ticket; this
+ticket builds it.
+**Depends on:** B-10 (leg `requires.tickets` and `depends_at`), B-7 (person legs, which replace
+`waiting_on: owner`), R3-1258 (child tickets in core, whose `spawned` rows move onto legs).
+
+### Requires
+
+None: a checkout, a sibling docs checkout and a terminal.
+
+### Why
+
+Each overlap is a second place to look when a ticket does not move, and some change behaviour:
+the parent's `blocked_by` fan-in blocks every leg, so `epic`'s `replan` waits for the other
+children (R-BTN-124) and a parent cannot work beside its children (B-34). Courses written now
+(`build-app`, B-40) copy whichever form is nearest.
+
+### What to build
+
+Ordered by the window's phases (`cross_repo_migration`); each phase is its own PR, and only
+phase 4 removes anything.
+
+1. **Phase 0, core.** `ticket_requires` stores `human-operator`, and rule 4 checks it; rule 6
+   keeps only the administrator-only grant. (`depends_at` and `requires.tickets` are B-10's.)
+2. **Phase 1, dual-read in core.** A posted `blocked_by` id is read as `depends_at: {ticket,
+   done: true}` on the whole ticket; `operator_only` as `human-operator` in the clause; the
+   labels `dependencies`, `children`, `owner` and `policy` from a station function are
+   honoured. Each logs one `deprecated-field` event per repository and field per day.
+   `spawned`'s provisional rows go on each leg leaving the reached station whose
+   `requires.tickets` selects `children`, else on the whole ticket.
+3. **Phase 2, writers.**
+   - `src/defaults/tickets-markdown.ts`: `depends_on` → `depends_at` on the course's
+     `start_leg`; no child added to `blocked_by`; `OP` → `human-operator` in `requires`.
+   - `src/defaults/course-markers.ts` and `course-pr.ts`: no `dependencies` or `children`
+     label (core now answers them).
+   - The standard courses, each a new version that replays its in-flight tickets (R-BTN-48,
+     `baton test-course` against the live board): `build-app`'s `verify` requires
+     `{select: children, done: true}`, and its four approvals, `decision`'s answer and
+     `create-pr`'s `owner` adjudication become person legs. `file.md` writes
+     `requires: [human-operator]`, not `tags: [OP]`.
+   - docs `.baton/tickets.mjs` (a docs PR): `OP` as `human-operator`; `blocked_by` is already
+     empty there, and `dependsOn` becomes `depends_at`.
+4. **Phase 3, drain.** **Needs you** lists each repository whose snapshot still carries an old
+   form.
+5. **Phase 4, cutover (its own PR, after the drain shows none).** The board-post validator
+   refuses `blocked_by`, `operator_only` and the reserved labels, naming the ticket; a new
+   migration stops storing `tickets.depends_on`, `tickets.blocked_by` and
+   `tickets.operator_only`.
+
+### Do not
+
+- Translate `depends_on` to every leg: in-flight tickets have only ever waited at the start.
+- Rename the posted `requires` field, or touch `needs` and `requires.resources` (§2n: not
+  overlaps).
+- Drop `waiting_on`: forge effects (an author's push, CI) have no kind and get none.
+- Edit an old migration: the schema change is a new numbered file.
+
+### Tests
+
+- **S-BTN-108** on both hosts, its trace replayed through the model.
+- Unit: the source's translations; a `spawned` end before its snapshot holding a fan-in leg
+  whose earlier children are all `done`; rule 4 refusing an ungranted `human-operator`; the
+  validator refusing each reserved label after cutover.
+- `baton test-course` on each standard course's new version against a board with tickets
+  mid-course on the old one.
+
+### Exit criteria
+
+- [ ] S-BTN-108 passes on both hosts; G-BTN-127 holds
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] docs' `tickets.mjs` on the new forms, merged
+- [ ] the cutover PR merged after Needs you shows no repository on an old form
+
+## Status
+
+_(filed 2026-10-19 with the §2n amendment)_
