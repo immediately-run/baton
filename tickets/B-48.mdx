@@ -1,0 +1,53 @@
+---
+title: "B-48 — npm test back under 20 minutes on a hosted runner: replay the scenario traces in batches, not one Quint run each"
+id: B-48
+project: baton
+status: available
+updated: 2026-10-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "npm run traces checks each of ~150 scenario traces with its own `quint test` process, and each process parses and compiles the whole model. Since 2026-10-19, with the model's fleet (R3-1254 part 2b) and more scenarios, npm test takes over 25 minutes on a hosted runner, so ci.yml and baton-deploy.yml were raised to 45. Batch the traces that share an instance into one Quint run, or otherwise cut the per-trace compile, and lower the timeouts again. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** BATON_SPEC R-BTN-29 to R-BTN-31 (the scenario traces checked against the model), R-BTN-68.
+**Found by:** baton#60's CI, 2026-10-19. Main's `ci` and `baton-deploy` runs were cancelled at their
+25- and 15-minute limits after baton#59 merged, so no deploy ran. The limits were raised to 45 minutes
+as a stopgap.
+
+### Requires
+
+None.
+
+### Why
+
+`scripts/check-traces.mjs` writes one module per trace and spawns `npx quint test` for it. Each
+process parses, typechecks and compiles `model/baton.qnt`, which takes about 3.4 s of a typecheck alone
+since part 2b (2.7 s before), and then runs the trace. On 4 local CPUs, 150 traces take 8½ minutes.
+A hosted runner has fewer CPUs, so `npm test` overall runs past 25 minutes, and a rejected trace's
+bisection adds a run per step.
+
+### What to build
+
+1. Group the traces by the instance constants `translate` derives (workers, tickets, tags, the
+   required bar, the slots). Write one module per group, with one `run` per trace, and run it with one
+   `quint test` process. Keep each trace's own module only for the bisection of a rejected one.
+2. Keep the per-trace report (`checked`, `end`, the scope check) exactly as it is.
+3. Lower `ci.yml`'s and `baton-deploy.yml`'s `test` job timeouts back to 25 and 15 minutes, or to what the
+   measured time allows with headroom.
+
+### Tests
+
+- `test/unit/check-traces.test.ts` still rejects each case it rejects today, and names the same step.
+- The CI run's `npm test` time, before and after, in the PR body.
+
+### Exit criteria
+
+- [ ] `npm test` under 20 minutes on a hosted runner, and the timeouts lowered
+- [ ] merged under the review gate

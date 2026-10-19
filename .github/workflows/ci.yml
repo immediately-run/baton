@@ -20,7 +20,10 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # npm test replays every scenario trace through the model, one Quint run each; since 2026-10-19
+    # (R3-1254 part 2b's fleet, more scenarios) it takes over 25 minutes on a hosted runner. B-48
+    # brings it back down.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

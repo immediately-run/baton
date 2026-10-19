@@ -55,7 +55,7 @@ describe('check-traces rejects what the model forbids, naming the step', () => {
     // the model refuses the claim: its gates fail on the hold
     expect(r.failure).toMatchObject({ step: 3, label: 'POST /v1/runner/claim → 200', actionRefused: true });
     expect(r.failure.actions).toContain('claim("w1", "docs:T-1")');
-  }, 120_000);
+  }, 240_000);
 
   it('an end confirmed by an observation not above its own: rejected at the post that claims it', async () => {
     const steps = trace([
@@ -80,12 +80,14 @@ describe('check-traces rejects what the model forbids, naming the step', () => {
     expect(r.ok).toBe(false);
     expect(r.failure).toMatchObject({ step: 5 });
     expect(r.failure.fields).toContain('claim 1 confirmed');
-  }, 120_000);
+  }, 240_000);
 });
 
 // each case checks one trace through the model; the first also pays for loading it, which outgrew
-// the default 5 s with R3-1254's prerequisites (the cases above already allow 120 s)
-describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1)', { timeout: 120_000 }, () => {
+// the default 5 s with R3-1254's prerequisites. Each case runs Quint over the whole model, which
+// R3-1254 part 2b's fleet made larger: 85 s locally and over 120 s on a CI runner, so every case
+// here allows 240 s (baton#60's CI, 2026-10-19)
+describe('check-traces rejects each step round 1 found accepted (round 2, 2-r2-1)', { timeout: 240_000 }, () => {
   const claimed = (over: Partial<ClaimView> = {}) => (p: Projection) => ({ ...p, claims: { 1: claim(over) } });
   const rejected = async (name: string, rest: [Step['origin'], (p: Projection) => Projection][], reason: string) => {
     const r = await check(name, trace(rest));
