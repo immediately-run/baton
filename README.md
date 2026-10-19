@@ -72,6 +72,10 @@ checkout, run the CLI as `node cli/baton.mjs`.
 
 - `npm test` (alias `npm run test:baton`) — the suite on both hosts, with a fake clock; `npx vitest --project local`
   (or `cloudflare`) runs one.
+- `npm run test:no-quint` — the suite and `model:links` without quint: no model-drawn replay, no
+  `traces`, no `model:quick`. CI runs it for a change that touches no model file (`model/`,
+  `test/model/`, `scripts/check-traces.mjs`, `test/integration/trace.ts` or `trace-scope.json`), and
+  `npm test` otherwise.
 - `npm run start:local -- --db <path> --port <n>` — Baton as a local process (below).
 - `node cli/baton.mjs test-course <repository root> <course> [--base REF|none] [--board FILE]` — the course test kit
   (§2d, R-BTN-64/-65): the working tree's `.baton/` against REF's (default `origin/HEAD`, else

@@ -22,17 +22,42 @@ jobs:
     runs-on: ubuntu-latest
     # 2026-10-19: the suite takes ~9 minutes on a hosted runner and the trace replay
     # (check-traces, 150 traces through quint, 4 at a time) ~17, after baton#52, #56 and #59
-    # grew both; at 25 every push to main timed out and the release job never ran.
+    # grew both; at 25 every push to main timed out and the release job never ran. The quint
+    # half now runs only for a change to the model (below), but such a change still needs it.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the diff against the PR's base, or the push's previous head
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # Quint — the model-drawn replay (test/model/replay.test.ts), the scenario traces through
+      # the model (`npm run traces`) and its regression runs (`npm run model:quick`) — runs only
+      # when the change touches the model or the code that checks traces against it. Any other
+      # change runs the suite without them, and `model:links`, which needs no quint. A diff that
+      # cannot be computed counts as touching the model, so the check is never skipped by error.
+      - name: Does this change touch the model?
+        id: model
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          MODEL='^(model/|test/model/|scripts/check-traces\.mjs$|test/integration/trace\.ts$|test/integration/trace-scope\.json$)'
+          if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ] || ! CHANGED=$(git diff --name-only "$BASE"...HEAD); then
+            echo "touched=true" >> "$GITHUB_OUTPUT"; echo "::notice::no base to diff against — running quint"
+          elif printf '%s\n' "$CHANGED" | grep -Eq "$MODEL"; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "$CHANGED" | grep -E "$MODEL" | sed 's/^/model file changed: /'
+          else
+            echo "touched=false" >> "$GITHUB_OUTPUT"; echo "::notice::no model file changed — quint skipped"
+          fi
       - run: npm test
+        if: steps.model.outputs.touched == 'true'
+      - run: npm run test:no-quint
+        if: steps.model.outputs.touched != 'true'
       - run: npm run check:wiki   # content/, the tickets' wiki
       - run: npm run check:spec   # spec/BATON_SPEC.md defines every R-BTN-n the code cites
       - run: npm run check:package   # the npm tarball installs and its `baton` starts
