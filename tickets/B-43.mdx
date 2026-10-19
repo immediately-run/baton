@@ -1,0 +1,61 @@
+---
+title: "B-43 — Courses are what their sources name; the CLI ships none (R-BTN-134)"
+id: B-43
+project: baton
+status: available
+updated: 2026-10-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "Build BATON_SPEC §2p (R-BTN-134): a course is a course directory at a full commit reachable from its repository's default branch; sync, runner and kit read it from there; the standard courses move to course directories in the baton repository; the home holds only overrides; the CLI's registry and its own-commit checks go; the workflow pins the CLI's npm version. S-BTN-110, G-BTN-129. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-42
+---
+
+**Brief:** the owner, 2026-10-19: "course files should be loaded from .baton. Any other files
+(such as standard courses) should be referenced from within files under .baton. The CLI should
+not package standard courses", then "the CLI shouldn't include any hardcoded course graphs or
+associated legs. baton CLI should not assume it has the correct version of a course. Using a
+specific commit hash instead of @main is fine."
+**Spec:** `spec/BATON_SPEC.md` §2p (R-BTN-134), amending R-BTN-51, R-BTN-65, R-BTN-69, R-BTN-72,
+R-BTN-74, R-BTN-96, R-BTN-124, R-BTN-131, R-BTN-133 and §7.1. The amendment lands in the PR
+that names this ticket; this ticket builds it.
+**Depends on:** B-42 (leg trees, which sourced courses reuse).
+
+### Requires
+
+`github-admin` is not needed; network access to github.com for the source fetch.
+
+### Why
+
+The CLI holds the standard courses as a registry (`src/defaults/courses.ts`) and the sync holds
+a source to the CLI's own git commit (`cliSelf`, `checkSource`), which a published CLI cannot
+tell — so `repo sync` and `repo init` fail from the npm package, blocking OIDC publishing.
+
+### What to build
+
+1. Source grammar (`src/defaults/course-source.ts`): the path slot; reachability check; no
+   stored refs.
+2. One source fetcher shared by sync, runner and kit: cache clone per repository, fetch by
+   commit, `merge-base --is-ancestor` against the default branch, read-only worktree +
+   install (R-BTN-133's code).
+3. Move each standard course to a course directory `src/defaults/courses/<id>/` (`course.json`,
+   `sync.mjs`, `entry.json`, `legs/*`, instructions) — `create-pr`, `review-pr`, `bug-report`,
+   `draft-ticket`, `decision`, `build-app`, `epic`, `branch`; delete the registry and the
+   CLI-commit checks (`cliSelf`, `cliPin`, `checkSource`'s byte-equality).
+4. Sync: read `course.json`/`sync.mjs` from the course directory; facts by `entry.json`
+   `facts`; refuse a home `course.json`/`sync.mjs`/leg script beside a `source`.
+5. `baton repo init`: `--course`, `--source`, `--at`, `--instructions`, `--override`; writes
+   no course file; pins the CLI's npm version; retire `--eject stations`; `--eject tickets`
+   copies a file prebuilt by `build:cli`. The one-commit move from B-33's form.
+6. S-BTN-110, G-BTN-129; update S-BTN-104/-105/-107 to the new layout.
+
+### Exit criteria
+
+S-BTN-110 passes; `npm test` and `npm run typecheck` green; `dist/baton.mjs` from `npm run
+build:cli`, run outside any git checkout, scaffolds and syncs a repository on `create-pr`.
