@@ -7,12 +7,20 @@ module properties {
   const P_MAX_CLAIMS: int
   const P_GIT_BUDGET: int
   const P_OWNER_BUDGET: int
+  // the fleet (R3-1254 part 2b): `sim` carries capabilities and a resource, `small` none
+  const P_DECLARED: str -> Set[str]
+  const P_GRANTED: str -> Set[str]
+  const P_REQUIRES: str -> Set[str]
+  const P_RESOURCES: Set[str]
+  const P_NEEDS: str -> Set[str]
   import baton(TICKETS = P_TICKETS, WORKERS = P_WORKERS, SLOTS = P_SLOTS,
                MAX_CLAIMS = P_MAX_CLAIMS, GIT_BUDGET = P_GIT_BUDGET,
                OWNER_BUDGET = P_OWNER_BUDGET,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
                REQUIRED = Set("fix", "merge"), MAX_TIME = 12,
-               MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1).* from "./baton"
+               MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1,
+               DECLARED = P_DECLARED, GRANTED = P_GRANTED, REQUIRES = P_REQUIRES,
+               RESOURCES = P_RESOURCES, NEEDS = P_NEEDS).* from "./baton"
   action pinit = init
   action pstep = step
   action pprogress = progressStep
@@ -108,11 +116,20 @@ module properties {
   val attemptsBounded = TICKETS.forall(t => LEGS.forall(l => st.attempts.get(t).get(l) <= MAX_ATTEMPTS))
   val blockedEndsBounded = TICKETS.forall(t => LEGS.forall(l => st.blockedEnds.get(t).get(l) <= MAX_BLOCKED + 1))
 
+  // R-BTN-75 (R3-1254 part 2b): the `capability` rows are what the fleet Baton last counted
+  // says — every change to what a worker declares, or to the live set, recounts.
+  val capabilityRowsCounted = TICKETS.forall(t => st.capRows.get(t) == capRowsFor(st, st.fleetLive, t))
+  // R-BTN-77 as amended by R3-1251: a lost answer is remembered only while the ticket is
+  // unblocked and its `blocked` is still open — the `unblocked` it is owed.
+  val answerLostOwesUnblocked = TICKETS.forall(t =>
+    st.lost.get(t) == Set() or (not(st.blocked.get(t)) and st.lastEvent.get(t) == "blocked"))
+
   val safety = and {
     oneLiveHolderPerTicket, oneClaimPerWorker, observationsIncrease, confirmationAfterEnd,
     confirmedIsInGit, staleOnlyWhenTakenAway, regressedOnlyWhenGitRegressed, boundedLoops,
     writingLegsBarred, gatesHeld, noActAfterLoss, noStuckTicket,
     blockedIsStored, unblockedFollowsBlocked, attemptsBounded, blockedEndsBounded,
+    capabilityRowsCounted, answerLostOwesUnblocked,
   }
 
   // ---- liveness: in liveness.qnt, so the safety proof does not carry the fairness terms ----

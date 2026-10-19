@@ -40,7 +40,11 @@ const wsim = (step) => ['model/witnesses.qnt', '--main=witnesses', '--init=winit
 const witnesses = [
   ['wstep', ['noConfirmedSuspension', 'noResumedClaim', 'noFence', 'noAlarmReap',
     // R3-1254: a blocked ticket, a provisional row, a backoff, an `unblocked` event
-    'noBlockedTicket', 'noProvisionalRow', 'noRetryRow', 'noUnblockedEvent']],
+    'noBlockedTicket', 'noProvisionalRow', 'noRetryRow', 'noUnblockedEvent',
+    // R3-1254 part 2b: a capability row, a resource row (a lost answer, which needs every
+    // worker silent through a lease while a resource row stands, random runs rarely reach:
+    // regressions.qnt does, answerLostIsSilentThenReblocksTest)
+    'noCapabilityRow', 'noResourceRow']],
   ['wprogress', ['noFixLeg', 'noRegressedClaim', 'noMerge', 'noConfirmedDone']],
 ];
 // A second review takes a long specific sequence random runs rarely produce;

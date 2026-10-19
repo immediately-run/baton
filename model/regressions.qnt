@@ -5,7 +5,11 @@ module regressions {
                MAX_CLAIMS = 6, GIT_BUDGET = 2, OWNER_BUDGET = 2,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
                REQUIRED = Set("fix", "merge"), MAX_TIME = 12,
-               MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1).* from "./baton"
+               MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1,
+               DECLARED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp"), "w3" -> Set("vpn:corp")),
+               GRANTED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp"), "w3" -> Set("vpn:corp")),
+               REQUIRES = Map("t1" -> Set(), "t2" -> Set("vpn:corp")),
+               RESOURCES = Set("llm", "gpu"), NEEDS = Map("implement" -> Set("llm"), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())).* from "./baton"
 
   val c1 = st.claims.get(1)
   val c2 = st.claims.get(2)
@@ -430,6 +434,87 @@ module regressions {
       .expect(st.blocked.get("t1") and st.lastEvent.get("t1") == "blocked")
       .then(gitDecides("t1", "", false)).then(sync1)
       .expect(not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked" and not(st.unpairedUnblock))
+
+  // ---- the fleet (R3-1254 part 2b) ----
+  // R-BTN-75: a `capability` row stands while no live worker both declares and is granted it;
+  // the heartbeats that change what is declared write and clear it, with their events.
+  run capabilityRowFollowsTheFleetTest =
+    start.then(declare("w1", NONE)).then(declare("w2", NONE))
+      .expect(st.capRows.get("t2") == Set() and not(st.blocked.get("t2")))
+      .then(declare("w3", NONE))
+      .expect(st.capRows.get("t2") == Set("vpn:corp") and st.blocked.get("t2") and st.lastEvent.get("t2") == "blocked")
+      .then(declare("w1", Set("vpn:corp")))
+      .expect(st.capRows.get("t2") == Set() and not(st.blocked.get("t2")) and st.lastEvent.get("t2") == "unblocked"
+              and not(st.unpairedUnblock))
+  // §7.2 rule 4: a worker that no longer declares what the ticket requires may not claim it,
+  // nor advance on a claim it holds.
+  run rule4RefusesTheClaimTest =
+    start.then(declare("w1", NONE)).then(claim("w1", "t2")).fail()
+  run rule4RefusesTheAdvanceTest =
+    start.then(claim("w1", "t2")).then(declare("w1", NONE)).then(advance("w1", "implement", NONE)).fail()
+  // R-BTN-75: workers that stop heartbeating leave the fleet when the alarm sees it; one coming
+  // back clears the row in its heartbeat.
+  run lapsedFleetWritesTheRowTest =
+    start.then(sleep("w1")).then(sleep("w2")).then(sleep("w3")).then(tick).then(tick).then(tick).then(tick)
+      .then(alarmLive)
+      .expect(st.fleetLive == Set() and st.capRows.get("t2") == Set("vpn:corp") and st.blocked.get("t2"))
+      .then(wake("w1")).then(heartbeat("w1"))
+      .expect(st.fleetLive == Set("w1") and st.capRows.get("t2") == Set() and st.lastEvent.get("t2") == "unblocked")
+  // R-BTN-126: a `capability` end drops it from the runner's declared set in its transaction —
+  // rule 4 refuses that runner at once — and writes the row only when no other live runner has it.
+  run capabilityEndDropsItTest =
+    start.then(claim("w1", "t2")).then(endBlockedOn("w1", "capability", "vpn:corp"))
+      .expect(not(st.declared.get("w1").contains("vpn:corp")) and st.capRows.get("t2") == Set()
+              and not(st.blocked.get("t2")) and st.blockedEnds.get("t2").get("implement") == 1)
+      .then(claim("w1", "t2")).fail()
+  run capabilityEndOfTheLastHolderBlocksTest =
+    start.then(declare("w2", NONE)).then(declare("w3", NONE))
+      .then(claim("w1", "t2")).then(endBlockedOn("w1", "capability", "vpn:corp"))
+      .expect(st.capRows.get("t2") == Set("vpn:corp") and st.blocked.get("t2") and st.lastEvent.get("t2") == "blocked")
+  // R-BTN-75, R-BTN-45: a `resource` row is advice — it blocks the ticket, and a claim into the
+  // leg is still granted, with no gate violation.
+  run resourceRowIsAdviceTest =
+    start.then(reading("llm", false))
+      .expect(st.resRows.get("t1") == Set({ leg: "implement", res: "llm" }) and st.blocked.get("t1")
+              and st.lastEvent.get("t1") == "blocked")
+      .then(claim("w1", "t1"))
+      .expect(c1.status == "active" and not(c1.gateViolation) and not(st.blocked.get("t1")) and st.events == 2)
+  // R-BTN-76: an `available` reading clears the row; an `unavailable` one lapses.
+  run availableReadingClearsTheRowTest =
+    start.then(reading("llm", false)).then(reading("llm", true))
+      .expect(st.resRows.get("t1") == Set() and not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked")
+  run readingLapsesTest =
+    start.then(reading("llm", false))
+      .then(4.reps(_ => tick.then(tick).then(heartbeat("w1"))))
+      .then(readingLapses("llm"))
+      .expect(st.resRows.get("t1") == Set() and not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked")
+  run readingWaitsOutItsTimeTest =
+    start.then(reading("llm", false)).then(tick).then(readingLapses("llm")).fail()
+  // R-BTN-77 as amended by R3-1251: the fleet empties — the row goes, silently, and is
+  // remembered; the fleet back and the resource still out, it is written again silently.
+  action fleetEmptiedWhileBlocked: bool =
+    start.then(reading("llm", false)).then(sleep("w1")).then(sleep("w2")).then(sleep("w3"))
+      .then(tick).then(tick).then(tick).then(tick).then(alarmLive)
+      .expect(not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "blocked"
+              and st.lost.get("t1") == Set({ leg: "implement", res: "llm" }) and st.events == 2)
+  run answerLostIsSilentThenReblocksTest =
+    fleetEmptiedWhileBlocked.then(wake("w1")).then(heartbeat("w1"))
+      .expect(st.blocked.get("t1") and st.lastEvent.get("t1") == "blocked" and st.lost.get("t1") == Set()
+              and st.events == 2)
+  // ... and the resource back while no one could see it: the owed `unblocked` when the fleet
+  // returns.
+  run answerLostOwesTheUnblockedTest =
+    fleetEmptiedWhileBlocked.then(tick).then(tick).then(tick).then(tick).then(readingLapses("llm"))
+      .expect(st.lost.get("t1") != Set() and st.events == 2)
+      .then(wake("w1")).then(heartbeat("w1"))
+      .expect(not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked" and st.lost.get("t1") == Set()
+              and st.events == 4 and not(st.unpairedUnblock))
+  // R-BTN-126: a `resource` end stores its reading and an `end`-sourced need on the leg.
+  run resourceEndStoresReadingAndNeedTest =
+    start.then(claim("w1", "t1")).then(endBlockedOn("w1", "resource", "gpu"))
+      .expect(st.endNeeds.get("t1") == Set({ leg: "implement", res: "gpu" }) and st.unavailable.get("gpu") > 0
+              and st.resRows.get("t1").contains({ leg: "implement", res: "gpu" }) and st.blocked.get("t1")
+              and st.lastEvent.get("t1") == "blocked" and st.blockedEnds.get("t1").get("implement") == 1)
 
   // R-BTN-69 (R3-1254, owner: "exactly one start and at least one terminal station for each
   // course"): the model's course passes the acceptance rules, and each case below breaks one —

@@ -6,7 +6,9 @@ module liveness {
                MAX_CLAIMS = 3, GIT_BUDGET = 1, OWNER_BUDGET = 1,
                FAMILIES = Set("family:a", "family:b"), TAGS = Map("w1" -> Set("family:a"), "w2" -> Set("family:b"), "w3" -> Set("family:a")),
                REQUIRED = Set("fix", "merge"), MAX_TIME = 12,
-               MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1).* from "./baton"
+               MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1,
+               DECLARED = Map("w1" -> Set(), "w2" -> Set()), GRANTED = Map("w1" -> Set(), "w2" -> Set()),
+               REQUIRES = Map("t1" -> Set()), RESOURCES = Set(), NEEDS = Map("implement" -> Set(), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())).* from "./baton"
   action linit = init
   action lstep = step
 
