@@ -32,6 +32,7 @@ jobs:
       - run: npm test
       - run: npm run check:wiki   # content/, the tickets' wiki
       - run: npm run check:spec   # spec/BATON_SPEC.md defines every R-BTN-n the code cites
+      - run: npm run check:package   # the npm tarball installs and its `baton` starts
 
   # The model's simulation, witnesses, 1,000-trace replay and Apalache proof do not run here
   # (R-BTN-68, amended 2026-10-17): they outgrew hosted runners' time limits, so the author runs
@@ -39,3 +40,91 @@ jobs:
   # model-report.yml checks against the head. npm test
   # above keeps the deterministic part: the model's typecheck and regression runs, the scenario
   # traces checked against it, the @impl/@model links and 200 model-drawn traces driving the core.
+
+  # The CLI's npm release: `@immediately-run/baton@<version>`, published by OIDC trusted
+  # publishing (no npm token exists), with provenance, when `main`'s package.json names a
+  # version npm does not have. Releasing is bumping `version` (and package-lock.json's two root
+  # copies) in a PR and merging it. A version, once published, is never published again.
+  #
+  # OPERATOR PREREQUISITES (one-time; a PR cannot do them):
+  #   - Settings → Environments → New environment `npm` → Required reviewers: the maintainer(s).
+  #     GitHub auto-creates a missing environment with no protection, so the first step below
+  #     checks this run's own approval record and fails closed without one.
+  #   - npmjs.com → @immediately-run/baton → Settings → Trusted publishing: GitHub Actions,
+  #     immediately-run/baton, workflow `ci.yml`, environment `npm`. The package must exist for
+  #     that page to exist, so its first version is published once by hand (README, Releasing).
+  release:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    concurrency:
+      group: npm-release
+      cancel-in-progress: false
+    permissions:
+      contents: write   # the release tag
+      id-token: write   # npm trusted publishing (OIDC) and provenance
+      actions: read     # this run's approval record
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        id: version
+        run: |
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VER=$(node -p "require('./package.json').version")
+          echo "name=$PKG_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$PKG_VER" >> "$GITHUB_OUTPUT"
+          if npm view "$PKG_NAME@$PKG_VER" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$PKG_NAME@$PKG_VER is already on npm — nothing to release."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assert this run cleared the `npm` approval gate
+        if: steps.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APPROVALS=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/approvals")
+          COUNT=$(printf '%s' "$APPROVALS" | jq '[.[] | select(.state == "approved") | select(any(.environments[]?; .name == "npm"))] | length')
+          if [ "${COUNT:-0}" -lt 1 ]; then
+            echo "::error::No approval recorded for environment 'npm' on this run: its Required reviewers rule is missing. Configure Settings → Environments → npm → Required reviewers, then re-run. A published version cannot be taken back, so this job refuses to publish unattended."
+            exit 1
+          fi
+          printf '%s' "$APPROVALS" | jq -r '.[] | select(.state == "approved") | "approved by \(.user.login)"'
+
+      - uses: actions/setup-node@v4
+        if: steps.version.outputs.publish == 'true'
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm install -g npm@11   # trusted publishing needs npm >= 11.5.1
+        if: steps.version.outputs.publish == 'true'
+      - run: npm ci
+        if: steps.version.outputs.publish == 'true'
+      # The test job checked this commit; the tarball is rebuilt here (jobs share no files) and
+      # checked again before it is uploaded.
+      - run: npm run check:package
+        if: steps.version.outputs.publish == 'true'
+
+      - name: Tag the release
+        if: steps.version.outputs.publish == 'true'
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::notice::tag ${TAG} already exists."
+          else
+            git tag -a "${TAG}" -m "${{ steps.version.outputs.name }} ${{ steps.version.outputs.version }}"
+            git push origin "refs/tags/${TAG}"
+          fi
+
+      - name: Publish to npm (trusted publishing)
+        if: steps.version.outputs.publish == 'true'
+        env:
+          # setup-node's .npmrc binds npm to NODE_AUTH_TOKEN; empty, npm uses OIDC instead.
+          NODE_AUTH_TOKEN: ""
+        run: npm publish   # publishConfig: access public, provenance
