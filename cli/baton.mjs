@@ -6,7 +6,7 @@
 // printed as it came. `baton run` (§6.13 R-BTN-72) is the worker loop: it lives in src/runner
 // (TypeScript, node-only), so scripts/baton-run.mjs bundles it first, the way start-local does.
 //
-//   baton key create FILE [--comment TEXT]     an administrator's or owner's API key (R-BTN-159): FILE for -i, FILE.pub its public line
+//   baton key create FILE [--comment TEXT]     an API key (R-BTN-159), beside SSH keys: FILE for -i, FILE.pub its public line
 //   baton admin -i KEY repo add <forge path> --owner-key PUB[,PUB…] [--id ID (default: the path's last segment)]
 //                [--forge github|gitlab|gitea|git] [--remote URL] [--web-base URL] [--default-branch main]
 //                [--sync-workflow PATH] [--mirror-workflow PATH] [--ci-identity none|github-actions|gitlab:<issuer>|gitlab-mirror:<issuer>]
@@ -316,12 +316,13 @@ function grantBody(flags, readKey, extra) {
   };
 }
 
-/** R-BTN-159: a person's API key, `bak_<id>_<secret>` — an administrator's or an owner's. */
+/** R-BTN-159: an API key, `bak_<id>_<secret>` — an administrator's, an owner's or a worker's. */
 const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
 
-/** `baton key create FILE [--comment TEXT]` (R-BTN-159): an administrator's or owner's API key,
- *  made here and never sent anywhere. FILE (mode 0600) holds the key, for `-i FILE`; FILE.pub
- *  holds its public line — what BATON_ADMIN_KEYS lists, or `--owner-key FILE.pub` registers. */
+/** `baton key create FILE [--comment TEXT]` (R-BTN-159): an API key, made here and never sent
+ *  anywhere. FILE (mode 0600) holds the key, for `-i FILE` or a runner's IR_BATON_KEY_FILE;
+ *  FILE.pub holds its public line — what BATON_ADMIN_KEYS lists, `--owner-key FILE.pub` or
+ *  `--key FILE.pub` registers. */
 export function createApiKey(file, comment = '') {
   if (existsSync(file) || existsSync(`${file}.pub`)) throw new Error(`${file} or ${file}.pub already exists`);
   const key = `bak_${randomBytes(8).toString('hex')}_${randomBytes(32).toString('hex')}`;

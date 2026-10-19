@@ -145,11 +145,14 @@ After the first heartbeat a worker also presents the per-session secret it regis
 
 Whoever deploys Baton is its administrator (R-BTN-57): the secret `BATON_ADMIN_KEYS` (locally
 `--admin-keys`) lists their keys, one per line, read on every request. Owners are per
-repository (R-BTN-58), named by an administrator when it registers the repository. People use
-API keys (R-BTN-159); workers and syncs sign with SSH keys. `baton key create FILE` makes one on
-your machine: `FILE` holds the key (`-i FILE`), `FILE.pub` its public line, which goes in
-`BATON_ADMIN_KEYS` or after `--owner-key` as an SSH public key would. An SSH key still works for
-an administrator or owner, and its requests are signed. The CLI is the one path:
+repository (R-BTN-58), named by an administrator when it registers the repository. Each
+administrator, owner and worker holds an SSH key or an API key, their choice (R-BTN-159). An SSH
+key signs every request and reveals nothing reusable. An API key is a shared secret sent as a
+bearer: easier to set up, but anyone who reads one request holds it until it is revoked. `baton
+key create FILE` makes an API key on your machine. `FILE` holds the key (`-i FILE`, or a runner's
+`IR_BATON_KEY_FILE`). `FILE.pub` holds its public line, which goes wherever an SSH public key
+would: `BATON_ADMIN_KEYS`, `--owner-key` or a grant's `--key`. Sync, probe and courier keys stay
+SSH keys. The CLI is the one path:
 
 ```
 baton key create ~/.config/baton/admin --comment "admin"          # once; then:

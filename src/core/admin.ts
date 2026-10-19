@@ -414,7 +414,7 @@ export class Admin {
     only(b, by === 'admin' ? ['repository', 'public_key', 'hostname', 'label', 'capabilities', 'max_tier'] : ['public_key', 'hostname', 'label', 'capabilities', 'max_tier'], 'body');
     const repo = this.c.registry.get(repository);
     if (!repo || repo.retired_at != null) throw new BatonError('not-found', `${repository} is not registered`);
-    const key = await this.parseKey(b.public_key, 'public_key');
+    const key = await this.parsePersonOrWorkerKey(b.public_key, 'public_key');
     const hostname = b.hostname === undefined ? null : typeof b.hostname === 'string' && HOSTNAME.test(b.hostname) ? b.hostname : bad('hostname', 'must be a hostname');
     const label = b.label === undefined ? null : typeof b.label === 'string' && LABEL.test(b.label) ? b.label : bad('label', 'must be a short label');
     const raw = Array.isArray(b.capabilities) && b.capabilities.length <= CAPABILITIES_MAX && b.capabilities.every((x) => typeof x === 'string' && CAPABILITY.test(x))
@@ -724,15 +724,16 @@ export class Admin {
     return { fingerprint: key.fingerprint, line: lineOf(key, v as string) };
   }
 
-  /** An owner's key: an OpenSSH public key, or an API key's public line (R-BTN-159). */
-  private async parseOwnerKey(v: unknown, field: string): Promise<{ fingerprint: string; line: string }> {
+  /** An owner's or a worker's key: an OpenSSH public key, or an API key's public line (R-BTN-159).
+   *  Probe, courier and sync keys stay SSH keys (parseKey). */
+  private async parsePersonOrWorkerKey(v: unknown, field: string): Promise<{ fingerprint: string; line: string }> {
     const api = typeof v === 'string' ? parseApiKeyLine(v) : null;
     return api ? { fingerprint: api.fingerprint, line: api.line } : this.parseKey(v, field);
   }
 
   private async ownerKeys(v: unknown, field: string): Promise<{ fingerprint: string; line: string }[]> {
     if (!Array.isArray(v) || v.length > OWNERS_MAX) bad(field, `must be a list of at most ${OWNERS_MAX} public keys`);
-    const keys = await Promise.all((v as unknown[]).map((k, i) => this.parseOwnerKey(k, `${field}[${i}]`)));
+    const keys = await Promise.all((v as unknown[]).map((k, i) => this.parsePersonOrWorkerKey(k, `${field}[${i}]`)));
     if (new Set(keys.map((k) => k.fingerprint)).size !== keys.length) bad(field, 'names a key twice');
     return keys;
   }

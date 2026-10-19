@@ -1,17 +1,18 @@
-// S-BTN-126 people's API keys (BATON_SPEC §10.6 R-BTN-159, R-BTN-57, R-BTN-58): an administrator
+// S-BTN-126 API keys beside SSH keys (BATON_SPEC §10.6 R-BTN-159, R-BTN-57, R-BTN-58): an administrator
 // whose BATON_ADMIN_KEYS line is an API key's public line registers `ops` with an owner API key;
-// that owner grants a worker SSH key K. Must hold: both API keys work as bearers on their own
-// routes and nowhere else; a wrong secret, an unknown key and a malformed bearer are
-// `unauthenticated`; an API key is never a worker's — refused on /v1/runner and as a grant's
-// key; one role per key holds across kinds; an owner API key owns only its repository; an
+// that owner grants a worker SSH key K and a worker API key W. Must hold: both people's API keys
+// work as bearers on their own routes; a wrong secret, an unknown key and a malformed bearer are
+// `unauthenticated`; W heartbeats and claims by bearer with its worker secret, and never syncs or
+// delivers (R-BTN-117); one role per key holds across kinds; an owner API key owns only its repository; an
 // administrator's revoke stops an owner API key at its next call, and a key that leaves
 // BATON_ADMIN_KEYS stops at once; a login link minted with an API key opens a session. Runs on
 // both hosts.
-import { describe, it, expect, beforeEach } from 'vitest';
-import { apiKeyCall, cutover, hbBody, makeApiKey, ORIGIN, setAdminKeys, setClock, sha256, withCore } from '../helpers';
+import { describe, it, expect, beforeEach, inject } from 'vitest';
+import { apiKeyCall, cutover, hbBody, makeApiKey, ORIGIN, payload, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
+const board = inject('board');
 const T0 = Date.parse('2026-10-19T12:00:00Z');
 let admin: Awaited<ReturnType<typeof makeApiKey>>;
 let owner: Awaited<ReturnType<typeof makeApiKey>>;
@@ -31,10 +32,12 @@ beforeEach(async () => {
   await setAdminKeys(admin.line);
   expect((await apiKeyCall(admin.key, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', default_branch: 'main',
     sync_workflow: '.github/workflows/baton-sync.yml', owner_keys: [owner.line] })).status).toBe(200);
+  const ops = await syncToken({ repository: 'immediately-run/ops', job_workflow_ref: 'immediately-run/ops/.github/workflows/baton-sync.yml@refs/heads/main' });
+  await syncCall('/v1/sync/board', payload('f'.repeat(40), null, board.states.A), ops);
   await cutover(1, 'ops');
 });
 
-describe('S-BTN-126 people’s API keys', () => {
+describe('S-BTN-126 API keys beside SSH keys', () => {
   it('an administrator’s and an owner’s API keys work as bearers on their own routes', async () => {
     const grant = await apiKeyCall(owner.key, '/v1/owner/ops/grants', { public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue'] });
     expect(grant.status).toBe(200);
@@ -62,13 +65,28 @@ describe('S-BTN-126 people’s API keys', () => {
     expect(bare.status).toBe(401);
   });
 
-  it('an API key is never a worker’s', async () => {
-    // Not on the runner's routes: they take a signature (or the transition's worker token) only.
-    const runner = await hostCall(new Request(`${ORIGIN}/v1/runner/heartbeat`, { method: 'POST', headers: { Authorization: `Bearer ${owner.key}`, 'Content-Type': 'application/json' }, body: '{}' }));
-    expect(runner.status).toBe(401);
-    // Not as a grant's key: a worker's key is an SSH key.
-    const other = await makeApiKey();
-    expect((await apiKeyCall(owner.key, '/v1/owner/ops/grants', { public_key: other.line, capabilities: [] })).json.code).toBe('invalid-params');
+  it('a worker may hold an API key: it works where granted, and never syncs or delivers', async () => {
+    const w = await makeApiKey('w');
+    expect((await apiKeyCall(owner.key, '/v1/owner/ops/grants', { public_key: w.line, hostname: 'w-host', capabilities: ['agent-venue'] })).status).toBe(200);
+    const hb = await apiKeyCall(w.key, '/v1/runner/heartbeat', hbBody('vm-a', { hostname: 'w-host', session_name: 'w', secret_hash: await sha256('w-secret'),
+      courses: [{ repository: 'ops', course: 'roadmap-pr', version: 3 }] }));
+    expect(hb.status).toBe(200);
+    const asWorker = (path: string, body: unknown) => hostCall(new Request(ORIGIN + path, { method: 'POST',
+      headers: { Authorization: `Bearer ${w.key}`, 'X-Worker-Secret': 'w-secret', 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
+    const claim = await asWorker('/v1/runner/claim', { request_id: 'req-w-0001' });
+    expect(await claim.json()).toMatchObject({ ticket_id: expect.stringMatching(/^ops:/) });
+    // A wrong secret beside the right key is refused as any worker's is (R-BTN-14).
+    const wrong = await hostCall(new Request(`${ORIGIN}/v1/runner/claim`, { method: 'POST',
+      headers: { Authorization: `Bearer ${w.key}`, 'X-Worker-Secret': 'nope', 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: 'req-w-0002' }) }));
+    expect(wrong.status).toBe(401);
+    // R-BTN-117: syncing and delivering stay with signed machine keys.
+    expect((await asWorker('/v1/sync/board', {})).status).toBe(401);
+    expect((await asWorker('/v1/courier/deliveries', {})).status).toBe(401);
+    // An API key not granted is no worker.
+    const stranger = await makeApiKey();
+    expect((await apiKeyCall(stranger.key, '/v1/runner/heartbeat', {})).status).toBe(401);
+    // An owner's API key is never a worker's (one role per key).
+    expect((await apiKeyCall(owner.key, '/v1/owner/ops/grants', { public_key: owner.line, hostname: 'o-host', capabilities: [] })).json.code).toBe('conflict');
   });
 
   it('one role per key holds across kinds', async () => {
