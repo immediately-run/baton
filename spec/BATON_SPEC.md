@@ -6311,7 +6311,7 @@ SELECT id FROM (
                              json_each(g.capabilities) j
                       WHERE c.worker_id = :worker AND g.credential_id = :credential
                         AND g.repository_id = w.repository_id AND g.revoked_at IS NULL
-                                                AND j.value = c.capability)
+                        AND j.value = c.capability)
                     -- (amended 2026-10-19 by §2o: a `runner:` capability counts as granted,
                     --  R-BTN-133)
                     AND NOT (r.name LIKE 'runner:%' AND r.name IN (SELECT capability FROM
