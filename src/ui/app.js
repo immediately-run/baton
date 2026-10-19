@@ -179,7 +179,7 @@ function renderWorkers() {
   const body = document.getElementById('workers');
   body.replaceChildren();
   for (const w of state.workers) {
-    const who = el('td', {}, el('div', { text: w.hostname }), el('div', { text: `${w.session_name} · ${w.harness} · ${w.kind} · #${w.id}`, cls: 'muted' }));
+    const who = el('td', {}, el('div', { text: w.hostname }), el('div', { text: `${w.session_name} · ${w.harness} · ${w.kind}${w.isolation && w.isolation !== 'process' ? ` · ${w.isolation}` : ''} · #${w.id}`, cls: 'muted' }));
     // §14: tier ceiling, capabilities, providers and lease timeout.
     const caps = (w.capabilities ?? []).map((c) => c.capability).join(', ') || 'no capabilities';
     const provs = (w.providers ?? []).map((p) => `${p.prefix}→${p.provider_id}`).join(', ') || 'no known accounts';

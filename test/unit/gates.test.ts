@@ -25,7 +25,7 @@ describe('gatesFor: every gate of the table', () => {
   });
 
   // [gate, the input that fails it, the verdict at a claim, the verdict at an advance (null: passes)]
-  const cases: [string, () => Parameters<typeof gatesFor>, { rule: number; code: string }, { rule: number; code: string } | null][] = [
+  const cases: [string, () => Parameters<typeof gatesFor>, { rule: number | string; code: string }, { rule: number | string; code: string } | null][] = [
     ['rule 1: the queued leg is not ready', () => [worker(), ticket(), leg({ state: 'waiting' }), 'claim', facts()], { rule: 1, code: 'not-ready' }, null],
     ['rule 1: a leg no snapshot posted', () => [worker(), ticket(), leg({ state: null }), 'claim', facts()], { rule: 1, code: 'not-ready' }, null],
     ['§6.7: no sync since the last end', () => [worker(), ticket(), leg(), 'claim', facts({ headObservation: 4 })], { rule: 1, code: 'awaiting-sync' }, null],
@@ -39,12 +39,23 @@ describe('gatesFor: every gate of the table', () => {
     ['rule 8: a posted barred tag', () => [worker(), ticket(), leg({ bars: ['family:glm'] }), 'claim', facts()], { rule: 8, code: 'barred-tag' }, { rule: 8, code: 'barred-tag' }],
     ['rule 9: an older course version', () => [worker({ courses: [{ repository: 'docs', course: 'roadmap-pr', version: 2 }] }), ticket(), leg(), 'claim', facts()], { rule: 9, code: 'stale-skills' }, null],
     ['rule 9: a course not declared', () => [worker({ courses: [] }), ticket(), leg(), 'claim', facts()], { rule: 9, code: 'stale-skills' }, null],
+    ['chain (R-BTN-106): the key ran a leg this one names', () => [worker(), ticket(), leg({ noChainFrom: ['implement'] }), 'claim', facts({ ranByKey: ['implement'] })], { rule: 'chain', code: 'chain' }, { rule: 'chain', code: 'chain' }],
+    ['isolation (R-BTN-107): a session floor, a process worker', () => [worker(), ticket(), leg({ isolation: 'session' }), 'claim', facts()], { rule: 'isolation', code: 'isolation' }, { rule: 'isolation', code: 'isolation' }],
+    ['isolation (R-BTN-107): a session floor, an attached worker', () => [worker({ isolation: 'attached' }), ticket(), leg({ isolation: 'session' }), 'claim', facts()], { rule: 'isolation', code: 'isolation' }, { rule: 'isolation', code: 'isolation' }],
     ['rule 10: backing off', () => [worker(), ticket(), leg(), 'claim', facts({ override: { hold: 0, retry_after: T0 + 1 } })], { rule: 10, code: 'backing-off' }, { rule: 10, code: 'backing-off' }],
   ];
   it.each(cases)('%s', (_name, args, atClaim, atAdvance) => {
     const [w, t, l, , f] = args();
     expect(gatesFor(w, t, l, 'claim', f)).toEqual({ ok: false, ...atClaim });
     expect(gatesFor(w, t, l, 'advance', f)).toEqual(atAdvance ? { ok: false, ...atAdvance } : { ok: true });
+  });
+
+  it('chain and isolation pass a key that ran none of the named legs, and a session worker', () => {
+    expect(gatesFor(worker(), ticket(), leg({ noChainFrom: ['implement', 'fix'] }), 'advance', facts({ ranByKey: ['review'] }))).toEqual({ ok: true });
+    expect(gatesFor(worker(), ticket(), leg({ noChainFrom: [] }), 'claim', facts({ ranByKey: ['implement'] }))).toEqual({ ok: true });
+    expect(gatesFor(worker({ isolation: 'session' }), ticket(), leg({ isolation: 'session' }), 'claim', facts())).toEqual({ ok: true });
+    // No floor: any declared mode takes the leg.
+    expect(gatesFor(worker({ isolation: 'attached' }), ticket(), leg({ isolation: null }), 'claim', facts())).toEqual({ ok: true });
   });
 
   it('rule 8 at an advance joins the holder’s own bars to the posted ones, which only add', () => {

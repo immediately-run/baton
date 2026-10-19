@@ -613,11 +613,12 @@ export class Admin {
   }
 
   /** `PUT /v1/owner/{repository}/settings`: `required_bars`, `retry`, `transcript_repos`,
-   *  `unblocked_trigger`, `remind_after` (seconds, R-BTN-80) — each given replaces that setting whole. */
+   *  `unblocked_trigger`, `remind_after` (seconds, R-BTN-80), `required_independence`
+   *  (R-BTN-106) — each given replaces that setting whole. */
   setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'required_independence'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     const sets: [string, string | null][] = [];
     if (b.required_bars !== undefined) sets.push(['required_bars', JSON.stringify(this.checkRequiredBars(repository, b.required_bars))]);
@@ -633,6 +634,7 @@ export class Admin {
         ? (b.remind_after as number) : bad('remind_after', `must be whole seconds from ${REMIND_AFTER_S.min} to ${REMIND_AFTER_S.max}`);
       sets.push(['remind_after_s', JSON.stringify(r)]);
     }
+    if (b.required_independence !== undefined) sets.push(['required_independence', JSON.stringify(checkIndependence(b.required_independence))]);
     return this.c.store.transaction(() => {
       for (const [k, v] of sets) this.exec(`UPDATE repositories SET ${k} = ? WHERE id = ?`, v, repository);
       this.event(actor, { act: 'settings', repository, ...Object.fromEntries(sets.map(([k, v]) => [k === 'remind_after_s' ? 'remind_after' : k, v == null ? null : JSON.parse(v)])) }, repository);
@@ -687,6 +689,12 @@ export class Admin {
     return JSON.parse(this.rows<{ required_bars: string }>('SELECT required_bars FROM repositories WHERE id = ?', repository)[0]?.required_bars ?? '[]');
   }
 
+  /** R-BTN-106: the owners' `required_independence`, leg → the legs a key that ran any of them
+   *  on a ticket may not take it; joined to every course file's `no_chain_from`. */
+  requiredIndependence(repository: string): Record<string, string[]> {
+    return JSON.parse(this.rows<{ v: string }>('SELECT required_independence AS v FROM repositories WHERE id = ?', repository)[0]?.v ?? '{}');
+  }
+
   /** A repository's retry policy (R-BTN-23), or null for the default. */
   retry(repository: string): RetryPolicy | null {
     const r = this.rows<{ retry: string | null }>('SELECT retry FROM repositories WHERE id = ?', repository)[0]?.retry;
@@ -704,7 +712,7 @@ export class Admin {
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
-      settings: this.rows('SELECT id AS repository_id, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after FROM repositories WHERE retired_at IS NULL ORDER BY id'),
+      settings: this.rows('SELECT id AS repository_id, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, required_independence FROM repositories WHERE retired_at IS NULL ORDER BY id'),
       // R-BTN-80: the personal channels, by repository.
       couriers: this.c.notices?.couriers() ?? [],
     };
@@ -724,6 +732,22 @@ export class Admin {
     if (new Set(keys.map((k) => k.fingerprint)).size !== keys.length) bad(field, 'names a key twice');
     return keys;
   }
+}
+
+/** R-BTN-106's `required_independence`: `{<leg>: [<leg>, …]}`, leg names compared as strings
+ *  in every course of the repository (a renamed leg is followed at the gate). At most
+ *  LEGS_MAX legs, each naming at most LEGS_MAX; an empty list is dropped. */
+export function checkIndependence(v: unknown): Record<string, string[]> {
+  if (!isObj(v) || Object.keys(v).length > LEGS_MAX) bad('required_independence', `must be an object of at most ${LEGS_MAX} leg names`);
+  const out: Record<string, string[]> = {};
+  for (const [leg, from] of Object.entries(v as Record<string, unknown>)) {
+    const at = `required_independence.${leg}`;
+    if (!COURSE_ID.test(leg)) bad(at, 'must be a leg name');
+    if (!Array.isArray(from) || from.length > LEGS_MAX || !from.every((l) => typeof l === 'string' && COURSE_ID.test(l))) bad(at, `must be a list of at most ${LEGS_MAX} leg names`);
+    const legs = [...new Set(from as string[])].sort();
+    if (legs.length) out[leg] = legs;
+  }
+  return out;
 }
 
 /** R-BTN-23's policy as owners set it: 1–8 backoffs, each 1 minute to 30 days, and the failed

@@ -95,6 +95,8 @@ export interface Heartbeat {
   /** R-BTN-60: course-defined strings the tag gate matches. */
   tags: string[];
   tier_ceiling: (typeof TIERS)[number];
+  /** R-BTN-107: how the runner isolates a leg — `process` (the default), `attached` or `session`. */
+  isolation: 'attached' | 'process' | 'session';
   /** Per repository (R-BTN-66): `{repository: tier}`, checked against each ladder at the heartbeat. */
   tier_ceilings: Record<string, string>;
   lease_timeout_s: number;
@@ -118,6 +120,9 @@ export interface TranscriptReport { index?: number; repo: string; path: string; 
 
 /** §6.6 R-BTN-9: the worker declares its lease timeout, clamped to [900, 86400] s, default 900. */
 export const clampLease = (s: unknown) => (typeof s === 'number' && Number.isFinite(s) ? Math.min(86400, Math.max(900, Math.round(s))) : 900);
+
+/** R-BTN-107: the isolation modes a heartbeat may declare. */
+export const ISOLATIONS: readonly Heartbeat['isolation'][] = ['attached', 'process', 'session'];
 
 export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartbeat {
   if (!isObj(body)) bad('body', 'must be a JSON object');
@@ -160,6 +165,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   });
   if (b.last_activity_at !== undefined && !isTime(b.last_activity_at)) bad('last_activity_at', 'must be epoch ms');
   if (b.test_harness !== undefined && typeof b.test_harness !== 'boolean') bad('test_harness', 'must be a boolean');
+  if (b.isolation !== undefined && !ISOLATIONS.includes(b.isolation as Heartbeat['isolation'])) bad('isolation', `must be one of ${ISOLATIONS.join(', ')}`);
   const transcripts = (b.transcripts ?? []) as unknown[];
   if (!Array.isArray(transcripts) || transcripts.length > 50) bad('transcripts', 'must be a list of at most 50');
   const usage = (b.usage ?? []) as unknown[];
@@ -179,6 +185,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     capabilities,
     tags,
     tier_ceiling: tier as Heartbeat['tier_ceiling'],
+    isolation: (b.isolation ?? 'process') as Heartbeat['isolation'],
     tier_ceilings: checkTierCeilings(b.tier_ceilings),
     lease_timeout_s: clampLease(b.lease_timeout_s),
     courses,

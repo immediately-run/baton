@@ -47,6 +47,11 @@ describe('plan: one request per command', () => {
     expect(plan('owner', ['settings', 'docs', '--unblocked-workflow', '.github/workflows/unblocked.yml'], key).body)
       .toEqual({ unblocked_trigger: { kind: 'github-app', workflow: '.github/workflows/unblocked.yml' } });
     expect(() => plan('owner', ['settings', 'docs', '--no-required-bars', '--required-bar', '*', '--course', 'c', '--tag-prefix', 'p'], key)).toThrow('clears them');
+    // R-BTN-106: required_independence as leg=a,b;leg=c, and none to clear it.
+    expect(plan('owner', ['settings', 'docs', '--independence', 'review=implement,fix;adjudicate=implement'], key).body)
+      .toEqual({ required_independence: { review: ['implement', 'fix'], adjudicate: ['implement'] } });
+    expect(plan('owner', ['settings', 'docs', '--independence', 'none'], key).body).toEqual({ required_independence: {} });
+    expect(() => plan('owner', ['settings', 'docs', '--independence', 'review'], key)).toThrow('leg=a,b');
     expect(() => plan('owner', ['settings', 'docs'], key)).toThrow('at least one setting');
     // R-BTN-80: remind_after in seconds, from a duration.
     expect(plan('owner', ['settings', 'docs', '--remind-after', '6h'], key).body).toEqual({ remind_after: 21_600 });

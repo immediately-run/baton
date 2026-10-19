@@ -350,8 +350,10 @@ depth 5 back, and with it the `unblocked` event.
   for the policy in force. The instances that drive the core (the scenario traces and the
   model-based tests) set `BACKOFF = 0` and the counts to 100000 or 1000: the core keeps §6.10's
   per-ticket policy until B-11 builds R-BTN-122, and holds it makes are carried as the owner's.
-- **Tiers and grants beyond rule 4** (rules 5–7): column comparisons with no interleaving of
-  their own; matching tests cover them (G-BTN-40). Rule 4 is modelled (R3-1254 part 2b).
+- **Tiers and grants beyond rule 4** (rules 5–7), and **isolation floors** (R-BTN-107): column
+  comparisons with no interleaving of their own — a leg's `isolation: session` against the
+  worker's latest declared mode; matching tests cover them (G-BTN-40, S-BTN-64). Rule 4 is
+  modelled (R3-1254 part 2b).
 - **A leg's own `requires.capabilities`** (R-BTN-120) and **course `capability_types` and
   roles** (R-BTN-121): core has not built them (B-10); a leg's list joins the ticket's for that
   leg, the same check, and types and roles are the course file's acceptance (`baton course
@@ -373,7 +375,9 @@ depth 5 back, and with it the `unblocked` event.
   logs nothing where the spec logs `blocked`, and the lift logs no `unblocked`. R3-1254's part 3
   models them (its Status names them; round 3, 3-r3-0).
 - **The rest of §2g–§2m, still R3-1254's** (part 3): open-world claims (R-BTN-104), sync wants
-  (R-BTN-94), `no_chain_from` (R-BTN-106), child tickets' spawned rows (R-BTN-86), `not_before`
+  (R-BTN-94), `no_chain_from` and the owners' `required_independence` (R-BTN-106; core refuses
+them since B-2, rule `chain` — a refusal is no model action, so the scenario traces stay
+accepted, but the model still lets a key review what it implemented), child tickets' spawned rows (R-BTN-86), `not_before`
   and leg deadlines (R-BTN-89, R-BTN-90; R3-1259 names the deadline's model change), the
   holder's reported `next` (R-BTN-83's provisional queued leg), and exhaustive liveness on a
   narrowed instance. Leg queues (R-BTN-79, now a warning) and notices (R-BTN-80, which no leg
