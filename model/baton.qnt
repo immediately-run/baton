@@ -673,7 +673,7 @@ module baton {
   // §6.3: the sidecar's heartbeat renews the lease, and tells the worker what it holds.
   // @impl src/core/workerApi.ts#heartbeat
   // @impl src/core/claims.ts#fenced
-  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-47)
+  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-49)
   action heartbeat(w: str): bool = all {
     st.up.get(w), not(st.asleep.get(w)),
     st' = beatOf(w, st.declared.get(w)),
@@ -701,7 +701,7 @@ module baton {
   // R-BTN-121: a heartbeat declaring a changed set — a capability whose check failed dropped, or
   // one whose check passes again re-declared (the runner runs its checks; Baton runs nothing).
   // @impl src/core/workerApi.ts#heartbeat
-  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-47)
+  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-49)
   action declare(w: str, decl: Set[str]): bool = all {
     st.up.get(w), not(st.asleep.get(w)), decl.subseteq(DECLARED.get(w)), decl != st.declared.get(w),
     st' = beatOf(w, decl),
@@ -709,7 +709,7 @@ module baton {
   // R-BTN-75: the alarm finds a worker no longer live — silent past its lease timeout, dead or
   // asleep — and recounts the fleet, as it reaps, in the same tick.
   // @impl src/core/baton.ts#alarm
-  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-47)
+  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-49)
   action alarmLive: bool = all {
     FLEET, liveIn(st) != st.fleetLive,
     st' = recount(st),
@@ -718,14 +718,14 @@ module baton {
   // or `available`, which clears a stale `unavailable` early; the instance's state changes and
   // the rows follow.
   // @impl src/core/resources.ts#post
-  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-47)
+  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-49)
   action reading(x: str, available: bool): bool = all {
     RESOURCES.contains(x),
     st' = recount(st.with("unavailable", st.unavailable.set(x, if (available) 0 else st.now + READING_TTL))),
   }
   // R-BTN-76: an `unavailable` reading lapses; the alarm drops it and the rows follow.
   // @impl src/core/resources.ts#alarm
-  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-47)
+  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-49)
   action readingLapses(x: str): bool = all {
     RESOURCES.contains(x), st.unavailable.get(x) > 0, st.unavailable.get(x) <= st.now,
     st' = recount(st.with("unavailable", st.unavailable.set(x, 0))),

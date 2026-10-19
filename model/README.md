@@ -220,7 +220,7 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   logged ones. **One evaluation per recount** (R-BTN-75 as amended here): core's
   `Blocks.recount` evaluates after the capability rows and again after the resource rows, so a
   fleet returning to a ticket that needs both logs an `unblocked` and a `blocked` the model
-  does not; the actions that recount carry `@impl pending` notes naming B-47, which fixes core.
+  does not; the actions that recount carry `@impl pending` notes naming B-49, which fixes core.
   An instance with no requirements and no resources (`FLEET` false: `small`) never recounts.
 
 ## Properties (`safety`)

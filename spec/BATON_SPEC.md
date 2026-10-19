@@ -1047,7 +1047,7 @@ another ticket, or a third-party resource is unavailable.)*
   transaction that changes its rows, its next legs or whether it is held, once, after the
   transaction's last row change, so a transaction that rewrites several kinds of row logs at most
   one transition per ticket, after any owed `unblocked` (R-BTN-77) *(amended 2026-10-19, R3-1254
-  part 2b: core's recount evaluated after each kind, B-47)*, and stores it as
+  part 2b: core's recount evaluated after each kind, B-49)*, and stores it as
   `tickets.blocked_since`; `blocked` and `unblocked` (R-BTN-77) are its transitions, except that
   a claim starting changes it silently — a claimed ticket is not waiting. A claim's end is never
   an unblocking; an end that leaves the ticket blocked — a backoff it starts (R-BTN-122), a

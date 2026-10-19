@@ -1,5 +1,5 @@
 ---
-title: "B-47 — One evaluation per recount: a returning fleet logs no spurious unblocked and keeps blocked_since"
+title: "B-47 — B-47 — Baton runner: sessions report over a local channel, bounded runs, attached and session-mode cloud runners"
 id: B-47
 project: baton
 status: available
@@ -8,59 +8,46 @@ repos:
   - baton
 tags:
   - roadmap-item
-description: "Blocks.recount writes the capability rows and evaluates, then writes the resource rows and evaluates again. A ticket that requires a capability and needs an unavailable resource, whose fleet empties overnight and returns, is logged unblocked (waking workers and firing the trigger) and blocked again, and its blocked_since moves, though it never stopped being blocked. R-BTN-75 (amended by R3-1254 part 2b) evaluates once, after the transaction's last row change. Requires: none."
+order: 1107
+tier: critical
+description: "The runner's local channel (`baton leg …`, `0600` socket) checking every move, bounded runs, and the `attached` and `session` isolation modes (BATON_SPEC R-BTN-106, R-BTN-107); S-BTN-62, -75, -78. Split from B-2. Requires: none."
 topics:
   - baton
 owns: {}
 prs: []
-depends_on: []
+depends_on:
+  - B-3
 ---
 
-**Spec:** BATON_SPEC R-BTN-75 ("once, after the transaction's last row change", amended
-2026-10-19 by R3-1254 part 2b), R-BTN-77.
-**Found by:** baton#59's review gate, round 1 (1-A-4, 1-B-1). Both reviewers reproduced it in core
-with a scratch test, while the model's `recount` settles once.
+**Brief:** continues B-2 (split 2026-10-19). The owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.1 R-BTN-106 (the local channel, the runner checking every move, bounded runs), R-BTN-107 (`attached` and `session` modes), §2m.7a's heartbeat row (`session_url`), §6.13 and R-BTN-72 as amended; §13a S-BTN-62, S-BTN-75, S-BTN-78; G-BTN-89, G-BTN-99.
+**Depends on:** B-3. The runner checks a session's move as it checks a script's result: `reached` an outcome, `next` a leg leaving it, each named output valid against its schema (R-BTN-108) and every entry requirement of `reached` met (R-BTN-109). S-BTN-62's second move ("a valid move without the station's required output") is refused by B-3's validator and station entry; built first, the channel would check half a move.
 
 ### Requires
 
-None.
+- none — the channel, bounded runs and `attached` mode run in the integration harness; `session` mode runs against a fake session provider in the tests, the Claude remote-session adapter against the real one by hand.
 
-### Why
+### What B-2 already delivered
 
-`Blocks.recount` (`src/core/blocks.ts`) calls `this.write(touched, ['capability'])` and then
-`this.write(needers, ['resource'])`, and each `write` ends in `evaluate`, which reads the table as it
-stands. Take ticket D, which requires `mcp-chrome` and whose queued leg needs a resource that is
-`unavailable`:
-1. Overnight the one worker declaring `mcp-chrome` lapses. Its capability row is written and the
-   resource row is cleared, with no live worker left to answer. D stays blocked.
-2. In the morning that worker heartbeats. The capability write clears its row while no resource
-   row exists yet, so `evaluate` logs `unblocked` and calls `unblocked()`, which messages workers
-   and fires the trigger.
-3. The resource write re-adds the row, and `evaluate` logs `blocked` with a new `blocked_since`.
-
-D was never claimable.
+- Rule `chain`: `no_chain_from` joined to the owners' `required_independence`, refused at a claim and an advance by the credential that ran a named leg on the ticket; the runner suspends on the refused advance (§6.13).
+- Rule `isolation`: the heartbeat's `isolation` (`attached`, `process`, `session`), a leg's `isolation: session` floor refused at a claim and an advance and dropped from the worker's recommendations; the dashboard shows a worker's mode.
 
 ### What to build
 
-1. Make `recount` (and any caller that writes several kinds in one transaction) rewrite every kind
-   first and evaluate each touched ticket once, after the last write. `write`'s per-kind diff
-   can stay; the evaluation and the `answer_lost` handling move to one pass over the union of
-   touched tickets.
-2. Keep R3-1251's `answer_lost` semantics, which the model now pins (`settleLost`): a row lost to an
-   empty fleet clears silently; blocked again only on rows it lost, silently; otherwise logged,
-   with the owed `unblocked` first.
-3. Drop the `@impl pending — one evaluation per recount … (R-BTN-75, B-47)` notes on the model's
-   `heartbeat`, `declare`, `alarmLive`, `reading` and `readingLapses` (`npm run model:links` lists
-   them), and re-stamp.
+1. **Channel.** The runner listens on a `0600` Unix socket in its state directory named by `IR_BATON_SOCKET`; the CLI wraps it as `baton leg status | output | done | suspend | release | next | yield`, refused outside a leg's session (R-BTN-127). The runner checks each move (station, next leg, outputs, entry) before it calls Baton and answers a failing one on the channel with the reason; the session never holds the worker secret or nonce (`IR_BATON_STATE` is the view without them).
+2. **Bounded runs.** `baton runner start --legs <a,b> --max-legs n --until <t>`: claims only tickets whose queued leg is named, chains only into named legs, at most `n` legs per claim (default 8), none started after `until`; a move into a leg outside the grant suspends at `reached` with the hand-off.
+3. **Isolation modes.** `baton runner start --attached` and `baton leg next` (blocks until the runner has a leg to give); `--sessions <provider>`: one cloud session per agent leg, a brief with the ticket, the leg, its inputs' URIs and the hand-off and no claim id, worker secret or Baton credential, the child's ```` ```baton-leg-result ```` block read from its events and checked like a channel move. The heartbeat declares the mode, and `session_url` for the running leg.
+
+### Do not
+
+- Let the session talk to Baton, or hand it the worker secret.
 
 ### Tests
 
-- The reviewers' probe as a unit test in `test/unit/blocks.test.ts`: D as above. After the morning
-  heartbeat, no new `blocked` or `unblocked` event, and `blocked_since` unchanged. It fails on
-  today's core.
-- An S-BTN scenario row for it under R-BTN-75's scenarios, on both hosts.
+- S-BTN-62, S-BTN-75 and S-BTN-78 as integration scenarios on both hosts; G-BTN-89 and G-BTN-99.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
 
 ### Exit criteria
 
-- [ ] a recount evaluates each ticket once, with the probe test failing before and passing after
+- [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
 - [ ] merged under the review gate

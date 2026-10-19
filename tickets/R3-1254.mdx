@@ -154,6 +154,6 @@ heartbeat recounts). The counts' other causes — registration, grants made, cha
 a revoked credential, a post changing `requires` or needs — are fixed by the instance and listed
 under *Not modelled*. `small`'s cost did grow with the fleet's state, even with no fleet; the
 measured figure is in the round-1 follow-up's `model:full` report. The reviewers found a core defect, recorded
-as B-47: core's recount evaluates after each kind of row, so a returning fleet logs an extra
+as B-49: core's recount evaluates after each kind of row, so a returning fleet logs an extra
 `unblocked` and `blocked`. R-BTN-75 is amended to evaluate once per transaction. baton#59 merged before
 these fixes; they land in a follow-up pull request._
