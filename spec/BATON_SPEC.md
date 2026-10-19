@@ -338,7 +338,7 @@ Knowledge that needs **secrets** comes from **probes** outside it.
                                 #   <ext> mjs, js, cjs, mts, ts or cts (R-BTN-133)
       legs/<leg>.run.<ext>      # optional: the repository's replacement for that leg's run (R-BTN-131)
     package.json                # optional, with its lockfile: the legs' dependencies (R-BTN-133);
-                                #   absent, the repository root's
+                                                                #   absent, none — never the repository root's (R-BTN-133)
   ```
 
   - `course.json` is the course's whole state machine (§2e); `baton.json` names the course
@@ -815,7 +815,8 @@ offers a sane default.)*
   - **no default leg scripts.** Leg scripts run the repository's own agents (R-BTN-72), so
     `baton repo init` writes stubs, one per leg, that run a command the repository names in
     `.baton/baton.json` (`agent_command`, with the ticket, leg and checkout as arguments) and
-    export the `pr` course's `close` (R-BTN-83), which the CLI provides; the `review` stub
+        export the `pr` course's `close` (R-BTN-83), which the CLI provides *(since 2026-10-19 the
+    `pr` course directory's, importing `@immediately-run/baton/leg`, R-BTN-134)*; the `review` stub
     tells the agent to return a verdict, which `close` writes as the verdict line.
 
   `baton repo init [--course <a standard course>]` scaffolds `.baton/baton.json`, the course's
@@ -1012,8 +1013,8 @@ another ticket, or a third-party resource is unavailable.)*
     docs)*. A `ticket` block refuses a claim (rule 1).
   - **`capability`** — no worker that could take the ticket has a capability it requires:
     one row per capability in the ticket's `requires` that no **live** worker — one that has
-    heartbeated within its lease timeout (§5) — both declares and is granted on its
-    repository (rule 4), `ref` the capability. Baton keeps a count of such workers per
+        heartbeated within its lease timeout (§5) — both declares and is granted on its
+    repository (rule 4; a `runner:` capability needs only the declaration, R-BTN-133), `ref` the capability. Baton keeps a count of such workers per
     (repository, capability), `fleet_capabilities`, changed when a worker registers or
     changes what it declares, stops being live (the alarm, §3) or is reaped, and when a grant
     is made, changed or revoked (R-BTN-58); it rewrites these rows only when a count crosses
@@ -1697,7 +1698,8 @@ run one child ticket per run.)*
     `stations.<id>.not_before` always wins *(review gate round 1)*. Baton never computes one: a
     schedule — a cron expression and a time zone — is the leg script's to turn into the next
     instant, so core holds timestamps only and stays course-agnostic (R-BTN-50). The CLI's
-    leg-script library (`baton/leg`, the module `close` and the stubs import, §6.13) exports
+        leg-script library (`baton/leg`, the module `close` and the stubs import, §6.13 — *since
+    2026-10-19 `@immediately-run/baton/leg`, whose one export list is R-BTN-133's*) exports
     `nextFire(cron, tz, after)` and `writeSuccessor` *(review gate round 1: not the test kit)*.
   - **Validated as untrusted input** (§10.4) *(review gate round 1)*: an RFC 3339 date-time with
     `Z` or a numeric offset, at most 400 days after Baton's `now` (R-BTN-32) when the snapshot
@@ -2192,7 +2194,9 @@ archiver — and git's server-side hooks are unaffected: they are not Baton hook
     (`baton runner start`), the sidecar and launchers load it **from the remote default branch's
     head**: they fetch it, extract that commit's tree into a fresh directory (`git archive`,
     never the working tree, as R-BTN-105 does for the sync) and import it from there, so it
-    may import any module of the repository at that commit and the worker's installed
+        may import any module of the repository at that commit *(amended 2026-10-19 by §2o and §2p:
+    run through the wrapper from a verified tree; an own course's imports what `imports` lists, a
+    sourced course's only its directory — R-BTN-133, R-BTN-134)* and the worker's installed
     dependencies. It default-exports `rank(view)`, where `view` is assembled by the caller
     and passed in whole — `rank` makes no Baton request of its own, and may make any other:
     - `view`: `{worker: {tags, profile, harness} | null, candidates, fleet, instances, now}` —
@@ -2449,7 +2453,7 @@ archiver — and git's server-side hooks are unaffected: they are not Baton hook
     heartbeat's claim, with a `release` message. None is a failed attempt (§6.10).
   - **The response** is a claim's (§11), with `station` the course's `start`, an empty
     `path`, `snapshot_sha` the request's `sha`, and `provisional: true`.
-- **R-BTN-105 (a sync reads the commit it syncs; a plain server needs nothing).** *(Amended 2026-10-19 by §2o and §2p: the "fresh directory" is R-BTN-133's sparse, verified tree of `.baton/` at `sha`, with `.baton/package.json`'s dependencies installed, so a repository's own `tickets.mjs` and `sync.mjs` import what it declares; a sourced course's directory comes from its source — R-BTN-134.)* *(Amends
+- **R-BTN-105 (a sync reads the commit it syncs; a plain server needs nothing).** *(Amended 2026-10-19 by §2o and §2p: the "fresh directory" is a detached worktree of the whole commit at `sha` — not sparse, since the ticket source reads files anywhere in it — with `.baton/package.json`'s dependencies installed by R-BTN-133's rules, so a repository's own `tickets.mjs` and `sync.mjs` import what it declares and what `imports` lists; a sourced course's directory comes from its source; only the runner's leg trees are sparse — R-BTN-133, R-BTN-134.)* *(Amends
   R-BTN-94 and R-BTN-97.)*
   - **Every input from the commit.** A sync run anywhere reads the tickets, `.baton/` and each
     course's `course.json`, `sync.mjs` and ticket source from the commit it posts (`sha`) —
@@ -2458,9 +2462,11 @@ archiver — and git's server-side hooks are unaffected: they are not Baton hook
     check that the post's commit descends from the head stops a stale commit; this rule makes
     sure the course file and code really are that commit's (§7.1's `registry` carries the
     course file with every post, R-BTN-69).
-  - **A worker already runs its repository's code** — every leg is repository code (R-BTN-72)
+    - **A worker already runs its repository's code** — every leg is repository code (R-BTN-72)
     — so a worker that syncs adds no exposure of the machine, and R-BTN-97's sandboxing
-    obligation binds only runners that are not workers.
+    obligation binds only runners that are not workers *(amended 2026-10-19 by §2p: except for
+    the station functions and installs of sourced courses the worker does not itself run legs
+    of, which syncing adds — R-BTN-134)*.
   - **Triggers without a server component.** A worker that pushes the default branch syncs
     after its push. A worker that offers to sync a repository (its own configuration; none
     is required to) asks `GET /v1/sync/wanted?repository=<id>` and runs `git ls-remote` on
@@ -2471,7 +2477,9 @@ archiver — and git's server-side hooks are unaffected: they are not Baton hook
     re-trigger forever. R-BTN-62's numbering and `sync-busy` keep several workers from posting
     at once. An owner pushing from a machine with no worker records a want with `baton owner
     sync-want <repository>` (`POST /v1/owner/{repository}/sync-want`).
-  - So a plain repository is **a bare repository reachable over SSH and nothing else**: no
+    - So a plain repository is **a bare repository reachable over SSH and nothing else** *(amended
+    2026-10-19 by §2p: plus, for a standard course, the baton repository or a mirror of it that
+    `sources` maps it to — R-BTN-134)*: no
     `post-receive` hook, spool, sync account or sync key is required. One stays optional — a
     `post-receive` hook that records a want under a sync key, shortening the wait when no
     worker is live — and with no live worker nothing is claimed, so the cost of none is a
@@ -3068,7 +3076,8 @@ prerequisite may say where the other ticket is now (`at`) or that it has been th
   lists the cycle under **Needs you** as `prerequisite-cycle`, with its tickets.
 
   **§7.2 rule 4** reads, for the leg to be started: `capabilitiesOf(ticket.requires ∪
-  leg.requires.capabilities) ⊆ capabilitiesOf(declared) ∩ grant(repository)` — checked at the
+    leg.requires.capabilities) ⊆ capabilitiesOf(declared) ∩ grant(repository)` *(amended
+  2026-10-19 by §2o: a capability of the built-in type `runner` counts as granted — R-BTN-133)* — checked at the
   claim for the queued leg and at each `advance` into a leg.
 
   **Why a leg cannot start, in one answer.** `GET
@@ -3078,7 +3087,8 @@ prerequisite may say where the other ticket is now (`at`) or that it has been th
   - `station`: `met`, or `why: not-at` with where the ticket is;
   - `ticket`: `not-at`, `not-reached` or `not-done` with where the other ticket is (or
     `withdrawn`), `no-parent`, or `unknown-ticket`;
-  - `capability`: `no-live-runner` (no live runner both declares it and is granted it), or,
+    - `capability`: `no-live-runner` (no live runner both declares it and is granted it — a
+    `runner:` capability needs only the declaration, R-BTN-133), or,
     with `worker=me`, `not-declared` or `not-granted` for the asking runner;
   - `resource`: `unavailable`, with `until`;
   - `decision`: `open`, with its `url` and `asks`;
@@ -4042,9 +4052,13 @@ from git at a commit, never from a working tree (R-BTN-34, B-33).
   course's trees are R-BTN-134's.)*
   - **The commit is the default branch's.** Before it reads anything at a claim's
     `snapshot_sha`, the runner fetches the home repository's default branch and checks that
-    `snapshot_sha` is an ancestor of it (`git merge-base --is-ancestor`), on every claim — not
+        `snapshot_sha` is an ancestor of it (`git merge-base --is-ancestor`), on every claim — not
     only when R-BTN-34's `cat-file` finds the commit missing — and releases `stale-board`
-    otherwise. Baton checks only that a post's `parent_sha` is its head (R-BTN-11), so a machine
+    otherwise; a failed fetch is `cannot-finish:transient`, never `stale-board` (an undetermined
+    check is not a negative one). A runner that releases `stale-board` for an off-branch
+    `snapshot_sha` makes no further claim on that repository while Baton's head is that `sha`,
+    so it does not loop; and **Needs you** (R-BTN-102) lists a post by a machine key whose
+    `sha` is not a descendant of the previous post's, which the runners' releases report. Baton checks only that a post's `parent_sha` is its head (R-BTN-11), so a machine
     key could post a board whose `sha` is an unmerged branch; without this check every runner
     would run that branch's leg scripts — a reviewer leg included, which B-33 forbids — and,
     since this rule, install its lockfile.
@@ -4054,21 +4068,28 @@ from git at a commit, never from a working tree (R-BTN-34, B-33).
     (R-BTN-134). The **course directory** — `.baton/courses/<course>/` in the home tree, or the
     source's path in its tree, named by `ctx.course.dir` — is the module root of the leg's
     script; the home tree holds the overrides (R-BTN-131). Sparse trees cost what `.baton/` and
-    one course directory cost, not a whole checkout, and no `package.json` above them is checked
-    out for Node or npm to find. A tree is keyed by (repository, commit, checked-out path) and
+    one course directory cost, not a whole checkout, and no `package.json` above them is checked out for Node or npm to find; and because the trees
+    sit inside the home checkout's git directory, below its working tree, the runner writes
+    `{"private": true}` as `<git dir>/baton/package.json` (refusing to start if it cannot), so the
+    nearest `package.json` of any tree file is within the tree or that stop file, never the
+    working tree's. A tree is keyed by (repository, commit, checked-out path) and
     lives at `<git dir>/baton/trees/<provider>/<namespace>/<repository>/<commit>-<the first 12
     hex of SHA-256 of the path>`, its stamp `<that path>.ready` beside it — under the home
     checkout's git directory, so the one runner that holds the home checkout (R-BTN-131's lock)
     is the one writer of its trees. It is reused by a later claim at the same key; the runner
     keeps the three it used last per repository and removes the others when a claim ends
     (restoring their write bits, then `git worktree remove --force` and `git worktree prune`).
-    Every git command the runner runs on a tree passes `-c core.hooksPath=/dev/null`, so the
-    home checkout's hooks — which agents can write — never run.
-  - **A tree is verified on every use.** On reuse, the runner checks the stamp, re-checks the
-    commit's ancestry, and checks that the tree is clean (`git status --porcelain` empty); a
-    tree that fails any check is removed and made again. A tree holding a symbolic link whose
-    target resolves outside the tree ends the claim `released:cannot-finish:spec`, naming the
-    link.
+        Every git command the runner runs — on a tree, the home checkout or a cache clone — passes
+    `-c core.hooksPath=/dev/null -c core.fsmonitor=false`, so no hook or monitor the home
+    checkout's config names, which agents can write, ever runs.
+    - **A tree is verified on every use.** On reuse, the runner checks the stamp, re-checks the
+    commit's ancestry against the branch head it has just fetched (never a stored ref), and
+    checks that the tree is clean: `git status --porcelain --ignored=matching
+    --untracked-files=all` lists nothing but the install roots' `node_modules` links, each
+    pointing at its digest's directory. A tree that fails any check is removed and made again.
+    A tree holding a symbolic link — other than those links, which are the runner's — whose
+    target resolves outside the tree, or a submodule entry, ends the claim
+    `released:cannot-finish:spec`, naming it.
   - **Dependencies: the course directory's, then `.baton/`'s.** A tree's **install roots** are
     the course directory and, in the home tree, `.baton/`: each that has a `package.json`
     declaring any `dependencies` is installed; one that declares none (a `package.json` that only
@@ -4078,13 +4099,24 @@ from git at a commit, never from a working tree (R-BTN-34, B-33).
     `package-lock.json` or `npm-shrinkwrap.json`, and must not declare `workspaces`. The runner
     runs `npm ci --omit=dev --no-audit --no-fund` (npm ships with Node, so a runner needs no
     other package manager); a `pnpm-lock.yaml` or `yarn.lock` instead ends
-    `released:cannot-finish:spec` naming the file, and so does a `package.json` with
-    dependencies and no lockfile. An install is cached by the SHA-256 of its lockfile at
-    `<git dir>/baton/deps/<digest>/node_modules`, which the tree's install root links as its
-    `node_modules`, so a push that leaves a lockfile alone installs nothing. An install that
-    fails is `released:cannot-finish:transient`, a failed attempt retried under R-BTN-122's
-    policy; the same digest failing twice in a row is `spec` from then on, until its lockfile
-    changes, so a broken lockfile is not retried on every ticket of the course.
+        `released:cannot-finish:spec` naming the file, and so does a `package.json` with
+    dependencies and no lockfile, and a `file:` dependency on a directory (one on a tarball,
+    which the lockfile hashes, is allowed).
+    - **The dependency cache.** An install is made once per **digest** — the SHA-256 of the
+      lockfile, the install root's `package.json`, `process.versions.modules`,
+      `process.platform`, `process.arch` and npm's version — in `<git dir>/baton/deps/<digest>/`,
+      which the tree's install root links as its `node_modules`; so a push that leaves the
+      lockfile alone installs nothing, and a Node upgrade or another machine installs afresh.
+      Once installed, the digest's directory has its write bits cleared and a stamp written
+      holding the SHA-256 of its file list and contents, re-checked before each claim's first
+      leg; on a mismatch the directory is removed and installed again. A digest no kept tree
+      links is removed with the last tree that did; removing a tree never changes a digest's
+      bits.
+    - **Failures.** An install whose npm error says the lockfile and `package.json` disagree
+      (`EUSAGE`), or that names a package the lockfile lacks, ends
+      `released:cannot-finish:spec`; a full disk (`ENOSPC`) ends `cannot-finish:capability`;
+      every other failure — the registry, the network — ends `transient`, retried under
+      R-BTN-122's policy.
   - **Preparation is fenced and bounded.** The ancestry fetch, the source fetch (R-BTN-134),
     `git worktree add`, the install and the write-bit walk are the claim's **preparation**,
     each run as an asynchronous child in its own process group — never a synchronous call, so
@@ -4103,22 +4135,32 @@ from git at a commit, never from a working tree (R-BTN-34, B-33).
     stripping, so the runner requires Node 22.18 or later and refuses to start on an older one,
     naming the version. That means **erasable syntax only** — no `enum`, no namespace with
     values, no parameter properties, no `import =` or `export =` — relative imports that name
-    their file's extension, and no `tsconfig` `paths`; type checking is the repository's CI's
+        their file's extension, type-only imports written `import type`, and no `tsconfig` `paths`;
+    a `.cts` file is CommonJS, so it imports by `require`; type checking is the repository's CI's
     job, never the runner's. A dependency under `node_modules` must ship JavaScript (Node strips
     no types there). Two scripts for one leg (`implement.ts` beside `implement.mjs`) fail the
     test kit, and a runner that meets them ends `released:cannot-finish:spec`.
   - **The wrapper: resolution held to the trees.** Every call of a script — `run`, and also
     `close` and `handoff`, which until now ran inside the runner's own process — goes through
     the CLI's wrapper, `legProcess.mjs`, spawned detached in its own process group, with
-    `ctx.checkout` as its working directory (a leg works in the checkout; the tree is not
+        `ctx.checkout` as its working directory (a leg works in the checkout; the tree is not
     writable), and with `NODE_OPTIONS` and `NODE_PATH` removed from its environment. So no tree
-    code is ever loaded into the long-lived runner that holds the worker secret. `close` and
-    `handoff` are bounded at 2 minutes each, then killed as a failure of that call (R-BTN-72's
-    retries). The wrapper registers a resolve hook (`module.registerHooks`) that answers
-    `@immediately-run/baton/leg` with the running CLI's own module — `LegError`, `yield`, and
-    the forge and marker writes a `close` needs (R-BTN-134) — whatever a tree installs, and
-    refuses any other resolution outside the claim's trees and their linked `node_modules`
-    (no `~/node_modules`, no global folders), naming the specifier. The runner tells a
+    code is ever loaded into the long-lived runner that holds the worker secret — `rank.mjs`
+    (R-BTN-98) included, which runs through the same wrapper. The wrapper is called as `node
+    legProcess.mjs <call> <script> <ctx.json> <out.json>`, `<call>` one of `run`, `close` (its
+    `ctx.json` carries the validated `result` beside the context) and `handoff`; `out.json`
+    receives `{ok, result | ref | url, error?}`. `close` and `handoff` are bounded at 2 minutes
+    each, then killed as a failure of that call, retried as R-BTN-72 says. The wrapper registers
+    a resolve hook (`module.registerHooks`) that answers `@immediately-run/baton/leg` with the
+    running CLI's own module, whatever a tree installs, and refuses any other resolution outside
+    the claim's trees, their linked digests and the paths R-BTN-134's `imports` allows (no
+    `~/node_modules`, no `node_modules` above `<git dir>/baton/`, no global folders), naming the
+    specifier.
+    - **The leg module**, one list: `@immediately-run/baton/leg` exports `LegError`,
+      `writeMarker` (R-BTN-131's marker append with its rebase-and-retry), `commentOnPr`
+      (through the fact adapter's forge, R-BTN-96), `yieldContext` (the channel's `yield`,
+      R-BTN-123), `nextFire`, `writeSuccessor` and `NOT_BEFORE_HORIZON_DAYS` (R-BTN-89), and
+      `CLI_VERSION`. It carries no course meaning. The runner tells a
     `LegError` by a brand the module sets (`Symbol.for('baton.LegError')`), never by
     `instanceof`. The wrapper takes `run`, `handoff` and `close` as named exports, else from
     the default export, so a CommonJS script's `module.exports` works as an ES module's
@@ -4131,19 +4173,29 @@ from git at a commit, never from a working tree (R-BTN-34, B-33).
     binds a cooperating leg, not a hostile one: a leg runs as the runner's user and could
     restore the bits, which the clean check on reuse catches. A leg that needs a cache writes
     under its scratch directory or `$TMPDIR`.
-  - **Trust, stated.** A leg's script and every install script of its dependencies run with the
+    - **Trust, stated.** A leg's script and every install script of its dependencies run with the
     worker's full rights, as leg scripts always have (§6.13 **Trust**); the lockfile pins exact
-    versions and their integrity hashes, at a commit of the default branch.
+    versions and their integrity hashes, at a commit of the default branch. An old commit of
+    the default branch also passes the ancestry check: the check stops unmerged code, not a
+    rollback, which Baton's head (R-BTN-11) and **Needs you** guard (below).
   - **Old runners are kept off by a capability.** Core gains a second built-in capability type,
     **`runner`**, beside `human-operator` (R-BTN-121): `runner:<feature>` names a feature of the
     runner itself. Only the runner declares it — from its own code, never from its
     configuration — and rule 4 treats it as granted to every worker key, so it needs no grant
-    and stays self-reported (R-BTN-60). This rule's runner declares `runner:leg-trees`. A
-    course must list `runner:leg-trees` in the `requires` (R-BTN-120) of every leg whose script
-    is not `.mjs`, whose course directory or `.baton/` declares dependencies, or which belongs
-    to a sourced course; the test kit fails a course that does not, and Baton refuses a claim
-    and an advance into such a leg by a worker that does not declare it (rule 4,
-    `not-eligible`), and leaves it out of that worker's recommendations. `min_worker_version`
+        and stays self-reported (R-BTN-60). Its values are the features the CLI defines —
+    `leg-trees` today — and the test kit and the sync refuse another, so a misspelled feature is
+    caught before it makes a leg unclaimable; a runner refuses to start when its configuration
+    names a `runner:` capability; and a course may declare no type named `runner` or
+    `human-operator`. This rule's runner declares `runner:leg-trees`; so does a sidecar that
+    runs no leg script, such as an interactive session's (R-BTN-72's **Both ways of working
+    stay**), since it runs none of the code the feature gates. A course must list
+    `runner:leg-trees` in the `requires` (R-BTN-120) of every leg whose script is not `.mjs`,
+    imports `@immediately-run/baton/leg`, or whose course directory or `.baton/` declares
+    dependencies, and of every leg of a sourced course. The test kit fails a course that does
+    not, and so does the sync before it posts, naming the leg — so a third-party source that
+    omits it is refused by every home that names it. Baton refuses a claim and an advance into
+    such a leg by a worker that does not declare it (rule 4, `not-eligible`), and leaves it out
+    of that worker's recommendations. `min_worker_version`
     cannot do this: rule 9 compares it with the course `version` the worker reads from its own
     checkout (R-BTN-65), which an older runner on a pulled checkout already has. A course of
     `.mjs` legs that import only Node built-ins needs no capability and runs the same under
@@ -4151,14 +4203,17 @@ from git at a commit, never from a working tree (R-BTN-34, B-33).
   - **The test kit.** `baton course test <repository root> <course>` (§2d) accepts the same
     extensions, fails two scripts for one leg and a leg missing `runner:leg-trees` where it is
     required, and imports each script and override from the repository root it is given through
-    the same wrapper and resolve hook — so a CI job installs the install roots before it runs
-    the kit, and an import the kit cannot resolve fails it, naming the specifier. The kit runs
-    the PR's code, so its CI job runs on `pull_request` with a read-only token and no
-    `id-token`, never on `pull_request_target`.
+        the same wrapper and resolve hook. It installs each install root itself, with the runner's
+    command (`--omit=dev`), into a cache of its own run, and resolves only from there — so a leg
+    importing a devDependency fails the kit as it would fail a runner — and an import it cannot
+    resolve fails it, naming the specifier. The kit runs the PR's code, so its CI job runs on
+    `pull_request` with a read-only token, no `id-token` and no `BATON_SOURCE_TOKEN`, never on
+    `pull_request_target`; a private source then cannot be fetched, and the kit fails that
+    course naming the token, unless the operator opts the job in.
 
   S-BTN-109, G-BTN-128.
 
-  | S-BTN-109 legs in a checkout of their commit (R-BTN-133, B-42) | a repository whose `.baton/package.json` declares one dependency as a `file:` package, with its lockfile; course legs `implement.ts` (importing the dependency), `review.cjs` and `merge.mjs`, each requiring `runner:leg-trees`; two claims at one commit, a push that leaves the lockfile alone, then one that changes it; then, one at a time: a board posted with a `sha` off the default branch; a lease lost during the install; Cancel during the install; `fix.ts` beside `fix.mjs`; a `yarn.lock`; an import of a package installed only in the user's home; a runner that does not declare `runner:leg-trees` | each leg runs and its result is reported, `close` and `handoff` in the wrapper; the first claim installs once, the second and the push that kept the lockfile reuse the install (the runner's log shows one install per digest), the changed lockfile installs again; the off-branch `sha` is released `stale-board` before any install; the lost lease kills the install's group and writes no hand-off; Cancel stops it within 30 seconds and ends `released:owner-cancel`; the kit fails the two `fix` scripts; the `yarn.lock` ends `released:cannot-finish:spec` naming it; the import from the home is refused naming the specifier; the runner without the capability is not offered the legs and its claim is refused, rule 4 |
+    | S-BTN-109 legs in a checkout of their commit (R-BTN-133, B-42) | a repository whose `.baton/package.json` declares one dependency as a `file:` tarball, with its lockfile; course legs `implement.ts` (importing the dependency), `review.cjs`, `fix.mts`, `merge.mjs`, `adjudicate.cts` and `close-out.js`, each requiring `runner:leg-trees`; the runner started under Node 22.17, refused naming the version, then under 22.18 or later, with injected stop timers; two claims at one commit, a push that leaves the lockfile alone, then one that changes it; then, one at a time: a board posted with a `sha` off the default branch; a lease lost during the install; Cancel during the install; `fix.ts` beside `fix.mjs`; a `yarn.lock`; an import of a package installed only in the user's home; a runner that does not declare `runner:leg-trees` | each leg runs and its result is reported, `close` and `handoff` in the wrapper; the first claim installs once, the second and the push that kept the lockfile reuse the install (the runner's log shows one install per digest), the changed lockfile installs again; the off-branch `sha` is released `stale-board` before any install; the lost lease kills the install's group and writes no hand-off; Cancel stops it within 30 seconds and ends `released:owner-cancel`; the kit fails the two `fix` scripts; the `yarn.lock` ends `released:cannot-finish:spec` naming it; the import from the home is refused naming the specifier; the runner without the capability is not offered the legs and its claim is refused, rule 4 |
 
   | Must hold | Gate |
   |---|---|
@@ -4195,21 +4250,30 @@ still runs no repository code (R-BTN-102) and still receives the course file in 
     and a `package.json` with its lockfile. **It is self-contained**: its files import each
     other, Node built-ins, the dependencies its own `package.json` declares, and
     `@immediately-run/baton/leg` (R-BTN-133) — nothing else in its repository — so a sparse
-    tree of the directory alone runs it, and owning a course is copying the directory. A
+        tree of the directory alone runs it, and owning a course is copying the directory. A
     repository's own course is `.baton/courses/<course>/` in its own tree, which may also import
-    what `.baton/package.json` declares.
+    what `.baton/package.json` declares. An own course's `sync.mjs` and `rank.mjs`, and the
+    repository's `tickets.mjs`, may also import files of their repository outside `.baton/`
+    that `.baton/baton.json` lists in `imports: [<path>…]`: those paths are checked out in the
+    home tree beside `.baton/`, and the resolve hook allows them; leg scripts may not import
+    them. Docs lists `scripts/`, where its `tickets.mjs` wraps `factory-state.mjs` and
+    `roadmap-pr`'s `locate` lives (R-BTN-74, §6.12).
   - **A source names a directory, at a commit.** `courses[].source` is
     `<provider>/<namespace>/<repository>/<commit>/<path>` — B-33's grammar with the course id's
     slot widened to a relative path without `.` or `..` segments, whose last segment is the
     course id, e.g. `github/immediately-run/baton/<commit>/src/defaults/courses/create-pr`. The
-    commit is all 40 hex characters; no branch, tag or `@main` is ever stored. `github` maps to
-    `https://github.com/<namespace>/<repository>.git` and is still the only provider.
+        commit is all 40 hex characters; no branch, tag or `@main` is ever stored. `github` maps to
+    `https://github.com/<namespace>/<repository>.git` and is still the only provider. A
+    deployment may map a source repository to another URL — a mirror on a plain server, for a
+    Baton without GitHub (§2k) — in the CLI's configuration (`sources: {"github/immediately-run/baton":
+    "<url>"}`, read by `baton runner start --config` and `baton repo sync --config`); the source
+    string, and so the ancestry rule, stays the same.
   - **Fetching a source, the same way for every reader.** The reader keeps one cache clone per
     source repository, asks it for its default branch (`git ls-remote --symref <url> HEAD`),
     fetches that branch's whole history without blobs (`git fetch --filter=blob:none`), and
     checks that the commit is an ancestor of the fetched branch head — **never fetching a commit
     by its id**, so GitHub serving a fork's commits through the parent's URL cannot pass, and
-    every forge's fetch rules are met. It then makes the sparse, read-only, verified tree of
+        no forge needs to allow fetching by id for the check. It then makes the sparse, read-only, verified tree of
     R-BTN-133 with the course directory's install root installed, re-checking ancestry and
     cleanliness on every reuse. The runner's clones and trees live under its home checkout's git
     directory (R-BTN-133). The sync's and the kit's live in a cache of their own run, never
@@ -4217,7 +4281,9 @@ still runs no repository code (R-BTN-102) and still receives the course file in 
     token reads only its own repository, so a private source in another repository needs a
     secret, `BATON_SOURCE_TOKEN`, which the sync workflow passes to git as a credential for
     that host; `baton repo init` writes the step, and a CI cache keyed by the sources' commits
-    and lockfile digests, so a sync does not refetch or reinstall what it fetched last time. A
+        and lockfile digests: every use still fetches the default branch (cheap when the cache is
+    warm) and checks ancestry against the head just fetched — the cache saves objects and
+    installs, never the check. A
     source that cannot be fetched or read fails the sync, posting nothing, or ends the claim
     `released:cannot-finish:transient`, naming it; a commit off the default branch, or a
     directory with no `course.json` or `sync.mjs`, fails as a course fault (`spec`).
@@ -4232,17 +4298,19 @@ still runs no repository code (R-BTN-102) and still receives the course file in 
     time: the source's `entry.json` (`version`, `min_worker_version`, `skill`, `step_kinds`,
     `report_horizon_h`, `branch_pattern`, `facts`), then the home entry's fields over it, field
     by field. Init writes none of `entry.json`'s fields into the home, so a moved source moves
-    them. A runner declares a sourced course's merged `version` on its heartbeat (R-BTN-65). An
+    them. A runner declares a sourced course's merged `version` on its heartbeat (R-BTN-65),
+    reading the source's `entry.json` at startup and again after each fetch of its home's
+    default branch, through the same fetcher, at the source commit the home's head names. An
+    `entry.json` may name `min_cli`; the sync and init refuse a source whose `min_cli` exceeds
+    the running CLI's version, naming both. An
     own course's entry carries the same fields by hand, `facts` among them (R-BTN-51).
   - **Facts, by declaration.** A course's `facts` names what the CLI reads for its station
     function: `prs` (the forge's fact adapter, R-BTN-96) and `branches` (git's refs, the
     `branch` course's); markers are always read. So the CLI's adapters serve any course
     without knowing it.
-  - **The CLI's leg module serves every course.** `@immediately-run/baton/leg` (R-BTN-133)
-    carries the primitives a `close` needs and no course meaning: write a closing marker to
-    `.baton/markers.jsonl` with R-BTN-131's rebase-and-retry, comment on a PR through the fact
-    adapter's forge, and `LegError`. Which line a leg writes, and what it means, is the
-    course directory's code.
+    - **The CLI's leg module serves every course.** `@immediately-run/baton/leg` (R-BTN-133's
+    one list) carries the primitives a `close` needs and no course meaning. Which line a leg
+    writes, and what it means, is the course directory's code.
   - **Every reader goes through the snapshot.** The sync reads `.baton/baton.json` at the commit
     it posts (R-BTN-105); the runner at the claim's `snapshot_sha`, after R-BTN-133's ancestry
     check; the worker's re-verification (R-BTN-5) and an open-world claim (R-BTN-104), which run
@@ -4271,32 +4339,38 @@ still runs no repository code (R-BTN-102) and still receives the course file in 
     before anything is written. Init reads a source as data only — `entry.json` and, for
     `--instructions`, a regular file, never a symbolic link — and never installs or runs it, so
     nothing of a source runs on the owner's machine before the commit that adopts it is
-    reviewed. It writes the entry, the sync workflow and the tickets README, and no course file.
+        reviewed. It writes the entry, the sync workflow and the tickets README, and no course file.
+    *(Note: the `npx` pin below needs the package published to npm, which B-43 depends on.)*
     Re-run, it moves the named course's source to the head again; `--at <commit>` pins another.
     `--override <leg>` seeds `legs/<leg>.run.mjs`; `--instructions <leg>` copies the source's
     `legs/<leg>.md` into the home directory, to edit. `--eject stations` is retired — it was
     already refused for every sourced course — so a repository that wants its own station
     function owns the course. `--eject tickets` stays: the markdown ticket source is CLI code,
     not a course, and `build:cli` ships it prebuilt so the eject copies a file and needs no
-    compiler. Init prints, for each source it writes or moves, the commit range the move adopts
-    (`<old>..<new>` with the source repository's compare URL), so the reviewer of the commit sees
-    more than two ids.
+        compiler. For each source it writes or moves, init writes into the commit message it
+    proposes a trailer `Baton-Source: <id> <old>..<new> <compare URL>`, and the sync logs the
+    same line in its run summary for each source whose commit differs from the previous post's
+    — so the PR's reviewer, and anyone reading the sync, sees the range adopted, however the
+    source moved.
   - **The CLI is pinned by its own version.** The sync workflow runs `npx --yes
     @immediately-run/baton@<version> repo sync` (the package R-BTN-127's `baton` command ships
     in); init writes the version of the CLI that runs it. A CLI release changes no course, and a
     course commit needs no CLI release; a runner feature a course needs is gated by a `runner:`
     capability (R-BTN-133), never by the CLI's version.
-  - **`--defaults-only`** (R-BTN-97) loads no code of the repository's own: only the CLI's
-    markdown ticket source and the station functions of sources the operator trusts, listed in
-    the runner's own configuration outside the checkout (`trusted_sources: ["github/immediately-run/baton"]`,
-    by repository, any commit reachable from its default branch); a ticket on any other course
-    fails, as before.
+    - **`--defaults-only`** (R-BTN-97) loads no code of the repository's own: only the CLI's
+    markdown ticket source and the station functions of sources the operator trusts, listed as
+    `trusted_sources` in `baton repo sync --config` (default `~/.config/baton/sync.json`,
+    outside the checkout; no default list), by repository, any commit reachable from its
+    default branch. Under it the sync installs nothing of the home's `.baton/` and refuses a home
+    `tickets.mjs`; a ticket on any other course fails, as before.
   - **Trust, stated.** Naming a source is adopting its code, with exactly the rights of the
     place it runs. Its `sync.mjs` and its dependencies' install scripts run in the home
     repository's sync job **with that job's full environment** — the forge token and, on GitHub
     Actions, `id-token: write`, with which they can mint OIDC tokens for any audience as the
     home's default branch: enough to post boards as the home's sync and to assume any cloud role
-    federated to that branch. Its leg scripts run on the home's workers with their full rights
+        federated to that branch — and, where the workflow passes it, `BATON_SOURCE_TOKEN`, which
+    should be a read-only, fine-grained token limited to the named sources' repositories. Its
+    leg scripts run on the home's workers with their full rights
     (§6.13 **Trust**). The full commit, the reachability check and init's printed range make the
     adoption exact and reviewable — a source moves only by a commit to the home's
     `.baton/baton.json` — as a pinned action does, and with the same consequence: **name only
@@ -4308,9 +4382,11 @@ still runs no repository code (R-BTN-102) and still receives the course file in 
     keeps `legs/<leg>.md` and `legs/<leg>.run.mjs` — which are, file for file, the new
     overrides — and moves the workflow's pin, in one commit. Until then the new CLI's sync
     refuses the old form, naming the command: it cannot read the old commits, at which the
-    course directories do not exist. A claim held across that commit ends
-    `released:course-changed` (R-BTN-72), and the old runners are kept off the moved courses by
-    `runner:leg-trees`.
+        course directories do not exist. A **runner** that meets B-33's form at a claim's snapshot
+    runs it as an own course — the home's `course.json` and `.mjs` stubs, as before — logging
+    `baton repo init` once, and never ends a claim `spec` for the form. A claim held across the
+    move's commit continues when the graph is unchanged and ends `released:course-changed` when
+    it is not (R-BTN-72); the old runners are kept off the moved courses by `runner:leg-trees`.
 
   S-BTN-110, G-BTN-129.
 
@@ -5886,8 +5962,8 @@ this subsection describes docs'. Every repository's workflow runs `npx baton rep
 pinned CLI version, which calls the repository's ticket source and station functions, or the
 CLI's defaults (R-BTN-74) *(amended 2026-10-19 by §2p: the CLI's defaults are its ticket
 sources only; every station function is a course directory's `sync.mjs`, the repository's own or
-its source's, and the workflow runs `npx --yes @immediately-run/baton@<version> repo sync` —
-R-BTN-134)*. Another repository's sync follows the same protocol —
+its source's, and the workflow runs `npx --yes @immediately-run/baton@<version> repo sync`;
+`npx baton repo sync` elsewhere in this spec names that package's `baton` binary — R-BTN-134)*. Another repository's sync follows the same protocol —
 head, compare-and-set, confirmations, the board post below — with its own board code and
 courses.)*
 
@@ -6235,7 +6311,11 @@ SELECT id FROM (
                              json_each(g.capabilities) j
                       WHERE c.worker_id = :worker AND g.credential_id = :credential
                         AND g.repository_id = w.repository_id AND g.revoked_at IS NULL
-                        AND j.value = c.capability))                           -- rule 4
+                                                AND j.value = c.capability)
+                    -- (amended 2026-10-19 by §2o: a `runner:` capability counts as granted,
+                    --  R-BTN-133)
+                    AND NOT (r.name LIKE 'runner:%' AND r.name IN (SELECT capability FROM
+                             worker_capabilities WHERE worker_id = :worker)))   -- rule 4
     AND COALESCE(w.tier, (SELECT json_array_length(p.tiers) - 1 FROM repositories p
                           WHERE p.id = w.repository_id))
         <= json_extract(:ceiling, '$."' || w.repository_id || '"')   -- rule 5, per repository
@@ -6942,7 +7022,7 @@ integration suite that drives them together, on a controllable clock, proves the
   | S-BTN-51 a series and a timed leg | a series ticket S on `series`, and its run R1 on a course with one leg `prepare` (`scheduled` → `done`), `parent: S`, `not_before` T; the clock passes T − 1 min, T, then 8 days with no worker alive across two fires; R1's leg writes R2 through `writeSuccessor` before its closing marker, crashes before the marker and is retried after the next fire has passed; an unrelated ticket already holds the id another series' successor needs; a snapshot posts a `not_before` in year 2062 for another ticket, and one that is not RFC 3339; R1's queued leg is also posted `waiting` on `ci` with a `not_before`; then the pending run is withdrawn | before T, R1 is `waiting` on `time`, not recommended, raises no `baton:stalled` after 72 hours and is not under Needs you; the dashboard shows it waiting until T; at T the alarm (set early for it) makes it `ready` with no sync, its `ready_since` T and its `not_before` cleared, and the idle worker gets one `unblocked` message with `cleared: [{kind: 'time'}]` and no workflow dispatch; while posted `waiting` on `ci` it stays on `ci` past T; the retried leg writes no second R2, and R2, though due, is not offered until R1 closes; the other series' leg fails `cannot-finish:spec` and the series does not retire; the year-2062 and malformed values leave their legs `waiting` on `not-before-invalid`, logged and under Needs you; a run that suspends with a result `not_before` 2 hours ahead is not offered before then, though no sync has run; a re-posted past instant keeps `ready_since`; R1 runs and ends `done`, R2 appears with `parent: S` and `not_before` the next fire; after the 8 idle days R2 runs once and R3's `not_before` is the next fire after that run; S is blocked by its open run throughout and `children` lists R1–R3; once R3 is withdrawn S is offered and retires |
   | S-BTN-52 leg deadline and scheduled cancel | a leg with `max_duration` 1,800; W0b's script returns at 30:05, with its `leg-timeout` release queued but not yet delivered and no doorbell; W0c's returns at 32:30, its release delivered at 31:00; W0d's runner hangs in `close` after `leg_finished`; W0's leg finishes at 20 minutes and waits 15 minutes on CI under the claim; W1 runs it past 30 minutes and stops at its safe point; W2's harness hangs past its deadline; on a third claim the owner extends the deadline by an hour, then schedules a Cancel at +10 minutes; on a fourth a Cancel is scheduled and the claim suspends first, then the ticket is claimed again; an `extend_to` on a claim running no timed leg, and a `cancel_at` 8 days ahead | W0's immediate `leg_finished` heartbeat re-arms its deadline and it is not timed out during its CI wait, W0b's still-pending `leg-timeout` is withdrawn by its `leg_finished` heartbeat (the message `expired`, `withdrawn: 'leg-finished'`, an event `{withdrawn: true}`), W0c's delivered release stands, and W0d's re-armed deadline releases it `leg-timeout` 40 minutes after `leg_finished`; W1 gets `release` `leg-timeout`, ends `released:leg-timeout` with its hand-off, a failed attempt with its backoff; W2's unacknowledged release is reaped with a fence at +15 minutes, actor `alarm:leg-timeout`, a failed attempt, the ticket not re-issued until `fence-cleared`, its push refused; the third claim's `deadline_at` moves in the heartbeat response, then at `cancel_at` the ticket is held and its holder gets `release` `owner-cancel`; the fourth's schedule is logged lapsed and does not bind the next claim; the last two are refused `invalid-params`; every step logged |
   | S-BTN-53 the doorbell | W1 connects `GET /v1/runner/push` with its session and secret; the owner cancels W1's claim, and 0.5 s after W1's heartbeat a second message is queued; a deploy closes the socket; W1 is force-reaped while connected; W2 stops heartbeating with no claim; an unsigned upgrade, and one with the key but another session's name and no secret | W1 gets a ring naming `release` within a second and heartbeats, and a trailing ring for the second message when the second ends; after the deploy W1 reconnects with backoff and, meanwhile, gets its next message at its heartbeat with no other change; the reap closes W1's socket and the alarm W2's once it is no longer alive; the unsigned upgrade is refused `unauthenticated` and the other session's `forbidden`; after the object is evicted and re-instantiated, the last ring's time and a suppressed kind are recovered from `deserializeAttachment` and the trailing ring is sent, with no module-level socket map; |
-  | S-BTN-54 a Baton without GitHub | one Baton serving `plain` (forge `git`: a bare repository with a `post-receive` hook running `baton repo sync --defaults-only` under the sync key, its tickets on the `branch` course) and `docs` (forge `github`, OIDC); no dispatch adapter or webhook secret configured for `plain`; a worker implements `plain:T-1`, a reviewer commits `Baton-Verdict: changes`, a fix follows, then `Baton-Verdict: approve` from another committer, and the merge leg merges; a claim on `plain:T-2` ends while the sync is idle, and a cron loop runs `baton repo sync --if-wanted` every minute | `plain:T-1` moves `filed` → `pushed` → `reviewed` → `fixed` → `reviewed` → `merged` on the pushes' syncs alone, and a verdict naming an older content commit changes nothing; after `T-2`'s end `GET /v1/sync/wanted` says `wanted` until the next run's post, numbered after the end, clears it, and the loop's ticks before and after cost one request each; no forge credential exists for `plain` and no link is drawn for it; `docs` behaves as before |
+    | S-BTN-54 a Baton without GitHub *(amended 2026-10-19 by §2p: the `branch` course is read from a mirror of the baton repository that the sync's and runners' `sources` map it to, and `--defaults-only` lists it in `trusted_sources`)* | one Baton serving `plain` (forge `git`: a bare repository with a `post-receive` hook running `baton repo sync --defaults-only` under the sync key, its tickets on the `branch` course) and `docs` (forge `github`, OIDC); no dispatch adapter or webhook secret configured for `plain`; a worker implements `plain:T-1`, a reviewer commits `Baton-Verdict: changes`, a fix follows, then `Baton-Verdict: approve` from another committer, and the merge leg merges; a claim on `plain:T-2` ends while the sync is idle, and a cron loop runs `baton repo sync --if-wanted` every minute | `plain:T-1` moves `filed` → `pushed` → `reviewed` → `fixed` → `reviewed` → `merged` on the pushes' syncs alone, and a verdict naming an older content commit changes nothing; after `T-2`'s end `GET /v1/sync/wanted` says `wanted` until the next run's post, numbered after the end, clears it, and the loop's ticks before and after cost one request each; no forge credential exists for `plain` and no link is drawn for it; `docs` behaves as before |
   | S-BTN-55 the sync key | `plain`'s sync key posts a board; then registering `docs`' sync key for `plain` too, a post by a worker key, by `plain`'s mirror key, by a revoked sync key, and a replay of the first post | the first is accepted; the second registration is `conflict`; the worker key's and the mirror key's posts are `forbidden`, the revoked key's and the replay `unauthenticated`; registering a worker key as a sync key is `conflict` |
   | S-BTN-56 other forges and the edges of a want | `lab` (forge `gitlab`, a GitLab CI identity) and `tea` (forge `gitea`, sync key), each with a webhook secret and a dispatch adapter in `BATON_FORGE_SECRETS`; a GitLab notification with a wrong `X-Gitlab-Token`, a Gitea one with a forged signature, then good ones; a GitLab `id_tokens` JWT with audience `#mirror` posting a board, then one with `#sync`; a claim ends while `lab`'s sync is reading with an observation number already handed out; `tea`'s dispatch adapter answers 500; a decision `url` of `<lab web_base>-evil/…`, one with a port, one under `lab`'s `web_base`; `baton repo sync --defaults-only` over a ticket on a course with its own `sync.mjs`, and run through `npx` from the checkout | the bad notifications are refused in the Worker with no object request, the good ones record wants; the `#mirror` token's post is `forbidden` and the `#sync` one accepted; that run's post leaves the want set and the next run's clears it; the failed dispatch is retried once and the want stays for the runner; only the URL under `lab`'s `web_base` is kept; `--defaults-only` fails that ticket and refuses to start from the checkout |
 
