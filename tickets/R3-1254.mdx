@@ -117,3 +117,31 @@ findings, all fixed; logged in `docs/review/pr-findings.mdx`). Its `model:full` 
 on the merged head (`ffecbfb`): 10,000 samples, 1,000 model-based traces, Apalache at depth 4
 (the owner's choice; B-37 restores 5). Next: part 2b, the capability and resource
 prerequisites and `answer_lost`; then part 3 and item 1._
+
+_2026-10-19 — part 2b, decided at claim (branch `claude/R3-1254-model-capabilities`). Core's
+side, mapped first: capability rows (`fleet_capabilities`, `Blocks.recount`), rule 4 on the
+ticket's `requires`, resource rows with readings and the fleet answer, and `answer_lost` are
+built (R3-1251); a leg's own `requires.capabilities` and `released:blocked` are not (B-10,
+B-21). The model:_
+- _**Liveness.** Baton records each worker's last heartbeat and a stored live set (core's
+  `fleet_live`); an idle worker heartbeats too. A worker is live while its last heartbeat is
+  within `TIMEOUT`._
+- _**Capability rows** are stored, whole-ticket, and rewritten only where R-BTN-75 says the
+  counts change: a heartbeat that changes what a worker declares (its check failing or passing
+  again), the alarm noticing a worker stop being live, a force-reap, and a `capability` blocked
+  end, which drops the capability from the runner's declared set in its transaction. A leg's own
+  list is not modelled until B-10 builds it: it joins the ticket's for that leg, the same check._
+- _**Rule 4** at the claim and at each advance: the ticket's `requires` within what the worker
+  declares and is granted._
+- _**Resources** as one `service` instance per resource, its reading `unavailable` until a
+  lapse or `available`; account and worker instances, the administrator's precedence and
+  `unknown` are not modelled (each a choice of which reading is in force, with no interleaving
+  of its own). A `resource` row is advice: it counts toward `blocked_since` and gates nothing;
+  a `resource` blocked end stores its reading and an `end`-sourced need._
+- _**`answer_lost`** as R-BTN-77 states it: a row that goes because the live fleet emptied
+  clears `blocked_since` silently and is remembered; settled, it logs the owed `unblocked`, or
+  is written again silently; any logged transition ends it._
+- _**`small`**, the proof's instance, keeps no capability requirements and no needs, so the
+  depth-4 proof's cost does not grow; `sim` and the regression runs carry them. A core gap the
+  map found — `forceReap` does not recount the fleet, so its rows wait for the next alarm tick —
+  is filed as its own ticket rather than written into the model as the spec's behaviour._
