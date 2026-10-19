@@ -664,3 +664,6 @@ The columns:
 | 2026-10-19 | baton | 56 | R1 | should-fix | (A) closed-under-claim was not logged for a ticket posted at a git end status under a claim | fixed — ed0dfb8 (GIT_ENDS statuses too; legacy stale-board tests) | impl | — | — |
 | 2026-10-19 | baton | 56 | R9 | nit | (A) the dashboard's discrepancy by_kind counted only the capped 200 rows | fixed — ed0dfb8 (GROUP BY over the window) | impl | — | — |
 | 2026-10-19 | baton | 56 | R7 | should-fix | (B) a posted next leg that does not leave the station was stored unchecked, though the PR body said it waits | fixed — ed0dfb8 (every such leg waits on course-changed; test) | impl | — | — |
+| 2026-10-19 | baton | 56 | R2 | should-fix | (r2) the regressed fix logging expectedPath had no test telling it from the previous snapshot's path; the round-1 reply claimed one | fixed — e06c2e9 (the case advances twice before git regresses it) | impl | — | ed0dfb8 |
+| 2026-10-19 | baton | 56 | R10 | should-fix | (r2) the PR body still described git-moved, closed-under-claim and the course-changed wait as before round 1 | fixed — PR body edited (Architecture, Deviations, Tests added) | impl | — | ed0dfb8 |
+| 2026-10-19 | baton | 56 | R15 | nit | (r2) a new comment was glued to the end of an expect line in claims.test | fixed — e06c2e9 (its own line) | impl | — | ed0dfb8 |
