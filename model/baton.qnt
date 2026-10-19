@@ -782,6 +782,7 @@ module baton {
   // @impl src/core/claims.ts#fenced
   // In core the report is the heartbeat's `fenced` field, so a worker that was not live is
   // recounted in the same call (round 1 of baton#60, 1-A-1/1-B-1).
+  // @impl pending — one evaluation per recount: core evaluates after each kind of row (R-BTN-75, B-49)
   action fenceCleared(w: str): bool = all {
     st.up.get(w), not(st.asleep.get(w)), workerFenced(w),
     val s = st.with("claims", st.claims.keys().mapBy(i => {
