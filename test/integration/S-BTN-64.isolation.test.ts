@@ -4,7 +4,8 @@
 // advances into it are refused, rule `isolation`. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { advance, beat, claimItem, course, cutover, Git, placed, recommended, register, rows, setClock } from '../helpers';
+import { adminSession, advance, beat, claimItem, course, cutover, Git, placed, recommended, register, rows, sessionCall, setAdminKeys, setClock } from '../helpers';
+import { makeKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-10-19T12:00:00Z');
 const ISOLATED = { ...roadmapPr, legs: { ...roadmapPr.legs, review: { ...roadmapPr.legs.review, isolation: 'session' } } };
@@ -25,6 +26,11 @@ describe('S-BTN-64 isolation floors', () => {
     const proc = await register('vm-b');
     const session = await register('mac', { isolation: 'session' });
     expect(await rows('SELECT isolation FROM workers ORDER BY id')).toEqual([{ isolation: 'attached' }, { isolation: 'process' }, { isolation: 'session' }]);
+    // The dashboard's Workers view carries each worker's mode (R-BTN-107, §14).
+    const admin = await makeKey('ssh-ed25519', 'admin');
+    await setAdminKeys(admin);
+    const state = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as { workers: { id: number; isolation: string }[] };
+    expect(Object.fromEntries(state.workers.map((w) => [w.id, w.isolation]))).toEqual({ [attached.id]: 'attached', [proc.id]: 'process', [session.id]: 'session' });
 
     expect(await recommended(session.id)).toEqual(['docs:R-1', 'docs:F-1']);
     expect(await recommended(attached.id)).toEqual(['docs:F-1']);

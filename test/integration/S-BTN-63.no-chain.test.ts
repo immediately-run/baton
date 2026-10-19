@@ -7,7 +7,7 @@
 // Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
-import { advance, claimItem, course, cutover, endClaim, Git, keyCall, placed, recommended, register, setAdminKeys, setClock } from '../helpers';
+import { adminSession, advance, claimItem, course, cutover, endClaim, Git, keyCall, placed, recommended, register, sessionCall, setAdminKeys, setClock } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 
 const T0 = Date.parse('2026-10-19T12:00:00Z');
@@ -65,6 +65,9 @@ describe('S-BTN-63 no review by its author’s key', () => {
     // The course file in force has no list (the model's own file, so this case replays through
     // the model whole: a refusal is no model action).
     expect((await keyCall(owner, '/v1/owner/docs/settings', { required_independence: { review: ['implement'] } }, 'PUT')).status).toBe(200);
+    // The dashboard's Settings list reads it from the limits view.
+    const state = (await (await sessionCall(await adminSession(admin), '/v1/ui/state')).json()) as { limits: { settings: { repository_id: string; required_independence: string }[] } };
+    expect(state.limits.settings.find((s) => s.repository_id === 'docs')?.required_independence).toBe('{"review":["implement"]}');
     const a = await implementAndSuspend();
     expect(await claimItem('vm-a', a.secret, { ticket_id: 'docs:T-1' })).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 'chain' } });
     const b = await register('vm-b');
