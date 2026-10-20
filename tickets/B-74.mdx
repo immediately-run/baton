@@ -1,0 +1,124 @@
+---
+title: "B-74 — Light questions: answered from a channel in the claim, or promoted to an ask file through the outbox (R-BTN-173)"
+id: B-74
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1123
+tier: critical
+description: "Build BATON_SPEC §7.2 R-BTN-173: a `suspend` raise marked `light` gets a Baton-held handler ticket (no file, no push) and Baton-held `deliver` legs; a delivery leg reports a reply with `POST /v1/runner/claims/{id}/answers`, which in one transaction settles an open condition and rings the waiting parent, queues an outbox `answer` entry for a promoted one, or records the reply `ignored`, a repeat changing nothing; every end of a claim that consumed an answer records it in git and lists it in `answers`, and any settled, unrecorded condition is carried in the next claim's `resume`; an end or reap of the waiting claim on an open light condition promotes it through an outbox `handler` entry and blocks the leg; an `answer` write never overwrites an answer in the file; channels declare `answers`, and `retract` reports unread replies first. S-BTN-138, G-BTN-158. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-59
+  - B-64
+  - B-66
+---
+
+**Brief:** the owner, 2026-10-20: "Within the timeout interval, the parent leg can wait for the
+HITL answer to arrive. If the human response arrives during this time then the channel can respond
+directly. Otherwise, the parent course's leg will be interrupted and the HITL response must be
+written to git." The design was checked against every failure point the owner named (process
+death, lost responses, two channels, wait expiry, the outbox writer) by `model/lightQuestion.qnt`
+before it was written into the spec.
+**Spec:** `spec/BATON_SPEC.md` §7.2 R-BTN-173 (with its failure table); R-BTN-160 (§7.1, `light`
+on the raise, the declaration and the report); R-BTN-161 (handler tickets, delivery runners);
+R-BTN-162 (the wait, `handled`, the blocked end, `resume`); R-BTN-169 (§7.9, `ask` and `deliver`,
+`retract`); R-BTN-171 (§7.8, the outbox's `handler` and `answer` kinds, `skipped`); R-BTN-114
+(§10, tickets Baton holds without a file); R-BTN-10 (§9.6, confirmation); §9.4 (the end's
+`answers`); §13.4, §13.6, §13.8 (`tickets.baton_held`, `conditions.light`, `promoted_at`,
+`recorded`, `condition_answers`, the outbox's `answer` kind, `answer-ignored`); §14 (`POST
+/v1/runner/claims/{id}/answers`); §15 S-BTN-138, G-BTN-158.
+**Depends on:**
+- B-59 (the wait in the claim, `handled`, the blocked end and `resume`);
+- B-64 (the outbox and `baton.write`);
+- B-66 (the standard `ask` and `deliver` courses and `retract`).
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+Every `hitl` question today costs a ticket file and a push before the leg can wait, and a reply on
+a channel cannot count as the answer. A leg that asks many quick questions needs a question that
+costs no git write when the person answers while it waits, and loses no answer when it does not.
+
+### What to build
+
+1. **Raising light** (`src/runner/`, `src/core/`):
+   - `light` on `ctx.raise`, `baton leg raise --light`, a type's declaration and the raise's
+     report; the course validator accepts it on `suspend` types only.
+   - For a bound light raise the runner writes and pushes no handler file; Baton files the handler
+     ticket and its `deliver` child as Baton-held rows (`tickets.baton_held`), at the course's start
+     station, under R-BTN-161's id.
+   - A Baton-held ticket's legs are claimed and advanced as any leg's; its ends are confirmed at the
+     end; an accepted snapshot neither posts nor drops it.
+2. **The answer report** (`src/core/`, a registry entry): `POST /v1/runner/claims/{id}/answers`
+   from the holder of a delivery leg of the condition's handler, `{condition_id, channel,
+   message_id, restart, answered_by}`, validated in `src/core/validate.ts`. In one transaction:
+   - a repeat of an accepted `(condition_id, channel, message_id)` answers its first state;
+   - an open condition settles (`outcome: answered`), the handler closes `done`, `handled` is
+     queued with the restart inline and the holder is rung;
+   - a promoted condition with no answer queued queues an outbox `answer` entry;
+   - anything else records `ignored` and an `answer-ignored` history row.
+3. **Recording and carrying** (`src/runner/`, `src/core/`):
+   - The runner pushes each consumed light answer into the leg's evidence or hand-off before any
+     end, and sends `answers: [condition_id]`; Baton sets `conditions.recorded`.
+   - The claim response's `resume` lists every settled `suspend` condition of the leg not
+     `recorded`, in raise order, after any end (a reap included); `ctx.resume` is that list.
+4. **Promotion** (`src/core/`): in the transaction of any end of the waiting claim, or its reap,
+   that finds its light condition open, queue an outbox `handler` entry (the ask file at the
+   station reached, its `deliver` child staying Baton-held), set `promoted_at`, and write a
+   non-provisional `condition` block on the leg.
+5. **The outbox's `answer` kind** (`src/runner/` `baton.write`): write `answer` and `answered_by`
+   with `baton_write: <id>`; read the file at the fetched head first, and report the entry
+   `skipped` when it already carries an answer; Baton then records that reply `ignored`.
+6. **Channels** (`src/defaults/courses/deliver/`): `answers: true` on `push` with a webhook
+   channel that keeps replies until acknowledged; the leg acknowledges a reply only after Baton
+   answered, re-reads its condition's replies when re-claimed, and `retract` reports unread replies
+   before it withdraws. A leg declaring `answers: false` never reports.
+7. **Migration** (a new numbered file): `tickets.baton_held`; `conditions.light`,
+   `promoted_at`, `recorded`; the `condition_answers` table; `answer` in the outbox's kinds and
+   `skipped` in its states; `answer-ignored` in the history kinds.
+8. **The model**: `model/lightQuestion.qnt` is the design's check. Keep its rules in step with
+   the code, and run its `full` instance and each `no*` instance in the PR (commands in the file's
+   header).
+
+### Do not
+
+- Write or push anything to git at the moment a reply settles a condition in the claim.
+- Decide promotion on the runner's clock or outside the transaction that ends or reaps the claim.
+- Apply a reply to a condition that is not open, or apply two replies to one condition.
+- Re-run the leg, or let another claimant take it, while its light question is open.
+- Drop a settled answer at a reap: it is carried until an end records it.
+- Overwrite an answer already in an ask file.
+- Acknowledge a reply to the channel before Baton has answered the report.
+- Store the question, the reply's text or anything but restart ids and identities (R-BTN-33).
+
+### Tests
+
+- On both hosts, `test/integration/S-BTN-138.light-question.test.ts`, with the shipped `ask` and
+  `deliver` and a test channel that keeps history: every row of S-BTN-138, killing the parent and
+  delivery runners with the harness (R-BTN-29), and a fire-and-forget test channel.
+- Unit: the answer report's four outcomes and its repeat; the `resume` list after a reap; the
+  `answer` entry's `skipped`.
+- `npx quint run model/lightQuestion.qnt --main=full --invariant=allProps` with 20,000 samples,
+  and each `no*` instance failing.
+
+### Exit criteria
+
+- [ ] S-BTN-138 passes on both hosts; G-BTN-158 holds
+- [ ] `model/lightQuestion.qnt`'s `full` passes and each `no*` instance fails, reported in the PR
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 from the light-question model and R-BTN-173)_

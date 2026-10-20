@@ -42,12 +42,19 @@
 // Properties: `safety` (every state) and `noLostAnswer` (once the run has drained: no failure
 // and no new answer, every enabled step taken until none is — weak fairness, bounded).
 //
-// Run (from the repository root; `full` must pass, each `no*` instance must fail):
+// Run (from the repository root). The TypeScript backend runs about 4 runs a second per process;
+// split a large run over processes with different --seed values.
 //   npx quint typecheck model/lightQuestion.qnt
-//   npx quint run model/lightQuestion.qnt --main=full --invariant=allProps --max-samples=20000 --max-steps=80 --backend=typescript
-//   npx quint run model/lightQuestion.qnt --main=noR3 --invariant=allProps --max-samples=20000 --max-steps=80 --backend=typescript
-//   npx quint run model/lightQuestion.qnt --main=full --invariant=noDrainDone --max-samples=2000 --max-steps=80 --backend=typescript   (a witness: must fail)
-//   npx quint verify model/lightQuestion.qnt --main=tiny --invariant=safety --max-steps=8
+//   npx quint run model/lightQuestion.qnt --main=full --invariant=allProps --max-samples=10000 \
+//     --max-steps=120 --backend=typescript                                  (must pass)
+//   the same with --main=noR1 … noR6, noHistory                             (each must fail)
+//   the same with --main=full --invariant=<a witness below>                (each must fail)
+// Apalache (bounded proof of `safety`): `quint verify` sends the IR in one request, which its
+// server refuses over 20 MB, so compile to a file named *.qnt.json and run Apalache on it:
+//   npx quint compile model/lightQuestion.qnt --main=tiny --init=init --step=step \
+//     --invariant=safety --target=json > /tmp/tiny.qnt.json
+//   ~/.quint/apalache-dist-0.62.1/apalache/bin/apalache-mc check --init=q::init --next=q::step \
+//     --inv=q::inv --length=10 --tuning-options=search.invariant.mode=after /tmp/tiny.qnt.json
 module lightQuestion {
   // ---- sizes and rules, set by the instance ----
   const QUESTIONS: Set[int]   // the leg's questions, asked in order
@@ -459,4 +466,9 @@ module noHistory {
   import lightQuestion(QUESTIONS = Set(1, 2), CONDS = Set(1, 2, 3, 4), CHANNELS = Set("push", "chat"),
                        ANSWERS = Set("a", "b"), CRASHES = 3, HISTORY = false,
                        R1 = true, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
+}
+module tinyNoR1 {
+  import lightQuestion(QUESTIONS = Set(1), CONDS = Set(1, 2), CHANNELS = Set("push", "chat"),
+                       ANSWERS = Set("a", "b"), CRASHES = 1, HISTORY = true,
+                       R1 = false, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
 }
