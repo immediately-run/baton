@@ -3,14 +3,14 @@ title: "B-8 — Baton registration tokens and API keys beside SSH keys"
 id: B-8
 project: baton
 status: available
-updated: 2026-10-18
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1111
 tier: critical
-description: "Owners mint scoped, expiring, revocable registration tokens; a session registers an SSH key or an API key with them; API keys work as worker or personal-courier credentials unless the owners set `api_keys: false`; today's bearer and seed keys become API keys with explicit grants (BATON_SPEC R-BTN-117); S-BTN-69. Requires: none."
+description: "Owners mint scoped, expiring, revocable registration tokens for runners; a session registers an SSH key or an API key with one; the owners' `api_keys: false` refuses API-key runners and MCP keys; today's bearer and seed keys become API-key runner credentials with explicit grants, each raised for its owners (BATON_SPEC R-BTN-117, R-BTN-159, R-BTN-146); S-BTN-69, G-BTN-94, G-BTN-144. Requires: none."
 topics:
   - baton
 owns: {}
@@ -19,28 +19,57 @@ depends_on: []
 ---
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §2m.4 (R-BTN-117), R-BTN-13, R-BTN-57 and R-BTN-58 as amended, §2m.7a's grants and settings rows.
+**Spec:** `spec/BATON_SPEC.md` §8.2 (R-BTN-117, R-BTN-146), §11.1 (R-BTN-13, R-BTN-159), §11.2
+(R-BTN-57, R-BTN-58), §13.2's `registration_tokens`, §14's token, register and settings rows;
+`spec/BATON_SPEC_HISTORY.md`, Migrations: the bearer-key migration.
+
+### Requires
+
+None: a checkout and a terminal.
 
 ### Why
 
-§2m is agreed and specified; this ticket builds its part of it.
+A cloud session has no key of its own to sign with, and an owner should not hand it one.
+Registration tokens let the owner scope what such a session may become; R-BTN-159's API keys
+(built, S-BTN-126) give it a credential it can hold.
 
 ### What to build
 
-1. `baton owner token create --ttl --max-tier --role worker|courier [--asks]` and the registration route; a credential never exceeds its token and dies with it.
-2. API keys in `Authorization` on every call, including the push and stream upgrades; 7 days idle ends one; refused in any other role.
-3. `api_keys: false` refuses an API-key worker at its next call.
-4. The migration: grant each legacy key what it declared on repositories it used in 30 days, each listed under **Needs you**.
-
-- **Pending grants** *(added 2026-10-18 by BATON_SPEC R-BTN-146)*: the grants this migration writes for `BATON_KEYS` seed keys are written with `accepted_at` set to the migration's time, so no migrated machine stops; a seed key migrated onto two or more repositories lands at span 2, with sync and courier off, and the release notes say so.
+1. **Tokens.** `baton owner token create --repo <id> --role runner [--capabilities …]
+   [--max-tier <t>] [--ttl <d>] [--uses <n>]` and `baton owner token revoke`, in a new
+   migration adding `registration_tokens`. `runner` is the only role: there is no `courier` role
+   and no `--asks` (a forge courier registers through `baton owner courier add`, R-BTN-115).
+   `--uses` defaults to 1, at most 100; TTL defaults to 7 days, at most 30. Shown once as
+   `brt_<id>_<secret>`, stored as its SHA-256, valid in the minting tenant only.
+2. **Registering.** `baton runner register --token <t> --name <name> [--key ssh | --key api]`
+   (`POST /v1/register`) creates a runner credential with a grant inside the token's scope,
+   never wider and never `human-operator`; registering is acceptance (R-BTN-146). A name bound
+   to another live credential is `conflict`; renewing one's own name is a re-key that spends no
+   use. Each registration is an `admin` event; more than 10 by one token in 24 hours raises
+   `baton.token-burst`. The credential lasts until the token's `grant_ttl` or 7 days without an
+   authenticated call; revoking the token revokes every credential it registered.
+3. **API-key runners.** Bearers work on the push and stream upgrades as on every other
+   `/v1/runner/*` route. The repository setting `api_keys: false` (R-BTN-66, default `true`)
+   refuses an API-key runner at its next call, and MCP keys (B-25). An API-key runner credential
+   lives at most 90 days.
+4. **The migration** (history, "Bearer-key migration"): the bearer tokens and `BATON_KEYS` seed
+   keys the code accepts become API-key runner credentials, granted on each repository they
+   heartbeated or claimed on in the 30 days before, with the capabilities they declared there
+   and `accepted_at` set to the migration's time, so no migrated runner stops. A seed key so
+   granted on two or more repositories lands at span 2 with sync off, and the release notes say
+   so. Each migrated grant is raised for its owners to confirm or revoke (through today's
+   listing if B-57 has not landed). Bearer tokens and `BATON_KEYS` are refused once the
+   migration has run.
 
 ### Do not
 
-- Store an API key in clear: keep a hash.
+- Store a token or an API key in clear: keep a hash.
+- Add a `courier` role, flag or scope: forge couriers have their own credential kind.
 
 ### Tests
 
-- S-BTN-69; G-BTN-94.
+- S-BTN-69; G-BTN-94, G-BTN-144's token clause.
+- Unit: the migration's grants, span and `accepted_at`, on fixture keys.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green.
 
 ### Exit criteria
@@ -49,3 +78,6 @@ depends_on: []
 - [ ] merged under the review gate
 
 ## Status
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — tokens register runners only, with no
+courier role or `--asks`; the migration raises each grant for its owners.)_

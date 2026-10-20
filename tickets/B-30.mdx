@@ -3,12 +3,12 @@ title: "B-30 — Baton's create-pr review is independent of its implementer: no_
 id: B-30
 project: baton
 status: available
-updated: 2026-10-18
+updated: 2026-10-20
 repos:
   - immediately-run/baton
 tags:
   - roadmap-item
-description: "create-pr's review may chain from implement or fix in the same claim, so the implementing worker's own model can review its work; the docs review gate never allowed that. Once B-2 builds no_chain_from (R-BTN-106), create-pr's course file gives review no_chain_from [implement, fix] and the review stub's instructions require a different model where the runner offers one. Requires: none."
+description: "create-pr's review may chain from implement or fix in the same claim, so the implementing runner's own model can review its work; the docs review gate never allowed that. B-2 built no_chain_from (§8.3 R-BTN-106), so create-pr's course file (`src/defaults/courses/create-pr/` once B-43 moves it; `src/defaults/courses.ts` today) gives review no_chain_from [implement, fix] and the review stub's instructions require a different model where the runner offers one. Requires: none."
 topics:
   - baton
 owns: {}
@@ -19,3 +19,5 @@ depends_on:
 ---
 
 _(filed; the body follows.)_
+
+**Spec:** `spec/BATON_SPEC.md` §8.3 R-BTN-106 (`no_chain_from`, rule `chain`), §5.8 R-BTN-131 (`create-pr`'s legs); §15 S-BTN-63, G-BTN-90.

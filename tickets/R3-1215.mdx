@@ -3,7 +3,7 @@ title: "R3-1215 — Baton in the skills: shadow reports from claim.sh, activity 
 id: R3-1215
 project: baton
 status: available
-updated: 2026-10-13
+updated: 2026-10-20
 repos:
   - docs
 tags:
@@ -24,7 +24,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.9 (skill-declared phases), §7.4 (catalog frontmatter, substitution), R-BTN-27, §13 step 2 (shadow reports), §15 rows for `claim.sh`, the skills and the agents (docs@2dbf1424)
+**Spec:** `spec/BATON_SPEC.md` §9.9 (activities: skill-declared phases), §16.1 R-BTN-28 (shadow reports, `POST /v1/runner/shadow-report`), §16.2 step 2, §15 S-BTN-10; docs' `BATON_ROADMAP_PR_COURSE` (catalog frontmatter, substitution, seats; R-BTN-27; G-BTN-29, -30) and `BATON_DOCS_DEPLOYMENT` §15 (the rows for `claim.sh`, the skills and the agents)
 **Depends on:** R3-1205, R3-1211, R3-1213
 
 ### Requires
@@ -42,14 +42,14 @@ the one function that also decides matching. Tier: critical — the review gate'
 1. `claim.sh claim` and `set --status` report the transition to `POST /v1/runner/shadow-report`
    after a successful push (best effort; a failure never fails the claim in shadow).
 2. `next-roadmap-item` (both copies) and `review-gate` (both copies) call
-   `baton-activity.mjs` at the §6.9 phase boundaries.
+   `baton-activity.mjs` at the phase boundaries (§9.9).
 3. `reviews_on:` and `bills:` frontmatter on every `.opencode/agents/review-pr-*.md` and
    `adjudicator.md`, and `models:` where an agent spends a second model (`review-pr-claude`:
    a second model on another provider account), matching `scripts/data/reviewer-matrix.json`'s
    `agents` (R3-1205).
 4. The opencode review gate takes its seats from `node docs/scripts/baton-seats.mjs --authors …
    --accounts <the session's declared accounts>` (required since R3-1205; the sidecar's state
-   file holds the declaration) at round one and keeps them for the gate (§7.4), with the `awaiting-review-capacity`
+   file holds the declaration) at round one and keeps them for the gate (docs' `BATON_ROADMAP_PR_COURSE`), with the `awaiting-review-capacity`
    release and the blocked-adjudicator packet.
 
 ### Architecture — the decisions, named
@@ -68,7 +68,7 @@ the one function that also decides matching. Tier: critical — the review gate'
 - `bash scripts/claim.sh --self-test` gains: with a stub Baton returning 500, `claim` still
   exits 0 and pushes.
 - Integration: `S-BTN-10.no-review-capacity` with the real `baton-seats.mjs` and stub
-  reviewers; G-BTN-29 and G-BTN-30.
+  reviewers; docs' course gates G-BTN-29 and G-BTN-30.
 
 ### Exit criteria
 
@@ -82,3 +82,5 @@ the one function that also decides matching. Tier: critical — the review gate'
 _updated 2026-10-13 — from docs#204 round 3 (3-r3-1): baton-seats --accounts takes plain account ids and picks each prefix's first held candidate in model-providers.json order. That equals the heartbeat's worker_providers choice only while every prefix has one candidate, which is true today. Before a second account joins a prefix, make --accounts take prefix=account pairs from the sidecar's state file, so the gate and rule 8 read the same declaration.._
 
 _(filed 2026-10-13)_
+
+_2026-10-20 — **conflict, not rescoped:** item 4's `awaiting-review-capacity` release was removed from core by R3-1237, and S-BTN-10 now ends the holder `suspended:pr-open` with `review` posted `waiting` (and `baton.stalled` at 72 h). Item 4's release reason must follow docs' `BATON_ROADMAP_PR_COURSE` as it stands when this ticket is claimed; settle it at claim._

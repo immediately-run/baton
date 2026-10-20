@@ -3,7 +3,7 @@ title: "R3-1235 — The roadmap-pr course's capacity logic: course data, tags, m
 id: R3-1235
 project: baton
 status: available
-updated: 2026-10-16
+updated: 2026-10-20
 repos:
   - docs
   - baton
@@ -12,20 +12,20 @@ tags:
   - roadmap-item
 order: 1072
 tier: judgement
-description: "The roadmap-pr course's capacity logic in docs, run on the worker (BATON_SPEC §2l): course data, worker tags and hourly reports, measure readings of spend, and .baton/courses/roadmap-pr/rank.mjs — room from readings and billing counts, exhaustion, model advice and seat pairs, the review-queue bound, skipping reviews it cannot bill; suspensions are owner bars; S-BTN-19, -20, -21, -27. Requires: none."
+description: "The roadmap-pr course's capacity logic in docs, run on the runner (BATON_SPEC §1 R-BTN-98, §6.6–§6.7): course data, runner tags and hourly reports, measure readings of spend, and .baton/courses/roadmap-pr/rank.mjs — room from readings and billing counts, exhaustion, model advice and seat pairs, the review-queue bound, skipping reviews it cannot bill; suspensions are owner bars; S-BTN-19, -20, -21, -27. Requires: none."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
-  - R3-1233
+  - B-31
   - R3-1269
   - R3-1272
 ---
 
-**Brief:** the Baton project; the owner, 2026-10-16: estimates stay on the worker; measured readings, not forecasts, are shared.
-**Spec:** `docs/content/specs/BATON_ROADMAP_PR_COURSE.mdx` §1 (the ranking code's row), §2, §3 (R-BTN-42), §4 (R-BTN-43 as of 2026-10-16), §5 (R-BTN-49), §6, §7 (G-BTN-28–30, -34, -45, -46 as replaced, -48, -52, -65); `docs/content/specs/BATON_SPEC.mdx` §2l R-BTN-98 (`rank.mjs`, `view`, `protocol_files`), R-BTN-99, R-BTN-100 (`bills`), R-BTN-101 (`measure`), §13a S-BTN-19, -20, -21, -27 as amended (docs@646eca6, the merge of docs#220)
-**Depends on:** R3-1233 (the course in docs), R3-1269 (the views and `bills`), R3-1272 (the CLI that loads `rank.mjs`)
+**Brief:** the Baton project; the owner, 2026-10-16: estimates stay on the runner; measured readings, not forecasts, are shared.
+**Spec:** `docs/content/specs/BATON_ROADMAP_PR_COURSE.mdx` §1 (the ranking code's row), §2, §3 (R-BTN-42), §4 (R-BTN-43 as of 2026-10-16), §5 (R-BTN-49), §6, §7 (G-BTN-28–30, -34, -45, -46 as replaced, -48, -52, -65); `spec/BATON_SPEC.md` §1 R-BTN-98 (`rank.mjs`, `view`, `protocol_files`), §6.6 (matching: gates and advice), §6.7 R-BTN-99, R-BTN-100 (`bills`), §6.3 R-BTN-101 (`measure`), §15 S-BTN-19, -20, -21, -27
+**Depends on:** B-31 (docs on Baton's standard courses, which carried R3-1233's course in docs; done), R3-1269 (the views and `bills`), R3-1272 (the CLI that loads `rank.mjs`)
 
 ### Requires
 
@@ -37,13 +37,13 @@ depends_on:
 start a session on — and its suspensions. Until 2026-10-16 that was a hook inside Baton forecasting
 by reservation. The owner retired both: the hook because Baton runs no repository code, the
 forecast because estimates are unverifiable and gameable. What remains is the course's ranking
-code on the worker, judging room from measurements. Tier: judgement — one course, many inputs.
+code on the runner, judging room from measurements. Tier: judgement — one course, many inputs.
 
 ### What to build
 
 1. The sync's course data: providers (accounts, per-model limits, `max_concurrent`, the prefix → accounts map), prices, matrix and catalog, estimates (p75 per leg kind and family). No `factory_share`; no suspensions (owner bars).
 2. The sidecar: tags (`family:`, `account:`, `model:`) from the harness configuration; hourly reports; a **`measure`** reading per billed account — the session's cumulative list-price spend per window, at each leg's end and at most hourly while billing, `valid_for` up to the longest window (≤ 31 days); `state` readings on a rate limit and on recovery; `bills` on every claim and `advance` (the claimant's coding account for `implement`, `fix`, `merge`; the seats' accounts, with `n`, for `review`).
-3. `.baton/courses/roadmap-pr/rank.mjs`, listed in `protocol_files`: `rank(view)` marks each account short or possibly roomy from its readings, summed `measure`s and billing count against `max_concurrent`; orders candidates; skips a review the worker cannot bill or whose reviewers bill a line under a `no-new-work` bar for a new claim; flags `wip-bound` past 8 tickets beyond `filed`; returns per-candidate `advice` (ranked models, `seat_pairs`) and, for `worker: null`, `launch` (the model to start on).
+3. `.baton/courses/roadmap-pr/rank.mjs`, listed in `protocol_files`: `rank(view)` marks each account short or possibly roomy from its readings, summed `measure`s and billing count against `max_concurrent`; orders candidates; skips a review the runner cannot bill or whose reviewers bill a line under a `no-new-work` bar for a new claim; flags `wip-bound` past 8 tickets beyond `filed`; returns per-candidate `advice` (ranked models, `seat_pairs`) and, for `runner: null`, `launch` (the model to start on).
 4. The leg scripts and `baton-seats.mjs` read `seat_pairs` from the `advice` `baton runner start` kept, falling back to the matrix order.
 5. The pre-tool hook keeps denying reviewer spawns on suspended lines from the heartbeat's bars, fail closed.
 
@@ -51,14 +51,14 @@ code on the worker, judging room from measurements. Tier: judgement — one cour
 
 - **`rank.mjs` imports the pure functions** from `scripts/lib/courses/roadmap-pr/` (created by R3-1233 and this item: `qualifyingPair`, `familyOf`, the room rule) at the commit it is loaded from (R-BTN-98 lets it import any module of the repository there); no bundling step.
 - **The room rule is one function** `roomOf(readings, billings, account, legEstimate, now)` in `scripts/lib/courses/roadmap-pr/room.mjs`, used by `rank` and by nothing that posts to Baton.
-- **Estimates never leave the worker**: no estimate in `bills`, reports, readings or `rationale`.
+- **Estimates never leave the runner**: no estimate in `bills`, reports, readings or `rationale`.
 - **Do not**: refuse anything from `rank` (skip is advice); read another repository's tickets from the views; sum spend in Baton; recreate `factory_share` or reservations.
 
 ### Tests
 
 - `scripts/lib/courses/roadmap-pr/rank.test.mjs`: every course-spec §7 gate test over fixture views built from a real board post of docs' sync (R3-1233's `sync.mjs` run on a docs checkout, saved under `scripts/lib/courses/roadmap-pr/fixtures/`) and readings shaped by the registered schema.
 - `scripts/lib/courses/roadmap-pr/room.test.mjs`: exhausted, measured-too-high, at-`max_concurrent`, and roomy cases; a `measure` from another repository counts.
-- Integration in Baton's harness with docs' `.baton/` as the fixture course: S-BTN-19, -20, -21, -27 as amended in BATON_SPEC §2l.
+- Integration in Baton's harness with docs' `.baton/` as the fixture course: S-BTN-19, -20, -21, -27 as BATON_SPEC §15 states them.
 
 ### Exit criteria
 
@@ -69,7 +69,7 @@ code on the worker, judging room from measurements. Tier: judgement — one cour
 
 ## Status
 
-_2026-10-16 — rescoped for BATON_SPEC §2l: the hook becomes `rank.mjs` on the worker, forecast by reservation becomes room from `measure` readings and billing counts; depends on R3-1269 and R3-1272 instead of R3-1236._
+_2026-10-16 — rescoped for the 2026-10-16 amendment (now BATON_SPEC §1 R-BTN-98, §6.7): the hook becomes `rank.mjs` on the runner, forecast by reservation becomes room from `measure` readings and billing counts; depends on R3-1269 and R3-1272 instead of R3-1236._
 
 _(filed 2026-10-14)_
 

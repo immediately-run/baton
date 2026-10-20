@@ -1,0 +1,133 @@
+---
+title: "B-64 — The outbox and the built-in leg baton.write: Baton's git writes, drained by runners (R-BTN-171)"
+id: B-64
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1120
+tier: critical
+description: "Build R-BTN-171: every git write Baton intends is an `outbox` row (`handler` for a bound core condition, `withdraw` for a superseded ticket) holding identifiers only; the built-in leg `baton.write`, requiring `runner:baton-legs` (declared under `--outbox`), writes a ticket's entries in id order with `baton_write: <id>` idempotence and reports `written[]`; entries land at a snapshot, drop when their condition closes first, and raise `baton.outbox-late` after 24 h; the source gains a `withdraw(ticket, reason)` export. S-BTN-136, G-BTN-156. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-58
+  - B-56
+  - B-38
+  - B-42
+---
+
+**Brief:** the ticket plan for the current-state spec (PR #71, 2026-10-20), §2's B-64. Baton holds
+no git credential, so the handler tickets of its own conditions (R-BTN-163) and the withdrawals
+of superseded tickets (R-BTN-168) reach git only through a runner.
+**Spec:** `spec/BATON_SPEC.md` §7.8 R-BTN-171 (the outbox); §7.3 R-BTN-163 ("Binding core's
+conditions": the handler id `<local>.c<n>` or `baton.<sub>.<condition_id>`, `baton.outbox-late`
+never bound); §5.2 R-BTN-69 (built-in legs: held, `ready` while held, `runner:baton-legs`, rule 9
+not binding `baton.write`); §4.2 R-BTN-74 (`file(ticket)` and `withdraw(ticket, reason)`); §8.4
+R-BTN-133 (the `runner` capability type's `baton-legs` value); §5.3 R-BTN-83 (held positions);
+§6.6 (recommendation order: built-in legs first); §13.6 `ticket_overrides.override_kind`; §13.8
+the `outbox` table, `outbox_pending`, the alarm's `outbox.queued_at` + 24 h; §15 S-BTN-136,
+G-BTN-156.
+**Depends on:** B-58 (bindings, handler ticket frontmatter, the source's `file` export,
+`std:condition@1`), B-56 (`baton.<sub>` and `hitl.decision` conditions, which are what a
+`handler` entry files), B-38 (route overrides stored with their `next_source` kind; this ticket
+adds `outbox`), B-42 (the `runner` capability type; this ticket adds its `baton-legs` value).
+
+### Requires
+
+None: a checkout and a terminal. The forge-refused push runs against the integration harness's
+fake forge.
+
+### Why
+
+Bound core conditions need a handler ticket in git, and supersession (B-65) needs withdrawals
+in git, but Baton must never write git itself. Until this lands, every core condition reaches
+only the debugger, and nothing Baton decides can be written back.
+
+### What to build
+
+1. **Schema.** A new numbered migration in `src/migrations/` adds the `outbox` table as §13.8
+   gives it (`(repository_id, id)`, `id` increasing per repository; `ticket_id`, `kind`
+   `handler|withdraw`, `condition_id`, `fields` JSON, `state`
+   `queued|written|landed|dropped`, `queued_at`, `written_commit`, `landed_at`), the
+   `outbox_pending` index, and `outbox` to `ticket_overrides.override_kind`'s CHECK.
+2. **Core module `src/core/outbox.ts`.** `queue(kind, ticket, fields, condition?)` in the
+   caller's transaction; `fields` passes a new identifiers-only validator in
+   `src/core/validate.ts` (no free text, §12.3). Each queue, write and land logs an
+   `outbox {id, kind, state}` event in the ticket's history (`src/core/history.ts`).
+   - **`handler` entries.** When B-56/B-58 raise a bound `baton.*` or `hitl.decision`
+     condition, queue a `handler` entry and, in the same transaction, a provisional ticket row
+     at the handler course's start station with queued leg `baton.write` held as an override
+     (`next_source: outbox`, B-38's store). The id is `<local>.c<n>`, or
+     `baton.<sub>.<condition_id>` for a repository- or runner-level condition. The condition
+     counts as handled from this moment. A binding of `baton.outbox-late` is ignored.
+   - **`withdraw` entries** are queued by B-65; this ticket gives them their kind, ordering and
+     drain, and tests them with a fixture supersession.
+   - **Dropping.** A `handler` entry still `queued` when its condition closes is `dropped`, its
+     provisional row deleted, and no withdrawal follows; a `written` one is followed by a
+     `withdraw` entry.
+   - **Landing.** In the snapshot transaction (`src/core/board.ts`), an entry whose
+     `written_commit` the accepted snapshot contains turns `landed`; the posted ticket then rules
+     and the override ends.
+3. **The built-in leg in core.** `baton.write` is queued only as a held position, `ready` while
+   held, requires `runner:baton-legs` for rule 4 and R-BTN-126, is exempt from rule 9, reports
+   no position, and is recommended ahead of the repository's other legs (`src/core/claims.ts`'s
+   recommendation order; `src/core/gates.ts` for rule 4). Its claim response carries
+   `outbox: [{id, kind, fields}]`, every pending entry of the ticket in `id` order; a `completed`
+   end carrying `written: [{id, commit}]` (validated in `src/core/validate.ts`) sets them
+   `written`.
+4. **The runner (`src/runner/`).** `--outbox` on the runner's start flags (`src/runner/main.ts`;
+   `baton runner start --outbox` once B-23's tree lands) declares `runner:baton-legs`; a config
+   naming the capability refuses to start (R-BTN-133). The built-in leg runs runner code, no
+   script: fetch the default-branch head, skip an entry whose file already carries
+   `baton_write: <id>` (or, for `withdraw`, already says withdrawn), else render it through the
+   source's `file(ticket)` (`handler`, body generated from `fields`) or `withdraw(ticket,
+   reason)`, commit, push; on a rejected push fetch, check and write again at most 3 times, then
+   end `released:cannot-finish:transient`. A push the forge refuses ends
+   `released:cannot-finish:capability`: the ticket is held and `baton.retries` names the runner.
+5. **The `withdraw` export.** `src/defaults/tickets-markdown.ts` (and the generated
+   `.baton/tickets.mjs` wrapper in `src/defaults/cli.ts`) gains `withdraw(ticket, reason)`,
+   setting `status: withdrawn`, `withdrawn_reason` and `baton_write: <id>`.
+6. **Alarm and export.** The alarm (`src/core/baton.ts`) raises `baton.outbox-late` for an entry
+   not `landed` 24 h after `queued_at`, closed when it lands or drops. R3-1258's export
+   (R-BTN-88) carries the `outbox` rows.
+7. **Model.** The `outbox` override kind as a held position, with a `model:pr` report
+   (R-BTN-68).
+
+### Do not
+
+- Give Baton or the Worker any git credential, or write git from core: every write is a
+  runner's `baton.write` or `baton.cancel`.
+- Store a subject, body or any free text in `fields`.
+- Put choice settlements, timer legs, `exhausted` legs or call settlements in the outbox: they
+  are overrides written by the leg they queue (R-BTN-171's "Not in the outbox").
+- End a forge-refused push `released:blocked` on `runner:baton-legs`: the runner would
+  re-declare at once and loop (history, Integration, "Who drains the outbox").
+
+### Tests
+
+- **S-BTN-136** on both hosts, its trace replayed through the model: a bound
+  `baton.output-invalid`; no `runner:baton-legs` runner, then one; a write landed by a lost
+  claim (the re-claim writes nothing); a forge-refused push; a condition closing while queued
+  (`dropped`); an entry undrained 24 h (`baton.outbox-late`).
+- Unit: entry ordering per ticket; the `fields` validator; `withdraw` on the markdown source;
+  the `baton_write` idempotence check; the three-retry rejected push.
+
+### Exit criteria
+
+- [ ] S-BTN-136 passes on both hosts; G-BTN-156 holds
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 with the current-state spec, PR #71)_ S-BTN-136's row says a forge-refused
+push ends `released:blocked` on `runner:baton-legs` with another runner taking it; R-BTN-171 and
+the history's later Integration entry say `released:cannot-finish:capability`, the ticket held
+and `baton.retries` naming the runner. This ticket follows R-BTN-171; the §15 row needs a spec
+fix before the scenario is written.

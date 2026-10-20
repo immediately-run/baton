@@ -3,7 +3,7 @@ title: "R3-1209 — Verify: Baton read-only view on baton.immediately.run"
 id: R3-1209
 project: baton
 status: available
-updated: 2026-10-13
+updated: 2026-10-20
 repos:
   - docs
 tags:
@@ -12,7 +12,7 @@ tags:
   - roadmap-item
 order: 1050
 tier: critical
-description: "Live leg of the read-only view: dashboard behind Access, Ready order equal to rankReady per tier, staging S-BTN-13 green after deploy. Requires: human-operator."
+description: "Live leg of the read-only view (BATON_SPEC §16.2 step 1): the dashboard behind its sign-in, the Ready view's order equal to the course's own claim order per tier on one snapshot, staging S-BTN-13 green after deploy. S-BTN-13, G-BTN-10. Requires: human-operator."
 topics:
   - baton
   - verification
@@ -24,18 +24,19 @@ depends_on:
 ---
 
 **Brief:** the Baton project.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §13 step 1 (exit), §13a (staging), §14 (docs@2dbf1424)
+**Spec:** `spec/BATON_SPEC.md` §16.2 step 1 (exit), §11.4 (the dashboard's Ready view, R-BTN-155 sign-in), §15 (staging; S-BTN-13, G-BTN-10)
 **Depends on:** R3-1207, R3-1208
 
 ### Requires
 
-- `human-operator` — exit criteria 1–3: signing in through Cloudflare Access as the owner.
+- `human-operator` — exit criteria 1–2: signing in to the dashboard as the owner.
 
 ### Why
 
-Step 1's exit (§13) is that the live Ready view's order equals `rankReady` for every tier on
-the same snapshot (Baton applies the expedite bound from its own claims, so git's withholding
-in `claimOrder` is not compared — amended by docs#205's review); only a deployed Worker behind the real Access policy proves it.
+Step 1's exit (§16.2) is that, for each tier, the live Ready view's order equals the course's
+own claim order on the same snapshot (Baton applies the expedite bound from its own claims, so
+git's withholding is not compared — docs#205's review). Only a deployed Worker behind its real
+sign-in proves it.
 
 ### What to build
 
@@ -43,7 +44,11 @@ A verification sitting (about 15 minutes), no code.
 
 ### Architecture — the decisions, named
 
-- Compare on one snapshot: read the sha the dashboard shows, then run `--compare` at that sha.
+- Compare on one snapshot: read the sha the dashboard shows, then run the course's own
+  claim-order tool at that sha (docs: `node scripts/baton-sync.mjs --compare`, or its successor
+  once R3-1216's sync swap lands).
+- No provider view: R3-1237 removed the provider tables, and provider state is docs'
+  `roadmap-pr` course's (R3-1235).
 - **Do not:** fix a difference here; file a BUG item against R3-1206 or R3-1207 instead.
 
 ### Tests
@@ -52,12 +57,13 @@ None to write. The automated half is S-BTN-13 on `baton-staging` after each depl
 
 ### Exit criteria
 
-- [ ] **live leg** (`human-operator`): `https://baton.immediately.run/` asks for the owner's Access sign-in and then shows the Ready and Providers views; another account is refused
-- [ ] **live leg** (`human-operator`): the Ready view's snapshot sha equals `git rev-parse origin/main` within one sync, and `node scripts/baton-sync.mjs --compare` exits 0 for `routine`, `judgement` and `critical`
-- [ ] **live leg** (`human-operator`): Providers shows DeepSeek and Z.AI peak state matching the current UTC time
+- [ ] **live leg** (`human-operator`): `https://baton.immediately.run/` asks for the owner's sign-in (Access where configured, then R-BTN-155's code) and then shows the Ready view; another account is refused
+- [ ] **live leg** (`human-operator`): the Ready view's snapshot sha equals `git rev-parse origin/main` within one sync, and for `routine`, `judgement` and `critical` its order equals the course's own claim order at that sha (the compare tool exits 0)
 - [ ] the latest `baton-deploy` run shows staging `S-BTN-13` green
 - [ ] `npm run verify` green
 
 ## Status
 
 _(filed 2026-10-13)_
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — the exit is §16.2 step 1 as written, and the Providers check is dropped.)_

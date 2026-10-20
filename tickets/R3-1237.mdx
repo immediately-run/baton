@@ -3,7 +3,7 @@ title: "R3-1237 — Baton boundary: move roadmap-pr knowledge out of Baton, boun
 id: R3-1237
 project: baton
 status: available
-updated: 2026-10-14
+updated: 2026-10-20
 repos:
   - baton
   - docs
@@ -23,9 +23,9 @@ depends_on:
 ---
 
 **Brief:** the Baton project.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2b (R-BTN-50, R-BTN-60, the what-moves table, the
-boundary test), R-BTN-37 (the vendored set ends), R-BTN-67 (owner and required bars in the
-gate), §7.2 rule 8, §13a S-BTN-28, -33, -39 (docs@0928c207; the spec at docs#212 head 0d4ef0e4)
+**Spec:** `spec/BATON_SPEC.md` §1 (R-BTN-50, the boundary test; the what-moves table is in
+`spec/BATON_SPEC_HISTORY.md`), §2.1 R-BTN-37 (the vendored set ends), §5.6 R-BTN-60 and R-BTN-67
+(owner and required bars in the gate), §6.6 rule 8, §15 S-BTN-28, -33, -39
 **Depends on:** R3-1232, R3-1233
 
 ### Requires
@@ -56,7 +56,7 @@ ties a course change to a Baton deploy. Tier: judgement — removals behind a te
 ### Architecture — the decisions, named
 
 - **Core compares tag strings and leg names, never meanings**; the boundary test's word list
-  is BATON_SPEC §2b's.
+  is BATON_SPEC §1's.
 - **Owner and required bars are read from SQLite at every gate**, never from the board.
 - **Do not**: keep a compatibility shim that reads the old reviewer tables; let the toy course
   share a fixture with `roadmap-pr`.

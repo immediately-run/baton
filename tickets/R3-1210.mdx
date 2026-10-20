@@ -3,7 +3,7 @@ title: "R3-1210 — [OP] Spike: hook and process capabilities of Claude Code and
 id: R3-1210
 project: baton
 status: available
-updated: 2026-10-16
+updated: 2026-10-20
 repos:
   - docs
 tags:
@@ -21,7 +21,7 @@ depends_on: []
 ---
 
 **Brief:** the Baton project.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.3 (three layers), §6.4, §6.8 (the opencode archiver), §6.9 (pairing) (docs@2dbf1424)
+**Spec:** `spec/BATON_SPEC.md` §9.2 (R-BTN-6, R-BTN-26, the three fence layers), §8.1 (the sidecar, per harness), §9.9 (R-BTN-20: the archiver and child sessions; activity pairing)
 **Depends on:** —
 
 ### Requires
@@ -54,11 +54,12 @@ run and its output:
    children fire `SessionStart`.
 5. Where the VMs' opencode archiver lives (unit file, script, repo), and how it would append
    a line to a spool file.
-6. Both *(added 2026-10-14, BATON_SPEC R-BTN-49)*: can an unattended session switch its main
+6. Both *(added 2026-10-14, R-BTN-49, now docs' `BATON_ROADMAP_PR_COURSE`)*: can an unattended session switch its main
    model at a leg boundary (Claude Code `/model` or a settings change mid-session; opencode
    per-message model), or run one leg in a subagent on another model and provider, and does
    the switch survive a resume? This decides whether model advice applies per leg or only at
-   launch; §7.2's premise that a session's model is fixed when it starts is re-checked here.
+   launch; the premise behind a course's `launch` advice (R-BTN-98 §1, §6.7), that a
+   session's model is fixed when it starts, is re-checked here.
 
 ### Architecture — the decisions, named
 
@@ -80,7 +81,7 @@ None: a measurement.
 
 ## Status
 
-_2026-10-16 — Baton runs no hooks any more (BATON_SPEC §2l R-BTN-98); this spike's questions are about the harnesses' own pre-tool and session hooks, which the sidecar and the reviewer-spawn denial still need, so it stands. Question 6 (switching models per leg) now feeds docs' `rank.mjs` (R3-1235), not a Baton hook._
+_2026-10-16 — Baton runs no hooks any more (BATON_SPEC §1 R-BTN-98); this spike's questions are about the harnesses' own pre-tool and session hooks, which the sidecar and the reviewer-spawn denial still need, so it stands. Question 6 (switching models per leg) now feeds docs' `rank.mjs` (R3-1235), not a Baton hook._
 
 
 _(filed 2026-10-13)_

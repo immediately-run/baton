@@ -3,7 +3,7 @@ title: "B-6 — [OP] Baton merge check: create the dedicated check GitHub App an
 id: B-6
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -21,16 +21,18 @@ depends_on:
 ---
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §2m.3 (R-BTN-115).
+**Spec:** `spec/BATON_SPEC.md` §10 (R-BTN-115), §12.7 (Baton's own GitHub App, which never posts
+the check).
 
 ### Why
 
-§2m is agreed and specified; this ticket builds its part of it.
+R-BTN-115 is specified; this ticket does its operator part.
 
 ### What to build
 
 1. **Operator.** Create the App (checks: write, nothing else), never Baton's own App.
-2. Install it on immediately-run/baton (and docs once it uses check courses).
+2. Install it on immediately-run/baton (and docs once it uses check courses), on selected
+   repositories only, never "All repositories".
 3. Hand its private key only to the forge courier's host; record the App id in the repository's settings.
 4. Set branch protection's required check to the check name, pinned to the App's id.
 
