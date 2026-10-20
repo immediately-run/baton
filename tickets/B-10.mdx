@@ -3,14 +3,14 @@ title: "B-10 — Baton leg prerequisites and capability types: one requires per 
 id: B-10
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1113
 tier: critical
-description: "A leg's `requires` (tickets `at`/`reached`/`done` with `children`/`parent`/`posted`, `skip_withdrawn`, `allow_empty`; capabilities; resources), block rows per leg, cycles listed, `GET …/prerequisites` and `baton leg why`, and `capability_types`/`roles` declared in each course file with runner-side checks and `<type>:*` grants (BATON_SPEC R-BTN-120, R-BTN-121); S-BTN-72–74, -82. Requires: none."
+description: "A leg's `requires` (tickets selected by `parent` or `posted` with `at`/`reached`/`done`/`withdrawn`/`closed`, `skip_withdrawn`, `allow_empty`; capabilities; resources), block rows per leg, a cycle raising `baton.prerequisite-cycle` and an unmeetable entry `baton.prerequisite-unmet`, `GET …/prerequisites` and `baton leg why`, and `capability_types`/`capability_roles` declared in each course file with runner-side checks and `<type>:*` grants (BATON_SPEC R-BTN-120, R-BTN-121); S-BTN-72–74, -82. Requires: none."
 topics:
   - baton
 owns: {}
@@ -19,26 +19,58 @@ depends_on: []
 ---
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §2m.6 (R-BTN-120, R-BTN-121), R-BTN-75, §7.1 and §7.2 rule 4 as amended.
+**Spec:** `spec/BATON_SPEC.md` §6.1 (R-BTN-120), §5.6 (R-BTN-121), §6.2 (R-BTN-75's `ticket` and
+`capability` rows), §6.6 rules 1 and 4, §13.6's `ticket_blocks`; history, Migrations: the `ROLES`
+window.
+
+### Requires
+
+None: a checkout and a terminal.
 
 ### Why
 
-§2m is agreed and specified; this ticket builds its part of it.
+R-BTN-120 gives each kind of prerequisite one way in and answers "why not" from one index;
+R-BTN-121 moves capability types out of the vendored vocabulary into the course file. This
+ticket builds both.
 
 ### What to build
 
-1. Per-leg `ticket` and `capability` rows with `@at`, `@reached` and `@done` refs, rewritten in the transaction that changes a referenced ticket; `closed_tickets.final_station`, `final_path` and `parent` read for closed tickets.
-2. `depends_at` on the posted ticket; cycles listed `prerequisite-cycle`, blocks kept.
-3. `GET /v1/repositories/{repository}/tickets/{ticket}/prerequisites` and `baton leg why` from the blocks index alone.
-4. Capability types and roles validated with the course file; runners re-run checks while idle; `ROLES` leaves the vendored library through the transition window.
+1. **Ticket entries.** `validateCourse` (`src/core/course.ts`) accepts a leg's
+   `requires.tickets` with `select` `parent` (optional `course`) or `posted`, and refuses any
+   other `select` (no `children`, no `run`: children are a call's range, B-62). Each entry has
+   exactly one of `at`, `reached`, `done: true`, `withdrawn: true` or `closed: true`, plus
+   optional `skip_withdrawn` and `allow_empty`. `baton course test` checks each named station
+   exists in the selectable course.
+2. **Rows.** Per-leg `ticket` and `capability` rows in `ticket_blocks` (`src/core/blocks.ts`)
+   with refs `@at:`, `@reached:`, `@done`, `@withdrawn` and `@closed`, rewritten in the
+   transaction that changes a referenced ticket (index `ticket_dependents`);
+   `closed_tickets.final_station`, `final_path` and `parent` read for closed tickets. A
+   withdrawn ticket meets only `withdrawn` and `closed`.
+3. **`depends_at`** on the posted ticket (`src/core/board.ts`), with `leg` binding one leg and
+   no `leg` the whole ticket.
+4. **Fail closed.** A `parent` entry with no parent, an unknown `posted` id, or an entry a
+   withdrawn ticket leaves unmet keeps its block and raises `baton.prerequisite-unmet`; a cycle
+   in an accepted snapshot keeps every block and raises `baton.prerequisite-cycle` naming the
+   tickets (through today's listing if B-57 has not landed).
+5. **Why not.** `GET /v1/repositories/{repository}/tickets/{ticket}/prerequisites[?leg=][&runner=me]`
+   and `baton leg why` from the blocks index alone, every prerequisite met or not, with R-BTN-120's
+   `why` table. The `condition` and `call` rows are B-59's and B-62's, and show here when they
+   land.
+6. **Capability types and roles** (`capability_types`, `capability_roles`) validated with the
+   course file; a course may not declare a type named `runner` or `human-operator`; grants may
+   name `<type>:*`, never a role; runners re-run `check` commands while idle. Through the `ROLES`
+   window a course without `capability_types` reads through the vendored `ROLES`; `ROLES` is
+   removed once no registered course reads through it.
 
 ### Do not
 
 - Read past the blocks index to answer `baton leg why`.
+- Accept a `children` or `run` selector, or select a call's children from `requires.tickets`.
 
 ### Tests
 
 - S-BTN-72, S-BTN-73, S-BTN-74, S-BTN-82; G-BTN-97, G-BTN-98, G-BTN-104.
+- Unit: the validator refusing every other `select`; each `ref` form's rows.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green.
 
 ### Exit criteria
@@ -47,3 +79,6 @@ depends_on: []
 - [ ] merged under the review gate
 
 ## Status
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — `select` is `parent` or `posted` only,
+`withdrawn` and `closed` entries join, and cycles and unmeetable entries raise conditions.)_

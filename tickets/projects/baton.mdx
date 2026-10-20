@@ -4,7 +4,7 @@ id: baton
 status: active
 tags:
   - project
-description: Build Baton (BATON_SPEC) — workers that come and go, one fenced lease per work item, provider suspensions, retries and resume records, and a live dashboard at baton.immediately.run — in four rollout steps (read-only view, shadow week, cutover, consumer migration), each item carrying its integration scenarios.
+description: Build Baton (BATON_SPEC) — runners that come and go, one fenced lease per work item, provider suspensions, retries and resume records, and a live dashboard at baton.immediately.run — in four rollout steps (read-only view, shadow week, cutover, consumer migration), each item carrying its integration scenarios.
 kind: project
 nav: Project
 order: 5
@@ -14,7 +14,7 @@ order: 5
 _Project entity, filed 2026-10-13 from the owner's design session and the approved
 `BATON_SPEC` (docs@f84fa9e2)._
 
-**Plan / spec:** `BATON_SPEC` (`spec/BATON_SPEC.md` since R3-1252) — rollout in §13, integration scenarios in §13a.
+**Plan / spec:** `BATON_SPEC` (`spec/BATON_SPEC.md` since R3-1252; its history, retired ids and the old → new § map in `spec/BATON_SPEC_HISTORY.md`) — adoption and rollout in §16, scenarios and gates in §15.
 
 **Status:** `active` — author-set.
 
@@ -22,8 +22,8 @@ _Project entity, filed 2026-10-13 from the owner's design session and the approv
 
 - The factory coordinates through git: `claim.sh` uses a push as its lock, a dead claim
   blocks an item for up to 7 days, eligibility is self-judged, and nobody can see which
-  workers are up or what they are doing (BATON_SPEC §1).
-- The owner asked for a Temporal-like view of workers, running work and queues, the power to
+  runners are up or what they are doing (BATON_SPEC §1).
+- The owner asked for a Temporal-like view of runners, running work and queues, the power to
   switch off a provider before its credits run out, and integration tests for timeouts,
   retries, poisoned items, reaps and disabled providers.
 
@@ -35,7 +35,7 @@ Filed 2026-10-13, in rollout order. Every item names its `S-BTN-n` scenarios (R-
   Durable Object with the read-only dashboard and the integration harness; the deploy and
   board-sync workflows; [OP] Cloudflare provisioning; Verify: the read-only view.
 - **Before step 2:** [OP] the hook-capability spike.
-- **Step 2 — shadow:** the worker API; claims, matching and reaping; the sidecar and Claude
+- **Step 2 — shadow:** the runner API; claims, matching and reaping; the sidecar and Claude
   Code hooks; opencode; the skills wiring; Verify: the shadow week.
 - **Step 3 — cutover:** the cutover server; the git mirror; the cutover client; [OP] the
   cutover; Verify: cutover.
@@ -45,21 +45,76 @@ Filed 2026-10-13, in rollout order. Every item names its `S-BTN-n` scenarios (R-
   (R3-1228); the host move (R3-1229, before R3-1208); the rename to tickets (R3-1230);
   repositories and courses (R3-1231); legs on the server (R3-1232); the `roadmap-pr` course
   (R3-1233); the skills (R3-1234); budgets and model advice (R3-1235); hooks and probes
-  (R3-1236, superseded 2026-10-16 by §2l); the boundary move (R3-1237); one codebase on two hosts (R3-1238, before R3-1231);
+  (R3-1236, superseded 2026-10-16: Baton runs no repository code, §1 R-BTN-98); the boundary move (R3-1237); one codebase on two hosts (R3-1238, before R3-1231);
   SSH key identity (R3-1239); administration by an instance administrator and repository owners
   (R3-1240); (R3-1241 and R3-1242, a Firecracker hook sandbox, were superseded the same day: local hooks are
-  trusted and run in plain workerd, built in R3-1236). Cutover (R3-1220) depends on R3-1232–R3-1240.
+  trusted and run in plain workerd, built in R3-1236). Cutover (R3-1220) depends on those of R3-1231–R3-1240 that were not superseded.
 
 - **The 2026-10-16 amendment** (Baton without GitHub — forges, sync keys, pulled syncs, per-forge
   notifications and the `branch` course; docs#217, R3-1253): sync keys and forge-aware repositories
   (R3-1262); pulled syncs and dispatch adapters (R3-1263); forge notifications (R3-1264); the
   CLI's runners, fact adapters and the `branch` course (R3-1265).
 
-- **The 2026-10-16 amendment, §2l** (Baton serves state; workers decide): hooks inside Baton are
+- **The 2026-10-16 amendment** (Baton serves state; runners decide — now §1 R-BTN-98, §6.6–§6.7,
+  §8.2, §4.5, §3.3): hooks inside Baton are
   retired (R3-1236 superseded). The views, launch candidates and `prefer`/`bills` claims
   (R3-1269); machine-key sync (R3-1270); open-world claims (R3-1271); the CLI's ranking and
-  worker sync triggers (R3-1272); readings per instrument (R3-1251, amended); worker couriers
-  (R3-1256, amended); `roadmap-pr`'s ranking from measurements (R3-1235, rescoped).
+  runner sync triggers (R3-1272); readings per instrument (R3-1251, amended); worker couriers
+  (R3-1256, amended; retired 2026-10-20, B-67 removes them); `roadmap-pr`'s ranking from
+  measurements (R3-1235, rescoped).
+
+- **The 2026-10-20 current-state spec** (PR #71: the spec rewritten as one current-state
+  document, with conditions, handlers, retries, timers, calls, choices, compensation and the
+  outbox in §7, and every process that runs a leg a runner). The live tickets were repointed or
+  rescoped to it; R3-1259's leg deadlines moved to B-60, B-14 is superseded by B-55 and B-56, and
+  B-11 became retries as the default handler of `error`. New tickets:
+  - **Conditions and the debugger:** B-55 — Conditions: typed raises, reported and closed;
+    B-56 — The debugger and Baton's suspend conditions; B-57 — Every Needs-you listing becomes a
+    `baton.<sub>` condition.
+  - **Handlers:** B-58 — Bindings and handler ticket files; B-59 — Suspend: wait in the claim,
+    block, resume; B-66 — Standard handler courses `ask`, `deliver`, `announce`.
+  - **Time:** B-60 — Leg deadlines: the interrupting `start` timer and the owner's controls;
+    B-61 — Timers on a leg.
+  - **Calls, choices and cancel:** B-62 — Call legs and completion tables; B-63 — Choice
+    stations; B-64 — The outbox and `baton.write`; B-65 — Compensation, supersession and
+    `baton.cancel`.
+  - **Retiring old forms:** B-67 — Notices for people removed; B-68 — "Worker" is "runner" in
+    code, through a dual-read window; B-69 — Close the runner-rename window; B-70 — Isolation is
+    the capability `runner:session`; B-71 — Scenario tests on the rewritten §15; B-72 —
+    check-spec: retired citations fail.
+  - **After the adversarial review** (filed from the coverage audit of the tickets against the
+    spec, 2026-10-20): B-77 — Heads, held posts and dropped tickets (after B-46, B-11, B-57);
+    B-78 — Markers and foreign writes, R-BTN-46 (after B-46, B-57, B-77); B-79 — Fences,
+    idempotency and adoption (after B-60, B-47, B-57).
+
+  Order (each arrow is a dependency; "also" names further ones):
+
+  ```
+  B-71 tests audit ─────────────────────────────┐
+  B-68 rename ── B-69 close window              │
+                                                │
+  B-55 conditions core ── B-56 debugger + baton.retries/contract/stalled ── B-57 Needs-you→baton.<sub>
+     │                      │  │                                            │
+     │                      │  └──────────────── B-67 notices removed ◄─────┘ (and after B-66)
+     │                      │                        └── B-72 check-spec fails on retired ids (also R3-1269, B-71)
+     ├── B-11 retries (also B-10, B-38) ───────────┐
+     │                                             │
+  B-42 ─┬─ B-58 bindings + handler files (also R3-1258)
+        │     ├── B-59 suspend/resume (also B-21, B-56)
+        │     ├── B-62 calls (also R3-1258, B-21, B-52) ── B-13 epic, B-41 build-app on calls
+        │     └── B-64 outbox (also B-56, B-38) ── B-65 compensation/cancel (also B-62, B-9)
+        └─ B-70 runner:session (→ B-5, B-34, B-47)
+
+  R3-1257(done) ── B-60 deadlines ── B-61 timers (also B-11, B-38, B-56) ── B-50 (also R3-1259)
+  B-38, B-7, B-10, R3-1259 ── B-63 choice stations ── (feeds B-65 lifetime: station)
+
+  B-59 + B-63 + B-65 + B-7 + B-43 + B-11 ── B-66 ask/deliver/announce ── B-67
+  B-58 ── B-36 assignee (rescoped) ── B-34 interactive legs (also B-70)
+  ```
+
+  The critical path for §7 is B-55 → B-56 → B-58 → B-62/B-64 → B-65 → B-66 → B-67, with B-11,
+  B-60, B-61, B-59 and B-63 beside it. B-68 goes right after B-49 merges, before the §7 wave
+  adds new `worker` code.
 
 Step 4 (consumer migration) is filed after cutover.
 

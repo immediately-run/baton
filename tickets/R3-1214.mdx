@@ -3,7 +3,7 @@ title: "R3-1214 — Baton for opencode: plugin, reviewer child sessions, transcr
 id: R3-1214
 project: baton
 status: available
-updated: 2026-10-13
+updated: 2026-10-20
 repos:
   - docs
 tags:
@@ -23,7 +23,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §6.4 (opencode), §6.8 (child sessions, the opencode archiver), §6.9 (pairing by `callID`), §7.4 (reviewer spawn deny); the spike (R3-1210) (docs@2dbf1424)
+**Spec:** `spec/BATON_SPEC.md` §8.1 (the sidecar, per harness: opencode), §9.9 (R-BTN-20: child sessions, the archiver; activity pairing by `callID`), §9.2 (the fence layers), §15 (S-BTN-4, -8; G-BTN-15, -26, -27); the reviewer-spawn denial is docs' `BATON_ROADMAP_PR_COURSE`; the spike (R3-1210)
 **Depends on:** R3-1213, R3-1210
 
 ### Requires
@@ -34,7 +34,7 @@ depends_on:
 ### Why
 
 Most of the fleet runs opencode. The sidecar from R3-1213 is harness-neutral; opencode needs
-its plugin, and reviewer child sessions must not register as workers. Tier: critical —
+its plugin, and reviewer child sessions must not register as runners. Tier: critical —
 fencing on the main harness.
 
 ### What to build
@@ -55,7 +55,7 @@ fencing on the main harness.
 ### Tests
 
 - Integration: `S-BTN-4.hung-worker` and `S-BTN-8.no-new-work` with the opencode-shaped fake
-  harness; G-BTN-26 (a `claude -p` child with `IR_BATON_PARENT` registers no worker and its
+  harness; G-BTN-26 (a `claude -p` child with `IR_BATON_PARENT` registers no runner and its
   transcript lands on the parent's `reviewer` activity); G-BTN-15 and G-BTN-27 for opencode.
 
 ### Exit criteria

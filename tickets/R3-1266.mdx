@@ -3,14 +3,14 @@ title: "R3-1266 — Baton hosts its own tickets: the baton repository joins Bato
 id: R3-1266
 project: baton
 status: available
-updated: 2026-10-16
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - FEAT
   - roadmap-item
 order: 1098
-description: "The baton repository registers as a second Baton repository, Baton reading its tickets/ MDX tickets with the pr course, cut over from the start, with a break-glass path for when Baton itself is down. Requires: none."
+description: "The baton repository registers as a second Baton repository, Baton reading its tickets/ MDX tickets with the create-pr course (BATON_SPEC R-BTN-134 refuses pr), cut over from the start, with a break-glass path for when Baton itself is down; the acceptance run is the next free B-n ticket. Requires: none."
 topics:
   - baton
 owns: {}
@@ -23,7 +23,7 @@ depends_on:
 **Brief:** [SELF-HOSTING](https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/plans/self-hosting.mdx). The owner, 2026-10-16: "I want baton to be
 completely self-sufficient as an open source project, no access to the docs repo should be
 required to understand how it works or what is being developed."
-**Spec:** BATON_SPEC §2a (R-BTN-47), §2f (R-BTN-74), R-BTN-18, §11.
+**Spec:** `spec/BATON_SPEC.md` §3.1 R-BTN-47 (registration), §4.2 R-BTN-74 (the markdown source), §5.1 R-BTN-134 (`baton repo init`, course sources; `--course pr` refused), §5.8 (`create-pr`), §1 R-BTN-18, §2.1 (append-only migrations), §16.1 R-BTN-28 (`cut_over: true`).
 
 ### Why
 
@@ -34,14 +34,17 @@ repository can be one of them once it has a ticket source (R3-1249).
 ### What to build
 
 1. **Join.**
-   - Run `baton repo init --course pr` in immediately-run/baton. It writes `.baton/baton.json`, the
-     `pr` course file, its leg stubs and `.github/workflows/baton-sync.yml`, pinning the CLI.
+   - Run `baton repo init --course create-pr` in immediately-run/baton. It writes
+     `.baton/baton.json` with the course entry naming the source
+     `github/immediately-run/baton/<commit>/src/defaults/courses/create-pr` (R-BTN-134; no course
+     file is copied, and `--course pr` is refused naming `create-pr`), the tickets README and
+     `.github/workflows/baton-sync.yml`, pinning the CLI.
    - Tickets are the MDX files in `tickets/`, in docs' roadmap format (owner, 2026-10-16), so
      the sync reads them through a `.baton/tickets.mjs` source over that folder, or R3-1249's
      default source taught `.mdx` and the folder's name.
 2. **Register cut over.**
-   - Run `baton repositories add --id baton --github immediately-run/baton --cut-over` against
-     staging, then production.
+   - Run `baton admin repo add --id baton --github immediately-run/baton --cut-over` (R-BTN-127;
+     it reads the forge ids, R-BTN-138) against staging, then production.
    - Add the entry to `BATON_REPOSITORIES` in `wrangler.toml`, so a fresh deployment seeds it.
    - A new repository has no git-claim history to reconcile, so it skips the shadow week.
 3. **Ids.**
@@ -53,16 +56,19 @@ repository can be one of them once it has a ticket source (R3-1249).
    baton tickets only through Baton, with no git fallback after cutover (R-BTN-18), so a
    broken Baton stops agents from claiming its own fix:
    - a person (never an agent) may push a fix to `main` without a claim;
-   - `npx wrangler rollback` is allowed only to a version at the same migration number (§11);
+   - `npx wrangler rollback` is allowed only to a version at the same migration number (§2.1:
+     migrations are append-only and the object refuses to serve until all are applied);
    - the deploy workflow deploys staging first and runs the smoke checks there, and production
      deploys only when staging is healthy.
-5. **First ticket.** File one real `B-1` ticket, claim it through Baton with an SSH-key runner
-   (R3-1239), and take it to merged under the `pr` course. That run is the acceptance test.
+5. **First ticket.** File one real ticket at the next free `B-n` (`npm run ticket -- new`), claim
+   it through Baton with an SSH-key runner (R3-1239), and take it to merged under `create-pr`.
+   That run is the acceptance test.
 
 ### Do not
 
 - Give the baton repository a mirror: R-BTN-74's markdown source needs none.
-- Let a baton ticket depend on a docs ticket: dependencies stay within a repository (§2a).
+- Let a baton ticket depend on a docs ticket: dependencies stay within a repository (R-BTN-120,
+  §6.1).
 
 ### Tests
 
@@ -74,9 +80,11 @@ repository can be one of them once it has a ticket source (R3-1249).
 
 - [ ] immediately-run/baton is registered and cut over in staging and production; its sync
       workflow is green
-- [ ] `B-1` claimed through Baton and merged under the `pr` course
+- [ ] the acceptance `B-n` claimed through Baton and merged under `create-pr`
 - [ ] the break-glass section is in baton's README; the deploy is gated on staging
 
 ## Status
 
 _(filed 2026-10-16)_
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — `create-pr` read from its source instead of the `pr` course (R-BTN-134), and the acceptance ticket is the next free B-n, since B-1 exists.)_

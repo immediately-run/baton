@@ -3,12 +3,12 @@ title: "B-42 — Legs run in a checkout of their commit: TypeScript or JavaScrip
 id: B-42
 project: baton
 status: available
-updated: 2026-10-19
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
-description: "Build BATON_SPEC §2o (R-BTN-133): each leg runs in place from a read-only worktree at its commit with its lockfile's dependencies installed under the claim's fence; scripts may be mjs, js, cjs, mts, ts or cts; the test kit resolves as Node does. S-BTN-109, G-BTN-128. Requires: none."
+description: "Build BATON_SPEC §8.4 (R-BTN-133): each leg runs in place from a read-only worktree at its commit with its lockfile's dependencies installed under the claim's fence; scripts may be mjs, js, cjs, mts, ts or cts; the test kit resolves as Node does. S-BTN-109, G-BTN-128. Requires: none."
 topics:
   - baton
 owns: {}
@@ -19,9 +19,10 @@ depends_on: []
 **Brief:** the owner, 2026-10-19: "a user's legs should be typescript, mjs or regular non-module
 js. Node should perform module resolution (dependencies should be declared in the repo's
 package.json)", then "please make the spec amendment, this is important".
-**Spec:** `spec/BATON_SPEC.md` §2o (R-BTN-133), as merged from PR 57 after three adversarial
-review rounds. It amends R-BTN-5, -34, -51, -65, -72, -105, -119, -121, -131, §2d and §7.2 rule
-4. This ticket builds it. The owner's two rulings in it are settled: install roots are only
+**Spec:** `spec/BATON_SPEC.md` §8.4 R-BTN-133, as merged from PR 57 after three adversarial
+review rounds, with R-BTN-143 (§8.4, the default-branch check). It amended R-BTN-5, -34, -51, -65,
+-72, -105, -119, -121, -131, §5.7 (the test kit) and §6.6 rule 4; §15 S-BTN-109, G-BTN-128. This
+ticket builds it. The owner's two rulings in it are settled: install roots are only
 the course directory and `.baton/`, never the repository root.
 
 ### Requires
@@ -40,8 +41,9 @@ written in TypeScript, or one that needs a library, cannot be expressed.
    any preparation, so an off-branch commit is never checked out or installed. B-46 builds
    R-BTN-143; if it has not landed, this ticket builds that check exactly as R-BTN-143 states
    (registered branch, `refs/baton/<repository>/default`, one fetch, `released:off-branch`, the
-   held-rewrite cache) and B-46 reuses it. *(Changed 2026-10-19 when baton#57 merged with
-   §10.7: §2o first defined its own check, ending `stale-board`.)*
+   held-rewrite cache) and B-46 reuses it. *(Changed 2026-10-19 when baton#57 merged with the
+   hardening rules R-BTN-139–R-BTN-158: R-BTN-133 first defined its own check, ending
+   `stale-board`.)*
 2. **Leg trees:**
    - Sparse (non-cone) detached worktrees keyed by (repository, commit, path), stored under
      `<git dir>/baton/trees/`, each with a `.ready` stamp beside it.
@@ -78,10 +80,13 @@ written in TypeScript, or one that needs a library, cannot be expressed.
    The runner refuses to start under Node < 22.18; set `engines` to `>=22.18`.
 7. **The leg module** `@immediately-run/baton/leg`: `LegError` (identified by brand), `writeMarker`,
    `commentOnPr`, `yieldContext`, `nextFire`, `writeSuccessor`, `NOT_BEFORE_HORIZON_DAYS` and
-   `CLI_VERSION`. `build:cli` (PR 58) ships it in `dist/`.
+   `CLI_VERSION`. `build:cli` (PR 58) ships it in `dist/`. The leg's `ctx` later gains `raise`
+   (B-55, R-BTN-160) and `resume` (B-59, R-BTN-162); `LegError(type, …)` typing is B-55's.
 8. **The `runner:` capability:**
-   - Built-in type `runner` with values `leg-trees`, treated as granted in core's rule 4: the
-     `isEligible` list, the claim SQL, `fleet_capabilities` and the prerequisites answer.
+   - Built-in type `runner`, treated as granted in core's rule 4: the `isEligible` list, the
+     claim SQL, `fleet_capabilities` and the prerequisites answer. This ticket adds the value
+     `leg-trees`; B-70 adds `session` (R-BTN-107) and B-64 `baton-legs` (R-BTN-171), on the same
+     code.
    - The runner declares it from its own code, and so does an interactive sidecar. The kit and
      the sync refuse unknown values, and courses may not define the type.
 9. **The test kit** (`src/local/testCourse.ts`): installs with the runner's command into its own

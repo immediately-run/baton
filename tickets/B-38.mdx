@@ -1,16 +1,16 @@
 ---
-title: "B-38 — Baton positions held by Baton: the holder's provisional queued leg, the owner's re-route and resolve … route (R-BTN-83, from R3-1257)"
+title: "B-38 — Baton positions held by Baton: the holder's provisional queued leg, the owner's re-route, held positions by kind and the route:<leg> restart (R-BTN-83, from R3-1257)"
 id: B-38
 project: baton
 status: available
-updated: 2026-10-19
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1091
 tier: critical
-description: "The holder's (reached, next) stored as a provisional queued leg that the next snapshot confirms or replaces (position-replaced), the owner's re-route (route_leg, route_station, route-overridden) and resolve … route, the runner suspending on a bad pair, with the model; S-BTN-47's positions and re-route half. Requires: none."
+description: "The holder's (reached, next) stored as a provisional queued leg that the next snapshot confirms or replaces (position-replaced); the owner's re-route held in ticket_overrides with its override_kind, so the retry, choice, timer, cancel and outbox overrides reuse it (route-overridden); baton.retries' route:<leg> restart through baton owner resolve; the runner suspending on a bad pair, with the model; S-BTN-47's positions and re-route half, G-BTN-73, G-BTN-75. Requires: none."
 topics:
   - baton
 owns: {}
@@ -20,7 +20,7 @@ depends_on:
 ---
 
 **Brief:** continues R3-1257 (split 2026-10-19). The owner, 2026-10-15: a leg's completion always names a (station, next leg) pair, and Baton keeps it until git confirms it.
-**Spec:** `spec/BATON_SPEC.md` §2h R-BTN-83 (the pair, git first, the provisional queued leg, the owner's re-route), R-BTN-85 (`position-replaced`, `route-overridden`), R-BTN-78 (`resolve … route <leg>`), §6.13 (the runner suspends at the leg's `from` on a bad pair), §4 (`ticket_overrides.route_leg`, `route_station`); §13a S-BTN-47's positions and re-route half.
+**Spec:** `spec/BATON_SPEC.md` §5.3 R-BTN-83 (the pair, git first, the provisional queued leg, held positions and their kinds, the owner's re-route), §4.7 R-BTN-85 (`position-replaced`, `route-overridden`), §7.3 R-BTN-163 (`baton owner resolve <ticket> route:<leg>` on `baton.retries`), §8.3 R-BTN-72 (the runner suspends at the leg's `from` on a bad pair), §13.6 (`ticket_overrides.route_leg`, `route_station`, `override_kind`); §15 S-BTN-47's positions and re-route half, G-BTN-73, G-BTN-75.
 **Depends on:** R3-1254. Its status lists "the holder's reported `next` (R-BTN-83)" as model work still to do. A provisional queued leg and an owner's re-route both change which leg a claim is offered, and the model's `claim` offers `st.queued` alone. Built before the model covers them, every scenario trace that ends a leg or re-routes would be rejected by `npm run traces`, and R-BTN-68 asks the code and the model to change together.
 
 ### Requires
@@ -30,22 +30,29 @@ depends_on:
 ### What R3-1257 already delivered
 
 - Advances and ends carry `reached`/`next`, checked against the course file's edges (`off-graph`, `not-queued`); `next_source` `course`, `marker`, `inferred` and `holder` as posted (R3-1232).
-- The ticket history (R-BTN-81), discrepancy logging for the triggers that exist (R-BTN-85), the `course-changed` wait, and Baton-raised `baton:retries` and `baton:stalled` decisions with `resolve retry|park` (R3-1257).
+- The ticket history (R-BTN-81), discrepancy logging for the triggers that exist (R-BTN-85), the `course-changed` wait, and Baton-raised `baton:retries` and `baton:stalled` decisions with `resolve retry|park` (R3-1257). B-56 turns those decisions into the `suspend` core conditions `baton.retries` and `baton.stalled` (R-BTN-163).
 
 ### What to build
 
 1. **The provisional queued leg.** An end or a suspension carrying `(reached, next)` stores `next` as the ticket's queued leg with `next_source: holder`, provisional. The next snapshot's posted pair confirms it (a `position-confirmed` history row) or replaces it (a `position-replaced` discrepancy with both values, then git's).
-2. **The owner's re-route.** `POST /v1/owner/{repository}/tickets/{ticket}/route {leg}` and `baton owner route`: a leg leaving the ticket's station, stored in `ticket_overrides.route_leg` and `route_station`. It wins over the posted pair until the station changes. The snapshot or advance that moves the ticket clears it and logs `route-overridden`. History row `re-routed`.
-3. **`resolve … route <leg>`** for `baton:retries` (R-BTN-78), which re-routes and clears the hold.
-4. **The runner:** a leg result whose pair is not an edge suspends at the leg's `from` before Baton is called.
-5. **The model:** the same in `model/baton.qnt`, with `@impl`/`@model` links.
+2. **The owner's re-route.** `POST /v1/owner/{repository}/tickets/{ticket}/route {leg}` and `baton owner route`: a leg leaving the ticket's station, stored in `ticket_overrides.route_leg` and `route_station` (item 3's migration). It wins over the posted pair until the station changes. The snapshot or advance that moves the ticket clears it and logs `route-overridden`. History row `re-routed`.
+3. **Held positions by kind (R-BTN-83).** The new migration that adds `route_leg` and `route_station` also adds `ticket_overrides.override_kind` (`route`, `choice`, `timer`, `retry`, `cancel` or `outbox`, §13.6) and widens `ticket_stations.next_source` past `0013_stations.sql`'s four values; the queued leg an override holds carries its kind as `next_source`. This ticket writes only `route`. One write-and-clear path in `src/core/` serves every kind, so B-11 (`retry`), B-63 (`choice`), B-61 (`timer`), B-65 (`cancel`) and B-64 (`outbox`) add a kind, not a mechanism. Every held position is in the ticket's history and the owner-state export (R-BTN-88).
+4. **The `route:<leg>` restart of `baton.retries`** (R-BTN-163): re-routes to a leg leaving the station and clears the hold. Whichever of this ticket and B-56 lands second wires it: before B-56, `route` with a `leg` on R3-1257's `resolve` of a `baton:retries` decision; after it, `baton owner resolve <ticket> route:<leg>`.
+5. **The runner:** a leg result whose pair is not an edge suspends at the leg's `from` before Baton is called.
+6. **The model:** the same in `model/baton.qnt`, with `@impl`/`@model` links.
 
 ### Tests
 
 - S-BTN-47's positions and re-route cases, on both hosts.
-- `positions.test.ts`: confirmation, replacement, re-route and its clearing.
+- `positions.test.ts`: confirmation, replacement, re-route and its clearing, and `override_kind` written and cleared with the station change.
 
 ### Exit criteria
 
 - [ ] S-BTN-47 passes whole on both hosts; G-BTN-73 and G-BTN-75 hold for positions and re-routes
 - [ ] `npm test` (traces included) and `npm run typecheck` green
+
+## Status
+
+_2026-10-20 — R3-1255 counts each leg's queue (R-BTN-79): an owner's re-route and the holder's provisional queued leg move a ticket between queues, so they must reach `Queues.touch` in their transaction — `Blocks.write`/`held` do, through `Blocks.evaluate`. Add the re-route to `test/unit/queues.test.ts`'s membership cases._
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — the re-route is stored with its `override_kind` so the other held positions reuse it, and `resolve … route` becomes `baton.retries`' `route:<leg>` restart.)_

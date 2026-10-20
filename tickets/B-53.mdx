@@ -1,0 +1,44 @@
+---
+title: "B-53 — The sync checks output pointers: output-invalid, never an input"
+id: B-53
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1109
+tier: judgement
+description: "baton repo sync fetches and validates each output given by uri and posts its verdict; an invalid one is an output-invalid discrepancy, never resolved as an input (input-missing), raising baton.output-invalid; sync-posted arrivals checked at acceptance (R-BTN-109). S-BTN-66's third move. Split from B-3. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-3
+  - B-39
+---
+
+**Brief:** continues B-3 (split 2026-10-20).
+**Spec:** `spec/BATON_SPEC.md` §5.5 R-BTN-109 (the sync checks pointers; a sync-posted arrival is checked when the snapshot is accepted), R-BTN-82 (an invalid output is never resolved as an input; its consumer waits on `input-missing`); §4.7 R-BTN-85 (`output-invalid`); §7.3 R-BTN-163 (`baton.output-invalid`); §15 S-BTN-66's third move; G-BTN-92's pointer clause.
+**Depends on:** B-3 (the validator and the entry rule) and B-39 (outputs recorded and resolved as inputs, `input-missing`).
+
+### Requires
+
+- none.
+
+### What to build
+
+1. **The sync validates pointers.** For an output given by `uri`, the sync (`baton repo sync`) fetches it from git or the forge as the station function already reads git, validates it with `src/shared/schema.mjs`, and posts each output's verdict with the ticket. Baton never fetches.
+2. **An invalid one** is logged as a discrepancy, sub `output-invalid` (R-BTN-85), is never resolved as an input, so its consumer waits on `input-missing`, and raises `baton.output-invalid` (R-BTN-163). Landing before B-57, it lists the ticket under **Needs you** through today's `needsYou()` path, which B-57 converts.
+3. **A sync-posted arrival** — a path through a leg no claim reported, a person's leg among them — is checked when the snapshot is accepted: an unmet requirement or an invalid inline value is logged `output-invalid`, the station's outputs are not resolved as inputs, and the ticket raises `baton.output-invalid` as in 2.
+
+### Tests
+
+- S-BTN-66's third move (a pointer the sync finds invalid) on both hosts; G-BTN-92 whole.
+
+### Exit criteria
+
+- [ ] the scenario passes on both hosts, its traces replayed through the model where it touches the core
+- [ ] merged under the review gate

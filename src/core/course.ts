@@ -10,7 +10,7 @@
 
 export type CourseRule =
   | 'shape' | 'unknown-key' | 'id' | 'unknown-station' | 'start-leg' | 'unreachable' | 'no-end' | 'terminal'
-  | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar';
+  | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar' | 'no-chain-from' | 'entry' | 'schema';
 
 export interface CourseViolation {
   rule: CourseRule;
@@ -20,6 +20,7 @@ export interface CourseViolation {
 }
 
 import { isFreeText } from './text';
+import { parseSchemaId } from '../shared/schema.mjs';
 
 /** A station, leg or course id (R-BTN-69, R-BTN-48). */
 export const COURSE_ID = /^[a-z][a-z0-9-]{0,39}$/;
@@ -40,8 +41,10 @@ const COURSE_LIST_MAX = 64;
  *  hostile file's thousand faults cost no more memory than a hundred. */
 const COURSE_VIOLATIONS_MAX = 100;
 const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs']);
-const STATION_KEYS = new Set(['label', 'renamed_from']);
-const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from']);
+const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
+const ENTRY_KEYS = new Set(['output', 'schema']);
+const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
+  'no_chain_from', 'isolation']);
 const INPUT_KEYS = new Set(['from', 'accepts', 'required']);
 const OUTPUT_KEYS = new Set(['schema']);
 /** A schema file in the course directory (R-BTN-82): a relative path whose every segment is
@@ -92,6 +95,22 @@ export function validateCourse(json: unknown): CourseViolation[] {
       continue;
     }
     for (const k of Object.keys(s)) if (!STATION_KEYS.has(k)) add('unknown-key', `${at}.${k}`, `unknown key "${k}"`);
+    // R-BTN-109: what any leg arriving here must have produced, by output name and schema id.
+    if ('entry' in s) {
+      if (!Array.isArray(s.entry) || s.entry.length > COURSE_LIST_MAX) add('entry', `${at}.entry`, `entry is a list of at most ${COURSE_LIST_MAX} requirements`);
+      else {
+        const names = new Set<string>();
+        for (const [i, r] of (s.entry as unknown[]).entries()) {
+          const rp = `${at}.entry.${i}`;
+          if (!isObject(r)) { add('entry', rp, 'a requirement is {output, schema}'); continue; }
+          for (const k of Object.keys(r)) if (!ENTRY_KEYS.has(k)) add('unknown-key', `${rp}.${k}`, `unknown key "${k}"`);
+          if (typeof r.output !== 'string' || !NAME.test(r.output)) add('entry', `${rp}.output`, `output must match ${NAME.source}`);
+          else if (names.has(r.output)) add('entry', `${rp}.output`, `the output ${r.output} is required twice`);
+          else names.add(r.output);
+          if (!parseSchemaId(r.schema)) add('entry', `${rp}.schema`, 'schema names a schema as <id>@<version>');
+        }
+      }
+    }
     if ('label' in s && !isFreeText(s.label)) add('bound', `${at}.label`, 'a label is §10.4 free text: 1–500 characters, no control characters, none of < > { }');
   }
 
@@ -122,6 +141,14 @@ export function validateCourse(json: unknown): CourseViolation[] {
     if ('max_queue' in l && !(isInt(l.max_queue) && l.max_queue >= 1 && l.max_queue <= 10_000)) add('bound', `${at}.max_queue`, 'max_queue is an integer from 1 to 10000');
     if ('version' in l && !(isInt(l.version) && l.version >= 0)) add('bound', `${at}.version`, 'a contract version is an integer of at least 0');
     if ('replay_safe' in l && typeof l.replay_safe !== 'boolean') add('bound', `${at}.replay_safe`, 'replay_safe is true or false');
+    // R-BTN-106: the legs a key that ran any of them on the ticket may not take this one.
+    if ('no_chain_from' in l) {
+      const named = l.no_chain_from;
+      if (!Array.isArray(named) || named.length > COURSE_LIST_MAX) add('no-chain-from', `${at}.no_chain_from`, `no_chain_from is a list of at most ${COURSE_LIST_MAX} leg ids`);
+      else for (const [i, n] of named.entries()) if (typeof n !== 'string' || !isLeg.has(n)) add('no-chain-from', `${at}.no_chain_from.${i}`, 'no_chain_from names a leg of this course');
+    }
+    // R-BTN-107: `session` is the one floor a leg may require.
+    if ('isolation' in l && l.isolation !== 'session') add('bound', `${at}.isolation`, 'isolation, when given, is "session"');
     if ('label' in l && !isFreeText(l.label)) add('bound', `${at}.label`, 'a label is §10.4 free text: 1–500 characters, no control characters, none of < > { }');
     if ('outputs' in l) {
       if (!isObject(l.outputs)) add('shape', `${at}.outputs`, 'outputs is an object of output names');
@@ -131,7 +158,8 @@ export function validateCourse(json: unknown): CourseViolation[] {
         if (!NAME.test(name)) add('id', op, `output name "${name}" must match ${NAME.source}`);
         if (!isObject(o)) { add('shape', op, 'an output is an object'); continue; }
         for (const k of Object.keys(o)) if (!OUTPUT_KEYS.has(k)) add('unknown-key', `${op}.${k}`, `unknown key "${k}"`);
-        if ('schema' in o && !isSchemaPath(o.schema)) add('shape', `${op}.schema`, 'a schema is a relative path in the course directory, no segment empty, . or ..');
+        // R-BTN-108: a named schema `<id>@<version>`, or R-BTN-82's legacy relative path.
+        if ('schema' in o && !parseSchemaId(o.schema) && !isSchemaPath(o.schema)) add('shape', `${op}.schema`, 'a schema is <id>@<version>, or a relative path in the course directory, no segment empty, . or ..');
       }
     }
   }

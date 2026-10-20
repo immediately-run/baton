@@ -59,3 +59,22 @@ Part 2 lowered the proof to depth 4 for now, by the owner's choice. This ticket 
 
 - [ ] `SIZES.depth` is 5 again and a passing `model:full` report for the head shows it
 - [ ] merged under the review gate
+
+### Status
+
+2026-10-20, a first part (uncommitted, in the working tree; measured on 4 CPUs): `model:verify` now
+checks `pverify`, `step` less the actions no state of `small` enables, with `verifyShape` checked
+beside `safety` so the reduction cannot silently go stale, and Apalache's
+`search.invariant.mode=after` (one invariant check per step, not one per enabled transition).
+Same transitions, same invariants. Depth 3: 9.1 → about 7 minutes; depth 4: 127 → 82 minutes
+(measured with other proofs running beside it). Tried and not taken: `--smt-encoding=arrays` and
+`funArrays` (Apalache 0.62.1 fails an internal assertion at step 0), `--discard-disabled=false`
+(slower at depth 3), `MAX_CLAIMS = 2` on `small` (no change), a four-way split of `safety` in
+parallel processes (no faster on 4 CPUs: each process pays the whole search; kept opt-in as
+`MODEL_VERIFY_SPLIT=1`), and an inductive check of `safety` from an arbitrary bounded state (did
+not finish one step in 30 minutes; `safety` is not inductive without strengthening lemmas, and
+drawing the 45-field state is itself the cost). Depth 5 is still several hours: at depth 4 the time
+is Apalache's per-transition enabledness queries (25 minutes) and the invariant queries at the
+last state (53 minutes), both over the whole symbolic path. `SIZES.depth` stays 4; the next steps
+need an owner decision: a `small`-only state without the fleet fields (re-stamps every `@model`
+marker), TLC for an exhaustive check of `small`, or a newer Apalache whose `arrays` encoding works.

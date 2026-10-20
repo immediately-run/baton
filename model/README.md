@@ -14,7 +14,7 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 | File | What it holds |
 |---|---|
 | `baton.qnt` | the state (one record, `st`) and every action; the sizes are constants |
-| `properties.qnt` | the safety invariants, conjoined as `safety`, over any instance |
+| `properties.qnt` | the safety invariants, conjoined as `safety` (in four groups, `safetyA`…`safetyD`), over any instance; `pverify`, the proof's step, and `verifyShape`, what makes it `step` on `small` |
 | `liveness.qnt` | the liveness properties under weak fairness, over `small` (kept apart: their fairness terms made Apalache's input too large) |
 | `witnesses.qnt` | the reachability witnesses, each an invariant that must fail |
 | `instances.qnt` | `sim` (R3-1243's bounds: 3 workers, 2 tickets, 2 overlapping sync runs) and `small` (2 workers, 1 ticket, 1 sync run, for Apalache) |
@@ -30,33 +30,52 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 author's machine, not on hosted CI runners, whose time limits it outgrew. A pull request that
 changes what the checks read — `model/`, `src/core/` with the `src/shared/` modules and
 `src/migrations/` it imports, the replay and its helpers (`test/model/`, `test/helpers.ts`,
-`test/lib/`), the trace check, or `package-lock.json`, which pins Quint and Apalache — carries
-`npm run model:full`'s report in its body. CI's `model-report` workflow
+`test/lib/`), the scenarios and their hosts (`test/integration/`, `test/hosts/`), the trace check,
+or `package-lock.json`, which pins Quint and Apalache — carries
+`npm run model:pr`'s report in its body (about half an hour; a weekly `npm run model:full` report
+is accepted too). CI's `model-report` workflow
 (`scripts/model-report.mjs`) runs no model: it reads the body, and fails until the report is
 there, names the PR's head and shows every check passing at full size; editing the body re-runs
-it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick`, the scenario traces
-(`npm run traces`), the links (`npm run model:links`) and 200 model-drawn traces driving the core.
+it. Since 2026-10-20 hosted CI runs no Quint at all (owner: baton was the org's most expensive
+repository in Actions minutes): it runs `npm run test:no-quint`, whose only model check is the
+links (`npm run model:links`). `npm test` on your machine still runs `npm run model:quick`, the
+scenario traces and 200 model-drawn traces driving the core.
 
-- `npm run model:full` — every check below, in order: `npm run model` with 10,000 samples, the
-  model-based tests with 1,000 traces, and `npm run model:verify` to depth 4. It runs every step
+- `npm run model:pr` — the PR report: `npm run model:quick`, the model-based tests with 200 traces,
+  and the scenario traces, with the same Markdown report. About 20–30 minutes; paste it into the PR.
+- `npm run model:full` — weekly, on `main`'s head (R-BTN-68 as amended 2026-10-20): the "Weekly
+  model check" series (B-50) runs it on any runner granted on baton, keeps each report in its run's
+  ticket file and files a ticket for a failure; until B-50 is built, run it by hand. Every check below, in order: `npm run model` with 10,000 samples, the
+  model-based tests with 1,000 traces, `npm run model:verify` to depth 4, and the scenario traces
+  (the integration scenarios write a fresh set, then `npm run traces`). It runs every step
   even after a failure and prints a Markdown report on stdout: the commit (flagged when the
   working tree has any uncommitted or untracked change), the Quint version, and each check's
   result and minutes. `MODEL_SAMPLES`, `REPLAY_TRACES` and `MODEL_VERIFY_DEPTH` lower the sizes
   to try a change, and the report then says it is a reduced run, which `model-report` refuses.
-  Paste it into the PR. Needs Java for the last step; about two hours on 4 CPUs.
+  A PR may carry it instead of `model:pr`'s. Needs Java for the proof; about two and a quarter hours on 4
+  CPUs since B-37's first part cut the proof from 127 to about 82 minutes (three hours before).
 - `npm run model` — typecheck, the 75 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
   fifteen reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
   and scales the `progressStep` runs (30%).
 - `npm run model:quick` — the typecheck and the regression runs alone; `npm test` runs it.
-- `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 4: about 127
-  minutes on 4 CPUs since R3-1254 part 2b's fleet (47 at part 2a). Depth 5 took 15 minutes before R3-1254 and 49 with its queued leg. With part
-  2's prerequisites it takes about 23 minutes per enabled transition, roughly 10 hours, so the
-  proof is at depth 4 for now (owner, 2026-10-19), and B-37 brings depth 5 back. Needs Java; the first run downloads Apalache. `model/verify.mjs` compiles
-  the model to Quint's JSON IR in a file and runs Apalache's command line on it: `quint verify`
-  sends the model to an Apalache server in one request, whose reader refuses a string over 20 MB,
-  and `small` compiles to just over that since R3-1254 (19.8 MB before it).
+- `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 4. Needs Java;
+  the first run downloads Apalache. Since B-37's first part (2026-10-20) it checks `pverify` —
+  `step` less the six actions no state of `small` enables (`gitDepends`, `declare`, `alarmLive`,
+  `reading`, `readingLapses`, `endBlockedOn`) and `endBlocked`'s `ticket` kind (`properties.qnt` gives the
+  guard that never holds for each), so the same transitions and states — with `verifyShape`
+  checked beside `safety`, which fails the proof if `small` gains a second ticket or a fleet; and
+  it checks the invariants once per step over every transition (`search.invariant.mode=after`)
+  rather than once per enabled transition, with an 8 GB heap. Measured on 4 CPUs: depth 3 in
+  about 7 minutes (9 before), depth 4 in 82 minutes with other proofs running beside it (127
+  before); depth 5 is still several hours (B-37 keeps it open; its report says why).
+  `MODEL_VERIFY_SPLIT=1` checks `safety`'s four groups in four processes at once: each still pays
+  the whole search, so on 4 CPUs it is no faster at depth 3 (7.8 minutes against 6.9); it is for a
+  machine with CPUs to spare. `model/verify.mjs` compiles the model to Quint's JSON IR in a file
+  and runs Apalache's command line on it: `quint verify` sends the model to an Apalache server in
+  one request, whose reader refuses a string over 20 MB, and `small` compiles to about 67 MB, 63
+  of it the type and name tables.
 
 Simulation uses Quint's TypeScript backend: the Rust evaluator is fetched from GitHub
 releases at first use, which a sandboxed agent cannot always reach.
@@ -320,7 +339,7 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
 | `safety`, 10,000 × 40 steps of `step`; 3,000 × 40 of `progressStep` | `sim` | no violation |
 | witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap, a blocked ticket, a provisional row, a backoff, an `unblocked` event, a `capability` row, a `resource` row, a lost answer; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all 15 reached |
 | a second review | — | reached by a regression run only (`maxRunsSurviveResumptionTest`) |
-| Apalache, `safety` | `small`, depth 4 | no violation; 127 min on 4 CPUs at R3-1254 part 2b (baton#60's report, 769b5c3), 47 min at part 2a. Depth 5: 15 min 29 s before R3-1254, 49–59 min with its queued leg, about 10 h with part 2's prerequisites (B-37 brings it back). Each model PR's `model:full` report carries the figure for its head (R-BTN-68) |
+| Apalache, `safety` | `small`, depth 4 | no violation; 82 min on 4 CPUs with `pverify` and `search.invariant.mode=after` (B-37, 2026-10-20, beside other proofs), 127 min at R3-1254 part 2b (baton#60's report, 769b5c3), 47 min at part 2a. Depth 5: 15 min 29 s before R3-1254, 49–59 min with its queued leg, about 10 h with part 2's prerequisites (B-37 brings it back). Each model PR's `model:full` report carries the figure for its head (R-BTN-68) |
 | liveness, `fencesClear` | `small`, TLC (Apalache cannot check fairness) | **at `b76af9c`, the pre-round-2 formula and model**: no violation in 8,187 distinct states before a 28-minute cap, not exhaustive. The current formulas (rounds 2–3) have not been run; R3-1254 runs them to completion on a narrowed instance |
 
 Depth 4 on `small` reaches claims, advances, pushes and a sync; a fail end's backoff and the
@@ -371,8 +390,19 @@ depth 5 back, and with it the `unblocked` event.
   for the policy in force. The instances that drive the core (the scenario traces and the
   model-based tests) set `BACKOFF = 0` and the counts to 100000 or 1000: the core keeps §6.10's
   per-ticket policy until B-11 builds R-BTN-122, and holds it makes are carried as the owner's.
-- **Tiers and grants beyond rule 4** (rules 5–7): column comparisons with no interleaving of
-  their own; matching tests cover them (G-BTN-40). Rule 4 is modelled (R3-1254 part 2b).
+- **Leg outputs and station entry** (R-BTN-108, R-BTN-109): an arrival without its entry
+  outputs, or with an invalid inline value, is refused (rule `entry`), and a refusal is no model
+  action; the runner then ends `released:cannot-finish:contract-output`, a failed attempt the
+  model's `cannot-finish` end already covers. Schemas, their validity and refinement are data the
+  shared validator decides, with no interleaving of their own (B-3).
+- **Leg queues and course intake** (R-BTN-79): a queue's depth, its `queue-over` warning and a
+  closed intake are advice — no ticket is held, blocked, refused or reordered for them — and a
+  depth only counts what the model's holds and queued legs already are; they leave every
+  modelled state as it was (R3-1255; R3-1254 may model them).
+- **Tiers and grants beyond rule 4** (rules 5–7), and **isolation floors** (R-BTN-107): column
+  comparisons with no interleaving of their own — a leg's `isolation: session` against the
+  worker's latest declared mode; matching tests cover them (G-BTN-40, S-BTN-64). Rule 4 is
+  modelled (R3-1254 part 2b).
 - **A leg's own `requires.capabilities`** (R-BTN-120) and **course `capability_types` and
   roles** (R-BTN-121): core has not built them (B-10); a leg's list joins the ticket's for that
   leg, the same check, and types and roles are the course file's acceptance (`baton course
@@ -413,7 +443,9 @@ depth 5 back, and with it the `unblocked` event.
   logs nothing where the spec logs `blocked`, and the lift logs no `unblocked`. R3-1254's part 3
   models them (its Status names them; round 3, 3-r3-0).
 - **The rest of §2g–§2m, still R3-1254's** (part 3): open-world claims (R-BTN-104), sync wants
-  (R-BTN-94), `no_chain_from` (R-BTN-106), child tickets' spawned rows (R-BTN-86), `not_before`
+  (R-BTN-94), `no_chain_from` and the owners' `required_independence` (R-BTN-106; core refuses
+them since B-2, rule `chain` — a refusal is no model action, so the scenario traces stay
+accepted, but the model still lets a key review what it implemented), child tickets' spawned rows (R-BTN-86), `not_before`
   and leg deadlines (R-BTN-89, R-BTN-90; R3-1259 names the deadline's model change), the
   holder's reported `next` (R-BTN-83's provisional queued leg), and exhaustive liveness on a
   narrowed instance. Leg queues (R-BTN-79, now a warning) and notices (R-BTN-80, which no leg

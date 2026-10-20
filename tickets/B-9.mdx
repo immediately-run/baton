@@ -3,7 +3,7 @@ title: "B-9 — Baton leg streams and Stop leg: a running leg's output over wss,
 id: B-9
 project: baton
 status: available
-updated: 2026-10-18
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -21,11 +21,12 @@ depends_on:
 ---
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §2m.5 (R-BTN-118, R-BTN-119), R-BTN-33 and R-BTN-91 as amended, §11's stream rows.
+**Spec:** `spec/BATON_SPEC.md` §8.5 (R-BTN-118), §8.4 (R-BTN-119, R-BTN-145), §1 R-BTN-33, §8.1
+R-BTN-91, §14's stream rows.
 
 ### Why
 
-§2m is agreed and specified; this ticket builds its part of it.
+R-BTN-118 and R-BTN-119 are specified; this ticket builds them.
 
 ### What to build
 
@@ -33,9 +34,9 @@ depends_on:
 2. Runner upgrade: only the claim's holder, after `watch`; a second connection replaces the first.
 3. The channel enforces 8 KB frames and 64 KB/s, counting drops in `gap`; nothing stored, logged or exported.
 4. **Stop leg** on the dashboard sends the release message; the runner stops the group within 30 s and ends `released:requested`.
-5. **Tenancy** *(added 2026-10-18 by BATON_SPEC §3b, R-BTN-135)*: a stream's Durable Object is named through B-45's helper, `idFromName('baton/stream/<claim id>')`, never by the claim id alone, since claim ids repeat across tenants.
+5. **Tenancy** *(added 2026-10-18, §2.2 R-BTN-135)*: a stream's Durable Object is named through B-45's helper, `'<tenant id>/stream/<claim id>'` (R-BTN-118), never by the claim id alone, since claim ids repeat across tenants.
 
-6. **Hardening** *(added 2026-10-18 by BATON_SPEC §10.7, R-BTN-145)*: each leg starts with `IR_BATON_LEG=<claim id>.<leg>.<run>`; stopping it also signals every visible process carrying exactly that tag (start time checked against pid reuse), in a systemd scope where available, all gone within 30 seconds; S-BTN-119.
+6. **Hardening** *(added 2026-10-18, §8.4 R-BTN-145)*: each leg starts with `IR_BATON_LEG=<claim id>.<leg>.<run>`; stopping it also signals every visible process carrying exactly that tag (start time checked against pid reuse), in a systemd scope where available, all gone within 30 seconds; S-BTN-119.
 
 ### Do not
 
@@ -52,3 +53,6 @@ depends_on:
 - [ ] merged under the review gate
 
 ## Status
+
+_(2026-10-20: references moved to the current-state spec, PR #71. R-BTN-119 now also stops a
+`superseded` claim at once, with `close` but no hand-off; B-65 adds that reason.)_

@@ -1,0 +1,47 @@
+---
+title: "B-51 — Model checks that finish in a session: the PR report without model:full"
+id: B-51
+project: baton
+status: superseded
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1050
+tier: judgement
+description: "R-BTN-68's PR report needs only the model checks npm test runs (model:links, the trace replay, model:quick); model:full moves to a schedule or resumable steps, off the PR path. Owner, 2026-10-20. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-20: "Don't run the full model, it takes too long. We'll always be interrupted." B-2 (baton#66) merged with the `report` check red on that direction.
+**Spec:** `spec/BATON_SPEC.md` R-BTN-68 (as amended 2026-10-17: model checks on the author's machine, `npm run model:full`'s report in the PR body); `scripts/model-report.mjs`, `model/full.mjs`, `.github/workflows/model-report.yml`.
+
+### Why
+
+`npm run model:full` takes about six hours here (27 + 142 + 206 minutes on baton#56; longer on baton#66), and the cloud session's container restarts or goes idle before it ends: baton#66's run was lost 4.5 hours in, at depth 4 of the Apalache proof. An author's PR cannot carry the report the `report` check demands, so every core PR either waits most of a day or merges red.
+
+### What to build
+
+1. **The PR gate asks for what finishes in a session.** The `report` check, and R-BTN-68's wording, require only the model checks `npm test` already runs on the head — `model:links`, the scenario trace replay (`npm run traces`) and `model:quick` — reported in the PR body with the head's sha (or read from CI's `test` job, which runs them), not `model:full`.
+2. **`model:full` moves off the PR path.** It runs on a schedule against `main` (a scheduled routine or a self-hosted runner with no time limit), and a failure files a ticket naming the commit range; or it runs in resumable steps, each step's result keyed by commit so a restart repeats only the step it lost.
+3. **Amend R-BTN-68** with the new rule and the date, and update `model/README.md`'s "Commands" and the CLAUDE.md line on reports.
+
+### Do not
+
+- Drop the trace replay or `model:quick` from the PR path: they are what catches a core change the model forbids.
+
+### Tests
+
+- `scripts/model-report.mjs`'s unit cases: a PR body with the new report passes, a stale or failing one is refused.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] a core PR's `report` check passes with checks that finish within a session
+- [ ] `model:full` still runs, off the PR path, and its failures reach a ticket
+- [ ] merged under the review gate

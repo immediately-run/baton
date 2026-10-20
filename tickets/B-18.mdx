@@ -1,16 +1,16 @@
 ---
-title: "B-18 — Baton spec: settle §2m's open questions — merge checks on GitLab and Gitea, the check legs' sandbox for forks and public repositories, owners watching leg streams"
+title: "B-18 — Baton spec: settle three open questions — merge checks on GitLab and Gitea, the check legs' sandbox for forks and public repositories, owners watching leg streams"
 id: B-18
 project: baton
-status: available
-updated: 2026-10-17
+status: superseded
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1121
 tier: judgement
-description: "Three open questions from §2m (R-BTN-114, R-BTN-115, R-BTN-118) settled as spec amendments, with the owner where they are decisions, and their implementation tickets filed. Requires: none."
+description: "Three of the spec's open questions (R-BTN-114, R-BTN-115, R-BTN-118) settled as spec amendments, with the owner where they are decisions, and their implementation tickets filed. Requires: none."
 topics:
   - baton
 owns: {}
@@ -18,15 +18,15 @@ prs: []
 depends_on: []
 ---
 
-**Brief:** §2m's open questions (the spec's **Open questions**, 2026-10-17), and the binding decision that Baton runs without GitHub.
-**Spec:** `spec/BATON_SPEC.md` §2m.3 (R-BTN-114, R-BTN-115), §2m.5 (R-BTN-118), §14, **Open questions**.
+**Brief:** three of the spec's **Open questions** (filed 2026-10-17), and the binding decision that Baton runs without GitHub.
+**Spec:** `spec/BATON_SPEC.md` §10 (R-BTN-114, R-BTN-115), §8.5 (R-BTN-118), §11.4, **Open questions**.
 
 ### Why
 
-Three decisions in §2m are still open, and each blocks a use:
+Three decisions are still open, and each blocks a use:
 - **Checks on GitLab and Gitea.** v1 merge checks are GitHub-only, so a repository on another forge cannot gate merges on a check course.
 - **The check legs' sandbox.** What "every secret withheld" needs beyond replay's credential rule. Until that is settled, check courses must not run code from forks or public repositories.
-- **Watching for owners.** The leg stream is open to the administrator's dashboard session, and owners have no session yet.
+- **Watching for owners.** Owners watch through `baton leg log -f` (R-BTN-128); the dashboard's leg stream is open to administrators' sessions, and owners have no dashboard session yet.
 
 ### What to do
 
@@ -47,3 +47,11 @@ Three decisions in §2m are still open, and each blocks a use:
 - [ ] their implementation tickets filed
 
 ## Status
+
+_(2026-10-20: superseded — all three questions are settled in the spec and no longer among its
+Open questions. Checks on GitLab and Gitea: §10 R-BTN-115, checks are GitHub only until GitLab or
+Gitea offers a status that only one identity can post. The check legs' sandbox: §10 R-BTN-114 and
+the Decisions entry of 2026-10-20, checks run only changes from the repository's own branches,
+never a fork's, with every secret withheld as replay does; B-5 builds it. Owners watching leg
+streams: §8.5 R-BTN-118 with R-BTN-155's owner dashboard sessions (owner decision, 2026-10-20);
+B-76 builds it.)_

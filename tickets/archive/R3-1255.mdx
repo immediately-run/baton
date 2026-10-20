@@ -2,8 +2,8 @@
 title: "R3-1255 — Baton leg queues: queue depths, and a queue-over warning at the course's max_queue"
 id: R3-1255
 project: baton
-status: available
-updated: 2026-10-16
+status: done
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -15,7 +15,8 @@ description: "Baton counts each leg's queue — the unheld tickets whose queued 
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/70
 depends_on:
   - R3-1251
   - R3-1256
@@ -97,6 +98,8 @@ R3-1269 serves each leg's depth and `max_queue` in the fleet view (BATON_SPEC R-
 full leg's tickets first; R3-1254 models queues.
 
 ## Status
+
+_2026-10-20 — narrowed (upstream: item-stale). Built here: `leg_queues` with each ticket's membership (`leg_queue_members`) and the bound last judged, both spec-silent, maintained through `Queues.touch` from every re-evaluation of a ticket (a snapshot, a claim's start and end, a confirmation, a fence clearing) and from a ticket's deletion; a course file's rename or new bound judged again; `queue-over` logged once per crossing, one notice per `owner` courier updated in place and closed at the bound (payload `{course, leg, depth, max_queue, intake}` — `intake` per BATON_SPEC §4, which replaced the brief's `oldest_since`; `course` added so a leg's name is unambiguous); the intake closed and reopened (`course-closed`, `course-opened`), leaving new unexpedited tickets out of recommendations and recording a claim of one by id `advice-overridden` (`intake`); depths, bounds and intake in stats and on the dashboard. Moved: the owner's re-route to B-38, which has no code here yet (noted on B-38); the hook input's board summary — hooks retired with R3-1236 (R-BTN-98) — to R3-1269's fleet view, which reads `Queues.all`. Not given: a pool copy of a `queue-over` notice (R-BTN-103's pool carries decisions)._
 
 _2026-10-16 — hand-off retargeted: no hook reads the queues; R3-1269's fleet view serves them (BATON_SPEC §2l)._
 

@@ -1,9 +1,9 @@
 ---
-title: "R3-1260 — Baton push doorbell: an optional hibernating WebSocket that rings a worker to heartbeat now (BATON_SPEC §2j)"
+title: "R3-1260 — Baton push doorbell: an optional hibernating WebSocket that rings a runner to heartbeat now"
 id: R3-1260
 project: baton
 status: available
-updated: 2026-10-15
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1093
 tier: judgement
-description: "Build BATON_SPEC R-BTN-91: GET /v1/runner/push, a signed WebSocket upgrade accepted with the Durable Object WebSocket Hibernation API (a local Push implementation on the Node host), rings after a message is queued (at most one a second), closing on reap, re-key, revocation and seal, and the sidecar's reconnecting client that heartbeats on a ring; S-BTN-53, G-BTN-81. Requires: none."
+description: "Build BATON_SPEC R-BTN-91 (§8.1): GET /v1/runner/push, a signed WebSocket upgrade accepted with the Durable Object WebSocket Hibernation API (a local Push implementation on the Node host), rings after a message is queued (at most one a second), closing on reap, re-key, revocation and seal, and the sidecar's reconnecting client that heartbeats on a ring; S-BTN-53, G-BTN-81. Requires: none."
 topics:
   - baton
 owns: {}
@@ -20,10 +20,10 @@ depends_on:
   - R3-1259
 ---
 
-**Brief:** the Baton project; the owner, 2026-10-15: workers may receive Baton's
+**Brief:** the Baton project; the owner, 2026-10-15: runners may receive Baton's
 messages over a push connection, provided it does not fight the Cloudflare architecture.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2j R-BTN-91, R-BTN-55 (the `Push` interface), §9,
-§11 (`GET /v1/runner/push`), §13a S-BTN-53; §16 G-BTN-81
+**Spec:** `spec/BATON_SPEC.md` §8.1 R-BTN-91 (the doorbell), §2.1 R-BTN-55 (the `Push`
+interface), §6.9 (messages), §14 (`GET /v1/runner/push`), §15 (S-BTN-53; G-BTN-81)
 **Depends on:** R3-1259 (the alarm's unblocking at `not_before`, which rings)
 
 ### Requires
@@ -33,21 +33,23 @@ messages over a push connection, provided it does not fight the Cloudflare archi
 
 ### Why
 
-A cancel, a `leg-timeout` or a due recurring run reaches a worker at its next heartbeat, up to
+A cancel, a `leg-timeout` (B-60), a due recurring run or a handler's `handled` message (B-59)
+reaches a runner at its next heartbeat, up to
 2 minutes later. A ring makes it about a second, at no idle cost on Cloudflare, without a
 second delivery path. Tier: judgement — latency only; nothing depends on it.
 
 ### What to build
 
 1. **`Push`** (R-BTN-55): the Cloudflare implementation with `ctx.acceptWebSocket(ws,
-   [workerId])`, `setWebSocketAutoResponse` for pings and `ctx.getWebSockets(workerId)` for
+   [runnerId])`, `setWebSocketAutoResponse` for pings and `ctx.getWebSockets(runnerId)` for
    rings; the local implementation over the Node server's upgrade.
 2. **The route**: `GET /v1/runner/push?session_name=`, signed (query included) and
-   replay-checked, with `X-Worker-Secret`, the worker resolved and checked as a heartbeat is;
-   one socket per worker, a new one closing the old; closed on reap, re-key, revocation, loss
+   replay-checked, with `X-Worker-Secret` (the header's name until B-68 adds `X-Runner-Secret`),
+   the runner resolved and checked as a heartbeat is; one socket per runner, a new one closing
+   the old; closed on reap, re-key, revocation, loss
    of liveness (by the alarm) and seal.
-3. **Rings**: after each transaction that queues a message for a worker (and R3-1259's
-   unblocking), one `{ring: [<kind>]}` per worker per second at most, sent after commit, and a
+3. **Rings**: after each transaction that queues a message for a runner (and R3-1259's
+   unblocking), one `{ring: [<kind>]}` per runner per second at most, sent after commit, and a
    trailing ring at the second's end through the alarm set early; the last ring's time and the
    suppressed kinds in the socket's `serializeAttachment`.
 4. **Keepalive**: `setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))`

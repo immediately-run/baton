@@ -3,7 +3,7 @@ title: "B-17 — [OP] Baton dashboard design: iterate with Claude Design from th
 id: B-17
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1120
 tier: judgement
-description: "The owner takes docs/context/design-brief.mdx through Claude Design to an agreed dashboard design (BATON_SPEC §14 as amended by §2m); the design's implementation tickets follow. Requires: none."
+description: "The owner takes docs/context/design-brief.mdx through Claude Design to an agreed dashboard design (BATON_SPEC §11.4); the design's implementation tickets follow. Requires: none."
 topics:
   - baton
 owns: {}
@@ -20,7 +20,9 @@ depends_on: []
 ---
 
 **Brief:** `docs/context/design-brief.mdx`, written in R3-1248's landing for iterating on Baton's web UI with Claude Design: what the dashboard is for, who reads it, what it shows, and the constraints a design must keep.
-**Spec:** `spec/BATON_SPEC.md` §14 (the dashboard), as amended by §2m (**Needs you** by severity, the leg stream and **Stop leg**, session links); §10.4 (text, never markup).
+**Spec:** `spec/BATON_SPEC.md` §11.4 (the dashboard: **Needs you** is the debugger — open conditions
+with no handler ticket plus the floor, by severity then age, R-BTN-163; the leg stream and **Stop
+leg**, R-BTN-118 and R-BTN-119; session links, R-BTN-113); §12.3 (text, never markup).
 
 ### Why
 
@@ -29,7 +31,7 @@ The brief exists, but no ticket takes it through a design to a dashboard that im
 ### What to do
 
 1. **Operator.** The owner iterates on a design with Claude Design from the brief, then exports or links the result.
-2. Turn the agreed design into implementation tickets with `npm run ticket -- new`, citing §14. Each change must keep §10.4: values are set through `textContent`, and the dashboard loads no remote resource.
+2. Turn the agreed design into implementation tickets with `npm run ticket -- new`, citing §11.4. Each change must keep §12.3: values are set through `textContent`, and the dashboard loads no remote resource.
 3. Update the brief with whatever the design settled.
 
 ### Do not
@@ -38,7 +40,7 @@ The brief exists, but no ticket takes it through a design to a dashboard that im
 
 ### Tests
 
-- The tickets filed cite §14 and the design; `npm run check:wiki` is green.
+- The tickets filed cite §11.4 and the design; `npm run check:wiki` is green.
 
 ### Exit criteria
 

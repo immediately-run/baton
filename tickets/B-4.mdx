@@ -3,7 +3,7 @@ title: "B-4 — Baton session links: a leg run's session URL from an allowlisted
 id: B-4
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -19,17 +19,19 @@ depends_on: []
 ---
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §2m.3 (R-BTN-113), §2m.7a's `PUT /v1/admin/settings` row.
+**Spec:** `spec/BATON_SPEC.md` §8.3 (R-BTN-113), §11.2 (R-BTN-57: an administrator sets
+`link_hosts` and `session_hosts`), §13.1's `instance_settings`, §14's `PUT /v1/admin/settings`
+row.
 
 ### Why
 
-§2m is agreed and specified; this ticket builds its part of it.
+R-BTN-113 is specified; this ticket builds it.
 
 ### What to build
 
 1. Store `claim_legs.session_url` under R-BTN-113's rule; drop and log the rest.
 2. Add `instance_settings` and `PUT /v1/admin/settings`.
-3. Show the link on the dashboard and in the history.
+3. Show the link on the dashboard's **Running** and **Timeline** views (§11.4) and in the history.
 
 ### Tests
 

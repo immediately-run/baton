@@ -3,14 +3,14 @@ title: "B-5 — Baton check courses: check-runner keys, owner-held conclusions a
 id: B-5
 project: baton
 status: available
-updated: 2026-10-18
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1108
 tier: critical
-description: "Check courses (`checks`), check tickets per change head, owner-registered check-runner keys, the owners' conclusions map, `forge-check` notices signed with a named key (`GET /v1/keys/signing`), the forge courier credential kind, and `check-mismatch` from the sync's read-back (BATON_SPEC R-BTN-114, R-BTN-115); S-BTN-68, -81. Requires: B-3."
+description: "Check tickets per change head, owner-registered check-runner keys, the owners' `checks` conclusions map, `forge-check` notices signed with a named key (`GET /v1/keys/signing`), the forge courier credential kind, and `check-mismatch` from the sync's read-back raising `baton.check-mismatch` (BATON_SPEC R-BTN-114, R-BTN-115, R-BTN-153). Extended after the adversarial review: the `check_runners` row standing in for a grant (rules 4, 5, 7) with the hostname bound at `add --name`; `check_command` read from the fetched default-branch tip; a changed `check.sha` marking an unconfirmed completed claim `superseded_at`; the courier skipping a lower `seq` and read-back re-queuing the highest notice on a stale newest run; fileless check tickets re-verified against Baton's record. S-BTN-68, -81, -123; G-BTN-93, -103, -143. Requires: B-3."
 topics:
   - baton
 owns: {}
@@ -20,34 +20,113 @@ depends_on:
 ---
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §2m.3 (R-BTN-114, R-BTN-115), §2m.7a's courier, notice and check-runner rows, R-BTN-66 and R-BTN-103 as amended.
+**Spec:** `spec/BATON_SPEC.md` §10 (R-BTN-114, R-BTN-115, R-BTN-153), §8.3 R-BTN-107 (check legs
+require `runner:session`), §1 R-BTN-66 (the owners' `checks` setting), §2.2 R-BTN-136, §13.2's
+`check_runners` and `couriers`, §13.8's `notices`, §14's courier, notice and check-runner rows.
+After the adversarial review (`spec/BATON_SPEC_HISTORY.md`, "Adversarial review (2026-10-20)"):
+R-BTN-114 and §12.1 (adv-3 F5, F6), R-BTN-153 (F4), R-BTN-115 (F7), R-BTN-10 and R-BTN-168's
+`superseded_at` (F6), R-BTN-5/R-BTN-34 (adv-2 M3); §13's `claims.superseded_at`.
 
 ### Why
 
-§2m is agreed and specified; this ticket builds its part of it.
+R-BTN-114, R-BTN-115 and R-BTN-153 are specified; this ticket builds them.
 
 ### What to build
 
-1. **Check tickets** from the `changes` ticket source, `check.<course>.<number>`, superseded by a push; claimable only by a check-runner key, and only in `session` isolation.
-2. **The notice.** Queued only after a sync confirms the end and its entry; conclusion from the owners' `checks` setting; signed (Ed25519, `BATON_SIGNING_KEY`, `kid`); retired keys still listed.
-3. **The forge courier.** Its own credential kind, never a machine key, never the pool; `?delivers=forge-check`; `check_id` on `sent`; an unsent notice listed after 15 minutes.
-4. **Read-back.** The sync reads the check runs; a run Baton did not issue is logged `check-mismatch`.
-5. **Tenancy** *(added 2026-10-18 by BATON_SPEC §3b, R-BTN-136)*: the notice also carries and signs `origin` and `forge_repo_id` (null while the repository has no ids); `GET /v1/keys/signing` returns `{keys: [{kid, alg, public_key, retired_at?}]}`; the forge courier refuses a notice whose `origin` is not its configured origin or whose `forge_repo_id` is not the target repository's id.
+1. **Check tickets** from the `changes` ticket source, `check.<course>.<number>`; a push that
+   changes `check.sha` supersedes every claim on the ticket (released `superseded`, R-BTN-168;
+   B-65 adds that reason) and restarts it at its start station. Claimable only by a
+   check-runner key. Check legs require `runner:session` (R-BTN-107): no `process` or
+   `attached` runner takes one (rule 4). Whichever of B-5 and B-70 lands second wires that
+   requirement into the check courses.
+2. **The notice.** Queued only after a sync confirms the end and its entry; conclusion from the
+   owners' `checks` setting; signed (Ed25519, `BATON_SIGNING_KEY`, `kid`); retired keys still
+   listed. `forge-check` is a kind in today's `notices` (`src/core/notices.ts`); B-67 later drops
+   every other kind.
+3. **The forge courier.** Its own credential kind (`courier`), never a machine key;
+   `?delivers=forge-check`; `check_id` on `sent`; a notice not sent within 15 minutes raises
+   `baton.forge-check-late` (through today's listing if B-57 has not landed).
+4. **Read-back.** The sync reads the check runs; a run Baton did not issue is the discrepancy
+   `check-mismatch` (R-BTN-85) and raises `baton.check-mismatch`.
+5. **Tenancy** *(added 2026-10-18, §2.2 R-BTN-136)*: the notice also carries and signs `origin`
+   and `forge_repo_id` (null while the repository has no ids); `GET /v1/keys/signing` returns
+   `{keys: [{kid, alg, public_key, retired_at?}]}`; the forge courier refuses a notice whose
+   `origin` is not its configured origin or whose `forge_repo_id` is not the target repository's
+   id.
 
-6. **Hardening** *(added 2026-10-18 by BATON_SPEC §10.7, R-BTN-153)*: a check ticket's head is the core field `check: {sha, head_repo_id, head_ref}`, and the claim response carries `check_sha` and `check_head_ref`, a fork's dropped and every check dropped while the repository has no ids; a claim binds `check_sha` and refuses an `advance` without it (`head-moved`); a concluding notice only for a confirmed `done` of an ordinary check-runner claim, mapped from the end's own `reached`; the verdict leg runs `check_command` first through the session provider's `exec` in a fresh sandbox at `check_sha`, after checking `check_sha` is `check.head_ref`'s head (else `released:stale-board`, with a sync want); add `exec` to the Claude session provider, without which no check passes on any runner, and an `advance` or end reaching a success station carries `exit_status: 0`; `process` and `attached` workers take no verdict leg (R-BTN-114's `isolation: session` floor); an agent reaches only failure or neutral stations; never open-world; `courier add --delivers forge-check` refuses an App installed on others' repositories; S-BTN-123, G-BTN-143.
+6. **Hardening** *(added 2026-10-18, §10 R-BTN-153)*: a check ticket's head is the core field
+   `check: {sha, head_repo_id, head_ref}`, and the claim response carries `check_sha` and
+   `check_head_ref`, a fork's dropped and every check dropped while the repository has no ids; a
+   claim binds `check_sha` and refuses an `advance` without it (`head-moved`); a concluding
+   notice only for a confirmed `done` of an ordinary check-runner claim, mapped from the end's
+   own `reached`, anything else raising `baton.check-unattested`; the verdict leg runs
+   `check_command` first through the session provider's `exec` in a fresh sandbox at
+   `check_sha`, after checking `check_sha` is `check.head_ref`'s head (else
+   `released:stale-board`, with a sync want); add `exec` to the Claude session provider, without
+   which no check passes on any runner, and an `advance` or end reaching a success station
+   carries `exit_status: 0`; `process` and `attached` runners take no verdict leg (rule 4's
+   `missing-capability` on `runner:session`); an agent reaches only failure or neutral stations;
+   never open-world; `courier add --delivers forge-check` refuses an App installed on others'
+   repositories or on "All repositories"; S-BTN-123, G-BTN-143.
+7. **The adversarial review's fixes** (2026-10-20):
+   - **The `check_runners` row is the grant** (R-BTN-114, adv-3 F5). `baton owner check-runner
+     add <key> --name <hostname> [--capabilities …] [--max-tier <t>]` stores them in
+     `check_runners`. Rule 7 reads that row for a check ticket, rule 4 its `capabilities` and
+     rule 5 its `max_tier` (`src/core/gates.ts`). The hostname binds at `add` and is the name the
+     key heartbeats under (R-BTN-3). A check-runner holds no other grant, and `not-eligible`
+     names the rule `check-runner`.
+   - **The command from the branch tip** (R-BTN-153, adv-3 F4). The runner reads
+     `check_command` and its `timeout_s` from `course.json` at the head of
+     `refs/baton/<repository>/default` it fetched for the claim, never at an older
+     `snapshot_sha`, so a post cannot run a check on a weaker historical command.
+   - **`superseded_at` on a new head** (R-BTN-114, R-BTN-168, adv-3 F6). A post that changes
+     `check.sha` also marks a completed claim on the old sha that is still unconfirmed
+     `superseded_at`, so a push right after a check ends never wedges the next one. B-65 builds
+     the mark and its effects (never confirmed, concludes nothing, no `baton.check-unattested`,
+     no attempt, no longer holding rule 3). Whichever of B-5 and B-65 lands second wires this
+     trigger to it, as item 1's `superseded` release already is.
+   - **No older `seq` over a newer one** (R-BTN-115, adv-3 F7). Before posting, the forge
+     courier reads the sha's check runs of that name and skips its notice when one carries a
+     higher `seq`; each run's output holds its notice's `seq` beside the signature. In the
+     sync's read-back, a newest run of a name that is not the highest-`seq` notice already marked
+     `sent` for that head is `check-mismatch`, and Baton also re-queues that highest notice
+     (`src/core/notices.ts`). A mark arriving after the lease lapsed stays accepted.
+   - **Fileless check tickets re-verified against Baton's record** (R-BTN-5/R-BTN-34, adv-2
+     M3). A `changes` check ticket has no file, so the runner (`src/runner/runner.ts`'s
+     re-verification before the leg runs) checks it against the claim response's station and
+     queued leg, never against git, and never releases it `stale-board` for a missing file.
+     B-64 and B-65 add the built-in legs to the same path; whichever of the three lands first
+     writes it.
 
 ### Do not
 
-- Let the course file's `checks` set conclusions: they are the owners'.
+- Accept `checks` in a course file: conclusions are the owners' setting, a course file carrying
+  `checks` is refused (R-BTN-69, S-BTN-68), and `baton course test` prints a check course's end
+  stations for the owners to map.
 
 ### Tests
 
-- S-BTN-68, S-BTN-81, S-BTN-123; G-BTN-93, G-BTN-103, G-BTN-143.
+- S-BTN-68, S-BTN-81, S-BTN-123; G-BTN-93, G-BTN-103, G-BTN-143. Item 7's cases, on both
+  hosts:
+  - S-BTN-68: a push right after a `done`, before the sync, marks that `done` `superseded_at`
+    and leaves the new head claimable; a courier that stalls past its lease and posts an older
+    `seq` is skipped, or read-back raises `check-mismatch` and re-queues the newest notice;
+  - S-BTN-123: the command read from the branch tip, not from an older `snapshot_sha`;
+  - G-BTN-103: a check-runner's claim judged by its `check_runners` row's capabilities and
+    `max_tier`, and refused to a key without one.
+- Unit: a fileless check ticket re-verified against the claim response, with no git read.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green.
 
 ### Exit criteria
 
 - [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
+- [ ] item 7's cases pass; G-BTN-103 holds with the `check_runners` row standing in for a grant
 - [ ] merged under the review gate
 
 ## Status
+
+_(2026-10-20: references moved to the current-state spec, PR #71; check legs now require
+`runner:session` instead of `isolation: session` — wired by whichever of B-5 and B-70 lands
+second.)_
+
+_(2026-10-20: extended for the adversarial review's fixes — `check_runners` as the grant, the command from the branch tip, `superseded_at` on a new head, `seq` skipping and the re-queue, and fileless check tickets re-verified against Baton's record (item 7).)_

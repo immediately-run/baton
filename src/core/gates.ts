@@ -17,6 +17,8 @@ export interface GateWorker {
    *  for a key no owner or administrator granted — a bearer token or a BATON_KEYS seed key, which
    *  keep their interim reach until the seed retires (spec-silent, recorded on R3-1240). */
   grants: Record<string, { capabilities: string[] }> | null;
+  /** R-BTN-107: the isolation its heartbeat declared; `process` when none. */
+  isolation?: 'attached' | 'process' | 'session';
 }
 
 /** What is asked for: the ticket's filter fields (R-BTN-33). */
@@ -39,6 +41,11 @@ export interface GateLeg {
   state: 'ready' | 'waiting' | null;
   /** The tags the sync posted barred from this leg of the ticket (`ticket_bars`). */
   bars: string[];
+  /** R-BTN-106: the course file's `no_chain_from` joined to the owners' `required_independence`
+   *  for this leg, as current leg names. */
+  noChainFrom?: string[];
+  /** R-BTN-107: the course file's floor, `session`, or null. */
+  isolation?: 'session' | null;
 }
 
 export interface GateContext {
@@ -57,11 +64,17 @@ export interface GateContext {
   /** R-BTN-75, R-BTN-78: the ticket's stored `ticket` and `decision` blocks — the kinds that
    *  refuse (`leg` '' for the whole ticket). `capability` refuses through rule 4; `resource` is advice. */
   blocks?: { kind: string; leg: string }[];
+  /** R-BTN-106: the legs the asking worker's credential has run on the ticket, in any claim
+   *  (`claim_legs` through each claim's worker to its credential), as current leg names. */
+  ranByKey?: string[];
 }
 
 export type Phase = 'claim' | 'advance';
 
-export type GateVerdict = { ok: true } | { ok: false; rule: number; code: string };
+/** A numbered rule of §7.2, or one §2m names: `chain` (R-BTN-106), `isolation` (R-BTN-107). */
+export type GateRule = keyof typeof GATE_CODES | 'chain' | 'isolation';
+
+export type GateVerdict = { ok: true } | { ok: false; rule: GateRule; code: string };
 
 /** The refusal code of each rule (§7.2, §11). */
 export const GATE_CODES = {
@@ -76,7 +89,7 @@ export const GATE_CODES = {
   10: 'backing-off',
 } as const;
 
-const refuse = (rule: keyof typeof GATE_CODES, code: string = GATE_CODES[rule]): GateVerdict => ({ ok: false, rule, code });
+const refuse = (rule: GateRule, code: string = typeof rule === 'number' ? GATE_CODES[rule] : rule): GateVerdict => ({ ok: false, rule, code });
 
 /** Whether a claim row still holds its ticket (rule 3): active, completed but unconfirmed (§6.7),
  *  or reaped while its worker was alive and not yet fenced (R-BTN-19). */
@@ -88,9 +101,10 @@ export function claimHolds(c: { status: string; confirmed_at: number | null; fen
  * Whether `worker` may take `leg` of `ticket` now, at a claim or at an advance, naming the first
  * rule that refuses. At a claim: the leg is ready and a sync has run since the ticket's last end
  * (rule 1), the lease (3), the grant (7), capabilities (4), tier (5), operator-only (6), the
- * barred tags — posted and owner bars — (8), the course version (9) and the backoff (10). At an
- * advance only the rules that bind a holder (§7.2): the hold (3), 4–7, 8 with the holder's own
- * bars and the owner bars that apply at advances joined, and 10 — rule 1 is the
+ * barred tags — posted and owner bars — (8), `chain` and `isolation` (§2m), the course version
+ * (9) and the backoff (10). At an advance only the rules that bind a holder (§7.2): the hold
+ * (3), 4–7, 8 with the holder's own bars and the owner bars that apply at advances joined,
+ * `chain`, `isolation` and 10 — rule 1 is the
  * edge and run limit the caller checks against the course file, the lease is the holder's own,
  * and rule 9 is not re-checked, so a course change never strands a claim halfway (R-BTN-22).
  */
@@ -125,6 +139,13 @@ export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, p
 
   const barred = new Set([...leg.bars, ...(phase === 'advance' ? facts.holderBars ?? [] : [])]);
   if (worker.tags.some((t) => barred.has(t))) return refuse(8);
+
+  // R-BTN-106: the key that ran a leg this one names may not take it — at a claim or an advance.
+  const ran = new Set(facts.ranByKey ?? []);
+  if ((leg.noChainFrom ?? []).some((l) => ran.has(l))) return refuse('chain');
+
+  // R-BTN-107: a leg's isolation floor, against the worker's own word.
+  if (leg.isolation && (worker.isolation ?? 'process') !== leg.isolation) return refuse('isolation');
 
   if (phase === 'claim') {
     const declared = worker.courses.find((c) => c.repository === ticket.repository && c.course === ticket.course);

@@ -2,8 +2,8 @@
 title: "B-14 — Baton decision severities: critical, high and normal decisions routed and ordered"
 id: B-14
 project: baton
-status: available
-updated: 2026-10-17
+status: superseded
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -42,3 +42,9 @@ depends_on: []
 - [ ] merged under the review gate
 
 ## Status
+
+_(2026-10-20: superseded by B-55 and B-56. R-BTN-164 retired notices for people, so severity
+routing to couriers, runner-courier severities, `remind_after` reminders, `couriers.severities`
+and `notices.severity` are gone with S-BTN-90 and G-BTN-110. Severity survives only as condition
+data (R-BTN-125, B-55) and the debugger's order, severity then age (R-BTN-163, B-56); nothing
+remains to build here.)_

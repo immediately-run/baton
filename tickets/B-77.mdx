@@ -1,0 +1,184 @@
+---
+title: "B-77 — Heads, held posts and dropped tickets after the adversarial review: lagging fetches, acceptance that adopts only a later post, held posts that only tighten, station jumps, and owner state kept past a drop"
+id: B-77
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1142
+tier: critical
+description: "Build the adversarial review's changes to BATON_SPEC §4.3, §5.3 and §6.8 (adv-1 M1–M3, m1, m2, M5; adv-3 F4, F8; adv-4 B2; schema review 13): a lagging fetch releasing its number with `behind`, `board_head.behind_since` and `behind_confirmed` after 30 minutes; a known sha and a machine key's `head_unfounded` post held; acceptance setting only `accepted_at` on the newest held row, dropping the others (`held-dropped`), the next force post of that sha adopted; `contains` dropping held rows; `posted_by` and 4 held rows per credential; `baton.held-history` raised; a held post refreshing positions and markers and tightening only by R-BTN-147's list, its `closed` ignored and omissions dropping nothing; observation numbers bound to the credential they were issued to, `{release, behind?}` and the definition of a lapse; `baton.station-jump` on any post and suspensions left unconfirmed; `baton.machine-loosened` for a dropped `stream: false`; a dropped ticket's claim ended `stale-board` and its `ticket_overrides` and `leg_attempts` kept in `closed_tickets.kept_json` (`closed_as: dropped`), restored when the id returns; the Courses view listing closed or dropped tickets that keep a hold; the model. S-BTN-13, S-BTN-39, S-BTN-121 (heads and held posts), S-BTN-122 (numbers), G-BTN-7, G-BTN-59 (drops), G-BTN-141, G-BTN-142 (numbers). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-46
+  - B-11
+  - B-57
+---
+
+**Brief:** the coverage audit of the tickets against the spec (2026-10-20) found that the
+adversarial review's fixes to heads, held posts and owner state (spec/BATON_SPEC_HISTORY.md,
+"Adversarial review (2026-10-20)", adv-1 M1–M3, M5, m1, m2; adv-3 F4, F8; adv-4 B2) are built
+only in their older form and ticketed nowhere. This ticket builds them.
+**Spec:** `spec/BATON_SPEC.md` §4.3 R-BTN-11 (held rows, acceptance, `contains`, `posted_by`),
+R-BTN-62 / R-BTN-150 (numbers issued per credential, release with `behind`, lapses, a held post's
+refresh) and R-BTN-147 (founded heads, the lagging fetch, the known sha, the tighten-only list,
+`station-jump`, `ticket-dropped`, `machine-loosened`); §4.4 (`contains`, a returning ticket's kept
+state); §5.3 R-BTN-71 and §9.6 R-BTN-10 (arrivals beyond the expected path); §6.8 R-BTN-12 (owner
+state outlives the board); §1 R-BTN-66 (the residual risk owners see); §4.8 R-BTN-88
+(`closed_tickets` exported with `kept_json`); §2.3 R-BTN-149 (4 held rows per credential); §13.4
+`board_head.behind_since`, `held_snapshots`, `closed_tickets`; §14 the observation and board
+routes; §15 S-BTN-13, S-BTN-39, S-BTN-121, S-BTN-122, G-BTN-7, G-BTN-59, G-BTN-141, G-BTN-142.
+**Depends on:** B-46 (its part 3 builds the pre-review form of R-BTN-147 and R-BTN-150: the
+founded-head check, `head-replaced`, renumbering, observation renewal and voiding, the sync bar
+and `observation_lapses`; this ticket changes them as below, and B-46 does not build these
+changes); B-11 (`leg_attempts`, which a drop keeps); B-57 (`baton.<sub>` conditions).
+
+### Requires
+
+None: every case runs in the integration harness with a fake clock and constructed git
+histories.
+
+### Why
+
+The adversarial review found that a fetch from a lagging replica could move the head backwards,
+that the 24-hour auto-accept had no board to adopt and could rewind the head by clock, that a
+held post replaced stations wholesale and so could drop bars, decisions and tickets, that a holder
+could run a leg it never advanced through and have its suspension confirmed, and that withdrawing
+a ticket in git and reopening it cleared an owner's hold and its attempts. The code still behaves
+the old way: `src/core/baton.ts` replaces a held post's stations and closures, the alarm in
+`src/core/claims.ts` accepts every held row at `auto_accept_at`, and `src/core/stations.ts`
+deletes a returning ticket's `closed_tickets` row with nothing kept.
+
+### What to build
+
+1. **Migration** (one new numbered file in `src/migrations/`): `board_head.behind_since`;
+   `held_snapshots.posted_by`; `closed_tickets.kept_json` and `dropped` in `closed_as`.
+2. **The lagging fetch** (`src/shared/batonSync.mjs` through docs and `npm run vendor`, and
+   `src/core/observations.ts`):
+   - The sync's founded check follows R-BTN-147: the head is founded when it is reachable from
+     `new` or `new` from it (after one fetch of the head's sha by name); only an absent or
+     diverged head posts `force: true, head_unfounded: true`.
+   - When `new` is a strict ancestor of the head the sync posts nothing and releases its number
+     with `POST /v1/sync/observation {release, behind: new}`.
+   - Baton sets `board_head.behind_since` at the first such release since the head last moved,
+     and clears it when the head moves. After 30 minutes the observation response carries
+     `behind_confirmed: true`, and the sync then posts `new` as `force: true` without
+     `head_unfounded`, which is held.
+3. **Numbers** (R-BTN-62 / R-BTN-150, `src/core/observations.ts`):
+   - A post is `stale-observation` unless its number was issued to the posting credential, as
+     well as greater than the last accepted one's.
+   - `{release: <number>, behind?: <sha>}` voids the holder's own number; every no-post exit of
+     `baton repo sync` (nothing to post, a failed trust read, a failing ticket source, any error)
+     releases.
+   - A number **lapses** only when it is voided for idleness or age, never posted or released;
+     an immediate void by the sync key or CI identity is not a lapse. Only lapses count toward
+     B-46's sync bar.
+4. **Held rows** (R-BTN-11, the board route in `src/core/baton.ts`, the alarm in
+   `src/core/claims.ts`):
+   - A force post is held whoever posted the head when its `sha` is an accepted snapshot's
+     (`board_snapshots`), and a machine key's `head_unfounded` post is held; only a sync key's or
+     CI token's `head_unfounded` post over a machine key's head is accepted at once (B-46's
+     `head-replaced`).
+   - Each held row records `posted_by`; a fifth held row of one credential on a repository drops
+     that credential's own oldest (`admin` event `held-dropped`), never another's.
+   - A new held row raises `baton.held-history` on the repository (G-BTN-7).
+   - **Acceptance adopts nothing by itself.** `POST /v1/ui/board/accept` and the alarm at
+     `auto_accept_at` set `accepted_at` only on the repository's newest held row by observation,
+     and only while it is still held; the repository's other held rows are dropped
+     (`held-dropped`). The alarm never moves the head. The next force post of that sha whose
+     observation is greater than the last accepted one's is accepted as a new-head post with its
+     own board.
+   - The observation response's `held` lists held rows' shas; an accepted post naming one in
+     `contains` drops that row (`held-dropped`).
+5. **A held post only tightens** (R-BTN-62, R-BTN-147, `src/core/baton.ts`,
+   `src/core/stations.ts`):
+   - Its positions (station, path, next leg) and markers are taken as a refresh against the
+     current head when its observation is newer.
+   - Its gates are applied to current rows only where they tighten: from `tickets[]` a raised
+     tier, added `requires` or `depends_at`; from `stations` tags added to `bars`, added
+     `decisions` and a next leg turned from `ready` to `waiting`; from `registry` a raised
+     `min_runner_version`, an added `stream: false`, a lengthened `no_chain_from` or `requires`.
+     Nothing is removed or loosened.
+   - Its `closed` list is ignored and a ticket it omits is not dropped.
+6. **Arrivals no claim ran** (R-BTN-10, R-BTN-71, R-BTN-147; `src/core/claims.ts`,
+   `src/core/stations.ts`):
+   - On every accepted or held post, whoever posted it, an arrival on a ticket that has had a
+     claim with no `claim_legs` row of that ticket for it — other than a person's leg (R-BTN-116)
+     or a Baton settlement — raises `baton.station-jump` naming the ticket, the leg and the
+     posting key.
+   - A suspension is confirmed only when every arrival beyond its expected path is such a person's
+     leg or settlement; otherwise it stays unconfirmed (and so goes to `baton.unconfirmed` at 6
+     hours).
+7. **Drops and returns** (R-BTN-12, R-BTN-147, `src/core/stations.ts`, `src/core/claims.ts`):
+   - An accepted post that drops, without listing it in `closed`, a ticket Baton holds state for
+     raises `baton.ticket-dropped`, ends an active claim on it `released:stale-board` (G-BTN-59)
+     and writes its `closed_tickets` row with `closed_as: dropped`.
+   - On every closing or drop, the ticket's `ticket_overrides` row and its `leg_attempts` move
+     into `closed_tickets.kept_json`. When a later post returns the same id, they are restored
+     before the row is deleted: the hold stands, no attempt is refunded, and a backoff not yet over
+     blocks again. The traversal record stays with the claims.
+   - `kept_json` survives the 90-day purge (`src/core/history.ts`) and is exported and imported
+     with `closed_tickets` (R-BTN-88).
+   - The dashboard's **Courses** view (`src/ui/app.js`, its view route in `src/core/baton.ts`)
+     lists every closed or dropped ticket that keeps a hold, with its reason, beside the new
+     ticket (R-BTN-12, R-BTN-66's residual risk).
+8. **Machine-key loosening** (schema review 13): a machine-key post that drops a course's
+   `stream: false` raises `baton.machine-loosened` with the other loosenings B-46 builds.
+9. **The model** (R-BTN-68): in `model/baton.qnt`, held rows accepted only at a later numbered
+   post, `behind` releases, numbers bound to their credential, and suspensions not confirmed
+   past a station jump; the property that the head never moves by the alarm. Attach the
+   `npm run model:pr` report.
+
+### Do not
+
+- Let the alarm, or an administrator's acceptance, move the head; only a later-numbered post
+  does (G-BTN-141).
+- Store a held post's board; the next force post brings it.
+- Let a held post close, drop, clear or loosen anything.
+- Raise `baton.station-jump` only on machine-key posts; any poster's post counts.
+- Refund attempts or lift a hold when a ticket returns; carry a hold to a ticket re-filed under a
+  new id (only R-BTN-147's renumbering at the same path does).
+- Build B-46's open-world settlement (the author and posted-state gates) here.
+- Edit an old migration.
+
+### Tests
+
+- On both hosts, `test/integration/S-BTN-13.board-ordering.test.ts` updated: a force-push held,
+  accepted at 24 h by setting `accepted_at`, the head moved only by the next force post of that
+  sha.
+- On both hosts, S-BTN-121's file (B-46 creates it) with this ticket's cases: a fetch lagging the
+  head once (nothing posted, released) and for 31 minutes (`behind_confirmed`, a held force post);
+  a force post of an earlier head's sha held; a machine key's `head_unfounded` post held; a held
+  force post dropping a bar, a decision and a ticket, all kept; two held rows reaching 24 h, only
+  the newest accepted, adopted at the next force post, the older dropped; normal posts whose
+  `contains` drops a held row; a machine-key post dropping `stream: false` raising
+  `machine-loosened`.
+- On both hosts, `test/integration/S-BTN-39.limits.test.ts` extended: a held, attempts-exhausted
+  ticket in backoff withdrawn in git and reopened, then dropped and re-added, its hold, attempts
+  and backoff restored each time and the drop raising `baton.ticket-dropped`; a copy filed under a
+  new id unheld, with the old id listed closed with its hold.
+- S-BTN-122's number cases: a post under another credential's number refused
+  `stale-observation`; two runs that post nothing released, no bar.
+- Unit: the tighten-only filter field by field; held-row caps per credential; `behind_since`
+  set, kept and cleared; arrivals beyond the expected path by an agent leg, a person's leg and a
+  settlement.
+- Model: `npm run model` with the new actions and properties.
+
+### Exit criteria
+
+- [ ] S-BTN-13, S-BTN-39 and this ticket's S-BTN-121 and S-BTN-122 cases pass on both hosts;
+      G-BTN-7, G-BTN-141 and this ticket's parts of G-BTN-59 and G-BTN-142 hold
+- [ ] `model/` changed in the same PR, with its `npm run model:pr` report (R-BTN-68)
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 from the coverage audit of the tickets against the spec, for the adversarial
+review's fixes to §4.3, §5.3 and §6.8)_

@@ -1,0 +1,143 @@
+---
+title: "B-65 — Compensation, supersession and the built-in leg baton.cancel (R-BTN-168)"
+id: B-65
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1121
+tier: critical
+description: "Build R-BTN-168: `compensate` and `kind: compensation` legs outside the graph; `spawns.lifetime` `parent` or `station`; Baton supersedes a ticket when a call settles without it, a choice settles against its work, its handled condition closes by other means, its lifetime ends or a fileless `changes` ticket stops being posted — releasing a running claim `superseded`, logging `superseded {by}`, queuing a `withdraw` entry and `baton.cancel` or `baton.write`, the ticket shown `cancelling`; `baton.cancel` runs compensations in reverse path order under one claim, then drains the withdrawal; cancelling cascades to `lifetime: parent` children. Extended after the adversarial review: a superseded ticket's completed, unconfirmed claim marked `superseded_at` (never confirmed, concluding nothing, counting no attempt, no longer holding rule 3); each finished compensation recorded in `claim_legs` and skipped by a later `baton.cancel`; `baton.cancel` re-verified against Baton's record, never git. S-BTN-132 (supersession half and the partial cancel), S-BTN-129 (compensation), G-BTN-153. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-64
+  - B-62
+  - R3-1258
+  - B-9
+---
+
+**Brief:** the ticket plan for the current-state spec (PR #71, 2026-10-20), §2's B-65. A call
+that settles on two approvals of three, an ask answered before its push channel fired, or a
+condition an owner resolved by hand all leave work running that nobody needs; this ticket ends
+it and undoes what a leg declared undoable.
+**Spec:** `spec/BATON_SPEC.md` §7.7 R-BTN-168; §4.6 R-BTN-86 (children, the parent's close
+superseding `lifetime: parent` children); §5.2 R-BTN-69 (`kind: compensation`, `compensate`,
+`spawns.lifetime`, the validator's compensation rules, built-in legs and rule 9 binding
+`baton.cancel`); §5.5 R-BTN-111 (`spawns`); §6.9 (`release` reason `superseded`, no hand-off);
+§8.4 R-BTN-119 (stopping at once); §9.4 (`released:superseded`, not a failed attempt); §7.8
+R-BTN-171 (`withdraw` entries, their drain by `baton.cancel`); §13.6
+`ticket_overrides.override_kind` `cancel`; §13.8 `events.kind` `superseded`; §15 S-BTN-129,
+S-BTN-132, G-BTN-153. After the adversarial review (`spec/BATON_SPEC_HISTORY.md`, "Adversarial
+review (2026-10-20)"): R-BTN-168's `superseded_at` and R-BTN-10's exception (adv-3 F6), R-BTN-168's
+recorded compensations (adv-2 m6), R-BTN-5/R-BTN-34's built-in legs (adv-2 M3); §13's
+`claims.superseded_at`.
+**Depends on:** B-64 (the outbox, `withdraw` entries and the `baton.write` drain this reuses),
+B-62 (call settlement, the first supersession trigger, and `spawns` on a call leg), R3-1258
+(children: `tickets.parent` and the `spawned` record that `lifetime` reads), B-9 (R-BTN-119's
+stop, which a `superseded` release uses). The choice trigger needs B-63 and the `changes`
+trigger needs B-5: whichever of this ticket and each of those lands second wires that trigger.
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+Without supersession a call's surplus children, a lapsed ask's push message and a resolved
+condition's handler run to completion and keep runners busy; without compensation a superseded
+`deliver` leaves its notification on the person's phone. G-BTN-153 is the guarantee.
+
+### What to build
+
+1. **Course file** (`src/core/course.ts`, `src/core/graph.ts`). Accept `kind: "compensation"`
+   (no `from`, no `to`, outside the graph), a leg's `compensate: <leg>` naming one, and
+   `spawns.lifetime` `parent|station`. Refuse a compensation leg as any leg's `from`, `to`,
+   `next` or completion `next`, and a `compensate` naming a leg that is not one. The kit
+   (`src/local/testCourse.ts`) reports the same.
+2. **`supersede(ticket, by)` in a new `src/core/cancel.ts`**, called in the deciding transaction
+   of each trigger:
+   - a call settled without the ticket (B-62's `settleCall` path in `src/core/stations.ts`);
+   - a handler's condition closed by other means (an owner's resolve, its cause ending, the
+     raising ticket cancelled: B-56/B-58's close path);
+   - a `lifetime: parent` child whose parent closed or was cancelled, a `lifetime: station`
+     child whose parent left the station it was filed at (the snapshot transaction in
+     `src/core/board.ts`);
+   - a choice settled against the work (B-63) and a fileless `changes` ticket no longer posted
+     (B-5), as above.
+
+   It sends any running claim a `release` with reason `superseded` (the `release` message
+   `src/core/claims.ts` already writes for a stale board), logs `superseded {by}`, and then: for a ticket with a file, queues a `withdraw`
+   entry (B-64) and holds `baton.cancel` (`next_source: cancel`) if any leg on its path named a
+   compensation, else `baton.write` (`next_source: outbox`); for a ticket with no file, holds
+   `baton.cancel` if its path has compensations, else closes it `withdrawn` at once. The ticket
+   shows `cancelling` (dashboard, `GET …/tickets/{t}`) until it closes. A ticket withdrawn in git
+   whose path has compensations stays open, `cancelling`, while `baton.cancel` runs.
+3. **The end.** `released:superseded` in the end validator and `src/core/attempts.ts`: not a
+   failed attempt, no hand-off expected. The runner (`src/runner/runner.ts`) stops at once and
+   calls `close` but not `handoff`.
+4. **`baton.cancel` in the runner** (built-in, `runner:baton-legs`, bound by rule 9). Under one
+   claim it runs, in reverse path order, the compensation leg of each completed leg that named
+   one, each as a leg run needing that leg's capabilities (a missing one releases `blocked` on
+   it, R-BTN-126); then drains the ticket's `withdraw` entry as `baton.write` does; then pushes
+   and ends at the withdrawn close. Core gives its claim response the compensation list and the
+   entry.
+5. **Cascade.** Cancelling a ticket supersedes its open `lifetime: parent` children, each in the
+   same transaction.
+6. **Model.** The `superseded` release and the `cancel` override kind, with a `model:pr` report
+   (R-BTN-68).
+7. **The adversarial review's fixes** (2026-10-20):
+   - **`superseded_at`** (R-BTN-168, R-BTN-10, adv-3 F6). In `supersede`'s transaction, a
+     completed claim on the ticket still unconfirmed gets `claims.superseded_at` (a column in
+     this ticket's migration). Such a claim is never confirmed (R-BTN-10's confirmation path in
+     `src/core/claims.ts` skips it), concludes nothing (no `baton.check-unattested`), counts no
+     attempt, no longer holds rule 3 (`src/core/gates.ts`) and raises no `baton.unconfirmed`.
+     B-5's changed `check.sha` is one caller.
+   - **A partial cancel resumes** (R-BTN-168, adv-2 m6). The runner reports each finished
+     compensation as it ends, and Baton records it in `claim_legs`. The claim response of a later
+     `baton.cancel` leaves out the compensations already recorded, so a cancel released after one
+     of two compensations runs only the second.
+   - **Re-verified against Baton's record** (R-BTN-5/R-BTN-34, adv-2 M3). `baton.cancel` acts
+     only on its claim's compensations and `withdraw` entry, so the runner
+     (`src/runner/runner.ts`'s re-verification) checks it against the claim response's station
+     and queued leg, never against the ticket file in git. B-64 (`baton.write`) and B-5 (fileless
+     check tickets) use the same path; whichever of the three lands first writes it.
+
+### Do not
+
+- Kill anything from core: a `superseded` release asks the runner (R-BTN-119).
+- Count `released:superseded` toward attempts or `max_blocked`.
+- Run compensations from `baton.write`, or drain a compensating ticket's `withdraw` entry
+  anywhere but its own `baton.cancel`.
+- Supersede children with no `lifetime`: they live on (R-BTN-86).
+
+### Tests
+
+- **S-BTN-132**'s supersession half on both hosts (the third `review-pr` child superseded and
+  withdrawn through the outbox), its trace replayed through the model.
+- **S-BTN-129**'s compensation case with a fixture course whose leg names a compensation (the
+  whole scenario is B-66's, on `ask`/`deliver`).
+- **S-BTN-132**'s partial cancel on both hosts: a `baton.cancel` released after one of two
+  compensations, and the next `baton.cancel` running only the second.
+- Unit: the validator's compensation rules; reverse path order; a fileless ticket with and
+  without compensations; the `lifetime: station` trigger on a station change.
+- Unit: a superseded completed claim marked `superseded_at`, then a post that would confirm it
+  leaving it unconfirmed, with no attempt counted and rule 3 no longer held; `baton.cancel`
+  re-verified with no git read.
+
+### Exit criteria
+
+- [ ] the cases above pass on both hosts, item 7's among them; G-BTN-153 holds
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 with the current-state spec, PR #71)_
+
+_(2026-10-20: extended for the adversarial review's fixes — `superseded_at` on a superseded unconfirmed claim, compensations recorded in `claim_legs` so a partial cancel resumes, and `baton.cancel` re-verified against Baton's record (item 7).)_

@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 import chore from '../fixtures/courses/chore/course.json';
-import { requiredBarCovers, isOwnerBarReason, checkRetry } from '../../src/core/admin';
+import { requiredBarCovers, isOwnerBarReason, checkRetry, checkIndependence } from '../../src/core/admin';
 import { graphOf } from '../../src/core/graph';
 import { accessToken as accessTokenFor, adminSession, ownerCall, workerCall, call, captureDispatches, claimItem, hbBody, ORIGIN, sessionCall, sha256, tick, withCore, course, cutover, Git, keyCall, placed, recommended, register, rows, setAdminKeys, setClock } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
@@ -212,6 +212,13 @@ describe('requiredBarCovers and the reason rule', () => {
     expect(isOwnerBarReason('quota')).toBe(true);
     for (const r of ['done', 'cannot-finish', 'leg-timeout', 'awaiting-review-capacity', 'Bad Reason', '']) expect([r, isOwnerBarReason(r)]).toEqual([r, false]);
     expect(checkRetry({ backoff_ms: [60_000], max_failed: 1 })).toEqual({ backoff_ms: [60_000], max_failed: 1 });
+  });
+  it('required_independence (R-BTN-106): leg → leg names, deduplicated and sorted; an empty list dropped', () => {
+    expect(checkIndependence({ review: ['implement', 'fix', 'implement'], adjudicate: [] })).toEqual({ review: ['fix', 'implement'] });
+    expect(checkIndependence({})).toEqual({});
+    for (const bad of [[], null, 'review', { Review: ['implement'] }, { review: 'implement' }, { review: ['Implement'] }, { review: Array.from({ length: 65 }, (_, i) => `l${i}`) }, { __proto__: null, constructor: [1] }]) {
+      expect(() => checkIndependence(bad)).toThrow();
+    }
   });
 });
 

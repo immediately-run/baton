@@ -20,10 +20,12 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # npm test replays every scenario trace through the model, one Quint run each; since 2026-10-19
-    # (R3-1254 part 2b's fleet, more scenarios) it takes 20 to over 25 minutes on a hosted runner
-    # (baton#65's run 19 m 48 s; main's two runs cancelled at 25). B-48 brings it back down.
-    timeout-minutes: 45
+    # No Quint on hosted runners (R-BTN-68, amended 2026-10-20, owner: baton was the org's most
+    # expensive repository in Actions minutes). The suite without quint takes ~9 minutes; the
+    # model's checks — the scenario traces among them — run on the author's machine in
+    # `npm run model:pr` (and weekly in `model:full`), whose report model-report.yml reads from
+    # the PR body.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,7 +34,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - run: npm run test:no-quint
       - run: npm run check:wiki   # content/, the tickets' wiki
       - run: npm run check:spec   # spec/BATON_SPEC.md defines every R-BTN-n the code cites
       - run: npm run check:package   # the npm tarball installs and its `baton` starts

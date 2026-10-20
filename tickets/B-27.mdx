@@ -1,14 +1,14 @@
 ---
-title: "B-27 — Baton refuses or flags a board post with no queued leg short of an end"
+title: "B-27 — Baton refuses a board post with no queued leg short of an end, or keeps it and raises a condition"
 id: B-27
 project: baton
 status: available
-updated: 2026-10-18
+updated: 2026-10-20
 repos:
   - immediately-run/baton
 tags:
   - roadmap-item
-description: "R-BTN-83 requires a next at every station but an end, and locate must infer one for work without a pair; core accepts a post whose ticket has legs left and no next_leg silently (src/core/board.ts), and the spec does not say what Baton does with it — refuse the post, or keep it and list the ticket under Needs you. Found by baton#48's review gate (round 2, 2-r2-4). Requires: none."
+description: "R-BTN-83 (BATON_SPEC §5.3) requires a next at every station but an end, and locate must infer one for work without a pair; core accepts a post whose ticket has legs left and no next_leg silently (src/core/board.ts), and the spec does not say what Baton does with it — refuse the post, or keep it and raise a `baton.<sub>` condition (R-BTN-163). A decision for the owner. Found by baton#48's review gate (round 2, 2-r2-4). Requires: none."
 topics:
   - baton
 owns: {}

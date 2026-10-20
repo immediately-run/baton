@@ -3,14 +3,14 @@ title: "B-7 — Baton person legs: legs a person runs, answered in git"
 id: B-7
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1110
 tier: judgement
-description: "`kind: person` legs with `asks`: never offered to or claimable by a worker (rule `person`), a decision opened with its notices, the answer's arrival checked at the snapshot, `std:decision@1` as its output (BATON_SPEC R-BTN-116); S-BTN-67. Requires: B-3."
+description: "`kind: person` legs with `asks`: never offered to or claimable by a runner (rule `person`); the decision the source posts on a queued person's leg stored with the leg's `asks`, `asks-mismatch` logged when the post differs; the answer's arrival checked at the snapshot as a `std:decision@1` output, an invalid one raising `baton.output-invalid` (BATON_SPEC R-BTN-116, R-BTN-109); S-BTN-67, G-BTN-90's person clause. Requires: none."
 topics:
   - baton
 owns: {}
@@ -20,21 +20,51 @@ depends_on:
 ---
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §2m.3 (R-BTN-116), R-BTN-78 and R-BTN-80 as amended.
+**Spec:** `spec/BATON_SPEC.md` §6.4 (R-BTN-116, R-BTN-78), §5.5 R-BTN-109 (a sync-posted arrival
+is checked as a claim's is), §6.6 (rules 1 and `person`), §13.4's `ticket_decisions.asks`.
+**Depends on:** B-3 (done: the `std:` library and the entry check).
+
+### Requires
+
+None: a checkout and a terminal.
 
 ### Why
 
-§2m is agreed and specified; this ticket builds its part of it.
+A person's typed answer is a leg like any other: the ticket waits in that leg's queue, git
+records the answer, and the station it reaches can require it. Baton only has to keep runners
+out of the leg and check the answer when a sync shows it.
 
 ### What to build
 
-1. Refuse claims and advances into a person's leg, rule `person`.
-2. Open the decision and queue notices when the ticket queues the leg.
-3. Check the arrival a sync posts through the leg; log a missing answer `output-invalid`.
+1. **The course file.** `validateCourse` (`src/core/course.ts`) accepts `"kind": "person"` with
+   `"asks": <label>` (R-BTN-78's `asks` pattern); `asks` is required on a person's leg and
+   refused on any other.
+2. **Rule `person`.** `src/core/gates.ts` refuses a claim or `advance` into a person's leg
+   (`not-eligible`, rule `person`), and the recommendation query in `src/core/claims.ts` never
+   offers one. A ticket whose queued leg is a person's waits in that leg's queue (R-BTN-79), with
+   its posted decision's `decision` block (rule 1).
+3. **The leg's `asks` wins.** When a snapshot posts a decision on a queued person's leg,
+   `ticket_decisions` (`src/core/blocks.ts`) stores the leg's `asks`, whatever the post says, and
+   logs `asks-mismatch` (R-BTN-81) when they differ. Decisions on other legs are stored as
+   posted.
+4. **The answer.** A snapshot whose path is extended by a person's leg is checked as R-BTN-109
+   checks a sync-posted arrival: the output is a `std:decision@1` value or refinement, and the
+   reached station's `entry` holds. An invalid output is the discrepancy `output-invalid`
+   (R-BTN-85), is never resolved as an input, and raises `baton.output-invalid` (through today's
+   listing if B-57 has not landed).
+
+### Do not
+
+- Open a decision or queue a notice in Baton: the ticket source posts the decision (R-BTN-116),
+  and the `hitl.decision` it raises is B-56's.
+- Make a person's leg wait on a delivery: it waits on the answer in git.
+- Build completion at a choice station without being queued: that is B-63's (R-BTN-166).
 
 ### Tests
 
 - S-BTN-67; G-BTN-90's person clause.
+- Unit: the validator on `kind`/`asks`; rule `person` at a claim and an advance; the
+  recommendation query skipping a person's leg.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green.
 
 ### Exit criteria
@@ -43,3 +73,6 @@ depends_on:
 - [ ] merged under the review gate
 
 ## Status
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — the source posts the decision and Baton
+stores the leg's `asks`; no notices, and an invalid answer raises `baton.output-invalid`.)_

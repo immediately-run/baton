@@ -14,7 +14,7 @@ import { priceFor } from '../shared/sessionUsage.mjs';
 import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { WorkerApi } from './workerApi';
-import { parseSshKey, verifyRequest, withBody, type SyncCredential } from './auth';
+import { parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
 import { Cutover } from './cutover';
 import { Mirror } from './mirror';
@@ -27,6 +27,7 @@ import { Stats, STATS_WINDOW_MS } from './stats';
 import { Blocks } from './blocks';
 import { Resources } from './resources';
 import { Notices, type Courier } from './notices';
+import { Queues } from './queues';
 import { History, HISTORY_PAGE_MAX } from './history';
 import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
@@ -53,6 +54,7 @@ export class BatonCore {
   readonly blocks: Blocks;
   readonly resources: Resources;
   readonly notices: Notices;
+  readonly queues: Queues;
   readonly history: History;
   readonly store: Store;
   /** §12: workflows to dispatch once the current request or alarm has committed, one per
@@ -86,15 +88,20 @@ export class BatonCore {
       decisions: {
         opened: (ticket, ids) => { this.notices.opened(ticket, ids); decisionRows(ticket, ids, 'decision-opened'); },
         closed: (ticket, ids) => { this.notices.closed(ticket, ids); decisionRows(ticket, ids, 'decision-answered'); },
-      } });
+      },
+      queued: (ticket) => this.queues.touch(ticket) });
+    // R-BTN-79: each leg's queue, counted where membership changes; a leg over its bound warns.
+    this.queues = new Queues({ store, now: () => this.now(), held: (ticket) => this.blocks.isHeld(ticket),
+      graph: (repo, course) => this.stations.graph(repo, course), notices: this.notices });
     this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks });
     this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(), origin: ports.config.BATON_ORIGIN,
       dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices });
     this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo), history: this.history });
     this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
+      schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
-    this.stats = new Stats(store);
+    this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.workers = new WorkerApi({ store, config: ports.config, now: () => this.now(), fenced: (w, inc, id) => this.claims.fenced(w, inc, id),
       // R-BTN-76: what a heartbeat declares it uses; the fleet's counts move with the worker.
@@ -423,6 +430,14 @@ export class BatonCore {
     return { req: withBody(req, v.body), cred: v.keyid };
   }
 
+  /** R-BTN-13 or R-BTN-159: a signed request's key, or an API key's fingerprint — whichever the
+   *  front passed — checked against `lookup`. */
+  private async authenticated(req: Request, lookup?: (fp: string) => string | null): Promise<{ req: Request; cred: string }> {
+    const apiKey = req.headers.get('X-Baton-Api-Key');
+    if (apiKey == null) return this.verifySigned(req, lookup);
+    return { req, cred: await verifyApiKey(apiKey, lookup ?? ((fp) => this.workers.publicKey(fp))) };
+  }
+
   /** The worker and owner routes of R3-1211. The front passes the principal in
    *  `X-Baton-Credential` (a bearer token's credential, verified), `X-Baton-Signed` (a signed
    *  request's keyid, pre-checked; verifySigned finishes it here) or `X-Baton-Owner` (the Access
@@ -432,10 +447,11 @@ export class BatonCore {
     const m = req.method;
     let cred = req.headers.get('X-Baton-Credential');
     const secret = req.headers.get('X-Worker-Secret');
-    if (req.headers.has('X-Baton-Signed')) {
+    if (req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key')) {
       // R-BTN-13 as amended: the front checked the request's shape, @authority and digest; the
-      // key, the signature and the clock are checked here, and the nonce in this turn.
-      ({ req, cred } = await this.verifySigned(req));
+      // key, the signature and the clock are checked here, and the nonce in this turn. An API
+      // key (R-BTN-159) is checked against the public line its grant registered.
+      ({ req, cred } = await this.authenticated(req));
       // One role per key (R-BTN-57): a key in BATON_ADMIN_KEYS is never a worker's, even one
       // granted before it was listed.
       if ((await this.admin.adminFingerprints()).has(cred)) throw new BatonError('forbidden', 'an administrator key is never a worker key (R-BTN-57)');
@@ -600,9 +616,12 @@ export class BatonCore {
    * does not know is `unauthenticated`; a known key outside its role or repository `forbidden`.
    */
   private async adminRoute(req: Request, url: URL): Promise<Response> {
-    if (!req.headers.has('X-Baton-Signed')) throw new BatonError('unauthenticated', 'sign with an administrator or owner key');
+    const apiKey = req.headers.get('X-Baton-Api-Key');
+    if (!req.headers.has('X-Baton-Signed') && apiKey == null) throw new BatonError('unauthenticated', 'sign with an administrator or owner key, or send its API key');
     const admins = await this.admin.adminFingerprints();
-    const signed = await this.verifySigned(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp));
+    const lookup = (fp: string) => admins.get(fp) ?? this.admin.ownerKey(fp);
+    // R-BTN-159: a person's API key, checked against its public line, in place of a signature.
+    const signed = await this.authenticated(req, lookup);
     const fp = signed.cred;
     const p = url.pathname;
     const m = req.method;
@@ -738,9 +757,9 @@ export class BatonCore {
     if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
     let cred = req.headers.get('X-Baton-Credential');
     let role: 'admin' | 'owner' | 'worker' = 'worker';
-    if (req.headers.has('X-Baton-Signed')) {
+    if (req.headers.has('X-Baton-Signed') || req.headers.has('X-Baton-Api-Key')) {
       const admins = await this.admin.adminFingerprints();
-      const v = await this.verifySigned(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.workers.publicKey(fp));
+      const v = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.workers.publicKey(fp));
       cred = v.cred;
       role = admins.has(cred) ? 'admin' : this.admin.ownerKey(cred) ? 'owner' : 'worker';
       if (role === 'owner' && !this.admin.owns(cred, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
@@ -951,6 +970,7 @@ export class BatonCore {
         this.blocks.forget(id);
         this.store.exec('DELETE FROM ticket_requires WHERE ticket_id = ?', id);
         this.store.exec('DELETE FROM tickets WHERE id = ?', id);
+        this.queues.touch(id);
         changed.deleted++;
       }
       // Where each ticket is (R-BTN-70): the normative post's stations, or the interim post's
@@ -1051,6 +1071,13 @@ export class BatonCore {
       // R-BTN-83: a ticket queued for a leg the accepted file no longer has there waits on course-changed.
       this.stations.recheckCourse(r, e.id);
     }
+    // R-BTN-79: every course in force — accepted now or kept over a refused file — has its renamed
+    // legs' tickets moved and each leg's bound judged against the row's, so a bound never waits on
+    // a file being fixed (round 2, 2-r2-0); a course the registry dropped takes its queues and
+    // their notices with it (round 1, 1-A-3).
+    const inForce = this.courses.all().filter((c) => c.repository_id === r).map((c) => c.id);
+    for (const c of inForce) this.queues.coursed(r, c);
+    this.queues.retain(r, inForce);
     return refused;
   }
 
@@ -1111,7 +1138,9 @@ export class BatonCore {
     const repositories = this.registry.all().map((repo) => {
       const sha = this.headOf(repo.id);
       const head = sha ? this.sql('SELECT sha, parent_sha, received_at, ticket_count FROM board_snapshots WHERE repository_id = ? AND sha = ?', repo.id, sha)[0] ?? null : null;
-      const courses = this.courses.all().filter((c) => c.repository_id === repo.id).map(({ id, version, min_worker_version, skill }) => ({ id, version, min_worker_version, skill }));
+      const courses = this.courses.all().filter((c) => c.repository_id === repo.id).map(({ id, version, min_worker_version, skill }) => ({ id, version, min_worker_version, skill,
+          // R-BTN-79: the course's intake and each of its queues, for the Courses view.
+          intake: this.queues.intake(repo.id, id), queues: this.queues.legs(repo.id, id).map(({ leg, depth, max_queue }) => ({ leg, depth, max_queue })) }));
       return { id: repo.id, github: repo.github, forge: repo.forge, web_base: repo.web_base, default_branch: repo.default_branch, weight: repo.weight, head, mode: this.workers.mode(repo.id), courses };
     });
     const where = new Map(repositories.map((r) => [r.id, r]));

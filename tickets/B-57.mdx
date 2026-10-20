@@ -1,0 +1,115 @@
+---
+title: "B-57 — Every Needs-you listing becomes a baton.<sub> condition (R-BTN-163, second half)"
+id: B-57
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1106
+tier: judgement
+description: "Build R-BTN-163's rule that no listing outside §7 exists: each built Needs-you listing becomes a `notify` core condition `baton.<sub>` with an identifiers-only `detail`, raised in the transaction that finds the cause and closed when the cause ends (`regressed`, `bars-mismatch`, `course-refused`, `course-held`, `course-changed`, `required-bar`, `capability-missing`, `resource-unknown`, `unconfirmed`, and `queue-over` beside its notice until B-67); Needs you reads conditions only and the `needsYou()` methods go. S-BTN-34, S-BTN-37, S-BTN-39, S-BTN-44's capability case, S-BTN-45's queue case, S-BTN-79, S-BTN-117, G-BTN-71. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-56
+---
+
+**Brief:** filed from the ticket plan for the current-state spec (PR #71). The owner's 2026-10-20
+decision on conditions (`spec/BATON_SPEC_HISTORY.md`, "Decisions in full") makes Needs you the
+debugger, and the rewrite turned every "listed under Needs you" into a `baton.<sub>` raise.
+**Spec:** `spec/BATON_SPEC.md` §7.3 R-BTN-163 ("Every other core condition", `detail` under
+§12.3, closing when the cause ends); the rules that name each sub: R-BTN-35 (§1, `regressed` at 30
+minutes), R-BTN-63 (§5.3, `bars-mismatch`), R-BTN-69 (§5.2, `course-refused`), R-BTN-142 (§5.6,
+`course-held`), R-BTN-83 (§5.3, `course-changed`), R-BTN-67 (§5.6, `required-bar`), R-BTN-75
+(§6.2, `capability-missing`), R-BTN-76 (§6.3, `resource-unknown`), §9.6 (`unconfirmed`), R-BTN-79
+(§5.4, `queue-over`); §11.4's Needs you view; §15 S-BTN-34, -37, -39, -44, -45, -79, -117,
+G-BTN-71.
+**Depends on:** B-56 (`raiseCore`/`closeCore` and the debugger's list).
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+`GET /v1/ui/state` builds Needs you from five `needsYou()` methods (`src/core/claims.ts`,
+`blocks.ts`, `notices.ts`, `stations.ts`, and `courses.refusals()` and `keysNotice()` in
+`src/core/baton.ts`). Each is computed on read and seen only on the dashboard. As conditions they
+are rows a repository can bind (B-58), the outbox can deliver (B-64), and
+`GET …/conditions` can list.
+
+### What to build
+
+1. **Raise in the transaction that finds the cause, and close when it ends.** Each is a `notify`
+   core condition, using B-56's `raiseCore`/`closeCore`, with a `detail` of identifiers and
+   numbers only:
+
+   | Built listing | Condition | Raised | Closed |
+   |---|---|---|---|
+   | `regressed` (claims) | `baton.regressed`, ref the claim | the alarm, at 30 minutes regressed | the claim stops regressing or ends |
+   | `bars_mismatch` (claims) | `baton.bars-mismatch`, ref the claim | the `bars-mismatch` event | the claim ends |
+   | `policy` (claims) | `baton.required-bar`, ref `<course>:<leg>` | a leg stored `waiting` on `policy`, or a snapshot lacking the prefix | the wait clears |
+   | `courses_refused` | `baton.course-refused`, ref the course | a refused course file or schema | a later file is accepted, or the course leaves |
+   | course held for bars, where built | `baton.course-held`, ref the course | a file held (R-BTN-142) | the hold ends |
+   | `course_changed` (stations) | `baton.course-changed`, ref `<course>:<leg>` | a queued leg stored `waiting` on `course-changed` | the wait clears |
+   | `blocked_capability` (blocks) | `baton.capability-missing`, ref the capability | the alarm, 24 hours blocked | the block clears |
+   | `instances_unknown` (blocks) | `baton.resource-unknown`, ref the instance | the alarm, 24 hours `unknown` while a posted leg needs it | the reading returns, or no leg needs it |
+   | `unconfirmed` (claims) | `baton.unconfirmed`, ref the claim | the alarm at `ended_at` + 6 hours, or a snapshot undoing its legs | confirmed or released |
+   | R3-1255's queue-over (`src/core/queues.ts`) | `baton.queue-over`, detail `{course, leg, depth, max_queue}` | depth rises over `max_queue` | depth back within it |
+
+   - `queue-over`'s notice stays beside the condition until B-67 deletes it.
+   - A condition on a repository has `ticket_id` NULL.
+2. **Listings that are not conditions.** The spec names no sub for these, so they leave Needs you
+   for the views §11.4 gives them:
+   - `stale_skills` goes to **Runners**, as "needs a restart", per R-BTN-65 rule 9.
+   - `unacknowledged_releases` and `fence_pending` go to **Running**, with the reap deadline.
+   - `held_items` goes to the held list. Its retry holds are already on the floor as
+     `baton.retries`.
+   - Adoptions go to **Running**, with their confirm action (§16.1).
+   - `keys_notice`: B-8 retires `BATON_KEYS`, so nothing is raised. If B-8 has not landed, it
+     goes to **Runners**.
+   - `pool_unclaimed` and `no_owner_channel` are dropped: the floor already lists every open
+     posted decision (B-56), and B-67 deletes the pool.
+3. **The dashboard.** `needs_you` is the debugger's list alone.
+   - Delete every `needsYou()` method and their merge in `src/core/baton.ts`.
+   - `src/ui/app.js` drops the old sections.
+4. **Backfill.** A migration, or the first alarm after deploy, raises the conditions whose cause
+   already stands, so nothing listed today disappears.
+
+### Do not
+
+- Store free text in `detail` (§12.3). It holds ids, counts and instants only.
+- Compute a condition on read. It is a row written with its cause (R-BTN-163).
+- Invent a sub name the spec does not give. Move the listing to its view instead.
+- Remove the queue-over notice (B-67).
+
+### Tests
+
+- On both hosts:
+  - `S-BTN-34.progress-not-staleness.test.ts`: `baton.regressed` raised after 30 minutes and
+    closed when the path recovers.
+  - `S-BTN-37.course-renames.test.ts`: bad files refused, the previous kept, `baton.course-refused`.
+  - `S-BTN-39.limits.test.ts`: a leg missing a required bar waits on `policy`, and
+    `baton.required-bar` is raised.
+  - `S-BTN-44.blocks.test.ts`: `baton.capability-missing` after 24 hours.
+  - `S-BTN-45.leg-queues.test.ts`: `baton.queue-over` raised and closed, the course `closed`
+    meanwhile (G-BTN-71).
+  - `S-BTN-79.schemas-refused.test.ts`: raised for a refused schema.
+  - S-BTN-117: bars-held files raise `baton.course-held` once that hold is built.
+- Unit: each row of the table raises once and closes when its cause ends; the backfill.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts; G-BTN-71 holds
+- [ ] `grep -rn needsYou src/` finds nothing
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_

@@ -55,6 +55,12 @@ function renderHead() {
     // R-BTN-48: its courses, each with the version a worker must declare (rule 9).
     const courses = (r.courses ?? []).map((c) => `${c.id} v${c.version} (workers at ${c.min_worker_version})`).join(', ');
     box.append(el('div', { text: courses ? `courses: ${courses}` : 'no course registered', cls: 'muted' }));
+    // R-BTN-79: each course's intake and its legs' queues — depth over bound where it has one.
+    for (const c of r.courses ?? []) {
+      const queues = (c.queues ?? []).filter((q) => q.depth > 0 || q.max_queue != null)
+        .map((q) => `${q.leg} ${q.depth}${q.max_queue != null ? `/${q.max_queue}${q.depth > q.max_queue ? ' over' : ''}` : ''}`).join(', ');
+      if (queues || c.intake === 'closed') box.append(el('div', { text: `${c.id}: intake ${c.intake}${queues ? ` · queues: ${queues}` : ''}`, cls: 'muted' }));
+    }
   }
 }
 
@@ -179,7 +185,7 @@ function renderWorkers() {
   const body = document.getElementById('workers');
   body.replaceChildren();
   for (const w of state.workers) {
-    const who = el('td', {}, el('div', { text: w.hostname }), el('div', { text: `${w.session_name} · ${w.harness} · ${w.kind} · #${w.id}`, cls: 'muted' }));
+    const who = el('td', {}, el('div', { text: w.hostname }), el('div', { text: `${w.session_name} · ${w.harness} · ${w.kind} · ${w.isolation ?? 'process'} · #${w.id}`, cls: 'muted' }));
     // §14: tier ceiling, capabilities, providers and lease timeout.
     const caps = (w.capabilities ?? []).map((c) => c.capability).join(', ') || 'no capabilities';
     const provs = (w.providers ?? []).map((p) => `${p.prefix}→${p.provider_id}`).join(', ') || 'no known accounts';
@@ -497,6 +503,8 @@ function renderLimits() {
     if (transcripts) parts.push(`transcripts: ${transcripts.join(', ')}`);
     const trigger = parsed(s.unblocked_trigger, null);
     if (trigger) parts.push(`unblocked trigger: ${trigger.kind}${trigger.workflow ? ` ${trigger.workflow}` : ''}${trigger.ref ? ` @${trigger.ref}` : ''}`);
+    // R-BTN-106: the legs a key that ran any of the named ones may not take.
+    for (const [leg, from] of Object.entries(parsed(s.required_independence, {}))) parts.push(`${leg}: not by a key that ran ${from.join(', ')}`);
     if (s.remind_after != null) parts.push(`reminders after ${s.remind_after % 3600 ? `${Math.round(s.remind_after / 60)} min` : `${s.remind_after / 3600} h`}`);
     return `${s.repository_id}: ${parts.join(' · ')}`;
   }), 'No repository is registered.');

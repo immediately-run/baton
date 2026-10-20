@@ -9,6 +9,8 @@ import { BatonError } from './http';
 import { FREE_TEXT_MAX } from './text';
 import type { Store } from './ports';
 import { COURSE_ID, COURSE_VERSION_MAX, COURSES_MAX } from './validate';
+import { checkSchema, checkSchemaSet, parseSchemaId, POST_STATES_MAX, SCHEMA_MAX_BYTES, type Schema } from '../shared/schema.mjs';
+import { stdSchema } from '../shared/std.mjs';
 
 export { COURSE_ID };
 
@@ -22,6 +24,22 @@ export const COURSE_FILE_MAX_BYTES = 64 * 1024;
 export const REGISTRY_MAX = COURSES_MAX;
 /** Step kinds per course. */
 const STEP_KINDS_MAX = 64;
+/** R-BTN-108: the schemas one course posts, and the bytes a whole registry's schemas may hold
+ *  (spec-silent, recorded on B-3): with 64 course files at 64 KiB, the body stays inside either
+ *  host's 8 MiB. */
+const SCHEMAS_PER_COURSE = 32;
+const REGISTRY_SCHEMA_BYTES_MAX = 2 * 1024 * 1024;
+const DIGEST = /^[0-9a-f]{64}$/;
+
+/** A schema as the sync posts it with its course (R-BTN-108): `<course>:<name>@<n>`, the
+ *  SHA-256 of its file, and the schema. Its content is judged when the post is applied. */
+export interface PostedSchema {
+  id: string;
+  digest: string;
+  schema: unknown;
+  /** Over SCHEMA_MAX_BYTES: refused with its course, never stored or walked. */
+  oversized: boolean;
+}
 
 /** Violations kept per refused file: the dashboard shows the first, the owner fixes the file. */
 export const REFUSAL_VIOLATIONS_MAX = 20;
@@ -46,6 +64,8 @@ export interface RegistryEntry {
   report_horizon_h: number;
   branch_pattern: string;
   previous_branch_pattern: string | null;
+  /** R-BTN-108: the course's schemas, posted with its file at every sync. */
+  schemas: PostedSchema[];
 }
 
 const bad = (field: string, why: string): never => {
@@ -69,6 +89,7 @@ function pattern(v: unknown, field: string): string {
 export function checkRegistry(v: unknown): RegistryEntry[] {
   if (!Array.isArray(v) || v.length > REGISTRY_MAX) bad('registry', `must be a list of at most ${REGISTRY_MAX} courses`);
   const seen = new Set<string>();
+  let schemaBytes = 0;
   return (v as unknown[]).map((e, i) => {
     const at = `registry[${i}]`;
     if (!isObj(e)) bad(at, 'must be an object');
@@ -94,7 +115,29 @@ export function checkRegistry(v: unknown): RegistryEntry[] {
     } catch {
       // A value JSON cannot hold is no course file.
     }
+    // R-BTN-108: the schemas' shape here; their content, prefix and immutability at apply, so a
+    // bad schema refuses its course and not the board.
+    const schemas: PostedSchema[] = [];
+    if (r.schemas !== undefined) {
+      if (!Array.isArray(r.schemas) || r.schemas.length > SCHEMAS_PER_COURSE) bad(`${at}.schemas`, `must be a list of at most ${SCHEMAS_PER_COURSE} schemas`);
+      const ids = new Set<string>();
+      for (const [j, x] of (r.schemas as unknown[]).entries()) {
+        const sp = `${at}.schemas[${j}]`;
+        if (!isObj(x)) bad(sp, 'must be {id, digest, schema}');
+        const o = x as Record<string, unknown>;
+        if (!parseSchemaId(o.id)) bad(`${sp}.id`, 'must be a schema id, <id>@<version>');
+        if (ids.has(o.id as string)) bad(`${sp}.id`, `repeats ${o.id}`);
+        ids.add(o.id as string);
+        if (typeof o.digest !== 'string' || !DIGEST.test(o.digest)) bad(`${sp}.digest`, 'must be a SHA-256 in hex');
+        let n = Infinity;
+        try { n = new TextEncoder().encode(JSON.stringify(o.schema ?? null)).length; } catch { /* no JSON */ }
+        schemaBytes += Math.min(n, SCHEMA_MAX_BYTES + 1);
+        if (schemaBytes > REGISTRY_SCHEMA_BYTES_MAX) bad('registry', `its schemas must total at most ${REGISTRY_SCHEMA_BYTES_MAX} bytes`);
+        schemas.push({ id: o.id as string, digest: o.digest as string, schema: n > SCHEMA_MAX_BYTES ? null : o.schema, oversized: n > SCHEMA_MAX_BYTES });
+      }
+    }
     return {
+      schemas,
       oversized: size > COURSE_FILE_MAX_BYTES,
       id,
       version: r.version as number,
@@ -135,10 +178,16 @@ export class Courses {
     this.c.store.exec('DELETE FROM courses WHERE repository_id = ? AND id NOT IN (SELECT value FROM json_each(?))', repo, listed);
     this.c.store.exec('DELETE FROM course_refusals WHERE repository_id = ? AND course_id NOT IN (SELECT value FROM json_each(?))', repo, listed);
     const refused: string[] = [];
+    // Each course's own faults first: its file, the owners' required bars, its schemas' prefix,
+    // size and immutability.
+    const faults = new Map<string, CourseViolation[]>();
+    // One compile budget for the whole post's patterns (2-r2-1).
+    const meter = { steps: POST_STATES_MAX };
     for (const e of registry) {
       const violations: CourseViolation[] = e.oversized
         ? [{ rule: 'bound', path: '', message: `the course file is over ${COURSE_FILE_MAX_BYTES} bytes` }]
         : validateCourse(e.course);
+      if (!violations.length) violations.push(...this.ownSchemaViolations(repo, e, meter));
       // R-BTN-67: a file that no longer has a leg an owner's required bar names — by its name or a
       // `renamed_from` — is held until an owner updates or drops the bar.
       if (!violations.length) {
@@ -149,6 +198,26 @@ export class Courses {
           }
         }
       }
+      faults.set(e.id, violations);
+    }
+    // Then references (R-BTN-108): a `$ref` or base resolves among the repository's schemas —
+    // those held and those this very post carries for a course it is accepting — so one
+    // course's schemas may name another's posted beside them, in any registry order (1-A-3). A
+    // course refused for any reason takes its schemas out of the pool, which may refuse a course
+    // naming them, until nothing changes: nothing accepted names a schema that is not stored.
+    for (let changed = true; changed; ) {
+      changed = false;
+      const pool = new Map<string, unknown>();
+      for (const e of registry) if (!faults.get(e.id)!.length) for (const x of e.schemas) pool.set(x.id, x.schema);
+      const resolve = (id: string) => (pool.has(id) ? (pool.get(id) as Schema) : this.schema(repo, id));
+      for (const e of registry) {
+        if (faults.get(e.id)!.length) continue;
+        const v = this.refViolations(e, resolve);
+        if (v.length) { faults.set(e.id, v); changed = true; }
+      }
+    }
+    for (const e of registry) {
+      const violations = faults.get(e.id)!;
       if (violations.length) {
         if (!this.get(repo, e.id)) {
           throw new BatonError('invalid-params', `registry: ${e.id}'s course file fails R-BTN-69 and no earlier one is in force — ${storedViolations(violations).slice(0, 3).map((v) => `${v.path || '(file)'}: ${v.message}`).join('; ')}`);
@@ -170,8 +239,67 @@ export class Courses {
         repo, e.id, e.version, e.skill, JSON.stringify(e.course), JSON.stringify(e.step_kinds), e.min_worker_version, e.report_horizon_h,
         e.branch_pattern, e.previous_branch_pattern);
       this.c.store.exec('DELETE FROM course_refusals WHERE repository_id = ? AND course_id = ?', repo, e.id);
+      // Immutable: a schema already held has the same digest (schemaViolations), so it is kept.
+      for (const x of e.schemas) {
+        this.c.store.exec(`INSERT OR IGNORE INTO course_schemas (repository_id, id, course_id, digest, schema_json, posted_at, snapshot_sha) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          repo, x.id, e.id, x.digest, JSON.stringify(x.schema), now, sha);
+      }
     }
     return refused;
+  }
+
+  /**
+   * R-BTN-108's rules for one course's own schemas, as course-file violations (rule `schema`):
+   * each named `<course>:` for this course, never `std:`; within its size; the same digest as
+   * any version Baton holds.
+   */
+  private ownSchemaViolations(repo: string, e: RegistryEntry, meter: { steps: number }): CourseViolation[] {
+    const out: CourseViolation[] = [];
+    const v = (path: string, message: string) => out.push({ rule: 'schema', path, message });
+    for (const x of e.schemas) {
+      const p = parseSchemaId(x.id)!;
+      if (p.prefix === 'std') { v(`schemas.${x.id}`, `${x.id}: std: schemas come only from Baton's library`); continue; }
+      if (p.prefix !== e.id) { v(`schemas.${x.id}`, `${x.id}: a course posts only its own schemas, ${e.id}:<name>@<n>`); continue; }
+      if (x.oversized) { v(`schemas.${x.id}`, `${x.id}: a schema is at most ${SCHEMA_MAX_BYTES} bytes`); continue; }
+      const held = this.rows<{ digest: string }>('SELECT digest FROM course_schemas WHERE repository_id = ? AND id = ?', repo, x.id)[0];
+      if (held && held.digest !== x.digest) { v(`schemas.${x.id}`, `${x.id}: a schema version is immutable; this digest differs from the one held — post a new version`); continue; }
+      // The subset, once per post: the reference fixpoint below never re-checks it (2-r2-1).
+      for (const f of checkSchema(x.schema, meter)) v(`schemas.${x.id}${f.path ? `.${f.path}` : ''}`, `${x.id}: ${f.message}`);
+    }
+    return out;
+  }
+
+  /**
+   * The rest of R-BTN-108 for a course whose own schemas passed: each inside the subset; every
+   * `$ref` and `x-baton-base` resolving through `resolve` (the repository's held schemas, the
+   * schemas this post carries for courses it accepts, and the library), with no cycle; and every
+   * schema the file's outputs and entries name, resolvable the same way.
+   */
+  private refViolations(e: RegistryEntry, resolve: (id: string) => Schema | null): CourseViolation[] {
+    const out: CourseViolation[] = [];
+    const v = (path: string, message: string) => out.push({ rule: 'schema', path, message });
+    const posted = Object.fromEntries(e.schemas.map((x) => [x.id, x.schema]));
+    for (const f of checkSchemaSet(posted, resolve, { subset: false })) v(`schemas.${f.id}${f.path ? `.${f.path}` : ''}`, `${f.id}: ${f.message}`);
+    // The schemas the file itself names.
+    const c = e.course as { stations?: Record<string, { entry?: { schema: string }[] }>; legs?: Record<string, { outputs?: Record<string, { schema?: string }> }> };
+    for (const [sid, st] of Object.entries(c.stations ?? {})) {
+      for (const [i, r] of (st.entry ?? []).entries()) if (!resolve(r.schema)) v(`stations.${sid}.entry.${i}.schema`, `${r.schema} is not posted, held or in the std: library`);
+    }
+    for (const [lid, l] of Object.entries(c.legs ?? {})) {
+      for (const [name, o] of Object.entries(l.outputs ?? {})) {
+        if (o.schema && parseSchemaId(o.schema) && !resolve(o.schema)) v(`legs.${lid}.outputs.${name}.schema`, `${o.schema} is not posted, held or in the std: library`);
+      }
+    }
+    return out;
+  }
+
+  /** A schema by id for `repo`: the `std:` library's, or the repository's stored one; null when
+   *  neither. Core's one resolver (R-BTN-108): to core an id is a string with a digest. */
+  schema(repo: string, id: string): Schema | null {
+    const std = stdSchema(id);
+    if (std) return std;
+    const row = this.rows<{ schema_json: string }>('SELECT schema_json FROM course_schemas WHERE repository_id = ? AND id = ?', repo, id)[0];
+    return row ? (JSON.parse(row.schema_json) as Schema) : null;
   }
 
   get(repo: string, id: string): CourseRow | null {

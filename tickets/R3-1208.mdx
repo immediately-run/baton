@@ -3,7 +3,7 @@ title: "R3-1208 — [OP] Provision Baton on Cloudflare: Worker route, Access, se
 id: R3-1208
 project: baton
 status: available
-updated: 2026-10-16
+updated: 2026-10-20
 repos:
   - docs
 tags:
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1049
 tier: critical
-description: "The owner sets up the Cloudflare account, the baton.immediately.run route, the Access application, the Worker and GitHub secrets, and the baton-staging namespace, then runs the first deploy. Requires: cloudflare-admin, github-admin, human-operator."
+description: "The owner sets up the Cloudflare account, the baton.immediately.run route, the Access application (covering only the dashboard's pages, `POST /v1/login` and `/v1/ui/*`, R-BTN-16), the Worker and GitHub secrets, and the baton-staging namespace, then runs the first deploy. Requires: cloudflare-admin, github-admin, human-operator."
 topics:
   - baton
   - infra
@@ -24,14 +24,14 @@ depends_on:
 ---
 
 **Brief:** the Baton project.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §3, §10.1, §10.5 R-BTN-16, §13a (staging) (docs@2dbf1424)
+**Spec:** `spec/BATON_SPEC.md` §2.1 (the service, the `baton-staging` tenant), §11.1 (keys), §11.2 R-BTN-57, §11.4 R-BTN-155 (dashboard sign-in), §12.1 (principals), §12.4 R-BTN-16, §12.7 (Baton's GitHub App), §15 (staging)
 **Depends on:** R3-1207
 **Runbook:** `DEPLOY-RUNBOOK` — every step below from the command line, with the check after each.
 
 ### Requires
 
 - `cloudflare-admin` — exit criteria 1–4: the Worker route, Access application and Worker
-  vars live in the owner's Cloudflare account.
+  secrets live in the owner's Cloudflare account.
 - `github-admin` — exit criterion 5: the `CLOUDFLARE_API_TOKEN` repository secret.
 - `human-operator` — the Cloudflare and Access consoles are interactive.
 
@@ -49,19 +49,24 @@ The owner, in one sitting (about 30 minutes):
    namespace) at `baton-staging.immediately.run/*` — both declared in
    `immediately-run/baton`'s `wrangler.toml` (baton#2), so the first deploy creates them. Add
    the DNS records both hostnames need (proxied).
-2. In Zero Trust → Access: a self-hosted application for `baton.immediately.run` (and one
-   for `baton-staging.immediately.run`) with a policy allowing only the owner's email, **excluding** the paths `/v1/runner/*` and
-   `/v1/sync/*` (they carry their own tokens). Note the application's `aud` tag and the team
-   domain.
-3. Worker vars for both environments: `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `OWNER_EMAILS`.
-   Also the Worker secret **`BATON_ADMIN_KEYS`** in both environments — the owner's SSH public
+2. *(Optional hardening, R-BTN-16.)* In Zero Trust → Access: a self-hosted application for
+   `baton.immediately.run` (and one for `baton-staging.immediately.run`) with a policy allowing
+   only the owner's email, **covering only** the dashboard's pages `/`, `/login` and
+   `/oauth/authorize`, `POST /v1/login` and `/v1/ui/*`, and **bypassed on every other path**:
+   keys, webhooks (`/v1/github/webhook`), forge notifications, couriers, instruments, CI
+   identities and MCP clients call those without an Access cookie, and each authenticates its
+   own requests or is public (adv-4 m5). Baton never requires Access and never reads its
+   cookie or JWT.
+3. The Worker secret **`BATON_ADMIN_KEYS`** in both environments — the owner's SSH public
    key: `npx wrangler secret put BATON_ADMIN_KEYS < ~/.ssh/id_ed25519.pub` (BATON_SPEC
-   R-BTN-57, docs#212). *(2026-10-14: once R3-1240 lands, administrators are these keys and
-   the dashboard uses one-time sign-in links; Access in steps 2–3 then becomes optional
-   hardening, kept here so the read-only view is protected before that. Use a separate,
-   touch-required administrator key, `~/.ssh/baton_admin.pub`, never loaded into an
-   ssh-agent agent sessions reach — R-BTN-57 as revised.)*
-3a. The Baton GitHub App (BATON_SPEC §10.3, R-BTN-73, as of docs#212 head 1dae3316): create
+   R-BTN-57, §11.2). *(2026-10-14, restated 2026-10-20: administrators are these keys and the
+   dashboard signs in with a code an administrator confirms (R-BTN-155, §11.4); Access in step
+   2 is optional hardening (§12.4). No `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` or `OWNER_EMAILS`
+   var is set: Baton reads no Access assertion — B-46 removes the code that still does
+   (`verifyOwner` in `src/core/auth.ts`, `src/core/front.ts`).
+   Use a separate, touch-required administrator key, `~/.ssh/baton_admin.pub`, never loaded into
+   an ssh-agent agent sessions reach — R-BTN-57.)*
+3a. The Baton GitHub App (BATON_SPEC §12.7, R-BTN-73 §3.3): create
    it with **Actions: write** and read-only **Contents**, **Pull requests** and **Issues** (the
    permissions its subscriptions need; no Checks), subscriptions to `push`, `pull_request`,
    `pull_request_review`, `issue_comment` and `workflow_run`, webhook URL
@@ -74,7 +79,7 @@ The owner, in one sitting (about 30 minutes):
    writes the two routes on deploy (found in baton#2's review).
 5. In GitHub `immediately-run/baton` → Settings → Environments → `production`: the secret
    `CLOUDFLARE_API_TOKEN` (the deploy workflow lives in that repository since the owner moved
-   Baton's code there, BATON_SPEC §3).
+   Baton's code there, BATON_SPEC §2.1).
 6. Re-run the latest `baton-deploy` workflow on `immediately-run/baton` `main`.
 7. In GitHub `immediately-run/docs` → Settings → Variables: `BATON_ENABLED` = `true`, which
    turns on `baton-sync.yml` (off until now, so it never ran against a Worker that was not
@@ -85,8 +90,9 @@ The owner, in one sitting (about 30 minutes):
 - One account, one zone; staging shares the Worker code but never the Durable Object.
 - The API token is scoped to Workers Scripts on this account and Zone Read plus Workers
   Routes on the one zone, nothing else.
-- **Do not:** add the test signing key to any deployed environment (§13a); allow any email
-  but the owner's in the Access policy.
+- **Do not:** add the test signing key to any deployed environment (§15); allow any email
+  but the owner's in the Access policy; put any path but the dashboard's pages, `POST /v1/login`
+  and `/v1/ui/*` behind Access; set the Access vars.
 
 ### Tests
 
@@ -95,14 +101,15 @@ None to write: provisioning. The live checks are R3-1209.
 ### Exit criteria
 
 - [ ] `curl -sI https://baton.immediately.run/` answers with an Access redirect (`302` to the team domain)
-- [ ] `curl -s https://baton.immediately.run/v1/sync/head` answers `401` `unauthenticated` (reaches the Worker, not Access)
+- [ ] `curl -s https://baton.immediately.run/v1/sync/head` answers `401` `unauthenticated` (reaches the Worker, not Access), and so do `/v1/owner/x/grants`, `/v1/admin/repositories`, `/v1/stream`, `/v1/actions` and `POST /v1/mcp`; `POST /v1/github/webhook` without a signature is refused by the Worker, not redirected by Access
+- [ ] `curl -sI https://baton.immediately.run/v1/ui/state` answers with an Access redirect (Access covers `/v1/ui/*`)
 - [ ] `npx wrangler secret list` shows `BATON_ADMIN_KEYS` in both environments
 - [ ] the `baton-deploy` run on `main` is green for both environments
 - [ ] `wrangler deployments list --name baton` shows the deploy
 - [ ] the `production` environment secret `CLOUDFLARE_API_TOKEN` exists in `immediately-run/baton`
 - [ ] the docs variable `BATON_ENABLED` is `true` and the dispatched `baton-sync` run is green
 - [ ] `npx wrangler secret list` shows `BATON_GITHUB_APP_KEY` and `BATON_GITHUB_WEBHOOK_SECRET`, and the App's recent deliveries page shows a delivery to `/v1/github/webhook` answered 2xx
-- ~~the account's plan offers the Worker Loader binding (Dynamic Workers) that R3-1236 needs~~ — dropped 2026-10-16: Baton runs no hooks (BATON_SPEC §2l R-BTN-98), so no Worker Loader binding is needed
+- ~~the account's plan offers the Worker Loader binding (Dynamic Workers) that R3-1236 needs~~ — dropped 2026-10-16: Baton runs no hooks (BATON_SPEC §1 R-BTN-98), so no Worker Loader binding is needed
 
 ### Hand-off
 
@@ -110,7 +117,9 @@ R3-1209 verifies the view live.
 
 ## Status
 
-_2026-10-16 — the Worker Loader exit criterion is dropped: hooks are retired (BATON_SPEC §2l)._
+_2026-10-16 — the Worker Loader exit criterion is dropped: hooks are retired (BATON_SPEC §1 R-BTN-98)._
+
+_(2026-10-20: extended for the adversarial review's fixes — Access, if used, covers only the dashboard's pages, `POST /v1/login` and `/v1/ui/*`, and no Access var is set, adv-4 m5.)_
 
 
 _(filed 2026-10-13)_

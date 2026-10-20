@@ -2,8 +2,8 @@
 title: "B-3 — Baton leg outputs: one envelope, versioned schemas with a base, one validator, station entry, the std: library, signatures and declarative views"
 id: B-3
 project: baton
-status: available
-updated: 2026-10-17
+status: done
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -14,7 +14,8 @@ description: "The output envelope, `id@version` schemas keyed per repository wit
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/69
 depends_on: []
 ---
 
@@ -49,3 +50,5 @@ depends_on: []
 - [ ] merged under the review gate
 
 ## Status
+
+_2026-10-20 — narrowed (upstream: item-stale). Built here: the envelope `{name, schema, uri?, digest?, value?}` on advances and ends; course schemas posted with the course file at every sync, keyed per repository, immutable, refused with the course file when outside the subset, in a `$ref`/base cycle, under `std:` or another course's prefix, or naming an unposted schema (S-BTN-79, G-BTN-102); the one validator `src/shared/schema.mjs` — the subset, the linear-time pattern engine, validation against a schema and every base, the inline bound, the static refinement check; the `std:` library `src/shared/std.mjs` (R-BTN-110, without views); station `entry`, refused at an advance or a completed end, rule `entry`, inline values validated in full (S-BTN-66's first two moves, S-BTN-65's runtime half, G-BTN-91, G-BTN-92's arrival clause); `released:cannot-finish:contract-output`, which the runner ends with on an `entry` refusal of an advance or a completed end; the runner forwards a leg result's `outputs` on the advance and the done end. Split out: B-52, `baton course test`'s refinement report, entry against contracts, signatures and `spawns` (S-BTN-65's kit half, S-BTN-80); B-53, the sync's pointer check, `output-invalid` and `input-missing` (S-BTN-66's third move; needs B-39's inputs); B-54, `x-baton-view` and the three renderers (S-BTN-76, G-BTN-100)._

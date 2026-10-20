@@ -21,6 +21,11 @@ describe('decide: the four result shapes', () => {
     expect(decide({ reached: 'pr-open', next: 'review' }, g, 'implement', 'filed')).toEqual({
       kind: 'advance', reached: 'pr-open', leg: 'review', bars: [],
     });
+    // R-BTN-108: a result's outputs ride the advance and the done end unchanged.
+    const outputs = [{ name: 'change', schema: 'std:url@1', value: { url: 'https://x.test/' } }];
+    expect(decide({ reached: 'pr-open', next: 'review', outputs }, g, 'implement', 'filed')).toMatchObject({ kind: 'advance', outputs });
+    expect(decide({ end: 'done', reached: 'pr-open', outputs }, g, 'implement', 'filed')).toMatchObject({ kind: 'done', outputs });
+    expect(decide({ reached: 'pr-open', next: 'review', outputs: [] }, g, 'implement', 'filed')).not.toHaveProperty('outputs');
   });
 
   it('a suspend result rests where the script says, naming the queued leg', () => {
@@ -107,6 +112,9 @@ describe('decide: the edge rule', () => {
 describe('refusalKind: how an advance refusal settles (§6.13)', () => {
   it('off-graph ends released:course-changed; gates and max-runs suspend', () => {
     expect(refusalKind('off-graph')).toBe('course-changed');
+    // R-BTN-109: an unmet or invalid entry output is an output contract failure (R-BTN-82).
+    expect(refusalKind('entry')).toBe('contract-output');
+    expect(refusalKind('output-invalid')).toBe('contract-output');
     for (const code of ['max-runs', 'policy', 'not-queued', 'barred-tag', 'stale-skills', 'backing-off', undefined]) {
       expect(refusalKind(code)).toBe('suspend');
     }

@@ -21,21 +21,22 @@ depends_on:
 ---
 
 **Brief:** the Baton project; the remainder R3-1243 named in baton#10.
-**Spec:** `spec/BATON_SPEC.md` (moved here by R3-1252) §2g (R-BTN-75–80), R-BTN-19, R-BTN-10, §6.7,
-R-BTN-45; widened 2026-10-17 to §2h R-BTN-83, §2l R-BTN-98, §2m.6 R-BTN-120, §2m.6a R-BTN-122 and
-§2m.6c R-BTN-126 (Status); `model/README.md`.
+**Spec:** `spec/BATON_SPEC.md` (moved here by R3-1252) §6.1–§6.4 (R-BTN-75–R-BTN-78), §5.4
+R-BTN-79, §9.5 R-BTN-19, §9.6 R-BTN-10, §1 R-BTN-45; widened 2026-10-17 to §5.3 R-BTN-83, §1
+R-BTN-98, §6.1 R-BTN-120, §7.4 R-BTN-122 and §6.2 R-BTN-126 (Status); §15 R-BTN-68;
+`model/README.md`. R-BTN-80 (notices) is retired (`spec/BATON_SPEC_HISTORY.md`).
 
 ### Why
 
 baton#10 states four liveness properties but could not check them: Apalache does not support
 fairness, and TLC on `small` explored 8,187 distinct states (971 million generated) in 28
 minutes without finishing — each `syncRead` picks any barred-tag set per ticket, so a state has
-thousands of successors. And §2g (docs#213) adds blocks, decisions, queues and notices, whose
+thousands of successors. And the blocks amendment (docs#213, now §6.1–§6.4) adds blocks, decisions, queues and notices, whose
 safety and liveness the model does not yet cover.
 
 ### What to build
 
-1. **A liveness instance** (`live` in `instances.qnt`): one ticket, two workers, one sync slot,
+1. **A liveness instance** (`live` in `instances.qnt`): one ticket, two runners, one sync slot,
    the sync's barred tags drawn from two fixed sets, git and owner budgets of 1. TLC checks
    `fencesClear`, `endsResolveWithOwner`, `barsLiftClaimable` and `readyIsClaimed` (as rewritten
    in baton#10's rounds 2–3) to completion; CI runs it if it stays under 10 minutes, else
@@ -43,8 +44,8 @@ safety and liveness the model does not yet cover.
    every completed end whose evidence landed in git is eventually confirmed (baton#10 3-A-2). From the
    adjudication of 3-A-0: make `fencesClear` exercise `fenceCleared` (today every fence times
    out or is pushed past the horizon, so a mutant breaking only `fenceCleared` passes — add
-   fairness of a live fenced worker's heartbeat or a property of its own); state
-   `readyIsClaimed` so it survives two tickets (a worker holding the other ticket forever);
+   fairness of a live fenced runner's heartbeat or a property of its own); state
+   `readyIsClaimed` so it survives two tickets (a runner holding the other ticket forever);
    and give `ownerResolve` the owner budget.
 2. **Blocks** (R-BTN-75): `blocked_since` as a function of rows and next legs; invariants — a
    ticket with a free next leg is not blocked; a `ticket` or `decision` block is never claimed
@@ -75,12 +76,12 @@ _(filed 2026-10-15)_
 _2026-10-17 — claimed; scope widened at the owner's request: "inspect the model and ensure that it
 is up to date with recent spec changes, including the kinds of station arrival prerequisites which
 may block a leg from being completed." A read of the spec against the model found it at R-BTN-74:
-no change since — §2g to §2m — reached it, though R-BTN-68 asks every spec change to a cited
+no change since — the blocks amendment through the runner's (now §5–§8) — reached it, though R-BTN-68 asks every spec change to a cited
 requirement to change the model in the same pull request. Delivered in parts:_
 
 1. _**One-step claims and the queued leg** (R-BTN-98, R-BTN-83): `claim` replaces the hook's
    `claimStart`/`claimFinish`; a claim is offered the queued leg the sync posts, rule 8 is judged on
-   it, and the first advance must be into it; every end clears the claim's regression flag (§4).
+   it, and the first advance must be into it; every end clears the claim's regression flag (§13.5).
    The scenario traces and the model-based tests compare the queued leg after every step._
 2. _**A leg's prerequisites** (R-BTN-120): other tickets `at`, `reached` or `done`, capabilities,
    resources, decisions and retry; blocks and `blocked_since` with paired events (R-BTN-75,
@@ -123,18 +124,18 @@ side, mapped first: capability rows (`fleet_capabilities`, `Blocks.recount`), ru
 ticket's `requires`, resource rows with readings and the fleet answer, and `answer_lost` are
 built (R3-1251); a leg's own `requires.capabilities` and `released:blocked` are not (B-10,
 B-21). The model:_
-- _**Liveness.** Baton records each worker's last heartbeat and a stored live set (core's
-  `fleet_live`); an idle worker heartbeats too. A worker is live while its last heartbeat is
+- _**Liveness.** Baton records each runner's last heartbeat and a stored live set (core's
+  `fleet_live`); an idle runner heartbeats too. A runner is live while its last heartbeat is
   within `TIMEOUT`._
 - _**Capability rows** are stored, whole-ticket, and rewritten only where R-BTN-75 says the
-  counts change: a heartbeat that changes what a worker declares (its check failing or passing
-  again), the alarm noticing a worker stop being live, a force-reap, and a `capability` blocked
+  counts change: a heartbeat that changes what a runner declares (its check failing or passing
+  again), the alarm noticing a runner stop being live, a force-reap, and a `capability` blocked
   end, which drops the capability from the runner's declared set in its transaction. A leg's own
   list is not modelled until B-10 builds it: it joins the ticket's for that leg, the same check._
-- _**Rule 4** at the claim and at each advance: the ticket's `requires` within what the worker
+- _**Rule 4** at the claim and at each advance: the ticket's `requires` within what the runner
   declares and is granted._
 - _**Resources** as one `service` instance per resource, its reading `unavailable` until a
-  lapse or `available`; account and worker instances, the administrator's precedence and
+  lapse or `available`; account and runner instances, the administrator's precedence and
   `unknown` are not modelled (each a choice of which reading is in force, with no interleaving
   of its own). A `resource` row is advice: it counts toward `blocked_since` and gates nothing;
   a `resource` blocked end stores its reading and an `end`-sourced need._
@@ -143,13 +144,13 @@ B-21). The model:_
   is written again silently; any logged transition ends it._
 - _**`small`**, the proof's instance, keeps no capability requirements and no needs, so the
   depth-4 proof's cost does not grow; `sim` and the regression runs carry them. A force-reap
-  changes no worker's liveness — core marks a worker reaped only when it is already silent past
+  changes no runner's liveness — core marks a runner reaped only when it is already silent past
   its lease, and the alarm's live-set check recounts for that as for any lapse — so it
   recounts nothing in the model either. (B-44, filed for it on the first reading, was
   withdrawn.)_
 
-_2026-10-19 — part 2b's review round 1 (baton#59) corrects the note above. A worker is live
-within `TIMEOUT` of its last **authenticated call**, not only its last heartbeat (§5, §11; only a
+_2026-10-19 — part 2b's review round 1 (baton#59) corrects the note above. A runner is live
+within `TIMEOUT` of its last **authenticated call**, not only its last heartbeat (§8.1, §14; only a
 heartbeat recounts). The counts' other causes — registration, grants made, changed or revoked,
 a revoked credential, a post changing `requires` or needs — are fixed by the instance and listed
 under *Not modelled*. `small`'s cost did grow with the fleet's state, even with no fleet; the
@@ -164,3 +165,14 @@ model-based traces in 54, and the depth-4 proof on `small` in 127, against 47 at
 `FLEET` guard did not keep `small`'s proof cost flat (B-37 tracks the proof's depth). B-49 fixes core's
 per-kind evaluation; six recounting actions carry its `@impl pending` note. Part 3 remains: Baton-raised
 decisions, open-world claims and the rest this item's scope names._
+
+_2026-10-20 — references repointed to the current-state spec (PR #71); scope unchanged, since this
+ticket is claimed. **Conflicts for the claimant to settle, not rescoped here:**_
+- _Item 3's decisions-and-notices half is retired (R-BTN-80, R-BTN-103 and R-BTN-164; history
+  "Notices for people to conditions"); the earlier note already drops it from the core model._
+- _Part 3's "Baton-raised decisions (`baton:retries`, `baton:contract`, `baton:stalled` …)" are
+  now `suspend` core conditions `baton.retries`, `baton.contract` and `baton.stalled`
+  (R-BTN-163, §7.3), with restarts `retry`/`route:<leg>`/`park` and no default. B-56 builds
+  them and carries their model change (R-BTN-68). Part 3 should not model `baton:*` decisions;
+  whichever of this ticket and B-56 lands second reconciles the model._
+- _Leg deadlines (R-BTN-90) moved from R3-1259 to B-60, which carries their model change._

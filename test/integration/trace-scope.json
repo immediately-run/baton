@@ -75,8 +75,60 @@
     "at": 7,
     "reason": "the harness wrote a claim (a state Baton did not reach)"
   },
+  "S-BTN-45.leg-queues › S-BTN-45 a queue over its bound > the third ticket enters and warns; the course closes its intake; a claim drains it and reopens": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
   "S-BTN-47.positions-decisions › S-BTN-47 positions, course changes and the dead-ticket queue > a leg added later changes no queued leg; a removed queued leg waits on course-changed under Needs you": {
     "at": 3,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-63.no-chain › S-BTN-63 no review by its author’s key > a course file that drops its list, or renames the leg the owners key on, loosens nothing": {
+    "at": 3,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-63.no-chain › S-BTN-63 no review by its author’s key > the course file’s no_chain_from refuses the advance and a second claim by the same key; another key takes review": {
+    "at": 3,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-64.isolation › S-BTN-64 isolation floors > only the session worker is offered the leg; the others’ claims and advances into it are refused, rule isolation": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-64.isolation › S-BTN-64 isolation floors > the declaration is the worker’s latest heartbeat: one that stops declaring session is refused": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-65.refinement › S-BTN-65 refinement > a leg that cannot meet it is given up: released cannot-finish:contract-output": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-65.refinement › S-BTN-65 refinement > a value missing url fails the base though its refinement allows it; with url it meets the entry through its refinement": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-66.entry › S-BTN-66 entry requirements > a large valid value through the stored schemas is accepted: each schema read once per request (3-r3-1)": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-66.entry › S-BTN-66 entry requirements > a pointer meets the requirement by name and schema; its contents are the sync's to check": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-66.entry › S-BTN-66 entry requirements > a runner that cannot meet the entry gives the leg up: released cannot-finish:contract-output, a failed attempt": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-66.entry › S-BTN-66 entry requirements > an advance into reviewed: refused without findings, refused with an invalid value, accepted with a valid one": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-66.entry › S-BTN-66 entry requirements > an end that finishes review at reviewed is held to the same entry; a release is not": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-66.entry › S-BTN-66 entry requirements > the envelope's shape is checked before anything else: one of uri and value, a bounded value, a digest off git": {
+    "at": 1,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   }
 }

@@ -3,10 +3,10 @@
 // file by `ssh-keygen -Y sign` that Baton's verifier accepts. Node only: it runs ssh-keygen.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { duration, parseArgs, plan, send } from '../../cli/baton.mjs';
+import { createApiKey, duration, parseArgs, plan, send } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
 import { ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
@@ -47,6 +47,11 @@ describe('plan: one request per command', () => {
     expect(plan('owner', ['settings', 'docs', '--unblocked-workflow', '.github/workflows/unblocked.yml'], key).body)
       .toEqual({ unblocked_trigger: { kind: 'github-app', workflow: '.github/workflows/unblocked.yml' } });
     expect(() => plan('owner', ['settings', 'docs', '--no-required-bars', '--required-bar', '*', '--course', 'c', '--tag-prefix', 'p'], key)).toThrow('clears them');
+    // R-BTN-106: required_independence as leg=a,b;leg=c, and none to clear it.
+    expect(plan('owner', ['settings', 'docs', '--independence', 'review=implement,fix;adjudicate=implement'], key).body)
+      .toEqual({ required_independence: { review: ['implement', 'fix'], adjudicate: ['implement'] } });
+    expect(plan('owner', ['settings', 'docs', '--independence', 'none'], key).body).toEqual({ required_independence: {} });
+    expect(() => plan('owner', ['settings', 'docs', '--independence', 'review'], key)).toThrow('leg=a,b');
     expect(() => plan('owner', ['settings', 'docs'], key)).toThrow('at least one setting');
     // R-BTN-80: remind_after in seconds, from a duration.
     expect(plan('owner', ['settings', 'docs', '--remind-after', '6h'], key).body).toEqual({ remind_after: 21_600 });
@@ -144,6 +149,23 @@ describe('send: signed with a key file, verified by Baton', () => {
     expect(ok.status).toBe(200);
     expect(ok.json.url).toMatch(/\/login#[0-9a-f]{64}$/);
     expect(await send(ORIGIN, plan('admin', ['open']), other, fetchImpl)).toMatchObject({ status: 401, json: { code: 'unauthenticated' } });
+  });
+
+  it('baton key create makes an API key whose file -i sends as a bearer Baton accepts (R-BTN-159)', async () => {
+    const file = join(dir, 'admin.key');
+    const line = createApiKey(file, 'admin');
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(readFileSync(`${file}.pub`, 'utf8').trim()).toBe(line);
+    expect(line).toMatch(/^bak_[0-9a-f]{16} sha256:[0-9a-f]{64} admin$/);
+    // Never over an existing key.
+    expect(() => createApiKey(file)).toThrow('already exists');
+    await setClock(Date.now());
+    await setAdminKeys(line);
+    const fetchImpl = (url: string, init: RequestInit) => hostCall(new Request(url, init));
+    const ok = await send(ORIGIN, plan('admin', ['open']), file, fetchImpl);
+    expect(ok.status).toBe(200);
+    // The owner-key flag reads the public line from its file, as it reads an SSH public key.
+    expect(plan('admin', ['repo', 'add', 'o/r', '--owner-key', `${file}.pub`]).body.owner_keys).toEqual([line]);
   });
 });
 

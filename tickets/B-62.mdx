@@ -1,0 +1,144 @@
+---
+title: "B-62 — Call legs: a leg that files children and waits for a completion table (R-BTN-165)"
+id: B-62
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1118
+tier: critical
+description: "Build BATON_SPEC §7.6 R-BTN-165: a leg of `kind: call` whose `spawns` names the course, the courses or `*` it calls and whose `to` is a completion table (`of`, `at`/`done`/`withdrawn`/`closed`, `skip_withdrawn`, `next`, `null` outcomes); the script files children through `file(ticket)` with `called_by` and returns `spawned`; the runner ends `released:blocked` on `{kind: call}`, neither a failed attempt nor counted toward `max_blocked`; a `spawned` end naming none is refused; Baton settles the table in order in each transaction that moves a child, held provisionally (`next_source: call`) and logged `call-settled`; one `settleCall` shared by core and the sync's `locate`; the next leg's `called` input; the kit's checks of `spawns` and completion stations; the validator and the kit refusing a table whose last non-null entry is not `{\"of\": \"all\", \"closed\": true}`, so every call settles. S-BTN-132's settling and its table-without-a-closing-entry case, S-BTN-80's completion case, S-BTN-49's call case, G-BTN-150, G-BTN-76. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1258
+  - B-21
+  - B-52
+  - B-58
+---
+
+**Brief:** filed from the ticket plan for the current-state spec (PR #71). It follows the owner's
+schema review of 2026-10-20 (`spec/BATON_SPEC_HISTORY.md`, "Schema review", items 1, 5 and 14):
+there is no `call` field and no `select: "run"`, and `spawns.course` may be one id, a list or
+`"*"`.
+**Spec:** `spec/BATON_SPEC.md` §7.6 R-BTN-165; R-BTN-111 (§5.5, `spawns` and the signature);
+R-BTN-86 (§4.6, children and `spawned`); R-BTN-74 (§4.2, `file(ticket)`); R-BTN-120 (§6.1, no
+`requires.tickets` selects a call's children); R-BTN-126 (§6.2, the blocked end, `max_blocked`);
+R-BTN-83 (§5.3, provisional positions, git wins); R-BTN-82 (§5.5, the `called` input as pointers);
+R-BTN-69 (§5.2); §13.6 `ticket_blocks.kind`, §13.4 `ticket_stations.next_source`; §15 S-BTN-49,
+S-BTN-80, S-BTN-132, G-BTN-76, G-BTN-150. After the adversarial review (adv-2 M9,
+`spec/BATON_SPEC_HISTORY.md`): R-BTN-165's closing entry.
+**Depends on:**
+- R3-1258 (child tickets and `spawned`);
+- B-21 (`released:blocked` and its provisional rows);
+- B-52 (`spawns` and course signatures in the kit);
+- B-58 (the source's `file(ticket)` export).
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+`build-app`'s `file` and `verify`, `epic`'s `plan` and `replan` (B-13), and every "N of M reviewers"
+pattern need a leg that starts other tickets and goes on when enough of them finish. Today a
+parent waits on children only through `blocked_by` fan-in, which blocks every leg (B-41). A call
+leg scopes the wait to one leg and one run's children.
+
+### What to build
+
+1. **The course file** (`src/core/course.ts`, the kit):
+   - A leg may be `kind: "call"`, with a `spawns` that is B-52's shape. `spawns.course` is an id,
+     a list or `"*"`.
+   - Its `to` is an ordered table `{<station>: <completion> | null}`. A `<completion>` is
+     `{of: "all" | "any" | <n>, at: [<station>…] | done: true | withdrawn: true | closed: true,
+     skip_withdrawn?, next}`.
+   - `next` is required unless the station is an end, and must leave that station.
+   - `at` names stations that every course the call may spawn has. A call over `"*"` may not use
+     `at`.
+   - A `null` entry's station is an outcome the script may report instead of `spawned`.
+   - The table's last non-null entry must be `{of: "all", closed: true, …}`, which holds once
+     every child has closed, so a call always settles (adv-2 M9). The validator and `baton
+     course test` refuse a table without it, naming the leg.
+   - Refuse a leg's `call` field and `select: "run"`, naming the field.
+   - `spawns.lifetime` is accepted. Ending children by lifetime is B-65's.
+2. **The end** (the runner, the leg module, `src/core/claims.ts`):
+   - The script writes each child git first through `file(ticket)`, naming a course its `spawns`
+     allows and `called_by: {leg, run}`, then returns `spawned` (≤ 50, never the parent).
+   - The runner ends `released:blocked` on `{kind: "call", ref: <claim_legs seq>}`, carrying
+     `spawned`.
+   - Baton writes a `ticket_blocks` row of kind `call`. It is not a failed attempt and does not
+     count toward `max_blocked`.
+   - A `spawned` end naming no children is `invalid-params`.
+   - A call never waits in its claim.
+3. **Settling** (a pure `settleCall(course, leg, children)` in a new `src/core/calls.ts`):
+   - Core and the CLI's station-function library both import `settleCall`, so the sync's
+     `locate` (`src/defaults/course-markers.ts`, `course-pr.ts`) applies the same table.
+   - In each transaction that changes the station of one of the run's children (a snapshot or an
+     end), Baton evaluates the table in order over that run's children. The first entry that holds
+     settles the call.
+   - A completion never holds over no children.
+   - The settled `(station, next)` is stored provisionally with `next_source: call`, and the
+     `call` block is cleared. `call-settled {station, children}` is logged.
+   - The sync's posted pair confirms or replaces the settled position (git wins, R-BTN-83).
+   - Children still open at settlement are B-65's to supersede. Until B-65 lands, they stay open
+     and are listed in the `call-settled` detail.
+4. **The next leg's input.** `called` holds the settled children's end outputs, resolved as
+   pointers (R-BTN-82) in the claim response's inputs.
+5. **Children of a call** block their parent only through the call (G-BTN-76). No
+   `requires.tickets` entry selects them.
+6. **The kit** (`baton course test`):
+   - It checks what `spawns` provides against each called course's input.
+   - It checks what each completion station's `entry` requires against each called course's end
+     outputs. It names an end that does not produce what is required (S-BTN-80's `abandoned`).
+7. **Migration** (a new numbered file):
+   - `call` in `ticket_blocks.kind` and `ticket_stations.next_source`;
+   - `call-settled` in `ticket_history.kind`.
+8. **The model** (R-BTN-68): add the `call` block and its settlement to `model/baton.qnt`, with
+   the property that a call settles on the first holding entry, never over none. Attach the
+   `npm run model:pr` report.
+
+### Do not
+
+- Wait for children inside the claim.
+- Count a `call` block toward `max_blocked`. A `condition` block (B-59) does count.
+- Write a second implementation of the table for the sync. Use one `settleCall`.
+- Move `build-app` or `epic` onto calls. That is B-41 phase 2 and B-13.
+
+### Tests
+
+- On both hosts, `test/integration/S-BTN-132.calls.test.ts`:
+  - a call over three `review-pr` children, settling on the second approval (`{of: 2, at:
+    ["approved"]}`);
+  - an epic-shaped `plan` call with one child withdrawn, settling `planned` only once all have
+    closed (`{of: "all", closed: true}`);
+  - a `spawned` end naming none, refused;
+  - a table without a closing `{"of": "all", "closed": true}` entry, refused with the previous
+    file kept;
+  - `settleCall` agreeing with Baton.
+
+  The supersession half is B-65's.
+- `S-BTN-80`'s completion case through `baton course test` on fixture courses.
+- `S-BTN-49`: an open child blocks its parent only through a call. T's non-calling leg is still
+  offered.
+- Unit: `settleCall`'s table order, `of: n`, `skip_withdrawn` and `null` outcomes; the validator's
+  refusals, the missing closing entry and a closing entry followed only by `null` entries
+  (accepted) among them.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts; G-BTN-150 and G-BTN-76 hold
+- [ ] `model/` changed in the same PR, with its `npm run model:pr` report
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
+
+_(2026-10-20: extended for the adversarial review's fixes — a completion table must end with the closing `{"of": "all", "closed": true}` entry.)_

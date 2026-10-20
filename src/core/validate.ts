@@ -4,6 +4,7 @@
 import { BatonError } from './http';
 import { FREE_TEXT_MAX, isFreeText } from './text';
 import { COURSE_ID } from './course';
+import { parseSchemaId, VALUE_MAX_BYTES } from '../shared/schema.mjs';
 
 /** §5: the harness's own session id, the rule `claim.sh --session` already applies. */
 export const SESSION_NAME = /^[A-Za-z0-9_.:-]{1,128}$/;
@@ -95,6 +96,8 @@ export interface Heartbeat {
   /** R-BTN-60: course-defined strings the tag gate matches. */
   tags: string[];
   tier_ceiling: (typeof TIERS)[number];
+  /** R-BTN-107: how the runner isolates a leg — `process` (the default), `attached` or `session`. */
+  isolation: 'attached' | 'process' | 'session';
   /** Per repository (R-BTN-66): `{repository: tier}`, checked against each ladder at the heartbeat. */
   tier_ceilings: Record<string, string>;
   lease_timeout_s: number;
@@ -118,6 +121,9 @@ export interface TranscriptReport { index?: number; repo: string; path: string; 
 
 /** §6.6 R-BTN-9: the worker declares its lease timeout, clamped to [900, 86400] s, default 900. */
 export const clampLease = (s: unknown) => (typeof s === 'number' && Number.isFinite(s) ? Math.min(86400, Math.max(900, Math.round(s))) : 900);
+
+/** R-BTN-107: the isolation modes a heartbeat may declare. */
+export const ISOLATIONS: readonly Heartbeat['isolation'][] = ['attached', 'process', 'session'];
 
 export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartbeat {
   if (!isObj(body)) bad('body', 'must be a JSON object');
@@ -160,6 +166,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   });
   if (b.last_activity_at !== undefined && !isTime(b.last_activity_at)) bad('last_activity_at', 'must be epoch ms');
   if (b.test_harness !== undefined && typeof b.test_harness !== 'boolean') bad('test_harness', 'must be a boolean');
+  if (b.isolation !== undefined && !ISOLATIONS.includes(b.isolation as Heartbeat['isolation'])) bad('isolation', `must be one of ${ISOLATIONS.join(', ')}`);
   const transcripts = (b.transcripts ?? []) as unknown[];
   if (!Array.isArray(transcripts) || transcripts.length > 50) bad('transcripts', 'must be a list of at most 50');
   const usage = (b.usage ?? []) as unknown[];
@@ -179,6 +186,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     capabilities,
     tags,
     tier_ceiling: tier as Heartbeat['tier_ceiling'],
+    isolation: (b.isolation ?? 'process') as Heartbeat['isolation'],
     tier_ceilings: checkTierCeilings(b.tier_ceilings),
     lease_timeout_s: clampLease(b.lease_timeout_s),
     courses,
@@ -408,7 +416,7 @@ export function checkShadowReport(body: unknown) {
 const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/;
 export const GIT_SHA = /^[0-9a-f]{40}$/;
 /** §6.5: the `released:` reasons, exactly. */
-export const RELEASE_END_REASONS = ['stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec',
+export const RELEASE_END_REASONS = ['stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output',
   'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed'] as const;
 
 export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null } {
@@ -429,6 +437,61 @@ export const isHttpsPointer = (v: unknown): v is string =>
  *  the leg. */
 const isPointer = (v: unknown) => typeof v === 'string' && (GIT_SHA.test(v) || isHttpsPointer(v));
 
+/** R-BTN-108's envelope: one leg output, by pointer or inline, naming its schema. */
+export interface Output {
+  name: string;
+  schema: string;
+  uri?: string;
+  digest?: string;
+  value?: unknown;
+}
+
+/** R-BTN-82: outputs per leg run. */
+export const OUTPUTS_MAX = 16;
+const OUTPUT_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+const OUTPUT_DIGEST = /^sha256:[0-9a-f]{64}$/;
+/** R-BTN-82's pointers: `git:<owner>/<name>@<commit>:<path>` or `#blob=<sha>` (content-addressed),
+ *  an `https://` URL, or `s3://<bucket>/<key>?versionId=…`; at most 1 KB. */
+const GIT_POINTER = /^git:[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(@[0-9a-f]{40}([0-9a-f]{24})?:[^\s]+|#blob=[0-9a-f]{40}([0-9a-f]{24})?)$/;
+const S3_POINTER = /^s3:\/\/[a-z0-9.-]{3,63}\/[^\s?]+\?versionId=[^\s&]+$/;
+
+/** `outputs` on an advance or an end (R-BTN-108, R-BTN-82): at most 16 envelopes, distinct
+ *  names, each `{name, schema, uri, digest?}` or `{name, schema, value}` — never both. A value is
+ *  at most 4 KB serialized; its content is validated against its schema by the caller, which
+ *  holds the repository's schemas. */
+export function checkOutputs(v: unknown): Output[] {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.length > OUTPUTS_MAX) bad('outputs', `must be a list of at most ${OUTPUTS_MAX} outputs`);
+  const names = new Set<string>();
+  return (v as unknown[]).map((raw, i) => {
+    const at = `outputs[${i}]`;
+    if (!isObj(raw)) bad(at, 'must be {name, schema, uri, digest?} or {name, schema, value}');
+    const o = raw as Record<string, unknown>;
+    for (const k of Object.keys(o)) if (!['name', 'schema', 'uri', 'digest', 'value'].includes(k)) bad(`${at}.${k}`, 'is not an output field');
+    const name = matches(OUTPUT_NAME, `${at}.name`)(o.name);
+    if (names.has(name)) bad(`${at}.name`, `repeats ${name}`);
+    names.add(name);
+    if (!parseSchemaId(o.schema)) bad(`${at}.schema`, 'must name a schema as <id>@<version>');
+    const hasValue = Object.prototype.hasOwnProperty.call(o, 'value');
+    if (hasValue === (o.uri !== undefined)) bad(at, 'gives exactly one of uri and value');
+    if (hasValue) {
+      if (o.digest !== undefined) bad(`${at}.digest`, 'an inline value carries no digest');
+      let n = Infinity;
+      try { n = new TextEncoder().encode(JSON.stringify(o.value)).length; } catch { /* not JSON */ }
+      if (n > VALUE_MAX_BYTES) bad(`${at}.value`, `must be at most ${VALUE_MAX_BYTES} bytes serialized; give a larger output by pointer`);
+      return { name, schema: o.schema as string, value: o.value };
+    }
+    const uri = o.uri;
+    if (typeof uri !== 'string' || uri.length > 1000 || !(GIT_POINTER.test(uri) || S3_POINTER.test(uri) || isHttpsPointer(uri))) {
+      bad(`${at}.uri`, 'must be a git:, https:// or s3:// pointer of at most 1000 characters');
+    }
+    const digest = optional(o.digest, matches(OUTPUT_DIGEST, `${at}.digest`));
+    // Anything not content-addressed carries its digest (R-BTN-82).
+    if (!(uri as string).startsWith('git:') && !digest) bad(`${at}.digest`, 'an https:// or s3:// output carries its sha256:<hex> digest');
+    return { name, schema: o.schema as string, uri: uri as string, ...(digest ? { digest } : {}) };
+  });
+}
+
 export interface End {
   end_reason: string;
   status: 'completed' | 'released';
@@ -440,6 +503,8 @@ export interface End {
   ended_at_sha: string | null;
   /** `released:<reason>` naming no §6.5 reason: an owner bar's (R-BTN-67), checked by the claims. */
   owner_bar: boolean;
+  /** R-BTN-108: what the finished leg produced. */
+  outputs: Output[];
 }
 
 /** §6.5's ends: `done`, `suspended:<station>` and `released:<reason>`, each with an optional
@@ -476,7 +541,7 @@ export function checkEnd(body: unknown): End {
   if (ptr !== undefined && ptr !== null && !isPointer(ptr)) bad('ended_at_sha', 'must be a commit sha or an https URL of at most 1000 characters');
   const sha = (ptr as string | undefined | null) ?? null;
   if (status! === 'released' && sha) bad('ended_at_sha', 'only a completed end points at its evidence');
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, outputs: checkOutputs(b.outputs) };
 }
 
 export interface Advance {
@@ -484,6 +549,8 @@ export interface Advance {
   reached: string | null;
   evidence: string | null;
   bars: string[];
+  /** R-BTN-108: what the finished leg produced, checked against `reached`'s entry (R-BTN-109). */
+  outputs: Output[];
 }
 
 /** `POST /v1/runner/claims/{id}/advance` (R-BTN-63, §11): the leg to start; `reached`, the
@@ -498,7 +565,7 @@ export function checkAdvance(body: unknown): Advance {
   const raw = b.bars ?? [];
   if (!Array.isArray(raw) || raw.length > TAGS_MAX || !raw.every((t) => typeof t === 'string' && TAG.test(t))) bad('bars', `must be a list of at most ${TAGS_MAX} tags`);
   if (b.course !== undefined && JSON.stringify(b.course).length > 4096) bad('course', 'must be at most 4 KB');
-  return { leg, reached, evidence, bars: [...new Set(raw as string[])] };
+  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs) };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */

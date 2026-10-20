@@ -1,0 +1,112 @@
+---
+title: "B-66 — Standard handler courses ask, deliver and announce, and the standard courses' error.no-answer (R-BTN-169)"
+id: B-66
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1122
+tier: judgement
+description: "Build R-BTN-169: three course directories under `src/defaults/courses/` — `ask` (a choice station: a person leg `answer` against an `expire` after 172,800 s, filing a `deliver` child with `lifetime: parent`), `deliver` (`push` on `channel:push` with `exhausted: email` and the `retract` compensation, `lapse` by `not_before`, `email` on `channel:email` + `credential:SMTP_URL`; a generic signed webhook and SMTP as shipped scripts) and `announce` (one leg `send`); `baton repo init --bind-conditions`; the standard courses declare `error.no-answer` as new versions replaying their in-flight tickets. S-BTN-127, S-BTN-128, S-BTN-129. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-59
+  - B-63
+  - B-65
+  - B-7
+  - B-43
+  - B-10
+  - B-11
+  - R3-1259
+---
+
+**Brief:** the ticket plan for the current-state spec (PR #71, 2026-10-20), §2's B-66. With
+notices for people retired (R-BTN-164), these courses are how a question or a warning reaches a
+person; B-67 removes the old channel only after they ship.
+**Spec:** `spec/BATON_SPEC.md` §7.9 R-BTN-169 (the three courses, their graphs, binding them);
+§7.2 R-BTN-161 (bindings, handler tickets, `std:condition@1`, `std:restart@1`); §7.1 R-BTN-160
+and §7.2 R-BTN-162 (`wait_s` in the input; `restart: null` and `error.no-answer`); §5.8
+R-BTN-131's table and its `error.no-answer` line; §7.6 R-BTN-166 (choice stations), R-BTN-165
+(`spawns`); §7.7 R-BTN-168 (`lifetime: parent`, compensation); §7.4 R-BTN-122 (`retry`,
+`exhausted`); §6.5 R-BTN-89 (`not_before`); §6.4 R-BTN-116 (person legs); §5.1 R-BTN-134
+(course directories); §5.6 (`channel:` and `credential:` capabilities); §4.1 R-BTN-48 (new
+versions replaying in-flight tickets); §15 S-BTN-127, S-BTN-128, S-BTN-129, S-BTN-131's
+`announce` case.
+**Depends on:** B-59 (suspend, `handled`, `resume`), B-63 (the `waiting` choice station), B-65
+(`lifetime: parent`, `retract` as a compensation), B-7 (the `answer` person leg), B-43 (course
+directories in the baton repository), B-10 (leg `requires`), B-11 (`retry` with `exhausted`),
+R3-1259 (`lapse`'s `not_before`).
+
+### Requires
+
+None: a checkout and a terminal. The shipped `push` and `email` scripts are tested against a
+local webhook receiver and an SMTP stub; a real phone channel is a repository's own override.
+
+### Why
+
+Every `hitl` raise and every bound warning needs a course that turns it into a message and an
+answer. Shipping three standard ones means a repository gets a working channel with one init
+flag instead of writing its own handler courses.
+
+### What to build
+
+1. **`src/defaults/courses/ask/`** in B-43's layout (`course.json`, `sync.mjs`, `legs/`,
+   `schemas/`), with the graph R-BTN-169 gives: `open` (`asked` → `waiting`, `spawns: {course:
+   "deliver", lifetime: "parent"}`), `answer` (person, `asks: owner`) and `expire` (`after_s`
+   172,800) leaving the `waiting` choice station; input `std:condition@1`; ends `answered` and
+   `unanswered`, each producing `std:restart@1`. The station function reads the ask file's
+   `answer:` field (the default source's, R-BTN-131) and posts it as the `answer` leg's output
+   with `reason: "chosen"`; `expire` writes `{restart: null, reason: "unanswered"}`. The raise's
+   `wait_s` is in the input.
+2. **`src/defaults/courses/deliver/`**: stations `queued`, `pushed`; ends `lapsed`, `emailed`.
+   `push` requires `channel:push`, with `"retry": {"initial_s": 60, "coefficient": 4,
+   "max_attempts": 3, "exhausted": "email"}` and `compensate: "retract"` (idempotent); `lapse`
+   (`pushed` → `lapsed`) queued by `push`'s `close` with `not_before` one hour after the push,
+   retracting the message; `email` (`queued` → `emailed`) requires `channel:email` and
+   `credential:SMTP_URL`, and a failed send holds under the retry policy. Shipped scripts: a
+   generic signed webhook for `push`/`retract` and SMTP mail for `email`; a repository
+   overrides `push` and `retract` for its own channel (R-BTN-131).
+3. **`src/defaults/courses/announce/`**: one leg `send` requiring `channel:push`; ends `sent`
+   and `undeliverable`.
+4. **Init.** `baton repo init --bind-conditions` (`src/defaults/cli.ts`) writes `{"hitl": "ask",
+   "warning": "announce", "baton": "announce"}` into `.baton/baton.json`'s bindings; without it a
+   repository binds nothing.
+5. **`error.no-answer` in the standard courses.** Each standard course that exists at merge
+   (today `create-pr`, `review-pr`, `bug-report`, `draft-ticket`, `decision` and `build-app`;
+   `epic` and `branch` declare it as B-13 and R3-1265 add them) declares `error.no-answer`
+   (`interrupt`, `retryable: false`) under `conditions`, each as a new course version replaying its in-flight
+   tickets (R-BTN-48, checked with `baton course test` against a board mid-course on the old
+   version). This is the conditions migration's phase 2 (history, Migrations).
+6. **Kit.** `baton course test` passes on all three new courses, including the `suspend`
+   binding check that `ask` ends in `std:restart@1` (B-58).
+
+### Do not
+
+- Add any core code for delivery: these are ordinary courses run by runners with `channel:`
+  capabilities (history, Integration: "Delivery runners").
+- Ship a provider-specific push channel or credentials; the shipped scripts are generic.
+- Name the capabilities `courier:*`: "courier" names only the forge courier.
+- Make `announce` answer anything: core conditions close only by their cause or a resolve.
+
+### Tests
+
+- **S-BTN-127**, **S-BTN-128** and **S-BTN-129** whole, on both hosts, with `hitl` bound to
+  `ask` (B-59 tested them with a fixture handler); traces replayed through the model.
+- S-BTN-131's case of `baton` bound to `announce`.
+- `baton course test` on each new course and on each standard course's new version.
+
+### Exit criteria
+
+- [ ] S-BTN-127, -128 and -129 pass on both hosts with the shipped courses
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 with the current-state spec, PR #71)_

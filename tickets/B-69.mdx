@@ -1,0 +1,70 @@
+---
+title: "B-69 — Close the runner-rename window: refuse the old worker wire names"
+id: B-69
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1140
+tier: routine
+description: "Close B-68's window once every registered runner sends the new names: refuse `X-Worker-Secret`, the `Min-Worker-Version:` trailer, `?worker=me` and a registry entry's `min_worker_version`, stop sending the heartbeat's `worker_id` and the client's read of `worker-reaped`, and drop `runners.legacy_names_at`. S-BTN-30. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-68
+---
+
+**Brief:** the ticket plan for the current-state spec (PR #71, 2026-10-20), §2's B-69: the
+second half of the "Worker" is "runner" migration.
+**Spec:** `spec/BATON_SPEC_HISTORY.md` "Migrations the implementation still carries", "\"Worker\"
+is \"runner\"": "A runner accepts both header names until every runner sends the new one." In
+`spec/BATON_SPEC.md`: §8.1 R-BTN-14 (`X-Runner-Secret`, `runner-reaped`); §5.7 R-BTN-22 /
+R-BTN-65 (`min_runner_version`, `Min-Runner-Version`); §6.1 (`?runner=me`); §15 S-BTN-30.
+**Depends on:** B-68, which accepts both names and records each runner's last use of an old one
+in `runners.legacy_names_at`.
+
+### Requires
+
+None: a checkout and a terminal. The precondition is read from the reference deployment's
+dashboard by whoever claims this.
+
+### Why
+
+The window's old names are a second way in on the authentication path; closing it leaves one
+header to check and one name in every log.
+
+### What to build
+
+1. **Precondition.** No live runner has `legacy_names_at` in the last 14 days, and no registered
+   repository's registry posts `min_worker_version` (the dashboard shows both, B-68). Record the
+   check in `## Status` with the date.
+2. **Refusals.** `X-Worker-Secret` is `unauthenticated` naming `X-Runner-Secret`;
+   `Min-Worker-Version:` no longer satisfies the course-change check; `?worker=` is
+   `invalid-params`; `min_worker_version` in a registry entry is refused naming
+   `min_runner_version` (`src/core/auth.ts`, `src/core/http.ts`, `src/core/courses.ts`).
+3. **Clean-up.** The heartbeat response drops `worker_id`; `src/runner/` stops reading
+   `worker-reaped`; a new migration drops `runners.legacy_names_at`.
+
+### Do not
+
+- Merge before the precondition holds: a runner on an older CLI would be locked out.
+
+### Tests
+
+- S-BTN-30's B-68 case flips: `X-Worker-Secret` is refused, `X-Runner-Secret` passes.
+- Unit: each old name refused with the new name in the message.
+
+### Exit criteria
+
+- [ ] the precondition recorded
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 with the current-state spec, PR #71)_

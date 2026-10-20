@@ -1,0 +1,127 @@
+---
+title: "B-63 — Choice stations: every leg armed, the first to hold wins by Baton's clock (R-BTN-166)"
+id: B-63
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1119
+tier: critical
+description: "Build BATON_SPEC §7.6 R-BTN-166: a station's `\"choice\": \"first\"` arms every leg leaving it on confirmed facts only (prerequisites, a person leg's answer, and `after_s` as an alarm-held time prerequisite in `ticket_timers` that survives a Baton move); the first leg to hold settles the station, stamped `this.now` and tied by file order, queued with `next_source: choice`, held as an override until the station changes, exported and logged `choice-settled`; the winner's run writes the marker; a later sync posting another leg is the discrepancy `choice-lost` and is not adopted; losers are disarmed. S-BTN-133, S-BTN-129's choice cases, S-BTN-50's `after_s` case, G-BTN-151. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-38
+  - B-7
+  - B-10
+  - R3-1259
+---
+
+**Brief:** filed from the ticket plan for the current-state spec (PR #71). It follows the owner's
+schema review of 2026-10-20 (`spec/BATON_SPEC_HISTORY.md`, "Schema review", items 6 and 12): a
+choice leg's `after_s` takes a timer's range and is held in `ticket_timers`, and a timer `leg` on
+a choice station's leg is refused. The standard `ask` course (B-66) is built on a choice station.
+**Spec:** `spec/BATON_SPEC.md` §7.6 R-BTN-166; R-BTN-120 (§6.1, prerequisites, and the `time`
+kind's `after_s`); R-BTN-116 (§6.4, a person's leg and its answer); R-BTN-83 (§5.3, overrides held
+until the station changes; provisional positions); R-BTN-85 (§4.7, `choice-lost`); R-BTN-88 (§4.8,
+owner state); R-BTN-167 (§7.5, `ticket_timers`, the refusal of a timer `leg` on a choice leg);
+R-BTN-32 (§2.1, Baton's clock); R-BTN-69 (§5.2, `choice` and `after_s` in the course file); §13.6
+`ticket_overrides.override_kind`, `ticket_timers`; §15 S-BTN-50, S-BTN-129, S-BTN-133, G-BTN-151.
+**Depends on:**
+- B-38 (overrides held with their kind until the station changes);
+- B-7 (person legs and their answers);
+- B-10 (per-leg prerequisites as blocks);
+- R3-1259 (the alarm's time waits, which `after_s` reuses).
+
+### Requires
+
+None: every case runs in the integration harness with a fake clock.
+
+### Why
+
+Today only the queued leg is evaluated. A question that should be answered by a person *or*
+expire after two days, whichever comes first, cannot be written. With choice stations, `ask`'s
+`answer` and `expire` race, and Baton settles the race once, by its own clock, before git learns
+the outcome.
+
+### What to build
+
+1. **The course file** (`src/core/course.ts`'s `STATION_KEYS` and `LEG_KEYS`, the kit):
+   - A station may say `"choice": "first"`.
+   - A leg leaving a choice station may carry `after_s` (60 to 2,592,000). `after_s` on any other
+     leg is refused.
+   - An interrupting timer with `leg` on a choice station's leg is refused. Whichever of B-61 and
+     B-63 lands second adds this check.
+2. **Arming** (a new `src/core/choices.ts`, called wherever blocks are evaluated,
+   `src/core/blocks.ts` `evaluate`):
+   - At a choice station, evaluate every leg leaving it, not only the queued one:
+     - its prerequisites;
+     - for a person's leg, its answer (B-7), counted from the snapshot that shows it;
+     - its `after_s`: a `ticket_timers` row (`timer` = `after_s`) due at the ticket's arrival at
+       the station plus `after_s`, which the alarm marks met.
+   - Only confirmed facts arm a leg. A provisional row or position does not.
+   - The `after_s` instant restarts only when the station changes, so a Baton move keeps it.
+   - If B-61 has not landed, this ticket's migration creates `ticket_timers` as §13.6 says.
+3. **Settling:**
+   - In the transaction that makes a leg's prerequisites all hold, that leg settles the station,
+     stamped `this.now`. When several legs come to hold in one transaction, the one listed first
+     in the course file wins.
+   - The winner becomes the queued leg (`next_source: choice`), held as B-38's override
+     (`override_kind: choice`) until the ticket's station changes. It appears in the ticket's
+     history and in the owner-state export.
+   - The other legs are disarmed. `choice-settled {leg, at}` is logged.
+   - The winner's run writes its closing marker, so git holds the position from the next station
+     on.
+4. **The discrepancy.** A sync that posts another leg's arrival from a settled choice station is
+   logged `choice-lost` (R-BTN-85) and is not adopted. This is the one exception to "git wins at
+   once" in `src/core/stations.ts`.
+5. **Losers.** A disarmed leg never ran, so nothing is stopped. Superseding a `lifetime:
+   "station"` child when the ticket leaves is B-65's.
+6. **Migration** (a new numbered file):
+   - `choice` in `ticket_stations.next_source` and `override_kind`;
+   - `choice-settled` in `ticket_history.kind`;
+   - `choice-lost` as a discrepancy sub.
+7. **The model** (R-BTN-68): add arming and settlement to `model/baton.qnt`, with the property that
+   a settled choice holds until the station changes. Attach the `npm run model:pr` report.
+
+### Do not
+
+- Arm a leg on a provisional row or position.
+- Let a later sync's post replace a settled choice (`choice-lost`). This is unlike a timer's
+  queued leg, which yields to git (`route-overridden`).
+- Restart an `after_s` instant on a Baton move.
+- Give an answer committed before the deadline but synced after it a grace period. A course adds
+  one to `after_s`.
+
+### Tests
+
+- On both hosts, `test/integration/S-BTN-133.choice-station.test.ts`:
+  - `answer` listed before `expire`, both holding in one alarm transaction: `answer` wins by
+    order;
+  - a provisional position arms nothing;
+  - the settlement held as an override and written by the winner's run;
+  - a later sync posting `expire` gives `choice-lost`;
+  - the settlement exported;
+  - `after_s` 30 and 2,592,001 refused.
+- S-BTN-129's choice cases, with a fixture `ask`-shaped course: `expire` settles after 2 days
+  (`choice-settled`), and a late answer is `choice-lost`. The whole scenario is B-66's.
+- S-BTN-50: a choice leg's pending `after_s` exported and restored (if R3-1258's export has
+  landed).
+- Unit: the `after_s` instant kept across a Baton move and restarted on a station change; a person
+  leg armed from the snapshot that shows the answer.
+
+### Exit criteria
+
+- [ ] S-BTN-133 and S-BTN-129's choice cases pass on both hosts; G-BTN-151 holds
+- [ ] `model/` changed in the same PR, with its `npm run model:pr` report
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_

@@ -1,16 +1,16 @@
 ---
-title: "B-47 — B-47 — Baton runner: sessions report over a local channel, bounded runs, attached and session-mode cloud runners"
+title: "B-47 — Baton runner: sessions report over a local channel, bounded runs, attached and session-mode cloud runners"
 id: B-47
 project: baton
 status: available
-updated: 2026-10-19
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1107
 tier: critical
-description: "The runner's local channel (`baton leg …`, `0600` socket) checking every move, bounded runs, and the `attached` and `session` isolation modes (BATON_SPEC R-BTN-106, R-BTN-107); S-BTN-62, -75, -78. Split from B-2. Requires: none."
+description: "The runner's local channel (`baton leg …`, `0600` socket) checking every move, bounded runs, and the `attached` and `session` modes (BATON_SPEC R-BTN-106, R-BTN-107); S-BTN-62, -75, -78, G-BTN-89, G-BTN-99. Split from B-2. Requires: none."
 topics:
   - baton
 owns: {}
@@ -20,7 +20,7 @@ depends_on:
 ---
 
 **Brief:** continues B-2 (split 2026-10-19). The owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §2m.1 R-BTN-106 (the local channel, the runner checking every move, bounded runs), R-BTN-107 (`attached` and `session` modes), §2m.7a's heartbeat row (`session_url`), §6.13 and R-BTN-72 as amended; §13a S-BTN-62, S-BTN-75, S-BTN-78; G-BTN-89, G-BTN-99.
+**Spec:** `spec/BATON_SPEC.md` §8.3 R-BTN-106 (the local channel, the runner checking every move, bounded runs), R-BTN-107 (`attached` and `session` modes), R-BTN-113 (`session_url`), R-BTN-72; §8.1 (the heartbeat); §15 S-BTN-62, S-BTN-75, S-BTN-78, G-BTN-89, G-BTN-99.
 **Depends on:** B-3. The runner checks a session's move as it checks a script's result: `reached` an outcome, `next` a leg leaving it, each named output valid against its schema (R-BTN-108) and every entry requirement of `reached` met (R-BTN-109). S-BTN-62's second move ("a valid move without the station's required output") is refused by B-3's validator and station entry; built first, the channel would check half a move.
 
 ### Requires
@@ -29,18 +29,19 @@ depends_on:
 
 ### What B-2 already delivered
 
-- Rule `chain`: `no_chain_from` joined to the owners' `required_independence`, refused at a claim and an advance by the credential that ran a named leg on the ticket; the runner suspends on the refused advance (§6.13).
-- Rule `isolation`: the heartbeat's `isolation` (`attached`, `process`, `session`), a leg's `isolation: session` floor refused at a claim and an advance and dropped from the worker's recommendations; the dashboard shows a worker's mode.
+- Rule `chain`: `no_chain_from` joined to the owners' `required_independence`, refused at a claim and an advance by the credential that ran a named leg on the ticket; the runner suspends on the refused advance (R-BTN-72, R-BTN-106).
+- Rule `isolation`: the heartbeat's `isolation` (`attached`, `process`, `session`), a leg's `isolation: session` floor refused at a claim and an advance and dropped from the runner's recommendations; the dashboard shows a runner's mode. The spec now has no rule `isolation`: a session-only leg requires the capability `runner:session` (R-BTN-107, rule 4), which B-70 builds.
 
 ### What to build
 
-1. **Channel.** The runner listens on a `0600` Unix socket in its state directory named by `IR_BATON_SOCKET`; the CLI wraps it as `baton leg status | output | done | suspend | release | next | yield`, refused outside a leg's session (R-BTN-127). The runner checks each move (station, next leg, outputs, entry) before it calls Baton and answers a failing one on the channel with the reason; the session never holds the worker secret or nonce (`IR_BATON_STATE` is the view without them).
+1. **Channel.** The runner listens on a `0600` Unix socket in its state directory named by `IR_BATON_SOCKET`; the CLI wraps it as `baton leg status | output | done | suspend | release | next | yield`, refused outside a leg's session (R-BTN-127). R-BTN-106's verbs also include `raise` and `await` (R-BTN-160, R-BTN-162): whichever of this ticket and B-55/B-59 lands second adds them to the channel. The runner checks each move (station, next leg, outputs, entry) before it calls Baton and answers a failing one on the channel with the reason; the session never holds the runner secret (`IR_BATON_STATE` is the view without it). The claim nonce is public — markers and the mirror's claim note carry it, and it authenticates nothing — so it is neither hidden from the state view nor masked (R-BTN-144, adv-3 F12).
 2. **Bounded runs.** `baton runner start --legs <a,b> --max-legs n --until <t>`: claims only tickets whose queued leg is named, chains only into named legs, at most `n` legs per claim (default 8), none started after `until`; a move into a leg outside the grant suspends at `reached` with the hand-off.
-3. **Isolation modes.** `baton runner start --attached` and `baton leg next` (blocks until the runner has a leg to give); `--sessions <provider>`: one cloud session per agent leg, a brief with the ticket, the leg, its inputs' URIs and the hand-off and no claim id, worker secret or Baton credential, the child's ```` ```baton-leg-result ```` block read from its events and checked like a channel move. The heartbeat declares the mode, and `session_url` for the running leg.
+3. **Isolation modes.** `baton runner start --attached` and `baton leg next` (blocks until the runner has a leg to give); `--sessions <provider>`: one cloud session per agent leg, a brief with the ticket, the leg, its inputs' URIs and the hand-off and no claim id, runner secret or Baton credential, the child's ```` ```baton-leg-result ```` block read from its events and checked like a channel move. The heartbeat declares the mode, and `session_url` for the running leg.
 
 ### Do not
 
-- Let the session talk to Baton, or hand it the worker secret.
+- Let the session talk to Baton, or hand it the runner secret.
+- Treat the claim nonce as a secret: no masking of it and no removal from the state view.
 
 ### Tests
 
@@ -51,3 +52,7 @@ depends_on:
 
 - [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
 - [ ] merged under the review gate
+
+## Status
+
+_(2026-10-20: text corrected to the current spec — the claim nonce is public, so the state view keeps it and nothing masks it, adv-3 F12.)_

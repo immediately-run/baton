@@ -1,9 +1,9 @@
 ---
-title: "B-15 — The roadmap-pr course adopts §2m: capability types in its course file, independent review, retries per leg and fresh context"
+title: "B-15 — The roadmap-pr course adopts the course schema: capability types in its course file, independent review, retries per leg and fresh context"
 id: B-15
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-20
 repos:
   - docs
   - baton
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1118
 tier: judgement
-description: "docs' reference course declares its capability types and roles (ROLES leaves vocabulary.mjs), gives review no_chain_from with the owners' required_independence, declares error types and per-leg retry policies, and sets max_context (BATON_SPEC R-BTN-106, R-BTN-120–123). Requires: B-2, B-10, B-11, B-12."
+description: "docs' reference course declares its capability types and roles (leaving the `ROLES` window), gives review no_chain_from with the owners' required_independence, declares its `interrupt` condition types with `retryable` and per-leg retry policies, throws `LegError(type, …)`, and sets max_context (BATON_SPEC R-BTN-106, R-BTN-121, R-BTN-122, R-BTN-123, R-BTN-160). Requires: a sibling docs checkout."
 topics:
   - baton
 owns: {}
@@ -21,26 +21,50 @@ depends_on:
   - B-10
   - B-11
   - B-12
+  - B-55
 ---
 
-**Brief:** the owner, 2026-10-17 (§2m, B-1, baton#43). docs and `roadmap-pr` are Baton's labelled reference deployment, so they should use what §2m adds once Baton serves it.
-**Spec:** `spec/BATON_SPEC.md` §2m.1 (R-BTN-106 `no_chain_from`), §2m.6 (R-BTN-120, R-BTN-121), §2m.6a (R-BTN-122), §2m.6b (R-BTN-123); docs' `BATON_ROADMAP_PR_COURSE` and `BATON_DOCS_DEPLOYMENT`.
+**Brief:** the owner, 2026-10-17 (B-1, baton#43). docs and `roadmap-pr` are Baton's labelled
+reference deployment, so they should use what the course schema adds once Baton serves it.
+**Spec:** `spec/BATON_SPEC.md` §8.3 (R-BTN-106 `no_chain_from`, R-BTN-123 fresh context), §5.6
+(R-BTN-121), §7.1 (R-BTN-160: declared condition types, `retryable`, `LegError(type, …)`), §7.4
+(R-BTN-122), §6.2 (R-BTN-126: a provider at capacity is a blocked end); history, Migrations: the
+`ROLES` window; docs' `BATON_ROADMAP_PR_COURSE` and `BATON_DOCS_DEPLOYMENT`.
+**Depends on:** B-2 (done), B-10 (capability types), B-11 (retries per leg), B-12 (fresh
+context), B-55 (declared condition types and typed `LegError`).
+
+### Requires
+
+A sibling docs checkout.
 
 ### Why
 
-§2m changes what a course file can say. `roadmap-pr`, the course docs runs, still keeps its roles in the vendored `vocabulary.mjs`, counts retries per ticket, and leaves the independence of `review` to convention.
+`roadmap-pr`, the course docs runs, still keeps its roles in the vendored `vocabulary.mjs`,
+counts retries per ticket, and leaves the independence of `review` to convention.
 
 ### What to build
 
-1. **Capability types.** Declare `roadmap-pr`'s capability types and roles in its course file (`capability_types`, `capability_roles`). Then retire `ROLES` from docs' `vocabulary.mjs` after B-10's transition window, and run `npm run vendor` in baton.
-2. **Independence.** Give `review` a `no_chain_from: ["implement", "fix"]`, and set the docs repository's `required_independence` owner setting to match.
-3. **Retries.** Declare the course's `error_types` (for example `merge-conflict` as non-retryable and `flaky-test` as retryable; a provider's capacity reached is a blocked prerequisite, not an error type, R-BTN-126). Give the agent legs `retry` policies within the owners' ceiling, and throw `LegError` from the leg scripts (R3-1246).
-4. **Fresh context.** Set `max_context` on `implement` and `fix`, and have their scripts report context use with `baton leg yield --context`.
-5. **Docs.** Amend `BATON_ROADMAP_PR_COURSE` and `BATON_DOCS_DEPLOYMENT` to match, each with a dated note.
+1. **Capability types.** Declare `roadmap-pr`'s capability types and roles in its course file
+   (`capability_types`, `capability_roles`), which takes it out of the `ROLES` window; once no
+   registered course reads through `ROLES`, retire it from docs' `vocabulary.mjs` and run
+   `npm run vendor` in baton.
+2. **Independence.** Give `review` a `no_chain_from: ["implement", "fix"]`, and set the docs
+   repository's `required_independence` owner setting to match.
+3. **Conditions and retries.** Declare the course's `interrupt` condition types in its
+   `conditions` with `retryable` (for example `merge-conflict` `false`, `flaky-test` `true`); a
+   provider's capacity reached is a blocked end, not a condition type (R-BTN-126). Give the
+   agent legs `retry` policies within the owners' bounds, and throw `LegError(type, message)`
+   from the leg scripts. Once B-66 ships, docs may bind `hitl` and `warning` in its
+   `.baton/baton.json` (R-BTN-161); that is optional here.
+4. **Fresh context.** Set `max_context` on `implement` and `fix`, and have their scripts report
+   context use with `baton leg yield --context`.
+5. **Docs.** Amend `BATON_ROADMAP_PR_COURSE` and `BATON_DOCS_DEPLOYMENT` to match, each with a
+   dated note.
 
 ### Do not
 
 - Put any of this in Baton's core (R-BTN-50): it is course data.
+- Declare `error_types` or a per-leg `non_retryable`: the validator refuses both.
 
 ### Tests
 
@@ -50,7 +74,10 @@ depends_on:
 
 ### Exit criteria
 
-- [ ] the course file and leg scripts use §2m's fields, merged in docs under the review gate
+- [ ] the course file and leg scripts use the fields above, merged in docs under the review gate
 - [ ] `ROLES` retired from the vendored library
 
 ## Status
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — item 3 declares `interrupt` condition
+types with `retryable` and throws `LegError(type, …)`; `error_types` is gone.)_

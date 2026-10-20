@@ -1,43 +1,70 @@
 ---
-title: "B-13 — Baton epic course: baton repo init --course epic, a planning leg that files child tickets"
+title: "B-13 — Baton epic course: a course directory whose planning legs are calls over create-pr"
 id: B-13
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
-order: 1116
+order: 1119
 tier: judgement
-description: "The CLI's `epic` course: `plan` files child tickets, `locate` queues `replan` after an unanswered withdrawal and `integrate` otherwise, `integrate` with `children done: true, skip_withdrawn: true` (BATON_SPEC R-BTN-124); S-BTN-89. Requires: B-10."
+description: "The standard `epic` course as a course directory, `src/defaults/courses/epic/`: `plan` (`filed`) and `replan` (`planned`, `max_runs` 2) are call legs over `create-pr` with the completion table `built` ← `{of: all, done: true, next: integrate}`, `planned` ← `{of: all, closed: true, next: replan}`, and `replan`'s `abandoned: null`; `integrate` is an agent leg (BATON_SPEC R-BTN-124); S-BTN-89, G-BTN-109. Requires: none."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
-  - B-10
+  - B-62
+  - B-43
 ---
 
-**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §2m.6b (R-BTN-124), R-BTN-74 and R-BTN-86 as amended.
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43); `epic` moved onto
+call legs on 2026-10-20 (§7.6).
+**Spec:** `spec/BATON_SPEC.md` §5.8 (R-BTN-124, R-BTN-131), §7.6 (R-BTN-165: call legs and
+completion tables), §4.6 (R-BTN-86: children and `parent`), §5.1 (R-BTN-134: course directories).
+**Depends on:** B-62 (call legs, `settleCall`, the `call` block), B-43 (standard courses as
+course directories in the baton repository).
+
+### Requires
+
+None: a checkout and a terminal.
 
 ### Why
 
-§2m is agreed and specified; this ticket builds its part of it.
+`epic` turns a request into child tickets and integrates them with no coordinator in core. Built
+on calls, a withdrawn child sends the epic to `replan` only once every child has closed, and the
+CLI ships no course of its own (R-BTN-134), so `epic` is a course directory like the others.
 
 ### What to build
 
-1. `baton repo init --course epic` writes the course file, its `locate` and stub leg scripts calling the repository's `agent_command`.
-2. `plan`'s output is a `std:git.file@1` plan, and `integrate` reads it.
+1. **The directory** `src/defaults/courses/epic/` in R-BTN-72's layout: `course.json` (start
+   `filed`; ends `integrated`, `abandoned`), `sync.mjs`, a script and instructions per leg. Its
+   shared code is copied in by `npm run courses`; its legs require `runner:leg-trees`; it
+   declares `error.no-answer` (`interrupt`, `retryable: false`).
+2. **`plan`** (`filed`) and **`replan`** (`planned`, `max_runs` 2) are `kind: call` legs with
+   `"spawns": {"course": "create-pr"}` and the completion table, in order:
+   `{"built": {"of": "all", "done": true, "next": "integrate"}, "planned": {"of": "all",
+   "closed": true, "next": "replan"}}`; `replan`'s table also has `"abandoned": null`. Each
+   script files its children git first through the source's `file` export, each naming the
+   epic as `parent` and `called_by`, and returns `spawned`; `plan`'s output is the plan, a
+   `std:git.file@1`. A `replan` that files nothing reports `abandoned`.
+3. **`integrate`** (`built` → `integrated`) is an ordinary agent leg that reads the plan and the
+   children's results (`called`) through git.
+4. **`locate`** in `sync.mjs` confirms Baton's settled position with `settleCall` from the CLI's
+   station-function library.
+5. Stubs call the repository's `agent_command`; the planning prompt is the repository's.
 
 ### Do not
 
-- Add a coordinator to core.
+- Add a coordinator to core, or select the children through `requires.tickets`.
+- Ship `epic` inside the CLI package: it is a course directory in the baton repository, which
+  a repository scaffolds with `baton repo init --course epic` (R-BTN-131, R-BTN-134).
 
 ### Tests
 
-- S-BTN-89; G-BTN-109; `baton course test` passes on the shipped course.
+- S-BTN-89; G-BTN-109; `baton course test` passes on the course directory.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green.
 
 ### Exit criteria
@@ -46,3 +73,6 @@ depends_on:
 - [ ] merged under the review gate
 
 ## Status
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — `epic` is a course directory whose
+`plan` and `replan` are call legs over `create-pr`, after B-62 and B-43.)_

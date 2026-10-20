@@ -1,45 +1,100 @@
 ---
-title: "B-11 — Baton retries per leg: course error types, Temporal-style policies, a backoff as a prerequisite, owners' bounds"
+title: "B-11 — Baton retries per leg: the default handler of error conditions, Temporal-style policies, a backoff as a prerequisite, owners' bounds"
 id: B-11
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1114
 tier: critical
-description: "`error_types` and `LegError`, per-leg `retry` policies with jitter, `in_claim`, `max_attempts_s` and `max_ready_s`, `leg_attempts` replacing the per-ticket backoff, the `retry` block refused `backing-off`, and the owners' default, ceiling and floor (BATON_SPEC R-BTN-122); S-BTN-83–87. Requires: B-10."
+description: "Retries as the default handler of `interrupt` conditions: `leg_attempts` per ticket and leg replacing the per-ticket backoff, per-leg `retry` policies (`initial_s`, `coefficient`, `max_interval_s`, `max_attempts`, `in_claim`, `exhausted`, `exhausted_on`) with jitter, retryability from the declared type's `retryable`, the `retry` block refused `backing-off`, in-claim retries, exhaustion holding and raising `baton.retries` or queuing the `exhausted` leg, `contract-input` raising `baton.contract`, counts reset on a hold lift and when the leg reaches an outcome, and the owners' bounds (BATON_SPEC R-BTN-122/R-BTN-23); S-BTN-5, -6, -7, -83–86; G-BTN-105–107. Requires: none."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
   - B-10
+  - B-55
+  - B-56
+  - B-38
 ---
 
-**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §2m.6a (R-BTN-122), §6.10, R-BTN-23, R-BTN-66 and §7.2 rule 10 as amended.
+**Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43); retries became
+the default handler of `error` conditions on 2026-10-20 (§7).
+**Spec:** `spec/BATON_SPEC.md` §7.4 (R-BTN-122 / R-BTN-23), §7.1 (R-BTN-160: `retryable`,
+`LegError(type, …)`, untyped errors as `error.transient`), §7.3 (R-BTN-163: `baton.retries`,
+`baton.contract`), §5.3 R-BTN-83 (held positions, `next_source: retry`), §6.1–§6.2 (the `retry`
+prerequisite and row), §6.6 rule 10, §9.7 (what counts as a failed attempt), §9.9 (activity
+`in-claim-retry`), §13.1's owner `retry` setting, §13.6's `leg_attempts`.
+**Depends on:** B-10 (per-leg rows), B-55 (declared `conditions` with `retryable`, typed
+`LegError`), B-56 (`baton.retries` and `baton.contract` as `suspend` core conditions), B-38 (held
+positions with their `next_source`, for `exhausted`).
+
+### Requires
+
+None: a checkout and a terminal.
 
 ### Why
 
-§2m is agreed and specified; this ticket builds its part of it.
+Today a ticket backs off as a whole on a fixed 1 h / 4 h schedule (`src/core/attempts.ts`), so a
+failing `review` spends `implement`'s attempts and a loop accumulates failures across passes.
+R-BTN-122 makes the retry policy per leg, the handler every `interrupt` condition falls to.
 
 ### What to build
 
-1. A migration adding `leg_attempts`, `claims.error_type` and the `retry` block kind; rule 10 and the gate query read the leg's backoff.
-2. The schedule, jittered ±10%, counted per ticket and leg; the alarm clears the row and fires `unblocked`.
-3. The runner's `LegError` export and in-claim retries (each an activity, capped at 5 minutes).
-4. The owners' `retry` setting: the default, the ceiling on every quota-spending field, `coefficient` ≥ 1, the floor; `baton course test` warns of cut-backs and of an undeclared floor type.
+1. **State.** A new migration adds `leg_attempts` (repository, ticket, leg, `attempts`,
+   `first_attempt_at`, `retry_after`, `last_error_type`) and `claims.error_type`, and the
+   `retry` block kind; it moves today's `ticket_overrides.retry_after` onto the queued leg's
+   row. The row resets when a run of the leg reaches one of its outcomes (an `advance` or end
+   reporting it, or a posted path extended by it) and when a hold is lifted.
+2. **Policy.** `validateCourse` (`src/core/course.ts`) accepts a leg's `retry` with `initial_s`,
+   `coefficient`, `max_interval_s`, `max_attempts`, `in_claim`, `exhausted` (a leg leaving the
+   same station) and `exhausted_on` (declared types); a leg without one takes the repository's
+   default. Whether a type is retried is its declaration's `retryable` (B-55) and the owners'
+   floor; there is no per-leg `non_retryable`. An untyped exception is `error.transient`.
+3. **Backoff.** After failed attempt *n*, `retry_after` = now + `min(initial_s ×
+   coefficient^(n−1), max_interval_s)` × a uniform factor in [0.9, 1.1]; meanwhile a `retry` row
+   on that leg (`until` = `retry_after`) refuses a claim or `advance` `backing-off` with `until`
+   (rule 10, `src/core/gates.ts`), the leg leaves recommendations, and `baton leg why` shows
+   `attempt: <n> of <max>`. The alarm clears the row at `retry_after` and `unblocked` follows.
+   A backoff on one leg leaves the ticket's other legs alone.
+4. **In the claim.** The runner (`src/runner/runner.ts`) re-runs a leg failing with a retryable
+   type up to `in_claim` times under the same claim, waiting the schedule's first steps (at most
+   5 minutes each); each re-run is an `in-claim-retry` activity, neither a run for `max_runs`
+   nor a failed attempt. A provider at capacity is a blocked end (B-21), never an in-claim
+   retry.
+5. **Exhaustion.** At `max_attempts`, a spent `first_attempt` budget (`budget-spent`, set by
+   B-61's timer) or a non-retryable class: Baton holds the ticket (`attempts-exhausted`,
+   `budget-spent` or `non-retryable:<class>`), logs the reason and raises `baton.retries`;
+   unless the policy names `exhausted`, in which case it queues that leg (`next_source: retry`,
+   held via B-38 until the station changes) and raises nothing. A non-retryable type still
+   holds unless `exhausted_on` lists it. `contract-input` holds at once, is not an attempt and
+   raises `baton.contract`. `lease-lost` counts once per distinct runner.
+6. **Owners' bounds.** The owners' `retry` setting (`PUT /v1/owner/{repository}/settings`)
+   holds R-BTN-122's table: the default policy; ceilings on `max_attempts`, `max_interval_s`,
+   `in_claim`, an interrupting `start` or `first_attempt` timer and `max_refreshes`; the owners'
+   own `max_blocked` and `max_wait_s`; floors on `initial_s`, `coefficient` (below 1 refused by
+   core and the kit) and the never-retried types `capability`, `spec`, `contract-input`. Baton
+   applies field by field the stricter of course and owners, and the course view shows the
+   policy in force.
+7. **The kit.** `baton course test` warns where the bounds cut a policy back and when a floor
+   type is not declared, and refuses a policy naming an undeclared type.
 
 ### Do not
 
-- Let a course policy exceed the owners' ceiling.
+- Let a course policy exceed the owners' bounds, or a course set `max_blocked`.
+- Build `max_attempts_s` or `max_ready_s`: they are B-61's timers, and the validator refuses them.
+- Retry an error naming a prerequisite: that is a blocked end (B-21).
 
 ### Tests
 
-- S-BTN-83 to S-BTN-87; G-BTN-105, G-BTN-106, G-BTN-107.
+- S-BTN-5, S-BTN-6, S-BTN-7, S-BTN-83 to S-BTN-86; G-BTN-105, G-BTN-106, G-BTN-107 (the
+  `first_attempt` clause with B-61).
+- Unit: `src/core/attempts.ts`'s schedule with jitter bounds; the reset on an outcome for a
+  looped leg; the stricter-of table.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green.
 
 ### Exit criteria
@@ -48,3 +103,7 @@ depends_on:
 - [ ] merged under the review gate
 
 ## Status
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — retries are the default handler of
+`interrupt` conditions; `error_types`, `max_attempts_s`, `max_ready_s` and `retry.non_retryable`
+are gone, and counts also reset when the leg reaches an outcome.)_

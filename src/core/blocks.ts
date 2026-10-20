@@ -50,6 +50,9 @@ export interface Ctx {
   decisions?: { opened: (ticket: string, ids: string[]) => void; closed: (ticket: string, ids: string[]) => void };
   /** R-BTN-81: a logged `blocked` or `unblocked` is a history row too. */
   history?: History;
+  /** R-BTN-79: whatever is re-evaluated here — the queued leg, the course, the hold — is what
+   *  moves a ticket between leg queues, in the same transaction (Queues.touch). */
+  queued?: (ticketId: string) => void;
 }
 
 /** R-BTN-78: the decisions Baton raises itself, each `asks: owner` on the whole ticket, answered in
@@ -311,7 +314,7 @@ export class Blocks {
   }
 
   /** Whether a claim holds the ticket — rule 3's check, the one definition (R-BTN-75). */
-  private isHeld(id: string): boolean {
+  isHeld(id: string): boolean {
     return this.rows(`SELECT 1 FROM claims WHERE ticket_id = ? AND (status = 'active' OR (status = 'completed' AND confirmed_at IS NULL)
                       OR (status = 'reaped' AND fence_pending = 1)) LIMIT 1`, id).length > 0;
   }
@@ -320,6 +323,7 @@ export class Blocks {
    *  that leg — a ticket with no queued leg (done, or placed nowhere) is not blocked; `blocked_since`
    *  follows, and its transitions are the `blocked` and `unblocked` events. */
   private evaluate(id: string, cleared: Cleared[], silent: boolean, since: number | null = null) {
+    this.c.queued?.(id);
     const t = this.rows<{ repository_id: string; blocked_since: number | null }>('SELECT repository_id, blocked_since FROM tickets WHERE id = ?', id)[0];
     if (!t) return;
     const queued = this.queuedLeg(id);

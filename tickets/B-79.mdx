@@ -1,0 +1,150 @@
+---
+title: "B-79 — Fences, idempotency and adoption after the adversarial review: fences that clear at a deadline, session-mode reaps fenced, resume records bounded, claims idempotent per runner, adoption confirmed by an administrator"
+id: B-79
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1144
+tier: critical
+description: "Build the adversarial review's changes to BATON_SPEC §8, §9 and §16.1 (adv-3 F1, F2, F10–F14; adv-4 M5): `claims.fence_deadline` (the reap instant plus the runner's lease timeout) set by every reap of a live runner's claim, which sets no `reaped_at`, and cleared by the alarm at the deadline whatever the runner does (`fence-cleared {deadline: true}`); `baton.fence-pending` after 30 minutes; every reap of a claim running a `session`-mode leg fence-pending, the runner reporting `fenced` only once the provider confirms the child interrupted or archived; the sidecar fencing on the lowest lease timeout in force at `last_ok` or declared since; the spool drained before `end`, a grace-period close carrying `resume` rewriting `resume_json`, `previous_attempts` capped at the newest 10 with hand-off URLs and `previous_attempts_total`; a resume-named branch continued only when it matches the current or previous `branch_pattern`; claim idempotency keyed by `(runner_id, request_id)`; the claim nonce public; `adoption_requests`, `adopt` answering `{pending: true}` until an administrator confirms one runner's request and refusing the others `forbidden`, and legacy runners exempt from uniqueness and lease expiry; the model. S-BTN-4, S-BTN-16, G-BTN-2, G-BTN-14, G-BTN-19. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-60
+  - B-47
+  - B-57
+---
+
+**Brief:** the coverage audit of the tickets against the spec (2026-10-20) found the adversarial
+review's fixes to fences, claims and cutover adoption (spec/BATON_SPEC_HISTORY.md, "Adversarial
+review (2026-10-20)", adv-3 F1, F2, F10–F14; adv-4 M5) ticketed nowhere, and B-60's text still
+clearing a `leg-timeout` fence on the runner's silence. This ticket builds them.
+**Spec:** `spec/BATON_SPEC.md` §9.5 R-BTN-19 (`fence_deadline`, `baton.fence-pending`,
+`session`-mode reaps) and reaping; §7.5 R-BTN-90 (the `leg-timeout` reap clears at the fence's
+deadline); §8.1 R-BTN-9 (the lowest declared timeout) and R-BTN-14 (a re-key never clears a
+fence); §9.2 R-BTN-6, R-BTN-26 (what the old incarnation computes); §9.8 R-BTN-24 (the resume
+record) and R-BTN-25 (continuing a branch); §9.1 (idempotency per runner, the public nonce);
+§8.4 R-BTN-144 (the nonce is not masked); §8.3 R-BTN-107 (`session` mode); §16.1 R-BTN-28
+(adoption requests, legacy runners); §13.3 `runners`, §13.5 `claims` (`fence_deadline`,
+`request_id` unique per runner) and `adoption_requests`; §14 `POST /v1/runner/adopt`; §15 S-BTN-4,
+S-BTN-16, G-BTN-2, G-BTN-14, G-BTN-19.
+**Depends on:** B-60 (the `leg-timeout` reap, whose clearing this ticket replaces with
+`fence_deadline`); B-47 (`session`-mode legs, whose reaps become fence-pending); B-57
+(`baton.<sub>` conditions).
+
+### Requires
+
+None: every case runs in the integration harness with a fake clock and a fake provider.
+
+### Why
+
+The adversarial review found that a fence could stay pending forever: after a force-reap, a
+sidecar that lost its state file re-keys, the new incarnation's heartbeats keep `last_seen_at`
+fresh, the old secret can no longer report `fenced`, and the ticket is never claimable again with
+nothing on the dashboard saying why. A `session`-mode child has no sidecar or hooks, so a silence
+reap left it pushing unfenced. A heartbeat that lowers the lease timeout and loses its response
+let Baton reap on a shorter lease than the sidecar fenced on. Resume records missed late closes
+and grew without bound, a prior claimant could steer its successor onto another ticket's branch,
+and another runner's colliding `request_id` was handed someone else's claim. At cutover, the first
+runner to name a legacy session adopted its claim with no one checking.
+
+### What to build
+
+1. **Migration** (one new numbered file in `src/migrations/`): `claims.fence_deadline`; the
+   unique index on `claims.request_id` replaced by one on `(runner_id, request_id)`;
+   `adoption_requests (claim_id, runner_id)` with `requested_at` and `confirmed_at`, replacing the
+   current adoption rows; `(hostname, session_name)` uniqueness applying to every runner but a
+   `legacy` one.
+2. **Fences that clear** (`src/core/claims.ts`, the alarm):
+   - Every reap of a live runner's claim — the force-reap, the unacknowledged-release reap and
+     B-60's `leg-timeout` reap — sets `fence_pending`, `fence_incarnation` and `fence_deadline` (the
+     reap instant plus the runner's `lease_timeout_ms`) and sets no `reaped_at`.
+   - The fence clears when that incarnation's sidecar reports `fenced: {claim_id, terminated:
+     true}` (`fence-cleared`), or when the alarm reaches `fence_deadline`, whatever the runner did
+     meanwhile — a re-key, a new incarnation's heartbeats, a heartbeat that cannot terminate
+     (`fence-cleared {deadline: true}`). A re-key never clears it.
+   - A fence still pending 30 minutes after the reap raises `baton.fence-pending` on the ticket,
+     naming the runner and the deadline; clearing closes it.
+   - `fence_deadline` is an alarm instant (§13's list) and shows on the ticket's row.
+3. **`session`-mode reaps** (`src/core/claims.ts`, `src/runner/runner.ts`): every reap of a claim
+   running a `session`-mode leg, a silence reap included, is fence-pending. The runner reports
+   `fenced` for it only once the provider confirms the child session interrupted or archived;
+   otherwise the fence clears at `fence_deadline`, and the child's later markers are noticed as
+   `foreign-write` (B-78).
+4. **The lowest timeout** (`src/runner/state.ts`, `src/runner/runner.ts`): the state file keeps the
+   lowest `lease_timeout_s` in force at `last_ok` and declared since, and every fence check
+   (R-BTN-6, R-BTN-26) computes on it.
+5. **Resume records** (`src/runner/runner.ts`, `src/core/workerApi.ts`, `src/core/claims.ts`):
+   - The runner drains its spool before it calls `end`.
+   - A close accepted in the 10-minute grace that carries `resume` rewrites the claim's
+     `resume_json`.
+   - The claim response's `previous_attempts` holds the newest 10, newest first, each with its
+     resume record, legs run and hand-off URL, plus `previous_attempts_total`.
+6. **Continuing a branch** (`src/runner/runner.ts`): a branch the resume record names is continued
+   only when it matches the course's current or previous `branch_pattern` for this ticket; any
+   other is ignored and logged. A tainted branch is never continued.
+7. **Idempotency per runner** (`src/core/claims.ts`): a repeated `request_id` returns the original
+   claim only to the runner that sent it; another runner's same `request_id` is a new request.
+8. **The public nonce** (R-BTN-144, §9.1): the state view (`IR_BATON_STATE`) carries the claim
+   nonce, and the masking set leaves it out. B-47's state view and B-46's masking set follow this.
+9. **Adoption** (`src/core/cutover.ts`, the routes in `src/core/baton.ts`, `src/ui/app.js`):
+   - `POST /v1/runner/adopt {ticket_id}` from a runner whose `session_name` equals the legacy
+     runner's records an `adoption_requests` row and answers `{pending: true}` until confirmed.
+   - `POST /v1/ui/adoptions/{claim}/confirm {runner_id}` confirms one request by an administrator,
+     through the dashboard's confirmation (R-BTN-155); the dashboard lists each requester's
+     hostname and session name. The confirmed runner's next `adopt` gets the claim; every other
+     requester is refused `forbidden`.
+   - The cutover import makes one legacy runner per ticket, sharing a `session_name` where one
+     session held several git claims; lease expiry skips `legacy` runners, whose claims end only
+     at `reap_after`.
+10. **The model** (R-BTN-68): in `model/baton.qnt`, `fence_deadline` clearing every fence whatever
+    the runner does, `session`-mode reaps fenced, and adoption only after a confirmed request; the
+    property that every fence clears by its deadline. Attach the `npm run model:pr` report.
+
+### Do not
+
+- Let anything a runner does after the reap — a re-key, a heartbeat, a new incarnation — extend
+  or clear a fence before its deadline but the old incarnation's own `fenced` report (G-BTN-14).
+- Set `reaped_at` on a fence reap; the runner must still be able to heartbeat and report.
+- Report `fenced` for a `session`-mode leg on the runner's word alone.
+- Hand a claim to a runner on its `session_name` alone.
+- Treat the nonce as a secret anywhere.
+- Edit an old migration.
+
+### Tests
+
+- On both hosts, a new `test/integration/S-BTN-4.force-reaped.test.ts` (R3-1213 adds the real
+  sidecar's half): a force-reap of a hung tool call, unissued until `fence-cleared`; a sidecar that
+  re-keys after losing its state file, cleared at `fence_deadline`, `baton.fence-pending` raised
+  at 30 minutes; a `session`-mode leg whose runner went silent, fence-pending until the fake
+  provider confirms the interrupt, and again until the deadline when it never does.
+- On both hosts, `test/integration/S-BTN-16.cutover.test.ts` extended: one session holding two git
+  claims, two legacy runners; two runners with one `session_name` on different hosts requesting
+  one adoption, `{pending: true}` to both, the confirmed one adopting and the other `forbidden`;
+  a silent legacy runner not reaped before `reap_after`.
+- `test/integration/S-BTN-1.claim-race.test.ts`, G-BTN-2's case: two runners sending one
+  `request_id` get two claims; a repeat from one runner returns its own.
+- Unit: the lowest timeout across a lowering heartbeat whose response is lost; `previous_attempts`
+  at 11 earlier claims; a grace close rewriting `resume_json`; a resume record naming another
+  ticket's branch, ignored; the nonce present in the state view and unmasked in a leg log.
+- Model: `npm run model` with the new actions and properties.
+
+### Exit criteria
+
+- [ ] S-BTN-4 (this ticket's rows), S-BTN-16 and S-BTN-1's G-BTN-2 case pass on both hosts;
+      G-BTN-2, G-BTN-14 and G-BTN-19 hold
+- [ ] `model/` changed in the same PR, with its `npm run model:pr` report (R-BTN-68)
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 from the coverage audit of the tickets against the spec, for the adversarial
+review's fixes to §8, §9 and §16.1; it replaces B-60's fence clearing "until the runner goes
+silent past its lease" with `fence_deadline`)_

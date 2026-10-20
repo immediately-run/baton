@@ -8,10 +8,11 @@ import { transcriptUrl } from './links';
 import { isUniqueViolation, logEvent, randomHex } from './db';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
-import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End } from './validate';
+import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
-import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Step } from './graph';
+import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
+import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from '../shared/schema.mjs';
 import type { Seen, Stations } from './stations';
 import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
 import type { Row, SqlValue, Store } from './ports';
@@ -42,6 +43,10 @@ export interface Ctx {
   blocks?: Blocks;
   /** R-BTN-81, R-BTN-85: the ticket's history and Baton's disagreements with git. */
   history?: History;
+  /** R-BTN-79: a course's intake, `closed` while any of its legs is over its `max_queue`. */
+  intake?: (repo: string, course: string) => 'open' | 'closed';
+  /** R-BTN-108: a schema by id for a repository — the `std:` library's or the repository's. */
+  schema?: (repo: string, id: string) => Schema | null;
 }
 
 interface WorkerFacts {
@@ -60,6 +65,8 @@ interface WorkerFacts {
   /** R-BTN-60: what rule 8 matches. */
   tags: string[];
   credential_id: string;
+  /** R-BTN-107: the isolation its last heartbeat declared. */
+  isolation: 'attached' | 'process' | 'session';
   /** R-BTN-58: its key's grants by repository, or null for a key no owner granted (gates.ts). */
   grants: Record<string, { capabilities: string[]; max_tier: number | null }> | null;
 }
@@ -193,7 +200,7 @@ export class Claims {
 
   private worker(id: number): WorkerFacts {
     const w = this.rows<Omit<WorkerFacts, 'declared' | 'courses' | 'tier_ceilings' | 'tags' | 'grants'> & { tier_ceilings: string; created_by: string | null }>(
-      `SELECT w.id, w.kind, w.incarnation, w.tier_ceiling, w.tier_ceilings, w.lease_timeout_ms, w.last_seen_at, w.last_activity_at, w.credential_id, c.created_by
+      `SELECT w.id, w.kind, w.incarnation, w.tier_ceiling, w.tier_ceilings, w.lease_timeout_ms, w.last_seen_at, w.last_activity_at, w.credential_id, w.isolation, c.created_by
        FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE w.id = ?`, id)[0];
     if (!w) throw new BatonError('unauthenticated', 'no such worker');
     const declared = this.rows<{ declared: string }>('SELECT DISTINCT declared FROM worker_capabilities WHERE worker_id = ? ORDER BY declared', id).map((r) => r.declared);
@@ -256,11 +263,29 @@ export class Claims {
     return this.rows<{ n: number }>('SELECT last_handed_out AS n FROM board_head WHERE repository_id = ?', repo)[0]?.n ?? 0;
   }
 
-  /** The leg as the head snapshot posted it for the ticket, and its barred tags (R-BTN-70). */
+  /** The leg as the head snapshot posted it for the ticket, its barred tags (R-BTN-70), and what
+   *  the course file and the owners ask of whoever takes it (R-BTN-106, R-BTN-107). */
   private postedLeg(item: ItemFacts, leg: string, phase: Phase): GateLeg {
     const n = this.rows<{ state: 'ready' | 'waiting' }>('SELECT state FROM ticket_next_legs WHERE ticket_id = ? AND leg = ?', item.id, leg)[0];
     const posted = this.rows<{ tag: string }>('SELECT tag FROM ticket_bars WHERE ticket_id = ? AND leg = ? ORDER BY tag', item.id, leg).map((r) => r.tag);
-    return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...this.ownerBarTags(item, leg, phase)])] };
+    const g = this.stations.graph(item.repository, item.course);
+    const def = g?.legs.get(leg);
+    // The owners' list joins the file's, as required bars join posted ones (R-BTN-67): a file
+    // that drops its list loosens nothing the owners hold.
+    // Its keys are followed through `renamed_from` too, so renaming the leg loosens nothing.
+    const owners = Object.entries(this.c.admin.requiredIndependence(item.repository))
+      .filter(([key]) => (g ? resolveLeg(g, key) ?? key : key) === leg).flatMap(([, from]) => from);
+    const noChainFrom = [...new Set([...(def?.noChainFrom ?? []), ...owners].map((l) => (g ? resolveLeg(g, l) ?? l : l)))];
+    return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...this.ownerBarTags(item, leg, phase)])], noChainFrom, isolation: def?.isolation ?? null };
+  }
+
+  /** R-BTN-106: the legs `credential` has run on the ticket, in this claim or an earlier one —
+   *  `claim_legs` through each claim's worker to its credential — as current names. */
+  private ranByKey(item: ItemFacts, credential: string): string[] {
+    const g = this.stations.graph(item.repository, item.course);
+    return this.rows<{ leg: string }>(
+      `SELECT DISTINCT l.leg FROM claim_legs l JOIN claims k ON k.id = l.claim_id JOIN workers w ON w.id = k.worker_id
+       WHERE k.ticket_id = ? AND w.credential_id = ?`, item.id, credential).map((r) => (g ? resolveLeg(g, r.leg) ?? r.leg : r.leg));
   }
 
   /** R-BTN-67: the tags the owner bars in force bar from `leg` of the ticket — its course's bars and
@@ -286,6 +311,7 @@ export class Claims {
       headObservation: this.rows<{ n: number }>('SELECT observation AS n FROM board_head WHERE repository_id = ?', item.repository)[0]?.n ?? 0,
       lastEndObservation: this.rows<{ n: number | null }>('SELECT MAX(end_observation) AS n FROM claims WHERE ticket_id = ?', item.id)[0]?.n ?? -1,
       holderBars: opts.holderBars,
+      ranByKey: this.ranByKey(item, w.credential_id),
       // R-BTN-78: Baton's own decisions refuse nothing advice would not — `baton:retries` sits on a
       // ticket its hold keeps (rule 3), `baton:stalled` on a queued leg posted waiting (rule 1) — so
       // they are left to those rules, whose refusals name the cause; they stay blocks for asking.
@@ -293,7 +319,7 @@ export class Claims {
         `SELECT b.kind, b.leg FROM ticket_blocks b WHERE b.ticket_id = ? AND b.kind IN ('ticket', 'decision')
            AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))`, item.id),
     };
-    return gatesFor({ declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants }, ticket, this.postedLeg(item, leg, phase), phase, facts);
+    return gatesFor({ declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase), phase, facts);
   }
 
   /** Rule 2's count (advice): active Baton claims on expedited tickets, not git in-progress. */
@@ -391,7 +417,9 @@ export class Claims {
         const item = this.item(c.id);
         // R-BTN-76: a leg blocked on a resource — for the fleet, or for this worker by its own
         // instances — is left out after the gate query: advice, never a refusal.
-        if (item?.station?.next_leg && this.gate(w, item, item.station.next_leg, 'claim').ok && !this.resourceAdvice(w.id, item.id, item.station.next_leg).length) g.rows.push({ ...c, item });
+        // R-BTN-79: so is a new ticket of a course whose intake is closed, so its queues drain.
+        if (item?.station?.next_leg && this.gate(w, item, item.station.next_leg, 'claim').ok && !this.resourceAdvice(w.id, item.id, item.station.next_leg).length
+          && !this.intakeClosed(item)) g.rows.push({ ...c, item });
       }
       for (const [key, g] of groups) if ((counts.get(key) ?? 0) < 50) g.done = true;
     }
@@ -422,8 +450,17 @@ export class Claims {
     }));
   }
 
+  /** R-BTN-79: whether `item` is a new ticket — at its course's start with an empty path — of a
+   *  course whose intake is closed, and not expedited (R-BTN-12: the owner's say still counts). */
+  private intakeClosed(item: ItemFacts): boolean {
+    if (item.expedite || !item.station || item.station.path.length) return false;
+    if (this.c.stations.graph(item.repository, item.course)?.start !== item.station.station) return false;
+    return this.c.intake?.(item.repository, item.course) === 'closed';
+  }
+
   /** The refusal a failed gate becomes (§11): `barred-tag`, `stale-skills` and `backing-off` have
-   *  codes of their own; every other gate is `not-eligible` naming the rule. */
+   *  codes of their own; every other gate is `not-eligible` naming the rule — `chain` and
+   *  `isolation` by name (R-BTN-106, R-BTN-107). */
   private refusal(ticketId: string, v: Exclude<GateVerdict, { ok: true }>, phase: Phase): BatonError {
     const code = v.code === 'blocked' ? 'blocked' : v.rule === 8 ? 'barred-tag' : v.rule === 9 ? 'stale-skills' : v.rule === 10 ? 'backing-off' : 'not-eligible';
     return new BatonError(code, `${ticketId}: ${v.code} at ${phase === 'claim' ? 'a claim' : 'an advance'}`, { rule: v.rule, rule_code: v.code });
@@ -446,6 +483,7 @@ export class Claims {
         ...(place !== 0 ? [{ advice: 'order', place: place < 0 ? null : place + 1, first: recs[0]?.ticket_id ?? null }] : []),
         ...(item.expedite && this.expediteActive() >= EXPEDITE_BOUND ? [{ advice: 'expedite-bound', bound: EXPEDITE_BOUND }] : []),
         ...(resources.length ? [{ advice: 'resource', leg: item.station.next_leg, resources }] : []),
+        ...(this.intakeClosed(item) ? [{ advice: 'intake', course: item.course }] : []),
       ];
       return { item, advice: overridden.length ? { recommendation: place < 0 ? null : recs[place], overridden } : place === 0 ? { recommendation: recs[0] } : null };
     }
@@ -668,6 +706,9 @@ export class Claims {
     if (unmet) throw new BatonError('not-eligible', `policy: ${leg} must bar a ${unmet.tag_prefix} tag (an owner's required bar)`, { rule: 8, rule_code: 'policy' });
     const v = this.gate(this.worker(workerId), item, leg, 'advance', { except: claimId, holderBars: b.bars });
     if (!v.ok) throw this.refusal(c.ticket_id, v, 'advance');
+    // R-BTN-109: the finished leg arrives at `at` with what its entry asks; inline values in full.
+    if (run) this.checkEntry(repo, g, at, b.outputs);
+    else this.checkOutputValues(repo, b.outputs);
     // R-BTN-76: an advance into a leg blocked on a resource is accepted — the holder may know better.
     const resources = this.resourceAdvice(workerId, c.ticket_id, leg);
     if (resources.length) this.event('advice-overridden', `worker:${workerId}`, { overridden: [{ advice: 'resource', leg, resources }] }, c.ticket_id, claimId);
@@ -719,8 +760,60 @@ export class Claims {
       throw new BatonError('claim-ended', `the claim already ended (${c.status}: ${c.end_reason})`);
     }
     const { reached, finished } = this.restingAt(c, e);
+    // R-BTN-109: a completed end that finishes its leg arrives at `reached` and meets its entry. A
+    // release is not checked: it is how the runner gives up a leg whose outputs fail (R-BTN-82).
+    const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
+    if (e.status === 'completed' && finished && g) this.checkEntry(repositoryOf(c.ticket_id), g, reached, e.outputs);
+    else if (e.status === 'completed') this.checkOutputValues(repositoryOf(c.ticket_id), e.outputs);
     this.finish(c.id, c.ticket_id, e.status, e.end_reason, `worker:${workerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next });
     return { ok: true };
+  }
+
+  /**
+   * R-BTN-109: an arrival at `station` must carry each output its `entry` names — by that name,
+   * with the required schema or one refining it (by the repository's posted base chains). Every
+   * inline value is validated in full with the shared validator, against its schema and each
+   * base (R-BTN-108). An unmet requirement or an invalid value is refused `not-eligible`, rule
+   * `entry` — which the runner treats as an output contract failure.
+   */
+  private checkEntry(repo: string, g: Graph, station: string, outputs: Output[]) {
+    const resolve = this.resolver(repo);
+    this.checkOutputValues(repo, outputs, resolve);
+    for (const r of g.entry.get(station) ?? []) {
+      const o = outputs.find((x) => x.name === r.output);
+      if (!o) throw new BatonError('not-eligible', `entry: ${station} requires the output ${r.output} (${r.schema})`, { rule: 'entry', rule_code: 'entry' });
+      if (!resolve(o.schema) || !baseChain(o.schema, resolve).includes(r.schema)) {
+        throw new BatonError('not-eligible', `entry: ${r.output} is ${o.schema}, which is not ${r.schema} or a refinement of it`, { rule: 'entry', rule_code: 'entry' });
+      }
+    }
+  }
+
+  /** One request's schema resolver (3-r3-1): each id read and parsed once, so the validator's
+   *  done-once work — enum sets and `const` keys, keyed by the schema object — is done once, and
+   *  the reads are bounded by the schemas a chain names, not by the value's size. */
+  private resolver(repo: string): (id: string) => Schema | null {
+    const seen = new Map<string, Schema | null>();
+    return (id) => {
+      if (!seen.has(id)) seen.set(id, this.c.schema?.(repo, id) ?? null);
+      return seen.get(id) ?? null;
+    };
+  }
+
+  /** R-BTN-108: each inline value, against its schema and every base; a value whose schema chain
+   *  does not bound it is given by pointer instead. */
+  private checkOutputValues(repo: string, outputs: Output[], resolve = this.resolver(repo)) {
+    // One budget for the request: up to 16 outputs share it (baton#69 round 2, 2-r2-0).
+    const meter = { steps: PATTERN_STEPS_MAX };
+    for (const o of outputs) {
+      if (!Object.prototype.hasOwnProperty.call(o, 'value')) continue;
+      if (!resolve(o.schema)) throw new BatonError('not-eligible', `entry: ${o.name}'s schema ${o.schema} is not posted or in the std: library`, { rule: 'entry', rule_code: 'output-invalid' });
+      const unbounded = unboundedAt(o.schema, resolve);
+      if (unbounded) throw new BatonError('invalid-params', `outputs: ${o.name} is given inline, but its schema does not bound it (${unbounded}); give it by pointer`);
+      const faults = validate(o.value, o.schema, resolve, meter);
+      if (faults.length) {
+        throw new BatonError('not-eligible', `entry: ${o.name} fails ${o.schema}: ${faults.slice(0, 3).map((f) => `${f.path || '/'} ${f.message}`).join('; ')}`, { rule: 'entry', rule_code: 'output-invalid' });
+      }
+    }
   }
 
   /**

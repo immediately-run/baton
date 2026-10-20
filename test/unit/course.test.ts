@@ -32,6 +32,33 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(validateCourse(c)).toEqual([]);
   });
 
+  it('no_chain_from names legs of this course, and isolation is "session" (R-BTN-106, R-BTN-107)', () => {
+    const c = copy();
+    c.legs.review.no_chain_from = ['implement', 'fix'];
+    c.legs.review.isolation = 'session';
+    expect(validateCourse(c)).toEqual([]);
+    c.legs.review.no_chain_from = ['implement', 'ghost'];
+    expect(rules(c)).toEqual(['no-chain-from legs.review.no_chain_from.1']);
+    c.legs.review.no_chain_from = 'implement';
+    expect(rules(c)).toEqual(['no-chain-from legs.review.no_chain_from']);
+    c.legs.review.no_chain_from = Array.from({ length: 65 }, () => 'implement');
+    expect(rules(c)).toEqual(['no-chain-from legs.review.no_chain_from']);
+    delete c.legs.review.no_chain_from;
+    c.legs.review.isolation = 'process';
+    expect(rules(c)).toEqual(['bound legs.review.isolation']);
+  });
+
+  it('a station names its entry outputs by name and schema id; an output may name an id or a legacy path (R-BTN-108, R-BTN-109)', () => {
+    const c = copy();
+    c.stations.reviewed.entry = [{ output: 'findings', schema: 'roadmap-pr:findings@2' }, { output: 'change', schema: 'std:forge.change@1' }];
+    c.legs.review.outputs = { findings: { schema: 'roadmap-pr:findings@2' }, notes: { schema: 'schemas/notes.json' } };
+    expect(validateCourse(c)).toEqual([]);
+    c.stations.reviewed.entry = [{ output: 'findings', schema: 'findings.json' }, { output: 'findings', schema: 'std:url@1' }, { output: 'x', schema: 'std:url@1', why: 1 }, 'x'];
+    expect(rules(c)).toEqual(['entry stations.reviewed.entry.0.schema', 'entry stations.reviewed.entry.1.output', 'unknown-key stations.reviewed.entry.2.why', 'entry stations.reviewed.entry.3']);
+    c.stations.reviewed.entry = 'findings';
+    expect(rules(c)).toEqual(['entry stations.reviewed.entry']);
+  });
+
   it('a station no leg reaches is unreachable', () => {
     const c = copy();
     c.stations.orphan = { label: 'Nobody gets here' };

@@ -3,7 +3,7 @@ title: "B-40 — The build-app standard course: product definition, design, arch
 id: B-40
 project: baton
 status: in-progress
-updated: 2026-10-19
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -23,8 +23,8 @@ definition document, and then gradually the user interfaces, overall software ar
 operations, concerns like where the software should run and how state should be persisted, how
 users should be authenticated … Then tickets created, and finally PRs from those tickets", tested
 on an online version of Blokus.
-**Spec:** `spec/BATON_SPEC.md` R-BTN-131 (the standard courses), R-BTN-86 (children), R-BTN-83
-(markers). This ticket amends R-BTN-131.
+**Spec:** `spec/BATON_SPEC.md` §5.8 R-BTN-131 (the standard courses), §4.6 R-BTN-86 (children), §5.3
+R-BTN-83 (markers); §15 S-BTN-107, G-BTN-126. This ticket amends R-BTN-131.
 
 ### Requires
 
@@ -72,4 +72,6 @@ built underneath it.
 
 ## Status
 
-_(filed 2026-10-19)_ Pushed straight to `main` at the owner's direction, 2026-10-19, without a PR or the review gate; the trial run is outstanding. The interim forms it uses (`waiting_on: owner` over `answer:`, the parent's `blocked_by` fan-in, `tags: [OP]`) move under B-41 (§2n, R-BTN-132).
+_(filed 2026-10-19)_ Pushed straight to `main` at the owner's direction, 2026-10-19, without a PR or the review gate; the trial run is outstanding. The interim forms it uses (`waiting_on: owner` over `answer:`, the parent's `blocked_by` fan-in, `tags: [OP]`) move under B-41 (§6.1, R-BTN-132).
+
+_2026-10-20 — conflict with the current-state spec (PR #71), recorded, not rescoped: the spec's `build-app` has `file` and `verify` as call legs with `"spawns": {"course": "*"}` and completion tables, and its four approvals as person legs (§5.8 R-BTN-131, §7.6 R-BTN-165). The course this ticket built is the migration-window form (history: R-BTN-132's window and "Course fields the schema review removed"), and S-BTN-107's test still asserts `waiting_on: children`. B-41's phase 2 with B-62 (call legs) and B-7 (person legs) moves it as a new course version; the "replaced by" table's children row now reads B-62, not B-10's `requires.tickets`, and its session-link row B-34 as rescoped (a `notify` condition, not a notice). This ticket's scope is unchanged and the trial run is still outstanding._
