@@ -127,6 +127,46 @@ describe('bounded work on a $ref fan-out the sync accepts (1-B-0)', () => {
   });
 });
 
+describe('round 1 (A): pattern cost, the bound\'s holes, deep JSON, the subset', () => {
+  it('one value\'s patterns share one budget: a base chain of distinct costly patterns is refused, not run for 40 s (1-A-0)', () => {
+    const S: Record<string, Record<string, unknown>> = {};
+    for (let i = 0; i < 32; i++) {
+      S[`c:s${i}@1`] = { ...(i ? { 'x-baton-base': `c:s${i - 1}@1` } : {}), type: 'array', maxItems: 100, items: { type: 'string', maxLength: 256, pattern: `[a-z]{0,1000}[a-z]{0,${1000 - i}}$` } };
+    }
+    const start = performance.now();
+    const faults = validate(Array(15).fill('a'.repeat(256)), 'c:s31@1', resolveWith(S));
+    expect(performance.now() - start).toBeLessThan(5000);
+    expect(faults.map((f) => f.message)).toContain('the value\'s patterns cost more than the validator allows');
+  });
+
+  it('a root that leaves its type open, and an array open past prefixItems, bound nothing (1-A-1, 1-A-2)', () => {
+    expect(unboundedAt('c:a@1', resolveWith({ 'c:a@1': {} }))).toMatch(/any type/);
+    expect(unboundedAt('c:a@1', resolveWith({ 'c:a@1': { title: 'x' } }))).toMatch(/any type/);
+    expect(unboundedAt('c:a@1', resolveWith({ 'c:a@1': { type: 'array', prefixItems: [{ const: 1 }] } }))).toMatch(/any items/);
+    expect(unboundedAt('c:a@1', resolveWith({ 'c:a@1': { type: 'array', prefixItems: [{ const: 1 }], maxItems: 1 } }))).toBeNull();
+    expect(unboundedAt('c:a@1', resolveWith({ 'c:a@1': { $ref: 'std:url@1' } }))).toBeNull();
+  });
+
+  it('JSON nested past 64 in a schema is refused at the sync, and validation of a too-deep value reports, never throws (1-A-5)', () => {
+    let deep: unknown = 0;
+    for (let i = 0; i < 3000; i++) deep = [deep];
+    expect(checkSchema({ const: deep })).toEqual([{ path: '', message: 'a schema\'s JSON nests at most 64 deep' }]);
+    expect(validate(1, 'x', () => ({ const: deep }))).toEqual([{ path: '', message: 'the value is too deep to validate' }]);
+  });
+
+  it('$schema and $id are outside the subset (1-A-6)', () => {
+    expect(checkSchema({ $schema: 'https://json-schema.org/draft/2020-12/schema', $id: 'x' }).map((e) => e.path)).toEqual(['/$schema', '/$id']);
+  });
+
+  it('the refinement check is sound where an open object or extra positions would loosen the base (1-A-4)', () => {
+    expect(refinementGaps({ type: 'object' }, { type: 'object', properties: { x: { type: 'string' } } }, stdSchema).map((g) => g.keyword)).toEqual(['properties']);
+    expect(refinementGaps({ type: 'object', additionalProperties: true }, { type: 'object', additionalProperties: { type: 'string' } }, stdSchema).map((g) => g.keyword)).toEqual(['additionalProperties']);
+    expect(refinementGaps({ type: 'array', prefixItems: [{ type: 'number' }], items: { type: 'string' } }, { type: 'array', items: { type: 'string' } }, stdSchema).map((g) => `${g.path} ${g.keyword}`)).toEqual(['/prefixItems/0 type']);
+    // A new property where the base leaves the object open narrows it.
+    expect(refinementGaps({ type: 'object', properties: { y: { type: 'number' } } }, { type: 'object' }, stdSchema)).toEqual([]);
+  });
+});
+
 describe('the inline bound (R-BTN-108)', () => {
   it('stores a value only when its whole chain closes every object and caps every string at 256', () => {
     for (const id of Object.keys(STD)) expect([id, unboundedAt(id, stdSchema)]).toEqual([id, null]);

@@ -9,6 +9,22 @@
 export const SCHEMA_ID = /^(std|[a-z][a-z0-9-]{0,39}):([A-Za-z][A-Za-z0-9._-]{0,63})@(0|[1-9][0-9]{0,5})$/;
 export const SCHEMA_MAX_BYTES = 32 * 1024;
 export const SCHEMA_MAX_DEPTH = 16;
+/** Nesting of any JSON in a schema — a `const`, an `enum` member, a view — so nothing that
+ *  compares or copies it recursively can overflow the stack (1-A-5). */
+const JSON_MAX_DEPTH = 64;
+
+/** The nesting depth of a JSON value, measured without recursion; stops past `limit`. */
+function jsonDepth(v, limit) {
+  let max = 0;
+  const stack = [[v, 1]];
+  while (stack.length) {
+    const [x, d] = stack.pop();
+    if (d > max) max = d;
+    if (max > limit) return max;
+    if (x && typeof x === 'object') for (const y of Array.isArray(x) ? x : Object.values(x)) stack.push([y, d + 1]);
+  }
+  return max;
+}
 export const PATTERN_MAX_CHARS = 512;
 export const PATTERN_MAX_REPEAT = 1000;
 /** R-BTN-149: the expanded automaton's states, whatever the pattern's repeats. */
@@ -26,7 +42,7 @@ const WALK_BUDGET = 10_000;
 
 const KEYWORDS = new Set(['type', 'properties', 'required', 'additionalProperties', 'items', 'prefixItems', 'enum', 'const', 'minimum', 'maximum',
   'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'pattern', 'format', '$ref', 'title', 'description',
-  'x-baton-base', 'x-baton-view', '$schema', '$id']);
+  'x-baton-base', 'x-baton-view']);
 const TYPES = new Set(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null']);
 const FORMATS = new Set(['date-time', 'uri']);
 
@@ -268,6 +284,16 @@ function compileAst(ast) {
   return f.start;
 }
 
+/** Thrown by a matcher whose meter runs out (1-A-0): one value's patterns share one budget. */
+export class PatternBudget extends Error {
+  constructor() { super('the patterns cost more than the validator\'s budget'); }
+}
+
+/** Automaton steps one `validate` call may spend on all its patterns together: each matched
+ *  string costs its length times the live states, and a base chain or `$ref` layers repeat it
+ *  (baton#69 round 1, 1-A-0). Measured well under a second. */
+export const PATTERN_STEPS_MAX = 2_000_000;
+
 /**
  * Compile a pattern in R-BTN-108's grammar into a matcher: `(s) => boolean`, true when the
  * pattern matches anywhere in `s` (JSON Schema's unanchored search). Throws a pattern outside
@@ -276,7 +302,7 @@ function compileAst(ast) {
  */
 export function compilePattern(src) {
   const start = compileAst(parsePattern(src));
-  return (input) => {
+  return (input, meter = null) => {
     const chars = [...input];
     const n = chars.length;
     let gen = 0;
@@ -286,6 +312,7 @@ export function compilePattern(src) {
       const stack = [s];
       while (stack.length) {
         const x = stack.pop();
+        if (meter && --meter.steps < 0) throw new PatternBudget();
         if (!x || mark.get(x) === gen) continue;
         mark.set(x, gen);
         if (x.k === 'split') { stack.push(x.out2, x.out); }
@@ -328,6 +355,7 @@ export function checkSchema(schema) {
   let size = Infinity;
   try { size = byteLength(JSON.stringify(schema)); } catch { /* not JSON */ }
   if (size > SCHEMA_MAX_BYTES) return [{ path: '', message: `a schema is at most ${SCHEMA_MAX_BYTES} bytes` }];
+  if (jsonDepth(schema, JSON_MAX_DEPTH) > JSON_MAX_DEPTH) return [{ path: '', message: `a schema's JSON nests at most ${JSON_MAX_DEPTH} deep` }];
   const walk = (s, path, depth) => {
     if (depth > SCHEMA_MAX_DEPTH) return add(path, `a schema is at most ${SCHEMA_MAX_DEPTH} levels deep`);
     if (!isObj(s)) return add(path, 'a schema is an object');
@@ -458,6 +486,10 @@ export function validate(value, id, resolve) {
   const errors = [];
   const add = (path, message) => { if (errors.length < ERRORS_MAX) errors.push({ path, message }); };
   const patterns = new Map();
+  // One meter for every pattern this value meets, and each (pattern, string) matched once.
+  const meter = { steps: PATTERN_STEPS_MAX };
+  const matched = new Map();
+  let costly = false;
   let budget = 10_000;
   const check = (s, v, path, depth) => {
     if (errors.length >= ERRORS_MAX || --budget < 0 || depth > SCHEMA_MAX_DEPTH * 4) return add(path, 'the value is too deep or too large to validate');
@@ -483,10 +515,20 @@ export function validate(value, id, resolve) {
       const len = [...v].length;
       if (own(s, 'minLength') && len < s.minLength) add(path, `must be at least ${s.minLength} characters`);
       if (own(s, 'maxLength') && len > s.maxLength) add(path, `must be at most ${s.maxLength} characters`);
-      if (own(s, 'pattern')) {
+      if (own(s, 'pattern') && !costly) {
         let m = patterns.get(s.pattern);
         if (!m) { m = compilePattern(s.pattern); patterns.set(s.pattern, m); }
-        if (!m(v)) add(path, 'must match the schema\'s pattern');
+        const key = `${s.pattern}\u0000${v}`;
+        let ok = matched.get(key);
+        if (ok === undefined) {
+          try { ok = m(v, meter); } catch (e) {
+            if (!(e instanceof PatternBudget)) throw e;
+            costly = true;
+            return add(path, 'the value\'s patterns cost more than the validator allows');
+          }
+          matched.set(key, ok);
+        }
+        if (!ok) add(path, 'must match the schema\'s pattern');
       }
       if (s.format === 'date-time' && !isDateTime(v)) add(path, 'must be an RFC 3339 date-time');
       if (s.format === 'uri' && !isUri(v)) add(path, 'must be a URI');
@@ -516,7 +558,12 @@ export function validate(value, id, resolve) {
     seen.add(cur);
     const s = resolve(cur);
     if (!s) { add('', `${cur} is not a known schema`); break; }
-    check(s, value, '', 0);
+    try { check(s, value, '', 0); } catch (e) {
+      // A value too deep for the comparisons' recursion is invalid, never a crash (1-A-5).
+      if (!(e instanceof RangeError)) throw e;
+      add('', 'the value is too deep to validate');
+      break;
+    }
     cur = typeof s['x-baton-base'] === 'string' ? s['x-baton-base'] : null;
   }
   return errors;
@@ -558,10 +605,15 @@ export function unboundedAt(id, resolve) {
       const ts = own(x, 'type') ? (Array.isArray(x.type) ? x.type : [x.type]) : [];
       if ((ts.includes('object') || own(x, 'properties')) && x.additionalProperties !== false) { found = `${cid}${path}: an object without additionalProperties: false`; return; }
       if (ts.includes('string') && !own(x, 'enum') && !own(x, 'const') && !(isCount(x.maxLength) && x.maxLength <= INLINE_STRING_MAX)) { found = `${cid}${path}: a string without maxLength ≤ ${INLINE_STRING_MAX}`; return; }
-      if (!ts.length && !own(x, 'const') && !own(x, 'enum') && !own(x, '$ref') && depth > 0) { found = `${cid}${path}: a value of any type`; return; }
+      // The root too: a schema that leaves its value's type open bounds nothing (1-A-1).
+      if (!ts.length && !own(x, 'const') && !own(x, 'enum') && !own(x, '$ref')) { found = `${cid}${path}: a value of any type`; return; }
       if (isObj(x.properties)) for (const [k, v] of Object.entries(x.properties)) walk(v, `${path}/${k}`, depth + 1);
       if (isObj(x.items)) walk(x.items, `${path}/items`, depth + 1);
-      if (ts.includes('array') && !own(x, 'items') && !Array.isArray(x.prefixItems)) { found = `${cid}${path}: an array of any items`; return; }
+      // Items past `prefixItems` are bounded by `items`, or forbidden by a `maxItems` within it (1-A-2).
+      if (ts.includes('array') && !own(x, 'items')) {
+        const fixed = Array.isArray(x.prefixItems) ? x.prefixItems.length : 0;
+        if (!(isCount(x.maxItems) && x.maxItems <= fixed)) { found = `${cid}${path}: an array of any items`; return; }
+      }
       if (Array.isArray(x.prefixItems)) x.prefixItems.forEach((p, j) => walk(p, `${path}/${j}`, depth + 1));
     };
     walk(s, '', 0);
@@ -609,12 +661,19 @@ export function refinementGaps(schema, base, resolve) {
     if (own(b, 'format') && s.format !== b.format) add(path, 'format', 'format must equal the base\'s');
     const bp = isObj(b.properties) ? b.properties : {};
     const sp = isObj(s.properties) ? s.properties : {};
+    // Every base property against what the refinement says of it: its own schema, else its
+    // additionalProperties — an open object leaves the property open, which is no narrowing
+    // unless the base's says nothing either (1-A-4).
+    const anything = (x) => x === true || (isObj(x) && Object.keys(x).every((k) => k === 'title' || k === 'description' || k === 'x-baton-view'));
     for (const [k, v] of Object.entries(bp)) {
       if (own(sp, k)) cmp(sp[k], v, `${path}/properties/${k}`, depth + 1);
-      else if (s.additionalProperties === false && !(Array.isArray(b.required) && b.required.includes(k))) {
-        // Dropping an optional base property while closing the object narrows it: allowed.
-      } else if (s.additionalProperties !== undefined && s.additionalProperties !== true && s.additionalProperties !== false) {
+      else if (s.additionalProperties === false) {
+        // Dropping an optional base property while closing the object narrows it (a required
+        // one is reported under `required`).
+      } else if (isObj(s.additionalProperties)) {
         cmp(s.additionalProperties, v, `${path}/properties/${k}`, depth + 1);
+      } else if (!anything(v)) {
+        add(`${path}/properties/${k}`, 'properties', `"${k}" is left open where the base constrains it; restate the base's property`);
       }
     }
     for (const k of Object.keys(sp)) {
@@ -624,14 +683,19 @@ export function refinementGaps(schema, base, resolve) {
     }
     if (b.additionalProperties === false && s.additionalProperties !== false) add(path, 'additionalProperties', 'additionalProperties must stay false');
     else if (isObj(b.additionalProperties) && isObj(s.additionalProperties)) cmp(s.additionalProperties, b.additionalProperties, `${path}/additionalProperties`, depth + 1);
-    else if (isObj(b.additionalProperties) && s.additionalProperties === undefined) add(path, 'additionalProperties', 'additionalProperties must restate or narrow the base\'s');
+    else if (isObj(b.additionalProperties) && (s.additionalProperties === undefined || s.additionalProperties === true)) add(path, 'additionalProperties', 'additionalProperties must restate or narrow the base\'s');
     if (own(b, 'items')) {
       if (!own(s, 'items')) add(path, 'items', 'items must restate or narrow the base\'s');
       else cmp(s.items, b.items, `${path}/items`, depth + 1);
     }
-    if (Array.isArray(b.prefixItems)) {
-      if (!Array.isArray(s.prefixItems) || s.prefixItems.length < b.prefixItems.length) add(path, 'prefixItems', 'prefixItems must restate the base\'s');
-      else b.prefixItems.forEach((p, j) => cmp(s.prefixItems[j], p, `${path}/prefixItems/${j}`, depth + 1));
+    const bPrefix = Array.isArray(b.prefixItems) ? b.prefixItems : [];
+    if (bPrefix.length && (!Array.isArray(s.prefixItems) || s.prefixItems.length < bPrefix.length)) add(path, 'prefixItems', 'prefixItems must restate the base\'s');
+    else if (Array.isArray(s.prefixItems)) {
+      // Each of the refinement's positions against the base's: its prefix item, else its items.
+      s.prefixItems.forEach((p, j) => {
+        if (j < bPrefix.length) cmp(p, bPrefix[j], `${path}/prefixItems/${j}`, depth + 1);
+        else if (own(b, 'items')) cmp(p, b.items, `${path}/prefixItems/${j}`, depth + 1);
+      });
     }
   };
   cmp(schema, base, '', 0);

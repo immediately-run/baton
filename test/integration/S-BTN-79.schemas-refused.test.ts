@@ -6,6 +6,7 @@
 // other repository's schema is accepted, keyed to it. (The spec's course `roadmap` is docs'
 // `roadmap-pr` here, the fixture's.) Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
+import chore from '../fixtures/courses/chore/course.json';
 import { course, cutover, Git, keyCall, rows, setAdminKeys, setClock, syncToken } from '../helpers';
 import { makeKey } from '../lib/sshKeys';
 
@@ -71,6 +72,28 @@ describe('S-BTN-79 schemas refused', () => {
     expect((await ops.post()).status).toBe(200);
     expect(await held('ops')).toEqual([{ id: 'roadmap-pr:findings@2', digest: digest('b') }]);
     expect(await held('docs')).toEqual([{ id: 'roadmap-pr:findings@2', digest: digest('a') }]);
+  });
+
+  it.each([['before', true], ['after', false]])('a schema may base on another course\'s posted in the same sync, listed %s it (1-A-3)', async (_where, first) => {
+    const own = course(4, 3, { schemas: [{ id: 'roadmap-pr:x@1', digest: digest('2'), schema: { 'x-baton-base': 'chore:y@1', type: 'object', additionalProperties: false } }] });
+    const other = course(1, 1, { id: 'chore', skill: 'chore', course: chore, step_kinds: ['other'], schemas: [{ id: 'chore:y@1', digest: digest('3'), schema: { type: 'object' } }] });
+    git.registry = first ? [own, other] : [other, own];
+    expect((await git.post()).status).toBe(200);
+    expect(await refusal()).toEqual([]);
+    expect((await held()).map((r) => r.id)).toEqual(['chore:y@1', 'roadmap-pr:findings@2', 'roadmap-pr:x@1']);
+  });
+
+  it('a course naming a schema whose own course this post refuses is refused with it: nothing dangles', async () => {
+    git.registry = [...posted([{ id: 'roadmap-pr:findings@2', digest: digest('a'), schema: FINDINGS }], 3), course(1, 1, { id: 'chore', skill: 'chore', course: chore, step_kinds: ['other'] })];
+    expect((await git.post()).status).toBe(200);
+    const own = course(4, 3, { schemas: [{ id: 'roadmap-pr:x@1', digest: digest('2'), schema: { 'x-baton-base': 'chore:y@1', type: 'object' } }] });
+    const other = course(2, 1, { id: 'chore', skill: 'chore', course: chore, step_kinds: ['other'], schemas: [
+      { id: 'chore:y@1', digest: digest('3'), schema: { type: 'object' } }, { id: 'chore:z@1', digest: digest('4'), schema: { oneOf: [] } },
+    ] });
+    git.registry = [own, other];
+    expect((await git.post()).status).toBe(200);
+    expect((await refusal()).map((r) => r.course).sort()).toEqual(['chore', 'roadmap-pr']);
+    expect((await held()).map((r) => r.id)).toEqual(['roadmap-pr:findings@2']);
   });
 
   it('a course file naming a schema nobody posted is refused too', async () => {

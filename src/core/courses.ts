@@ -178,11 +178,14 @@ export class Courses {
     this.c.store.exec('DELETE FROM courses WHERE repository_id = ? AND id NOT IN (SELECT value FROM json_each(?))', repo, listed);
     this.c.store.exec('DELETE FROM course_refusals WHERE repository_id = ? AND course_id NOT IN (SELECT value FROM json_each(?))', repo, listed);
     const refused: string[] = [];
+    // Each course's own faults first: its file, the owners' required bars, its schemas' prefix,
+    // size and immutability.
+    const faults = new Map<string, CourseViolation[]>();
     for (const e of registry) {
       const violations: CourseViolation[] = e.oversized
         ? [{ rule: 'bound', path: '', message: `the course file is over ${COURSE_FILE_MAX_BYTES} bytes` }]
         : validateCourse(e.course);
-      if (!violations.length) violations.push(...this.schemaViolations(repo, e));
+      if (!violations.length) violations.push(...this.ownSchemaViolations(repo, e));
       // R-BTN-67: a file that no longer has a leg an owner's required bar names — by its name or a
       // `renamed_from` — is held until an owner updates or drops the bar.
       if (!violations.length) {
@@ -193,6 +196,26 @@ export class Courses {
           }
         }
       }
+      faults.set(e.id, violations);
+    }
+    // Then references (R-BTN-108): a `$ref` or base resolves among the repository's schemas —
+    // those held and those this very post carries for a course it is accepting — so one
+    // course's schemas may name another's posted beside them, in any registry order (1-A-3). A
+    // course refused for any reason takes its schemas out of the pool, which may refuse a course
+    // naming them, until nothing changes: nothing accepted names a schema that is not stored.
+    for (let changed = true; changed; ) {
+      changed = false;
+      const pool = new Map<string, unknown>();
+      for (const e of registry) if (!faults.get(e.id)!.length) for (const x of e.schemas) pool.set(x.id, x.schema);
+      const resolve = (id: string) => (pool.has(id) ? (pool.get(id) as Schema) : this.schema(repo, id));
+      for (const e of registry) {
+        if (faults.get(e.id)!.length) continue;
+        const v = this.refViolations(e, resolve);
+        if (v.length) { faults.set(e.id, v); changed = true; }
+      }
+    }
+    for (const e of registry) {
+      const violations = faults.get(e.id)!;
       if (violations.length) {
         if (!this.get(repo, e.id)) {
           throw new BatonError('invalid-params', `registry: ${e.id}'s course file fails R-BTN-69 and no earlier one is in force — ${storedViolations(violations).slice(0, 3).map((v) => `${v.path || '(file)'}: ${v.message}`).join('; ')}`);
@@ -224,28 +247,35 @@ export class Courses {
   }
 
   /**
-   * R-BTN-108's rules for the schemas a course posts, as course-file violations (rule `schema`):
-   * each named `<course>:` for this course, never `std:`; the same digest as any version Baton
-   * holds; inside the subset; every `$ref` and `x-baton-base` resolving among the repository's
-   * schemas and the library, with no cycle; and every schema the file's outputs and entries
-   * name, posted or held.
+   * R-BTN-108's rules for one course's own schemas, as course-file violations (rule `schema`):
+   * each named `<course>:` for this course, never `std:`; within its size; the same digest as
+   * any version Baton holds.
    */
-  private schemaViolations(repo: string, e: RegistryEntry): CourseViolation[] {
+  private ownSchemaViolations(repo: string, e: RegistryEntry): CourseViolation[] {
     const out: CourseViolation[] = [];
     const v = (path: string, message: string) => out.push({ rule: 'schema', path, message });
-    const posted: Record<string, unknown> = {};
     for (const x of e.schemas) {
       const p = parseSchemaId(x.id)!;
       if (p.prefix === 'std') { v(`schemas.${x.id}`, `${x.id}: std: schemas come only from Baton's library`); continue; }
       if (p.prefix !== e.id) { v(`schemas.${x.id}`, `${x.id}: a course posts only its own schemas, ${e.id}:<name>@<n>`); continue; }
       if (x.oversized) { v(`schemas.${x.id}`, `${x.id}: a schema is at most ${SCHEMA_MAX_BYTES} bytes`); continue; }
       const held = this.rows<{ digest: string }>('SELECT digest FROM course_schemas WHERE repository_id = ? AND id = ?', repo, x.id)[0];
-      if (held && held.digest !== x.digest) { v(`schemas.${x.id}`, `${x.id}: a schema version is immutable; this digest differs from the one held — post a new version`); continue; }
-      posted[x.id] = x.schema;
+      if (held && held.digest !== x.digest) v(`schemas.${x.id}`, `${x.id}: a schema version is immutable; this digest differs from the one held — post a new version`);
     }
-    if (out.length) return out;
-    const resolve = (id: string) => (Object.prototype.hasOwnProperty.call(posted, id) ? (posted[id] as Schema) : this.schema(repo, id));
-    for (const f of checkSchemaSet(posted, (id) => this.schema(repo, id))) v(`schemas.${f.id}${f.path ? `.${f.path}` : ''}`, `${f.id}: ${f.message}`);
+    return out;
+  }
+
+  /**
+   * The rest of R-BTN-108 for a course whose own schemas passed: each inside the subset; every
+   * `$ref` and `x-baton-base` resolving through `resolve` (the repository's held schemas, the
+   * schemas this post carries for courses it accepts, and the library), with no cycle; and every
+   * schema the file's outputs and entries name, resolvable the same way.
+   */
+  private refViolations(e: RegistryEntry, resolve: (id: string) => Schema | null): CourseViolation[] {
+    const out: CourseViolation[] = [];
+    const v = (path: string, message: string) => out.push({ rule: 'schema', path, message });
+    const posted = Object.fromEntries(e.schemas.map((x) => [x.id, x.schema]));
+    for (const f of checkSchemaSet(posted, resolve)) v(`schemas.${f.id}${f.path ? `.${f.path}` : ''}`, `${f.id}: ${f.message}`);
     // The schemas the file itself names.
     const c = e.course as { stations?: Record<string, { entry?: { schema: string }[] }>; legs?: Record<string, { outputs?: Record<string, { schema?: string }> }> };
     for (const [sid, st] of Object.entries(c.stations ?? {})) {
