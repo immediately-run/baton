@@ -33,6 +33,7 @@
 //   baton owner -i KEY settings REPO [--required-bar LEG|'*' --course C|'*' [--except a,b] --tag-prefix P]… | --no-required-bars
 //                [--retry 1h,4h --max-failed 3 | --retry default] [--transcript-repos a,b]
 //                [--unblocked-workflow .github/workflows/F.yml | --unblocked-workflow none] [--remind-after 24h]
+//                [--independence 'review=implement,fix;adjudicate=implement' | --independence none]
 //   baton owner -i KEY courier add REPO --key PUB --asks owner[,…]      (R-BTN-80: a personal courier)
 //   baton owner -i KEY courier revoke REPO FINGERPRINT
 //   baton owner -i KEY resolve REPO TICKET baton:retries|baton:stalled retry|park   (R-BTN-78)
@@ -245,7 +246,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       } };
     }
     if (cmd === 'settings') {
-      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after'], 1);
+      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'independence'], 1);
       const body = {};
       if (flags['no-required-bars']) {
         if (groups.length) throw new Error('--no-required-bars clears them: name no --required-bar beside it');
@@ -263,6 +264,16 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       else if (flags['unblocked-workflow']) body.unblocked_trigger = { kind: 'github-app', workflow: flags['unblocked-workflow'] };
       // R-BTN-80: how long a sent notice waits for its decision before it is queued again, in seconds.
       if (flags['remind-after']) body.remind_after = Math.round(duration(flags['remind-after']) / 1000);
+      // R-BTN-106: `leg=a,b;leg=c` — the legs a key that ran any of a,b on a ticket may not take
+      // leg; `none` clears them.
+      if (flags.independence === 'none') body.required_independence = {};
+      else if (flags.independence) {
+        body.required_independence = Object.fromEntries(flags.independence.split(';').filter(Boolean).map((pair) => {
+          const [leg, from, ...extra] = pair.split('=');
+          if (!leg || from === undefined || extra.length) throw new Error(`--independence takes leg=a,b;leg=c, not ${pair}`);
+          return [leg.trim(), list(from)];
+        }));
+      }
       if (!Object.keys(body).length) throw new Error('baton owner settings REPO names at least one setting');
       return { method: 'PUT', path: `/v1/owner/${need(positional[0], 'the repository id')}/settings`, body };
     }

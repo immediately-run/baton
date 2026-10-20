@@ -357,9 +357,9 @@ export class WorkerApi {
     const current = rekeyed ? hb.secret_hash : w.secret_hash; // the hash stored now
     const secretSeen = presented != null && presented === current ? 1 : 0;
     this.exec(`UPDATE workers SET last_seen_at = ?, secret_seen = MAX(secret_seen, ?), last_activity_at = COALESCE(?, last_activity_at), harness = ?, kind = ?,
-                 model_id = ?, model_provider_id = ?, tier_ceiling = ?, tier_ceilings = ?, lease_timeout_ms = ? WHERE id = ?`,
+                 model_id = ?, model_provider_id = ?, tier_ceiling = ?, tier_ceilings = ?, lease_timeout_ms = ?, isolation = ? WHERE id = ?`,
       now, secretSeen, hb.last_activity_at ?? null, hb.harness, hb.kind, hb.model_id ?? null, modelProvider, hb.tier_ceiling, JSON.stringify(hb.tier_ceilings),
-      hb.lease_timeout_s * 1000, w.id);
+      hb.lease_timeout_s * 1000, hb.isolation, w.id);
     // The stored hash also covers which billed accounts the reference data knows, so a prefix
     // skipped while its account was unknown is written once the account arrives (§7.4).
     const known = Object.values(hb.billing).filter((a) => knownAccounts.has(a)).sort().join(',');
@@ -769,7 +769,7 @@ export class WorkerApi {
   // ── the dashboard's Workers view (§14) ──────────────────────────────────────────────────
 
   workersView(now: number) {
-    const workers = this.rows<Row>(`SELECT id, hostname, session_name, harness, kind, model_id, model_provider_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
+    const workers = this.rows<Row>(`SELECT id, hostname, session_name, harness, kind, isolation, model_id, model_provider_id, tier_ceiling, tier_ceilings, lease_timeout_ms,
                                        first_seen_at, last_seen_at, last_activity_at, reaped_at, incarnation FROM workers ORDER BY hostname, id`);
     return workers.map((w) => {
       const id = w.id as number;

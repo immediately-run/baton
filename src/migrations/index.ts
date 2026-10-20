@@ -18,6 +18,7 @@ import claimReady from './0015_claim_ready.sql';
 import blocks from './0016_blocks.sql';
 import notices from './0017_notices.sql';
 import history from './0018_history.sql';
+import independence from './0019_independence.sql';
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },
@@ -38,4 +39,5 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 16, sql: blocks },
   { id: 17, sql: notices },
   { id: 18, sql: history },
+  { id: 19, sql: independence },
 ];

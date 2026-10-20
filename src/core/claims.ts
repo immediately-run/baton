@@ -60,6 +60,8 @@ interface WorkerFacts {
   /** R-BTN-60: what rule 8 matches. */
   tags: string[];
   credential_id: string;
+  /** R-BTN-107: the isolation its last heartbeat declared. */
+  isolation: 'attached' | 'process' | 'session';
   /** R-BTN-58: its key's grants by repository, or null for a key no owner granted (gates.ts). */
   grants: Record<string, { capabilities: string[]; max_tier: number | null }> | null;
 }
@@ -193,7 +195,7 @@ export class Claims {
 
   private worker(id: number): WorkerFacts {
     const w = this.rows<Omit<WorkerFacts, 'declared' | 'courses' | 'tier_ceilings' | 'tags' | 'grants'> & { tier_ceilings: string; created_by: string | null }>(
-      `SELECT w.id, w.kind, w.incarnation, w.tier_ceiling, w.tier_ceilings, w.lease_timeout_ms, w.last_seen_at, w.last_activity_at, w.credential_id, c.created_by
+      `SELECT w.id, w.kind, w.incarnation, w.tier_ceiling, w.tier_ceilings, w.lease_timeout_ms, w.last_seen_at, w.last_activity_at, w.credential_id, w.isolation, c.created_by
        FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE w.id = ?`, id)[0];
     if (!w) throw new BatonError('unauthenticated', 'no such worker');
     const declared = this.rows<{ declared: string }>('SELECT DISTINCT declared FROM worker_capabilities WHERE worker_id = ? ORDER BY declared', id).map((r) => r.declared);
@@ -256,11 +258,29 @@ export class Claims {
     return this.rows<{ n: number }>('SELECT last_handed_out AS n FROM board_head WHERE repository_id = ?', repo)[0]?.n ?? 0;
   }
 
-  /** The leg as the head snapshot posted it for the ticket, and its barred tags (R-BTN-70). */
+  /** The leg as the head snapshot posted it for the ticket, its barred tags (R-BTN-70), and what
+   *  the course file and the owners ask of whoever takes it (R-BTN-106, R-BTN-107). */
   private postedLeg(item: ItemFacts, leg: string, phase: Phase): GateLeg {
     const n = this.rows<{ state: 'ready' | 'waiting' }>('SELECT state FROM ticket_next_legs WHERE ticket_id = ? AND leg = ?', item.id, leg)[0];
     const posted = this.rows<{ tag: string }>('SELECT tag FROM ticket_bars WHERE ticket_id = ? AND leg = ? ORDER BY tag', item.id, leg).map((r) => r.tag);
-    return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...this.ownerBarTags(item, leg, phase)])] };
+    const g = this.stations.graph(item.repository, item.course);
+    const def = g?.legs.get(leg);
+    // The owners' list joins the file's, as required bars join posted ones (R-BTN-67): a file
+    // that drops its list loosens nothing the owners hold.
+    // Its keys are followed through `renamed_from` too, so renaming the leg loosens nothing.
+    const owners = Object.entries(this.c.admin.requiredIndependence(item.repository))
+      .filter(([key]) => (g ? resolveLeg(g, key) ?? key : key) === leg).flatMap(([, from]) => from);
+    const noChainFrom = [...new Set([...(def?.noChainFrom ?? []), ...owners].map((l) => (g ? resolveLeg(g, l) ?? l : l)))];
+    return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...this.ownerBarTags(item, leg, phase)])], noChainFrom, isolation: def?.isolation ?? null };
+  }
+
+  /** R-BTN-106: the legs `credential` has run on the ticket, in this claim or an earlier one —
+   *  `claim_legs` through each claim's worker to its credential — as current names. */
+  private ranByKey(item: ItemFacts, credential: string): string[] {
+    const g = this.stations.graph(item.repository, item.course);
+    return this.rows<{ leg: string }>(
+      `SELECT DISTINCT l.leg FROM claim_legs l JOIN claims k ON k.id = l.claim_id JOIN workers w ON w.id = k.worker_id
+       WHERE k.ticket_id = ? AND w.credential_id = ?`, item.id, credential).map((r) => (g ? resolveLeg(g, r.leg) ?? r.leg : r.leg));
   }
 
   /** R-BTN-67: the tags the owner bars in force bar from `leg` of the ticket — its course's bars and
@@ -286,6 +306,7 @@ export class Claims {
       headObservation: this.rows<{ n: number }>('SELECT observation AS n FROM board_head WHERE repository_id = ?', item.repository)[0]?.n ?? 0,
       lastEndObservation: this.rows<{ n: number | null }>('SELECT MAX(end_observation) AS n FROM claims WHERE ticket_id = ?', item.id)[0]?.n ?? -1,
       holderBars: opts.holderBars,
+      ranByKey: this.ranByKey(item, w.credential_id),
       // R-BTN-78: Baton's own decisions refuse nothing advice would not — `baton:retries` sits on a
       // ticket its hold keeps (rule 3), `baton:stalled` on a queued leg posted waiting (rule 1) — so
       // they are left to those rules, whose refusals name the cause; they stay blocks for asking.
@@ -293,7 +314,7 @@ export class Claims {
         `SELECT b.kind, b.leg FROM ticket_blocks b WHERE b.ticket_id = ? AND b.kind IN ('ticket', 'decision')
            AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))`, item.id),
     };
-    return gatesFor({ declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants }, ticket, this.postedLeg(item, leg, phase), phase, facts);
+    return gatesFor({ declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase), phase, facts);
   }
 
   /** Rule 2's count (advice): active Baton claims on expedited tickets, not git in-progress. */
@@ -423,7 +444,8 @@ export class Claims {
   }
 
   /** The refusal a failed gate becomes (§11): `barred-tag`, `stale-skills` and `backing-off` have
-   *  codes of their own; every other gate is `not-eligible` naming the rule. */
+   *  codes of their own; every other gate is `not-eligible` naming the rule — `chain` and
+   *  `isolation` by name (R-BTN-106, R-BTN-107). */
   private refusal(ticketId: string, v: Exclude<GateVerdict, { ok: true }>, phase: Phase): BatonError {
     const code = v.code === 'blocked' ? 'blocked' : v.rule === 8 ? 'barred-tag' : v.rule === 9 ? 'stale-skills' : v.rule === 10 ? 'backing-off' : 'not-eligible';
     return new BatonError(code, `${ticketId}: ${v.code} at ${phase === 'claim' ? 'a claim' : 'an advance'}`, { rule: v.rule, rule_code: v.code });
