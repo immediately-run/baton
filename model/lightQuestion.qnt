@@ -156,10 +156,12 @@ module lightQuestion {
     known.keys().filter(q => known.get(q) == "").fold(1000, (a, q) => if (q < a) q else a)
 
   // ---- the parent ----
-  // the claim's `resume`: R4 carries every settled, unused condition; without it, only
-  // R-BTN-162's resume after a blocked end on a condition that has since settled
+  // the claim's `resume`: R4 carries every settled, unused condition; without it, R-BTN-162's
+  // resume alone — the claim that clears a `condition` block, or the claim after a blocked end
+  // whose condition had already settled (no row written)
   def resumeSet: Set[int] =
     if (R4) CONDS.filter(c => isSettled(cond(c)) and not(cond(c).used))
+    else if (st.blockedOn != 0 and isSettled(cond(st.blockedOn))) Set(st.blockedOn)
     else if (st.lastEnd == "blocked" and st.lastBlocked != 0 and isSettled(cond(st.lastBlocked))
              and not(cond(st.lastBlocked).used)) Set(st.lastBlocked)
     else Set()
@@ -236,7 +238,8 @@ module lightQuestion {
 
   def canRead(c: int, ch: str): bool =
     val v = st.chReply.get((c, ch))
-    all { v != "", st.held.get((c, ch)) == "", not(st.accepted.contains((c, ch, v))),
+    all { v != "", not(st.retracted.contains((c, ch))), st.held.get((c, ch)) == "",
+          not(st.accepted.contains((c, ch, v))),
           not(st.pending.contains((c, ch, v))) }
   action read(c: int, ch: str): bool = all {
     canRead(c, ch),
@@ -332,18 +335,31 @@ module lightQuestion {
     CONDS.exists(c => canSync(c)),
   }
 
+  // each parameterised branch draws only from the values that enable it, so that a run stops
+  // only when nothing at all is enabled (`drained`)
+  def KEYS: Set[(int, str)] = tuples(CONDS, CHANNELS)
+  def chaos: bool = st.mode == "chaos" and st.crashes > 0
+  action pick(S: Set[(int, str)], A: ((int, str)) => bool): bool = all { S != Set(), nondet k = S.oneOf() A(k) }
   action step = {
-    nondet c = CONDS.oneOf()
-    nondet ch = CHANNELS.oneOf()
     nondet v = ANSWERS.oneOf()
     nondet coin = 1.to(DRAIN_ODDS).oneOf()
     any {
       claim, ask, consume, expire, finish, reap, die,
-      send(c, ch), read(c, ch), report(c, ch), reportLost(c, ch), deliveryDies(c, ch), retract(c, ch),
-      answerOnChannel(c, ch, v), answerInFile(c, v),
-      sync(c),
+      pick(KEYS.filter(k => canSend(k._1, k._2)), k => send(k._1, k._2)),
+      pick(KEYS.filter(k => canRead(k._1, k._2)), k => read(k._1, k._2)),
+      pick(KEYS.filter(k => canReport(k._1, k._2)), k => report(k._1, k._2)),
+      pick(KEYS.filter(k => chaos and R1 and canReport(k._1, k._2)), k => reportLost(k._1, k._2)),
+      pick(KEYS.filter(k => chaos and canReport(k._1, k._2)), k => deliveryDies(k._1, k._2)),
+      pick(KEYS.filter(k => canRetract(k._1, k._2)), k => retract(k._1, k._2)),
+      pick(KEYS.filter(k => st.mode == "chaos" and st.sent.contains(k) and not(st.retracted.contains(k))
+                            and not(ANSWERS.exists(w => st.given.contains((k._1, k._2, w))))),
+           k => answerOnChannel(k._1, k._2, v)),
+      all { CONDS.exists(c => st.mode == "chaos" and st.gFile.get(c) and st.gAns.get(c) == ""),
+            nondet c = CONDS.filter(c => st.gFile.get(c) and st.gAns.get(c) == "").oneOf() answerInFile(c, v) },
+      all { CONDS.exists(c => canSync(c)), nondet c = CONDS.filter(c => canSync(c)).oneOf() sync(c) },
       all { st.pending != Set(), nondet r = st.pending.oneOf() commit(r) },
-      all { st.outbox != Set(), nondet e = st.outbox.oneOf() any { push(e), written(e) } },
+      all { st.outbox.exists(e => canPush(e)), nondet e = st.outbox.filter(e => canPush(e)).oneOf() push(e) },
+      all { st.outbox.exists(e => canWritten(e)), nondet e = st.outbox.filter(e => canWritten(e)).oneOf() written(e) },
       all { st.mode == "chaos", coin == 1, st' = { ...st, mode: "drain" } },
       all { st.mode == "drain", not(st.drained), not(progressEnabled), st' = { ...st, drained: true } },
     }
@@ -357,11 +373,12 @@ module lightQuestion {
   // at most one answer of a condition is applied, and an applied answer is never also ignored
   val oneApplied = CONDS.forall(c => st.applied.filter(r => r._1 == c).size() <= 1)
                    and st.applied.intersect(st.ignored) == Set()
-  // no orphan: the leg never asks a question again while an ask of it is still open
-  val noOrphan = CONDS.forall(c1 => CONDS.forall(c2 =>
-    (c1 != c2 and cond(c1).q == cond(c2).q
-     and (cond(c1).status == "open" or cond(c1).status == "promoted"))
-    implies not(cond(c2).status == "open" or cond(c2).status == "promoted")))
+  // no orphan: an open condition belongs to the active claim that waits on it, and a promoted
+  // one blocks the leg, unclaimed: the leg never runs, nor asks again, while its question is open
+  val noOrphan = CONDS.forall(c => and {
+    cond(c).status == "open" implies (st.claimActive and cond(c).claim == st.claimId and st.pCond == c),
+    cond(c).status == "promoted" implies (not(st.claimActive) and st.blockedOn == c),
+  })
   // promotion is safe: once promoted, a condition settles only from git
   val promotionSafe = CONDS.forall(c => cond(c).promotedEver implies cond(c).via != "channel")
   // git agrees with Baton: a closed condition's file holds its answer; the leg's record holds

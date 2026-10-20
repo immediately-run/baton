@@ -2657,6 +2657,77 @@ Limits that hold throughout:
   - **One at a time.** A leg awaits one `suspend` condition at a time. The `notify` conditions it
     raises in the meantime are not waits.
 
+- **R-BTN-173 (light questions: answered in the claim, or promoted to git).** A light question is
+  a bound `suspend` condition whose handler lives in Baton's database until the parent stops
+  waiting. Answered while the parent waits, it never touches git until the consuming leg ends;
+  otherwise it is promoted to an ask file, and from then on its answer is git's.
+  - **Raising.** A raise or a declaration carries `"light": true` (`ctx.raise(type, {…, light:
+    true})`, `baton leg raise --light`), and the raise's report carries `light`. An unbound light
+    raise is an ordinary unbound `suspend` (R-BTN-163).
+  - **The handler is Baton-held.**
+    - The runner writes no file and pushes nothing before it waits. Baton files the handler
+      ticket, id as R-BTN-161's, in its database alone, as it holds the `changes` source's check
+      tickets (R-BTN-114); its `deliver` child is Baton-held too. Binding, delivery legs
+      (ordinary claims by runners with `channel:*` capabilities, R-BTN-161) and the parent's wait
+      (R-BTN-162) are unchanged.
+    - A Baton-held ticket's positions are the holder's word (R-BTN-63), its ends are confirmed at
+      the end (nothing in git shows them, R-BTN-10), and a snapshot neither posts nor drops it.
+  - **Answering in the claim.** A delivery leg that reads a reply reports it with `POST
+    /v1/runner/claims/{id}/answers` `{condition_id, channel, message_id, restart, answered_by}`,
+    `answered_by` being the channel's identity for the person. In that one transaction Baton
+    reads the condition and:
+
+    | The condition is | Baton |
+    |---|---|
+    | open, not promoted | settles it (`outcome: answered`, `restart`, `answered_by`), closes the handler `done`, queues `handled` with the restart inline and rings the holder (R-BTN-91) |
+    | promoted, with no answer queued | queues an outbox `answer` entry for the ask file (R-BTN-171) |
+    | promoted with an answer queued, settled or closed | records the reply `ignored` and applies nothing |
+
+    - A report already accepted (same `condition_id`, `channel` and `message_id`) answers `ok`
+      and changes nothing. A restart the raise did not offer is `invalid-params`.
+    - The parent's `ctx.raise` returns `{restart, reason: "chosen", answered_by}` and the leg goes
+      on in the same session. No git write is made then.
+  - **Recording and carrying the answer.**
+    - Every end of a claim that consumed a light answer is preceded by a push recording it in the
+      leg's evidence (its closing marker) or its hand-off, and lists it as `answers:
+      [condition_id]`; Baton then marks the condition `recorded`.
+    - Every settled `suspend` condition of the leg that is not `recorded` is carried in the next
+      claim's `resume` (a list, in raise order), whatever ended the earlier claim: a blocked end,
+      a release or a reap. The leg reads `ctx.resume` before it asks anything, so a claim reaped
+      after the answer arrived never asks again.
+  - **Promotion.** Any end of the waiting claim, or its reap, that finds its light condition
+    still open promotes it in the same transaction:
+    - Baton queues an outbox `handler` entry that writes the handler ticket as an ask file at the
+      station it has reached (R-BTN-171), and writes a `condition` block on the leg (R-BTN-162),
+      not provisional. A reaped parent is therefore blocked on the open question and is never
+      re-run to ask it again.
+    - From then on the condition settles only when the ask closes in git (R-BTN-162, R-BTN-169);
+      the delivery legs go on, and their replies reach the file through the outbox.
+    - An `answer` entry writes the reply's `answer` and `answered_by` with `baton_write: <id>`. The
+      runner first reads the file at the fetched head; a file that already carries an answer is
+      not written, the entry is reported `skipped`, and Baton records that reply `ignored`.
+  - **Channels that answer.** A delivery leg that reports answers declares `"answers": true`.
+    Its channel must keep each reply readable by condition id until Baton has accepted it
+    (history, or redelivery until acknowledged): the leg acknowledges a reply only after Baton
+    answered its report, and a re-claimed leg re-reads the replies of its condition. `retract`
+    reports every reply not yet reported before it withdraws the question. A channel that cannot
+    keep replies declares `"answers": false`, and its leg only notifies.
+  - **Failure points.** Each is a step of `model/lightQuestion.qnt`, whose instance `full`
+    holds every rule above; dropping any one of them loses or doubles an answer.
+
+    | Failure | What happens |
+    |---|---|
+    | The parent dies while waiting, before any reply | It is reaped; the reap promotes the question and blocks the leg; nobody asks again |
+    | A reply races the end of the wait | One transaction comes first. Settled first: the blocked end writes no row and the next claim resumes with the answer. Promoted first: the reply goes to the ask file |
+    | The parent dies after the answer settled, before or after consuming it | The next claim's `resume` carries it |
+    | The delivery leg dies after reading a reply, before reporting it | Its claim is reaped; the next claim re-reads the reply from the channel |
+    | The delivery leg's report is applied but the response is lost | It reports again: `ok`, no second effect |
+    | The person answers on two channels, differently | The first report Baton accepts settles; the other is recorded `ignored` |
+    | A reply is reported after promotion | It is queued as an `answer` entry and written to the ask file, unless the file already has an answer |
+    | The person answers in the ask file while an `answer` entry is queued | The entry is `skipped`; the channel's reply is recorded `ignored` |
+    | The outbox runner dies between push and report, or its push is refused | The entry stays queued; the next `baton.write` finds `baton_write: <id>` and reports it; a refusal holds the ticket (R-BTN-171) |
+    | A reply is sent after `retract` | It is outside Baton; the channel shows the question withdrawn |
+
 ### 7.3 The debugger and Baton's own conditions
 
 - **R-BTN-163 (the debugger: unhandled conditions, and core's own).**
@@ -3044,8 +3115,9 @@ Limits that hold throughout:
 
     | `kind` | Written | Through |
     |---|---|---|
-    | `handler` | the handler ticket of a bound condition Baton raised: a `baton.*` condition or `hitl.decision` (R-BTN-163) | the source's `file(ticket)` export, as R-BTN-161's frontmatter, with a body the runner generates from `fields` |
+    | `handler` | the handler ticket of a bound condition Baton raised: a `baton.*` condition or `hitl.decision` (R-BTN-163); or a promoted light question (R-BTN-173) | the source's `file(ticket)` export, as R-BTN-161's frontmatter, with a body the runner generates from `fields` |
     | `withdraw` | the withdrawal of a superseded ticket (R-BTN-168) | the source's `withdraw(ticket, reason)` export (the markdown source sets `status: withdrawn` and `withdrawn_reason`) |
+    | `answer` | a reply a delivery leg reported after its light question was promoted (R-BTN-173) | the source's `answer` field (R-BTN-169) with `answered_by`; never over an answer already in the file |
 
   - **Who drains it.** A runner drains the outbox if it meets all of the following:
     - its key is granted on the repository (R-BTN-58);
