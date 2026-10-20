@@ -2,7 +2,7 @@
 // tickets that exist here, and carries none of the scrubbed terms.
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error a plain .mjs script, no types
-import { check, definedIds } from '../../scripts/check-spec.mjs';
+import { check, definedIds, retiredIds } from '../../scripts/check-spec.mjs';
 
 const SPEC = [
   '- **R-BTN-1 (the lock).** One holder.',
@@ -27,5 +27,17 @@ describe('check-spec', () => {
       'the spec cites R3-1205, which is not a ticket here',
       'the spec contains the scrubbed term "garda"',
     ]);
+  });
+
+  it('reads a merged heading as defining both ids', () => {
+    expect([...definedIds('- **R-BTN-117 / R-BTN-159 (keys).** Text.')].sort()).toEqual(['R-BTN-117', 'R-BTN-159']);
+  });
+
+  it('warns, and does not fail, on code citing a retired rule', () => {
+    const history = '## Retired requirements\n\n| Id | Title |\n|---|---|\n| R-BTN-80 | notices |\n\n## Other\n| R-BTN-3 | not retired |\n';
+    expect([...retiredIds(history)]).toEqual(['R-BTN-80']);
+    const problems = check(SPEC, [['src/a.ts', '// R-BTN-80, R-BTN-3']], new Set(['R3-1205']), history);
+    expect([...problems]).toEqual(['src/a.ts cites R-BTN-3, which the spec does not define']);
+    expect(problems.warnings).toEqual(['src/a.ts cites R-BTN-80, which is retired (spec/BATON_SPEC_HISTORY.md)']);
   });
 });

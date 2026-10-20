@@ -5,8 +5,10 @@
 //                             requirement ids they cite) and tickets/ (the tickets it cites)
 //
 // - every requirement id (`R-BTN-n`) the code cites is defined in the spec — as a bold
-//   `**R-BTN-n` rule heading or a bold rule followed by `(R-BTN-n)` — or is one of the
-//   `roadmap-pr` course's own (COURSE_IDS), whose spec stays in docs;
+//   `**R-BTN-n` rule heading (`**R-BTN-n / R-BTN-m (…)**` defines both) or a bold rule followed
+//   by `(R-BTN-n)` — or is one of the `roadmap-pr` course's own (COURSE_IDS), whose spec stays in
+//   docs; a citation of a retired id (spec/BATON_SPEC_HISTORY.md's Retired requirements table) is
+//   a warning, so the code that still names it can be cleaned up without breaking the check;
 // - every ticket the spec cites (`R3-n`, `B-n`) is a ticket in tickets/ or tickets/archive/;
 // - none of the scrub's terms (SCRUBBED) is in the spec: the repository is public.
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
@@ -32,8 +34,17 @@ export const COURSE_IDS = ['R-BTN-21', 'R-BTN-27', 'R-BTN-42', 'R-BTN-43', 'R-BT
 export function definedIds(spec) {
   return new Set([
     ...[...spec.matchAll(/\*\*(R-BTN-\d+)\b/g)].map((m) => m[1]),
+    ...[...spec.matchAll(/\*\*R-BTN-\d+((?: \/ R-BTN-\d+)+)/g)]
+      .flatMap((m) => [...m[1].matchAll(/R-BTN-\d+/g)].map((n) => n[0])),
     ...[...spec.matchAll(/^\s*- \*\*[^*\n]+\*\* \((R-BTN-\d+)\)/gm)].map((m) => m[1]),
   ]);
+}
+
+/** The retired requirement ids: the first cell of each row of the history file's
+ *  `## Retired requirements` table. */
+export function retiredIds(history) {
+  const section = history.split(/^## /m).find((s) => s.startsWith('Retired requirements')) ?? '';
+  return new Set([...section.matchAll(/^\| *(R-BTN-\d+)\b/gm)].map((m) => m[1]));
 }
 
 /** Every `R-BTN-n` in a text. */
@@ -42,11 +53,17 @@ export function citedIds(text) {
 }
 
 /** The problems with a spec, given the code's texts by path and the ticket ids that exist. */
-export function check(spec, code, tickets) {
+export function check(spec, code, tickets, history = '') {
   const problems = [];
+  const warnings = [];
   const defined = new Set([...definedIds(spec), ...COURSE_IDS]);
+  const retired = retiredIds(history);
   for (const [path, text] of code) {
-    for (const id of citedIds(text)) if (!defined.has(id)) problems.push(`${path} cites ${id}, which the spec does not define`);
+    for (const id of citedIds(text)) {
+      if (defined.has(id)) continue;
+      if (retired.has(id)) warnings.push(`${path} cites ${id}, which is retired (spec/BATON_SPEC_HISTORY.md)`);
+      else problems.push(`${path} cites ${id}, which the spec does not define`);
+    }
   }
   for (const id of new Set([...spec.matchAll(/(?<![\w-])(R3-\d+|B-\d+)\b/g)].map((m) => m[1]))) {
     if (!tickets.has(id) && !EXAMPLE_TICKETS.includes(id)) problems.push(`the spec cites ${id}, which is not a ticket here`);
@@ -54,6 +71,7 @@ export function check(spec, code, tickets) {
   for (const term of SCRUBBED) {
     if (spec.toLowerCase().includes(term)) problems.push(`the spec contains the scrubbed term "${term}"`);
   }
+  Object.defineProperty(problems, 'warnings', { value: warnings, enumerable: false });
   return problems;
 }
 
@@ -72,7 +90,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     .map((p) => [relative(REPO, p), readFileSync(p, 'utf8')]);
   const tickets = new Set(['tickets', 'tickets/archive'].flatMap((d) => readdirSync(join(REPO, d)))
     .filter((n) => n.endsWith('.mdx')).map((n) => n.slice(0, -4)));
-  const problems = check(spec, code, tickets);
+  const historyPath = join(REPO, 'spec', 'BATON_SPEC_HISTORY.md');
+  const history = existsSync(historyPath) ? readFileSync(historyPath, 'utf8') : '';
+  const problems = check(spec, code, tickets, history);
+  for (const w of problems.warnings) console.warn(`! ${w}`);
   if (problems.length) {
     for (const p of problems) console.error(`✗ ${p}`);
     console.error(`check-spec: ${problems.length} problem(s)`);
