@@ -147,3 +147,13 @@ B-21). The model:_
   its lease, and the alarm's live-set check recounts for that as for any lapse — so it
   recounts nothing in the model either. (B-44, filed for it on the first reading, was
   withdrawn.)_
+
+_2026-10-19 — part 2b's review round 1 (baton#59) corrects the note above. A worker is live
+within `TIMEOUT` of its last **authenticated call**, not only its last heartbeat (§5, §11; only a
+heartbeat recounts). The counts' other causes — registration, grants made, changed or revoked,
+a revoked credential, a post changing `requires` or needs — are fixed by the instance and listed
+under *Not modelled*. `small`'s cost did grow with the fleet's state, even with no fleet; the
+measured figure is in the round-1 follow-up's `model:full` report. The reviewers found a core defect, recorded
+as B-49: core's recount evaluates after each kind of row, so a returning fleet logs an extra
+`unblocked` and `blocked`. R-BTN-75 is amended to evaluate once per transaction. baton#59 merged before
+these fixes; they land in a follow-up pull request._

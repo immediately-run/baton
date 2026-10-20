@@ -7,9 +7,10 @@ module regressions {
                REQUIRED = Set("fix", "merge"), MAX_TIME = 12,
                MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1,
                DECLARED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp"), "w3" -> Set("vpn:corp")),
-               GRANTED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp"), "w3" -> Set("vpn:corp")),
+               // w3 declares vpn:corp without a grant: it counts toward no row (round 1, 1-B-3)
+               GRANTED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp"), "w3" -> Set()),
                REQUIRES = Map("t1" -> Set(), "t2" -> Set("vpn:corp")),
-               RESOURCES = Set("llm", "gpu"), NEEDS = Map("implement" -> Set("llm"), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())).* from "./baton"
+               RESOURCES = Set("llm", "gpu", "disk"), NEEDS = Map("implement" -> Set("llm", "gpu"), "review" -> Set("disk"), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())).* from "./baton"
 
   val c1 = st.claims.get(1)
   val c2 = st.claims.get(2)
@@ -436,13 +437,15 @@ module regressions {
       .expect(not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked" and not(st.unpairedUnblock))
 
   // ---- the fleet (R3-1254 part 2b) ----
-  // R-BTN-75: a `capability` row stands while no live worker both declares and is granted it;
-  // the heartbeats that change what is declared write and clear it, with their events.
+  // R-BTN-75: a `capability` row stands while no live worker both declares and is granted it —
+  // w3, live and declaring it without a grant, counts for nothing — and the heartbeats that change
+  // what is declared write and clear it, with their events.
   run capabilityRowFollowsTheFleetTest =
-    start.then(declare("w1", NONE)).then(declare("w2", NONE))
+    start.then(declare("w1", NONE))
       .expect(st.capRows.get("t2") == Set() and not(st.blocked.get("t2")))
-      .then(declare("w3", NONE))
-      .expect(st.capRows.get("t2") == Set("vpn:corp") and st.blocked.get("t2") and st.lastEvent.get("t2") == "blocked")
+      .then(declare("w2", NONE))
+      .expect(st.capRows.get("t2") == Set("vpn:corp") and st.blocked.get("t2") and st.lastEvent.get("t2") == "blocked"
+              and st.fleetLive.contains("w3"))
       .then(declare("w1", Set("vpn:corp")))
       .expect(st.capRows.get("t2") == Set() and not(st.blocked.get("t2")) and st.lastEvent.get("t2") == "unblocked"
               and not(st.unpairedUnblock))
@@ -466,9 +469,14 @@ module regressions {
     start.then(claim("w1", "t2")).then(endBlockedOn("w1", "capability", "vpn:corp"))
       .expect(not(st.declared.get("w1").contains("vpn:corp")) and st.capRows.get("t2") == Set()
               and not(st.blocked.get("t2")) and st.blockedEnds.get("t2").get("implement") == 1)
-      .then(claim("w1", "t2")).fail()
+      .then(sync1).then(claim("w1", "t2")).fail()
+  // ... and the sync that lets the ticket be claimed again offers it to a runner that has it.
+  run capabilityEndLeavesItToAnotherTest =
+    start.then(claim("w1", "t2")).then(endBlockedOn("w1", "capability", "vpn:corp"))
+      .then(sync1).then(claim("w2", "t2"))
+      .expect(c2.worker == "w2" and c2.status == "active")
   run capabilityEndOfTheLastHolderBlocksTest =
-    start.then(declare("w2", NONE)).then(declare("w3", NONE))
+    start.then(declare("w2", NONE))
       .then(claim("w1", "t2")).then(endBlockedOn("w1", "capability", "vpn:corp"))
       .expect(st.capRows.get("t2") == Set("vpn:corp") and st.blocked.get("t2") and st.lastEvent.get("t2") == "blocked")
   // R-BTN-75, R-BTN-45: a `resource` row is advice — it blocks the ticket, and a claim into the
@@ -490,6 +498,9 @@ module regressions {
       .expect(st.resRows.get("t1") == Set() and not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked")
   run readingWaitsOutItsTimeTest =
     start.then(reading("llm", false)).then(tick).then(readingLapses("llm")).fail()
+  run readingLapsesNotATickEarlyTest =
+    start.then(reading("llm", false)).then(3.reps(_ => tick.then(tick).then(heartbeat("w1"))))
+      .then(tick).then(readingLapses("llm")).fail()
   // R-BTN-77 as amended by R3-1251: the fleet empties — the row goes, silently, and is
   // remembered; the fleet back and the resource still out, it is written again silently.
   action fleetEmptiedWhileBlocked: bool =
@@ -509,6 +520,62 @@ module regressions {
       .then(wake("w1")).then(heartbeat("w1"))
       .expect(not(st.blocked.get("t1")) and st.lastEvent.get("t1") == "unblocked" and st.lost.get("t1") == Set()
               and st.events == 4 and not(st.unpairedUnblock))
+  // §5, §11: every authenticated call keeps a worker live, not only a heartbeat — a lapsed worker
+  // that claims and ends `resource`-blocked is live in that end's recount (round 1, 1-B-0).
+  run aWorkersCallKeepsItLiveTest =
+    start.then(tick).then(tick).then(tick).then(tick).then(claim("w1", "t1"))
+      .then(endBlockedOn("w1", "resource", "llm"))
+      .expect(st.fleetLive == Set("w1") and st.resRows.get("t1").contains({ leg: "implement", res: "llm" })
+              and st.blocked.get("t1") and st.lastEvent.get("t1") == "blocked")
+  // ... a different block while the record stands: the owed `unblocked`, then the `blocked`, both
+  // logged, and the record ends (round 1, 1-A-2).
+  run answerLostThenAnotherBlockLogsTheOwedFirstTest =
+    fleetEmptiedWhileBlocked.then(gitDecides("t1", "", true)).then(sync1)
+      .expect(st.blocked.get("t1") and st.lost.get("t1") == Set() and st.events == 4 and not(st.unpairedUnblock))
+  // ... the leg moved past while the fleet is away: the need is gone, the record settles, and
+  // the owed `unblocked` is logged (round 1, 1-A-1).
+  run answerLostSettlesWhenTheLegMovesPastTest =
+    fleetEmptiedWhileBlocked.then(foreignPush("t1", "implement")).then(sync1)
+      .expect(st.queued.get("t1") != "implement" and not(st.blocked.get("t1")) and st.lost.get("t1") == Set()
+              and st.lastEvent.get("t1") == "unblocked" and st.events == 3)
+  // ... the fleet back to a ticket blocked on more than it lost (a resource that went down
+  // while no one could see it): logged — the owed `unblocked`, then the `blocked` (round 1, 1-B-2).
+  run answerLostBackOnMoreThanItLostIsLoggedTest =
+    fleetEmptiedWhileBlocked.then(reading("gpu", false)).then(wake("w1")).then(heartbeat("w1"))
+      .expect(st.blocked.get("t1") and st.lost.get("t1") == Set() and st.events == 4 and not(st.unpairedUnblock))
+  // ... the fleet back while the ticket is held by a claim: settled with no event (round 1, 1-B-2).
+  run answerLostSettledSilentlyWhileHeldTest =
+    fleetEmptiedWhileBlocked.then(wake("w1")).then(claim("w1", "t1")).then(alarmLive)
+      .expect(st.fleetLive == Set("w1") and st.lost.get("t1") == Set() and not(st.blocked.get("t1"))
+              and st.events == 2)
+  // ... judged on the queued leg: the model's `review`/`disk` row, which the fleet's return adds and
+  // was never lost, does not stop a silent reblock. Core agrees here — t1 sits at `filed`, whose
+  // only next leg is `implement`, so core posts no `review` need — and the mutant that weighs every
+  // leg would log two events core does not. Where they part (a row on another *next* leg) is stated
+  // under *Not modelled*, not pinned (round 2 of baton#60, 2-r2-0).
+  run answerLostJudgedOnTheQueuedLegTest =
+    fleetEmptiedWhileBlocked.then(reading("disk", false)).then(wake("w1")).then(heartbeat("w1"))
+      .expect(st.resRows.get("t1").contains({ leg: "review", res: "disk" }) and st.blocked.get("t1")
+              and st.lost.get("t1") == Set() and st.events == 2)
+  // Each call keeps a worker live, not only the claim: a lapsed fleet's one caller is counted at
+  // the alarm's next check (round 1 of baton#60, 1-B-2). w1 claims at tick 2, calls at 3; at tick
+  // 6 only that call is within TIMEOUT.
+  action claimAtTwo: bool = start.then(tick).then(tick).then(claim("w1", "t1")).then(tick)
+  run anAdvanceKeepsItLiveTest =
+    claimAtTwo.then(advance("w1", "implement", NONE)).then(tick).then(tick).then(tick).then(alarmLive)
+      .expect(st.fleetLive == Set("w1"))
+  run anEndKeepsItLiveTest =
+    claimAtTwo.then(endClaim("w1", "release", false)).then(tick).then(tick).then(tick).then(alarmLive)
+      .expect(st.fleetLive == Set("w1"))
+  run aBlockedEndKeepsItLiveTest =
+    claimAtTwo.then(endBlocked("w1", "decision", T2_DONE)).then(tick).then(tick).then(tick).then(alarmLive)
+      .expect(st.fleetLive == Set("w1"))
+  // ... and a fence report is a heartbeat: from a lapsed worker it recounts at once. It comes
+  // before the alarm, as in core, whose alarm times the fence out in the same transaction that
+  // drops the worker from the live set (round 2 of baton#60, 2-r2-1).
+  run aFenceReportRecountsTest =
+    start.then(claim("w1", "t1")).then(forceReap("w1")).then(tick).then(tick).then(tick).then(tick)
+      .then(fenceCleared("w1")).expect(st.fleetLive == Set("w1"))
   // R-BTN-126: a `resource` end stores its reading and an `end`-sourced need on the leg.
   run resourceEndStoresReadingAndNeedTest =
     start.then(claim("w1", "t1")).then(endBlockedOn("w1", "resource", "gpu"))
