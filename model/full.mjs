@@ -1,6 +1,7 @@
 // npm run model:full: every model check, on the author's machine (R-BTN-68, amended 2026-10-17:
 // model checking does not run on hosted CI runners, whose time limits it outgrew; amended
-// 2026-10-20: about three hours, so it runs weekly on main, and a PR carries `--pr`'s report).
+// 2026-10-20: about three hours, so it runs weekly on main, and a PR carries `--pr`'s report;
+// about two and a quarter since B-37 made the proof cheaper).
 // A pull request that changes what the checks read (scripts/model-report.mjs lists it) pastes a
 // report into its body, and CI checks it names the PR's head and passes. `--pr` (npm run
 // model:pr, about 20–30 minutes) runs `npm run model:quick`, the model-based tests at 200 traces
