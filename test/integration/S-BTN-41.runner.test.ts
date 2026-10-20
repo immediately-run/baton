@@ -219,6 +219,18 @@ describe('S-BTN-41 the runner', () => {
     expect(await rows('SELECT status, end_reason FROM claims')).toEqual([{ status: 'released', end_reason: 'released:cannot-finish:contract-output' }]);
   }, 30_000);
 
+  it('an advance refused for another reason suspends with the outputs, meeting the entry (3-r3-2)', async () => {
+    // check may not be taken by the key that built: the runner's advance into it is refused,
+    // rule chain, and it suspends at built — an arrival carrying build's outputs.
+    const CHAINED = { ...ENTRY, legs: { ...ENTRY.legs, check: { ...ENTRY.legs.check, no_chain_from: ['build'] } } };
+    home.write('.baton/courses/relay/course.json', `${JSON.stringify(CHAINED, null, 2)}\n`);
+    home.leg('build', `return { reached: 'built', next: 'check', outputs: ${ARTIFACT} };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, undefined, { course: CHAINED });
+    expect(await makeRunner().runOnce()).toMatchObject({ ticket: 'docs:T-1', end_reason: 'suspended:built', reached: 'built' });
+    expect(await rows('SELECT status, end_reason FROM claims')).toEqual([{ status: 'completed', end_reason: 'suspended:built' }]);
+  }, 30_000);
+
   it('a done end whose outputs fail its arrival is given up the same way', async () => {
     const END = { ...relay, stations: { ...relay.stations, merged: { ...relay.stations.merged, entry: [{ output: 'artifact', schema: 'std:url@1' }] } } };
     home.write('.baton/courses/relay/course.json', `${JSON.stringify(END, null, 2)}\n`);

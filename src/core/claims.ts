@@ -764,8 +764,8 @@ export class Claims {
    * `entry` — which the runner treats as an output contract failure.
    */
   private checkEntry(repo: string, g: Graph, station: string, outputs: Output[]) {
-    this.checkOutputValues(repo, outputs);
-    const resolve = (id: string) => this.c.schema?.(repo, id) ?? null;
+    const resolve = this.resolver(repo);
+    this.checkOutputValues(repo, outputs, resolve);
     for (const r of g.entry.get(station) ?? []) {
       const o = outputs.find((x) => x.name === r.output);
       if (!o) throw new BatonError('not-eligible', `entry: ${station} requires the output ${r.output} (${r.schema})`, { rule: 'entry', rule_code: 'entry' });
@@ -775,10 +775,20 @@ export class Claims {
     }
   }
 
+  /** One request's schema resolver (3-r3-1): each id read and parsed once, so the validator's
+   *  done-once work — enum sets and `const` keys, keyed by the schema object — is done once, and
+   *  the reads are bounded by the schemas a chain names, not by the value's size. */
+  private resolver(repo: string): (id: string) => Schema | null {
+    const seen = new Map<string, Schema | null>();
+    return (id) => {
+      if (!seen.has(id)) seen.set(id, this.c.schema?.(repo, id) ?? null);
+      return seen.get(id) ?? null;
+    };
+  }
+
   /** R-BTN-108: each inline value, against its schema and every base; a value whose schema chain
    *  does not bound it is given by pointer instead. */
-  private checkOutputValues(repo: string, outputs: Output[]) {
-    const resolve = (id: string) => this.c.schema?.(repo, id) ?? null;
+  private checkOutputValues(repo: string, outputs: Output[], resolve = this.resolver(repo)) {
     // One budget for the request: up to 16 outputs share it (baton#69 round 2, 2-r2-0).
     const meter = { steps: PATTERN_STEPS_MAX };
     for (const o of outputs) {

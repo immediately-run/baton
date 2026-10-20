@@ -588,7 +588,11 @@ export class Runner {
         if (verdict.kind === 'suspend' || verdict.kind === 'release') {
           const reason = verdict.kind === 'suspend' ? `suspended:${verdict.reached}` : `released:${verdict.reason}`;
           // §6.5: only a completed end points at its evidence — a released end carries none.
-          return await this.finish(claimId, { end_reason: reason, reached: verdict.reached, next: verdict.next, ...(verdict.kind === 'suspend' && closed ? { ended_at_sha: closed } : {}) }, await this.callHandoff(script, ctx));
+          return await this.finish(claimId, {
+            end_reason: reason, reached: verdict.reached, next: verdict.next,
+            ...(verdict.kind === 'suspend' && verdict.outputs ? { outputs: verdict.outputs } : {}),
+            ...(verdict.kind === 'suspend' && closed ? { ended_at_sha: closed } : {}),
+          }, await this.callHandoff(script, ctx));
         }
         // The go-on decision: the advance carries the result's bars on the edge (R-BTN-63) and
         // the evidence `close` wrote; it finishes this leg and starts the next. The finished leg
@@ -626,7 +630,9 @@ export class Runner {
       }
       // The leg's outputs did not meet its arrival: the leg is given up where the claim rests.
       if (kind === 'contract-output') return { settle: { end_reason: 'released:cannot-finish:contract-output' } };
-      return { settle: { end_reason: `suspended:${body.reached ?? fallbackStation}`, reached: body.reached ?? fallbackStation, next: body.leg } };
+      // The suspension arrives where the advance would have (R-BTN-109): its outputs go with it,
+      // so a refusal for any other reason still suspends rather than failing the entry (3-r3-2).
+      return { settle: { end_reason: `suspended:${body.reached ?? fallbackStation}`, reached: body.reached ?? fallbackStation, next: body.leg, ...(body.outputs ? { outputs: body.outputs } : {}) } };
     }
   }
 

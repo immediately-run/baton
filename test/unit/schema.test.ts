@@ -198,6 +198,24 @@ describe('round 2: every kind of validation work metered; the memo; $ref sibling
   });
 });
 
+describe('round 3: the budget before the work; a $ref two hops deep (3-r3-0, 3-r3-3)', () => {
+  it('a spent compile budget compiles nothing more; a refused compile is charged', () => {
+    const meter = { steps: 0 };
+    const start = performance.now();
+    for (let i = 0; i < 200; i++) expect(checkSchema({ type: 'string', pattern: `^(a{${i}}){20}$` }, meter)[0].message).toMatch(/more states than one sync allows/);
+    expect(performance.now() - start).toBeLessThan(1000);
+    const m = { steps: 1_000_000 };
+    expect(checkSchema({ type: 'string', pattern: '(a{1000}){1000}' }, m)[0].message).toMatch(/4096 states/);
+    expect(m.steps).toBeLessThanOrEqual(1_000_000 - 4096);
+  });
+
+  it('a base reached through a pure $ref keeps the keywords beside the next $ref', () => {
+    const r = resolveWith({ 'c:y@1': { type: 'string' }, 'c:x@1': { $ref: 'c:y@1', maxLength: 5 } });
+    expect(refinementGaps({ type: 'string' }, { $ref: 'c:x@1' }, r).map((g) => g.keyword)).toEqual(['maxLength']);
+    expect(refinementGaps({ type: 'object', properties: { p: { type: 'string' } } }, { type: 'object', properties: { p: { $ref: 'c:x@1' } } }, r).map((g) => g.keyword)).toEqual(['maxLength']);
+  });
+});
+
 describe('the inline bound (R-BTN-108)', () => {
   it('stores a value only when its whole chain closes every object and caps every string at 256', () => {
     for (const id of Object.keys(STD)) expect([id, unboundedAt(id, stdSchema)]).toEqual([id, null]);

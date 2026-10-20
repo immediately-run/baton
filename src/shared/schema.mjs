@@ -402,8 +402,14 @@ export function checkSchema(schema, meter = null) {
     for (const k of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum']) if (own(s, k) && !isNum(s[k])) add(`${path}/${k}`, `${k} is a number`);
     for (const k of ['minLength', 'maxLength', 'minItems', 'maxItems']) if (own(s, k) && !isCount(s[k])) add(`${path}/${k}`, `${k} is a non-negative integer`);
     if (own(s, 'pattern')) {
-      try { charge(meter, compilePattern(s.pattern).states); } catch (e) {
-        add(`${path}/pattern`, e instanceof PatternBudget ? 'the schemas\' patterns compile to more states than one sync allows' : `pattern: ${e.message}`);
+      // The budget is checked before compiling, and a refused compile is charged its cap, so a
+      // post of costly patterns stops at the budget instead of compiling them all (3-r3-0).
+      if (meter && meter.steps <= 0) add(`${path}/pattern`, 'the schemas\' patterns compile to more states than one sync allows');
+      else {
+        try { charge(meter, compilePattern(s.pattern).states); } catch (e) {
+          if (e instanceof PatternBudget) add(`${path}/pattern`, 'the schemas\' patterns compile to more states than one sync allows');
+          else { if (meter) meter.steps -= PATTERN_MAX_STATES; add(`${path}/pattern`, `pattern: ${e.message}`); }
+        }
       }
     }
     if (own(s, 'format') && !FORMATS.has(s.format)) add(`${path}/format`, 'format is date-time or uri');
@@ -558,6 +564,7 @@ export function validate(value, id, resolve, meter = { steps: PATTERN_STEPS_MAX 
       if (own(s, 'minLength') && len < s.minLength) add(path, `must be at least ${s.minLength} characters`);
       if (own(s, 'maxLength') && len > s.maxLength) add(path, `must be at most ${s.maxLength} characters`);
       if (own(s, 'pattern')) {
+        if (meter.steps <= 0) throw new PatternBudget();
         const m = compilePattern(s.pattern);
         if (!charged.has(s.pattern)) { charge(meter, m.states); charged.add(s.pattern); }
         // Per pattern, by string: no key can stand for two pairs (2-r2-2).
@@ -672,10 +679,13 @@ export function unboundedAt(id, resolve) {
 export function refinementGaps(schema, base, resolve) {
   const gaps = [];
   const add = (path, keyword, message) => { if (gaps.length < ERRORS_MAX) gaps.push({ path, keyword, message }); };
-  const deref = (s, depth = 0) => (isObj(s) && typeof s.$ref === 'string' && depth < 16 ? deref(resolve(s.$ref), depth + 1) ?? s : s);
+  const NOT_CONSTRAINTS = new Set(['$ref', 'title', 'description', 'x-baton-base', 'x-baton-view']);
+  // A pure `$ref` is followed; a node with constraints beside its `$ref` is kept whole, so cmp
+  // compares both its target and its own keywords (2-r2-3, 3-r3-3).
+  const pureRef = (s) => isObj(s) && typeof s.$ref === 'string' && Object.keys(s).every((k) => NOT_CONSTRAINTS.has(k));
+  const deref = (s, depth = 0) => (pureRef(s) && depth < 16 ? deref(resolve(s.$ref), depth + 1) ?? s : s);
   let budget = WALK_BUDGET;
   let spent = false;
-  const NOT_CONSTRAINTS = new Set(['$ref', 'title', 'description', 'x-baton-base', 'x-baton-view']);
   const cmp = (sRaw, bRaw, path, depth) => {
     if (--budget < 0) { if (!spent) add(path, '', 'too large to compare'); spent = true; return; }
     if (depth > SCHEMA_MAX_DEPTH) return add(path, '', 'too deep to compare');

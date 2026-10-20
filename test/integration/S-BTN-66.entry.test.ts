@@ -22,6 +22,8 @@ beforeEach(async () => {
   git.registry = [course(3, 3, { course: ENTRY, schemas: [
     { id: 'roadmap-pr:findings@2', digest: 'a'.repeat(64), schema: FINDINGS },
     { id: 'roadmap-pr:notes@1', digest: 'b'.repeat(64), schema: { type: 'object', properties: { text: { type: 'string' } } } },
+    { id: 'roadmap-pr:code@1', digest: 'c'.repeat(64), schema: { type: 'string', maxLength: 8, enum: Array.from({ length: 1500 }, (_, i) => `c${i}`) } },
+    { id: 'roadmap-pr:codes@1', digest: 'd'.repeat(64), schema: { type: 'array', maxItems: 500, items: { $ref: 'roadmap-pr:code@1' } } },
   ] })];
   git.add('T-1', {}, AT_PR_OPEN).add('T-2', {}, AT_PR_OPEN);
   expect((await git.post()).status).toBe(200);
@@ -49,6 +51,14 @@ describe('S-BTN-66 entry requirements', () => {
       .toMatchObject({ code: 'not-eligible', rule: 'entry', rule_code: 'entry' });
     expect((await advance('vm-a', secret, claim, { reached: 'reviewed', leg: 'fix', outputs: [{ name: 'findings', schema: 'roadmap-pr:findings@2', value: { open: 2 } }] })).json)
       .toMatchObject({ ok: true, station: 'reviewed' });
+  });
+
+  it('a large valid value through the stored schemas is accepted: each schema read once per request (3-r3-1)', async () => {
+    const { secret, claim } = await reviewing('docs:T-1');
+    const codes = Array.from({ length: 500 }, (_, i) => `c${i % 1500}`);
+    expect((await advance('vm-a', secret, claim, { reached: 'reviewed', leg: 'fix', outputs: [
+      { name: 'findings', schema: 'roadmap-pr:findings@2', value: { open: 1 } }, { name: 'codes', schema: 'roadmap-pr:codes@1', value: codes },
+    ] })).json).toMatchObject({ ok: true, station: 'reviewed' });
   });
 
   it('a pointer meets the requirement by name and schema; its contents are the sync\'s to check', async () => {

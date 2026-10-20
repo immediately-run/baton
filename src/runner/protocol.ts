@@ -13,7 +13,7 @@ import { resolveLeg, resolveStation } from '../core/graph';
  * at: an outcome it reached, or its `from` when it gave the leg up (R-BTN-71). */
 export type LegResult =
   | { reached: string; next?: string | null; bars?: string[]; session?: string; not_before?: number; outputs?: unknown[] }
-  | { suspend: true; reached: string; next?: string | null }
+  | { suspend: true; reached: string; next?: string | null; outputs?: unknown[] }
   | { end: 'done'; reached: string; detail?: string; outputs?: unknown[] }
   | { release: string; reached: string; next?: string | null };
 
@@ -27,7 +27,7 @@ export const SCRIPT_RELEASE_REASONS = ['stale-board', 'cannot-finish:transient',
 export type Decision =
   | { kind: 'advance'; reached: string; leg: string; bars: string[]; session?: string; notBefore?: number; outputs?: unknown[] }
   | { kind: 'done'; reached: string; detail?: string; outputs?: unknown[] }
-  | { kind: 'suspend'; reached: string; next: string | null }
+  | { kind: 'suspend'; reached: string; next: string | null; outputs?: unknown[] }
   | { kind: 'release'; reason: string; reached: string; next: string | null };
 
 /** A script bug (§6.13): the result's pair does not follow the course file, so the leg is given
@@ -74,7 +74,8 @@ export function decide(result: unknown, g: Graph, legName: string, from: string)
     if (!rests.has(reached)) return bug(`suspends at ${result.reached}, which is not ${from} or an outcome of ${leg}`);
     const next = nextLeaving(result.next, reached);
     if (result.next != null && next == null) return bug(`names the next leg ${result.next}, which does not leave ${result.reached}`);
-    return { kind: 'suspend', reached, next };
+    // A suspension at an outcome is an arrival there (R-BTN-109): it carries the leg's outputs.
+    return { kind: 'suspend', reached, next, ...outputsOf(result) };
   }
   if ('end' in result) {
     const reached = resolved(result.reached);
