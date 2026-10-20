@@ -2525,7 +2525,9 @@ Limits that hold throughout:
     - The body holds filter fields only (R-BTN-33), never the subject or the body. `url` is sent
       only for an unbound `suspend` and points to where git holds the question (the leg's
       evidence or its hand-off), under R-BTN-92's link rule.
-    - Baton answers with a `condition_id` and stores the `conditions` row. It records an activity
+    - Baton answers with a `condition_id` and, when `handler` names a course, the handler's id
+      `handler_id` (below), and stores the `conditions` row; the runner then writes the handler
+      ticket under that id. It records an activity
       of kind `condition` on the leg run and a `condition` event in the ticket's history
       (R-BTN-81).
     - A claim may hold at most 20 open conditions, and a ticket may raise at most 200 a day.
@@ -2579,8 +2581,8 @@ Limits that hold throughout:
     - The runner writes the handler ticket git first, through the ticket source's `file(ticket)`
       export (R-BTN-74; the markdown source writes `<items>/<local id>.md`). It pushes the file
       before the raise returns or the leg ends.
-    - Its id is the raising ticket's local id, then `.c`, then the number of conditions raised on
-      that ticket so far (`R3-1205.c3`).
+    - Its id is the raising ticket's local id, then `.c`, then Baton's count of conditions raised on
+      that ticket so far (`R3-1205.c3`), returned as `handler_id` by the raise's report.
     - Its frontmatter names `course` (the resolved course), `parent` (the raising ticket),
       `handles: {type, disposition, restarts, default?, severity?, wait_s?, condition_id}` and
       `raised_by: {leg, run}`. Its body is the subject and body the leg supplied.
@@ -2592,7 +2594,7 @@ Limits that hold throughout:
       severity?, raised_by: {ticket, leg?, run?}, question: <std:git.file@1>}`.
     - A course bound to a `suspend` type produces a **`std:restart@1`** at every end station:
       `{restart: <id> | null, reason: "chosen" | "unanswered" | "withdrawn" | "resolved",
-      answered_by?, commit?}`. This type refines `std:decision@1`. `baton course test` refuses
+      answered_by?, commit?}`. `baton course test` refuses
       the binding otherwise.
     - What a handler of a `notify` or `interrupt` type produces is not read.
     - Both formats are in R-BTN-110's library.

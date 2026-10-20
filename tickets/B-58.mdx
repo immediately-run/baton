@@ -69,8 +69,9 @@ delivery.
    - B-62 (call children) and B-64 (outbox writes) reuse it.
 5. **The handler ticket.** For a bound raise, in this order:
    1. B-55's check.
-   2. `POST …/conditions` with `handler`. Its id is the raising ticket's local id, then `.c<n>`,
-      where `n` is the number of conditions raised on that ticket so far (`R3-1205.c3`).
+   2. `POST …/conditions` with `handler`; Baton answers `handler_id`, the raising ticket's local
+      id, then `.c<n>`, where `n` is Baton's count of conditions raised on that ticket so far
+      (`R3-1205.c3`).
    3. `file(ticket)` with frontmatter `course`, `parent` (the raising ticket), `handles: {type,
       disposition, restarts, default?, severity?, wait_s?, condition_id}` and `raised_by: {leg,
       run}`. The body is the leg's subject and body.
@@ -82,7 +83,7 @@ delivery.
    - `std:condition@1`: `{type, disposition, restarts, default?, severity?, raised_by: {ticket,
      leg?, run?}, question: <std:git.file@1>}`.
    - `std:restart@1`: `{restart: <id>|null, reason: chosen|unanswered|withdrawn|resolved,
-     answered_by?, commit?}`, as a refinement of `std:decision@1`.
+     answered_by?, commit?}` (its own schema; it does not refine `std:decision@1`).
    - `baton course test` refuses a `suspend` binding whose course does not produce
      `std:restart@1` at every end station. What a `notify` or `interrupt` handler produces is not
      read.
@@ -103,18 +104,6 @@ delivery.
 - Return from a raise, or end the leg, before the handler file is pushed (G-BTN-146).
 - Write a core condition's handler here. Those go through B-64's outbox.
 
-### Settle while building
-
-- **`std:restart@1` cannot refine `std:decision@1` as both are written.** `std:decision@1`
-  requires `id`, `option` and `commit` and is closed, while `std:restart@1` has
-  `{restart, reason, answered_by?, commit?}`. B-52's refinement check would report the gap. Do
-  not loosen the check. Raise a spec amendment: either drop "refining `std:decision@1`", or give
-  `std:restart@1` the base's fields.
-- **How the runner learns `n` for `.c<n>`** before its `POST`. One option is to count the
-  ticket's handler files at the fetched head, since a ticket's legs are sequential (R-BTN-86).
-  The other is to have Baton return the count. Pick one, and amend R-BTN-161 if the route
-  changes.
-
 ### Tests
 
 - `test/integration/S-BTN-130.dynamic-binding.test.ts`, on both hosts:
@@ -132,7 +121,6 @@ delivery.
 
 - [ ] S-BTN-130 passes on both hosts; G-BTN-148 holds, and G-BTN-146's "handler pushed before it
       returns" holds
-- [ ] the two points under "Settle while building" are settled, and the spec is amended if needed
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
 - [ ] merged under the review gate
 

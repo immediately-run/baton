@@ -1,9 +1,9 @@
 ---
-title: "R3-1270 — Baton machine-key sync: a granted worker key posts its repository's board, recorded and reviewable, with an owner opt-out"
+title: "R3-1270 — Baton machine-key sync: a granted runner key posts its repository's board, recorded and reviewable, with an owner opt-out"
 id: R3-1270
 project: baton
 status: available
-updated: 2026-10-16
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1101
 tier: critical
-description: "verifySync accepts a machine key granted on the repository in the sync role (never the mirror) with ?repository=, unless the owners set machine_sync false; every board post records posted_by, and a machine-key post that closes another worker's ticket, drops a posted bar or loosens an author's gate is listed under Needs you (BATON_SPEC R-BTN-102); S-BTN-59. Requires: none."
+description: "verifySync accepts a machine key granted on the repository in the sync role (never the mirror) with ?repository=, unless the owners set machine_sync false; every board post records posted_by, and a machine-key post that closes another runner's ticket, drops a posted bar or loosens an author's gate raises baton.machine-post (BATON_SPEC §8.2 R-BTN-102); S-BTN-59. Requires: none."
 topics:
   - baton
 owns: {}
@@ -21,8 +21,8 @@ depends_on:
   - R3-1269
 ---
 
-**Brief:** the Baton project; the owner, 2026-10-16: workers are fully trusted to sync the tickets from git, none of it required of them.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2l R-BTN-102 (sync under a machine key, `machine_sync`, `posted_by`, the stated cost), R-BTN-93 and §10.1 as annotated, §4's 2026-10-16 DDL block (`board_snapshots.posted_by`, `repositories.machine_sync`), §13a S-BTN-59 (docs@646eca6, the merge of docs#220)
+**Brief:** the Baton project; the owner, 2026-10-16: runners are fully trusted to sync the tickets from git, none of it required of them.
+**Spec:** `spec/BATON_SPEC.md` §8.2 R-BTN-102 (sync under a machine key, `machine_sync`, `posted_by`, `baton.machine-post`) and R-BTN-146 (active grants, span), §3.2 R-BTN-93 (one verifier for sync routes), §12.1 (principals), §13 (`board_snapshots.posted_by`, `repositories.machine_sync`), §14, §15 S-BTN-59
 **Depends on:** R3-1263 (pulled syncs: `/v1/sync/want` and `/v1/sync/wanted`), R3-1269 (the migration this extends)
 
 ### Requires
@@ -33,25 +33,25 @@ depends_on:
 
 Today a board can be posted only under a sync key or a CI identity token
 (`verifySyncCredential` in `src/core/auth.ts`, R3-1262's sync keys). A plain git server should
-need no server-side component, so a worker that already holds a grant must be able to post its
+need no server-side component, so a runner that already holds a grant must be able to post its
 repository's board. The owner accepted that any agent on such a machine can then post a board
 that matches no commit; the spec bounds it by recording and listing, not refusing. Tier:
 critical — authentication.
 
 ### What to build
 
-1. `/v1/sync/observation`, `/v1/sync/board`, `/v1/sync/want` and `/v1/sync/wanted` accept a request signed by a machine key (credential kind `worker`) with `?repository=<id>` in the signed query, no worker secret, role `sync` only; `/v1/sync/events` and the mirror's routes refuse it `forbidden`.
+1. `/v1/sync/observation`, `/v1/sync/board`, `/v1/sync/want` and `/v1/sync/wanted` accept a request signed by a machine key (credential kind `runner`, still `worker` in the code until B-68) with `?repository=<id>` in the signed query, no runner secret, role `sync` only; `/v1/sync/events` and the mirror's routes refuse it `forbidden`.
 2. Refused `forbidden` when the key holds no unrevoked grant on the repository, or the repository's `machine_sync` is false.
 3. `PUT /v1/owner/{repository}/settings` takes `machine_sync`.
 4. Every accepted or held board post stores `posted_by` (the credential's fingerprint, or the CI identity), and its `snapshot-accepted` event names it.
-5. **Needs you** lists a machine-key post that closes a ticket another worker holds, drops a posted bar, lowers a tier, drops a `requires` clause or `operator_only`, or removes a `ticket` block or a decision — with the tickets and the key.
+5. A machine-key post that closes a ticket another runner holds, drops a posted bar, lowers a tier, drops a `requires` clause (or, during R-BTN-132's window, `operator_only`), or removes a `ticket` block or a decision raises `baton.machine-post` naming the tickets and the key — through today's `needsYou()` path if this lands before B-57, which converts it.
 
 ### Architecture — the decisions, named
 
 - **One verifier still answers every sync route**: extend the existing path that turns a sync request into `{repository, role}` so a machine key is one more credential kind it tries; no route checks keys itself (R-BTN-93's rule).
 - **The loosening check is a pure function** `loosenedBy(before, after)` in `src/core/board.ts`, comparing the outgoing and incoming `TicketRow`s the snapshot transaction already holds; it returns the ticket ids and what loosened. The transaction calls it only when the poster is a machine key.
-- **Owner and administrator keys stay out**: a key that is both granted as a worker and listed in `repository_owners` or `BATON_ADMIN_KEYS` is already impossible (R-BTN-57); do not relax that check.
-- **Do not**: let a machine key mirror; accept `?repository=` from an unsigned part of the request; refuse a loosening post (it is listed, by the owner's decision); require a worker secret on sync routes.
+- **Owner and administrator keys stay out**: a key that is both granted as a runner and listed in `repository_owners` or `BATON_ADMIN_KEYS` is already impossible (R-BTN-57); do not relax that check.
+- **Do not**: let a machine key mirror; accept `?repository=` from an unsigned part of the request; refuse a loosening post (it is raised, by the owner's decision); require a runner secret on sync routes.
 
 ### Tests
 
