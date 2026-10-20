@@ -20,10 +20,10 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # 2026-10-19: the suite takes ~9 minutes on a hosted runner and the trace replay
-    # (check-traces, 150 traces through quint, 4 at a time) ~17, after baton#52, #56 and #59
-    # grew both; at 25 every push to main timed out and the release job never ran. The quint
-    # half now runs only for a change to the model (below), but such a change still needs it.
+    # npm test replays every scenario trace through the model, one Quint run each; since 2026-10-19
+    # (R3-1254 part 2b's fleet, more scenarios) it takes 20 to over 25 minutes on a hosted runner
+    # (baton#65's run 19 m 48 s; main's two runs cancelled at 25). B-48 brings it back down. The
+    # quint half now runs only for a change to the model (below), but such a change still needs it.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
