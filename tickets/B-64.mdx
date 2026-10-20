@@ -131,3 +131,5 @@ push ends `released:blocked` on `runner:baton-legs` with another runner taking i
 the history's later Integration entry say `released:cannot-finish:capability`, the ticket held
 and `baton.retries` naming the runner. This ticket follows R-BTN-171; the §15 row needs a spec
 fix before the scenario is written.
+
+_(2026-10-20: adversarial review of the spec — R-BTN-171 gains the entry state `claimed`, a `written` entry is never handed out again, an entry not landed after 3 snapshots holds the ticket `outbox-unlanded`, dropping a claimed handler keeps its row until the claim ends and withdraws it if written, later `answer` entries drop with their handler, R-BTN-83 names the built-in legs' clearing events, and a core `notify` condition re-raised within an hour or past 20 handler entries an hour files no handler. Build these here.)_

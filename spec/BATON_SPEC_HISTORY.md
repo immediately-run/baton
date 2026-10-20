@@ -878,6 +878,96 @@ changes):
 15. **Gap (i), a person's leg's decision carries the leg's `asks`**: Baton stores the course's
     value and logs `asks-mismatch` when the post differs (R-BTN-116, §13; S-BTN-67, G-BTN-90).
 
+### Adversarial review (2026-10-20), adv-3.md
+
+§8–§10 (runners, claims, checks).
+
+- F1 (major) fixed: a fence-reap stores `fence_deadline` (reap + lease timeout) and the alarm clears the fence then, whatever the runner does; only the silence reap sets `reaped_at`; `baton.fence-pending` at 30 min (R-BTN-19, §9.5, R-BTN-90, §13; S-BTN-4, G-BTN-14).
+- F2 (major) fixed: every reap of a claim running a `session`-mode leg is fence-pending, `fenced` only after the provider confirms the interrupt, else the deadline; layer 1 interrupts the child; the unreachable-child residual stated (noticed as `foreign-write`, R-BTN-46) (R-BTN-19, §9.2).
+- F3 (major) fixed: both holder queries take `session_name` and the runner secret and answer relative to that runner; asked by the key alone, every active claim counts as another's (§9.2, §14).
+- F4 (major) fixed: the claim response's `base_sha` must be an ancestor of `snapshot_sha` (no roll-back, R-BTN-143); a check's `check_command` is read from the default branch's fetched tip (R-BTN-153); a machine key's `head_unfounded` post is held (R-BTN-147); S-BTN-123.
+- F5 (major) fixed: a `check_runners` row stands in for a grant (capabilities, `max_tier`; rules 4, 5, 7), the hostname binds at `check-runner add --name`; powers restated in §12.1; `not-queued` and `check-runner` named as gates (§6.6, §13, §14; G-BTN-103).
+- F6 (major) fixed: a supersession (a changed `check.sha` included) marks a completed-unconfirmed claim `superseded_at`: never confirmed, concludes nothing, no attempt, no longer rule 3 (R-BTN-168, R-BTN-114, §9.6, §13; S-BTN-68).
+- F7 (major) fixed: the courier reads the sha's runs and skips a notice when a higher `seq` is posted; read-back raises `check-mismatch` on a stale newest run and re-queues the highest notice (R-BTN-115; S-BTN-68). The proposed refusal of a mark after the lease lapsed is not taken: with the pre-post read a late mark is harmless, and refusing it would only re-deliver.
+- F8 (major) fixed: `baton.station-jump` is raised on any accepted post, not only a machine key's, for an arrival with no `claim_legs` row (person legs and settlements excepted); a suspension is confirmed only when arrivals beyond its expected path are such legs (R-BTN-147, R-BTN-71, R-BTN-10; S-BTN-25). The marker-nonce variant is not added; these two cover it.
+- F9 (minor) fixed: delivered, unacknowledged messages are re-sent on every heartbeat and acted on once per id (§6.9, §8.1).
+- F10 (minor) fixed: the sidecar fences on the lowest timeout in force at `last_ok` or declared since (R-BTN-9).
+- F11 (minor) fixed: a resume-named branch is continued only if it matches this ticket's current or previous `branch_pattern` (R-BTN-25).
+- F12 (minor) fixed: the claim nonce is declared public; dropped from masking and the state-view exclusion (R-BTN-144, §9.1, §13).
+- F13 (minor) fixed: the runner drains its spool before `end`, a grace-period close carrying `resume` rewrites `resume_json`; `previous_attempts` capped at the newest 10 plus `previous_attempts_total` (R-BTN-24, §14).
+- F14 (minor) fixed: claim idempotency is keyed by `(runner_id, request_id)` (§9.1, §13; G-BTN-2).
+
+### Adversarial review (2026-10-20), adv-1.md
+
+§1–§4 (what Baton is, deployments, repositories and forges, tickets and the board).
+
+- M1 (major) fixed: "founded" means the head and `new` lie on one line; a `new` strictly behind the head (a lagging fetch) posts nothing and releases its number with `behind`; after 30 minutes behind (`board_head.behind_since`, `behind_confirmed`) the sync posts a force post, which is held; only a diverged or absent head is `head_unfounded`; a force post naming an accepted snapshot's sha is never adopted at once (§4.3, R-BTN-147, §13, §14; S-BTN-121, G-BTN-141).
+- M2 (major) fixed: accepting a held row (administrator or alarm) only sets `accepted_at` and drops the repository's other held rows; the next force post of that sha with a newer observation is adopted with its own board; the alarm accepts only the newest held row; a held row whose sha an accepted post `contains` is dropped; the alarm row is in §2.1 (R-BTN-11, §4.4, §13; S-BTN-121).
+- M3 (major) fixed: the tighten-only list names the real fields — `stations[].bars` only grow, `decisions` only added, `next[].state` only `ready`→`waiting`, plus tier, `requires`, `depends_at`; a held post's `closed` is ignored and its omissions drop nothing; R-BTN-62's refresh takes positions and markers (R-BTN-62, R-BTN-147; S-BTN-121).
+- M4 (major) fixed: R-BTN-33 lists the opaque blobs as the other inline values with §12.3's caps and states core cannot keep prose out of them; the markdown source no longer posts `prs` or `answer` — they are sync-local `fields` station functions read (R-BTN-33, R-BTN-74, §5.8).
+- M5 (major) fixed as the owner decided (decision 3): no inherited holds; R-BTN-66 states that a hold binds a ticket id only as firmly as git keeps it, pointing to R-BTN-12's residual-risk text and the listing of the old id's held `closed` row.
+- M6 (major) fixed: markers are never refused; past 20 per ticket or 20,000 in all the sync posts the newest and lists the cut tickets in `markers_truncated`; markers gate nothing (R-BTN-149, §4.4; S-BTN-122).
+- M7 (major) fixed: "author gate" defined (the `requires` and tier gates over `declared`); a claim settling at `start` with a posted-state gate failing ends `stale-board`, no failed attempt, branch tainted when the settling post is at the claim's sha (R-BTN-104; S-BTN-121, G-BTN-59, G-BTN-141).
+- M8 (major) fixed: the longest matching id wins a branch, in the fact adapter, station functions, the local branch check and the branch-holder query; an unposted child's branch maps to its parent until its first snapshot (R-BTN-141; S-BTN-49).
+- m1 (minor) fixed: a post is `stale-observation` unless its number was issued to the posting credential (R-BTN-62; S-BTN-122).
+- m2 (minor) fixed: `POST /v1/sync/observation {release, behind?}` gives a number back on every no-post exit; a lapse is a number voided for idleness or age, never posted or released (R-BTN-150, R-BTN-139, §14; S-BTN-122).
+- m3 (minor) fixed: the open-world bar is per ticket, for every key; `open_world_bars` is keyed by ticket with the setting credential as a column (R-BTN-148, §13).
+- m4 (minor) fixed: §2.1's idempotency promise is limited to claims' `request_id`; every other write names how a retry is safe; §2.3's retry keeps a `request_id` only where the route takes one.
+- m5 (minor) fixed: admission at `/v1/sync/*` takes a sync key's or a machine key's signature (§2.3).
+- m6 (minor) fixed: §1's runner definition, R-BTN-94's "Who answers a want", R-BTN-97's "a machine", and `cloudflare:*` in §2.1 and G-BTN-56.
+- m7 (minor) fixed: a push is dropped only when its pusher is the repository's `mirror_pusher` and its author email the mirror's; an email alone drops nothing (R-BTN-73, R-BTN-47, §13, §14, §16.3; S-BTN-56).
+- m8 (minor) fixed: a heartbeat's declaration and report writes count against a per-credential daily budget (50,000); past it the lease is kept and the changes dropped (`declarations: 'quota'`) (§2.3, R-BTN-149; S-BTN-122).
+- m9 (minor) fixed: `branch` verdict commits carry `Baton-Claim: <nonce>` and are posted as markers, so an unclaimed verdict logs `foreign-write` and still counts (R-BTN-96, §4.4; S-BTN-54).
+
+### Adversarial review (2026-10-20), adv-2.md
+
+§5–§7 (courses; prerequisites, blocks and advice; conditions).
+
+- B1 (blocker) fixed as the owner decided (decision 1): R-BTN-163's owner-signed-commit answers removed; a `baton.*` condition is answered only through `baton owner resolve`, an owner's or administrator's dashboard session, or an MCP key allowed `owner.resolve`, never through git; a bound handler only delivers a deep link to the dashboard's Resolve page `/conditions/<condition_id>` (`resolve_url` in `std:condition@1`; §11.4); R-BTN-63's traversal record kept; Decisions line revised; B-75 rescoped (S-BTN-131).
+- M1 (major) fixed: a light question's text is pushed before the report as a parentless commit holding `question.md` on `refs/baton/questions/<local id>/<commit sha>`; the report carries the `question` pointer, Baton stores only it, and a promoted ask's body is its text (R-BTN-160, R-BTN-161, R-BTN-173, R-BTN-171, §13, §14; S-BTN-138, G-BTN-146).
+- M2 (major) fixed: a Baton-held ticket's children are Baton-held — its `spawned` end carries `{local_id, course, input?}`, Baton creates them, and they are never `spawned-unposted` (R-BTN-173, R-BTN-86; S-BTN-138).
+- M3 (major) fixed: R-BTN-5's git re-verification applies to claims with a ticket file; built-in legs and fileless tickets (Baton-held, `changes` checks) are re-verified against Baton's record (R-BTN-5, R-BTN-173).
+- M4 (major) fixed: a promoted ask's frontmatter carries `baton_position: {station, path}`, which the CLI's station-function library reads as closing markers, so it is posted at `waiting` and `open` is not re-run; the row, arrival instants and `deliver` child are kept; `baton_held` clears when the entry lands (R-BTN-173, R-BTN-171, §13; S-BTN-138).
+- M5 (major) fixed: R2 generalised to every `suspend` condition — any end of a waiting claim other than the consuming one, and any reap (`leg-timeout` included), writes a non-provisional `condition` block (R-BTN-162, R-BTN-173; S-BTN-128, G-BTN-147).
+- M6 (major) fixed: R-BTN-83's held positions name the built-in legs' clearing events (`outbox`: the snapshot posting the ticket, or posting it withdrawn or closed; `cancel`: withdrawn or closed) and that they report no position (R-BTN-83, R-BTN-12, §13; G-BTN-73).
+- M7 (major) fixed: a `written` entry is never handed out again; the ticket then waits Baton-side on `outbox`; an entry not `landed` after 3 snapshots holds the ticket `outbox-unlanded` and raises `baton.outbox-late`; lifting the hold re-queues it (R-BTN-171, R-BTN-12, §13; S-BTN-136).
+- M8 (major) fixed: an entry handed to a claim is `claimed`; a claimed `handler` entry whose condition closes is dropped but its row kept until the claim ends, a reported write being followed by a `withdraw`; dropping a handler entry drops its `answer` entries; an unreported held entry returns to `queued` (R-BTN-171, §13; S-BTN-136).
+- M9 (major) fixed: a completion table's last non-null entry must be `{"of": "all", "closed": true}`, so every call settles; the validator and `baton course test` refuse one without (R-BTN-165; S-BTN-132).
+- M10 (major) fixed: rule 1's advance form refuses on a `ticket` row on the leg or the whole ticket; R-BTN-75's `ticket` row binds advances (§6.6, R-BTN-75; S-BTN-72).
+- M11 (major) fixed: a core `notify` condition re-raised within an hour of the same one closing, or past 20 `handler` entries a repository an hour, files no handler and is unhandled, counting `reraised` / `outbox-throttled` (R-BTN-163; S-BTN-131).
+- M12 (major) fixed: the board post carries top-level `bindings` (the repository scope); runner- and tenant-level core conditions are never bound (§4.4, R-BTN-163, §13; S-BTN-131).
+- m1 (minor) fixed: legs may not raise or declare `baton`, `baton.*` or `hitl.decision`; the raise route answers `invalid-params` (R-BTN-160, §14; G-BTN-146).
+- m2 (minor) fixed: a handler id over 64 characters becomes `c<condition_id>`; `.c<n>` and `c<n>` ids are reserved (the markdown source skips such a file without `handles`); a handler write never overwrites a foreign file (`cannot-finish:spec`, or `outbox-collision`) (R-BTN-161, R-BTN-171).
+- m3 (minor) fixed: a ticket leaving a leg's station or closing with a settled, unrecorded light answer writes the closed ask with its answer through the outbox (R-BTN-173; S-BTN-138).
+- m4 (minor) fixed: `answered_by` is a channel's opaque id (`<channel>:<id>`), shown as reported by a claim via a channel, never a verified identity (R-BTN-173, §13).
+- m5 (minor) fixed: `resume` is a list everywhere with `answered` in its outcomes; the end's `written` carries `skipped`; R-BTN-69 lists `light` and `answers`; the `replaces` binding form is given; `human-operator` is a bare built-in capability (R-BTN-162, R-BTN-161, R-BTN-69, R-BTN-121, R-BTN-171, §9.1, §14).
+- m6 (minor) fixed: each finished compensation is recorded in `claim_legs` and a later `baton.cancel` skips it (R-BTN-168; S-BTN-132).
+
+### Adversarial review (2026-10-20), adv-4.md
+
+- B1 (blocker) fixed, per owner decision 2: owner dashboard sessions integrated — principal `owner-session` (scope: the repositories its minting key still owns; never an administrator) in R-BTN-129; `dashboard_sessions` gains `role`, `key_fingerprint`, `repositories`, and `login_codes` a `role` set by `POST /v1/login {role}`, so a code binds only through its own role's route; `POST /v1/owner/login-links`, `POST /v1/owner/confirm`, `POST /v1/owner/sessions/revoke` and `POST /v1/ui/conditions/{condition}/resolve` added to §14, the owner resolve route no longer lists sessions, administrator-only `/v1/ui/*` routes marked *admin session*; confirmation only by the minting key; one confirmed-action list for both roles (Stop, cancel and resolve one click; OAuth `leg.stop` approval confirmed); a session dies with its minting key's role; §11.2, §11.4, §12.1, G-BTN-57, G-BTN-144 updated; S-BTN-124 extended; B-76 and B-73 updated.
+- B2 (blocker) fixed, per owner decision 3: a ticket leaving the board (closed or dropped) keeps its `ticket_overrides` row and `leg_attempts` in `closed_tickets.kept_json` (new `closed_as: dropped`), restored when the id returns; §13's cascade enumerated; the residual risk of a re-filed new id stated, with the old id's held row listed on Courses (R-BTN-12, R-BTN-147, §4.4, §13; S-BTN-39 extended).
+- M1 (major) fixed: `admin.key.revoke` removes an owner key from every repository (ending its sessions and MCP keys) and refuses an administrator's key, which ends only by leaving `BATON_ADMIN_KEYS` (R-BTN-57, R-BTN-159, §14; S-BTN-32).
+- M2 (major) fixed: consents live in `code_repo_consents`, written only by the consenting repository's owner route or an administrator's `code_repo_consents_add`; owners write `code_repos` paths only, Baton owns `repo_id` and `former_paths` (R-BTN-140, §13.1, §14; S-BTN-116).
+- M3 (major) fixed: only a bearer whose secret fully verifies is revoked over `http`; others are refused and counted (R-BTN-158; S-BTN-124).
+- M4 (major) fixed: G-BTN-57 now says a machine key's grant may sync and post readings for instances listing a granted repository, never holding the instrument, sync-key or mirror role.
+- M5 (major) fixed: `adoption_requests` table; `adopt` answers `{pending: true}` until the named runner's request is confirmed (`{runner_id}`); legacy runners exempt from `(hostname, session_name)` uniqueness and from lease expiry, `reap_after` in the alarm list (§16.1, §13, §14; S-BTN-16).
+- M6 (major) fixed: the owner routes added; §13 and §14 include `BATON_MCP_OAUTH_SPEC` §12–§13 by reference until B-73 folds them in; the raise's `handler_id` was already in §14.
+- m1 fixed: the mirror's `after` is clamped to the last `seq` returned (§16.3, §14).
+- m2 fixed: `accept` takes `{confirm_span?}`, else `conflict` listing the repositories (§14).
+- m3 fixed: `owner.sync-key.revoke` (and `owner.sessions.revoke`) in §12.2.
+- m4 fixed: a never-accepted pending grant's key holds no role; `conflict` names no role; administrator lines checked by `baton admin keys set` and at load (`baton.admin-key-conflict`) (§12.1, §13.2; S-BTN-32).
+- m5 fixed: Access covers only the dashboard's pages, `POST /v1/login` and `/v1/ui/*` (R-BTN-16).
+- m6 fixed: `/v1/ui/messages` takes only `release` and `status_request`, the release's holder checked (§14; S-BTN-124).
+- m7 fixed: MCP rate limits count in the tenant's object.
+- m8 fixed: `bmcp_` keys, which have no id, count only in the (origin, client IP) bucket (§2.3).
+- m9 fixed: Open questions lists confirmation by keys a same-user process can reach; the MCP id flag is closed by m8.
+- m10 fixed: `reading-refused` and `invalid-pointer` added to `events.kind`; `answer-unsigned` no longer exists (owner decision 1).
+- m11 fixed: §16.3 cites §12.3 and R-BTN-17 for the lint, and writes R-BTN-12's hold Status note.
+- m12 fixed: G-BTN-117 signs as the first role in `callers` the user holds a key for.
+- m13 fixed: API keys also reach `GET /v1/stream` and `GET /v1/actions` (R-BTN-159).
+- m14 fixed: G-BTN-55 cites S-BTN-30 and S-BTN-126.
+
 ## Decisions in full
 
 - **Conditions bound dynamically to courses, over delivery policy in core** (2026-10-20, owner;

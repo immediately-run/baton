@@ -31,8 +31,9 @@ R-BTN-135 and R-BTN-137 (§2.2), §2.3's admission and failure buckets, R-BTN-14
 R-BTN-158 (bearers over `http`), §2.1's alarm, §13.2 `mcp_keys`, §13.8 `events.kind`, §14.
 **Depends on:** B-25 (the registry, `authorize`, `POST /v1/mcp` and `mcp_keys`, which this ticket
 extends), B-45 (served only at the origin, per-tenant objects and refusal handling, which the
-issuer, resource and tenant binding rest on) and B-76 (owners' dashboard sessions, which consent
-runs on, and their confirmation codes, which `leg.stop` approvals need).
+issuer, resource and tenant binding rest on) and B-76 (owners' dashboard sessions, the `owner-session`
+principal consent runs on, and their confirmation codes, confirmed by the minting owner key
+through `POST /v1/owner/confirm`, which `leg.stop` approvals need).
 
 ### Requires
 
@@ -56,7 +57,8 @@ device-code phishing kit, so consent is now the standard OAuth shape: spec Decis
    change (an immutable `id` as key), `oauth_clients`, `oauth_requests` and `oauth_tokens`,
    §13.1's `oauth_redirect_uris`; §2.1's alarm instants and §13.8's `oauth` event kind; §14's
    routes; §15's S-BTN-137 and G-BTN-157; R-BTN-172 itself, in §11.3 beside R-BTN-130;
-   R-BTN-130's new challenge; R-BTN-129's caller scope for an owner's dashboard session;
+   R-BTN-130's new challenge; the four OAuth actions under R-BTN-129's `owner-session` principal
+   (which B-76 builds);
    R-BTN-158's and §12.1's new bearer prefixes (`bmo_`, `bmr_`, `bor_`); §12.1's Public row
    (`/oauth/authorize`, the OAuth machine routes). §2.3's admission and R-BTN-16's Access
    bypass already name the OAuth routes. Defining R-BTN-172 in `spec/BATON_SPEC.md` is what lets

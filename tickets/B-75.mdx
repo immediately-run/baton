@@ -1,5 +1,5 @@
 ---
-title: "B-75 — Agents rewriting git can neither clear a hold nor buy runs: owner-signed answers to core conditions, and counts from Baton's traversal record"
+title: "B-75 — Agents rewriting git can neither clear a hold nor buy runs: core conditions answered only in Baton, and counts from Baton's traversal record"
 id: B-75
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1124
 tier: critical
-description: "Build BATON_SPEC R-BTN-163's owner-signed answers (a bound handler of a `baton.*` condition answers only through a commit signed by an owner key of the repository, verified by the sync; otherwise `answer-unsigned`) and §9.3's traversal record (a ticket's runs of each leg and arrivals at each station counted from `claim_legs` and confirmed arrivals, never the posted path alone; a lower posted count logged `path-rewritten`, R-BTN-85; `max_runs`, attempts and retries read it). S-BTN-131, S-BTN-23, G-BTN-149. Requires: none."
+description: "Build BATON_SPEC R-BTN-163's answers to core conditions (a `baton.*` condition is answered only through Baton's authenticated surfaces — `baton owner resolve`, an owner's or administrator's dashboard session, an MCP key allowed `owner.resolve` — never through git; a bound handler only delivers a link to the dashboard's resolve page `/conditions/<condition_id>`) and §9.3's traversal record (a ticket's runs of each leg and arrivals at each station counted from `claim_legs` and confirmed arrivals, never the posted path alone; a lower posted count logged `path-rewritten`, R-BTN-85; `max_runs`, attempts and retries read it). S-BTN-131, S-BTN-23, G-BTN-149. Requires: none."
 topics:
   - baton
 owns: {}
@@ -19,6 +19,7 @@ depends_on:
   - B-56
   - B-64
   - B-66
+  - B-76
 ---
 
 **Brief:** the owner, 2026-10-20, closing the open question "Handlers that answer core
@@ -27,12 +28,16 @@ a ticket over a course in Baton, so even if an agent modified the record in git,
 Baton record which would be authoritative if there is disagreement. The number of times a
 particular station / leg has been traversed by the given ticket is really all the state we need for
 the retry logic."
-**Spec:** `spec/BATON_SPEC.md` §7.3 R-BTN-163 (binding core conditions: owner-signed answers),
+**Revised** the same day after the adversarial review (adv-2 B1): the sync that would verify a
+signature is code agents can change, so the owner chose that a core condition is answered only
+through Baton's own authenticated surfaces, the handler delivering a deep link to its resolve page.
+**Spec:** `spec/BATON_SPEC.md` §7.3 R-BTN-163 (binding core conditions: answered only in Baton),
+§11.4 (the Resolve page),
 §9.3 R-BTN-63 (Baton's traversal record counts), R-BTN-85 (§4.7, `path-rewritten`), R-BTN-122
 (§7.4, attempts), R-BTN-58 (§11.2, owner keys), R-BTN-13 (§11.1, SSH key format); Decisions
 (2026-10-20).
 **Depends on:** B-56 (core conditions and `owner resolve`), B-64 (handler tickets of core conditions
-through the outbox), B-66 (the `ask` course whose answer leg is read).
+through the outbox), B-66 (the standard handler courses that deliver the link), B-76 (owners' dashboard sessions).
 
 ### Requires
 
@@ -46,12 +51,12 @@ agent that rewrote a ticket's history could buy its legs more runs.
 
 ### What to build
 
-1. **Signed answers.** The sync, posting an `ask` handler of a `baton.*` condition at `answered`,
-   verifies the answering commit's SSH signature (`git verify-commit` with an allowed-signers file
-   built from the repository's owner keys, fetched from Baton by the sync key) and posts
-   `answer_signed_by: <fingerprint>` with the answer. Core resolves the condition as
-   `baton owner resolve` does, `answered_by` that owner, only when the fingerprint is a current
-   owner key of the repository; otherwise it logs `answer-unsigned` and leaves the condition open.
+1. **Answers only in Baton.** Core never reads a core condition's handler output or file answer
+   for the condition. The outbox's `handler` entry for a `baton.*` condition carries the
+   condition id, and the handler's input and message carry `resolve_url`
+   (`https://<origin>/conditions/<condition_id>`). The dashboard's Resolve page shows the condition
+   and its restarts; choosing one is `owner.resolve` for a signed-in owner of the repository or an
+   administrator, through `authorize` (R-BTN-129); signed out, it asks for sign-in and returns.
 2. **Traversal record.** Counts of each leg run and station arrival per ticket, under resolved
    names, maintained in the transactions that record `claim_legs` and confirm sync-posted
    arrivals (a new table or columns on the ticket's history — one new numbered migration). The
@@ -61,13 +66,15 @@ agent that rewrote a ticket's history could buy its legs more runs.
 
 ### Do not
 
-- Accept a signature from an administrator, runner or sync key in place of an owner key.
+- Read anything from git (a handler's `answer`, its output, a signature) as an answer to a
+  `baton.*` condition.
 - Let a posted path lower a count, or a count move a ticket: git still places it (R-BTN-35).
 
 ### Tests
 
-- S-BTN-131 extended: a bound `baton.retries` answered `retry` unsigned (ignored,
-  `answer-unsigned`), signed by a runner key (ignored), signed by an owner key (resolved).
+- S-BTN-131 extended: a bound `baton.retries` answered `retry` in its handler's file (read for
+  nothing, the hold kept); the handler's message links `/conditions/<id>`; resolved there by a
+  signed-in owner; the page refused to a runner key and to another repository's owner.
 - Unit: the traversal counts across a course rename; a force-pushed history with fewer runs logs
   `path-rewritten` and the leg is still refused at `max_runs`.
 

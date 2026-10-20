@@ -199,15 +199,18 @@ standard OAuth consent on Baton's dashboard (Decisions).
   - **The session.** The consent page reads nothing until it has an owner's dashboard session:
     its first call, `POST /v1/ui/oauth/requests`, carries the session cookie or is refused
     `unauthenticated`, and the page then shows "sign in to Baton to continue" with a link to
-    `/login` in a new tab and a Check again button. Sign-in is R-BTN-155's, unchanged: the
-    owner types the `/login` page's code into `baton owner open`, which works from any machine
-    with the owner key, the phone's code typed at a desk included. Without a session the page
+    `/login?as=owner` in a new tab and a Check again button. Sign-in is R-BTN-155's, unchanged:
+    the owner types that page's owner sign-in code into `baton owner open`, which binds it with
+    the owner key through `POST /v1/owner/login-links` and works from any machine with the key,
+    the phone's code typed at a desk included. The session that results is an owner's
+    (`owner-session`, `BATON_SPEC` R-BTN-129): it holds the repositories its key owns, and dies
+    with that key's ownership. Without a session the page
     shows nothing about the client, fetches no document and writes no row.
   - **The request.** With an owner's session, `POST /v1/ui/oauth/requests {query}` runs §4's
     checks, writes an `oauth_requests` row bound to that session and living 10 minutes, and
     answers `{request, client, redirect_uri, requested, repositories, expires_at}`: `request` is
     the handle `bor_<id>_<secret>`, kept only in the page's memory; `repositories` are the
-    session's own (R-BTN-155), on which `api_keys` is not `false`. A check failing after §4's
+    session's repositories its key still owns (R-BTN-155), on which `api_keys` is not `false`. A check failing after §4's
     step 2 answers `{error, redirect}`, which the page follows.
   - **What the page shows** (all through `textContent`, §6): the client as §3 names it, its
     self-declared name, the full redirect URI, and for a loopback redirect "the code goes to
@@ -227,8 +230,8 @@ standard OAuth consent on Baton's dashboard (Decisions).
     - answers `{redirect, repository, actions}`; the page shows "approved for <repository>:
       <actions>" and navigates to `redirect`.
     - An approval naming `leg.stop` is R-BTN-155's confirmed action: it answers `202
-      {confirm_code}`, the page shows the code, the owner confirms it with the owner key, and the
-      page polls `POST /v1/ui/oauth/status {request}` every 2 seconds for the redirect.
+      {confirm_code}`, the page shows the code, the owner confirms it with `baton owner confirm`
+      and the key that minted the session (`POST /v1/owner/confirm`), and the page polls `POST /v1/ui/oauth/status {request}` every 2 seconds for the redirect.
       `read` and `ticket.hold` need no confirmation code (Decisions).
   - **Deny.** `POST /v1/ui/oauth/approve {request, deny: true}` (`owner.mcp-key.deny`) ends the
     request and answers `{redirect}` carrying `access_denied`. Closing the page is a silent
@@ -237,8 +240,8 @@ standard OAuth consent on Baton's dashboard (Decisions).
     repository, actions}` (again on every call until the code is redeemed or expires, so a lost
     answer is recoverable), `{expired: true}` or `{gone: true}` (denied, redeemed, or unknown).
   - **Who may approve.** `owner.oauth.request`, `owner.oauth.status`, `owner.mcp-key.approve` and
-    `owner.mcp-key.deny` admit only an owner's dashboard session (R-BTN-155), on its own
-    repositories: no key, so no CLI or agent holding an owner key approves without a browser;
+    `owner.mcp-key.deny` admit only an owner's dashboard session (principal `owner-session`,
+    R-BTN-129, R-BTN-155), on its own repositories: no key, so no CLI or agent holding an owner key approves without a browser;
     and no administrator's session, which has no owner key for a grant to die with. Every grant
     still has a minting owner key: the one that minted the approving session.
   - **What consent cannot tell.** An owner who approves a link someone else sent them connects
@@ -456,8 +459,8 @@ client's `created_at` + 24 hours, an ended grant's `ended_at` + 90 days. **`even
 For `BATON_SPEC` §14. The consent page is a static dashboard asset, not an action (R-BTN-129).
 Every other route is a registry entry: the metadata, token, register and revoke entries list
 `public`; `owner.oauth.request`, `owner.oauth.status`, `owner.mcp-key.approve` and
-`owner.mcp-key.deny` list only an owner's dashboard session, scope `repository` (§5), and none is
-ever `mcp: true`.
+`owner.mcp-key.deny` list only `owner-session` (an owner's dashboard session, R-BTN-129), scope
+`repository` (§5), and none is ever `mcp: true`.
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
@@ -475,8 +478,8 @@ ever `mcp: true`.
 
 **Admission and Access** (`BATON_SPEC` §2.3, R-BTN-16): `/oauth/authorize` is a static page
 needing no session, as `/login` is; `/.well-known/oauth-*` and `/v1/oauth/*` are unauthenticated
-routes under the per-IP rule; `/v1/ui/oauth/*` needs a dashboard session as all of `/v1/ui/*`
-does. Codes, verifiers and tokens are checked inside the object. Where Cloudflare Access fronts
+routes under the per-IP rule; `/v1/ui/oauth/*` needs an owner's dashboard session, as an
+`owner-session` route of `/v1/ui/*`. Codes, verifiers and tokens are checked inside the object. Where Cloudflare Access fronts
 the dashboard it is bypassed on `/v1/mcp`, `/v1/oauth/*` and `/.well-known/*`, which hosted
 Claude calls without an Access cookie; `/oauth/authorize` and `/v1/ui/oauth/*` stay behind it,
 since the owner's browser passes it.

@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1123
 tier: critical
-description: "Build BATON_SPEC §7.2 R-BTN-173: a `suspend` raise marked `light` gets a Baton-held handler ticket (no file, no push) and Baton-held `deliver` legs; a delivery leg reports a reply with `POST /v1/runner/claims/{id}/answers`, which in one transaction settles an open condition and rings the waiting parent, queues an outbox `answer` entry for a promoted one, or records the reply `ignored`, a repeat changing nothing; every end of a claim that consumed an answer records it in git and lists it in `answers`, and any settled, unrecorded condition is carried in the next claim's `resume`; an end or reap of the waiting claim on an open light condition promotes it through an outbox `handler` entry and blocks the leg; an `answer` write never overwrites an answer in the file; channels declare `answers`, and `retract` reports unread replies first. S-BTN-138, G-BTN-158. Requires: none."
+description: "Build BATON_SPEC §7.2 R-BTN-173: a `suspend` raise marked `light` pushes its question off the branch (`refs/baton/questions/…`) and gets a Baton-held handler ticket (no file) whose children are Baton-held too; a delivery leg reports a reply with `POST /v1/runner/claims/{id}/answers`, which in one transaction settles an open condition and rings the waiting parent, queues an outbox `answer` entry for a promoted one, or records the reply `ignored`, a repeat changing nothing; every end of a claim that consumed an answer records it in git and lists it in `answers`, and any settled, unrecorded condition is carried in the next claim's `resume`; an end or reap of the waiting claim on an open light condition promotes it through an outbox `handler` entry and blocks the leg; an `answer` write never overwrites an answer in the file; channels declare `answers`, and `retract` reports unread replies first. S-BTN-138, G-BTN-158. Requires: none."
 topics:
   - baton
 owns: {}
@@ -55,9 +55,16 @@ costs no git write when the person answers while it waits, and loses no answer w
 1. **Raising light** (`src/runner/`, `src/core/`):
    - `light` on `ctx.raise`, `baton leg raise --light`, a type's declaration and the raise's
      report; the course validator accepts it on `suspend` types only.
-   - For a bound light raise the runner writes and pushes no handler file; Baton files the handler
-     ticket and its `deliver` child as Baton-held rows (`tickets.baton_held`), at the course's start
-     station, under R-BTN-161's id.
+   - For a bound light raise the runner writes no handler file and makes no default-branch
+     commit: it pushes the question as a parentless commit holding `question.md` to
+     `refs/baton/questions/<local id>/<commit sha>` and reports `question` (a `std:git.file@1`);
+     Baton stores the pointer only and files the handler ticket as a Baton-held row
+     (`tickets.baton_held`), at the course's start station, under R-BTN-161's id.
+   - A Baton-held ticket's children are Baton-held: its leg's `spawned` end carries `{local_id,
+     course, input?}` per child, Baton creates them in that transaction, and they are never
+     `spawned-unposted` (R-BTN-86). The ask's `open` files its `deliver` child this way.
+   - R-BTN-5's re-verification reads Baton's record, not git, for a Baton-held ticket.
+   - `answered_by` is a channel's opaque id (`<channel>:<id>`), never a name or address.
    - A Baton-held ticket's legs are claimed and advanced as any leg's; its ends are confirmed at the
      end; an accepted snapshot neither posts nor drops it.
 2. **The answer report** (`src/core/`, a registry entry): `POST /v1/runner/claims/{id}/answers`
@@ -75,8 +82,13 @@ costs no git write when the person answers while it waits, and loses no answer w
      `recorded`, in raise order, after any end (a reap included); `ctx.resume` is that list.
 4. **Promotion** (`src/core/`): in the transaction of any end of the waiting claim, or its reap,
    that finds its light condition open, queue an outbox `handler` entry (the ask file at the
-   station reached, its `deliver` child staying Baton-held), set `promoted_at`, and write a
-   non-provisional `condition` block on the leg.
+   station reached, with `baton_position: {station, path}` read by the CLI's station-function
+   library as closing markers and the question's text as its body; its `deliver` child staying
+   Baton-held), set `promoted_at`, and write a non-provisional `condition` block on the leg
+   (R-BTN-162's rule for every `suspend`). Keep the ticket's row and arrival
+   instants; clear `baton_held` when the entry lands.
+   - A ticket that changes station or closes with a settled, unrecorded light answer of a leg it
+     leaves queues a `handler` entry writing the closed ask with its answer.
 5. **The outbox's `answer` kind** (`src/runner/` `baton.write`): write `answer` and `answered_by`
    with `baton_write: <id>`; read the file at the fetched head first, and report the entry
    `skipped` when it already carries an answer; Baton then records that reply `ignored`.
@@ -100,7 +112,8 @@ costs no git write when the person answers while it waits, and loses no answer w
 - Drop a settled answer at a reap: it is carried until an end records it.
 - Overwrite an answer already in an ask file.
 - Acknowledge a reply to the channel before Baton has answered the report.
-- Store the question, the reply's text or anything but restart ids and identities (R-BTN-33).
+- Store the question, the reply's text or anything but restart ids, opaque identities and the
+  question's pointer (R-BTN-33).
 
 ### Tests
 
