@@ -9,7 +9,7 @@ import { BatonError } from './http';
 import { FREE_TEXT_MAX } from './text';
 import type { Store } from './ports';
 import { COURSE_ID, COURSE_VERSION_MAX, COURSES_MAX } from './validate';
-import { checkSchemaSet, parseSchemaId, SCHEMA_MAX_BYTES, type Schema } from '../shared/schema.mjs';
+import { checkSchema, checkSchemaSet, parseSchemaId, POST_STATES_MAX, SCHEMA_MAX_BYTES, type Schema } from '../shared/schema.mjs';
 import { stdSchema } from '../shared/std.mjs';
 
 export { COURSE_ID };
@@ -181,11 +181,13 @@ export class Courses {
     // Each course's own faults first: its file, the owners' required bars, its schemas' prefix,
     // size and immutability.
     const faults = new Map<string, CourseViolation[]>();
+    // One compile budget for the whole post's patterns (2-r2-1).
+    const meter = { steps: POST_STATES_MAX };
     for (const e of registry) {
       const violations: CourseViolation[] = e.oversized
         ? [{ rule: 'bound', path: '', message: `the course file is over ${COURSE_FILE_MAX_BYTES} bytes` }]
         : validateCourse(e.course);
-      if (!violations.length) violations.push(...this.ownSchemaViolations(repo, e));
+      if (!violations.length) violations.push(...this.ownSchemaViolations(repo, e, meter));
       // R-BTN-67: a file that no longer has a leg an owner's required bar names — by its name or a
       // `renamed_from` — is held until an owner updates or drops the bar.
       if (!violations.length) {
@@ -251,7 +253,7 @@ export class Courses {
    * each named `<course>:` for this course, never `std:`; within its size; the same digest as
    * any version Baton holds.
    */
-  private ownSchemaViolations(repo: string, e: RegistryEntry): CourseViolation[] {
+  private ownSchemaViolations(repo: string, e: RegistryEntry, meter: { steps: number }): CourseViolation[] {
     const out: CourseViolation[] = [];
     const v = (path: string, message: string) => out.push({ rule: 'schema', path, message });
     for (const x of e.schemas) {
@@ -260,7 +262,9 @@ export class Courses {
       if (p.prefix !== e.id) { v(`schemas.${x.id}`, `${x.id}: a course posts only its own schemas, ${e.id}:<name>@<n>`); continue; }
       if (x.oversized) { v(`schemas.${x.id}`, `${x.id}: a schema is at most ${SCHEMA_MAX_BYTES} bytes`); continue; }
       const held = this.rows<{ digest: string }>('SELECT digest FROM course_schemas WHERE repository_id = ? AND id = ?', repo, x.id)[0];
-      if (held && held.digest !== x.digest) v(`schemas.${x.id}`, `${x.id}: a schema version is immutable; this digest differs from the one held — post a new version`);
+      if (held && held.digest !== x.digest) { v(`schemas.${x.id}`, `${x.id}: a schema version is immutable; this digest differs from the one held — post a new version`); continue; }
+      // The subset, once per post: the reference fixpoint below never re-checks it (2-r2-1).
+      for (const f of checkSchema(x.schema, meter)) v(`schemas.${x.id}${f.path ? `.${f.path}` : ''}`, `${x.id}: ${f.message}`);
     }
     return out;
   }
@@ -275,7 +279,7 @@ export class Courses {
     const out: CourseViolation[] = [];
     const v = (path: string, message: string) => out.push({ rule: 'schema', path, message });
     const posted = Object.fromEntries(e.schemas.map((x) => [x.id, x.schema]));
-    for (const f of checkSchemaSet(posted, resolve)) v(`schemas.${f.id}${f.path ? `.${f.path}` : ''}`, `${f.id}: ${f.message}`);
+    for (const f of checkSchemaSet(posted, resolve, { subset: false })) v(`schemas.${f.id}${f.path ? `.${f.path}` : ''}`, `${f.id}: ${f.message}`);
     // The schemas the file itself names.
     const c = e.course as { stations?: Record<string, { entry?: { schema: string }[] }>; legs?: Record<string, { outputs?: Record<string, { schema?: string }> }> };
     for (const [sid, st] of Object.entries(c.stations ?? {})) {

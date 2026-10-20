@@ -12,7 +12,7 @@ import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswe
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
 import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
-import { baseChain, unboundedAt, validate, type Schema } from '../shared/schema.mjs';
+import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from '../shared/schema.mjs';
 import type { Seen, Stations } from './stations';
 import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
 import type { Row, SqlValue, Store } from './ports';
@@ -779,12 +779,14 @@ export class Claims {
    *  does not bound it is given by pointer instead. */
   private checkOutputValues(repo: string, outputs: Output[]) {
     const resolve = (id: string) => this.c.schema?.(repo, id) ?? null;
+    // One budget for the request: up to 16 outputs share it (baton#69 round 2, 2-r2-0).
+    const meter = { steps: PATTERN_STEPS_MAX };
     for (const o of outputs) {
       if (!Object.prototype.hasOwnProperty.call(o, 'value')) continue;
       if (!resolve(o.schema)) throw new BatonError('not-eligible', `entry: ${o.name}'s schema ${o.schema} is not posted or in the std: library`, { rule: 'entry', rule_code: 'output-invalid' });
       const unbounded = unboundedAt(o.schema, resolve);
       if (unbounded) throw new BatonError('invalid-params', `outputs: ${o.name} is given inline, but its schema does not bound it (${unbounded}); give it by pointer`);
-      const faults = validate(o.value, o.schema, resolve);
+      const faults = validate(o.value, o.schema, resolve, meter);
       if (faults.length) {
         throw new BatonError('not-eligible', `entry: ${o.name} fails ${o.schema}: ${faults.slice(0, 3).map((f) => `${f.path || '/'} ${f.message}`).join('; ')}`, { rule: 'entry', rule_code: 'output-invalid' });
       }

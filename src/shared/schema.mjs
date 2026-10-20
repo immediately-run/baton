@@ -281,18 +281,31 @@ function compileAst(ast) {
   const f = frag(ast);
   const match = add({ k: 'match' });
   patch(f.outs, match);
-  return f.start;
+  return { start: f.start, states: states.length };
 }
 
-/** Thrown by a matcher whose meter runs out (1-A-0): one value's patterns share one budget. */
+/** Thrown when a meter runs out (1-A-0, 2-r2-0): one value's validation — every pattern's
+ *  states and steps, every `const` and `enum` comparison — draws on one budget. */
 export class PatternBudget extends Error {
-  constructor() { super('the patterns cost more than the validator\'s budget'); }
+  constructor() { super('the work costs more than the validator\'s budget'); }
 }
 
-/** Automaton steps one `validate` call may spend on all its patterns together: each matched
- *  string costs its length times the live states, and a base chain or `$ref` layers repeat it
- *  (baton#69 round 1, 1-A-0). Measured well under a second. */
+/** The work one request's validation may spend, in steps: compiling a pattern costs its
+ *  states, matching a string its length times the live states, comparing with a `const` or an
+ *  `enum` the bytes compared (baton#69 rounds 1–2, 1-A-0, 2-r2-0). Measured well under a second. */
 export const PATTERN_STEPS_MAX = 2_000_000;
+/** The pattern states one sync's schemas may compile together, so a registry of costly patterns
+ *  cannot spend seconds at the sync (2-r2-1). */
+export const POST_STATES_MAX = 1_000_000;
+
+const charge = (meter, n) => {
+  if (meter && (meter.steps -= n) < 0) throw new PatternBudget();
+};
+
+/** Compiled patterns by source, per process: a pattern is compiled once however many values
+ *  meet it (bounded, so a hostile set of patterns cannot grow it without end). */
+const COMPILED = new Map();
+const COMPILED_MAX = 1024;
 
 /**
  * Compile a pattern in R-BTN-108's grammar into a matcher: `(s) => boolean`, true when the
@@ -301,8 +314,10 @@ export const PATTERN_STEPS_MAX = 2_000_000;
  * once, so it runs in time linear in the input for a fixed pattern.
  */
 export function compilePattern(src) {
-  const start = compileAst(parsePattern(src));
-  return (input, meter = null) => {
+  const hit = COMPILED.get(src);
+  if (hit) return hit;
+  const { start, states } = compileAst(parsePattern(src));
+  const matcher = (input, meter = null) => {
     const chars = [...input];
     const n = chars.length;
     let gen = 0;
@@ -339,6 +354,10 @@ export function compilePattern(src) {
     }
     return false;
   };
+  matcher.states = states;
+  if (COMPILED.size >= COMPILED_MAX) COMPILED.clear();
+  COMPILED.set(src, matcher);
+  return matcher;
 }
 
 // ── the subset ──────────────────────────────────────────────────────────────────────────────
@@ -349,7 +368,7 @@ export function compilePattern(src) {
  * against the grammar, `$ref` and `x-baton-base` as schema ids, and `x-baton-view`'s size.
  * It reads nothing else: references are resolved by `checkSchemaSet`.
  */
-export function checkSchema(schema) {
+export function checkSchema(schema, meter = null) {
   const errors = [];
   const add = (path, message) => { if (errors.length < ERRORS_MAX) errors.push({ path, message }); };
   let size = Infinity;
@@ -383,7 +402,9 @@ export function checkSchema(schema) {
     for (const k of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum']) if (own(s, k) && !isNum(s[k])) add(`${path}/${k}`, `${k} is a number`);
     for (const k of ['minLength', 'maxLength', 'minItems', 'maxItems']) if (own(s, k) && !isCount(s[k])) add(`${path}/${k}`, `${k} is a non-negative integer`);
     if (own(s, 'pattern')) {
-      try { compilePattern(s.pattern); } catch (e) { add(`${path}/pattern`, `pattern: ${e.message}`); }
+      try { charge(meter, compilePattern(s.pattern).states); } catch (e) {
+        add(`${path}/pattern`, e instanceof PatternBudget ? 'the schemas\' patterns compile to more states than one sync allows' : `pattern: ${e.message}`);
+      }
     }
     if (own(s, 'format') && !FORMATS.has(s.format)) add(`${path}/format`, 'format is date-time or uri');
     if (own(s, '$ref') && !parseSchemaId(s.$ref)) add(`${path}/$ref`, '$ref names a schema as <id>@<version>');
@@ -426,10 +447,10 @@ export function schemaRefs(schema) {
  * repository's schemas and the `std:` library); and no schema reaching itself through them.
  * `schemas` maps id → schema; returns `{id, path, message}` for every fault.
  */
-export function checkSchemaSet(schemas, resolve) {
+export function checkSchemaSet(schemas, resolve, { subset = true, meter = null } = {}) {
   const errors = [];
   for (const [id, s] of Object.entries(schemas)) {
-    for (const e of checkSchema(s)) errors.push({ id, ...e });
+    if (subset) for (const e of checkSchema(s, meter)) errors.push({ id, ...e });
     for (const r of schemaRefs(s)) if (!own(schemas, r) && !resolve(r)) errors.push({ id, path: '', message: `${r} is not a posted or std: schema` });
   }
   // A cycle through $ref or x-baton-base, by depth-first search with colours.
@@ -482,14 +503,23 @@ const isUri = (s) => { try { return !!new URL(s).protocol; } catch { return fals
  * once per call; the chain and `$ref`s are bounded by the cycle check the sync applies, and
  * here again by a visit limit.
  */
-export function validate(value, id, resolve) {
+export function validate(value, id, resolve, meter = { steps: PATTERN_STEPS_MAX }) {
   const errors = [];
   const add = (path, message) => { if (errors.length < ERRORS_MAX) errors.push({ path, message }); };
-  const patterns = new Map();
-  // One meter for every pattern this value meets, and each (pattern, string) matched once.
-  const meter = { steps: PATTERN_STEPS_MAX };
+  // Every kind of work draws on `meter` — shared by a caller validating several values — and is
+  // done once: a pattern compiled and charged once, each (pattern, string) matched once, a
+  // `const` or an `enum` canonicalized once, the value at each node canonicalized once (2-r2-0).
+  const charged = new Set();
   const matched = new Map();
-  let costly = false;
+  const constKeys = new Map();
+  const enumSets = new Map();
+  const valueKeys = new Map();
+  const keyOf = (v) => {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v);
+    let k = valueKeys.get(v);
+    if (k === undefined) { k = JSON.stringify(canonical(v)); charge(meter, k.length); valueKeys.set(v, k); }
+    return k;
+  };
   let budget = 10_000;
   const check = (s, v, path, depth) => {
     if (errors.length >= ERRORS_MAX || --budget < 0 || depth > SCHEMA_MAX_DEPTH * 4) return add(path, 'the value is too deep or too large to validate');
@@ -503,8 +533,20 @@ export function validate(value, id, resolve) {
       const ts = Array.isArray(s.type) ? s.type : [s.type];
       if (!ts.some((t) => typeMatches(t, v))) return add(path, `must be ${ts.join(' or ')}`);
     }
-    if (own(s, 'const') && !deepEqual(s.const, v)) add(path, 'must equal the schema\'s const');
-    if (own(s, 'enum') && !s.enum.some((e) => deepEqual(e, v))) add(path, 'must be one of the schema\'s enum');
+    if (own(s, 'const')) {
+      let k = constKeys.get(s);
+      if (k === undefined) { k = JSON.stringify(canonical(s.const)); charge(meter, k.length); constKeys.set(s, k); }
+      if (k !== keyOf(v)) add(path, 'must equal the schema\'s const');
+    }
+    if (own(s, 'enum')) {
+      let set = enumSets.get(s.enum);
+      if (!set) {
+        set = new Set();
+        for (const e of s.enum) { const k = JSON.stringify(canonical(e)); charge(meter, k.length); set.add(k); }
+        enumSets.set(s.enum, set);
+      }
+      if (!set.has(keyOf(v))) add(path, 'must be one of the schema\'s enum');
+    }
     if (typeof v === 'number') {
       if (own(s, 'minimum') && v < s.minimum) add(path, `must be at least ${s.minimum}`);
       if (own(s, 'maximum') && v > s.maximum) add(path, `must be at most ${s.maximum}`);
@@ -515,19 +557,14 @@ export function validate(value, id, resolve) {
       const len = [...v].length;
       if (own(s, 'minLength') && len < s.minLength) add(path, `must be at least ${s.minLength} characters`);
       if (own(s, 'maxLength') && len > s.maxLength) add(path, `must be at most ${s.maxLength} characters`);
-      if (own(s, 'pattern') && !costly) {
-        let m = patterns.get(s.pattern);
-        if (!m) { m = compilePattern(s.pattern); patterns.set(s.pattern, m); }
-        const key = `${s.pattern}\u0000${v}`;
-        let ok = matched.get(key);
-        if (ok === undefined) {
-          try { ok = m(v, meter); } catch (e) {
-            if (!(e instanceof PatternBudget)) throw e;
-            costly = true;
-            return add(path, 'the value\'s patterns cost more than the validator allows');
-          }
-          matched.set(key, ok);
-        }
+      if (own(s, 'pattern')) {
+        const m = compilePattern(s.pattern);
+        if (!charged.has(s.pattern)) { charge(meter, m.states); charged.add(s.pattern); }
+        // Per pattern, by string: no key can stand for two pairs (2-r2-2).
+        let byString = matched.get(s.pattern);
+        if (!byString) { byString = new Map(); matched.set(s.pattern, byString); }
+        let ok = byString.get(v);
+        if (ok === undefined) { ok = m(v, meter); byString.set(v, ok); }
         if (!ok) add(path, 'must match the schema\'s pattern');
       }
       if (s.format === 'date-time' && !isDateTime(v)) add(path, 'must be an RFC 3339 date-time');
@@ -559,7 +596,9 @@ export function validate(value, id, resolve) {
     const s = resolve(cur);
     if (!s) { add('', `${cur} is not a known schema`); break; }
     try { check(s, value, '', 0); } catch (e) {
-      // A value too deep for the comparisons' recursion is invalid, never a crash (1-A-5).
+      // A value too costly for the meter, or too deep for the comparisons' recursion, is
+      // invalid, never a stall or a crash (1-A-0, 1-A-5, 2-r2-0).
+      if (e instanceof PatternBudget) { add('', 'the value costs more than the validator allows'); break; }
       if (!(e instanceof RangeError)) throw e;
       add('', 'the value is too deep to validate');
       break;
@@ -636,9 +675,20 @@ export function refinementGaps(schema, base, resolve) {
   const deref = (s, depth = 0) => (isObj(s) && typeof s.$ref === 'string' && depth < 16 ? deref(resolve(s.$ref), depth + 1) ?? s : s);
   let budget = WALK_BUDGET;
   let spent = false;
+  const NOT_CONSTRAINTS = new Set(['$ref', 'title', 'description', 'x-baton-base', 'x-baton-view']);
   const cmp = (sRaw, bRaw, path, depth) => {
     if (--budget < 0) { if (!spent) add(path, '', 'too large to compare'); spent = true; return; }
     if (depth > SCHEMA_MAX_DEPTH) return add(path, '', 'too deep to compare');
+    // A base node constrains by its `$ref` and its own keywords together, as validate checks
+    // both: compare the refinement with each (2-r2-3).
+    if (isObj(bRaw) && typeof bRaw.$ref === 'string' && Object.keys(bRaw).some((k) => !NOT_CONSTRAINTS.has(k))) {
+      const { $ref, ...rest } = bRaw;
+      const target = resolve($ref);
+      if (!target) return add(path, '$ref', `${$ref} is not a known schema`);
+      cmp(sRaw, target, path, depth + 1);
+      cmp(sRaw, rest, path, depth + 1);
+      return;
+    }
     const s = deref(sRaw), b = deref(bRaw);
     if (!isObj(b)) return;
     if (!isObj(s)) return add(path, '', 'not a schema');
@@ -649,7 +699,8 @@ export function refinementGaps(schema, base, resolve) {
     if (own(b, 'const') && !(own(s, 'const') && deepEqual(s.const, b.const))) add(path, 'const', 'const must equal the base\'s');
     if (own(b, 'enum')) {
       const sEnum = own(s, 'const') ? [s.const] : s.enum;
-      if (!Array.isArray(sEnum) || !sEnum.every((e) => b.enum.some((x) => deepEqual(x, e)))) add(path, 'enum', 'enum must be a subset of the base\'s');
+      const baseSet = new Set(b.enum.map((x) => JSON.stringify(canonical(x))));
+      if (!Array.isArray(sEnum) || !sEnum.every((e) => baseSet.has(JSON.stringify(canonical(e))))) add(path, 'enum', 'enum must be a subset of the base\'s');
     }
     const tighter = (k, lower) => {
       if (!own(b, k)) return;

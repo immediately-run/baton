@@ -14,7 +14,7 @@ import { resolveLeg, resolveStation } from '../core/graph';
 export type LegResult =
   | { reached: string; next?: string | null; bars?: string[]; session?: string; not_before?: number; outputs?: unknown[] }
   | { suspend: true; reached: string; next?: string | null }
-  | { end: 'done'; reached: string; detail?: string }
+  | { end: 'done'; reached: string; detail?: string; outputs?: unknown[] }
   | { release: string; reached: string; next?: string | null };
 
 /** The `released:` reasons a script may choose itself (§6.5): the runner's own are
@@ -25,8 +25,8 @@ export const SCRIPT_RELEASE_REASONS = ['stale-board', 'cannot-finish:transient',
 
 /** What the runner does with a validated result. */
 export type Decision =
-  | { kind: 'advance'; reached: string; leg: string; bars: string[]; session?: string; notBefore?: number }
-  | { kind: 'done'; reached: string; detail?: string }
+  | { kind: 'advance'; reached: string; leg: string; bars: string[]; session?: string; notBefore?: number; outputs?: unknown[] }
+  | { kind: 'done'; reached: string; detail?: string; outputs?: unknown[] }
   | { kind: 'suspend'; reached: string; next: string | null }
   | { kind: 'release'; reason: string; reached: string; next: string | null };
 
@@ -79,7 +79,7 @@ export function decide(result: unknown, g: Graph, legName: string, from: string)
   if ('end' in result) {
     const reached = resolved(result.reached);
     if (!rests.has(reached)) return bug(`ends at ${result.reached}, which is not ${from} or an outcome of ${leg}`);
-    return { kind: 'done', reached, ...(result.detail != null ? { detail: result.detail } : {}) };
+    return { kind: 'done', reached, ...(result.detail != null ? { detail: result.detail } : {}), ...outputsOf(result) };
   }
   if ('release' in result) {
     if (!(SCRIPT_RELEASE_REASONS as readonly string[]).includes(result.release)) {
@@ -93,7 +93,7 @@ export function decide(result: unknown, g: Graph, legName: string, from: string)
   // station the runner ends done whatever `next` says (§6.13) — Baton's ends have no legs out.
   const reached = resolved(result.reached);
   if (!def.to.includes(reached)) return bug(`reached ${result.reached}, which is not an outcome of ${leg} (${def.to.join(', ')})`);
-  if (g.ends.has(reached)) return { kind: 'done', reached };
+  if (g.ends.has(reached)) return { kind: 'done', reached, ...outputsOf(result) };
   const next = nextLeaving(result.next, reached);
   if (next == null) {
     return bug(result.next == null
@@ -105,7 +105,14 @@ export function decide(result: unknown, g: Graph, legName: string, from: string)
     bars: Array.isArray(result.bars) ? result.bars.filter((b) => typeof b === 'string') : [],
     ...(result.session != null ? { session: String(result.session) } : {}),
     ...(result.not_before != null && Number.isFinite(result.not_before) ? { notBefore: result.not_before } : {}),
+    ...outputsOf(result),
   };
+}
+
+/** R-BTN-108: the outputs a result reports, passed to Baton as they are — Baton checks the
+ *  envelope, the station's entry and every inline value (R-BTN-109); the runner adds nothing. */
+function outputsOf(result: { outputs?: unknown }): { outputs?: unknown[] } {
+  return Array.isArray(result.outputs) && result.outputs.length ? { outputs: result.outputs } : {};
 }
 
 /** How an `advance` refusal settles (§6.13): `off-graph` means the course changed under the

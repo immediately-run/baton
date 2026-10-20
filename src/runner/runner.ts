@@ -582,7 +582,8 @@ export class Runner {
         if (verdict.kind === 'done') {
           // A done end carries no hand-off (R-BTN-44 writes one for suspensions and releases);
           // the closing marker and the resume record are its record.
-          return await this.finish(claimId, { end_reason: 'done', reached: verdict.reached, ...(verdict.detail ? { detail: verdict.detail } : {}), ...(closed ? { ended_at_sha: closed } : {}) }, null);
+          const done = { end_reason: 'done', reached: verdict.reached, ...(verdict.detail ? { detail: verdict.detail } : {}), ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { ended_at_sha: closed } : {}) };
+          return await this.finish(claimId, done, null);
         }
         if (verdict.kind === 'suspend' || verdict.kind === 'release') {
           const reason = verdict.kind === 'suspend' ? `suspended:${verdict.reached}` : `released:${verdict.reason}`;
@@ -592,7 +593,7 @@ export class Runner {
         // The go-on decision: the advance carries the result's bars on the edge (R-BTN-63) and
         // the evidence `close` wrote; it finishes this leg and starts the next. The finished leg
         // joins the evidenced path only now — the next leg's run number counts what ran.
-        const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(closed ? { evidence: closed } : {}) }, verdict.reached);
+        const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}) }, verdict.reached);
         if ('settle' in answer) return await this.finish(claimId, answer.settle, await this.callHandoff(script, ctx) ?? handoffUrl);
         gitPath = [...gitPath, { leg: legName, reached: verdict.reached }];
         at = answer.station ?? verdict.reached;
@@ -614,7 +615,7 @@ export class Runner {
   /** One `advance`, its refusal settled by §6.13: off-graph ends `released:course-changed`; an
    * `entry` refusal (R-BTN-109) ends `released:cannot-finish:contract-output`; every other
    * refusal suspends at the station the claim reached, never releasing. */
-  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown } | { settle: Record<string, unknown> }> {
+  private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string; outputs?: unknown[] }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown } | { settle: Record<string, unknown> }> {
     try {
       return await this.o.api.advance(claimId, body) as { station?: string; next?: NextLegs; advice?: unknown };
     } catch (e) {
@@ -752,6 +753,11 @@ export class Runner {
         // transport failure, or the orphan path would re-end the claim with another reason.
         this.log(`baton: the end of ${ticket} did not reach Baton (${e.message}) — retried on every beat`);
         this.pendingEnd = { claimId, body };
+      } else if (e instanceof BatonRefusal && refusalKind(e.ruleCode) === 'contract-output' && !String(body.end_reason).startsWith('released:')) {
+        // R-BTN-109: a completed end whose outputs fail its station's entry gives the leg up, as
+        // a refused advance does — an output contract failure (R-BTN-82).
+        this.log(`baton: ${ticket}'s outputs do not meet its arrival (${e.message}) — the leg is given up`);
+        return await this.finish(claimId, { end_reason: 'released:cannot-finish:contract-output' }, handoff);
       } else if (e instanceof BatonRefusal) {
         throw e;
       } else {

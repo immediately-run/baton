@@ -195,6 +195,39 @@ describe('S-BTN-41 the runner', () => {
     expect(home.markers()).toHaveLength(3);
   }, 30_000);
 
+  // R-BTN-109 (B-3, baton#69 round 2): a result's outputs travel on the advance and the done end;
+  // an arrival without its station's entry outputs is given up contract-output.
+  const ENTRY = { ...relay, stations: { ...relay.stations, built: { ...relay.stations.built, entry: [{ output: 'artifact', schema: 'std:url@1' }] } } };
+  const ARTIFACT = `[{ name: 'artifact', schema: 'std:url@1', value: { url: 'https://example.test/a' } }]`;
+
+  it('a result\'s outputs reach Baton and meet the station\'s entry', async () => {
+    home.write('.baton/courses/relay/course.json', `${JSON.stringify(ENTRY, null, 2)}\n`);
+    home.leg('build', `return { reached: 'built', next: 'check', outputs: ${ARTIFACT} };`);
+    home.leg('check', `return { reached: 'checked', next: 'merge' };`);
+    home.leg('merge', `return { reached: 'merged' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, undefined, { course: ENTRY });
+    expect(await makeRunner().runOnce()).toMatchObject({ ticket: 'docs:T-1', end_reason: 'done', reached: 'merged' });
+  }, 30_000);
+
+  it('an arrival without its entry outputs is given up: released cannot-finish:contract-output', async () => {
+    home.write('.baton/courses/relay/course.json', `${JSON.stringify(ENTRY, null, 2)}\n`);
+    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, undefined, { course: ENTRY });
+    expect(await makeRunner().runOnce()).toMatchObject({ ticket: 'docs:T-1', end_reason: 'released:cannot-finish:contract-output' });
+    expect(await rows('SELECT status, end_reason FROM claims')).toEqual([{ status: 'released', end_reason: 'released:cannot-finish:contract-output' }]);
+  }, 30_000);
+
+  it('a done end whose outputs fail its arrival is given up the same way', async () => {
+    const END = { ...relay, stations: { ...relay.stations, merged: { ...relay.stations.merged, entry: [{ output: 'artifact', schema: 'std:url@1' }] } } };
+    home.write('.baton/courses/relay/course.json', `${JSON.stringify(END, null, 2)}\n`);
+    home.leg('merge', `return { reached: 'merged', outputs: [{ name: 'artifact', schema: 'std:url@1', value: { url: 'not a url' } }] };`);
+    home.commit();
+    await home.post({ 'T-1': placed('checked', [['build', 'built'], ['check', 'checked']], [['merge', 'ready']]) }, undefined, { course: END });
+    expect(await makeRunner().runOnce()).toMatchObject({ ticket: 'docs:T-1', end_reason: 'released:cannot-finish:contract-output' });
+  }, 30_000);
+
   it('holds the claim through a short ci wait and goes on when it clears', async () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
     home.leg('check', `return { reached: 'checked', next: 'merge' };`);

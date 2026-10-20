@@ -136,7 +136,7 @@ describe('round 1 (A): pattern cost, the bound\'s holes, deep JSON, the subset',
     const start = performance.now();
     const faults = validate(Array(15).fill('a'.repeat(256)), 'c:s31@1', resolveWith(S));
     expect(performance.now() - start).toBeLessThan(5000);
-    expect(faults.map((f) => f.message)).toContain('the value\'s patterns cost more than the validator allows');
+    expect(faults.map((f) => f.message)).toContain('the value costs more than the validator allows');
   });
 
   it('a root that leaves its type open, and an array open past prefixItems, bound nothing (1-A-1, 1-A-2)', () => {
@@ -164,6 +164,37 @@ describe('round 1 (A): pattern cost, the bound\'s holes, deep JSON, the subset',
     expect(refinementGaps({ type: 'array', prefixItems: [{ type: 'number' }], items: { type: 'string' } }, { type: 'array', items: { type: 'string' } }, stdSchema).map((g) => `${g.path} ${g.keyword}`)).toEqual(['/prefixItems/0 type']);
     // A new property where the base leaves the object open narrows it.
     expect(refinementGaps({ type: 'object', properties: { y: { type: 'number' } } }, { type: 'object' }, stdSchema)).toEqual([]);
+  });
+});
+
+describe('round 2: every kind of validation work metered; the memo; $ref siblings (2-r2-0..3)', () => {
+  it('compiling, matching and enum and const comparisons all draw on one meter, shared across a request\'s values', () => {
+    const big = Array.from({ length: 12_000 }, (_, i) => `member-${i}`);
+    const S: Record<string, Record<string, unknown>> = {};
+    for (let i = 0; i < 32; i++) S[`c:e${i}@1`] = { ...(i ? { 'x-baton-base': `c:e${i - 1}@1` } : {}), type: 'string', maxLength: 256, enum: big };
+    const start = performance.now();
+    validate('member-5', 'c:e31@1', resolveWith(S));
+    expect(performance.now() - start).toBeLessThan(2000);
+    // A small meter runs out: the fault, never a long run or a throw.
+    expect(validate('member-5', 'c:e31@1', resolveWith(S), { steps: 10_000 })).toEqual([{ path: '', message: 'the value costs more than the validator allows' }]);
+    const meter = { steps: 5000 };
+    expect(validate('x', 'c:p@1', resolveWith({ 'c:p@1': { type: 'string', pattern: '^[a-z]{0,50}$' } }), meter)).toEqual([]);
+    expect(meter.steps).toBeLessThan(5000);
+  });
+
+  it('the subset check charges compiled states to a sync\'s budget', () => {
+    expect(checkSchema({ type: 'string', pattern: '^[a-z]{0,1000}$' }, { steps: 100 })[0].message).toMatch(/more states than one sync allows/);
+  });
+
+  it('a (pattern, string) verdict is never reused for another pair: no NUL ambiguity', () => {
+    const r = resolveWith({ 'c:n@1': { type: 'object', properties: { a: { type: 'string', pattern: 'c' }, b: { type: 'string', pattern: 'c\u0000' } } } });
+    expect(validate({ a: '\u0000c', b: 'c' }, 'c:n@1', r)).toEqual([{ path: '/b', message: 'must match the schema\'s pattern' }]);
+  });
+
+  it('a base node\'s keywords beside its $ref constrain too: a refinement that drops them is a gap', () => {
+    const r = resolveWith({ 'c:str@1': { type: 'string' } });
+    const base = { type: 'object', properties: { p: { $ref: 'c:str@1', const: 'x' } } };
+    expect(refinementGaps({ type: 'object', properties: { p: { type: 'string', maxLength: 10 } } }, base, r).map((g) => g.keyword)).toEqual(['const']);
   });
 });
 

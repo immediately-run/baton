@@ -21,6 +21,11 @@ describe('decide: the four result shapes', () => {
     expect(decide({ reached: 'pr-open', next: 'review' }, g, 'implement', 'filed')).toEqual({
       kind: 'advance', reached: 'pr-open', leg: 'review', bars: [],
     });
+    // R-BTN-108: a result's outputs ride the advance and the done end unchanged.
+    const outputs = [{ name: 'change', schema: 'std:url@1', value: { url: 'https://x.test/' } }];
+    expect(decide({ reached: 'pr-open', next: 'review', outputs }, g, 'implement', 'filed')).toMatchObject({ kind: 'advance', outputs });
+    expect(decide({ end: 'done', reached: 'pr-open', outputs }, g, 'implement', 'filed')).toMatchObject({ kind: 'done', outputs });
+    expect(decide({ reached: 'pr-open', next: 'review', outputs: [] }, g, 'implement', 'filed')).not.toHaveProperty('outputs');
   });
 
   it('a suspend result rests where the script says, naming the queued leg', () => {
