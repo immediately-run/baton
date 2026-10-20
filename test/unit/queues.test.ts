@@ -168,6 +168,21 @@ describe('R-BTN-79: the bound, as a warning', () => {
     expect(await depths()).toEqual({ implement: 1, review: 2 });
   });
 
+  it('a bound not yet judged is judged by the next post even when it refuses the new course file (2-r2-0)', async () => {
+    git.registry = [course(4, 3, { course: bounded(1, 1) })];
+    expect((await git.post()).status).toBe(200);
+    // As migration 0021 leaves an upgraded install: depths counted, bounds unjudged, nothing logged.
+    await rows('UPDATE leg_queues SET max_queue = NULL');
+    await rows(`DELETE FROM events WHERE kind IN ('queue-over', 'course-closed', 'course-opened')`);
+    await rows(`DELETE FROM notices WHERE kind = 'queue-over'`);
+    git.registry = [course(5, 3, { course: { ...bounded(1, 1), legs: { ...bounded(1, 1).legs, fix: { ...roadmapPr.legs.fix, max_queue: 0 } } } })];
+    expect((await git.post()).status).toBe(200);
+    expect((await rows<{ course_id: string }>('SELECT course_id FROM course_refusals')).map((x) => x.course_id)).toEqual(['roadmap-pr']);
+    expect(await rows(`SELECT depth, max_queue FROM leg_queues WHERE leg = 'review'`)).toEqual([{ depth: 2, max_queue: 1 }]);
+    expect(await kinds()).toEqual(['queue-over', 'course-closed']);
+    expect((await overNotices()).map((n) => n.state)).toEqual(['queued']);
+  });
+
   it('no ticket is held, blocked or refused for a full queue', async () => {
     git.registry = [course(4, 3, { course: bounded(1, 1) })];
     expect((await git.post()).status).toBe(200);

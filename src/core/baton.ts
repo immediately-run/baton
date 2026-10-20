@@ -1060,11 +1060,14 @@ export class BatonCore {
       this.claims.renameActive(r, e.id);
       // R-BTN-83: a ticket queued for a leg the accepted file no longer has there waits on course-changed.
       this.stations.recheckCourse(r, e.id);
-      // R-BTN-79: renamed legs keep their tickets, and a changed bound is judged again.
-      this.queues.coursed(r, e.id);
     }
-    // A course the registry dropped takes its queues and their notices with it (round 1, 1-A-3).
-    this.queues.retain(r, this.courses.all().filter((c) => c.repository_id === r).map((c) => c.id));
+    // R-BTN-79: every course in force — accepted now or kept over a refused file — has its renamed
+    // legs' tickets moved and each leg's bound judged against the row's, so a bound never waits on
+    // a file being fixed (round 2, 2-r2-0); a course the registry dropped takes its queues and
+    // their notices with it (round 1, 1-A-3).
+    const inForce = this.courses.all().filter((c) => c.repository_id === r).map((c) => c.id);
+    for (const c of inForce) this.queues.coursed(r, c);
+    this.queues.retain(r, inForce);
     return refused;
   }
 

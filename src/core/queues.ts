@@ -89,7 +89,7 @@ export class Queues {
   }
 
   /**
-   * A course file was accepted for `course` (R-BTN-69), in the snapshot's transaction: its tickets
+   * A post was applied with `course` in force (R-BTN-69), in the snapshot's transaction: its tickets
    * whose queued leg it renamed are touched (R-BTN-64), and every leg's bound is judged
    * again — a bound lowered below the depth is a crossing as much as a ticket arriving.
    */
