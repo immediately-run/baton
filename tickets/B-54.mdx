@@ -1,0 +1,44 @@
+---
+title: "B-54 — Declarative views and Baton's three renderers"
+id: B-54
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1110
+tier: judgement
+description: "x-baton-view rendered by plain, html and ui renderers that escape or text-set every value and link only under the link rule or link_hosts; the std: library's views; fallback up the base chain (R-BTN-112). S-BTN-76, G-BTN-100. Split from B-3. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-3
+---
+
+**Brief:** continues B-3 (split 2026-10-20).
+**Spec:** `spec/BATON_SPEC.md` §2m.2 R-BTN-112 (declarative views, Baton's renderers), R-BTN-110 (each `std:` schema with a view), R-BTN-157 (a `link_hosts` link is https with no userinfo), §10.4 (the link rule); §13a S-BTN-76; G-BTN-100.
+**Depends on:** B-3 (`x-baton-view` is accepted and bounded in a schema; the `std:` library).
+
+### Requires
+
+- none.
+
+### What to build
+
+1. **Renderers** in the shared library: `plain` (the CLI and a courier's text), `html` (a courier's email: every value escaped, inline styles only, no script, image or remote resource) and `ui` (the dashboard, through `textContent`). A view's `title`/`summary` templates replace `{<JSON Pointer>}` only; `fields` with `as` in `text`, `number`, `time`, `gauge`, `status`, `table` (≤ 50 rows) and `link` — shown as a link only under §10.4's link rule or the instance's `link_hosts` (an administrator's setting, default empty).
+2. **Fallback**: a value's own view, else the nearest up its base chain, else a generic two-level rendering, truncated.
+3. **The `std:` library's views**, and core events rendered by core's own templates with one slot for the course's view.
+4. Courses never ship rendering code.
+
+### Tests
+
+- S-BTN-76 (hostile values in templates and table cells, a link to a host neither in `link_hosts` nor `web_base`) through all three renderers.
+
+### Exit criteria
+
+- [ ] the scenario passes
+- [ ] merged under the review gate
