@@ -1,0 +1,44 @@
+---
+title: "B-52 — Baton's course test kit: refinement report, entry against contracts, course signatures and spawns"
+id: B-52
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1108
+tier: judgement
+description: "baton course test reports every refinement gap (R-BTN-108), checks entry schemas against legs' contracts (R-BTN-109), prints each course's signature and checks spawns (R-BTN-111); stats carries the signature. S-BTN-65's kit half, S-BTN-80. Split from B-3. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-3
+---
+
+**Brief:** continues B-3 (split 2026-10-20). The owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
+**Spec:** `spec/BATON_SPEC.md` §2m.2 R-BTN-108 (the static refinement check `baton course test` runs), R-BTN-109's last bullet (every `entry` schema posted; every arriving leg's contract can meet it), R-BTN-111 (a course's signature, `spawns`); §2d (the test kit, `GET …/stats`); §13a S-BTN-65's kit half, S-BTN-80.
+**Depends on:** B-3, which ships the validator (`src/shared/schema.mjs`: `refinementGaps`, `checkSchemaSet`), the `std:` library and the schemas a sync posts.
+
+### Requires
+
+- none.
+
+### What to build
+
+1. **The kit's refinement report.** `baton course test` reads `.baton/schemas/<course>/`, runs `checkSchemaSet` and, for each schema with an `x-baton-base`, `refinementGaps` against its base, and reports every gap with its keyword (S-BTN-65: a refinement dropping `head_sha` from `required` is reported, naming `required`).
+2. **Entry against contracts.** The kit checks every `entry` schema is posted or `std:`, and that every leg arriving at a station declares outputs that can meet its requirements.
+3. **Signatures and spawns (R-BTN-111).** The kit prints each course's signature (its `start` entry as input, each `end` station's entry as output); `GET /v1/repositories/{repository}/stats` carries it per course; a leg's `spawns: {course, provides, awaits}` is accepted in the course file and checked by the kit against the child course's signature (S-BTN-80).
+
+### Tests
+
+- S-BTN-65's kit half and S-BTN-80, through `baton course test` on fixture courses.
+- `npm test`, `npm run typecheck` and `npm run check:spec` green.
+
+### Exit criteria
+
+- [ ] the scenarios above pass
+- [ ] merged under the review gate
