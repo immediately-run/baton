@@ -1,0 +1,100 @@
+---
+title: "B-71 — Scenario tests against the rewritten §15: stale citations fixed, changed rows assigned, retired scenarios checked"
+id: B-71
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1090
+tier: routine
+description: "Audit every `test/integration/S-BTN-*.test.ts` against its current §15 row: repoint headers to the new § numbers, fix citations and assertions whose behaviour the rewrite did not change (S-BTN-22's retired R-BTN-41, S-BTN-55's machine key with sync off, the S-BTN-2 file name, `trace-scope.json` keys), record which ticket changes each test whose row did change, and make check-spec fail on a test file named for a retired or unknown scenario, allowlisting S-BTN-46 and S-BTN-60 until B-67. Builds no scenario. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the ticket plan for the current-state spec (PR #71, 2026-10-20), §2's B-71. The
+rewrite renumbered every section, retired S-BTN-29, -35, -46, -60, -90 and -135, and changed
+rows the tests still assert in their old form; nothing today ties a test file to its row.
+**Spec:** `spec/BATON_SPEC.md` §15 (Scenarios, Gates; R-BTN-29–R-BTN-31, R-BTN-68);
+`spec/BATON_SPEC_HISTORY.md` "Old § → new §", "Retired scenarios and gates" and "Resolutions
+made in the rewrite" §15 (S-BTN-55 now posts a machine key with `machine_sync` off; S-BTN-22's
+bound is docs' ranking).
+**Depends on:** nothing. It lands beside B-68; leave `worker` identifiers inside test code to
+B-68.
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+A test that cites a retired rule or an old § sends its reader to the wrong text, and a test for a
+retired scenario keeps retired behaviour alive. The tickets that change a row need to know which
+test they own, or two tickets edit one file blind.
+
+### What to build
+
+1. **Headers.** Every `test/integration/S-BTN-*.test.ts` header cites `§15` and the new § of each
+   rule it names (the history's "Old § → new §"), in place of `§13a`, `§2e`, `§2g`, `§2l`,
+   `§2m.*`, `§6.x`, `§7.x` and `§10.x`. Rule ids stay unless retired.
+2. **Unchanged behaviour, stale text.**
+   - S-BTN-22: drop R-BTN-41 (retired); the bound is `roadmap-pr`'s ranking in docs, core counts
+     `max_queue` (R-BTN-79); "nothing flagged" stays.
+   - S-BTN-55: the forbidden post is a machine key's with `machine_sync` off (today the only
+     kind; R3-1270 adds the sync-on case).
+   - Rename `S-BTN-2.silent-worker.test.ts` to `S-BTN-2.silent-runner.test.ts` (the row's name).
+   - `test/integration/trace-scope.json`: re-key every entry whose test file or title moved, and
+     repoint the old § numbers in its `reason`s.
+3. **Changed rows: owners recorded, not fixed here.** Confirm this table in the audit, extend it
+   with anything else found, and post it in `## Status`; each listed ticket changes its test in
+   its own PR.
+
+   | Test | What the row now says | Changed by |
+   |---|---|---|
+   | S-BTN-6, S-BTN-7 | held with `baton.retries`; a looped leg's count resets at each outcome | B-56; B-11 (the reset) |
+   | S-BTN-10 | `baton.stalled` at 72 h, resolved by `baton owner resolve` | B-56, B-61 |
+   | S-BTN-47 | spent retries and a 72 h wait as conditions; `course-changed` raised | B-56, B-57, B-61 |
+   | S-BTN-44 | a posted decision raises `hitl.decision`; the ticket prerequisite is `depends_on`, not `blocked_by` | B-56, B-41 |
+   | S-BTN-12, S-BTN-18 | the 6-h unconfirmed end raises `baton.unconfirmed` | B-57 |
+   | S-BTN-34, S-BTN-39, S-BTN-37 | regressed path, `policy` waits and refused course files raised | B-57 (S-BTN-37's timer and held-position carry-over: B-61, B-38) |
+   | S-BTN-45 (both files) | the queue over its bound raises `baton.queue-over`; no notice | B-57, then B-67 |
+   | S-BTN-64 | `runner:session` through rule 4, a `capability` block | B-70 |
+   | S-BTN-104, S-BTN-107 | person and call legs, not `waiting_on: owner\|children` | B-41 (with B-7, B-62) |
+   | S-BTN-126 | no `courier` role for API keys or tokens | B-67 |
+   | S-BTN-46, S-BTN-60 | retired | B-67 deletes them |
+
+4. **The check.** `scripts/check-spec.mjs` gains `retiredScenarioIds(history)` (the S-BTN ids of
+   the history's "Retired scenarios and gates" table) and checks `test/integration/` file names:
+   a file named for a retired scenario, or for an S-BTN id with no §15 row, is a problem, except
+   those in an exported `RETIRED_TESTS_ALLOWED` list holding S-BTN-46 and S-BTN-60 (B-67 empties
+   it). `test/unit/check-spec.test.ts` covers both cases and the allowlist.
+
+### Do not
+
+- Change what a test asserts where the row changed: that is the listed ticket's work, and a
+  test asserting new behaviour before it is built fails.
+- Rename `worker` identifiers inside test code (B-68), or delete S-BTN-46/-60 (B-67).
+- Fail check-spec on retired rule citations: that is B-72, after the code stops citing them.
+
+### Tests
+
+- `npm test` green with the renamed files and re-keyed `trace-scope.json`
+  (`npm run traces` passes).
+- `node scripts/check-spec.mjs` passes, and fails on a fixture file named for S-BTN-35.
+
+### Exit criteria
+
+- [ ] every integration test's header cites §15 and current § numbers
+- [ ] the changed-rows table confirmed and posted in `## Status`
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 with the current-state spec, PR #71)_

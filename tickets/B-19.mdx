@@ -3,14 +3,14 @@ title: "B-19 — Baton reserved: the runner saves a leg's session, and a course'
 id: B-19
 project: baton
 status: deferred
-updated: 2026-10-17
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1122
 tier: judgement
-description: "Deferred until a course hits a problem it solves (owner, 2026-10-17): the runner, which already reads a leg's stdout and stderr for the stream, saves the session to the repository's transcript store; asking the predecessor is a feature of that course's leg, not core (BATON_SPEC §2m.6b's reserved note). Requires: B-9."
+description: "Deferred until a course hits a problem it solves (owner, 2026-10-17): the runner, which already reads a leg's stdout and stderr for the stream, saves the session to the repository's transcript store; asking the predecessor is a feature of that course's leg, not core (BATON_SPEC Open questions: asking a predecessor session, R-BTN-123). Requires: B-9."
 topics:
   - baton
 owns: {}
@@ -20,7 +20,9 @@ depends_on:
 ---
 
 **Brief:** the owner, 2026-10-17: "Asking a predecessor session" is "an interesting idea, but it should be implemented as a feature of a specific course's leg. Don't do this until we hit a problem it solves. We should have the ability to save leg's session by the worker. The worker already needs to read a leg's std\{err, out\} to allow streaming it to the web ui, so this seems like a modest addition - but one reserved for the future."
-**Spec:** `spec/BATON_SPEC.md` §2m.6b (the reserved note after R-BTN-125), R-BTN-118 (the runner reads a leg's output), §6.8 (transcript pointers).
+**Spec:** `spec/BATON_SPEC.md` **Open questions** ("Asking a predecessor session", R-BTN-123, §8.3), §8.5
+(R-BTN-118: the runner reads a leg's output; R-BTN-128: leg logs), §9.9 (R-BTN-20: transcript
+pointers), §1 (R-BTN-33, R-BTN-50).
 
 ### Why
 
@@ -28,7 +30,7 @@ This ticket records reserved work so it is not lost. It is **deferred**: do not 
 
 ### What to build (when un-deferred)
 
-1. *(2026-10-17: done by R-BTN-128, which saves each leg run's output to the transcript repos now; its build is B-23.)* **The runner saves a leg's session.** The runner already reads each leg's stdout and stderr for the stream (B-9). It may also save them, with the harness's session file where an adapter can export one, to the repository's transcript store (§6.8). Saving is per repository and opt-in, and it is pointed at, never stored in Baton (R-BTN-33).
+1. *(2026-10-17: done by R-BTN-128, which saves each leg run's output to the transcript repos now; its build is B-23.)* **The runner saves a leg's session.** The runner already reads each leg's stdout and stderr for the stream (B-9). It may also save them, with the harness's session file where an adapter can export one, to the repository's transcript store (§9.9). Saving is per repository and opt-in, and it is pointed at, never stored in Baton (R-BTN-33).
 2. **A course's leg may ask its predecessor.** This is a feature of that course's leg script, not of Baton's core (R-BTN-50). The script resumes or replays the saved session to answer a question.
 
 ### Do not

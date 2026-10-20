@@ -1,0 +1,113 @@
+---
+title: "B-70 — Isolation is the capability runner:session: rule isolation folds into rule 4 (R-BTN-107)"
+id: B-70
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1107
+tier: critical
+description: "Build R-BTN-107 and R-BTN-133 as the schema review left them: a runner started in `session` mode declares the built-in capability `runner:session`; a session-only leg lists it in `requires.capabilities`; rule `isolation` (B-2) is removed and rule 4 refuses other runners `missing-capability`, with a `capability` block and `baton leg why` `no-live-runner` when no session runner is live; a course file's `isolation: \"session\"` is read as that capability with `deprecated-field` during the migration window, then refused. S-BTN-64, S-BTN-134's `isolation` case, S-BTN-123's `process` runner case; G-BTN-90. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-42
+  - B-10
+---
+
+**Brief:** the course-schema review, 2026-10-20 (owner approved; history, "Schema review
+(2026-10-20)" item 2): "`isolation` merged into `requires.capabilities` as `runner:session`". A
+leg's `isolation` floor was a second way to say what a capability says; the ticket plan's §2
+B-70 builds the merge.
+**Spec:** `spec/BATON_SPEC.md` §8.3 R-BTN-107 (the three modes; a session-only leg requires
+`runner:session`, which only a `session`-mode runner declares; rule 4 refuses others, omits the
+leg from their recommendations, and with no such runner live the leg carries a `capability`
+block); §8.4 R-BTN-133 (the `runner` capability type and its CLI-defined values `leg-trees`,
+`baton-legs`, `session`); §6.6 rule 4 and the note after the table ("a leg's `session` mode is
+rule 4's `runner:session`"); §6.1 R-BTN-120 (`baton leg why`, `capability` → `no-live-runner`);
+§6.2 R-BTN-75 (capability blocks); §5.2 R-BTN-69 (the validator refuses `isolation`); §10
+R-BTN-114 (check legs require `runner:session`); `spec/BATON_SPEC_HISTORY.md` Migrations,
+"Course fields the schema review removed"; §15 S-BTN-64, S-BTN-123, S-BTN-134; G-BTN-90.
+**Depends on:** B-42 (the built-in `runner` capability type, counted as granted to every runner
+key; this ticket adds its `session` value), B-10 (a leg's own `requires.capabilities`, which
+rule 4 and the capability block must read). The runner's `session` mode itself is B-47's;
+whichever of B-47 and this ticket lands second makes `--sessions` declare `runner:session`. Check
+legs are B-5's; whichever of B-5 and this ticket lands second gives them the requirement.
+
+### Requires
+
+None: a checkout and a terminal. `session` mode runs against a fake session provider in the
+tests.
+
+### Why
+
+Two gates for one fact — rule `isolation` against the heartbeat's mode, and rule 4 against
+declared capabilities — meant a session-only leg with no session runner showed nothing
+(`isolation` writes no block), while every other missing capability shows a `capability` block
+and a reason in `baton leg why`.
+
+### What to build
+
+1. **Core gates** (`src/core/gates.ts`, `src/core/claims.ts`, `src/core/graph.ts`). Remove rule
+   `isolation` (`GateRule`'s member, the leg's `isolation` field, the check against
+   `worker.isolation`). `runner:session` is a `runner:` capability: rule 4 counts it once
+   declared, with no grant (B-42's rule), against the leg's `requires.capabilities` (B-10). The
+   heartbeat keeps declaring its `isolation` mode for display (§8.1); it gates nothing.
+2. **Blocks and why** (`src/core/blocks.ts`). A leg requiring `runner:session` with no live
+   runner declaring it carries a `capability` block like any capability; `baton leg why` answers
+   `no-live-runner`, and with `runner=me` `not-declared`.
+3. **The runner** (`src/runner/`). A runner in `session` mode declares `runner:session` in its
+   heartbeat capabilities from its own code; a runner config naming it refuses to start
+   (R-BTN-133). `process` and `attached` runners never declare it.
+4. **The window** (history, Migrations, "Course fields the schema review removed").
+   - **Phase 1.** `src/core/course.ts` reads a leg's `isolation: "session"` as `runner:session`
+     added to its `requires.capabilities`, logging one `deprecated-field` event per repository,
+     course and field per day, and the course is listed for its owners (raised once B-57's
+     conditions exist; until then on today's Needs-you path). Stored courses are re-read on
+     their next post; no stored row is rewritten by hand.
+   - **Cutover (its own PR, once no registered course file carries `isolation`).** The validator
+     refuses `isolation`, naming the leg and field, the previous file kept and
+     `baton.course-refused` raised (S-BTN-134). The kit (`src/local/testCourse.ts`) refuses it
+     from phase 1.
+   - The `workers.isolation` column stays (it is the heartbeat's mode, §13.3 `runners`); no
+     migration drops it.
+5. **Model.** `model/README.md`'s "isolation floors" entry goes; rule 4 already modelled
+   (R3-1254 part 2b) gains `runner:` capabilities counted once declared if B-42 has not added
+   it, with a `model:pr` report (R-BTN-68).
+
+### Do not
+
+- Grant `runner:session` through a key's grant or let a course declare a capability type named
+  `runner` (R-BTN-133).
+- Keep rule `isolation` as an alias: refusals are rule 4's `missing-capability`.
+- Edit `0019_independence.sql`.
+
+### Tests
+
+- **S-BTN-64**, rewritten on both hosts (rename the file
+  `test/integration/S-BTN-64.session-only-legs.test.ts`): a leg requiring `runner:session`;
+  `process`, `attached` and `session` runners; only the `session` runner is offered it, the
+  others' claims and advances are refused `missing-capability` (rule 4); with no `session`
+  runner live, a `capability` block and `baton leg why` `no-live-runner`. Its trace replayed
+  through the model; `trace-scope.json` keys updated.
+- S-BTN-134's `isolation` case after cutover; a phase-1 case reading `isolation` with
+  `deprecated-field`.
+- Unit: `test/unit/gates.test.ts`'s isolation cases become rule 4 cases;
+  `test/unit/course.test.ts`'s `isolation` cases become the window's.
+- S-BTN-123's `process` runner case (`missing-capability`) where B-5 has built it.
+
+### Exit criteria
+
+- [ ] S-BTN-64 passes on both hosts; G-BTN-90's `runner:session` clause holds
+- [ ] the cutover PR merged once no registered course carries `isolation`
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 with the current-state spec, PR #71)_

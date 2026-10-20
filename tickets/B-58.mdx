@@ -1,0 +1,141 @@
+---
+title: "B-58 — Bindings choose a handler course; the handler is a ticket file pushed before the raise returns (R-BTN-161)"
+id: B-58
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1115
+tier: critical
+description: "Build BATON_SPEC §7.2 R-BTN-161: bindings in `.baton/baton.json` and a ticket's `conditions:` (posted as `tickets[].conditions`), resolved by the runner from the verified home tree at the claim's commit (innermost scope, then the repository, longest prefix); `baton leg why` and `baton course test --bindings` naming each type's course and scope; the ticket source's `file(ticket)` export and handler tickets `<local>.c<n>` pushed git-first with `course`, `parent`, `handles` and `raised_by`; `std:condition@1` and `std:restart@1`; the kit refusing a `suspend` binding to a course without `std:restart@1` ends; bound `interrupt` and `notify` filing a handler and closing with it. S-BTN-130, G-BTN-148, G-BTN-146. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-55
+  - B-42
+  - R3-1258
+---
+
+**Brief:** the owner, 2026-10-20: bindings belong to git, and no owner setting gates them
+(`spec/BATON_SPEC_HISTORY.md`, "Decisions in full"). Filed from the ticket plan for the
+current-state spec (PR #71).
+**Spec:** `spec/BATON_SPEC.md` §7.2 R-BTN-161; R-BTN-160's dispositions and closing table (§7.1);
+R-BTN-74 (§4.2, the source's `file(ticket)` export); R-BTN-110 and R-BTN-111 (§5.5, the `std:`
+library and the signature); R-BTN-133 and R-BTN-143 (§8.4, the verified home tree, default-branch
+code only); R-BTN-86 (§4.6, children) and R-BTN-149 (§2.3, four generations); R-BTN-66 (§1, who may
+bind); §11.3 (`leg why`, `course test`); §15 S-BTN-130, G-BTN-146, G-BTN-148.
+**Depends on:**
+- B-55 (raises and the `conditions` row);
+- B-42 (leg trees at the claim's commit, and the wrapper's `tickets` call that reads the source
+  from that tree);
+- R3-1258 (child tickets, which handler tickets are).
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+Until bindings exist, every condition reaches the debugger. A binding lets a project choose how
+it is reached, through a course of its own or a standard one (B-66), and Baton stays out of
+delivery.
+
+### What to build
+
+1. **Where bindings are written.**
+   - Repository scope: `"conditions": {<type prefix>: <course id>}` in `.baton/baton.json`,
+     validated with the rest of that file.
+   - Ticket scope: a ticket file's `conditions:`, which `src/defaults/tickets-markdown.ts` reads
+     and the sync posts as `tickets[].conditions`. The board post validator (`src/core/board.ts`)
+     accepts and bounds it. Baton stores it only for display.
+2. **Resolution, in the runner** (`src/runner/`):
+   - Read bindings from the verified home tree at the claim's commit: `.baton/baton.json`, and the
+     ticket chain through the source's `tickets` call on B-42's tree. Never read them from Baton's
+     rows.
+   - Walk from the raising ticket, through its parent, to the root, then the repository.
+   - Within a scope the longest matching prefix wins, and the first scope with a match wins.
+   - No match means the condition is unhandled.
+   - The resolved course and scope go into the handler ticket and the `condition` activity.
+3. **Diagnostics.** `baton leg why` and `baton course test --bindings` print, for each type a
+   course may raise (B-55's signature), the course it resolves to and the scope that supplied it.
+4. **The source's `file(ticket)` export** (R-BTN-74).
+   - The markdown source writes `<items>/<local id>.md`, and refuses an existing file that is not
+     its own write.
+   - B-62 (call children) and B-64 (outbox writes) reuse it.
+5. **The handler ticket.** For a bound raise, in this order:
+   1. B-55's check.
+   2. `POST …/conditions` with `handler`. Its id is the raising ticket's local id, then `.c<n>`,
+      where `n` is the number of conditions raised on that ticket so far (`R3-1205.c3`).
+   3. `file(ticket)` with frontmatter `course`, `parent` (the raising ticket), `handles: {type,
+      disposition, restarts, default?, severity?, wait_s?, condition_id}` and `raised_by: {leg,
+      run}`. The body is the leg's subject and body.
+   4. Push, then return.
+
+   The handler is a child, so R-BTN-149's four-generation bound applies. From then on it is an
+   ordinary ticket.
+6. **Contracts** (`src/shared/std.mjs`, which is not vendored):
+   - `std:condition@1`: `{type, disposition, restarts, default?, severity?, raised_by: {ticket,
+     leg?, run?}, question: <std:git.file@1>}`.
+   - `std:restart@1`: `{restart: <id>|null, reason: chosen|unanswered|withdrawn|resolved,
+     answered_by?, commit?}`, as a refinement of `std:decision@1`.
+   - `baton course test` refuses a `suspend` binding whose course does not produce
+     `std:restart@1` at every end station. What a `notify` or `interrupt` handler produces is not
+     read.
+7. **Bound dispositions.**
+   - Bound `interrupt` files the handler, then ends as unbound does. Nothing waits for it.
+   - Bound `notify` files the handler, and the raise returns at once.
+   - Both close when their handler ticket closes. Close them in the transaction that shows the
+     handler closed (snapshot or end), using the by-handler index.
+   - Bound `suspend` files the handler too. B-59 builds the wait, and until then B-55's
+     refusal stands.
+8. **Delivery runners** need no core change. A handler course declares its capability types
+   (R-BTN-121).
+
+### Do not
+
+- Add an owner setting, or anything in Baton, that gates or overrides a binding.
+- Resolve from an unmerged branch (R-BTN-143). An unmerged binding binds nothing.
+- Return from a raise, or end the leg, before the handler file is pushed (G-BTN-146).
+- Write a core condition's handler here. Those go through B-64's outbox.
+
+### Settle while building
+
+- **`std:restart@1` cannot refine `std:decision@1` as both are written.** `std:decision@1`
+  requires `id`, `option` and `commit` and is closed, while `std:restart@1` has
+  `{restart, reason, answered_by?, commit?}`. B-52's refinement check would report the gap. Do
+  not loosen the check. Raise a spec amendment: either drop "refining `std:decision@1`", or give
+  `std:restart@1` the base's fields.
+- **How the runner learns `n` for `.c<n>`** before its `POST`. One option is to count the
+  ticket's handler files at the fetched head, since a ticket's legs are sequential (R-BTN-86).
+  The other is to have Baton return the count. Pick one, and amend R-BTN-161 if the route
+  changes.
+
+### Tests
+
+- `test/integration/S-BTN-130.dynamic-binding.test.ts`, on both hosts:
+  - repository-scope and epic-scope bindings: the innermost scope wins, then the longest prefix;
+  - a narrowed leg's raise refused on the channel;
+  - `course test` refusing a restart-less handler course for `suspend`;
+  - an unmerged binding inert;
+  - `baton leg why` naming each type's course and scope.
+- Unit, for the markdown source's `file(ticket)`: the path, the frontmatter, and an existing
+  foreign file.
+- Unit: the handler is pushed before the raise returns, and a failed push fails the raise.
+- Unit: a bound `notify` closes with its handler.
+
+### Exit criteria
+
+- [ ] S-BTN-130 passes on both hosts; G-BTN-148 holds, and G-BTN-146's "handler pushed before it
+      returns" holds
+- [ ] the two points under "Settle while building" are settled, and the spec is amended if needed
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_

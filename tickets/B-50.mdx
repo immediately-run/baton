@@ -10,18 +10,21 @@ tags:
   - roadmap-item
 order: 1130
 tier: routine
-description: "A Baton series, Weekly model check: every Monday 02:00 UTC a run ticket on a no-agent course model-check runs npm run model:full (simulation, witnesses, 1,000 model-drawn traces, the depth-4 proof, the scenario traces) on main's head on any runner granted on baton, appends the report to its own ticket file, files a B-ticket when it fails, and writes the next run (R-BTN-68 as amended by baton#68; R-BTN-89's series). Requires: none (a JRE is fetched when missing)."
+description: "A Baton series, Weekly model check: every Monday 02:00 UTC a run ticket on a no-agent course model-check runs npm run model:full (simulation, witnesses, 1,000 model-drawn traces, the depth-4 proof, the scenario traces) on main's head on any runner granted on baton, bounded by an interrupting start timer of five hours, appends the report to its own ticket file, files a B-ticket when it fails, and writes the next run (R-BTN-68; R-BTN-89's series; R-BTN-167). S-BTN-51. Requires: none (a JRE is fetched when missing)."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
   - R3-1259
+  - B-60
 ---
 
-**Spec:** BATON_SPEC R-BTN-68 (amended 2026-10-20 by baton#68: hosted runners run no Quint; a PR
-carries `npm run model:pr`'s report; `npm run model:full` runs weekly on `main`), R-BTN-89's
-recurring jobs ("one child ticket per run", `writeSuccessor`, the `series` course), R-BTN-86.
+**Spec:** BATON_SPEC §15 R-BTN-68 (hosted runners run no Quint; a PR carries `npm run
+model:pr`'s report; `npm run model:full` runs weekly on `main` as this series), §6.5 R-BTN-89's
+recurring jobs ("one child ticket per run", `writeSuccessor`, the `series` course), §4.6
+R-BTN-86, §7.5 R-BTN-167 (an interrupting `start` timer), §7.1 R-BTN-160 (`error.capability`).
+**Depends on:** R3-1259 (the series) and B-60 (the interrupting `start` timer).
 **Brief:** the owner, 2026-10-20: "3 hours is absurdly long. We can run that maybe once a week not
 for every pr", then "Please create the recurring 'Weekly model check' as a baton ticket within
 the baton repo. It should be run on any baton runner connected to the baton repo."
@@ -49,13 +52,17 @@ is a Baton series, and any runner granted on baton takes it.
    - **No agent.** The leg's `run` executes `npm ci` and `npm run model:full` in the leg's
      checkout of the run's commit (`main`'s head when the leg starts) and keeps its stdout, the
      Markdown report. It never calls `agent_command`.
-   - **Any runner.** The course requires no capability, so every worker granted on baton is
+   - **Any runner.** The course requires no capability, so every runner granted on baton is
      eligible (rule 7). `model:verify` needs Java: when `java` is not on the PATH, the leg
      downloads a pinned Temurin JRE tarball into the runner's cache, outside the checkout, and
-     puts it on the PATH for the step. A runner that cannot fetch it fails the leg
-     `cannot-finish:env`, naming the missing JRE.
-   - **Time.** `max_duration` 18,000 seconds (five hours) for a run of about three hours on 4
-     CPUs. The leg reports progress on each step, so the lease holds.
+     puts it on the PATH for the step. A runner that cannot fetch it throws
+     `LegError('error.capability', …)` naming the missing JRE, ending
+     `cannot-finish:capability` (a floor type, never retried, R-BTN-122). Before B-55 types
+     `LegError`, the leg ends `cannot-finish:capability` directly.
+   - **Time.** `"timers": [{"after_s": 18000, "from": "start", "interrupting": true}]` (five
+     hours, R-BTN-167, built by B-60) for a run of about three hours on 4 CPUs. The course file
+     carries no `max_duration` (retired: read as such a timer during the window, refused after B-67). The leg reports progress on each
+     step, so the lease holds.
    - **The report.** Before its closing commit, the leg appends the report under `### Report` to
      the run's own ticket file, so every week's report stays in git, archived with the run. When
      the report does not pass, the leg also files a B-ticket with `npm run ticket -- new`, titled
@@ -71,24 +78,25 @@ is a Baton series, and any runner granted on baton takes it.
      `not_before` at the first Monday 02:00 UTC after this ticket merges.
    - Both carry the ticket source's fields only (R-BTN-33). Stopping the series is a git act:
      withdraw the pending run, then retire the series.
-3. **R-BTN-68 and the READMEs.** Name the series as where the weekly run happens. Drop "on the
-   owner's machine", since any granted runner takes it, and replace the pinned issue baton#68
-   proposed with the run's ticket.
 
 ### Tests
 
-- `node cli/baton.mjs test-course . model-check` passes. The test kit drives a run to `done`, and
+- `baton course test . model-check` passes, including the timer's validation. The test kit drives a run to `done`, and
   the leg script exports `run`, `handoff` and `close`.
 - A unit test for the leg with `npm run model:full` stubbed:
   - a passing report is appended to the run's file, and no B-ticket is filed;
   - a failing report files one B-ticket and the run still closes `done`;
   - the successor is `model-check-<n+1>` with the next Monday's `not_before`, and a retried leg
     writes no second one;
-  - no `java` and no network fails the leg `cannot-finish:env`.
+  - no `java` and no network fails the leg `cannot-finish:capability`, naming the JRE.
 - S-BTN-51 (R3-1259) already covers the series mechanics.
 
 ### Exit criteria
 
 - `model-check-1` runs on a granted runner at its `not_before`, appends a passing report for
   `main`'s head, writes `model-check-2` for the next Monday, and closes `done`.
-- R-BTN-68 names the series. `npm test` and `npm run check:wiki` are green.
+- `npm test` and `npm run check:wiki` are green.
+
+## Status
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — `max_duration` becomes an interrupting `start` timer (B-60), a missing JRE ends `cannot-finish:capability` as `error.capability` (no `env` class exists), and the R-BTN-68 edit is dropped because the spec already names the series.)_

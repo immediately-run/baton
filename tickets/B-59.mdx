@@ -1,0 +1,135 @@
+---
+title: "B-59 — Suspend: a leg waits in its claim for a restart, then blocks on the condition and resumes (R-BTN-162)"
+id: B-59
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1116
+tier: critical
+description: "Build BATON_SPEC §7.2 R-BTN-162 and the unhandled `suspend` of R-BTN-163: a `suspend` raise waits in the claim (`condition-wait`) for `wait_s` bounded by `max_wait_s`; a handler closing in the wait queues and rings a `handled` message, and `ctx.raise` returns the validated `std:restart@1`; past the wait the leg pushes, hands off and ends `released:blocked` on `{kind: condition}` with a provisional row, which counts toward `max_blocked` and is not a failed attempt; it resumes on `unblocked` with `resume` in the claim response and `ctx.resume`; a withdrawn handler resumes with the default; one suspend at a time; `baton leg raise --wait` and `baton leg await`. S-BTN-127, S-BTN-128 (with a fixture handler course), S-BTN-131's resolve case, G-BTN-147. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-58
+  - B-56
+  - B-21
+---
+
+**Brief:** the owner, 2026-10-20: a leg that needs a person raises a condition and goes on with
+the handler's restart (`spec/BATON_SPEC_HISTORY.md`, "Decisions in full"). Filed from the ticket
+plan for the current-state spec (PR #71).
+**Spec:** `spec/BATON_SPEC.md` §7.2 R-BTN-162; R-BTN-163 (§7.3, an unhandled `suspend` with the
+debugger as handler, resolving inline); R-BTN-161 (`std:restart@1`); R-BTN-122 (§7.4, `max_wait_s`
+and `max_blocked`); R-BTN-167 (§7.5, the wait counts toward the `start` timer); R-BTN-126 and
+R-BTN-120 (§6.2, §6.1, the blocked end and the prerequisite); R-BTN-44 (§9.3, the hand-off);
+R-BTN-77 and R-BTN-91 (§6.2, §8.1, `unblocked`, messages and the ring); R-BTN-82 (§5.5,
+pointers); R-BTN-106 (§8.3, the local channel); §13.6 `ticket_blocks.kind`; §15 S-BTN-127,
+S-BTN-128, S-BTN-131, G-BTN-147.
+**Depends on:**
+- B-58 (handler tickets and bindings);
+- B-56 (resolve, and the debugger as handler);
+- B-21 (the `released:blocked` end, provisional block rows and `max_blocked`).
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+B-55 refuses every `suspend` raise with `suspend-unavailable`. This ticket builds the wait, so a
+leg can ask a question in the middle of its work and act on the answer, in the same session when
+the answer comes quickly and in a later claim when it does not.
+
+### What to build
+
+1. **Lift B-55's refusal.** A `suspend` raise is accepted. A second one raised while one is
+   awaited is refused on the channel (one at a time). `notify` raises in the meantime are not
+   waits.
+2. **Waiting in the claim** (`src/runner/runner.ts`):
+   - After the handler is pushed (bound) or the condition is reported (unbound), the runner keeps
+     the claim and heartbeats as usual.
+   - It records a `condition-wait` activity naming the handler. **Running** and `baton leg why`
+     show it.
+   - The wait is the raise's `wait_s`, else the declaration's, else 120 seconds for `hitl` and 0
+     for any other type.
+   - It is capped at the owners' `max_wait_s`: 900 by default, at most 3,600. B-11 makes this a
+     setting; until then use the constant.
+   - The wait counts toward B-60's `start` deadline, and nothing pauses that deadline.
+3. **Settling within the wait** (`src/core/`):
+   - The handler can close in three transactions: a snapshot that shows it closed, the end of its
+     last claim, or `owner resolve`. Each queues a `handled` message for the raiser's holder and
+     rings it (R-BTN-91).
+   - The heartbeat answers `handled: [{condition_id, handler, outcome, output?}]`, where `output`
+     is a pointer.
+   - The runner reads the value from git and validates it as a `std:restart@1` whose `restart` is
+     one the raise offered, or null. `ctx.raise` returns `{restart, reason}`.
+   - If validation fails, the leg ends `released:cannot-finish:contract-input`.
+   - A debugger resolve is handed over inline as `{restart, reason: "resolved", answered_by}`.
+4. **Past the wait:**
+   - `ctx.raise` returns `{suspended: true}`, and the script returns.
+   - The runner pushes, calls `handoff`, and ends `released:blocked` with the prerequisite
+     `{kind: "condition", ref: <condition_id>}`.
+   - Baton writes a `ticket_blocks` row of kind `condition`. It is provisional on the handler's
+     commit, and not provisional when the debugger is the handler.
+   - It writes no row when the handler has already closed, so the next claim resumes at once.
+   - The end is not a failed attempt and counts toward `max_blocked`.
+   - The prerequisite is met when the handler closes `done` or `withdrawn`, or when the condition
+     is resolved.
+5. **Resuming:**
+   - On `unblocked`, any runner eligible for the leg may claim it.
+   - The claim response carries `resume: {condition_id, type, handler, outcome:
+     done|withdrawn|resolved, output?, handoff}`, as pointers.
+   - The runner validates it as in item 3, and the script reads `ctx.resume` first.
+   - A `withdrawn` handler resumes with `{restart: <default>, reason: "withdrawn"}`, or with
+     `restart: null` when the raise named no default.
+6. **The CLI** goes on B-47's channel:
+   - `baton leg raise --wait` blocks for the wait and prints the restart or `suspend`.
+   - `baton leg await <handler> --timeout <s>` can be called again until the wait is spent.
+7. **Migration** (a new numbered file):
+   - `condition` in `ticket_blocks.kind`;
+   - `handled` in the messages' kind;
+   - `condition-wait` in the activity kinds.
+8. **The model** (R-BTN-68): add the `condition` block and its resume to `model/baton.qnt`, with
+   the `npm run model:pr` report in this PR.
+
+### Do not
+
+- Count a `condition` block as a failed attempt, or leave it out of `max_blocked`.
+- Wait past `min(wait_s, max_wait_s)`.
+- Accept a restart the raise did not offer.
+- Pause or extend the `start` deadline for the wait.
+- Lose an answer that arrives during the end. A handler closed before the end arrives writes no
+  row (G-BTN-147).
+
+### Tests
+
+- On both hosts, `test/integration/S-BTN-127.answered-within-wait.test.ts` and
+  `S-BTN-128.answered-after-wait.test.ts`, using a fixture handler course under `test/fixtures/`:
+  - an answer within the wait, and an answer outside the restarts (`contract-input`);
+  - no answer, then a resume by another runner;
+  - a withdrawn handler resuming with the default;
+  - an answer 1 second after the wait, with no block row and an immediate resume.
+
+  The `deliver`, `retract` and supersession parts become whole once B-65 and B-66 land.
+- `S-BTN-131.debugger.test.ts`: an unhandled `hitl` resumed by `baton owner resolve` with
+  `reason: "resolved"`.
+- Unit: the wait-time precedence and the `max_wait_s` cap; a second `suspend` refused; a
+  `handled` message rung once.
+
+### Exit criteria
+
+- [ ] S-BTN-127 and S-BTN-128 pass on both hosts with the fixture course; S-BTN-131's resolve case
+      passes; G-BTN-147 holds
+- [ ] `model/` changed in the same PR, with its `npm run model:pr` report
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_

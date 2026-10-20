@@ -1,0 +1,141 @@
+---
+title: "B-61 — Timers on a leg: arrival, ready and first-attempt clocks, interrupting or raising, and core's default stall timer (R-BTN-167)"
+id: B-61
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1117
+tier: critical
+description: "Build the rest of BATON_SPEC §7.5 R-BTN-167: the validator's full timer rules (contradictory timers, a timer `leg` on a choice station's leg, a second `baton.stalled`, `max_ready_s` and `max_attempts_s` refused); `ticket_timers` for `arrival`, `ready` and `first_attempt`, each firing once per instant from the alarm and carried across renames and the owner-state export; interrupting timers releasing as `leg-timeout` and queuing their `leg` (`next_source: timer`) or failing the attempt, a `first_attempt` timer spending the budget (`budget-spent`); non-interrupting timers raising their `notify` type once per arrival (`baton.ready-late`); core's default 259,200-s `baton.stalled` timer counted only while the sync posts the leg `waiting`, replacing the 72-hour scan. S-BTN-87, S-BTN-134, S-BTN-10's 72 h case, S-BTN-37's timer case, G-BTN-152. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-60
+  - B-11
+  - B-38
+  - B-56
+---
+
+**Brief:** filed from the ticket plan for the current-state spec (PR #71). It follows the schema
+review of 2026-10-20 (`spec/BATON_SPEC_HISTORY.md`, "Schema review", items 6, 8, 10, 11 and 12),
+which the owner approved. It replaces the per-leg deadline fields `max_ready_s` and
+`max_attempts_s`, which were never built.
+**Spec:** `spec/BATON_SPEC.md` §7.5 R-BTN-167 (shape, when each clock starts, interrupting and
+non-interrupting timers, core's default timer, choice stations); R-BTN-90 (the `leg-timeout`
+release and reap, which B-60 built); R-BTN-122 (§7.4, `budget-spent`, the owners' ceiling, the
+reset when a leg reaches an outcome); R-BTN-163 (§7.3, `baton.stalled` and its restarts); R-BTN-83
+(§5.3, held positions); R-BTN-88 (§4.8, owner state); R-BTN-64 (§5.7, renames carry timers);
+R-BTN-69 (§5.2, the validator); §13.6 `ticket_timers` and `ticket_overrides.override_kind`; §15
+S-BTN-10, S-BTN-37, S-BTN-87, S-BTN-134, G-BTN-64, G-BTN-152.
+**Depends on:**
+- B-60 (the `start` timer, `deadline_at`, and the `leg-timeout` release and reap);
+- B-11 (`leg_attempts.first_attempt_at`, exhaustion and `budget-spent`, the owners' bounds);
+- B-38 (held positions with their kind);
+- B-56 (`baton.stalled` as a `suspend` core condition).
+
+### Requires
+
+None: every case runs in the integration harness with a fake clock.
+
+### Why
+
+A leg that is ready but nobody takes, or one that keeps failing past a total budget, has no
+bound today. The 72-hour `baton.stalled` scan in `src/core/blocks.ts` is one hard-coded timer. This
+ticket makes it one row among a leg's timers, which a course can tune.
+
+### What to build
+
+1. **The validator** (`src/core/course.ts`, the kit), lifting B-60's interim refusals and
+   refusing, each naming the leg and the field:
+   - an `after_s` outside 60 to 2,592,000, or above the owners' ceiling for an interrupting
+     `start` or `first_attempt` timer;
+   - an interrupting timer with `raise`, or one whose `leg` does not leave the same station;
+   - an interrupting timer with `leg` on a leg leaving a choice station. Whichever of B-61 and
+     B-63 lands second adds this check;
+   - a non-interrupting timer with `leg`, or one without a `raise` that is a `notify` type or
+     `baton.stalled`;
+   - a second `baton.stalled` timer on a leg;
+   - `max_ready_s` and `max_attempts_s`. Nothing ever posted them, so they get no window.
+2. **Migration** (a new numbered file):
+   - `ticket_timers` exactly as §13.6;
+   - `timer` in `ticket_stations.next_source`;
+   - B-38's `override_kind` gains `timer` if B-38 did not add it.
+3. **Arming** (a new `src/core/timers.ts`, called from the transactions that change each `from`):
+   - `arrival`: when the ticket's station changes, never when Baton moves it.
+   - `ready`: when the leg becomes ready and unclaimed.
+   - `first_attempt`: at `leg_attempts.first_attempt_at`, re-armed when B-11 resets it.
+   - `start` stays B-60's `deadline_at`.
+
+   Each timer fires once per `from_at` (`fired_at`). The alarm scans `due_at`, as R-BTN-90's
+   alarm does. Renames carry the rows (R-BTN-64), and the owner-state export carries them
+   (R-BTN-88).
+4. **Interrupting timers:**
+   - The alarm releases a running claim on the leg with `leg-timeout`, through B-60's path.
+   - With `leg`, Baton queues that leg (`next_source: timer`), held as B-38's override until the
+     station changes. Its own run writes the position to git. In this case the release is not a
+     failed attempt, which also applies to B-60's `start` timer.
+   - Without `leg`, the firing is a failed attempt.
+   - A `first_attempt` timer without `leg` spends the budget: no further attempt starts, and the
+     ticket goes to B-11's exhaustion with `budget-spent`.
+5. **Non-interrupting timers:**
+   - Baton raises the timer's `raise` on the ticket, once per timer per arrival, and the leg goes
+     on.
+   - A course's `notify` type is raised by core with no claim.
+   - `{from: "ready", raise: "baton.ready-late"}` covers a leg that is ready but untaken.
+6. **Core's default timer:**
+   - Every leg carries `{after_s: 259200, from: "arrival", interrupting: false, raise:
+     "baton.stalled"}`.
+   - It counts only while the sync posts the leg `waiting`, not while Baton holds it waiting or a
+     `time` wait holds it.
+   - A leg's own `baton.stalled` timer replaces the default on that leg. Nothing removes the
+     default.
+   - It replaces `src/core/blocks.ts`'s 72-hour scan and its constant.
+   - B-56's `retry` restart re-arms it. `baton.stalled` still closes by itself when the leg is
+     posted `ready`.
+7. **The model** (R-BTN-68): if `model/baton.qnt` cites R-BTN-167 or the stall rule it replaces,
+   change it in this PR with its `npm run model:pr` report.
+
+### Do not
+
+- Restart an `arrival` instant on a Baton move (R-BTN-88).
+- Fire a timer twice for one `from` instant.
+- Let a timer raise `baton.stalled` unless it is the leg's one override.
+- Count a `time` wait or a Baton-held wait toward the default timer.
+
+### Tests
+
+- On both hosts:
+  - `test/integration/S-BTN-87.timers-attempts.test.ts`:
+    - an interrupting `first_attempt` timer that a backoff would pass, held `budget-spent`;
+    - a `ready` timer raising `baton.ready-late` once;
+    - a looped leg's second pass budgeted from its own first attempt.
+  - `S-BTN-134.timers.test.ts`:
+    - an interrupting arrival timer with `leg`: `leg-timeout`, and the leg queued;
+    - `warning.slow` raised once per arrival;
+    - a 1-day `baton.stalled` override raising after 1 day, not 3;
+    - every refused form in item 1, each named, with the previous file kept.
+
+    The scenario's other refusals belong to other tickets: `error_types` is B-55's, `isolation`
+    is B-70's and `max_duration` is B-67's. A leg's `call`, `checks` and `retry.non_retryable`
+    are refused as unknown keys and need only an assertion.
+  - `S-BTN-10.no-review-capacity.test.ts`: `baton.stalled` at 72 hours from the default timer.
+  - `S-BTN-37.course-renames.test.ts`: an armed timer carried over a rename.
+- Unit: the `arrival` instant kept across a Baton move and restarted on a station change; the
+  default not counting a `time` wait.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts; G-BTN-152 holds, and G-BTN-64 holds for timers
+- [ ] the 72-hour stall scan is gone from `src/core/blocks.ts`
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_

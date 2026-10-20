@@ -3,7 +3,7 @@ title: "R3-1263 — Baton pulled syncs: sync wants, GET /v1/sync/wanted, POST /v
 id: R3-1263
 project: baton
 status: available
-updated: 2026-10-16
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -21,13 +21,13 @@ depends_on:
 ---
 
 **Brief:** the Baton project; filed by R3-1253 (docs#217).
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2k R-BTN-94; R-BTN-73, R-BTN-77, R-BTN-88 (export, the seal) and §10.3 as amended; §3a (`ForgeSecrets`); §11 (`GET /v1/sync/wanted`, `POST /v1/sync/want`); §13a S-BTN-56 (the want and dispatch cases), G-BTN-83 (docs@71b18e3e)
+**Spec:** `spec/BATON_SPEC.md` §3.3 R-BTN-94 (wants, runners, dispatch adapters, the unblocked trigger, forge credentials, raises) and R-BTN-73; §6.2 R-BTN-77; §4.8 R-BTN-88 (export, the seal); §3.2 (the sync principal); §12.7 (the GitHub App as dispatch adapter); §2.1 (`ForgeSecrets`); §14 (`GET /v1/sync/wanted`, `POST /v1/sync/want`); §15 S-BTN-56 (the want and dispatch cases), G-BTN-83
 **Depends on:** R3-1262
 
-### Amended 2026-10-16 (BATON_SPEC §2l, docs@646eca6 (docs#220), R-BTN-105, R-BTN-102)
+### Amended 2026-10-16 (docs#220; now BATON_SPEC §3.3 R-BTN-105, §8.2 R-BTN-102)
 
-- `GET /v1/sync/wanted` also returns `head_sha`: the newest commit any post named, held posts included, so a worker comparing it with `git ls-remote` is not re-triggered forever by a held head.
-- `POST /v1/owner/{repository}/sync-want` (an owner key) records a want, for a person pushing from a machine with no worker; `baton owner sync-want` is R3-1272's.
+- `GET /v1/sync/wanted` also returns `head_sha`: the newest commit any post named, held posts included, so a runner comparing it with `git ls-remote` is not re-triggered forever by a held head.
+- `POST /v1/owner/{repository}/sync-want` (an owner key) records a want, for a person pushing from a machine with no runner; `baton owner sync-want` is R3-1272's.
 - Machine keys calling these routes are R3-1270's; this item's verifier answers the credential kinds it already knows.
 
 ### Requires
@@ -52,8 +52,10 @@ ticket's station stale, and the clearing rule rides R-BTN-62's numbers.
    (`--forge-secrets` locally), whose entries also carry `forge` and `gitlab_issuer`; one retry
    at most; the unblocked trigger through the same adapters, restricted to the repository's
    own target.
-5. Needs you: a want older than 30 minutes, a mirror 30 minutes behind, a configured adapter
-   with no secret; the seal's mirror rule ("has a mirror").
+5. Raise `baton.sync-late` (a sync want older than 30 minutes), `baton.mirror-late` (a mirror
+   more than 30 minutes behind) and `baton.forge-secret-missing` (a configured adapter or
+   webhook with no secret) — through today's `needsYou()` path if this lands before B-57,
+   which converts them; the seal's mirror rule ("has a mirror").
 
 ### Architecture — the decisions, named
 
@@ -74,7 +76,7 @@ ticket's station stale, and the clearing rule rides R-BTN-62's numbers.
 
 ## Status
 
-_2026-10-16 — amended for BATON_SPEC §2l: `head_sha` on `wanted`, the owner's `sync-want` route._
+_2026-10-16 — amended for the 2026-10-16 amendment (now BATON_SPEC §3.3 R-BTN-105): `head_sha` on `wanted`, the owner's `sync-want` route._
 
 
 _(filed 2026-10-16)_

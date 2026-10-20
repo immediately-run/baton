@@ -1,0 +1,83 @@
+---
+title: "B-72 — check-spec fails on retired requirement ids, once the code no longer cites them"
+id: B-72
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1141
+tier: routine
+description: "Turn check-spec's retired-id warning into a failure: repoint the citations left after B-67, R3-1269 and B-71 (the model's R-BTN-52 and R-BTN-80 in `model/README.md`, `baton.qnt` and `regressions.qnt`; `test/unit/check-spec.test.ts`'s fixture; any `cli/` leftover), exempt `src/migrations/*.sql`, which are append-only, and make a retired id a problem. R-BTN-68. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-67
+  - R3-1269
+  - B-71
+---
+
+**Brief:** the ticket plan for the current-state spec (PR #71, 2026-10-20), §2's B-72. R3-1252
+made a retired citation a warning "so the code that still names it can be cleaned up without
+breaking the check"; once the clean-up tickets land, the warning should stop new citations of
+retired rules.
+**Spec:** `spec/BATON_SPEC_HISTORY.md` "Retired requirements" (R-BTN-41, -52, -54, -59, -80,
+-103, -164, -170), the table `scripts/check-spec.mjs`'s `retiredIds` reads; `spec/BATON_SPEC.md`
+§15 R-BTN-68 (the model cites only live rules; `npm run model:links`).
+**Depends on:** B-67 (removes the notice code citing R-BTN-80 and R-BTN-103 from `src/`, `cli/`,
+`ui/` and `test/`), R3-1269 (removes the `HookRunner` residue citing R-BTN-52 and R-BTN-59 in
+`src/core/ports.ts`), B-71 (repoints S-BTN-22's R-BTN-41).
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+While a retired citation only warns, new code can cite a retired rule and pass; the warnings
+list today (36 lines) hides any new one among the old.
+
+### What to build
+
+1. **Repoint what remains.** Run `node scripts/check-spec.mjs` and clear every warning outside
+   `src/migrations/`. Expected after the dependencies land:
+   - `model/README.md`, `model/baton.qnt`, `model/regressions.qnt`: R-BTN-52 → R-BTN-98
+     ("the claim hook R-BTN-98 retired"), and `model/README.md`'s R-BTN-80 → the conditions
+     (R-BTN-160–R-BTN-163) or dropped. Comment-only; re-stamp any `@model` hash that moves
+     (`node scripts/check-model-links.mjs --stamp`).
+   - `test/unit/check-spec.test.ts`: build the fixture's retired id from parts
+     (`'R-BTN-' + '80'`), so the test file does not itself cite it.
+   - any `cli/` or `src/ui/` line B-67 left.
+2. **Exempt migrations.** `scripts/check-spec.mjs`'s file walk skips `src/migrations/*.sql`
+   for retired ids only (an old migration's comment is history and may not be edited); an
+   undefined, never-retired id there still fails.
+3. **Fail.** In `check()`, a retired id outside the exemption is a problem naming the file, the
+   id and its replacement from the history table's "What replaced it" cell; the header comment
+   says so. `test/unit/check-spec.test.ts`'s "warns, and does not fail" case becomes "fails",
+   plus a case for the migration exemption.
+
+### Do not
+
+- Edit an old migration to clear a warning.
+- Add retired ids to `COURSE_IDS` or any other allowlist to make the check pass.
+- Delete the history table rows: they are what the check reads.
+
+### Tests
+
+- `test/unit/check-spec.test.ts`: a retired citation in `src/a.ts` fails; the same in
+  `src/migrations/0001_x.sql` passes; an undefined id in a migration still fails.
+- `npm run check:spec` green on the repository with no warning printed.
+
+### Exit criteria
+
+- [ ] `node scripts/check-spec.mjs` prints no warning and passes
+- [ ] `npm test`, `npm run typecheck`, `npm run model:links` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 with the current-state spec, PR #71)_

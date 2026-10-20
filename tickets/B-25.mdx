@@ -3,14 +3,14 @@ title: "B-25 — Baton action registry and MCP endpoint: one authorize behind ev
 id: B-25
 project: baton
 status: available
-updated: 2026-10-18
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1128
 tier: critical
-description: "Build R-BTN-129 and R-BTN-130: the action registry in src/shared/actions.mjs with one authorize for every surface; the router, CLI tree and MCP tools generated from it and kept equal by check:actions; GET /v1/actions; confirm on destructive routes; the stateless MCP endpoint with its closed allowlist; owner-minted MCP keys in mcp_keys, and CursorKey. Requires: B-24, B-23."
+description: "Build R-BTN-129 and R-BTN-130: the action registry in src/shared/actions.mjs with one authorize for every surface and the scopes instance, repository, claim-holder and own; the router, CLI tree and MCP tools generated from it and kept equal by check:actions; GET /v1/actions; confirm on destructive routes; the stateless MCP endpoint with its closed allowlist; owner-minted MCP keys in mcp_keys, and CursorKey; owner.resolve, condition.list and owner.route registered. S-BTN-100–103, G-BTN-120–122. Requires: none."
 topics:
   - baton
 owns: {}
@@ -21,7 +21,9 @@ depends_on:
 ---
 
 **Brief:** the owner, 2026-10-17, asked for one registry of the actions an authenticated user can take, the same whether the call comes through Baton's REST API, the CLI or an agent's MCP integration. B-24 specified it (baton#47).
-**Spec:** `spec/BATON_SPEC.md` §2m.6e: R-BTN-129 (the action registry) and R-BTN-130 (Baton's MCP endpoint), with their dated notes and the §10.1, §11 and §14 rows.
+**Spec:** `spec/BATON_SPEC.md` §11.3: R-BTN-129 (the action registry) and R-BTN-130 / R-BTN-154
+(Baton's MCP endpoint); §12.1 (principals), §12.2 (destructive actions), §11.4 (R-BTN-155:
+confirmed dashboard actions), §7.3 (R-BTN-163: `owner.resolve`, `condition.list`), §14.
 
 ### Why
 
@@ -31,6 +33,7 @@ R-BTN-129 and R-BTN-130 are specified. This ticket builds them.
 
 1. **The registry.** `src/shared/actions.mjs`:
    - every action is one entry: a `<noun>.<verb>` id, `callers` with scopes, effect, schemas, an optional route, a dashboard control and an `mcp` flag;
+   - the principals are R-BTN-129's list, `courier` meaning the forge courier only; the scopes are exactly `instance`, `repository`, `claim-holder` and `own`, with no `asks` or `instances` scope;
    - CLI commands live in a second table.
 2. **One `authorize`.** Every surface calls it: the router, the dashboard, the CLI and MCP.
 3. **Generated surfaces.**
@@ -50,7 +53,8 @@ R-BTN-129 and R-BTN-130 are specified. This ticket builds them.
    - A key dies with its minter, and is refused (not killed) while `api_keys: false`.
    - `CursorKey` is wired on both hosts: the Worker secret `BATON_CURSOR_KEY`, or `--cursor-key <file>` locally.
 
-- **Hardening** *(added 2026-10-18 by BATON_SPEC §10.7)*: the overrides route serves `ticket.hold`, `ticket.unhold`, `ticket.expedite` and `ticket.cancel` told apart by field and value (R-BTN-129, R-BTN-154); register `ui.logout`, `admin.sessions.revoke` (destructive), `admin.confirm`, `owner.grants.list`, `owner.grants.flags`, `owner.code-repo.consent`, `owner.bars.follow`, `runner.grant.accept` and `runner.grant.decline` (R-BTN-140 to R-BTN-155).
+- **Hardening** *(added 2026-10-18, R-BTN-140 to R-BTN-155)*: the overrides route serves `ticket.hold`, `ticket.unhold`, `ticket.expedite` and `ticket.cancel` told apart by field and value (R-BTN-129, R-BTN-154); register `ui.logout`, `admin.sessions.revoke` (destructive), `admin.confirm`, `owner.grants.list`, `owner.grants.flags` (a grant's `sync` flag only, R-BTN-146; there is no `courier` flag), `owner.code-repo.consent`, `owner.bars.follow`, `runner.grant.accept` and `runner.grant.decline`.
+- **Conditions and routes** *(2026-10-20)*: register `owner.resolve` (`POST /v1/owner/{repository}/tickets/{ticket}/resolve`, confirmed on the dashboard, §11.4), `condition.list` (`GET /v1/repositories/{repository}/conditions`) and `owner.route` (`POST /v1/owner/{repository}/tickets/{ticket}/route`); whichever of B-25 and B-56 lands second registers the first two, and whichever of B-25 and B-38 lands second the third. `owner.courier.revoke` stays, for forge couriers.
 
 ### Do not
 
@@ -69,3 +73,6 @@ R-BTN-129 and R-BTN-130 are specified. This ticket builds them.
 - [ ] merged under the review gate
 
 ## Status
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — no `courier` grant flag and no
+`asks`/`instances` scopes; `owner.resolve`, `condition.list` and `owner.route` registered.)_
