@@ -292,6 +292,58 @@ describe('R-BTN-76, R-BTN-77: a worker\'s own instance, and an answer lost', () 
     expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: JSON.stringify({ since: T0, rows: [{ kind: 'resource', ref: R, leg: 'review' }] }) }]);
   });
 
+  it('a lost row on a next leg that is not queued silences nothing: a capability back in the same recount is logged (B-49, round 2)', async () => {
+    await keyCall(admin, '/v1/admin/resources', { name: R, scope: 'account', detail_schema: SCHEMA });
+    await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
+    git.add('D', { requires: ['mcp-chrome'] }, { ...placed('reviewed', [['implement', 'pr-open'], ['review', 'reviewed']], [['fix', 'ready'], ['merge', 'waiting', 'ci']]),
+      next: [{ leg: 'fix', state: 'ready' }, { leg: 'merge', state: 'waiting', waiting_on: 'ci', needs: [R] }] });
+    await git.post();
+    await cutover(T0);
+    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue', 'mcp-chrome'], [GO]);
+    await w.beat({ capabilities: ['agent-venue'] });
+    await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }] });
+    expect((await blockRows('D')).map((r) => `${r.kind}:${r.leg}`)).toEqual(['capability:', 'resource:merge']);
+    const unblocked = (await kinds('unblocked')).length;
+    const messages = async () => (await rows("SELECT 1 FROM messages WHERE kind = 'unblocked'")).length;
+    const sent = await messages();
+    // One heartbeat brings the capability back and drops merge's only instance: merge's row is a lost
+    // answer, but it never blocked D, whose queued leg is fix, so D's unblocking is logged and wakes work.
+    await setClock(T0 + 5 * MIN);
+    await w.beat({ capabilities: ['agent-venue', 'mcp-chrome'], uses: [] });
+    expect(await blockRows('D')).toEqual([]);
+    expect(await since('D')).toBeNull();
+    expect((await kinds('unblocked')).length).toBe(unblocked + 1);
+    expect(await messages()).toBe(sent + 1);
+    expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: null }]);
+  });
+
+  it('a lost row on a next leg that is not queued silences nothing: the queued leg\'s reading lapsing in the same tick is logged (B-49, round 2)', async () => {
+    const R2 = 'llm:glm-5';
+    const GO2 = 'opencode-go:go_plus_2';
+    for (const name of [R, R2]) await keyCall(admin, '/v1/admin/resources', { name, scope: 'account', detail_schema: SCHEMA });
+    await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
+    await keyCall(admin, '/v1/admin/instances', { name: GO2, serves: [R2], repositories: ['docs'] });
+    git.add('D', {}, { ...placed('reviewed', [['implement', 'pr-open'], ['review', 'reviewed']], [['fix', 'ready'], ['merge', 'waiting', 'ci']]),
+      next: [{ leg: 'fix', state: 'ready', needs: [R2] }, { leg: 'merge', state: 'waiting', waiting_on: 'ci', needs: [R] }] });
+    await git.post();
+    await cutover(T0);
+    await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    const w2 = await grantedWorker(owner, 'docs', 'w2', ['agent-venue'], [GO2]);
+    await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }, { instance: GO2, available: false, valid_for: 15 * 60 }] });
+    expect(await since('D')).toBe(T0);
+    const unblocked = (await kinds('unblocked')).length;
+    // One tick: fix's reading lapses (a real clear on the queued leg) and w1, merge's only user, lapses
+    // (merge's row lost). D is unblocked on fix for real: logged.
+    await setClock(T0 + 10 * MIN);
+    await w2.beat();
+    await setClock(T0 + 15 * MIN);
+    await tick();
+    expect(await blockRows('D')).toEqual([]);
+    expect(await since('D')).toBeNull();
+    expect((await kinds('unblocked')).length).toBe(unblocked + 1);
+    expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: null }]);
+  });
+
   it('the alarm evaluates once: a reading lapsing in the tick that raises baton:stalled logs nothing for a ticket blocked throughout (B-49)', async () => {
     await keyCall(admin, '/v1/admin/resources', { name: R, scope: 'account', detail_schema: SCHEMA });
     await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });

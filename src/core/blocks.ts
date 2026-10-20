@@ -211,15 +211,17 @@ export class Blocks {
       // without an `unblocked`, and the ticket remembers what it lost, and since when it was
       // blocked, until the fleet can answer again (`settleLost`; R-BTN-77 as amended by R3-1251).
       // A row that went because its need went (the leg moved past, the need was dropped) is an
-      // ordinary unblocking. Any other row cleared with a lost one (the capability the same recount
-      // brings back, a resource whose reading lapsed in the same tick) leaves the unblocking unknown,
-      // so it is a lost answer too: the ticket would still be blocked had the fleet been able to
-      // answer, and only the lost rows are kept (R-BTN-77, amended by B-49). An answer that comes back blocked
-      // on exactly what was lost writes the row again silently, with the evening's `blocked_since`:
-      // that `blocked` still stands.
+      // ordinary unblocking. Any other row cleared with a lost one on the queued leg (the capability
+      // the same recount brings back, a resource whose reading lapsed in the same tick) leaves the
+      // unblocking unknown, so it is a lost answer too: the ticket would still be blocked had the
+      // fleet been able to answer, and only the lost rows are kept (R-BTN-77, amended by B-49). A
+      // lost row on another next leg never blocked the ticket, so it silences nothing. An answer that
+      // comes back blocked on exactly what was lost writes the row again silently, with the evening's
+      // `blocked_since`: that `blocked` still stands.
       const marker = t.answer_lost ? (JSON.parse(t.answer_lost) as LostAnswer) : null;
       const lostRows = cleared.filter((r) => r.kind === 'resource' && this.lostAnswer(id, r));
-      const lost = lostRows.length > 0;
+      const queued = this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', id)[0]?.next_leg ?? null;
+      const lost = queued != null && lostRows.some((r) => r.leg === queued);
       const reblock = marker != null && added.length > 0
         && added.every((w) => w.kind === 'resource' && marker.rows.some((r) => r.ref === w.ref && (r.leg ?? '') === w.leg));
       this.evaluate(id, cleared, lost || reblock, reblock ? marker.since : null);
