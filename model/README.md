@@ -30,20 +30,29 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 author's machine, not on hosted CI runners, whose time limits it outgrew. A pull request that
 changes what the checks read — `model/`, `src/core/` with the `src/shared/` modules and
 `src/migrations/` it imports, the replay and its helpers (`test/model/`, `test/helpers.ts`,
-`test/lib/`), the trace check, or `package-lock.json`, which pins Quint and Apalache — carries
-`npm run model:full`'s report in its body. CI's `model-report` workflow
+`test/lib/`), the scenarios and their hosts (`test/integration/`, `test/hosts/`), the trace check,
+or `package-lock.json`, which pins Quint and Apalache — carries
+`npm run model:pr`'s report in its body (about half an hour; a weekly `npm run model:full` report
+is accepted too). CI's `model-report` workflow
 (`scripts/model-report.mjs`) runs no model: it reads the body, and fails until the report is
 there, names the PR's head and shows every check passing at full size; editing the body re-runs
-it. CI runs only the deterministic part, inside `npm test`: `npm run model:quick`, the scenario traces
-(`npm run traces`), the links (`npm run model:links`) and 200 model-drawn traces driving the core.
+it. Since 2026-10-20 hosted CI runs no Quint at all (owner: baton was the org's most expensive
+repository in Actions minutes): it runs `npm run test:no-quint`, whose only model check is the
+links (`npm run model:links`). `npm test` on your machine still runs `npm run model:quick`, the
+scenario traces and 200 model-drawn traces driving the core.
 
-- `npm run model:full` — every check below, in order: `npm run model` with 10,000 samples, the
-  model-based tests with 1,000 traces, and `npm run model:verify` to depth 4. It runs every step
+- `npm run model:pr` — the PR report: `npm run model:quick`, the model-based tests with 200 traces,
+  and the scenario traces, with the same Markdown report. About 20–30 minutes; paste it into the PR.
+- `npm run model:full` — weekly, on `main`'s head (R-BTN-68 as amended 2026-10-20): the "Weekly
+  model check" series (B-50) runs it on any runner granted on baton, keeps each report in its run's
+  ticket file and files a ticket for a failure; until B-50 is built, run it by hand. Every check below, in order: `npm run model` with 10,000 samples, the
+  model-based tests with 1,000 traces, `npm run model:verify` to depth 4, and the scenario traces
+  (the integration scenarios write a fresh set, then `npm run traces`). It runs every step
   even after a failure and prints a Markdown report on stdout: the commit (flagged when the
   working tree has any uncommitted or untracked change), the Quint version, and each check's
   result and minutes. `MODEL_SAMPLES`, `REPLAY_TRACES` and `MODEL_VERIFY_DEPTH` lower the sizes
   to try a change, and the report then says it is a reduced run, which `model-report` refuses.
-  Paste it into the PR. Needs Java for the last step; about two hours on 4 CPUs.
+  A PR may carry it instead of `model:pr`'s. Needs Java for the proof; about three hours on 4 CPUs.
 - `npm run model` — typecheck, the 75 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
