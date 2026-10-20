@@ -3,7 +3,7 @@ title: "R3-1254 — Baton model, remainder of R3-1243: exhaustive liveness on a 
 id: R3-1254
 project: baton
 status: in-progress
-updated: 2026-10-19
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -157,3 +157,10 @@ measured figure is in the round-1 follow-up's `model:full` report. The reviewers
 as B-49: core's recount evaluates after each kind of row, so a returning fleet logs an extra
 `unblocked` and `blocked`. R-BTN-75 is amended to evaluate once per transaction. baton#59 merged before
 these fixes; they land in a follow-up pull request._
+
+_2026-10-20 — part 2b delivered: baton#59 (3e42a69) and its round-1 follow-up baton#60 (0b73345),
+three review rounds. `npm run model:full` on baton#60's head: 10,000 samples in 8 minutes, 1,000
+model-based traces in 54, and the depth-4 proof on `small` in 127, against 47 at part 2a, so the
+`FLEET` guard did not keep `small`'s proof cost flat (B-37 tracks the proof's depth). B-49 fixes core's
+per-kind evaluation; six recounting actions carry its `@impl pending` note. Part 3 remains: Baton-raised
+decisions, open-world claims and the rest this item's scope names._
