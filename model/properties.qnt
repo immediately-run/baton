@@ -25,6 +25,48 @@ module properties {
   action pstep = step
   action pprogress = progressStep
 
+  // The proof's step (B-37): `step` less the actions no state of a one-ticket instance without a
+  // fleet enables, and less the choices only they read — the same transitions, so the same
+  // reachable states, with fewer for Apalache to encode and rule out at every depth. Dropped, each
+  // with the guard that never holds on such an instance (`verifyShape` below, checked with the
+  // invariants, says `small` is one):
+  //   gitDepends, and endBlocked naming a `ticket` — a prerequisite names another ticket;
+  //   declare — a declared set is a subset of DECLARED's, here empty, and must change;
+  //   alarmLive — FLEET is false;
+  //   reading, readingLapses — no RESOURCES;
+  //   endBlockedOn — no REQUIRES and no RESOURCES.
+  // `npm run model` simulates `safety` with the full `step` on `sim`, which has all of them.
+  action pverify = {
+    nondet w = WORKERS.oneOf()
+    nondet t = TICKETS.oneOf()
+    nondet leg = LEGS.oneOf()
+    nondet s = SLOTS.oneOf()
+    nondet b = Set(true, false).oneOf()
+    nondet kind = Set("done", "suspended", "release", "fail").oneOf()
+    nondet holderBars = FAMILIES.powerset().oneOf()
+    nondet postBars = TICKETS.setOfMaps(FAMILIES.powerset()).oneOf()
+    nondet picks = TICKETS.setOfMaps(LEGS).oneOf()
+    nondet tag = FAMILIES.oneOf()
+    nondet applies = Set("claim", "claim+advance").oneOf()
+    nondet i = 1.to(MAX_CLAIMS).oneOf()
+    nondet decisionLeg = LEGS.union(Set("")).oneOf()
+    // endBlocked's `decision` kind reads no entry
+    val noDep = { leg: "", other: t, mode: "done", stations: Set() }
+    any {
+      claim(w, t),
+      pushEvidence(w, b), advance(w, leg, holderBars), endClaim(w, kind, b), endBlocked(w, "decision", noDep),
+      heartbeat(w), sleep(w), wake(w), tick, timeUp, alarmReap(i),
+      crash(w), reapDead(w), forceReap(w), fenceCleared(w), fenceTimeout(i),
+      setHold(t, b), setOwnerBar(tag, applies), liftOwnerBars, ownerResolve(i),
+      foreignPush(t, leg), regress(t), withdraw(t), gitDecides(t, decisionLeg, b),
+      retryElapse(t, leg), provisionalLapses(t, leg),
+      syncNumber(s), syncRead(s, postBars, queuedFor(st.gitPath, picks)), syncVoid(s), syncPost(s),
+    }
+  }
+  // What makes `pverify` the same as `step`: one ticket, no fleet, nothing declared. A constant,
+  // so it holds in every state or none; the proof checks it beside `safety`.
+  val verifyShape = TICKETS.size() == 1 and not(FLEET) and WORKERS.forall(w => DECLARED.get(w) == Set())
+
   // R-BTN-4, R-BTN-19, R-BTN-26: at most one live holder per ticket — an active claim, or a
   // force-reaped one whose worker has not cleared its fence — and one active claim per worker.
   val oneLiveHolderPerTicket = TICKETS.forall(t => activeOf(t).size() + fencedOf(t).size() <= 1)
@@ -124,13 +166,13 @@ module properties {
   val answerLostOwesUnblocked = TICKETS.forall(t =>
     st.lost.get(t) == Set() or (not(st.blocked.get(t)) and st.lastEvent.get(t) == "blocked"))
 
-  val safety = and {
-    oneLiveHolderPerTicket, oneClaimPerWorker, observationsIncrease, confirmationAfterEnd,
-    confirmedIsInGit, staleOnlyWhenTakenAway, regressedOnlyWhenGitRegressed, boundedLoops,
-    writingLegsBarred, gatesHeld, noActAfterLoss, noStuckTicket,
-    blockedIsStored, unblockedFollowsBlocked, attemptsBounded, blockedEndsBounded,
-    capabilityRowsCounted, answerLostOwesUnblocked,
-  }
+  // `safety` in four groups, so the proof can check them in four processes at once (B-37,
+  // `npm run model:verify`); `safety` is their conjunction, so no property is left out of a split.
+  val safetyA = and { observationsIncrease, oneLiveHolderPerTicket, oneClaimPerWorker, staleOnlyWhenTakenAway, writingLegsBarred }
+  val safetyB = and { confirmationAfterEnd, gatesHeld, noActAfterLoss, noStuckTicket, unblockedFollowsBlocked }
+  val safetyC = and { confirmedIsInGit, regressedOnlyWhenGitRegressed, capabilityRowsCounted, answerLostOwesUnblocked }
+  val safetyD = and { boundedLoops, blockedIsStored, attemptsBounded, blockedEndsBounded }
+  val safety = and { safetyA, safetyB, safetyC, safetyD }
 
   // ---- liveness: in liveness.qnt, so the safety proof does not carry the fairness terms ----
 
