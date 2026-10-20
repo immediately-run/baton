@@ -334,10 +334,24 @@ export async function advance(cred: keyof typeof TOKENS, secret: string, claimId
 // ── administration (R3-1240) ──────────────────────────────────────────────────────────────
 
 /** BATON_ADMIN_KEYS for this test (R-BTN-57): the core reads the port on every call. */
-export function setAdminKeys(...keys: TestKey[]) {
+export function setAdminKeys(...keys: (TestKey | string)[]) {
   return withCore((c) => {
-    (c as unknown as { ports: { adminKeys: { list: () => string[] } } }).ports.adminKeys = { list: () => keys.map((k) => k.publicKey) };
+    // A string is a line as written (an API key's public line, R-BTN-159); a key, its public key.
+    (c as unknown as { ports: { adminKeys: { list: () => string[] } } }).ports.adminKeys = { list: () => keys.map((k) => (typeof k === 'string' ? k : k.publicKey)) };
   });
+}
+
+/** R-BTN-159: an API key and its public line, as `baton key create` makes them. */
+export async function makeApiKey(comment = '') {
+  const hex = (n: number) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const key = `bak_${hex(8)}_${hex(32)}`;
+  return { key, fingerprint: key.slice(0, 20), line: `${key.slice(0, 20)} sha256:${await sha256(key)}${comment ? ` ${comment}` : ''}` };
+}
+
+/** A request to an administrator's or owner's route with an API key as its bearer (R-BTN-159). */
+export async function apiKeyCall(key: string, path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') {
+  const res = await hostCall(new Request(ORIGIN + path, { method, headers: { Authorization: `Bearer ${key}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) }));
+  return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 
 /** A request signed by `key` (an administrator's or an owner's), at the core's clock. */

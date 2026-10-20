@@ -158,6 +158,16 @@ describe('envAuth (§6.4, R-BTN-13)', () => {
     expect(auth('POST', 'https://b.test/x', '{}', 's')).toHaveProperty('X-Worker-Secret', 's');
     rmSync(dir, { recursive: true, force: true });
   });
+  it('an API key, in IR_BATON_KEY or the key file, goes as a bearer with the secret (R-BTN-159)', () => {
+    const key = `bak_${'a'.repeat(16)}_${'b'.repeat(64)}`;
+    const fromEnv = envAuth({ IR_BATON_KEY: key }, () => { throw new Error('an API key is never written out as an SSH key'); });
+    expect(fromEnv('POST', 'https://b.test/v1/runner/heartbeat', '{}', 's')).toEqual({ Authorization: `Bearer ${key}`, 'X-Worker-Secret': 's' });
+    const dir = mkdtempSync(join(tmpdir(), 'baton-key-'));
+    const file = join(dir, 'worker.key');
+    writeFileSync(file, `${key}\n`);
+    expect(envAuth({ IR_BATON_KEY_FILE: file })('POST', 'https://b.test/v1/runner/heartbeat', '{}', null)).toEqual({ Authorization: `Bearer ${key}` });
+    rmSync(dir, { recursive: true, force: true });
+  });
   it('no credential at all is an error, never a silent anonymous call', () => {
     expect(() => envAuth({})).toThrow(/no credential/);
   });

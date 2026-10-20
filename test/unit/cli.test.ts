@@ -3,10 +3,10 @@
 // file by `ssh-keygen -Y sign` that Baton's verifier accepts. Node only: it runs ssh-keygen.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { duration, parseArgs, plan, send } from '../../cli/baton.mjs';
+import { createApiKey, duration, parseArgs, plan, send } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
 import { ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
@@ -144,6 +144,23 @@ describe('send: signed with a key file, verified by Baton', () => {
     expect(ok.status).toBe(200);
     expect(ok.json.url).toMatch(/\/login#[0-9a-f]{64}$/);
     expect(await send(ORIGIN, plan('admin', ['open']), other, fetchImpl)).toMatchObject({ status: 401, json: { code: 'unauthenticated' } });
+  });
+
+  it('baton key create makes an API key whose file -i sends as a bearer Baton accepts (R-BTN-159)', async () => {
+    const file = join(dir, 'admin.key');
+    const line = createApiKey(file, 'admin');
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(readFileSync(`${file}.pub`, 'utf8').trim()).toBe(line);
+    expect(line).toMatch(/^bak_[0-9a-f]{16} sha256:[0-9a-f]{64} admin$/);
+    // Never over an existing key.
+    expect(() => createApiKey(file)).toThrow('already exists');
+    await setClock(Date.now());
+    await setAdminKeys(line);
+    const fetchImpl = (url: string, init: RequestInit) => hostCall(new Request(url, init));
+    const ok = await send(ORIGIN, plan('admin', ['open']), file, fetchImpl);
+    expect(ok.status).toBe(200);
+    // The owner-key flag reads the public line from its file, as it reads an SSH public key.
+    expect(plan('admin', ['repo', 'add', 'o/r', '--owner-key', `${file}.pub`]).body.owner_keys).toEqual([line]);
   });
 });
 

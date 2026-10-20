@@ -6,6 +6,7 @@
 // printed as it came. `baton run` (§6.13 R-BTN-72) is the worker loop: it lives in src/runner
 // (TypeScript, node-only), so scripts/baton-run.mjs bundles it first, the way start-local does.
 //
+//   baton key create FILE [--comment TEXT]     an API key (R-BTN-159), beside SSH keys: FILE for -i, FILE.pub its public line
 //   baton admin -i KEY repo add <forge path> --owner-key PUB[,PUB…] [--id ID (default: the path's last segment)]
 //                [--forge github|gitlab|gitea|git] [--remote URL] [--web-base URL] [--default-branch main]
 //                [--sync-workflow PATH] [--mirror-workflow PATH] [--ci-identity none|github-actions|gitlab:<issuer>|gitlab-mirror:<issuer>]
@@ -48,7 +49,8 @@
 //
 // The URL is `--url`, else BATON_URL, else https://baton.immediately.run.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { signHeaders, signingKey } from './sign.mjs';
@@ -314,13 +316,31 @@ function grantBody(flags, readKey, extra) {
   };
 }
 
-/** Send a planned request, signed with `keyFile`. Returns `{status, json}`. */
+/** R-BTN-159: an API key, `bak_<id>_<secret>` — an administrator's, an owner's or a worker's. */
+const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
+
+/** `baton key create FILE [--comment TEXT]` (R-BTN-159): an API key, made here and never sent
+ *  anywhere. FILE (mode 0600) holds the key, for `-i FILE` or a runner's IR_BATON_KEY_FILE;
+ *  FILE.pub holds its public line — what BATON_ADMIN_KEYS lists, `--owner-key FILE.pub` or
+ *  `--key FILE.pub` registers. */
+export function createApiKey(file, comment = '') {
+  if (existsSync(file) || existsSync(`${file}.pub`)) throw new Error(`${file} or ${file}.pub already exists`);
+  const key = `bak_${randomBytes(8).toString('hex')}_${randomBytes(32).toString('hex')}`;
+  const line = `${key.slice(0, 20)} sha256:${createHash('sha256').update(key).digest('hex')}${comment ? ` ${comment}` : ''}`;
+  writeFileSync(file, `${key}\n`, { mode: 0o600 });
+  writeFileSync(`${file}.pub`, `${line}\n`);
+  return line;
+}
+
+/** Send a planned request, signed with `keyFile` — or, when it holds an API key (R-BTN-159),
+ *  with that key as a bearer. Returns `{status, json}`. */
 export async function send(url, p, keyFile, fetchImpl = fetch) {
-  const key = signingKey(keyFile);
+  const text = readFileSync(keyFile, 'utf8').trim();
   const target = new URL(p.path, url).toString();
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
-  const headers = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...signHeaders({ method: p.method, url: target, body, key }) };
+  const auth = API_KEY.test(text) ? { Authorization: `Bearer ${text}` } : signHeaders({ method: p.method, url: target, body, key: signingKey(keyFile) });
+  const headers = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
   const res = await fetchImpl(target, { method: p.method, headers, body, signal: AbortSignal.timeout(30_000) });
   let json = null;
@@ -385,6 +405,13 @@ async function decisionList(argv) {
 
 async function main(argv) {
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
+  if (argv[0] === 'key') {
+    if (argv[1] !== 'create' || !argv[2]) throw new Error('baton key create FILE [--comment TEXT]');
+    const { flags } = parseArgs(argv.slice(3), [], ['comment'], 0);
+    process.stdout.write(`${createApiKey(argv[2], flags.comment ?? '')}\n`);
+    process.stderr.write(`baton: the key is in ${argv[2]} (keep it secret; -i ${argv[2]}), its public line above and in ${argv[2]}.pub\n`);
+    return 0;
+  }
   if (argv[0] === 'decision') {
     if (argv[1] !== 'list') throw new Error('baton decision list -i KEY [--watch | --all]');
     return decisionList(argv.slice(2));

@@ -1,9 +1,13 @@
 // api.ts — the runner's client of Baton's runner API (BATON_SPEC §11, §6.3 R-BTN-13 as amended):
 // every call signed with the machine's SSH key (ssh-keygen -Y sign, the one verifier shape), or
-// — through R3-1239's transition — a bearer token, and after the first heartbeat the worker
+// with its API key as a bearer (R-BTN-159), or — through R3-1239's transition — a bearer token, and after the first heartbeat the worker
 // secret. A call Baton refuses comes back as a `BatonRefusal` (never thrown past the loop); a
 // call that cannot reach Baton throws.
+import { readFileSync } from 'node:fs';
 import { signHeaders, signingKey } from '../../cli/sign.mjs';
+
+/** R-BTN-159's API key, as src/core/auth.ts's API_KEY (not imported: it would bring jose). */
+const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
 
 /** §6.3: every heartbeat request — and every call a fence depends on — has a 30-second timeout. */
 export const CALL_TIMEOUT_MS = 30_000;
@@ -34,6 +38,12 @@ export interface ApiOptions {
  * a cloud environment's secret this run's caller materialises through `keyWriter`), else the
  * transition's `IR_BATON_TOKEN`. A runner with none cannot talk to Baton (§6.4). */
 export function envAuth(env: NodeJS.ProcessEnv, keyWriter?: (material: string) => string): Auth {
+  // R-BTN-159: an API key, in IR_BATON_KEY or the key file, goes as a bearer in place of a
+  // signature; the worker secret joins it as it joins a signature.
+  const material = env.IR_BATON_KEY_FILE ? readFileSync(env.IR_BATON_KEY_FILE, 'utf8').trim() : env.IR_BATON_KEY?.trim();
+  if (material && API_KEY.test(material)) {
+    return (_method, _url, _body, secret) => ({ Authorization: `Bearer ${material}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
+  }
   const keyFile = env.IR_BATON_KEY_FILE || (env.IR_BATON_KEY && keyWriter ? keyWriter(env.IR_BATON_KEY) : null);
   if (keyFile) {
     return (method, url, body, secret) => {

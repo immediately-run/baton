@@ -18,7 +18,7 @@ updated: 2026-10-19
 
 # immediately.run Baton — the factory's live state, off git
 
-**Status:** proposal — approved 2026-10-13 after a claims-truth review and five adversarial and final review rounds (Review record); owned by project [`baton`](../tickets/projects/baton.mdx), items R3-1205–R3-1221 (§13). **Amended 2026-10-14** (owner direction): the ticket as a course of legs derived from git (§6.12), rate-limit exhaustion, provider budget forecasts and model advice as the `roadmap-pr` course's logic (§7.3, now `BATON_ROADMAP_PR_COURSE`), Baton as an advisor that gates only safety (R-BTN-45), the boundary between Baton and courses (§2b, R-BTN-50), hooks, probes and their trust model (§2c), hosting on Cloudflare and locally (§3a), **amended 2026-10-15** with blocks and their queries (§2g), positions, history, contracts and replay (§2h), child tickets, the capacity envelope and owner-state export (§2i), time on legs and the push doorbell (§2j), SSH key identity (R-BTN-13 as amended), administration by deployment-anchored administrators and repository owners (§10.6), provider capacity as course logic and the tags gate (§2b, §7.3), cooperative locks with detection (R-BTN-46), and registered repositories and courses (§2a), **amended 2026-10-16** so Baton runs without GitHub — forges, sync keys, pulled syncs, per-forge notifications and the `branch` course (§2k, R3-1253) — and **amended again 2026-10-16** so Baton runs no repository code: hooks retired, workers rank from a fleet and instance view, claims name preferences and the accounts they bill, readings kept per instrument from any machine key, a machine key trusted to sync, report and deliver, worker couriers, open-world claims and a passive plain git server (§2l) — reviewed adversarially six times on 2026-10-14 and revised after each (Review record), §2l twice on 2026-10-16 and revised; a cutover precondition (§13); **amended 2026-10-17** (owner direction, §2m): the runner organizes a ticket's legs and sessions report to it (R-BTN-106), cloud sessions as runners (R-BTN-107), one envelope and named, refinable schemas for leg outputs and readings (R-BTN-108), station entry requirements (R-BTN-109), the standard output formats (R-BTN-110), a course's signature (R-BTN-111), declarative views (R-BTN-112), session links (R-BTN-113), check courses and the merge check delivered by a forge courier (R-BTN-114, R-BTN-115), legs a person runs (R-BTN-116), registration tokens and API keys (R-BTN-117), a running leg's output streamed to its viewers (R-BTN-118) and stopping a running leg (R-BTN-119), a leg's prerequisites in one place (R-BTN-120), capability types declared by courses (R-BTN-121), retry policies per leg (R-BTN-122), a fresh session when a leg's context fills (R-BTN-123), the `epic` planning course (R-BTN-124) and decision severities (R-BTN-125); **amended 2026-10-18** (owner direction, §3b, built by B-45; revised after review gate round 1): a tenant is a Baton named by its origin and served only there, nothing crosses a tenant, every Durable Object named under its tenant and many tenants later is a router (R-BTN-135), the operator with configuration, secrets, signed notices and administrators per tenant and a secret sink (R-BTN-136), a credential valid in one tenant and a runner bound to one origin (R-BTN-137) and forge repositories named by their immutable ids (R-BTN-138); **amended again 2026-10-18** (owner direction after the security review, §10.7, built by B-46): only pushers' forge writes count (R-BTN-139), code repositories as the owners' list (R-BTN-140), a branch-pattern grammar (R-BTN-141), bars that name legs literally (R-BTN-142), runners that run only default-branch code, scrub their credentials and stop every process a leg starts (R-BTN-143 to R-BTN-145), a multi-repository key's sync and delivery by opt-in (R-BTN-146), unfounded heads replaced and held posts that only tighten (R-BTN-147), open-world claims gated at the claim (R-BTN-148), per-repository caps (R-BTN-149), observation takeover (R-BTN-150), bounded readings (R-BTN-151), views as data (R-BTN-152), merge checks from an exit status (R-BTN-153), MCP holds that only add (R-BTN-154), sign-in by a confirmed code (R-BTN-155), CI-token and notification checks (R-BTN-156), tokens, roles and links (R-BTN-157), and the App manifest, untrusted text, the local host and import (R-BTN-158); **amended 2026-10-19**: the `build-app` standard course (R-BTN-131, B-40) and one primitive per kind of prerequisite (§2n, R-BTN-132), and a leg run in a checkout of its commit, in TypeScript or JavaScript with Node's own resolution (§2o, R-BTN-133), and courses read from their sources, the CLI shipping none (§2p, R-BTN-134) · **Updated:** 2026-10-19
+**Status:** proposal — approved 2026-10-13 after a claims-truth review and five adversarial and final review rounds (Review record); owned by project [`baton`](../tickets/projects/baton.mdx), items R3-1205–R3-1221 (§13). **Amended 2026-10-14** (owner direction): the ticket as a course of legs derived from git (§6.12), rate-limit exhaustion, provider budget forecasts and model advice as the `roadmap-pr` course's logic (§7.3, now `BATON_ROADMAP_PR_COURSE`), Baton as an advisor that gates only safety (R-BTN-45), the boundary between Baton and courses (§2b, R-BTN-50), hooks, probes and their trust model (§2c), hosting on Cloudflare and locally (§3a), **amended 2026-10-15** with blocks and their queries (§2g), positions, history, contracts and replay (§2h), child tickets, the capacity envelope and owner-state export (§2i), time on legs and the push doorbell (§2j), SSH key identity (R-BTN-13 as amended), administration by deployment-anchored administrators and repository owners (§10.6), provider capacity as course logic and the tags gate (§2b, §7.3), cooperative locks with detection (R-BTN-46), and registered repositories and courses (§2a), **amended 2026-10-16** so Baton runs without GitHub — forges, sync keys, pulled syncs, per-forge notifications and the `branch` course (§2k, R3-1253) — and **amended again 2026-10-16** so Baton runs no repository code: hooks retired, workers rank from a fleet and instance view, claims name preferences and the accounts they bill, readings kept per instrument from any machine key, a machine key trusted to sync, report and deliver, worker couriers, open-world claims and a passive plain git server (§2l) — reviewed adversarially six times on 2026-10-14 and revised after each (Review record), §2l twice on 2026-10-16 and revised; a cutover precondition (§13); **amended 2026-10-17** (owner direction, §2m): the runner organizes a ticket's legs and sessions report to it (R-BTN-106), cloud sessions as runners (R-BTN-107), one envelope and named, refinable schemas for leg outputs and readings (R-BTN-108), station entry requirements (R-BTN-109), the standard output formats (R-BTN-110), a course's signature (R-BTN-111), declarative views (R-BTN-112), session links (R-BTN-113), check courses and the merge check delivered by a forge courier (R-BTN-114, R-BTN-115), legs a person runs (R-BTN-116), registration tokens and API keys (R-BTN-117), a running leg's output streamed to its viewers (R-BTN-118) and stopping a running leg (R-BTN-119), a leg's prerequisites in one place (R-BTN-120), capability types declared by courses (R-BTN-121), retry policies per leg (R-BTN-122), a fresh session when a leg's context fills (R-BTN-123), the `epic` planning course (R-BTN-124) and decision severities (R-BTN-125); **amended 2026-10-18** (owner direction, §3b, built by B-45; revised after review gate round 1): a tenant is a Baton named by its origin and served only there, nothing crosses a tenant, every Durable Object named under its tenant and many tenants later is a router (R-BTN-135), the operator with configuration, secrets, signed notices and administrators per tenant and a secret sink (R-BTN-136), a credential valid in one tenant and a runner bound to one origin (R-BTN-137) and forge repositories named by their immutable ids (R-BTN-138); **amended again 2026-10-18** (owner direction after the security review, §10.7, built by B-46): only pushers' forge writes count (R-BTN-139), code repositories as the owners' list (R-BTN-140), a branch-pattern grammar (R-BTN-141), bars that name legs literally (R-BTN-142), runners that run only default-branch code, scrub their credentials and stop every process a leg starts (R-BTN-143 to R-BTN-145), a multi-repository key's sync and delivery by opt-in (R-BTN-146), unfounded heads replaced and held posts that only tighten (R-BTN-147), open-world claims gated at the claim (R-BTN-148), per-repository caps (R-BTN-149), observation takeover (R-BTN-150), bounded readings (R-BTN-151), views as data (R-BTN-152), merge checks from an exit status (R-BTN-153), MCP holds that only add (R-BTN-154), sign-in by a confirmed code (R-BTN-155), CI-token and notification checks (R-BTN-156), tokens, roles and links (R-BTN-157), and the App manifest, untrusted text, the local host and import (R-BTN-158); **amended 2026-10-19**: the `build-app` standard course (R-BTN-131, B-40) and one primitive per kind of prerequisite (§2n, R-BTN-132), SSH or API keys at the holder's choice (§10.6, R-BTN-159), and a leg run in a checkout of its commit, in TypeScript or JavaScript with Node's own resolution (§2o, R-BTN-133), and courses read from their sources, the CLI shipping none (§2p, R-BTN-134) · **Updated:** 2026-10-19
 
 > **Reads first:** `PARALLEL_AGENT_DOCS_SPEC` §5 (R-PAD-6/7: claims and ids as one
 > scripted act on `docs/main`; this spec amends R-PAD-6 only, §15), `docs/scripts/claim.sh`
@@ -2950,7 +2950,8 @@ Baton's own shared code; git stays the truth and Baton a cache (R-BTN-39).
     two powers of R-BTN-102 stay with signed machine keys. Its push and stream upgrades carry
     the key in `Authorization`, as its other calls do.
   - **Roles.** An API key may be a worker's or a personal courier's credential. Administrator,
-    owner, sync, instrument and forge-courier credentials stay SSH keys (or, for a sync, a CI
+    owner *(since 2026-10-19 an administrator or owner may hold either kind, and a worker's API key may also be made locally and granted like an SSH key, R-BTN-159)*,
+    sync, instrument and forge-courier credentials stay SSH keys (or, for a sync, a CI
     identity token): each guards something an agent must not reach (R-BTN-57, R-BTN-66), or
     something an attacker could forge. *(Amended 2026-10-17 by §2m: the one bearer credential that
     carries owner actions is an MCP key, R-BTN-130. That is acceptable because it reaches only
@@ -7254,7 +7255,7 @@ for every instance. **R-BTN-16:** *(Amended 2026-10-18 by §10.7.5: the CSP gain
 Getting started must take a few commands, and keys never live in git. Every key lives in
 Baton's SQLite — except the administrators' own, which anchor everything else.
 
-- **R-BTN-57 (administrators: whoever controls the deployment).** *(Amended 2026-10-18 by §10.7: dashboard sign-in is a code the administrator confirms, sessions can be revoked, and the App manifest flow checks `state` and the App it gets — R-BTN-155, R-BTN-158.)* *(Amended 2026-10-18 by §3b: the administrators are one tenant's; "Baton's storage" below is the tenant's; an administrator's powers end at its tenant; `github-app create` and key rotation write through the CLI's secret sink, `wrangler` here — R-BTN-136)* *(Amended 2026-10-17 by §2m: every administrator action is a registry entry, never exposed over MCP, R-BTN-129, R-BTN-130; two key roles join the one-role rule — the forge courier and the check-runner — and a check course's merge check uses a dedicated check App, never Baton's own (R-BTN-114, R-BTN-115).)*  Anyone who can deploy a
+- **R-BTN-57 (administrators: whoever controls the deployment).** *(Amended 2026-10-19, owner: a `BATON_ADMIN_KEYS` line may be an SSH key or an API key's public line, the key sent as a bearer in place of a signature — R-BTN-159.)* *(Amended 2026-10-18 by §10.7: dashboard sign-in is a code the administrator confirms, sessions can be revoked, and the App manifest flow checks `state` and the App it gets — R-BTN-155, R-BTN-158.)* *(Amended 2026-10-18 by §3b: the administrators are one tenant's; "Baton's storage" below is the tenant's; an administrator's powers end at its tenant; `github-app create` and key rotation write through the CLI's secret sink, `wrangler` here — R-BTN-136)* *(Amended 2026-10-17 by §2m: every administrator action is a registry entry, never exposed over MCP, R-BTN-129, R-BTN-130; two key roles join the one-role rule — the forge courier and the check-runner — and a check course's merge check uses a dedicated check App, never Baton's own (R-BTN-114, R-BTN-115).)*  Anyone who can deploy a
   Baton or set its secrets can already replace its code, so that control — on Cloudflare,
   the account's login and second factor; locally, control of the process — is the root of
   trust, and Baton adds no second one. The administrators are the SSH public keys in the
@@ -7316,7 +7317,7 @@ Baton's SQLite — except the administrators' own, which anchor everything else.
     App's id, private key and webhook secret, which it writes straight to the Worker secrets
     (`wrangler secret put`) or to a local Baton's files, never to the terminal or a file in a
     repository. It then prints the App's installation link for an organisation owner.
-- **R-BTN-58 (repository owners).** *(Amended 2026-10-18 by §10.7, review gate round 4: a grant is pending until the key's holder accepts it, and a key's hostname binds at its first acceptance — R-BTN-146.)* *(Amended 2026-10-18 by §10.7: owners see a key's span, a grant at span 2 or more opts in to sync and delivery, and a grant never holds a role — R-BTN-146, R-BTN-157.)* *(Amended 2026-10-18 by §3b: a hostname is unique within the tenant; a key may also be granted in another tenant, which this tenant neither sees nor governs — R-BTN-135, R-BTN-137)* *(Amended 2026-10-17 by §2m: an owner may mint MCP keys for an agent, narrowed to listed owner actions on the repository, R-BTN-130; an owner may stop a running leg of the repository (`POST /v1/owner/{repository}/tickets/{ticket}/release`, R-BTN-127), list a leg's runs and watch a stream from the CLI (R-BTN-128), and set `leg_logs`; a grant may name a whole capability type, `<type>:*` (R-BTN-121).)*  Each registered repository has a set of owner SSH public
+- **R-BTN-58 (repository owners).** *(Amended 2026-10-19, owner: an owner's or a granted worker's key may be an SSH key or an API key's public line — R-BTN-159.)* *(Amended 2026-10-18 by §10.7, review gate round 4: a grant is pending until the key's holder accepts it, and a key's hostname binds at its first acceptance — R-BTN-146.)* *(Amended 2026-10-18 by §10.7: owners see a key's span, a grant at span 2 or more opts in to sync and delivery, and a grant never holds a role — R-BTN-146, R-BTN-157.)* *(Amended 2026-10-18 by §3b: a hostname is unique within the tenant; a key may also be granted in another tenant, which this tenant neither sees nor governs — R-BTN-135, R-BTN-137)* *(Amended 2026-10-17 by §2m: an owner may mint MCP keys for an agent, narrowed to listed owner actions on the repository, R-BTN-130; an owner may stop a running leg of the repository (`POST /v1/owner/{repository}/tickets/{ticket}/release`, R-BTN-127), list a leg's runs and watch a stream from the CLI (R-BTN-128), and set `leg_logs`; a grant may name a whole capability type, `<type>:*` (R-BTN-121).)*  Each registered repository has a set of owner SSH public
   keys (`repository_owners`). An owner signs requests to `/v1/owner/{repository}/*` to, **for
   that repository only**: grant a worker key access, with the capabilities it may use on
   that repository's tickets and its `max_tier` (`worker_grants`); add or remove
@@ -7336,9 +7337,61 @@ Baton's SQLite — except the administrators' own, which anchor everything else.
   (`worker_grants`) for a ticket's repository to be recommended or to claim it — a gate
   (rule 7, R-BTN-45).
 - **One command line, one set of functions.** `baton admin …` and `baton owner …` sign with
-  the user's ssh-agent and call the same validated functions in `src/core/admin.ts` on both
-  hosts. There is no other management path: Durable Objects Data Studio is not used, and a
+  the user's ssh-agent *(or, since 2026-10-19, send the user's API key if that is the key they chose, R-BTN-159)* and call the
+  same validated functions in `src/core/admin.ts` on both hosts. There is no other management path: Durable Objects Data Studio is not used, and a
   local operator who edits the SQLite file directly bypasses validation at their own risk.
+
+- **R-BTN-159 (an SSH key or an API key, the holder's choice).** *(2026-10-19, owner: "I would
+  like to be able to use both ssh keys and api keys for authentication (applies to both admins,
+  owners and runners). SSH keys are more secure in the sense that even a break-in will not allow
+  impersonation later, but they are more difficult on the user side. API keys are just a shared
+  secret, so they are easier to use but also less secure.")* *(Amends R-BTN-13, R-BTN-57,
+  R-BTN-58, R-BTN-117 and §10.6's command line.)*
+  - **Who chooses.** An administrator, an owner and a worker each holds either an SSH key, whose
+    every request is signed (R-BTN-13), or an API key, sent as a bearer. Both kinds are accepted
+    side by side, and nothing about a key's role, grants or revocation depends on its kind.
+    Sync, mirror, probe and courier keys stay SSH keys (or, for a sync, a CI identity), and an
+    API-key worker never syncs or delivers as a worker courier (R-BTN-117).
+  - **The trade, stated.** A signature proves the key without revealing it: whoever reads a
+    request — a log, a proxy, the TLS terminator, a break-in at either end after the fact —
+    gets nothing that works again (R-BTN-13's nonce and clock refuse a replay). An API key is
+    a shared secret that travels with every request: whoever reads one request holds the key
+    until it is revoked. It is easier — a file or an environment variable, no `ssh-keygen`, no
+    agent — and that is the whole of its advantage. Baton stores only the key's hash for both
+    kinds' sakes, so a copy of Baton's storage gives no key of either kind.
+  - **The key.** `baton key create FILE` makes `bak_<id>_<secret>` — 64 random bits of id, 256
+    of secret, hex — on the holder's machine, writes it to `FILE` (mode 0600), and writes its
+    **public line** `bak_<id> sha256:<SHA-256 of the key> [comment]` to `FILE.pub`. Nothing is
+    sent: Baton holds the public line exactly as it holds an SSH public key, and the key's
+    fingerprint is `bak_<id>`. R-BTN-117's registration tokens, which mint a worker's API key
+    on Baton, are a second way to the same credential.
+  - **Where it is registered.** Wherever an SSH public key goes for that role:
+    `BATON_ADMIN_KEYS` (or `--admin-keys`); `owner_keys`, `owner_keys_add` and an owner's
+    `owners` add; a grant's `public_key` (`--key FILE.pub`).
+  - **How it is sent.** `Authorization: Bearer <key>` in place of a signature, on `/v1/admin/*`,
+    `/v1/owner/*`, `/v1/runner/*` and the repository reads (§11); a worker adds its secret
+    (R-BTN-14) as a signing worker does. `baton … -i FILE` and a runner's `IR_BATON_KEY_FILE` or
+    `IR_BATON_KEY` send it whenever they hold one. Baton hashes it and compares every byte of
+    the hash with the public line its fingerprint names; an unknown fingerprint, a wrong secret
+    or a malformed bearer is `unauthenticated`. A bearer on `/v1/sync/*`, `/v1/courier/*` or
+    `/v1/probe/*` is never an API key's.
+  - **Everything else is a key's.** One role per key (R-BTN-57) holds across kinds; an owner
+    key owns only its repositories (R-BTN-58); a worker key works only where it is granted; an
+    administrator revokes any by its fingerprint (`baton admin revoke bak_<id>`) and it stops at
+    its next call; a line removed from `BATON_ADMIN_KEYS` stops at once; a login link (R-BTN-57)
+    may be minted with one; each act's actor is `admin:bak_<id>` or `owner:bak_<id>`.
+  - **Not built yet.** R-BTN-117's `api_keys: false` repository setting, its TTLs and its 7-day
+    idle expiry for API-key workers, and its registration tokens; until they are, an API key
+    lasts until it is revoked.
+  - **Scenario and gate.**
+
+    | Scenario | Setup | Must hold |
+    |---|---|---|
+    | S-BTN-126 API keys beside SSH keys (R-BTN-159) | an administrator whose `BATON_ADMIN_KEYS` line is an API key's public line registers `ops` with an owner API key; the owner grants a worker SSH key K and a worker API key W | both people's API keys work as bearers on their own routes; K heartbeats by signature; W heartbeats and claims an `ops` ticket by bearer and its secret, and a wrong secret is refused; W's bearer on `/v1/sync` and `/v1/courier` is `unauthenticated`; the owner key is `forbidden` on another repository and on `/v1/admin`; a wrong secret, an unknown key and a malformed bearer are `unauthenticated`; the administrator's line cannot become an owner's, nor the owner's a worker's (`conflict`), while an SSH owner beside it can; a revoke stops the owner key at its next call and a removed line stops the administrator's at once; a login link minted with an API key opens a session |
+
+    | Gate | Proved by |
+    |---|---|
+    | An API key authenticates only as its public line's holder, in that holder's one role, only on the administrator, owner, runner and repository-read routes, and never syncs, delivers or reports as a probe | G-BTN-145 (S-BTN-126) |
 
 ### 10.7 Hardening within a tenant *(amendment 2026-10-18, owner direction after the security review; proposal; built by B-46)*
 
@@ -8703,6 +8756,17 @@ table is in docs' `BATON_DOCS_DEPLOYMENT` §16, where `check-spec-anchors` re-re
 
 ## Decisions & rejected alternatives
 
+- **Either kind of key, for people and workers alike** (2026-10-19, owner; R-BTN-159). SSH
+  keys reveal nothing reusable on the wire, so a break-in or a captured request never lets
+  anyone impersonate the holder later, but they cost the user `ssh-keygen`, an agent and a
+  signing step; an API key is a shared secret, easy to hold and as easy to lose. The owner
+  chose to let each holder trade one for the other rather than fix it per role. Superseded the
+  same day's first ruling, "I only want to use ssh keys for runner authentication", which kept
+  workers on signatures. Rejected: an Access service token as an administrator's key (it makes
+  administration depend on Cloudflare, which §10.5 keeps optional, and a local Baton has no
+  Access); keeping Access in front of `/v1/admin` and `/v1/owner` and adding a service token to
+  the CLI (two secrets per user). Production bypasses Access on those paths, as on `/v1/sync`
+  and `/v1/runner`, and keeps it on the dashboard.
 - **Chose a Cloudflare Durable Object over SQLite on the owner's Raspberry Pi**
   (2026-10-13): cloud sessions cannot reach a home tailnet without exposing it, and a Pi is a
   single point of failure on home power and network.
