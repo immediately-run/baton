@@ -14,7 +14,7 @@ defect: it is filed against BATON_SPEC with the trace, never fixed by weakening 
 | File | What it holds |
 |---|---|
 | `baton.qnt` | the state (one record, `st`) and every action; the sizes are constants |
-| `properties.qnt` | the safety invariants, conjoined as `safety`, over any instance |
+| `properties.qnt` | the safety invariants, conjoined as `safety` (in four groups, `safetyA`…`safetyD`), over any instance; `pverify`, the proof's step, and `verifyShape`, what makes it `step` on `small` |
 | `liveness.qnt` | the liveness properties under weak fairness, over `small` (kept apart: their fairness terms made Apalache's input too large) |
 | `witnesses.qnt` | the reachability witnesses, each an invariant that must fail |
 | `instances.qnt` | `sim` (R3-1243's bounds: 3 workers, 2 tickets, 2 overlapping sync runs) and `small` (2 workers, 1 ticket, 1 sync run, for Apalache) |
@@ -52,20 +52,30 @@ scenario traces and 200 model-drawn traces driving the core.
   working tree has any uncommitted or untracked change), the Quint version, and each check's
   result and minutes. `MODEL_SAMPLES`, `REPLAY_TRACES` and `MODEL_VERIFY_DEPTH` lower the sizes
   to try a change, and the report then says it is a reduced run, which `model-report` refuses.
-  A PR may carry it instead of `model:pr`'s. Needs Java for the proof; about three hours on 4 CPUs.
+  A PR may carry it instead of `model:pr`'s. Needs Java for the proof; about two and a quarter hours on 4
+  CPUs since B-37's first part cut the proof from 127 to about 82 minutes (three hours before).
 - `npm run model` — typecheck, the 75 regression runs, 10,000 random runs of 40 steps of `sim`
   against `safety` with the full `step` and 3,000 with `progressStep` (the happy path's actors,
   so runs reach merges, fix loops and regressions; every run of it is a run of `step`), and
   fifteen reachability witnesses. No JVM; about 6 minutes. `MODEL_SAMPLES` sets the `step` runs
   and scales the `progressStep` runs (30%).
 - `npm run model:quick` — the typecheck and the regression runs alone; `npm test` runs it.
-- `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 4: about 127
-  minutes on 4 CPUs since R3-1254 part 2b's fleet (47 at part 2a). Depth 5 took 15 minutes before R3-1254 and 49 with its queued leg. With part
-  2's prerequisites it takes about 23 minutes per enabled transition, roughly 10 hours, so the
-  proof is at depth 4 for now (owner, 2026-10-19), and B-37 brings depth 5 back. Needs Java; the first run downloads Apalache. `model/verify.mjs` compiles
-  the model to Quint's JSON IR in a file and runs Apalache's command line on it: `quint verify`
-  sends the model to an Apalache server in one request, whose reader refuses a string over 20 MB,
-  and `small` compiles to just over that since R3-1254 (19.8 MB before it).
+- `npm run model:verify` — Apalache's bounded proof of `safety` on `small` to depth 4. Needs Java;
+  the first run downloads Apalache. Since B-37's first part (2026-10-20) it checks `pverify` —
+  `step` less the six actions no state of `small` enables (`gitDepends`, `declare`, `alarmLive`,
+  `reading`, `readingLapses`, `endBlockedOn`) and `endBlocked`'s `ticket` kind (`properties.qnt` gives the
+  guard that never holds for each), so the same transitions and states — with `verifyShape`
+  checked beside `safety`, which fails the proof if `small` gains a second ticket or a fleet; and
+  it checks the invariants once per step over every transition (`search.invariant.mode=after`)
+  rather than once per enabled transition, with an 8 GB heap. Measured on 4 CPUs: depth 3 in
+  about 7 minutes (9 before), depth 4 in 82 minutes with other proofs running beside it (127
+  before); depth 5 is still several hours (B-37 keeps it open; its report says why).
+  `MODEL_VERIFY_SPLIT=1` checks `safety`'s four groups in four processes at once: each still pays
+  the whole search, so on 4 CPUs it is no faster at depth 3 (7.8 minutes against 6.9); it is for a
+  machine with CPUs to spare. `model/verify.mjs` compiles the model to Quint's JSON IR in a file
+  and runs Apalache's command line on it: `quint verify` sends the model to an Apalache server in
+  one request, whose reader refuses a string over 20 MB, and `small` compiles to about 67 MB, 63
+  of it the type and name tables.
 
 Simulation uses Quint's TypeScript backend: the Rust evaluator is fetched from GitHub
 releases at first use, which a sandboxed agent cannot always reach.
@@ -328,7 +338,7 @@ the ticket blocked; R-BTN-75 is amended, B-26 builds it in core, and
 | `safety`, 10,000 × 40 steps of `step`; 3,000 × 40 of `progressStep` | `sim` | no violation |
 | witnesses (a confirmed suspension, a resumed claim, a fence, an alarm reap, a blocked ticket, a provisional row, a backoff, an `unblocked` event, a `capability` row, a `resource` row, a lost answer; a fix leg, a regression, a merge, a confirmed `done`), seeded | `sim` | all 15 reached |
 | a second review | — | reached by a regression run only (`maxRunsSurviveResumptionTest`) |
-| Apalache, `safety` | `small`, depth 4 | no violation; 127 min on 4 CPUs at R3-1254 part 2b (baton#60's report, 769b5c3), 47 min at part 2a. Depth 5: 15 min 29 s before R3-1254, 49–59 min with its queued leg, about 10 h with part 2's prerequisites (B-37 brings it back). Each model PR's `model:full` report carries the figure for its head (R-BTN-68) |
+| Apalache, `safety` | `small`, depth 4 | no violation; 82 min on 4 CPUs with `pverify` and `search.invariant.mode=after` (B-37, 2026-10-20, beside other proofs), 127 min at R3-1254 part 2b (baton#60's report, 769b5c3), 47 min at part 2a. Depth 5: 15 min 29 s before R3-1254, 49–59 min with its queued leg, about 10 h with part 2's prerequisites (B-37 brings it back). Each model PR's `model:full` report carries the figure for its head (R-BTN-68) |
 | liveness, `fencesClear` | `small`, TLC (Apalache cannot check fairness) | **at `b76af9c`, the pre-round-2 formula and model**: no violation in 8,187 distinct states before a 28-minute cap, not exhaustive. The current formulas (rounds 2–3) have not been run; R3-1254 runs them to completion on a narrowed instance |
 
 Depth 4 on `small` reaches claims, advances, pushes and a sync; a fail end's backoff and the
