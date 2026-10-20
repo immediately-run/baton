@@ -9,7 +9,7 @@ CREATE TABLE leg_queues (                         -- R-BTN-79: unheld tickets wh
   depth         INTEGER NOT NULL,
   max_queue     INTEGER,                          -- the bound last judged against (spec-silent, R3-1255): a
                                                   -- course file's new bound is a crossing too, and is
-                                                  -- found by comparing with this
+                                                  -- found by comparing with this; NULL for none
   PRIMARY KEY (repository_id, course_id, leg)
 );
 -- Which queue each ticket is counted in (spec-silent, R3-1255): a change of membership moves one
@@ -30,10 +30,12 @@ INSERT INTO leg_queue_members (ticket_id, repository_id, course_id, leg)
   WHERE s.next_leg IS NOT NULL AND t.course_id IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM claims c WHERE c.ticket_id = t.id AND (c.status = 'active'
                     OR (c.status = 'completed' AND c.confirmed_at IS NULL) OR (c.status = 'reaped' AND c.fence_pending = 1)));
+-- Seeded with no bound: the bound in force is judged by the next accepted course file
+-- (Queues.coursed), on Baton's clock, so a leg already over its bound logs its `queue-over` and
+-- `course-closed` and queues its notices like any other crossing, rather than reading closed
+-- with neither (round 1, 1-B-1).
 INSERT INTO leg_queues (repository_id, course_id, leg, depth, max_queue)
-  SELECT m.repository_id, m.course_id, m.leg, COUNT(*),
-         (SELECT json_extract(c.course_json, '$.legs."' || m.leg || '".max_queue') FROM courses c
-          WHERE c.repository_id = m.repository_id AND c.id = m.course_id)
+  SELECT m.repository_id, m.course_id, m.leg, COUNT(*), NULL
   FROM leg_queue_members m GROUP BY m.repository_id, m.course_id, m.leg;
 
 -- The event log gains `queue-over`, `course-closed` and `course-opened` (R-BTN-79). Nothing

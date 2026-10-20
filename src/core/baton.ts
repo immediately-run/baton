@@ -101,7 +101,7 @@ export class BatonCore {
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
-    this.stats = new Stats(store);
+    this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.workers = new WorkerApi({ store, config: ports.config, now: () => this.now(), fenced: (w, inc, id) => this.claims.fenced(w, inc, id),
       // R-BTN-76: what a heartbeat declares it uses; the fleet's counts move with the worker.
@@ -1063,6 +1063,8 @@ export class BatonCore {
       // R-BTN-79: renamed legs keep their tickets, and a changed bound is judged again.
       this.queues.coursed(r, e.id);
     }
+    // A course the registry dropped takes its queues and their notices with it (round 1, 1-A-3).
+    this.queues.retain(r, this.courses.all().filter((c) => c.repository_id === r).map((c) => c.id));
     return refused;
   }
 

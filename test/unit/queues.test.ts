@@ -143,6 +143,31 @@ describe('R-BTN-79: the bound, as a warning', () => {
     expect((await overNotices()).map((n) => n.state)).toEqual(['closed']);
   });
 
+  it('a courier registered while a leg is over gets its notice; one that stops delivering owner has it closed (1-B-0)', async () => {
+    git.registry = [course(4, 3, { course: bounded(1, 1) })];
+    expect((await git.post()).status).toBe(200);
+    const phone = await makeKey('ssh-ed25519', 'phone-push');
+    expect((await keyCall(owner, '/v1/owner/docs/couriers', { public_key: phone.publicKey, asks: ['owner'] })).status).toBe(200);
+    const of = async (k: TestKey) => rows<{ state: string; payload_json: string }>(`SELECT state, payload_json FROM notices WHERE kind = 'queue-over' AND credential_id = ?`, k.fingerprint);
+    expect((await of(phone)).map((n) => [n.state, JSON.parse(n.payload_json)])).toEqual([['queued', { course: 'roadmap-pr', leg: 'review', depth: 2, max_queue: 1, intake: 'closed' }]]);
+    // Registered again, the same: no second notice.
+    expect((await keyCall(owner, '/v1/owner/docs/couriers', { public_key: phone.publicKey, asks: ['owner'] })).status).toBe(200);
+    expect(await of(phone)).toHaveLength(1);
+    // Asked for something else only: its queue-over notice closes.
+    expect((await keyCall(owner, '/v1/owner/docs/couriers', { public_key: phone.publicKey, asks: ['reviewer'] })).status).toBe(200);
+    expect((await of(phone)).map((n) => n.state)).toEqual(['closed']);
+  });
+
+  it('a course no longer in the registry takes its queues and their notices with it (1-A-3)', async () => {
+    await rows(`INSERT INTO leg_queues (repository_id, course_id, leg, depth, max_queue) VALUES ('docs', 'gone', 'work', 0, 1)`);
+    await rows(`INSERT INTO notices (id, credential_id, repository_id, ticket_id, kind, ref, state, attempts, not_before, payload_json, updated_at, created_at)
+                VALUES ('${'e'.repeat(32)}', ?, 'docs', NULL, 'queue-over', 'gone:work', 'queued', 0, 0, '{}', 0, 0)`, cli.fingerprint);
+    expect((await git.post()).status).toBe(200);
+    expect(await rows(`SELECT leg FROM leg_queues WHERE course_id = 'gone'`)).toEqual([]);
+    expect(await rows(`SELECT state FROM notices WHERE ref = 'gone:work'`)).toEqual([{ state: 'closed' }]);
+    expect(await depths()).toEqual({ implement: 1, review: 2 });
+  });
+
   it('no ticket is held, blocked or refused for a full queue', async () => {
     git.registry = [course(4, 3, { course: bounded(1, 1) })];
     expect((await git.post()).status).toBe(200);

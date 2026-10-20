@@ -10,7 +10,7 @@ import { BatonError } from './http';
 import { randomHex } from './db';
 import { checkMark, qualify } from './validate';
 import type { Store } from './ports';
-import type { QueueOver } from './queues';
+import { OVER_SQL, type QueueOver } from './queues';
 
 /** R-BTN-103: the reserved credential pool copies are queued to (migration 0017). */
 export const POOL = 'pool';
@@ -124,6 +124,23 @@ export class Notices {
          AND NOT EXISTS (SELECT 1 FROM notices n WHERE n.credential_id = ? AND n.ticket_id = d.ticket_id AND n.ref = d.decision_id AND n.state != 'closed')
        ORDER BY d.ticket_id, d.decision_id`, repository, JSON.stringify(asks), credential)) {
       this.queue(credential, repository, d.ticket_id, d.decision_id, now);
+    }
+    // R-BTN-79: the legs over their bound there now, likewise — queued to a courier that delivers
+    // `owner` and holds none, closed for one that no longer does (round 1, 1-B-0).
+    if (!asks.includes('owner')) {
+      this.exec(`UPDATE notices SET state = 'closed', not_before = ?, updated_at = ?
+                 WHERE credential_id = ? AND repository_id = ? AND kind = 'queue-over' AND state != 'closed'`, now + CLOSED_KEPT_MS, now, credential, repository);
+      return;
+    }
+    for (const q of this.rows<{ course_id: string; leg: string; depth: number; max_queue: number }>(
+      `SELECT q.course_id, q.leg, q.depth, q.max_queue FROM leg_queues q WHERE q.repository_id = ? AND ${OVER_SQL.replace(/max_queue|depth/g, 'q.$&')}
+         AND NOT EXISTS (SELECT 1 FROM notices n WHERE n.credential_id = ? AND n.repository_id = q.repository_id AND n.kind = 'queue-over'
+                         AND n.ref = q.course_id || ':' || q.leg AND n.state != 'closed')
+       ORDER BY q.course_id, q.leg`, repository, credential)) {
+      // A leg over its bound closes its course's intake (R-BTN-79), so the payload says `closed`.
+      const payload: QueueOver = { course: q.course_id, leg: q.leg, depth: q.depth, max_queue: q.max_queue, intake: 'closed' };
+      this.exec(`INSERT INTO notices (id, credential_id, repository_id, ticket_id, kind, ref, state, attempts, not_before, payload_json, updated_at, created_at)
+                 VALUES (?, ?, ?, NULL, 'queue-over', ?, 'queued', 0, ?, ?, ?, ?)`, randomHex(16), credential, repository, `${q.course_id}:${q.leg}`, now, JSON.stringify(payload), now, now);
     }
   }
 

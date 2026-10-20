@@ -4,6 +4,7 @@
 // overridden, hook failures, `off-graph` transitions and foreign writes — over a window, for one
 // repository. Aggregates and ids only: no worker, no profile, no report (G-BTN-64).
 import type { Row, Store } from './ports';
+import type { Queues } from './queues';
 
 /** Seconds, summarised: how many, the median and the longest. */
 export interface Durations {
@@ -50,7 +51,8 @@ export function durations(ms: number[]): Durations {
 }
 
 export class Stats {
-  constructor(private readonly store: Store) {}
+  /** `queues`: the one reader of `leg_queues` and the intake (R-BTN-79). */
+  constructor(private readonly store: Store, private readonly queues?: Queues) {}
 
   private rows<T = Row>(q: string, ...p: unknown[]): T[] {
     return this.store.exec(q, ...p).toArray() as T[];
@@ -140,11 +142,10 @@ export class Stats {
       leg(r.course_id, r.leg).ready_now = { tickets: r.tickets, oldest_s: r.oldest == null ? null : Math.round(Math.max(0, now - r.oldest) / 1000) };
     }
 
-    // Each leg's queue as Baton counts it (R-BTN-79, leg_queues), and the intake it closes.
-    for (const q of this.rows<{ course_id: string; leg: string; depth: number; max_queue: number | null }>(
-      'SELECT course_id, leg, depth, max_queue FROM leg_queues WHERE repository_id = ?', repository)) {
-      leg(q.course_id, q.leg).queue = { depth: q.depth, max_queue: q.max_queue };
-      if (q.max_queue != null && q.depth > q.max_queue) course(q.course_id).intake = 'closed';
+    // Each leg's queue as Baton counts it (R-BTN-79), and the intake it closes — Queues' own reads.
+    for (const q of this.queues?.all(repository) ?? []) {
+      leg(q.course, q.leg).queue = { depth: q.depth, max_queue: q.max_queue };
+      course(q.course).intake = this.queues!.intake(repository, q.course);
     }
 
     // Ends in the window, by reason and the course's detail; suspensions by station.

@@ -1231,7 +1231,7 @@ another ticket, or a third-party resource is unavailable.)*
     automation — a notification, a re-plan — runs in its CI, never in Baton.
 
   Hooks are not called on it: they do no I/O (R-BTN-52).
-- **R-BTN-79 (legs are queues; a course may bound them, as a warning).** *(Owner, 2026-10-15: a
+- **R-BTN-79 (legs are queues; a course may bound them, as a warning).** *(Amended 2026-10-20 by R3-1255: the `queue-over` payload names its `course`, so a leg's name is unambiguous; §4 keeps each ticket's membership and the bound last judged, so a depth is counted and a course file's new bound is a crossing like any other.)* *(Owner, 2026-10-15: a
   blocked leg leaves its ticket queued at the station, so the legs between stations are queues,
   and a course must be able to bound each; revised the same day — holding a ticket outside a
   full queue would make a second, hidden queue, so a ticket always enters its queue and a full
@@ -1244,7 +1244,7 @@ another ticket, or a third-party resource is unavailable.)*
   depth may pass the bound.
   - **Over the bound.** When L's depth rises above `max_queue`, Baton logs `queue-over` and
     queues one notice per `owner` courier of the repository (R-BTN-80, kind `queue-over`:
-    `{leg, depth, max_queue, intake}`), updated in place while L stays over; when the
+    `{course, leg, depth, max_queue, intake}`), updated in place while L stays over; when the
     depth falls to the bound or below, the notices close. No ticket is held, refused or
     reordered by core.
   - **A course over its bounds closes its intake** *(owner, 2026-10-15: backpropagate the
@@ -5646,7 +5646,15 @@ CREATE TABLE leg_queues (                         -- R-BTN-79: unheld tickets wh
   course_id     TEXT NOT NULL,
   leg           TEXT NOT NULL,
   depth         INTEGER NOT NULL,
+  max_queue     INTEGER,                           -- R3-1255: the bound last judged; NULL for none — a course
+                                                 -- file's new bound is compared with it, a crossing like a ticket's
   PRIMARY KEY (repository_id, course_id, leg)
+);
+CREATE TABLE leg_queue_members (                  -- R3-1255: the one queue each ticket is counted in, so a change
+  ticket_id     TEXT PRIMARY KEY,                  -- of membership moves it between two rows: counted, never scanned
+  repository_id TEXT NOT NULL,
+  course_id     TEXT NOT NULL,
+  leg           TEXT NOT NULL
 );
 CREATE TABLE ticket_decisions (                   -- R-BTN-78: open decisions as the sync posts them; decision blocks derive from it
   ticket_id     TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
@@ -5679,7 +5687,7 @@ CREATE TABLE notices (                            -- R-BTN-80: requests for peop
                                                  -- closed: deletion
   sent_at       INTEGER,
   channel       TEXT,                              -- the courier's label for how it delivered
-  payload_json  TEXT,                              -- 'queue-over': {leg, depth, max_queue, intake}; ≤ 512 bytes
+  payload_json  TEXT,                              -- 'queue-over': {course, leg, depth, max_queue, intake}; ≤ 512 bytes
   updated_at    INTEGER NOT NULL,
   created_at    INTEGER NOT NULL                   -- R3-1256 (2026-10-18): the notice's `created_at` (R-BTN-80)
 );
@@ -8250,7 +8258,7 @@ round 3)*.
 | `GET /v1/repositories/{repository}/blocked` | `?on=ticket:<id>\|resource:<name>\|capability:<name>\|decision:<id or *>&transitive=1?`, or `?cursor=` with no `on`; the same principals | `{tickets: [{ticket_id, blocks}]}`, or with no `on` the repository's blocked tickets grouped by kind and `ref`, 100 per page, with `next_cursor` (R-BTN-75, R-BTN-79) |
 | `POST /v1/runner/readings` | `{readings: [{instance, available, until?, valid_for?, detail?}]}` — for instances the worker uses and its own `worker` instances; one per worker and instance a minute (R-BTN-76) | `{ok: true, refused: [{instance, code}], overridden: [<instance>]}` — `overridden`: stored, but an administrator's reading is in force |
 | `POST /v1/admin/resources`, `POST /v1/admin/instances`, `POST /v1/admin/readings` | an administrator: register an external resource `{name, scope, detail_schema}` (the schema subset of R-BTN-76); an `account` instance `{name, serves: [<resource>], repositories: [<repository>]}`, re-posted to change either; a reading by hand, in force at most 7 days (R-BTN-76) | `{ok: true}` |
-| `POST /v1/courier/notices/claim` | a courier key; `{limit?}` (≤ 50) | `{notices: [{notice_id, kind, repository, created_at} + (decision: {ticket, title, decision, unblocks}) or (queue-over: {leg, depth, max_queue, intake})]}`, each leased 10 minutes (R-BTN-80) |
+| `POST /v1/courier/notices/claim` | a courier key; `{limit?}` (≤ 50) | `{notices: [{notice_id, kind, repository, created_at} + (decision: {ticket, title, decision, unblocks}) or (queue-over: {course, leg, depth, max_queue, intake})]}`, each leased 10 minutes (R-BTN-80) |
 | `POST /v1/courier/notices/{id}` | `{state: 'sent'\|'failed', channel?}` | `{ok: true}`; `closed` when its decision was answered meanwhile; `forbidden` for another courier's notice (R-BTN-80) |
 | `GET /v1/courier/decisions` | a courier key | `{decisions: [{repository, ticket, title, decision, unblocks, notice_state}]}` — every open decision it delivers (R-BTN-80) |
 | `POST /v1/owner/{repository}/couriers` | an owner: `{public_key, asks: [<label>]}` to add, or `{fingerprint, revoke: true}` (R-BTN-80) | `{ok: true}` |

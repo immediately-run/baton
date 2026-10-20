@@ -289,7 +289,7 @@ describe('migration 0013: stations and legs (R3-1232, round 1, 1-B-2)', () => {
 });
 
 describe('migration 0021: leg queues (R3-1255)', () => {
-  it('counts the tickets already queued, unheld, at the bound their course file gives; keeps the events and admits the new kinds', async () => {
+  it('counts the tickets already queued and unheld, leaving the bound to the next course file; keeps the events and admits the new kinds', async () => {
     const id = env.BATON.idFromName('migrations-0021');
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
@@ -317,7 +317,9 @@ describe('migration 0021: leg queues (R3-1255)', () => {
       sql.exec('PRAGMA foreign_keys = ON');
       sql.exec(MIGRATIONS.find((x) => x.id === 21)!.sql);
 
-      expect(sql.exec('SELECT leg, depth, max_queue FROM leg_queues ORDER BY leg').toArray()).toEqual([{ leg: 'fix', depth: 2, max_queue: 1 }, { leg: 'review', depth: 1, max_queue: null }]);
+      // fix is over its course file's bound of 1, but seeded unjudged: the next accepted course file
+      // judges it on Baton's clock, with its event and notices (round 1, 1-B-1; queues.test.ts).
+      expect(sql.exec('SELECT leg, depth, max_queue FROM leg_queues ORDER BY leg').toArray()).toEqual([{ leg: 'fix', depth: 2, max_queue: null }, { leg: 'review', depth: 1, max_queue: null }]);
       expect(sql.exec('SELECT ticket_id FROM leg_queue_members ORDER BY ticket_id').toArray().map((r) => r.ticket_id)).toEqual(['docs:A', 'docs:B', 'docs:C']);
       expect(sql.exec('SELECT seq, kind FROM events').toArray()).toEqual([{ seq: 4, kind: 'discrepancy' }]);
       for (const kind of ['queue-over', 'course-closed', 'course-opened']) sql.exec(`INSERT INTO events (at, kind, actor) VALUES (2, ?, 'baton')`, kind);

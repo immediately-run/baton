@@ -38,6 +38,10 @@ interface QueueRow {
   max_queue: number | null;
 }
 
+/** A `leg_queues` row over its bound, in SQL: the one statement of R-BTN-79's crossing that
+ *  every reader shares (`intake`, Notices.registered, Stats). */
+export const OVER_SQL = 'max_queue IS NOT NULL AND depth > max_queue';
+
 const over = (r: QueueRow | undefined) => r != null && r.max_queue != null && r.depth > r.max_queue;
 
 export class Queues {
@@ -102,6 +106,19 @@ export class Queues {
     }
   }
 
+  /** The courses of `repo` in force are `courses`, in the snapshot's transaction: any other's
+   *  queues go, and with them its members and its `queue-over` notices (R-BTN-80). A ticket
+   *  cannot name a course the registry dropped (the post is refused), so no queued ticket is lost. */
+  retain(repo: string, courses: string[]) {
+    const keep = JSON.stringify(courses);
+    for (const r of this.rows<{ course_id: string; leg: string }>(
+      `SELECT course_id, leg FROM leg_queues WHERE repository_id = ? AND course_id NOT IN (SELECT value FROM json_each(?)) ORDER BY course_id, leg`, repo, keep)) {
+      this.c.notices.within(repo, `${r.course_id}:${r.leg}`);
+    }
+    this.exec('DELETE FROM leg_queues WHERE repository_id = ? AND course_id NOT IN (SELECT value FROM json_each(?))', repo, keep);
+    this.exec('DELETE FROM leg_queue_members WHERE repository_id = ? AND course_id NOT IN (SELECT value FROM json_each(?))', repo, keep);
+  }
+
   /** Add `delta` to a leg's depth, its row made at the course's bound when it has none. */
   private move(repo: string, course: string, leg: string, delta: number) {
     const before = this.row(repo, course, leg);
@@ -147,7 +164,7 @@ export class Queues {
 
   /** A course's intake: `closed` while any of its legs is over its bound (R-BTN-79). */
   intake(repo: string, course: string): Intake {
-    return this.rows(`SELECT 1 FROM leg_queues WHERE repository_id = ? AND course_id = ? AND max_queue IS NOT NULL AND depth > max_queue LIMIT 1`,
+    return this.rows(`SELECT 1 FROM leg_queues WHERE repository_id = ? AND course_id = ? AND ${OVER_SQL} LIMIT 1`,
       repo, course).length ? 'closed' : 'open';
   }
 
