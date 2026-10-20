@@ -8506,9 +8506,10 @@ integration suite that drives them together, on a controllable clock, proves the
   about half an hour — and a CI job that runs no model reads the PR body and fails until that
   report (or a full one) is there, names the PR's head and passes (`model-report`). The full
   check — simulation, witnesses, 1,000 model-drawn traces, the proof and the scenario traces,
-  `npm run model:full`, about three hours — runs weekly on `main`'s head on the owner's machine;
-  its report is posted to the repository's pinned "Weekly model check" issue, and a failure is
-  filed as a ticket. A week's PRs can therefore carry a defect only simulation or the proof
+  `npm run model:full`, about three hours — runs weekly on `main`'s head as a Baton series,
+  "Weekly model check" (B-50, R-BTN-89), on any runner granted on baton; each run appends its
+  report to its own ticket file, and a failure is filed as a ticket. Until B-50 is built, the
+  owner runs it by hand. A week's PRs can therefore carry a defect only simulation or the proof
   finds until that week's run: the owner's trade of a week's latency for three hours per PR.
   Hosted runners run no Quint: CI and the deploy run the suite without it, whose only model
   check is the `@impl`/`@model` links.

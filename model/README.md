@@ -43,8 +43,9 @@ scenario traces and 200 model-drawn traces driving the core.
 
 - `npm run model:pr` — the PR report: `npm run model:quick`, the model-based tests with 200 traces,
   and the scenario traces, with the same Markdown report. About 20–30 minutes; paste it into the PR.
-- `npm run model:full` — weekly, on `main`'s head (R-BTN-68 as amended 2026-10-20); post the report
-  to the pinned "Weekly model check" issue and file a ticket for a failure. Every check below, in order: `npm run model` with 10,000 samples, the
+- `npm run model:full` — weekly, on `main`'s head (R-BTN-68 as amended 2026-10-20): the "Weekly
+  model check" series (B-50) runs it on any runner granted on baton, keeps each report in its run's
+  ticket file and files a ticket for a failure; until B-50 is built, run it by hand. Every check below, in order: `npm run model` with 10,000 samples, the
   model-based tests with 1,000 traces, `npm run model:verify` to depth 4, and the scenario traces
   (the integration scenarios write a fresh set, then `npm run traces`). It runs every step
   even after a failure and prints a Markdown report on stdout: the commit (flagged when the
