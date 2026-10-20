@@ -107,6 +107,9 @@ describe('decide: the edge rule', () => {
 describe('refusalKind: how an advance refusal settles (§6.13)', () => {
   it('off-graph ends released:course-changed; gates and max-runs suspend', () => {
     expect(refusalKind('off-graph')).toBe('course-changed');
+    // R-BTN-109: an unmet or invalid entry output is an output contract failure (R-BTN-82).
+    expect(refusalKind('entry')).toBe('contract-output');
+    expect(refusalKind('output-invalid')).toBe('contract-output');
     for (const code of ['max-runs', 'policy', 'not-queued', 'barred-tag', 'stale-skills', 'backing-off', undefined]) {
       expect(refusalKind(code)).toBe('suspend');
     }

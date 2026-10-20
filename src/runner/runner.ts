@@ -611,16 +611,20 @@ export class Runner {
     }
   }
 
-  /** One `advance`, its refusal settled by §6.13: off-graph ends `released:course-changed`;
-   * every other refusal suspends at the station the claim reached, never releasing. */
+  /** One `advance`, its refusal settled by §6.13: off-graph ends `released:course-changed`; an
+   * `entry` refusal (R-BTN-109) ends `released:cannot-finish:contract-output`; every other
+   * refusal suspends at the station the claim reached, never releasing. */
   private async advance(claimId: number, body: { leg: string; reached?: string; bars?: string[]; evidence?: string }, fallbackStation: string): Promise<{ station?: string; next?: NextLegs; advice?: unknown } | { settle: Record<string, unknown> }> {
     try {
       return await this.o.api.advance(claimId, body) as { station?: string; next?: NextLegs; advice?: unknown };
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
-      if (refusalKind(e.ruleCode) === 'course-changed') {
+      const kind = refusalKind(e.ruleCode);
+      if (kind === 'course-changed') {
         return { settle: { end_reason: 'released:course-changed', reached: body.reached ?? fallbackStation, ...(body.leg ? { next: body.leg } : {}) } };
       }
+      // The leg's outputs did not meet its arrival: the leg is given up where the claim rests.
+      if (kind === 'contract-output') return { settle: { end_reason: 'released:cannot-finish:contract-output' } };
       return { settle: { end_reason: `suspended:${body.reached ?? fallbackStation}`, reached: body.reached ?? fallbackStation, next: body.leg } };
     }
   }

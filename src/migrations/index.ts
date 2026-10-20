@@ -19,6 +19,7 @@ import blocks from './0016_blocks.sql';
 import notices from './0017_notices.sql';
 import history from './0018_history.sql';
 import independence from './0019_independence.sql';
+import schemas from './0020_schemas.sql';
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },
@@ -40,4 +41,5 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 17, sql: notices },
   { id: 18, sql: history },
   { id: 19, sql: independence },
+  { id: 20, sql: schemas },
 ];

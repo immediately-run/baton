@@ -7,7 +7,8 @@
 // Course code in the CLI, never core (§2b). Reached through the esbuild bundle
 // (scripts/baton-cli.mjs), the way `baton run` reaches src/runner.
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -238,6 +239,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     markers.push(...out.markers);
     courseData[c.id] = out.course_data;
     registry.push({
+      ...courseSchemas(root, c.id),
       id: c.id, version: c.version, min_worker_version: c.min_worker_version ?? c.version, skill: c.skill ?? defaultSkill(c.id), course,
       step_kinds: c.step_kinds ?? Object.keys(course.legs ?? {}), ...(c.report_horizon_h != null ? { report_horizon_h: c.report_horizon_h } : {}),
       branch_pattern: branchPatterns[0], ...(c.previous_branch_pattern ? { previous_branch_pattern: c.previous_branch_pattern } : {}),
@@ -997,4 +999,19 @@ jobs:
         env:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
 `;
+}
+
+/** R-BTN-108: a course's schemas, `.baton/schemas/<course>/<name>@<n>.json`, each posted as
+ *  `<course>:<name>@<n>` with the SHA-256 of its file — the digest that makes a version
+ *  immutable. Absent directory, no schemas. */
+export function courseSchemas(root: string, course: string): { schemas?: { id: string; digest: string; schema: unknown }[] } {
+  const dir = join(root, '.baton', 'schemas', course);
+  if (!existsSync(dir)) return {};
+  const schemas = readdirSync(dir).filter((f) => /^[A-Za-z][A-Za-z0-9._-]{0,63}@(0|[1-9][0-9]{0,5})\.json$/.test(f)).sort().map((f) => {
+    const bytes = readFileSync(join(dir, f));
+    let schema: unknown;
+    try { schema = JSON.parse(bytes.toString('utf8')); } catch (e) { throw new Error(`.baton/schemas/${course}/${f} is not JSON: ${(e as Error).message}`); }
+    return { id: `${course}:${f.slice(0, -5)}`, digest: createHash('sha256').update(bytes).digest('hex'), schema };
+  });
+  return schemas.length ? { schemas } : {};
 }

@@ -113,7 +113,10 @@ export function decide(result: unknown, g: Graph, legName: string, from: string)
  * newer file disagreeing) and ends `released:course-changed`; every other refusal — a gate's,
  * `max-runs`, `policy`, `not-queued` — suspends at the station the claim reached, never
  * releasing. The codes are Baton's (`rule_code` in the §11 error body). */
-export function refusalKind(ruleCode: string | undefined): 'course-changed' | 'suspend' {
+export function refusalKind(ruleCode: string | undefined): 'course-changed' | 'contract-output' | 'suspend' {
+  // R-BTN-109: an arrival without its entry outputs, or with an invalid one, is an output
+  // contract failure (R-BTN-82): another run may do better.
+  if (ruleCode === 'entry' || ruleCode === 'output-invalid') return 'contract-output';
   return ruleCode === 'off-graph' ? 'course-changed' : 'suspend';
 }
 

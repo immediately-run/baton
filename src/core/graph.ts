@@ -30,6 +30,8 @@ export interface Graph {
   /** An old leg or station name → the current one (`renamed_from`, R-BTN-64). */
   legRenames: Map<string, string>;
   stationRenames: Map<string, string>;
+  /** R-BTN-109: what a leg arriving at each station must have produced, by output and schema. */
+  entry: Map<string, { output: string; schema: string }[]>;
   /** Legs on the shortest route from each station to an end (`to_end`, §2e). */
   toEnd: Map<string, number>;
 }
@@ -40,7 +42,7 @@ const names = (v: unknown): string[] => (typeof v === 'string' ? [v] : Array.isA
 export function graphOf(json: unknown): Graph {
   const f = json as {
     start: string; start_leg: string; end: string[]; short_waits?: string[];
-    stations: Record<string, { renamed_from?: string | string[] }>;
+    stations: Record<string, { renamed_from?: string | string[]; entry?: { output: string; schema: string }[] }>;
     legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session' }>;
   };
   const legs = new Map<string, Leg>();
@@ -51,7 +53,11 @@ export function graphOf(json: unknown): Graph {
       noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null });
     for (const old of names(l.renamed_from)) legRenames.set(old, id);
   }
-  for (const [id, s] of Object.entries(f.stations)) for (const old of names(s.renamed_from)) stationRenames.set(old, id);
+  const entry = new Map<string, { output: string; schema: string }[]>();
+  for (const [id, s] of Object.entries(f.stations)) {
+    for (const old of names(s.renamed_from)) stationRenames.set(old, id);
+    if (s.entry?.length) entry.set(id, s.entry.map((r) => ({ output: r.output, schema: r.schema })));
+  }
   const stations = new Set(Object.keys(f.stations));
   const ends = new Set(f.end);
   // Breadth-first from the ends, backwards along every leg's every outcome.
@@ -71,7 +77,7 @@ export function graphOf(json: unknown): Graph {
     }
     frontier = next;
   }
-  return { start: f.start, startLeg: f.start_leg, ends, shortWaits: f.short_waits ?? [], stations, legs, legRenames, stationRenames, toEnd };
+  return { start: f.start, startLeg: f.start_leg, ends, shortWaits: f.short_waits ?? [], stations, legs, legRenames, stationRenames, toEnd, entry };
 }
 
 /** A leg's current name: itself, or the leg whose `renamed_from` names it; null when neither. */

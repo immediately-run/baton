@@ -379,6 +379,11 @@ depth 5 back, and with it the `unblocked` event.
   for the policy in force. The instances that drive the core (the scenario traces and the
   model-based tests) set `BACKOFF = 0` and the counts to 100000 or 1000: the core keeps §6.10's
   per-ticket policy until B-11 builds R-BTN-122, and holds it makes are carried as the owner's.
+- **Leg outputs and station entry** (R-BTN-108, R-BTN-109): an arrival without its entry
+  outputs, or with an invalid inline value, is refused (rule `entry`), and a refusal is no model
+  action; the runner then ends `released:cannot-finish:contract-output`, a failed attempt the
+  model's `cannot-finish` end already covers. Schemas, their validity and refinement are data the
+  shared validator decides, with no interleaving of their own (B-3).
 - **Tiers and grants beyond rule 4** (rules 5–7), and **isolation floors** (R-BTN-107): column
   comparisons with no interleaving of their own — a leg's `isolation: session` against the
   worker's latest declared mode; matching tests cover them (G-BTN-40, S-BTN-64). Rule 4 is
