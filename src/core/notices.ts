@@ -10,6 +10,7 @@ import { BatonError } from './http';
 import { randomHex } from './db';
 import { checkMark, qualify } from './validate';
 import type { Store } from './ports';
+import type { QueueOver } from './queues';
 
 /** R-BTN-103: the reserved credential pool copies are queued to (migration 0017). */
 export const POOL = 'pool';
@@ -38,17 +39,19 @@ export type Courier =
   | { kind: 'personal'; fingerprint: string }
   | { kind: 'worker'; fingerprint: string; repository: string; asks: string[] };
 
-/** A notice as a courier receives it (R-BTN-80). */
-export interface NoticeView {
-  notice_id: string;
-  kind: 'decision';
-  repository: string;
-  ticket: string;
-  title: string;
-  decision: { id: string; asks: string; url?: string };
-  unblocks: string[];
-  created_at: number;
-}
+/** A notice as a courier receives it (R-BTN-80): a decision, or a leg over its bound (R-BTN-79). */
+export type NoticeView =
+  | {
+    notice_id: string;
+    kind: 'decision';
+    repository: string;
+    ticket: string;
+    title: string;
+    decision: { id: string; asks: string; url?: string };
+    unblocks: string[];
+    created_at: number;
+  }
+  | ({ notice_id: string; kind: 'queue-over'; repository: string; created_at: number } & QueueOver);
 
 interface NoticeRow {
   id: string;
@@ -57,6 +60,7 @@ interface NoticeRow {
   ticket_id: string | null;
   kind: string;
   ref: string;
+  payload_json: string | null;
   state: 'queued' | 'claimed' | 'sent' | 'closed';
   attempts: number;
   claimed_by: string | null;
@@ -130,6 +134,33 @@ export class Notices {
     this.exec(`UPDATE notices SET state = 'closed', not_before = ?, updated_at = ?
                WHERE credential_id = ? AND (? IS NULL OR repository_id = ?) AND state != 'closed'`,
       now + CLOSED_KEPT_MS, now, credential, repository, repository);
+  }
+
+  /** Leg `ref` (`course:leg`) of `repository` is over its `max_queue`, or still is and its depth or
+   *  its course's intake changed (R-BTN-79): one `queue-over` notice per `owner` courier of the
+   *  repository, queued once and then updated in place — a courier that already delivered it is
+   *  not asked to deliver it again for each ticket more. */
+  over(repository: string, ref: string, payload: QueueOver) {
+    const now = this.c.now();
+    const json = JSON.stringify(payload);
+    for (const k of this.rows<{ credential_id: string }>(
+      `SELECT c.credential_id FROM couriers c JOIN credentials k ON k.id = c.credential_id
+       WHERE c.repository_id = ? AND c.asks = 'owner' AND k.revoked_at IS NULL ORDER BY c.credential_id`, repository)) {
+      const open = this.rows<{ id: string }>(`SELECT id FROM notices WHERE credential_id = ? AND repository_id = ? AND kind = 'queue-over' AND ref = ? AND state != 'closed'`,
+        k.credential_id, repository, ref)[0];
+      if (open) this.exec('UPDATE notices SET payload_json = ?, updated_at = ? WHERE id = ?', json, now, open.id);
+      else {
+        this.exec(`INSERT INTO notices (id, credential_id, repository_id, ticket_id, kind, ref, state, attempts, not_before, payload_json, updated_at, created_at)
+                   VALUES (?, ?, ?, NULL, 'queue-over', ?, 'queued', 0, ?, ?, ?, ?)`, randomHex(16), k.credential_id, repository, ref, now, json, now, now);
+      }
+    }
+  }
+
+  /** Leg `ref` of `repository` is back within its bound: its `queue-over` notices close (R-BTN-79). */
+  within(repository: string, ref: string) {
+    const now = this.c.now();
+    this.exec(`UPDATE notices SET state = 'closed', not_before = ?, updated_at = ?
+               WHERE repository_id = ? AND kind = 'queue-over' AND ref = ? AND state != 'closed'`, now + CLOSED_KEPT_MS, now, repository, ref);
   }
 
   private queue(credential: string, repository: string, ticket: string, decision: string, now: number) {
@@ -225,6 +256,9 @@ export class Notices {
   }
 
   private view(n: NoticeRow): NoticeView | null {
+    if (n.kind === 'queue-over') {
+      return n.payload_json ? { notice_id: n.id, kind: 'queue-over', repository: n.repository_id, ...(JSON.parse(n.payload_json) as QueueOver), created_at: n.created_at } : null;
+    }
     const v = n.ticket_id ? this.decisionView(n.ticket_id, n.ref) : null;
     return v ? { notice_id: n.id, kind: 'decision', ...v, created_at: n.created_at } : null;
   }

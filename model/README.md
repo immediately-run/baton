@@ -384,6 +384,10 @@ depth 5 back, and with it the `unblocked` event.
   action; the runner then ends `released:cannot-finish:contract-output`, a failed attempt the
   model's `cannot-finish` end already covers. Schemas, their validity and refinement are data the
   shared validator decides, with no interleaving of their own (B-3).
+- **Leg queues and course intake** (R-BTN-79): a queue's depth, its `queue-over` warning and a
+  closed intake are advice — no ticket is held, blocked, refused or reordered for them — and a
+  depth only counts what the model's holds and queued legs already are; they leave every
+  modelled state as it was (R3-1255; R3-1254 may model them).
 - **Tiers and grants beyond rule 4** (rules 5–7), and **isolation floors** (R-BTN-107): column
   comparisons with no interleaving of their own — a leg's `isolation: session` against the
   worker's latest declared mode; matching tests cover them (G-BTN-40, S-BTN-64). Rule 4 is
