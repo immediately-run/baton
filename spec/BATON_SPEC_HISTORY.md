@@ -775,6 +775,20 @@ states the result.
 - **Core conditions on no ticket, repository or worker** (`baton.sign-in-burst`,
   `baton.bearer-over-http`) sit on the tenant.
 - **The ticket-id rule** cited by §4 and §6 is stated in §12.3 (Identifiers).
+- **Call legs never wait in their claim.** Baton learns a call's children only from the end that
+  carries `spawned`, so an in-claim wait could never settle; the call leg's `wait_s` was dropped.
+- **Who drains the outbox.** A runner declares `runner:baton-legs` only when started with
+  `--outbox`, its operator vouching for push access; a refused push is a misconfiguration, ending
+  `released:cannot-finish:capability` with the ticket held and `baton.retries` naming the runner.
+  (A drafted alternative, ending blocked on the capability, was rejected: `runner:` capabilities
+  have no check, so the runner would re-declare at once and loop into `blocked-exhausted`.)
+- **"Baton holds no git credential"** means it never uses one to write git. The deployment's
+  dispatch credentials start workflows only; a Gitea bot token, which Gitea cannot scope below
+  write, is a stated exposure held as a Worker secret (R-BTN-94, R-BTN-171).
+- **Moving a Baton** (R-BTN-88) also carries `check_runners`, `mcp_keys`, `instance_settings` and
+  unexpired `registration_tokens`, which the old export list predated.
+- **A call leg reaches an end without a settlement** (`epic`'s `replan` → `abandoned`) through a
+  `null` entry in its completion table (R-BTN-165).
 
 ## Decisions in full
 
