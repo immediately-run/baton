@@ -2,7 +2,7 @@
 title: "B-49 — One evaluation per recount: a returning fleet logs no spurious unblocked and keeps blocked_since"
 id: B-49
 project: baton
-status: in-progress
+status: in-review
 updated: 2026-10-20
 repos:
   - baton
@@ -12,7 +12,8 @@ description: "Blocks.recount writes the capability rows and evaluates, then writ
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/67
 depends_on: []
 ---
 
@@ -68,3 +69,5 @@ D was never claimable.
 ## Status
 
 _2026-10-20 — claimed (session https://claude.ai/code/session_01Jf7hvrTF88hd1zY1YSQ1gq) — baton._
+
+_2026-10-20 — in review: https://github.com/immediately-run/baton/pull/67. `Blocks.batch` defers every row write's evaluation to the transaction's end; the probe test fails on main and passes on the branch._
