@@ -41,7 +41,7 @@ describe('reportProblem: the CI check on a PR body', () => {
     expect(reportProblem(body(report().text).replace(/\n/g, '\r\n'), HEAD)).toBeNull();
   });
   it('refuses no report, another commit, a dirty run, a failed or missing check', () => {
-    expect(reportProblem('## Tests\n\nnone', HEAD)).toMatch(/no ".*" report/);
+    expect(reportProblem('## Tests\n\nnone', HEAD)).toMatch(/no model report/);
     expect(reportProblem(body(report({ head: 'b'.repeat(40) }).text), HEAD)).toBe(`the report is for bbbbbbb, not the head aaaaaaa`);
     expect(reportProblem(body(report({ dirty: ' M x' }).text), HEAD)).toMatch(/uncommitted/);
     expect(reportProblem(body(report({ rows: [passing[0], passing[1], [passing[2][0], false, 20]] }).text), HEAD)).toBe('"npm run model:verify (depth 4)" did not pass');
@@ -56,6 +56,26 @@ describe('reportProblem: the CI check on a PR body', () => {
   it('reads only the report: a later section\'s table does not count', () => {
     const r = report({ rows: [passing[0], passing[2]] }).text;
     expect(reportProblem(`${r}\n\n## Other\n\n| model-based tests (1000 traces) | pass | 1 |`, HEAD)).toBe('the report has no "model-based tests (1000 traces)" row');
+  });
+});
+
+describe('the PR report (2026-10-20): model:quick, 200 model-drawn traces, the scenario traces', () => {
+  const prRows: [string, boolean, number][] = [['npm run model:quick', true, 1], ['model-based tests (200 traces)', true, 3], ['scenario traces (npm run traces)', true, 15]];
+  const pr = (over: Partial<Parameters<typeof renderReport>[0]> = {}) =>
+    renderReport({ kind: 'pr', head: HEAD, dirty: '', quintVersion: '0.33.0', platform: 'darwin-arm64', rows: prRows, ...over });
+  it('passes for its head; a reduced replay or a missing row is refused', () => {
+    expect(pr().text).toContain('### Model checks (`npm run model:pr`)');
+    expect(reportProblem(pr().text, HEAD)).toBeNull();
+    const reduced = pr({ rows: [prRows[0], ['model-based tests (20 traces)', true, 1], prRows[2]] });
+    expect(reduced.ok).toBe(false);
+    expect(reportProblem(reduced.text, HEAD)).toMatch(/no "model-based tests \(200 traces\)" row/);
+    expect(reportProblem(pr({ rows: prRows.slice(0, 2) }).text, HEAD)).toMatch(/scenario traces/);
+    expect(reportProblem(pr().text, 'b'.repeat(40))).toMatch(/not the head/);
+  });
+  it('a weekly full report is accepted on a PR too; either passing one is enough', () => {
+    expect(reportProblem(report().text, HEAD)).toBeNull();
+    expect(reportProblem(`${pr({ head: 'b'.repeat(40) }).text}\n\n${report().text}`, HEAD)).toBeNull();
+    expect(reportProblem('no report', HEAD)).toMatch(/npm run model:pr/);
   });
 });
 

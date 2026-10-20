@@ -1,20 +1,32 @@
-// The model-checking report (R-BTN-68, amended 2026-10-17): `npm run model:full` writes it on the
-// author's machine, the PR body carries it, and CI checks that it is there, for the PR's head and
-// passing, whenever the PR changes what the model checks read (.github/workflows/model-report.yml).
-// Model checking itself never runs on hosted runners; this check only reads a PR body.
+// The model-checking report (R-BTN-68, amended 2026-10-17 and 2026-10-20): `npm run model:pr` (or
+// the weekly `npm run model:full`) writes it on the author's machine, the PR body carries it, and
+// CI checks that it is there, for the PR's head and passing, whenever the PR changes what the
+// model checks read (.github/workflows/model-report.yml). Model checking itself never runs on
+// hosted runners; this check only reads a PR body.
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const HEADING = '### Model checks (`npm run model:full`)';
 // the checks a report must show passing, in model/full.mjs's order, each at the size R-BTN-68
-// promises: a run with fewer samples, fewer traces or a shallower proof is no report for a PR
-// (round 2, 2-r2-1). The proof is at depth 4 since R3-1254 part 2 (owner, 2026-10-19): with a
-// leg's prerequisites, depth 5 on `small` takes about 10 hours; B-37 brings 5 back.
+// promises: a run with fewer samples, fewer traces or a shallower proof is no report (round 2,
+// 2-r2-1). The proof is at depth 4 since R3-1254 part 2 (owner, 2026-10-19): with a leg's
+// prerequisites, depth 5 on `small` takes about 10 hours; B-37 brings 5 back.
 export const SIZES = { samples: '10000', traces: '1000', depth: '4' };
+const TRACES = 'scenario traces (npm run traces)';
 export const labels = ({ samples, traces, depth }) =>
-  [`npm run model (${samples} samples)`, `model-based tests (${traces} traces)`, `npm run model:verify (depth ${depth})`, 'scenario traces (npm run traces)'];
-export const CHECKS = labels(SIZES);
+  [`npm run model (${samples} samples)`, `model-based tests (${traces} traces)`, `npm run model:verify (depth ${depth})`, TRACES];
+/** The two reports (owner, 2026-10-20: "3 hours is absurdly long. We can run that maybe once a
+ *  week not for every pr"). `pr`, for every PR that needs one, about 20–30 minutes: the
+ *  regression runs, the model-drawn traces at `npm test`'s 200, the scenario traces. `full`, run
+ *  weekly on main and accepted on a PR too: simulation, witnesses, 1,000 traces, the proof, the
+ *  scenario traces. */
+export const PR_TRACES = '200';
+export const REPORTS = {
+  pr: { heading: '### Model checks (`npm run model:pr`)', checks: ['npm run model:quick', `model-based tests (${PR_TRACES} traces)`, TRACES] },
+  full: { heading: '### Model checks (`npm run model:full`)', checks: labels(SIZES) },
+};
+export const HEADING = REPORTS.full.heading;
+export const CHECKS = REPORTS.full.checks;
 // a change to any of these can change a model check's outcome: the model; the core it is held
 // to, with the shared modules and migrations it imports; the replay that drives the core with
 // model traces, with its helpers; the scenarios, whose traces the model checks, with their hosts
@@ -37,10 +49,11 @@ export const needsReport = (files) => files.some((f) => CHECKED.test(f));
  * The report for `head`, as Markdown, and whether it passes: every check passed, at full size, on
  * a clean tree. `rows` are [label, passed, minutes]; `dirty` is `git status --porcelain`'s output.
  */
-export function renderReport({ head, dirty, quintVersion, platform, rows }) {
-  const full = rows.length === CHECKS.length && rows.every(([label], i) => label === CHECKS[i]);
+export function renderReport({ kind = 'full', head, dirty, quintVersion, platform, rows }) {
+  const { heading, checks } = REPORTS[kind];
+  const full = rows.length === checks.length && rows.every(([label], i) => label === checks[i]);
   const lines = [
-    `${HEADING}\n`,
+    `${heading}\n`,
     `Commit \`${head}\`${dirty ? ' **with uncommitted changes — not a report for this commit**' : ''}${full ? '' : ' **a reduced run — not a report for a PR**'}; Quint ${quintVersion}; ${platform}.\n`,
     '| check | result | minutes |',
     '|---|---|---|',
@@ -49,19 +62,25 @@ export function renderReport({ head, dirty, quintVersion, platform, rows }) {
   return { text: lines.join('\n'), ok: !dirty && full && rows.every(([, pass]) => pass) };
 }
 
-/** The verdict on a PR body for `head`: null when it carries a passing report for it, else why not. */
+/** The verdict on a PR body for `head`: null when it carries a passing report of either kind
+ *  for it, else why not. */
 export function reportProblem(body, head) {
   // a body edited on github.com comes back with CRLF line ends
   body = (body ?? '').replace(/\r\n/g, '\n');
-  const at = body.indexOf(HEADING);
-  if (at < 0) return `no "${HEADING}" report in the PR body`;
-  const report = body.slice(at + HEADING.length).split(/\n#{1,3} /)[0];
+  const present = Object.values(REPORTS).filter(({ heading }) => body.includes(heading));
+  if (!present.length) return `no model report in the PR body — neither "${REPORTS.pr.heading}" nor the weekly "${REPORTS.full.heading}"`;
+  const problems = present.map((r) => oneReportProblem(body, head, r));
+  return problems.includes(null) ? null : problems.join('; ');
+}
+
+function oneReportProblem(body, head, { heading, checks }) {
+  const report = body.slice(body.indexOf(heading) + heading.length).split(/\n#{1,3} /)[0];
   const commit = /Commit `([0-9a-f]{40})`/.exec(report)?.[1];
   if (!commit) return 'the report names no full commit SHA';
   if (commit !== head) return `the report is for ${commit.slice(0, 7)}, not the head ${head.slice(0, 7)}`;
   if (report.includes('with uncommitted changes')) return 'the report was run with uncommitted changes';
   const rows = [...report.matchAll(/^\| ([^|]+?) \| ([^|]+?) \| [^|]*\|$/gm)].filter(([, label]) => label !== 'check');
-  for (const check of CHECKS) {
+  for (const check of checks) {
     const row = rows.find(([, label]) => label === check);
     if (!row) return `the report has no "${check}" row`;
     if (row[2].trim() !== 'pass') return `"${row[1]}" did not pass`;
@@ -85,7 +104,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   }
   const problem = reportProblem(PR_BODY, HEAD_SHA);
   console.log(problem
-    ? `✗ ${problem}. This PR changes what the model checks read: run \`npm run model:full\` on its head and paste the report into the PR body (R-BTN-68).`
+    ? `✗ ${problem}. This PR changes what the model checks read: run \`npm run model:pr\` on its head and paste the report into the PR body (R-BTN-68).`
     : `✓ the PR body carries a passing model report for ${HEAD_SHA.slice(0, 7)}`);
   process.exit(problem ? 1 : 0);
 }

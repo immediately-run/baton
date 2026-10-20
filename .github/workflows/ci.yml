@@ -23,7 +23,8 @@ jobs:
     # No Quint on hosted runners (R-BTN-68, amended 2026-10-20, owner: baton was the org's most
     # expensive repository in Actions minutes). The suite without quint takes ~9 minutes; the
     # model's checks — the scenario traces among them — run on the author's machine in
-    # `npm run model:full`, whose report model-report.yml reads from the PR body.
+    # `npm run model:pr` (and weekly in `model:full`), whose report model-report.yml reads from
+    # the PR body.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
