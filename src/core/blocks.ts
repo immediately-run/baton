@@ -24,6 +24,11 @@ export interface Cleared { kind: BlockKind; ref: string; leg?: string }
 /** `tickets.answer_lost`: the `resource` rows cleared silently when no one could answer, and the
  *  `blocked_since` they cleared (R-BTN-77 as amended by R3-1251). */
 interface LostAnswer { since: number; rows: Cleared[] }
+/** A `ticket_blocks` row as a cause asks for it: `leg` '' is the whole ticket. */
+interface BlockRow { kind: BlockKind; ref: string; leg: string; until: number | null }
+/** What one ticket's row rewrites removed and wrote, keyed by `rowKey`, until its evaluation. */
+interface RowChanges { cleared: Map<string, Cleared>; added: Map<string, BlockRow> }
+const rowKey = (r: { kind: BlockKind; ref: string; leg?: string }) => `${r.kind}\u0000${r.ref}\u0000${r.leg ?? ''}`;
 
 /** R-BTN-77: an `unblocked` dispatch is coalesced like the sync's (one window, `DISPATCH_WINDOW_MS`),
  *  capped at 100 entries; an `unblocked` message names at most 20 tickets. */
@@ -127,54 +132,105 @@ export class Blocks {
 
   /**
    * Rewrite the rows of `kinds` for each ticket from their stored causes, writing only what
-   * changed, then re-evaluate whether it is blocked. `silent`: the transition is a claim's start
-   * or end, which logs nothing (R-BTN-77).
+   * changed, then re-evaluate whether it is blocked. Inside a `batch` the evaluation waits for the
+   * batch's end.
    */
-  write(ticketIds: Iterable<string>, kinds: readonly BlockKind[] = BLOCK_KINDS, silent = false) {
+  write(ticketIds: Iterable<string>, kinds: readonly BlockKind[] = BLOCK_KINDS) {
+    if (this.pending) return this.rewrite(ticketIds, kinds, this.pending);
+    const changes = new Map<string, RowChanges>();
+    this.rewrite(ticketIds, kinds, changes);
+    this.settle(changes);
+  }
+
+  /**
+   * Run `fn` with every evaluation its row writes call for deferred to its end, so a transaction
+   * that rewrites several kinds of row, or the same kind twice, evaluates each ticket once, after
+   * its last row change (R-BTN-75; B-49): a fleet coming back to a ticket that needs a capability
+   * and an unavailable resource clears one row and writes the other, and the ticket was blocked
+   * throughout. A batch inside a batch joins it. `held` is not deferred: a claim's start or end
+   * is its own silent transition (R-BTN-77).
+   */
+  batch<T>(fn: () => T): T {
+    if (this.pending) return fn();
+    const changes = new Map<string, RowChanges>();
+    this.pending = changes;
+    let out: T;
+    try {
+      out = fn();
+    } finally {
+      this.pending = null;
+    }
+    this.settle(changes);
+    return out;
+  }
+
+  /** The row writes a running `batch` holds for its evaluation; null outside one. */
+  private pending: Map<string, RowChanges> | null = null;
+
+  /** Rewrite the rows of `kinds` for each ticket, adding what went and what came to `into`. */
+  private rewrite(ticketIds: Iterable<string>, kinds: readonly BlockKind[], into: Map<string, RowChanges>) {
     const now = this.c.now();
     for (const id of new Set(ticketIds)) {
-      const t = this.rows<{ repository_id: string; blocked_by: string; blocked_since: number | null; answer_lost: string | null }>(
-        'SELECT repository_id, blocked_by, blocked_since, answer_lost FROM tickets WHERE id = ?', id)[0];
+      const t = this.rows<{ repository_id: string; blocked_by: string }>('SELECT repository_id, blocked_by FROM tickets WHERE id = ?', id)[0];
       if (!t) continue;
-      const want = new Map<string, { kind: BlockKind; ref: string; leg: string; until: number | null }>();
-      for (const kind of kinds) for (const r of this.desired(id, t.repository_id, t.blocked_by, kind)) want.set(`${r.kind}\u0000${r.ref}\u0000${r.leg}`, r);
-      const have = this.rows<{ kind: BlockKind; ref: string; leg: string; until: number | null }>(
+      const want = new Map<string, BlockRow>();
+      for (const kind of kinds) for (const r of this.desired(id, t.repository_id, t.blocked_by, kind)) want.set(rowKey(r), r);
+      const have = this.rows<BlockRow>(
         `SELECT kind, ref, leg, until FROM ticket_blocks WHERE ticket_id = ? AND kind IN (SELECT value FROM json_each(?))`, id, JSON.stringify(kinds));
-      const cleared: Cleared[] = [];
+      const c = into.get(id) ?? { cleared: new Map(), added: new Map() };
+      into.set(id, c);
       let changed = false;
       for (const h of have) {
-        const key = `${h.kind}\u0000${h.ref}\u0000${h.leg}`;
+        const key = rowKey(h);
         const w = want.get(key);
         if (!w) {
           this.exec('DELETE FROM ticket_blocks WHERE ticket_id = ? AND kind = ? AND ref = ? AND leg = ?', id, h.kind, h.ref, h.leg);
-          cleared.push({ kind: h.kind, ref: h.ref, ...(h.leg ? { leg: h.leg } : {}) });
+          c.cleared.set(key, { kind: h.kind, ref: h.ref, ...(h.leg ? { leg: h.leg } : {}) });
           changed = true;
         } else if (w.until !== h.until) {
           this.exec('UPDATE ticket_blocks SET until = ? WHERE ticket_id = ? AND kind = ? AND ref = ? AND leg = ?', w.until, id, h.kind, h.ref, h.leg);
         }
         want.delete(key);
       }
-      const added = [...want.values()];
-      for (const w of added) {
+      for (const [key, w] of want) {
         this.exec('INSERT INTO ticket_blocks (repository_id, ticket_id, leg, kind, ref, since, until) VALUES (?, ?, ?, ?, ?, ?, ?)', t.repository_id, id, w.leg, w.kind, w.ref, now, w.until);
+        c.added.set(key, w);
         changed = true;
       }
       if (changed) this.invalidateRecommend(t.repository_id);
+    }
+  }
+
+  /** Evaluate each ticket once, on what its rows' rewrites cleared and added. */
+  private settle(changes: Map<string, RowChanges>) {
+    for (const [id, c] of changes) {
+      const t = this.rows<{ blocked_since: number | null; answer_lost: string | null }>('SELECT blocked_since, answer_lost FROM tickets WHERE id = ?', id)[0];
+      if (!t) continue;
+      const cleared = [...c.cleared.values()];
+      const added = [...c.added.values()];
       // A `resource` row that went only because no live worker has a usable instance left (the
       // fleet emptied overnight) — its leg still needs the resource, and the count says no one can
       // answer — is an answer lost, not a resource back: like a claim, it clears `blocked_since`
       // without an `unblocked`, and the ticket remembers what it lost, and since when it was
       // blocked, until the fleet can answer again (`settleLost`; R-BTN-77 as amended by R3-1251).
       // A row that went because its need went (the leg moved past, the need was dropped) is an
-      // ordinary unblocking. An answer that comes back blocked on exactly what was lost writes the
-      // row again silently, with the evening's `blocked_since`: that `blocked` still stands.
+      // ordinary unblocking. Any other row cleared with a lost one on the queued leg (the capability
+      // the same recount brings back, a resource whose reading lapsed in the same tick) leaves the
+      // unblocking unknown, so it is a lost answer too: the ticket would still be blocked had the
+      // fleet been able to answer, and only the lost rows are kept (R-BTN-77, amended by B-49). A
+      // lost row on another next leg never blocked the ticket, so it silences nothing. An answer that
+      // comes back blocked on exactly what was lost writes the row again silently, with the evening's
+      // `blocked_since`: that `blocked` still stands.
       const marker = t.answer_lost ? (JSON.parse(t.answer_lost) as LostAnswer) : null;
-      const lost = cleared.length > 0 && cleared.every((c) => c.kind === 'resource' && this.lostAnswer(id, c));
+      const lostRows = cleared.filter((r) => r.kind === 'resource' && this.lostAnswer(id, r));
+      const queued = this.queuedLeg(id);
+      const lost = queued != null && lostRows.some((r) => r.leg === queued);
       const reblock = marker != null && added.length > 0
         && added.every((w) => w.kind === 'resource' && marker.rows.some((r) => r.ref === w.ref && (r.leg ?? '') === w.leg));
-      this.evaluate(id, cleared, silent || lost || reblock, reblock ? marker.since : null);
-      if (lost && !silent && t.blocked_since != null && this.blockedSince(id) == null) {
-        const next: LostAnswer = { since: marker?.since ?? t.blocked_since, rows: [...(marker?.rows ?? []), ...cleared] };
+      // A logged transition names only the rows whose removal unblocked it: a lost row is not one.
+      this.evaluate(id, lost || reblock ? cleared : cleared.filter((r) => !lostRows.includes(r)), lost || reblock, reblock ? marker.since : null);
+      if (lost && t.blocked_since != null && this.blockedSince(id) == null) {
+        const next: LostAnswer = { since: marker?.since ?? t.blocked_since, rows: [...(marker?.rows ?? []), ...lostRows] };
         this.exec('UPDATE tickets SET answer_lost = ? WHERE id = ?', JSON.stringify(next), id);
       } else if (marker) {
         this.settleLost(id);
@@ -207,7 +263,7 @@ export class Blocks {
     const pending = marker.rows.filter((c) => this.lostAnswer(id, c));
     if (pending.length) return;
     this.exec('UPDATE tickets SET answer_lost = NULL WHERE id = ?', id);
-    const queued = this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', id)[0]?.next_leg ?? null;
+    const queued = this.queuedLeg(id);
     if (t.blocked_since != null || queued == null || this.isHeld(id)) return;
     logEvent(this.c.store, this.c.now(), 'unblocked', 'baton', { ticket: id, cleared: marker.rows }, id);
     this.unblocked(t.repository_id, id, marker.rows);
@@ -220,7 +276,7 @@ export class Blocks {
   }
 
   /** The rows one kind of cause asks for, from what is stored. */
-  private desired(id: string, repo: string, blockedBy: string, kind: BlockKind): { kind: BlockKind; ref: string; leg: string; until: number | null }[] {
+  private desired(id: string, repo: string, blockedBy: string, kind: BlockKind): BlockRow[] {
     if (kind === 'ticket') {
       // The posted list taken as given: the course's sync knows what is still open (R-BTN-75).
       return [...new Set(JSON.parse(blockedBy) as string[])].map((local) => ({ kind, ref: TICKET_ID.test(local) ? local : qualify(repo, local), leg: '', until: null }));
@@ -252,6 +308,11 @@ export class Blocks {
       resource, resource, resource)[0]?.u ?? null;
   }
 
+  /** The ticket's queued leg, or null when it has none (R-BTN-83). */
+  private queuedLeg(id: string): string | null {
+    return this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', id)[0]?.next_leg ?? null;
+  }
+
   /** Whether a claim holds the ticket — rule 3's check, the one definition (R-BTN-75). */
   isHeld(id: string): boolean {
     return this.rows(`SELECT 1 FROM claims WHERE ticket_id = ? AND (status = 'active' OR (status = 'completed' AND confirmed_at IS NULL)
@@ -265,7 +326,7 @@ export class Blocks {
     this.c.queued?.(id);
     const t = this.rows<{ repository_id: string; blocked_since: number | null }>('SELECT repository_id, blocked_since FROM tickets WHERE id = ?', id)[0];
     if (!t) return;
-    const queued = this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', id)[0]?.next_leg ?? null;
+    const queued = this.queuedLeg(id);
     const blocking = queued == null || this.isHeld(id) ? [] : this.rows<{ kind: BlockKind; leg: string; ref: string }>(
       `SELECT kind, leg, ref FROM ticket_blocks WHERE ticket_id = ? AND (leg = '' OR leg = ?) ORDER BY kind, ref, leg`, id, queued);
     const now = this.c.now();
@@ -554,6 +615,11 @@ export class Blocks {
    * instance's state, a resource or instance registered.
    */
   recount() {
+    // Both kinds' rows are rewritten before any ticket is evaluated (B-49).
+    this.batch(() => this.recountRows());
+  }
+
+  private recountRows() {
     const fleet = this.fleet();
     this.exec(`INSERT INTO baton_settings (key, value) VALUES ('fleet_live', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(fleet.map((w) => w.id)));
     const capsOf = (w: FleetWorker, repo: string) => {
@@ -642,7 +708,13 @@ export class Blocks {
   instancesChanged(instances: string[]) {
     if (!instances.length) return;
     this.invalidateRecommend(null);
-    this.recount();
+    // The `until` refresh after the recount finds the rows the recount wrote, so it changes no
+    // row today; the batch keeps the evaluation at one if it ever does (R-BTN-75; B-49).
+    this.batch(() => this.instancesRows(instances));
+  }
+
+  private instancesRows(instances: string[]) {
+    this.recountRows();
     const served = new Set(this.rows<{ resource: string }>('SELECT DISTINCT resource FROM instance_serves WHERE instance IN (SELECT value FROM json_each(?))', JSON.stringify(instances)).map((r) => r.resource));
     for (const i of instances) {
       const worker = /^(.+)@worker:\d+$/.exec(i);
@@ -709,7 +781,7 @@ export class Blocks {
     const o = this.rows<{ hold: number; hold_reason: string | null; retry_after: number | null }>('SELECT hold, hold_reason, retry_after FROM ticket_overrides WHERE ticket_id = ?', ticketId)[0];
     if (o?.hold) other.push({ kind: 'hold', detail: { reason: o.hold_reason } });
     if (o?.retry_after != null && o.retry_after > now) other.push({ kind: 'backoff', detail: { retry_after: o.retry_after } });
-    const queued = this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', ticketId)[0]?.next_leg ?? null;
+    const queued = this.queuedLeg(ticketId);
     for (const n of this.rows<{ leg: string; waiting_on: string | null }>(`SELECT leg, waiting_on FROM ticket_next_legs WHERE ticket_id = ? AND state = 'waiting' AND waiting_on IS NOT NULL ORDER BY leg`, ticketId)) {
       other.push({ kind: 'waiting_on', detail: { leg: n.leg, on: n.waiting_on } });
     }

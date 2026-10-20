@@ -151,6 +151,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - Retired: R-BTN-41 (to docs), R-BTN-164, R-BTN-170; transition machinery moved to
     **Migrations the implementation still carries**.
 
+- **2026-10-20 — one evaluation per transaction built (B-49, baton#67).** baton#59's review found
+  core's recount evaluating after the capability rows and again after the resource rows, so a
+  ticket blocked on both whose fleet returned was logged `unblocked` and `blocked` again with a
+  new `blocked_since`. R-BTN-77's lost answer now also silences a transition whose cleared rows
+  include a lost one on the queued leg, whatever else cleared; S-BTN-45 gained ticket K.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

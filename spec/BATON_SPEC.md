@@ -2184,8 +2184,12 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
     (a backoff it starts, a decision posted while held) logs `blocked`, which wakes no one.
     Every `unblocked` follows a `blocked`.
   - **A lost answer is not an unblocking.** A `resource` row that goes because no live granted
-    runner has a usable instance left clears `blocked_since` silently, and the ticket keeps the
-    lost rows and `blocked_since` in `tickets.answer_lost` until each settles (need gone, or the
+    runner has a usable instance left clears `blocked_since` silently. So does a transition
+    whose cleared rows include a lost one on the queued leg, whatever else the same transaction
+    cleared (a capability the same recount brings back, a dependency the same post closes);
+    only the lost rows are kept, and a lost row is never named in an `unblocked`'s `cleared`.
+    A lost row on another next leg never blocked the ticket and silences nothing. The ticket
+    keeps the lost rows and `blocked_since` in `tickets.answer_lost` until each settles (need gone, or the
     fleet able to answer). Then, if the ticket is unblocked, unheld and has a queued leg, Baton
     logs the owed `unblocked` with its message and trigger; if it is blocked only on rows it
     lost, Baton rewrites them silently with the original `blocked_since`. Any `blocked` or
@@ -5516,7 +5520,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-22 review queue bound | eight tickets wait for review | default order, nothing flagged; override recorded (the bound is docs' ranking) |
 | S-BTN-27 model advice | three lines, one with spare budget near reset | `launch-candidates` serves the ranking code; a claim on another line accepted, recording the model |
 | S-BTN-44 blocks, resources, decisions | `depends_on`, an undeclared capability, a resource on two instances, a posted decision, an `unblocked_trigger`, an idle runner; readings lapse, B closes, the capability comes and goes | rows per kind, fleet-wide only when every instance is down; one index serves `blocked?on=`; claims `blocked`, by-id override accepted; `unblocked` logged, messaged, dispatched once; `baton.capability-missing` after 24 h |
-| S-BTN-45 edges of blocks, a queue over its bound | `$ref` resource schema; foreign runner; bounded and schema-failing readings; administrator over probe; an empty fleet overnight; leg- and whole-ticket decisions; `max_queue: 2` with three; 150 unblockings | refused, `forbidden`, `invalid-params`; lapse at `until`; `overridden`; no row, `no-instance`; `advance` into a decided leg `blocked`; `baton.queue-over` raised and the course `closed` until back to two; dispatch of 100 plus `{truncated: 50}` |
+| S-BTN-45 edges of blocks, a queue over its bound | `$ref` resource schema; foreign runner; bounded and schema-failing readings; administrator over probe; an empty fleet overnight; K blocked overnight on a capability and a resource at once; leg- and whole-ticket decisions; `max_queue: 2` with three; 150 unblockings | refused, `forbidden`, `invalid-params`; lapse at `until`; `overridden`; no row, `no-instance`; K's morning heartbeat swaps its rows with no `unblocked` or `blocked`, the same `blocked_since`, no runner woken (one evaluation per transaction); `advance` into a decided leg `blocked`; `baton.queue-over` raised and the course `closed` until back to two; dispatch of 100 plus `{truncated: 50}` |
 | S-BTN-51 a series and a timed leg | a series run due at T; idle days; a retried successor write; a foreign successor id; invalid `not_before`; a `ci` wait; a withdrawn run | `waiting` on `time` until the alarm readies it at T with one message; one successor, after its predecessor; `cannot-finish:spec`; `not-before-invalid` raised; `ci` wins; missed fires not replayed; the series retires |
 | S-BTN-61 shared instances | one instance listed by `docs` and `ops`; measures from both; a key of neither; two containers on one key | both visible, no foreign ticket or host; none replaces another; `forbidden`, omitted; unlisted bill `refused` |
 | S-BTN-67 a person's leg | a queued `kind: person` leg; its decision posted with another `asks`; a runner asks; the owner answers in git; an answer lacking `option` | stored with the leg's `asks`, `asks-mismatch` logged; refused (rule `person`); the path posted with `std:decision@1`; `output-invalid` raised |
