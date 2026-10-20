@@ -1498,12 +1498,18 @@ mean (R-BTN-50).
     nothing.
   - `advance {reached, leg}` finishes the running leg, if any, at `reached` — one of its
     outcomes, else refused `off-graph` — records the position, then starts `leg` if it leaves
-    `reached`, the ticket's runs of it (in `start_path` plus this claim's `claim_legs`, under
-    resolved names, R-BTN-64) are fewer than its `max_runs`, and every holder gate holds
+    `reached`, the ticket's runs of it are fewer than its `max_runs`, and every holder gate holds
     (matching rules, §6: grants, holds, barred tags with owner bars that apply at advances,
     required bars, prerequisites). The first `advance` starts the first leg; every leg a claim
     runs has its own `advance`. Baton records each leg a claim starts and finishes
     (`claim_legs`).
+  - **Baton's traversal record counts.** A ticket's runs of each leg and arrivals at each station
+    are counted from Baton's own record — every leg a claim ran (`claim_legs`) and every arrival a
+    snapshot confirmed, under resolved names (R-BTN-64) — never from the posted path alone.
+    `max_runs`, attempts (R-BTN-122) and retries read these counts. A snapshot whose path shows
+    fewer runs than Baton recorded does not lower them: git still places the ticket (R-BTN-35),
+    and the disagreement is logged `path-rewritten` (R-BTN-85). So an agent that rewrites a
+    ticket's history in git cannot buy its legs more runs.
   - The holder pushes a leg's evidence before the `advance` that finishes it, and may pass
     `bars`, tags it bars from the new leg, which only add to the posted bars. A later snapshot
     posting that leg's bars without a tag the holder declared is the discrepancy
@@ -2703,8 +2709,14 @@ Limits that hold throughout:
       or runner.
     - The frontmatter's `raised_by` names no leg. The runner generates the body from the
       condition's fields.
-    - Such a handler only delivers and never answers: a core condition closes only by its cause
-      or by `baton owner resolve`, so its handler needs no restart output.
+    - Such a handler delivers, and answers only through an **owner-signed commit**: its answer
+      leg's output counts as `baton owner resolve` only when the commit that writes it is signed
+      (git's SSH signature) by a key registered as an owner of the repository (R-BTN-58), which
+      the sync verifies and posts with the answer; `answered_by` is that owner. An unsigned or
+      non-owner answer is logged `answer-unsigned` and ignored, and the condition stays open. Any
+      other way, a core condition closes only by its cause or by `baton owner resolve`. An owner
+      key held where agents run gives agents this power too; owners who need the boundary keep
+      the signing key off those machines (`sk-` keys need a touch).
     - When the condition closes, the handler is superseded (R-BTN-168).
     - A binding of `baton.outbox-late` is ignored, so that a stuck outbox never feeds itself.
   - **The floor, which no binding removes.**
@@ -2730,8 +2742,10 @@ Limits that hold throughout:
 
 - **R-BTN-122 / R-BTN-23 (retries: the default handler of `error`).** The retry policy handles
   every `interrupt` condition. A binding of an `error` type adds a handler ticket beside the
-  retry policy and does not replace it. Whether a binding may replace the retry policy is an
-  open question.
+  retry policy and does not replace it, unless the binding says `"replaces": "retry"`: then the
+  handler's restart (`retry`, `route:<leg>` or `park`) decides in the policy's place, every
+  restart checked against the owners' bounds below, and the leg ends blocked on the condition as a
+  `suspend` would. *(Specified, not built.)*
   - **State.** Attempts are counted **per ticket and leg**, with §9's rules for what counts as a
     failed attempt, in `leg_attempts`: repository, ticket, leg, `attempts`, `first_attempt_at`,
     `retry_after` and `last_error_type`. A failing `review` spends none of `implement`'s attempts.
@@ -3404,7 +3418,9 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     any other runner and omits it from that runner's recommendations, and with no such runner
     live the leg carries a `capability` block (R-BTN-75). The declaration is the runner's own
     word, like its tags.
-- **R-BTN-123 (a leg hands off to a fresh session when its context fills).** A leg may declare
+- **R-BTN-123 (a leg hands off to a fresh session when its context fills).** A fresh session may
+  one day ask the session it replaced about its work; that may prove useful and is not built. A
+  leg may declare
   `"max_context": <fraction>` (0.1–0.95) and `"max_refreshes"` (default 3; capped by the owners'
   `retry` ceiling, R-BTN-122).
   - Context use is reported by the session provider's `contextUse(sessionId) → fraction | null`
@@ -3587,7 +3603,8 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     claim not running, a leg with `"stream": false`, or a viewer not allowed, all `forbidden`;
     then it rings the holder `watch`. The CLI viewer opens `GET /v1/stream?claim=<id>`, signed
     as an owner request by an owner key of the claim's repository or an administrator key, with
-    no `Origin`; it closes when the key is revoked.
+    no `Origin`; it closes when the key is revoked. An owner's dashboard session (R-BTN-155) may
+    watch its repositories' running legs as the CLI viewer may.
   - The runner opens `GET /v1/runner/stream?claim=<id>`, authenticated as the doorbell is. Only
     the claim's holder, while the claim runs and after a `watch` ring, may open it; a second
     holder connection replaces the first. 60 s after the last viewer leaves Baton rings
@@ -3963,8 +3980,9 @@ print its way to `success`.
       `check.`, or a course that is a key of the owners' `checks`, is refused the same way.
   - **Isolation.** Check legs require `runner:session` (R-BTN-107): no `process` or `attached`
     runner takes one (rule 4), and they run with every write-capable
-    credential and secret withheld, as replay does (R-BTN-84). Check courses run on private
-    repositories (see Open questions: the check legs' sandbox).
+    credential and secret withheld, as replay does (R-BTN-84). Checks run only changes from the
+    repository's own branches, never a fork's: a leg's logic cannot be both generally useful and
+    a sandbox for strangers' code.
   - **Conclusions are the owners'.** The owner setting `checks: {<course>: {name, conclusions:
     {<end station>: "success" | "failure" | "neutral"}}}` (R-BTN-66) maps end stations to
     conclusions, so no edit in git turns `failed` into `success`. A course file carries no
@@ -4045,7 +4063,8 @@ print its way to `success`.
     unseen.
   - **The gate is the forge's.** Branch protection requires the check by name **and** by the
     check App's id — never Baton's own App (§12.7) — so neither a status any token could post
-    nor Baton itself satisfies it. Checks are GitHub only.
+    nor Baton itself satisfies it. Checks are GitHub only, until GitLab or Gitea offers a status
+  that only one identity can post.
 
 ## 11. People: administrators, owners and their surfaces *(partly built)*
 
@@ -4348,7 +4367,10 @@ is summarized in the principal table (§12.1).
 
 ### 11.4 The dashboard
 
-- **R-BTN-155 (dashboard sign-in is a code an administrator confirms).**
+- **R-BTN-155 (dashboard sign-in is a code a key holder confirms).** An owner signs in the same
+  way with `baton owner open` and an owner key (`POST /v1/owner/login-links`); an owner's session
+  sees, watches and acts only on its own repositories, with owner actions, and every action the
+  destructive list names (§12.2) is confirmed by its code as an administrator's is.
   - **Sign-in.**
     1. `baton admin open` opens `https://<origin>/login`, which carries nothing.
     2. The page sends `POST /v1/login {}`. Baton writes a `login_codes` row, sets the pending
@@ -5406,7 +5428,10 @@ that predate Baton. What a cutover changes in docs' own text is in docs'
 ### 16.3 The git mirror
 
 A **mirror** is optional, per repository: a workflow (`mirror_workflow`, or a `mirror`-role
-sync key, R-BTN-93) that writes Baton's claim events into git for readers that predate Baton.
+sync key, R-BTN-93) that writes Baton's claim events into git for readers that predate Baton. The
+baton repository runs none, and work on Baton writes nothing to the docs repository, whose
+tickets concern the other immediately.run projects; docs keeps its mirror for those tickets until
+its readers read Baton's API, and then retires it.
 
 - It reads its own repository's events from `GET /v1/sync/events?after=`; each read's `after`
   acknowledges everything up to it, kept as `repositories.mirror_acked_seq`, which a seal
@@ -5453,6 +5478,11 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 
 **Scope and truth**
 
+- Chose to run checks only on the repository's own branches over a sandbox for forks' code: a leg's logic cannot be both generally useful and safely sandboxed (2026-10-20; R-BTN-114).
+- Chose to let a bound handler answer a core condition only through an owner-signed commit, and Baton's own traversal record over the posted path for every count, so that agents rewriting git can neither clear a hold nor buy runs (2026-10-20; R-BTN-163, R-BTN-63).
+- Chose no core default timers per tier: timers are the course's, and `baton.stalled` already flags a leg nobody takes (2026-10-20; R-BTN-167).
+- Chose to keep dependencies within one repository (2026-10-20; R-BTN-120).
+- Chose to leave reviewer-independence seats and tags as cooperative checks, without Baton recording seats or verifying a session's model, unless misuse is seen (2026-10-20; R-BTN-60, R-BTN-66).
 - Chose a Cloudflare Durable Object over SQLite on a home server: cloud sessions cannot reach a home network without exposing it, and one machine is a single point of failure (2026-10-13; §2).
 - Chose one codebase with Cloudflare in production and a Node host for development and self-hosting over separate implementations (2026-10-14; R-BTN-55, R-BTN-56).
 - Chose to move only the live lease into Baton: git holds every ticket fact and its content, and Baton holds the lease, filter fields, identifiers, pointers and digests (2026-10-13, 2026-10-15; R-BTN-33, R-BTN-35).
@@ -5556,18 +5586,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 
 ## Open questions
 
-- **Binding `error.<type>` to a course (R-BTN-122).** May a binding on an `error` type replace the retry policy, rather than file a handler beside it?
 - **Answering from a channel (R-BTN-161).** A reply on a channel (a chat app, say) cannot yet count as the answer: the delivery runner would have to write it to git attributably to the person. Answers are written in the ask's file.
 - **A lighter question (R-BTN-161).** A question that opens no ticket file, for legs that ask many quick questions. Deferred until a course needs it.
-- **Handlers that answer core conditions (R-BTN-163).** Letting a bound handler of `baton.*` invoke a restart needs an owner-attributable answer from outside Baton's surfaces.
 - **OAuth for MCP clients (R-BTN-130).** Baton as an OAuth 2.1 authorization server issuing MCP keys through a consent page, for clients that cannot send a bearer.
-- **Checks on GitLab and Gitea (R-BTN-114).** Which status on those forges a token other than the forge courier's cannot satisfy.
-- **The check legs' sandbox (R-BTN-114).** What "every secret withheld" requires beyond replay's credential rule before forks and public repositories are accepted.
-- **Watching for owners' dashboard sessions (R-BTN-118).** Owners watch through `baton leg log -f`; dashboard sessions for owners, once they exist, may watch running legs too.
-- **The git mirror (R-BTN-36).** Retire it once its consumers migrate, or keep it as the readable record?
-- **Default timers per tier (R-BTN-167).** Whether core arms default `start` or `ready` timers per tier, once activity data exists.
-- **Cross-repository dependencies (R-BTN-120).** May a ticket depend on another repository's ticket (`ops:T-1` on `docs:R3-1205`)? Dependencies stay within one repository.
-- **Asking a predecessor session (R-BTN-123).** A fresh session asking the one it replaced; reserved, not built.
-- **Rules beyond tags (R-BTN-60, R-BTN-66).** If agents aim reviewer independence at the wrong family, Baton could record each ticket's seats itself. Watch for it.
-- **Tags bound to sessions (R-BTN-60, R-BTN-66).** Tags are self-reported; binding them to a session's real model would fortify a cooperative check. Revisit only if dropped tags are seen.
 

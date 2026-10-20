@@ -1,0 +1,62 @@
+---
+title: "B-76 — Owners sign in to the dashboard and watch their running legs"
+id: B-76
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1125
+tier: judgement
+description: "Build BATON_SPEC R-BTN-155's owner sign-in (`baton owner open`, `POST /v1/owner/login-links`, an owner session scoped to its repositories with owner actions, destructive ones confirmed by code) and R-BTN-118's owner watching (an owner's dashboard session opens `GET /v1/ui/stream` for its repositories' running legs). S-BTN-126, S-BTN-70, G-BTN-144. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-9
+  - B-25
+---
+
+**Brief:** the owner, 2026-10-20, closing the open question "Watching for owners' dashboard
+sessions": "Sounds useful."
+**Spec:** `spec/BATON_SPEC.md` §11.4 R-BTN-155 (sign-in by a confirmed code, now for owners too),
+§8 R-BTN-118 (streaming; owner sessions watch), §12.2 (destructive actions), §12.4 R-BTN-16
+(cookies, origin checks), R-BTN-129 (the registry decides each action's callers).
+**Depends on:** B-9 (leg streams), B-25 (the registry, which scopes a session's actions).
+
+### Requires
+
+None: a checkout, a terminal and a browser.
+
+### What to build
+
+1. `baton owner open` and `POST /v1/owner/login-links {code}` signed by an owner key, binding the
+   pending sign-in as the administrator's route does; the session row records the owner's
+   credential and its repositories.
+2. Every `/v1/ui/*` read and action authorizes an owner session against its repositories and the
+   registry's `owner.*` actions; destructive ones need a confirmation code as an
+   administrator's do.
+3. `GET /v1/ui/stream` admits an owner session for a claim of one of its repositories.
+4. The dashboard hides what the session may not see.
+
+### Do not
+
+- Give an owner session any administrator action, or another repository's rows.
+
+### Tests
+
+- S-BTN-126 extended: an owner signs in, sees only its repositories, and a destructive action
+  needs its code; S-BTN-70 extended: an owner session watches its repository's leg and is refused
+  another's.
+
+### Exit criteria
+
+- [ ] the extended scenarios pass on both hosts; G-BTN-144 holds
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+
+## Status
+
+_(filed 2026-10-20 with the open-questions PR)_
