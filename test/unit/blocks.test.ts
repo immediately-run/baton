@@ -314,6 +314,12 @@ describe('R-BTN-76, R-BTN-77: a worker\'s own instance, and an answer lost', () 
     expect(await since('D')).toBeNull();
     expect((await kinds('unblocked')).length).toBe(unblocked + 1);
     expect(await messages()).toBe(sent + 1);
+    // The unblocking names the capability alone: merge's lost row is not why D unblocked (round 3).
+    const cleared = [{ kind: 'capability', ref: 'mcp-chrome' }];
+    const event = (await rows<{ d: string }>(`SELECT detail_json AS d FROM events WHERE kind = 'unblocked' AND ticket_id = 'docs:D' ORDER BY seq DESC LIMIT 1`))[0];
+    expect(JSON.parse(event.d).cleared).toEqual(cleared);
+    const message = (await rows<{ p: string }>(`SELECT payload_json AS p FROM messages WHERE kind = 'unblocked' ORDER BY id DESC LIMIT 1`))[0];
+    expect(JSON.stringify(JSON.parse(message.p))).toContain(JSON.stringify(cleared));
     expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: null }]);
   });
 

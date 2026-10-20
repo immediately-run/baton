@@ -220,11 +220,12 @@ export class Blocks {
       // `blocked_since`: that `blocked` still stands.
       const marker = t.answer_lost ? (JSON.parse(t.answer_lost) as LostAnswer) : null;
       const lostRows = cleared.filter((r) => r.kind === 'resource' && this.lostAnswer(id, r));
-      const queued = this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', id)[0]?.next_leg ?? null;
+      const queued = this.queuedLeg(id);
       const lost = queued != null && lostRows.some((r) => r.leg === queued);
       const reblock = marker != null && added.length > 0
         && added.every((w) => w.kind === 'resource' && marker.rows.some((r) => r.ref === w.ref && (r.leg ?? '') === w.leg));
-      this.evaluate(id, cleared, lost || reblock, reblock ? marker.since : null);
+      // A logged transition names only the rows whose removal unblocked it: a lost row is not one.
+      this.evaluate(id, lost || reblock ? cleared : cleared.filter((r) => !lostRows.includes(r)), lost || reblock, reblock ? marker.since : null);
       if (lost && t.blocked_since != null && this.blockedSince(id) == null) {
         const next: LostAnswer = { since: marker?.since ?? t.blocked_since, rows: [...(marker?.rows ?? []), ...lostRows] };
         this.exec('UPDATE tickets SET answer_lost = ? WHERE id = ?', JSON.stringify(next), id);
@@ -259,7 +260,7 @@ export class Blocks {
     const pending = marker.rows.filter((c) => this.lostAnswer(id, c));
     if (pending.length) return;
     this.exec('UPDATE tickets SET answer_lost = NULL WHERE id = ?', id);
-    const queued = this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', id)[0]?.next_leg ?? null;
+    const queued = this.queuedLeg(id);
     if (t.blocked_since != null || queued == null || this.isHeld(id)) return;
     logEvent(this.c.store, this.c.now(), 'unblocked', 'baton', { ticket: id, cleared: marker.rows }, id);
     this.unblocked(t.repository_id, id, marker.rows);
@@ -304,6 +305,11 @@ export class Blocks {
       resource, resource, resource)[0]?.u ?? null;
   }
 
+  /** The ticket's queued leg, or null when it has none (R-BTN-83). */
+  private queuedLeg(id: string): string | null {
+    return this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', id)[0]?.next_leg ?? null;
+  }
+
   /** Whether a claim holds the ticket — rule 3's check, the one definition (R-BTN-75). */
   private isHeld(id: string): boolean {
     return this.rows(`SELECT 1 FROM claims WHERE ticket_id = ? AND (status = 'active' OR (status = 'completed' AND confirmed_at IS NULL)
@@ -316,7 +322,7 @@ export class Blocks {
   private evaluate(id: string, cleared: Cleared[], silent: boolean, since: number | null = null) {
     const t = this.rows<{ repository_id: string; blocked_since: number | null }>('SELECT repository_id, blocked_since FROM tickets WHERE id = ?', id)[0];
     if (!t) return;
-    const queued = this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', id)[0]?.next_leg ?? null;
+    const queued = this.queuedLeg(id);
     const blocking = queued == null || this.isHeld(id) ? [] : this.rows<{ kind: BlockKind; leg: string; ref: string }>(
       `SELECT kind, leg, ref FROM ticket_blocks WHERE ticket_id = ? AND (leg = '' OR leg = ?) ORDER BY kind, ref, leg`, id, queued);
     const now = this.c.now();
@@ -771,7 +777,7 @@ export class Blocks {
     const o = this.rows<{ hold: number; hold_reason: string | null; retry_after: number | null }>('SELECT hold, hold_reason, retry_after FROM ticket_overrides WHERE ticket_id = ?', ticketId)[0];
     if (o?.hold) other.push({ kind: 'hold', detail: { reason: o.hold_reason } });
     if (o?.retry_after != null && o.retry_after > now) other.push({ kind: 'backoff', detail: { retry_after: o.retry_after } });
-    const queued = this.rows<{ next_leg: string | null }>('SELECT next_leg FROM ticket_stations WHERE ticket_id = ?', ticketId)[0]?.next_leg ?? null;
+    const queued = this.queuedLeg(ticketId);
     for (const n of this.rows<{ leg: string; waiting_on: string | null }>(`SELECT leg, waiting_on FROM ticket_next_legs WHERE ticket_id = ? AND state = 'waiting' AND waiting_on IS NOT NULL ORDER BY leg`, ticketId)) {
       other.push({ kind: 'waiting_on', detail: { leg: n.leg, on: n.waiting_on } });
     }
