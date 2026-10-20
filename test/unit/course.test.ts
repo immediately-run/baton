@@ -48,6 +48,17 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(rules(c)).toEqual(['bound legs.review.isolation']);
   });
 
+  it('a station names its entry outputs by name and schema id; an output may name an id or a legacy path (R-BTN-108, R-BTN-109)', () => {
+    const c = copy();
+    c.stations.reviewed.entry = [{ output: 'findings', schema: 'roadmap-pr:findings@2' }, { output: 'change', schema: 'std:forge.change@1' }];
+    c.legs.review.outputs = { findings: { schema: 'roadmap-pr:findings@2' }, notes: { schema: 'schemas/notes.json' } };
+    expect(validateCourse(c)).toEqual([]);
+    c.stations.reviewed.entry = [{ output: 'findings', schema: 'findings.json' }, { output: 'findings', schema: 'std:url@1' }, { output: 'x', schema: 'std:url@1', why: 1 }, 'x'];
+    expect(rules(c)).toEqual(['entry stations.reviewed.entry.0.schema', 'entry stations.reviewed.entry.1.output', 'unknown-key stations.reviewed.entry.2.why', 'entry stations.reviewed.entry.3']);
+    c.stations.reviewed.entry = 'findings';
+    expect(rules(c)).toEqual(['entry stations.reviewed.entry']);
+  });
+
   it('a station no leg reaches is unreachable', () => {
     const c = copy();
     c.stations.orphan = { label: 'Nobody gets here' };

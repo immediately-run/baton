@@ -8,10 +8,11 @@ import { transcriptUrl } from './links';
 import { isUniqueViolation, logEvent, randomHex } from './db';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
-import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End } from './validate';
+import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
-import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Step } from './graph';
+import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
+import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from '../shared/schema.mjs';
 import type { Seen, Stations } from './stations';
 import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
 import type { Row, SqlValue, Store } from './ports';
@@ -42,6 +43,8 @@ export interface Ctx {
   blocks?: Blocks;
   /** R-BTN-81, R-BTN-85: the ticket's history and Baton's disagreements with git. */
   history?: History;
+  /** R-BTN-108: a schema by id for a repository — the `std:` library's or the repository's. */
+  schema?: (repo: string, id: string) => Schema | null;
 }
 
 interface WorkerFacts {
@@ -690,6 +693,9 @@ export class Claims {
     if (unmet) throw new BatonError('not-eligible', `policy: ${leg} must bar a ${unmet.tag_prefix} tag (an owner's required bar)`, { rule: 8, rule_code: 'policy' });
     const v = this.gate(this.worker(workerId), item, leg, 'advance', { except: claimId, holderBars: b.bars });
     if (!v.ok) throw this.refusal(c.ticket_id, v, 'advance');
+    // R-BTN-109: the finished leg arrives at `at` with what its entry asks; inline values in full.
+    if (run) this.checkEntry(repo, g, at, b.outputs);
+    else this.checkOutputValues(repo, b.outputs);
     // R-BTN-76: an advance into a leg blocked on a resource is accepted — the holder may know better.
     const resources = this.resourceAdvice(workerId, c.ticket_id, leg);
     if (resources.length) this.event('advice-overridden', `worker:${workerId}`, { overridden: [{ advice: 'resource', leg, resources }] }, c.ticket_id, claimId);
@@ -741,8 +747,60 @@ export class Claims {
       throw new BatonError('claim-ended', `the claim already ended (${c.status}: ${c.end_reason})`);
     }
     const { reached, finished } = this.restingAt(c, e);
+    // R-BTN-109: a completed end that finishes its leg arrives at `reached` and meets its entry. A
+    // release is not checked: it is how the runner gives up a leg whose outputs fail (R-BTN-82).
+    const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
+    if (e.status === 'completed' && finished && g) this.checkEntry(repositoryOf(c.ticket_id), g, reached, e.outputs);
+    else if (e.status === 'completed') this.checkOutputValues(repositoryOf(c.ticket_id), e.outputs);
     this.finish(c.id, c.ticket_id, e.status, e.end_reason, `worker:${workerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next });
     return { ok: true };
+  }
+
+  /**
+   * R-BTN-109: an arrival at `station` must carry each output its `entry` names — by that name,
+   * with the required schema or one refining it (by the repository's posted base chains). Every
+   * inline value is validated in full with the shared validator, against its schema and each
+   * base (R-BTN-108). An unmet requirement or an invalid value is refused `not-eligible`, rule
+   * `entry` — which the runner treats as an output contract failure.
+   */
+  private checkEntry(repo: string, g: Graph, station: string, outputs: Output[]) {
+    const resolve = this.resolver(repo);
+    this.checkOutputValues(repo, outputs, resolve);
+    for (const r of g.entry.get(station) ?? []) {
+      const o = outputs.find((x) => x.name === r.output);
+      if (!o) throw new BatonError('not-eligible', `entry: ${station} requires the output ${r.output} (${r.schema})`, { rule: 'entry', rule_code: 'entry' });
+      if (!resolve(o.schema) || !baseChain(o.schema, resolve).includes(r.schema)) {
+        throw new BatonError('not-eligible', `entry: ${r.output} is ${o.schema}, which is not ${r.schema} or a refinement of it`, { rule: 'entry', rule_code: 'entry' });
+      }
+    }
+  }
+
+  /** One request's schema resolver (3-r3-1): each id read and parsed once, so the validator's
+   *  done-once work — enum sets and `const` keys, keyed by the schema object — is done once, and
+   *  the reads are bounded by the schemas a chain names, not by the value's size. */
+  private resolver(repo: string): (id: string) => Schema | null {
+    const seen = new Map<string, Schema | null>();
+    return (id) => {
+      if (!seen.has(id)) seen.set(id, this.c.schema?.(repo, id) ?? null);
+      return seen.get(id) ?? null;
+    };
+  }
+
+  /** R-BTN-108: each inline value, against its schema and every base; a value whose schema chain
+   *  does not bound it is given by pointer instead. */
+  private checkOutputValues(repo: string, outputs: Output[], resolve = this.resolver(repo)) {
+    // One budget for the request: up to 16 outputs share it (baton#69 round 2, 2-r2-0).
+    const meter = { steps: PATTERN_STEPS_MAX };
+    for (const o of outputs) {
+      if (!Object.prototype.hasOwnProperty.call(o, 'value')) continue;
+      if (!resolve(o.schema)) throw new BatonError('not-eligible', `entry: ${o.name}'s schema ${o.schema} is not posted or in the std: library`, { rule: 'entry', rule_code: 'output-invalid' });
+      const unbounded = unboundedAt(o.schema, resolve);
+      if (unbounded) throw new BatonError('invalid-params', `outputs: ${o.name} is given inline, but its schema does not bound it (${unbounded}); give it by pointer`);
+      const faults = validate(o.value, o.schema, resolve, meter);
+      if (faults.length) {
+        throw new BatonError('not-eligible', `entry: ${o.name} fails ${o.schema}: ${faults.slice(0, 3).map((f) => `${f.path || '/'} ${f.message}`).join('; ')}`, { rule: 'entry', rule_code: 'output-invalid' });
+      }
+    }
   }
 
   /**

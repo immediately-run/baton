@@ -10,7 +10,9 @@ import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { githubFacts, parseSyncArgs, remoteSlug, syncWorkflow } from '../../src/defaults/cli';
+import { courseSchemas, githubFacts, parseSyncArgs, remoteSlug, syncWorkflow } from '../../src/defaults/cli';
+import { createHash } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
 import { githubFake } from '../githubFake';
 import { graphOf } from '../../src/core/graph';
 import { decide } from '../../src/runner/protocol';
@@ -925,4 +927,24 @@ export async function run(ctx, standard) {
       rmSync(extra, { force: true });
     }
   }, 120_000);
+});
+
+describe('courseSchemas: the sync posts a course\'s schemas (R-BTN-108)', () => {
+  it('reads .baton/schemas/<course>/<name>@<n>.json as <course>:<name>@<n>, with the SHA-256 of its bytes', () => {
+    const root = mkdtempSync(join(tmpdir(), 'baton-schemas-'));
+    try {
+      expect(courseSchemas(root, 'roadmap-pr')).toEqual({});
+      const dir = join(root, '.baton', 'schemas', 'roadmap-pr');
+      mkdirSync(dir, { recursive: true });
+      const text = '{ "type": "object" }\n';
+      writeFileSync(join(dir, 'findings@2.json'), text);
+      writeFileSync(join(dir, 'README.md'), 'not a schema');
+      writeFileSync(join(dir, 'findings.json'), '{}');
+      expect(courseSchemas(root, 'roadmap-pr')).toEqual({ schemas: [{ id: 'roadmap-pr:findings@2', digest: createHash('sha256').update(text).digest('hex'), schema: { type: 'object' } }] });
+      writeFileSync(join(dir, 'broken@1.json'), '{');
+      expect(() => courseSchemas(root, 'roadmap-pr')).toThrow(/broken@1.json is not JSON/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
