@@ -1,0 +1,73 @@
+---
+title: "B-49 — One evaluation per recount: a returning fleet logs no spurious unblocked and keeps blocked_since"
+id: B-49
+project: baton
+status: in-review
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "Blocks.recount writes the capability rows and evaluates, then writes the resource rows and evaluates again. A ticket that requires a capability and needs an unavailable resource, whose fleet empties overnight and returns, is logged unblocked (waking workers and firing the trigger) and blocked again, and its blocked_since moves, though it never stopped being blocked. R-BTN-75 (amended by R3-1254 part 2b) evaluates once, after the transaction's last row change. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/67
+depends_on: []
+---
+
+**Spec:** BATON_SPEC R-BTN-75 ("once, after the transaction's last row change", amended
+2026-10-19 by R3-1254 part 2b), R-BTN-77.
+**Found by:** baton#59's review gate, round 1 (1-A-4, 1-B-1). Both reviewers reproduced it in core
+with a scratch test, while the model's `recount` settles once.
+
+### Requires
+
+None.
+
+### Why
+
+`Blocks.recount` (`src/core/blocks.ts`) calls `this.write(touched, ['capability'])` and then
+`this.write(needers, ['resource'])`, and each `write` ends in `evaluate`, which reads the table as it
+stands. Take ticket D, which requires `mcp-chrome` and whose queued leg needs a resource that is
+`unavailable`:
+1. Overnight the one worker declaring `mcp-chrome` lapses. Its capability row is written and the
+   resource row is cleared, with no live worker left to answer. D stays blocked.
+2. In the morning that worker heartbeats. The capability write clears its row while no resource
+   row exists yet, so `evaluate` logs `unblocked` and calls `unblocked()`, which messages workers
+   and fires the trigger.
+3. The resource write re-adds the row, and `evaluate` logs `blocked` with a new `blocked_since`.
+
+D was never claimable.
+
+### What to build
+
+1. Make `recount` (and any caller that writes several kinds in one transaction) rewrite every kind
+   first and evaluate each touched ticket once, after the last write. `write`'s per-kind diff
+   can stay; the evaluation and the `answer_lost` handling move to one pass over the union of
+   touched tickets.
+2. Keep R3-1251's `answer_lost` semantics, which the model now pins (`settleLost`): a row lost to an
+   empty fleet clears silently; blocked again only on rows it lost, silently; otherwise logged,
+   with the owed `unblocked` first.
+3. Drop the `@impl pending — one evaluation per recount … (R-BTN-75, B-49)` notes on the model's
+   `heartbeat`, `fenceCleared`, `declare`, `alarmLive`, `reading` and `readingLapses` (`npm run
+   model:links` lists them), and re-stamp.
+
+### Tests
+
+- The reviewers' probe as a unit test in `test/unit/blocks.test.ts`: D as above. After the morning
+  heartbeat, no new `blocked` or `unblocked` event, and `blocked_since` unchanged. It fails on
+  today's core.
+- An S-BTN scenario row for it under R-BTN-75's scenarios, on both hosts.
+
+### Exit criteria
+
+- [ ] a recount evaluates each ticket once, with the probe test failing before and passing after
+- [ ] merged under the review gate
+
+## Status
+
+_2026-10-20 — claimed (session https://claude.ai/code/session_01Jf7hvrTF88hd1zY1YSQ1gq) — baton._
+
+_2026-10-20 — in review: https://github.com/immediately-run/baton/pull/67. `Blocks.batch` defers every row write's evaluation to the transaction's end; the probe test fails on main and passes on the branch._

@@ -1,0 +1,69 @@
+---
+title: "B-48 — npm test back under 20 minutes on a hosted runner: replay the scenario traces in batches, not one Quint run each"
+id: B-48
+project: baton
+status: available
+updated: 2026-10-19
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: "npm run traces checks each of ~150 scenario traces with its own `quint test` process, and each process parses and compiles the whole model. Since 2026-10-19, with the model's fleet (R3-1254 part 2b) and more scenarios, npm test takes 20 to over 25 minutes on a hosted runner, so ci.yml and baton-deploy.yml were raised to 45. Batch the traces that share an instance into one Quint run, or otherwise cut the per-trace compile, and lower the timeouts again. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** BATON_SPEC R-BTN-29 to R-BTN-31 (the scenario traces checked against the model), R-BTN-68.
+**Found by:** baton#60's CI, 2026-10-19. `baton-deploy` on main has been cancelled at its 15-minute
+limit intermittently since 485ca9e on 2026-10-18 (run 39150220904), well before baton#59 merged, and on
+every push from bbc525a on (bbc525a, 9cfae24, b4314f8, 34f0ef2 and 349694a, with `npm test` at
+14.8–14.9 minutes; the last deploy was eaa585f, `npm test` 13.5 minutes). Main's `ci` ran `npm test` in
+9½–18 minutes before baton#59. After baton#59, main's `ci`
+runs were cancelled at their 25-minute limit too. baton#65 raised both limits to 45 minutes as a
+stopgap. Open baton#62 proposes the other answer, running Quint only for a change to the model; this
+ticket keeps the traces on every change (R-BTN-68) and makes them cheaper instead.
+
+### Requires
+
+None.
+
+### Why
+
+`scripts/check-traces.mjs` writes one module per trace and spawns `npx quint test` for it. Each
+process parses, typechecks and compiles `model/baton.qnt`, which takes about 3.4 s of a typecheck alone
+since part 2b (2.7 s before), and then runs the trace. On 4 local CPUs, 150 traces take 8½ minutes.
+On a hosted runner (also 4 vCPUs; the pool is a fixed `TRACE_JOBS ?? 4`) the measured phases are:
+vitest about 9 minutes (baton#60's CI, `Duration 540.50s`), and the trace replay over 16 minutes (main's
+a336208, run 39274212588, cancelled 16 minutes into it). `npm test` overall took 19 m 48 s on baton#65's
+run and over 25 minutes on main's. A rejected trace's bisection adds a run per step. Vitest's 9 minutes
+count against any target, so the replay itself has to come down to about 10 minutes for `npm test` to
+fit in 20.
+
+### What to build
+
+1. Group the traces by the instance constants `translate` derives (workers, tickets, tags, the
+   required bar, the slots). Write one module per group, with one `run` per trace, and run it with one
+   `quint test` process. Keep each trace's own module only for the bisection of a rejected one.
+2. Keep the per-trace report (`checked`, `end`, the scope check) exactly as it is.
+3. Set `ci.yml`'s and `baton-deploy.yml`'s `test` job timeouts from the measured time (the last item of Tests)
+   plus stated headroom, the deploy job's no lower than `ci.yml`'s, since both run the same `npm test`.
+   Not "back to 15": `baton-deploy` already failed at 15 minutes before baton#59.
+
+### Tests
+
+- `test/unit/check-traces.test.ts` still rejects each case it rejects today, and names the same step.
+- A mixed batch: accepted traces and one rejected trace that share an instance run in one module; each
+  trace gets its own result, and only the rejected one is bisected and named at its step.
+- Grouping by constants: two traces whose instance constants differ land in different modules. The
+  grouping function is exported, and at least one case is built from the recorder's own output (`toItf`,
+  or a `test/.traces` file), not a hand-written one (R2).
+- The `npm test` step's time on at least three CI runs, before and after, in the PR body.
+
+### Exit criteria
+
+- [ ] `npm test` under 20 minutes on the slowest of at least three hosted-runner runs, recorded in the PR body
+- [ ] both `test` job timeouts set from that time plus stated headroom, `baton-deploy.yml`'s no lower than `ci.yml`'s
+- [ ] merged under the review gate
