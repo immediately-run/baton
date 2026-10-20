@@ -6,6 +6,11 @@
 // of this comment). One parent ticket, one leg that asks QUESTIONS in order, each ask a fresh
 // condition id; CHANNELS delivery legs per condition; one outbox writer; one sync.
 //
+// Assumed, not modelled: the question's text is pushed atomically, off any branch, as a
+// parentless commit to `refs/baton/questions/<local id>/<sha>` before the raise is reported
+// (R-BTN-173), so the raise either reached Baton with a readable `question` pointer or did not
+// happen; promotion and the `leave` write render the ask's body from it.
+//
 // Actors and failures:
 //   Baton    durable; each request one transaction (a Durable Object). R1 off splits the
 //            channel report into a read and a later write.
@@ -18,17 +23,23 @@
 //            the ask file once it exists; may give different answers on two channels.
 //   channel  HISTORY: a reply stays readable by condition id until Baton has accepted it; off,
 //            reading consumes it (a fire-and-forget webhook).
-//   outbox   a `baton.write` claim pushes an entry, then reports it; dying between the two, or a
-//            refused push, leaves the entry queued and the next claim finds `baton_write: <id>`
-//            in the file (R-BTN-171's idempotence), so both are the same as not yet reporting.
-//   sync     closes a promoted condition when the ask file carries an answer.
+//   outbox   a `baton.write` claim takes an entry, pushes it, then reports it; it may die
+//            before or after the push (reaped: the entry is queued again, and a re-claim finds
+//            `baton_write: <id>` already in git, R-BTN-171's idempotence) or end unwritten
+//            (a refused push).
+//   sync     closes a promoted condition when the ask file carries an answer; an answer in the
+//            file of an already closed condition is recorded ignored (`answer-ignored`).
+//   owner    resolves a promoted condition (R-BTN-163), racing the outbox's `handler` write;
+//            moves the ticket off the leg (`leave`: an owner `route`, an `exhausted` leg, a
+//            timer's `leg`, a choice, a withdrawal) while it holds a settled, unrecorded answer.
 //   clock    the parent's wait expiry races every report (`expire` is enabled while waiting).
 //
 // The rules under test, each a constant so that an instance can drop one (R-BTN-173):
 //   R1 settle-or-promote in one transaction: a report settles only an `open` condition, in the
 //      transaction that reads it; a report on anything else is never applied in the claim.
-//   R2 a reap (or any end) of the claim waiting on an open light condition promotes it and
-//      blocks the leg on it, in the reap's transaction.
+//   R2 any end or reap of a claim waiting on an open condition blocks the leg on it in that
+//      transaction (R-BTN-162: every `suspend` condition, light or not); for a light one the
+//      same transaction promotes it. Every condition here is light; noR2 drops both halves.
 //   R3 a reply reported after promotion is queued as an outbox `answer` entry into the ask
 //      file (the first one only; later ones are recorded ignored).
 //   R4 carry: every settled condition of the leg whose answer no end of a consuming claim has
@@ -36,6 +47,13 @@
 //   R5 a delivery leg is retracted only after every reply on its channel has been reported.
 //   R6 an outbox `answer` write never overwrites an answer already in the file; it is then
 //      recorded ignored.
+//   R7 leaving the leg while an answer is settled but not recorded queues an outbox `handler`
+//      write of the closed ask carrying the answer (R-BTN-173's "records it in git another way").
+//   R8 a dropped `handler` entry that any `baton.write` claim ever took is followed by a
+//      `withdraw`, whether or not that claim reported it written (R-BTN-171). R8 off is the
+//      reading "a withdraw follows only if the end reports it written; otherwise the row is
+//      deleted", which leaves an ask file for a closed condition in git when the writer pushes
+//      and is reaped before reporting.
 //   A1 (assumption, HISTORY) the channel keeps each reply readable by condition id until Baton
 //      has accepted it (history, or redelivery until acknowledged).
 //
@@ -47,7 +65,7 @@
 //   npx quint typecheck model/lightQuestion.qnt
 //   npx quint run model/lightQuestion.qnt --main=full --invariant=allProps --max-samples=10000 \
 //     --max-steps=120 --backend=typescript                                  (must pass)
-//   the same with --main=noR1 … noR6, noHistory                             (each must fail)
+//   the same with --main=noR1 … noR8, noHistory                             (each must fail)
 //   the same with --main=full --invariant=<a witness below>                (each must fail)
 // Apalache (bounded proof of `safety`): `quint verify` sends the IR in one request, which its
 // server refuses over 20 MB, so compile to a file named *.qnt.json and run Apalache on it:
@@ -69,22 +87,24 @@ module lightQuestion {
   const R4: bool
   const R5: bool
   const R6: bool
+  const R7: bool
+  const R8: bool
   const DRAIN_ODDS: int       // a chaos step turns to drain with odds 1 in this
 
   type Reply = (int, str, str)                    // (condition, source: a channel or "file", answer)
   type Cond = { status: str,                      // none | open | settled | promoted | closed
                 q: int, claim: int,
-                ans: str, src: str, via: str,     // the settled answer; via "channel" | "git"
+                ans: str, src: str, via: str,     // the settled answer; via "channel" | "git" | "owner"
                 settles: int, promotedEver: bool,
                 used: bool }                      // an end of a claim that consumed it recorded it
-  type Entry = { id: int, kind: str, c: int, src: str, v: str }   // kind handler | answer
+  type Entry = { id: int, kind: str, c: int, src: str, v: str }   // kind handler | answer | closedAsk | withdraw
   type State = {
     mode: str, drained: bool, crashes: int,
     conds: int -> Cond, nextCond: int,
     // the parent: Baton's claim and the runner's process
     claimActive: bool, claimId: int, alive: bool, phase: str,   // none | run | wait | done
     pCond: int, pKnown: int -> str, pConsumed: Set[int],
-    blockedOn: int, lastEnd: str, lastBlocked: int, legDone: bool,
+    blockedOn: int, lastEnd: str, lastBlocked: int, legDone: bool, legLeft: bool,
     consumed: int -> Set[str],                                  // ghost: every answer a leg run took, per condition
     // channels and delivery legs, by (condition, channel)
     sent: Set[(int, str)], retracted: Set[(int, str)],
@@ -94,8 +114,9 @@ module lightQuestion {
     given: Set[Reply], accepted: Set[Reply], ignored: Set[Reply], applied: Set[Reply],
     // the outbox
     outbox: Set[Entry], outPushed: Set[int], outSkipped: Set[int], outDone: Set[int], nextOut: int,
+    outClaimed: Set[int], outEverClaimed: Set[int], outDropped: Set[int],
     // git: the ask file per condition, and what the leg's ends wrote (evidence or hand-off)
-    gFile: int -> bool, gAns: int -> str, gSrc: int -> str, gLeg: int -> str,
+    gFile: int -> bool, gAns: int -> str, gSrc: int -> str, gLeg: int -> str, gWithdrawn: int -> bool,
   }
 
   var st: State
@@ -108,15 +129,16 @@ module lightQuestion {
     conds: CONDS.mapBy(c => NOCOND), nextCond: 1,
     claimActive: false, claimId: 0, alive: true, phase: "none",
     pCond: 0, pKnown: QUESTIONS.mapBy(q => ""), pConsumed: Set(),
-    blockedOn: 0, lastEnd: "none", lastBlocked: 0, legDone: false,
+    blockedOn: 0, lastEnd: "none", lastBlocked: 0, legDone: false, legLeft: false,
     consumed: CONDS.mapBy(c => Set()),
     sent: Set(), retracted: Set(),
     chReply: tuples(CONDS, CHANNELS).mapBy(k => ""), held: tuples(CONDS, CHANNELS).mapBy(k => ""),
     pending: Set(),
     given: Set(), accepted: Set(), ignored: Set(), applied: Set(),
     outbox: Set(), outPushed: Set(), outSkipped: Set(), outDone: Set(), nextOut: 1,
+    outClaimed: Set(), outEverClaimed: Set(), outDropped: Set(),
     gFile: CONDS.mapBy(c => false), gAns: CONDS.mapBy(c => ""), gSrc: CONDS.mapBy(c => ""),
-    gLeg: QUESTIONS.mapBy(q => ""),
+    gLeg: QUESTIONS.mapBy(q => ""), gWithdrawn: CONDS.mapBy(c => false),
   }
 
   // ---- helpers ----
@@ -296,29 +318,53 @@ module lightQuestion {
     st' = { ...st, chReply: st.chReply.set((c, ch), v), given: st.given.union(Set((c, ch, v))) },
   }
   action answerInFile(c: int, v: str): bool = all {
-    st.mode == "chaos", st.gFile.get(c), st.gAns.get(c) == "",
+    st.mode == "chaos", st.gFile.get(c), not(st.gWithdrawn.get(c)), st.gAns.get(c) == "",
     not(ANSWERS.exists(w => st.given.contains((c, "file", w)))),
     st' = { ...st, gAns: st.gAns.set(c, v), gSrc: st.gSrc.set(c, "file"),
             given: st.given.union(Set((c, "file", v))) },
   }
 
   // ---- the outbox (R-BTN-171) ----
-  def canPush(e: Entry): bool = all {
-    st.outbox.contains(e), not(st.outPushed.contains(e.id)),
-    st.outbox.forall(f => (f.c == e.c and f.id < e.id) implies st.outPushed.contains(f.id)),
+  pure def queue(s: State, kind: str, c: int, src: str, v: str): State =
+    { ...s, outbox: s.outbox.union(Set({ id: s.nextOut, kind: kind, c: c, src: src, v: v })), nextOut: s.nextOut + 1 }
+  def live(e: Entry): bool = not(st.outDone.contains(e.id))
+  // a `baton.write` claim takes the next live entry of a ticket, in id order
+  def canTake(e: Entry): bool = all {
+    st.outbox.contains(e), live(e), not(st.outClaimed.contains(e.id)), not(st.outDropped.contains(e.id)),
+    st.outbox.forall(f => (f.c == e.c and f.id < e.id) implies st.outDone.contains(f.id)),
   }
+  action take(e: Entry): bool = all {
+    canTake(e),
+    st' = { ...st, outClaimed: st.outClaimed.union(Set(e.id)), outEverClaimed: st.outEverClaimed.union(Set(e.id)) },
+  }
+  def canPush(e: Entry): bool = st.outClaimed.contains(e.id) and not(st.outPushed.contains(e.id))
   action push(e: Entry): bool = all {
     canPush(e),
     val s1 = { ...st, outPushed: st.outPushed.union(Set(e.id)) }
     st' = if (e.kind == "handler") { ...s1, gFile: s1.gFile.set(e.c, true) }
+          else if (e.kind == "withdraw") { ...s1, gWithdrawn: s1.gWithdrawn.set(e.c, s1.gFile.get(e.c)) }
+          else if (e.kind == "closedAsk")
+            { ...s1, gFile: s1.gFile.set(e.c, true), gAns: s1.gAns.set(e.c, e.v), gSrc: s1.gSrc.set(e.c, e.src) }
           else if (R6 and st.gAns.get(e.c) != "") { ...s1, outSkipped: s1.outSkipped.union(Set(e.id)) }
           else { ...s1, gAns: s1.gAns.set(e.c, e.v), gSrc: s1.gSrc.set(e.c, e.src) },
   }
-  def canWritten(e: Entry): bool = st.outPushed.contains(e.id) and not(st.outDone.contains(e.id))
-  action written(e: Entry): bool = all {
-    canWritten(e),
-    st' = { ...st, outDone: st.outDone.union(Set(e.id)),
-            ignored: if (st.outSkipped.contains(e.id)) st.ignored.union(Set((e.c, e.src, e.v))) else st.ignored },
+  // the claim's end: reports a pushed entry written, or ends without writing it
+  pure def endEntry(s: State, e: Entry, reported: bool): State =
+    val s1 = { ...s, outClaimed: s.outClaimed.exclude(Set(e.id)) }
+    if (s.outDropped.contains(e.id))
+      // R-BTN-171: a dropped entry's row was kept until this end
+      val s2 = { ...s1, outDone: s1.outDone.union(Set(e.id)) }
+      if (e.kind == "handler" and (reported or R8)) queue(s2, "withdraw", e.c, "", "") else s2
+    else if (reported)
+      { ...s1, outDone: s1.outDone.union(Set(e.id)),
+        ignored: if (s.outSkipped.contains(e.id)) s1.ignored.union(Set((e.c, e.src, e.v))) else s1.ignored }
+    else s1
+  def canWritten(e: Entry): bool = st.outClaimed.contains(e.id) and st.outPushed.contains(e.id)
+  action written(e: Entry): bool = all { canWritten(e), st' = endEntry(st, e, true) }
+  // the claim ends unwritten (a refused push) or its runner is reaped, before or after its push
+  action writerFails(e: Entry): bool = all {
+    st.mode == "chaos", st.crashes > 0, st.outClaimed.contains(e.id),
+    st' = { ...endEntry(st, e, false), crashes: st.crashes - 1 },
   }
 
   // ---- the sync: a promoted condition closes when its ask file carries an answer ----
@@ -330,6 +376,42 @@ module lightQuestion {
     st' = { ...setCond(st, c, { ...cd, status: "closed", ans: r._3, src: r._2, via: "git", settles: cd.settles + 1 }),
             applied: st.applied.union(Set(r)) },
   }
+  // an answer in the ask file of a condition already closed another way: `answer-ignored`
+  def canSyncLate(c: int): bool =
+    val r = (c, st.gSrc.get(c), st.gAns.get(c))
+    all { cond(c).status == "closed", st.gAns.get(c) != "", not(st.applied.contains(r)), not(st.ignored.contains(r)) }
+  action syncLate(c: int): bool = all {
+    canSyncLate(c),
+    st' = { ...st, ignored: st.ignored.union(Set((c, st.gSrc.get(c), st.gAns.get(c)))) },
+  }
+
+  // ---- the owner ----
+  // R-BTN-163: resolve a promoted condition; R-BTN-171: its live `handler` and `answer` entries
+  // are dropped — deleted when no claim holds them, kept until the claim ends when one does; a
+  // handler already written is followed by a withdraw (endEntry, or here for a finished one)
+  action ownerResolve(c: int, v: str): bool = all {
+    st.mode == "chaos", cond(c).status == "promoted",
+    val cd = cond(c)
+    val s1 = { ...setCond(st, c, { ...cd, status: "closed", ans: v, src: "owner", via: "owner", settles: cd.settles + 1 }),
+               applied: st.applied.union(Set((c, "owner", v))) }
+    val mine = st.outbox.filter(e => e.c == c and (e.kind == "handler" or e.kind == "answer"))
+    val dropNow = mine.filter(e => live(e) and not(st.outClaimed.contains(e.id)))
+    val dropLater = mine.filter(e => live(e) and st.outClaimed.contains(e.id))
+    val handlerWritten = mine.exists(e => e.kind == "handler" and st.outDone.contains(e.id))
+    // an unclaimed live handler entry a dead writer pushed is in git too (R8: ever claimed)
+    val needWithdraw = handlerWritten or (R8 and dropNow.exists(e => e.kind == "handler" and st.outEverClaimed.contains(e.id)))
+    val s2 = { ...s1, outDone: s1.outDone.union(dropNow.map(e => e.id)),
+               outDropped: s1.outDropped.union(dropNow.union(dropLater).map(e => e.id)),
+               ignored: s1.ignored.union(mine.filter(e => e.kind == "answer" and live(e)).map(e => (e.c, e.src, e.v))) }
+    st' = if (needWithdraw) queue(s2, "withdraw", c, "", "") else s2,
+  }
+  // the ticket leaves the leg while it holds settled answers no end recorded (R-BTN-173, R7)
+  action leave: bool = all {
+    st.mode == "chaos", not(st.claimActive), not(st.legDone),
+    val unrec = CONDS.filter(c => isSettled(cond(c)) and not(cond(c).used) and cond(c).via == "channel")
+    val s1 = { ...st, legDone: true, legLeft: true }
+    st' = if (R7) unrec.fold(s1, (s, c) => queue(s, "closedAsk", c, cond(c).src, cond(c).ans)) else s1,
+  }
 
   // ---- the run: chaos, then drain (no failure, no new answer) until nothing is enabled ----
   def entries: Set[Entry] = st.outbox
@@ -338,8 +420,8 @@ module lightQuestion {
     tuples(CONDS, CHANNELS).exists(k => or { canSend(k._1, k._2), canRead(k._1, k._2),
                                              canReport(k._1, k._2), canRetract(k._1, k._2) }),
     st.pending.exists(r => canCommit(r)),
-    entries.exists(e => canPush(e) or canWritten(e)),
-    CONDS.exists(c => canSync(c)),
+    entries.exists(e => canTake(e) or canPush(e) or canWritten(e)),
+    CONDS.exists(c => canSync(c) or canSyncLate(c)),
   }
 
   // each parameterised branch draws only from the values that enable it, so that a run stops
@@ -361,11 +443,18 @@ module lightQuestion {
       pick(KEYS.filter(k => st.mode == "chaos" and st.sent.contains(k) and not(st.retracted.contains(k))
                             and not(ANSWERS.exists(w => st.given.contains((k._1, k._2, w))))),
            k => answerOnChannel(k._1, k._2, v)),
-      all { CONDS.exists(c => st.mode == "chaos" and st.gFile.get(c) and st.gAns.get(c) == ""),
-            nondet c = CONDS.filter(c => st.gFile.get(c) and st.gAns.get(c) == "").oneOf() answerInFile(c, v) },
+      all { CONDS.exists(c => st.mode == "chaos" and st.gFile.get(c) and not(st.gWithdrawn.get(c)) and st.gAns.get(c) == ""),
+            nondet c = CONDS.filter(c => st.gFile.get(c) and not(st.gWithdrawn.get(c)) and st.gAns.get(c) == "").oneOf() answerInFile(c, v) },
       all { CONDS.exists(c => canSync(c)), nondet c = CONDS.filter(c => canSync(c)).oneOf() sync(c) },
       all { st.pending != Set(), nondet r = st.pending.oneOf() commit(r) },
+      all { st.outbox.exists(e => canTake(e)), nondet e = st.outbox.filter(e => canTake(e)).oneOf() take(e) },
       all { st.outbox.exists(e => canPush(e)), nondet e = st.outbox.filter(e => canPush(e)).oneOf() push(e) },
+      all { chaos and st.outClaimed != Set(), nondet e = st.outbox.filter(e => st.outClaimed.contains(e.id)).oneOf() writerFails(e) },
+      all { CONDS.exists(c => canSyncLate(c)), nondet c = CONDS.filter(c => canSyncLate(c)).oneOf() syncLate(c) },
+      // the owner acts rarely, so that runs reach deep states first
+      all { coin <= 2, st.mode == "chaos" and CONDS.exists(c => cond(c).status == "promoted"),
+            nondet c = CONDS.filter(c => cond(c).status == "promoted").oneOf() ownerResolve(c, v) },
+      all { coin == 3, leave },
       all { st.outbox.exists(e => canWritten(e)), nondet e = st.outbox.filter(e => canWritten(e)).oneOf() written(e) },
       all { st.mode == "chaos", coin == 1, st' = { ...st, mode: "drain" } },
       all { st.mode == "drain", not(st.drained), not(progressEnabled), st' = { ...st, drained: true } },
@@ -388,9 +477,12 @@ module lightQuestion {
   })
   // promotion is safe: once promoted, a condition settles only from git
   val promotionSafe = CONDS.forall(c => cond(c).promotedEver implies cond(c).via != "channel")
-  // git agrees with Baton: a closed condition's file holds its answer; the leg's record holds
-  // the answer of a used condition
-  val gitAgrees = CONDS.forall(c => cond(c).status == "closed" implies st.gAns.get(c) == cond(c).ans)
+  // git agrees with Baton: an ask file holding an answer of a settled condition holds the one
+  // Baton applied (an owner-resolved one's file is withdrawn instead); a condition closed from
+  // git has its file's answer; the leg's record holds the answer of a used condition
+  val gitAgrees = CONDS.forall(c => (isSettled(cond(c)) and cond(c).via != "owner" and st.gFile.get(c) and st.gAns.get(c) != "")
+                                    implies st.gAns.get(c) == cond(c).ans)
+                  and CONDS.forall(c => cond(c).status == "closed" and cond(c).via == "git" implies st.gAns.get(c) == cond(c).ans)
                   and CONDS.forall(c => cond(c).used implies st.gLeg.get(cond(c).q) == cond(c).ans)
   val safety = settlesOnce and oneAnswerConsumed and oneApplied and noOrphan and promotionSafe and gitAgrees
 
@@ -401,7 +493,14 @@ module lightQuestion {
   val noLostAnswer = st.drained implies and {
     st.given.forall(r => st.applied.contains(r) or st.ignored.contains(r)),
     st.ignored.forall(r => st.applied.exists(a => a._1 == r._1)),
-    CONDS.forall(c => isSettled(cond(c)) implies (cond(c).used or waitsForPerson)),
+    CONDS.forall(c => isSettled(cond(c)) implies or {
+      cond(c).used, waitsForPerson,
+      // the leg was left: the answer reached git in the ask file (R7), or is an owner's
+      // resolution, which Baton's record holds (R-BTN-163)
+      st.legLeft and (cond(c).via == "owner" or (st.gFile.get(c) and st.gAns.get(c) == cond(c).ans)),
+    }),
+    // no ask file of an owner-resolved condition is left open in git (R8)
+    CONDS.forall(c => (cond(c).via == "owner" and st.gFile.get(c)) implies st.gWithdrawn.get(c)),
   }
   // the leg is blocked on a promoted question nobody has answered: what it already holds waits
   // with it (the next claim's resume), and the person is the one who must act
@@ -417,6 +516,9 @@ module lightQuestion {
   val noLateAnswerViaOutbox = not(CONDS.exists(c => cond(c).via == "git" and cond(c).src != "file" and cond(c).used))
   val noCarry = not(st.claimActive and st.lastEnd == "reaped" and st.pConsumed != Set())
   val noIgnoredSecond = not(st.ignored != Set() and st.legDone)
+  val noLeaveWrite = not(st.legLeft and st.outbox.exists(e => e.kind == "closedAsk" and st.outDone.contains(e.id)))
+  val noWithdraw = not(CONDS.exists(c => st.gWithdrawn.get(c)))
+  val noDropWhileClaimed = not(st.outDropped.exists(i => st.outClaimed.contains(i)))
   val noTwoChannels = not(CONDS.exists(c => CHANNELS.forall(ch => st.given.exists(r => r._1 == c and r._2 == ch))
                                           and st.given.filter(r => r._1 == c).map(r => r._3).size() == 2 and st.drained))
 }
@@ -425,50 +527,60 @@ module lightQuestion {
 module full {
   import lightQuestion(QUESTIONS = Set(1, 2), CONDS = Set(1, 2, 3, 4), CHANNELS = Set("push", "chat"),
                        ANSWERS = Set("a", "b"), CRASHES = 3, HISTORY = true,
-                       R1 = true, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
+                       R1 = true, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, R7 = true, R8 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
 }
 module tiny {
   import lightQuestion(QUESTIONS = Set(1), CONDS = Set(1, 2), CHANNELS = Set("push", "chat"),
                        ANSWERS = Set("a", "b"), CRASHES = 1, HISTORY = true,
-                       R1 = true, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
+                       R1 = true, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, R7 = true, R8 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
 }
 module noR1 {
   import lightQuestion(QUESTIONS = Set(1, 2), CONDS = Set(1, 2, 3, 4), CHANNELS = Set("push", "chat"),
                        ANSWERS = Set("a", "b"), CRASHES = 3, HISTORY = true,
-                       R1 = false, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
+                       R1 = false, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, R7 = true, R8 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
 }
 module noR2 {
   import lightQuestion(QUESTIONS = Set(1, 2), CONDS = Set(1, 2, 3, 4), CHANNELS = Set("push", "chat"),
                        ANSWERS = Set("a", "b"), CRASHES = 3, HISTORY = true,
-                       R1 = true, R2 = false, R3 = true, R4 = true, R5 = true, R6 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
+                       R1 = true, R2 = false, R3 = true, R4 = true, R5 = true, R6 = true, R7 = true, R8 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
 }
 module noR3 {
   import lightQuestion(QUESTIONS = Set(1, 2), CONDS = Set(1, 2, 3, 4), CHANNELS = Set("push", "chat"),
                        ANSWERS = Set("a", "b"), CRASHES = 3, HISTORY = true,
-                       R1 = true, R2 = true, R3 = false, R4 = true, R5 = true, R6 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
+                       R1 = true, R2 = true, R3 = false, R4 = true, R5 = true, R6 = true, R7 = true, R8 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
 }
 module noR4 {
   import lightQuestion(QUESTIONS = Set(1, 2), CONDS = Set(1, 2, 3, 4), CHANNELS = Set("push", "chat"),
                        ANSWERS = Set("a", "b"), CRASHES = 3, HISTORY = true,
-                       R1 = true, R2 = true, R3 = true, R4 = false, R5 = true, R6 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
+                       R1 = true, R2 = true, R3 = true, R4 = false, R5 = true, R6 = true, R7 = true, R8 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
 }
 module noR5 {
   import lightQuestion(QUESTIONS = Set(1, 2), CONDS = Set(1, 2, 3, 4), CHANNELS = Set("push", "chat"),
                        ANSWERS = Set("a", "b"), CRASHES = 3, HISTORY = true,
-                       R1 = true, R2 = true, R3 = true, R4 = true, R5 = false, R6 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
+                       R1 = true, R2 = true, R3 = true, R4 = true, R5 = false, R6 = true, R7 = true, R8 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
 }
 module noR6 {
   import lightQuestion(QUESTIONS = Set(1, 2), CONDS = Set(1, 2, 3, 4), CHANNELS = Set("push", "chat"),
                        ANSWERS = Set("a", "b"), CRASHES = 3, HISTORY = true,
-                       R1 = true, R2 = true, R3 = true, R4 = true, R5 = true, R6 = false, DRAIN_ODDS = 25).* from "./lightQuestion"
+                       R1 = true, R2 = true, R3 = true, R4 = true, R5 = true, R6 = false, R7 = true, R8 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
 }
 module noHistory {
   import lightQuestion(QUESTIONS = Set(1, 2), CONDS = Set(1, 2, 3, 4), CHANNELS = Set("push", "chat"),
                        ANSWERS = Set("a", "b"), CRASHES = 3, HISTORY = false,
-                       R1 = true, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
+                       R1 = true, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, R7 = true, R8 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
 }
 module tinyNoR1 {
   import lightQuestion(QUESTIONS = Set(1), CONDS = Set(1, 2), CHANNELS = Set("push", "chat"),
                        ANSWERS = Set("a", "b"), CRASHES = 1, HISTORY = true,
-                       R1 = false, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
+                       R1 = false, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, R7 = true, R8 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
+}
+module noR7 {
+  import lightQuestion(QUESTIONS = Set(1, 2), CONDS = Set(1, 2, 3, 4), CHANNELS = Set("push", "chat"),
+                       ANSWERS = Set("a", "b"), CRASHES = 3, HISTORY = true,
+                       R1 = true, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, R7 = false, R8 = true, DRAIN_ODDS = 25).* from "./lightQuestion"
+}
+module noR8 {
+  import lightQuestion(QUESTIONS = Set(1, 2), CONDS = Set(1, 2, 3, 4), CHANNELS = Set("push", "chat"),
+                       ANSWERS = Set("a", "b"), CRASHES = 3, HISTORY = true,
+                       R1 = true, R2 = true, R3 = true, R4 = true, R5 = true, R6 = true, R7 = true, R8 = false, DRAIN_ODDS = 25).* from "./lightQuestion"
 }

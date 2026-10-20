@@ -2864,6 +2864,9 @@ Limits that hold throughout:
     - An `answer` entry writes the reply's `answer` and `answered_by` with `baton_write: <id>`. The
       runner first reads the file at the fetched head; a file that already carries an answer is
       not written, the entry is reported `skipped`, and Baton records that reply `ignored`.
+    - An owner's resolve (R-BTN-163) closes a promoted condition like any other close: its
+      `handler` and `answer` entries are dropped as R-BTN-171 says, and an answer a snapshot then
+      posts in the ask is recorded `ignored`.
   - **Channels that answer.** A delivery leg that reports answers declares `"answers": true`.
     Its channel must keep each reply readable by condition id until Baton has accepted it
     (history, or redelivery until acknowledged): the leg acknowledges a reply only after Baton
@@ -2885,6 +2888,8 @@ Limits that hold throughout:
     | The person answers in the ask file while an `answer` entry is queued | The entry is `skipped`; the channel's reply is recorded `ignored` |
     | The outbox runner dies between push and report, or its push is refused | The entry stays queued; the next `baton.write` finds `baton_write: <id>` and reports it; a refusal holds the ticket (R-BTN-171) |
     | A reply is sent after `retract` | It is outside Baton; the channel shows the question withdrawn |
+    | The ticket leaves the leg (a route, a close) with a settled answer not yet recorded | The closed ask is written through the outbox with its answer |
+    | An owner resolves a promoted question while `baton.write` holds its `handler` entry, and that runner is reaped after pushing | The entry is dropped and a `withdraw` follows, which writes nothing if the push never happened; a reply then posted in the file is recorded `ignored` |
 
 ### 7.3 The debugger and Baton's own conditions
 
@@ -3326,18 +3331,19 @@ Limits that hold throughout:
       claim. Entries of different tickets are unordered.
     - A `withdraw` entry for a ticket with compensations is drained only by that ticket's
       `baton.cancel`, after the compensations.
-    - A `handler` entry still `queued` when its condition closes is `dropped`: nothing is
-      written, its provisional ticket row is deleted, and no withdrawal follows. An entry already
-      written is followed by a `withdraw` entry. A `claimed` one is `dropped` too, but its row is
-      kept until that claim ends: if the end reports it written, a `withdraw` entry follows;
-      otherwise the row is deleted. Dropping a ticket's `handler` entry drops its later `answer`
-      entries.
+    - A `handler` entry still `queued` when its condition closes, and never taken by a
+      `baton.write` claim, is `dropped`: nothing is written, its provisional ticket row is
+      deleted, and no withdrawal follows. Any other is `dropped` and followed by a `withdraw`
+      entry: one already written; one `claimed`, whose row is kept until that claim ends; and one
+      queued again after a claim that ended without reporting it, since that claim may have
+      pushed it. Dropping a ticket's `handler` entry drops its later `answer` entries, and Baton
+      records their replies `ignored`.
   - **Idempotence.**
     - Every write carries its entry's id: the handler ticket's frontmatter has `baton_write:
       <id>`, and a withdrawal writes `baton_write: <id>` beside `status: withdrawn`.
     - Before writing, the runner reads the file at the freshly fetched default-branch head. A
-      file that already carries the id, or for `withdraw` already says withdrawn, is not
-      written again, and the runner reports the head's commit.
+      file that already carries the id, or for `withdraw` already says withdrawn or is absent, is
+      not written again, and the runner reports the head's commit.
     - On a rejected push, the runner fetches, checks and writes again, at most 3 times, then ends
       `released:cannot-finish:transient`.
     - The claim's `completed` end reports `written: [{id, commit?, skipped?}]`, and Baton sets
@@ -5683,7 +5689,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-152 | Each timer fires once per `from` instant; interrupting ones release and fence; contradictory timers, a timer `leg` on a choice station and the retired course fields are refused; one override of `baton.stalled` per leg | S-BTN-134 |
 | G-BTN-153 | A superseded claim is released `superseded` in the settling transaction; `baton.cancel` compensates in reverse path order before withdrawing | S-BTN-129, -132 |
 | G-BTN-154 | Baton queues no notice for a person; only `forge-check` notices exist | S-BTN-68, -131 |
-| G-BTN-156 | Baton uses no credential to write git, and writes git only through outbox entries runners drain with `baton.write`, each carrying `baton_write: <id>` and written at most once, in id order per ticket; a queued entry whose condition closes is dropped; 24 h unlanded raises `baton.outbox-late` | S-BTN-136 |
+| G-BTN-156 | Baton uses no credential to write git, and writes git only through outbox entries runners drain with `baton.write`, each carrying `baton_write: <id>` and written at most once, in id order per ticket; a queued entry whose condition closes is dropped, and followed by a `withdraw` when any claim took it; 24 h unlanded raises `baton.outbox-late` | S-BTN-136 |
 | G-BTN-158 | A light question settles once, in the claim or from git, never both; a reply is applied, queued to the ask file or recorded `ignored`, never dropped; no claim of the leg runs while its question is open; a settled answer is carried in `resume` until an end records it in git; an outbox `answer` never overwrites an answer in the file; `model/lightQuestion.qnt`'s `full` holds its safety and no-lost-answer properties | S-BTN-138 |
 | **§8** | | |
 | G-BTN-5 | A heartbeat without its session's secret is refused; a key cannot claim another hostname, an ungranted capability or an ungranted repository's course | hostile-key tests |
