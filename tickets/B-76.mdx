@@ -1,0 +1,77 @@
+---
+title: "B-76 — Owners sign in to the dashboard and watch their running legs"
+id: B-76
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1125
+tier: judgement
+description: "Build BATON_SPEC R-BTN-155's owner sessions: sign-in codes per role (`POST /v1/login {role}`, `baton owner open`, `POST /v1/owner/login-links`), a session row with its role, minting key and repositories, the `owner-session` principal of R-BTN-129 scoped to the repositories the key still owns and never an administrator, confirmation by the minting key (`POST /v1/owner/confirm`), `owner.sessions.revoke`, and R-BTN-118's owner watching. S-BTN-124, S-BTN-126, S-BTN-70, G-BTN-57, G-BTN-144. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-9
+  - B-25
+---
+
+**Brief:** the owner, 2026-10-20, closing the open question "Watching for owners' dashboard
+sessions": "Sounds useful."
+**Spec:** `spec/BATON_SPEC.md` §11.4 R-BTN-155 (sign-in by a confirmed code, now for owners too),
+§8 R-BTN-118 (streaming; owner sessions watch), §12.2 (destructive actions), §12.4 R-BTN-16
+(cookies, origin checks), R-BTN-129 (the registry decides each action's callers).
+**Depends on:** B-9 (leg streams), B-25 (the registry, which scopes a session's actions).
+
+### Requires
+
+None: a checkout, a terminal and a browser.
+
+### What to build
+
+1. Sign-in per role: `/login?as=administrator|owner`, `POST /v1/login {role}` writing a
+   `login_codes` row with its `role`; `baton owner open` and `POST /v1/owner/login-links {code}`
+   signed by an owner key bind only an owner row (`POST /v1/admin/login-links` only an
+   administrator row; any other code `not-found`); the CLI shows the row's role, address and age.
+2. `dashboard_sessions` gains `role`, `key_fingerprint` and `repositories` (one new migration);
+   an owner's session drops a repository its key stops owning and ends when none remains, or
+   when an administrator revokes the key (R-BTN-57); `POST /v1/owner/sessions/revoke`
+   (`owner.sessions.revoke`, destructive).
+3. The `owner-session` principal in `authorize` (R-BTN-129): only entries whose `callers` list
+   it, on its repositories; never an administrator's action. `GET /v1/ui/state` filtered to its
+   repositories; `/v1/ui/messages` (only `release` and `status_request`, holder checked) and
+   `/v1/ui/resync`, `/v1/ui/overrides/{ticket}` and `POST /v1/ui/conditions/{condition}/resolve`
+   on its repositories; the administrator-only `/v1/ui/*` routes refuse it.
+4. Confirmation by the minting key only: `baton owner confirm` and `POST /v1/owner/confirm`
+   (`baton admin confirm` likewise restricted to the administrator key that minted the
+   session); R-BTN-155's one confirmed-action list.
+5. `GET /v1/ui/stream` admits an owner session for a claim of one of its repositories.
+6. The dashboard hides what the session may not see, and draws no administrator control for it.
+
+### Do not
+
+- Give an owner session any administrator action, or another repository's rows.
+
+### Tests
+
+- S-BTN-124's owner-session cases (a foreign repository and an administrator route
+  `forbidden`, an owner code typed into `baton admin open` `not-found`, another key's
+  confirmation `not-found`, removal and `owner sessions revoke` ending the session); S-BTN-32's
+  revoked owner key; S-BTN-126 extended: an owner signs in, sees only its repositories, and a
+  confirmed action needs its code; S-BTN-70 extended: an owner session watches its repository's leg and is refused
+  another's.
+
+### Exit criteria
+
+- [ ] the extended scenarios pass on both hosts; G-BTN-57 and G-BTN-144 hold
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+
+## Status
+
+_(filed 2026-10-20 with the open-questions PR; scope widened the same day by the spec's
+adversarial review, owner decision 2: per-role sign-in codes, the `owner-session` principal,
+confirmation by the minting key, session revocation)_
