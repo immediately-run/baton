@@ -439,7 +439,10 @@ process for development and CI. Nothing crosses a tenant.
     Other routes are checked first in the Worker too: `/v1/sync/*` a CI identity token or a
     sync-key signature (R-BTN-93); `/` and `/v1/ui/*` a dashboard session; `POST /v1/login` a
     pending sign-in (R-BTN-155); `POST /v1/github/webhook` `X-Hub-Signature-256` (R-BTN-73);
-    `POST /v1/forges/{repository}/notify` its forge's verifier (R-BTN-95).
+    `POST /v1/forges/{repository}/notify` its forge's verifier (R-BTN-95). The static pages
+    `/login` and `/oauth/authorize` need no session; `/.well-known/oauth-*` and `/v1/oauth/*`
+    take no credential and fall under the per-IP rule, and `POST /v1/mcp`'s bearer is checked
+    in the object (R-BTN-130, `BATON_MCP_OAUTH_SPEC` §13).
   - A per-IP rule (a Workers rate-limit binding keyed `<host>|<ip>`) applies only to
     unauthenticated requests, never to `POST /v1/github/webhook`.
   - Authenticated calls are limited to 600 a minute per credential, keyed by origin and
@@ -4375,6 +4378,7 @@ is summarized in the principal table (§12.1).
     | `owner resolve <ticket> <restart>` | `POST /v1/owner/{repository}/tickets/{ticket}/resolve` (R-BTN-163) | owner |
     | `owner …` | R-BTN-58's actions | owner |
     | `admin …` | R-BTN-57's actions, `admin open` and `admin confirm` (R-BTN-155) | administrator |
+    | `owner open`, `owner confirm` | an owner's dashboard sign-in and confirmations (R-BTN-155) | owner |
 
   - **A leg is named by its ticket.** `<ticket>` is a qualified id, or a local id unique among
     the signing key's repositories; one matching several exits 2, listing the qualified
@@ -4447,7 +4451,9 @@ is summarized in the principal table (§12.1).
 - **R-BTN-155 (dashboard sign-in is a code a key holder confirms).** An owner signs in the same
   way with `baton owner open` and an owner key (`POST /v1/owner/login-links`); an owner's session
   sees, watches and acts only on its own repositories, with owner actions, and every action the
-  destructive list names (§12.2) is confirmed by its code as an administrator's is.
+  destructive list names (§12.2) is confirmed by its code with `baton owner confirm <code>`, as an
+  administrator's is with `baton admin confirm`. The registry (R-BTN-129) names an owner's
+  dashboard session as a caller of the `owner.*` actions it may use there.
   - **Sign-in.**
     1. `baton admin open` opens `https://<origin>/login`, which carries nothing.
     2. The page sends `POST /v1/login {}`. Baton writes a `login_codes` row, sets the pending
@@ -4660,10 +4666,13 @@ Every value below is validated on write; a value over its cap is refused `invali
   - **Every session request.** Any request a dashboard session authorizes, reads included,
     carries an `Origin` equal to the origin when it carries one, and `Sec-Fetch-Site:
     same-origin` when it carries that header, else `forbidden`.
-  - **Sessions.** `/v1/ui/*` requires a dashboard session minted from an administrator key.
+  - **Sessions.** `/v1/ui/*` requires a dashboard session minted from an administrator or owner key
+    (R-BTN-155).
     Cloudflare Access may stand in front of the dashboard as extra hardening; Baton never
     requires it and never reads its cookie. Where it stands, it is bypassed on `/v1/admin`,
-    `/v1/owner`, `/v1/sync` and `/v1/runner`, which authenticate every request themselves.
+    `/v1/owner`, `/v1/sync`, `/v1/runner`, `/v1/mcp`, `/v1/oauth` and `/.well-known`, which
+    authenticate every request themselves or are public; MCP clients call them without an
+    Access cookie.
 
 ### 12.5 The local host and bearers
 
