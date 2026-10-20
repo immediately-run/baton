@@ -21,7 +21,7 @@ describe('the pattern grammar (R-BTN-108, R-BTN-149)', () => {
   });
 
   it('refuses back-references, look-around, lazy and possessive quantifiers, flags, properties, unbounded size', () => {
-    for (const p of ['(a)\\1', '(?=a)', '(?!a)', '(?<n>a)', 'a*?', 'a++', '\\p{L}', '\\bword', '[a', '(a', 'a)', '*a', 'a{2000}', 'a{3,2}', 'x'.repeat(513), '(a{1000}){1000}']) {
+    for (const p of ['a{2,}', 'a**', 'a{2}{3}', 'a+?', '(a)\\1', '(?=a)', '(?!a)', '(?<n>a)', 'a*?', 'a++', '\\p{L}', '\\bword', '[a', '(a', 'a)', '*a', 'a{2000}', 'a{3,2}', 'x'.repeat(513), '(a{1000}){1000}']) {
       expect(() => compilePattern(p), p).toThrow();
     }
   });
@@ -96,8 +96,34 @@ describe('validation: the schema and every base (R-BTN-108, G-BTN-91)', () => {
     expect(bad.map((f) => f.path).sort()).toEqual(['/at', '/e', '/k', '/l', '/l/1/url', '/n', '/p/0', '/s', '/s', '/u', '/z'].sort());
   });
 
+  it('date-time is RFC 3339 in range, leap years and leap seconds included (1-B-1)', () => {
+    const r = () => ({ type: 'string', format: 'date-time' });
+    for (const ok of ['2026-10-20T09:00:00Z', '2024-02-29T23:59:60+05:30', '2026-10-20t09:00:00.123z']) expect([ok, validate(ok, 'x', r)]).toEqual([ok, []]);
+    for (const bad of ['9999-99-99T99:99:99Z', '2026-02-29T00:00:00Z', '2026-04-31T00:00:00Z', '2026-10-20T24:00:00Z', '2026-10-20T09:60:00Z', '2026-10-20T09:00:00+24:00', '2026-00-10T09:00:00Z']) {
+      expect([bad, validate(bad, 'x', r).length]).toEqual([bad, 1]);
+    }
+  });
+
   it('an unknown schema is an error, never a pass', () => {
     expect(validate({}, 'c:missing@1', stdSchema)).toEqual([{ path: '', message: 'c:missing@1 is not a known schema' }]);
+  });
+});
+
+describe('bounded work on a $ref fan-out the sync accepts (1-B-0)', () => {
+  it('five schemas of 60 properties, each a $ref to the next: the bound, the refinement check and validation all finish at once', () => {
+    const S: Record<string, Record<string, unknown>> = {};
+    for (let i = 0; i < 5; i++) {
+      const properties: Record<string, unknown> = {};
+      for (let k = 0; k < 60; k++) properties[`p${k}`] = i < 4 ? { $ref: `c:s${i + 1}@1` } : { type: 'integer' };
+      S[`c:s${i}@1`] = { type: 'object', additionalProperties: false, properties };
+    }
+    const r = resolveWith(S);
+    expect(checkSchemaSet(S, stdSchema)).toEqual([]);
+    const start = performance.now();
+    expect(unboundedAt('c:s0@1', r)).toBeNull();
+    expect(refinementGaps(S['c:s0@1'], S['c:s0@1'], r)).toEqual([{ path: expect.any(String), keyword: '', message: 'too large to compare' }]);
+    expect(validate(Object.fromEntries(Array.from({ length: 60 }, (_, k) => [`p${k}`, {}])), 'c:s0@1', r)).toEqual([]);
+    expect(performance.now() - start).toBeLessThan(2000);
   });
 });
 

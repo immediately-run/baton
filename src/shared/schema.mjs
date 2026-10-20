@@ -20,6 +20,9 @@ export const INLINE_STRING_MAX = 256;
 const VIEW_MAX_BYTES = 4096;
 /** The validator's own bound on errors returned, so a hostile value costs no more than this. */
 const ERRORS_MAX = 50;
+/** The schema nodes one walk visits at most — `$ref`s fan out, so a 32 KB schema bounds nothing
+ *  by itself (baton#69 round 1, 1-B-0). A walk that runs out reports, never passes. */
+const WALK_BUDGET = 10_000;
 
 const KEYWORDS = new Set(['type', 'properties', 'required', 'additionalProperties', 'items', 'prefixItems', 'enum', 'const', 'minimum', 'maximum',
   'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'pattern', 'format', '$ref', 'title', 'description',
@@ -159,14 +162,17 @@ function parsePattern(src) {
         const rest = cps.slice(i).join('');
         const m = /^\{(\d{1,4})(?:(,)(\d{1,4})?)?\}/.exec(rest);
         if (!m) fail('a malformed {n,m}');
+        // R-BTN-108 lists {n} and {n,m}: an open {n,} is outside the grammar (1-B-2).
+        if (m[2] && m[3] === undefined) fail('{n,} is outside the grammar; write {n,m}');
         min = Number(m[1]);
-        max = m[2] ? (m[3] === undefined ? Infinity : Number(m[3])) : min;
+        max = m[2] ? Number(m[3]) : min;
         if (max !== Infinity && max < min) fail('{n,m} with m below n');
         if (min > PATTERN_MAX_REPEAT || (max !== Infinity && max > PATTERN_MAX_REPEAT)) fail(`a repeat over ${PATTERN_MAX_REPEAT}`);
         i += [...m[0]].length;
       } else break;
       if (peek() === '?' || peek() === '+') fail('lazy and possessive quantifiers are outside the grammar');
       if (node.t === 'bol' || node.t === 'eol') fail('a quantified anchor');
+      if (node.t === 'rep') fail('a quantifier on a quantifier is outside the grammar');
       node = { t: 'rep', node, min, max };
     }
     return node;
@@ -427,7 +433,18 @@ function canonical(v) {
   if (isObj(v)) return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical(v[k])]));
   return v;
 }
-const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+const DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-](\d{2}):(\d{2}))$/;
+/** RFC 3339 §5.6, in range: month, the month's days (leap years too), hour, minute, second (60
+ *  for a leap second) and the offset's hour and minute. */
+function isDateTime(s) {
+  const m = DATE_TIME.exec(s);
+  if (!m) return false;
+  const [y, mo, d, h, mi, se] = m.slice(1, 7).map(Number);
+  const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1];
+  if (!days || d < 1 || d > days || h > 23 || mi > 59 || se > 60) return false;
+  return m[9] === undefined || (Number(m[9]) <= 23 && Number(m[10]) <= 59);
+}
 const isUri = (s) => { try { return !!new URL(s).protocol; } catch { return false; } };
 
 /**
@@ -471,7 +488,7 @@ export function validate(value, id, resolve) {
         if (!m) { m = compilePattern(s.pattern); patterns.set(s.pattern, m); }
         if (!m(v)) add(path, 'must match the schema\'s pattern');
       }
-      if (s.format === 'date-time' && !DATE_TIME.test(v)) add(path, 'must be an RFC 3339 date-time');
+      if (s.format === 'date-time' && !isDateTime(v)) add(path, 'must be an RFC 3339 date-time');
       if (s.format === 'uri' && !isUri(v)) add(path, 'must be a URI');
     }
     if (Array.isArray(v)) {
@@ -522,16 +539,21 @@ export function baseChain(id, resolve) {
  * most 256. Returns the first unbounded place, or null when bounded.
  */
 export function unboundedAt(id, resolve) {
+  // Whether a schema bounds its value does not depend on where it is referenced from, so each
+  // `$ref` target is walked once; and the whole walk is budgeted.
+  const walked = new Set();
+  let budget = WALK_BUDGET;
   for (const cid of baseChain(id, resolve)) {
     const s = resolve(cid);
     if (!s) return `${cid}: not a known schema`;
     let found = null;
     const walk = (x, path, depth) => {
-      if (found || !isObj(x) || depth > SCHEMA_MAX_DEPTH + 1) return;
+      if (found || !isObj(x)) return;
+      if (--budget < 0 || depth > SCHEMA_MAX_DEPTH * 4) { found = `${cid}${path}: too large to bound`; return; }
       if (typeof x.$ref === 'string') {
         const r = resolve(x.$ref);
         if (!r) { found = `${cid}${path}: ${x.$ref} unknown`; return; }
-        walk(r, path, depth + 1);
+        if (!walked.has(x.$ref)) { walked.add(x.$ref); walk(r, path, depth + 1); }
       }
       const ts = own(x, 'type') ? (Array.isArray(x.type) ? x.type : [x.type]) : [];
       if ((ts.includes('object') || own(x, 'properties')) && x.additionalProperties !== false) { found = `${cid}${path}: an object without additionalProperties: false`; return; }
@@ -560,7 +582,10 @@ export function refinementGaps(schema, base, resolve) {
   const gaps = [];
   const add = (path, keyword, message) => { if (gaps.length < ERRORS_MAX) gaps.push({ path, keyword, message }); };
   const deref = (s, depth = 0) => (isObj(s) && typeof s.$ref === 'string' && depth < 16 ? deref(resolve(s.$ref), depth + 1) ?? s : s);
+  let budget = WALK_BUDGET;
+  let spent = false;
   const cmp = (sRaw, bRaw, path, depth) => {
+    if (--budget < 0) { if (!spent) add(path, '', 'too large to compare'); spent = true; return; }
     if (depth > SCHEMA_MAX_DEPTH) return add(path, '', 'too deep to compare');
     const s = deref(sRaw), b = deref(bRaw);
     if (!isObj(b)) return;
