@@ -4364,6 +4364,8 @@ is summarized in the principal table (§12.1).
     repository's object (a restart empties it), else `rate-limited` with `retry_after_s`. A list
     tool takes `cursor` and returns `next_cursor`, HMAC-bound under `CursorKey` (R-BTN-55) to
     the key, action and input. A page is at most 256 KB; a larger single item is `too-large`.
+  - Clients that cannot send a bearer obtain MCP keys through OAuth 2.1, `BATON_MCP_OAUTH_SPEC`
+    (`spec/BATON_MCP_OAUTH_SPEC.md`).
 
 ### 11.4 The dashboard
 
@@ -5588,5 +5590,4 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 
 - **Answering from a channel (R-BTN-161).** A reply on a channel (a chat app, say) cannot yet count as the answer: the delivery runner would have to write it to git attributably to the person. Answers are written in the ask's file.
 - **A lighter question (R-BTN-161).** A question that opens no ticket file, for legs that ask many quick questions. Deferred until a course needs it.
-- **OAuth for MCP clients (R-BTN-130).** Baton as an OAuth 2.1 authorization server issuing MCP keys through a consent page, for clients that cannot send a bearer.
 

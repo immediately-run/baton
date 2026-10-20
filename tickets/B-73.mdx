@@ -1,0 +1,132 @@
+---
+title: "B-73 — OAuth 2.1 for MCP clients: Baton issues owner-approved MCP keys through the MCP authorization flow (R-BTN-172)"
+id: B-73
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1129
+tier: critical
+description: "Build BATON_MCP_OAUTH_SPEC (R-BTN-172, its parts §2 to §10): the 401 challenge and the two metadata documents; Client ID Metadata Documents and bounded dynamic registration, public clients only; the authorization request, redirect URI rules and oauth_redirect_hosts; the consent page and owner.mcp-key.approve, the owner key approving a code Baton's page shows; a grant that is an mcp_keys row; one-hour access tokens and rotating refresh tokens with reuse detection; RFC 7009 revocation; the bounds; the rows and routes folded into BATON_SPEC §13 and §14. S-BTN-137, G-BTN-157. Requires: a Claude account for the manual connection check."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-25
+  - B-45
+---
+
+**Brief:** the owner, 2026-10-20: close the open question "OAuth for MCP clients (R-BTN-130)" so
+Claude's clients (claude.ai custom connectors, the desktop app, Claude Code) connect to Baton's
+MCP endpoint through the standard MCP authorization flow instead of a pasted `bmcp_` key.
+**Spec:** `spec/BATON_MCP_OAUTH_SPEC.md` (all of it); `spec/BATON_SPEC.md` R-BTN-130 / R-BTN-154
+and R-BTN-129 (§11.3), R-BTN-155 and R-BTN-159 (§11), R-BTN-16 and §12.1's bearer rule (§12),
+R-BTN-135 and R-BTN-137 (§2.2), §2.3's admission and failure buckets, R-BTN-158 (bearers over
+`http`), §13.2 `mcp_keys`, §14.
+**Depends on:** B-25 (the registry, `authorize`, `POST /v1/mcp` and `mcp_keys`, which this ticket
+extends) and B-45 (served only at the origin, per-tenant objects and refusal handling, which the
+issuer, resource and tenant binding rest on).
+
+### Requires
+
+A checkout and a terminal for everything but one check: connecting a real Claude client (a
+claude.ai custom connector against `baton-staging`, and Claude Code against a local host) needs
+a Claude account and a person at the browser. An agent without one does the rest and leaves that
+check to a human, saying so in the Status note.
+
+### Why
+
+R-BTN-130's MCP key is a bearer an owner pastes into a client. Claude's hosted clients take a
+pasted bearer only in a beta for some organisations; every Claude surface supports the MCP
+authorization flow. This ticket lets a client obtain exactly an MCP key's authority through that
+flow, approved by an owner key, and nothing more.
+
+### What to build
+
+1. **Fold the spec in.** Add the companion's rows to `spec/BATON_SPEC.md`: §13.2's `mcp_keys`
+   change, `oauth_clients`, `oauth_requests` and `oauth_tokens`, §13.1's `oauth_redirect_hosts`;
+   §14's routes; §15's S-BTN-137 and G-BTN-157; R-BTN-172 itself, in §11.3 beside R-BTN-130;
+   R-BTN-130's new challenge; R-BTN-158's and §12.1's new bearer prefixes (`bmo_`, `bmr_`,
+   `bor_`); §2.3's admission of the OAuth routes. Defining R-BTN-172 in `spec/BATON_SPEC.md` is what lets code cite it: `check-spec`
+   reads only that file.
+2. **Discovery** (R-BTN-172 §2), in `src/core/oauth/metadata.ts`: both documents built from
+   `Config` (the origin), served on both hosts; the `401` challenge on `POST /v1/mcp`; `404` for
+   all of it on a non-loopback `http` origin.
+3. **Clients** (R-BTN-172 §3):
+   - `src/core/oauth/clients.ts`: the document URL grammar, document validation and the
+     registration body's validation, all pure and validated through `src/core/validate.ts`.
+   - The fetch lives in the shell (`src/shell/`), behind a `ClientDocuments` port added to
+     R-BTN-55's table: the Cloudflare implementation uses `fetch` with `redirect: "manual"`, a
+     5 KB read cap and a 5 s abort, cached by exact URL with the Cache API; the local one resolves
+     the host, refuses special-use addresses (RFC 6890) and connects to the address it checked.
+   - `POST /v1/oauth/register`.
+4. **The authorization request** (R-BTN-172 §4): the consent page as a dashboard static asset at
+   `/oauth/authorize` (text through `textContent`, polling every 2 s, Cancel only);
+   `POST /v1/oauth/requests` and `…/poll` under R-BTN-16's same-origin JSON rule; the redirect
+   URI match with the loopback exception; `oauth_redirect_hosts` in `PUT /v1/admin/settings`;
+   errors shown on the page until the client and redirect URI validate, redirected after.
+5. **Consent** (R-BTN-172 §5): `owner.mcp-key.approve` in the registry, `callers` exactly
+   `[owner]`, `mcp: false`; `POST /v1/owner/{repository}/oauth/approve` with `dry_run`, `confirm`
+   and `deny`; `baton owner mcp-key approve` printing the client's host, the self-declared name,
+   the redirect URI, the loopback warning, the scope, the address and the age before it asks.
+6. **The grant** (R-BTN-172 §7): one transaction writes the `mcp_keys` row (`key_hash` NULL,
+   `client_id`) and the authorization code; `authorize` treats an access token exactly as the
+   row's MCP key — reuse B-25's `mcp` principal, do not add a principal.
+7. **Tokens** (R-BTN-172 §8): `POST /v1/oauth/token` parsing `application/x-www-form-urlencoded`;
+   the code's single use and 60 s; `S256` verification; rotation with the 60-second lost-response
+   window; reuse revoking the grant and raising `baton.oauth-replay`; `Cache-Control: no-store`.
+8. **Revocation** (R-BTN-172 §9): `POST /v1/oauth/revoke`; every end of the `mcp_keys` row ends
+   every token at its next use; the alarm prunes expired requests, codes, tokens and unused
+   registrations.
+9. **Bounds** (R-BTN-172 §10): the per-IP limits, failure buckets, unbound-request eviction, the
+   registration cap and the 20-grant cap.
+10. **Migration**: one new numbered file in `src/migrations/` for the tables and columns of item
+    1. Never edit an old one.
+
+### Do not
+
+- Widen what MCP reaches: no new `mcp: true` entry, no step-up `403`, no scope beyond R-BTN-130's
+  `--actions` vocabulary (G-BTN-157).
+- Put a grant button on the consent page, set or read a cookie on these routes, or let a
+  dashboard session approve (R-BTN-172 §6).
+- Issue, store or accept a client secret, or fetch anything a client document links.
+- Store a code, poll secret or token except as its SHA-256 hash, or log one.
+- Read the clock outside `this.now` (R-BTN-32); the token and code lifetimes run on it.
+- Edit `src/shared/`, which is vendored from docs (CLAUDE.md).
+
+### Tests
+
+- New `test/unit/oauth-clients.test.ts`: the document URL grammar at its edges; documents that
+  are over 5 KB, redirected, mismatched, carrying a secret method or 11 redirect URIs; a
+  registration with `client_secret_basic`.
+- New `test/unit/oauth-tokens.test.ts`: `S256` against RFC 7636's appendix B vector; a code at
+  59 s and 61 s and used twice; rotation; the lost-response window at 59 s and 61 s and with a
+  presented successor; scope on refresh.
+- New `test/unit/oauth-redirects.test.ts`: exact matches, loopback with any port on all three
+  loopback hosts, a non-allowlisted host, a fragment, userinfo.
+- On both hosts, S-BTN-137's four parts, `test/integration/S-BTN-137.connect.test.ts`,
+  `S-BTN-137.refusals.test.ts`, `S-BTN-137.grant-life.test.ts` and
+  `S-BTN-137.registration.test.ts`, driving an MCP client
+  through discovery, the page (by its routes), the CLI's approval, the exchange and
+  `POST /v1/mcp`, with a stub client-document server.
+- `check:actions` passes with the new entries; `check-spec` finds R-BTN-172 defined.
+- Manual, by a person with a Claude account: add `https://<staging origin>/v1/mcp` as a claude.ai
+  custom connector and as `claude mcp add --transport http` in Claude Code; approve each; list the
+  tools; hold a test ticket; revoke the grant and see the next call fail.
+
+### Exit criteria
+
+- [ ] S-BTN-137's four parts pass on both hosts; G-BTN-157 holds
+- [ ] R-BTN-172 and the companion's rows are in `spec/BATON_SPEC.md`
+- [ ] a claude.ai custom connector and Claude Code each connect to `baton-staging` and are
+      refused after revocation (the manual check)
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 with `spec/BATON_MCP_OAUTH_SPEC.md`)_
