@@ -3628,8 +3628,8 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     its end (R-BTN-171) — are the runner's own code with no script; they require the capability
     `runner:baton-legs` (R-BTN-133).
   - **Leg sessions** a script starts get `IR_BATON_PARENT=<runner id>`, `IR_BATON_SOCKET`
-    (R-BTN-106) and `IR_BATON_STATE`, a read-only state view without the runner secret or claim
-    nonce. They start no sidecar and register no runner; their harness hooks read the view for
+    (R-BTN-106) and `IR_BATON_STATE`, a read-only state view without the runner secret (the claim
+    nonce is public, R-BTN-144). They start no sidecar and register no runner; their harness hooks read the view for
     the fence, owner bars and claim, and append activities and transcript paths to the runner's
     spool; their skills never claim, advance or end.
   - **Loading.** The runner loads `course.json` and the scripts from the claim's `snapshot_sha`
