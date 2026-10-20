@@ -4,6 +4,7 @@
 // scripts/baton-cli.mjs, scripts/bundle.mjs), which needs esbuild, a devDependency. Here each of
 // those three is swapped for its TypeScript source, so dist/baton.mjs runs with dependencies only.
 import { build } from 'esbuild';
+import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { LOCAL_LOADERS, uiScriptAsText } from './bundle.mjs';
@@ -49,3 +50,14 @@ await build({
 });
 // The runner spawns its leg process by path (src/runner/runner.ts LEG_PROCESS), beside the bundle.
 copyFileSync(join(ROOT, 'src/runner/legProcess.mjs'), join(OUT, 'legProcess.mjs'));
+
+// What `baton repo init` writes, prebuilt (a package has no src/ and no esbuild), and the commit
+// it was built from, which the package names as its courses' source and its workflow's pin
+// (src/defaults/cli.ts cliPin). A modified tree is recorded as such, and that package pins nothing.
+const git = (...a) => execFileSync('git', ['-C', ROOT, ...a], { encoding: 'utf8' }).trim();
+const { prebuildDefaults, remoteSlug } = await import('./baton-cli.mjs');
+const repository = process.env.GITHUB_REPOSITORY ?? remoteSlug(ROOT);
+if (!repository) throw new Error('build-cli: no origin remote names the repository the package is built from');
+const dirty = git('status', '--porcelain', '--untracked-files=no') !== '';
+const files = await prebuildDefaults(OUT, { repository, commit: git('rev-parse', 'HEAD'), ...(dirty ? { dirty: true } : {}) });
+process.stderr.write(`build-cli: dist/baton.mjs and ${files} prebuilt defaults, ${repository}@${git('rev-parse', '--short', 'HEAD')}${dirty ? ' (modified tree)' : ''}\n`);
