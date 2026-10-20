@@ -3,7 +3,7 @@ title: "R3-1208 — [OP] Provision Baton on Cloudflare: Worker route, Access, se
 id: R3-1208
 project: baton
 status: available
-updated: 2026-10-16
+updated: 2026-10-20
 repos:
   - docs
 tags:
@@ -24,7 +24,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §3, §10.1, §10.5 R-BTN-16, §13a (staging) (docs@2dbf1424)
+**Spec:** `spec/BATON_SPEC.md` §2.1 (the service, the `baton-staging` tenant), §11.1 (keys), §11.2 R-BTN-57, §11.4 R-BTN-155 (dashboard sign-in), §12.1 (principals), §12.4 R-BTN-16, §12.7 (Baton's GitHub App), §15 (staging)
 **Depends on:** R3-1207
 **Runbook:** `DEPLOY-RUNBOOK` — every step below from the command line, with the check after each.
 
@@ -56,12 +56,12 @@ The owner, in one sitting (about 30 minutes):
 3. Worker vars for both environments: `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `OWNER_EMAILS`.
    Also the Worker secret **`BATON_ADMIN_KEYS`** in both environments — the owner's SSH public
    key: `npx wrangler secret put BATON_ADMIN_KEYS < ~/.ssh/id_ed25519.pub` (BATON_SPEC
-   R-BTN-57, docs#212). *(2026-10-14: once R3-1240 lands, administrators are these keys and
-   the dashboard uses one-time sign-in links; Access in steps 2–3 then becomes optional
-   hardening, kept here so the read-only view is protected before that. Use a separate,
-   touch-required administrator key, `~/.ssh/baton_admin.pub`, never loaded into an
-   ssh-agent agent sessions reach — R-BTN-57 as revised.)*
-3a. The Baton GitHub App (BATON_SPEC §10.3, R-BTN-73, as of docs#212 head 1dae3316): create
+   R-BTN-57, §11.2). *(2026-10-14, restated 2026-10-20: administrators are these keys and the
+   dashboard signs in with a code an administrator confirms (R-BTN-155, §11.4); Access in steps
+   2–3 is optional hardening (§12.4), kept here so the read-only view is protected before that.
+   Use a separate, touch-required administrator key, `~/.ssh/baton_admin.pub`, never loaded into
+   an ssh-agent agent sessions reach — R-BTN-57.)*
+3a. The Baton GitHub App (BATON_SPEC §12.7, R-BTN-73 §3.3): create
    it with **Actions: write** and read-only **Contents**, **Pull requests** and **Issues** (the
    permissions its subscriptions need; no Checks), subscriptions to `push`, `pull_request`,
    `pull_request_review`, `issue_comment` and `workflow_run`, webhook URL
@@ -74,7 +74,7 @@ The owner, in one sitting (about 30 minutes):
    writes the two routes on deploy (found in baton#2's review).
 5. In GitHub `immediately-run/baton` → Settings → Environments → `production`: the secret
    `CLOUDFLARE_API_TOKEN` (the deploy workflow lives in that repository since the owner moved
-   Baton's code there, BATON_SPEC §3).
+   Baton's code there, BATON_SPEC §2.1).
 6. Re-run the latest `baton-deploy` workflow on `immediately-run/baton` `main`.
 7. In GitHub `immediately-run/docs` → Settings → Variables: `BATON_ENABLED` = `true`, which
    turns on `baton-sync.yml` (off until now, so it never ran against a Worker that was not
@@ -85,7 +85,7 @@ The owner, in one sitting (about 30 minutes):
 - One account, one zone; staging shares the Worker code but never the Durable Object.
 - The API token is scoped to Workers Scripts on this account and Zone Read plus Workers
   Routes on the one zone, nothing else.
-- **Do not:** add the test signing key to any deployed environment (§13a); allow any email
+- **Do not:** add the test signing key to any deployed environment (§15); allow any email
   but the owner's in the Access policy.
 
 ### Tests
@@ -102,7 +102,7 @@ None to write: provisioning. The live checks are R3-1209.
 - [ ] the `production` environment secret `CLOUDFLARE_API_TOKEN` exists in `immediately-run/baton`
 - [ ] the docs variable `BATON_ENABLED` is `true` and the dispatched `baton-sync` run is green
 - [ ] `npx wrangler secret list` shows `BATON_GITHUB_APP_KEY` and `BATON_GITHUB_WEBHOOK_SECRET`, and the App's recent deliveries page shows a delivery to `/v1/github/webhook` answered 2xx
-- ~~the account's plan offers the Worker Loader binding (Dynamic Workers) that R3-1236 needs~~ — dropped 2026-10-16: Baton runs no hooks (BATON_SPEC §2l R-BTN-98), so no Worker Loader binding is needed
+- ~~the account's plan offers the Worker Loader binding (Dynamic Workers) that R3-1236 needs~~ — dropped 2026-10-16: Baton runs no hooks (BATON_SPEC §1 R-BTN-98), so no Worker Loader binding is needed
 
 ### Hand-off
 
@@ -110,7 +110,7 @@ R3-1209 verifies the view live.
 
 ## Status
 
-_2026-10-16 — the Worker Loader exit criterion is dropped: hooks are retired (BATON_SPEC §2l)._
+_2026-10-16 — the Worker Loader exit criterion is dropped: hooks are retired (BATON_SPEC §1 R-BTN-98)._
 
 
 _(filed 2026-10-13)_
