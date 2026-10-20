@@ -348,6 +348,16 @@ working until the stated condition holds, then removes it.
   the `Skills-Version:` trailer as an alias (R-BTN-22), belongs to docs' `BATON_DOCS_DEPLOYMENT`.
   Cutover itself — shadow reports, the legacy-claim import and adoption — stays in the
   specification (§16.1).
+- **"Worker" is "runner" (2026-10-20, owner).** The spec names every process that can execute a
+  leg a runner — an interactive runner (an agent harness session, through its sidecar) or a CLI
+  runner (`baton runner start`). The code still uses the old names; rename them through a
+  dual-read window: the tables `workers`, `worker_grants`, `worker_capabilities`, `worker_tags`,
+  `worker_courses`, `worker_instances`, `worker_reports` and the index
+  `worker_instances_by_instance` (→ `runners`, `runner_*`); the columns `worker_id`,
+  `from_worker_id`, `to_worker_id` and `min_worker_version`; the credential kind `worker`; the
+  header `X-Worker-Secret` and the trailer `Min-Worker-Version`; the query `?worker=me`; the
+  refusal `worker-reaped`. A runner accepts both header names until every runner sends the new
+  one.
 
 ## Resolutions made in the rewrite
 
@@ -775,6 +785,11 @@ states the result.
 - **Core conditions on no ticket, repository or worker** (`baton.sign-in-burst`,
   `baton.bearer-over-http`) sit on the tenant.
 - **The ticket-id rule** cited by §4 and §6 is stated in §12.3 (Identifiers).
+- **"Worker" is retired as a term** (owner, 2026-10-20: "worker is used for so many other things, it's
+  an overloaded term"). Every process that can execute a leg is a **runner**: an **interactive
+  runner** (an agent harness session through its sidecar) or a **CLI runner** (`baton runner
+  start`). "Worker" remains only for the Cloudflare Worker that hosts Baton. Identifier renames
+  are listed under migrations.
 - **Call legs never wait in their claim.** Baton learns a call's children only from the end that
   carries `spawned`, so an in-claim wait could never settle; the call leg's `wait_s` was dropped.
 - **Who drains the outbox.** A runner declares `runner:baton-legs` only when started with
