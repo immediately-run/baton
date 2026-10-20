@@ -8,7 +8,7 @@ repos:
   - immediately-run/baton
 tags:
   - roadmap-item
-description: "Owner, 2026-10-18, after the security review: build BATON_SPEC R-BTN-139 to R-BTN-158 (placed by rule across §2.3, §3–§6, §8 and §10–§12), which close the holes inside one tenant that the tenancy rules (§2.2) do not touch — outsiders' PRs and verdicts, off-branch leg code, runner secrets in legs and logs, multi-repository machine keys, unfounded heads, open-world gates, missing caps, forged merge checks, MCP lifting holds, the login link, CI-token events, tokens, and the local host. The grant's one flag is sync: no courier flag, delivery flag or courier asks scope (personal couriers are retired). S-BTN-115 to S-BTN-125, G-BTN-135 to G-BTN-145. Requires: a public GitHub repository and a GitLab project for two exit criteria."
+description: "Owner, 2026-10-18, after the security review: build BATON_SPEC R-BTN-139 to R-BTN-158 (placed by rule across §2.3, §3–§6, §8 and §10–§12), which close the holes inside one tenant that the tenancy rules (§2.2) do not touch — outsiders' PRs and verdicts, off-branch leg code, runner secrets in legs and logs, multi-repository machine keys, unfounded heads, open-world gates, missing caps, forged merge checks, MCP lifting holds, the login link, CI-token events, tokens, and the local host. The grant's one flag is sync: no courier flag, delivery flag or courier asks scope (personal couriers are retired). Extended after the adversarial review: the author and posted-state gates at an open-world settlement, consents in `code_repo_consents`, the longest id winning a branch, `base_sha` ancestry, `accept {confirm_span?}` and pending grants holding no role, the per-credential declaration budget, revocation only of a fully verifying bearer over `http`, and no read of Cloudflare Access's JWT. S-BTN-115 to S-BTN-125, S-BTN-32's pending-grant case, G-BTN-135 to G-BTN-145, G-BTN-57's pending-grant clause, G-BTN-59's open-world clause. Requires: a public GitHub repository and a GitLab project for two exit criteria."
 topics:
   - baton
 owns: {}
@@ -21,7 +21,12 @@ depends_on:
 §3.4 (R-BTN-139–R-BTN-141, R-BTN-156), §4.3–§4.4 (R-BTN-147, R-BTN-148, R-BTN-150), §5.6
 (R-BTN-142), §6.3 and §6.7 (R-BTN-151, R-BTN-152), §6.8 (R-BTN-154), §8.2 and §8.4 (R-BTN-143–
 R-BTN-146), §10 (R-BTN-153), §11.4 (R-BTN-155), §12.5–§12.6 (R-BTN-157, R-BTN-158); §13 (the
-columns and tables); §15 S-BTN-115 to S-BTN-125, G-BTN-135 to G-BTN-145.
+columns and tables); §15 S-BTN-115 to S-BTN-125, G-BTN-135 to G-BTN-145. After the adversarial
+review (`spec/BATON_SPEC_HISTORY.md`, "Adversarial review (2026-10-20)"): R-BTN-104/R-BTN-148
+(adv-1 M7), R-BTN-140 and §13.1's `code_repo_consents` (adv-4 M2), R-BTN-141 (adv-1 M8),
+R-BTN-143 (adv-3 F4), R-BTN-146, §12.1 and §14's accept row (adv-4 m2, m4), §2.3 and R-BTN-149's
+declaration budget (adv-1 m8), R-BTN-158 (adv-4 M3), R-BTN-16 (adv-4 m5); S-BTN-32, G-BTN-57,
+G-BTN-59.
 **Depends on:** B-45 for the origin rules R-BTN-158 cites. Check courses (B-5, R-BTN-153),
 streams and Stop (B-9, R-BTN-145) and the action registry and MCP (B-25, R-BTN-154) take their
 parts, which their tickets name; this item builds the rest and their tests.
@@ -108,7 +113,59 @@ Split into reviewed PRs along four parts. Each is independent.
      runner's hint; API-key and migrated grants active at once; decline returning an active
      grant to pending, logged; a hostname binding at first acceptance; the confirmation set
      without Stop or setting a hold; clients refusing to send bearers over non-loopback `http`
-     and the server revoking any that arrive.
+     and the server refusing every one that arrives (which it revokes is item 7's).
+7. **The adversarial review's fixes** (2026-10-20), each with its scenario case:
+   - **Author and posted-state gates at settlement** (R-BTN-104/R-BTN-148, adv-1 M7), in the
+     settlement path in `src/core/claims.ts`. The author gates are the `requires` and tier gates,
+     judged over `declared` at the claim and again over the posted ticket; the outcome table
+     applies only when one of them fails. A claim settling at `start` whose author gates pass but
+     whose posted-state gate fails for the claimed leg (not `ready`, a block, an open decision, a
+     posted bar excluding the runner's tags) ends `released:stale-board`: no failed attempt, the
+     branch tainted when the settling post is at the claim's sha.
+   - **Consents in their own table** (R-BTN-140, adv-4 M2).
+     - `code_repo_consents` `(home_id, repo_id)` with `consented_by` and `consented_at`, judged by
+       id at every use.
+     - It is written only by `POST /v1/owner/{repository}/code-repo-consents {repository,
+       confirm: true}` or `{repository, withdraw: true}`, signed by the consenting repository's
+       owner (a registry action and a `baton owner` command), or by an administrator's
+       `code_repo_consents_add` on `POST /v1/admin/repositories`.
+     - The owners' `code_repos` write takes `path` only. Baton resolves `repo_id` at addition and
+       keeps `former_paths` itself; a `repo_id` or `consented_at` in the write is not kept, and a
+       re-written list keeps the ids and consents of the paths it keeps.
+     - An entry naming a live registered repository has no reach until that repository
+       consents, and raises `baton.code-repo-unconsented`.
+   - **The longest id wins a branch** (R-BTN-141, adv-1 M8). One matcher, used by the fact
+     adapter, the standard station functions (`src/defaults/course-pr.ts`,
+     `src/defaults/course-markers.ts`), the runner's local branch check and `branchHolder` in
+     `src/core/claims.ts`: a branch maps to a ticket only when no longer id of the same repository
+     also matches it. Until a child's first snapshot, its branch maps to its parent.
+   - **No roll-back** (R-BTN-143, adv-3 F4). The claim response names `base_sha`
+     (`board_snapshots.parent_sha`; null for a repository's first snapshot and for a held post
+     accepted per R-BTN-11). The runner (`src/runner/home.ts`) checks that it is an ancestor of
+     `snapshot_sha` too, and a failure is handled as an off-branch sha. The held machine-key
+     post that may name such a sha is B-77's.
+   - **Accepting a grant** (R-BTN-146, §12.1, §14; adv-4 m2, m4).
+     - `POST /v1/runner/grants/{repository}/accept` takes `{confirm_span?}`; an acceptance that
+       raises the span without it is `conflict`, listing the repositories that would lose sync.
+     - A machine key whose every grant is pending and never accepted holds no role, so a grant
+       naming any public key reserves nothing; its acceptance is checked as a registration.
+     - The one-role `conflict` (`src/core/admin.ts`) never names the role the key holds.
+   - **The declaration budget** (§2.3, R-BTN-149, adv-1 m8). A heartbeat's declaration and
+     report writes count per credential per UTC day. Past 50,000, the heartbeat still renews the
+     lease, but its declaration changes and reports are dropped and it is answered
+     `declarations: 'quota'` until 00:00 UTC. The count lives in this item's migration.
+   - **Revoking a bearer over `http`** (R-BTN-158, adv-4 M3). Only a bearer whose secret fully
+     verifies is revoked (a cookie's session ended) and raises `baton.bearer-over-http`. One that
+     does not verify is refused `unauthenticated` and counted in §2.3's failure buckets: an id
+     or fingerprint alone, which is public, revokes nothing.
+   - **Access is never read** (R-BTN-16, adv-4 m5). Remove `verifyOwner` and every
+     `Cf-Access-Jwt-Assertion` read from `src/core/auth.ts` and `src/core/front.ts`, the
+     `X-Baton-Owner` principal from `src/core/baton.ts`, and the `ACCESS_TEAM_DOMAIN`,
+     `ACCESS_AUD`, `OWNER_EMAILS` and `TEST_ACCESS_JWKS` bindings (`src/core/ports.ts`,
+     `src/local/main.ts`, `src/local/testCourse.ts`, the test bindings). A dashboard request is
+     authorized by Baton's own session alone. R3-1208 narrows the Access policy itself. The
+     release notes say that a deployment signing in through Access alone needs an administrator
+     key first.
 
 ### Architecture
 
@@ -121,12 +178,30 @@ Split into reviewed PRs along four parts. Each is independent.
 ### Tests
 
 S-BTN-115 to S-BTN-125 in `test/integration/`, on both hosts, with unit tests for each
-adapter's trust and fork mapping from real payload shapes.
+adapter's trust and fork mapping from real payload shapes. Item 7's cases, on both hosts:
+- S-BTN-116: A's owner writing `code_repos` with a `repo_id` and `consented_at` for B keeps only
+  the path, with no reach until B's owner consents; a re-written list keeps its ids and consents.
+- S-BTN-121: an open-world claim settling at its sha with an open decision ends `stale-board`,
+  not failed, with its branch tainted. This ticket writes only that case; the lag, held-row and
+  `stream` cases are B-77's.
+- S-BTN-122: heartbeats flipping declarations past the budget keep their leases and drop the
+  declarations (`declarations: 'quota'`).
+- S-BTN-123: a post naming an older default-branch sha gives `released:off-branch`, because
+  `base_sha` is not its ancestor.
+- S-BTN-124: an unverifying bearer naming an administrator's `bak_<id>` over `http` is refused
+  and nothing is revoked.
+- S-BTN-32: a pending grant on a key later added as an owner gives `conflict` without naming the
+  role. Its `admin.key.revoke` case is B-76's.
+- Unit: `claude/T-12-1-impl` maps to `T-12-1`, never `T-12`, in every caller of the matcher, and
+  to `T-12` while `T-12-1` is unposted; `accept` without `confirm_span` listing the repositories;
+  no `Cf-Access-Jwt-Assertion` header changes any principal.
 
 ### Exit criteria
 
 - `npm test` and `npm run typecheck` green, with S-BTN-115 to S-BTN-125 and G-BTN-135 to
-  G-BTN-145 passing.
+  G-BTN-145 passing, item 7's cases among them; G-BTN-57's pending-grant clause and G-BTN-59's
+  open-world clause hold.
+- No code under `src/` reads Cloudflare Access's cookie or JWT.
 - On a scratch public GitHub repository, an outsider's fork PR and approve comment move
   nothing.
 - A real GitLab `id_tokens` JWT from a merge-request pipeline is refused.
@@ -134,3 +209,5 @@ adapter's trust and fork mapping from real payload shapes.
 ## Status
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — the courier `asks` scope, the delivery flag and the `courier` grant flag are dropped (personal couriers retired, R-BTN-164); everything else is unchanged.)_
+
+_(2026-10-20: extended for the adversarial review's fixes — settlement gates, `code_repo_consents`, the longest id winning a branch, `base_sha`, grant acceptance and roleless pending keys, the declaration budget, verified-only revocation over `http`, and no Access JWT read (item 7).)_

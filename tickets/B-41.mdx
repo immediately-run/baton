@@ -9,7 +9,7 @@ repos:
   - docs
 tags:
   - roadmap-item
-description: "Build the window of BATON_SPEC R-BTN-132 (§6.1; history Migrations): ticket prerequisites reach core only as a leg's `requires.tickets` (`parent`, `posted`) or a posted `depends_at`; an open child blocks its parent only through a call, so the parent's `blocked_by` fan-in goes and `spawned` writes no provisional rows; `human-operator` is checked by rule 4 like any capability; a station function's `waiting_on` may not be `dependencies`, `children`, `owner` or `policy`; `build-app`'s `file`/`verify` move onto call legs and the standard courses' approvals onto person legs; docs' `tickets.mjs` moves; the old forms are read during a dual-read window and refused at cutover. S-BTN-108, G-BTN-127. Requires: none."
+description: "Build the window of BATON_SPEC R-BTN-132 (§6.1; history Migrations): ticket prerequisites reach core only as a leg's `requires.tickets` (`parent`, `posted`) or a posted `depends_at`; an open child blocks its parent only through a call, so the parent's `blocked_by` fan-in goes and `spawned` writes no provisional rows; `human-operator` is checked by rule 4 like any capability; a station function's `waiting_on` may not be `dependencies`, `children`, `owner` or `policy`; `build-app`'s `file`/`verify` move onto call legs and the standard courses' approvals onto person legs; docs' `tickets.mjs` moves; the markdown source's `prs` and `answer` become sync-local `fields` station functions read, never posted (R-BTN-33, R-BTN-74); the old forms are read during a dual-read window and refused at cutover. S-BTN-108, G-BTN-127. Requires: none."
 topics:
   - baton
 owns: {}
@@ -28,7 +28,8 @@ for a person and two for `human-operator`.
 **Spec:** `spec/BATON_SPEC.md` §6.1 R-BTN-120 / R-BTN-132 (one way in per kind of prerequisite),
 §4.6 R-BTN-86 (children; an open child blocks only through a call), §7.6 R-BTN-165 (call legs),
 §6.4 R-BTN-116 (person legs), §5.8 R-BTN-131 (the standard courses, `build-app` on calls), §6.6
-rules 4 and 6; history, "Migrations the implementation still carries" (R-BTN-132's window, and
+rules 4 and 6; §1 R-BTN-33 and §4.2 R-BTN-74 (the markdown source's `prs` and `answer` are sync-local
+`fields`, never posted; a ticket's `course` is `{}`); history, "Migrations the implementation still carries" (R-BTN-132's window, and
 "Course fields the schema review removed" for `build-app`); §15 S-BTN-108, G-BTN-127. The
 amendment landed with this ticket; this ticket builds it.
 **Depends on:** B-10 (leg `requires.tickets` and `depends_at`), B-7 (person legs, which replace
@@ -63,6 +64,13 @@ phase 4 removes anything.
 3. **Phase 2, writers.**
    - `src/defaults/tickets-markdown.ts`: `depends_on` → `depends_at` on the course's
      `start_leg`; no child added to `blocked_by`; `OP` → `human-operator` in `requires`.
+   - **`prs` and `answer` stay in the sync** (R-BTN-33, R-BTN-74, adv-1 M4): the markdown
+     source stops posting them in the opaque `course` field (today `course: {prs, answer}` in
+     `src/defaults/tickets-markdown.ts`) and returns them as the ticket's sync-local `fields`,
+     which `src/defaults/cli.ts` hands to the station functions and strips from the board post;
+     the posted `course` is `{}`. The readers move with it: `course-pr.ts`'s `prs` (`prRefs` over
+     `t.course.prs`) and `courses.ts`'s `answer` read `t.fields`. No old-form read is kept —
+     both ends are the CLI's own code and move in one PR.
    - `src/defaults/course-markers.ts` and `course-pr.ts`: no `dependencies` or `children`
      label (core now answers them).
    - The standard courses, each a new version that replays its in-flight tickets (R-BTN-48,
@@ -95,7 +103,9 @@ phase 4 removes anything.
 ### Tests
 
 - **S-BTN-108** on both hosts, its trace replayed through the model.
-- Unit: the source's translations; a `spawned` end writing no block, the parent's other leg
+- Unit: the source's translations; a ticket with `prs:` and `answer:` posts `course: {}` and no
+  `fields`, while its station function still sees both (`test/unit/tickets-markdown.test.ts`,
+  `test/unit/course-pr.test.ts`); a `spawned` end writing no block, the parent's other leg
   ready beside its open children; rule 4 refusing an ungranted `human-operator`; the validator
   refusing each reserved label after cutover.
 - S-BTN-104's and S-BTN-107's tests: their `waiting_on: owner|children` assertions become the
@@ -108,6 +118,7 @@ phase 4 removes anything.
 - [ ] S-BTN-108 passes on both hosts; G-BTN-127 holds
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
 - [ ] docs' `tickets.mjs` on the new forms, merged
+- [ ] no board post from the markdown source carries `prs` or `answer`
 - [ ] the cutover PR merged after Needs you shows no repository on an old form
 
 ## Status
@@ -115,3 +126,5 @@ phase 4 removes anything.
 _(filed 2026-10-19 with the R-BTN-132 amendment)_
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — `spawned` places no provisional rows and children block only through a call, so `build-app`'s `file`/`verify` move onto call legs (B-62) and its approvals onto person legs (B-7).)_
+
+_(2026-10-20: extended for the adversarial review's fixes — phase 2 moves the markdown source's `prs` and `answer` out of the posted `course` into sync-local `fields`, adv-1 M4.)_

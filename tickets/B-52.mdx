@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1108
 tier: judgement
-description: "Schemas read from the course directory's schemas/<name>@<n>.json by the sync and the kit alike; baton course test reports every refinement gap (R-BTN-108), checks entry schemas against legs' contracts (R-BTN-109), prints each course's signature and checks spawns, lifetime included, against each spawned course's input (R-BTN-111); stats carries the signature. Call legs' completion-station checks are B-62's and the signature's condition list B-55's. S-BTN-65's kit half, S-BTN-80's signatures. Split from B-3. Requires: none."
+description: "Schemas read from the course directory's schemas/<name>@<n>.json by the sync and the kit alike; baton course test reports every refinement gap (R-BTN-108), checks entry schemas against legs' contracts (R-BTN-109), prints each course's signature and checks spawns, lifetime included, against each spawned course's input (R-BTN-111); stats carries the signature; the legacy relative-path schema window (history, Migrations: Legacy schema forms) reported and then closed. Call legs' completion-station checks are B-62's and the signature's condition list B-55's. S-BTN-65's kit half, S-BTN-80's signatures. Split from B-3. Requires: none."
 topics:
   - baton
 owns: {}
@@ -20,7 +20,7 @@ depends_on:
 ---
 
 **Brief:** continues B-3 (split 2026-10-20). The owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §5.1 R-BTN-134 (`schemas/<name>@<n>.json` in the course directory); §5.5 R-BTN-108 (the static refinement check `baton course test` runs), R-BTN-109's last bullet (every `entry` schema posted; every arriving leg's contract can meet it), R-BTN-111 (a course's signature, `spawns` with `lifetime`); §5.7 (the test kit); §14 (`GET …/stats`); §15 S-BTN-65's kit half, S-BTN-80's signatures.
+**Spec:** `spec/BATON_SPEC.md` §5.1 R-BTN-134 (`schemas/<name>@<n>.json` in the course directory); §5.5 R-BTN-108 (the static refinement check `baton course test` runs), R-BTN-109's last bullet (every `entry` schema posted; every arriving leg's contract can meet it), R-BTN-111 (a course's signature, `spawns` with `lifetime`); §5.7 (the test kit); §14 (`GET …/stats`); §15 S-BTN-65's kit half, S-BTN-80's signatures; `spec/BATON_SPEC_HISTORY.md`, "Migrations the implementation still carries": Legacy schema forms (R-BTN-108).
 **Depends on:** B-3, which ships the validator (`src/shared/schema.mjs`: `refinementGaps`, `checkSchemaSet`), the `std:` library and the schemas a sync posts.
 
 ### Requires
@@ -34,8 +34,21 @@ depends_on:
 3. **Entry against contracts.** The kit checks every `entry` schema is posted or `std:`, and that every leg arriving at a station declares outputs that can meet its requirements.
 4. **Signatures and spawns (R-BTN-111).** The kit prints each course's signature (its `start` entry as input, each `end` station's entry as output); `GET /v1/repositories/{repository}/stats` carries it per course. A leg's `spawns: {course: <id> | [<id>…] | "*", provides, lifetime?}` is accepted in the course file (`lifetime` `parent` or `station`) and checked by the kit against each named course's input; `"*"` checks against every course the repository lists other than its own.
 
+5. **End the legacy schema-path window** (history, Migrations: Legacy schema forms). Today
+   `validateCourse` in `src/core/course.ts` accepts an output `schema` that is a relative path
+   (`isSchemaPath`), read as `<course>:<leg>.<output>@<contract version>` with no base.
+   - `baton course test` reports each such output, naming the `<id>@<version>` to write in its
+     place; the docs repository's courses are moved to ids.
+   - Once no registered course file uses a path (checked over the deployed Baton's
+     `courses.course_json` and over this repository's fixtures), remove
+     `isSchemaPath` and the path branch: a path is then a `shape` violation like any other
+     non-id string, and the history's Migrations entry is deleted in the same PR (the spec
+     amended here, by pull request).
+
 ### Do not
 
+- Remove the path form while a registered course file still uses one: the post would be
+  refused and the previous course kept in force (R-BTN-69).
 - Check a call leg's completion stations against the called courses' end outputs: that is B-62's (R-BTN-165), on this ticket's signature code.
 - List conditions in the signature: B-55 adds them (R-BTN-160).
 - Act on `lifetime`: supersession is B-65's (R-BTN-168); this ticket only accepts and validates the field.
@@ -44,13 +57,19 @@ depends_on:
 
 - S-BTN-65's kit half and S-BTN-80's signatures half (both signatures printed; naming `abandoned` as not producing `result` is its completion case, B-62's), through `baton course test` on fixture courses whose schemas sit in `schemas/` of the course directory.
 - A unit case in which the sync's post and the kit read the same schemas from the same path.
+- Unit (`test/unit/course.test.ts`): before the window closes, a path-form output is accepted and
+  reported by the kit; after, it is refused `shape`, and no fixture course uses a path.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green.
 
 ### Exit criteria
 
 - [ ] the scenarios above pass
+- [ ] no registered course uses a path-form schema, `isSchemaPath` is gone from `src/`, and the
+  history's "Legacy schema forms" migration is removed
 - [ ] merged under the review gate
 
 ## Status
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — schemas move to the course directory's `schemas/`, `spawns` gains `lifetime` and several courses, and completion-station checks and the signature's conditions go to B-62 and B-55.)_
+
+_(2026-10-20: extended for the coverage audit — reports and then ends the legacy relative-path schema window, history Migrations: Legacy schema forms.)_

@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1117
 tier: critical
-description: "Build the rest of BATON_SPEC §7.5 R-BTN-167: the validator's full timer rules (contradictory timers, a timer `leg` on a choice station's leg, a second `baton.stalled`, `max_ready_s` and `max_attempts_s` refused); `ticket_timers` for `arrival`, `ready` and `first_attempt`, each firing once per instant from the alarm and carried across renames and the owner-state export; interrupting timers releasing as `leg-timeout` and queuing their `leg` (`next_source: timer`) or failing the attempt, a `first_attempt` timer spending the budget (`budget-spent`); non-interrupting timers raising their `notify` type once per arrival (`baton.ready-late`); core's default 259,200-s `baton.stalled` timer counted only while the sync posts the leg `waiting`, replacing the 72-hour scan. S-BTN-87, S-BTN-134, S-BTN-10's 72 h case, S-BTN-37's timer case, G-BTN-152. Requires: none."
+description: "Build the rest of BATON_SPEC §7.5 R-BTN-167: the validator's full timer rules (contradictory timers, a timer `leg` on a choice station's leg, a second `baton.stalled`, `max_ready_s` and `max_attempts_s` refused); `ticket_timers` for `arrival`, `ready` and `first_attempt`, each firing once per instant from the alarm and carried across renames and the owner-state export; interrupting timers releasing as `leg-timeout` and queuing their `leg` (`next_source: timer`) or failing the attempt, a `first_attempt` timer spending the budget (`budget-spent`); non-interrupting timers raising their `notify` type once per arrival (`baton.ready-late`); core's default 259,200-s `baton.stalled` timer counted only while the sync posts the leg `waiting`, replacing the 72-hour scan. Extended for R-BTN-64 as the schema review left it: a rename rewrites every per-leg record keyed by an old name — `leg_attempts`, `ticket_timers`, `ticket_blocks`, `leg_needs`, `ticket_next_legs`, `ticket_bars` and a held position's `route_leg` and `route_station` — in the transaction that accepts the course file. S-BTN-87, S-BTN-134, S-BTN-10's 72 h case, S-BTN-37 (attempts, backoff, timer and held position over a rename), G-BTN-152, G-BTN-64. Requires: none."
 topics:
   - baton
 owns: {}
@@ -32,12 +32,17 @@ release and reap, which B-60 built); R-BTN-122 (§7.4, `budget-spent`, the owner
 reset when a leg reaches an outcome); R-BTN-163 (§7.3, `baton.stalled` and its restarts); R-BTN-83
 (§5.3, held positions); R-BTN-88 (§4.8, owner state); R-BTN-64 (§5.7, renames carry timers);
 R-BTN-69 (§5.2, the validator); §13.6 `ticket_timers` and `ticket_overrides.override_kind`; §15
-S-BTN-10, S-BTN-37, S-BTN-87, S-BTN-134, G-BTN-64, G-BTN-152.
+S-BTN-10, S-BTN-37, S-BTN-87, S-BTN-134, G-BTN-64, G-BTN-152. R-BTN-64's per-leg rewrite comes from
+the schema review (`spec/BATON_SPEC_HISTORY.md`, "Schema review (2026-10-20)", item 9).
 **Depends on:**
 - B-60 (the `start` timer, `deadline_at`, and the `leg-timeout` release and reap);
 - B-11 (`leg_attempts.first_attempt_at`, exhaustion and `budget-spent`, the owners' bounds);
 - B-38 (held positions with their kind);
 - B-56 (`baton.stalled` as a `suspend` core condition).
+
+B-11 and B-38 add `leg_attempts` and the held position's `route_leg`/`route_station`; this ticket
+lands after both, so item 8 rewrites every per-leg table in one place and neither of them needs a
+rename path of its own.
 
 ### Requires
 
@@ -100,6 +105,21 @@ ticket makes it one row among a leg's timers, which a course can tune.
      posted `ready`.
 7. **The model** (R-BTN-68): if `model/baton.qnt` cites R-BTN-167 or the stall rule it replaces,
    change it in this PR with its `npm run model:pr` report.
+8. **Every per-leg record follows a rename** (R-BTN-64, schema review item 9). Today
+   `applyRegistry` in `src/core/baton.ts` calls `renameActive` in `src/core/claims.ts`, which
+   rewrites only active claims' `station` and `leg`. Beside it, in the same transaction, add one
+   rewrite that maps every old station or leg name (the graph's `legRenames` and
+   `stationRenames`) to its new one in:
+   - `leg_attempts` (attempts, `first_attempt_at`, `retry_after`, B-11);
+   - `ticket_timers` (armed timers, item 3);
+   - `ticket_blocks` (a `retry` backoff and every other per-leg block);
+   - `leg_needs` and `ticket_next_legs`;
+   - `ticket_bars`. These are the posted bars; owner bars still do not follow renames
+     (R-BTN-142);
+   - `ticket_overrides.route_leg` and `route_station` (a held position of any kind, B-38).
+
+   Runs keep counting toward `max_runs` under the resolved name, and attempts, backoffs, armed
+   timers, blocks and held positions carry over unchanged.
 
 ### Do not
 
@@ -125,13 +145,16 @@ ticket makes it one row among a leg's timers, which a course can tune.
     is B-70's and `max_duration` is B-67's. A leg's `call`, `checks` and `retry.non_retryable`
     are refused as unknown keys and need only an assertion.
   - `S-BTN-10.no-review-capacity.test.ts`: `baton.stalled` at 72 hours from the default timer.
-  - `S-BTN-37.course-renames.test.ts`: an armed timer carried over a rename.
+  - `S-BTN-37.course-renames.test.ts`: a rename of a leg with an attempt, a backoff, an armed
+    timer and a held position, each carried over under the new name (item 8).
 - Unit: the `arrival` instant kept across a Baton move and restarted on a station change; the
-  default not counting a `time` wait.
+  default not counting a `time` wait; item 8's rewrite of each table under a leg rename and a
+  station rename.
 
 ### Exit criteria
 
-- [ ] the scenarios above pass on both hosts; G-BTN-152 holds, and G-BTN-64 holds for timers
+- [ ] the scenarios above pass on both hosts; G-BTN-152 holds, and G-BTN-64 holds for every
+      per-leg record (attempts, backoff, timers, blocks, needs, held positions)
 - [ ] the 72-hour stall scan is gone from `src/core/blocks.ts`
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
 - [ ] merged under the review gate
@@ -139,3 +162,5 @@ ticket makes it one row among a leg's timers, which a course can tune.
 ## Status
 
 _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
+
+_(2026-10-20: extended for the adversarial review's fixes — R-BTN-64's rename (from the schema review) carries every per-leg record, not only timers (item 8); B-11 and B-38 need no rename path of their own.)_

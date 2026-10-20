@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1102
 tier: critical
-description: "A claim may name an unknown ticket into its course's start_leg with course, leg and sha; it is provisional, records a sync want, may start only its entry leg, and is settled by the first post whose contains lists its sha — ordinary, or ended stale-board, course-changed, closed or unknown-ticket — or ends after 60 minutes (BATON_SPEC §4.5 R-BTN-104); S-BTN-58. Requires: none."
+description: "A claim may name an unknown ticket into its course's start_leg with course, leg and sha; it is provisional, records a sync want, may start only its entry leg, and is settled by the first post whose contains lists its sha — ordinary, or ended stale-board, course-changed, as R-BTN-35 ends a claim on a closed ticket, unknown-ticket or (when an author gate fails) misdeclared — or ends after 60 minutes, or at once off-branch (BATON_SPEC §4.5 R-BTN-104 / R-BTN-148); S-BTN-58. The `declared` author gates, `misdeclared` and tainted branches are B-46's. Requires: none."
 topics:
   - baton
 owns: {}
@@ -39,15 +39,21 @@ lease, and server-side claim ends.
 
 1. `POST /v1/runner/claim` with `ticket_id`, `course`, `leg`, `sha` for a ticket with no `tickets` and no `closed_tickets` row: refused unless the repository has an accepted snapshot, `leg` is the course's `start_leg` with no required bar, the key holds no other provisional claim, and the id has no `released:unknown-ticket` end in the last 24 hours; then the lease, grant, `min_runner_version` (`min_worker_version` in the code until B-68) and owner-bar gates.
 2. A provisional claim records a sync want; may make one `advance`, into `start_leg`; any later `advance` or end but a release is refused `provisional`.
-3. `POST /v1/sync/observation` returns `provisional: [{claim_id, sha}]`; the board post's `contains` lists those `sha`s it contains; only such a post settles a claim, by R-BTN-104's five outcomes.
-4. The alarm ends a claim unsettled after 60 minutes `released:unknown-ticket`, actor `alarm`; settlement ends use actor `server`; every end queues a `release` message; none counts in `failedAttempts`.
+3. `POST /v1/sync/observation` returns `provisional: [{claim_id, sha}]`; the board post's `contains` lists those that are its `sha` or an ancestor of it; only the first accepted post containing a claim's `sha` settles it, by R-BTN-104 / R-BTN-148's outcomes as the spec now states them:
+   - present at `start` (or past it by a path beginning with the claimed leg), every author gate passing → an ordinary claim — unless it is still at `start` and a posted-state gate fails for the claimed leg, which ends `released:stale-board` with no failed attempt (and taints the branch when the settling post is at the claim's sha);
+   - under another course → `released:course-changed`; closed → ended as R-BTN-35 ends a claim on a closed ticket; absent → `released:unknown-ticket`;
+   - at another station by another path → `released:stale-board`;
+   - an author gate (the `requires` and tier gates over `declared`, judged again over the posted ticket) failing → the first matching row of R-BTN-148's table: `stale-board` (raising `baton.open-world-stale` for a later sha or another machine key) or `misdeclared` (a failed attempt with backoff, a 24-hour bar, `baton.misdeclared`).
+
+   This ticket builds the outcomes that need no `declared`: ordinary, `course-changed`, the closed end, `unknown-ticket` and `stale-board` by position. The `declared` field, the author and posted-state gates, `misdeclared`, the tainting and `released:off-branch` (R-BTN-143) are B-46's (its items on open-world gates and adv-1 M7), built on this ticket's `settle`. Whichever lands second wires the other's half into `settle`.
+4. The alarm ends a claim unsettled after 60 minutes `released:unknown-ticket`, actor `alarm`; settlement ends use actor `server`; every end queues a `release` message; only `misdeclared` (B-46's) counts in `failedAttempts`.
 
 ### Architecture — the decisions, named
 
 - **Settlement is one pure function** `settle(claim, postedTicket | null, closed: boolean, gates) → 'ordinary' | endReason` in `src/core/claims.ts`, called from the snapshot transaction (`Claims.judge`'s neighbourhood) for each provisional claim whose `sha` the post lists. The author gates it re-runs are `gatesFor` in `src/core/gates.ts` with phase `'claim'`, not a copy.
 - **"Unknown" is decided in the claim transaction** by reading `tickets` and `closed_tickets` there, so a sync landing between the check and the insert cannot let a known ticket through the open-world path.
-- **`countsAsFailed` in `src/core/attempts.ts` returns false for `released:unknown-ticket`**, as it does for `stale-board`; extend its doc comment's list.
-- **Do not**: let the runner's `sha` stand in for `contains` (Baton cannot check ancestry); settle on a post that does not list the claim's `sha`; recommend a provisional ticket; count a settlement end as a failed attempt.
+- **`countsAsFailed` in `src/core/attempts.ts` returns false for `released:unknown-ticket` and `released:course-changed`**, as it does for `stale-board`; extend its doc comment's list. `misdeclared` is the one settlement end that counts (B-46).
+- **Do not**: let the runner's `sha` stand in for `contains` (Baton cannot check ancestry); settle on a post that does not list the claim's `sha`; recommend a provisional ticket; count a settlement end other than `misdeclared` as a failed attempt.
 
 ### Tests
 
@@ -63,3 +69,5 @@ lease, and server-side claim ends.
 ## Status
 
 _(filed 2026-10-16)_
+
+_(2026-10-20: text corrected to the current spec — settlement follows R-BTN-104 / R-BTN-148's outcomes (posted-state gates at `start`, the author-gate table, `misdeclared`), not the old five; the `declared` gates and tainting are B-46's.)_

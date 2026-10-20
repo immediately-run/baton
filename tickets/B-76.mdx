@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1125
 tier: judgement
-description: "Build BATON_SPEC R-BTN-155's owner sessions: sign-in codes per role (`POST /v1/login {role}`, `baton owner open`, `POST /v1/owner/login-links`), a session row with its role, minting key and repositories, the `owner-session` principal of R-BTN-129 scoped to the repositories the key still owns and never an administrator, confirmation by the minting key (`POST /v1/owner/confirm`), `owner.sessions.revoke`, and R-BTN-118's owner watching. S-BTN-124, S-BTN-126, S-BTN-70, G-BTN-57, G-BTN-144. Requires: none."
+description: "Build BATON_SPEC R-BTN-155's owner sessions: sign-in codes per role (`POST /v1/login {role}`, `baton owner open`, `POST /v1/owner/login-links`), a session row with its role, minting key and repositories, the `owner-session` principal of R-BTN-129 scoped to the repositories the key still owns and never an administrator, confirmation by the minting key (`POST /v1/owner/confirm`), `owner.sessions.revoke`, and R-BTN-118's owner watching; `admin.key.revoke` removing an owner key from every repository (its sessions and MCP keys ending) and refusing an administrator's key `invalid-params` (R-BTN-57), and `baton admin keys set` refusing a line whose key holds another role, a host loading one anyway treating it as no administrator and raising `baton.admin-key-conflict` (§12.1). S-BTN-32, S-BTN-124, S-BTN-126, S-BTN-70, G-BTN-57, G-BTN-144. Requires: none."
 topics:
   - baton
 owns: {}
@@ -24,7 +24,9 @@ depends_on:
 sessions": "Sounds useful."
 **Spec:** `spec/BATON_SPEC.md` §11.4 R-BTN-155 (sign-in by a confirmed code, now for owners too),
 §8 R-BTN-118 (streaming; owner sessions watch), §12.2 (destructive actions), §12.4 R-BTN-16
-(cookies, origin checks), R-BTN-129 (the registry decides each action's callers).
+(cookies, origin checks), R-BTN-129 (the registry decides each action's callers); §11.2 R-BTN-57
+(`admin.key.revoke`: an owner key from every repository, never an administrator's); §12.1 (one
+role per key: `baton admin keys set` and `baton.admin-key-conflict`).
 **Depends on:** B-9 (leg streams), B-25 (the registry, which scopes a session's actions).
 
 ### Requires
@@ -51,23 +53,38 @@ None: a checkout, a terminal and a browser.
    session); R-BTN-155's one confirmed-action list.
 5. `GET /v1/ui/stream` admits an owner session for a claim of one of its repositories.
 6. The dashboard hides what the session may not see, and draws no administrator control for it.
+7. **Revoking keys** (R-BTN-57, adv-4 M1): `admin.key.revoke` (`revokeKey` in
+   `src/core/admin.ts`) removes an owner key from every repository it owns, the last owner
+   included, and ends its dashboard sessions and MCP keys in the same transaction; naming a key
+   listed in `BATON_ADMIN_KEYS` it answers `invalid-params` and changes nothing — an
+   administrator's key ends only by leaving the secret.
+8. **One role per administrator line** (§12.1, adv-4 m4): `baton admin keys set` (`cli/baton.mjs`)
+   refuses a line whose key holds another role in the tenant, without naming the role; a host
+   that loads such a line anyway (`src/cloudflare/baton.ts`, `src/local/host.ts`, through the
+   admin-key reader in `src/core/auth.ts`) treats that key as no administrator and raises
+   `baton.admin-key-conflict` (R-BTN-163) for the administrators.
 
 ### Do not
 
 - Give an owner session any administrator action, or another repository's rows.
+- Let any route remove an administrator's key from Baton's side; only the secret does.
 
 ### Tests
 
 - S-BTN-124's owner-session cases (a foreign repository and an administrator route
   `forbidden`, an owner code typed into `baton admin open` `not-found`, another key's
   confirmation `not-found`, removal and `owner sessions revoke` ending the session); S-BTN-32's
-  revoked owner key; S-BTN-126 extended: an owner signs in, sees only its repositories, and a
+  revoked owner key (removed from every repository, its sessions and MCP keys dead) and
+  `admin.key.revoke` on an administrator line (`invalid-params`); S-BTN-126 extended: an owner signs in, sees only its repositories, and a
   confirmed action needs its code; S-BTN-70 extended: an owner session watches its repository's leg and is refused
   another's.
+- Unit: `baton admin keys set` refuses a line whose key is an owner key; a host started with
+  such a line refuses that key's administrator requests and raises `baton.admin-key-conflict`.
 
 ### Exit criteria
 
-- [ ] the extended scenarios pass on both hosts; G-BTN-57 and G-BTN-144 hold
+- [ ] the extended scenarios pass on both hosts, S-BTN-32's administrator-line case included;
+  G-BTN-57 and G-BTN-144 hold
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
 
 ## Status
@@ -75,3 +92,5 @@ None: a checkout, a terminal and a browser.
 _(filed 2026-10-20 with the open-questions PR; scope widened the same day by the spec's
 adversarial review, owner decision 2: per-role sign-in codes, the `owner-session` principal,
 confirmation by the minting key, session revocation)_
+
+_(2026-10-20: extended for the adversarial review's fixes — `admin.key.revoke` refuses an administrator's key, and `baton admin keys set` and a host's load refuse an administrator line holding another role, adv-4 M1 and m4.)_

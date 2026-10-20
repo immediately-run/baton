@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1126
 tier: critical
-description: "Build R-BTN-127 and R-BTN-128: the noun-verb CLI with each command signing as one role and the old names refused; the runner archiving process-mode leg output to the transcript repos, masked, when the owners opt in; the runs, stream and release routes; baton leg log; and every caller in this repository and in docs moved to the new names in the same release. Requires: B-22."
+description: "Build R-BTN-127 and R-BTN-128: the noun-verb CLI with each command signing as the first role in its actions' `callers` the user holds a key for, and the old names refused; the runner archiving process-mode leg output to the transcript repos, masked, when the owners opt in; the runs, stream and release routes, `GET /v1/stream` taking an owner's or administrator's API key as well as a signature (R-BTN-159); baton leg log; and every caller in this repository and in docs moved to the new names in the same release. Requires: B-22."
 topics:
   - baton
 owns: {}
@@ -22,7 +22,7 @@ depends_on:
 
 **Brief:** the owner, 2026-10-17: a Git-like CLI with every leg command under `baton leg`, and `baton leg log` showing a leg's logs. Each leg run's output is saved now, and the old command names go outright. B-22 specified it (baton#46).
 **Spec:** `spec/BATON_SPEC.md` §11.3 (R-BTN-127), §8.5 (R-BTN-128), §8.4 (R-BTN-144: the one list of
-what is masked), §14's rows; history, Migrations: renamed CLI commands.
+what is masked), §11.1 R-BTN-159 (API keys reach `GET /v1/stream`), §14's rows; history, Migrations: renamed CLI commands.
 
 ### Why
 
@@ -31,7 +31,9 @@ R-BTN-127 and R-BTN-128 are specified. This ticket builds them, and moves every 
 ### What to build
 
 1. **The tree.** Rebuild `cli/baton.mjs` as R-BTN-127's tree:
-   - each command signs as its one role, with `-i` or `~/.config/baton/keys.json`;
+   - each command signs as its actions' `callers`, in order, trying the first role the user
+     holds a key for (`-i`, else `~/.config/baton/keys.json` for the origin called); no key for
+     any of them exits 2 naming the first role (R-BTN-127, G-BTN-117, adv-4 m12);
    - each old name exits 2 with its "renamed:" line, kept until no caller uses it (history, Migrations);
    - an ambiguous ticket id lists its matches;
    - the leg default is running, then queued, then most recent;
@@ -45,7 +47,9 @@ R-BTN-127 and R-BTN-128 are specified. This ticket builds them, and moves every 
    - the `leg_logs` table and its pointer validation;
    - the `leg_logs` setting;
    - `GET …/tickets/{ticket}/legs/{leg}/runs`;
-   - `GET /v1/stream`, signed by an owner or administrator key and closed on revocation;
+   - `GET /v1/stream`, authenticated by an owner's or administrator's SSH-key signature or API
+     key (`Authorization: Bearer bak_…`, R-BTN-159, adv-4 m13), and closed on revocation of
+     either;
    - `POST /v1/owner/{repository}/tickets/{ticket}/release`.
 4. **`baton leg log`.**
    - finished runs from git, with the user's credentials;
@@ -66,14 +70,21 @@ R-BTN-127 and R-BTN-128 are specified. This ticket builds them, and moves every 
 ### Tests
 
 - S-BTN-97, S-BTN-98 and S-BTN-99 as integration scenarios on both hosts; G-BTN-117 to G-BTN-119.
+- Unit (`test/unit/cli.test.ts`): a command whose actions' `callers` are `[owner, admin]` signs
+  with the owner key when both are held, with the administrator key when only it is, and exits 2
+  naming `owner` when neither is.
+- Integration: `GET /v1/stream` opened with an owner's API key, and closed when that key is
+  revoked.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green, and docs' `npm run verify` green.
 
 ### Exit criteria
 
-- [ ] the scenarios above pass on both hosts
+- [ ] the scenarios above pass on both hosts, with the first-held-role signing and the API-key stream
 - [ ] no caller in either repository uses an old name
 - [ ] merged under the review gate
 
 ## Status
 
 _(2026-10-20: references moved to the current-state spec, PR #71.)_
+
+_(2026-10-20: extended for the adversarial review's fixes — a command signs as the first role in its actions' `callers` the user holds a key for (m12), and API keys reach `GET /v1/stream` (m13).)_

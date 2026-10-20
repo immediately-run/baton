@@ -2987,7 +2987,9 @@ Limits that hold throughout:
   retry policy and does not replace it, unless the binding says `"replaces": "retry"`: then the
   handler's restart (`retry`, `route:<leg>` or `park`) decides in the policy's place, every
   restart checked against the owners' bounds below, and the leg ends blocked on the condition as a
-  `suspend` would. *(Specified, not built.)*
+  `suspend` would. Only the runner knows the binding, so it reports the raise with `replaces:
+  "retry"` and ends the claim `released:blocked` on the condition, never `cannot-finish`.
+  *(Specified, not built.)*
   - **State.** Attempts are counted **per ticket and leg**, with §9's rules for what counts as a
     failed attempt, in `leg_attempts`: repository, ticket, leg, `attempts`, `first_attempt_at`,
     `retry_after` and `last_error_type`. A failing `review` spends none of `implement`'s attempts.
@@ -3628,8 +3630,8 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     its end (R-BTN-171) — are the runner's own code with no script; they require the capability
     `runner:baton-legs` (R-BTN-133).
   - **Leg sessions** a script starts get `IR_BATON_PARENT=<runner id>`, `IR_BATON_SOCKET`
-    (R-BTN-106) and `IR_BATON_STATE`, a read-only state view without the runner secret or claim
-    nonce. They start no sidecar and register no runner; their harness hooks read the view for
+    (R-BTN-106) and `IR_BATON_STATE`, a read-only state view without the runner secret (the claim
+    nonce is public, R-BTN-144). They start no sidecar and register no runner; their harness hooks read the view for
     the fence, owner bars and claim, and append activities and transcript paths to the runner's
     spool; their skills never claim, advance or end.
   - **Loading.** The runner loads `course.json` and the scripts from the claim's `snapshot_sha`
