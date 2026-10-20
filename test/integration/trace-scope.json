@@ -94,5 +94,33 @@
   "S-BTN-64.isolation › S-BTN-64 isolation floors > the declaration is the worker’s latest heartbeat: one that stops declaring session is refused": {
     "at": 1,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-65.refinement › S-BTN-65 refinement > a leg that cannot meet it is given up: released cannot-finish:contract-output": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-65.refinement › S-BTN-65 refinement > a value missing url fails the base though its refinement allows it; with url it meets the entry through its refinement": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-66.entry › S-BTN-66 entry requirements > a pointer meets the requirement by name and schema; its contents are the sync's to check": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-66.entry › S-BTN-66 entry requirements > a runner that cannot meet the entry gives the leg up: released cannot-finish:contract-output, a failed attempt": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-66.entry › S-BTN-66 entry requirements > an advance into reviewed: refused without findings, refused with an invalid value, accepted with a valid one": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-66.entry › S-BTN-66 entry requirements > an end that finishes review at reviewed is held to the same entry; a release is not": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
+  "S-BTN-66.entry › S-BTN-66 entry requirements > the envelope's shape is checked before anything else: one of uri and value, a bounded value, a digest off git": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   }
 }
