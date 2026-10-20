@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1104
 tier: critical
-description: "Build BATON_SPEC §7.1 (R-BTN-160, R-BTN-125): the course file's `conditions` declarations and a leg's narrowing; the type grammar, hierarchy and standard types; `ctx.raise`, `baton leg raise` and `LegError(type, …)` as an `interrupt` raise; the runner's raise check; `POST /v1/runner/claims/{id}/conditions` with filter fields only, the `conditions` table and its quotas; unbound `interrupt` and `notify`; the closing table; severity as data; the signature's conditions; the read-only conditions route; the validator refusing `error_types`. S-BTN-130's narrowed-leg case, S-BTN-134's `error_types` case, G-BTN-146. Requires: none."
+description: "Build BATON_SPEC §7.1 (R-BTN-160, R-BTN-125): the course file's `conditions` declarations and a leg's narrowing; the type grammar, hierarchy and standard types; `ctx.raise`, `baton leg raise` and `LegError(type, …)` as an `interrupt` raise; the runner's raise check; `POST /v1/runner/claims/{id}/conditions` with filter fields only, the `conditions` table and its quotas; unbound `interrupt` and `notify`; the closing table; severity as data; the signature's conditions; the read-only conditions route; the validator refusing `error_types`; `baton`, `baton.*` and `hitl.decision` core's alone — refused in a course's declarations, by the runner's raise check and by the raise route (`invalid-params`). S-BTN-130's narrowed-leg case, S-BTN-131's case of a leg raising `baton.retries`, S-BTN-134's `error_types` case, G-BTN-146. Requires: none."
 topics:
   - baton
 owns: {}
@@ -25,7 +25,9 @@ current-state spec (PR #71).
 course file), R-BTN-111 (§5.5, the signature), R-BTN-33 (§1, filter fields only), R-BTN-81 (§4.7,
 the history row), §2.1's write budget, §12.3 (`message` is untrusted text); §13.6 `conditions`;
 §14 `POST /v1/runner/claims/{id}/conditions` and `GET /v1/repositories/{repository}/conditions`;
-§15 S-BTN-130, S-BTN-134, G-BTN-146.
+§15 S-BTN-130, S-BTN-134, G-BTN-146. After the adversarial review (adv-2 m1,
+`spec/BATON_SPEC_HISTORY.md`): R-BTN-160's core-only types, §14's raise row (`invalid-params`),
+G-BTN-146's last clause, S-BTN-131.
 **Depends on:** nothing. It is better built after B-42 (the leg module
 `@immediately-run/baton/leg` and its `LegError`) and B-52 (course signatures). Whichever of these
 tickets lands second adds `LegError`'s type argument and the signature's conditions.
@@ -56,7 +58,8 @@ route. It adds no handler. Until B-58 lands, every condition is unbound.
      description?}}`, where only `disposition` is required.
    - Restart ids use R-BTN-78's decision-id pattern, and `default` must be one of them.
    - A declared subtype of a standard type inherits its disposition unless it states one.
-   - A course may not declare `baton` or `baton.*`.
+   - A course may not declare `baton`, `baton.*` or `hitl.decision`, which are core's alone
+     (adv-2 m1); the validator names the type.
    - A leg's `conditions: [<type>…]` narrows what it may raise; `[]` allows nothing.
    - A file carrying `error_types` is refused, naming the field. It was never built, so it has no
      dual read. `max_duration` is B-60's window and B-67's refusal.
@@ -72,6 +75,7 @@ route. It adds no handler. Until B-58 lands, every condition is unbound.
      `--wait` is B-59's.
    - **The check**, made before anything is reported:
      - the type is standard or declared, and the leg's narrowing allows it;
+     - the type is not `baton`, `baton.*` or `hitl.decision`, which no leg may raise (adv-2 m1);
      - `restarts` are the declared ones or a subset of them (a standard type with none declared
        takes the raise's own);
      - `default` is one of them;
@@ -83,6 +87,8 @@ route. It adds no handler. Until B-58 lands, every condition is unbound.
    - The body is `{type, disposition, handler?, restarts, default?, severity?, url?}`.
    - A `subject`, `body` or any other field is `invalid-params` (R-BTN-33).
    - The answer is `{condition_id}`.
+   - A `type` of `baton`, `baton.*` or `hitl.decision` is `invalid-params`, so a runner that
+     skips its own check still cannot raise core's types (adv-2 m1).
    - The limits are 20 open conditions per claim and 200 raises per ticket per day. Past either,
      the request is refused with `quota`.
    - One transaction writes the `conditions` row, an activity of kind `condition` on the leg run
@@ -126,30 +132,36 @@ route. It adds no handler. Until B-58 lands, every condition is unbound.
   - the grammar at 64 and 65 characters;
   - an inherited disposition;
   - a `default` outside `restarts`;
-  - a declared `baton.x`;
+  - a declared `baton.x`, and a declared `hitl.decision`;
   - a narrowing;
   - `error_types` refused, naming the field (S-BTN-134's case).
 - New `test/unit/conditions.test.ts`:
   - the quotas at 20 and 21 open conditions, and at 200 and 201 raises a day;
   - a body carrying `subject` refused;
+  - a `type` of `baton.retries`, `baton` or `hitl.decision` refused `invalid-params`;
   - the unique open core condition;
   - closing an unbound `notify`.
 - `test/unit/runner-protocol.test.ts`:
   - a narrowed leg's raise refused on the channel (S-BTN-130's case);
   - restarts that are not a subset, a bad default and a bad severity, each refused;
+  - a raise of `baton.retries` or `hitl.decision` refused on the channel;
   - a `suspend` raise refused until B-59;
   - a typed `LegError` ending `cannot-finish:spec`, and an untyped throw ending
     `cannot-finish:transient`.
 - On both hosts, in `test/integration/S-BTN-131.debugger.test.ts` (a file B-56 completes): an
-  unbound `notify` raise recorded and closed, and an unbound `interrupt` ending the claim.
+  unbound `notify` raise recorded and closed, an unbound `interrupt` ending the claim, and a leg
+  raising `baton.retries` refused `invalid-params` (S-BTN-131's case).
 
 ### Exit criteria
 
-- [ ] S-BTN-130's narrowed-leg case and S-BTN-134's `error_types` case pass; G-BTN-146 holds for
-      the check and the report
+- [ ] S-BTN-130's narrowed-leg case, S-BTN-131's `baton.retries` raise and S-BTN-134's
+      `error_types` case pass; G-BTN-146 holds for the check, the report and core's reserved
+      types
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
 - [ ] merged under the review gate
 
 ## Status
 
 _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
+
+_(2026-10-20: extended for the adversarial review's fixes — `baton`, `baton.*` and `hitl.decision` reserved to core: refused in declarations, by the runner's raise check and by the raise route.)_

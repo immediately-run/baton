@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1100
 tier: critical
-description: "Baton runs no repository code (BATON_SPEC §1 R-BTN-98, §6.7 R-BTN-99–100): drop the hook machinery, serve the fleet and instance views and launch-candidates with ETags, recommendations?all=1, and claims that take prefer, bills and rationale; S-BTN-57, -21. Requires: none."
+description: "Baton runs no repository code (BATON_SPEC §1 R-BTN-98, §6.7 R-BTN-99–100): drop the hook machinery, serve the fleet and instance views and launch-candidates with ETags, recommendations?all=1, and claims that take prefer, bills and rationale; S-BTN-57, -21, -61, G-BTN-88. Requires: none."
 topics:
   - baton
 owns: {}
@@ -22,7 +22,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project; the owner, 2026-10-16: Baton only accepts and delivers state; hooks inside the server are retired.
-**Spec:** `spec/BATON_SPEC.md` §1 R-BTN-98 (what Baton still decides), §6.7 R-BTN-99 (the views, ETags, `?all=1`, `launch-candidates`) and R-BTN-100 (`prefer`, `bills`, `rationale`), §6.6 (matching), §13 (`claim_bills`, `board_head.fleet_version`, `instances_version`), §14, §15 S-BTN-21, S-BTN-57; the hook residue in `spec/BATON_SPEC_HISTORY.md` (Migrations)
+**Spec:** `spec/BATON_SPEC.md` §1 R-BTN-98 (what Baton still decides), §6.7 R-BTN-99 (the views, ETags, `?all=1`, `launch-candidates`) and R-BTN-100 (`prefer`, `bills`, `rationale`), §6.6 (matching), §13 (`claim_bills`, `board_head.fleet_version`, `instances_version`), §14, §15 S-BTN-21, S-BTN-57, S-BTN-61 (shared instances) and G-BTN-88; the hook residue in `spec/BATON_SPEC_HISTORY.md` (Migrations)
 **Depends on:** R3-1251 (instances and readings, which the instance view serves), R3-1255 (queue depths in the board summary)
 
 ### Requires
@@ -58,11 +58,17 @@ is Baton serving the state a runner ranks from. Tier: critical — the claim tra
 
 - `test/unit/claims.test.ts`: `prefer` takes the first passing entry; all refused returns one refusal per entry; `prefer` with `ticket_id` is `invalid-params`; `bills` with a foreign instance is refused.
 - `test/unit/views.test.ts` (new): the fleet view for a fixture repository holds none of a second repository's claims; the instance view hides another repository's ticket and host; the ETag changes after a grant, a reading and an hour boundary, and not otherwise.
+- Integration: S-BTN-61 (one instance listed by two repositories, measured from both: both
+  repositories see it with no foreign ticket or host; neither reading replaces the other; a key
+  of neither repository `forbidden` and the instance omitted from its view; a bill naming an
+  instance that does not list the claim's repository returned in `refused`), on both hosts —
+  the readings half is built, the bills half is this ticket's (G-BTN-88: billings counted across
+  repositories).
 - Integration: S-BTN-57 and the rewritten S-BTN-21 as `test/integration/S-BTN-57.ranking-on-runner.test.ts` and an updated `S-BTN-21`, on both hosts; S-BTN-24 and S-BTN-22 updated so no assertion reads hook advice.
 
 ### Exit criteria
 
-- [ ] `npm run test:baton` green with S-BTN-21, -22, -24 and -57 on both hosts
+- [ ] `npm run test:baton` green with S-BTN-21, -22, -24, -57 and -61 on both hosts; G-BTN-88 holds
 - [ ] `test/unit/views.test.ts` and `test/unit/claims.test.ts` pass
 - [ ] `git grep -n -i "hookrunner\|hook-refused\|launch-advice" src/` finds nothing
 - [ ] `npm run typecheck` green
@@ -70,3 +76,5 @@ is Baton serving the state a runner ranks from. Tier: critical — the claim tra
 ## Status
 
 _(filed 2026-10-16; replaces R3-1236)_
+
+_(2026-10-20: extended for the coverage audit — names S-BTN-61 and G-BTN-88, whose bills half this ticket builds.)_

@@ -34,13 +34,14 @@ depends_on:
 
 ### What to build
 
-1. **Channel.** The runner listens on a `0600` Unix socket in its state directory named by `IR_BATON_SOCKET`; the CLI wraps it as `baton leg status | output | done | suspend | release | next | yield`, refused outside a leg's session (R-BTN-127). R-BTN-106's verbs also include `raise` and `await` (R-BTN-160, R-BTN-162): whichever of this ticket and B-55/B-59 lands second adds them to the channel. The runner checks each move (station, next leg, outputs, entry) before it calls Baton and answers a failing one on the channel with the reason; the session never holds the runner secret or nonce (`IR_BATON_STATE` is the view without them).
+1. **Channel.** The runner listens on a `0600` Unix socket in its state directory named by `IR_BATON_SOCKET`; the CLI wraps it as `baton leg status | output | done | suspend | release | next | yield`, refused outside a leg's session (R-BTN-127). R-BTN-106's verbs also include `raise` and `await` (R-BTN-160, R-BTN-162): whichever of this ticket and B-55/B-59 lands second adds them to the channel. The runner checks each move (station, next leg, outputs, entry) before it calls Baton and answers a failing one on the channel with the reason; the session never holds the runner secret (`IR_BATON_STATE` is the view without it). The claim nonce is public — markers and the mirror's claim note carry it, and it authenticates nothing — so it is neither hidden from the state view nor masked (R-BTN-144, adv-3 F12).
 2. **Bounded runs.** `baton runner start --legs <a,b> --max-legs n --until <t>`: claims only tickets whose queued leg is named, chains only into named legs, at most `n` legs per claim (default 8), none started after `until`; a move into a leg outside the grant suspends at `reached` with the hand-off.
 3. **Isolation modes.** `baton runner start --attached` and `baton leg next` (blocks until the runner has a leg to give); `--sessions <provider>`: one cloud session per agent leg, a brief with the ticket, the leg, its inputs' URIs and the hand-off and no claim id, runner secret or Baton credential, the child's ```` ```baton-leg-result ```` block read from its events and checked like a channel move. The heartbeat declares the mode, and `session_url` for the running leg.
 
 ### Do not
 
 - Let the session talk to Baton, or hand it the runner secret.
+- Treat the claim nonce as a secret: no masking of it and no removal from the state view.
 
 ### Tests
 
@@ -51,3 +52,7 @@ depends_on:
 
 - [ ] the scenarios above pass on both hosts, with their traces replayed through the model where they touch the core
 - [ ] merged under the review gate
+
+## Status
+
+_(2026-10-20: text corrected to the current spec — the claim nonce is public, so the state view keeps it and nothing masks it, adv-3 F12.)_

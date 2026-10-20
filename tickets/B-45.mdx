@@ -8,7 +8,7 @@ repos:
   - immediately-run/baton
 tags:
   - roadmap-item
-description: "Owner, 2026-10-18: build Baton single-tenant now so that one deployment can later serve parties who do not trust each other with no interface changed and no trust promise taken back. Builds BATON_SPEC §2.2 and §3.1 (R-BTN-135 to R-BTN-138): the Cloudflare Worker serves only its origin, every Durable Object is named under its tenant, clients handle rate-limited and quota on every route, a runner serves one origin, the CLI's keys and secret sink are per origin, signed forge-check notices name their tenant, and forge repositories are identified by their immutable ids."
+description: "Owner, 2026-10-18: build Baton single-tenant now so that one deployment can later serve parties who do not trust each other with no interface changed and no trust promise taken back. Builds BATON_SPEC §2.2 and §3.1 (R-BTN-135 to R-BTN-138): the Cloudflare Worker serves only its origin, every Durable Object is named under its tenant, clients handle rate-limited and quota on every route, a runner serves one origin, the CLI's keys and secret sink are per origin, signed forge-check notices name their tenant, and forge repositories are identified by their immutable ids; an MCP key (`bmcp_`), having no id part, counts only in the (origin, client IP) failure bucket (§2.3)."
 topics:
   - baton
 owns: {}
@@ -53,7 +53,9 @@ today and an interface change or a broken promise later.
      the object verified.
    - Lease upkeep has its own bucket.
    - Failures are counted in two buckets: by origin, credential id (an SSH keyid or a
-     bearer's `<id>`) and IP; and by origin and IP across all ids.
+     bearer's `<id>`) and IP; and by origin and IP across all ids. An MCP key (`bmcp_`), which
+     has no id part, counts only in the (origin, client IP) bucket — never in the first under
+     an id parsed from its secret (§2.3, adv-4 m8).
    - Beyond 60 failures a minute in either bucket, the Worker checks requests against a
      snapshot of the tenant's whole active credential set. It fetches the snapshot at most
      once a minute, and again at most every 5 seconds on a miss, and refuses only the
@@ -150,7 +152,10 @@ today and an interface change or a broken promise later.
 ### Tests
 
 - S-BTN-111 to S-BTN-114 in `test/integration/`, on both hosts.
-- Unit tests for the shell's host check, naming helper and handshake (G-BTN-131). The static
+- Unit tests for the shell's host check, naming helper and handshake (G-BTN-131).
+- Unit test for the failure buckets: a failing `bak_<id>_…` bearer counts in both buckets under
+  its id; a failing `bmcp_…` bearer counts only in (origin, client IP), and 61 of them in a
+  minute switch that IP's requests to the snapshot check. The static
   check on `src/core/` runs in `npm test`.
 - Unit tests for OIDC, GitLab and webhook verification with matching and mismatched ids,
   using fixtures from real token and payload shapes.
@@ -166,3 +171,5 @@ today and an interface change or a broken promise later.
 ## Status
 
 _2026-10-20 — references repointed to the current-state spec (PR #71). The repository-level `baton.<sub>` conditions above (R-BTN-163): landing before B-57, this ticket lists them under **Needs you** through today's `needsYou()` path and B-57 converts them; after B-57 it raises them directly._
+
+_(2026-10-20: extended for the adversarial review's fixes — `bmcp_` keys count only in the (origin, client IP) failure bucket, adv-4 m8.)_

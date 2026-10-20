@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1105
 tier: critical
-description: "Build BATON_SPEC §7.3 R-BTN-163's debugger: Needs you lists open conditions with no handler ticket and the floor, by severity then age; R3-1257's Baton-raised decisions become the whole-ticket `suspend` core conditions `baton.retries`, `baton.contract` and `baton.stalled` with restarts `retry`, `route:<leg>` and `park` and no default, converted by a migration; `baton owner resolve <ticket> <restart>` and `POST …/tickets/{ticket}/resolve {restart, condition_id?}` replace `{decision, answer, leg?}`; `owner.resolve` confirmed on the dashboard; `hitl.decision` per open posted decision; `baton decision list` on `GET …/conditions?open=1&person=1`. S-BTN-131 (debugger half), S-BTN-6, S-BTN-7, S-BTN-10's resolve, S-BTN-47's retries and resolve cases, S-BTN-44's decision case, G-BTN-149. Requires: none."
+description: "Build BATON_SPEC §7.3 R-BTN-163's debugger: Needs you lists open conditions with no handler ticket and the floor, by severity then age; R3-1257's Baton-raised decisions become the whole-ticket `suspend` core conditions `baton.retries`, `baton.contract` and `baton.stalled` with restarts `retry`, `route:<leg>` and `park` and no default, converted by a migration; `baton owner resolve <ticket> <restart>` and `POST …/tickets/{ticket}/resolve {restart, condition_id?}` replace `{decision, answer, leg?}`; `owner.resolve` on the dashboard in one step (`POST /v1/ui/conditions/{condition}/resolve`, never confirmed by code); `hitl.decision` per open posted decision; `baton decision list` on `GET …/conditions?open=1&person=1`. S-BTN-131 (debugger half), S-BTN-6, S-BTN-7, S-BTN-10's resolve, S-BTN-47's retries and resolve cases, S-BTN-44's decision case, G-BTN-149. Requires: none."
 topics:
   - baton
 owns: {}
@@ -26,7 +26,7 @@ B-14: severity is now data, and routing and reminders are retired.
 **Spec:** `spec/BATON_SPEC.md` §7.3 R-BTN-163 (Needs you, resolving, core conditions, posted
 decisions, the floor, reading the list); R-BTN-160's closing table (§7.1), R-BTN-125 (severity),
 R-BTN-78 (§6.4, posted decisions), R-BTN-83 (§5.3, a re-route), R-BTN-122 (§7.4, the holds that
-raise `baton.retries`), R-BTN-82 (§5.5, `baton.contract`), R-BTN-155 (§11.4, confirmed actions),
+raise `baton.retries`), R-BTN-82 (§5.5, `baton.contract`), R-BTN-155 (§11.4: resolving a condition is not a confirmed action),
 §11.4's Needs you view, §11.3 (`owner resolve`, `condition.list`), §13.3/§13.6
 (`ticket_decisions`, `ticket_overrides.hold_reason`, `pending_owner_state`), §14 (the resolve and
 conditions routes); §15 S-BTN-6, -7, -10, -44, -47, -131, G-BTN-149.
@@ -87,8 +87,12 @@ the list of what nothing else handles.
      - A restart the condition does not offer is `invalid-params`.
    - `baton owner resolve <ticket> <restart>` in `cli/baton.mjs` replaces `resolve <decision>
      retry|park`.
-   - The dashboard reaches it with a session as `owner.resolve`, answered `202 {confirm_code}`
-     and performed by `baton admin confirm` (R-BTN-155).
+   - The dashboard reaches it with an administrator's session (and an owner's, once B-76 adds
+     owner sessions) as `owner.resolve`, in one step: `POST /v1/ui/conditions/{condition}/resolve {restart}`
+     answers `{ok: true}` (`invalid-params` for a restart the condition does not offer). It is
+     not on R-BTN-155's confirmed list — no `confirm_code`, no `baton admin confirm` (R-BTN-163,
+     §11.4, adv-2 B1 and adv-4 B1). The Resolve page `/conditions/<condition_id>` that a core
+     handler links to is B-75's.
    - A leg-raised `suspend` closed this way records `{restart, reason: "resolved", answered_by}`
      for B-59's resume.
 5. **`hitl.decision`.** In the transaction that stores posted decisions (`src/core/blocks.ts`,
@@ -143,6 +147,8 @@ the list of what nothing else handles.
   - a `hitl` raise listed by severity and age with its restarts;
   - `baton.retries` offering `retry`, `route:<leg>` and `park`;
   - a restart not offered refused `invalid-params`;
+  - a dashboard session resolving `baton.retries` with `retry` in one `POST
+    /v1/ui/conditions/{condition}/resolve`, with no confirmation code;
   - `baton decision list` showing the floor.
 
   The `hitl` raise's resume is B-59's case.
@@ -161,3 +167,5 @@ the list of what nothing else handles.
 ## Status
 
 _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
+
+_(2026-10-20: text corrected to the current spec — a dashboard resolve is one step, `POST /v1/ui/conditions/{condition}/resolve`, not a confirmed action, adv-2 B1 and adv-4 B1.)_

@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1120
 tier: critical
-description: "Build R-BTN-171: every git write Baton intends is an `outbox` row (`handler` for a bound core condition, `withdraw` for a superseded ticket) holding identifiers only; the built-in leg `baton.write`, requiring `runner:baton-legs` (declared under `--outbox`), writes a ticket's entries in id order with `baton_write: <id>` idempotence and reports `written[]`; entries land at a snapshot, drop when their condition closes first, and raise `baton.outbox-late` after 24 h; the source gains a `withdraw(ticket, reason)` export. S-BTN-136, G-BTN-156. Requires: none."
+description: "Build R-BTN-171: every git write Baton intends is an `outbox` row (`handler` for a bound core condition, `withdraw` for a superseded ticket) holding identifiers only; the built-in leg `baton.write`, requiring `runner:baton-legs` (declared under `--outbox`), writes a ticket's entries in id order with `baton_write: <id>` idempotence and reports `written[]`; entries land at a snapshot, drop when their condition closes first, and raise `baton.outbox-late` after 24 h; the source gains a `withdraw(ticket, reason)` export. Extended after the adversarial review: core's handlers resolved from the board post's top-level `bindings` and the tickets' `conditions`, stored in `condition_bindings`, a runner's or the tenant's condition never bound; a foreign file at a handler's path never overwritten, the ticket held `outbox-collision`; `baton.write` re-verified against Baton's record. S-BTN-136, S-BTN-131's binding cases, G-BTN-156. Requires: none."
 topics:
   - baton
 owns: {}
@@ -32,7 +32,10 @@ not binding `baton.write`); §4.2 R-BTN-74 (`file(ticket)` and `withdraw(ticket,
 R-BTN-133 (the `runner` capability type's `baton-legs` value); §5.3 R-BTN-83 (held positions);
 §6.6 (recommendation order: built-in legs first); §13.6 `ticket_overrides.override_kind`; §13.8
 the `outbox` table, `outbox_pending`, the alarm's `outbox.queued_at` + 24 h; §15 S-BTN-136,
-G-BTN-156.
+G-BTN-156. After the adversarial review (`spec/BATON_SPEC_HISTORY.md`, "Adversarial review
+(2026-10-20)"): §4.4's top-level `bindings`, R-BTN-163's "Binding core's conditions" and §13's
+`condition_bindings` (adv-2 M12); R-BTN-171's `outbox-collision` and §13.6's `hold_reason`
+(adv-2 m2); R-BTN-5/R-BTN-34's built-in legs (adv-2 M3); S-BTN-131.
 **Depends on:** B-58 (bindings, handler ticket frontmatter, the source's `file` export,
 `std:condition@1`), B-56 (`baton.<sub>` and `hitl.decision` conditions, which are what a
 `handler` entry files), B-38 (route overrides stored with their `next_source` kind; this ticket
@@ -64,7 +67,8 @@ only the debugger, and nothing Baton decides can be written back.
      condition, queue a `handler` entry and, in the same transaction, a provisional ticket row
      at the handler course's start station with queued leg `baton.write` held as an override
      (`next_source: outbox`, B-38's store). The id is `<local>.c<n>`, or
-     `baton.<sub>.<condition_id>` for a repository- or runner-level condition. The condition
+     `baton.<sub>.<condition_id>` for a repository-level condition; a runner's or the tenant's
+     condition is never bound (item 8). The condition
      counts as handled from this moment. A binding of `baton.outbox-late` is ignored.
    - **`withdraw` entries** are queued by B-65; this ticket gives them their kind, ordering and
      drain, and tests them with a fixture supersession.
@@ -98,6 +102,28 @@ only the debugger, and nothing Baton decides can be written back.
    (R-BTN-88) carries the `outbox` rows.
 7. **Model.** The `outbox` override kind as a held position, with a `model:pr` report
    (R-BTN-68).
+8. **The adversarial review's fixes** (2026-10-20):
+   - **Bindings for core's handlers** (§4.4, R-BTN-163, adv-2 M12). The sync posts
+     `.baton/baton.json`'s `conditions` as the board post's top-level `bindings` (`<type
+     prefix>: <course> | {course, replaces}`); the sync is `src/shared/batonSync.mjs`, vendored,
+     so that change goes to docs first, then `npm run vendor`. The board validator
+     (`src/core/board.ts`) accepts and bounds it beside B-58's `tickets[].conditions`. A new
+     migration adds `condition_bindings` `(repository_id, ticket_id, prefix)` (`ticket_id` `''`
+     for the repository scope) with `course_id`, `replaces` and `snapshot_sha`, rewritten in each
+     accepted snapshot's transaction. Baton reads it only to file handler tickets for its own
+     conditions, walking scopes as R-BTN-161 does, and never for a leg's raise.
+   - **Never bound** (R-BTN-163, adv-2 M12). A condition on a runner or on the tenant has no
+     repository whose bindings and outbox apply: it queues no entry, and Needs you lists it as
+     unhandled.
+   - **`outbox-collision`** (R-BTN-171, adv-2 m2). When `baton.write` finds a foreign file at a
+     `handler` entry's path (one without that entry's `baton_write`), it writes nothing for the
+     entry and reports it. Baton leaves the entry unwritten and holds the ticket with
+     `hold_reason` `outbox-collision` (added to the CHECK in item 1's migration).
+   - **Re-verified against Baton's record** (R-BTN-5/R-BTN-34, adv-2 M3). `baton.write` acts only
+     on its claim's `outbox` list, so the runner (`src/runner/runner.ts`'s re-verification)
+     checks it against the claim response's station and queued leg, never against the ticket
+     file in git. B-65 (`baton.cancel`) and B-5 (fileless check tickets) use the same path;
+     whichever of the three lands first writes it.
 
 ### Do not
 
@@ -117,10 +143,14 @@ only the debugger, and nothing Baton decides can be written back.
   (`dropped`); an entry undrained 24 h (`baton.outbox-late`).
 - Unit: entry ordering per ticket; the `fields` validator; `withdraw` on the markdown source;
   the `baton_write` idempotence check; the three-retry rejected push.
+- Item 8, on both hosts: S-BTN-136's foreign file at the handler's path (held
+  `outbox-collision`); S-BTN-131's `baton.output-invalid` filed with its binding taken from the
+  post's `bindings`, and a runner's condition never bound. Unit: `condition_bindings` rewritten
+  per snapshot and resolved innermost first; `baton.write` re-verified with no git read.
 
 ### Exit criteria
 
-- [ ] S-BTN-136 passes on both hosts; G-BTN-156 holds
+- [ ] S-BTN-136 passes on both hosts, with item 8's cases; G-BTN-156 holds
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
 - [ ] merged under the review gate
 
@@ -133,3 +163,5 @@ and `baton.retries` naming the runner. This ticket follows R-BTN-171; the §15 r
 fix before the scenario is written.
 
 _(2026-10-20: adversarial review of the spec — R-BTN-171 gains the entry state `claimed`, a `written` entry is never handed out again, an entry not landed after 3 snapshots holds the ticket `outbox-unlanded`, dropping a claimed handler keeps its row until the claim ends and withdraws it if written, later `answer` entries drop with their handler, R-BTN-83 names the built-in legs' clearing events, and a core `notify` condition re-raised within an hour or past 20 handler entries an hour files no handler. Build these here.)_
+
+_(2026-10-20: extended for the adversarial review's fixes — the board post's `bindings` stored in `condition_bindings` for core's handlers, runner- and tenant-level conditions never bound, `outbox-collision`, and `baton.write` re-verified against Baton's record (item 8).)_

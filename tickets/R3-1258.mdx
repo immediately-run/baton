@@ -13,7 +13,7 @@ tags:
   - roadmap-item
 order: 1091
 tier: critical
-description: "Build BATON_SPEC §4.6, §2.3 and §4.8 (R-BTN-86–88): child tickets (parent stored and validated, `spawned` recorded for `spawned-unposted` and for calls, children listed; no provisional blocks and no fan-in), the capacity envelope's dashboard figures, `capacity` events and `baton.capacity`, the load test, and owner-state freeze, unfreeze, seal (after every mirror catches up), a repeatable export from one section list and import with pending ticket-scoped rows. S-BTN-49 (non-call cases), S-BTN-50, G-BTN-76–78. Requires: human-operator."
+description: "Build BATON_SPEC §4.6, §2.3 and §4.8 (R-BTN-86–88): child tickets (parent stored and validated, `spawned` recorded for `spawned-unposted` and for calls, children listed; no provisional blocks and no fan-in), the capacity envelope's dashboard figures and the day's usage against the plan's limits (R-BTN-2), `capacity` events and `baton.capacity`, the load test, and owner-state freeze, unfreeze, seal (after every mirror catches up), a repeatable export from one section list and import with pending ticket-scoped rows. S-BTN-49 (non-call cases), S-BTN-50, G-BTN-76–78. R-BTN-2's usage figure. Requires: human-operator."
 topics:
   - baton
 owns: {}
@@ -26,7 +26,8 @@ depends_on:
 **Brief:** the Baton project; the owner, 2026-10-15: tickets are sequential and child
 tickets are the parallelism primitive; one Baton per team, with a stated envelope; owner state
 exportable.
-**Spec:** `spec/BATON_SPEC.md` §4.6 R-BTN-86 (children, `spawned`), §2.3 R-BTN-87 and R-BTN-149
+**Spec:** `spec/BATON_SPEC.md` §4.6 R-BTN-86 (children, `spawned`), §2.1 R-BTN-2 (the day's usage
+against the plan's limits), §2.3 R-BTN-87 and R-BTN-149
 (the envelope, the generation cap), §4.8 R-BTN-88 (owner state), §4.7 R-BTN-85
 (`spawned-unposted`), §4.2 R-BTN-74 (the source's `parent`), §13 (`tickets.parent`,
 `closed_tickets.parent`, `pending_owner_state`), §14 (children, freeze, seal, export, import),
@@ -76,7 +77,17 @@ Tier: critical — the load test is a cutover precondition.
 3. **Capacity** (R-BTN-87, §2.3): the dashboard's **Capacity** figures (current counts, rates
    as 5-minute means) against the envelope; the alarm logs `capacity` on crossing 80% each way
    and, while over, raises `baton.capacity` — through today's `needsYou()` path if this lands
-   before B-57, which converts it; nothing is refused. `npm run test:load` (§15): local in CI
+   before B-57, which converts it; nothing is refused.
+   **The day's usage** (R-BTN-2): beside the envelope, the **Capacity** view shows the UTC day's
+   Durable Object requests and SQLite rows written against the plan's daily limits (Workers
+   Free: 100,000 each, failing until 00:00 UTC; on Workers Paid, the plan's included amounts).
+   The tenant counts its own: each request its object handles, and the rows each transaction
+   writes (the SQL cursor's `rowsWritten` on Cloudflare, the local store's change count on the
+   local host), kept as two `baton_settings` counters reset at 00:00 UTC, so a deployment
+   serving several tenants shows each tenant its own counters only. Which plan applies is
+   configuration the spec does not yet name: this ticket adds one setting for it (a Worker var,
+   default Workers Free's limits) and names it in the spec in the same PR. Nothing is refused
+   at a limit. `npm run test:load` (§15): local in CI
    (20 repositories, 1,000,000 seeded history rows); against `baton-staging` before cutover,
    seeded by a synthetic `--with-history` export, with driver-generated keys an administrator
    registers and one real staging repository's sync posting a generated 5,000-ticket board.
@@ -115,6 +126,8 @@ Tier: critical — the load test is a cutover precondition.
   open and closed; bad parents `parent-invalid`) and **S-BTN-50** for the sections that exist
   when this lands.
 - `npm run test:load` at the envelope (**G-BTN-77**).
+- Unit: the day's usage counters count handled requests and written rows, reset at 00:00 UTC,
+  and are drawn against the plan's limits.
 - Unit: parent validation (cycles, depth, self, foreign, orphan); `spawned` bounds and
   `spawned-unposted`; the digest's canonical form; pending rows applied and dropped; the
   export's section list equal to the tables it names.
@@ -123,6 +136,7 @@ Tier: critical — the load test is a cutover precondition.
 
 - [ ] S-BTN-49's non-call cases and S-BTN-50 pass on both hosts; G-BTN-76 (but its call clause,
       B-62's) and G-BTN-78 hold
+- [ ] the **Capacity** view shows the day's usage against the plan's limits (R-BTN-2)
 - [ ] the load test passes on the local host in CI and once against staging (G-BTN-77)
 - [ ] no code path writes a `ticket` block from `spawned`
 - [ ] `npm test` and `npm run typecheck` green
@@ -132,3 +146,5 @@ Tier: critical — the load test is a cutover precondition.
 _(filed 2026-10-15)_
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — `spawned` is recorded for `spawned-unposted` and calls with no provisional blocks or fan-in, capacity raises `baton.capacity`, and the export reads one section list later tickets extend.)_
+
+_(2026-10-20: extended for the coverage audit — R-BTN-2's day's usage against the plan's limits on the **Capacity** view.)_

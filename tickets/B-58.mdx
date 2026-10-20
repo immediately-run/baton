@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1115
 tier: critical
-description: "Build BATON_SPEC §7.2 R-BTN-161: bindings in `.baton/baton.json` and a ticket's `conditions:` (posted as `tickets[].conditions`), resolved by the runner from the verified home tree at the claim's commit (innermost scope, then the repository, longest prefix); `baton leg why` and `baton course test --bindings` naming each type's course and scope; the ticket source's `file(ticket)` export and handler tickets `<local>.c<n>` pushed git-first with `course`, `parent`, `handles` and `raised_by`; `std:condition@1` and `std:restart@1`; the kit refusing a `suspend` binding to a course without `std:restart@1` ends; bound `interrupt` and `notify` filing a handler and closing with it. S-BTN-130, G-BTN-148, G-BTN-146. Requires: none."
+description: "Build BATON_SPEC §7.2 R-BTN-161: bindings in `.baton/baton.json` and a ticket's `conditions:` (posted as `tickets[].conditions`), resolved by the runner from the verified home tree at the claim's commit (innermost scope, then the repository, longest prefix); `baton leg why` and `baton course test --bindings` naming each type's course and scope; the ticket source's `file(ticket)` export and handler tickets `<local>.c<n>` pushed git-first with `course`, `parent`, `handles` and `raised_by`; `std:condition@1` and `std:restart@1`; the kit refusing a `suspend` binding to a course without `std:restart@1` ends; bound `interrupt` and `notify` filing a handler and closing with it. Extended after the adversarial review: a handler id that would pass 64 characters becomes `c<condition_id>`; `.c<n>` and `c<n>` ids reserved, the markdown source skipping such a file without `handles`; a handler write never overwriting a foreign file (`released:cannot-finish:spec`); an `error` binding's `{course, replaces: \"retry\"}` form, whose handler's restart decides in the retry policy's place. S-BTN-130, G-BTN-148, G-BTN-146. Requires: none."
 topics:
   - baton
 owns: {}
@@ -28,7 +28,9 @@ current-state spec (PR #71).
 R-BTN-74 (§4.2, the source's `file(ticket)` export); R-BTN-110 and R-BTN-111 (§5.5, the `std:`
 library and the signature); R-BTN-133 and R-BTN-143 (§8.4, the verified home tree, default-branch
 code only); R-BTN-86 (§4.6, children) and R-BTN-149 (§2.3, four generations); R-BTN-66 (§1, who may
-bind); §11.3 (`leg why`, `course test`); §15 S-BTN-130, G-BTN-146, G-BTN-148.
+bind); §11.3 (`leg why`, `course test`); §15 S-BTN-130, G-BTN-146, G-BTN-148. After the
+adversarial review (`spec/BATON_SPEC_HISTORY.md`, "Adversarial review (2026-10-20)", adv-2 m2 and
+m5): R-BTN-161's handler ids and foreign files, R-BTN-161's and R-BTN-122's `replaces` form (§7.4).
 **Depends on:**
 - B-55 (raises and the `conditions` row);
 - B-42 (leg trees at the claim's commit, and the wrapper's `tickets` call that reads the source
@@ -52,7 +54,8 @@ delivery.
      validated with the rest of that file.
    - Ticket scope: a ticket file's `conditions:`, which `src/defaults/tickets-markdown.ts` reads
      and the sync posts as `tickets[].conditions`. The board post validator (`src/core/board.ts`)
-     accepts and bounds it. Baton stores it only for display.
+     accepts and bounds it. Baton never resolves a leg's raise from it; B-64 stores it in
+     `condition_bindings`, for core's own handlers only.
 2. **Resolution, in the runner** (`src/runner/`):
    - Read bindings from the verified home tree at the claim's commit: `.baton/baton.json`, and the
      ticket chain through the source's `tickets` call on B-42's tree. Never read them from Baton's
@@ -96,6 +99,25 @@ delivery.
      refusal stands.
 8. **Delivery runners** need no core change. A handler course declares its capability types
    (R-BTN-121).
+9. **The adversarial review's fixes** (2026-10-20):
+   - **Long and reserved ids** (R-BTN-161, adv-2 m2). When `<local>.c<n>` would break the
+     ticket-id rule's 64 characters, Baton answers `handler_id` `c<condition_id>`. Ids ending
+     `.c<n>` or of the form `c<n>` are reserved: `src/defaults/tickets-markdown.ts` skips a file
+     carrying one without a `handles` block, with a sync warning naming it.
+   - **No foreign overwrite** (R-BTN-161, adv-2 m2). When `file(ticket)` finds a file at the
+     handler's path that is not its own write, the runner writes nothing, fails the raise and
+     ends `released:cannot-finish:spec`. The outbox's `outbox-collision` hold for core's handlers
+     is B-64's.
+   - **`replaces: "retry"`** (R-BTN-161, R-BTN-122, adv-2 m5). An `error` type's binding may be
+     `{"course": <id>, "replaces": "retry"}` in either scope: `.baton/baton.json`, the ticket's
+     `conditions:` and the board validator (`src/core/board.ts`) accept it, and a non-`error`
+     prefix carrying it is refused. Without `replaces`, the handler is filed beside the retry
+     policy, which still routes the ticket. With it, the handler's restart (`retry`,
+     `route:<leg>` or `park`) decides in the policy's place, and the leg ends blocked on the
+     condition as a `suspend` would. That end is B-59's wait and the restart's check against the
+     owners' bounds is B-11's: whichever of B-58, B-59 and B-11 lands last wires them, and until
+     then a `replaces` binding is refused by `baton course test --bindings`, naming the missing
+     piece.
 
 ### Do not
 
@@ -116,14 +138,22 @@ delivery.
   foreign file.
 - Unit: the handler is pushed before the raise returns, and a failed push fails the raise.
 - Unit: a bound `notify` closes with its handler.
+- Unit (item 9): a raise on a ticket with a 60-character local id answered `c<condition_id>`;
+  the markdown source skipping `T-1.c3.md` and `c17.md` without `handles`, and reading them with
+  it; a foreign file at the handler's path ending `released:cannot-finish:spec` with nothing
+  pushed; `{course, replaces: "retry"}` resolved for `error.transient` and refused for
+  `warning`.
 
 ### Exit criteria
 
 - [ ] S-BTN-130 passes on both hosts; G-BTN-148 holds, and G-BTN-146's "handler pushed before it
       returns" holds
+- [ ] item 9's unit cases pass
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
 - [ ] merged under the review gate
 
 ## Status
 
 _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
+
+_(2026-10-20: extended for the adversarial review's fixes — `c<condition_id>` and reserved handler ids, no foreign overwrite, and the `{course, replaces: "retry"}` binding form (item 9).)_

@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1118
 tier: critical
-description: "Build BATON_SPEC §7.6 R-BTN-165: a leg of `kind: call` whose `spawns` names the course, the courses or `*` it calls and whose `to` is a completion table (`of`, `at`/`done`/`withdrawn`/`closed`, `skip_withdrawn`, `next`, `null` outcomes); the script files children through `file(ticket)` with `called_by` and returns `spawned`; the runner ends `released:blocked` on `{kind: call}`, neither a failed attempt nor counted toward `max_blocked`; a `spawned` end naming none is refused; Baton settles the table in order in each transaction that moves a child, held provisionally (`next_source: call`) and logged `call-settled`; one `settleCall` shared by core and the sync's `locate`; the next leg's `called` input; the kit's checks of `spawns` and completion stations. S-BTN-132's settling, S-BTN-80's completion case, S-BTN-49's call case, G-BTN-150, G-BTN-76. Requires: none."
+description: "Build BATON_SPEC §7.6 R-BTN-165: a leg of `kind: call` whose `spawns` names the course, the courses or `*` it calls and whose `to` is a completion table (`of`, `at`/`done`/`withdrawn`/`closed`, `skip_withdrawn`, `next`, `null` outcomes); the script files children through `file(ticket)` with `called_by` and returns `spawned`; the runner ends `released:blocked` on `{kind: call}`, neither a failed attempt nor counted toward `max_blocked`; a `spawned` end naming none is refused; Baton settles the table in order in each transaction that moves a child, held provisionally (`next_source: call`) and logged `call-settled`; one `settleCall` shared by core and the sync's `locate`; the next leg's `called` input; the kit's checks of `spawns` and completion stations; the validator and the kit refusing a table whose last non-null entry is not `{\"of\": \"all\", \"closed\": true}`, so every call settles. S-BTN-132's settling and its table-without-a-closing-entry case, S-BTN-80's completion case, S-BTN-49's call case, G-BTN-150, G-BTN-76. Requires: none."
 topics:
   - baton
 owns: {}
@@ -31,7 +31,8 @@ R-BTN-86 (§4.6, children and `spawned`); R-BTN-74 (§4.2, `file(ticket)`); R-BT
 `requires.tickets` selects a call's children); R-BTN-126 (§6.2, the blocked end, `max_blocked`);
 R-BTN-83 (§5.3, provisional positions, git wins); R-BTN-82 (§5.5, the `called` input as pointers);
 R-BTN-69 (§5.2); §13.6 `ticket_blocks.kind`, §13.4 `ticket_stations.next_source`; §15 S-BTN-49,
-S-BTN-80, S-BTN-132, G-BTN-76, G-BTN-150.
+S-BTN-80, S-BTN-132, G-BTN-76, G-BTN-150. After the adversarial review (adv-2 M9,
+`spec/BATON_SPEC_HISTORY.md`): R-BTN-165's closing entry.
 **Depends on:**
 - R3-1258 (child tickets and `spawned`);
 - B-21 (`released:blocked` and its provisional rows);
@@ -61,6 +62,9 @@ leg scopes the wait to one leg and one run's children.
    - `at` names stations that every course the call may spawn has. A call over `"*"` may not use
      `at`.
    - A `null` entry's station is an outcome the script may report instead of `spawned`.
+   - The table's last non-null entry must be `{of: "all", closed: true, …}`, which holds once
+     every child has closed, so a call always settles (adv-2 M9). The validator and `baton
+     course test` refuse a table without it, naming the leg.
    - Refuse a leg's `call` field and `select: "run"`, naming the field.
    - `spawns.lifetime` is accepted. Ending children by lifetime is B-65's.
 2. **The end** (the runner, the leg module, `src/core/claims.ts`):
@@ -114,6 +118,8 @@ leg scopes the wait to one leg and one run's children.
   - an epic-shaped `plan` call with one child withdrawn, settling `planned` only once all have
     closed (`{of: "all", closed: true}`);
   - a `spawned` end naming none, refused;
+  - a table without a closing `{"of": "all", "closed": true}` entry, refused with the previous
+    file kept;
   - `settleCall` agreeing with Baton.
 
   The supersession half is B-65's.
@@ -121,7 +127,8 @@ leg scopes the wait to one leg and one run's children.
 - `S-BTN-49`: an open child blocks its parent only through a call. T's non-calling leg is still
   offered.
 - Unit: `settleCall`'s table order, `of: n`, `skip_withdrawn` and `null` outcomes; the validator's
-  refusals.
+  refusals, the missing closing entry and a closing entry followed only by `null` entries
+  (accepted) among them.
 
 ### Exit criteria
 
@@ -133,3 +140,5 @@ leg scopes the wait to one leg and one run's children.
 ## Status
 
 _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
+
+_(2026-10-20: extended for the adversarial review's fixes — a completion table must end with the closing `{"of": "all", "closed": true}` entry.)_

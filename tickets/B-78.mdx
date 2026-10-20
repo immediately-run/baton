@@ -1,0 +1,128 @@
+---
+title: "B-78 — Markers and foreign writes: every marker carries its claim's nonce, the sync posts them within caps that never refuse, and Baton notices a write no claim made (R-BTN-46)"
+id: B-78
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1143
+tier: critical
+description: "Build BATON_SPEC R-BTN-46, the one rule no ticket covered, with R-BTN-149's marker caps and R-BTN-85's `foreign-write` sub (adv-1 M6, m9): every `baton:` marker the standard courses write carries `claim=<nonce>`; the standard station functions post trusted authors' markers on live tickets' PRs and the marker courses' `.baton/markers.jsonl` lines in the board post's `markers` (`{ticket, leg, ref, claim_nonce}`); markers are never refused — the sync posts each ticket's newest 20 and the newest 20,000 in all and names the cut tickets in `markers_truncated`; Baton keeps judged refs in `markers_seen`, a repository's first accepted snapshot only seeding it; a new marker whose nonce names no claim on its ticket active at or after the previous accepted snapshot's observation logs the discrepancy `foreign-write` and raises `baton.foreign-write`, reverting nothing; a held post's markers are judged as a refresh. The `branch` course's `Baton-Claim` verdict markers are R3-1265's and are judged here. S-BTN-25, S-BTN-54 (its `foreign-write`), S-BTN-122 (markers), G-BTN-50, G-BTN-142 (marker caps). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-46
+  - B-57
+  - B-77
+---
+
+**Brief:** the coverage audit of the tickets against the spec (2026-10-20) found R-BTN-46 the one
+requirement no ticket covers: no board-post `markers` are read, there is no `markers_seen`, and
+nothing logs `foreign-write` or raises `baton.foreign-write`. Its scenario S-BTN-25 and gate
+G-BTN-50 were uncovered with it. The adversarial review (adv-1 M6) also made the marker caps
+truncate instead of refuse, and (m9) put the `branch` course's verdicts under the same rule.
+**Spec:** `spec/BATON_SPEC.md` §1 R-BTN-46 (markers carry `claim=<nonce>`, `markers_seen`,
+`foreign-write`, the first snapshot seeding); §4.4 (the board post's `markers` and
+`markers_truncated`; markers never refused); §2.3 R-BTN-149 (20 markers per ticket, 20,000 in
+all); §4.7 R-BTN-85 (the `foreign-write` sub); §3.4 R-BTN-139 (only trusted authors' markers are
+posted) and R-BTN-96 (`branch` verdicts posted as markers); §4.3 R-BTN-62 (a held post's markers
+taken as a refresh); §5.8 (the marker courses' `.baton/markers.jsonl`); §9.5 R-BTN-19 (a fenced-off
+session-mode child noticed as `foreign-write`); §9.1 (the nonce is public); §13.4 `markers_seen`;
+§15 S-BTN-25, S-BTN-54, S-BTN-122, G-BTN-50, G-BTN-142.
+**Depends on:** B-46 (the fact adapters' `trusted` flag, R-BTN-139, which decides what is posted);
+B-57 (`baton.<sub>` conditions); B-77 (`baton.station-jump`, the other half of S-BTN-25, and a held
+post's refresh). R3-1265 writes the `branch` course's `Baton-Claim` trailers and posts its
+verdicts as markers; this ticket judges them.
+
+### Requires
+
+None: every case runs in the integration harness with constructed PR facts and histories.
+
+### Why
+
+Baton cannot refuse a push or a comment (R-BTN-46), so overlap — a second runner writing on a
+ticket it does not hold, a reaped runner's orphaned child still pushing, an agent approving its
+own branch — must at least be noticed. Today the sync's station functions return `markers: []`
+(`src/defaults/course-pr.ts`, `src/defaults/course-markers.ts`), PR closing markers write the nonce
+as prose (`claim <nonce>` in `src/defaults/pr-close.ts`), and core ignores the post's markers. A
+per-ticket cap that refused the post (as R-BTN-149 first read) would have frozen a repository's
+whole board once one ticket collected 20 markers.
+
+### What to build
+
+1. **Markers carry the nonce** (`src/defaults/pr-close.ts`, `src/defaults/course-markers.ts`):
+   every `baton:` marker a standard course writes — verdict, adjudication and conclusion lines,
+   closing markers, the `baton:handoff` marker — carries `claim=<nonce>` in one parseable form;
+   `.baton/markers.jsonl` lines keep their `claim` field.
+2. **The sync posts markers** (`src/defaults/course-pr.ts`, `src/defaults/course-markers.ts`,
+   `src/defaults/cli.ts`):
+   - The PR-reading station functions return each trusted author's `baton:` marker on a live
+     ticket's PRs as `{ticket, leg, ref, claim_nonce}` (`ref` the comment's, review's or PR body's
+     forge id; `claim_nonce` null when absent). Untrusted markers are never posted (R-BTN-139);
+     the sync log counts them per PR.
+   - The marker courses' function returns each `.baton/markers.jsonl` line as a marker, `ref` the
+     commit that added it.
+   - Past the caps the CLI cuts, never refuses: each ticket's newest 20 by forge creation time
+     (commit time for a file marker), then the newest 20,000 in all, naming the cut tickets in
+     `markers_truncated`.
+3. **The board route** (`src/core/board.ts`): `markers` and `markers_truncated` validated on write
+   (§12.3's identifier rules; `claim_nonce` a nonce's form or null); the post is never refused
+   for its markers.
+4. **Migration** (one new numbered file): `markers_seen (repository_id, ref)` with `ticket_id` and
+   `observation`.
+5. **Judging** (a new `src/core/markers.ts`, called from the snapshot transaction in
+   `src/core/stations.ts`):
+   - For each posted marker whose `ref` is not in `markers_seen`: when its `claim_nonce` names a
+     claim on that ticket that was active at or after the previous accepted snapshot's
+     observation, nothing happens; otherwise Baton logs the discrepancy `foreign-write` (R-BTN-85:
+     `{sub, baton: <the ticket's claims in that window>, git: <ref, leg, nonce>, observation}`) and
+     raises `baton.foreign-write` on the ticket, naming the ref, leg and nonce. Every judged ref is
+     then inserted.
+   - A repository's first accepted snapshot only seeds `markers_seen`.
+   - A held post's markers are judged as a refresh against the current head (R-BTN-62).
+   - Baton reverts nothing, moves no ticket and gates nothing on a marker.
+6. **Surfaces:** `src/core/stats.ts` counts `foreign-write` discrepancies (not the mirror's
+   `foreign-claim` events) as foreign writes, and the dashboard's discrepancy list shows them by
+   sub and age (R-BTN-85).
+
+### Do not
+
+- Refuse, revert or discount anything on a marker, or let a marker gate a leg (G-BTN-50).
+- Check a commit, a signature or an author's identity beyond R-BTN-139's `trusted` flag.
+- Post an untrusted author's marker.
+- Refuse a board post for its marker count.
+- Write the `branch` course's trailers here; they are R3-1265's.
+- Edit an old migration.
+
+### Tests
+
+- On both hosts, a new `test/integration/S-BTN-25.two-runners.test.ts`: W2 pushes to W1's branch
+  and posts markers under its own nonce and with none, logged `foreign-write` and raised, nothing
+  refused and no commit checked; W1's next `advance` reports the moved branch; W1 writes a later
+  leg's marker under its own nonce without advancing into it and suspends, raising
+  `baton.station-jump` on the CI sync's post (B-77) with the suspension unconfirmed; a first
+  snapshot over old markers seeding without raising.
+- S-BTN-54's unclaimed `branch` verdict logging `foreign-write` (R3-1265's test, which waits for
+  this ticket).
+- S-BTN-122's marker case: a ticket with 25 markers, the newest 20 posted and the ticket in
+  `markers_truncated`, the post accepted.
+- Unit: the nonce-window judgement (a claim ended before the previous snapshot, one active
+  across it, another ticket's claim, a null nonce); the caps' cut order; marker parsing of each
+  `baton:` line form.
+
+### Exit criteria
+
+- [ ] S-BTN-25 passes on both hosts; G-BTN-50 holds; this ticket's S-BTN-122 case and
+      G-BTN-142's marker caps hold
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 from the coverage audit of the tickets against the spec: R-BTN-46 was the one
+uncovered requirement)_

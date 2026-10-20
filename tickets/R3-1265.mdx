@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1097
 tier: judgement
-description: "baton repo sync and mirror --if-wanted, baton repo spool for post-receive hooks, --defaults-only from a CLI outside the checkout, GitLab and Gitea fact adapters for the PR-reading courses (create-pr, review-pr), and the branch course as a course directory of the baton repository with verdict trailers (BATON_SPEC §3.3–§3.4, §5.1); S-BTN-54. Requires: none."
+description: "baton repo sync and mirror --if-wanted, baton repo spool for post-receive hooks, --defaults-only from a CLI outside the checkout, GitLab and Gitea fact adapters for the PR-reading courses (create-pr, review-pr), and the branch course as a course directory of the baton repository with verdict trailers — `Baton-Verdict`, `Baton-Reviewed` and `Baton-Claim: <nonce>`, each verdict posted as a marker so an unclaimed verdict is a `foreign-write` (R-BTN-96, R-BTN-46) (BATON_SPEC §3.3–§3.4, §5.1); S-BTN-54. Requires: none."
 topics:
   - baton
 owns: {}
@@ -20,11 +20,12 @@ depends_on:
   - R3-1263
   - R3-1249
   - B-43
+  - B-78
 ---
 
 **Brief:** the Baton project; filed by R3-1253 (docs#217).
-**Spec:** `spec/BATON_SPEC.md` §3.3 R-BTN-94 (runners, the spool), R-BTN-97 (a sync off a CI sandbox); §3.4 R-BTN-96 (fact adapters, the `branch` course), R-BTN-139 (trusted facts); §5.1 R-BTN-134 (course directories and sources, `facts`, `baton repo init`, `--defaults-only`); §4.2 R-BTN-74; §15 S-BTN-54 and S-BTN-56's `--defaults-only` cases
-**Depends on:** R3-1263, R3-1249, B-43 (course directories: `branch` is one)
+**Spec:** `spec/BATON_SPEC.md` §3.3 R-BTN-94 (runners, the spool), R-BTN-97 (a sync off a CI sandbox); §3.4 R-BTN-96 (fact adapters, the `branch` course), R-BTN-139 (trusted facts); §5.1 R-BTN-134 (course directories and sources, `facts`, `baton repo init`, `--defaults-only`); §4.2 R-BTN-74; §1 R-BTN-46 (markers carrying the claim's nonce, `foreign-write`); §15 S-BTN-54 and S-BTN-56's `--defaults-only` cases
+**Depends on:** R3-1263, R3-1249, B-43 (course directories: `branch` is one), B-78 (markers posted by the sync, `markers_seen` and `foreign-write`)
 
 ### Requires
 
@@ -56,7 +57,11 @@ Gitea need the PR facts `create-pr` and `review-pr` read. Tier: judgement — th
    `reviewed` and the next review; merged first by a `Baton-Ticket` trailer on the default
    branch's first-parent history; a ticket's branch is a ref matching the current or previous
    `branch_pattern` with a commit off the default branch; empty verdict commits with
-   `Baton-Verdict` and `Baton-Reviewed`; legs `implement`, `review` (`max_runs` 4), `fix`
+   `Baton-Verdict`, `Baton-Reviewed` and `Baton-Claim: <nonce>` (the `review` claim's nonce,
+   from `ctx`), parsed with `git interpret-trailers --parse`, last occurrence per key; the
+   station function posts each verdict as a marker (`{ticket, leg: "review", ref: <commit sha>,
+   claim_nonce: <trailer or null>}`) in the board post's `markers`, so a verdict no `review`
+   claim wrote is noticed as `foreign-write` and still counted (R-BTN-96, adv-1 m9); legs `implement`, `review` (`max_runs` 4), `fix`
    (`max_runs` 3) and `merge`, whose leg script writes `git merge --no-ff` with the trailer.
 5. `baton repo init` writes CI configuration whose sync key only default-branch runs can read.
 
@@ -64,19 +69,22 @@ Gitea need the PR facts `create-pr` and `review-pr` read. Tier: judgement — th
 
 - **The station rules are written once** over forge-neutral facts.
 - **Do not**: let a `post-receive` hook read the sync key or wait for a sync; bar identities in
-  the `branch` course.
+  the `branch` course; discount or refuse a verdict without `Baton-Claim` — it is noticed, never
+  reverted (G-BTN-50).
 
 ### Tests
 
-- Integration: S-BTN-54, both hosts; S-BTN-56's `--defaults-only` cases.
+- Integration: S-BTN-54, both hosts, its verdict without `Baton-Claim` counting and logging
+  `foreign-write`; S-BTN-56's `--defaults-only` cases.
 - Unit: the `branch` station function over constructed histories (no branch, a branch at the
   tip, verdicts naming older commits, a fix after a verdict, a squash merge, a deleted branch, a
-  trailer on a merged-in commit); each fact adapter over recorded GitLab and Gitea answers,
+  trailer on a merged-in commit, a verdict with and without `Baton-Claim` posting a marker with
+  its nonce or `claim_nonce: null`); each fact adapter over recorded GitLab and Gitea answers,
   mapped to the GitHub adapter's facts.
 
 ### Exit criteria
 
-- [ ] S-BTN-54 passes on both hosts
+- [ ] S-BTN-54 passes on both hosts, the unclaimed verdict's `foreign-write` included
 - [ ] the `branch` station function's and the adapters' unit tests pass
 - [ ] `src/defaults/courses/branch/` passes `baton course test`, and `baton repo init --course branch` writes a source, never a course file
 - [ ] `npm run typecheck` green
@@ -86,3 +94,5 @@ Gitea need the PR facts `create-pr` and `review-pr` read. Tier: judgement — th
 _(filed 2026-10-16)_
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — fact adapters serve `create-pr`/`review-pr` (there is no `pr` course), and `branch` is a course directory in the baton repository read from its source; depends on B-43.)_
+
+_(2026-10-20: extended for the adversarial review's fixes — `branch` verdicts carry `Baton-Claim: <nonce>` and are posted as markers, adv-1 m9; the marker pipeline that turns an unclaimed one into `foreign-write` is B-78's (R-BTN-46), which S-BTN-54's `foreign-write` case waits for.)_

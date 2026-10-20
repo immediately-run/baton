@@ -78,9 +78,15 @@ the deadline is independent of `not_before`, so it is its own ticket.
    - The runner aborts at its next safe point, writes its hand-off and ends
      `released:leg-timeout`. That end is a failed attempt (`src/core/attempts.ts`).
    - A delivered `leg-timeout` release unacknowledged for 15 minutes is reaped by the alarm with a
-     fence, actor `alarm:leg-timeout`. The ticket is not re-issued until the sidecar confirms that
-     it killed the tool processes, or until the runner goes silent past its lease. This reap
-     counts as the `leg-timeout` end does.
+     fence, actor `alarm:leg-timeout`: `fence_pending` with its `fence_incarnation` and
+     `fence_deadline` (the reap instant plus the runner's `lease_timeout_ms`). The ticket is not
+     re-issued until the sidecar reports `fenced: {claim_id, terminated: true}`, or until
+     `fence_deadline` passes, whatever the runner does meanwhile — a re-key, a new incarnation's
+     heartbeats or silence change nothing — and the alarm clears it (R-BTN-19, adv-3 F1). This
+     reap counts as the `leg-timeout` end does. This ticket's reap uses the fence path the code
+     has today; `fence_deadline`, its alarm clear and `baton.fence-pending` for every live
+     runner's reap, this one included, are B-79's, which follows this ticket. Write no clearing on
+     the runner's silence here.
 6. **The owner's controls:**
    - `POST /v1/owner/{repository}/claims/{id}/deadline` and `baton owner deadline <claim>
      --extend-to <t> | --cancel-at <t|none>`. Each act is logged `override`.
@@ -132,3 +138,5 @@ the deadline is independent of `not_before`, so it is its own ticket.
 
 _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71; carved out of
 R3-1259's items 4–6)_
+
+_(2026-10-20: text corrected to the current spec — a `leg-timeout` reap's fence clears at `fence_deadline`, not when the runner goes silent past its lease, adv-3 F1.)_
