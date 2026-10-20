@@ -1541,8 +1541,8 @@ mean (R-BTN-50).
   transactions that accept a snapshot, start, end or advance a claim, confirm an end, clear a
   fence or re-route a ticket.
   - A leg's `max_queue` is a **warning threshold**: a ticket always enters its queue, and the
-    depth may pass the bound. Depth above it raises `baton.queue-over` (`{leg, depth,
-    max_queue, intake}`), closed when the depth is back within it. Core never holds, refuses or
+    depth may pass the bound. Depth above it raises `baton.queue-over` (`{course, leg,
+    depth, max_queue, intake}`), closed when the depth is back within it. Core never holds, refuses or
     reorders for it.
   - **Intake.** A repository's course is `closed` while any of its legs is over `max_queue` and
     `open` when all are within (logged `course-closed`, `course-opened`). While closed,
@@ -4725,8 +4725,8 @@ checked in the transaction that adds a key.
 | `ticket_bars` | `(ticket_id, leg, tag)` | — | Tags barred from a leg (R-BTN-60) |
 | `ticket_decisions` | `(ticket_id, decision_id)` | `leg` (`''` for the ticket), `asks` (a person's leg's own, R-BTN-116), `url` | Posted decisions; each open one raises `hitl.decision` (R-BTN-78, R-BTN-163) |
 | `closed_tickets` | `ticket_id` | `closed_as` (`done`\|`withdrawn`), `final_station`, `final_path` JSON, `parent`, `observation`, `closed_at`, `purged_at` | What a snapshot reported closing; deleted if the ticket returns (R-BTN-10, R-BTN-81, R-BTN-86) |
-| `leg_queues` | `(repository_id, course_id, leg)` | `depth` | R-BTN-79 |
-| `leg_queue_members` | `(repository_id, course_id, leg, ticket_id)` | — | The unheld tickets each depth counts (R-BTN-79) |
+| `leg_queues` | `(repository_id, course_id, leg)` | `depth`, `max_queue` (the bound last judged; NULL until judged) | R-BTN-79 |
+| `leg_queue_members` | `ticket_id` | `repository_id`, `course_id`, `leg` | The one queue each unheld ticket is counted in (R-BTN-79) |
 | `unblocked_dispatch` | `repository_id` | `last_sent_at`, `pending_json` (≤ 100 entries and a `truncated` count), `due_at` | The unblocked trigger's coalescing window (R-BTN-77) |
 | `pending_owner_state` | `(repository_id, ticket_id, kind, key)` | `kind` (`override`\|`condition`\|`timer`\|`outbox`), `key` (`''`, the condition id, the timer's `(leg, timer)` or the outbox id), `row_json` | Imported ticket-scoped rows awaiting their ticket's first snapshot (R-BTN-88) |
 

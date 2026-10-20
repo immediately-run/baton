@@ -55,6 +55,12 @@ function renderHead() {
     // R-BTN-48: its courses, each with the version a worker must declare (rule 9).
     const courses = (r.courses ?? []).map((c) => `${c.id} v${c.version} (workers at ${c.min_worker_version})`).join(', ');
     box.append(el('div', { text: courses ? `courses: ${courses}` : 'no course registered', cls: 'muted' }));
+    // R-BTN-79: each course's intake and its legs' queues — depth over bound where it has one.
+    for (const c of r.courses ?? []) {
+      const queues = (c.queues ?? []).filter((q) => q.depth > 0 || q.max_queue != null)
+        .map((q) => `${q.leg} ${q.depth}${q.max_queue != null ? `/${q.max_queue}${q.depth > q.max_queue ? ' over' : ''}` : ''}`).join(', ');
+      if (queues || c.intake === 'closed') box.append(el('div', { text: `${c.id}: intake ${c.intake}${queues ? ` · queues: ${queues}` : ''}`, cls: 'muted' }));
+    }
   }
 }
 

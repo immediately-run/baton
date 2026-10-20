@@ -14,6 +14,8 @@ export interface Leg {
   from: string[];
   to: string[];
   maxRuns: number | null;
+  /** R-BTN-79: the queue depth above which the leg raises `queue-over`; null for unbounded. */
+  maxQueue: number | null;
   /** R-BTN-106: the legs a key that ran any of them on the ticket may not take this one. */
   noChainFrom: string[];
   /** R-BTN-107: the isolation a worker must declare to take it, or null for any. */
@@ -43,13 +45,13 @@ export function graphOf(json: unknown): Graph {
   const f = json as {
     start: string; start_leg: string; end: string[]; short_waits?: string[];
     stations: Record<string, { renamed_from?: string | string[]; entry?: { output: string; schema: string }[] }>;
-    legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session' }>;
+    legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session' }>;
   };
   const legs = new Map<string, Leg>();
   const legRenames = new Map<string, string>();
   const stationRenames = new Map<string, string>();
   for (const [id, l] of Object.entries(f.legs)) {
-    legs.set(id, { from: [...new Set(l.from)], to: [...new Set(names(l.to))], maxRuns: l.max_runs ?? null,
+    legs.set(id, { from: [...new Set(l.from)], to: [...new Set(names(l.to))], maxRuns: l.max_runs ?? null, maxQueue: l.max_queue ?? null,
       noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null });
     for (const old of names(l.renamed_from)) legRenames.set(old, id);
   }

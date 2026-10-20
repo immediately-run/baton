@@ -43,6 +43,8 @@ export interface Ctx {
   blocks?: Blocks;
   /** R-BTN-81, R-BTN-85: the ticket's history and Baton's disagreements with git. */
   history?: History;
+  /** R-BTN-79: a course's intake, `closed` while any of its legs is over its `max_queue`. */
+  intake?: (repo: string, course: string) => 'open' | 'closed';
   /** R-BTN-108: a schema by id for a repository — the `std:` library's or the repository's. */
   schema?: (repo: string, id: string) => Schema | null;
 }
@@ -415,7 +417,9 @@ export class Claims {
         const item = this.item(c.id);
         // R-BTN-76: a leg blocked on a resource — for the fleet, or for this worker by its own
         // instances — is left out after the gate query: advice, never a refusal.
-        if (item?.station?.next_leg && this.gate(w, item, item.station.next_leg, 'claim').ok && !this.resourceAdvice(w.id, item.id, item.station.next_leg).length) g.rows.push({ ...c, item });
+        // R-BTN-79: so is a new ticket of a course whose intake is closed, so its queues drain.
+        if (item?.station?.next_leg && this.gate(w, item, item.station.next_leg, 'claim').ok && !this.resourceAdvice(w.id, item.id, item.station.next_leg).length
+          && !this.intakeClosed(item)) g.rows.push({ ...c, item });
       }
       for (const [key, g] of groups) if ((counts.get(key) ?? 0) < 50) g.done = true;
     }
@@ -446,6 +450,14 @@ export class Claims {
     }));
   }
 
+  /** R-BTN-79: whether `item` is a new ticket — at its course's start with an empty path — of a
+   *  course whose intake is closed, and not expedited (R-BTN-12: the owner's say still counts). */
+  private intakeClosed(item: ItemFacts): boolean {
+    if (item.expedite || !item.station || item.station.path.length) return false;
+    if (this.c.stations.graph(item.repository, item.course)?.start !== item.station.station) return false;
+    return this.c.intake?.(item.repository, item.course) === 'closed';
+  }
+
   /** The refusal a failed gate becomes (§11): `barred-tag`, `stale-skills` and `backing-off` have
    *  codes of their own; every other gate is `not-eligible` naming the rule — `chain` and
    *  `isolation` by name (R-BTN-106, R-BTN-107). */
@@ -471,6 +483,7 @@ export class Claims {
         ...(place !== 0 ? [{ advice: 'order', place: place < 0 ? null : place + 1, first: recs[0]?.ticket_id ?? null }] : []),
         ...(item.expedite && this.expediteActive() >= EXPEDITE_BOUND ? [{ advice: 'expedite-bound', bound: EXPEDITE_BOUND }] : []),
         ...(resources.length ? [{ advice: 'resource', leg: item.station.next_leg, resources }] : []),
+        ...(this.intakeClosed(item) ? [{ advice: 'intake', course: item.course }] : []),
       ];
       return { item, advice: overridden.length ? { recommendation: place < 0 ? null : recs[place], overridden } : place === 0 ? { recommendation: recs[0] } : null };
     }
