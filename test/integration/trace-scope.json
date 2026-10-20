@@ -75,6 +75,10 @@
     "at": 7,
     "reason": "the harness wrote a claim (a state Baton did not reach)"
   },
+  "S-BTN-45.leg-queues › S-BTN-45 a queue over its bound > the third ticket enters and warns; the course closes its intake; a claim drains it and reopens": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
   "S-BTN-47.positions-decisions › S-BTN-47 positions, course changes and the dead-ticket queue > a leg added later changes no queued leg; a removed queued leg waits on course-changed under Needs you": {
     "at": 3,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"

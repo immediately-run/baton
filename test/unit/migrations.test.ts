@@ -287,3 +287,45 @@ describe('migration 0013: stations and legs (R3-1232, round 1, 1-B-2)', () => {
     });
   });
 });
+
+describe('migration 0021: leg queues (R3-1255)', () => {
+  it('counts the tickets already queued and unheld, leaving the bound to the next course file; keeps the events and admits the new kinds', async () => {
+    const id = env.BATON.idFromName('migrations-0021');
+    await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
+      for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id <= 20)) sql.exec(m.sql);
+      sql.exec(`INSERT INTO repositories (id, github, default_branch, sync_workflow) VALUES ('docs', 'immediately-run/docs', 'main', '.github/workflows/baton-sync.yml')`);
+      const file = JSON.stringify({ legs: { fix: { max_queue: 1 }, review: {} } });
+      sql.exec(`INSERT INTO courses (repository_id, id, version, skill, course_json, step_kinds, min_worker_version) VALUES ('docs', 'roadmap-pr', 3, 's', ?, '[]', 3)`, file);
+      for (const [t, leg] of [['docs:A', 'fix'], ['docs:B', 'fix'], ['docs:C', 'review'], ['docs:D', null], ['docs:E', 'fix']] as const) {
+        // Every other required column of the ticket filled with an empty value of its type.
+        const rest = (sql.exec(`SELECT name, type FROM pragma_table_info('tickets') WHERE "notnull" = 1 AND dflt_value IS NULL AND name NOT IN ('id', 'repository_id', 'local_id')`)
+          .toArray() as { name: string; type: string }[]);
+        sql.exec(`INSERT INTO tickets (id, repository_id, local_id, course_id${rest.map((c) => `, ${c.name}`).join('')}) VALUES (?, 'docs', ?, 'roadmap-pr'${rest.map((c) => (c.name === 'requires_clause' ? ", 'absent'" : /INT|REAL/.test(c.type) ? ', 0' : ", ''")).join('')})`, t, t.slice(5));
+        sql.exec(`INSERT INTO ticket_stations (ticket_id, station, path, path_len, to_end, next_leg, next_source, snapshot_sha, observation) VALUES (?, 's', '[]', 0, 1, ?, 'course', '', 1)`, t, leg);
+      }
+      sql.exec(`INSERT INTO credentials (id, hostname, allowed_capabilities) VALUES ('vm-1', 'vm-1', '[]')`);
+      sql.exec(`INSERT INTO workers (hostname, session_name, secret_hash, credential_id, harness, kind, tier_ceiling, lease_timeout_ms, settings_hash, first_seen_at, last_seen_at)
+                VALUES ('vm-1', 's', 'h', 'vm-1', 'opencode', 'vm', 'critical', 900000, '', 1, 1)`);
+      // E is held: its claim is active.
+      sql.exec(`INSERT INTO claims (ticket_id, worker_id, request_id, nonce, snapshot_sha, claimed_at, status) VALUES ('docs:E', 1, 'r-1', 'abcdef', '', 1, 'active')`);
+      sql.exec(`INSERT INTO events (seq, at, kind, ticket_id, actor, detail_json, repository_id) VALUES (4, 1, 'discrepancy', 'docs:A', 'sync', '{}', 'docs')`);
+
+      sql.exec('PRAGMA foreign_keys = ON');
+      sql.exec(MIGRATIONS.find((x) => x.id === 21)!.sql);
+
+      // fix is over its course file's bound of 1, but seeded unjudged: the next accepted course file
+      // judges it on Baton's clock, with its event and notices (round 1, 1-B-1; queues.test.ts).
+      expect(sql.exec('SELECT leg, depth, max_queue FROM leg_queues ORDER BY leg').toArray()).toEqual([{ leg: 'fix', depth: 2, max_queue: null }, { leg: 'review', depth: 1, max_queue: null }]);
+      expect(sql.exec('SELECT ticket_id FROM leg_queue_members ORDER BY ticket_id').toArray().map((r) => r.ticket_id)).toEqual(['docs:A', 'docs:B', 'docs:C']);
+      expect(sql.exec('SELECT seq, kind FROM events').toArray()).toEqual([{ seq: 4, kind: 'discrepancy' }]);
+      for (const kind of ['queue-over', 'course-closed', 'course-opened']) sql.exec(`INSERT INTO events (at, kind, actor) VALUES (2, ?, 'baton')`, kind);
+      expect(() => sql.exec(`INSERT INTO events (at, kind, actor) VALUES (3, 'nonsense', 'x')`)).toThrow(/CHECK/);
+      expect(sql.exec(`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events' ORDER BY name`).toArray().map((r) => r.name))
+        .toEqual(['events_by_claim', 'events_by_repository', 'events_by_ticket', 'events_discrepancies']);
+    });
+  });
+});

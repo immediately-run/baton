@@ -123,6 +123,11 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   owner moved model checking off hosted CI entirely ("I want to run it locally") and made the
   full check weekly ("3 hours is absurdly long").
 
+- **2026-10-20 — leg queues built (R3-1255).** `leg_queues` gained `max_queue`, the bound last
+  judged, so a course file that lowers or raises a bound is a crossing like a ticket's; and
+  `leg_queue_members` is keyed by ticket, each ticket counted in one queue. The queue-over payload
+  names its `course`, since a leg name is unambiguous only within one.
+
 - **2026-10-20 — this rewrite (owner direction).** The specification was rewritten "as if it were
   the only version": organized by concept with new section numbers, history moved to this file,
   and every concept no longer needed removed rather than annotated. Ids were kept; merged rules
@@ -337,7 +342,9 @@ working until the stated condition holds, then removes it.
   runner on the repository declares `runner:baton-legs` and the CLI version that drops them is
   every sync's.
 - **Notices for people to conditions (R-BTN-80, R-BTN-103, R-BTN-164).** Until R-BTN-170's phase
-  4 the code keeps the `decision` and `queue-over` notice kinds, personal channels (couriers with
+  4 the code keeps the `decision` and `queue-over` notice kinds (a `queue-over` notice per `owner`
+  courier, payload `{course, leg, depth, max_queue, intake}`, with `queue-over`, `course-closed`
+  and `course-opened` events — R3-1255), personal channels (couriers with
   `asks` and severities, `remind_after`), worker couriers (heartbeat `couriers`,
   `refused_couriers`, the `pool` credential, `worker_couriers`, the grant's and token's
   `courier` flag and role), and `GET /v1/courier/decisions`. After it they are dropped; only

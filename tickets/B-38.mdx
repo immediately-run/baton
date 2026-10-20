@@ -49,3 +49,7 @@ depends_on:
 
 - [ ] S-BTN-47 passes whole on both hosts; G-BTN-73 and G-BTN-75 hold for positions and re-routes
 - [ ] `npm test` (traces included) and `npm run typecheck` green
+
+## Status
+
+_2026-10-20 — R3-1255 counts each leg's queue (R-BTN-79): an owner's re-route and the holder's provisional queued leg move a ticket between queues, so they must reach `Queues.touch` in their transaction — `Blocks.write`/`held` do, through `Blocks.evaluate`. Add the re-route to `test/unit/queues.test.ts`'s membership cases._

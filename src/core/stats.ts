@@ -4,6 +4,7 @@
 // overridden, hook failures, `off-graph` transitions and foreign writes — over a window, for one
 // repository. Aggregates and ids only: no worker, no profile, no report (G-BTN-64).
 import type { Row, Store } from './ports';
+import type { Queues } from './queues';
 
 /** Seconds, summarised: how many, the median and the longest. */
 export interface Durations {
@@ -20,7 +21,11 @@ export interface CourseStats {
     /** Per leg: runs started in the window; how long each waited at its `from` station before it
      *  started (from the previous leg's finish in the claim, or the previous claim's end on the
      *  ticket), and how long it ran; and the tickets whose leg is ready and unclaimed now. */
-    legs: Record<string, { started: number; finished: number; abandoned: number; waited: Durations; ran: Durations; ready_now: { tickets: number; oldest_s: number | null } }>;
+    legs: Record<string, { started: number; finished: number; abandoned: number; waited: Durations; ran: Durations; ready_now: { tickets: number; oldest_s: number | null };
+      /** R-BTN-79: the leg's queue now — its unheld tickets queued for it — and its bound. */
+      queue: { depth: number; max_queue: number | null } }>;
+    /** R-BTN-79: `closed` while any leg is over its `max_queue`. */
+    intake: 'open' | 'closed';
     /** Per station: how long a ticket rested there between one claim's end and the next claim. */
     stations: Record<string, { waited: Durations }>;
   }>;
@@ -46,7 +51,8 @@ export function durations(ms: number[]): Durations {
 }
 
 export class Stats {
-  constructor(private readonly store: Store) {}
+  /** `queues`: the one reader of `leg_queues` and the intake (R-BTN-79). */
+  constructor(private readonly store: Store, private readonly queues?: Queues) {}
 
   private rows<T = Row>(q: string, ...p: unknown[]): T[] {
     return this.store.exec(q, ...p).toArray() as T[];
@@ -57,9 +63,9 @@ export class Stats {
     const prefix = `${repository}:`;
     const mine = 'substr(c.ticket_id, 1, length(?)) = ?';
     const courses: CourseStats['courses'] = {};
-    const course = (id: string | null) => (courses[id ?? '?'] ??= { legs: {}, stations: {} });
+    const course = (id: string | null) => (courses[id ?? '?'] ??= { legs: {}, intake: 'open', stations: {} });
     const leg = (c: string | null, name: string) =>
-      (course(c).legs[name] ??= { started: 0, finished: 0, abandoned: 0, waited: durations([]), ran: durations([]), ready_now: { tickets: 0, oldest_s: null } });
+      (course(c).legs[name] ??= { started: 0, finished: 0, abandoned: 0, waited: durations([]), ran: durations([]), ready_now: { tickets: 0, oldest_s: null }, queue: { depth: 0, max_queue: null } });
     const samples = new Map<string, number[]>();
     const add = (key: string, ms: number) => {
       const xs = samples.get(key);
@@ -134,6 +140,12 @@ export class Stats {
          AND NOT (COALESCE(o.hold, 0) = 1 OR COALESCE(o.retry_after, 0) > ?)
        GROUP BY t.course_id, n.leg`, prefix, prefix, prefix, prefix, head, now)) {
       leg(r.course_id, r.leg).ready_now = { tickets: r.tickets, oldest_s: r.oldest == null ? null : Math.round(Math.max(0, now - r.oldest) / 1000) };
+    }
+
+    // Each leg's queue as Baton counts it (R-BTN-79), and the intake it closes — Queues' own reads.
+    for (const q of this.queues?.all(repository) ?? []) {
+      leg(q.course, q.leg).queue = { depth: q.depth, max_queue: q.max_queue };
+      course(q.course).intake = this.queues!.intake(repository, q.course);
     }
 
     // Ends in the window, by reason and the course's detail; suspensions by station.
