@@ -3,7 +3,7 @@ title: "B-23 — Baton CLI command tree and leg logs: baton <noun> <verb>, the r
 id: B-23
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-20
 repos:
   - baton
   - docs
@@ -21,7 +21,8 @@ depends_on:
 ---
 
 **Brief:** the owner, 2026-10-17: a Git-like CLI with every leg command under `baton leg`, and `baton leg log` showing a leg's logs. Each leg run's output is saved now, and the old command names go outright. B-22 specified it (baton#46).
-**Spec:** `spec/BATON_SPEC.md` §2m.6d: R-BTN-127 and R-BTN-128, with their dated notes and the §11 rows.
+**Spec:** `spec/BATON_SPEC.md` §11.3 (R-BTN-127), §8.5 (R-BTN-128), §8.4 (R-BTN-144: the one list of
+what is masked), §14's rows; history, Migrations: renamed CLI commands.
 
 ### Why
 
@@ -31,13 +32,15 @@ R-BTN-127 and R-BTN-128 are specified. This ticket builds them, and moves every 
 
 1. **The tree.** Rebuild `cli/baton.mjs` as R-BTN-127's tree:
    - each command signs as its one role, with `-i` or `~/.config/baton/keys.json`;
-   - each old name exits 2 with its "renamed:" line;
+   - each old name exits 2 with its "renamed:" line, kept until no caller uses it (history, Migrations);
    - an ambiguous ticket id lists its matches;
    - the leg default is running, then queued, then most recent;
    - the channel verbs work only inside a leg;
    - `help` covers every level, with nearest-name suggestions;
-   - every read takes `--json`.
-2. **The archive.** In `src/runner`: read the pipes of a `process`-mode leg whether or not anyone is watching, mask the closed credential set on the byte stream before framing, append to `baton-legs/<repository id>/<local ticket id>/<leg>/<run>-<claim id>.jsonl` with bounded retries and buffer, and report the pointers on heartbeat, `advance` and `end`. Only when the owners set `leg_logs: true`.
+   - every read takes `--json`;
+   - R-BTN-127's rows that later tickets fill in: `decision list` on the conditions route and
+     `owner resolve` (B-56), `leg raise` (B-55), `leg await` (B-59).
+2. **The archive.** In `src/runner`: read the pipes of a `process`-mode leg whether or not anyone is watching, mask R-BTN-144's closed credential set on the byte stream before framing, append to `baton-legs/<repository id>/<local ticket id>/<leg>/<run>-<claim id>.jsonl` with bounded retries and buffer, and report the pointers on heartbeat, `advance` and `end`. Only when the owners set `leg_logs: true`.
 3. **The server.**
    - the `leg_logs` table and its pointer validation;
    - the `leg_logs` setting;
@@ -50,7 +53,7 @@ R-BTN-127 and R-BTN-128 are specified. This ticket builds them, and moves every 
    - `--transcripts`;
    - session and attached runs as links;
    - the failure messages;
-   - escapes and controls stripped on every printed path.
+   - escapes and C0/C1 controls stripped on every printed path.
 5. **The callers, in the same release.**
    - this repository's `README.md`, `scripts/`, tests and the runner's usage text;
    - the docs repository: `content/specs/BATON_DOCS_DEPLOYMENT.mdx` (docs' CI, `npx baton repo sync`, `baton course test`), `BATON_ROADMAP_PR_COURSE.mdx`, its skills and workflows that call `baton run`, `baton sync` or `baton test-course`.
@@ -72,3 +75,5 @@ R-BTN-127 and R-BTN-128 are specified. This ticket builds them, and moves every 
 - [ ] merged under the review gate
 
 ## Status
+
+_(2026-10-20: references moved to the current-state spec, PR #71.)_

@@ -1,9 +1,9 @@
 ---
-title: "R3-1259 — Baton leg timing: not_before on queued legs, leg deadlines and scheduled cancels (BATON_SPEC §2j)"
+title: "R3-1259 — Baton leg timing: not_before on queued legs and the series course"
 id: R3-1259
 project: baton
 status: available
-updated: 2026-10-15
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1092
 tier: critical
-description: "Build BATON_SPEC R-BTN-89 and R-BTN-90: a queued leg's not_before from git, stored waiting on time and made ready by the alarm, with the CLI's nextFire and writeSuccessor helpers and the series course for recurring jobs; leg deadlines from max_duration, the leg-timeout release, its fenced reap and failed attempt, and the owner's deadline extension and scheduled Cancel; S-BTN-51, S-BTN-52, G-BTN-79, G-BTN-80. Requires: none."
+description: "Build BATON_SPEC R-BTN-89 (§6.5): a queued leg's not_before from git, validated (else baton.not-before-invalid), stored waiting on time and made ready by the alarm, with the leg module's nextFire and writeSuccessor, the runner's wait, and the series course directory for recurring jobs. Leg deadlines moved to B-60. S-BTN-51, G-BTN-79. Requires: none."
 topics:
   - baton
 owns: {}
@@ -19,18 +19,19 @@ prs: []
 depends_on:
   - R3-1257
   - R3-1258
+  - B-43
 ---
 
 **Brief:** the Baton project; the owner, 2026-10-15: recurring jobs such as the
 decision-packet routine as Baton courses, one child ticket per run; legs that time out or are
-cancelled administratively.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2j (R-BTN-89, R-BTN-90), R-BTN-69
-(`max_duration`), R-BTN-74 and §7.1 (`not_before`), R-BTN-83 (the closing marker's
-`not_before=`), §4 (`ticket_next_legs.not_before`, `ticket_next_legs_due`, `claims.deadline_at`,
-`claims.cancel_at`, the `leg-timeout` and `not-before-invalid` events), §3 (the alarm), §6.5, §6.6, §6.10,
-§9, §11, R-BTN-68 (the model), §13a S-BTN-51, -52; §16 G-BTN-79, -80
+cancelled administratively (that half is B-60's now).
+**Spec:** `spec/BATON_SPEC.md` §6.5 R-BTN-89 (time waits, series), §4.2 R-BTN-74 and §4.4
+(`not_before` in the board post), §5.3 R-BTN-83 (the closing marker's `not_before=`), §8.3
+R-BTN-72 (the leg result), §6.2 R-BTN-77 (`unblocked`), §6.6 rule 1, §5.1 R-BTN-134 (course
+directories), §2.1 (the alarm), §13 (`ticket_next_legs.not_before`, `ticket_next_legs_due`, the
+`not-before-invalid` event), §14, §15 (S-BTN-51; G-BTN-79)
 **Depends on:** R3-1257 (positions and closing markers, which carry `not_before`), R3-1258
-(child tickets, which series use)
+(child tickets, which series use), B-43 (course directories, where `series` lives)
 
 ### Requires
 
@@ -39,89 +40,93 @@ cancelled administratively.
 
 ### Why
 
-A recurring job — the decision-packet routine, a weekly audit — should run on a course like any
-other work, with Baton's leases, history and dead-ticket queue, which needs a leg that waits
-for a time. A leg that overruns, or an owner who wants work stopped at a set time, needs a
-deadline Baton enforces by taking the claim away. Tier: critical — the deadline and its reap
-change the lease paths.
+A recurring job — the decision-packet routine, a weekly audit, the weekly model check (B-50) —
+should run on a course like any other work, with Baton's leases, history and dead-ticket
+queue, which needs a leg that waits for a time. Tier: critical — a time wait changes what is
+offered and when the alarm wakes. (Leg deadlines, the other half of this ticket as filed, are
+B-60's: R-BTN-90 is now an interrupting `start` timer, §7.5.)
 
 ### What to build
 
 1. **Migration** (one new numbered file): `ticket_next_legs.not_before` and the
-   `ticket_next_legs_due` index (`state = 'waiting' AND waiting_on = 'time'`); `claims.deadline_at`,
-   `claims.cancel_at`; the events CHECK's `leg-timeout` and `not-before-invalid`.
-2. **Time waits** (`src/core/time.ts`): validate `not_before` on a ticket and on a station's
-   queued leg, and on `end`, in `src/core/validate.ts` (RFC 3339 with `Z` or an offset, at most
-   `NOT_BEFORE_HORIZON_DAYS` (400) after `now`, the one constant shared with `baton/leg`;
-   otherwise logged and a posted `ready` leg waits on `not-before-invalid`, under Needs you); a past value stored as NULL; the station's value wins over the ticket's; store `waiting` on `time` only over a posted `ready`, in every transaction that
-   writes next legs, exempt from `waiting_since` and Needs you, `time` reserved; the alarm, set
-   early to the earliest pending instant, readies due legs (`ready_since` = `not_before`,
-   `not_before` cleared), drops the repository's cached recommendations and queues `unblocked`
-   with `cleared: [{kind: 'time'}]` to the idle workers the ticket would pass the gates for, with
-   no workflow dispatch (the ring once R3-1260 lands); `not_before?` in the `next` entries of the
-   heartbeat, claim, adopt and advance responses; the dashboard's "waiting until" and the
-   Courses view's list of pending waits.
-3. **The CLI**: `nextFire(cron, tz, after)` and `writeSuccessor(ctx, {schedule})` in the
-   leg-script module `baton/leg`, with `NOT_BEFORE_HORIZON_DAYS`, which both enforce;
-   `writeSuccessor` commits the next run's ticket file on the default branch before the run's
-   closing commit, with the same `parent`, `run: <n+1>`, the id `<series>-<n+1>` and its
-   `not_before`, and `depends_on` naming the current run; it writes nothing if that file exists
-   as this series' run (`parent`, `run`), and fails `cannot-finish:spec` on a foreign file or an
-   over-long id; `not_before?` in the leg result,
-   validated by the runner, written by `close` and reported on the `end`; the default
-   markdown ticket source's `not_before` field and the default `locate`'s decoding and posting
-   of the closing marker's `not_before=`; the default
-   `series` course (`active`, `retired`, leg `retire`); the runner suspending on a `time` wait
-   more than 30 minutes away and waiting under the claim otherwise.
-4. **Deadlines** (`src/core/deadlines.ts`): `max_duration` validated in the course file (60 to
-   604,800); `deadline_at` set at each `advance`, re-armed to now + 40 minutes by the
-   heartbeat's `leg_finished` (the runner sends an immediate heartbeat when the leg's `run`
-   returns; it withdraws a still-pending `leg-timeout` release, the message `expired` with
-   `withdrawn: 'leg-finished'`), cleared by the next advance and the end; the alarm
-   queuing `release` `leg-timeout`, reaping an unacknowledged one with a fence after 15 minutes
-   (actor `alarm:leg-timeout`, a failed attempt), and running a scheduled Cancel at
-   `cancel_at`; `released:leg-timeout` as a failed attempt.
-5. **Owner route and display**: `POST /v1/owner/{repository}/claims/{id}/deadline`,
-   `baton owner deadline` (`extend_to` refused with no deadline or once the release is queued;
-   `cancel_at` within 7 days, lapsing with the claim, logged); `deadline_at` and `cancel_at` in
-   the heartbeat's claim and on the dashboard's claim row.
-6. **The model** (R-BTN-68): `model/` in the same PR — the `leg-timeout` release and its fenced
-   reap as Baton actions, `leg_finished` clearing the deadline, and the properties that every
-   fence clears and no leg finished inside its budget is timed out *(review gate round 1)*.
+   `ticket_next_legs_due` index (`state = 'waiting' AND waiting_on = 'time'`); the events
+   CHECK's `not-before-invalid`.
+2. **Time waits** (`src/core/time.ts`, R-BTN-89):
+   - validate `not_before` on a ticket (`tickets[].not_before`, used only at `start` with an
+     empty path), on a station's queued leg (`stations.<id>.not_before`) and on a suspending or
+     releasing `end`, in `src/core/validate.ts`: RFC 3339 with `Z` or an offset, at most
+     `NOT_BEFORE_HORIZON_DAYS` (400) after `this.now`, the one constant shared with
+     `@immediately-run/baton/leg`. A failing value is logged `not-before-invalid`; a leg posted
+     `ready` is stored `waiting` on `not-before-invalid` and raises `baton.not-before-invalid`
+     until git is valid (through today's `needsYou()` path if this lands before B-57); a leg
+     posted `waiting` on another label keeps it; no snapshot is refused. A value at or before
+     `now` is stored NULL;
+   - store `waiting` on `time` exactly when posted `ready` and `now < not_before`, re-applied in
+     every transaction that writes `ticket_next_legs` (`src/core/stations.ts`) and by the alarm;
+     `time` is reserved; a `time` wait raises no condition and is exempt from `waiting_since`;
+   - the alarm, set early to the earliest pending instant, readies due legs (`ready_since` =
+     `not_before`, `not_before` cleared), drops the repository's cached recommendations and
+     queues R-BTN-77's `unblocked` with `cleared: [{kind: "time", ref: <not_before>}]` to the
+     idle runners the ticket would pass the gates for, rung once R3-1260 lands; it calls no
+     trigger or dispatch;
+   - recommendations leave a `time` wait out and rule 1 refuses its claim; `not_before?` in the
+     `next` entries of the heartbeat, claim, adopt and advance responses; the dashboard's
+     "waiting until …" and the **Courses** view's list of pending waits.
+3. **The CLI**:
+   - `nextFire(cron, tz, after)` and `writeSuccessor(ctx, {schedule})` in the leg-script module
+     `@immediately-run/baton/leg` (B-42's; whichever lands second exports them), with
+     `NOT_BEFORE_HORIZON_DAYS`, which both enforce, failing the leg `cannot-finish:spec` past it;
+   - `writeSuccessor` commits `<series>-<n+1>` on the default branch at or before the run's
+     closing commit, with the same `parent`, `run: <n+1>`, its `not_before` (the next fire
+     after the run's own, or after now if that has passed) and `depends_on` naming the current
+     run; it writes nothing if that file exists naming this series and `run: n+1`, and fails
+     `cannot-finish:spec` on a foreign file or an id the ticket-id rule refuses;
+   - `not_before?` in the leg result, validated by the runner (`src/runner/protocol.ts` already
+     carries it), written by `close` as the closing marker's `not_before=` and reported on the
+     `end`; the default markdown ticket source's `not_before` field and the default `locate`'s
+     decoding and posting of the marker's `not_before=`;
+   - the runner suspends on a `time` wait more than 30 minutes away and waits under the claim
+     otherwise.
+4. **The `series` course**, a course directory `src/defaults/courses/series/` (R-BTN-134:
+   `course.json`, `sync.mjs`, `legs/retire.mjs`, `legs/retire.md`): stations `active` and
+   `retired`, leg `retire`. `retire` does no fan-in: it withdraws the pending run, then retires
+   the series. Its children are its runs, ordinary tickets on the job's course.
 
 ### Architecture — the decisions, named
 
 - **Time is git data**: Baton reads `not_before` from what the sync posts and never computes a
   schedule; a leg script turns cron into instants.
 - **One clock**: every comparison uses `this.now` (R-BTN-32); tests set it with `setClock`.
-- **Do not**: loop a ticket through a timed leg; complete a leg from Baton; count a `time` wait
-  toward `baton:stalled`; refuse a claim for a `time` wait beyond what rule 1 does for any
-  waiting leg.
+- **The model**: `not_before` (R-BTN-89) is R3-1254 part 3's; whichever of the two lands second
+  keeps the model's traces of a time wait matching core.
+- **Do not**: loop a ticket through a timed leg; complete a leg from Baton; raise a condition
+  for a `time` wait; refuse a claim for a `time` wait beyond what rule 1 does for any waiting
+  leg; build deadlines, `deadline_at`, `cancel_at` or `leg-timeout` here (B-60).
 
 ### Tests
 
-- Integration, both hosts: **S-BTN-51** and **S-BTN-52**.
+- Integration, both hosts: **S-BTN-51** (a series run due at T; idle days; a retried successor
+  write; a foreign successor id; invalid `not_before`; a `ci` wait; a withdrawn run).
 - Unit: `nextFire` across a DST change and a leap day; `not_before` grammar and the 400-day
   bound; the alarm's due scan at `not_before` ± 1 ms; the runner at `not_before` − 30 minutes
   ± 1 second; `writeSuccessor` with the run's `not_before` past and future, twice, and retried
-  after the next fire; `nextFire` and `writeSuccessor` refusing beyond the horizon; the
-  `leg_finished` heartbeat withdrawing a pending `leg-timeout` and re-arming the deadline; a
-  `cancel_at` lapsing with its claim; `writeSuccessor` against a foreign file at its id; the
-  stored state for a posted `ready` and a posted `waiting` on `ci`; `max_duration` at 59, 60,
-  604,800 and 604,801; `deadline_at` across advances and `leg_finished`; the 15-minute reap
-  boundary; `extend_to` and `cancel_at` validation.
-- Model: `npm run model` with the new actions and properties.
+  after the next fire; `nextFire` and `writeSuccessor` refusing beyond the horizon;
+  `writeSuccessor` against a foreign file at its id; the stored state for a posted `ready` and a
+  posted `waiting` on `ci`; the `series` course's `retire` withdrawing the pending run.
 
 ### Exit criteria
 
-- [ ] S-BTN-51 and S-BTN-52 pass on both hosts; G-BTN-79 and -80 hold
-- [ ] `model/` changed in the same PR, `npm run model` green (R-BTN-68)
+- [ ] S-BTN-51 passes on both hosts; G-BTN-79 holds
+- [ ] `src/defaults/courses/series/` passes `baton course test`
 - [ ] `npm test` and `npm run typecheck` green; the boundary test green
 
 ### Hand-off
 
-R3-1260 adds the ring at the unblocking this item's alarm runs.
+R3-1260 adds the ring at the unblocking this item's alarm runs. B-60 builds leg deadlines
+(R-BTN-90) on the same alarm.
 
 ## Status
 
 _(filed 2026-10-15)_
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — R-BTN-89 only; leg deadlines, the owner's deadline route and their model change (old items 4–5 and part of 6) moved to B-60.)_

@@ -3,7 +3,7 @@ title: "R3-1264 — Baton forge notifications: GitLab, Gitea and GitHub reposito
 id: R3-1264
 project: baton
 status: available
-updated: 2026-10-16
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1096
 tier: judgement
-description: "POST /v1/forges/{repository}/notify verifies GitLab tokens, Gitea and GitHub-repository HMACs in the Worker against BATON_FORGE_SECRETS, one parser per forge reading only R-BTN-95's fields, recording wants; S-BTN-56's notification cases. Requires: none."
+description: "POST /v1/forges/{repository}/notify verifies GitLab tokens, Gitea and GitHub-repository HMACs in the Worker against BATON_FORGE_SECRETS, one parser per forge reading only R-BTN-95's fields, and records a want for {repository} only when the delivery's project is {repository} or one of its code_repos, by id (BATON_SPEC §3.3); S-BTN-56's notification cases. Requires: none."
 topics:
   - baton
 owns: {}
@@ -21,7 +21,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project; filed by R3-1253 (docs#217).
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2k R-BTN-95; R-BTN-73; §3 (Worker-first checks); §10.1 (the forge notification principal); §11 (`POST /v1/forges/{repository}/notify`); §13a S-BTN-56 (the notification cases) (docs@71b18e3e)
+**Spec:** `spec/BATON_SPEC.md` §3.3 R-BTN-73 / R-BTN-95 (routes, events and fields, drops, which want); §3.1 R-BTN-138 and §3.4 R-BTN-140 (repositories and `code_repos` matched by id); §2.3 (admission: Worker-first checks); §12.1 (the forge notification principal); §14 (`POST /v1/forges/{repository}/notify`); §15 S-BTN-56 (the notification cases)
 **Depends on:** R3-1263
 
 ### Requires
@@ -41,8 +41,12 @@ too. Tier: judgement — a trigger, verified before anything is read.
 2. One parser per forge over its accepted events and fields (R-BTN-95), returning only them;
    no pipeline, job or workflow-run events from GitLab or Gitea; the mirror's push dropped by
    its author email; repeated delivery ids dropped (`webhook_deliveries`).
-3. The map to repositories whose tickets name the delivery's repository (on the home's forge
-   host) and the want it records (R3-1263).
+3. **Which want** (R-BTN-95): a delivery to `/v1/forges/{repository}/notify` records a want
+   (R3-1263) for `{repository}` only, and only when its project — the parsed id
+   (`project.id`, `repository.id`) — is `{repository}`'s own forge id or that of one of its
+   `code_repos` entries (R-BTN-140, matched by id once stored; by path for a row registered
+   before forge ids, until B-45's backfill). Any other delivery is dropped. Tickets' `repos:`
+   play no part.
 
 ### Architecture — the decisions, named
 
@@ -53,7 +57,9 @@ too. Tier: judgement — a trigger, verified before anything is read.
 
 - Integration: S-BTN-56's notification cases, both hosts.
 - `test/unit/forge-notify.test.ts`: each verifier, each parser with a recording payload, an
-  unaccepted event, a code repository's delivery through a home repository's route.
+  unaccepted event, a code repository's delivery through a home repository's route, a delivery
+  for a project that is neither the repository nor one of its `code_repos` (dropped), and a
+  renamed project still matched by id.
 
 ### Exit criteria
 
@@ -64,3 +70,5 @@ too. Tier: judgement — a trigger, verified before anything is read.
 ## Status
 
 _(filed 2026-10-16)_
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — a delivery's want goes to `{repository}` only when its project is that repository or one of its `code_repos`, matched by id, not to repositories whose tickets name it.)_

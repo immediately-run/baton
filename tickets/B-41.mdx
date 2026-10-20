@@ -3,13 +3,13 @@ title: "B-41 — One primitive per kind of prerequisite: retire blocked_by, oper
 id: B-41
 project: baton
 status: available
-updated: 2026-10-19
+updated: 2026-10-20
 repos:
   - baton
   - docs
 tags:
   - roadmap-item
-description: "Build BATON_SPEC §2n (R-BTN-132): ticket prerequisites reach core only as a leg's `requires.tickets` or a posted `depends_at`; fan-in moves from the parent's `blocked_by` onto the legs that select children, with `spawned`'s provisional rows on those legs; `human-operator` is checked by rule 4 like any capability; a station function's `waiting_on` may not be `dependencies`, `children`, `owner` or `policy`; the standard courses and docs' `tickets.mjs` move; the old forms are read during a dual-read window and refused at cutover. S-BTN-108, G-BTN-127. Requires: none."
+description: "Build the window of BATON_SPEC R-BTN-132 (§6.1; history Migrations): ticket prerequisites reach core only as a leg's `requires.tickets` (`parent`, `posted`) or a posted `depends_at`; an open child blocks its parent only through a call, so the parent's `blocked_by` fan-in goes and `spawned` writes no provisional rows; `human-operator` is checked by rule 4 like any capability; a station function's `waiting_on` may not be `dependencies`, `children`, `owner` or `policy`; `build-app`'s `file`/`verify` move onto call legs and the standard courses' approvals onto person legs; docs' `tickets.mjs` moves; the old forms are read during a dual-read window and refused at cutover. S-BTN-108, G-BTN-127. Requires: none."
 topics:
   - baton
 owns: {}
@@ -18,17 +18,22 @@ depends_on:
   - B-10
   - B-7
   - R3-1258
+  - B-62
 ---
 
 **Brief:** the owner, 2026-10-19 (this session): "Can you please verify that we do not have a set
 of overlapping primitives for legacy reasons in the course schema?", then "file the ticket with
 the spec amendment". The audit found five ways in for a ticket waiting on other tickets, three
 for a person and two for `human-operator`.
-**Spec:** `spec/BATON_SPEC.md` §2n (R-BTN-132), amending R-BTN-69, R-BTN-74, R-BTN-75, R-BTN-86,
-R-BTN-116, R-BTN-120, R-BTN-131 and §7.2 rule 6. The amendment landed with this ticket; this
-ticket builds it.
+**Spec:** `spec/BATON_SPEC.md` §6.1 R-BTN-120 / R-BTN-132 (one way in per kind of prerequisite),
+§4.6 R-BTN-86 (children; an open child blocks only through a call), §7.6 R-BTN-165 (call legs),
+§6.4 R-BTN-116 (person legs), §5.8 R-BTN-131 (the standard courses, `build-app` on calls), §6.6
+rules 4 and 6; history, "Migrations the implementation still carries" (R-BTN-132's window, and
+"Course fields the schema review removed" for `build-app`); §15 S-BTN-108, G-BTN-127. The
+amendment landed with this ticket; this ticket builds it.
 **Depends on:** B-10 (leg `requires.tickets` and `depends_at`), B-7 (person legs, which replace
-`waiting_on: owner`), R3-1258 (child tickets in core, whose `spawned` rows move onto legs).
+`waiting_on: owner`), R3-1258 (child tickets in core: `spawned` recorded as a run's children),
+B-62 (call legs, which replace the fan-in).
 
 ### Requires
 
@@ -37,8 +42,8 @@ None: a checkout, a sibling docs checkout and a terminal.
 ### Why
 
 Each overlap is a second place to look when a ticket does not move, and some change behaviour:
-the parent's `blocked_by` fan-in blocks every leg, so `epic`'s `replan` waits for the other
-children (R-BTN-124) and a parent cannot work beside its children (B-34). Courses written now
+the parent's `blocked_by` fan-in blocks every leg, so a parent cannot work beside its children
+(B-34), and `epic`'s `replan` cannot wait on its own children alone (R-BTN-124). Courses written now
 (`build-app`, B-40) copy whichever form is nearest.
 
 ### What to build
@@ -47,27 +52,31 @@ Ordered by the window's phases (`cross_repo_migration`); each phase is its own P
 phase 4 removes anything.
 
 1. **Phase 0, core.** `ticket_requires` stores `human-operator`, and rule 4 checks it; rule 6
-   keeps only the administrator-only grant. (`depends_at` and `requires.tickets` are B-10's.)
-2. **Phase 1, dual-read in core.** A posted `blocked_by` id is read as `depends_at: {ticket,
-   done: true}` on the whole ticket; `operator_only` as `human-operator` in the clause; the
-   labels `dependencies`, `children`, `owner` and `policy` from a station function are
-   honoured. Each logs one `deprecated-field` event per repository and field per day.
-   `spawned`'s provisional rows go on each leg leaving the reached station whose
-   `requires.tickets` selects `children`, else on the whole ticket.
+   keeps only the administrator-only grant (R-BTN-58). (`depends_at` and `requires.tickets` are
+   B-10's.)
+2. **Phase 1, dual-read in core.** A posted `blocked_by` id is read as a whole-ticket `ticket`
+   block (`depends_at: {ticket, done: true}`); `operator_only` as `human-operator` in the clause;
+   the labels `dependencies`, `children`, `owner` and `policy` from a station function are
+   honoured as before. Each logs one `deprecated-field` event per repository and field per day.
+   `spawned` writes no provisional row anywhere: an open child blocks its parent only through a
+   call (R-BTN-86, G-BTN-76), so a parent's other legs stay ready beside its children.
 3. **Phase 2, writers.**
    - `src/defaults/tickets-markdown.ts`: `depends_on` → `depends_at` on the course's
      `start_leg`; no child added to `blocked_by`; `OP` → `human-operator` in `requires`.
    - `src/defaults/course-markers.ts` and `course-pr.ts`: no `dependencies` or `children`
      label (core now answers them).
    - The standard courses, each a new version that replays its in-flight tickets (R-BTN-48,
-     `baton test-course` against the live board): `build-app`'s `verify` requires
-     `{select: children, done: true}`, and its four approvals, `decision`'s answer and
-     `create-pr`'s `owner` adjudication become person legs. `file.md` writes
-     `requires: [human-operator]`, not `tags: [OP]`.
+     `baton course test` against the live board):
+     - `build-app`'s `file` and `verify` become call legs (B-62) with `"spawns": {"course":
+       "*"}` and the completion tables §5.8 gives, replacing `buildAppWaits`' `children` wait;
+     - `build-app`'s four approvals, `decision`'s answer and `create-pr`'s `owner`
+       adjudication become person legs (B-7), replacing `waiting_on: owner`;
+     - `file.md` writes `requires: [human-operator]`, not `tags: [OP]`.
    - docs `.baton/tickets.mjs` (a docs PR): `OP` as `human-operator`; `blocked_by` is already
      empty there, and `dependsOn` becomes `depends_at`.
-4. **Phase 3, drain.** **Needs you** lists each repository whose snapshot still carries an old
-   form.
+4. **Phase 3, drain.** Each repository whose snapshot still carries an old form is raised for
+   its owners (a `baton.<sub>` notify condition, R-BTN-163, once B-57 lands; today's Needs-you
+   path before).
 5. **Phase 4, cutover (its own PR, after the drain shows none).** The board-post validator
    refuses `blocked_by`, `operator_only` and the reserved labels, naming the ticket; a new
    migration stops storing `tickets.depends_on`, `tickets.blocked_by` and
@@ -76,18 +85,22 @@ phase 4 removes anything.
 ### Do not
 
 - Translate `depends_on` to every leg: in-flight tickets have only ever waited at the start.
-- Rename the posted `requires` field, or touch `needs` and `requires.resources` (§2n: not
-  overlaps).
+- Rename the posted `requires` field, or touch `needs` and `requires.resources` (R-BTN-120's
+  "pairs that join": not overlaps).
+- Give a non-call leg a wait on children, or add a `children` selector: the validator refuses any
+  `select` but `parent` and `posted` (B-10).
 - Drop `waiting_on`: forge effects (an author's push, CI) have no kind and get none.
 - Edit an old migration: the schema change is a new numbered file.
 
 ### Tests
 
 - **S-BTN-108** on both hosts, its trace replayed through the model.
-- Unit: the source's translations; a `spawned` end before its snapshot holding a fan-in leg
-  whose earlier children are all `done`; rule 4 refusing an ungranted `human-operator`; the
-  validator refusing each reserved label after cutover.
-- `baton test-course` on each standard course's new version against a board with tickets
+- Unit: the source's translations; a `spawned` end writing no block, the parent's other leg
+  ready beside its open children; rule 4 refusing an ungranted `human-operator`; the validator
+  refusing each reserved label after cutover.
+- S-BTN-104's and S-BTN-107's tests: their `waiting_on: owner|children` assertions become the
+  person legs' decision blocks and the call legs' `call` blocks.
+- `baton course test` on each standard course's new version against a board with tickets
   mid-course on the old one.
 
 ### Exit criteria
@@ -99,4 +112,6 @@ phase 4 removes anything.
 
 ## Status
 
-_(filed 2026-10-19 with the §2n amendment)_
+_(filed 2026-10-19 with the R-BTN-132 amendment)_
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — `spawned` places no provisional rows and children block only through a call, so `build-app`'s `file`/`verify` move onto call legs (B-62) and its approvals onto person legs (B-7).)_

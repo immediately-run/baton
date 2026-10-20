@@ -3,12 +3,12 @@ title: "B-43 — Courses are what their sources name; the CLI ships none (R-BTN-
 id: B-43
 project: baton
 status: available
-updated: 2026-10-19
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
-description: "Build BATON_SPEC §2p (R-BTN-134): a course is a course directory at a full commit reachable from its repository's default branch; sync, runner and kit read it from there; the standard courses move to course directories in the baton repository; the home holds only overrides; the CLI's registry and its own-commit checks go; the workflow pins the CLI's npm version. S-BTN-110, G-BTN-129. Requires: none."
+description: "Build BATON_SPEC §5.1 (R-BTN-134): a course is a course directory at a full commit reachable from its repository's default branch, its schemas at schemas/<name>@<n>.json; sync, runner and kit read it from there; the standard courses that exist today move to course directories in the baton repository (no pr directory: --course pr is refused naming create-pr); the home holds only overrides; the CLI's registry and its own-commit checks go; the workflow pins the CLI's npm version. S-BTN-110, G-BTN-129. Requires: none."
 topics:
   - baton
 owns: {}
@@ -22,9 +22,11 @@ depends_on:
 not package standard courses", then "the CLI shouldn't include any hardcoded course graphs or
 associated legs. baton CLI should not assume it has the correct version of a course. Using a
 specific commit hash instead of @main is fine."
-**Spec:** `spec/BATON_SPEC.md` §2p (R-BTN-134), as merged from PR 57 after three adversarial
-review rounds. It amends R-BTN-5, -22, -51, -65, -69, -72, -74, -96, -97, -98, -104, -105,
--124, -131, -133 and §7.1. This ticket builds it. The owner's ruling in it is settled: a
+**Spec:** `spec/BATON_SPEC.md` §5.1 R-BTN-134, as merged from PR 57 after three adversarial
+review rounds; §5.8 R-BTN-131 (the standard courses); history, "Migrations the implementation
+still carries" (B-33's source form and the `pr` course). It amended R-BTN-5, -22, -51, -65, -69,
+-72, -74, -96, -97, -98, -104, -105, -124, -131, -133 and §4.3; §15 S-BTN-110, G-BTN-129. This
+ticket builds it. The owner's ruling in it is settled: a
 source's code runs with the sync job's full environment, stated plainly, not sandboxed.
 **Depends on:** B-42 (trees, wrapper, leg module, `runner:` capability), and the CLI's first
 npm release (PR 58 makes the package public; the publish workflow still has to exist), because
@@ -51,12 +53,18 @@ cannot tell, so `repo sync` and `repo init` fail from the npm package.
    - B-42's trees and digests.
    - A `sources` URL mapping for mirrors, read by every reader.
    - `BATON_SOURCE_TOKEN` as git's credential in CI.
-3. **Course directories** under `src/defaults/courses/<id>/`:
-   - One each for `create-pr`, `review-pr`, `bug-report`, `draft-ticket`, `decision`,
-     `build-app`, `epic`, `branch` and `pr`.
+3. **Course directories** under `src/defaults/courses/<id>/` (today they hold only the `.md`
+   instructions):
+   - One each for the courses that exist today: `create-pr`, `review-pr`, `bug-report`,
+     `draft-ticket`, `decision` and `build-app`. No `pr` directory: `--course pr` is refused
+     naming `create-pr` (history Migrations; `REPLACED` in `src/defaults/courses.ts` already
+     does this). The others arrive with their tickets, on this layout: `epic` with B-13,
+     `branch` with R3-1265, `series` with R3-1259, and `ask`, `deliver` and `announce` with
+     B-66.
    - Each holds `course.json`, `sync.mjs`, `entry.json` (with `facts`, and `min_cli` where
-     needed), `legs/*` and the `.md` instructions, and is self-contained. `npm run courses`
-     copies shared code in, and CI checks it is current.
+     needed), `legs/*`, the `legs/<leg>.md` instructions and any `schemas/<name>@<n>.json`
+     (R-BTN-108; B-52 reads them there), and is self-contained. `npm run courses` copies shared
+     code in, and CI checks it is current.
    - Every leg requires `runner:leg-trees`.
    - Delete the registry, `cliSelf`, `cliPin` and `checkSource`'s byte-equality.
 4. **Sync:**
@@ -77,7 +85,7 @@ cannot tell, so `repo sync` and `repo init` fail from the npm package.
    - Writes `Baton-Source` trailers, and a workflow with `npx --yes
      @immediately-run/baton@<version>`, the CI cache and the source token.
    - Retire `--eject stations`; `--eject tickets` copies the file `build:cli` prebuilt.
-   - The one-commit move from B-33's form and from `pr` and `branch`.
+   - The one-commit move from B-33's form, and from `pr` onto `create-pr` (history Migrations).
 7. **Tests:** S-BTN-110, G-BTN-129. Rewrite S-BTN-104, -105, -107 and S-BTN-54 for the new layout.
    Add cases for mirrors, `imports`, the merged-entry version and `min_cli`.
 
@@ -88,3 +96,7 @@ cannot tell, so `repo sync` and `repo init` fail from the npm package.
   `create-pr` with a local mirror as the source.
 - Carried from review round 3, to settle while building: what a failed source fetch does
   before an open-world claim exists (C-3).
+
+## Status
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — no `pr` directory, directories only for the courses that exist today, and schemas inside each course directory.)_

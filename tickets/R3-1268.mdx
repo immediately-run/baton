@@ -3,7 +3,7 @@ title: "R3-1268 — Baton is self-sufficient: its agent workflow, shared modules
 id: R3-1268
 project: baton
 status: available
-updated: 2026-10-16
+updated: 2026-10-20
 repos:
   - baton
   - docs
@@ -11,7 +11,7 @@ tags:
   - FEAT
   - roadmap-item
 order: 1100
-description: "Nothing in immediately-run/baton needs docs: a baton-side workflow for working a ticket through Baton, CLAUDE.md and CHANGELOG without docs references, the shared modules sourced in baton and vendored by docs, and a generic deploy guide. Requires: none."
+description: "Nothing in immediately-run/baton needs docs: a baton-side workflow for working a ticket through Baton with leg instructions as overrides of create-pr (BATON_SPEC R-BTN-134), CLAUDE.md and CHANGELOG without docs references, the shared modules sourced in baton and vendored by docs (R-BTN-37 amended), and a generic deploy guide. Requires: none."
 topics:
   - baton
 owns: {}
@@ -22,7 +22,7 @@ depends_on:
 
 **Brief:** [SELF-HOSTING](https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/plans/self-hosting.mdx). The owner, 2026-10-16: no access to docs should
 be needed to understand how Baton works or what is being developed.
-**Spec:** BATON_SPEC R-BTN-37, §3, §6.4.
+**Spec:** `spec/BATON_SPEC.md` §2.1 R-BTN-37 (the vendored set) and the deployment, §5.1 R-BTN-134 (a sourced course's home holds only `legs/<leg>.run.<ext>` and `legs/<leg>.md` overrides), §5.8 (`create-pr`), §8.1 (the sidecar).
 
 ### Why
 
@@ -42,10 +42,12 @@ done there still point at docs:
      ticket by hand while git is the lock (`npm run ticket`, until R3-1266), and how `baton runner start`
      drives the legs once Baton claims this repository's tickets. It needs no docs checkout and
      no `claim.sh`.
-   - **The `pr` course's legs** in `.baton/courses/pr/legs/` (written by R3-1249's
-     `baton repo init`): each leg's instructions for the agent session it launches — implement,
-     review ending with a verdict line, fix, merge — beside its script, since a leg script is a
-     launcher and what the leg does is its instructions' text. Review findings are recorded
+   - **Leg instructions as `create-pr` overrides** in `.baton/courses/create-pr/legs/<leg>.md`
+     (R-BTN-134: the home of a sourced course holds only overrides; `baton repo init
+     --instructions <leg>` copies the source's text to start from): this repository's
+     instructions for the agent session each leg launches — implement, review ending with a
+     verdict line, fix, merge — since a leg script is a launcher and what the leg does is its
+     instructions' text. No course file or leg script is copied. Review findings are recorded
      under `docs/review/`.
 2. **CLAUDE.md, README, CHANGELOG.**
    - No rule or link needs docs.
@@ -81,10 +83,12 @@ done there still point at docs:
 
 ### Exit criteria
 
-- [ ] AGENTS.md and the `pr` course's leg instructions merged; a ticket worked end to end from a baton-only clone
+- [ ] AGENTS.md and the `create-pr` leg-instruction overrides merged; a ticket worked end to end from a baton-only clone
 - [ ] `src/shared/` sourced in baton; docs consumes it; R-BTN-37 amended
 - [ ] `docs/DEPLOY.md` merged; the reference check is green in CI
 
 ## Status
 
 _(filed 2026-10-16)_
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — the leg instructions are `create-pr` overrides under `.baton/courses/create-pr/legs/`, not a `pr` course's legs; R-BTN-37's amendment is still needed.)_

@@ -1,16 +1,16 @@
 ---
-title: "B-39 — Baton leg contracts and replay: inputs and outputs as envelopes, worker-side checks, baton:contract and baton leg replay (R-BTN-82, R-BTN-84, from R3-1257)"
+title: "B-39 — Baton leg contracts and replay: inputs and outputs as envelopes, runner-side checks, baton.contract and baton leg replay (R-BTN-82, R-BTN-84, from R3-1257)"
 id: B-39
 project: baton
 status: available
-updated: 2026-10-19
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1092
 tier: critical
-description: "Leg version, inputs, outputs and replay_safe in the course file; inputs resolved at the advance and waiting on input-missing/input-version; the runner's contract checks failing the leg contract-input (held, baton:contract) or contract-output; inputs/outputs history rows; baton leg replay; S-BTN-48, G-BTN-74. Requires: none."
+description: "Leg version, inputs, outputs and replay_safe in the course file; inputs resolved at the advance and waiting on input-missing/input-version; the runner's contract checks failing the leg contract-input (held non-retryable:contract-input, raising baton.contract) or contract-output; inputs/outputs history rows; baton leg replay; S-BTN-48, G-BTN-74. Requires: none."
 topics:
   - baton
 owns: {}
@@ -20,8 +20,8 @@ depends_on:
 ---
 
 **Brief:** continues R3-1257 (split 2026-10-19). The owner, 2026-10-15: legs that read each other's outputs need those outputs named, typed and found again; failures should name the producer; a past run should be re-runnable.
-**Spec:** `spec/BATON_SPEC.md` §2h R-BTN-82 (as amended 2026-10-17 by §2m: outputs are R-BTN-108's envelopes, checked by its one validator), R-BTN-84 (`baton leg replay`), R-BTN-78 (`baton:contract`), R-BTN-69 (a leg's `version`, `inputs`, `outputs`, `replay_safe`), §6.10 (`cannot-finish:contract-input` and `-output`), §6.13 (`ctx.inputs`, `close`), §4 (`leg_outputs`, `leg_run_inputs`, `run_inputs_by_ticket`, `repositories.artifact_buckets`), §10.4 (URIs and markers); §13a S-BTN-48; §16 G-BTN-74.
-**Depends on:** B-3. §2m amended R-BTN-82 on 2026-10-17: an output is an envelope naming `id@version`, given by pointer or inline, checked by one shared validator. B-3 builds the envelope and the validator. Building R-BTN-82's original pointer contracts first would build the check twice.
+**Spec:** `spec/BATON_SPEC.md` §5.5 R-BTN-82 (outputs are R-BTN-108's envelopes, checked by its one validator), §9.8 R-BTN-84 (`baton leg replay`), §7.3 R-BTN-163 (`baton.contract`), §5.2 R-BTN-69 (a leg's `version`, `inputs`, `outputs`, `replay_safe`), §9.7 and §7.4 R-BTN-122 (`cannot-finish:contract-input` and `-output`), §8.3 R-BTN-72 (`ctx.inputs`, `close`), §13 (`leg_outputs`, `leg_run_inputs`, `run_inputs_by_ticket`, `repositories.artifact_buckets`), §12.3 (URIs and markers); §15 S-BTN-48, G-BTN-74.
+**Depends on:** B-3. Under R-BTN-82 (§5.5) an output is an envelope naming `id@version`, given by pointer or inline, checked by one shared validator. B-3 builds the envelope and the validator. Building the earlier pointer-only contracts first would build the check twice.
 
 ### Requires
 
@@ -30,9 +30,9 @@ depends_on:
 ### What to build
 
 1. A course file's leg `version`, `inputs`, `outputs` and `replay_safe`, checked on acceptance (R-BTN-69).
-2. URI validation (§10.4: the repository allowlist, `artifact_buckets`, the marker encoding, digests).
+2. URI validation (R-BTN-82, §12.3: the repository allowlist, `artifact_buckets`, the marker encoding, digests).
 3. Inputs resolved at the advance that starts a leg. `input-missing`/`input-version` stored as `waiting` before the leg is offered. A foreign marker's outputs are never resolved.
-4. `baton runner start` validates inputs before and outputs after the script, failing the leg `cannot-finish:contract-input` (held, `baton:contract` raised) or `contract-output` (a failed attempt). The closing marker is written only from a validated result. `ctx.inputs` is set.
+4. `baton runner start` validates inputs before and outputs after the script, failing the leg `cannot-finish:contract-input` (held `non-retryable:contract-input`, raising `baton.contract`) or `contract-output` (a failed attempt). Landing before B-56, `baton.contract` is raised through R3-1257's Baton-raised decision path, which B-56 converts to the `suspend` core condition. The closing marker is written only from a validated result. `ctx.inputs` is set.
 5. `inputs`/`outputs` history rows (R-BTN-81, built by R3-1257).
 6. `baton leg replay [--run n] [--against sha]` with write credentials withheld; `replay_safe: false` refused.
 7. `baton course test`'s dataflow and version checks.

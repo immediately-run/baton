@@ -3,7 +3,7 @@ title: "B-26 — Baton logs blocked at a claim's end: an end that leaves the tic
 id: B-26
 project: baton
 status: available
-updated: 2026-10-17
+updated: 2026-10-20
 tags:
   - roadmap-item
 tier: routine
@@ -15,8 +15,9 @@ prs: []
 depends_on: []
 ---
 
-**Brief:** R3-1254 (the formal model brought up to §2g–§2m) found a ticket's event log showing an `unblocked` with no `blocked` before it. The owner, 2026-10-17, chose to log `blocked` when a claim's end leaves the ticket blocked.
-**Spec:** `spec/BATON_SPEC.md` R-BTN-75, as amended 2026-10-17 by R3-1254; R-BTN-77; R-BTN-122.
+**Brief:** R3-1254 (the formal model brought up to the amended spec) found a ticket's event log showing an `unblocked` with no `blocked` before it. The owner, 2026-10-17, chose to log `blocked` when a claim's end leaves the ticket blocked.
+**Spec:** `spec/BATON_SPEC.md` §6.2 (R-BTN-75, R-BTN-77: an end leaving the ticket blocked logs
+`blocked`, a claim start stays silent); §7.4 R-BTN-122.
 
 ### Why
 
@@ -30,7 +31,7 @@ The amendment keeps a claim's start silent. A claim's end is never an unblocking
 
 ### What to build
 
-1. **The end logs.** `Claims.finish` re-evaluates `blocked_since` with an event, `Blocks.held(ticket, false)`, for every end and reap: a worker's end, the alarm's reap, an owner's force-reap, a stale release.
+1. **The end logs.** `Claims.finish` re-evaluates `blocked_since` with an event, `Blocks.held(ticket, false)`, for every end and reap: a runner's end, the alarm's reap, an owner's force-reap, a stale release.
 2. **The start stays silent.** The claim's own call stays `held(ticket, true)`, and so do the cutover's and the mirror's legacy imports, which are claim starts.
 3. **One test per path:**
    - an end that leaves the ticket blocked logs `blocked`;

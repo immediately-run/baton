@@ -1,0 +1,118 @@
+---
+title: "B-67 — Notices for people removed: the conditions window's phases 3 and 4"
+id: B-67
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+  - docs
+tags:
+  - roadmap-item
+order: 1123
+tier: critical
+description: "Close the conditions migration (history, Migrations: R-BTN-80, R-BTN-103, R-BTN-164, R-BTN-170): phase 3 raises a condition for each repository still on an old form; phase 4, last, deletes the `decision` and `queue-over` notice kinds, personal channels (`asks`, severities, `remind_after_s`), worker couriers (heartbeat `couriers`, `refused_couriers`, `worker_couriers`, the `pool` credential, the grant's and token's `courier` flag and role) and `GET /v1/courier/decisions`, revokes `--asks` courier keys, leaves only `forge-check` notices, refuses `max_duration`, and deletes the retired S-BTN-46 and S-BTN-60 tests. G-BTN-154; S-BTN-68, S-BTN-131, S-BTN-126's courier case. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-56
+  - B-57
+  - B-66
+  - B-60
+---
+
+**Brief:** the ticket plan for the current-state spec (PR #71, 2026-10-20), §2's B-67. The
+owner retired notices for people on 2026-10-20 (R-BTN-164); R3-1256 and R3-1255 built them, so
+the code keeps them beside the conditions until people have another channel, then removes them.
+**Spec:** `spec/BATON_SPEC_HISTORY.md` "Migrations the implementation still carries": "R-BTN-170's
+window (conditions)" phases 3 and 4 and "Notices for people to conditions"; its Retired
+requirements (R-BTN-80, R-BTN-103, R-BTN-164, R-BTN-170) and Retired scenarios (S-BTN-46,
+S-BTN-60, S-BTN-90). In `spec/BATON_SPEC.md`: §7 introduction (Baton queues no notices for
+people); §7.3 R-BTN-163 (`baton decision list`, the floor); §10 R-BTN-115 (the forge courier and
+`forge-check` notices, the only kind); §12.6 R-BTN-157 and §11.1 R-BTN-159 (no `courier` token
+role; API keys are runner, owner and administrator credentials); §5.2 (`max_duration` refused);
+§13.2 `credentials`, `couriers`; §13.8 `notices`; §15 G-BTN-154, S-BTN-68, S-BTN-126, S-BTN-131.
+**Depends on:** B-56 (the debugger, `hitl.decision` and `baton decision list` on the conditions
+route), B-57 (`baton.queue-over` and the other listings as conditions), B-66 (people keep a
+channel: `ask`, `deliver`, `announce`), B-60 (`max_duration` read as a `start` timer, which this
+ticket stops reading). Phase 4 is the last step of the conditions migration.
+
+### Requires
+
+- A docs checkout: docs' callers of `baton decision list` and its courier setup move in a docs
+  PR before phase 4 merges.
+
+### Why
+
+Two channels to a person for one question is the overlap the owner retired: a notice and a
+handler ticket for the same decision, reminders on one and retries on the other. Until this
+lands the code carries R-BTN-80 and R-BTN-103 citations check-spec warns about (B-72).
+
+### What to build
+
+1. **Phase 3 (its own PR).** For each repository whose courses or bindings still lean on the old
+   forms — a personal courier with `asks` registered, a runner heartbeat carrying `couriers`, a
+   course file still carrying `max_duration` — raise one repository-level `notify` core
+   condition for its owners, closed when the last old form goes. The spec names no sub for it:
+   add `baton.old-form` (detail: the form and its count, identifiers only) to §7.3's list in the
+   same PR. Being conditions, they show in **Needs you** and `GET …/conditions`, which is how
+   phase 4's precondition is read.
+2. **Phase 4 (its own PR, after phase 3 shows none, and after docs' PR).**
+   - **Notices.** A new numbered migration deletes the `decision` and `queue-over` rows, drops
+     `notices.kind`, `ref`, `channel` and the `closed` state (states `queued`, `claimed`,
+     `sent`), the reminder use of `not_before`, `repositories.remind_after_s` and the
+     `notices_by_ref` index. `src/core/notices.ts` loses decision and queue-over queuing and
+     reminders; `src/core/queues.ts` stops queuing the queue-over notice (B-57's
+     `baton.queue-over` stays); `channel` leaves `POST /v1/courier/notices/{id}`.
+   - **Personal channels.** `POST /v1/owner/{repository}/couriers` accepts only `delivers:
+     ["forge-check"]` (B-5's form) and refuses `asks` (`src/core/admin.ts`); the `couriers`
+     table loses `asks` and takes §13.2's shape. Courier keys registered with `asks` are revoked;
+     a key with no other registration is deleted.
+   - **Worker couriers.** The heartbeat's `couriers` is refused (`src/core/validate.ts`); the
+     response's `refused_couriers`, the `worker_couriers` table, the reserved `pool` credential
+     and the `couriers` callback in `src/core/workerApi.ts` go, as do the grant's `courier` flag
+     and the token role `courier` (`src/core/registry.ts`, `src/core/auth.ts`).
+   - **Routes and CLI.** `GET /v1/courier/decisions` is removed (`src/core/http.ts`,
+     `src/core/front.ts`); `cli/decisions.mjs` already reads the conditions route (B-56) and
+     loses any fallback; `src/ui/app.js` loses the courier and notice views except forge
+     couriers.
+   - **Validator.** `src/core/course.ts` refuses `max_duration`, naming the leg and field, the
+     previous file kept and `baton.course-refused` raised.
+   - **Tests and citations.** Delete `test/integration/S-BTN-46.decision-reaches-owner.test.ts`,
+     `test/integration/S-BTN-60.worker-couriers.test.ts` and `test/unit/notices.test.ts`'s
+     decision and pool cases, drop their entries from B-71's retired-scenario allowlist and
+     `test/integration/trace-scope.json`, and remove every R-BTN-80 and R-BTN-103 citation from
+     `src/` (bar migrations), `cli/`, `ui/` and `test/`.
+3. **docs** (a docs PR before phase 4): docs' callers of `baton decision list` read the
+   conditions route, and docs' runner and courier setup drops `couriers` and `--asks`.
+
+### Do not
+
+- Remove `forge-check` notices, the forge courier credential kind `courier` or
+  `owner.courier.revoke`: they are R-BTN-115's.
+- Edit `0017_notices.sql` or any old migration: the change is a new numbered file.
+- Merge phase 4 while phase 3 still raises for any registered repository.
+- Keep a compatibility read of the heartbeat's `couriers` after phase 4: it is refused.
+
+### Tests
+
+- **G-BTN-154**: S-BTN-131 asserts no notice to anyone; S-BTN-68's forge-check case stays green
+  where B-5 has built it.
+- S-BTN-126's courier case: a courier-role API key or token is refused.
+- Unit: the migration on a database holding decision, queue-over and pool rows; the heartbeat
+  refusing `couriers`; the validator refusing `max_duration`.
+- `node scripts/check-spec.mjs` reports no R-BTN-80 or R-BTN-103 warning outside
+  `src/migrations/` and `model/`.
+
+### Exit criteria
+
+- [ ] phase 3 merged; phase 4 merged after it showed no repository
+- [ ] docs' PR merged first
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 with the current-state spec, PR #71)_

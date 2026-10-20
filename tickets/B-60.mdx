@@ -1,0 +1,134 @@
+---
+title: "B-60 — Leg deadlines: the interrupting start timer, the leg-timeout release and its fenced reap, and the owner's deadline controls (R-BTN-90)"
+id: B-60
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1093
+tier: critical
+description: "Build BATON_SPEC §7.5 R-BTN-90 and R-BTN-167's interrupting `start` timer (R3-1259's items 4–6, moved here): a leg's `{from: start, interrupting: true}` timer validated and held as `claims.deadline_at`; `max_duration` read as such a timer with `deprecated-field` until B-67 refuses it; `leg_finished` re-arming to +40 minutes once per run and withdrawing a pending `leg-timeout` release; the alarm's `leg-timeout` release, a failed attempt, and its fenced reap at +15 minutes (actor `alarm:leg-timeout`); `POST /v1/owner/{repository}/claims/{id}/deadline {extend_to | cancel_at}` and `baton owner deadline`; `deadline_at` and `cancel_at` on the heartbeat and the dashboard; the model. S-BTN-52, G-BTN-80. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** carved out of R3-1259 (its items 4–6) by the ticket plan for the current-state spec (PR
+#71). `max_duration` is now a timer (R-BTN-167). The owner, 2026-10-15: legs that time out or are
+cancelled administratively.
+**Spec:** `spec/BATON_SPEC.md` §7.5 R-BTN-90 (the `start` deadline, `leg_finished`, the deadline,
+the owner's controls) and R-BTN-167 (the timer's shape and range, interrupting timers); R-BTN-122
+(§7.4, the owners' 7-day ceiling on an interrupting `start` timer); R-BTN-19 (§9.5, fence before
+re-issue) and §9.5's reaping; §9.4's end table (`released:leg-timeout`, actor
+`alarm:leg-timeout`); R-BTN-149 (§2.3, once per leg run); §6.8 (Cancel); R-BTN-69 (§5.2, the
+validator); `spec/BATON_SPEC_HISTORY.md`, "Migrations the implementation still carries" (R-BTN-170's
+window: `max_duration`); §13.5 `claims`; §14 (the heartbeat, the deadline route); §15 S-BTN-52,
+G-BTN-80.
+**Depends on:** nothing. R3-1257, which provided positions, is done.
+
+### Requires
+
+None: every case runs in the integration harness with fixture course files and a fake clock.
+
+### Why
+
+`src/core/course.ts` accepts and validates `max_duration` but nothing enforces it. A leg that hangs
+holds its ticket until the runner's lease lapses, and an owner has no way to stop work at a set
+time. R3-1259 scoped this when `max_duration` was a leg field. The spec now makes it a timer, and
+the deadline is independent of `not_before`, so it is its own ticket.
+
+### What to build
+
+1. **The timer, in the course file** (`src/core/course.ts`, the kit):
+   - A leg's `timers: [{after_s, from: "start", interrupting: true}]` with `after_s` from 60 to
+     2,592,000.
+   - It is further bounded by the owners' 7-day ceiling. B-11 makes the ceiling a setting; until
+     then it is a constant.
+   - Any other `from`, a timer with `leg`, or a non-interrupting timer is refused naming the leg
+     and the field, until B-61 accepts them.
+   - At most one `start` timer per leg.
+2. **The window.**
+   - A leg's `max_duration` is read as `{after_s: max_duration, from: "start", interrupting:
+     true}`.
+   - It logs `deprecated-field` once per repository and field per day. Whichever of B-41 and B-60
+     lands first adds that event kind.
+   - A leg carrying both forms is refused.
+   - B-67 refuses `max_duration`.
+3. **Migration** (a new numbered file):
+   - `claims.deadline_at` and `claims.cancel_at`;
+   - `leg-timeout` in the release reasons, the `released:` end reasons
+     (`src/core/validate.ts` `RELEASE_END_REASONS`) and the events.
+   - R3-1259 keeps only its `not_before` columns.
+4. **The deadline** (a new `src/core/deadlines.ts`):
+   - An `advance` into a leg with a `start` timer sets `deadline_at` to `this.now + after_s`. The
+     next `advance` and the claim's end clear it.
+   - The runner sends an immediate heartbeat with `leg_finished: <claim_legs.seq>` when the
+     script's `run` returns. It comes before validation, `close`, and any wait under the claim.
+   - That heartbeat re-arms `deadline_at` to now + 40 minutes, once per leg run.
+   - It is processed before messages are delivered. A pending `leg-timeout` release for that leg
+     is withdrawn: the message becomes `expired` with `withdrawn: 'leg-finished'`, and
+     `leg-timeout {withdrawn: true}` is logged. A release already delivered stands.
+5. **At the deadline** (the alarm in `src/core/baton.ts`):
+   - The alarm queues a `release` with reason `leg-timeout` and logs `leg-timeout`.
+   - The runner aborts at its next safe point, writes its hand-off and ends
+     `released:leg-timeout`. That end is a failed attempt (`src/core/attempts.ts`).
+   - A delivered `leg-timeout` release unacknowledged for 15 minutes is reaped by the alarm with a
+     fence, actor `alarm:leg-timeout`. The ticket is not re-issued until the sidecar confirms that
+     it killed the tool processes, or until the runner goes silent past its lease. This reap
+     counts as the `leg-timeout` end does.
+6. **The owner's controls:**
+   - `POST /v1/owner/{repository}/claims/{id}/deadline` and `baton owner deadline <claim>
+     --extend-to <t> | --cancel-at <t|none>`. Each act is logged `override`.
+   - `extend_to` must be later than both now and the current deadline, and at most 7 days ahead.
+     It is `invalid-params` when the claim has no deadline or once the release is queued.
+   - `cancel_at` must be after now and within 7 days, and `null` withdraws it. At that instant it
+     runs a Cancel: an owner hold and a `release` with reason `owner-cancel`.
+   - If the claim ends first, the schedule lapses, is logged `override {lapsed: true}` and is
+     shown on the ticket's row.
+   - An ended claim is `claim-ended`.
+   - The heartbeat response's claim and the dashboard's claim row carry `deadline_at` and
+     `cancel_at`.
+7. **The model** (R-BTN-68): add to `model/baton.qnt` the `leg-timeout` release, its fenced reap,
+   and `leg_finished` clearing the deadline. Add the properties that every fence clears and that
+   no leg finishing inside its budget is timed out. Attach the `npm run model:pr` report.
+
+### Do not
+
+- Compute the deadline from the runner's clock. Use only `this.now` (R-BTN-32).
+- Queue a timer's `leg` or arm `arrival`, `ready` or `first_attempt` timers. Those are B-61's.
+- Treat a `leg-timeout` release as anything but a failed attempt here. The `leg` exception is
+  B-61's.
+- Edit an old migration.
+
+### Tests
+
+- On both hosts, `test/integration/S-BTN-52.deadline-cancel.test.ts`:
+  - a 1,800-second interrupting `start` timer;
+  - runs finishing before, at and after it, with and without delivery;
+  - a hung harness reaped with a fence at +15 minutes;
+  - `extend_to`, `cancel_at` and the invalid forms of each.
+- Unit:
+  - `after_s` at 59, 60, 2,592,000 and 2,592,001, and above the 7-day ceiling;
+  - `max_duration` read as a timer and logged once a day;
+  - `deadline_at` across advances and `leg_finished`;
+  - the withdrawal of a pending release;
+  - the reap at 15 minutes ± 1 ms;
+  - `cancel_at` lapsing with its claim.
+- Model: `npm run model` with the new actions and properties.
+
+### Exit criteria
+
+- [ ] S-BTN-52 passes on both hosts; G-BTN-80 holds
+- [ ] `model/` changed in the same PR, with its `npm run model:pr` report (R-BTN-68)
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71; carved out of
+R3-1259's items 4–6)_

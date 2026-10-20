@@ -3,7 +3,7 @@ title: "R3-1271 — Baton open-world claims: claiming a ticket Baton has not see
 id: R3-1271
 project: baton
 status: available
-updated: 2026-10-16
+updated: 2026-10-20
 repos:
   - baton
 tags:
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1102
 tier: critical
-description: "A claim may name an unknown ticket into its course's start_leg with course, leg and sha; it is provisional, records a sync want, may start only its entry leg, and is settled by the first post whose contains lists its sha — ordinary, or ended stale-board, course-changed, closed or unknown-ticket — or ends after 60 minutes (BATON_SPEC R-BTN-104); S-BTN-58. Requires: none."
+description: "A claim may name an unknown ticket into its course's start_leg with course, leg and sha; it is provisional, records a sync want, may start only its entry leg, and is settled by the first post whose contains lists its sha — ordinary, or ended stale-board, course-changed, closed or unknown-ticket — or ends after 60 minutes (BATON_SPEC §4.5 R-BTN-104); S-BTN-58. Requires: none."
 topics:
   - baton
 owns: {}
@@ -21,7 +21,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project; the owner, 2026-10-16: there can be a race between sync and claim, so Baton operates under the open world assumption.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2l R-BTN-104 (the request, unknown, entry legs, the gates at the claim, provisional, settlement, ending), §6.10 as annotated (`unknown-ticket` does not count), §4's 2026-10-16 DDL block (`claims.provisional`, `provisional_json`), §11 (`provisional` refusal, the observation's `provisional`, the board post's `contains`), §13a S-BTN-58 (docs@646eca6, the merge of docs#220)
+**Spec:** `spec/BATON_SPEC.md` §4.5 R-BTN-104 / R-BTN-148 (the request, unknown, entry legs, the gates at the claim, provisional, settlement, ending), §9.7 (attempts: `unknown-ticket` does not count), §13 (`claims.provisional`, `provisional_json`), §14 (`provisional` refusal, the observation's `provisional`, the board post's `contains`), §15 S-BTN-58
 **Depends on:** R3-1269 (its migration adds the columns; the claim path it reshapes)
 
 ### Requires
@@ -30,14 +30,14 @@ depends_on:
 
 ### Why
 
-A worker that files a ticket and pushes it cannot claim it until a sync posts it, so it waits
+A runner that files a ticket and pushes it cannot claim it until a sync posts it, so it waits
 or races. The spec now lets it claim at once, provisionally, and has Baton settle the claim
 from the first sync that provably read the ticket's commit. Tier: critical — a new path into the
 lease, and server-side claim ends.
 
 ### What to build
 
-1. `POST /v1/runner/claim` with `ticket_id`, `course`, `leg`, `sha` for a ticket with no `tickets` and no `closed_tickets` row: refused unless the repository has an accepted snapshot, `leg` is the course's `start_leg` with no required bar, the key holds no other provisional claim, and the id has no `released:unknown-ticket` end in the last 24 hours; then the lease, grant, `min_worker_version` and owner-bar gates.
+1. `POST /v1/runner/claim` with `ticket_id`, `course`, `leg`, `sha` for a ticket with no `tickets` and no `closed_tickets` row: refused unless the repository has an accepted snapshot, `leg` is the course's `start_leg` with no required bar, the key holds no other provisional claim, and the id has no `released:unknown-ticket` end in the last 24 hours; then the lease, grant, `min_runner_version` (`min_worker_version` in the code until B-68) and owner-bar gates.
 2. A provisional claim records a sync want; may make one `advance`, into `start_leg`; any later `advance` or end but a release is refused `provisional`.
 3. `POST /v1/sync/observation` returns `provisional: [{claim_id, sha}]`; the board post's `contains` lists those `sha`s it contains; only such a post settles a claim, by R-BTN-104's five outcomes.
 4. The alarm ends a claim unsettled after 60 minutes `released:unknown-ticket`, actor `alarm`; settlement ends use actor `server`; every end queues a `release` message; none counts in `failedAttempts`.
@@ -47,7 +47,7 @@ lease, and server-side claim ends.
 - **Settlement is one pure function** `settle(claim, postedTicket | null, closed: boolean, gates) → 'ordinary' | endReason` in `src/core/claims.ts`, called from the snapshot transaction (`Claims.judge`'s neighbourhood) for each provisional claim whose `sha` the post lists. The author gates it re-runs are `gatesFor` in `src/core/gates.ts` with phase `'claim'`, not a copy.
 - **"Unknown" is decided in the claim transaction** by reading `tickets` and `closed_tickets` there, so a sync landing between the check and the insert cannot let a known ticket through the open-world path.
 - **`countsAsFailed` in `src/core/attempts.ts` returns false for `released:unknown-ticket`**, as it does for `stale-board`; extend its doc comment's list.
-- **Do not**: let the worker's `sha` stand in for `contains` (Baton cannot check ancestry); settle on a post that does not list the claim's `sha`; recommend a provisional ticket; count a settlement end as a failed attempt.
+- **Do not**: let the runner's `sha` stand in for `contains` (Baton cannot check ancestry); settle on a post that does not list the claim's `sha`; recommend a provisional ticket; count a settlement end as a failed attempt.
 
 ### Tests
 

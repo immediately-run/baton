@@ -1,0 +1,163 @@
+---
+title: "B-56 — The debugger: Needs you lists unhandled conditions and the floor; baton.retries, baton.contract and baton.stalled become suspend conditions (R-BTN-163, first half)"
+id: B-56
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1105
+tier: critical
+description: "Build BATON_SPEC §7.3 R-BTN-163's debugger: Needs you lists open conditions with no handler ticket and the floor, by severity then age; R3-1257's Baton-raised decisions become the whole-ticket `suspend` core conditions `baton.retries`, `baton.contract` and `baton.stalled` with restarts `retry`, `route:<leg>` and `park` and no default, converted by a migration; `baton owner resolve <ticket> <restart>` and `POST …/tickets/{ticket}/resolve {restart, condition_id?}` replace `{decision, answer, leg?}`; `owner.resolve` confirmed on the dashboard; `hitl.decision` per open posted decision; `baton decision list` on `GET …/conditions?open=1&person=1`. S-BTN-131 (debugger half), S-BTN-6, S-BTN-7, S-BTN-10's resolve, S-BTN-47's retries and resolve cases, S-BTN-44's decision case, G-BTN-149. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-55
+---
+
+**Brief:** the owner, 2026-10-20: conditions replace notices for people and Baton's own decisions,
+and an unhandled condition reaches the debugger (`spec/BATON_SPEC_HISTORY.md`, "Decisions in
+full"). Filed from the ticket plan for the current-state spec (PR #71). With B-55 it supersedes
+B-14: severity is now data, and routing and reminders are retired.
+**Spec:** `spec/BATON_SPEC.md` §7.3 R-BTN-163 (Needs you, resolving, core conditions, posted
+decisions, the floor, reading the list); R-BTN-160's closing table (§7.1), R-BTN-125 (severity),
+R-BTN-78 (§6.4, posted decisions), R-BTN-83 (§5.3, a re-route), R-BTN-122 (§7.4, the holds that
+raise `baton.retries`), R-BTN-82 (§5.5, `baton.contract`), R-BTN-155 (§11.4, confirmed actions),
+§11.4's Needs you view, §11.3 (`owner resolve`, `condition.list`), §13.3/§13.6
+(`ticket_decisions`, `ticket_overrides.hold_reason`, `pending_owner_state`), §14 (the resolve and
+conditions routes); §15 S-BTN-6, -7, -10, -44, -47, -131, G-BTN-149.
+**Depends on:** B-55 (the `conditions` row, the route and `condition.list`).
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+R3-1257 built `baton:retries` and `baton:stalled` as decisions that Baton writes into
+`ticket_decisions` with `source = 'baton'`. Claims, blocks and notices each carry special cases for
+them (`src/core/claims.ts` rule 3's exception, `src/core/blocks.ts` `BATON_DECISIONS`, the notices'
+joins). The spec now makes them core conditions, so they need one code path. Needs you becomes
+the list of what nothing else handles.
+
+### What to build
+
+1. **Core conditions in `src/core/conditions.ts`** (from B-55):
+   - `raiseCore(type, {ticket?, ref?, detail?, restarts?})` and `closeCore(…)`, run in the
+     caller's transaction.
+   - They are unique while open on `(repository_id, type, ticket_id, ref)`.
+   - Raising writes a `condition` history row. Closing records `outcome`, `restart` and
+     `answered_by`.
+2. **`baton.retries`, `baton.contract` and `baton.stalled`** are whole-ticket `suspend`
+   conditions with restarts `retry`, `route:<leg>` and `park` and no default. Severity is
+   `normal`, except `baton.contract`, which is `high`.
+   - Replace `Blocks.raise`/`answer` and `BATON_DECISIONS` (`src/core/blocks.ts`) and the
+     `baton:retries` raises in `src/core/claims.ts`.
+   - `baton.stalled` keeps today's 72-hour alarm scan until B-61 replaces it with core's default
+     timer. It still closes by itself when the leg is posted other than `waiting`.
+   - `baton.contract` is raised by B-39's contract-input hold. Whichever of B-39 and B-56 lands
+     second wires it.
+   - **The restarts**, as R-BTN-163's table:
+     - `retry` clears the hold and the backoff (`baton.stalled`: closes and re-arms).
+     - `route:<leg>` is B-38's re-route plus clearing the hold. Whichever of B-38 and B-56 lands
+       second wires it.
+     - `park` closes the condition and keeps the hold, and nothing is raised again while that
+       hold stands. For `baton.stalled`, `park` sets an owner hold `hold_reason: parked`.
+   - Any owner act that clears the hold under `baton.retries` or `baton.contract` closes the
+     condition, including §6's clear-hold.
+   - These conditions block nothing. Remove rule 3's `decision`-block exception in
+     `src/core/claims.ts`.
+3. **Migration** (a new numbered file):
+   - Convert each open `ticket_decisions` row with `source = 'baton'` into an open `conditions`
+     row (`baton:retries` becomes `baton.retries`, `baton:stalled` becomes `baton.stalled`), and
+     delete the `decision` blocks those rows made.
+   - Drop `ticket_decisions.source` (posted decisions only remain).
+   - If R3-1258 has created `pending_owner_state`, its `kind` becomes
+     `override|condition|timer|outbox` as §13.6 says. Otherwise R3-1258 creates it with those
+     kinds.
+4. **Resolve.**
+   - `POST /v1/owner/{repository}/tickets/{ticket}/resolve {restart, condition_id?}` replaces
+     `{decision, answer, leg?}` (`src/core/baton.ts`, `Claims.resolveDecision`).
+     - `condition_id` is required when the ticket has more than one open condition taking a
+       restart.
+     - A restart the condition does not offer is `invalid-params`.
+   - `baton owner resolve <ticket> <restart>` in `cli/baton.mjs` replaces `resolve <decision>
+     retry|park`.
+   - The dashboard reaches it with a session as `owner.resolve`, answered `202 {confirm_code}`
+     and performed by `baton admin confirm` (R-BTN-155).
+   - A leg-raised `suspend` closed this way records `{restart, reason: "resolved", answered_by}`
+     for B-59's resume.
+5. **`hitl.decision`.** In the transaction that stores posted decisions (`src/core/blocks.ts`,
+   the `source = 'sync'` write):
+   - raise one `hitl.decision` per open posted decision on its ticket (`ref` the decision id,
+     severity the decision's own), and close it when the decision closes;
+   - no leg waits on it.
+6. **The debugger.** `GET /v1/ui/state`'s `needs_you` gains `conditions`:
+   - every open condition with no `handler`, plus the floor;
+   - ordered by severity, then age;
+   - each shown with type, restarts, default, `detail`, `url` and the tickets it would unblock.
+
+   `src/ui/app.js` renders it through `textContent`. The old listings stay beside it until B-57
+   converts them.
+7. **The floor**, which no binding removes:
+   - every open `hitl` and `hitl.*` condition;
+   - every open `baton.retries`, `baton.contract` and `baton.stalled` condition;
+   - every open posted decision;
+   - any `suspend` condition whose handler ticket has had no leg run for 24 hours (none can exist
+     before B-58).
+8. **Reading the floor.**
+   - `GET /v1/repositories/{repository}/conditions?open=1&person=1` returns the floor's
+     conditions and posted decisions with their links.
+   - `cli/decisions.mjs` (`baton decision list`, `--all`, `--watch` once a minute) reads it in
+     place of `GET /v1/courier/decisions`. The courier route stays for B-67 to delete.
+9. **The model** (R-BTN-68): Baton-raised decisions become conditions in `model/baton.qnt`, with
+   the `npm run model:pr` report in this PR. R3-1254 (in progress) models decisions in its part
+   3. If that part has landed, change it here. If it has not, record in R3-1254's `## Status` that
+   it should model these as conditions.
+
+### Do not
+
+- Give `baton.retries`, `baton.contract` or `baton.stalled` a default. They never resolve
+  themselves.
+- Let a handler close a core condition (G-BTN-149). Only its cause or `owner resolve` does.
+- Delete notices, couriers or `GET /v1/courier/decisions`; that is B-67, after B-66.
+- Convert the other Needs-you listings (B-57) or bind anything (B-58).
+- Accept a restart the condition did not offer.
+
+### Tests
+
+- On both hosts, rewrite the assertions on `baton:*` decisions:
+  - `test/integration/S-BTN-6.poisoned-item.test.ts`: held `attempts-exhausted`, `baton.retries`
+    raised; lifting resets.
+  - `S-BTN-7.non-retryable.test.ts`: `cannot-finish:spec` held at once, `baton.retries`.
+  - `S-BTN-10.no-review-capacity.test.ts`: `baton.stalled` at 72 hours, closed by
+    `owner resolve … retry`.
+  - `S-BTN-47.positions-decisions.test.ts`: spent retries and `baton.stalled` resolved with
+    `retry`.
+  - `S-BTN-44.blocks.test.ts`: a posted decision raises `hitl.decision` and still blocks its leg.
+- `test/integration/S-BTN-131.debugger.test.ts`, with no bindings:
+  - a `hitl` raise listed by severity and age with its restarts;
+  - `baton.retries` offering `retry`, `route:<leg>` and `park`;
+  - a restart not offered refused `invalid-params`;
+  - `baton decision list` showing the floor.
+
+  The `hitl` raise's resume is B-59's case.
+- Unit (`test/unit/migrations.test.ts`): the migration converts an open `baton:retries` row and
+  drops its block.
+- Unit: `park` keeps the hold and raises nothing more; clear-hold closes the condition.
+
+### Exit criteria
+
+- [ ] the scenarios above pass on both hosts; G-BTN-149 holds
+- [ ] no `baton:` decision id remains in `src/` or `cli/`
+- [ ] `model/` changed in the same PR, with its `npm run model:pr` report (R-BTN-68)
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_

@@ -2525,7 +2525,9 @@ Limits that hold throughout:
     - The body holds filter fields only (R-BTN-33), never the subject or the body. `url` is sent
       only for an unbound `suspend` and points to where git holds the question (the leg's
       evidence or its hand-off), under R-BTN-92's link rule.
-    - Baton answers with a `condition_id` and stores the `conditions` row. It records an activity
+    - Baton answers with a `condition_id` and, when `handler` names a course, the handler's id
+      `handler_id` (below), and stores the `conditions` row; the runner then writes the handler
+      ticket under that id. It records an activity
       of kind `condition` on the leg run and a `condition` event in the ticket's history
       (R-BTN-81).
     - A claim may hold at most 20 open conditions, and a ticket may raise at most 200 a day.
@@ -2579,8 +2581,8 @@ Limits that hold throughout:
     - The runner writes the handler ticket git first, through the ticket source's `file(ticket)`
       export (R-BTN-74; the markdown source writes `<items>/<local id>.md`). It pushes the file
       before the raise returns or the leg ends.
-    - Its id is the raising ticket's local id, then `.c`, then the number of conditions raised on
-      that ticket so far (`R3-1205.c3`).
+    - Its id is the raising ticket's local id, then `.c`, then Baton's count of conditions raised on
+      that ticket so far (`R3-1205.c3`), returned as `handler_id` by the raise's report.
     - Its frontmatter names `course` (the resolved course), `parent` (the raising ticket),
       `handles: {type, disposition, restarts, default?, severity?, wait_s?, condition_id}` and
       `raised_by: {leg, run}`. Its body is the subject and body the leg supplied.
@@ -2592,7 +2594,7 @@ Limits that hold throughout:
       severity?, raised_by: {ticket, leg?, run?}, question: <std:git.file@1>}`.
     - A course bound to a `suspend` type produces a **`std:restart@1`** at every end station:
       `{restart: <id> | null, reason: "chosen" | "unanswered" | "withdrawn" | "resolved",
-      answered_by?, commit?}`. This type refines `std:decision@1`. `baton course test` refuses
+      answered_by?, commit?}`. `baton course test` refuses
       the binding otherwise.
     - What a handler of a `notify` or `interrupt` type produces is not read.
     - Both formats are in R-BTN-110's library.
@@ -5135,7 +5137,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-132 calls and completion | a call over three `review-pr` children (2 of 3 approve; `lifetime: station`); an epic `plan` call with one child withdrawn; a `spawned` end naming none | settles on the second approval, third `superseded` and withdrawn through the outbox; `settleCall` agrees; the epic settles `planned` only once all closed; empty end refused |
 | S-BTN-133 a choice station | `answer` listed before `expire`; both in one alarm transaction; a provisional position; a later sync posting `expire`; `after_s` 30 or 2,592,001 | `answer` wins by order; nothing armed provisionally; held as an override, written by the winner's run; `choice-lost`; exported; out-of-range `after_s` refused |
 | S-BTN-134 timers | an interrupting arrival timer with `leg`; a non-interrupting `warning.slow`; a leg's `baton.stalled` override at 1 day; a file with `max_duration`, `max_ready_s`, `max_attempts_s`, `error_types`, `isolation`, a leg's `call`, `checks` or `retry.non_retryable`; timers interrupting with `raise`, non-interrupting with `leg` or without `raise`, with `leg` on a choice station's leg, or a second `baton.stalled` | `leg-timeout` and the leg queued; raised once per arrival; `baton.stalled` raised after 1 day, not 3; each refused naming the leg and field, previous kept |
-| S-BTN-136 the outbox | bound `baton.output-invalid`; no `runner:baton-legs` runner, then one; a write landed by a lost claim; a forge-refused push; a condition closing while queued; an entry undrained 24 h | provisional handler ticket queued `baton.write`; filed with `baton_write: <id>`, `written` then `landed`; the re-claim writes nothing; `released:blocked` on `runner:baton-legs`, another runner takes it; `dropped`; `baton.outbox-late` |
+| S-BTN-136 the outbox | bound `baton.output-invalid`; no `runner:baton-legs` runner, then one; a write landed by a lost claim; a forge-refused push; a condition closing while queued; an entry undrained 24 h | provisional handler ticket queued `baton.write`; filed with `baton_write: <id>`, `written` then `landed`; the re-claim writes nothing; `released:cannot-finish:capability`, the ticket held and `baton.retries` naming the runner; `dropped`; `baton.outbox-late` |
 | **§8** | | |
 | S-BTN-41 the runner | a `ci` wait, `{suspend: true}`, `max_runs`, a closed PR, returned `bars`, a lost lease, a course change, a non-edge `next`, a release, a leg session claiming | holds through `ci`; follows only named edges with their `bars`; suspends at `from` with a hand-off; kills the group on loss; new scripts unrestarted; `released:requested`; session refused (`IR_BATON_PARENT`) |
 | S-BTN-53 the doorbell | rings for a cancel and a follow-up; a deploy; a reap; liveness loss; bad upgrades; eviction | one ring then a trailing ring; reconnect with backoff, heartbeat delivery meanwhile; sockets closed; `unauthenticated`, `forbidden`; state recovered |
@@ -5277,7 +5279,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-152 | Each timer fires once per `from` instant; interrupting ones release and fence; contradictory timers, a timer `leg` on a choice station and the retired course fields are refused; one override of `baton.stalled` per leg | S-BTN-134 |
 | G-BTN-153 | A superseded claim is released `superseded` in the settling transaction; `baton.cancel` compensates in reverse path order before withdrawing | S-BTN-129, -132 |
 | G-BTN-154 | Baton queues no notice for a person; only `forge-check` notices exist | S-BTN-68, -131 |
-| G-BTN-156 | Baton holds no git credential and writes git only through outbox entries runners drain with `baton.write`, each carrying `baton_write: <id>` and written at most once, in id order per ticket; a queued entry whose condition closes is dropped; 24 h unlanded raises `baton.outbox-late` | S-BTN-136 |
+| G-BTN-156 | Baton uses no credential to write git, and writes git only through outbox entries runners drain with `baton.write`, each carrying `baton_write: <id>` and written at most once, in id order per ticket; a queued entry whose condition closes is dropped; 24 h unlanded raises `baton.outbox-late` | S-BTN-136 |
 | **§8** | | |
 | G-BTN-5 | A heartbeat without its session's secret is refused; a key cannot claim another hostname, an ungranted capability or an ungranted repository's course | hostile-key tests |
 | G-BTN-17 | A retried first heartbeat is idempotent; a re-key revives a reaped, claimless runner | tests |

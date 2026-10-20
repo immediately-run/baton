@@ -1,0 +1,99 @@
+---
+title: "B-68 — \"Worker\" is \"runner\" in the code: tables, columns, wire names and the model, through a dual-read window"
+id: B-68
+project: baton
+status: available
+updated: 2026-10-20
+repos:
+  - baton
+  - docs
+tags:
+  - roadmap-item
+order: 1090
+tier: critical
+description: "Rename the code's `worker` identifiers to the spec's `runner` (history, Migrations: \"Worker\" is \"runner\"): a new migration renames the `workers` and `worker_*` tables, the index `worker_instances_by_instance`, the columns `worker_id`, `from_worker_id`, `to_worker_id` and `min_worker_version`, and the credential kind; Baton accepts `X-Runner-Secret`, `Min-Runner-Version`, `?runner=me` and `min_runner_version` beside the old names and records which runners still send them; clients send and read only the new names (`runner-reaped`); TypeScript identifiers, UI text and the model's names follow, with `@impl` links re-stamped. S-BTN-30. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-20: "worker is used for so many other things, it's an overloaded
+term" (history, Integration). The spec now names every process that runs a leg a **runner**
+(interactive or CLI) and keeps "Worker" only for the Cloudflare Worker; the code still says
+`worker` everywhere. Ticket plan §2's B-68.
+**Spec:** `spec/BATON_SPEC_HISTORY.md` "Migrations the implementation still carries", the entry
+"\"Worker\" is \"runner\" (2026-10-20, owner)". In `spec/BATON_SPEC.md`: §8.1 R-BTN-3, R-BTN-14
+(`X-Runner-Secret`, `runner-reaped`); §6.2 and §6.1 (`?runner=me`); §5.7 R-BTN-22 / R-BTN-65 and §6.6
+rule 9 (`min_runner_version`, `Min-Runner-Version`); §13.2 `credentials.kind` `runner`; §13.3
+`runners` and the `runner_*` tables; §13.8 `runner_instances_by_instance`; §15 S-BTN-30.
+**Depends on:** nothing. Schedule it right after B-49 merges (its PR #67 touches
+`src/core/blocks.ts`) and before the §7 wave (B-55 onward) adds new `worker` code.
+
+### Requires
+
+- A docs checkout: the vendored client (`src/shared/` comes from docs, `npm run vendor`) and
+  docs' claim scripts and `.baton/baton.json` move in a docs PR.
+
+### Why
+
+Every ticket from here on is written in the spec's words; code that says `worker` for the same
+thing makes each review translate, and new code would copy whichever name is nearer. One rename,
+early, with a window so no running runner breaks.
+
+### What to build
+
+1. **Schema.** A new numbered migration in `src/migrations/` renames the tables `workers`,
+   `worker_grants`, `worker_capabilities`, `worker_tags`, `worker_courses`, `worker_instances`
+   and `worker_reports` to `runners` and `runner_*`, the index `worker_instances_by_instance` to
+   `runner_instances_by_instance`, the columns `worker_id`, `from_worker_id`, `to_worker_id`
+   (`messages`, claims and every other table carrying them) and `courses.min_worker_version`,
+   and rewrites `credentials.kind` `worker` → `runner` with its CHECK. It adds
+   `runners.legacy_names_at`, the last time a runner used an old wire name.
+2. **The window on the wire** (`src/core/auth.ts`, `src/core/http.ts`, `src/core/front.ts`,
+   `src/core/workerApi.ts`): `X-Runner-Secret` is accepted beside `X-Worker-Secret`;
+   `Min-Runner-Version:` beside `Min-Worker-Version:` in the course-change check; `?runner=me`
+   beside `?worker=me`; a registry entry's `min_runner_version` beside `min_worker_version`
+   (`src/core/courses.ts`), refusing both at once when they differ. A call using an old name
+   sets `legacy_names_at`; the dashboard's runners view (`/v1/ui/state`) shows it, which is what B-69 waits on. Refusals use the new code `runner-reaped`.
+3. **Clients.** `src/runner/api.ts` and `src/runner/runner.ts` send only the new header and read
+   `runner-reaped` (and, until B-69, `worker-reaped` from an older Baton); `src/defaults/cli.ts`
+   writes `min_runner_version`. In docs: the claim scripts and the vendored client send the new
+   header; `.baton/baton.json` moves to `min_runner_version`; `src/shared/baton.mjs` comments
+   are renamed there and re-vendored here.
+4. **Code and UI.** TypeScript identifiers (`workerApi.ts` → `runnerApi.ts`, `WorkerApi`,
+   `worker_id` fields, `toWorker`, …), `src/ui/app.js`'s text and the heartbeat response's
+   `worker_id` (sent as `runner_id` beside it until B-69).
+5. **Model.** `model/*.qnt` and `model/README.md` names, with every `@impl`/`@model` hash
+   re-stamped (`node scripts/check-model-links.mjs --stamp`) and a `model:pr` report.
+
+### Do not
+
+- Rename the Cloudflare Worker, Wrangler bindings or `wrangler.toml` names: "Worker" stays for
+  the host.
+- Edit an old migration: the rename is a new numbered file, and old files keep their names.
+- Rename the posted capability value `baton-worker` in `vocabulary.mjs`: it is a label docs'
+  tickets carry, and changing it is docs' data change (R3-1221).
+- Refuse an old name: that is B-69, once every runner has moved.
+- Change behaviour: the suite passes unchanged apart from names.
+
+### Tests
+
+- S-BTN-30 gains a case: a heartbeat with `X-Runner-Secret` and one with `X-Worker-Secret` both
+  pass, and only the second sets `legacy_names_at`.
+- Unit: the migration on a database at the previous schema keeps every row; `?worker=me` and
+  `?runner=me` answer alike; differing `min_runner_version` and `min_worker_version` refused.
+- The full suite green on both hosts; `npm run model:links` green after re-stamping.
+
+### Exit criteria
+
+- [ ] no `worker` identifier left in `src/` (bar migrations, the Cloudflare host and the window's
+  accepted names), `cli/`, `test/` or `model/`
+- [ ] docs' PR merged
+- [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-20 with the current-state spec, PR #71)_

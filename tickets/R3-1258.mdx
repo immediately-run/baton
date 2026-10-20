@@ -1,9 +1,9 @@
 ---
-title: "R3-1258 — Baton child tickets, the capacity load test and owner-state export (BATON_SPEC §2i)"
+title: "R3-1258 — Baton child tickets, the capacity load test and owner-state export"
 id: R3-1258
 project: baton
 status: available
-updated: 2026-10-15
+updated: 2026-10-20
 repos:
   - baton
   - docs
@@ -13,7 +13,7 @@ tags:
   - roadmap-item
 order: 1091
 tier: critical
-description: "Build BATON_SPEC §2i: child tickets (parent stored and validated, children listed, provisional blocks from `spawned`, the default ticket source's fan-in), the capacity envelope's dashboard figures, capacity events and the load test, and owner-state freeze, unfreeze, seal (after every mirror catches up), a repeatable export and import with pending ticket-scoped rows; S-BTN-49, S-BTN-50, G-BTN-76–78 (R-BTN-86–88). Requires: human-operator."
+description: "Build BATON_SPEC §4.6, §2.3 and §4.8 (R-BTN-86–88): child tickets (parent stored and validated, `spawned` recorded for `spawned-unposted` and for calls, children listed; no provisional blocks and no fan-in), the capacity envelope's dashboard figures, `capacity` events and `baton.capacity`, the load test, and owner-state freeze, unfreeze, seal (after every mirror catches up), a repeatable export from one section list and import with pending ticket-scoped rows. S-BTN-49 (non-call cases), S-BTN-50, G-BTN-76–78. Requires: human-operator."
 topics:
   - baton
 owns: {}
@@ -26,17 +26,20 @@ depends_on:
 **Brief:** the Baton project; the owner, 2026-10-15: tickets are sequential and child
 tickets are the parallelism primitive; one Baton per team, with a stated envelope; owner state
 exportable.
-**Spec:** `docs/content/specs/BATON_SPEC.mdx` §2i (R-BTN-86, -87, -88), R-BTN-74 (the default
-source's `parent` and fan-in), §4 (`tickets.parent`, `closed_tickets.parent`,
-`pending_owner_state`), §11 (children, `spawned`, freeze, export, import), §13 preconditions,
-§13a (the load test), §14; §13a S-BTN-49, -50; §16 G-BTN-76, -77, -78 (docs#215)
+**Spec:** `spec/BATON_SPEC.md` §4.6 R-BTN-86 (children, `spawned`), §2.3 R-BTN-87 and R-BTN-149
+(the envelope, the generation cap), §4.8 R-BTN-88 (owner state), §4.7 R-BTN-85
+(`spawned-unposted`), §4.2 R-BTN-74 (the source's `parent`), §13 (`tickets.parent`,
+`closed_tickets.parent`, `pending_owner_state`), §14 (children, freeze, seal, export, import),
+§16.1 (the load test is a cutover precondition), §15 (the load test; S-BTN-49, -50; G-BTN-76,
+-77, -78)
 **Depends on:** R3-1251 (blocks), R3-1257 (positions and history, which `spawned` and the
-`spawned` rows extend)
+`spawned` rows extend). B-58 (handler tickets) and B-62 (calls) build on this ticket's
+`spawned` record.
 
 ### Requires
 
 - `human-operator` — the staging load test needs the driver's keys registered by an
-  administrator, whose key is kept out of every agent's reach (§10.1), and one real
+  administrator, whose key is kept out of every agent's reach (§12.1), and one real
   repository's sync workflow. Every other case runs in the integration harness.
 
 ### Why
@@ -47,39 +50,85 @@ Tier: critical — the load test is a cutover precondition.
 
 ### What to build
 
-1. **Migration**: `tickets.parent` and `tickets_by_parent`, `closed_tickets.parent`,
-   `pending_owner_state`, the events CHECK's `capacity`, `parent-invalid`, `frozen`,
-   `unfrozen`, `sealed`, `imported`; `baton_settings` keys `frozen_at` and `sealed_at`;
-   `repositories.mirror_acked_seq`; `pending_owner_state.key`; the `frozen` and `sealed` codes.
-2. **Child tickets**: `parent` validated and dropped with `parent-invalid` as R-BTN-86 says;
-   `spawned` on a `suspended:` or `released:` end only (at most 50, validated in `src/core/validate.ts`, never the parent)
-   writing provisional `ticket` blocks kept until the first snapshot observed after the end, and
-   the `spawned-unposted` discrepancy; `GET …/children`; the
-   `spawned` history row; the dashboard tree; the CLI's markdown source reading `parent` and
-   adding open children to `blocked_by`.
-3. **Capacity**: the dashboard's figures (counts, 5-minute means), `capacity` on crossing 80%
-   each way, Needs you; `npm run test:load` (local in CI: 20 repositories, history seeded at
-   1,000,000 rows; staging before cutover: seeded by a synthetic `--with-history` import, the
-   worker load, and one real repository posting a generated 5,000-ticket board).
-4. **Owner state**: `freeze` and `unfreeze`, `seal` (no active claim, every mirror caught up),
-   `export [--with-history]` (sealed only, repeatable; every §4 column of the sections,
-   `closed_tickets` included, RFC 8785 digest), `import` (empty check, digest and schema
-   version, one transaction, `pending_owner_state`, `events_seq`, `last_seen_at` = 0), and the
-   move runbook in the README.
+1. **Migration** (one new numbered file in `src/migrations/`, registered in `index.ts`):
+   `tickets.parent` and `tickets_by_parent`, `closed_tickets.parent`; `pending_owner_state`
+   (`(repository_id, ticket_id, kind, key)`, `kind` CHECK `override|condition|timer|outbox`,
+   `row_json`); the events CHECK's `capacity`, `parent-invalid`, `frozen`, `unfrozen`,
+   `sealed`, `imported`; `baton_settings` keys `frozen_at` and `sealed_at`;
+   `repositories.mirror_acked_seq`; the `frozen` and `sealed` refusal codes (§14).
+2. **Child tickets** (R-BTN-86, §4.6):
+   - `parent` read in `src/core/board.ts`'s snapshot transaction (accepted unread today):
+     stored qualified, or stored as none and logged `parent-invalid` with the reason when it is
+     not a local id, names the ticket itself, closes a cycle or lies more than 4 generations
+     below a root (R-BTN-149); one naming no known ticket is stored and drawn orphaned. No
+     snapshot is refused for a parent.
+   - `spawned` on a `suspended:<station>` or `released:` end only — `done` with `spawned` and
+     `advance` with it are `invalid-params` — validated in `src/core/validate.ts` before any
+     write: at most 50 ids, each by the ticket-id rule (§12.3), never the parent's own.
+   - Baton records them as the run's children (the range a call settles over, R-BTN-165) until
+     the first accepted snapshot observed after the end; a reported child that snapshot does
+     not post is dropped with discrepancy `spawned-unposted` (R-BTN-85, `src/core/history.ts`).
+     **No provisional block** is written: an open child blocks its parent only through a call
+     (B-62, G-BTN-76).
+   - `GET /v1/repositories/{repository}/tickets/{ticket}/children` (open and closed children,
+     station and blocked state); the `spawned` history row when a child first appears; the
+     dashboard's tree (parent and children on the **Courses** ticket view).
+3. **Capacity** (R-BTN-87, §2.3): the dashboard's **Capacity** figures (current counts, rates
+   as 5-minute means) against the envelope; the alarm logs `capacity` on crossing 80% each way
+   and, while over, raises `baton.capacity` — through today's `needsYou()` path if this lands
+   before B-57, which converts it; nothing is refused. `npm run test:load` (§15): local in CI
+   (20 repositories, 1,000,000 seeded history rows); against `baton-staging` before cutover,
+   seeded by a synthetic `--with-history` export, with driver-generated keys an administrator
+   registers and one real staging repository's sync posting a generated 5,000-ticket board.
+4. **Owner state** (R-BTN-88, §4.8), in `src/core/admin.ts` behind `/v1/admin/*` and
+   `baton admin`:
+   - `freeze` / `unfreeze` (refusing new claims and owner writes `frozen`); `seal` once no claim
+     is active and every repository with a mirror has `mirror_acked_seq` at the last event
+     (else `conflict` naming them); a sealed Baton logs nothing and refuses all but an
+     administrator's read `sealed`.
+   - `export [--with-history]`: sealed only, deterministic (`exported_at` is `sealed_at`),
+     format `baton.owner-state/v1` with the RFC 8785 digest. Sections come from **one
+     list** of R-BTN-88's tables beside the exporter, holding those that exist when this lands
+     (repositories and their settings, owners, credentials, sync keys, grants, runners, owner
+     bars, overrides, `closed_tickets`, resources, instances, serves, `couriers`, readings in
+     force); each later ticket adds its own table to that list in its PR — conditions (B-55),
+     `ticket_timers` (B-61/B-63), the outbox (B-64), check runners (B-5), MCP keys (B-25),
+     registration tokens and instance settings (B-8, B-46).
+   - `import`: an empty Baton only, digest and `schema_version` checked, one transaction, every
+     row through the write path's validation; ticket-scoped rows wait in `pending_owner_state`
+     (kind `override` here; `condition`, `timer` and `outbox` applied by the tickets that add
+     those sections) until the first snapshot that creates their ticket; `events_seq`
+     continued; runners' `last_seen_at` 0. The move runbook in the README.
+
+### Do not
+
+- Write a provisional `ticket` block for a `spawned` child, or teach the markdown source a
+  child fan-in: an open child blocks only through a call (B-62). Removing the fan-in the
+  markdown source already writes into `blocked_by` is B-41's phase 2.
+- Export claims, events, notices, instrument readings or sync wants (R-BTN-88).
+- Edit an old migration.
 
 ### Tests
 
-- Integration, both hosts: **S-BTN-49** and **S-BTN-50**.
+- Integration, both hosts: **S-BTN-49** (its non-call cases: bad ends `invalid-params`;
+  children and parent held at once, the parent's non-calling leg offered; `children` listing
+  open and closed; bad parents `parent-invalid`) and **S-BTN-50** for the sections that exist
+  when this lands.
 - `npm run test:load` at the envelope (**G-BTN-77**).
-- Unit: parent validation (cycles, depth, self, foreign, orphan), the digest's canonical form,
-  pending rows applied and dropped.
+- Unit: parent validation (cycles, depth, self, foreign, orphan); `spawned` bounds and
+  `spawned-unposted`; the digest's canonical form; pending rows applied and dropped; the
+  export's section list equal to the tables it names.
 
 ### Exit criteria
 
-- [ ] S-BTN-49 and S-BTN-50 pass on both hosts; G-BTN-76 and -78 hold
+- [ ] S-BTN-49's non-call cases and S-BTN-50 pass on both hosts; G-BTN-76 (but its call clause,
+      B-62's) and G-BTN-78 hold
 - [ ] the load test passes on the local host in CI and once against staging (G-BTN-77)
+- [ ] no code path writes a `ticket` block from `spawned`
 - [ ] `npm test` and `npm run typecheck` green
 
 ## Status
 
 _(filed 2026-10-15)_
+
+_(2026-10-20: rescoped to the current-state spec, PR #71 — `spawned` is recorded for `spawned-unposted` and calls with no provisional blocks or fan-in, capacity raises `baton.capacity`, and the export reads one section list later tickets extend.)_

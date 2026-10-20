@@ -3,12 +3,12 @@ title: "B-34 — Interactive legs: a cloud session launched as the asked person,
 id: B-34
 project: baton
 status: available
-updated: 2026-10-18
+updated: 2026-10-20
 repos:
   - baton
 tags:
   - roadmap-item
-description: "`kind: interactive` legs with `asks`: claimed only by a session-mode runner that creates sessions as the asked person (rule `interactive`), launched with the leg's prompt, its link delivered by courier, idle suspension with a hand-off, the person's confirmation attested by the runner, children spawned mid-conversation (amends BATON_SPEC R-BTN-107, R-BTN-116, R-BTN-86). Requires: none."
+description: "Interactive legs: an agent leg requiring runner:session and interactive-session:assignee (rule 4), launched as the ticket's assignee with the leg's prompt; its link reaches the person through a notify condition the runner raises, bound to a delivery course (never a notice or courier); idle suspension with a hand-off, the person's confirmation attested by the runner, children filed mid-conversation (amends BATON_SPEC R-BTN-107, R-BTN-116, R-BTN-86, R-BTN-161). Requires: none."
 topics:
   - baton
 owns: {}
@@ -17,11 +17,13 @@ depends_on:
   - B-2
   - B-7
   - B-36
+  - B-58
+  - B-70
 ---
 
 **Brief:** the owner, 2026-10-18 (this session): a course's leg can be an interactive agent session, launched with a prompt, that delivers the leg's result (a product definition, a feature specification) and may plan as it goes. Steps toward the end-to-end application course: brief → specification → roadmap → build → test → deploy.
-**Spec:** `spec/BATON_SPEC.md` R-BTN-107 (session mode), R-BTN-116 (person legs), R-BTN-86 (child tickets), R-BTN-113 (session links), R-BTN-123 (fresh sessions), R-BTN-44 (hand-off), R-BTN-109 (entry requirements). This ticket amends them; the amendment is its first deliverable.
-**Depends on:** B-2 (the runner's channel and `session` mode), B-7 (person legs, `asks`, decisions and their notices).
+**Spec:** `spec/BATON_SPEC.md` §8.3 R-BTN-107 (session mode, `runner:session`), R-BTN-113 (session links), R-BTN-123 (fresh sessions); §6.4 R-BTN-116 (person legs); §4.6 R-BTN-86 (child tickets); §7.1 R-BTN-160 (raising a `notify` condition), §7.2 R-BTN-161 (bindings, handler tickets, delivery runners), §7.6 R-BTN-165 (call legs); §9.3 R-BTN-44 (hand-off); §5.5 R-BTN-109 (entry requirements); §5.6 R-BTN-121 (capability types); §6.6 rule 4. This ticket amends §6.4, §8.3 and §8.4; the amendment is its first deliverable.
+**Depends on:** B-2 (done: rule `chain`), B-7 (person legs and `asks`), B-36 (the assignee), B-58 (bindings and handler tickets, so the link's condition reaches a delivery course), B-70 (`runner:session`). B-47 builds the channel and `session` mode itself.
 
 ### Requires
 
@@ -42,24 +44,24 @@ Today a leg is either an agent's, run headlessly to its last output line (the st
    - **`interactive-session`** is a capability type Baton's standard courses declare. Its value is a typed identity (`github:user:joe`, B-36) or `assignee`.
    - **`assignee` is ticket-relative.** At the offer and the claim, core resolves it to the ticket's assignee (B-36): the person, or any member of a group. A runner qualifies when it holds `interactive-session:<that identity>`. On an unassigned ticket it resolves to anyone: any runner holding some `interactive-session:` capability qualifies. This substitution is the core change. Capabilities are otherwise compared as plain strings (R-BTN-121).
    - **The identity is granted, not only declared.** A runner declares `interactive-session:github:user:joe` in its configuration, as it declares any capability. The capability counts only when its key's grant includes it (R-BTN-58): a registration token minted for Joe's runner, or an owner's grant. A self-report alone cannot put a session in someone else's name.
-   - **The runner is a session-mode runner** (R-BTN-107) whose provider starts sessions under that person's account. A runner without the capability is refused at the claim (rule `capability`, as for any capability), and the leg is never offered to it.
+   - **The runner is a session-mode runner**: the leg also requires `runner:session` (R-BTN-107, B-70), and the runner's provider starts sessions under that person's account. A runner lacking either capability is refused at the claim and the advance by rule 4 (`missing-capability`), and the leg is left out of its recommendations.
    - **A group's first taker holds the rest.** On a group-assigned ticket, the member whose session takes the first interactive leg holds the ticket's later interactive legs until it is reassigned. This is the one rule beyond the capability match.
 3. **Launch.** The runner starts the session with the leg's brief (R-BTN-107) and the course's instructions for the leg. Interactive instructions say: interview the person, write the output to git, have the person confirm it, then end with the `baton-leg-result` block. The heartbeat carries the session's link (R-BTN-113).
-4. **The link reaches the person.** Queuing the leg opens its decision (R-BTN-116's machinery). Once the session exists, the notice carries its link, and couriers deliver it. The leg waits on its result, never on a delivery.
+4. **The link reaches the person through a condition, never a notice or courier** (§7: Baton queues no notices for people). The course declares a `notify` type (for example `session-ready`) for the leg. Once the session exists, the runner raises it (R-BTN-160) with the link in the handler ticket's body; a binding (R-BTN-161) sends it to a delivery course such as `deliver` (B-66), whose input carries the ticket's assignee (B-36). Unbound, the raise is only recorded, and the link stays on **Running** (R-BTN-113). The leg waits on its result, never on a delivery.
 5. **Absence.** A leg's `"idle": <seconds>`: the session adapter reports the person's last activity, and past the limit the runner suspends the leg with a hand-off document (R-BTN-44). Resuming launches a new session from the hand-off. R-BTN-123's context refresh is off for interactive legs unless the leg sets `max_context`.
 6. **The person's confirmation is the runner's word, not the agent's.** From the provider's session events, the runner records that a message from the person's account came after the output's last write. It reports this as `confirmed_by` on the leg's end. A result without it is a contract failure (`released:cannot-finish:contract-output`). A course that wants stronger proof follows the leg with a person leg answered in git.
-7. **Spawning during the conversation.** Children the session writes git-first become live at the next snapshot. They may be claimed while the session continues: R-BTN-86 allows a parent and its children to be held at once. The result block lists them as `spawned`, and fan-in blocks the parent's next leg, not the running one. Open: should the session see its children's progress read-only? Today the session never talks to Baton. The amendment decides.
+7. **Spawning during the conversation.** Children the session writes git-first, through the source's `file` export, become live at the next snapshot. They may be claimed while the session continues: R-BTN-86 allows a parent and its children to be held at once. An open child blocks its parent only through a call (R-BTN-165), so a course that must wait for them makes the interactive leg a call leg whose run ends `spawned` and settles by its completion table; any other interactive leg's children do not block. Open: should the session see its children's progress read-only? Today the session never talks to Baton. The amendment decides.
 
 ### Architecture
 
-- **Runner code and course code, never core rules beyond the claim gate.** Core gains the `interactive` kind, its claim rule and `confirmed_by` on an end. Launching, links, idling and attestation are the runner's and its session adapter's (R-BTN-107: "core knows only the mode's name").
+- **Runner code and course code, never core rules beyond the claim gate.** Core gains the `assignee` substitution in rule 4's capability match (`isEligible` in the vendored decision library and the claim SQL) and `confirmed_by` on an end. Launching, links, idling and attestation are the runner's and its session adapter's (R-BTN-107: "core knows only the mode's name").
 - **The person's credentials stay with the runner.** The session provider runs as the person: the runner holds their session-API credential, and the session gets none, as in R-BTN-107.
 - **Rejected for v1:** a terminal attached to a `process`-mode leg. It needs a TTY hand-over the runner does not have. `attached` mode already gives a person already in a session the same thing (`baton leg next`).
 
 ### Tests
 
-- A fake session provider: launch with the brief, link on the heartbeat and in the notice, idle → suspend → resume with the hand-off, `confirmed_by` from the person's message, a result without it refused, children spawned mid-session posted and blocking the next leg.
-- Rule `interactive`: a `process` or `attached` runner, or a session runner for another person, is refused and is never offered the leg.
+- A fake session provider: launch with the brief, link on the heartbeat and in the raised condition's handler ticket (bound to a fixture delivery course), idle → suspend → resume with the hand-off, `confirmed_by` from the person's message, a result without it refused, children filed mid-session posted, blocking the parent only when the leg is a call.
+- Rule 4: a `process` or `attached` runner (no `runner:session`), or a session runner for another person, is refused `missing-capability` and is never offered the leg.
 - A scenario (next free S-BTN number) through the local host, with its G-BTN row.
 
 ### Exit criteria
@@ -73,3 +75,4 @@ Today a leg is either an agent's, run headlessly to its last output line (the st
 
 2026-10-18: the owner refined who the "asked person" is. It is the ticket's **assignee**, a person or a group, which B-36 adds. This ticket's claim rule reads it: an interactive leg on an assigned ticket runs only as the assignee, and for a group the member whose session takes the first interactive leg holds the rest. B-34 now depends on B-36.
 
+_(2026-10-20: rescoped to the current-state spec, PR #71 — the session link reaches the person through a `notify` condition bound to a delivery course, not a notice or courier, and the session mode is the capability `runner:session`.)_
