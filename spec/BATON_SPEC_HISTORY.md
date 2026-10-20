@@ -186,7 +186,10 @@ second repository's window case; S-BTN-110 the B-33-form move; S-BTN-134 and G-B
 phase-1 translation; G-BTN-154 "after phase 4"; S-BTN-132 the empty call's `baton.call-empty`;
 S-BTN-49, G-BTN-76 and G-BTN-127 the `children` selector and the parent's provisional `spawned`
 block; G-BTN-87 delivery as a worker courier; G-BTN-120 S-BTN-60's half. The second G-BTN-145 (API
-keys, R-BTN-159) is G-BTN-155.
+keys, R-BTN-159) is G-BTN-155. The schema review (2026-10-20) retired S-BTN-64's and S-BTN-123's
+`isolation` refusal (now rule 4's `missing-capability`), S-BTN-68's course-file `checks` proposal,
+G-BTN-127's `run` selector and G-BTN-152's "timing" qualifier (every retired course field is
+refused).
 
 ## Old § → new §
 
@@ -358,6 +361,25 @@ working until the stated condition holds, then removes it.
   header `X-Worker-Secret` and the trailer `Min-Worker-Version`; the query `?worker=me`; the
   refusal `worker-reaped`. A runner accepts both header names until every runner sends the new
   one.
+
+- **Course fields the schema review removed (R-BTN-69, 2026-10-20).** Until every registered
+  course file has moved, the course validator reads them, logging one `deprecated-field` event
+  per repository, course and field per day and listing the course for its owners:
+  - a leg's `isolation: "session"` as `runner:session` added to its `requires.capabilities`
+    (the code's `graph.ts`/`gates.ts` rule `isolation` and `course.ts`'s check implement the old
+    form today);
+  - a leg's `call: {course: <id>}` as `spawns.course` when `spawns` names none, and refused when
+    they differ; `call: {condition: <type>}`, if built, keeps resolving through the bindings as
+    before;
+  - `retry.non_retryable` as before: each listed type is not retried on that leg, ending with
+    its declared class;
+  - a `requires.tickets` entry with `select: "run"`, if built, as before;
+  - course-level `checks` is ignored (it never bound).
+
+  `build-app`'s `file` and `verify` move onto call legs as a new course version replaying its
+  in-flight tickets (R-BTN-48); S-BTN-107's test still asserts `waiting_on: children` until then.
+  Stop when no registered course file carries any of these: the validator then refuses them
+  (R-BTN-69, S-BTN-134).
 
 ## Resolutions made in the rewrite
 
@@ -804,6 +826,50 @@ states the result.
   unexpired `registration_tokens`, which the old export list predated.
 - **A call leg reaches an end without a settlement** (`epic`'s `replan` → `abandoned`) through a
   `null` entry in its completion table (R-BTN-165).
+
+### Schema review (2026-10-20)
+
+An adversarial review of the course-file schema for overlapping concepts (owner approved all
+changes):
+
+1. **`call: {condition}` removed, then `call` itself** (R-BTN-69, R-BTN-111, R-BTN-165): no course
+   or scenario used the condition form, and its completion table could not name the stations of a
+   course a binding chooses; a call leg is `kind: call` with `spawns` naming the courses it calls.
+2. **`isolation` merged into `requires.capabilities` as `runner:session`** (R-BTN-107, R-BTN-133,
+   §6.6, R-BTN-104, R-BTN-114, R-BTN-147; S-BTN-64, S-BTN-123, G-BTN-90): rule `isolation` is
+   rule 4; a session-only leg with no session runner now shows a `capability` block.
+3. **`retry.non_retryable` removed** (R-BTN-122, R-BTN-160): `retryable` on the declaration alone
+   decides, which removes the undefined class of a retryable type made non-retryable per leg.
+4. **Course-file `checks` removed** (R-BTN-69, R-BTN-114, §5.7; S-BTN-68): an inert copy of the
+   binding owners' setting; the kit prints a check course's end stations instead.
+5. **`select: "run"` removed from `requires.tickets`** (R-BTN-120, R-BTN-86, R-BTN-165; G-BTN-127,
+   S-BTN-108): undefined outside a call; `build-app`'s `file` and `verify` became call legs
+   (R-BTN-131; S-BTN-107, G-BTN-126).
+6. **An interrupting timer with `leg` on a choice station's leg is refused** (R-BTN-167, R-BTN-69,
+   §5.7; S-BTN-134): it was a kit warning, and the claim that it "says the same thing" as
+   `after_s` was wrong — a timer yields to git (`route-overridden`), a choice does not
+   (`choice-lost`).
+7. **Gap (a), `max_blocked`** is the owners' bound alone, not a "ceiling" over a course value
+   (R-BTN-122).
+8. **Gap (b), attempts and the `first_attempt` budget reset when the leg reaches an outcome**, as
+   well as on a hold lift, so loops do not accumulate failures across passes (R-BTN-122,
+   R-BTN-167, §9.7, §13; S-BTN-6, S-BTN-87, G-BTN-107).
+9. **Gap (c), `renamed_from` carries every per-leg record** — attempts, timers, blocks, needs, next
+   legs, posted bars, held positions (R-BTN-64, §13; S-BTN-37, G-BTN-64).
+10. **Gap (d), overriding core's default timer** is a leg timer `{after_s, from: "arrival",
+    interrupting: false, raise: "baton.stalled"}`, one per leg (R-BTN-167; S-BTN-134).
+11. **Gap (e), contradictory timers are refused** by the validator and the kit: interrupting with
+    `raise`; non-interrupting with `leg` or without `raise` (R-BTN-167, R-BTN-69, §5.7;
+    S-BTN-134, G-BTN-152).
+12. **Gap (f), a choice leg's `after_s`** takes a timer's range (60 s–30 d) and is held in
+    `ticket_timers` from the ticket's arrival at the station, exported, restarting only when the
+    station changes (R-BTN-166, R-BTN-167, R-BTN-120, §13; S-BTN-50, S-BTN-133, G-BTN-151).
+13. **Gap (g), R-BTN-147** raises `baton.machine-loosened` for a dropped `stream: false`, and a held
+    post may add one (S-BTN-121).
+14. **Gap (h), `spawns.course`** may name several courses or `"*"`; `build-app` calls over `"*"`,
+    with completions using `done`, `withdrawn` or `closed` (R-BTN-111, R-BTN-165, R-BTN-131).
+15. **Gap (i), a person's leg's decision carries the leg's `asks`**: Baton stores the course's
+    value and logs `asks-mismatch` when the post differs (R-BTN-116, §13; S-BTN-67, G-BTN-90).
 
 ## Decisions in full
 
