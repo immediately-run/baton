@@ -7,7 +7,7 @@
 // Course code in the CLI, never core (§2b). Reached through the esbuild bundle
 // (scripts/baton-cli.mjs), the way `baton run` reaches src/runner.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -19,7 +19,7 @@ import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
 import { MARKERS_FILE, parseMarkers, type Marker } from './course-markers';
-import { DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
+import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
 import { readItems } from './read-items';
 import { ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
@@ -47,6 +47,13 @@ export function packageRoot(from: string = dirname(fileURLToPath(import.meta.url
   }
 }
 const source = (file: string): string => join(packageRoot(), 'src', 'defaults', file);
+
+/** Whether the defaults run from their source — a checkout, with `src/` and esbuild — or from
+ * the npm package, where `build:cli` prebuilt into `dist/` everything init writes: the leg
+ * stubs, the eject wrappers, the leg instructions, and the commit the package was built from
+ * (`dist/build.json`), which stands in for the checkout's HEAD as the courses' source. */
+const fromSource = (): boolean => existsSync(join(packageRoot(), 'src', 'defaults', 'cli.ts'));
+const prebuilt = (...path: string[]): string => join(packageRoot(), 'dist', 'defaults', ...path);
 
 /** One `courses` entry of `.baton/baton.json` (R-BTN-51). An older file's `{id, version}` takes
  * the defaults below. */
@@ -669,11 +676,60 @@ export async function run(ctx, standard) {
 
 /** The instructions shipped for one leg of a standard course (R-BTN-131), the Markdown `init`
  * copies into the repository, which owns them from then on. */
-const instructionsOf = (course: string, leg: string): string => readFileSync(join(packageRoot(), 'src', 'defaults', 'courses', course, `${leg}.md`), 'utf8');
+const instructionsOf = (course: string, leg: string): string =>
+  readFileSync(fromSource() ? join(packageRoot(), 'src', 'defaults', 'courses', course, `${leg}.md`) : prebuilt('courses', course, `${leg}.md`), 'utf8');
+
+/** A leg stub, bundled with its `close`: from source in a checkout, else build:cli's copy. */
+async function writeStub(b: BuiltIn, leg: string, abs: string): Promise<void> {
+  if (fromSource()) await bundleSource(stubSource(b, b.id, leg), abs);
+  else copyFileSync(prebuilt('stubs', b.id, `${leg}.mjs`), abs);
+}
+
+/** An ejected default (`--eject`): from source in a checkout, else build:cli's copy. */
+async function writeWrapper(kind: 'tickets' | 'stations', course: string, abs: string): Promise<void> {
+  if (fromSource()) await bundleSource(WRAPPERS[kind](course), abs);
+  else copyFileSync(kind === 'tickets' ? prebuilt('tickets.mjs') : prebuilt('stations', `${course}.mjs`), abs);
+}
+
+/** What build:cli writes into `dist/` for an installed package: every standard course's leg
+ * stubs and instructions, the eject wrappers, and `build.json` naming the commit built. The
+ * files are the ones init would write from this checkout at `commit`. */
+export async function prebuildDefaults(dist: string, build: { repository: string; commit: string; dirty?: boolean }): Promise<number> {
+  const out = join(dist, 'defaults');
+  rmSync(out, { recursive: true, force: true });
+  let files = 0;
+  for (const b of BUILT_INS) {
+    mkdirSync(join(out, 'stubs', b.id), { recursive: true });
+    for (const leg of Object.keys(b.course.legs)) {
+      await bundleSource(stubSource(b, b.id, leg), join(out, 'stubs', b.id, `${leg}.mjs`));
+      files++;
+      const md = join(packageRoot(), 'src', 'defaults', 'courses', b.id, `${leg}.md`);
+      if (existsSync(md)) {
+        mkdirSync(join(out, 'courses', b.id), { recursive: true });
+        copyFileSync(md, join(out, 'courses', b.id, `${leg}.md`));
+        files++;
+      }
+    }
+    mkdirSync(join(out, 'stations'), { recursive: true });
+    await bundleSource(WRAPPERS.stations(b.id), join(out, 'stations', `${b.id}.mjs`));
+    files++;
+  }
+  await bundleSource(WRAPPERS.tickets(DEFAULT_COURSE), join(out, 'tickets.mjs'));
+  writeFileSync(join(dist, 'build.json'), `${JSON.stringify(build, null, 2)}\n`);
+  return files + 2;
+}
 
 /** The CLI's own version, for the workflow's pin: `owner/name@<commit>` of the checkout this
- * CLI runs from. Outside a git checkout, `--pin` must name one. */
+ * CLI runs from, or, in the npm package, of the commit `build:cli` built it from. Outside both,
+ * `--pin` must name one. */
 function cliPin(): string {
+  if (!fromSource()) {
+    const file = join(packageRoot(), 'dist', 'build.json');
+    if (!existsSync(file)) throw new Error('this CLI package names no commit it was built from (dist/build.json) — pass --pin owner/name@<commit>');
+    const { repository, commit, dirty } = JSON.parse(readFileSync(file, 'utf8')) as { repository: string; commit: string; dirty?: boolean };
+    if (dirty) throw new Error(`this CLI package was built from a modified tree at ${repository}@${commit.slice(0, 10)}, so no commit holds its files — pass --pin owner/name@<commit>`);
+    return `${repository}@${commit}`;
+  }
   const root = packageRoot();
   const slug = remoteSlug(root);
   let sha: string | null = null;
@@ -733,7 +789,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     const to = join(root, '.baton', 'tickets.mjs');
     if (existsSync(to) && !force) throw new Error(`${relative(root, to)} already exists — it may hold your edits; --force overwrites it`);
     mkdirSync(join(root, '.baton'), { recursive: true });
-    await bundleSource(WRAPPERS.tickets(course), to);
+    await writeWrapper('tickets', course, to);
     log('baton: .baton/tickets.mjs — a standalone bundle of the default; edit it; the sync uses it from the next run');
     return 0;
   }
@@ -745,7 +801,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     const to = join(root, '.baton', 'courses', course, 'sync.mjs');
     if (existsSync(to) && !force) throw new Error(`${relative(root, to)} already exists — it may hold your edits; --force overwrites it`);
     mkdirSync(dirname(to), { recursive: true });
-    await bundleSource(WRAPPERS.stations(course), to);
+    await writeWrapper('stations', course, to);
     log(`baton: .baton/courses/${course}/sync.mjs — a standalone bundle of the default; edit it; the sync uses it from the next run`);
     return 0;
   }
@@ -777,7 +833,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     await put(`.baton/courses/${bi.id}/course.json`, (abs) => writeFileSync(abs, courseFileText(bi)), rewrite);
     for (const leg of Object.keys(bi.course.legs)) {
       // Each stub is bundled with its `close`, so it imports nothing the runner's scratch copy lacks.
-      await put(`.baton/courses/${bi.id}/legs/${leg}.mjs`, (abs) => bundleSource(stubSource(bi, bi.id, leg), abs), rewrite);
+      await put(`.baton/courses/${bi.id}/legs/${leg}.mjs`, (abs) => writeStub(bi, leg, abs), rewrite);
       // The leg's instructions: shipped with the CLI, the repository's to edit from here on.
       await put(`.baton/courses/${bi.id}/legs/${leg}.md`, (abs) => writeFileSync(abs, instructionsOf(bi.id, leg)));
     }
@@ -855,7 +911,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   for (const leg of overrides) {
     // The leg script is what loads the override, so an older one (from before overrides) is
     // replaced: it is Baton's file.
-    await put(`.baton/courses/${b.id}/legs/${leg}.mjs`, (abs) => bundleSource(stubSource(b, b.id, leg), abs), true);
+    await put(`.baton/courses/${b.id}/legs/${leg}.mjs`, (abs) => writeStub(b, leg, abs), true);
     await put(`.baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX}`, (abs) => writeFileSync(abs, overrideSource(b, leg)));
     log(`baton: .baton/courses/${b.id}/legs/${leg}${OVERRIDE_SUFFIX} — this repository's run of ${leg}; edit it, and the leg script runs it in place of its own`);
   }
@@ -869,7 +925,8 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
 /** A standard course's file as init writes it, and as the sync holds a sourced course to. */
 const courseFileText = (b: BuiltIn): string => `${JSON.stringify(b.course, null, 2)}\n`;
 
-/** This CLI's repository and commit, or null outside a git checkout with a GitHub origin. */
+/** This CLI's repository and commit, or null outside a git checkout with a GitHub origin and
+ * outside a package that names its build's commit. */
 function cliSelf(): { namespace: string; repository: string; sha: string } | null {
   try {
     return parsePin(cliPin());

@@ -16,13 +16,14 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 `@immediately-run/baton` is the `baton` command, published from this repository:
 
 ```sh
-npx --yes @immediately-run/baton@0.1.0 run   # a runner (§6.13), with IR_BATON_KEY_FILE set
+npx --yes @immediately-run/baton@0.1.1 run   # a runner (§6.13), with IR_BATON_KEY_FILE set
 ```
 
-From the package, `baton run`, `baton decision list` and the `baton admin|owner|worker …` API
-client work. `baton repo init` and `baton repo sync` still need a checkout of this repository:
-they pin the CLI to its own git commit and build leg stubs from `src/` with esbuild, which a
-published package has neither of, until B-43 moves the standard courses out of the CLI. In a
+From the package, `baton run`, `baton repo init`, `baton decision list` and the
+`baton admin|owner|worker …` API client work. Init names the commit the package was built from
+(`dist/build.json`) as its courses' source and its workflow's pin, and copies the leg stubs and
+instructions `build:cli` prebuilt into `dist/defaults/`, so it needs no checkout and no esbuild.
+`--eject` copies prebuilt defaults the same way. In a
 checkout, run the CLI as `node cli/baton.mjs`.
 
 ## Layout
@@ -72,6 +73,10 @@ checkout, run the CLI as `node cli/baton.mjs`.
 
 - `npm test` (alias `npm run test:baton`) — the suite on both hosts, with a fake clock; `npx vitest --project local`
   (or `cloudflare`) runs one.
+- `npm run test:no-quint` — the suite and `model:links` without quint: no model-drawn replay, no
+  `traces`, no `model:quick`. CI runs it for a change that touches no model file (`model/`,
+  `test/model/`, `scripts/check-traces.mjs`, `test/integration/trace.ts` or `trace-scope.json`), and
+  `npm test` otherwise.
 - `npm run start:local -- --db <path> --port <n>` — Baton as a local process (below).
 - `node cli/baton.mjs test-course <repository root> <course> [--base REF|none] [--board FILE]` — the course test kit
   (§2d, R-BTN-64/-65): the working tree's `.baton/` against REF's (default `origin/HEAD`, else

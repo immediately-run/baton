@@ -24,4 +24,4 @@ await build({
   logLevel: 'warning',
 });
 
-export const { initMain, parseSyncArgs, syncMain } = await import(pathToFileURL(OUT).href);
+export const { initMain, parseSyncArgs, syncMain, prebuildDefaults, remoteSlug } = await import(pathToFileURL(OUT).href);

@@ -1,6 +1,6 @@
 {
   "name": "@immediately-run/baton",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "Apache-2.0",
   "immediately.run": {
     "content": [
@@ -27,6 +27,7 @@
   "scripts": {
     "test": "rm -rf test/.traces && vitest run && npm run model:links && npm run traces && npm run model:quick",
     "test:baton": "vitest run",
+    "test:no-quint": "BATON_SKIP_QUINT=1 vitest run && npm run model:links",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.local.json",
     "build:cli": "node scripts/build-cli.mjs",
     "prepack": "npm run build:cli",
