@@ -24,8 +24,10 @@ export interface Cleared { kind: BlockKind; ref: string; leg?: string }
 /** `tickets.answer_lost`: the `resource` rows cleared silently when no one could answer, and the
  *  `blocked_since` they cleared (R-BTN-77 as amended by R3-1251). */
 interface LostAnswer { since: number; rows: Cleared[] }
+/** A `ticket_blocks` row as a cause asks for it: `leg` '' is the whole ticket. */
+interface BlockRow { kind: BlockKind; ref: string; leg: string; until: number | null }
 /** What one ticket's row rewrites removed and wrote, keyed by `rowKey`, until its evaluation. */
-interface RowChanges { cleared: Map<string, Cleared>; added: Map<string, { kind: BlockKind; ref: string; leg: string; until: number | null }> }
+interface RowChanges { cleared: Map<string, Cleared>; added: Map<string, BlockRow> }
 const rowKey = (r: { kind: BlockKind; ref: string; leg?: string }) => `${r.kind}\u0000${r.ref}\u0000${r.leg ?? ''}`;
 
 /** R-BTN-77: an `unblocked` dispatch is coalesced like the sync's (one window, `DISPATCH_WINDOW_MS`),
@@ -162,16 +164,15 @@ export class Blocks {
   /** The row writes a running `batch` holds for its evaluation; null outside one. */
   private pending: Map<string, RowChanges> | null = null;
 
-  /** Rewrite the rows of `kinds` for each ticket, adding what went and what came to `into`. A row
-   *  that comes back within one batch is no change. */
+  /** Rewrite the rows of `kinds` for each ticket, adding what went and what came to `into`. */
   private rewrite(ticketIds: Iterable<string>, kinds: readonly BlockKind[], into: Map<string, RowChanges>) {
     const now = this.c.now();
     for (const id of new Set(ticketIds)) {
       const t = this.rows<{ repository_id: string; blocked_by: string }>('SELECT repository_id, blocked_by FROM tickets WHERE id = ?', id)[0];
       if (!t) continue;
-      const want = new Map<string, { kind: BlockKind; ref: string; leg: string; until: number | null }>();
+      const want = new Map<string, BlockRow>();
       for (const kind of kinds) for (const r of this.desired(id, t.repository_id, t.blocked_by, kind)) want.set(rowKey(r), r);
-      const have = this.rows<{ kind: BlockKind; ref: string; leg: string; until: number | null }>(
+      const have = this.rows<BlockRow>(
         `SELECT kind, ref, leg, until FROM ticket_blocks WHERE ticket_id = ? AND kind IN (SELECT value FROM json_each(?))`, id, JSON.stringify(kinds));
       const c = into.get(id) ?? { cleared: new Map(), added: new Map() };
       into.set(id, c);
@@ -181,7 +182,7 @@ export class Blocks {
         const w = want.get(key);
         if (!w) {
           this.exec('DELETE FROM ticket_blocks WHERE ticket_id = ? AND kind = ? AND ref = ? AND leg = ?', id, h.kind, h.ref, h.leg);
-          if (!c.added.delete(key)) c.cleared.set(key, { kind: h.kind, ref: h.ref, ...(h.leg ? { leg: h.leg } : {}) });
+          c.cleared.set(key, { kind: h.kind, ref: h.ref, ...(h.leg ? { leg: h.leg } : {}) });
           changed = true;
         } else if (w.until !== h.until) {
           this.exec('UPDATE ticket_blocks SET until = ? WHERE ticket_id = ? AND kind = ? AND ref = ? AND leg = ?', w.until, id, h.kind, h.ref, h.leg);
@@ -190,7 +191,7 @@ export class Blocks {
       }
       for (const [key, w] of want) {
         this.exec('INSERT INTO ticket_blocks (repository_id, ticket_id, leg, kind, ref, since, until) VALUES (?, ?, ?, ?, ?, ?, ?)', t.repository_id, id, w.leg, w.kind, w.ref, now, w.until);
-        if (!c.cleared.delete(key)) c.added.set(key, w);
+        c.added.set(key, w);
         changed = true;
       }
       if (changed) this.invalidateRecommend(t.repository_id);
@@ -210,14 +211,15 @@ export class Blocks {
       // without an `unblocked`, and the ticket remembers what it lost, and since when it was
       // blocked, until the fleet can answer again (`settleLost`; R-BTN-77 as amended by R3-1251).
       // A row that went because its need went (the leg moved past, the need was dropped) is an
-      // ordinary unblocking. Rows of other kinds cleared with a lost one (the capability the same
-      // recount brings back) leave the unblocking unknown, so it is a lost answer too: the ticket
-      // would still be blocked had the fleet been able to answer. An answer that comes back blocked
+      // ordinary unblocking. Any other row cleared with a lost one (the capability the same recount
+      // brings back, a resource whose reading lapsed in the same tick) leaves the unblocking unknown,
+      // so it is a lost answer too: the ticket would still be blocked had the fleet been able to
+      // answer, and only the lost rows are kept (R-BTN-77, amended by B-49). An answer that comes back blocked
       // on exactly what was lost writes the row again silently, with the evening's `blocked_since`:
       // that `blocked` still stands.
       const marker = t.answer_lost ? (JSON.parse(t.answer_lost) as LostAnswer) : null;
       const lostRows = cleared.filter((r) => r.kind === 'resource' && this.lostAnswer(id, r));
-      const lost = lostRows.length > 0 && cleared.every((r) => r.kind !== 'resource' || lostRows.includes(r));
+      const lost = lostRows.length > 0;
       const reblock = marker != null && added.length > 0
         && added.every((w) => w.kind === 'resource' && marker.rows.some((r) => r.ref === w.ref && (r.leg ?? '') === w.leg));
       this.evaluate(id, cleared, lost || reblock, reblock ? marker.since : null);
@@ -268,7 +270,7 @@ export class Blocks {
   }
 
   /** The rows one kind of cause asks for, from what is stored. */
-  private desired(id: string, repo: string, blockedBy: string, kind: BlockKind): { kind: BlockKind; ref: string; leg: string; until: number | null }[] {
+  private desired(id: string, repo: string, blockedBy: string, kind: BlockKind): BlockRow[] {
     if (kind === 'ticket') {
       // The posted list taken as given: the course's sync knows what is still open (R-BTN-75).
       return [...new Set(JSON.parse(blockedBy) as string[])].map((local) => ({ kind, ref: TICKET_ID.test(local) ? local : qualify(repo, local), leg: '', until: null }));
@@ -694,6 +696,8 @@ export class Blocks {
   instancesChanged(instances: string[]) {
     if (!instances.length) return;
     this.invalidateRecommend(null);
+    // The `until` refresh after the recount finds the rows the recount wrote, so it changes no
+    // row today; the batch keeps the evaluation at one if it ever does (R-BTN-75; B-49).
     this.batch(() => this.instancesRows(instances));
   }
 

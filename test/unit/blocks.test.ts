@@ -8,7 +8,7 @@ import { Git, armedAt, cutover, keyCall, placed, register, beat, claimItem, endC
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { grantedWorker, signed, SCHEMA } from '../lib/fleet';
 import type { Workflow } from '../../src/core/ports';
-import { BLOCK_SQL } from '../../src/core/blocks';
+import { BLOCK_SQL, STALLED_AFTER_MS } from '../../src/core/blocks';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 const MIN = 60_000;
@@ -261,6 +261,74 @@ describe('R-BTN-76, R-BTN-77: a worker\'s own instance, and an answer lost', () 
     await w.beat({ uses: [GO] });
     expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 + 10 * MIN }]);
     expect(await since('D')).toBe(evening);
+    expect(await kinds('blocked')).toEqual(blocked);
+    expect(await kinds('unblocked')).toEqual(unblocked);
+  });
+
+  it('a lost resource row cleared with a real one in one alarm is the lost answer: silent, only the lost row kept (B-49)', async () => {
+    const R2 = 'llm:glm-5';
+    const GO2 = 'opencode-go:go_plus_2';
+    for (const name of [R, R2]) await keyCall(admin, '/v1/admin/resources', { name, scope: 'account', detail_schema: SCHEMA });
+    await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
+    await keyCall(admin, '/v1/admin/instances', { name: GO2, serves: [R2], repositories: ['docs'] });
+    git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R, R2] }] });
+    await git.post();
+    await cutover(T0);
+    await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    const w2 = await grantedWorker(owner, 'docs', 'w2', ['agent-venue'], [GO2]);
+    await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }, { instance: GO2, available: false, valid_for: 15 * 60 }] });
+    expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 }, { kind: 'resource', ref: R2, leg: 'review', since: T0 }]);
+    const unblocked = await kinds('unblocked');
+    // One tick: w1 has lapsed (no one left to answer for R: lost) and go_plus_2's reading has lapsed
+    // (R2 open again, while w2 still uses it: a real clear). The ticket would still be blocked on
+    // R had the fleet been able to answer, so the unblocking is the lost answer's (R-BTN-77).
+    await setClock(T0 + 10 * MIN);
+    await w2.beat();
+    await setClock(T0 + 15 * MIN);
+    await tick();
+    expect(await blockRows('D')).toEqual([]);
+    expect(await since('D')).toBeNull();
+    expect(await kinds('unblocked')).toEqual(unblocked);
+    expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: JSON.stringify({ since: T0, rows: [{ kind: 'resource', ref: R, leg: 'review' }] }) }]);
+  });
+
+  it('the alarm evaluates once: a reading lapsing in the tick that raises baton:stalled logs nothing for a ticket blocked throughout (B-49)', async () => {
+    await keyCall(admin, '/v1/admin/resources', { name: R, scope: 'account', detail_schema: SCHEMA });
+    await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
+    git.add('D', {}, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'waiting', 'ci']]), next: [{ leg: 'review', state: 'waiting', waiting_on: 'ci', needs: [R] }] });
+    await git.post();
+    await cutover(T0);
+    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue'], [GO]);
+    await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: STALLED_AFTER_MS / 1000 }] });
+    expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 }]);
+    const [blocked, unblocked] = [await kinds('blocked'), await kinds('unblocked')];
+    await setClock(T0 + STALLED_AFTER_MS - MIN);
+    await w.beat();
+    // At 72 hours the reading lapses (the resource row goes) and the stall raises baton:stalled (a
+    // decision row comes) in one alarm: blocked throughout, so no event and the same blocked_since.
+    await setClock(T0 + STALLED_AFTER_MS);
+    await tick();
+    expect(await blockRows('D')).toEqual([{ kind: 'decision', ref: 'baton:stalled', leg: '', since: T0 + STALLED_AFTER_MS }]);
+    expect(await since('D')).toBe(T0);
+    expect(await kinds('blocked')).toEqual(blocked);
+    expect(await kinds('unblocked')).toEqual(unblocked);
+  });
+
+  it('a sync post evaluates once: closing baton:stalled and adding a dependency logs nothing for a ticket blocked throughout (B-49)', async () => {
+    git.add('B', {}).add('S', {}, placed('pr-open', [['implement', 'pr-open']], [['review', 'waiting', 'ci']]));
+    await git.post();
+    await cutover(T0);
+    await setClock(T0 + STALLED_AFTER_MS);
+    await tick();
+    expect(await blockRows('S')).toEqual([{ kind: 'decision', ref: 'baton:stalled', leg: '', since: T0 + STALLED_AFTER_MS }]);
+    const [blocked, unblocked] = [await kinds('blocked'), await kinds('unblocked')];
+    // One post: S's review is ready (baton:stalled closes, its row goes) and S is blocked by B (its
+    // row comes in the post's own write).
+    await setClock(T0 + STALLED_AFTER_MS + MIN);
+    git.add('S', { blocked_by: ['B'] }, placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]));
+    await git.post();
+    expect(await blockRows('S')).toEqual([{ kind: 'ticket', ref: 'docs:B', leg: '', since: T0 + STALLED_AFTER_MS + MIN }]);
+    expect(await since('S')).toBe(T0 + STALLED_AFTER_MS);
     expect(await kinds('blocked')).toEqual(blocked);
     expect(await kinds('unblocked')).toEqual(unblocked);
   });

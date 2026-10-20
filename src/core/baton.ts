@@ -246,20 +246,22 @@ export class BatonCore {
         this.workers.alarm();
         // R-BTN-76: readings lapse; R-BTN-75: liveness moves the counts; R-BTN-77: a pending
         // `unblocked` message dies with its worker's liveness, and a window's trailing dispatch goes.
-        // Time moves liveness: recount when, and only when, the live set changed (R-BTN-75). The
-        // lapsed readings' recount and liveness's are evaluated once, after both (B-49).
+        // Time moves liveness: recount when, and only when, the live set changed (R-BTN-75); a
+        // lapsed reading's recount has already taken the live set, so a tick runs one recount.
+        // R-BTN-78: a queued leg posted waiting for 72 hours is put to the owner. The recount's rows
+        // and the stall's decision row are evaluated once, after both, before the dispatch reads
+        // what unblocked (B-49).
         lapse = this.blocks.batch(() => {
           const next = this.resources.alarm();
           if (this.blocks.liveChanged()) this.blocks.recount();
+          this.blocks.raiseStalled(this.now());
           return next;
         });
         this.blocks.expireMessages();
         this.takeUnblocked();
         // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.
         this.notices.alarm();
-        // R-BTN-78: a queued leg posted waiting for 72 hours is put to the owner; R-BTN-81: the
-        // history of tickets closed 90 days ago goes.
-        this.blocks.raiseStalled(this.now());
+        // R-BTN-81: the history of tickets closed 90 days ago goes.
         this.history.purge();
       });
     } catch (e) {
