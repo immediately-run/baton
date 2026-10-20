@@ -1,6 +1,6 @@
 {
   "name": "@immediately-run/baton",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "Apache-2.0",
   "immediately.run": {
     "content": [
@@ -39,6 +39,7 @@
     "model": "node model/check.mjs",
     "model:quick": "node model/check.mjs --quick",
     "model:full": "node model/full.mjs",
+    "model:pr": "node model/full.mjs --pr",
     "model:links": "node scripts/check-model-links.mjs",
     "traces": "node scripts/check-traces.mjs",
     "model:verify": "node model/verify.mjs",

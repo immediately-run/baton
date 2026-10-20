@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { CHECKS, needsReport, renderReport, reportProblem, stepEnv } from '../../scripts/model-report.mjs';
 
 const HEAD = 'a'.repeat(40);
-const passing: [string, boolean, number][] = [['npm run model (10000 samples)', true, 6], ['model-based tests (1000 traces)', true, 9], ['npm run model:verify (depth 4)', true, 20]];
+const passing: [string, boolean, number][] = [['npm run model (10000 samples)', true, 6], ['model-based tests (1000 traces)', true, 9], ['npm run model:verify (depth 4)', true, 20], ['scenario traces (npm run traces)', true, 12]];
 const report = (over: Partial<Parameters<typeof renderReport>[0]> = {}) =>
   renderReport({ head: HEAD, dirty: '', quintVersion: '0.33.0', platform: 'linux-x64', rows: passing, ...over });
 
@@ -41,7 +41,7 @@ describe('reportProblem: the CI check on a PR body', () => {
     expect(reportProblem(body(report().text).replace(/\n/g, '\r\n'), HEAD)).toBeNull();
   });
   it('refuses no report, another commit, a dirty run, a failed or missing check', () => {
-    expect(reportProblem('## Tests\n\nnone', HEAD)).toMatch(/no ".*" report/);
+    expect(reportProblem('## Tests\n\nnone', HEAD)).toMatch(/no model report/);
     expect(reportProblem(body(report({ head: 'b'.repeat(40) }).text), HEAD)).toBe(`the report is for bbbbbbb, not the head aaaaaaa`);
     expect(reportProblem(body(report({ dirty: ' M x' }).text), HEAD)).toMatch(/uncommitted/);
     expect(reportProblem(body(report({ rows: [passing[0], passing[1], [passing[2][0], false, 20]] }).text), HEAD)).toBe('"npm run model:verify (depth 4)" did not pass');
@@ -59,12 +59,35 @@ describe('reportProblem: the CI check on a PR body', () => {
   });
 });
 
+describe('the PR report (2026-10-20): model:quick, 200 model-drawn traces, the scenario traces', () => {
+  const prRows: [string, boolean, number][] = [['npm run model:quick', true, 1], ['model-based tests (200 traces)', true, 3], ['scenario traces (npm run traces)', true, 15]];
+  const pr = (over: Partial<Parameters<typeof renderReport>[0]> = {}) =>
+    renderReport({ kind: 'pr', head: HEAD, dirty: '', quintVersion: '0.33.0', platform: 'darwin-arm64', rows: prRows, ...over });
+  it('passes for its head; a reduced replay or a missing row is refused', () => {
+    expect(pr().text).toContain('### Model checks (`npm run model:pr`)');
+    expect(reportProblem(pr().text, HEAD)).toBeNull();
+    const reduced = pr({ rows: [prRows[0], ['model-based tests (20 traces)', true, 1], prRows[2]] });
+    expect(reduced.ok).toBe(false);
+    expect(reportProblem(reduced.text, HEAD)).toMatch(/no "model-based tests \(200 traces\)" row/);
+    expect(reportProblem(pr({ rows: prRows.slice(0, 2) }).text, HEAD)).toMatch(/scenario traces/);
+    expect(reportProblem(pr().text, 'b'.repeat(40))).toMatch(/not the head/);
+  });
+  it('a weekly full report is accepted on a PR too; either passing one is enough', () => {
+    expect(reportProblem(report().text, HEAD)).toBeNull();
+    expect(reportProblem(`${pr({ head: 'b'.repeat(40) }).text}\n\n${report().text}`, HEAD)).toBeNull();
+    expect(reportProblem('no report', HEAD)).toMatch(/npm run model:pr/);
+  });
+});
+
 describe('needsReport: what the model checks read', () => {
   it('the model, the core, the replay and the trace check need a report; the rest does not', () => {
     for (const f of ['model/baton.qnt', 'src/core/claims.ts', 'test/model/replay.test.ts', 'test/integration/trace.ts', 'scripts/check-traces.mjs']) expect(needsReport([f])).toBe(true);
     // what the core and the replay import, and the lock file that pins Quint and Apalache (2-r2-0)
     for (const f of ['src/shared/vocabulary.mjs', 'src/migrations/0016_blocks.sql', 'test/helpers.ts', 'test/lib/sshKeys.mjs', 'package-lock.json']) expect(needsReport([f])).toBe(true);
-    expect(needsReport(['tickets/R3-1254.mdx', 'src/defaults/cli.ts', 'test/integration/S-BTN-43.defaults.test.ts', 'CHANGELOG.md'])).toBe(false);
+    // the scenarios and their hosts: their traces are checked against the model, on the author's
+    // machine only since hosted CI runs no quint (2026-10-20)
+    for (const f of ['test/integration/S-BTN-43.defaults.test.ts', 'test/hosts/local.ts']) expect(needsReport([f])).toBe(true);
+    expect(needsReport(['tickets/R3-1254.mdx', 'src/defaults/cli.ts', 'test/unit/cli.test.ts', 'CHANGELOG.md', '.github/workflows/ci.yml'])).toBe(false);
     expect(needsReport([])).toBe(false);
   });
 });

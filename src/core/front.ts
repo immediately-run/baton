@@ -2,7 +2,7 @@
 // principal for the path, applies the R-BTN-16 rules, serves the dashboard's static files, and
 // forwards the API to the core — through the Durable Object on Cloudflare, through the request
 // queue locally (R-BTN-55). Every response leaves with the security headers.
-import { verifyOwner, verifyRequest, verifySyncCredential, verifyWorker, checkStateChanging, withBody } from './auth';
+import { API_KEY, verifyOwner, verifyRequest, verifySyncCredential, verifyWorker, checkStateChanging, withBody } from './auth';
 import { BatonError, SESSION_COOKIE, errorResponse, withSecurityHeaders } from './http';
 import { pickDelivery, verifyDelivery } from './webhook';
 import type { Config } from './ports';
@@ -62,9 +62,15 @@ async function forwardSigned(req: Request, env: Config, to: Forward): Promise<Re
   return forward(withBody(req, signed.body), to, { 'X-Baton-Signed': signed.keyid });
 }
 const isSigned = (req: Request) => req.headers.has('Signature-Input') || req.headers.has('Signature');
+/** A bearer that is an API key (R-BTN-159), else null; the core checks it against its public line. */
+const apiKeyOf = (req: Request): string | null => {
+  const h = req.headers.get('Authorization') ?? '';
+  const token = h.startsWith('Bearer ') ? h.slice(7).trim() : '';
+  return API_KEY.test(token) ? token : null;
+};
 
 /** The headers that carry a verified principal to the object. A request never brings its own. */
-const PRINCIPAL_HEADERS = ['X-Baton-Credential', 'X-Baton-Owner', 'X-Baton-Sync', 'X-Baton-Signed', 'X-Baton-Webhook', 'X-Baton-Session'];
+const PRINCIPAL_HEADERS = ['X-Baton-Credential', 'X-Baton-Owner', 'X-Baton-Sync', 'X-Baton-Signed', 'X-Baton-Webhook', 'X-Baton-Session', 'X-Baton-Api-Key'];
 
 async function route(req: Request, env: Config, to: Forward): Promise<Response> {
   const { pathname } = new URL(req.url);
@@ -112,15 +118,20 @@ async function route(req: Request, env: Config, to: Forward): Promise<Response> 
   // sign, as every key does.
   if (pathname.startsWith('/v1/runner/') || /^\/v1\/repositories\/[^/]+\/(stats|blocked|tickets\/[^/]+\/(blocks|history))$/.test(pathname)) {
     if (isSigned(req)) return forwardSigned(req, env, to);
+    // R-BTN-159: a worker's (or, on the reads, an owner's or administrator's) API key.
+    const apiKey = apiKeyOf(req);
+    if (apiKey) return forward(req, to, { 'X-Baton-Api-Key': apiKey });
     // The transition (R3-1239): a bearer token still serves until every worker signs.
     const credential = await verifyWorker(req, env);
     return forward(req, to, { 'X-Baton-Credential': credential });
   }
   if (pathname.startsWith('/v1/admin/') || pathname.startsWith('/v1/owner/')) {
-    // R-BTN-57, R-BTN-58: an administrator's or an owner's key signs every request; the core
-    // checks which, and for which repository.
-    if (!isSigned(req)) throw new BatonError('unauthenticated', 'sign with an administrator or owner key (R-BTN-13)');
-    return forwardSigned(req, env, to);
+    // R-BTN-57, R-BTN-58: an administrator's or an owner's key signs every request, or — an API
+    // key (R-BTN-159) — comes as a bearer; the core checks which, and for which repository.
+    if (isSigned(req)) return forwardSigned(req, env, to);
+    const apiKey = apiKeyOf(req);
+    if (!apiKey) throw new BatonError('unauthenticated', 'sign with an administrator or owner key, or send its API key as a bearer (R-BTN-13, R-BTN-159)');
+    return forward(req, to, { 'X-Baton-Api-Key': apiKey });
   }
   if (pathname === '/v1/login') {
     // R-BTN-16: against login CSRF, the token comes as JSON from this Baton's own page.
