@@ -6,6 +6,7 @@
 // an unavailable reading lapses at its `until`; an administrator's reading wins and an instrument's
 // takes over after it (`overridden` meanwhile); overnight the rows clear silently, none is written,
 // `other` lists `no-instance`, and the morning's answer logs the `unblocked` the evening was owed;
+// K, needing a capability only W1 declares as well, logs nothing when the fleet comes back (B-49);
 // G's leg decision refuses the advance into it, not the claim; H's decision naming a leg it lacks
 // sits on the whole ticket and its `url` is dropped. The 150 unblockings that dispatch 100 entries
 // and `{truncated: 50}` are in test/unit/blocks.test.ts: the formal model cannot replay an instance
@@ -132,6 +133,29 @@ describe('S-BTN-45 the edges of blocks', () => {
     ]);
     expect(await rows('SELECT answer_lost FROM tickets WHERE answer_lost IS NOT NULL')).toEqual([]);
     expect((await blocksOf('D')).blocked).toBe(false);
+  });
+
+  it('K, needing a capability only W1 declares and an unavailable resource, stays blocked through the night and logs nothing when the fleet comes back (B-49)', async () => {
+    expect((await git.add('K', { requires: ['mcp-chrome'] }, reviewNeeds([DS])).post()).status).toBe(200);
+    const w1 = await grantedWorker(owner, 'docs', 'w1', ['mcp-chrome'], [GO]);
+    expect((await w1.call('/v1/runner/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }] })).status).toBe(200);
+    const evening = await blocksOf('K');
+    expect(evening).toMatchObject({ blocked: true, blocks: [{ kind: 'resource', ref: DS, leg: 'review' }] });
+    const since = async () => (await rows<{ b: number | null }>(`SELECT blocked_since AS b FROM tickets WHERE id = 'docs:K'`))[0].b;
+    const blockedSince = await since();
+    const seq = (await rows<{ s: number }>('SELECT max(seq) AS s FROM events'))[0].s;
+    // Overnight W1 stops: K's capability row comes and its resource row goes with no one to answer.
+    await setClock(T0 + 12 * H);
+    await tick();
+    expect(await blocksOf('K')).toMatchObject({ blocked: true, blocks: [{ kind: 'capability', ref: 'mcp-chrome' }] });
+    // In the morning W1 heartbeats: one recount clears the capability row and writes the resource
+    // row again, and K is evaluated once, after both — blocked throughout, so nothing is logged and
+    // no worker is messaged (R-BTN-75: one evaluation per transaction).
+    await w1.beat();
+    expect(await blocksOf('K')).toMatchObject({ blocked: true, blocks: [{ kind: 'resource', ref: DS, leg: 'review' }] });
+    expect(await rows(`SELECT kind FROM events WHERE seq > ? AND ticket_id = 'docs:K' AND kind IN ('blocked', 'unblocked')`, seq)).toEqual([]);
+    expect(await since()).toBe(blockedSince);
+    expect(await rows(`SELECT 1 FROM messages WHERE kind = 'unblocked' AND sent_at >= ?`, T0 + 12 * H)).toEqual([]);
   });
 
   it('a leg decision refuses the advance into the leg, not the claim; a bad leg puts it on the whole ticket and a bad url is dropped', async () => {

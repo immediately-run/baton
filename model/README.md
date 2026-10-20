@@ -217,10 +217,11 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   leg no longer the queued leg: the leg moved past) or the fleet back — the owed `unblocked` is
   logged if the ticket is unblocked, unheld and has a queued leg. A ghost, `events`, counts every
   event logged, the owed `unblocked` included, so a run can tell the silent transitions from the
-  logged ones. **One evaluation per recount** (R-BTN-75 as amended here): core's
-  `Blocks.recount` evaluates after the capability rows and again after the resource rows, so a
-  fleet returning to a ticket that needs both logs an `unblocked` and a `blocked` the model
-  does not; the actions that recount carry `@impl pending` notes naming B-49, which fixes core.
+  logged ones. **One evaluation per recount** (R-BTN-75 as amended by R3-1254 part 2b): the
+  model settles each ticket once per action, and core matches it since B-49. `Blocks.batch`
+  rewrites every kind of row first and evaluates each ticket once, after the last, so a fleet
+  returning to a ticket that needs a capability and an unavailable resource logs nothing; before
+  B-49, core evaluated after each kind and logged an `unblocked` and a `blocked` there.
   An instance with no requirements and no resources (`FLEET` false: `small`) never recounts.
 
 ## Properties (`safety`)

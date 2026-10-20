@@ -246,9 +246,13 @@ export class BatonCore {
         this.workers.alarm();
         // R-BTN-76: readings lapse; R-BTN-75: liveness moves the counts; R-BTN-77: a pending
         // `unblocked` message dies with its worker's liveness, and a window's trailing dispatch goes.
-        lapse = this.resources.alarm();
-        // Time moves liveness: recount when, and only when, the live set changed (R-BTN-75).
-        if (this.blocks.liveChanged()) this.blocks.recount();
+        // Time moves liveness: recount when, and only when, the live set changed (R-BTN-75). The
+        // lapsed readings' recount and liveness's are evaluated once, after both (B-49).
+        lapse = this.blocks.batch(() => {
+          const next = this.resources.alarm();
+          if (this.blocks.liveChanged()) this.blocks.recount();
+          return next;
+        });
         this.blocks.expireMessages();
         this.takeUnblocked();
         // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.
@@ -1013,15 +1017,19 @@ export class BatonCore {
   private applyBlocks(r: string, stations: Map<string, PostedStation>, upserted: string[], legsBefore: Map<string, string | null>, removed = false): string[] {
     const live = this.sql<{ local_id: string }>('SELECT local_id FROM tickets WHERE repository_id = ?', r).map((x) => x.local_id);
     const { changed, dropped } = this.blocks.posted(r, stations, live);
-    // R-BTN-78: a `baton:stalled` whose queued leg the snapshot posts other than waiting closes.
-    this.blocks.settleStalled(r);
-    // The counts follow what is needed: a post that changed a ticket — its row (where `requires`
-    // lives), its needs or its decisions — or dropped one recounts; a post that changed nothing
-    // does not (R-BTN-75, R-BTN-76). Coarser than "what is needed changed", by design: a row's
-    // hash does not say which field moved, and a recount that finds no crossing writes no row.
-    if (upserted.length || changed.length || removed) this.blocks.recount();
-    const moved = [...this.queuedLegs(r)].filter(([id, leg]) => legsBefore.get(id) !== leg).map(([id]) => id);
-    this.blocks.write([...upserted, ...changed, ...moved]);
+    // A closed `baton:stalled`, the recount and the post's own rows are evaluated once, after all
+    // three (R-BTN-75; B-49).
+    this.blocks.batch(() => {
+      // R-BTN-78: a `baton:stalled` whose queued leg the snapshot posts other than waiting closes.
+      this.blocks.settleStalled(r);
+      // The counts follow what is needed: a post that changed a ticket — its row (where `requires`
+      // lives), its needs or its decisions — or dropped one recounts; a post that changed nothing
+      // does not (R-BTN-75, R-BTN-76). Coarser than "what is needed changed", by design: a row's
+      // hash does not say which field moved, and a recount that finds no crossing writes no row.
+      if (upserted.length || changed.length || removed) this.blocks.recount();
+      const moved = [...this.queuedLegs(r)].filter(([id, leg]) => legsBefore.get(id) !== leg).map(([id]) => id);
+      this.blocks.write([...upserted, ...changed, ...moved]);
+    });
     return dropped;
   }
 

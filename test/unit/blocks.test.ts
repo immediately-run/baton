@@ -208,6 +208,63 @@ describe('R-BTN-76, R-BTN-77: a worker\'s own instance, and an answer lost', () 
     expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: null }]);
   });
 
+  it('a fleet returning to a ticket blocked on a capability and a resource logs nothing: one evaluation per recount (B-49)', async () => {
+    await keyCall(admin, '/v1/admin/resources', { name: R, scope: 'account', detail_schema: SCHEMA });
+    await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
+    git.add('D', { requires: ['mcp-chrome'] }, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R] }] });
+    await git.post();
+    await cutover(T0);
+    const w = await grantedWorker(owner, 'docs', 'w1', ['mcp-chrome'], [GO]);
+    await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }] });
+    expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 }]);
+    const [blocked, unblocked] = [await kinds('blocked'), await kinds('unblocked')];
+    // Overnight the only worker declaring the capability lapses: its row comes, the resource's goes
+    // with no one left to answer, and D stays blocked.
+    await setClock(T0 + 16 * MIN);
+    await tick();
+    expect(await blockRows('D')).toEqual([{ kind: 'capability', ref: 'mcp-chrome', leg: '', since: T0 + 16 * MIN }]);
+    expect(await since('D')).toBe(T0);
+    // In the morning it heartbeats: the capability row goes and the resource's comes back in one
+    // recount. D was never claimable, so no `unblocked`, no second `blocked`, and the same
+    // blocked_since; no worker is messaged.
+    await w.beat();
+    expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 + 16 * MIN }]);
+    expect(await since('D')).toBe(T0);
+    expect(await kinds('blocked')).toEqual(blocked);
+    expect(await kinds('unblocked')).toEqual(unblocked);
+    expect(await rows("SELECT 1 FROM messages WHERE kind = 'unblocked' AND sent_at > ?", T0)).toEqual([]);
+  });
+
+  it('a capability back in the recount that loses the resource\'s answer is that lost answer: silent, and only the lost row kept (B-49)', async () => {
+    await keyCall(admin, '/v1/admin/resources', { name: R, scope: 'account', detail_schema: SCHEMA });
+    await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
+    git.add('D', { requires: ['mcp-chrome'] }, { ...placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]), next: [{ leg: 'review', state: 'ready', needs: [R] }] });
+    await git.post();
+    await cutover(T0);
+    const w = await grantedWorker(owner, 'docs', 'w1', ['agent-venue', 'mcp-chrome'], [GO]);
+    await w.beat({ capabilities: ['agent-venue'] });
+    await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: GO, available: false, valid_for: 24 * 3600 }] });
+    expect(await blockRows('D')).toEqual([{ kind: 'capability', ref: 'mcp-chrome', leg: '', since: T0 }, { kind: 'resource', ref: R, leg: 'review', since: T0 }]);
+    const [blocked, unblocked] = [await kinds('blocked'), await kinds('unblocked')];
+    const evening = await since('D');
+    // One heartbeat declares the capability again and stops using go_plus: its one recount clears
+    // the capability row and, with no one left to answer for the resource, its row too. The
+    // unblocking is the lost answer's: silent, keeping only the resource row (R-BTN-77).
+    await setClock(T0 + 5 * MIN);
+    await w.beat({ capabilities: ['agent-venue', 'mcp-chrome'], uses: [] });
+    expect(await blockRows('D')).toEqual([]);
+    expect(await since('D')).toBeNull();
+    expect(await kinds('unblocked')).toEqual(unblocked);
+    expect(await rows('SELECT answer_lost FROM tickets WHERE id = ?', 'docs:D')).toEqual([{ answer_lost: JSON.stringify({ since: evening, rows: [{ kind: 'resource', ref: R, leg: 'review' }] }) }]);
+    // It uses go_plus again, still down: blocked again silently, since the evening.
+    await setClock(T0 + 10 * MIN);
+    await w.beat({ uses: [GO] });
+    expect(await blockRows('D')).toEqual([{ kind: 'resource', ref: R, leg: 'review', since: T0 + 10 * MIN }]);
+    expect(await since('D')).toBe(evening);
+    expect(await kinds('blocked')).toEqual(blocked);
+    expect(await kinds('unblocked')).toEqual(unblocked);
+  });
+
   it('a post that moves the only ticket needing a resource past its leg is an unblocking, not a lost answer', async () => {
     await keyCall(admin, '/v1/admin/resources', { name: R, scope: 'account', detail_schema: SCHEMA });
     await keyCall(admin, '/v1/admin/instances', { name: GO, serves: [R], repositories: ['docs'] });
