@@ -2987,7 +2987,9 @@ Limits that hold throughout:
   retry policy and does not replace it, unless the binding says `"replaces": "retry"`: then the
   handler's restart (`retry`, `route:<leg>` or `park`) decides in the policy's place, every
   restart checked against the owners' bounds below, and the leg ends blocked on the condition as a
-  `suspend` would. *(Specified, not built.)*
+  `suspend` would. Only the runner knows the binding, so it reports the raise with `replaces:
+  "retry"` and ends the claim `released:blocked` on the condition, never `cannot-finish`.
+  *(Specified, not built.)*
   - **State.** Attempts are counted **per ticket and leg**, with §9's rules for what counts as a
     failed attempt, in `leg_attempts`: repository, ticket, leg, `attempts`, `first_attempt_at`,
     `retry_after` and `last_error_type`. A failing `review` spends none of `implement`'s attempts.
