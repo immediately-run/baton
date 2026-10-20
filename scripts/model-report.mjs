@@ -13,13 +13,14 @@ export const HEADING = '### Model checks (`npm run model:full`)';
 // leg's prerequisites, depth 5 on `small` takes about 10 hours; B-37 brings 5 back.
 export const SIZES = { samples: '10000', traces: '1000', depth: '4' };
 export const labels = ({ samples, traces, depth }) =>
-  [`npm run model (${samples} samples)`, `model-based tests (${traces} traces)`, `npm run model:verify (depth ${depth})`];
+  [`npm run model (${samples} samples)`, `model-based tests (${traces} traces)`, `npm run model:verify (depth ${depth})`, 'scenario traces (npm run traces)'];
 export const CHECKS = labels(SIZES);
 // a change to any of these can change a model check's outcome: the model; the core it is held
 // to, with the shared modules and migrations it imports; the replay that drives the core with
-// model traces, with its helpers; the scenario-trace check; and the lock file, which pins Quint
-// and with it Apalache (round 2, 2-r2-0)
-const CHECKED = /^(model\/|src\/core\/|src\/shared\/|src\/migrations\/|test\/model\/|test\/helpers\.ts$|test\/lib\/|test\/integration\/trace\.ts$|scripts\/check-traces\.mjs$|package-lock\.json$)/;
+// model traces, with its helpers; the scenarios, whose traces the model checks, with their hosts
+// and the trace check (since 2026-10-20, when hosted CI stopped running them); and the lock file,
+// which pins Quint and with it Apalache (round 2, 2-r2-0)
+const CHECKED = /^(model\/|src\/core\/|src\/shared\/|src\/migrations\/|test\/model\/|test\/helpers\.ts$|test\/lib\/|test\/hosts\/|test\/integration\/|scripts\/check-traces\.mjs$|package-lock\.json$)/;
 
 /** The environment each `model:full` step runs in: the caller's, less the knobs that would cut a
  * step down without its label saying so — `REPLAY_ONLY`, which replays only the traces it names

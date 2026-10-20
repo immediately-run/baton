@@ -58,9 +58,8 @@ const textModules: Plugin = {
  *  the runner's leg child processes, the model replay). It also runs every integration scenario
  *  and the mirror's unit tests (S-BTN-14's server half). */
 const NODE_ONLY = ['test/unit/local-queue.test.ts', 'test/unit/boundary-host.test.ts', 'test/unit/cli.test.ts', 'test/model/replay.test.ts', 'test/unit/check-traces.test.ts', 'test/unit/runner-main.test.ts', 'test/unit/runner-bundle.test.ts', 'test/integration/S-BTN-41.runner.test.ts', 'test/unit/test-course.test.ts', 'test/unit/stats-size.test.ts', 'test/integration/S-BTN-43.defaults.test.ts', 'test/unit/defaults-cli.test.ts', 'test/unit/standard-courses.test.ts', 'test/unit/course-markers.test.ts', 'test/integration/S-BTN-104.standard-courses.test.ts', 'test/integration/S-BTN-105.course-sources.test.ts', 'test/integration/S-BTN-106.cross-repo-prs.test.ts', 'test/integration/S-BTN-107.build-app-course.test.ts'];
-/** `BATON_SKIP_QUINT=1` (`npm run test:no-quint`, CI on a change that touches no model file)
- *  leaves out the one test that runs quint, the model-drawn replay (R3-1244); `npm test` and a
- *  model change run it. */
+/** `BATON_SKIP_QUINT=1` (`npm run test:no-quint`, what hosted CI runs) leaves out the one test
+ *  that runs quint, the model-drawn replay (R3-1244); `npm test` and `npm run model:full` run it. */
 const QUINT_TESTS = process.env.BATON_SKIP_QUINT === '1' ? ['test/model/replay.test.ts'] : [];
 const host = (name: string) => ({ '#host': resolve(import.meta.dirname, `test/hosts/${name}.ts`) });
 

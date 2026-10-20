@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { CHECKS, needsReport, renderReport, reportProblem, stepEnv } from '../../scripts/model-report.mjs';
 
 const HEAD = 'a'.repeat(40);
-const passing: [string, boolean, number][] = [['npm run model (10000 samples)', true, 6], ['model-based tests (1000 traces)', true, 9], ['npm run model:verify (depth 4)', true, 20]];
+const passing: [string, boolean, number][] = [['npm run model (10000 samples)', true, 6], ['model-based tests (1000 traces)', true, 9], ['npm run model:verify (depth 4)', true, 20], ['scenario traces (npm run traces)', true, 12]];
 const report = (over: Partial<Parameters<typeof renderReport>[0]> = {}) =>
   renderReport({ head: HEAD, dirty: '', quintVersion: '0.33.0', platform: 'linux-x64', rows: passing, ...over });
 
@@ -64,7 +64,10 @@ describe('needsReport: what the model checks read', () => {
     for (const f of ['model/baton.qnt', 'src/core/claims.ts', 'test/model/replay.test.ts', 'test/integration/trace.ts', 'scripts/check-traces.mjs']) expect(needsReport([f])).toBe(true);
     // what the core and the replay import, and the lock file that pins Quint and Apalache (2-r2-0)
     for (const f of ['src/shared/vocabulary.mjs', 'src/migrations/0016_blocks.sql', 'test/helpers.ts', 'test/lib/sshKeys.mjs', 'package-lock.json']) expect(needsReport([f])).toBe(true);
-    expect(needsReport(['tickets/R3-1254.mdx', 'src/defaults/cli.ts', 'test/integration/S-BTN-43.defaults.test.ts', 'CHANGELOG.md'])).toBe(false);
+    // the scenarios and their hosts: their traces are checked against the model, on the author's
+    // machine only since hosted CI runs no quint (2026-10-20)
+    for (const f of ['test/integration/S-BTN-43.defaults.test.ts', 'test/hosts/local.ts']) expect(needsReport([f])).toBe(true);
+    expect(needsReport(['tickets/R3-1254.mdx', 'src/defaults/cli.ts', 'test/unit/cli.test.ts', 'CHANGELOG.md', '.github/workflows/ci.yml'])).toBe(false);
     expect(needsReport([])).toBe(false);
   });
 });

@@ -8487,7 +8487,7 @@ integration suite that drives them together, on a controllable clock, proves the
   | S-BTN-55 the sync key | `plain`'s sync key posts a board; then registering `docs`' sync key for `plain` too, a post by a worker key, by `plain`'s mirror key, by a revoked sync key, and a replay of the first post | the first is accepted; the second registration is `conflict`; the worker key's and the mirror key's posts are `forbidden`, the revoked key's and the replay `unauthenticated`; registering a worker key as a sync key is `conflict` |
   | S-BTN-56 other forges and the edges of a want | `lab` (forge `gitlab`, a GitLab CI identity) and `tea` (forge `gitea`, sync key), each with a webhook secret and a dispatch adapter in `BATON_FORGE_SECRETS`; a GitLab notification with a wrong `X-Gitlab-Token`, a Gitea one with a forged signature, then good ones; a GitLab `id_tokens` JWT with audience `#mirror` posting a board, then one with `#sync`; a claim ends while `lab`'s sync is reading with an observation number already handed out; `tea`'s dispatch adapter answers 500; a decision `url` of `<lab web_base>-evil/…`, one with a port, one under `lab`'s `web_base`; `baton repo sync --defaults-only` over a ticket on a course with its own `sync.mjs`, and run through `npx` from the checkout | the bad notifications are refused in the Worker with no object request, the good ones record wants; the `#mirror` token's post is `forbidden` and the `#sync` one accepted; that run's post leaves the want set and the next run's clears it; the failed dispatch is retried once and the want stays for the runner; only the URL under `lab`'s `web_base` is kept; `--defaults-only` fails that ticket and refuses to start from the checkout |
 
-- **R-BTN-68 (the core is a checked model).** *(Amendment 2026-10-14, owner. Amended 2026-10-17, owner, R3-1254: the model is checked on the author's machine, not on hosted CI runners.)* Baton's core
+- **R-BTN-68 (the core is a checked model).** *(Amendment 2026-10-14, owner. Amended 2026-10-17, owner, R3-1254: the model is checked on the author's machine, not on hosted CI runners. Amended 2026-10-20, owner: "I don't think it makes sense to run formal model verification in the github CI pipeline. It takes too long and costs too much. If changes require it to be run, I want to run it locally." — hosted runners run no Quint at all; the scenario traces join `model:full`, and the scenarios join what it reads.)* Baton's core
   state machine — claims, fencing, stations and legs, observations, ends and their
   confirmation, bars and gates — is also written as a Quint model, with course hooks and
   sync output nondeterministic within their contract, so its properties hold for every
@@ -8499,13 +8499,13 @@ integration suite that drives them together, on a controllable clock, proves the
   (R3-1243, R3-1244). Both are cutover preconditions (§13). A spec change to a requirement
   the model cites changes the model in the same baton PR. The checking runs on the author's
   machine, not on hosted CI runners, whose time limits it outgrew: a PR that changes what the
-  checks read — the model, the core and what it imports, the replay and its helpers, the trace
-  check, or the Quint version — carries `npm run model:full`'s report for its
-  head — simulation, witnesses, the model-drawn traces driving the core, and the proof — and a
-  CI job that runs no model reads the PR body and fails until that report is there, names the
-  PR's head and passes (`model-report`). CI runs the deterministic part on every change: the
-  model's typecheck and regression runs, the scenario traces checked against it, and the
-  `@impl`/`@model` links.
+  checks read — the model, the core and what it imports, the replay and its helpers, the
+  integration scenarios and their hosts, the trace check, or the Quint version — carries
+  `npm run model:full`'s report for its head — simulation, witnesses, the model-drawn traces
+  driving the core, the proof, and every scenario's trace checked against the model — and a CI
+  job that runs no model reads the PR body and fails until that report is there, names the PR's
+  head and passes (`model-report`). Hosted runners run no Quint: CI and the deploy run the suite
+  without it, whose only model check is the `@impl`/`@model` links.
 - **R-BTN-31 (part of drafting).** Every roadmap item in project `baton` names, in its **Tests** section, the
   `S-BTN-n` scenarios it adds or makes pass — new scenarios get the next number and a row in
   this table in the same change — and its exit criteria require `npm run test:baton`

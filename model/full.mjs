@@ -5,7 +5,10 @@
 //   1. npm run model — typecheck, regression runs, MODEL_SAMPLES (10,000) runs of `step` and
 //      30% as many of `progressStep`, and the witnesses;
 //   2. the model-based tests with REPLAY_TRACES (1,000) traces driving the core (R3-1244);
-//   3. npm run model:verify — Apalache's bounded proof of `safety` on `small` (needs Java).
+//   3. npm run model:verify — Apalache's bounded proof of `safety` on `small` (needs Java);
+//   4. the scenario traces: the integration scenarios write one trace per scenario test, and
+//      `npm run traces` checks each against the model (R3-1244) — hosted CI runs no quint since
+//      2026-10-20, so this is where they are checked.
 // Each step runs even when an earlier one fails, so one run reports everything. The report is
 // Markdown on stdout; each step's own output goes to stderr.
 import { spawnSync } from 'node:child_process';
@@ -25,12 +28,14 @@ const sizes = {
   traces: process.env.REPLAY_TRACES ?? SIZES.traces,
   depth: process.env.MODEL_VERIFY_DEPTH ?? SIZES.depth,
 };
-const [modelLabel, replayLabel, verifyLabel] = labels(sizes);
+const [modelLabel, replayLabel, verifyLabel, tracesLabel] = labels(sizes);
 
 const steps = [
   [modelLabel, 'npm', ['run', 'model'], { MODEL_SAMPLES: sizes.samples }],
   [replayLabel, 'npx', ['vitest', 'run', '--project', 'local', 'test/model/replay.test.ts'], { REPLAY_TRACES: sizes.traces }],
   [verifyLabel, 'npm', ['run', 'model:verify'], { MODEL_VERIFY_DEPTH: sizes.depth }],
+  // a fresh set of traces from this tree, then each through the model
+  [tracesLabel, 'sh', ['-c', 'rm -rf test/.traces && BATON_SKIP_QUINT=1 npx vitest run test/integration && npm run traces'], {}],
 ];
 const rows = [];
 for (const [label, cmd, args, env] of steps) {
