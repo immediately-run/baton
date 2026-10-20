@@ -103,6 +103,10 @@
     "at": 1,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
   },
+  "S-BTN-66.entry › S-BTN-66 entry requirements > a large valid value through the stored schemas is accepted: each schema read once per request (3-r3-1)": {
+    "at": 1,
+    "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
+  },
   "S-BTN-66.entry › S-BTN-66 entry requirements > a pointer meets the requirement by name and schema; its contents are the sync's to check": {
     "at": 1,
     "reason": "a roadmap-pr course file other than the model’s (R-BTN-64, course changes: not modelled)"
