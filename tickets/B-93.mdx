@@ -1,0 +1,48 @@
+---
+title: "B-93 — Two noises that train operators to ignore logs"
+id: B-93
+project: baton
+status: available
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 491
+tier: routine
+description: "Every runner start logs 'no recommendation (no worker holds this secret)' on its first beat — the recommendation fires before the registering heartbeat; and remoteSlug prints git's raw 'error: No such remote' on an origin-less repository while the sync succeeds."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** two noises from the runs of 2026-10-21 (the lessons page): every runner start
+logs `no recommendation (no worker holds this secret)` on its first beat — the
+recommendation fires before the heartbeat that registers the secret; and `remoteSlug`
+prints git's raw `error: No such remote 'origin'` to stderr on a repository without one,
+while the sync still succeeds.
+**Spec:** §6.13 (the runner's first beat), `src/defaults/cli.ts` (`remoteSlug`).
+
+### Why
+
+Noise trains operators to ignore logs; both lines look like failures and are not. The
+first-beat one fired on every single runner start of the session.
+
+### What to build
+
+1. The runner's first loop takes its heartbeat before its first recommendation (the
+   registration ordering is already `tick()`-then-claim for `worker_id == null`; the
+   recommendation call inside that first beat is the stray), or the refusal for the
+   pre-registration beat is not logged as a failure.
+2. `remoteSlug` catches the missing remote and returns null quietly (the markdown courses
+   need no remote), keeping the loud failure for the repositories that do.
+
+### Tests
+
+- Unit: the first beat issues no unauthenticated recommendation; `remoteSlug` on a
+  no-remote checkout is null with empty stderr.
+
+### Exit criteria
+
+- [ ] a clean runner start logs nothing but its claim
+- [ ] an origin-less sync is quiet
