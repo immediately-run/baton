@@ -115,8 +115,13 @@ Watch for it.
    **done, 2026-10-21** (twelve bypass apps, verified).
 2. The CLI redirect fix (finding 2) — no longer blocking (the machine paths no
    longer redirect) but still worth doing as defense.
-3. Register `immediately-run/baton` with `--cut-over` per the runbook, grant the
-   worker key (finding 7 in mind).
+3. ~~Register `immediately-run/baton` with `--cut-over` per the runbook, grant the
+   worker key (finding 7 in mind).~~ — **done, 2026-10-21, production only**: the
+   owner's decision is that a repository is served by one Baton (two boards drift
+   and contradict), so `baton` is registered on `baton.immediately.run` alone and
+   `BATON_REPOSITORIES` seeds it in the top-level (production) vars only. The
+   worker key is granted (`metallic.local`, create-pr/llm-call/agent-venue, tier
+   judgement) and heartbeats cleanly.
 4. Merge the scaffold branch (repos map, filtered tickets source, real
    `agent_command`), set the `BATON_ENABLED` repository variable, dispatch the sync,
    and read the board back.
