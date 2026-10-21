@@ -1,0 +1,52 @@
+---
+title: "B-83 — A fresh repository's first run no-ops every leg: agent_command defaults to echo and --harness is telemetry"
+id: B-83
+project: baton
+status: available
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 481
+tier: routine
+description: "repo init writes agent_command: echo and baton run --harness only reports the harness in the heartbeat; the stubs take exit 0 from a no-op agent and return their positions. init names a real command per harness, the runner refuses a bare echo, and the docs show both validated commands."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the gap-analysis run of 2026-10-21
+([`docs/review/gap-analysis-2026-10-21.mdx`](../docs/review/gap-analysis-2026-10-21.mdx), findings 8–9;
+[`docs/lessons.mdx`](../docs/lessons.mdx)): `baton repo init` writes `agent_command: "echo"`, and
+`baton run --harness` is telemetry — reported in the heartbeat, never used to spawn anything.
+**Spec:** `spec/BATON_SPEC.md` §2f (R-BTN-74: `agent_command`), §5.8 (R-BTN-131: the standard
+courses), §6.13 (R-BTN-72: the runner).
+
+### Why
+
+A fresh repository's first run "succeeds" every leg with a no-op agent: the stubs run
+`echo`, take exit 0, and return their positions. The flag that looks like it configures the
+harness does not. No documented `agent_command` exists for either shipped harness anywhere.
+
+### What to build
+
+1. `baton repo init` names a real `agent_command` for each harness it knows (an `--agent`
+   flag choosing opencode or claude-code, with the command printed for the unfamiliar), and
+   refuses to write a bare `echo` without an explicit `--agent-command echo`.
+2. `baton run --harness X` either drives the harness (setting `agent_command` from the flag
+   when the settings name none) or the flag is renamed to what it is; the runner refuses a
+   settings file whose `agent_command` is exactly `echo` (a stub for tests, behind
+   `test_harness`).
+3. `docs/standard-courses.mdx` gains the two harness commands, validated on a real run —
+   including the model pin and the stdin redirection of B-84.
+
+### Tests
+
+- Unit: `initMain` writes the chosen harness's command; `parseRunArgs`/`runMain` refuse the
+  bare `echo`; the refusal names the fix.
+
+### Exit criteria
+
+- [ ] a repository scaffolded by `init` cannot no-op its first claim
+- [ ] the docs show both harness commands, validated on a real run
