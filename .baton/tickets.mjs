@@ -104,9 +104,18 @@ var entry_default = {
   // pages) and `home.mdx` are pages, not work items — every file under them with an
   // `id` would otherwise board as a claimable ticket. Tickets are the `*.mdx` files at
   // the top of `tickets/` plus `tickets/archive/` (closed, kept for history).
+  //
+  // `repos:` stops naming docs. The tickets that moved here from the docs roadmap keep
+  // it as heritage of where they came from, but their PRs live in this repository now —
+  // and the sync reads every repository a live ticket names, while this repository's
+  // CI token cannot read the private docs repository (R-BTN-74 fails the whole board
+  // for exactly that). A ticket that genuinely needs a docs PR names it again the day
+  // the sync's token can read it; the sync will say so loudly.
   async tickets(ctx) {
     const files = readItems(ctx.root, ctx.settings.items).filter((f) => /^(\w[\w-]*\.mdx|archive\/\w[\w-]*\.mdx)$/.test(f.path));
-    return ticketsMarkdown(files, ctx.settings);
+    const result = ticketsMarkdown(files, ctx.settings);
+    for (const t of result.tickets) t.repos = (t.repos ?? []).filter((r) => !/^immediately-run\/docs$/i.test(r));
+    return result;
   }
 };
 export {
