@@ -47,7 +47,8 @@ describe('since and holder on the board', () => {
 describe('the cutover’s refusals and the import’s names', () => {
   it('refuses with no board at all', async () => {
     expect((await owner('/v1/ui/cutover', { repository: 'docs', confirm: true })).status).toBe(403);
-    expect(await rows(`SELECT cutover_at FROM repositories`)).toEqual([{ cutover_at: null }]);
+    // baton itself is seeded already cut over (R3-1266); docs is the one refusing.
+    expect(await rows(`SELECT cutover_at FROM repositories`)).toEqual([{ cutover_at: null }, { cutover_at: expect.any(Number) }]);
   });
 
   it('adopt before cutover is not-cut-over', async () => {

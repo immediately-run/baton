@@ -57,8 +57,13 @@ describe('S-BTN-26 two repositories (registry half)', () => {
       { id: 'ops:R3-9001', repository_id: 'ops', local_id: 'R3-9001', title: 'ops: same local id' }]);
     expect(await (await syncCall('/v1/sync/head')).json()).toEqual({ sha: sha.A, unconfirmed: [] });
     expect(await (await opsCall('/v1/sync/head')).json()).toEqual({ sha: OPS_SHA, unconfirmed: [] });
-    const state = (await (await ownerCall('/v1/ui/state')).json()) as { repositories: { id: string; weight: number; head: { sha: string }; mode: { mode: string } }[] };
-    expect(state.repositories.map((r) => [r.id, r.weight, r.head.sha, r.mode.mode])).toEqual([['docs', 100, sha.A, 'shadow'], ['ops', 50, OPS_SHA, 'shadow']]);
+    const state = (await (await ownerCall('/v1/ui/state')).json()) as { repositories: { id: string; weight: number; head: { sha: string } | null; mode: { mode: string } }[] };
+    // baton is the deployment seed's second repository (R3-1266): registered already cut
+    // over, with no board yet. The scenario's two boards are docs' and ops'.
+    expect(state.repositories.map((r) => [r.id, r.weight, r.head?.sha ?? null, r.mode.mode])).toEqual([
+      ['baton', 100, null, 'cut-over'],
+      ['docs', 100, sha.A, 'shadow'],
+      ['ops', 50, OPS_SHA, 'shadow']]);
   });
 
   it('a sync token reaches only its own repository (R-BTN-15)', async () => {

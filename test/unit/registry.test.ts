@@ -42,9 +42,13 @@ describe('checkRegistration', () => {
 });
 
 describe('the registry', () => {
-  it('the deployment seed registered docs, with its board head waiting for a first snapshot', async () => {
-    expect(await rows(`SELECT id, github, weight, cutover_at FROM repositories`)).toEqual([{ id: 'docs', github: 'immediately-run/docs', weight: 100, cutover_at: null }]);
-    expect(await rows(`SELECT repository_id, sha FROM board_head`)).toEqual([{ repository_id: 'docs', sha: null }]);
+  it('the deployment seed registered docs and baton, with their board heads waiting for a first snapshot', async () => {
+    expect(await rows(`SELECT id, github, weight, cutover_at FROM repositories`)).toEqual([
+      { id: 'docs', github: 'immediately-run/docs', weight: 100, cutover_at: null },
+      // R3-1266: this repository itself, cut over from its first ticket (R-BTN-28).
+      { id: 'baton', github: 'immediately-run/baton', weight: 100, cutover_at: expect.any(Number) },
+    ]);
+    expect(await rows(`SELECT repository_id, sha FROM board_head`)).toEqual([{ repository_id: 'docs', sha: null }, { repository_id: 'baton', sha: null }]);
   });
 
   it('is insert-only: a known id or GitHub repository (in any case) is refused', async () => {
@@ -53,7 +57,7 @@ describe('the registry', () => {
       expect(() => c.registry.register({ ...OPS, github: 'immediately-run/other' })).toThrow(/already registered/);
       expect(() => c.registry.register({ ...OPS, id: 'ops2', github: 'Immediately-Run/OPS' })).toThrow(/already registered/);
     });
-    expect(await rows(`SELECT id FROM repositories ORDER BY id`)).toEqual([{ id: 'docs' }, { id: 'ops' }]);
+    expect(await rows(`SELECT id FROM repositories ORDER BY id`)).toEqual([{ id: 'baton' }, { id: 'docs' }, { id: 'ops' }]);
   });
 
   it('the seed adds what is new and leaves a known repository as it is; a malformed one throws', async () => {
@@ -84,7 +88,7 @@ describe('the registry', () => {
       expect(() => c.registry.forSync({ ...claimsOf('immediately-run/ops', 'sync.yml'), job_workflow_ref: 'immediately-run/docs/.github/workflows/sync.yml@refs/heads/trunk' }, 'sync')).toThrow(forbidden);
       c.store.exec(`UPDATE repositories SET retired_at = 1 WHERE id = 'ops'`);
       expect(() => c.registry.forSync(claimsOf('immediately-run/ops', 'sync.yml'), 'sync')).toThrow(forbidden);
-      expect(c.registry.all().map((r) => r.id)).toEqual(['docs']);
+      expect(c.registry.all().map((r) => r.id)).toEqual(['baton', 'docs']);
     });
   });
 

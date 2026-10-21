@@ -127,7 +127,9 @@ describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
       c.store.exec(`INSERT INTO tickets (id, repository_id, local_id, path, title, status, node, queue, tags, requires_clause, depends_on, blocked_by, repos, snapshot_sha, row_hash)
                     SELECT 'docs:X-1', 'docs', 'X-1', 'p', 't', 'available', 'ready', 'ready-autonomous', '[]', 'listed', '[]', '[]', '["baton","immediately-run/sandbox"]', 'a', 'h'`);
       const w = new Webhooks({ store: c.store, now: () => 5_000_000 });
-      expect(w.receive(d({ repository: 'immediately-run/baton' }))).toEqual({ outcome: 'dispatched', now: ['docs'], trailing: [] });
+      // A push to this repository now dispatches its own sync too: baton is a registered
+      // repository whose tickets name it (R3-1266), beside docs'.
+      expect(w.receive(d({ repository: 'immediately-run/baton' }))).toEqual({ outcome: 'dispatched', now: ['baton', 'docs'], trailing: [] });
       const later = new Webhooks({ store: c.store, now: () => 6_000_000 });
       expect(later.receive(d({ repository: 'IMMEDIATELY-RUN/Sandbox' }))).toEqual({ outcome: 'dispatched', now: ['docs'], trailing: [] });
       expect(later.receive(d({ repository: 'immediately-run/other' }))).toEqual({ outcome: 'dispatched', now: [], trailing: [] });
