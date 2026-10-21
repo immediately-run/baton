@@ -106,7 +106,7 @@ describe('reference data and the dashboard state', () => {
       ready_by_tier: Record<string, string[]>;
       providers: { id: string; peaks: { schedule: string; in_peak: boolean; next_change: number }[] }[];
     };
-    expect(s.repositories[0].head).toMatchObject({ sha: A, ticket_count: 4 });
+    expect(s.repositories.find((r) => r.id === 'docs')!.head).toMatchObject({ sha: A, ticket_count: 4 });
     expect(s.ready.map((r) => r.id)).toEqual(stateA.ready.map(q));
     expect(s.ready_by_tier).toEqual({ routine: [q('R3-9001')], judgement: [q('R3-9001'), q('R3-9002')], critical: [q('R3-9001'), q('R3-9002'), q('R3-9003')] });
     expect(s.ready[0]).toMatchObject({ repository_id: 'docs', local_id: 'R3-9001', url: 'https://github.com/immediately-run/docs/blob/main/content/roadmap/R3-9001.mdx', rank_reason: 'autonomous queue · order 10' });

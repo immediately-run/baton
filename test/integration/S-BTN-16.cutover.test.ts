@@ -31,7 +31,10 @@ describe('S-BTN-16 cutover (server)', () => {
     const { secret } = await register('vm-a');
     await syncCall('/v1/sync/board', boardB());
     expect(await mode(secret)).toEqual({ mode: 'shadow' });
-    expect((await claimItem('vm-a', secret)).json.code).toBe('not-cut-over');
+    // A bare claim finds nothing claimable (docs is not cut over; baton, which the deployment
+    // seed registers already cut over, has no tickets) — the named claim says why (R-BTN-28).
+    expect((await claimItem('vm-a', secret)).json.code).toBe('no-eligible-ticket');
+    expect((await claimItem('vm-a', secret, { ticket_id: 'docs:R3-9001' })).json.code).toBe('not-cut-over');
 
     expect((await owner('/v1/ui/cutover', {})).status).toBe(400); // names its confirmation
     expect((await owner('/v1/ui/cutover', { confirm: true })).status).toBe(400); // and its repository

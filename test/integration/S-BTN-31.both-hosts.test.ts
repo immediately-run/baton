@@ -26,8 +26,8 @@ describe(`S-BTN-31 both hosts (${HOST})`, () => {
 
   it('a posted board is served back in the order the sync ranked it', async () => {
     expect((await syncCall('/v1/sync/board', payload(board.shas.A, null, board.states.A))).status).toBe(200);
-    const state = (await (await ownerCall('/v1/ui/state')).json()) as { repositories: { head: { sha: string } }[]; ready: { id: string }[] };
-    expect(state.repositories[0].head.sha).toBe(board.shas.A);
+    const state = (await (await ownerCall('/v1/ui/state')).json()) as { repositories: { id: string; head: { sha: string } | null }[]; ready: { id: string }[] };
+    expect(state.repositories.find((r) => r.id === 'docs')!.head!.sha).toBe(board.shas.A);
     expect(state.ready.map((r) => r.id)).toEqual(board.states.A.ready.map((id: string) => `docs:${id}`));
   });
 
