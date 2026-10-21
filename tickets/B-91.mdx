@@ -1,0 +1,49 @@
+---
+title: "B-91 — A fresh deployment seeds a registered repository without its owner keys"
+id: B-91
+project: baton
+status: available
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 489
+tier: routine
+description: "BATON_REPOSITORIES carries a subset of what admin repo add wrote: a rebuilt Durable Object would know baton with no owner keys and say nothing. The seed grows owner_keys (or repo add prints the TOML), and a seed-only registration is named in a read."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the acceptance run (the lessons page): registration is two sources — `admin repo
+add` wrote the full record (owner keys, sync workflow, CI identity, cut-over) into the
+Durable Object; `wrangler.toml`'s `BATON_REPOSITORIES` seed carries a subset. A fresh
+deployment seeds `baton` with **no owner keys**: the owner CLI would fail against a rebuilt
+instance until someone re-adds them by hand, and nothing would say so.
+**Spec:** §3 (R-BTN-47: the seed), §5 R-BTN-58 (owner keys), the runbook's step 3 note.
+
+### Why
+
+The seed exists exactly for the fresh-deployment case, and it silently under-specifies it.
+The divergence is invisible until the day it matters.
+
+### What to build
+
+1. The seed accepts (and this repository's entry carries) `owner_keys`, synced with what
+   `admin repo add` wrote — either the seed grows the field or `repo add` prints the exact
+   TOML to paste, and the runbook says the seed must be updated in the same change.
+2. A `baton admin repos` (B-90) answer names a registered repository whose registration
+   came from the seed with no owner, so the gap is visible before it bites.
+3. The runbook's step 3 gains the "update the seed in the same PR" line as a check, not a
+   note.
+
+### Tests
+
+- Unit (`test/unit/registry.test.ts`): a seed entry with `owner_keys` registers them; the
+  printed warning covers the seeded-no-owner case.
+
+### Exit criteria
+
+- [ ] a rebuilt instance serves the owner CLI without a manual re-add
+- [ ] a seed-only registration is named in a read
