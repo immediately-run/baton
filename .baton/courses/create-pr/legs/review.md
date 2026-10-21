@@ -25,7 +25,11 @@ change: review them together, and post your review once, on that PR.
 ## The round
 
 - **Round one gets two blind reviewers.** If you can start independent sub-agents, start two,
-  from fresh contexts, ideally on two different models. Give each this file, the ticket and the
+  from fresh contexts, **on exactly these two models, one reviewer each: `zai-coding-plan/glm-5.3`
+  and `anthropic/claude-opus-5.5`** — name the model when you start each sub-agent; if the model
+  you are already running on is one of them, the other sub-agent takes the other model. Try no
+  other provider: the alternatives configured here are broken or redundant, and a failed launch
+  wastes the round's clock. Give each this file, the ticket and the
   PR, and tell neither about the other. Two blind passes find defects one pass misses. Without
   sub-agents, review once, slowly.
 - **Later rounds get one fresh reviewer**, who reads the earlier reviews and their replies and
