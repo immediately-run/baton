@@ -51,22 +51,20 @@ These are its lessons, newest understanding first.
   failure was the prompt's. [PR #82](https://github.com/immediately-run/baton/pull/82)
   spells the contract out in the leg instructions and `agent_command`. **Result-dependent
   legs say "a machine parses your last line: exactly the value word, optionally one URL,
-  nothing after."** *Status: instructions hardened; a tolerant parser in the stub is
-  still open.*
+  nothing after."** *Status: instructions hardened ([PR #82](https://github.com/immediately-run/baton/pull/82)); the tolerant parser is filed as [B-85](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-85.mdx).*
 
 - **The backstop sync's cron does not fire.** In three hours of a 15-minute schedule,
   GitHub ran it zero times; every board refresh came from a push or a manual dispatch.
   A stale board is not just missing news — it is what the regression fence needs to do
   its work. **Between pushes, dispatch `baton-sync.yml` when freshness matters.**
-  *Status: still true; a more reliable trigger (webhook-driven, or a shorter external
-  cron) is open.*
+  *Status: the reliable trigger is filed as [B-89](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-89.mdx).*
 
 - **A failed sync leaves its observation outstanding, and the next sync within ten
   minutes goes `busy` — exit 0, nothing posted.** The 10:34 failure (the `repos: [docs]`
   404) cascaded `busy` through the next two pushes; the filing of B-80 waited two syncs
   for no visible reason. This is R-BTN-62 voiding as designed, but it looks like
   success. **After a failed sync, expect one silent `busy`; check the outcome line, not
-  the green check.** *Status: still true (by design); worth a louder log.*
+  the green check.** *Status: by design; the louder outcome is filed as [B-89](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-89.mdx) with the backstop.*
 
 - **A repository's own tickets name it in `repos:`, and `repo init` writes an empty
   `repos` map.** The default source refuses the whole board until the map resolves every
@@ -83,14 +81,15 @@ These are its lessons, newest understanding first.
   "succeeds" every leg with a no-op agent. **Set a real `agent_command` before the
   first claim, pin its model, and redirect its stdin** — the stub's `sh -c` environment
   hangs `opencode run` deterministically without `< /dev/null` (root cause still
-  unexplained; ruled out: signals, trust prompts, the service). *Status: still true;
-  documented only here and in the report.*
+  unexplained; ruled out: signals, trust prompts, the service). *Status: filed as
+  [B-83](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-83.mdx) (the command) and
+  [B-84](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-84.mdx) (the spawn).*
 
 - **The runner declares `--capabilities agent-venue` and nothing else, whatever the
   grant allows.** The first acceptance runner registered, recommended, and idled — the
   gate had no `create-pr` capability to match the course's legs; the silence was total.
-  **Pass `--capabilities` to match the grant.** *Status: still true; the runbook's
-  `baton run` line omits it.*
+  **Pass `--capabilities` to match the grant.** *Status: filed as
+  [B-86](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-86.mdx).*
 
 - **A seeded second repository changes what tests mean, not just what they read.** The
   transcript allow-list is a union over registered repositories; a bare claim's refusal
