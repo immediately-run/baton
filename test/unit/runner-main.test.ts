@@ -3,7 +3,7 @@
 // the worker secret's shape. Node only: it writes temp checkouts and runs ssh-keygen.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { declareCourses, fetchMain, parseRunArgs, runnerCourse } from '../../src/runner/main';
@@ -42,7 +42,9 @@ describe('one runner per home checkout (R-BTN-131)', () => {
       const release = holdHome(dir);
       expect(readFileSync(lock, 'utf8').trim()).toBe(String(process.pid));
       // Another live process holds it: this test's parent stands in for a second runner's view.
-      expect(() => holdHome(dir, process.ppid)).toThrow(`held by another runner (pid ${process.pid}): each runner needs its own clone — pass --home <another clone>; if no runner is running there, remove ${lock}`);
+      // The lock's path is printed resolved (holdHome realpaths it), and on macOS the temp dir
+      // is a symlink (/var → /private/var): expect the resolved spelling.
+      expect(() => holdHome(dir, process.ppid)).toThrow(`held by another runner (pid ${process.pid}): each runner needs its own clone — pass --home <another clone>; if no runner is running there, remove ${realpathSync(lock)}`);
       release();
       expect(existsSync(lock)).toBe(false);
       // A stale lock — its pid is no process — is taken over.
