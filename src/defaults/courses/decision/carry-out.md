@@ -5,6 +5,16 @@ packet: the ticket's frontmatter `answer:` holds their letter, perhaps with a no
 file is `$BATON_TICKET_FILE`. When you finish, the answer is carried out or handed on, and the
 ticket is closed.
 
+> **How the stub runs you** — Baton's contract for the `agent_command` author: your command
+> line splits into words as `sh` would (quotes honoured, no substitutions) and executes
+> **without a shell**, with the ticket id, the leg and the checkout appended as arguments.
+> Stdin is never an open pipe: nothing to read, and a read ends at once. Stdout and stderr are
+> captured pipes, and the course reads stdout's last line. Your process's exit **is** your
+> completion: a harness that is a client of a background service must keep its session in
+> process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
+> work ends leaves truncated output and an orphaned session posting to a claim that no longer
+> exists (B-84).
+
 ## Carry it out
 
 - Read the packet's option for the letter the owner chose, and their note, if any. The note wins

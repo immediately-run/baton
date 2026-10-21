@@ -1,11 +1,12 @@
 // defaults-cli.test.ts — `baton repo sync`'s argument parser, `baton repo init`'s scaffolding
 // and `close` (BATON_SPEC §2f R-BTN-74, R-BTN-83; R3-1249): the flags; the scaffold's every
 // file, run through the BUILT CLI (the esbuild bundle production runs, not the source); the leg
-// stubs imported from a scratch copy, as the runner loads them, and run; both ejections
+// stubs imported from a scratch copy, as the runner loads them, and run; the spawn contract
+// every stub gives its agent — no shell, stdin never an open pipe (B-84); both ejections
 // imported and called, answering what the defaults answer; and `prClose` in a real git repo.
 // Node only: init writes a real tree and runs git.
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -18,6 +19,7 @@ import { graphOf } from '../../src/core/graph';
 import { decide } from '../../src/runner/protocol';
 import { CREATE_PR_COURSE, stationsPr, stationsReviewPr, type PrFact } from '../../src/defaults/course-pr';
 import { prClose, verdictLine, type Exec } from '../../src/defaults/pr-close';
+import { splitWords } from '../../src/defaults/agent-words';
 import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
 
 const ROOT = resolve(import.meta.dirname, '../..');
@@ -54,6 +56,54 @@ describe('parseSyncArgs', () => {
     expect(parseSyncArgs(['--root', '/x', '--url', 'https://u', '--facts', '/f.json', '--token', 't1'], {})).toMatchObject({ root: '/x', url: 'https://u', factsFile: '/f.json', token: 't1' });
     expect(() => parseSyncArgs(['--nope'], {})).toThrow('not a flag of baton repo sync');
     expect(() => parseSyncArgs(['--root'], {})).toThrow('needs a value');
+  });
+});
+
+describe('splitWords — agent_command splits as sh would, quotes and no substitutions (B-84)', () => {
+  /** Every row with `sh: true` is pure quoting, so real `sh` must split it into exactly the same
+   * words. Rows without it use `$`, newlines or continuations where sh would substitute, split
+   * commands or join — the split's own contract (no substitutions) differs from sh by design, so
+   * those rows carry their expected words only. */
+  const CASES: readonly { text: string; words: string[]; sh?: boolean }[] = [
+    { text: 'opencode run --standalone --auto --model zai/glm "You are the leg agent."', words: ['opencode', 'run', '--standalone', '--auto', '--model', 'zai/glm', 'You are the leg agent.'], sh: true },
+    { text: "claude -p 'single quotes keep \"double\" and $dollar'", words: ['claude', '-p', 'single quotes keep "double" and $dollar'], sh: true },
+    { text: 'echo a\\ b\tc d', words: ['echo', 'a b', 'c', 'd'], sh: true },
+    { text: 'echo   spaced\tout ', words: ['echo', 'spaced', 'out'], sh: true },
+    { text: 'echo "escaped \\"inner\\" plus \\\\ and \\$literal"', words: ['echo', 'escaped "inner" plus \\ and $literal'], sh: true },
+    { text: 'echo "" x', words: ['echo', '', 'x'], sh: true },
+    { text: 'echo "line \\\nspread"', words: ['echo', 'line spread'], sh: true }, // a continuation drops both characters, as in sh
+    // No substitutions: $ stays literal however written — the values come as BATON_* environment
+    // and the stub's trailing arguments, not through the command string.
+    { text: 'echo "$BATON_LEG is the leg, $1 the ticket"', words: ['echo', '$BATON_LEG is the leg, $1 the ticket'] },
+    { text: 'echo $BATON_INSTRUCTIONS "$@"', words: ['echo', '$BATON_INSTRUCTIONS', '$@'] },
+    { text: 'echo one\ntwo', words: ['echo', 'one', 'two'] },
+  ];
+
+  it('the table, and for pure quoting the same words sh itself splits', () => {
+    for (const { text, words, sh } of CASES) {
+      expect(splitWords(text), text).toEqual(words);
+      if (!sh) continue;
+      // The row's text as a command tail of pure quoting: sh's own split, arg by arg.
+      const out = execFileSync('sh', ['-c', `printf '%s\\n' ${text}`], { encoding: 'utf8' });
+      expect(out.trimEnd().split('\n'), text).toEqual(words);
+    }
+  });
+
+  it('refuses what cannot run without a shell, naming the word and the fix', () => {
+    expect(() => splitWords('opencode run < /dev/null')).toThrow(/has '<' as a word.*stdin is already closed/s); // the old workaround, caught on migration
+    expect(() => splitWords('echo one && echo two')).toThrow("'&&'");
+    expect(() => splitWords('cat ticket.md | wc -l')).toThrow("'|'");
+    expect(() => splitWords('echo out > log')).toThrow("'>'");
+    expect(() => splitWords("echo 'unterminated")).toThrow(/unterminated single quote/);
+    expect(() => splitWords('echo "unterminated')).toThrow(/unterminated double quote/);
+    expect(() => splitWords('echo trailing\\')).toThrow(/backslash/);
+    expect(splitWords('')).toEqual([]);
+    expect(splitWords(' \t ')).toEqual([]);
+  });
+
+  it('quoted or escaped shell syntax is a literal argument, not a refusal', () => {
+    expect(splitWords("echo '<'")).toEqual(['echo', '<']);
+    expect(splitWords('echo \\| and ">"')).toEqual(['echo', '|', 'and', '>']);
   });
 });
 
@@ -152,6 +202,69 @@ describe('baton repo init, through the built CLI', () => {
       commitAll(root);
     }
   });
+
+  it('the stub spawns its agent with no shell and never an open stdin pipe — the environment that hangs real harness CLIs (B-84)', async () => {
+    // The hang itself, reproduced without the harness: execFile leaves the child's stdin an
+    // open pipe the stub never writes and never closes — 'ignore' for fd 0 is not honoured —
+    // and an agent that reads stdin blocks on it forever, zero output, the claim burning until
+    // reap. That is B-84's `opencode run` hang (v2.1.2, macOS, the bun binary), root cause
+    // found building this: the old stub's execFile(sh, -c) held the pipe open; the shell was
+    // never the culprit, which is why `--standalone` changed nothing and only the manual
+    // `< /dev/null` worked. A stdin reader under it, alone and through sh -c as the old stub
+    // ran it, must not return:
+    const never = <T>(p: Promise<T>, ms: number): Promise<T | 'hung'> =>
+      Promise.race([p, new Promise<'hung'>((r) => setTimeout(() => r('hung'), ms))]);
+    const hung: ReturnType<typeof execFile>[] = [];
+    const open = (file: string, args: string[]): Promise<'hung' | 'returned'> => {
+      const child = execFile(file, args, () => {});
+      hung.push(child);
+      return new Promise((resolve) => child.on('exit', () => resolve('returned'))); // the child's death alone must not settle it
+    };
+    try {
+      expect(await never(open('cat', []), 2_000), 'execFile alone leaves stdin an open pipe: cat never ends').toBe('hung');
+      expect(await never(open('sh', ['-c', 'cat']), 2_000), 'the old stub\'s own spawn, through sh -c, hangs the same').toBe('hung');
+    } finally {
+      for (const c of hung) c.kill('SIGKILL');
+    }
+    // The stub's own spawn, then: its agent runs with no sh between (the agent's parent is the
+    // stub's node, not a shell), reads stdin to EOF at once (an open pipe would hang the cat in
+    // the agent below — and with it the whole leg), and a quoted agent_command word arrives as
+    // one argument beside the appended ticket, leg and checkout.
+    const agent = join(root, 'stdin-agent.sh');
+    writeFileSync(agent, [
+      '#!/bin/sh',
+      '{',
+      '  echo "parent=$(ps -o comm= -p $PPID)"',
+      '  echo "argc=$#"',
+      '  i=1; for a in "$@"; do echo "arg$i=$a"; i=$((i+1)); done',
+      "  echo \"stdin-bytes=$(cat | wc -c | tr -d ' ')\"",
+      '} > "$(dirname "$0")/stdin.facts"',
+      'echo done',
+      '',
+    ].join('\n'));
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const implement = join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
+    const guard = <T>(p: Promise<T>): Promise<T> =>
+      Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('the stub never returned — its agent hung, on an open stdin pipe?')), 20_000))]);
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: `${agent} --flag 'quoted arg'` }));
+      const snapshot = { sha: commitAll(root) };
+      expect(await guard((await load(implement)).run({ ticket: { id: 'B-1' }, checkout: root, snapshot }))).toEqual({ reached: 'pr-open', next: 'review' });
+      const facts = readFileSync(join(root, 'stdin.facts'), 'utf8');
+      expect(facts).toContain('argc=5');
+      expect(facts).toContain(`arg1=--flag\narg2=quoted arg\narg3=B-1\narg4=implement\narg5=${root}\n`);
+      expect(facts).toContain('stdin-bytes=0'); // read to EOF, instantly: stdin was not an open pipe
+      const parent = /parent=(.*)/.exec(facts)?.[1]?.trim() ?? '';
+      expect(parent, 'no shell stands between the stub and its agent').not.toMatch(/^(\/usr\/bin\/|\/bin\/)?(ba|da|z)?sh\d?$/);
+    } finally {
+      writeFileSync(settingsFile, before);
+      rmSync(join(root, 'stdin.facts'), { force: true });
+      rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
 
   it('the stub hands the agent its instructions in a temp file it removes; deleted instructions run with none; any other failure — the temp dir, the probe — stops the leg', async () => {
     const agent = join(root, 'agent.sh');

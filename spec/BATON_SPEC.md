@@ -2013,7 +2013,15 @@ mean (R-BTN-50).
   - **Stubs** run the repository's `agent_command` (R-BTN-74) with `BATON_COURSE`, `BATON_LEG`,
     `BATON_TICKET_FILE` and `BATON_INSTRUCTIONS` (the source's `legs/<leg>.md` or the home's
     override, at the claim's snapshot); a result-dependent leg reads the agent's last line
-    (`BATON_ANSWER`) and checks it against the course's values.
+    (`BATON_ANSWER`) and checks it against the course's values. The spawn is shell-free (B-84):
+    the command string splits into words as `sh` would — quotes, no substitutions — and runs as
+    `execFile(command, args)` with the ticket id, the leg and the checkout appended, stdin never
+    an open pipe (a closed fd — nothing to read), stdout and stderr captured pipes. The
+    instruction file's header carries that contract for `agent_command` authors, with the
+    completion rule it closes: the command's exit **is** the agent's, so a harness whose client
+    can exit before its work (a client of a background service) must run its session in process
+    (`opencode run --standalone`, or the equivalent) — else its truncated output fails the leg
+    while an orphaned session outlives and out-posts its claim.
   - **Overrides replace `run`, never `close`.** A home's `legs/<leg>.run.<ext>` exports
     `run(ctx, standard)`; the leg script imports it from the leg tree at the claim's snapshot and
     calls it instead of its own `run`, keeping its own `close`. Its position must be an edge

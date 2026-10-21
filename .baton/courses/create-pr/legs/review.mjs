@@ -1,9 +1,61 @@
-// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-cLq6vB/entry.ts
+// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-H4pHqV/entry.ts
 import { execFile, execFileSync as execFileSync2 } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
 import { pathToFileURL } from "node:url";
+
+// src/defaults/agent-words.ts
+function splitWords(command) {
+  const words = [];
+  const SHELL_SYNTAX = /* @__PURE__ */ new Set(["<", ">", ">>", "<<", "|", "||", "&&", ";", "&", "(", ")"]);
+  let word = "";
+  let started = false;
+  let quoted = false;
+  const take = () => {
+    if (!quoted && SHELL_SYNTAX.has(word)) {
+      throw new Error(
+        `agent_command has '${word}' as a word: the stub runs it with no shell, so redirections, pipes and lists are not executed \u2014 drop it (stdin is already closed for the agent) or quote it if the agent should receive it literally`
+      );
+    }
+    words.push(word);
+    word = "";
+    started = false;
+    quoted = false;
+  };
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (c === " " || c === "	" || c === "\n") {
+      if (started) take();
+      continue;
+    }
+    started = true;
+    if (c === "'") {
+      const end = command.indexOf("'", i + 1);
+      if (end < 0) throw new Error(`agent_command has an unterminated single quote (at character ${i})`);
+      word += command.slice(i + 1, end);
+      quoted = true;
+      i = end;
+    } else if (c === '"') {
+      const open = i;
+      quoted = true;
+      for (i++; ; i++) {
+        if (i >= command.length) throw new Error(`agent_command has an unterminated double quote (at character ${open})`);
+        const d = command[i];
+        if (d === '"') break;
+        if (d === "\\" && i + 1 < command.length && '"\\$`'.includes(command[i + 1])) word += command[++i];
+        else if (d === "\\" && command[i + 1] === "\n") i++;
+        else word += d;
+      }
+    } else if (c === "\\") {
+      if (i + 1 >= command.length) throw new Error("agent_command ends in a backslash with nothing to escape");
+      word += command[++i];
+      quoted = true;
+    } else word += c;
+  }
+  if (started) take();
+  return words;
+}
 
 // src/defaults/course-markers.ts
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -56,7 +108,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
 }
 
-// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-cLq6vB/entry.ts
+// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-H4pHqV/entry.ts
 async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read its override at");
@@ -85,19 +137,25 @@ async function standard(ctx) {
   const dir = text == null ? null : mkdtempSync(join2(tmpdir(), "baton-leg-"));
   const instructions = dir == null ? "" : join2(dir, "review.md");
   if (dir != null) writeFileSync(instructions, text);
-  const out = await new Promise((resolve, reject) => execFile("sh", ["-c", settings.agent_command + ' "$@"', "agent", ctx.ticket.id, "review", ctx.checkout], {
-    cwd: ctx.checkout,
-    maxBuffer: 67108864,
-    env: {
-      ...process.env,
-      BATON_COURSE: "create-pr",
-      BATON_LEG: "review",
-      BATON_INSTRUCTIONS: instructions,
-      BATON_TICKET_FILE: ctx.ticket.path ?? "",
-      BATON_ANSWER: "print approve or changes as your last line, then the URL of the PR to write it on when it is not the checkout branch's",
-      BATON_VERDICT: "print approve or changes as your last line, then the URL of the PR to write it on when it is not the checkout branch's"
-    }
-  }, (e, stdout) => e ? reject(e) : resolve(String(stdout)))).finally(() => {
+  const [command, ...words] = splitWords(settings.agent_command);
+  if (command === void 0) throw new Error(".baton/baton.json names no agent_command to run");
+  const out = await new Promise((resolve, reject) => {
+    const child = execFile(command, [...words, ctx.ticket.id, "review", ctx.checkout], {
+      cwd: ctx.checkout,
+      maxBuffer: 67108864,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        BATON_COURSE: "create-pr",
+        BATON_LEG: "review",
+        BATON_INSTRUCTIONS: instructions,
+        BATON_TICKET_FILE: ctx.ticket.path ?? "",
+        BATON_ANSWER: "print approve or changes as your last line, then the URL of the PR to write it on when it is not the checkout branch's",
+        BATON_VERDICT: "print approve or changes as your last line, then the URL of the PR to write it on when it is not the checkout branch's"
+      }
+    }, (e, stdout) => e ? reject(e) : resolve(String(stdout)));
+    child.stdin?.end();
+  }).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
   });
   const last = (out.trim().split("\n").at(-1) ?? "").trim();
