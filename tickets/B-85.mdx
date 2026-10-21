@@ -19,8 +19,12 @@ depends_on: []
 **Brief:** the first acceptance round (the lessons page): the review agent reviewed PR #81
 but ended its output with prose around the verdict; the stub refuses the round on the last
 line's shape. PR #82 hardened the instructions; prompts drift, and a round is expensive.
-**Spec:** §5.8 (R-BTN-131: `Ask` — "the agent's last line, checked against the course's
-values"), `src/defaults/courses.ts`'s stubs.
+**A second failure, B-71's first review round, bounds this ticket honestly:** the client
+process exited mid-review (B-84's client/server split) and the stub read *truncated*
+stdout — no verdict line existed yet to be tolerant of. The backward scan below saves the
+round only when the client outlives the session; the completion signal is B-84's, not
+this ticket's. **Spec:** §5.8 (R-BTN-131: `Ask` — "the agent's last line, checked against
+the course's values"), `src/defaults/courses.ts`'s stubs.
 
 ### Why
 

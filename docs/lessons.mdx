@@ -106,3 +106,47 @@ These are its lessons, newest understanding first.
   repository, and the seed lives in the top-level (production) vars only. Registration
   is live now but survives fresh deployments only through that seed agreeing with what
   `admin repo add` wrote. *Status: policy.*
+
+## 2026-10-21 — the resumed loop: B-71's review rounds
+
+- **A leg's close can outlive its claim — and silence the runner with it.** B-83's
+  implement agent finished at 16:09; the runner's heartbeats stopped at 17:28 with the
+  process alive; the leg's result landed at 18:09 — a two-hour close; the server reaped
+  the claim (`reaped:silent`); the runner then died with no log line and no crash
+  report. The morning's identical `reaped:silent` (then "unexplained") was the same
+  thing. The close's `git push` is unbounded — no timeout, no terminal to answer an ssh
+  prompt — and whatever blocked the runner's loop beside it, the heartbeat timer is
+  independent by design, so silence means the loop itself was blocked. **Bound every git
+  call (`GIT_TERMINAL_PROMPT=0`, ssh BatchMode, a kill on timeout), and never accept a
+  traceless death: a runner's shutdown must log.** Filed as
+  [B-94](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-94.mdx).
+
+- **The client's exit is not the agent's word.** `opencode run` is a client of a
+  background service. In B-71's first review round, subagent launches on other providers
+  errored; the client exited at 14:55 mid-review; the stub read truncated stdout, found
+  no verdict, refused the round and released the claim — while the service kept the
+  session running, finished it twelve minutes later, and posted the complete review (five
+  inline comments, a protocol-perfect last line) to a claim that no longer existed. The
+  verdict protocol was never violated; the completion signal was. **A leg's completion
+  must be the agent's, not the client process's** — for opencode, run `--standalone`
+  (in-process; the client cannot exit ahead of its session). And when diagnosing a
+  refused round, read the session store, not the stub's error: the work may exist.
+  *Status: filed as
+  [B-84](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-84.mdx)
+  (the completion contract), bounding
+  [B-85](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-85.mdx)
+  (the parser).*
+
+- **B-84's "unexplained" hang is explained: it was `execFile`'s stdin, not the shell.**
+  Building B-84 reproduced the hang with no harness at all: `execFile('cat')` never
+  returns, because execFile leaves the child's stdin an open pipe it never writes and
+  never closes — the `stdio: ['ignore', …]` option is not honoured for fd 0 (`spawn`
+  honours it; that, not the shell, is why "direct spawn works and `sh -c` hangs" — the
+  two tests differed in API, not only in shell). An agent that reads stdin (opencode's
+  client does) blocks on that pipe forever: zero output, idle, the claim burning until
+  reap — and `--standalone` and signal traps change nothing, exactly as observed.
+  **When a child must not wait on stdin, use `spawn` with `'ignore'`, or close
+  `child.stdin` the moment `execFile` returns it** — the stub now does the latter,
+  reproducible in the suite. *Status: fixed with
+  [B-84](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-84.mdx);
+  the reproduction and diagnosis are in its PR.*

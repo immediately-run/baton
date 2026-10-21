@@ -6,7 +6,7 @@
     "baton": "immediately-run/baton",
     "docs": "immediately-run/docs"
   },
-  "agent_command": "opencode run --auto --model zai-coding-plan/glm-5.3 \"You are the $BATON_LEG leg of the $BATON_COURSE course for ticket $1. Read the file named by $BATON_INSTRUCTIONS and follow it exactly. The ticket file is $BATON_TICKET_FILE. Work in the current repository checkout. $BATON_ANSWER \u2014 when that answer rule is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it.\" < /dev/null",
+  "agent_command": "opencode run --standalone --auto --model zai-coding-plan/glm-5.3 \"You are a Baton leg agent. The file named by the BATON_INSTRUCTIONS environment variable holds your instructions for this leg: read them and follow them exactly. The environment names your course (BATON_COURSE), your leg (BATON_LEG), the ticket's file (BATON_TICKET_FILE) and the answer rule for your last line (BATON_ANSWER, when one is set); the arguments after this message are the ticket id, your leg and the repository checkout. Work in the current repository checkout. When BATON_ANSWER is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it.\"",
   "courses": [
     {
       "id": "create-pr",
@@ -23,7 +23,7 @@
       "report_horizon_h": 6,
       "branch_pattern": "claude/{ticket}-*",
       "protocol_files": [],
-      "source": "github/immediately-run/baton/d989d9507436ec76ccc73617eae1578e5fdabca2/create-pr"
+      "source": "github/immediately-run/baton/6aff47ae261f50049e6af620b0dbcb75c04643d9/create-pr"
     }
   ]
 }

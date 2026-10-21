@@ -1,0 +1,68 @@
+---
+title: "B-94 — A wedged close silences the runner and kills the claim: unbounded git, a blocked loop, a traceless death"
+id: B-94
+project: baton
+status: available
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 479
+tier: judgement
+description: "Twice in one day: a leg's close blocked for two hours on an unbounded git push, the runner's heartbeats stopped with the process alive, the claim was reaped silent, and the runner died without a log line or crash report. Every git call bounded and non-interactive, the heartbeat path proven synchronous-free, and a death always leaves a line. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the resumed acceptance run, 2026-10-21, twice. The first `reaped:silent` (the
+morning's hung `opencode` leg) was written off as unreproducible; the second is fully
+observed: B-83's implement agent finished its session at 16:09, the runner's heartbeats
+stopped at 17:28 with the process still alive, the leg's result file landed at 18:09 — a
+two-hour close — the server reaped the claim (`leg-abandoned review, reaped:silent`), and
+the runner process then died with no log line and no crash report. The close is
+`commitMarker` + `git push origin HEAD` (`src/defaults/course-markers.ts`): an unbounded
+push — no timeout, `GIT_TERMINAL_PROMPT` unset, no terminal to answer an ssh prompt or
+wait out a dead connection — is the prime suspect for the wedge.
+**Spec:** §5.8 (R-BTN-131: the stubs' close), §6.3 (R-BTN-6: the lease), §6.13 (R-BTN-72:
+the runner); `src/defaults/course-markers.ts` (`markerClose`), `src/runner/runner.ts`
+(the heartbeat timer and the leg-wait race).
+
+### Why
+
+Two failures compound. A leg's close can block for hours on one unbounded git call — the
+claim is doomed from that moment whatever the agent achieved. And the runner went silent
+with it: the heartbeat timer is independent of the claim loop by design, so a silent
+runner means its event loop was blocked — something in the runner's own path runs
+synchronously alongside the leg — and when the loop unblocks the process dies without a
+trace (no log line, no crash report), which is the worst possible post-mortem.
+
+### What to build
+
+1. Every git call the stubs and the runner make is bounded and non-interactive:
+   `GIT_TERMINAL_PROMPT=0`, `GIT_SSH_COMMAND` with `BatchMode=yes` and a connect timeout,
+   and an explicit kill on timeout — a wedged push fails the leg in seconds, not hours.
+2. The runner's silence is reproduced or excluded: an audit (and test) that nothing on
+   the heartbeat path — spool writes, `ensureSha`, `fetchMain`, `holdHome` — can run
+   synchronously against git or the filesystem unboundedly; whatever blocked it is named.
+3. A runner's death leaves a line: SIGTERM/SIGINT handlers and an `exit` hook log the
+   last state (claim id, last beat, in-flight leg) before the process goes, so "died
+   tracelessly" cannot happen again.
+
+### Do not
+
+- Move the close off the leg: the marker's commit is the leg's evidence; bound it, don't
+  detach it.
+
+### Tests
+
+- Unit: a `git` stand-in that never returns fails the close within the bound (fake clock
+  or short timeout), and the leg reports the timeout as its failure.
+- Unit: the runner's shutdown hook writes its last line on SIGTERM.
+
+### Exit criteria
+
+- [ ] no git call in stubs or runner can outlive a bounded timeout
+- [ ] a wedged close fails its leg while the worker keeps heartbeating
+- [ ] a runner's death always leaves a log line

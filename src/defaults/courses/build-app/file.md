@@ -5,6 +5,16 @@ You are running the `file` leg of the `build-app` course. The ticket's file is
 ticket in the plan is a file on the board, a child of this ticket, and this ticket waits for them
 all to close. Baton's closing marker is written for you after you return; do not write it.
 
+> **How the stub runs you** — Baton's contract for the `agent_command` author: your command
+> line splits into words as `sh` would (quotes honoured, no substitutions) and executes
+> **without a shell**, with the ticket id, the leg and the checkout appended as arguments.
+> Stdin is never an open pipe: nothing to read, and a read ends at once. Stdout and stderr are
+> captured pipes, and the course reads stdout's last line. Your process's exit **is** your
+> completion: a harness that is a client of a background service must keep its session in
+> process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
+> work ends leaves truncated output and an orphaned session posting to a claim that no longer
+> exists (B-84).
+
 ## File them as written
 
 The owner approved the plan; file it, do not re-plan it. If a ticket cannot be filed as written
