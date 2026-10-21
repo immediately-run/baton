@@ -1,0 +1,42 @@
+name: baton sync
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  # A backstop for a missed trigger (§7.1): a run that finds nothing new posts nothing.
+  schedule:
+    - cron: '*/15 * * * *'
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: read
+  checks: read
+# One run at a time, one pending (§7.1): runs never race for observation numbers.
+concurrency:
+  group: baton-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    # Off until the repository variable BATON_ENABLED is 'true' — set once the repository is
+    # registered with Baton (§7.1), so an unregistered repository's pushes fail nothing.
+    if: vars.BATON_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The CLI's version is pinned: a release changes nothing here until this ref moves.
+      - uses: actions/checkout@v4
+        with:
+          repository: immediately-run/baton
+          ref: d989d9507436ec76ccc73617eae1578e5fdabca2
+          path: .baton-cli
+      - run: npm ci --prefix .baton-cli
+      # --latest main: after its observation number the run reads the newest main, so a slow
+      # run for an older push still posts the newest board (§7.1 step 2).
+      - run: node .baton-cli/cli/baton.mjs repo sync --latest main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
