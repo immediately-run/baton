@@ -3,7 +3,9 @@
 You are running the `adjudicate` leg of the `create-pr` course. Three review rounds have run on
 the ticket's PR, and the last still asked for changes. The ticket's file is `$BATON_TICKET_FILE`.
 You decide whether the open blocking findings are real. **Print your adjudication as your last
-line, alone:**
+line, alone:** a machine reads that line — exactly the one word (`merge` or `owner`), or the
+word followed by one PR URL; no other word before or after, nothing after it in your whole
+output, or the leg fails.
 
 - **`merge`**: none of the open blocking findings reproduces at the PR's head;
 - **`owner`**: at least one does, and the owner decides.
