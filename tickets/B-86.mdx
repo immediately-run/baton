@@ -1,0 +1,50 @@
+---
+title: "B-86 — A granted runner silently idles: --capabilities defaults to agent-venue alone"
+id: B-86
+project: baton
+status: available
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 484
+tier: judgement
+description: "The runner declared agent-venue while the grant allowed create-pr, and the gate matched nothing — total silence at claim time. The heartbeat defaults to what the grant allows, the flag narrows, and a never-eligible runner says so at startup."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the acceptance run (the lessons page): the runner registered, recommended, and
+idled in total silence — `parseRunArgs` defaults `--capabilities` to `["agent-venue"]`, the
+grant allowed `create-pr,llm-call,agent-venue`, and the gate had no `create-pr` to match the
+course's legs. The runbook's `baton run` line omits the flag.
+**Spec:** §6.13 (R-BTN-72: the runner), §11 (the heartbeat's capabilities), the runbook
+`docs/runbooks/register-baton.mdx` step 5.
+
+### Why
+
+The grant already names the machine's capabilities; asking the operator to restate them on
+every runner is one silent mismatch waiting per machine — and the failure mode is idle
+silence, the worst kind.
+
+### What to build
+
+1. The heartbeat's capability declaration defaults to the grant's: when `--capabilities` is
+   absent, the runner asks once (or the server answers from the grant) and declares what
+   the grant allows, the flag overriding for a narrower machine.
+2. The runbook's `baton run` line and the runner's `--help` say the flag exists to narrow,
+   not to enable.
+3. A runner whose declared capabilities match no course's legs logs why it can never claim
+   (one line at startup), instead of idling.
+
+### Tests
+
+- Integration (S-BTN-n new or extended): a granted worker with no `--capabilities` claims a
+  `create-pr` leg; a narrower `--capabilities llm-call` idles with the startup line.
+
+### Exit criteria
+
+- [ ] a granted runner needs no `--capabilities` to serve its grant
+- [ ] a never-eligible runner says so at startup
