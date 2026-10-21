@@ -1,0 +1,48 @@
+---
+title: "B-85 — The answer parser loses whole rounds to prose around the verdict"
+id: B-85
+project: baton
+status: available
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 483
+tier: routine
+description: "Result-dependent legs check the agent's last line strictly; a trailing sentence refused a completed review (B-80's round). Scan backwards for the last line beginning with a value word, keeping the strict refusal for a missing or misspelled verdict."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the first acceptance round (the lessons page): the review agent reviewed PR #81
+but ended its output with prose around the verdict; the stub refuses the round on the last
+line's shape. PR #82 hardened the instructions; prompts drift, and a round is expensive.
+**Spec:** §5.8 (R-BTN-131: `Ask` — "the agent's last line, checked against the course's
+values"), `src/defaults/courses.ts`'s stubs.
+
+### Why
+
+A machine parses the answer; the machine should read like one. The strict last-line rule
+loses whole rounds to a trailing sentence — B-80's review burned its claim on exactly this.
+
+### What to build
+
+1. The answer check scans backwards for the last line that begins with one of `ask.values`
+   (the value word as a whole word), taking any PR URL that follows it on that line; extra
+   prose before or after no longer fails the leg.
+2. The instructions keep demanding the bare line (a tolerant reader is no excuse for a
+   sloppy answer); the `.md` templates stay as PR #82 wrote them.
+3. The same scan serves `review` and `adjudicate` (and any future `Ask` leg) through one
+   helper, with the strict behaviour kept behind a flag for the kit's tests.
+
+### Tests
+
+- Unit: a table of agent outputs — bare word, word plus URL, prose before, prose after,
+  trailing blank lines, the word mid-line only (still refused) — against the helper.
+
+### Exit criteria
+
+- [ ] a verdict with prose around it no longer loses the round
+- [ ] a missing or misspelled verdict still fails, naming what was read
