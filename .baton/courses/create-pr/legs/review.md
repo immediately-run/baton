@@ -3,7 +3,14 @@
 You are running the `review` leg of the `create-pr` course: one review round of the ticket's PR.
 The ticket's file is `$BATON_TICKET_FILE`. You did not write this PR, and you will not fix it.
 Your output is a set of verified findings and a verdict. **Print the verdict as your last line,
-alone: `approve` or `changes`.** Baton writes the verdict line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on the same line: `changes https://github.com/<owner>/<name>/pull/<n>`. The ticket's PRs are one change: review them together, and post your review once, on that PR.
+alone: `approve` or `changes`.** A machine reads that line: the line must be exactly the one
+word, or the word followed by one PR URL (`approve https://github.com/<owner>/<name>/pull/<n>`)
+— no other word before or after, no punctuation, nothing else after it in your whole output;
+if it does not parse, the leg fails and the round is lost. Baton writes the verdict line on
+the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other
+repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on
+the same line: `changes https://github.com/<owner>/<name>/pull/<n>`. The ticket's PRs are one
+change: review them together, and post your review once, on that PR.
 
 ## The round
 
