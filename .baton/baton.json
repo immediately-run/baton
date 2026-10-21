@@ -6,7 +6,7 @@
     "baton": "immediately-run/baton",
     "docs": "immediately-run/docs"
   },
-  "agent_command": "echo",
+  "agent_command": "opencode run --auto --model zai-coding-plan/glm-5.3 \"You are the $BATON_LEG leg of the $BATON_COURSE course for ticket $1. Read the file named by $BATON_INSTRUCTIONS and follow it exactly. The ticket file is $BATON_TICKET_FILE. Work in the current repository checkout. $BATON_ANSWER\" < /dev/null",
   "courses": [
     {
       "id": "create-pr",

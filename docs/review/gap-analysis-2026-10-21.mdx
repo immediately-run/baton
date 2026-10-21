@@ -1,0 +1,120 @@
+---
+title: Gap analysis — completing baton tickets through baton.immediately.run
+description: What a dogfooding run on 2026-10-21 found between the runbook and reality — the Access wall over the machine API, the CLI that follows it silently, the first-sync blockers, the sh -c spawn that hangs opencode, and the local full loop that works.
+tags: [review]
+order: 50
+---
+
+<Lede>One working session tried to take baton's own tickets through the production
+Baton, exactly as the runbook says. This is everything that stood in the way, what was
+verified working, and what the owner must decide before the acceptance ticket
+(R3-1266) can run.</Lede>
+
+Scope: the runbook `docs/runbooks/register-baton.mdx` steps 1–6 against
+`https://baton.immediately.run` (and staging), plus a full local loop
+(`npm run start:local`) with real keys and a real `opencode` agent to validate the
+runner machinery the instance side blocks. Branch: `baton/self-host-gap-analysis`
+(scaffold + this report).
+
+## Blocking — the instance
+
+1. **Cloudflare Access covers the machine API.** Everything except `/v1/sync/*` and
+   `/v1/runner/*` redirects to the Access login on both production and staging:
+   `/v1/admin/*`, `/v1/owner/*`, `/v1/repositories/*`, `/v1/courier/*`, `/v1/probe/*`.
+   Registration (`baton admin repo add`), grants, revocations and every read are
+   impossible from a machine. **`/v1/github/webhook` is also covered**, so GitHub's
+   deliveries can never reach the Worker — R-BTN-73's webhook is dead on both
+   deployments (GitHub cannot sign in). Fix (owner, Cloudflare dashboard): bypass
+   rules for the machine paths, or a service-token design the CLI implements.
+2. **The CLI reports the Access login page as success.** `send()` in `cli/baton.mjs`
+   follows the 302 (fetch default), the login page answers `200` HTML, `res.json()`
+   fails, and the command prints `null` and **exits 0**. `baton admin repo add …`
+   silently no-ops against production. Fix: `redirect: 'error'` (or `'manual'`) and a
+   non-2xx exit code. Until then the runbook's steps 2–3 cannot be trusted to have
+   run.
+3. **No CLI reads.** No `repo list`, no grants list, no board dump; `blocked` and
+   `ticket history` exist but are unreachable on production (finding 1). Every read
+   needs the dashboard behind a human Access login.
+
+## Blocking — the first sync of this repository
+
+4. **Tickets that name this repository in `repos:` fail the board.** The default
+   markdown source resolves short repo names only through `.baton/baton.json`'s
+   `repos` map, which `repo init` leaves empty — `repos: [baton]` (80 tickets) fails
+   the whole post. Branch fix: `repos: {baton, docs}`. Product fix worth a ticket:
+   init preseeding the repository's own id, or the source passing a repo's own short
+   name through.
+5. **`tickets/projects/baton.mdx` boards as a claimable ticket.** `readItems` recurses
+   at any depth and any `.mdx` with an `id` counts; the Grove project page (id
+   `baton`, status `active`) landed on the board as an available ticket. The default
+   source has no exclude mechanism. Branch fix: the ejected `.baton/tickets.mjs`
+   filtering to top-level `*.mdx` plus `archive/`. Product gap: no exclusion setting.
+6. **`baton repo sync` cannot sign with a sync key.** The server accepts SSH sync
+   keys (R-BTN-93) — this run posted a board that way, hand-driven through `syncMain`
+   with a signing `auth` injected, proving the server side — but the CLI's sync path
+   is CI-JWT-only. Bootstrap repos without CI cannot post a board at all. `BatonApi`
+   already supports signed sync calls; a `--sync-key` flag is the missing wiring.
+7. **Claims are refused until cutover** (R-BTN-28, by design) — a new repository must
+   register with `--cut-over` (as R3-1266 says) or `baton run` can never claim. The
+   runbook's step 5 does not remind the reader; worth one line there.
+
+## The runner and leg integration
+
+8. **`agent_command: "echo"` is the init default and `--harness` is telemetry only.**
+   A fresh repository's first run "succeeds" every leg with a no-op agent. The stubs
+   never check that work happened (implement returns a fixed position on exit 0). No
+   documented `agent_command` for opencode or claude-code exists anywhere.
+9. **The leg stub's `sh -c` environment hangs `opencode run` deterministically**
+   (macOS, the bun binary, v2.1.2): zero output, idle event loop, forever — the claim
+   burns until reap. Ruled out: stdin pipes (`stdio: 'ignore'` still hung), signal
+   dispositions (`trap '' PIPE` completes), trust prompts, the background service
+   (`--standalone` also hung). Direct `spawn('opencode', …)` from node works 100%,
+   `sh -c 'opencode …'` hangs 100%, and `sh -c 'opencode … < /dev/null'` works.
+   Workaround (in the branch's `agent_command`): redirect stdin. Root cause still
+   unexplained; the stub spawning the agent without the shell (or the redirection,
+   documented) is the defensive fix.
+10. **A failing marker close re-appends its line on every retry.** A push failure the
+    runner retries re-runs `markerClose`, which appends the same marker line and
+    commits again — observed three identical lines and two commits for one leg. The
+    union merge protects the file, not the line. Idempotency defect in
+    `src/defaults/course-markers.ts`.
+11. **First-beat noise.** Every runner start logs `no recommendation (no worker holds
+    this secret)` — the recommendation fires before the first heartbeat registers the
+    secret. Cosmetic, alarming to an operator.
+12. Minor: `remoteSlug` prints `error: No such remote 'origin'` on repos without one
+    (the sync still succeeds).
+
+## Verified working
+
+- `baton repo init --course create-pr` scaffolds cleanly; the course `source` pins the
+  CLI's commit; `baton test-course . create-pr --base none` green; `check:wiki` green.
+- The ejected ticket source boards the real tickets: 86 live, 58 archived, no
+  project-page pseudo-ticket.
+- A sync-key-signed board post works against the local host (`syncMain` + injected
+  signing auth): observation → head → board accepted.
+- **The full worker loop on the local host over real HTTP**: heartbeat registration
+  with the session secret, recommendation, claim, the detached leg child
+  (`legProcess.mjs`), a real `opencode` agent run, the marker close (commit + push to
+  origin), advance with the commit sha as evidence, and the next leg started — ticket
+  history records the whole run. Heartbeats flow steadily through a 10-minute leg
+  (state-file `last_ok` polled).
+- `baton admin grant` and `baton ticket history` on a reachable host.
+
+One unexplained episode: the first runner was reaped `reaped:silent` during the
+chaotic first attempt (before the grant, during process kills); it did not reproduce —
+the instrumented probe and the later real runner both beat steadily through long legs.
+Watch for it.
+
+## What must happen before the acceptance ticket (owner-gated)
+
+1. Access path rules on both instances for the machine paths in finding 1 (or decide
+   service tokens) — without this, nothing else can happen.
+2. The CLI redirect fix (finding 2) — a small PR, worth doing first so registration
+   commands are trustworthy.
+3. Register `immediately-run/baton` with `--cut-over` per the runbook, grant the
+   worker key (finding 7 in mind).
+4. Merge the scaffold branch (repos map, filtered tickets source, real
+   `agent_command`), set the `BATON_ENABLED` repository variable, dispatch the sync,
+   and read the board back.
+5. `baton run --repository baton` on a granted machine against the production
+   instance — the acceptance run of R3-1266, on the next free `B-n`.
