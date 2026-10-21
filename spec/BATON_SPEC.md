@@ -2014,7 +2014,13 @@ mean (R-BTN-50).
   - **Stubs** run the repository's `agent_command` (R-BTN-74) with `BATON_COURSE`, `BATON_LEG`,
     `BATON_TICKET_FILE` and `BATON_INSTRUCTIONS` (the source's `legs/<leg>.md` or the home's
     override, at the claim's snapshot); a result-dependent leg reads the agent's last line
-    (`BATON_ANSWER`) and checks it against the course's values.
+    (`BATON_ANSWER`) and checks it against the course's values. A leg whose stub claims a PR on
+    the forge — `create-pr`'s `implement` — verifies it there before returning its position (B-81):
+    an open PR on a branch its course's `branch_pattern` maps to the ticket, in the checkout's
+    repository or one the ticket's `repos:` names (B-29), and the checkout's branch, when it feeds
+    such a PR, a head the PR contains — the review reads what is pushed. What cannot be verified
+    fails the leg naming what was looked for; the stub reports, never retries. The test kit fails
+    such a stub that returns its position for an `agent_command` exiting 0 with no PR.
   - **Overrides replace `run`, never `close`.** A home's `legs/<leg>.run.<ext>` exports
     `run(ctx, standard)`; the leg script imports it from the leg tree at the claim's snapshot and
     calls it instead of its own `run`, keeping its own `close`. Its position must be an edge

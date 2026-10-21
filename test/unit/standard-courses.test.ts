@@ -94,6 +94,14 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(builtIn('epic')).toBeUndefined();
   });
 
+  it('create-pr\'s implement stub verifies its PR on the forge before claiming it, and no other leg or course does (B-81)', () => {
+    for (const b of BUILT_INS) {
+      for (const [leg, stub] of Object.entries(b.legs)) {
+        expect(stub.verify, `${b.id}/${leg}`).toBe(b.id === 'create-pr' && leg === 'implement' ? 'pr' : undefined);
+      }
+    }
+  });
+
   describe('build-app waits (B-40)', () => {
     const ticket = (answer?: string, blocked_by: string[] = []): SourceTicket =>
       ({ id: 'A-1', course_id: 'build-app', blocked_by, depends_on: [], course: answer == null ? {} : { answer } }) as unknown as SourceTicket;

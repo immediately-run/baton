@@ -113,13 +113,32 @@ describe('baton repo init, through the built CLI', () => {
     }
     // The runner copies each script alone into a scratch directory (src/runner/home.ts).
     const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
+    // A gh the verification reads, answering the file beside it: the scaffold's agent_command
+    // (`echo`) is the B-81 no-op — exit 0, no PR — so the stub's word for its outcome is gh's.
+    const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegh-'));
+    const answer = join(fakeBin, 'answer');
+    writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\ncat "$(dirname "$0")/answer"\n');
+    chmodSync(join(fakeBin, 'gh'), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${path}`;
     try {
       copyFileSync(join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs'), join(scratch, 'implement.mjs'));
       const stub = await load(join(scratch, 'implement.mjs'));
       expect(typeof stub.close).toBe('function');
-      expect(await stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot: at(root) })).toEqual({ reached: 'pr-open', next: 'review' });
+      const ctx = { ticket: { id: 'A-1' }, checkout: root, snapshot: at(root) };
+      // An open PR on a branch the pattern maps to A-1: the stub returns its position.
+      writeFileSync(answer, JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
+      expect(await stub.run(ctx)).toEqual({ reached: 'pr-open', next: 'review' });
+      // No such PR: the leg fails naming the pattern it looked for, not trusting exit 0 (B-81).
+      writeFileSync(answer, '[]');
+      await expect(stub.run(ctx)).rejects.toThrow('no open PR on a branch matching claude/A-1-* for ticket A-1 exists in the checkout’s repository');
+      // A forge that cannot be read fails the leg naming that, too.
+      writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\necho "no git remotes found" >&2\nexit 1\n');
+      await expect(stub.run(ctx)).rejects.toThrow('cannot verify A-1’s PR — no repository the ticket reads could be read: the checkout’s repository (gh pr list --state open --limit 300 --json number,headRefName,headRefOid failed: no git remotes found)');
     } finally {
+      process.env.PATH = path;
       rmSync(scratch, { recursive: true, force: true });
+      rmSync(fakeBin, { recursive: true, force: true });
     }
   });
 
@@ -925,6 +944,25 @@ export async function run(ctx, standard) {
     } finally {
       writeFileSync(override, before);
       rmSync(extra, { force: true });
+    }
+  }, 120_000);
+
+  it('the kit fails a start leg that returns its position for a no-op agent with no PR (B-81), and passes the standard one', () => {
+    // The scaffolded stub above — the standard one — already passed the same run in the test
+    // before: its implement fails the no-op leg naming what it looked for.
+    const script = join(legs(), 'implement.mjs');
+    const before = readFileSync(script, 'utf8');
+    try {
+      writeFileSync(script, 'export async function run() { return { reached: "pr-open", next: "review" }; }\nexport async function handoff() { return null; }\nexport const close = () => "";\n');
+      let out = '';
+      try {
+        baton(root, 'test-course', root, 'create-pr', '--base', 'none');
+      } catch (e) {
+        out = String((e as { stdout?: unknown }).stdout);
+      }
+      expect(out).toContain('✗ no-op: legs/implement.mjs returned {"reached":"pr-open","next":"review"} for an agent_command that exits 0 with no PR — the course opens PRs, so its start leg must verify one on the forge before returning its position, failing the leg naming what it looked for (B-81)');
+    } finally {
+      writeFileSync(script, before);
     }
   }, 120_000);
 });
