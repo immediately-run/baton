@@ -343,8 +343,17 @@ export function createApiKey(file, comment = '') {
   return line;
 }
 
+/** A redirect, named for what it is (B-80): an intermediary in front of Baton — Cloudflare
+ *  Access's login — answered, so the request never reached Baton. */
+const redirectAnswered = (target, status, to) => new Error(
+  `a redirect answered ${target}${status ? ` (HTTP ${status}${to ? ` to ${to}` : ''})` : ''} — not followed; the request never reached Baton (an Access login in front of it?)`,
+);
+
 /** Send a planned request, signed with `keyFile` — or, when it holds an API key (R-BTN-159),
- *  with that key as a bearer. Returns `{status, json}`. */
+ *  with that key as a bearer. Returns `{status, json, text}`: `json` is null when the body is
+ *  not JSON, `text` the body as it arrived, for the caller to show. A redirect is refused,
+ *  never followed (B-80): a 3xx is an error naming what answered — a login page in front of
+ *  Baton is not Baton's answer. */
 export async function send(url, p, keyFile, fetchImpl = fetch) {
   const text = readFileSync(keyFile, 'utf8').trim();
   const target = new URL(p.path, url).toString();
@@ -353,14 +362,26 @@ export async function send(url, p, keyFile, fetchImpl = fetch) {
   const auth = API_KEY.test(text) ? { Authorization: `Bearer ${text}` } : signHeaders({ method: p.method, url: target, body, key: signingKey(keyFile) });
   const headers = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
-  const res = await fetchImpl(target, { method: p.method, headers, body, signal: AbortSignal.timeout(30_000) });
+  let res;
+  try {
+    // A 3xx is never followed (B-80): `redirect: 'error'` makes fetch refuse it outright.
+    res = await fetchImpl(target, { method: p.method, headers, body, redirect: 'error', signal: AbortSignal.timeout(30_000) });
+  } catch (e) {
+    // `redirect: 'error'` surfaces that refusal as a fetch failure whose cause names it: report
+    // what happened, not the generic failure (B-80).
+    if (/redirect/i.test(`${e?.message ?? ''} ${e?.cause?.message ?? ''}`)) throw redirectAnswered(target);
+    throw e;
+  }
+  // A fetch stand-in may hand the 3xx back instead of throwing: the same refusal (B-80).
+  if (res.status >= 300 && res.status < 400) throw redirectAnswered(target, res.status, res.headers.get('location'));
+  const raw = await res.text();
   let json = null;
   try {
-    json = await res.json();
+    json = JSON.parse(raw);
   } catch {
     json = null;
   }
-  return { status: res.status, json };
+  return { status: res.status, json, text: raw };
 }
 
 /** The base a course change is judged against: `--base`, else the remote's default branch. */
@@ -414,7 +435,13 @@ async function decisionList(argv) {
   return 0;
 }
 
-async function main(argv) {
+/** What arrived instead of Baton's JSON: its first 300 characters, an empty body named (B-80). */
+const arrived = (text) => (text.length > 300 ? `${text.slice(0, 300)}…` : text) || '(an empty body)';
+
+/** The one management path's exit: 0 when Baton answered its JSON, 1 when the answer was not
+ *  Baton's — a refusal, or a 2xx body that is not JSON (B-80) — and any error thrown up to the
+ *  caller (the CLI prints `baton: …` and exits 2). Exported for the tests of that contract. */
+export async function main(argv) {
   if (argv[0] === 'test-course') return testCourse(argv.slice(1));
   if (argv[0] === 'key') {
     if (argv[1] !== 'create' || !argv[2]) throw new Error('baton key create FILE [--comment TEXT]');
@@ -442,7 +469,13 @@ async function main(argv) {
   const { flags } = parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
   const args = rest.filter((_, i, a) => !(a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
   const p = plan(role, args);
-  const { status, json } = await send(flags.url ?? process.env.BATON_URL ?? DEFAULT_URL, p, need(flags.identity, '-i KEY (an administrator, owner or worker key file)'));
+  const { status, json, text } = await send(flags.url ?? process.env.BATON_URL ?? DEFAULT_URL, p, need(flags.identity, '-i KEY (an administrator, owner or worker key file)'));
+  // A 2xx whose body is not JSON — an intermediary's login page, an HTML error, an empty body —
+  // is a refusal, never success (B-80): the command fails, showing what arrived.
+  if (status >= 200 && status < 300 && json === null) {
+    process.stderr.write(`baton: ${status} answered no JSON — the request never reached Baton. It answered:\n${arrived(text)}\n`);
+    return 1;
+  }
   if (role === 'admin' && args[0] === 'open' && json?.url) process.stdout.write(`${json.url}\n`);
   else process.stdout.write(`${JSON.stringify(json)}\n`);
   return status >= 200 && status < 300 ? 0 : 1;
