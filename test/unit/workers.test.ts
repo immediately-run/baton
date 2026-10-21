@@ -348,8 +348,11 @@ describe('round-one review fixes (baton#4)', () => {
 
   it('§6.8: the owners’ transcript_repos replaces the default allow-list; a board post’s is ignored (R-BTN-66, R3-1240)', async () => {
     const { secret } = await register('vm-a');
-    // The setting is the owners' (`PUT /v1/owner/docs/settings`, S-BTN-39 drives the route).
-    await rows(`UPDATE repositories SET transcript_repos = '["immediately-run/other-transcripts"]' WHERE id = 'docs'`);
+    // The setting is the owners' (`PUT /v1/owner/docs/settings`, S-BTN-39 drives the route), and the
+    // allow-list is the union over every registered repository (§6.8): the deployment seed's baton
+    // (R3-1266) names none, so its list is the default — set it too, or the default swallows the
+    // refusal this test asserts.
+    await rows(`UPDATE repositories SET transcript_repos = '["immediately-run/other-transcripts"]'`);
     await syncCall('/v1/sync/board', payload(board.shas.B, board.shas.A, board.states.B, { transcript_repos: ['immediately-run/claude-sessions'] }));
     expect((await beat('vm-a', secret, { transcripts: [{ repo: 'immediately-run/other-transcripts', path: 'a.md' }] })).json.transcripts_refused).toBeUndefined();
     expect((await beat('vm-a', secret, { transcripts: [{ repo: 'immediately-run/claude-sessions', path: 'a.md' }] })).json.transcripts_refused).toHaveLength(1);
