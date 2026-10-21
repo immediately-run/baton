@@ -267,6 +267,15 @@ describe('baton repo init, through the built CLI', () => {
     const implement = join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs');
     const guard = <T>(p: Promise<T>): Promise<T> =>
       Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('the stub never returned — its agent hung, on an open stdin pipe?')), 20_000))]);
+    // B-81: the stub verifies its PR on the forge before returning pr-open, so the run below
+    // needs a gh answering an open PR on a branch the pattern maps to B-1 — the same scripted
+    // gh the verification's own test uses; the spawn facts it reads are the agent's, not gh's.
+    const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegh-'));
+    writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\ncat "$(dirname "$0")/answer"\n');
+    writeFileSync(join(fakeBin, 'answer'), JSON.stringify([{ number: 4, headRefName: 'claude/B-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
+    chmodSync(join(fakeBin, 'gh'), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${path}`;
     try {
       writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: `${agent} --flag 'quoted arg'` }));
       const snapshot = { sha: commitAll(root) };
@@ -278,6 +287,8 @@ describe('baton repo init, through the built CLI', () => {
       const parent = /parent=(.*)/.exec(facts)?.[1]?.trim() ?? '';
       expect(parent, 'no shell stands between the stub and its agent').not.toMatch(/^(\/usr\/bin\/|\/bin\/)?(ba|da|z)?sh\d?$/);
     } finally {
+      process.env.PATH = path;
+      rmSync(fakeBin, { recursive: true, force: true });
       writeFileSync(settingsFile, before);
       rmSync(join(root, 'stdin.facts'), { force: true });
       rmSync(agent, { force: true });
