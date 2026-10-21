@@ -106,3 +106,21 @@ These are its lessons, newest understanding first.
   repository, and the seed lives in the top-level (production) vars only. Registration
   is live now but survives fresh deployments only through that seed agreeing with what
   `admin repo add` wrote. *Status: policy.*
+
+## 2026-10-21 — the resumed loop: B-71's review rounds
+
+- **The client's exit is not the agent's word.** `opencode run` is a client of a
+  background service. In B-71's first review round, subagent launches on other providers
+  errored; the client exited at 14:55 mid-review; the stub read truncated stdout, found
+  no verdict, refused the round and released the claim — while the service kept the
+  session running, finished it twelve minutes later, and posted the complete review (five
+  inline comments, a protocol-perfect last line) to a claim that no longer existed. The
+  verdict protocol was never violated; the completion signal was. **A leg's completion
+  must be the agent's, not the client process's** — for opencode, run `--standalone`
+  (in-process; the client cannot exit ahead of its session). And when diagnosing a
+  refused round, read the session store, not the stub's error: the work may exist.
+  *Status: filed as
+  [B-84](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-84.mdx)
+  (the completion contract), bounding
+  [B-85](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-85.mdx)
+  (the parser).*
