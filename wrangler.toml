@@ -26,7 +26,7 @@ BATON_ORIGIN = "https://baton.immediately.run"
 # its registry (R-BTN-47), seeded here at start, insert-only, until R3-1240's admin route.
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 OIDC_JWKS_URL = "https://token.actions.githubusercontent.com/.well-known/jwks"
-BATON_REPOSITORIES = '[{"id":"docs","github":"immediately-run/docs","default_branch":"main","sync_workflow":".github/workflows/baton-sync.yml","mirror_workflow":".github/workflows/baton-mirror.yml","transcript_repos":["immediately-run/claude-sessions","immediately-run-worker/session-transcripts"]}]'
+BATON_REPOSITORIES = '[{"id":"docs","github":"immediately-run/docs","default_branch":"main","sync_workflow":".github/workflows/baton-sync.yml","mirror_workflow":".github/workflows/baton-mirror.yml","transcript_repos":["immediately-run/claude-sessions","immediately-run-worker/session-transcripts"]},{"id":"baton","github":"immediately-run/baton","default_branch":"main","sync_workflow":".github/workflows/baton-sync.yml","cut_over":true}]'
 # R-BTN-16: the owner principal — Cloudflare Access. Set by the owner in R3-1208.
 ACCESS_TEAM_DOMAIN = "mute-dew-600d.cloudflareaccess.com"
 ACCESS_AUD = "326d8bf228bb8472d48a681888ae117f378e1182618c1d5e3f9e7d00e3b6e94d"

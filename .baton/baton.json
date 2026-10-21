@@ -1,0 +1,29 @@
+{
+  "baton_url": "https://baton.immediately.run",
+  "items": "tickets",
+  "default_course": "create-pr",
+  "repos": {
+    "baton": "immediately-run/baton",
+    "docs": "immediately-run/docs"
+  },
+  "agent_command": "opencode run --auto --model zai-coding-plan/glm-5.3 \"You are the $BATON_LEG leg of the $BATON_COURSE course for ticket $1. Read the file named by $BATON_INSTRUCTIONS and follow it exactly. The ticket file is $BATON_TICKET_FILE. Work in the current repository checkout. $BATON_ANSWER\" < /dev/null",
+  "courses": [
+    {
+      "id": "create-pr",
+      "version": 1,
+      "min_worker_version": 1,
+      "skill": "baton-create-pr",
+      "step_kinds": [
+        "implement",
+        "review",
+        "fix",
+        "adjudicate",
+        "merge"
+      ],
+      "report_horizon_h": 6,
+      "branch_pattern": "claude/{ticket}-*",
+      "protocol_files": [],
+      "source": "github/immediately-run/baton/d989d9507436ec76ccc73617eae1578e5fdabca2/create-pr"
+    }
+  ]
+}
