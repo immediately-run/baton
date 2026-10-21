@@ -26,6 +26,10 @@ runner machinery the instance side blocks. Branch: `baton/self-host-gap-analysis
    deliveries can never reach the Worker — R-BTN-73's webhook is dead on both
    deployments (GitHub cannot sign in). Fix (owner, Cloudflare dashboard): bypass
    rules for the machine paths, or a service-token design the CLI implements.
+   **FIXED 2026-10-21** — twelve path-scoped bypass apps (the six machine paths on
+   both hostnames), mirroring the existing sync/runner exemptions exactly
+   (`.local/access-paths.py`); verified: machine paths reach the Worker, dashboard
+   paths stay gated.
 2. **The CLI reports the Access login page as success.** `send()` in `cli/baton.mjs`
    follows the 302 (fetch default), the login page answers `200` HTML, `res.json()`
    fails, and the command prints `null` and **exits 0**. `baton admin repo add …`
@@ -107,10 +111,10 @@ Watch for it.
 
 ## What must happen before the acceptance ticket (owner-gated)
 
-1. Access path rules on both instances for the machine paths in finding 1 (or decide
-   service tokens) — without this, nothing else can happen.
-2. The CLI redirect fix (finding 2) — a small PR, worth doing first so registration
-   commands are trustworthy.
+1. ~~Access path rules on both instances for the machine paths in finding 1~~ —
+   **done, 2026-10-21** (twelve bypass apps, verified).
+2. The CLI redirect fix (finding 2) — no longer blocking (the machine paths no
+   longer redirect) but still worth doing as defense.
 3. Register `immediately-run/baton` with `--cut-over` per the runbook, grant the
    worker key (finding 7 in mind).
 4. Merge the scaffold branch (repos map, filtered tickets source, real
