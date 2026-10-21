@@ -74,8 +74,17 @@ describe('the owner principal (R-BTN-16)', () => {
     expect((await as(await accessToken('someone@example.com'))).status).toBe(403);
     expect((await as(await accessToken('owner@example.com', { audience: 'another-app' }))).status).toBe(401);
     expect((await call('/v1/ui/state')).status).toBe(401);
-    expect((await call('/')).status).toBe(401);
     expect((await as(await syncToken())).status).toBe(401);
+  });
+
+  it('serves the page to a browser with no principal at all: it is the login page\'s bytes, and the data stays refused (R-BTN-16, R-BTN-57)', async () => {
+    // The exact report from the field: a browser past Cloudflare Access, no Baton session,
+    // administrators configured — it must meet a page that says what to do, not a JSON error.
+    const page = await call('/');
+    expect(page.status).toBe(200);
+    expect(page.headers.get('Content-Type')).toMatch(/text\/html/);
+    expect(await page.text()).toContain('<script type="module" src="/ui/app.js">');
+    expect((await call('/v1/ui/state')).status).toBe(401);
   });
 
   it('G-BTN-12: a state-changing /v1/ui call needs JSON and the dashboard Origin', async () => {
