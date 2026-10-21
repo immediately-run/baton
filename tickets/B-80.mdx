@@ -1,0 +1,61 @@
+---
+title: "B-80 — The CLI reports a redirect as success"
+id: B-80
+project: baton
+status: available
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 500
+tier: routine
+description: "send() follows redirects; a login page's 200 answers res.json() with null and the command exits 0 — baton admin silently no-ops. redirect: 'error', and a non-JSON 2xx fails the command. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the gap-analysis run of 2026-10-21
+([`docs/review/gap-analysis-2026-10-21.mdx`](../docs/review/gap-analysis-2026-10-21.mdx), finding 2):
+while Cloudflare Access covered the machine API, `baton admin repo add …` printed `null`
+and **exited 0** — fetch had followed the 302 to the Access login page, the page answers
+`200`, `res.json()` fails, and the CLI reports success for a request that never reached
+Baton.
+**Spec:** `cli/baton.mjs`'s `send()` (§11's client half); no spec section names redirect
+behaviour — this fixes the client to the spec's error contract: a refusal is a refusal.
+
+### Why
+
+A CLI that can silently no-op is worse than one that fails: the runbook's step 2–3
+commands appeared to succeed against a Baton they never reached, and nothing would have
+surfaced it but a manual probe. Any future Access misconfiguration (or any intermediary
+that answers redirects) turns every admin, owner and worker command into a silent lie.
+
+### What to build
+
+1. `send()` passes `redirect: 'error'` to `fetch`: a 3xx is an error, never followed —
+   named so the message says what happened ("a redirect answered …") rather than a
+   generic fetch failure.
+2. A request whose body is not JSON answers `json: null` **with a non-zero exit**: today
+   `main()` exits 0 on any 2xx; a 2xx whose body is not JSON (a login page, an HTML error
+   page, an empty body) exits non-zero and prints what it got.
+3. The unit tests cover both: a redirect is refused without the request reaching Baton,
+   and a 2xx with a non-JSON body fails the command. `test/unit/baton-cli.test.ts` (or
+   the file that tests `send`/`plan` — find it) takes them.
+
+### Do not
+
+- Change the request shapes, the signing, or the error bodies Baton itself answers —
+  this is the client's handling alone.
+
+### Tests
+
+- Unit: `send` with a `fetchImpl` that answers 302 → the command exits non-zero, the
+  error names the redirect; a 2xx HTML body → non-zero; a 2xx JSON body → today's
+  behaviour unchanged.
+
+### Exit criteria
+
+- [ ] `baton admin …` against a URL that redirects exits non-zero and says why
+- [ ] every existing CLI test still green; `npm run test:no-quint` green
