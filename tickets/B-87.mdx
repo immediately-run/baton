@@ -1,0 +1,49 @@
+---
+title: "B-87 — A retried marker close re-appends its line and commits it again"
+id: B-87
+project: baton
+status: available
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 485
+tier: routine
+description: "A close whose push fails is retried and appends the same marker line each time — three identical lines and two commits observed. markerClose becomes idempotent per (ticket, leg, claim)."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the local full-loop run of 2026-10-21 (the gap-analysis report, finding 10): a
+marker close whose `git push` fails is retried by the runner, and each retry re-appends the
+same marker line and commits it again — three identical lines and two commits for one leg
+(observed on the toy repository). The union merge protects the file across concurrent
+closes, not the line across sequential retries.
+**Spec:** §5.8 (R-BTN-131), `src/defaults/course-markers.ts` (`markerClose`,
+`MARKER_PUSH_TRIES`).
+
+### Why
+
+Duplicate markers are at best noise the sync dedupes by luck; at worst a second placement
+of a leg that ran once, and a history that says a close ran three times.
+
+### What to build
+
+1. `markerClose` is idempotent per (ticket, leg, claim): before appending, a line with the
+   same `claim` nonce and leg already in `markers.jsonl` is reused, not re-appended — and
+   if the local file lost it (a rebase dropped it), the append happens but the commit
+   checks the remote's copy first.
+2. A retried close with the identical marker lands one line and one commit on the remote,
+   whatever the local file holds.
+
+### Tests
+
+- Unit (`test/unit/course-markers.test.ts` or its home): a push that fails then succeeds
+  appends once; a re-run over an existing identical line appends nothing and pushes
+  nothing.
+
+### Exit criteria
+
+- [ ] a retried close is invisible in `markers.jsonl` beyond the first line
