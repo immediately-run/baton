@@ -2021,7 +2021,13 @@ mean (R-BTN-50).
     completion rule it closes: the command's exit **is** the agent's, so a harness whose client
     can exit before its work (a client of a background service) must run its session in process
     (`opencode run --standalone`, or the equivalent) — else its truncated output fails the leg
-    while an orphaned session outlives and out-posts its claim.
+    while an orphaned session outlives and out-posts its claim. A leg whose stub claims a PR on
+    the forge — `create-pr`'s `implement` — verifies it there before returning its position (B-81):
+    an open PR on a branch its course's `branch_pattern` maps to the ticket, in the checkout's
+    repository or one the ticket's `repos:` names (B-29), and the checkout's branch, when it feeds
+    such a PR, a head the PR contains — the review reads what is pushed. What cannot be verified
+    fails the leg naming what was looked for; the stub reports, never retries. The test kit fails
+    such a stub that returns its position for an `agent_command` exiting 0 with no PR.
   - **Overrides replace `run`, never `close`.** A home's `legs/<leg>.run.<ext>` exports
     `run(ctx, standard)`; the leg script imports it from the leg tree at the claim's snapshot and
     calls it instead of its own `run`, keeping its own `close`. Its position must be an edge
