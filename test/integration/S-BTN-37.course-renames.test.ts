@@ -1,4 +1,4 @@
-// S-BTN-37 a course changes under a claim — the rename half (BATON_SPEC §13a, R-BTN-64, R-BTN-22;
+// S-BTN-37 a course changes under a claim — the rename half (BATON_SPEC §15, R-BTN-64, R-BTN-22;
 // R3-1232): while W1 runs fix, roadmap-pr merges a course file renaming fix to address
 // (`renamed_from: fix`) and adding a station, raising `version` but not `min_worker_version`.
 // Must hold: W1's claim carries over — Baton rewrites its leg to address, its next advance into

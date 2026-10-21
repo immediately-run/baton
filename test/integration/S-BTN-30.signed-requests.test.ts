@@ -1,4 +1,4 @@
-// S-BTN-30 signed requests (BATON_SPEC §13a, §10.1 R-BTN-13 as amended; G-BTN-55; R3-1239): a
+// S-BTN-30 signed requests (BATON_SPEC §15, §11.1 R-BTN-13 as amended; G-BTN-55; R3-1239): a
 // worker's request is an RFC 9421 signature whose value is an SSHSIG in the `baton-request`
 // namespace, by a registered key of one of the four types. Must hold: a replay within 5 minutes,
 // one signed 6 minutes ago and one by a revoked key are refused `unauthenticated`; a request
@@ -6,7 +6,7 @@
 // signature presented as a request's is refused (namespace); fresh signed requests by every key
 // type pass, with and without a body. Runs on both hosts.
 //
-// The probe clause is amended by R-BTN-101 (§2l): a probe reports on any registered instance, so
+// The probe clause is amended by R-BTN-101 (§6.3): a probe reports on any registered instance, so
 // a reading outside the instances it was registered with is accepted; a key in another role is
 // refused at the probe's route.
 import { describe, it, expect, beforeEach } from 'vitest';

@@ -1,4 +1,4 @@
-// S-BTN-16 cutover (BATON_SPEC §13a, §13 step 3, R-BTN-28), the server half: shadow → cutover
+// S-BTN-16 cutover (BATON_SPEC §15, §16.1 R-BTN-28), the server half: shadow → cutover
 // with an in-flight git claim. Must hold: the legacy claim imported and adoptable on owner
 // confirmation (G-BTN-19); cutover is one-way (G-BTN-35, server half). The clone's sticky
 // marker and git fallback are R3-1219's.

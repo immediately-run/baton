@@ -1,9 +1,9 @@
-// S-BTN-22 review queue bound (BATON_SPEC §13a, R-BTN-41, R-BTN-45, §7.2's default order; R3-1232):
-// eight tickets wait for review, none with room. Core's half: with no hook (or a failing one) the
-// default order applies — expedite, then resume before start (`to_end`), rank, age, id — nothing is
-// flagged, and a worker that claims against the order is accepted and records the override.
-// (`roadmap-pr`'s hook sorting `implement` legs last, flagged `wip-bound`, is R3-1235's on R3-1236's
-// hooks.) Runs on both hosts.
+// S-BTN-22 review queue bound (BATON_SPEC §15, R-BTN-45, §6.6's default order; R3-1232): eight
+// tickets wait for review, none with room. No core rule bounds the queue — that rule retired with
+// the rewrite; the bound is `roadmap-pr`'s ranking code in docs, and core counts `max_queue`
+// (R-BTN-79). Core's half: the default order applies — expedite, then resume before start
+// (`to_end`), rank, age, id — nothing is flagged, and a worker that claims against the order is
+// accepted and records the override. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { claimItem, cutover, Git, placed, register, rows, setClock, workerCall } from '../helpers';
 

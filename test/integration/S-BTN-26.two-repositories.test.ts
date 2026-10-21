@@ -1,5 +1,5 @@
-// S-BTN-26 two repositories, two courses (BATON_SPEC §2a R-BTN-47, R-BTN-48, §7.1, §10.3
-// R-BTN-15, R-BTN-61, §6.3), the clauses R3-1231 delivers: a second repository `ops` with weight
+// S-BTN-26 two repositories, two courses (BATON_SPEC §3.1 R-BTN-47, R-BTN-48, §4.3, §3.2
+// R-BTN-15, R-BTN-61, §9.2), the clauses R3-1231 delivers: a second repository `ops` with weight
 // 50, its own course `runbook`, and tickets whose local ids docs also has. Must hold: `docs:T-1`
 // and `ops:T-1` are distinct tickets; `ops`' sync token cannot post `docs`' board; head, cutover
 // and events are each repository's own; every `docs` candidate ranks above every `ops` one; W1

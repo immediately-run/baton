@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // check-traces.mjs — replay each scenario's trace through the formal model (R3-1244; BATON_SPEC
-// §13a R-BTN-29–31): test/integration/trace.ts writes one ITF trace per scenario test, the
+// §15 R-BTN-29–31): test/integration/trace.ts writes one ITF trace per scenario test, the
 // steps Baton took with the state projection after each; this turns each into a deterministic
 // Quint run of model/baton.qnt — Baton's action, with the environment's steps that make it
 // possible (the holder's push, git moving, time passing), then the projection the model must
@@ -297,7 +297,7 @@ function translateStep(step, P, env, k) {
     const c = P.claims[id];
     const w = q(k.W(d.worker));
     if (!c) {
-      if (origin === '/v1/ui/cutover') return { end: `claim ${id} imported at cutover (a legacy claim; §13 step 3, not modelled)` };
+      if (origin === '/v1/ui/cutover') return { end: `claim ${id} imported at cutover (a legacy claim; §16.1, not modelled)` };
       if (step.kind !== 'request' || origin !== '/v1/runner/claim') return { reject: `claim ${id} made by ${origin}, which is no worker's claim` };
       if (!sameTags(d.worker)) return { end: `worker ${d.worker} claims with other tags than at its first claim (the model’s TAGS are constant)` };
       if (d.leg !== '' || d.finished.length || d.status !== 'active') return { reject: `claim ${id} created already advanced or ended` };
@@ -384,7 +384,7 @@ function applyPost(Q, env, k) {
     for (let x = g.length; x > common; x--) acts.push(`regress(${q(t)})`);
     g = g.slice(0, common);
     for (const l of target.slice(common)) {
-      if (!FROM[l]?.includes(stationOf(g))) return { end: `${t}'s posted path ${target.join(',')} is off the course graph (§2e: git can hold it; Baton logs off-graph — not modelled)` };
+      if (!FROM[l]?.includes(stationOf(g))) return { end: `${t}'s posted path ${target.join(',')} is off the course graph (§5.3: git can hold it; Baton logs off-graph — not modelled)` };
       acts.push(`foreignPush(${q(t)}, ${q(l)})`);
       g = [...g, l];
     }

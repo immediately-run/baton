@@ -10,7 +10,10 @@
 //   docs; a citation of a retired id (spec/BATON_SPEC_HISTORY.md's Retired requirements table) is
 //   a warning, so the code that still names it can be cleaned up without breaking the check;
 // - every ticket the spec cites (`R3-n`, `B-n`) is a ticket in tickets/ or tickets/archive/;
-// - none of the scrub's terms (SCRUBBED) is in the spec: the repository is public.
+// - none of the scrub's terms (SCRUBBED) is in the spec: the repository is public;
+// - every test/integration/ file named for a scenario (`S-BTN-n.*.test.ts`) names one §15's
+//   scenario table defines and not one the history retired (B-71) — the RETIRED_TESTS_ALLOWED
+//   list holds the two retired files that still test their rows until B-67 deletes them.
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,23 +50,55 @@ export function retiredIds(history) {
   return new Set([...section.matchAll(/^\| *(R-BTN-\d+)\b/gm)].map((m) => m[1]));
 }
 
+/** The scenario ids the spec's §15 scenario table defines: the first cell of each row of its
+ *  `### Scenarios` table (ids named in a row's other cells, or by a gate, are not rows). */
+export function scenarioIds(spec) {
+  const table = spec.split(/^### /m).find((s) => s.startsWith('Scenarios')) ?? '';
+  return new Set([...table.matchAll(/^\| *(S-BTN-\d+)\b/gm)].map((m) => m[1]));
+}
+
+/** The retired scenario ids: the S-BTN ids of the history's `## Retired scenarios and gates`
+ *  table (its G-BTN rows are gates, not scenarios). */
+export function retiredScenarioIds(history) {
+  const section = history.split(/^## /m).find((s) => s.startsWith('Retired scenarios and gates')) ?? '';
+  return new Set([...section.matchAll(/^\| *(S-BTN-\d+)\b/gm)].map((m) => m[1]));
+}
+
+/** Test files that may stay named for a retired scenario: they still test their (retired) rows,
+ *  and B-67 deletes them — empty the list then. */
+export const RETIRED_TESTS_ALLOWED = ['S-BTN-46', 'S-BTN-60'];
+
+/** The scenario a test file is named for (`S-BTN-2.silent-runner.test.ts` → `S-BTN-2`), if any. */
+export function fileScenario(name) {
+  return /^(S-BTN-\d+)\./.exec(name)?.[1] ?? null;
+}
+
 /** Every `R-BTN-n` in a text. */
 export function citedIds(text) {
   return new Set([...text.matchAll(/\bR-BTN-(\d+)\b/g)].map((m) => `R-BTN-${m[1]}`));
 }
 
-/** The problems with a spec, given the code's texts by path and the ticket ids that exist. */
-export function check(spec, code, tickets, history = '') {
+/** The problems with a spec, given the code's texts by path, the ticket ids that exist, the
+ *  history file and the names of test/integration/'s files. */
+export function check(spec, code, tickets, history = '', testNames = []) {
   const problems = [];
   const warnings = [];
   const defined = new Set([...definedIds(spec), ...COURSE_IDS]);
   const retired = retiredIds(history);
+  const scenarios = scenarioIds(spec);
+  const retiredScenarios = retiredScenarioIds(history);
   for (const [path, text] of code) {
     for (const id of citedIds(text)) {
       if (defined.has(id)) continue;
       if (retired.has(id)) warnings.push(`${path} cites ${id}, which is retired (spec/BATON_SPEC_HISTORY.md)`);
       else problems.push(`${path} cites ${id}, which the spec does not define`);
     }
+  }
+  for (const name of testNames) {
+    const id = fileScenario(name);
+    if (!id || RETIRED_TESTS_ALLOWED.includes(id)) continue;
+    if (retiredScenarios.has(id)) problems.push(`test/integration/${name} is named for the retired scenario ${id} (spec/BATON_SPEC_HISTORY.md)`);
+    else if (!scenarios.has(id)) problems.push(`test/integration/${name} is named for ${id}, which §15's scenario table does not define`);
   }
   for (const id of new Set([...spec.matchAll(/(?<![\w-])(R3-\d+|B-\d+)\b/g)].map((m) => m[1]))) {
     if (!tickets.has(id) && !EXAMPLE_TICKETS.includes(id)) problems.push(`the spec cites ${id}, which is not a ticket here`);
@@ -92,12 +127,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     .filter((n) => n.endsWith('.mdx')).map((n) => n.slice(0, -4)));
   const historyPath = join(REPO, 'spec', 'BATON_SPEC_HISTORY.md');
   const history = existsSync(historyPath) ? readFileSync(historyPath, 'utf8') : '';
-  const problems = check(spec, code, tickets, history);
+  const integration = join(REPO, 'test', 'integration');
+  const testNames = existsSync(integration) ? readdirSync(integration) : [];
+  const problems = check(spec, code, tickets, history, testNames);
   for (const w of problems.warnings) console.warn(`! ${w}`);
   if (problems.length) {
     for (const p of problems) console.error(`✗ ${p}`);
     console.error(`check-spec: ${problems.length} problem(s)`);
     process.exit(1);
   }
-  console.log(`check-spec OK — ${definedIds(spec).size} requirements; ${code.length} code files cite only those`);
+  console.log(`check-spec OK — ${definedIds(spec).size} requirements; ${code.length} code files cite only those; ${testNames.filter((n) => fileScenario(n)).length} scenario test files each name a §15 row`);
 }

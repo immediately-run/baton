@@ -1,4 +1,4 @@
-// S-BTN-15 stale skills (BATON_SPEC §13a, R-BTN-22, R-BTN-48, R-BTN-65): a worker declaring
+// S-BTN-15 stale skills (BATON_SPEC §15, R-BTN-22, R-BTN-48, R-BTN-65): a worker declaring
 // `roadmap-pr` below the registry's `min_worker_version`. Must hold: no new claim on its tickets
 // (`stale-skills`); its held claim finishes.
 import { describe, it, expect, inject, beforeEach } from 'vitest';

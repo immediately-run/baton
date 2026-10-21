@@ -1,4 +1,4 @@
-// S-BTN-66 entry requirements (BATON_SPEC §13a, §2m.2 R-BTN-109; B-3): `reviewed` requires
+// S-BTN-66 entry requirements (BATON_SPEC §15, §5.5 R-BTN-109; B-3): `reviewed` requires
 // `findings` of `roadmap-pr:findings@2`; a leg reaches it with no `findings`, then with an inline
 // value, then with a pointer. Must hold: the first advance is refused, rule `entry`; the second is
 // accepted and validated in full. The third is accepted here; the sync's posting it invalid, the

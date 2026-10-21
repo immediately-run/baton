@@ -1,8 +1,9 @@
-// S-BTN-55 the sync key (BATON_SPEC §13a, §2k R-BTN-93; G-BTN-82; R3-1262): a repository's sync
+// S-BTN-55 the sync key (BATON_SPEC §15, §3.2 R-BTN-93; G-BTN-82; R3-1262): a repository's sync
 // and mirror may sign with a sync key — one repository, one role — instead of a CI identity token.
 // Must hold: the sync key's post is accepted; registering a key that already serves a repository is
-// `conflict`; a worker key's and the mirror key's posts are `forbidden`; a revoked key's post and a
-// replay are `unauthenticated`; a worker key cannot become a sync key. Runs on both hosts.
+// `conflict`; a machine key's — with `machine_sync` off, today the only kind (R3-1270 adds the
+// sync-on case) — and the mirror key's posts are `forbidden`; a revoked key's post and a replay are
+// `unauthenticated`; a worker key cannot become a sync key. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { HOST, ORIGIN, payload, rows, setClock, SSH_KEYS, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';

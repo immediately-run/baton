@@ -1,5 +1,5 @@
 // trace.ts — every scenario's run as a trace the formal model can accept or reject (R3-1244;
-// BATON_SPEC §13a R-BTN-29–31, §4 `events`). The local host records each request and each alarm
+// BATON_SPEC §15 R-BTN-29–31, §13 `events`). The local host records each request and each alarm
 // tick as one step with the state projection after it; `scripts/check-traces.mjs` replays the
 // steps through model/baton.qnt. Only the local project records: the two hosts run the same
 // core (S-BTN-31), so one trace per scenario test is the record.

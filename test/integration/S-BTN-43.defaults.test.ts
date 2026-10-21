@@ -1,10 +1,10 @@
-// S-BTN-43 a repository with no course code (BATON_SPEC §13a S-BTN-43, §2f R-BTN-74; R3-1249):
+// S-BTN-43 a repository with no course code (BATON_SPEC §15 S-BTN-43, §4.2 R-BTN-74; R3-1249):
 // a fresh repository with a `tickets/` wiki of five items (one `depends_on` another, one
 // `done`, one with an unknown frontmatter field, one file without `id`) runs `baton repo init` and
 // its sync with no `.baton/tickets.mjs` or `sync.mjs`; a PR opens for one ticket, checks pass,
 // a review requests changes, a fix is pushed, a review approves, the PR merges and the item is
 // marked `done`; then `baton repo init --eject tickets` and an edit to the copy. Must hold: four
-// tickets on the `pr` course (the file without `id` is none, the `done` one closed); the
+// tickets on the `create-pr` course (the file without `id` is none, the `done` one closed); the
 // dependent ticket is not ready until its dependency is done; the ticket moves
 // filed → pr-open (review waiting on ci, then ready) → reviewed (fix ready) → fixed → reviewed
 // (merge ready) → merged; after the eject the edited source's tickets are posted; Baton's

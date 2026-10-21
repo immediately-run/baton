@@ -1,4 +1,4 @@
-// S-BTN-34 progress is not staleness (BATON_SPEC §13a, §2e, R-BTN-35; R3-1232): W1 runs fix, pushes
+// S-BTN-34 progress is not staleness (BATON_SPEC §15, §5.3, R-BTN-35; R3-1232): W1 runs fix, pushes
 // and advances into review before any sync, then waits on CI under its claim while syncs still
 // place the ticket at reviewed; a ticket W2 holds is withdrawn; a third claim's PR is closed so its
 // path goes backwards. Must hold: W1's claim stays active (its path only lagged) and its next

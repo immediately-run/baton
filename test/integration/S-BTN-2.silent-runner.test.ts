@@ -1,4 +1,4 @@
-// S-BTN-2 silent worker reaped (BATON_SPEC §13a), the server half: a worker's sidecar dies and
+// S-BTN-2 silent runner reaped (BATON_SPEC §15), the server half: a worker's sidecar dies and
 // the clock passes its lease timeout. Must hold: reaped exactly at the timeout; the item is
 // re-issued; the dead session can no longer act on it (its heartbeat is worker-reaped, and the
 // holder query its pre-push hook asks names another holder). The client half is R3-1213's.
@@ -14,7 +14,7 @@ beforeEach(async () => {
   await cutover();
 });
 
-describe('S-BTN-2 silent worker reaped (server half)', () => {
+describe('S-BTN-2 silent runner reaped (server half)', () => {
   it('reaped exactly at its timeout, the item re-issued, the dead session fenced out', async () => {
     const dead = await register('vm-a');
     const { json: c } = await claimItem('vm-a', dead.secret, { ticket_id: 'docs:R3-9001' });

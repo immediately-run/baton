@@ -1,4 +1,4 @@
-// S-BTN-40 slow and stale syncs, end to end (BATON_SPEC §13a, §2e, R-BTN-10, R-BTN-62; R3-1232): W1
+// S-BTN-40 slow and stale syncs, end to end (BATON_SPEC §15, §5.3, R-BTN-10, R-BTN-62; R3-1232): W1
 // runs filed → merged through two review loops and archives; every sync is slow, one arrives
 // during a held force-push, and the archive's sync takes its number before W1's /end. Must hold:
 // every advance is accepted as an edge; no sync ends the claim stale; the held post's stations are
