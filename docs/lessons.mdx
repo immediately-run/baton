@@ -1,0 +1,109 @@
+---
+title: Lessons learned
+description: What real runs taught us about running Baton — one dated entry per lesson, each with its evidence and what changed. Read before operating an instance or a runner; append when a run surprises you.
+tags: [lessons]
+order: 45
+---
+
+<Lede>The durable home for what real runs taught: every entry is dated, names its
+evidence, and says what changed. A lesson that a ticket or a PR carries links it; one
+still waiting for its fix says so.</Lede>
+
+How to use this page:
+
+- **Before operating** an instance or a runner, read the entries marked *still true*.
+- **After a run that surprised you**, append one entry at the bottom: the date, one
+  paragraph of what happened with links, one bold sentence carrying the lesson, and what
+  changed. Never edit an old entry except to flip its status when its fix lands.
+- A lesson is bigger than a bug: it is a way we were wrong about how the system behaves.
+  Bugs go to `tickets/`; the lesson is what the bug taught about operating Baton.
+
+## 2026-10-21 — the self-hosting gap analysis and the first acceptance run
+
+The full story is
+[`review/gap-analysis-2026-10-21.mdx`](review/gap-analysis-2026-10-21.mdx); the run
+registered this repository on `https://baton.immediately.run`, cut it over from its
+first ticket, and took B-80 from a claim to a merged PR ([#81](https://github.com/immediately-run/baton/pull/81)).
+These are its lessons, newest understanding first.
+
+- **A reverse proxy in front of the machine API breaks every operator command, and a
+  client that follows redirects calls the failure success.** Cloudflare Access covered
+  everything but `/v1/sync/*` and `/v1/runner/*`; the CLI followed the 302, the login
+  page answered `200`, and `baton admin repo add` printed `null`, **exit 0**. Fixed
+  both ways: twelve bypass apps for the six self-authenticated machine paths (the
+  dashboard keeps Access — it is its principal), and the CLI refuses redirects and
+  non-JSON 2xx answers ([B-80](https://github.com/immediately-run/baton/pull/81)).
+  *Status: fixed; re-verify with the probes in the report if the Access config ever
+  changes.*
+
+- **The leg stub trusts the agent's exit code, not its outcome.** B-71's implement
+  agent finished with exit 0 having committed nothing and opened no PR; the stub
+  returned `pr-open`, the claim advanced to a review of nothing, and the round burned
+  half an hour before a human stopped it. The board cannot fence this: no sync ever
+  showed `pr-open`, so there was nothing to regress from. **A leg's `run` must verify
+  its own outcome before returning its position** — for `create-pr`'s implement, that a
+  PR of the branch pattern exists. *Status: filed as [B-81](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-81.mdx);
+  the instructions alone did not enforce it.*
+
+- **A machine reads the agent's last line; the agent must be told so, in the place it
+  reads.** The first review round was refused — verdict prose around the word — and the
+  claim released cleanly (`cannot-finish:transient`), which is the design working; the
+  failure was the prompt's. [PR #82](https://github.com/immediately-run/baton/pull/82)
+  spells the contract out in the leg instructions and `agent_command`. **Result-dependent
+  legs say "a machine parses your last line: exactly the value word, optionally one URL,
+  nothing after."** *Status: instructions hardened; a tolerant parser in the stub is
+  still open.*
+
+- **The backstop sync's cron does not fire.** In three hours of a 15-minute schedule,
+  GitHub ran it zero times; every board refresh came from a push or a manual dispatch.
+  A stale board is not just missing news — it is what the regression fence needs to do
+  its work. **Between pushes, dispatch `baton-sync.yml` when freshness matters.**
+  *Status: still true; a more reliable trigger (webhook-driven, or a shorter external
+  cron) is open.*
+
+- **A failed sync leaves its observation outstanding, and the next sync within ten
+  minutes goes `busy` — exit 0, nothing posted.** The 10:34 failure (the `repos: [docs]`
+  404) cascaded `busy` through the next two pushes; the filing of B-80 waited two syncs
+  for no visible reason. This is R-BTN-62 voiding as designed, but it looks like
+  success. **After a failed sync, expect one silent `busy`; check the outcome line, not
+  the green check.** *Status: still true (by design); worth a louder log.*
+
+- **A repository's own tickets name it in `repos:`, and `repo init` writes an empty
+  `repos` map.** The default source refuses the whole board until the map resolves every
+  short name; and any `.mdx` with an `id` under `items` boards as a ticket, including
+  Grove project pages. **Self-hosting needs the map filled and the source scoped** —
+  ours is `.baton/tickets.mjs`, top-level `*.mdx` plus `archive/` (PRs
+  [#77](https://github.com/immediately-run/baton/pull/77),
+  [#80](https://github.com/immediately-run/baton/pull/80)). *Status: fixed for this
+  repository; the defaults remain a trap for the next self-hoster.*
+
+- **`--harness` is telemetry; `agent_command` is the runner.** `baton run` reports the
+  harness in its heartbeat and spawns nothing with it — the legs run
+  `.baton/baton.json`'s `agent_command`, whose init default is `echo`: a first run
+  "succeeds" every leg with a no-op agent. **Set a real `agent_command` before the
+  first claim, pin its model, and redirect its stdin** — the stub's `sh -c` environment
+  hangs `opencode run` deterministically without `< /dev/null` (root cause still
+  unexplained; ruled out: signals, trust prompts, the service). *Status: still true;
+  documented only here and in the report.*
+
+- **The runner declares `--capabilities agent-venue` and nothing else, whatever the
+  grant allows.** The first acceptance runner registered, recommended, and idled — the
+  gate had no `create-pr` capability to match the course's legs; the silence was total.
+  **Pass `--capabilities` to match the grant.** *Status: still true; the runbook's
+  `baton run` line omits it.*
+
+- **A seeded second repository changes what tests mean, not just what they read.** The
+  transcript allow-list is a union over registered repositories; a bare claim's refusal
+  code flips with `anyCutOver()`; state views gain a row. Sixteen assertions across
+  eight files assumed one registered repository. **When `BATON_REPOSITORIES` changes,
+  run the suite before anything else** (PRs
+  [#78](https://github.com/immediately-run/baton/pull/78),
+  [#79](https://github.com/immediately-run/baton/pull/79) — and read the failed list
+  without truncation; the sixteenth failure hid behind a `head -15`). *Status: fixed;
+  the lesson is the reading habit.*
+
+- **One repository, one Baton.** The owner's decision: a git repository is served by a
+  single Baton, because two boards drift and contradict; staging does not register this
+  repository, and the seed lives in the top-level (production) vars only. Registration
+  is live now but survives fresh deployments only through that seed agreeing with what
+  `admin repo add` wrote. *Status: policy.*

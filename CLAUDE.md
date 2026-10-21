@@ -20,6 +20,9 @@ sections it cites before changing anything. See `README.md` for the layout.
 - **Validate before you write.** Every worker- or owner-supplied field goes through
   `src/core/validate.ts` before any SQL; a heartbeat's writes run in one `store.transaction`.
 - **Every behaviour change names its `S-BTN-n` scenario** (R-BTN-31) and keeps `npm test` green.
+- **Log what a run taught.** When operating Baton (an instance, a runner, a sync) surprises
+  you, append one dated entry to `docs/lessons.mdx` — evidence links, one bold lesson,
+  what changed — and read that page before the next operational work.
 
 ## Commands
 
