@@ -109,6 +109,18 @@ These are its lessons, newest understanding first.
 
 ## 2026-10-21 — the resumed loop: B-71's review rounds
 
+- **A leg's close can outlive its claim — and silence the runner with it.** B-83's
+  implement agent finished at 16:09; the runner's heartbeats stopped at 17:28 with the
+  process alive; the leg's result landed at 18:09 — a two-hour close; the server reaped
+  the claim (`reaped:silent`); the runner then died with no log line and no crash
+  report. The morning's identical `reaped:silent` (then "unexplained") was the same
+  thing. The close's `git push` is unbounded — no timeout, no terminal to answer an ssh
+  prompt — and whatever blocked the runner's loop beside it, the heartbeat timer is
+  independent by design, so silence means the loop itself was blocked. **Bound every git
+  call (`GIT_TERMINAL_PROMPT=0`, ssh BatchMode, a kill on timeout), and never accept a
+  traceless death: a runner's shutdown must log.** Filed as
+  [B-94](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-94.mdx).
+
 - **The client's exit is not the agent's word.** `opencode run` is a client of a
   background service. In B-71's first review round, subagent launches on other providers
   errored; the client exited at 14:55 mid-review; the stub read truncated stdout, found
