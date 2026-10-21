@@ -20,9 +20,12 @@ const STATIC: Record<string, [string, string]> = {
   '/ui/app.css': [style, 'text/css; charset=utf-8'],
   '/ui/app.js': [script, 'text/javascript; charset=utf-8'],
 };
-/** What anyone may fetch: the login page and the code it runs, which hold no data (R-BTN-57's
- *  one-time link is opened before any session exists). The dashboard and its API need a principal. */
-const PUBLIC = new Set(['/login', '/ui/app.css', '/ui/app.js']);
+/** What anyone may fetch: the dashboard and login pages and the code they run. The two pages
+ *  are the same bytes and hold no data (R-BTN-57's one-time link is opened before any session
+ *  exists); an unauthenticated browser gets the page all the same — the app itself says what
+ *  it needs (`baton admin open`) and recovers when the session cookie lands — while every
+ *  data call under `/v1/ui` keeps its principal and its refusal (R-BTN-16). */
+const PUBLIC = new Set(['/', '/login', '/ui/app.css', '/ui/app.js']);
 
 function cookie(req: Request, name: string): string | null {
   for (const part of (req.headers.get('Cookie') ?? '').split(';')) {
@@ -146,8 +149,8 @@ async function route(req: Request, env: Config, to: Forward): Promise<Response> 
       if (req.method !== 'GET' && req.method !== 'HEAD') checkStateChanging(req, env);
       return forward(req, to, principal);
     }
-    // The dashboard page: the core checks the principal — a session against what it keeps, Access
-    // alone only while no administrator key is configured.
+    // An exotic /ui/ path that is not one of the public files: the principal decides whether
+    // even the not-found is named (the dashboard pages themselves are in PUBLIC, above).
     const ok = await forward(new Request(new URL('/v1/ui/session', req.url)), to, principal);
     if (!ok.ok) return ok;
     return serve(pathname, req);

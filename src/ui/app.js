@@ -535,6 +535,16 @@ async function poll() {
   const mine = ++latest;
   try {
     const res = await fetch('/v1/ui/state', { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(POLL_MS) });
+    if (res.status === 401) {
+      // A session question, not a load failure: say what to do and keep polling — the page
+      // recovers on its own once a session cookie lands (R-BTN-57's one-time link).
+      if (mine !== latest) return;
+      document.getElementById('head').textContent =
+        'This dashboard needs a session. Cloudflare Access alone does not open one while administrator keys are configured.';
+      document.getElementById('status').textContent =
+        'Run `baton admin open` and open its one-time link; this page recovers by itself.';
+      return;
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const next = await res.json();
     if (mine !== latest) return;
