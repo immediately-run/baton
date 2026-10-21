@@ -6,7 +6,7 @@
     "baton": "immediately-run/baton",
     "docs": "immediately-run/docs"
   },
-  "agent_command": "opencode run --auto --model zai-coding-plan/glm-5.3 \"You are the $BATON_LEG leg of the $BATON_COURSE course for ticket $1. Read the file named by $BATON_INSTRUCTIONS and follow it exactly. The ticket file is $BATON_TICKET_FILE. Work in the current repository checkout. $BATON_ANSWER \u2014 when that answer rule is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it.\" < /dev/null",
+  "agent_command": "opencode run --standalone --auto --model zai-coding-plan/glm-5.3 \"You are the $BATON_LEG leg of the $BATON_COURSE course for ticket $1. Read the file named by $BATON_INSTRUCTIONS and follow it exactly. The ticket file is $BATON_TICKET_FILE. Work in the current repository checkout. $BATON_ANSWER \u2014 when that answer rule is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it.\" < /dev/null",
   "courses": [
     {
       "id": "create-pr",
