@@ -2,7 +2,7 @@
 title: "B-81 — The implement stub trusts the agent's exit code, not its outcome"
 id: B-81
 project: baton
-status: available
+status: done
 updated: 2026-10-21
 tags:
   - roadmap-item
@@ -18,8 +18,8 @@ depends_on: []
 ---
 
 **Brief:** the first acceptance run of R3-1266, 2026-10-21
-([`docs/review/gap-analysis-2026-10-21.mdx`](../docs/review/gap-analysis-2026-10-21.mdx) and
-[`docs/lessons.mdx`](../docs/lessons.mdx)): B-71's implement agent finished with exit 0 having
+([`docs/review/gap-analysis-2026-10-21.mdx`](../../docs/review/gap-analysis-2026-10-21.mdx) and
+[`docs/lessons.mdx`](../../docs/lessons.mdx)): B-71's implement agent finished with exit 0 having
 committed nothing and opened no PR; the stub returned `pr-open` anyway, the claim advanced to a
 review of nothing, and the round burned half an hour before a human stopped it.
 **Spec:** `spec/BATON_SPEC.md` §5.8 R-BTN-131 (the standard courses' stubs), §2f R-BTN-74
