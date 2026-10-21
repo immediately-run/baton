@@ -1,0 +1,51 @@
+---
+title: "B-92 — The GitHub webhook path is reachable but unverified end to end"
+id: B-92
+project: baton
+status: available
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 490
+tier: routine
+description: "The Access bypass apps let deliveries reach /v1/github/webhook (it answers 403 to an unsigned probe, correctly), but no live delivery has been proven — the App's configuration and BATON_GITHUB_WEBHOOK_SECRET in production are unverified, and R-BTN-73's windowing has never run here."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the gap-analysis run (finding 1's follow-on): the twelve Access bypass apps made
+`POST /v1/github/webhook` reachable (it answers 403 to an unsigned probe, correctly), but
+nothing in the session proved a real delivery arrives — the GitHub App's configuration and
+`BATON_GITHUB_WEBHOOK_SECRET` in production are unverified, and R-BTN-73's windowing has
+never run against a live delivery here.
+**Spec:** §7 (R-BTN-73: the deliveries), the README's webhook section.
+
+### Why
+
+The webhook drives the sync dispatch (B-89's reliable trigger) and the push filters; an
+unconfigured App makes all of that dead code in production, silently.
+
+### What to build
+
+1. The GitHub App is configured (or created, if it is not) to deliver this repository's
+   events to `https://baton.immediately.run/v1/github/webhook`, and
+   `BATON_GITHUB_WEBHOOK_SECRET` is set in both environments.
+2. One live smoke: a push to a throwaway branch on a registered repository, the delivery
+   verified in Baton (a dispatched sync in the ticket history or the workers view), and the
+   repeat-delivery idempotency (the same delivery id twice, one dispatch) checked on the
+   way past.
+3. The runbook gains the App configuration as a step with its check, beside the Access
+   rules.
+
+### Tests
+
+- The smoke is the test; a unit test already covers the parser, so what is verified here is
+  the plumbing: secret set, App delivering, window coalescing on real events.
+
+### Exit criteria
+
+- [ ] a push to a registered repository dispatches its sync, observed in Baton
+- [ ] the runbook's webhook step is checkable by a fresh operator
