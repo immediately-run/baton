@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { courseSchemas, githubFacts, parseSyncArgs, remoteSlug, syncWorkflow } from '../../src/defaults/cli';
+import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { githubFake } from '../githubFake';
@@ -69,7 +70,12 @@ describe('baton repo init, through the built CLI', () => {
 
   it('writes the settings with every R-BTN-51 course field, the course file, the pinned workflow and the tickets directory', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
-    expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr', agent_command: 'echo' });
+    // B-83: a fresh scaffold names a real agent — the opencode command by default, never the
+    // bare `echo` stub.
+    expect(settings.agent_command).toBe(HARNESS_AGENTS.opencode);
+    expect(settings.agent_command).toContain('$BATON_INSTRUCTIONS');
+    expect(settings.agent_command.endsWith('< /dev/null')).toBe(true);
+    expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
     expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'review', 'fix', 'adjudicate', 'merge'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
@@ -100,6 +106,71 @@ describe('baton repo init, through the built CLI', () => {
     }
   }, 120_000);
 
+  it('--agent names the harness whose command agent_command is (printed for the unfamiliar); --agent-command names one outright — the bare echo only explicitly (B-83)', () => {
+    /** One scaffold with `flags`; its settings' agent_command, and everything init said. */
+    const scaffold = (...flags: string[]): { dir: string; command: string; said: string } => {
+      const dir = mkdtempSync(join(tmpdir(), 'baton-agent-'));
+      gitInit(dir);
+      const said = baton(dir, 'repo', 'init', '--pin', PIN, ...flags);
+      const command = (JSON.parse(readFileSync(join(dir, '.baton', 'baton.json'), 'utf8')) as { agent_command: string }).agent_command;
+      return { dir, command, said };
+    };
+    const run = (s: { dir: string; command: string; said: string }): string => s.command;
+    // The default is opencode's validated command — model pinned, stdin closed — and init
+    // prints it for the unfamiliar.
+    const def = scaffold();
+    try {
+      expect(def.command).toBe(HARNESS_AGENTS.opencode);
+      expect(def.command).toContain('--model zai-coding-plan/glm-5.3');
+      expect(def.command).toContain('$BATON_INSTRUCTIONS');
+      expect(def.command.endsWith('< /dev/null')).toBe(true);
+      expect(def.said).toContain(def.command);
+    } finally {
+      rmSync(def.dir, { recursive: true, force: true });
+    }
+    const cc = scaffold('--agent', 'claude-code');
+    try {
+      expect(cc.command).toBe(HARNESS_AGENTS['claude-code']);
+      expect(cc.command).toContain('--permission-mode bypassPermissions');
+      expect(cc.said).toContain(cc.command);
+    } finally {
+      rmSync(cc.dir, { recursive: true, force: true });
+    }
+    const own = scaffold('--agent-command', 'my-agent --flag');
+    try {
+      expect(own.command).toBe('my-agent --flag');
+    } finally {
+      rmSync(own.dir, { recursive: true, force: true });
+    }
+    // The no-op stub is named explicitly or not at all.
+    const stub = scaffold('--agent-command', 'echo');
+    try {
+      expect(run(stub)).toBe('echo');
+    } finally {
+      rmSync(stub.dir, { recursive: true, force: true });
+    }
+    // A scaffold from before B-83 (agent_command "echo"): re-running init replaces the stub
+    // with the chosen harness's command, loudly; an explicit --agent switches harnesses; a
+    // repository's own command is kept, as its own.
+    const old = scaffold('--agent-command', 'echo');
+    try {
+      const command = (): string => (JSON.parse(readFileSync(join(old.dir, '.baton', 'baton.json'), 'utf8')) as { agent_command: string }).agent_command;
+      const replaced = baton(old.dir, 'repo', 'init', '--pin', PIN);
+      expect(command()).toBe(HARNESS_AGENTS.opencode);
+      expect(replaced).toContain('no-op stub');
+      expect(replaced).toContain(HARNESS_AGENTS.opencode);
+      baton(old.dir, 'repo', 'init', '--pin', PIN, '--agent', 'claude-code');
+      expect(command()).toBe(HARNESS_AGENTS['claude-code']);
+      baton(old.dir, 'repo', 'init', '--pin', PIN, '--agent-command', 'mine');
+      expect(command()).toBe('mine');
+      const kept = baton(old.dir, 'repo', 'init', '--pin', PIN);
+      expect(command()).toBe('mine');
+      expect(kept).toContain('kept .baton/baton.json');
+    } finally {
+      rmSync(old.dir, { recursive: true, force: true });
+    }
+  }, 240_000);
+
   it('each leg stub imports only Node built-ins, so a scratch copy runs as the runner loads it', async () => {
     // A stub and its instructions per leg (R-BTN-131); the runner and the kit read only the .mjs.
     const files = readdirSync(join(root, '.baton', 'courses', 'create-pr', 'legs')).sort();
@@ -111,15 +182,23 @@ describe('baton repo init, through the built CLI', () => {
       const specifiers = [...text.matchAll(/^import .* from ["']([^"']+)["']/gm)].map((m) => m[1]);
       expect(specifiers.every((s) => s.startsWith('node:')), `${leg}: ${specifiers.join(', ')}`).toBe(true);
     }
-    // The runner copies each script alone into a scratch directory (src/runner/home.ts).
+    // The runner copies each script alone into a scratch directory (src/runner/home.ts). The
+    // scaffold's agent_command is B-83's real opencode command — which must not run mid-test —
+    // so the settings name a no-op, committed at the snapshot the stub reads.
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const scaffolded = readFileSync(settingsFile, 'utf8');
     const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
     try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'true' }));
+      const snapshot = { sha: commitAll(root) };
       copyFileSync(join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs'), join(scratch, 'implement.mjs'));
       const stub = await load(join(scratch, 'implement.mjs'));
       expect(typeof stub.close).toBe('function');
-      expect(await stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot: at(root) })).toEqual({ reached: 'pr-open', next: 'review' });
+      expect(await stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'pr-open', next: 'review' });
     } finally {
       rmSync(scratch, { recursive: true, force: true });
+      writeFileSync(settingsFile, scaffolded);
+      commitAll(root);
     }
   });
 
@@ -149,6 +228,51 @@ describe('baton repo init, through the built CLI', () => {
     } finally {
       delete process.env.VERDICT;
       writeFileSync(settingsFile, before);
+      commitAll(root);
+    }
+  });
+
+  it('the stub runs BATON_AGENT_COMMAND — what baton run --harness chose — when the snapshot’s settings name no agent_command; the settings win; neither names the fix (B-83)', async () => {
+    const agent = join(root, 'agent.sh');
+    writeFileSync(agent, '#!/bin/sh\necho "$1 $2 $3" > "$(dirname "$0")/agent.args"\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const fix = join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs');
+    const args = join(root, 'agent.args');
+    try {
+      // The settings name no agent_command: the environment's command runs the leg.
+      const noCommand = { ...JSON.parse(before) } as { agent_command?: string };
+      delete noCommand.agent_command;
+      writeFileSync(settingsFile, JSON.stringify(noCommand));
+      const snapshot = { sha: commitAll(root) };
+      process.env.BATON_AGENT_COMMAND = agent;
+      try {
+        expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'review' });
+        expect(readFileSync(args, 'utf8').trim()).toBe(`A-1 fix ${root}`);
+      } finally {
+        delete process.env.BATON_AGENT_COMMAND;
+      }
+      // The snapshot's own naming is authoritative: an environment command that would fail
+      // never runs, because the settings' command does.
+      writeFileSync(args, '');
+      writeFileSync(settingsFile, JSON.stringify({ ...noCommand, agent_command: agent }));
+      const named = { sha: commitAll(root) };
+      process.env.BATON_AGENT_COMMAND = '/nonexistent-baton-agent';
+      try {
+        expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: named })).toEqual({ reached: 'fixed', next: 'review' });
+        expect(readFileSync(args, 'utf8').trim()).toBe(`A-1 fix ${root}`);
+      } finally {
+        delete process.env.BATON_AGENT_COMMAND;
+      }
+      // Neither names one: the leg fails saying how to name one.
+      writeFileSync(settingsFile, JSON.stringify(noCommand));
+      const none = { sha: commitAll(root) };
+      await expect((await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: none })).rejects.toThrow('names no agent_command');
+      await expect((await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: none })).rejects.toThrow('baton repo init --agent opencode');
+    } finally {
+      writeFileSync(settingsFile, before);
+      rmSync(args, { force: true });
       commitAll(root);
     }
   });

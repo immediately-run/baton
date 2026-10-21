@@ -25,7 +25,7 @@ keeps until it switches.
 ## Adopting one
 
 ```
-npx baton repo init                       # create-pr, the settings and the sync workflow
+npx baton repo init                       # create-pr, the settings (agent_command among them) and the sync workflow
 npx baton repo init --course bug-report   # a second course beside the first
 ```
 
@@ -42,6 +42,50 @@ runner's legs work in its checkout's working tree (a second runner on a checkout
 npx baton run --course create-pr  --home ~/src/repo
 npx baton run --course bug-report --home ~/src/repo-bug-report
 ```
+
+## The agent that runs the legs
+
+Each leg's stub runs the command `.baton/baton.json` names in `agent_command` — a shell string,
+with the ticket id, the leg and the checkout as `$1`, `$2` and `$3`, and the leg's briefing in
+the environment (`BATON_COURSE`, `BATON_LEG`, `BATON_TICKET_FILE`, `BATON_INSTRUCTIONS`, and
+`BATON_ANSWER` on a leg whose last line is read). `baton repo init` names it for the harness you
+run, and prints the command for the unfamiliar:
+
+```
+npx baton repo init --agent opencode      # the default
+npx baton repo init --agent claude-code
+npx baton repo init --agent-command '<your own command>'
+```
+
+The two shipped commands, both validated on real runs (opencode on the acceptance runs of the
+self-hosting gap analysis; claude-code headless on a checkout, following the instructions file
+and editing the tree):
+
+```
+opencode run --auto --model zai-coding-plan/glm-5.3 "You are the $BATON_LEG leg of the $BATON_COURSE course for ticket $1. Read the file named by $BATON_INSTRUCTIONS and follow it exactly. The ticket file is $BATON_TICKET_FILE. Work in the current repository checkout. $BATON_ANSWER — when that answer rule is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it." < /dev/null
+```
+
+```
+claude -p --permission-mode bypassPermissions --model sonnet "You are the $BATON_LEG leg of the $BATON_COURSE course for ticket $1. Read the file named by $BATON_INSTRUCTIONS and follow it exactly. The ticket file is $BATON_TICKET_FILE. Work in the current repository checkout. $BATON_ANSWER — when that answer rule is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it." < /dev/null
+```
+
+Three details carry weight:
+
+- **The model is pinned.** An unpinned agent runs whatever the machine defaults to, and the
+  default moves under you. Change the pin in the command when your repository should run another
+  model.
+- **`< /dev/null` closes stdin.** The stub spawns the command through `sh -c`, an environment
+  that hangs `opencode run` deterministically with an open stdin (root cause unexplained; filed
+  as B-84, whose fix is to spawn without the shell). Until B-84 lands, keep the redirection.
+- **The prompt spells the last-line contract.** A result-dependent leg's answer is read from the
+  agent's last line; the prompt says so in the words the machine enforces.
+
+A runner refuses to start for a settings file whose `agent_command` is exactly `echo` — the
+no-op stub whose every leg "succeeds" while nothing happens. It is for tests, and tests pass
+`--test-harness` (which also declares `test_harness` on the heartbeat, so Baton refuses it from
+any credential but the test one). When the settings name no `agent_command` at all, `baton run
+--harness opencode|claude-code` runs that harness's command — the flag is the runner's word for
+its harness, and with no command named, it is the command.
 
 ## How each course finds where a ticket is
 
@@ -113,7 +157,8 @@ belongs in the leg's `.md` instead.
 The instructions are yours once scaffolded. Edit `.baton/courses/<course>/legs/<leg>.md` to
 match how your repository works: its checks, its review rubric, where its tickets live. A
 release of the CLI never touches them. Each leg's stub runs the command `.baton/baton.json`
-names in `agent_command`, with the ticket, the leg and the checkout as its arguments. It hands
+names in `agent_command` — [the two shipped ones are above](#the-agent-that-runs-the-legs) —
+with the ticket, the leg and the checkout as its arguments. It hands
 the agent the instructions, read at the claim's snapshot, through `BATON_INSTRUCTIONS`, so a
 branch under review cannot rewrite its reviewer's instructions.
 
