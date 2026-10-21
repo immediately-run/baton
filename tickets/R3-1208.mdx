@@ -101,7 +101,7 @@ None to write: provisioning. The live checks are R3-1209.
 ### Exit criteria
 
 - [ ] `curl -sI https://baton.immediately.run/` answers with an Access redirect (`302` to the team domain)
-- [ ] `curl -s https://baton.immediately.run/v1/sync/head` answers `401` `unauthenticated` (reaches the Worker, not Access), and so do `/v1/owner/x/grants`, `/v1/admin/repositories`, `/v1/stream`, `/v1/actions` and `POST /v1/mcp`; `POST /v1/github/webhook` without a signature is refused by the Worker, not redirected by Access
+- [ ] `curl -s https://baton.immediately.run/v1/sync/head` answers `401` `unauthenticated` (reaches the Worker, not Access), and so do `/v1/owner/x/grants`, `/v1/admin/repositories`, `/v1/actions` and `POST /v1/mcp`; `POST /v1/github/webhook` without a signature is refused by the Worker, not redirected by Access
 - [ ] `curl -sI https://baton.immediately.run/v1/ui/state` answers with an Access redirect (Access covers `/v1/ui/*`)
 - [ ] `npx wrangler secret list` shows `BATON_ADMIN_KEYS` in both environments
 - [ ] the `baton-deploy` run on `main` is green for both environments

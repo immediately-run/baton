@@ -3,7 +3,7 @@ title: "B-23 — Baton CLI command tree and leg logs: baton <noun> <verb>, the r
 id: B-23
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-21
 repos:
   - baton
   - docs
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1126
 tier: critical
-description: "Build R-BTN-127 and R-BTN-128: the noun-verb CLI with each command signing as the first role in its actions' `callers` the user holds a key for, and the old names refused; the runner archiving process-mode leg output to the transcript repos, masked, when the owners opt in; the runs, stream and release routes, `GET /v1/stream` taking an owner's or administrator's API key as well as a signature (R-BTN-159); baton leg log; and every caller in this repository and in docs moved to the new names in the same release. Requires: B-22."
+description: "Build R-BTN-127 and R-BTN-128: the noun-verb CLI with each command signing as the first role in its actions' `callers` the user holds a key for, and the old names refused; the runner writing process-mode leg output, masked, as create-only chunks to the owners' `leg_log_root` (`s3:`, `gs:`, or `file:` locally) with its own ambient credentials; the runs and release routes; baton leg log reading and following the run's directory with the user's own credentials; and every caller in this repository and in docs moved to the new names in the same release. Requires: B-22."
 topics:
   - baton
 owns: {}
@@ -22,7 +22,7 @@ depends_on:
 
 **Brief:** the owner, 2026-10-17: a Git-like CLI with every leg command under `baton leg`, and `baton leg log` showing a leg's logs. Each leg run's output is saved now, and the old command names go outright. B-22 specified it (baton#46).
 **Spec:** `spec/BATON_SPEC.md` §11.3 (R-BTN-127), §8.5 (R-BTN-128), §8.4 (R-BTN-144: the one list of
-what is masked), §11.1 R-BTN-159 (API keys reach `GET /v1/stream`), §14's rows; history, Migrations: renamed CLI commands.
+what is masked), §14's rows; history, Migrations: renamed CLI commands.
 
 ### Why
 
@@ -42,18 +42,22 @@ R-BTN-127 and R-BTN-128 are specified. This ticket builds them, and moves every 
    - every read takes `--json`;
    - R-BTN-127's rows that later tickets fill in: `decision list` on the conditions route and
      `owner resolve` (B-56), `leg raise` (B-55), `leg await` (B-59).
-2. **The archive.** In `src/runner`: read the pipes of a `process`-mode leg whether or not anyone is watching, mask R-BTN-144's closed credential set on the byte stream before framing, append to `baton-legs/<repository id>/<local ticket id>/<leg>/<run>-<claim id>.jsonl` with bounded retries and buffer, and report the pointers on heartbeat, `advance` and `end`. Only when the owners set `leg_logs: true`.
+2. **The leg log.** In `src/runner`: read the pipes of a `process`-mode leg, mask R-BTN-144's
+   closed credential set on the byte stream before framing, and write create-only chunks
+   `<dir>/<n>.jsonl` (1 s or 256 KB) then `end.json` to the `dir` the claim or `advance` reply
+   named, with bounded retries and buffer, `gap` frames and the 50 MB cap. One small writer
+   interface with three implementations — `s3:` (AWS default credential chain,
+   `AWS_ENDPOINT_URL_S3` for R2 or MinIO, `If-None-Match: *`), `gs:` (Application Default
+   Credentials, `ifGenerationMatch=0`) and `file:` (`O_EXCL`) — the local one driving the
+   scenarios. Only when the owners set `leg_log_root`.
 3. **The server.**
-   - the `leg_logs` table and its pointer validation;
-   - the `leg_logs` setting;
-   - `GET …/tickets/{ticket}/legs/{leg}/runs`;
-   - `GET /v1/stream`, authenticated by an owner's or administrator's SSH-key signature or API
-     key (`Authorization: Bearer bak_…`, R-BTN-159, adv-4 m13), and closed on revocation of
-     either;
+   - the `leg_log_root` setting and its validation (`file:` only on the local host);
+   - `claim_legs.leg_log_dir`, and `leg_log: {dir}` in the claim and `advance` replies;
+   - `GET …/tickets/{ticket}/legs/{leg}/runs` with `log_dir`;
    - `POST /v1/owner/{repository}/tickets/{ticket}/release`.
 4. **`baton leg log`.**
-   - finished runs from git, with the user's credentials;
-   - `-f`, joining the archive and the stream on `seq`;
+   - finished runs read from the directory with the user's own credentials, chunks in order;
+   - `-f`, polling for the next chunk until `end.json`;
    - `--transcripts`;
    - session and attached runs as links;
    - the failure messages;
@@ -65,7 +69,7 @@ R-BTN-127 and R-BTN-128 are specified. This ticket builds them, and moves every 
 ### Do not
 
 - Keep an alias for any old name.
-- Store a log's bytes in Baton.
+- Store a log's bytes, or hold, mint or sign a bucket credential, in Baton.
 
 ### Tests
 
@@ -73,13 +77,11 @@ R-BTN-127 and R-BTN-128 are specified. This ticket builds them, and moves every 
 - Unit (`test/unit/cli.test.ts`): a command whose actions' `callers` are `[owner, admin]` signs
   with the owner key when both are held, with the administrator key when only it is, and exits 2
   naming `owner` when neither is.
-- Integration: `GET /v1/stream` opened with an owner's API key, and closed when that key is
-  revoked.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green, and docs' `npm run verify` green.
 
 ### Exit criteria
 
-- [ ] the scenarios above pass on both hosts, with the first-held-role signing and the API-key stream
+- [ ] the scenarios above pass on both hosts, with the first-held-role signing
 - [ ] no caller in either repository uses an old name
 - [ ] merged under the review gate
 
@@ -88,3 +90,5 @@ R-BTN-127 and R-BTN-128 are specified. This ticket builds them, and moves every 
 _(2026-10-20: references moved to the current-state spec, PR #71.)_
 
 _(2026-10-20: extended for the adversarial review's fixes — a command signs as the first role in its actions' `callers` the user holds a key for (m12), and API keys reach `GET /v1/stream` (m13).)_
+
+_(2026-10-21: R-BTN-118 retired — leg output is written to the owners' log location and followed there by `baton leg log -f`, never relayed through Baton (R-BTN-128). Items 2–4 re-scoped from the git archive and `GET /v1/stream` to the owners' log location.)_

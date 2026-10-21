@@ -1,16 +1,16 @@
 ---
-title: "B-9 — Baton leg streams and Stop leg: a running leg's output over wss, never stored, and the runner stopping a leg's process group"
+title: "B-9 — Baton Stop leg: the runner stopping a leg's process group"
 id: B-9
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-21
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1112
 tier: critical
-description: "`/v1/ui/stream` and `/v1/runner/stream` behind the `Stream` interface (a Durable Object per claim; an in-process fan-out locally), the `watch`/`unwatch` rings, frames bounded by the channel, holder-only runner side, and Cancel/release stopping the process group with SIGINT, SIGTERM, then SIGKILL at 25 s (BATON_SPEC R-BTN-118, R-BTN-119); S-BTN-70, -71. Requires: B-2."
+description: "Cancel/release stopping a leg's process group and its tagged processes with SIGINT, SIGTERM, then SIGKILL at 25 s (BATON_SPEC R-BTN-119, R-BTN-145); S-BTN-71, S-BTN-119. Requires: B-2."
 topics:
   - baton
 owns: {}
@@ -21,30 +21,20 @@ depends_on:
 ---
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §8.5 (R-BTN-118), §8.4 (R-BTN-119, R-BTN-145), §1 R-BTN-33, §8.1
-R-BTN-91, §14's stream rows.
+**Spec:** `spec/BATON_SPEC.md` §8.4 (R-BTN-119, R-BTN-145), §8.1 R-BTN-91.
 
 ### Why
 
-R-BTN-118 and R-BTN-119 are specified; this ticket builds them.
+R-BTN-119 is specified; this ticket builds it.
 
 ### What to build
 
-1. Viewer upgrade: same `Origin`, a known running claim, `stream` not false, a session that may view it; else `forbidden`, ringing nothing.
-2. Runner upgrade: only the claim's holder, after `watch`; a second connection replaces the first.
-3. The channel enforces 8 KB frames and 64 KB/s, counting drops in `gap`; nothing stored, logged or exported.
-4. **Stop leg** on the dashboard sends the release message; the runner stops the group within 30 s and ends `released:requested`.
-5. **Tenancy** *(added 2026-10-18, §2.2 R-BTN-135)*: a stream's Durable Object is named through B-45's helper, `'<tenant id>/stream/<claim id>'` (R-BTN-118), never by the claim id alone, since claim ids repeat across tenants.
-
-6. **Hardening** *(added 2026-10-18, §8.4 R-BTN-145)*: each leg starts with `IR_BATON_LEG=<claim id>.<leg>.<run>`; stopping it also signals every visible process carrying exactly that tag (start time checked against pid reuse), in a systemd scope where available, all gone within 30 seconds; S-BTN-119.
-
-### Do not
-
-- Write a frame to storage or logs.
+1. **Stop leg** on the dashboard sends the release message; the runner stops the group within 30 s and ends `released:requested`.
+2. **Hardening** *(added 2026-10-18, §8.4 R-BTN-145)*: each leg starts with `IR_BATON_LEG=<claim id>.<leg>.<run>`; stopping it also signals every visible process carrying exactly that tag (start time checked against pid reuse), in a systemd scope where available, all gone within 30 seconds; S-BTN-119.
 
 ### Tests
 
-- S-BTN-70, S-BTN-71; G-BTN-95, G-BTN-96.
+- S-BTN-71, S-BTN-119; G-BTN-96.
 - `npm test`, `npm run typecheck` and `npm run check:spec` green.
 
 ### Exit criteria
@@ -56,3 +46,5 @@ R-BTN-118 and R-BTN-119 are specified; this ticket builds them.
 
 _(2026-10-20: references moved to the current-state spec, PR #71. R-BTN-119 now also stops a
 `superseded` claim at once, with `close` but no hand-off; B-65 adds that reason.)_
+
+_(2026-10-21: R-BTN-118 retired — leg output is written to the owners' log location and followed there by `baton leg log -f`, never relayed through Baton (R-BTN-128). This ticket keeps only Stop leg; the stream items, S-BTN-70 and G-BTN-95 are gone.)_
