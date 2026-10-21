@@ -558,8 +558,12 @@ const AGENT_OUTPUT_MAX = 64 * 1024 * 1024;
 
 /** One leg stub's source (R-BTN-74, R-BTN-131): run the `agent_command` that
  * `.baton/baton.json` names at the claim's snapshot (`ctx.snapshot.sha`, the commit the runner
- * loads the leg scripts from), through the shell (so it may carry arguments), with the ticket,
- * the leg and the checkout as its arguments, and the leg's instructions — its
+ * loads the leg scripts from), with no shell between the stub and the agent and stdin never an
+ * open pipe (B-84: an open stdin pipe under the old spawn hung real harness CLIs — `opencode
+ * run`, deterministically, zero output until the claim was reaped) — the command string splits
+ * into words as `sh` would, quotes and no substitutions (`agent-words.ts`), and runs as
+ * `execFile(command, args)` with the ticket, the leg and the checkout as its trailing
+ * arguments, its stdin pipe closed at spawn, and the leg's instructions — its
  * `.baton/courses/<id>/legs/<leg>.md`, read at the same snapshot — as a file named in
  * `BATON_INSTRUCTIONS`. A leg whose result depends on the agent (a verdict, an adjudication, an
  * outcome) asks for it as the agent's last line and checks it; the bundled `close` writes the
@@ -576,10 +580,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};
 // The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
 // repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the
-// checkout as its arguments and the leg's instructions in the file BATON_INSTRUCTIONS names. Both
+// checkout as its arguments and the leg's instructions in the file BATON_INSTRUCTIONS names. The
+// command runs with no shell between the stub and the agent (B-84), so no substitution or
+// redirection it may carry is executed; its own contract is the header of the leg's .md. Both
 // are read when the leg runs at the claim's snapshot, the commit the runner loaded this script
 // from, never the working tree an agent may have changed (so a branch under review cannot pick
 // its reviewer or rewrite the reviewer's instructions).${ask ? `
@@ -620,13 +627,29 @@ async function standard(ctx) {
   const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
   const instructions = dir == null ? '' : join(dir, ${JSON.stringify(`${leg}.md`)});
   if (dir != null) writeFileSync(instructions, text);
-  const out = await new Promise((resolve, reject) => execFile('sh', ['-c', settings.agent_command + ' "$@"', 'agent', ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout], {
-    cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX},
-    env: {
-      ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.path ?? '',${ask ? `
-      BATON_ANSWER: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},${ask.name === 'verdict' ? ` BATON_VERDICT: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},` : ''}` : ''}
-    },
-  }, (e, stdout) => (e ? reject(e) : resolve(String(stdout))))).finally(() => {
+  // B-84: no shell stands between the stub and the agent, and stdin is never an open pipe — the
+  // two halves of the hang that burned claims to reap. The command string splits into words as
+  // sh would (quotes; no substitutions) and runs as argv, the ticket, the leg and the checkout
+  // appended last; stdin closes at spawn (below), and stdout and stderr are captured pipes — and
+  // the command's exit is the agent's completion, which its own contract (the leg .md's header)
+  // requires it to mean.
+  const [command, ...words] = splitWords(settings.agent_command);
+  if (command === undefined) throw new Error('.baton/baton.json names no agent_command to run');
+  const out = await new Promise((resolve, reject) => {
+    const child = execFile(command, [...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout], {
+      cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX}, stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.path ?? '',${ask ? `
+        BATON_ANSWER: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},${ask.name === 'verdict' ? ` BATON_VERDICT: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},` : ''}` : ''}
+      },
+    }, (e, stdout) => (e ? reject(e) : resolve(String(stdout))));
+    // B-84's root cause, closed here: execFile does not honour 'ignore' for stdin — it leaves an
+    // open pipe the stub never writes and never closes, and an agent that reads stdin (opencode
+    // among them) blocks on it forever, zero output, the claim burning until reap. The pipe is
+    // closed the moment it exists: a reader sees EOF at once, never a wait. stdin is therefore
+    // never an open pipe for the agent, whatever execFile makes of the stdio option.
+    child.stdin?.end();
+  }).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
   });${names ? `
   // The last line: the answer, then — optionally — the PR its line goes on. A leg with no answer

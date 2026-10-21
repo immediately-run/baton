@@ -136,3 +136,17 @@ These are its lessons, newest understanding first.
   (the completion contract), bounding
   [B-85](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-85.mdx)
   (the parser).*
+
+- **B-84's "unexplained" hang is explained: it was `execFile`'s stdin, not the shell.**
+  Building B-84 reproduced the hang with no harness at all: `execFile('cat')` never
+  returns, because execFile leaves the child's stdin an open pipe it never writes and
+  never closes — the `stdio: ['ignore', …]` option is not honoured for fd 0 (`spawn`
+  honours it; that, not the shell, is why "direct spawn works and `sh -c` hangs" — the
+  two tests differed in API, not only in shell). An agent that reads stdin (opencode's
+  client does) blocks on that pipe forever: zero output, idle, the claim burning until
+  reap — and `--standalone` and signal traps change nothing, exactly as observed.
+  **When a child must not wait on stdin, use `spawn` with `'ignore'`, or close
+  `child.stdin` the moment `execFile` returns it** — the stub now does the latter,
+  reproducible in the suite. *Status: fixed with
+  [B-84](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-84.mdx);
+  the reproduction and diagnosis are in its PR.*
