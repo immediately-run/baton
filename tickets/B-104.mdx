@@ -147,6 +147,38 @@ positions), the semantics do not move (still positive Datalog), and the N3 mappi
 promoted from illustration to the serialization's semantic reference — variables are
 native there, which is precisely why the mapping exists.
 
+### Addendum, later the same day: ASP-Core-2 is the primary semantic reference
+
+The owner, on standards risk: "it would be fantastic if these constraints could be
+described using a uniform ontology language… complexity creeping in raises the risk that
+we start deviating from standards in ways which will prevent adoption." The uniform
+language exists and covers derivation *and* (B-105's) preferences: **ASP-Core-2**.
+Derivation is its Horn rules; "unless" guards are default negation (the canonical ASP
+idiom); preferential fallback is optimization statements / weak constraints — standard
+constructs, designed for exactly this class (configuration and resource selection are
+ASP's classic applications). This **supersedes the N3 mapping's promotion** above: N3
+remains an optional interop note for the fact vocabulary (names read as triples); the
+semantic reference is ASP-Core-2.
+
+**Runtime and conformance, split deliberately.**
+
+- **Runtime**: the worker-independent structure (which credential reaches which model,
+  the preference lists, the guard vocabulary) is compiled at **sync-post, in course
+  code** (`src/defaults` — plain Node, where tooling weight is fine); core receives a
+  precompiled graph and ordered lists and evaluates the **named fragment** — stratified
+  rules plus guarded optimization over finite alternatives: forward-chaining reachability
+  and first-match, ~50–100 pure TypeScript lines, no ontology parsing and no solver in
+  core, identical on both hosts. No general stable-model solving, ever (NP-complete
+  machinery for a linear fragment); the spec states the fragment in one sentence.
+- **Conformance**: the JSON↔ASP-Core-2 translation is checked in CI by running the
+  translated fixture ontologies through real clingo and asserting its optimal answer set
+  matches the TypeScript evaluation — the same posture as the formal model (R-BTN-68:
+  heavy tooling on the author's machine and in reports, never hosted): *the ontology
+  checked against the standard solver*.
+- **Recorded rejections**: clingo-wasm inside the Worker (megabytes against the size
+  budget, per-isolate cold start, NP machinery for a linear need); a clingo sidecar
+  service (core egress; a Baton that needs immediately.run's infra beside it — value 11).
+
 ### What Baton never does
 
 Stores a credential (holdings are labels, never material — value unchanged); learns a
