@@ -2945,3 +2945,4 @@ should-fix, 1 simplify, 7 nits, none a design question. Resolved:)*
 | 9 Simplify — the input digest over all of H | over H restricted to the program's constants (R-BTN-174) |
 | 10–16 nits | `route_choices_json`; `meters` placement; the instance view and §11.4's runners view; an empty `demote_when` refused, a leg absent from the course refused, needs outside the constant syntax refused; R-BTN-75 recounts derived rows when sets become current; the `derived` list never names `credential`, `runner` or `human-operator`; capacity-less resources billed for ranking |
 
+The owner accepted round 8's verdict without a further review (2026-10-22); B-104 and B-105 returned to `available`.
