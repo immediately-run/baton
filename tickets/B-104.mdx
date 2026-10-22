@@ -1,14 +1,14 @@
 ---
-title: "B-104 — The capability ontology: credentials map to capabilities per repository, transitively, server-side — positive Datalog in JSON, mapped to N3"
+title: "B-104 — The capability ontology: per-repository rules derive capabilities from holdings, server-side — a named ASP-Core-2 fragment in JSON, checked against clingo"
 id: B-104
 project: baton
-status: in-review
+status: available
 updated: 2026-10-22
 tags:
   - roadmap-item
 order: 506
 tier: judgement
-description: "Legs require at any altitude (capability, model); runners declare holdings (credential:, dependency:); a per-repo, sync-posted ontology derives transitively at matching — positive Datalog closure, cycles refused, JSON serialized with a documented N3 mapping. Baton maps claims, preflight tests truth, core learns no vocabulary. Requires: none."
+description: "Legs require at any altitude (capability, model); runners declare holdings (credential:, dependency:); a per-repo, sync-posted ontology derives capabilities from (holdings ∩ grant) — one named fragment of ASP-Core-2 (safe, stratified, default negation, integer comparison), evaluated by a bounded evaluator in core, materialized at heartbeat, conformance-checked against clingo in CI. Baton maps claims, preflight tests truth, core learns no vocabulary. Requires: none."
 topics:
   - baton
 owns: {}
@@ -16,244 +16,378 @@ prs: []
 depends_on: []
 ---
 
-**Review:** [the Opus 5.5 adversarial review, 2026-10-22](../docs/review/opus-ontology-review-2026-10-22.mdx) — 36 findings, 12 blocking, verdict "reworked before claim" — is binding input; B-104 sits in-review until the rework lands.
+**Review:** [the Opus 5.5 adversarial review, 2026-10-22](../docs/review/opus-ontology-review-2026-10-22.mdx)
+— 36 findings, 12 blocking. This text is the rework: it replaces the original ticket and both
+its addenda, and [§ Review dispositions](#review-dispositions) maps every finding this ticket
+owns to where it is resolved. B-105 owns the rest.
 
 **Brief:** the owner, 2026-10-22, across the credential-capability discussion: "credentials
 are capabilities: an anthropic api key is what enables a runner to execute an opus review."
 "We need a hierarchy for capabilities… course legs specify a high-level capability like
 code-generation-llm, while the runners know they have an API key for OpenCode Go and
 DeepInfra and an instance of OpenCode 2 installed in the VM. Baton should never store the
-credentials, but it needs to keep track of the ontology of how credentials map." And the
+credentials, but it needs to keep track of the ontology of how credentials map." The
 two-level case for transitivity: "anthropic api key → opus model capability → code
-generation llm capability." Settled in discussion: server-side inference at matching;
-transitive; and — "let's not reinvent the wheel" — the semantics are named Datalog, the
-serialization JSON with a documented 1:1 N3 mapping ("JSON-with-N3-mapping sounds like a
-reasonable compromise, lets go with this").
-**Spec:** §7.2 rules 4 and 7 (the capability gates these plug into), §2f R-BTN-74 (a
-sync-posted, validated file beside the course files), §5.6 R-BTN-121 (capability types),
-`docs/context/vocabulary.mdx` (the capability names), new §5.6 text for the ontology.
+generation llm capability." The join: "the rule could be capability:coding model →
+credential:provider offering coding model AND harness usable with coding model." The
+built-in: "baton should come with a reasonable ontology built-in, any fact of which can be
+overridden on the repository level." On standards: "it would be fantastic if these
+constraints could be described using a uniform ontology language… complexity creeping in
+raises the risk that we start deviating from standards in ways which will prevent
+adoption." Settled in discussion: server-side inference at matching; transitive; "let's not
+reinvent the wheel".
+
+**Decided in the rework (the owner, 2026-10-22):** core runs a **bounded general evaluator**
+for one named fragment, not compiled fixed shapes. The language **grows only in the
+directions ASP-Core-2 allows**: narrowing ("coding model = opus") is default negation inside
+the ontology, never a workaround through B-105's preferences.
+
+**Spec:** §5.6 R-BTN-121 (capability types — gains `derived`), §6.6 rule 4 and the pipeline
+(the derived set joins the declared set), §6.2 R-BTN-75 (`fleet_capabilities` counts derived
+capabilities), §8.4 R-BTN-144 (a leg's environment keeps the credentials its derivation
+used), §4.1/R-BTN-74 and R-BTN-69 (a sync-posted file, refused like a course file). New:
+**R-BTN-174** (the ontology file, its merge and its matching) and **R-BTN-175** (the fragment,
+its validation, its bounds and its evaluator), in a new §5.9 *The capability ontology*; a
+decision row in `## Decisions`; scenarios **S-BTN-139–S-BTN-146**. (The original ticket cited
+§7.2 and §2f, which are stale numbers.)
 
 ### The three layers, and who owns each
 
 | Layer | Owner | Example |
 |---|---|---|
-| Abstract requirements | course legs (course files, posted by syncs) | implement requires `capability:code-generation-llm`; a review round may require `model:claude-opus-5-5` directly |
-| Concrete holdings | the runner, in its heartbeat, bounded by its grant | `credential:opencode-go-api-key`, `credential:deep-infra-api-key`, `dependency:opencode-v2` |
-| The ontology | the repository, posted with the sync, versioned with the snapshot | the rules below |
+| Requirements | course legs (course files, posted by syncs) | implement requires `capability:code-generation-llm`; a review round may require `model:claude-opus-5-5` directly |
+| Holdings | the runner, in its heartbeat, bounded by its grant | `credential:OPENCODE_GO_API_KEY`, `credential:DEEPINFRA_API_KEY`, `dependency:opencode-v2` |
+| The ontology | the repository: `.baton/ontology.json`, posted by the sync from the default branch's accepted snapshot | the rules below |
 
-The worked example (the spec's test case, from the owner's message):
-
-```
-credential:opencode-go-api-key  ─⇒ model:deepseek-v4.1-flash ─┐
-credential:deep-infra-api-key   ─⇒ model:deepseek-v4.1-flash ─┤
-credential:anthropic-api-key    ─⇒ model:claude-opus-5-5 ─────┤
-dependency:opencode-v2 ────────────────────────────────────────┴⇒ capability:code-generation-llm
-dependency:claude-code ────────────────────────────────────────┘
-```
-
-### Semantics: positive Datalog, named, not invented
-
-The ontology is a **positive Datalog program** over flat string predicates: conjunctive
-rules (`head :- fact₁ … factₙ`), no negation, no functions, no built-ins. Inference is
-**forward-chaining closure** — deterministic, order-independent, terminating; a worker's
-derived set for a repository is the closure of its declared holdings under that
-repository's posted ontology, and **transitive by construction** (the owner's two-level
-chain needs no special case). Validation at sync-post refuses cycles (meaningless for
-reachability, poison for audit) and malformed rules, exactly as course files are refused.
-The middle layers are addressable: a leg may require any altitude.
-
-### Serialization: JSON rules, documented N3 mapping
-
-`.baton/capabilities.json` — one rule per entry, conjuncts as a list, head a string:
+Every capability is R-BTN-121's `<type>:<value>` with a declared type, so `credential:` values
+are environment-variable names (`^[A-Z0-9_]{1,64}$`) — never `credential:opencode-go-api-key`.
+A course declares the types the ontology derives with a new key, `"derived": true`:
 
 ```json
-{ "rules": [
-    { "all": ["credential:opencode-go-api-key"], "derives": "model:deepseek-v4.1-flash" },
-    { "all": ["model:deepseek-v4.1-flash", "dependency:opencode-v2"], "derives": "capability:code-generation-llm" }
-] }
+"capability_types": {
+  "credential": {"description": "a named secret in the runner's env", "values": "^[A-Z0-9_]{1,64}$"},
+  "dependency": {"description": "a harness or tool installed on the runner", "values": "^[a-z0-9.-]{1,64}$"},
+  "model":      {"description": "a model the runner can reach", "values": "^[a-z0-9.-]{1,64}$", "derived": true},
+  "capability": {"description": "an abstract ability a leg requires", "values": "^[a-z0-9-]{1,64}$", "derived": true}
+}
 ```
 
-The mapping to Notation3 triples-and-rules is written into the spec (one translated
-example beside each construct), so an RDF-shaped consumer — a dashboard querying the
-closure, ontologies merged across repos, an external reasoner — is a mechanical transform
-away, never a migration. Nothing RDF enters core: it stores rules, applies closure.
+`derived` is refused on a type named `credential` (R-BTN-144 keys the leg environment on it).
+The built-ins `runner` and `human-operator` are never derived. A derived type may still be
+declared directly, so a human-operator machine can simply *have*
+`capability:code-generation-llm`. The ontology translates; it does not gatekeep. Roles
+(`capability_roles`) expand before the ontology sees anything. Rules never name a role.
 
-### The built-in ontology, and value bindings
+### The language: one sentence, then its rules
 
-**Baton ships a reasonable ontology** (the owner, 2026-10-22: "baton should come with a
-reasonable ontology built-in, any fact of which can be overridden on the repository
-level"). It is course code — `src/defaults/`, scaffolded by `repo init`, the sync's
-fallback when a repository posts none — never core. Override is by rule identity on the
-merged program: the repository's file may add rules, retract the built-in's by id, or
-replace one; the built-in's other facts stand; one closure runs over the result.
-Precedence is repository over built-in, per fact.
+> **A Baton ontology is a safe, stratified ASP-Core-2 program of facts and normal rules over
+> string and integer constants, with default negation and the comparison built-ins, and with
+> no disjunction, function symbols, arithmetic terms or aggregates. It is the fragment whose
+> programs have exactly one answer set, computed bottom-up, stratum by stratum.**
 
-**Value bindings are facts, and they join.** The ontology stores ground binary facts —
-`binding("coding model", "claude-opus-5.5")` — validated functional (one value per key
-in the merged program; preference lists are a later decision, not v1). Because they are
-facts in the same Datalog program, rules can join them, and the repository's *choices*
-become participants in matching rather than prose in `agent_command`:
+B-105 adds one construct to it, preferences, as ASP-Core-2's choice rule and weak constraints
+in a separate stratum. Nothing else is added without a ticket that names the ASP-Core-2
+construct it adopts.
 
+- **Atoms.** A predicate name matches `^[a-z][a-z0-9_]{0,31}$`. Arguments are constants or
+  variables. A string constant matches `^[A-Za-z0-9:._/@-]{1,128}$`. An integer constant is a
+  32-bit signed integer, which is clingo's range. Predicates have fixed arity, and binary
+  predicates with variables in argument positions (`offers(K, M)`) are ordinary first-order
+  Datalog, not a second-order language.
+- **Safety** (ASP-Core-2's): every variable of a rule occurs in a positive body literal that
+  is not a comparison. This covers variables in the head, in a negated literal and in a
+  comparison.
+- **Comparisons.** `<, <=, >, >=` take integer operands only, and `=, !=` take two integers or
+  two strings. Validation types every variable from the literal that binds it (B-105 types
+  reading atoms by predicate) and refuses an ill-typed comparison. So the TypeScript evaluator
+  and clingo never meet a mixed-type comparison, and ASP-Core-2's cross-type term order is
+  never exercised.
+- **Recursion and cycles.** Cycles are judged on the **predicate** dependency graph. Positive
+  recursion is allowed, so generic transitivity
+  (`implies(A, C) :- implies(A, B), implies(B, C).`) is legal. A cycle **through negation** is
+  refused, and the refusal names the cycle. That is the stratification test, and it is the only
+  cycle that is refused. A cycle among ground facts (`a ⇒ b ⇒ a`) is harmless, since the
+  closure is a set.
+- **Integrity constraints** (`:- body.`) are allowed only over predicates that do not depend on
+  a core-formed atom. They are checked at post, and a violated constraint refuses the file and
+  names it. The built-in uses one to make bindings functional. That rule used to be hard-coded
+  validation; now it is ontology.
+- **Core-formed atoms.** Core supplies them, and a rule may never use them as its head. In the
+  gate stratum the only one is `holds(K)`: a holding in (declared ∩ grant). B-105 adds the
+  preference stratum's own.
+- **The output** is `derived(K)`. The runner's capability set for the repository is its
+  holdings ∪ every K with `derived(K)`.
+
+### What a repository may and may not derive
+
+Each of these is checked at post, and a refusal names the rule:
+
+1. **Heads.** No rule's head is a core-formed predicate. A `derived(K)` must name a capability
+   of a type that a course of the repository declares `derived: true`. A rule that could
+   derive `credential:`, `dependency:` (unless declared derived), `runner:` or
+   `human-operator` is therefore refused. The check runs on the program's maximal input (item 3
+   below), so a variable head is covered too.
+2. **`holds` is never negated** in the gate stratum. Every variable in a `holds` literal also
+   occurs in a positive literal of a non-core predicate, which binds it to a constant the
+   program names. So more holdings never lose a capability, and holdings the program does not
+   name cannot take part.
+3. **Monotone, therefore bounded at post.** By rules 1 and 2, the gate stratum's result only
+   grows with holdings, and only holdings named in the program matter. So validation evaluates
+   it once on the **maximal input**, with every capability constant the program names held,
+   and that evaluation bounds every runner's.
+4. **The gate stratum reads nothing else.** `derived` and everything it depends on may not
+   depend on B-105's reading, time or preference atoms (B-105 § Strata). Advice never becomes
+   refusal (value 2).
+
+### Bounds (validated at post; enforced again at evaluation)
+
+| Bound | Limit |
+|---|---|
+| File size | 64 KB serialized |
+| Entries (facts + rules + constraints, merged) | 512 |
+| Body literals per rule | 8 |
+| Distinct variables per rule | 4 |
+| Derived atoms per evaluation | 20 000 |
+| Join steps per evaluation (body-literal matches, counted) | 1 000 000 |
+
+The two evaluation bounds are counters, never wall-clock time, so both hosts fail at exactly
+the same point (value 9). Validation evaluates the gate stratum on the maximal input, and a
+file whose maximal evaluation crosses either bound is refused. The counter still runs at
+every evaluation. If it is crossed anyway (B-105's preference stratum has no maximal input),
+that evaluation yields no derivations, raises `baton.ontology-limit`, and leaves the runner
+with its holdings alone. That fails closed for gates and empty for advice, and it never stalls
+a tenant: each runner's evaluation is bounded, and a recompute runs in alarm batches (below).
+
+### The evaluator: in core, bounded, honest about its size
+
+`src/core/ontology.ts`, pure, no dependency. It parses the JSON, validates everything above,
+stratifies (SCCs of the predicate graph, in topological order) and evaluates semi-naively,
+stratum by stratum. Each rule's body is reordered once at validation: positive literals first,
+as written, then comparisons and negated literals as soon as their variables are bound. Order
+is deterministic, and so is the first-found derivation that explanations use. The honest size
+is **~300–400 lines**, not the addendum's 50–100. This is a general join engine with
+stratified negation, and the review was right that graph reachability plus first-match cannot
+express the owner's join. Core does parse the ontology. It does not run a solver.
+
+**Why this is not "running repository code" (value 4):** the program is total and
+terminating, has no I/O, and is bounded by the counters above. It is data that core
+interprets, as it interprets a course file's state machine. The decision row records this.
+
+**Where it runs: at heartbeat, not at claim.** A runner's derived set for a repository is
+recomputed when its inputs change: a heartbeat that changes its declared capabilities, a grant
+change, or an accepted ontology for the repository. It is stored in
+`runner_derived(runner_id, repository_id, capability, via_json, ontology_digest)`, created by
+a new append-only migration. Rule 4's SQL and `fleet_capabilities` read declared ∪ derived, so
+claim-time matching does no evaluation and the §6.6 pipeline keeps its shape. An accepted
+ontology recomputes the granted live runners of its repository in the alarm, 50 per turn.
+Until a runner is recomputed, its previous set stands under the digest it names. This is the
+same posture as any course-file change.
+
+### Serialization: `.baton/ontology.json`
+
+Every entry has an `id` (`^[a-z][a-z0-9-]{0,63}$`, unique in the file). Variables are written
+`$name`. The owner's worked example, in full:
+
+```json
+{ "version": 1,
+  "entries": [
+    { "id": "offers-ocg-deepseek",  "fact": ["offers", "credential:OPENCODE_GO_API_KEY", "model:deepseek-v4.1-flash"] },
+    { "id": "offers-di-deepseek",   "fact": ["offers", "credential:DEEPINFRA_API_KEY",   "model:deepseek-v4.1-flash"] },
+    { "id": "offers-anth-opus",     "fact": ["offers", "credential:ANTHROPIC_API_KEY",   "model:claude-opus-5-5"] },
+    { "id": "usable-oc-deepseek",   "fact": ["usable_with", "dependency:opencode-v2",   "model:deepseek-v4.1-flash"] },
+    { "id": "usable-oc-opus",       "fact": ["usable_with", "dependency:opencode-v2",   "model:claude-opus-5-5"] },
+    { "id": "usable-cc-opus",       "fact": ["usable_with", "dependency:claude-code",   "model:claude-opus-5-5"] },
+    { "id": "model-from-credential",
+      "head": ["derived", "$m"],
+      "body": [["offers", "$k", "$m"], ["holds", "$k"]] },
+    { "id": "codegen",
+      "head": ["derived", "capability:code-generation-llm"],
+      "body": [["model_for", "coding", "$m"],
+               ["offers", "$k", "$m"], ["holds", "$k"],
+               ["usable_with", "$d", "$m"], ["holds", "$d"]] }
+  ] }
 ```
-holds(W, model:claude-opus-5-5), binding("coding model", M), model_name(M, model:claude-opus-5-5)
-  ⇒ satisfies(W, capability:code-generation-llm)
+
+A body literal is `[pred, args…]`. A negated literal is `{"not": [pred, args…]}`. A comparison
+is `{"cmp": [lhs, op, rhs]}`. A constraint is `{"id", "constraint": [body…]}`. The format is
+pinned by a JSON Schema in `src/defaults/` and by the validator in core. The
+two-level chain `credential:ANTHROPIC_API_KEY → model:claude-opus-5-5 →
+capability:code-generation-llm` is these two rules. `model:` capabilities are derived
+in their own right, so a leg may require either altitude.
+
+### Bindings: narrowing by default negation, the ASP idiom
+
+A binding is a fact. Positive Datalog cannot narrow: an unconditional rule beside a binding
+rule only ever adds derivations, which is what the review found. So narrowing uses **default
+with exception**, which is ASP's own idiom and stays inside the fragment:
+
+```json
+{ "id": "model-for-bound",   "head": ["model_for", "$c", "$m"], "body": [["binding", "$c", "$m"]] },
+{ "id": "bound",             "head": ["bound", "$c"],           "body": [["binding", "$c", "$m"]] },
+{ "id": "model-for-default", "head": ["model_for", "$c", "$m"], "body": [["model_class", "$c"], ["model", "$m"], {"not": ["bound", "$c"]}] },
+{ "id": "binding-functional", "constraint": [["binding", "$c", "$m1"], ["binding", "$c", "$m2"], {"cmp": ["$m1", "!=", "$m2"]}] }
 ```
 
-The worked meaning: a worker satisfies this repository's code-generation requirement when
-it holds the model the repository bound — "coding model = claude opus 5.5" is a binding,
-the credential chain derives the holding, and one closure answers the join. Yesterday's
-pinned-pair review instructions and `agent_command` model pin are this mechanism's
-ancestors; the binding is where such pins live once B-104 is built.
+With no binding for `coding`, every model the ontology lists serves the codegen rule. A
+repository that writes `{"id": "coding-model", "fact": ["binding", "coding",
+"model:claude-opus-5-5"]}` narrows it to Opus. The binding's value is the capability string
+itself, so there is no `model_name` mapping and one naming scheme. `bound` depends only on
+facts, so negating it respects rule 2. B-105's preferences choose *among* what this stratum
+allows. They never stand in for it.
 
-**The binding names a class; the rule joins two dimensions through it** (the owner,
-2026-10-22: "then the rule could be capability:coding model → credential:provider
-offering coding model AND harness usable with coding model"):
+### The built-in ontology, and override by id
 
-```
-satisfies(W, capability:code-generation-llm) :-
-    binding("coding model", M),
-    holds(W, C), offers(C, M),
-    holds(W, D), usable_with(D, M).
-```
+Baton ships a reasonable ontology as course code: `src/defaults/ontology.json`, scaffolded by
+`repo init` (the facts above, the binding idiom, `model_class("coding")`, and
+`model(...)` facts for the models it lists). **Merging is the sync's job, in course code.** The
+CLI sync takes the built-in entries, removes the ids listed in the repository file's
+`"retract": [id…]`, replaces any built-in entry whose id the repository file reuses, adds the
+rest, and posts **one merged program** with its digest. There is one granularity: the entry
+id. Core never merges. It validates and evaluates what was posted. A repository that posts no
+file gets the built-in.
 
-Satisfaction is existential over the model: some model meeting the repository's binding,
-for which the worker holds both a credential that reaches it and a harness that can run
-it — `usable_with(dependency:opencode-v2, model:deepseek-v4.1-flash)` and its kin are
-ontology facts like any other, overridable per repository. **The serialization
-consequence, recorded honestly:** the flat conjunct-of-strings sketch above cannot
-express this — the rule needs variables in predicate positions (binary predicates:
-`offers`, `usable_with`, `binding`). The JSON sugar grows a variable syntax (`$m` in
-positions), the semantics do not move (still positive Datalog), and the N3 mapping is
-promoted from illustration to the serialization's semantic reference — variables are
-native there, which is precisely why the mapping exists.
-
-**The binding names a class; the rule joins two dimensions through it** (the owner,
-2026-10-22: "then the rule could be capability:coding model → credential:provider
-offering coding model AND harness usable with coding model"):
-
-```
-satisfies(W, capability:code-generation-llm) :-
-    binding("coding model", M),
-    holds(W, C), offers(C, M),
-    holds(W, D), usable_with(D, M).
-```
-
-Satisfaction is existential over the model: some model meeting the repository's binding,
-for which the worker holds both a credential that reaches it and a harness that can run
-it — `usable_with(dependency:opencode-v2, model:deepseek-v4.1-flash)` and its kin are
-ontology facts like any other, overridable per repository. **The serialization
-consequence, recorded honestly:** the flat conjunct-of-strings sketch above cannot
-express this — the rule needs variables in predicate positions (binary predicates:
-`offers`, `usable_with`, `binding`). The JSON sugar grows a variable syntax (`$m` in
-positions), the semantics do not move (still positive Datalog), and the N3 mapping is
-promoted from illustration to the serialization's semantic reference — variables are
-native there, which is precisely why the mapping exists.
-
-### Addendum, later the same day: ASP-Core-2 is the primary semantic reference
-
-The owner, on standards risk: "it would be fantastic if these constraints could be
-described using a uniform ontology language… complexity creeping in raises the risk that
-we start deviating from standards in ways which will prevent adoption." The uniform
-language exists and covers derivation *and* (B-105's) preferences: **ASP-Core-2**.
-Derivation is its Horn rules; "unless" guards are default negation (the canonical ASP
-idiom); preferential fallback is optimization statements / weak constraints — standard
-constructs, designed for exactly this class (configuration and resource selection are
-ASP's classic applications). This **supersedes the N3 mapping's promotion** above: N3
-remains an optional interop note for the fact vocabulary (names read as triples); the
-semantic reference is ASP-Core-2.
-
-**Runtime and conformance, split deliberately.**
-
-- **Runtime**: the worker-independent structure (which credential reaches which model,
-  the preference lists, the guard vocabulary) is compiled at **sync-post, in course
-  code** (`src/defaults` — plain Node, where tooling weight is fine); core receives a
-  precompiled graph and ordered lists and evaluates the **named fragment** — stratified
-  rules plus guarded optimization over finite alternatives: forward-chaining reachability
-  and first-match, ~50–100 pure TypeScript lines, no ontology parsing and no solver in
-  core, identical on both hosts. No general stable-model solving, ever (NP-complete
-  machinery for a linear fragment); the spec states the fragment in one sentence.
-- **Conformance**: the JSON↔ASP-Core-2 translation is checked in CI by running the
-  translated fixture ontologies through real clingo and asserting its optimal answer set
-  matches the TypeScript evaluation — the same posture as the formal model (R-BTN-68:
-  heavy tooling on the author's machine and in reports, never hosted): *the ontology
-  checked against the standard solver*.
-- **Recorded rejections**: clingo-wasm inside the Worker (megabytes against the size
-  budget, per-isolate cold start, NP machinery for a linear need); a clingo sidecar
-  service (core egress; a Baton that needs immediately.run's infra beside it — value 11).
-
-### Second addendum, the same day: readings as atoms — no provider vocabulary in core
-
-The owner: "I don't want Baton core to have to have hardcoded support for various model
-providers. An instrument contributing a metric reading — conforming to a custom JSON
-Schema it has declared, extending the general api-capacity schema — can be referred to
-by the ASP clauses which determine leg ranking. A completely new model provider and
-model-choice logic implemented in a repo using baton, without any baton modifications."
-The architecture is possible on three commitments:
-
-1. **Readings form ground atoms** — core's only naming contract: a validated reading of
-   a resource forms `reading(resource, field) = scalar`, the fields named by the
-   resource's declared schema (`baton admin resource add --schema` already carries
-   custom schemas; `detailSchema` already interprets them). Instruments — workers,
-   probes, administrators, the existing reading paths — extend the base `api-capacity`
-   schema with provider-specific fields via ordinary JSON Schema composition, and a rule
-   written against a base field serves every instrument that extends it: schema
-   extension buys rule reuse, which is what makes a new provider a repository change
-   and not a baton change.
-2. **The fragment grows comparison built-ins — from the standard**: arithmetic terms and
-   comparison predicates are ASP-Core-2 built-ins, so value guards stay inside the named
-   language; the TypeScript fragment implements comparisons over schema-validated
-   scalars only, keeping evaluation linear and total. No string cleverness, ever.
-3. **The base schemas ship in `src/defaults`** — course code, repo-overridable like the
-   built-in ontology. Core owns exactly two things: the atom-formation convention and
-   the evaluator. Everything provider-shaped — resource, schema, instrument, rules — is
-   repository data.
-
-Guards therefore evaluate at claim time against the latest posted reading: a stale
-instrument means stale ordering, so reading liveness (already modeled — readings lapse)
-becomes ranking-relevant, and the spec says so in one sentence.
-
-### What Baton never does
-
-Stores a credential (holdings are labels, never material — value unchanged); learns a
-vocabulary (`anthropic` is an opaque string to core); calls a provider (preflight is
-course code: a leg verifies the credentials it will use, and a failing preflight retracts
-the declaration and fails the leg naming the credential — the ontology maps claims,
-preflight tests truth).
+**Snapshot and timing.** The file is read from the default branch's accepted snapshot, like
+course files (R-BTN-74). A refused file keeps the previous one in force and raises
+`baton.ontology-refused` (R-BTN-69's posture). A claim and each advance check rule 4 against
+the runner's stored derived set. An ontology change mid-ticket therefore takes effect at the
+next advance, as a course file's `requires` change does.
 
 ### Matching, and the answers it gives
 
-A leg's requirement matches when it is in the derived set (declared ∪ closure), itself
-intersected with the grant — the existing rules-4/7 gates over a richer set, no new gate
-machinery. The blocks index answers **with its derivation chain**: "requires
-`model:claude-opus-5-5`; holdings derive `model:deepseek-v4.1-flash`; the link is
-`credential:anthropic-api-key`" — the operator's shopping list in one line. Direct
-declarations of any altitude remain (a human-operator machine simply *has*
-code-generation-llm); the ontology translates, it does not gatekeep.
+- **Rule 4 becomes** `capabilitiesOf(ticket.requires ∪ leg.requires.capabilities) ⊆ H ∪
+  derived(H)`, with `H = declared ∩ grant(repository)`. The closure runs over the granted
+  holdings, never the other way round. Derived capabilities need no grant of their own, and a
+  grant naming a derived capability still admits a runner that declares it directly. Open
+  decision 1's lean is adopted: tight concrete grants, stable abstract requirements.
+- **`fleet_capabilities`** counts declared ∪ derived, so a `capability` block (R-BTN-75)
+  clears when a derivation, not only a declaration, supplies the capability.
+- **The why-not chain** comes with the blocks index's `missing-capability` answer. It is
+  defined, not left to the implementer. The validator's maximal evaluation records, per derived
+  atom, its first four derivations in body-reordered, rule-id order. For a runner,
+  `missing(a)` is ∅ when `a` is in H ∪ derived(H) or is a fact, and `{a}` when `a` is an
+  unheld holding. For a derived atom it is the derivation whose union of `missing` over its
+  positive body literals is smallest, ties broken by the lexicographic order of the sorted set,
+  then by rule id. Negated literals contribute nothing, because they range over facts. The
+  answer is canonical and deterministic. It is an explanation, not a guaranteed minimum (the
+  general problem is set cover), and the spec says so. Example: *"requires
+  `capability:code-generation-llm`; missing `credential:ANTHROPIC_API_KEY` (rule `codegen` via
+  `model-from-credential`)."*
+- **The leg environment (R-BTN-144, amended).** The runner keeps `credential:<NAME>` when the
+  leg's `requires` names it, **or** when it is in the `via` of a required capability that was
+  derived for this runner. `via` is the set of holdings in the derivations recorded for that
+  capability, at most 16, stored in `runner_derived.via_json` and returned in the claim answer
+  per leg. Otherwise a leg that requires `capability:code-generation-llm` would have every
+  credential stripped and could not run its own route.
 
-### Open decisions, with leans recorded
+### What Baton never does
 
-1. **Grant level** — lean: grants bound concrete holdings, the ontology derives, the
-   intersection matches (stable abstract grants vs. tight concrete ones; tighter wins).
-2. **`dependency:` verification** — lean: heartbeat self-report plus the leg's preflight;
-   nothing stronger until a fleet lies about it.
-3. **Name scope** — lean: high-level capability names shared across repositories
-   (coherent grants, dashboards, one vocabulary page) with repo-local names permitted
-   beside them.
+Baton never stores a credential: holdings are labels, never material. It never learns a
+vocabulary: `anthropic` is an opaque string to core. It never calls a provider: preflight is
+course code. A leg verifies the credentials it will use, and a failing preflight retracts the
+declaration and fails the leg, naming the credential. The ontology maps claims, and preflight
+tests truth.
 
-### Tests
+### Conformance: the fragment checked against clingo (built here)
 
-- Closure: the owner's two-level chain derives `capability:code-generation-llm` from
-  `credential:anthropic-api-key` + `dependency:opencode-v2`; conjunctions are required;
-  cycles and malformed rules are refused at post with the rule named.
-- Matching (S-BTN-n): a leg requiring the capability is recommended to a worker whose
-  holdings close over it and not to one whose do not; the why-not answer carries the
-  chain; a direct declaration satisfies without derivation.
-- The N3 mapping: each spec construct's translated example is tested to translate.
+B-104 builds the harness, and B-105 adds fixtures to it.
+
+- **The translator**, `src/defaults/ontology-asp.ts`, emits ASP-Core-2 text from a merged
+  program. Every constant becomes a quoted string (`"credential:OPENCODE_GO_API_KEY"`; the
+  constant pattern admits no quote or backslash), an integer stays an integer, `$m` becomes
+  `V_m`, and `{"not": …}` becomes `not …`. The emitter is a closed set of templates, and its
+  output contains no gringo-only syntax (no `#show`, pools, intervals or scripts).
+- **The CI job** (`.github/workflows/`, a new `ontology-conformance` job) installs a pinned
+  clingo (`pip install clingo==5.7.1`). For every fixture under `test/fixtures/ontology/` it
+  runs the translated program, the fixture's holdings as `holds/1` facts, and a harness-only
+  `#show derived/1.` file, kept apart so `#show` never enters the translation. It asserts
+  exactly one answer set, which is the stratified fragment's guarantee, and that its
+  `derived/1` atoms equal `src/core/ontology.ts`'s result. A refused fixture must be refused by
+  the validator. The job is the R-BTN-68 posture: heavy tooling in CI, never hosted.
+- **The strict-syntax lint** backs the "standard" claim, since clingo accepts a superset of
+  ASP-Core-2. A unit test parses every emitted fixture with a small recursive-descent parser for
+  exactly the ASP-Core-2 productions the emitter uses, and fails on anything else.
+- **Recorded rejections:** clingo-wasm in the Worker (megabytes against the size budget, a
+  cold start per isolate, NP machinery for a polynomial need); a clingo sidecar (core egress, a
+  Baton that needs infrastructure beside it — value 11); an N3/RDF mapping (the first
+  addendum's demotion, completed). The facts read naturally as triples if a consumer ever needs
+  that. It is not built, tested or promised.
+
+### Decided defaults (reversible, recorded)
+
+1. **Grant level:** grants bound concrete holdings, and the closure runs over (holdings ∩
+   grant). This is now normative, in § Matching.
+2. **`dependency:` verification:** heartbeat self-report plus the leg's preflight, and nothing
+   stronger until a fleet lies about it.
+3. **Name scope:** the built-in uses shared names (`capability:code-generation-llm`, the
+   `model:` values), and repository-local names are permitted beside them. Each repository's
+   program is its own, so no cross-repository merge is needed.
+
+### Tests (each names its scenario)
+
+- **S-BTN-139 — closure.** The owner's chain derives `capability:code-generation-llm` from
+  `credential:ANTHROPIC_API_KEY` + `dependency:claude-code`. The conjunction is required, since
+  the credential alone does not derive it. A generic transitive rule derives across three hops.
+- **S-BTN-140 — refusals at post**, each naming the rule or cycle: a cycle through negation; an
+  unsafe rule; an ill-typed comparison; a head deriving `credential:X`, `runner:x` or
+  `human-operator`; a negated `holds`; a `holds` variable bound only by `holds`; a violated
+  constraint (two bindings for `coding`); each bound in the table crossed; an unknown
+  capability type. Positive recursion is accepted.
+- **S-BTN-141 — bindings narrow.** No binding: a DeepSeek-holding runner satisfies codegen.
+  `binding(coding, model:claude-opus-5-5)`: it no longer does, and an Opus-holding one does.
+- **S-BTN-142 — grant order.** A runner declaring `credential:ANTHROPIC_API_KEY`, granted
+  `credential:*` and `dependency:*` but not `capability:*`, matches a leg requiring
+  `capability:code-generation-llm`. Ungranted on `credential:ANTHROPIC_API_KEY`, it does not.
+- **S-BTN-143 — matching.** A leg requiring the capability is recommended to a runner whose
+  holdings derive it and not to one whose holdings do not. A direct declaration satisfies with
+  no derivation. `fleet_capabilities` clears a `capability` block on a derivation.
+- **S-BTN-144 — why-not.** The answer names `credential:ANTHROPIC_API_KEY` and the rule chain,
+  and with two alternative missing sets it names the smaller (ties broken lexicographically).
+- **S-BTN-145 — environment.** A leg requiring `capability:code-generation-llm`, derived via
+  `credential:DEEPINFRA_API_KEY`, receives `DEEPINFRA_API_KEY` and no other declared credential.
+- **S-BTN-146 — timing and bounds.** An accepted ontology recomputes runners in alarm batches,
+  and a claim in between matches under the previous digest. An evaluation crossing the step
+  counter yields holdings only and raises `baton.ontology-limit`, identically on both hosts.
+- **Conformance.** The CI job is green on every fixture, including the worked example, the
+  binding idiom and a recursive one. The strict-syntax lint passes on all emitted text.
 
 ### Exit criteria
 
-- [ ] legs require at any altitude; runners declare holdings; per-repo ontologies derive
-      transitively at matching, server-side
-- [ ] a missing capability's why-not names the missing link and its credential
-- [ ] the JSON↔N3 mapping documented in the spec with tested examples
+- [ ] legs require at any altitude; runners declare holdings; the closure of (holdings ∩
+      grant) under the repository's posted ontology derives, server-side, materialized at
+      heartbeat and read by rule 4 and `fleet_capabilities`
+- [ ] the fragment is stated in one sentence in §5.9 (R-BTN-175), with its safety,
+      stratification, typing, head, monotonicity and bounds rules, each refused at post with
+      the rule named
+- [ ] bindings narrow by default negation, built-in and overridable by entry id; the sync
+      merges, core never does
+- [ ] a missing capability's why-not names the missing holding and the rule chain, by the
+      specified canonical choice
+- [ ] a derived capability's credentials reach the leg's environment, and no others
+- [ ] the ASP-Core-2 translator, the clingo conformance job and the strict-syntax lint are
+      green in CI
 - [ ] no credential material, provider call or vocabulary word ever enters core
+
+### Review dispositions
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | N3 still the deliverable | Title, Brief, tests and exit criteria rewritten around ASP-Core-2; N3 recorded as a rejection (§ Conformance) |
+| 2 | Nobody builds the clingo check | B-104 builds the translator, the CI job and the lint (§ Conformance); B-105 adds fixtures |
+| 3 | Fragment named three ways | One sentence (§ The language); nothing in the ticket contradicts it |
+| 4 | Duplicated block | Removed; the join rule appears once, in § Serialization |
+| 5 | "Variables in predicate positions" | Corrected: argument positions, first-order (§ The language, Atoms) |
+| 6 | Which cycles are refused | Predicate graph; only cycles through negation; positive recursion allowed (§ The language) |
+| 7 | 50–100 lines cannot join | Owner: bounded general evaluator; honest ~300–400 lines; core parses, no solver (§ The evaluator) |
+| 10 | Names not ASP constants | Quoted-string encoding, `V_` variables, closed templates (§ Conformance); B-105 fixes the ternary reading form |
+| 15 | clingo ⊋ ASP-Core-2 | Strict-syntax lint over every emitted fixture; `#show` kept out of the translation (§ Conformance) |
+| 22 | Grant intersected after closure | Closure of (holdings ∩ grant) (§ Matching); decided default 1 |
+| 23 | Heads unrestricted | Head rules, `derived` types, the `credential` prohibition, checked on the maximal input (§ What a repository may and may not derive) |
+| 24 | No evaluation bounds | Table of bounds; deterministic counters; maximal-input check at post; heartbeat materialization; alarm batches (§ Bounds, § The evaluator) |
+| 26 | Which snapshot governs | Default branch's accepted snapshot; refused file keeps the previous; rule 4 re-checked at each advance against the stored set (§ The built-in ontology) |
+| 28 | Derived route strips its credential | R-BTN-144 amended: `via` credentials kept (§ Matching); B-105 adds the chosen route's |
+| 29 | `credential:` pattern; types undeclared | Env-name values; `derived: true` on declared types; roles expand first (§ The three layers) |
+| 30 | Bindings cannot narrow; bindings vs preferences | Owner: default negation inside the ontology, never preferences (§ Bindings) |
+| 31 | Two override granularities, no `id` | Every entry has an `id`; retract/replace by id; the sync merges (§ The built-in ontology) |
+| 32 | Why-not algorithm unspecified | Canonical, deterministic choice specified; stated as an explanation, not a minimum (§ Matching) |
+| 35 | `model_name` second scheme | The binding's value is the capability string (§ Bindings) |
+| 8, 9, 11–14, 16–21, 25, 27, 33, 34, 36 | — | B-105 |
