@@ -33,14 +33,16 @@ is in `BATON_SPEC_HISTORY.md` (Changelog, 2026-10-22, §6.11).
 1. **Registration.** A migration adds `capacity` to `external_resources` and
    `resource_instances`, and admits `scope = 'host'`. Add `baton admin resource add --capacity`
    and the `POST /v1/admin/resources` field.
-2. **Host instances.** `<resource>@host:<hostname>` resolves as a usable instance for every
-   runner of that hostname. Readings for it follow R-BTN-76 as a runner-scope instance does.
+2. **Host instances.** `<resource>@host:<hostname>` is a usable instance for every runner of
+   that hostname, and those runners may report on it (R-BTN-76). `service` instances are
+   billable too.
 3. **Rule 11.** In the claim's and advance's committing transaction, count each billed
-   instance's active seats from `claim_bills`, and refuse `instance-busy` past capacity, naming
-   the holder. This is never a failed attempt, and a `prefer` claim moves to its next candidate.
+   instance's seats held by other claims, and refuse `instance-busy` past capacity, naming the
+   holder only where the caller may see it. Per-candidate `bills` on `prefer`. This is never a failed attempt, and a `prefer` claim moves to its next candidate.
    Add the rule to the matching code and the model (R-BTN-68).
-4. **Release.** Seats are released at each advance that stops naming an instance, at the
-   claim's end, and at a reap.
+4. **Release.** Seats are released at each advance that stops naming an instance and at the
+   claim's end. For a fence-pending reap they are released at `fence-cleared` or the fence
+   deadline.
 5. **Recommendations and why-not.** Skip a leg whose `requires.resources` has no usable instance
    with a free seat for this runner. `baton leg why` names the holder. The instance view serves
    active seats.

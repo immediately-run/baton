@@ -320,6 +320,21 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - caps `choices` per leg, gives `BATON_ROUTE` limits, and moves the refinement check to the
     CLI.
 
+  Round 7 (Fable 5.1) found the seams of §6.11 and one blocker, which led to four owner
+  decisions:
+  - route choices are attached by the repository's own course entries, so a sourced standard
+    course runs unchanged;
+  - the advice concept is renamed "route choice", apart from R-BTN-166's choice stations;
+  - the 5-minute window is dropped;
+  - derived atoms are no longer checked against courses' `values`.
+
+  The rewrite also:
+  - makes sets current by an input digest, so a grant change evaluates nothing itself;
+  - stores a crossed evaluation as `limited`;
+  - fences seats through a pending reap;
+  - lets `prefer` candidates carry their own bills;
+  - makes `host` and `service` instances usable and billable.
+
 - **2026-10-22 — §6.11: seats (owner direction; B-106).** The owner asked how a leg can say it
   needs "a singleton within the runner's VM", such as a Chrome MCP session one agent can use at
   a time, or a machine reachable over RDP by "a single client at a time". The owner: "specific
@@ -2889,25 +2904,27 @@ derived types:)*
 
 *(2026-10-22, round 7 — Fable 5.1 again, over §5.9, §6.10 and §6.11 after the rewrite. It
 confirmed the formal core with clingo and checked several round 5–6 dispositions in the text:
-1 blocking, 13 should-fix, 2 simplify, 8 nits. **Not yet resolved**:)*
+1 blocking, 13 should-fix, 2 simplify, 8 nits. The owner accepted the four recommendations
+(route choices belong to the home's course entries; "route choice" renames the advice concept;
+both simplifications), and the rewrite resolved every finding as below:)*
 
 | Finding | Status |
 |---|---|
-| 1 B — a sourced course's home cannot add `choices` (R-BTN-134 allows only leg overrides), and a standard course listing them is refused wherever there is no ontology | open; decision needed: `choices` belong to the home (entry or override file) |
-| 2 G-BTN-57, S-BTN-32 and the vendored `ROLES['human-operator']` still treat `human-operator` as administrator-only, or as a role | open (verified) |
-| 3 seats released at a fence-pending reap | open |
-| 4 rule 11 counts the advancing claim's own seats | open |
-| 5 one claim-level `bills` for every `prefer` candidate | open |
-| 6 R-BTN-100 drops bills on `service` instances | open |
-| 7 R-BTN-76's usable and reporter lists omit `host` | open |
-| 8 claim-time seats against "a claim runs nothing"; rule 11 missing from §6.6's lists; no `why` for a full instance | open |
-| 9 no channel for a leg to name a dead holding without ending | open |
-| 10 what a generic runner bills is unspecified | open |
-| 11 a crossed gate evaluation is retried at every read | open |
-| 12 a grant change re-evaluates every runner of a credential in one transaction | open |
-| 13 G-BTN-5 contradicts derivation past the grant | open |
-| 14 "choice" names both advice choices and choice stations (R-BTN-166) | open; naming decision |
-| 15 Simplify — drop condition 4's cross-course `values` check | open; decision |
-| 16 Simplify — drop the 5-minute window and `pending_json` | open; decision |
-| 17–24 nits | open: grant acceptance and decline as triggers; `_` missing from the constant alphabet; alarm instants, instance `capacity` in §14, the `{error}` form in §4.4, `capacity` changes; the holder named across repositories, and `host` instances in the instance view; `seat` on R-BTN-50's banned list; `host` scope on cloud runners; R-BTN-69's circular wording and holds-dependent predicates outside both strata; `missing` against `not-granted` |
+| 1 B — a sourced course's home cannot add `choices`; a standard course listing them is refused without an ontology | route choices live in the home's course entry (`route_choices`), never a course file or a source's `entry.json`; standard courses list none (R-BTN-177, R-BTN-134; S-BTN-155) |
+| 2 `human-operator` in G-BTN-57, S-BTN-32 and the vendored `ROLES` | G-BTN-57 and S-BTN-32 amended; the vendored `ROLES` entry is a docs-first change named in B-104 |
+| 3 seats released at a fence-pending reap | held until `fence-cleared` or the fence deadline (R-BTN-178; G-BTN-162) |
+| 4 a claim's own seats counted | seats held by claims other than this one (R-BTN-178) |
+| 5 one `bills` for every `prefer` candidate | `prefer: [{ticket_id, leg?, bills?}]` (R-BTN-100, R-BTN-178) |
+| 6 `service` bills dropped | bills are any usable instance (R-BTN-100) |
+| 7 `host` missing from R-BTN-76 | added to usable instances and to who reports (R-BTN-76) |
+| 8 claim-time seats; rule 11 missing from §6.6; no `why` | a claim's seats are for the leg it is for, until its first advance; rule 11 in the claim and advance re-runs and pipeline step 4; `busy` in R-BTN-120's table |
+| 9 no channel for a dead holding | a `BATON_ROUTE` entry's `dead` (R-BTN-177) |
+| 10 what a runner bills | specified in R-BTN-178 |
+| 11 a crossed evaluation retried at every read | stored empty and `limited` under its input digest (R-BTN-174) |
+| 12 a grant change evaluating many runners | sets are current by input digest; a grant change evaluates nothing itself, and reads and the alarm cycle catch up (R-BTN-174; S-BTN-146) |
+| 13 G-BTN-5 against derivation past the grant | narrowed to holdings (G-BTN-5) |
+| 14 "choice" names two things | renamed "route choice" (`route_choices`, `route_last`); vocabulary amended (R-BTN-177) |
+| 15 Simplify — condition 4's `values` check | dropped; a non-matching atom is inert (R-BTN-175) |
+| 16 Simplify — the 5-minute window | dropped with `pending_json`; a unit is judged at each post (R-BTN-174) |
+| 17–24 nits | grant changes covered by the input digest; the constant alphabet already had `_` (no change); alarm instants added, `capacity` in `POST /v1/admin/instances`, the `{error}` form in §4.4, capacity changes never take back a seat; the holder named only where the asker is granted, `host` instances in the instance view; `seat` off R-BTN-50's banned list; cloud runners use `runner` scope; R-BTN-69's choices check gone with the field, and holds-dependent predicates outside the gate stratum refused; `missing` split from `ungranted` |
 

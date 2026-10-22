@@ -1,5 +1,5 @@
 ---
-title: "B-105 — Choices: advice on how a leg runs, from the ontology and the instruments' readings"
+title: "B-105 — Route choices: advice on how a leg runs, from the ontology and the instruments' readings"
 id: B-105
 project: baton
 status: in-review
@@ -8,7 +8,7 @@ tags:
   - roadmap-item
 order: 507
 tier: judgement
-description: "Build §6.10: a leg names the choices it wants advice on; the ontology orders each choice's alternatives, filtered hard by holdings, blocks and exclusions and demoted softly by guards over typed reading atoms, time and the stored last demotion; resolved at claim and advance as identifiers-only advice; overrides recorded from the reported route; pins become the fallback. Requires: B-104."
+description: "Build §6.10: a repository attaches route choices to its legs in its course entries; the ontology orders each choice's alternatives, filtered hard by holdings, blocks and exclusions and demoted softly by guards over typed reading atoms, time and the stored last demotion; resolved at claim and advance as identifiers-only advice; overrides recorded from the reported route; pins become the fallback. Requires: B-104."
 topics:
   - baton
 owns: {}
@@ -25,10 +25,10 @@ Claude Opus as reviewer 2 *unless my Claude subscription is nearing its 5-hour l
 case I would fall back to the second reviewer also using GLM." And: "A completely new model
 provider and model-choice logic implemented in a repo using baton, without any baton
 modifications."
-**Spec:** §6.10, R-BTN-176 (the atoms a choice reads) and R-BTN-177 (choices: semantics,
-hysteresis, delivery, overrides, conformance), with the rules it amends: R-BTN-69's leg
-`choices`, R-BTN-76's `atoms_from` and `std:` base, R-BTN-100, R-BTN-110's
-`std:api-capacity@1`, and R-BTN-144's `BATON_ADVICE` and `BATON_ROUTE`. The data model is in §13: `choice_last`, `external_resources.atoms_from`. The API is
+**Spec:** §6.10, R-BTN-176 (the atoms a route choice reads) and R-BTN-177 (route choices: semantics,
+hysteresis, delivery, overrides, conformance), with the rules it amends: R-BTN-51's and R-BTN-134's course-entry
+`route_choices`, R-BTN-76's `atoms_from` and `std:` base, R-BTN-100, R-BTN-110's
+`std:api-capacity@1`, and R-BTN-144's `BATON_ADVICE` and `BATON_ROUTE`. The data model is in §13: `route_last`, `external_resources.atoms_from`. The API is
 in §14: `advice` and `route`. The history is in `BATON_SPEC_HISTORY.md` (Changelog, 2026-10-22;
 Review record).
 
@@ -41,23 +41,23 @@ Review record).
    migration). Teach `src/core/detailSchema.ts` to store an `x-baton-base` chain; the
    CLI's `baton admin resource add` runs R-BTN-108's refinement check. Add `std:api-capacity@1` to the standard library.
 3. **Choices** (R-BTN-177). Generate the encoding, evaluate it as first-match under B-104's
-   counters at each advance that starts a leg, write `choice_last` and
-   `claim_legs.choices_json`, and put `advice` (with `ranked`) in the advance answer. Validate a
-   leg's `choices` in the course file.
+   counters at each advance that starts a leg, write `route_last` and
+   `claim_legs.route_choices_json`, and put `advice` (with `ranked`) in the advance answer. Validate each course entry's
+   `route_choices` with the ontology unit.
 4. **The runner.** Write `BATON_ADVICE`. Create `BATON_ROUTE` empty per leg and report it (one
-   entry per choice, at most 4 KB, never failing an end) on the finishing advance or end. Stop
+   entry per route choice, with its `dead` holdings, at most 4 KB, never failing an end) on the finishing advance or end. Stop
    declaring a holding a leg reported dead for the session. In core, record `advice-overridden`
    from a differing route.
 5. **The standard courses and this repository.** Have `agent_command` and the review leg's
    instructions read `BATON_ADVICE` first, keeping today's models as the fallback. Add this
-   repository's `codegen`, `reviewer-1` and `reviewer-2` choices (alternatives as `needs` over `key:` and `model:`
+   repository's `codegen`, `reviewer-1` and `reviewer-2` route choices, in its `baton.json` course entry (alternatives as `needs` over `key:` and `model:`
    labels), the `meters` facts, and runner `check`s declaring each `key:`. Register
    `anthropic-capacity` refining `std:api-capacity@1`, with `atoms_from: any`. This is an
    operator step: record it in the PR.
 6. **Conformance.** Add choice fixtures to B-104's suite (`--opt-mode=optN`, one optimum, the
    last witness's `route/2`).
 7. **Out of scope:** core's existing `model_providers`, `peak_schedules` and
-   `provider_suspensions` tables are not read by choices. File a ticket to retire them once this
+   `provider_suspensions` tables are not read by route choices. File a ticket to retire them once this
    lands.
 
 ### Tests

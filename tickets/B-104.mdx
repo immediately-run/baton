@@ -36,12 +36,11 @@ record).
    atom's canonical proof recorded. It is about 300–400 lines.
 2. **Accepting a unit.** The board post's `ontology` field (§4.4) carries the merged program, or
    the merge's `error`. Core computes the digest, accepts or refuses the unit (program, course
-   files' `choices`, derived types' `values`) whole, keeps the 5-minute window with
-   `pending_json`, and stores `fixed_json`.
-3. **Derived sets with their writes.** Evaluate `runner_derived` in the transaction of each write
-   that changes a runner's holdings (heartbeat declarations, grants, R-BTN-126's end). At a
-   runner's read, re-evaluate its sets whose digest is not in force. Run the alarm cycle after a
-   program change. Bump `fleet_version` on change. Rule 4 is `gatesFor` (`src/core/gates.ts`):
+   entries' `route_choices`) whole at each post, and stores `fixed_json`.
+3. **Derived sets, current by input digest.** Evaluate a runner's sets in the transaction of a
+   heartbeat or end that changes its holdings. At any read, re-evaluate the reader's sets that
+   are not current. Store a crossed evaluation as `limited`. Run the alarm cycle after program
+   and grant changes. Bump `fleet_version` on change. Rule 4 is `gatesFor` (`src/core/gates.ts`):
    check the grant against H, then requirements against H ∪ D(H). Update the model (R-BTN-68)
    to match.
 4. **Why-not.** Compute `not-derived` and `not-derivable` on read from the maximal evaluation,
@@ -51,7 +50,9 @@ record).
    sync's merge by id with `ontology: {error}` on failure, and `repo init` scaffolding a
    `.baton/ontology.json` that names it.
 6. **Removals the advisory model asks for.** Delete §11.1's refusal of a heartbeat declaring an
-   ungranted capability. Make `human-operator` grantable like any capability, and retire rule 6.
+   ungranted capability. Make `human-operator` grantable like any capability, retire rule 6, and
+   drop the vendored library's `ROLES['human-operator']` expansion in docs first, then `npm run
+   vendor`.
    Let R-BTN-126 accept any declared capability as a `capability` ref.
 7. **Conformance.** The translator `src/defaults/ontology-asp.ts`, fixtures under
    `test/fixtures/ontology/`, `test/unit/ontology-conformance.test.ts` on `clingo-wasm@0.6.0`
