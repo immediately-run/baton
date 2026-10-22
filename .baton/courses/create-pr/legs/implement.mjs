@@ -1,6 +1,6 @@
-// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-fZFTyU/entry.ts
+// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-iaAoLZ/entry.ts
 import { execFile, execFileSync as execFileSync2 } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync2, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -108,7 +108,165 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
 }
 
-// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-fZFTyU/entry.ts
+// src/defaults/course-pr.ts
+var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
+function branchMatches(pattern, branch) {
+  const p = pattern.toLowerCase();
+  const b = branch.toLowerCase();
+  let i = 0;
+  let j = 0;
+  let star = -1;
+  let mark = 0;
+  while (i < b.length) {
+    if (j < p.length && (p[j] === b[i] || p[j] === "*")) {
+      if (p[j] === "*") {
+        star = j++;
+        mark = i;
+      } else {
+        i++;
+        j++;
+      }
+    } else if (star >= 0) {
+      i = ++mark;
+      j = star + 1;
+    } else {
+      return false;
+    }
+  }
+  while (j < p.length && p[j] === "*") j++;
+  return j === p.length;
+}
+var matchPatterns = (branchPatterns) => (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, "*"));
+
+// src/defaults/tickets-markdown.ts
+function parseFrontmatter(text) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!m) return null;
+  const out = {};
+  const lines = m[1].split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const kv = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (!kv) continue;
+    const [, key, rest] = kv;
+    if (rest.trim() === "") {
+      const items = [];
+      while (i + 1 < lines.length && /^\s+-\s+/.test(lines[i + 1])) {
+        i++;
+        items.push(unquote(lines[i].replace(/^\s+-\s+/, "")));
+      }
+      out[key] = items;
+    } else if (/^\[.*\]$/.test(rest.trim())) {
+      out[key] = rest.trim().slice(1, -1).split(",").map(unquote).filter(Boolean);
+    } else {
+      out[key] = unquote(rest);
+    }
+  }
+  return out;
+}
+var unquote = (v) => {
+  const t = v.trim();
+  return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
+};
+
+// src/defaults/pr-verify.ts
+var bareId = (t) => {
+  if (t.home && t.id.startsWith(`${t.home}:`)) return t.id.slice(t.home.length + 1);
+  const colon = t.id.indexOf(":");
+  return colon < 0 ? t.id : t.id.slice(colon + 1);
+};
+var msg = (e) => e instanceof Error ? e.message : String(e);
+function ticketRepositories(text, reposMap) {
+  const fm = text == null ? null : parseFrontmatter(text);
+  const names = Array.isArray(fm?.repos) ? fm.repos : fm?.repos == null || fm.repos === "" ? [] : [fm.repos];
+  return names.map((r) => typeof r === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r) ? r : reposMap?.[r]).filter((r) => typeof r === "string" && r !== "");
+}
+function originSlug(run2, checkout) {
+  try {
+    const url = run2("git", ["remote", "get-url", "origin"], checkout);
+    return /[:/]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\s*$/.exec(url)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+var known = (oid, run2, checkout) => {
+  try {
+    run2("git", ["cat-file", "-e", oid], checkout);
+    return true;
+  } catch {
+    return false;
+  }
+};
+var ancestor = (a, b, run2, checkout) => {
+  try {
+    run2("git", ["merge-base", "--is-ancestor", a, b], checkout);
+    return true;
+  } catch {
+    return false;
+  }
+};
+function verifyPrOpen(ask, run2) {
+  const id = bareId(ask.ticket);
+  const patterns = matchPatterns(ask.branchPatterns).map((p) => p.replace(/\{ticket\}/g, id));
+  const siblings = ask.repositories ?? [];
+  const slug = originSlug(run2, ask.checkout);
+  const label = (repo) => repo ?? slug ?? "the checkout\u2019s repository";
+  const of = (repo) => {
+    const args = ["pr", "list", "--state", "open", "--limit", "300", "--json", "number,headRefName,headRefOid", ...repo ? ["--repo", repo] : []];
+    let text;
+    try {
+      text = run2("gh", args, ask.checkout);
+    } catch (e) {
+      throw new Error(msg(e));
+    }
+    let prs;
+    try {
+      prs = JSON.parse(text);
+    } catch {
+      prs = null;
+    }
+    if (!Array.isArray(prs)) throw new Error(`gh pr list${repo ? ` --repo ${repo}` : ""} answered no PR list: ${text.slice(0, 200)}`);
+    return prs.filter((p) => p != null && typeof p === "object" && typeof p.headRefName === "string" && patterns.some((pat) => branchMatches(pat, p.headRefName)));
+  };
+  const found = [null, ...siblings].map((repo) => {
+    try {
+      return { repo, prs: of(repo), error: null };
+    } catch (e) {
+      return { repo, prs: null, error: msg(e) };
+    }
+  });
+  let branch = "";
+  try {
+    branch = run2("git", ["branch", "--show-current"], ask.checkout);
+  } catch {
+    branch = "";
+  }
+  if (branch !== "") {
+    let head = null;
+    try {
+      head = run2("git", ["rev-parse", "HEAD"], ask.checkout);
+    } catch {
+      head = null;
+    }
+    for (const pr of found[0].prs ?? []) {
+      if (pr.headRefName !== branch || typeof pr.headRefOid !== "string" || pr.headRefOid === "" || head == null) continue;
+      if (head === pr.headRefOid) continue;
+      if (!known(pr.headRefOid, run2, ask.checkout)) continue;
+      if (!ancestor(head, pr.headRefOid, run2, ask.checkout)) {
+        throw new Error(`the checkout\u2019s branch ${branch} is at ${head.slice(0, 10)}, but its open PR #${String(pr.number)} is at ${pr.headRefOid.slice(0, 10)} \u2014 push the branch: the review reads what is pushed`);
+      }
+    }
+  }
+  if (found.some((f) => (f.prs ?? []).length > 0)) return;
+  const unread = found.filter((f) => f.error != null);
+  const read = found.filter((f) => f.prs != null).map((f) => label(f.repo));
+  if (read.length === 0) {
+    throw new Error(`cannot verify ${id}\u2019s PR \u2014 no repository the ticket reads could be read: ${unread.map((f) => `${label(f.repo)} (${f.error})`).join("; ")}`);
+  }
+  throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
+}
+
+// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-iaAoLZ/entry.ts
 async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read its override at");
@@ -130,14 +288,32 @@ async function standard(ctx) {
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read .baton/baton.json at");
   const show = (rel2) => execFileSync2("git", ["-C", ctx.checkout, "show", sha + ":" + rel2], { encoding: "utf8", maxBuffer: 67108864 });
   const settings = JSON.parse(show(".baton/baton.json"));
-  if (typeof settings.agent_command !== "string" || settings.agent_command === "") throw new Error(".baton/baton.json names no agent_command");
+  const agentCommand = typeof settings.agent_command === "string" && settings.agent_command !== "" ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? "";
+  if (agentCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
+  const entry = (settings.courses ?? []).find((c) => c && c.id === "create-pr") ?? {};
+  const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === "string" && p !== "");
+  const ticketText = (() => {
+    try {
+      return ctx.ticket?.path ? readFileSync2(join2(ctx.checkout, ctx.ticket.path), "utf8") : null;
+    } catch {
+      return null;
+    }
+  })();
+  const legRun = (cmd, args, cwd) => {
+    try {
+      return execFileSync2(cmd, args, { cwd, encoding: "utf8", maxBuffer: 67108864 }).trim();
+    } catch (e) {
+      const why = e && typeof e.stderr === "string" && e.stderr.trim() !== "" ? e.stderr.trim().split("\n")[0] : e && e.message ? e.message : String(e);
+      throw new Error(`${cmd} ${args.join(" ")} failed: ${why}`);
+    }
+  };
   const rel = ".baton/courses/create-pr/legs/implement.md";
   const present = execFileSync2("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel], { encoding: "utf8" }).trim() !== "";
   const text = present ? show(rel) : null;
   const dir = text == null ? null : mkdtempSync(join2(tmpdir(), "baton-leg-"));
   const instructions = dir == null ? "" : join2(dir, "implement.md");
   if (dir != null) writeFileSync(instructions, text);
-  const [command, ...words] = splitWords(settings.agent_command);
+  const [command, ...words] = splitWords(agentCommand);
   if (command === void 0) throw new Error(".baton/baton.json names no agent_command to run");
   const out = await new Promise((resolve, reject) => {
     const child = execFile(command, [...words, ctx.ticket.id, "implement", ctx.checkout], {
@@ -157,6 +333,7 @@ async function standard(ctx) {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
   });
   void out;
+  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
   return { reached: "pr-open", next: "review" };
 }
 var close = prClose;

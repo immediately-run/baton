@@ -1,4 +1,4 @@
-// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-a98MKE/entry.ts
+// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-VA5Ldg/entry.ts
 import { execFile, execFileSync as execFileSync2 } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -108,7 +108,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
 }
 
-// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-a98MKE/entry.ts
+// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-VA5Ldg/entry.ts
 async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read its override at");
@@ -130,14 +130,15 @@ async function standard(ctx) {
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read .baton/baton.json at");
   const show = (rel2) => execFileSync2("git", ["-C", ctx.checkout, "show", sha + ":" + rel2], { encoding: "utf8", maxBuffer: 67108864 });
   const settings = JSON.parse(show(".baton/baton.json"));
-  if (typeof settings.agent_command !== "string" || settings.agent_command === "") throw new Error(".baton/baton.json names no agent_command");
+  const agentCommand = typeof settings.agent_command === "string" && settings.agent_command !== "" ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? "";
+  if (agentCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
   const rel = ".baton/courses/create-pr/legs/merge.md";
   const present = execFileSync2("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel], { encoding: "utf8" }).trim() !== "";
   const text = present ? show(rel) : null;
   const dir = text == null ? null : mkdtempSync(join2(tmpdir(), "baton-leg-"));
   const instructions = dir == null ? "" : join2(dir, "merge.md");
   if (dir != null) writeFileSync(instructions, text);
-  const [command, ...words] = splitWords(settings.agent_command);
+  const [command, ...words] = splitWords(agentCommand);
   if (command === void 0) throw new Error(".baton/baton.json names no agent_command to run");
   const out = await new Promise((resolve, reject) => {
     const child = execFile(command, [...words, ctx.ticket.id, "merge", ctx.checkout], {
