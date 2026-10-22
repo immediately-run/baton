@@ -239,7 +239,7 @@ export class BatonCore {
   }
 
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch is due. */
-  // @model alarmLive sha256:03c4446e672e
+  // @model alarmLive sha256:ca9f6ccd8aa0
   async alarm(): Promise<void> {
     // Re-armed first, so one failing tick never ends the cycle.
     await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
@@ -847,7 +847,7 @@ export class BatonCore {
    * a rewind to a once-accepted history included — is a fresh hold with a fresh row. The 0001
    * schema's "written once" and "the first force post" describe that one hold.
    */
-  // @model syncPost sha256:ba2ccf2a7d6c
+  // @model syncPost sha256:710161d0a3b7
   async board(repo: Repository, p: BoardPayload) {
     // Course graphs are read per post: a registry applied, or a post refused after applying one,
     // must not leave another request reading a graph that is not in force.
