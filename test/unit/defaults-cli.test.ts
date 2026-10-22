@@ -11,7 +11,8 @@ import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { courseSchemas, githubFacts, parseSyncArgs, remoteSlug, syncWorkflow } from '../../src/defaults/cli';
+import { courseSchemas, githubFacts, initMain, parseSyncArgs, remoteSlug, syncMain, syncWorkflow } from '../../src/defaults/cli';
+import type { Transport } from '../../src/runner/api';
 import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
@@ -56,6 +57,132 @@ describe('parseSyncArgs', () => {
     expect(parseSyncArgs(['--root', '/x', '--url', 'https://u', '--facts', '/f.json', '--token', 't1'], {})).toMatchObject({ root: '/x', url: 'https://u', factsFile: '/f.json', token: 't1' });
     expect(() => parseSyncArgs(['--nope'], {})).toThrow('not a flag of baton repo sync');
     expect(() => parseSyncArgs(['--root'], {})).toThrow('needs a value');
+  });
+  it('takes --sync-key, and BATON_SYNC_KEY as its environment form (B-88)', () => {
+    expect(parseSyncArgs(['--sync-key', '/keys/sync'], {})).toMatchObject({ syncKey: '/keys/sync' });
+    expect(parseSyncArgs([], { BATON_SYNC_KEY: '/keys/env' })).toMatchObject({ syncKey: '/keys/env' });
+    // The flag wins over the environment; a sync with neither has no key.
+    expect(parseSyncArgs(['--sync-key', '/keys/flag'], { BATON_SYNC_KEY: '/keys/env' })).toMatchObject({ syncKey: '/keys/flag' });
+    expect(parseSyncArgs([], {}).syncKey).toBeUndefined();
+    expect(() => parseSyncArgs(['--sync-key'], {})).toThrow('needs a value');
+  });
+});
+
+describe('syncMain’s sync key (B-88, R-BTN-93)', () => {
+  /** A repository `baton repo init` scaffolded, with one ticket and no course code of its own. */
+  const scaffold = async (): Promise<string> => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-b88-'));
+    gitInit(dir);
+    mkdirSync(join(dir, 'tickets'), { recursive: true });
+    writeFileSync(join(dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\n---\n');
+    // An origin, so the board's PR read is the recorded facts' (none), not a refused forge read.
+    execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git'], { stdio: 'ignore' });
+    expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
+    commitAll(dir);
+    return dir;
+  };
+  /** A recording transport: every request's headers and a body answering `syncOnce`'s three calls. */
+  const recording = (): { transport: Transport; seen: Request[] } => {
+    const seen: Request[] = [];
+    const transport = async (req: Request): Promise<Response> => {
+      seen.push(req.clone());
+      const path = new URL(req.url).pathname;
+      const body = path === '/v1/sync/observation' ? { sha: null, observation: 1 } : path === '/v1/sync/head' ? { sha: null } : { outcome: 'held', steps: [], next: null };
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    return { transport, seen };
+  };
+  /** The three calls' methods, so a test names what it saw. */
+  const calls = (seen: Request[]) => seen.map((r) => `${r.method} ${new URL(r.url).pathname}`);
+  let dir: string;
+  let keyDir: string;
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(keyDir, { recursive: true, force: true });
+  });
+
+  it('signs the observation, head and board calls with the flag’s key — no bearer, no CI at all', async () => {
+    dir = await scaffold();
+    keyDir = mkdtempSync(join(tmpdir(), 'baton-b88-key-'));
+    const keyFile = join(keyDir, 'sync');
+    execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', keyFile], { stdio: 'ignore' });
+    const { transport, seen } = recording();
+    // No BATON_SYNC_TOKEN and no Actions OIDC in the environment: only the flag can authenticate.
+    vi.stubEnv('BATON_SYNC_TOKEN', '');
+    vi.stubEnv('ACTIONS_ID_TOKEN_REQUEST_URL', '');
+    vi.stubEnv('ACTIONS_ID_TOKEN_REQUEST_TOKEN', '');
+    vi.stubEnv('BATON_SYNC_KEY', '');
+    try {
+      const facts = join(keyDir, 'facts.json');
+      writeFileSync(facts, '[]');
+      const args = parseSyncArgs(['--root', dir, '--url', 'https://baton.test', '--facts', facts, '--sync-key', keyFile], process.env);
+      expect(await syncMain({ ...args, transport, log: () => {} })).toBe(0);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(calls(seen)).toEqual(['POST /v1/sync/observation', 'GET /v1/sync/head', 'POST /v1/sync/board']);
+    for (const req of seen) {
+      // Each call is signed in the baton-request namespace, and none carries a bearer.
+      expect(req.headers.get('Signature-Input')).toMatch(/^sig1=\("@method" "@authority" "@path" "@query" "content-digest"\);created=\d+;nonce="[^"]+";keyid="SHA256:[A-Za-z0-9+/]{43}";tag="baton-request"$/);
+      expect(req.headers.get('Signature')).toMatch(/^sig1=:[A-Za-z0-9+/]+={0,2}:$/);
+      expect(req.headers.get('Content-Digest')).toMatch(/^sha-256=:[A-Za-z0-9+/]+={0,2}:$/);
+      expect(req.headers.get('Authorization')).toBeNull();
+    }
+    // The key's fingerprint is the one the repository registers (`baton admin repo add --sync-key`).
+    const fingerprint = execFileSync('ssh-keygen', ['-l', '-E', 'sha256', '-f', keyFile], { encoding: 'utf8' }).split(' ')[1];
+    for (const req of seen) expect(req.headers.get('Signature-Input')).toContain(`keyid="${fingerprint}"`);
+  });
+
+  it('BATON_SYNC_KEY is the flag’s environment form', async () => {
+    dir = await scaffold();
+    keyDir = mkdtempSync(join(tmpdir(), 'baton-b88-key-'));
+    const keyFile = join(keyDir, 'sync');
+    execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', keyFile], { stdio: 'ignore' });
+    const { transport, seen } = recording();
+    vi.stubEnv('BATON_SYNC_KEY', keyFile);
+    vi.stubEnv('BATON_SYNC_TOKEN', '');
+    try {
+      const facts = join(keyDir, 'facts.json');
+      writeFileSync(facts, '[]');
+      const args = parseSyncArgs(['--root', dir, '--url', 'https://baton.test', '--facts', facts], process.env);
+      await syncMain({ ...args, transport, log: () => {} });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(seen.length).toBe(3);
+    for (const req of seen) expect(req.headers.get('Signature-Input')).toMatch(/tag="baton-request"/);
+  });
+
+  it('a key file ssh-keygen cannot read is refused before the first call, naming the flag', async () => {
+    dir = await scaffold();
+    keyDir = mkdtempSync(join(tmpdir(), 'baton-b88-key-'));
+    const { transport, seen } = recording();
+    await expect(syncMain({ root: dir, url: 'https://baton.test', syncKey: join(keyDir, 'absent'), transport, log: () => {} }))
+      .rejects.toThrow(/--sync-key .*absent: .*(not an SSH key ssh-keygen can read|ENOENT)/);
+    expect(seen).toEqual([]);
+  });
+
+  it('the flag decides: a sync with a key signs even with a --token beside it, and none signs without one', async () => {
+    dir = await scaffold();
+    keyDir = mkdtempSync(join(tmpdir(), 'baton-b88-key-'));
+    const keyFile = join(keyDir, 'sync');
+    execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', keyFile], { stdio: 'ignore' });
+    // A CI token beside the key is never spent: every call is signed.
+    const facts = join(keyDir, 'facts.json');
+    writeFileSync(facts, '[]');
+    const signed = recording();
+    await syncMain({ root: dir, url: 'https://baton.test', factsFile: facts, syncKey: keyFile, token: 'ci-token', transport: signed.transport, log: () => {} });
+    expect(signed.seen.every((r) => r.headers.get('Signature-Input') !== null && r.headers.get('Authorization') === null)).toBe(true);
+    // Without the key the transition's bearer is unchanged: the token, in Authorization.
+    const bearer = recording();
+    vi.stubEnv('ACTIONS_ID_TOKEN_REQUEST_URL', '');
+    vi.stubEnv('ACTIONS_ID_TOKEN_REQUEST_TOKEN', '');
+    try {
+      await syncMain({ root: dir, url: 'https://baton.test', factsFile: facts, token: 'ci-token', transport: bearer.transport, log: () => {} });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(bearer.seen.every((r) => r.headers.get('Authorization') === 'Bearer ci-token' && r.headers.get('Signature-Input') === null)).toBe(true);
   });
 });
 

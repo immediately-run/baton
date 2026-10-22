@@ -3,7 +3,9 @@
 // post from `.baton/tickets.mjs` and each course's `sync.mjs`, falling back to the markdown ticket
 // source and the standard courses' station functions (courses.ts); `init` scaffolds `.baton/`
 // (the settings, a standard course's file, its leg stubs and instructions, the pinned sync
-// workflow), and `--eject` copies a default out to edit.
+// workflow), and `--eject` copies a default out to edit. B-88 (R-BTN-93): the sync authenticates
+// with a CI identity token, or — `--sync-key FILE`, or `BATON_SYNC_KEY` — with a registered sync
+// key's signature, its no-CI path.
 // Course code in the CLI, never core (§2b). Reached through the esbuild bundle
 // (scripts/baton-cli.mjs), the way `baton run` reaches src/runner.
 import { execFileSync } from 'node:child_process';
@@ -12,10 +14,11 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { BatonApi, BatonRefusal, type Auth, type Transport } from '../runner/api';
+import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../runner/api';
 import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
+import { signingKey } from '../../cli/sign.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type PrFact, type StationsResult } from './course-pr';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
@@ -106,14 +109,26 @@ export interface SyncArgs {
   /** `--latest <branch>`: after the observation, fetch that branch and check it out detached, so
    * a slow run for an older push posts the newest board (§7.1 step 2). The workflow passes it. */
   latest?: string;
+  /** A CI identity token's place. It serves only a sync with no `syncKey` (B-88): a registered
+   * sync key signs, and a CI token beside it is never spent. */
   token?: string;
+  /** The repository's sync key (B-88, R-BTN-93): the private key file the three calls are signed
+   * with, as a worker's are. Set, it is the sync's credential — the no-CI path. */
+  syncKey?: string;
   transport?: Transport;
   auth?: Auth;
   log?: (line: string) => void;
 }
 
+/** `BATON_SYNC_KEY`'s environment form of `--sync-key` (B-88). */
+const SYNC_KEY_ENV = 'BATON_SYNC_KEY';
+
 export function parseSyncArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): Omit<SyncArgs, 'log'> {
-  const out: Omit<SyncArgs, 'log'> = { root: env.BATON_HOME ?? process.cwd(), ...(env.BATON_URL ? { url: env.BATON_URL } : {}) };
+  const out: Omit<SyncArgs, 'log'> = {
+    root: env.BATON_HOME ?? process.cwd(),
+    ...(env.BATON_URL ? { url: env.BATON_URL } : {}),
+    ...(env[SYNC_KEY_ENV] ? { syncKey: env[SYNC_KEY_ENV] } : {}),
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = (): string => {
@@ -126,6 +141,7 @@ export function parseSyncArgs(argv: string[], env: NodeJS.ProcessEnv = process.e
     else if (a === '--facts') out.factsFile = value();
     else if (a === '--latest') out.latest = value();
     else if (a === '--token') out.token = value();
+    else if (a === '--sync-key') out.syncKey = value();
     else throw new Error(`${a}: not a flag of baton repo sync`);
   }
   return out;
@@ -302,7 +318,7 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   const batonJsonPath = join(root, '.baton', 'baton.json');
   if (!existsSync(batonJsonPath)) throw new Error(`${root} has no .baton/baton.json — run \`baton repo init\` first`);
   const url = args.url ?? (JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson).baton_url ?? DEFAULT_URL;
-  const auth = args.auth ?? bearerAuth(args.token ?? process.env.BATON_SYNC_TOKEN ?? (await actionsToken(url)));
+  const auth = args.auth ?? (args.syncKey ? syncKeyAuth(args.syncKey) : bearerAuth(args.token ?? process.env.BATON_SYNC_TOKEN ?? (await actionsToken(url))));
   const api = new BatonApi({ url, transport: args.transport ?? ((req) => fetch(req)), auth }, log);
   let board: Board | null = null;
   const { outcome, steps, next } = await syncOnce(git(root, 'rev-parse', 'HEAD'), {
@@ -351,6 +367,23 @@ async function actionsToken(audience: string): Promise<string | null> {
 function bearerAuth(token: string | null): Auth {
   if (!token) throw new Error('no sync credential: run in the sync workflow (id-token: write), pass --token, or set BATON_SYNC_TOKEN');
   return (_m, _u, _b, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
+}
+
+/** A sync key (B-88, R-BTN-93): the file's key signs the three sync calls, through the runner's
+ * own helper (`envAuth`, imported and not copied), so a sync signs exactly as a worker does. An
+ * API key in the file is still a bearer (`envAuth`'s R-BTN-159 rule), so a bootstrap that keeps
+ * its credential in a file needs no CI either. */
+function syncKeyAuth(file: string): Auth {
+  let auth: Auth;
+  try {
+    auth = envAuth({ BATON_KEY_FILE: file });
+  } catch (e) {
+    throw new Error(`--sync-key ${file}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // The key's readability is answered now, before the first call signs with it: half a sync is
+  // never posted under one credential and half under none.
+  signingKey(file);
+  return auth;
 }
 
 /** GitHub's API origin, REST and GraphQL alike. */

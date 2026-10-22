@@ -21,7 +21,7 @@ says otherwise. Do each step on staging first (`--url https://baton-staging.imme
 | 1. Keys | yes |
 | 2. Make yourself administrator | yes |
 | 3. Register the repository | yes |
-| 4. The sync | **waits on R3-1249** (`baton sync` and a ticket source for `tickets/*.mdx`) |
+| 4. The sync | **waits on R3-1249** (`baton sync` and a ticket source for `tickets/*.mdx`); a sync key works today, from a laptop (see below) |
 | 5. Workers | the grant is ready; `baton run` waits on the `pr` course's legs (R3-1249's `baton init`) |
 | 6. Cut over | after 4 and 5 |
 
@@ -87,6 +87,23 @@ secret.
 
 Check: `gh workflow run baton-sync.yml -R immediately-run/baton` goes green, and the dashboard
 shows the `baton` board with the live tickets and the next available one.
+
+A repository with no Actions — or a first board to post before any workflow exists — needs no
+CI identity: register a sync key and sign the sync by hand. The key holds one role, so it can be
+neither a worker's nor an administrator's.
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/baton_sync -C "sync of baton"
+node cli/baton.mjs admin -i ~/.ssh/baton_admin repo add immediately-run/baton --id baton \
+  --owner-key ~/.ssh/baton_owner_baton.pub --sync-key ~/.ssh/baton_sync.pub   # or, on a registered repository:
+node cli/baton.mjs admin -i ~/.ssh/baton_admin repo set baton --add-sync-key ~/.ssh/baton_sync.pub
+BATON_SYNC_KEY=~/.ssh/baton_sync node cli/baton.mjs repo sync --root <a checkout of immediately-run/baton>
+```
+
+`--sync-key FILE` (or `BATON_SYNC_KEY`) signs the sync's observation, head and board calls with
+the file's key, exactly as a worker signs (R-BTN-93; B-88); it is the no-CI path, and a CI token
+beside it is never spent. The sync workflow stays as it is — in Actions the OIDC token is the
+credential, and no key secret is needed.
 
 ## 5. Workers
 

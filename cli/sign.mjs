@@ -9,9 +9,13 @@ import { createHash, randomBytes } from 'node:crypto';
 
 export const NAMESPACE = 'baton-request';
 
-/** The key at `file`: `{file, fingerprint}`, or throws. */
+/** How long ssh-keygen may take before the call fails (§6.3's bound; B-88). */
+const KEYGEN_TIMEOUT_MS = 30_000;
+
+/** The key at `file`: `{file, fingerprint}`, or throws. Bounded like every git and forge call:
+ * a key on a stalled mount or behind a busy agent fails the call, it never waits for ever. */
 export function signingKey(file) {
-  const r = spawnSync('ssh-keygen', ['-l', '-E', 'sha256', '-f', file], { encoding: 'utf8' });
+  const r = spawnSync('ssh-keygen', ['-l', '-E', 'sha256', '-f', file], { encoding: 'utf8', timeout: KEYGEN_TIMEOUT_MS, killSignal: 'SIGKILL' });
   const fingerprint = r.status === 0 ? /\b(SHA256:[A-Za-z0-9+/]{43})\b/.exec(r.stdout)?.[1] : null;
   if (!fingerprint) throw new Error(`${file} is not an SSH key ssh-keygen can read${r.error ? ` (${r.error.code})` : ''}`);
   return { file, fingerprint };
@@ -41,7 +45,7 @@ export function signHeaders({ method, url, body, key, now = Date.now() }) {
   const nonce = randomBytes(16).toString('base64url');
   const params = `("@method" "@authority" "@path" "@query" "content-digest");created=${Math.floor(now / 1000)};nonce="${nonce}";keyid="${key.fingerprint}";tag="${NAMESPACE}"`;
   const base = signatureBase({ method, url, digest, params });
-  const r = spawnSync('ssh-keygen', ['-Y', 'sign', '-f', key.file, '-n', NAMESPACE, '-q'], { input: base, encoding: 'utf8' });
+  const r = spawnSync('ssh-keygen', ['-Y', 'sign', '-f', key.file, '-n', NAMESPACE, '-q'], { input: base, encoding: 'utf8', timeout: KEYGEN_TIMEOUT_MS, killSignal: 'SIGKILL' });
   if (r.status !== 0) throw new Error(`ssh-keygen -Y sign failed (${(r.stderr || r.error?.code || '').trim().split('\n')[0]})`);
   const blob = r.stdout.split('\n').filter((l) => l && !l.startsWith('-----')).join('');
   return { 'Content-Digest': digest, 'Signature-Input': `sig1=${params}`, Signature: `sig1=:${blob}:` };
