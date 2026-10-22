@@ -2,7 +2,7 @@
 title: "B-97 — The runner's environment loses the IR_ prefix (PR #96's record)"
 id: B-97
 project: baton
-status: available
+status: in-progress
 updated: 2026-10-22
 tags:
   - roadmap-item
@@ -34,11 +34,13 @@ is its record, and its exit criteria are that PR's.
   skills and harness hooks still read the old ones).
 - README, the runbook and the spec's env rows teach only the new names, with one
   transition note where the aliases are named.
-- A release removes the aliases; that removal closes this ticket's last criterion.
+- A release removes the aliases; that removal closes this ticket's last criterion
+  (done 2026-10-22: `envAuth`, `parseRunArgs`, `runMain` and the leg environment read and set
+  only the new names, and the spec's transition note is gone).
 
 ### Exit criteria
 
 - [x] a runner started with only the new names registers and claims (verified against
       production, 2026-10-22)
 - [x] the legacy spellings warn and keep working; the leg markers dual-written
-- [ ] a release drops the `IR_BATON_*` aliases and the transition note
+- [x] a release drops the `IR_BATON_*` aliases and the transition note

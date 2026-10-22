@@ -9,7 +9,7 @@
 // any fence report, with no hand-off; the second claim runs new scripts with no restart; a bad
 // `next` suspends at its station; a release aborts the leg at its next safe point, writes the
 // hand-off and ends `released:requested` naming whether the leg reached its `to`; a leg
-// session's claim is refused, since it carries IR_BATON_PARENT, and leg sessions register no
+// session's claim is refused, since it carries BATON_PARENT, and leg sessions register no
 // worker of their own; an `unblocked` message is acknowledged. Node only: it spawns the legs'
 // child processes and runs git.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -166,7 +166,7 @@ afterEach(async () => {
 
 describe('S-BTN-41 the runner', () => {
   it('claims a ticket and takes the leg each result names, never inferring one', async () => {
-    home.leg('build', `out(ctx, { leg: 'build', parent: process.env.BATON_PARENT ?? process.env.IR_BATON_PARENT ?? null, hasState: !!(process.env.BATON_STATE ?? process.env.IR_BATON_STATE), session: ctx.session ?? null, run: ctx.run });
+    home.leg('build', `out(ctx, { leg: 'build', parent: process.env.BATON_PARENT ?? null, hasState: !!process.env.BATON_STATE, hasOldMarkers: !!(process.env.IR_BATON_PARENT || process.env.IR_BATON_STATE), session: ctx.session ?? null, run: ctx.run });
   return { reached: 'built', next: 'check', session: 's-1' };`);
     home.leg('check', `out(ctx, { leg: 'check', session: ctx.session ?? null, run: ctx.run });
   return { reached: 'checked', next: 'merge', bars: ['family:anthropic'] };`);
@@ -187,7 +187,13 @@ describe('S-BTN-41 the runner', () => {
     // of its own); the session token travelled from build's result into check's ctx. Each leg's
     // run number is 1 on its first run — the path gains a leg only when it finishes.
     const lines = home.evidence();
+    // B-97: the leg's env carries BATON_PARENT and BATON_STATE only — the transition's IR_ names
+    // are no longer set beside them.
     expect(JSON.parse(lines[0])).toMatchObject({ leg: 'build', parent: expect.stringMatching(/^\d+$/), hasState: true, run: 1 });
+    // B-97: the runner inherits its own environment, so only a run that starts without the old
+    // names can say they were not set beside the new ones — true of a runner, not of this test's
+    // own shell when it is itself a leg.
+    if (!process.env.IR_BATON_PARENT && !process.env.IR_BATON_STATE) expect(JSON.parse(lines[0]).hasOldMarkers).toBe(false);
     expect(JSON.parse(lines[2])).toMatchObject({ leg: 'check', session: 's-1', run: 1 });
     // close ran for every leg (git before the report, R-BTN-83); a done end writes no hand-off.
     expect(lines.filter((l) => l.startsWith('close '))).toEqual(['close build', 'close check', 'close merge']);
@@ -667,15 +673,24 @@ describe('S-BTN-41 the runner', () => {
     expect(await runner.runOnce()).toMatchObject({ end_reason: 'suspended:checked' }); // serving again
   }, 30_000);
 
-  it('a leg session never claims: the runner refuses to nest under BATON_PARENT (either spelling)', async () => {
+  it('a leg session never claims: the runner refuses to nest under BATON_PARENT', async () => {
     // Through the real CLI entry (the bundle `baton run` runs), as a leg session would.
     const r = spawnSync(process.execPath, [resolve('cli/baton.mjs'), 'run'], {
       cwd: resolve('.'),
-      env: { ...process.env, IR_BATON_PARENT: '7' },
+      env: { ...process.env, BATON_PARENT: '7' },
       encoding: 'utf8',
     });
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/BATON_PARENT=7: a leg session never claims/);
+    // B-97: the transition's spelling is not read — a hermetic HOME keeps it from parsing a real
+    // settings file, and with no credential it stops there instead of refusing to nest.
+    const legacy = spawnSync(process.execPath, [resolve('cli/baton.mjs'), 'run'], {
+      cwd: resolve('.'),
+      env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('BATON_'))), HOME: mkdtempSync(join(tmpdir(), 'baton-legacy-')), IR_BATON_PARENT: '7' },
+      encoding: 'utf8',
+    });
+    expect(legacy.stderr).not.toMatch(/a leg session never claims/);
+    expect(legacy.stderr).toMatch(/no credential: BATON_KEY_FILE, BATON_KEY or BATON_TOKEN/);
   }, 60_000);
 
   it('the state file carries the runner across a restart: the same worker, not a second one', async () => {

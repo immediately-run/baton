@@ -38,38 +38,28 @@ export interface ApiOptions {
  * a cloud environment's secret this run's caller materialises through `keyWriter`), else the
  * transition's `BATON_TOKEN`. A runner with none cannot talk to Baton (§6.4).
  *
- * The `IR_BATON_*` spellings are the immediately.run heritage (B-96): still read, with one
- * deprecation line naming the new name, until the last deployment stops sending them. */
+ * B-97: the `IR_BATON_*` spellings of the transition are gone — the release dropped them. A
+ * runner handed one reads no credential and stops at the error below, naming the names it
+ * reads; the variables are simply unknown, never silently honoured. */
 export function envAuth(env: NodeJS.ProcessEnv, keyWriter?: (material: string) => string): Auth {
-  /** The first of `names` the environment carries, and which one it was. */
-  const first = (...names: string[]): { value: string; name: string } | null => {
-    for (const name of names) if (env[name]) return { value: env[name]!, name };
-    return null;
-  };
-  const legacy = (name: string): void => {
-    if (name.startsWith('IR_')) process.stderr.write(`baton: ${name} is the old spelling — set ${name.replace('IR_', '')} instead\n`);
-  };
-  const keyFileEnv = first('BATON_KEY_FILE', 'IR_BATON_KEY_FILE');
-  const keyEnv = first('BATON_KEY', 'IR_BATON_KEY');
+  const keyFile = env.BATON_KEY_FILE;
+  const key = env.BATON_KEY;
   // R-BTN-159: an API key, in BATON_KEY or the key file, goes as a bearer in place of a
   // signature; the worker secret joins it as it joins a signature.
-  const material = keyFileEnv ? readFileSync(keyFileEnv.value, 'utf8').trim() : keyEnv?.value.trim();
+  const material = keyFile ? readFileSync(keyFile, 'utf8').trim() : key?.trim();
   if (material && API_KEY.test(material)) {
-    legacy(keyFileEnv?.name ?? keyEnv!.name);
     return (_method, _url, _body, secret) => ({ Authorization: `Bearer ${material}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
   }
-  const keyFile = keyFileEnv?.value ?? (keyEnv && keyWriter ? (legacy(keyEnv.name), keyWriter(keyEnv.value)) : null);
-  if (keyFile) {
-    if (keyFileEnv) legacy(keyFileEnv.name);
+  const signing = keyFile ?? (key && keyWriter ? keyWriter(key) : null);
+  if (signing) {
     return (method, url, body, secret) => {
-      const signed = signHeaders({ method, url, body: body ?? '', key: signingKey(keyFile) });
+      const signed = signHeaders({ method, url, body: body ?? '', key: signingKey(signing) });
       return { ...signed, ...(secret ? { 'X-Worker-Secret': secret } : {}) };
     };
   }
-  const tokenEnv = first('BATON_TOKEN', 'IR_BATON_TOKEN');
-  if (tokenEnv) {
-    legacy(tokenEnv.name);
-    return (_method, _url, _body, secret) => ({ Authorization: `Bearer ${tokenEnv.value}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
+  const token = env.BATON_TOKEN;
+  if (token) {
+    return (_method, _url, _body, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
   }
   throw new Error('no credential: BATON_KEY_FILE, BATON_KEY or BATON_TOKEN (§6.4, R-BTN-13)');
 }

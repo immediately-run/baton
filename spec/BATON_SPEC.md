@@ -4358,9 +4358,9 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     0600 key file, and deletes them from its environment before loading any repository code. No
     leg, `close`, `handoff` or `rank.mjs` inherits them; `rank.mjs` too runs in a child with the
     leg environment.
-  - **What a leg's environment holds.** The `BATON_*` names below are
-    the immediately.run heritage, read as aliases through the transition (the runner warns
-    once and sets the leg markers under both names); a release removes them.
+  - **What a leg's environment holds.** The `BATON_*` names below are the only names: the
+    transition's `IR_BATON_*` aliases were removed by the release that closed B-97 (2026-10-22),
+    so the runner reads no such spelling and sets the leg markers under these names alone.
 
     | Variable | Value |
     |---|---|
@@ -4376,7 +4376,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     | git, forge and model-provider credentials, `SSH_AUTH_SOCK` | kept |
 
     A course may not declare a `credential:` name that is `PATH`, `HOME`, `SSH_AUTH_SOCK`,
-    begins `BATON_` (or the transition's `IR_BATON_`), or is a variable the runner keeps; the course file is held (R-BTN-69).
+    begins `BATON_`, or is a variable the runner keeps; the course file is held (R-BTN-69).
   - **Masking.** Before any byte of a leg's output leaves the runner — to a leg log (R-BTN-128) or
     anywhere else — the runner replaces each exact occurrence of these with `***`:
     1. the runner secret (the claim nonce is public — markers and the mirror's claim note carry

@@ -1,5 +1,5 @@
 // main.ts — `baton run`'s entry (BATON_SPEC §6.13): parses the flags, refuses to nest (a session
-// that carries IR_BATON_PARENT is a leg session — it never claims, advances or ends: the runner
+// that carries BATON_PARENT is a leg session — it never claims, advances or ends: the runner
 // that started it does), refuses the no-op `echo` agent_command (B-83: a stub for tests, behind
 // --test-harness) and hands the legs the `--harness` flag's command when the settings name none,
 // wires the API client (the machine's key, or the transition's token),
@@ -42,8 +42,8 @@ export interface RunArgs {
 export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): RunArgs {
   const out: RunArgs = {
     harness: 'opencode', home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
-    session: env.BATON_SESSION ?? env.IR_BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
-    repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? env.IR_BATON_NAME ?? hostname(),
+    session: env.BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
+    repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? hostname(),
     tier: 'critical', capabilities: ['agent-venue'], beatEvery: 2 * 60_000, testHarness: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -164,8 +164,8 @@ function namedAgentCommand(home: string): string {
 export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void } = {}): Promise<number> {
   // §6.13: a leg session never claims — the runner that started it does. A nested `baton run`
   // is exactly that session trying, so it is refused before anything else. BATON_PARENT is the
-  // name (IR_BATON_PARENT the transition's alias — the runner sets both).
-  const parent = process.env.BATON_PARENT ?? process.env.IR_BATON_PARENT;
+  // runner's name for it (B-97: the transition's IR_BATON_PARENT is gone).
+  const parent = process.env.BATON_PARENT;
   if (parent) {
     process.stderr.write(`baton: this session carries BATON_PARENT=${parent}: a leg session never claims (§6.13)\n`);
     return 1;

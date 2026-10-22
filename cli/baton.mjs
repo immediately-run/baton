@@ -331,7 +331,7 @@ function grantBody(flags, readKey, extra) {
 const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
 
 /** `baton key create FILE [--comment TEXT]` (R-BTN-159): an API key, made here and never sent
- *  anywhere. FILE (mode 0600) holds the key, for `-i FILE` or a runner's IR_BATON_KEY_FILE;
+ *  anywhere. FILE (mode 0600) holds the key, for `-i FILE` or a runner's BATON_KEY_FILE;
  *  FILE.pub holds its public line — what BATON_ADMIN_KEYS lists, `--owner-key FILE.pub` or
  *  `--key FILE.pub` registers. */
 export function createApiKey(file, comment = '') {

@@ -2,7 +2,7 @@
 // `~/.cache/immediately-run/baton/`, mode 0600, holding the worker id, the worker secret, the
 // active claim, the time of the last successful heartbeat, the lease the server granted and the
 // sidecar's lease-lost flag — everything a harness hook or a leg session reads through
-// `IR_BATON_STATE` (read-only for them) and everything the fence computes from (R-BTN-26). The
+// `BATON_STATE` (read-only for them) and everything the fence computes from (R-BTN-26). The
 // spool of transcript pointers and activity rows sits beside it (never in it, R-BTN-20).
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
