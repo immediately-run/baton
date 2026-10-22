@@ -2757,3 +2757,30 @@ blocking, 12 should-fix, 6 nits. Resolved:)*
 | 14 S-BTN-154 tests the claim | it tests the advance |
 | 15–20 nits | the suite in vitest's Node project and the `Models.Optimal` cast; "one optimal answer set" with the encoding; a strict-syntax parser written from the grammar; path and instance-id length; S-BTN-148 aligned; merge edge cases fail the sync; guard rules obey the limits; the condition closes on acceptance; a route against `null` advice; declared-or-derived rules; `not-derivable` |
 
+*(2026-10-22, round 5 — a fifth fresh reviewer confirmed the formal core against clingo: the
+fragment, stratification, the gate stratum's monotonicity, the canonical proof and the choice
+encoding's equivalence with first-match. It found 1 blocking, 17 should-fix and 7 nits, all in
+bounds and seams. **Not yet resolved**, and B-104 and B-105 are back in review until they are:)*
+
+| Finding | Status |
+|---|---|
+| 1 B — acceptance-time evaluation of holding-independent predicates (and constraints) is unbounded | open |
+| 2 an absent `ontology` field: "none" (§4.4) or "the one in force" (R-BTN-174) | open |
+| 3 R-BTN-126 checks a dead holding against a proof only the maximal evaluation stores; derived needs are not admissible refs | open |
+| 4 a dead holding without a real `check` is re-declared at the next heartbeat | open |
+| 5 a choice may need a `credential:` capability the leg will not receive | open |
+| 6 R-BTN-126 re-evaluates every repository's set in one end | open |
+| 7 candidate selection reads stale sets; "rule 4 never reads a stale set" overstated | open |
+| 8 resource blocks attach to the leg, not the alternative; runner-scope resources cannot steer a choice under `atoms_from: admin` | open |
+| 9 the 5-minute window loses a revert to the program in force, and has no store for waiting course files | open |
+| 10 removing a course is outside unit acceptance | open |
+| 11 merge errors fail the whole sync instead of refusing the unit | open |
+| 12 proof and derived-row writes escape the write budgets | open |
+| 13 the match budgets are not checked against R-BTN-87's latency budgets | open |
+| 14 rule 4 is `gatesFor` (src/core/gates.ts), which re-checks the grant per need, not `isEligible` | open (verified) |
+| 15 S-BTN-142 and S-BTN-146 rely on heartbeats §11.1 refuses | open |
+| 16 S-BTN-143's block cannot appear while a direct declarer is live | open |
+| 17 repository rules over core atoms, and `meters`, can depend on `holds` at choice time | open |
+| 18 derived-set bookkeeping for non-live runners, empty sets and `runner_derived_state` | open |
+| 19–25 nits | open: R-BTN-120's prose, S-BTN-146's wording and test seam, S-BTN-144's fact order, the runtime bound's sufficiency, route-file lifetime, a program change mid-claim, S-BTN-148's lapse |
+
