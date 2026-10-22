@@ -83,6 +83,9 @@ interface BatonJson {
   items?: string;
   repos?: Record<string, string>;
   agent_command?: string;
+  /** A command whose words precede `agent_command`'s in every leg's spawn (B-95);
+   * `BATON_AGENT_WRAPPER` in the host's environment wins over it. */
+  agent_wrapper?: string;
 }
 
 /** The skill a course entry names when its file names none: the course's own (`baton-create-pr`). */
@@ -557,6 +560,11 @@ export default {
 /** The most output a stub keeps from its agent (the review reads only the last line). */
 const AGENT_OUTPUT_MAX = 64 * 1024 * 1024;
 
+/** The environment variable that overrides `.baton/baton.json`'s `agent_wrapper` for one host
+ * (B-95): the runner's environment reaches the stub, so a host wraps its legs without the
+ * repository file naming one. */
+const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
+
 /** One leg stub's source (R-BTN-74, R-BTN-131): run the `agent_command` that
  * `.baton/baton.json` names at the claim's snapshot (`ctx.snapshot.sha`, the commit the runner
  * loads the leg scripts from) — or, the settings naming none, the `BATON_AGENT_COMMAND` the
@@ -593,8 +601,10 @@ import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-ver
 // repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the
 // checkout as its arguments and the leg's instructions in the file BATON_INSTRUCTIONS names. The
 // command runs with no shell between the stub and the agent (B-84), so no substitution or
-// redirection it may carry is executed; its own contract is the header of the leg's .md. Both
-// are read when the leg runs at the claim's snapshot, the commit the runner loaded this script
+// redirection it may carry is executed; its own contract is the header of the leg's .md. Where
+// the repository sets \`agent_wrapper\` (B-95) — or the host sets BATON_AGENT_WRAPPER, which wins
+// — that command's words go in front of the agent's argv, and the rest is the wrapper's. Both are
+// read when the leg runs at the claim's snapshot, the commit the runner loaded this script
 // from, never the working tree an agent may have changed (so a branch under review cannot pick
 // its reviewer or rewrite the reviewer's instructions).${ask ? `
 // The agent's last line of output must be its ${ask.name}: ${values}. A line that opens with
@@ -658,8 +668,18 @@ async function standard(ctx) {
   // requires it to mean.
   const [command, ...words] = splitWords(agentCommand);
   if (command === undefined) throw new Error('.baton/baton.json names no agent_command to run');
+  // B-95: the repository's \`agent_wrapper\` — a host's BATON_AGENT_WRAPPER first, else the
+  // snapshot's setting — is one more command, split the same way, whose words go in front of the
+  // agent's argv. Baton only composes it; what it does with stdio, time or the log is its own.
+  const envWrapper = process.env.${AGENT_WRAPPER_ENV};
+  const wrapper = typeof envWrapper === 'string' && envWrapper.trim() !== '' ? envWrapper : settings.agent_wrapper;
+  if (wrapper != null && (typeof wrapper !== 'string' || wrapper.trim() === '')) throw new Error('.baton/baton.json\\'s agent_wrapper is not a command');
+  const [wrapped, ...wrapping] = wrapper == null ? [] : splitWords(wrapper);
+  const argv = wrapped === undefined
+    ? [command, ...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout]
+    : [wrapped, ...wrapping, command, ...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout];
   const out = await new Promise((resolve, reject) => {
-    const child = execFile(command, [...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout], {
+    const child = execFile(argv[0], argv.slice(1), {
       cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX}, stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.path ?? '',${ask ? `
@@ -725,6 +745,12 @@ export async function run(ctx, standard) {
 `;
 }
 
+/** The worked example of `agent_wrapper` (B-95): a `tee` to `.baton/logs/<ticket>-<leg>.log`,
+ * shipped but never used until the repository names it in `baton.json`. */
+const WRAPPER_EXAMPLE = 'leg-wrapper.example';
+const wrapperExample = (): string =>
+  readFileSync(fromSource() ? join(packageRoot(), '.baton', WRAPPER_EXAMPLE) : prebuilt(WRAPPER_EXAMPLE), 'utf8');
+
 /** The instructions shipped for one leg of a standard course (R-BTN-131), the Markdown `init`
  * copies into the repository, which owns them from then on. */
 const instructionsOf = (course: string, leg: string): string =>
@@ -766,8 +792,10 @@ export async function prebuildDefaults(dist: string, build: { repository: string
     files++;
   }
   await bundleSource(WRAPPERS.tickets(DEFAULT_COURSE), join(out, 'tickets.mjs'));
+  // B-95's worked example, beside the stubs: init writes it into .baton/ as leg-wrapper.example.
+  copyFileSync(join(packageRoot(), '.baton', WRAPPER_EXAMPLE), join(out, WRAPPER_EXAMPLE));
   writeFileSync(join(dist, 'build.json'), `${JSON.stringify(build, null, 2)}\n`);
-  return files + 2;
+  return files + 3;
 }
 
 /** The CLI's own version, for the workflow's pin: `owner/name@<commit>` of the checkout this
@@ -1008,6 +1036,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   }
   writeWorkflow();
   await put('tickets/README.md', (abs) => writeFileSync(abs, '# Tickets\n\nOne `*.md` file per ticket; `baton repo init` wrote this directory.\n'));
+  // B-95: the worked example of a leg wrapper, there to be copied and named; a repository already
+  // has one once it is.
+  await put(`.baton/${WRAPPER_EXAMPLE}`, (abs) => writeFileSync(abs, wrapperExample()));
   if (kept.length) log(`baton: kept ${kept.join(', ')} (already there; --force rewrites Baton's files, never your instructions or overrides)`);
   log(`baton: .baton/ scaffolded (course ${b.id}: ${b.summary}) — commit it, add tickets/*.md, and the workflow does the rest`);
   return 0;

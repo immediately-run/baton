@@ -14,7 +14,9 @@ after you return; do not write it.
 > completion: a harness that is a client of a background service must keep its session in
 > process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
 > work ends leaves truncated output and an orphaned session posting to a claim that no longer
-> exists (B-84).
+> exists (B-84). A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
+> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95).
 
 The owner's attention is the scarcest thing in this course. A blank page costs them an hour; a
 draft with five pointed questions, each with a recommendation, costs them ten minutes. Do the work

@@ -898,7 +898,7 @@ Baton, and it is exportable (R-BTN-88).
                         #   report_horizon_h, branch_pattern, previous_branch_pattern?,
                         #   protocol_files, source?, facts?}]; imports?; conditions? (bindings,
                         #   R-BTN-161); for the CLI's defaults (R-BTN-74): items, default_course,
-                        #   repos, agent_command
+                        #   repos, agent_command, agent_wrapper (B-95)
     tickets.mjs         # optional ticket source; absent, the CLI's markdown source (R-BTN-74)
     courses/<course>/   # an own course; a sourced course's directory holds only overrides (R-BTN-134)
       course.json       # the course file (R-BTN-69)
@@ -2021,8 +2021,12 @@ mean (R-BTN-50).
      and the last line read. The spawn is shell-free (B-84):
     the command string splits into words as `sh` would — quotes, no substitutions — and runs as
     `execFile(command, args)` with the ticket id, the leg and the checkout appended, stdin never
-    an open pipe (a closed fd — nothing to read), stdout and stderr captured pipes. The
-    instruction file's header carries that contract for `agent_command` authors, with the
+    an open pipe (a closed fd — nothing to read), stdout and stderr captured pipes. A repository's
+    `agent_wrapper` — or a host's `BATON_AGENT_WRAPPER`, which wins — is one more command, split
+    the same way, whose words precede the agent's argv (B-95): Baton composes it and builds
+    nothing in its place (no capture, upload, retention or redaction), and the instruction
+    file's header names the precedence. The instruction file's header carries that contract for
+    `agent_command` authors, with the
     completion rule it closes: the command's exit **is** the agent's, so a harness whose client
     can exit before its work (a client of a background service) must run its session in process
     (`opencode run --standalone`, or the equivalent) — else its truncated output fails the leg
