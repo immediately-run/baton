@@ -51,7 +51,11 @@ Git keeps every durable record; Baton keeps only what git cannot hold without be
 server — who holds which ticket now, which runners are alive and what they may do — and the
 limits agents must not change. A ticket follows a **course** whose logic is code in its home
 repository; Baton knows only the course's contract (§5), runs no repository code (R-BTN-98)
-and writes no git itself (R-BTN-171). One Baton is one tenant (§2).
+and writes no git itself (R-BTN-171). The division of labor is fixed (the owner, 2026-10-22):
+the **runner** is responsible for the leg processes — launching them, terminating them when
+necessary, and realizing they are stuck; **Baton** is responsible for collecting information
+(the ticket sync, instruments' metrics, claims) and recommending pending ticket legs for
+runners to work on. Nothing else supervises a leg's process. One Baton is one tenant (§2).
 
 **Names.** A **ticket** is the unit Baton hands out, `<repository id>:<local id>` to Baton
 (R-BTN-47). A **course** is the process it follows: **stations**, where a ticket rests and a
@@ -4120,7 +4124,9 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
 - **R-BTN-72 (the runner).** `baton runner start` is a generic runner loop. It hosts the
   sidecar, heartbeats, asks for recommendations, claims, and runs the ticket's legs one at a
   time, each by **the script for that leg**, then advances, suspends or ends as the script's
-  result and the course file allow. It knows no course. Idle, it asks for recommendations when
+  result and the course file allow. It knows no course. It owns the leg processes themselves —
+  launching them, terminating them when necessary, and realizing they are stuck (§1's division
+  of labor; B-108) — and nothing else does. Idle, it asks for recommendations when
   a heartbeat carries `unblocked`, else at its own interval (R-BTN-77).
   - **Course directory** (R-BTN-69, R-BTN-134):
 

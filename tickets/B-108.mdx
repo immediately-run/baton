@@ -18,7 +18,11 @@ depends_on: []
 
 **Brief:** the owner, 2026-10-22, after the B-86 leg held a claim in `implement` for five hours
 past the agent's last output: "the runner is responsible for detecting that the agent has
-completed its work and wont exit. The baton server has no role in this."
+completed its work and wont exit. The baton server has no role in this." Generalized, the same
+day: "it is the runner's responsibility to launch leg processes, terminate them if necessary
+and realize they are stuck. Baton is responsible for collecting information (ticket sync,
+instrument metrics, claims) and recommending pending ticket legs for runners to work on" — now
+§1's fixed division of labor and R-BTN-72's own words.
 **Spec:** §5.8 R-BTN-131 (the stubs and `agent_command`) as amended by B-84 ("the command's exit
 is the agent's completion, which its own contract requires it to mean") — this ticket amends
 R-BTN-131 again: an agent's completion is its **exit or its silence**, whichever comes first.
