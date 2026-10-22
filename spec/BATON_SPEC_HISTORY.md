@@ -2804,3 +2804,23 @@ bounds and seams. **Not yet resolved**, and B-104 and B-105 are back in review u
 | 18 derived-set bookkeeping for non-live runners, empty sets and `runner_derived_state` | open |
 | 19–25 nits | open: R-BTN-120's prose, S-BTN-146's wording and test seam, S-BTN-144's fact order, the runtime bound's sufficiency, route-file lifetime, a program change mid-claim, S-BTN-148's lapse |
 
+*(2026-10-22, round 6 — a review on a different model (Fable 5.1) read the sections against the
+new resident context (values 12) and round 5's open list: 1 blocking, 9 should-fix, 1
+simplify, 6 nits. It reclassified eight of round 5's findings. **Not yet resolved**:)*
+
+| Finding | Status |
+|---|---|
+| 1 B — lazy derived sets cannot meet the freshness bound (advice no older than the reader's last accepted write); flapping declarations saturate the alarm | open; proposed fix: evaluate D(H) in the transaction of the write that changes H; this drops the per-request cap, the `prefer` pass-over and `runner_derived_state` |
+| 2 "one alarm cycle" is not what the alarm budget delivers after a program change | open |
+| 3 "only the guard rules" omits repository rules over core atoms (`ocg_peak`, `near_limit`) | open (same seam as round 5 #17) |
+| 4 a leg's `choices` uncapped: 500 choices × 50,000 matches per advance | open |
+| 5 refinement check placed in core, which holds no `std:` schema bodies | open; proposed: the CLI checks, core stores chain names |
+| 6 `derived` in course files breaks sourced courses; `values` ambiguous across courses | open; proposed: declare derived types in `ontology.json` |
+| 7 the fleet view's `ETag` omits `runner_derived` changes | open |
+| 8 a dead choice holding costs a whole claim | open; proposed: advice carries the ranked available list, and the leg falls through |
+| 9 `BATON_ROUTE` is agent-written, with no size or parse rule | open |
+| 10 §11.1 refuses a heartbeat declaring an ungranted capability, which polices a statement | open; proposed: delete the refusal (resolves round 5 #15) |
+| 11 Simplify — `ontology_proofs` stores what a read can recompute | open |
+| 12–17 nits | open: the same-digest sentence; `exclude_when` called an invariant; `gatesFor`, not `isEligible`; untyped positions and reflexive "depends on"; S-BTN-147 and S-BTN-153 set-ups; R-BTN-120's prose |
+| Round 5 re-read | #3 cut (any declared capability is an admissible `ref`); #4 a runner-side nit; #5 smaller (refuse a `credential:` need `requires` does not name); #7 subsumed by 1; #8 a runner's own `runner`-scope instance always permitted; #12 halved by 11; #15 resolved by 10; the rest stand |
+
