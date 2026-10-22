@@ -43,6 +43,11 @@ change to Baton, not a change in Baton.</Lede>
   [`docs/review/parallel-collaboration-2026-10-22.mdx`](../review/parallel-collaboration-2026-10-22.mdx).
 - **Several dozen parallel workers** — humans and agents — are the load the architecture
   is for, provided they work separate tickets.
+- **Parallelism is horizontal: more runners, not bigger runners.** A runner works one
+  leg at a time by design, and scale comes from many runners — the end state being
+  virtual-machine sandboxes (the `fc-opencode` work) each running a runner on its own
+  legs. A single process multiplexing legs across threads or subprocesses is a possible
+  later evolution, decided when the sandbox fleet's evidence is in — not the plan.
 
 ## Where code lives
 
