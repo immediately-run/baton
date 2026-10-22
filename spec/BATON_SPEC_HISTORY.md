@@ -2928,3 +2928,20 @@ both simplifications), and the rewrite resolved every finding as below:)*
 | 16 Simplify — the 5-minute window | dropped with `pending_json`; a unit is judged at each post (R-BTN-174) |
 | 17–24 nits | grant changes covered by the input digest; the constant alphabet already had `_` (no change); alarm instants added, `capacity` in `POST /v1/admin/instances`, the `{error}` form in §4.4, capacity changes never take back a seat; the holder named only where the asker is granted, `host` instances in the instance view; `seat` off R-BTN-50's banned list; cloud runners use `runner` scope; R-BTN-69's choices check gone with the field, and holds-dependent predicates outside the gate stratum refused; `missing` split from `ungranted` |
 
+*(2026-10-22, round 8 — Fable 5.1, after round 7's rewrite. It confirmed the formal core and the
+hysteresis rules with clingo and found round 7's dispositions in the text: 1 blocking, 7
+should-fix, 1 simplify, 7 nits, none a design question. Resolved:)*
+
+| Finding | Resolution |
+|---|---|
+| 1 B — route choices' `needs` were checked against course files that standard courses lack | needs are shape-checked only; the unit no longer reads course files beyond legs' existence (R-BTN-174, R-BTN-177; S-BTN-155) |
+| 2 the rename reached two choice-station references | restored in R-BTN-120 and R-BTN-12 |
+| 3 "route" named the owner's re-route and the leg's report | the report is `taken` (`BATON_TAKEN`, `taken_json`, `taken-invalid`) |
+| 4 "entry kept at its previous version" | only the `route_choices` field keeps its previous value (R-BTN-174) |
+| 5 the `gatesFor` claim | stated as B-104's amendment, `isEligible` docs-first (R-BTN-174) |
+| 6 a `dead` holding stale at the advance reporting it | removed in that advance's or end's transaction (R-BTN-177; S-BTN-153) |
+| 7 seat statements | G-BTN-162 bounds admission; a silent reap releases at the reap, a fence-pending one after the fence (R-BTN-178) |
+| 8 one read evaluating many repositories | no write evaluates; a claim, advance or why-not evaluates its one repository, a recommendation at most two, leaving out legs of repositories not yet current (R-BTN-174) |
+| 9 Simplify — the input digest over all of H | over H restricted to the program's constants (R-BTN-174) |
+| 10–16 nits | `route_choices_json`; `meters` placement; the instance view and §11.4's runners view; an empty `demote_when` refused, a leg absent from the course refused, needs outside the constant syntax refused; R-BTN-75 recounts derived rows when sets become current; the `derived` list never names `credential`, `runner` or `human-operator`; capacity-less resources billed for ranking |
+
