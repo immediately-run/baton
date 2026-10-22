@@ -125,13 +125,14 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
 - **R-BTN-36 (git never records the holder).** Git says that a ticket is claimed and when;
   Baton says by whom. Nothing a mirror or export writes (§16) names a session, runner id or
   hostname; a runner appears only as a claim id.
-- **R-BTN-45 (Baton advises; it gates only safety).** Baton **recommends**, the runner
+- **R-BTN-45 (Baton advises; its gates protect the lock, not the work).** Baton **recommends**, the runner
   **decides**. Recommendations (R-BTN-61) list the legs a runner may take in Baton's default
   order (§6) with Baton's own advice — the expedite lane's bound, `wip-bound` from `max_queue`
   (R-BTN-79), resource blocks (R-BTN-76) — plus the course's opaque fields and hand-off. The
   runner claims one, another ticket it may take, or none. Advice never refuses: a claim against
   Baton's advice is accepted and logged `advice-overridden`. Only the gates — §6's matching
-  rules — refuse, at claim and `advance`. A rule every runner must obey is a barred tag or a
+  rules — refuse, at claim and `advance`. A gate is the lock's answer to a cooperating worker,
+  never enforcement of the work, which Baton neither does, verifies nor confines (values 12). A rule every runner must obey is a barred tag or a
   bar (R-BTN-60, R-BTN-67).
 - **R-BTN-46 (gates bind cooperating runners; overlaps are noticed, then git wins).** Baton
   cannot refuse a push, comment or status write, and checks no commit or signature; fencing
@@ -376,8 +377,7 @@ process for development and CI. Nothing crosses a tenant.
     reads a secret back; no Baton credential adds an administrator or rewrites a secret.
   - **Administrators belong to a tenant.** Nothing in a tenant's storage can add an
     administrator to it. An administrator's, a dashboard session's and every
-    `instance`-scoped action's powers end at the tenant. Granting `human-operator`,
-    force-reap, cutover, freeze, seal, export and import are the tenant administrator's.
+    `instance`-scoped action's powers end at the tenant. Force-reap, cutover, freeze, seal, export and import are the tenant administrator's.
 - **R-BTN-137 (a credential is valid in one tenant; a key in two tenants is two keys).**
   - A signature verifies only at its origin; a bearer secret (API key, MCP key, registration
     token, pending sign-in, dashboard session) is stored hashed in one tenant and unknown in
@@ -1858,7 +1858,7 @@ mean (R-BTN-50).
       "vpn":        {"description": "a tunnel to a named network", "values": "^[a-z0-9-]{1,32}$"},
       "credential": {"description": "a named secret in the runner's env", "values": "^[A-Z0-9_]{1,64}$"},
       "key":        {"description": "a provider key the runner holds, a label", "values": "^[a-z0-9-]{1,64}$"},
-      "model":      {"description": "a model the runner can reach", "values": "^[a-z0-9.-]{1,64}$", "derived": true} },
+      "model":      {"description": "a model the runner can reach", "values": "^[a-z0-9.-]{1,64}$"} },
     "capability_roles": {"deployer": ["vpn:corp", "credential:DEPLOY_TOKEN"]}
     ```
 
@@ -1866,10 +1866,10 @@ mean (R-BTN-50).
     role expands to its list once (roles do not nest). Baton accepts the file only if every
     capability a leg lists, after expansion, is of a declared type with a matching value, or is
     built-in. A role naming `human-operator` or another role holds the file (R-BTN-157). A
-    course may not declare a type named `runner` or `human-operator`. A type marked
-    `"derived": true` is one the repository's ontology may derive (R-BTN-174); `credential` may
-    not be marked so.
-  - **Built-ins:** `human-operator`, which only an administrator grants (R-BTN-58), and the type
+    course may not declare a type named `runner` or `human-operator`. Whether a type is derived
+    is the repository's ontology's (R-BTN-174), never the course file's.
+  - **Built-ins:** `human-operator`, a runner's own statement that a person operates it, which
+    Baton cannot verify and grants admit like any capability (R-BTN-58), and the type
     `runner` (R-BTN-133). `credential:<NAME>` names an environment variable a leg receives only
     when it requires it (R-BTN-144).
   - A course's types and roles are served with its course file (`GET
@@ -2082,113 +2082,118 @@ mean (R-BTN-50).
   `dependency:claude-code`). A holding is a label: a key the runner has is a course type such as
   `key` (`^[a-z0-9-]{1,64}$`), declared while its `check` passes (R-BTN-121), and the ontology
   never changes a leg's environment (R-BTN-144). Baton never stores a credential, learns what a
-  name means or calls a provider. Whether a holding is real is tested where it is used: by its
-  `check` (R-BTN-121), and by a leg that finds it dead and ends `released:blocked` on it
-  (R-BTN-126).
-  - **Derived types.** Only capabilities of a type that a course marks `"derived": true`
-    (R-BTN-121) are derived. A type named `credential` is never derived, and neither is a
-    built-in. Courses of one repository that define the same type must agree on `derived`. A
-    derived type may still be declared directly, so a machine may simply hold
-    `capability:code-generation-llm`.
+  name means, calls a provider or checks a holding: every holding, and every derived capability,
+  rests on the runner's own statement (values 12).
+  - **Derived types.** The ontology names the capability types it derives, in its file's
+    `derived` list. A course declares a type's `values` for the legs that require it (R-BTN-121);
+    whether the type is derived is the ontology's business alone, so a course sourced from
+    another repository (R-BTN-134) never conflicts with it. `credential`, `runner` and the bare
+    `human-operator` are never derived. A derived type may still be declared directly, so a
+    machine may simply hold `capability:code-generation-llm`.
   - **The file, and the built-in it names.** A repository has an ontology only when its default
     branch's head holds `.baton/ontology.json` (R-BTN-51); with no file there is none, and a
     runner's capabilities are its holdings. The file may name a built-in by version,
     `"builtin": "baton@<n>"`. The CLI ships each version under `src/defaults/ontology/`, and a
     published version never changes. The sync merges the two:
-    1. it starts from the named built-in's entries and choices, or from nothing;
+    1. it starts from the named built-in's entries, choices and `derived` list, or from nothing;
     2. it drops those whose ids the file's `retract` lists;
     3. it replaces each one whose id the file reuses, a reused choice id replacing the whole
-       choice;
-    4. it appends the file's other entries and choices, in file order.
+       choice, and a replaced entry keeping its built-in position;
+    4. it appends the file's other entries and choices, in file order, and adds its `derived`
+       types.
 
-    A replaced entry keeps its built-in position. Ids are one namespace across entries and
-    choices. A reused id that changes kind (entry for choice or the reverse), a `retract` naming
-    no built-in id, and an id both retracted and reused each fail the sync. The sync posts the result as the board
-    post's `ontology: {builtin?, program}` (§4.4). The program's digest is the SHA-256 of its
-    RFC 8785 canonical JSON, which core computes. Every CLI therefore posts the same program for
-    the same commit, and a CLI lacking the named version fails the sync. Core never merges: it
-    validates what is posted and evaluates it. A post whose program has the digest in force
-    changes nothing.
-  - **Acceptance, with the course files.** A course file's **ontology part** is its
-    `capability_types` and its legs' `choices`. A post's program, together with the ontology
-    parts of its course files, is accepted or refused as one unit:
-    1. the course files are validated as R-BTN-69 says, leaving out `choices`;
-    2. the unit is checked. The program that would be in force (the posted one, or the one in
-       force if none is posted) must validate (R-BTN-175) against the course files that would be
-       in force, and must define every choice they list.
+    Ids are one namespace across entries and choices. A merge cannot be made when the CLI lacks
+    the named version, a reused id changes kind (entry for choice, or the reverse), `retract`
+    names no built-in id, or an id is both retracted and reused. The sync then posts `ontology:
+    {error: <reason>}` and the rest of the board as usual.
 
-    If the check passes, the unit is accepted. If it fails, the program and every course file
-    whose ontology part changed are refused, each keeping its previous version (R-BTN-69), and
-    `baton.ontology-refused` is raised, naming the entry, course and rule. The state in force was
-    consistent before the post, and the course files accepted in its place leave their ontology
-    parts unchanged, so it stays consistent. The condition closes when a unit is accepted.
+    The sync posts the result as the board post's `ontology: {builtin?, program}` (§4.4); with
+    no file it posts no `ontology` field. The program's digest is the SHA-256 of its RFC 8785
+    canonical JSON, which core computes. Every CLI therefore posts the same program for the same
+    commit. Core never merges: it validates what is posted and evaluates it.
+  - **Acceptance, with the course files.** A post's ontology **unit** is its program (the posted
+    one; none when the field is absent) together with its course files' `choices` and the
+    `values` of the types the program derives. A unit is accepted or refused whole. It is
+    accepted when the course files that would be in force (R-BTN-69's checks passed, a removed
+    course gone) list only choices the program defines, and the program validates (R-BTN-175)
+    against them. Otherwise:
+    - the program and every course file whose unit part changed keep their previous versions,
+      a removed course staying in force until a unit without it is accepted;
+    - `baton.ontology-refused` is raised, naming the entry, course and rule (or the merge's
+      `error`). It closes when a unit is accepted.
 
-    A unit that changes the program, or a course file's derived types or `values`, marks every
-    derived set of the repository stale. A repository accepts such a unit at most once every 5
-    minutes. A later one waits whole, its other course-file changes accepted at once, and the
-    newest waiting unit is checked when the window ends. An accepted program without a choice
-    drops that choice's `choice_last` rows.
-  - **What a runner holds for a repository.** Let H be its declared capabilities ∩ its grant
-    there (R-BTN-58), together with its declared `runner:` capabilities (R-BTN-133). Let D(H) be
-    every K with `derived(K)` in the program's answer set over `holds(K)` for each K in H. The
-    runner's capabilities there are H ∪ D(H). That is the capability set rule 4 reads (§6.6),
-    `fleet_capabilities` counts (R-BTN-75), and the vendored `isEligible` (R-BTN-37) and the
-    model (R-BTN-68) receive as the runner's capabilities. The ontology's evaluation sits outside
-    both, and is checked by its own conformance suite (R-BTN-175).
+    The state in force was consistent before the post, and nothing in it changes unless the
+    whole unit is accepted, so it stays consistent. A repository accepts a changed unit at most
+    once every 5 minutes. A later one waits, with its course files, in `ontologies.pending_json`;
+    the course files' other changes are accepted at once. The newest waiting unit is checked when
+    the window ends, and a post whose unit equals the one in force discards a waiting one. An
+    accepted program without a choice drops that choice's `choice_last` rows.
+  - **What a runner has for a repository.** Let H be its declared capabilities ∩ its grant there
+    (R-BTN-58), together with its declared `runner:` capabilities (R-BTN-133). Let D(H) be every K
+    with `derived(K)` in the program's answer set over `holds(K)` for each K in H. The runner's
+    capabilities there are H ∪ D(H). Rule 4 reads it, through `gatesFor` (`src/core/gates.ts`),
+    which checks the grant against H, never against D(H). `fleet_capabilities` counts it
+    (R-BTN-75), and the model (R-BTN-68) receives it as the runner's capabilities. The ontology's
+    evaluation sits outside both, and is checked by its own conformance suite (R-BTN-175).
   - **Grants bound holdings, never derivations.** A capability gate matches what a runner can
-    do, not what it may do. Authority lives in grants, `human-operator` and `runner:`, which are
-    never derived (R-BTN-175). So a grant bounds H, and the ontology then says what H amounts to.
-    A program that derives an ability a runner lacks only offers that runner legs it cannot
-    finish, as a false declaration would (R-BTN-66). A grant that names a derived capability
-    admits a runner that declares it directly. The fleet view (R-BTN-99) and the dashboard show
-    each runner's derived capabilities beside its tags.
-  - **Stored, and fresh at a claim.** D(H) is kept in `runner_derived` with the program's digest.
-    At most 256 capabilities may be derived per runner.
-    - A heartbeat that changes the runner's declared capabilities, or a grant made, changed or
-      revoked, marks the runner's sets stale.
-    - An accepted unit marks sets stale as the acceptance bullet says.
-    - The alarm re-evaluates stale sets, taking repositories round-robin and writing only the
-      rows that changed. It starts no new evaluation once a turn has spent 1,000,000 matches, and
-      an evaluation it starts always finishes.
-    - A claim or advance re-evaluates, in a transaction of its own, the runner's set for the
-      ticket's repository if it is stale or names another digest. That transaction commits
-      whether or not the claim succeeds. A request makes at most two such evaluations; a
-      `prefer` candidate whose set would need a third is passed over for that request, and the
-      alarm is prompted.
+    do, not what it may do. Authority lives in grants and `runner:`, which are never derived
+    (R-BTN-175). So a grant bounds H, and the ontology then says what H amounts to. A program
+    that derives an ability a runner lacks only offers that runner legs it cannot finish, as a
+    false declaration would (R-BTN-66). A grant that names a derived capability admits a runner
+    that declares it directly. The fleet view (R-BTN-99) and the dashboard show each runner's
+    derived capabilities beside its tags.
+  - **Evaluated with the write that changes it.** D(H) is stored in `runner_derived`, with the
+    program's digest, at most 256 capabilities per runner and repository. It is evaluated:
+    - in the transaction of a write that changes H: a heartbeat that changes the runner's
+      declared capabilities, a grant made, changed or revoked, or an end that removes a holding
+      (R-BTN-126). It covers each repository the runner is granted on that has an ontology,
+      bounded by those grants and by R-BTN-175's per-evaluation bound;
+    - for a runner's read when the program in force changed since its set was stored: a claim,
+      an `advance`, a recommendation or a why-not re-evaluates the reader's sets whose digest is
+      not in force, at most one per repository, in a transaction of its own that commits whether
+      or not the request succeeds.
 
-    Rule 4 therefore never reads a set computed under another program or other holdings.
-    Recommendations, `unblocked` messages and fleet counts read the stored sets and may lag
-    until the alarm catches up, which only affects advice. `fleet_capabilities` for a repository
-    is recounted once its last stale set is current. A runner's rows go when it is reaped or its
-    grant is revoked.
-  - **Canonical proofs.** R-BTN-175's evaluator is fully determined, and each derived atom's
-    first derivation is the rule instance that first produced it. Its body atoms were all
-    produced in earlier rounds, so each atom has exactly one finite proof, a directed acyclic
-    graph over atoms: its **canonical proof**. Proofs serve only why-not; a leg's environment is
-    R-BTN-144's alone.
-  - **Why not.** Validation's **maximal evaluation** (R-BTN-175) stores the canonical proof of
-    each atom it derives, one row per atom in `ontology_proofs`. For a capability X of a derived
-    type that a leg requires, a `missing-capability` answer (the blocks index, `baton leg why`)
-    gives `why: not-derived` with:
-    - `needs`, the distinct holdings of X's canonical proof in the maximal evaluation, sorted;
+    A runner's advice is therefore never older than the last write Baton accepted for it, and
+    rule 4 never reads a set computed under another program or other holdings. An `advance` re-checks
+    rule 4 against the current set, so a program change can refuse a holder's next `advance`, as
+    a lost declaration can. After a program
+    change the alarm re-evaluates the remaining live granted runners' sets, writing only rows that
+    change, which count against the repository's write budget (R-BTN-149). An **alarm cycle** is
+    that run of back-to-back alarm turns: each spends at most 1,000,000 matches, never starts an
+    evaluation it could not finish within R-BTN-175's bound, and yields to requests between
+    turns. Fleet-wide views — `fleet_capabilities`, `capability` blocks, `unblocked` wake-ups,
+    the fleet view and the dashboard — are recounted when the cycle ends. A non-live runner's
+    sets are not re-evaluated; its next heartbeat evaluates them. Its rows go 30 days after it was
+    last live, and a revoked grant's rows go with the grant. A change to `runner_derived` bumps
+    the repository's `fleet_version` (R-BTN-99).
+  - **Canonical proofs, and why not.** R-BTN-175's evaluator is fully determined, and each
+    derived atom's first derivation is the rule instance that first produced it. Its body atoms
+    were all produced in earlier rounds, so each atom has exactly one finite proof, a directed
+    acyclic graph over atoms: its **canonical proof**. For a capability X of a derived type that a
+    leg requires, a `missing-capability` answer (the blocks index, `baton leg why`) gives
+    `why: not-derived` with:
+    - `needs`, the distinct holdings of X's canonical proof in the maximal evaluation (R-BTN-175),
+      sorted;
     - `missing`, those of them the asking runner lacks (omitted for the fleet);
     - `chain`, the distinct entry ids met in a depth-first walk of the proof from X, visiting
       each atom once and its body atoms in body order.
 
-    The walk is linear in the proof's size, at most 5,000 atoms. Declaring X directly satisfies
-    it too, and the answer says so. When the maximal evaluation has no proof of X, the answer is
-    `why: not-derivable`: no holdings derive it under this program. The answer is one canonical
-    route, not a search, and not a guaranteed minimum.
+    The answer is computed on read from the program in force, memoised in the object by digest;
+    it is advice and stores nothing. The walk is linear in the proof's size, at most 5,000 atoms.
+    Declaring X directly, where the grant admits it, satisfies it too, and the answer says so.
+    When the maximal evaluation has no proof of X, the answer is `why: not-derivable`: no holdings
+    derive it under this program. It is one canonical route, not a search, and not a guaranteed
+    minimum.
 - **R-BTN-175 (the ontology language, its validation and its bounds).** **A Baton ontology is a
   safe, stratified ASP-Core-2 program of ground facts, normal rules and integrity constraints
   over string and integer constants, with default negation and the comparison built-ins, and
   with no disjunction, function symbols, arithmetic terms other than a negative integer
   constant, or aggregates. It is the fragment whose programs have exactly one answer set,
   computed bottom-up, stratum by stratum.** Its only other construct is R-BTN-177's generated
-  choice encoding, with which a program has exactly one optimal answer set. A construct joins the language only by a change to this rule that names the
-  ASP-Core-2 construct it adopts.
+  choice encoding, with which a program has exactly one optimal answer set. A construct joins
+  the language only by a change to this rule that names the ASP-Core-2 construct it adopts.
   - **Serialization.** The file is `{version: 1, builtin?: "baton@<n>", retract?: [<id>…],
-    entries: [<entry>…], choices?: [<choice>…]}` (choices: R-BTN-177). Each entry has an `id`
+    derived?: [<type>…], entries: [<entry>…], choices?: [<choice>…]}` (choices: R-BTN-177). Each entry has an `id`
     matching `^[a-z][a-z0-9-]{0,63}$`, unique among the program's entries and choices, and takes
     one of three forms:
     - `{id, fact: [<pred>, <constant>…]}`;
@@ -2213,30 +2218,37 @@ mean (R-BTN-50).
     predicate may never be a repository head, and the encoding's may never appear in a
     repository body or guard.
   - **Validation** refuses a program that breaks any of these:
-    - **Safety.** Every variable of a rule, constraint or generated guard rule occurs in a positive body literal that is
-      not a comparison.
+    - **Safety.** Every variable of a rule, constraint or generated guard rule occurs in a positive
+      body literal that is not a comparison.
     - **Types.** Every argument position of every predicate has one type, string or integer. It
       is declared for reserved predicates, and inferred elsewhere by propagating types from facts,
       constants and heads, through variables shared between positions, to a fixpoint. A position
-      that receives both types is refused. `< <= > >=` compare two integers, and `=` and `!=`
+      that receives both types is refused; one that receives none holds no atom and is typed
+      string. `< <= > >=` compare two integers, and `=` and `!=`
       compare two values of one type.
     - **Strata.** The predicate dependency graph has no cycle through a negated literal, with the
       generated guard rules (R-BTN-177) included. Positive recursion is allowed.
     - **Constraints** range only over predicates that depend on no core-formed atom. They are
       checked at validation, and a violated one refuses the program.
-    - **The gate stratum** is `derived/1` and every predicate it depends on. In it:
-      1. no negated literal names a predicate that depends, at any depth, on `holds`;
+    - **The gate stratum** is `derived/1` and every predicate it depends on. "Depends on" is
+      reflexive and transitive. In it:
+      1. no negated literal names a predicate that depends on `holds`;
       2. every variable of a `holds` literal also occurs in a positive literal of a predicate that
          is not core-formed;
       3. nothing depends on R-BTN-176's atoms or on R-BTN-177's encoding;
-      4. every `derived` atom is a string `<type>:<value>` whose type the repository's courses
-         declare derived, and whose value matches that type's `values`.
+      4. every `derived` atom is a string `<type>:<value>` whose type is in the program's
+         `derived` list, and whose value matches the `values` of every course in force that
+         declares the type.
 
       By 1 and 2 the gate stratum's result is monotone in H, and every term in it is a constant
       of the program. A rule meant to accept a capability whether it is declared or derived names
-      both, `holds(M)` and `derived(M)`, in two rules. Validation therefore evaluates it once, with every string constant of the
-      program held: the **maximal evaluation**. Every runner's D(H) is a subset of it, and
-      condition 4 and the 256-capability limit are checked on it.
+      both, `holds(M)` and `derived(M)`, in two rules. Validation therefore evaluates it once, with
+      every string constant of the program held: the **maximal evaluation**. Every runner's D(H)
+      is a subset of it, and condition 4 and the 256-capability limit are checked on it.
+    - **Fixed predicates**, those that depend on no core-formed atom, are evaluated within the
+      maximal evaluation and under its bounds, the constraints over them included. Their result
+      is stored with the program (`ontologies.fixed_json`, at most 5,000 atoms), and later
+      evaluations read it as facts.
   - **The evaluator**, `src/core/ontology.ts`, is pure and fully determined:
     - strata are evaluated in topological order of the dependency graph's strongly connected
       components, ties broken by the smallest entry index;
@@ -2264,11 +2276,13 @@ mean (R-BTN-50).
   - **Bounds.** Both are counted, never timed, so both hosts stop at the same point.
     - A program has at most 512 entries and alternatives counted together. Each rule, and each
       guard as a rule, has at most 8 body literals and 4 variables.
-    - The maximal evaluation may derive at most 5,000 atoms in at most 200,000 matches.
+    - The maximal evaluation, fixed predicates and constraints included, may derive at most 5,000
+      atoms in at most 200,000 matches.
     - Any other gate evaluation may make at most 400,000 matches, since a smaller input does not
       always cost fewer matches.
     - A choice evaluation (R-BTN-177) may make at most 50,000 matches.
 
+    The load test (G-BTN-77) runs evaluations at these bounds against R-BTN-87's latency budgets.
     An evaluation that crosses its bound yields nothing — H alone for the gate stratum, which
     fails closed, and no advice for a choice. It raises `baton.ontology-limit` once per
     repository and program digest, and the condition closes when another program is
@@ -2304,7 +2318,8 @@ mean (R-BTN-50).
     emitted program with a parser written from the ASP-Core-2 grammar for the productions the
     fragment admits, so a production outside the fragment fails it. The suite runs in vitest's
     Node project (`clingo-wasm` needs `worker_threads`), and it reads `Models.Optimal`, which
-    `clingo-wasm`'s result type omits, through a cast. clingo never runs on a host (R-BTN-68's
+    `clingo-wasm`'s result type omits, through a cast. A test's lowered bounds reach the core only
+    through the test bindings in `vitest.config.ts`, as test keys do. clingo never runs on a host (R-BTN-68's
     posture).
 
 ## 6. Prerequisites, blocks and advice *(partly built — B-7, B-10, B-21, B-41, R3-1259, R3-1269)*
@@ -2321,7 +2336,7 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
   |---|---|---|---|
   | station | the leg's `from` (R-BTN-69) | the ticket is at one of them | nothing: only legs leaving the ticket's station are offered |
   | ticket | the leg's `requires.tickets`; the ticket's posted `depends_at` | the selected tickets are where the entry says | a `ticket` block |
-  | capability | the leg's `requires.capabilities`; the ticket's posted `requires` clause (every leg) | the runner declares each and is granted it (rule 4) | a `capability` block |
+  | capability | the leg's `requires.capabilities`; the ticket's posted `requires` clause (every leg) | the runner declares each and is granted it, or derives it (rule 4, R-BTN-174) | a `capability` block |
   | resource | the leg's `requires.resources`; the sync's posted `needs`; a `blocked` end | a usable instance is not `unavailable` (R-BTN-76) | a `resource` block (advice) |
   | decision | a posted decision (R-BTN-78) | the ticket source stops posting it | a `decision` block |
   | retry | the leg's `retry` policy (R-BTN-122) | `retry_after` has passed | a `retry` block |
@@ -2360,7 +2375,7 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
     naming the tickets.
   - **Capabilities** are stored expanded through R-BTN-121's `capability_roles`; no role name is
     stored. `human-operator` is an ordinary capability in `ticket_requires`, checked by rule 4,
-    that only an administrator grants (R-BTN-58); a source translates its own words for it
+    which a runner declares and a grant admits (R-BTN-121); a source translates its own words for it
     (docs' `OP` tag) into the clause.
   - **Pairs that join.** The ticket's clause and a leg's `requires.capabilities` join for that
     leg; the posted `needs` and a leg's `requires.resources` join. A station's `entry`
@@ -2481,11 +2496,11 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
       dropped and logged `reading-refused`; the end stands. An `end`-sourced need and its row go
       when the leg next ends other than `blocked` on that resource, or after 7 days, and posts
       never remove it; the `found_at` stamp clears at that same end.
-    - `capability` — `ref` one expanded capability in the leg's or ticket's `requires`, or a
-      holding in the canonical proof of one the runner derived (R-BTN-174), or a holding the
-      leg's advised alternative needs (R-BTN-177), that the runner declared and
-      lost. Baton removes it from the runner's declared set, re-evaluates its derived sets and
-      updates `fleet_capabilities`, so rule 4 refuses this runner at once. The runner declares it again
+    - `capability` — `ref` a capability the runner declared and says it lost, which the leg
+      needed directly or on the way to one it requires (R-BTN-174). This is the runner's own
+      statement, never checked against a proof. Baton removes it from the runner's declared set,
+      re-evaluates the runner's derived sets in the same transaction (R-BTN-174) and updates
+      `fleet_capabilities`, so rule 4 refuses this runner at once. The runner declares it again
       once its check passes (R-BTN-121).
     - `ticket` (`ref` in R-BTN-75's form, same repository) or `decision` (a decision id) — the
       leg writes the `depends_at` entry or decision to git first and the end carries `commit`;
@@ -2684,7 +2699,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | 3 | No other active, completed-unconfirmed (not superseded, R-BTN-168) or fence-pending claim on the ticket; no hold (§6.8) | claim; advance: hold only | `claimed`, `held` |
   | 4 | `capabilitiesOf(ticket.requires ∪ leg.requires.capabilities) ⊆ H ∪ D(H)`, with `H = declared ∩ grant(repository)` and D the repository's ontology (R-BTN-174); `runner:` counts once declared (R-BTN-133); no clause is met by all | claim, advance | `missing-capability` |
   | 5 | Tier at or below the runner's ceiling: the position in the repository's `tiers` of the lower of its declared ceiling and grant `max_tier`; untiered fits only the top | claim, advance | `above-tier-ceiling` |
-  | 6 | *(in rule 4)* `human-operator` is held only through an administrator's grant (R-BTN-58) | — | — |
+  | 6 | *(retired: `human-operator` is a runner's own statement, checked by rule 4 like any capability, R-BTN-121)* | — | — |
   | 7 | The key holds a grant for the ticket's repository (R-BTN-58) | claim, advance | `not-granted` |
   | 8 | Tags meet none of the leg's posted barred tags, the owner bars in force for its course or `*` (at an advance those with `applies: claim+advance`) and, at an advance, the holder's `bars`; required bars met by posted bars joined with the holder's `bars` (R-BTN-60, R-BTN-67) | claim, advance | `barred-tag`; rule 8 `policy` |
   | 9 | The runner declares the course at `min_runner_version` or later (R-BTN-22, R-BTN-65); not re-checked at an advance | claim | `stale-skills` |
@@ -2738,7 +2753,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   runner secret). Each answers with an `ETag` of a per-repository `fleet_version`, a per-Baton
   `instances_version`, the key's grant set and the UTC hour, so an unchanged poll costs a `304`.
   The counters are bumped in the transaction of each write a view shows (claim, `advance`, end;
-  a heartbeat changing tags, profile or reports; an accepted board post; an owner bar; a reading
+  a heartbeat changing tags, profile or reports; a change to `runner_derived` (R-BTN-174); an accepted board post; an owner bar; a reading
   — a `measure` at most once a minute per instance; a billing change) and by the alarm at each
   lapse and bar start or end; a grant or instance change bumps both.
   - **`GET /v1/runner/fleet?repository=<id>`** (key granted there): every active claim (ticket,
@@ -2836,12 +2851,11 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
 - **R-BTN-176 (the atoms a choice reads).** Core forms the atoms below for the runner and the
   ticket's repository, and for nothing else. They are reserved (R-BTN-175). A choice's guards and
-  the rules they depend on may read them; the gate stratum may not. Guards, and every predicate
-  they depend on, may not depend at any depth on `holds` or `derived`: a choice reads the
-  runner's capabilities only as `has`, from the stored H ∪ D(H). The program's predicates that
-  depend on no core-formed atom, such as `bound`, are evaluated once when the program is
-  accepted, and a choice evaluation reads them as facts. A choice evaluation therefore
-  evaluates only the guard rules over those facts and the atoms below.
+  the rules they depend on may read them; the gate stratum may not. The **choice stratum** is
+  the generated guard rules, `meters`, and every repository predicate that depends on an atom
+  below. None of it may depend on `holds` or `derived`: a choice reads the runner's
+  capabilities only as `has`, from the stored H ∪ D(H). The fixed predicates (R-BTN-175) are read
+  as facts. A choice evaluation evaluates exactly the choice stratum, under its bound.
 
   | Atom | Holds when |
   |---|---|
@@ -2858,7 +2872,8 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   - **Permitted sources.** Administrators and instrument keys are permitted. A runner's reading
     for an instance is permitted only when every resource the instance serves is registered
     `atoms_from: any` (R-BTN-76), which records that the tenant trusts its runners' reports to
-    steer advice.
+    steer advice. A runner's reading for its own `runner`-scope instance is always permitted: it
+    steers only advice that runner receives.
   - **The choice state and the field reading** both follow R-BTN-76's precedence, using permitted
     sources only.
     - The choice state is the administrator's `state` reading while it is in force, else the most
@@ -2887,15 +2902,16 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     and it has no field atoms. A guard over its fields is then false, as R-BTN-76's `unknown`
     blocks nothing. A rule that wants to fail closed names `state(I, "unknown")`.
   - **Schemas refine.** A resource's schema may name a `std:` schema as its `x-baton-base`
-    (R-BTN-76). Registration checks the refinement with R-BTN-108's check and refuses one it
-    cannot prove. Schemas stay immutable. A rule over `refines(R, "std:api-capacity@1")` and a
+    (R-BTN-76). `baton admin resource add` checks the refinement with R-BTN-108's check (the
+    CLI holds the `std:` library) and refuses one it cannot prove; core stores the named chain
+    and forms `refines` from it. Schemas stay immutable. A rule over `refines(R, "std:api-capacity@1")` and a
     base field therefore serves every resource that refines it.
   - **A peak is a rule.** Time-of-day schedules are repository rules over `now`. Core knows no
     provider, schedule or price.
   - **A new provider** needs no change to Baton's code. An administrator registers its resource
     and instances (R-BTN-76), and the repository adds the facts, choices and guards.
-- **R-BTN-177 (choices: advice on how a leg runs).** A leg lists, in `choices`, the choices it
-  wants advice on (§5.2). Each id must name a choice of the program in force (R-BTN-174). A
+- **R-BTN-177 (choices: advice on how a leg runs).** A leg lists, in `choices`, at most 8
+  choices it wants advice on (§5.2). Each id must name a choice of the program in force (R-BTN-174). A
   course sourced from another repository (R-BTN-134) that lists choices relies on its home
   defining them, so its documentation names them. The ontology's `choices` lists each choice's
   alternatives **in order**:
@@ -2910,8 +2926,9 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   - **Shape.**
     - Alternative ids match `^[a-z][a-z0-9-]{0,63}$` and are unique within their choice.
     - `needs` lists the capabilities the alternative uses, at most 8, and may be empty. Each need
-      is a capability of a type the repository's courses declare, with a matching value. Core
-      reads needs only as capabilities, and they never change the leg's environment.
+      is a capability of a type the repository's courses declare, with a matching value, and never
+      of type `credential`: a provider key is a `key:` label. Core reads needs only as
+      capabilities, and they never change the leg's environment.
     - `demote_when` and `exclude_when` are each a list of literals over the repository's own
       predicates and R-BTN-176's atoms, never over the encoding, and under R-BTN-176's
       dependency rule. Each one, as a rule, obeys R-BTN-175's safety, types and limits. Either
@@ -2944,10 +2961,12 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     - **Core evaluates the equivalent first-match:** filter to the available alternatives, order
       them by (demoted, position), and take the first. The repository writes neither choice rules
       nor weak constraints itself.
-  - **Invariants.** A constraint the advice must respect is an `exclude_when`. One that must
-    bind the claimant is a barred tag (R-BTN-60).
+  - **Exclusions filter advice.** An `exclude_when` keeps an alternative out of the advice. It is
+    not an invariant: a route naming an excluded alternative is still accepted and recorded
+    `advice-overridden`. A constraint on the claimant is a barred tag (R-BTN-60).
   - **When.** A claim runs nothing (R-BTN-63), so a choice is resolved at each `advance` that
-    starts a leg listing it, for that leg alone. The result is a snapshot. It is not refreshed
+    starts a leg listing it, for that leg alone, in one evaluation over all its `wanted` choices.
+    The result is a snapshot. It is not refreshed
     while the leg runs, and it is stored with the leg run (`claim_legs.choices_json`).
   - **Hysteresis.** Each resolution writes one row per alternative: `choice_last(runner,
     repository, choice, alternative, demoted, resolved_at)`. The row is written whether or not
@@ -2955,19 +2974,28 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     keyed by runner because what a runner can use differs between runners; an account instance's
     reading may still come from another source. It is an input, never derived, so two thresholds
     are two rules with no cycle: one enters the demotion below 200‰, and the other holds it below
-    300‰ while `was_demoted` is true. The alarm deletes rows older than 24 hours, and a reaped
-    runner's rows go with it.
-  - **Delivery.** The advance answer carries `advice: {choices: [{choice, alternative, needs:
-    [<capability>…], demoted: [<alternative id>…], reason?}], resolved_at}`.
-    - `alternative` is `null` when nothing resolves, with `reason` `none-available` or `limit`.
+    300‰ while `was_demoted` is true. It is written in the advance's transaction, and not when
+    that advance is refused. The alarm deletes rows older than 24 hours.
+  - **Delivery.** The advance answer carries `advice: {choices: [{choice, alternative, ranked:
+    [{alternative, needs: [<capability>…], demoted}…], reason?}], resolved_at}`.
+    - `ranked` lists every available alternative in the evaluator's order, (demoted, position),
+      and `alternative` is its first. A leg that finds its advised alternative unusable takes the
+      next one in `ranked` and reports it as its route. The holding it found dead reaches Baton
+      as the runner's own next declaration (R-BTN-121's `check`); the CLI runner stops declaring
+      a holding a leg reported dead for the rest of its session.
+    - `alternative` is `null`, and `ranked` empty, when nothing resolves, with `reason`
+      `none-available` or `limit`.
     - Every value is an id or a capability, checked against its pattern. No reading or
       repository text is ever interpolated.
     - The runner writes the object to `BATON_ADVICE` (R-BTN-144).
     - The dashboard composes any sentence from the identifiers as text (§11.4).
-  - **Overrides are recorded, never refused.** A leg may write `[{choice, alternative}]` to the
-    file `BATON_ROUTE` names, and the runner reports it as `route` on the next `advance` or the
-    end. Baton compares it with `claim_legs.choices_json` and stores it in
-    `claim_legs.route_json`.
+  - **Overrides are recorded, never refused.** The runner creates the file `BATON_ROUTE` names,
+    empty, before each leg, and removes it after. The leg may write `[{choice, alternative}]` to
+    it. The runner reports it as `route` on the `advance` or end that finishes the leg, keeping at
+    most one entry per choice the leg listed and dropping the rest, and dropping a file that is
+    unparseable or over 4 KB; reporting never fails an `advance` or end. Baton compares the route
+    with the finishing leg run's `claim_legs.choices_json` and stores it in that row's
+    `route_json`.
     - An alternative other than the advised one records `advice-overridden`, with `{choice,
       advised, taken}` (R-BTN-45).
     - An entry naming a choice the leg did not list, or an alternative that choice lacks, is
@@ -2975,16 +3003,14 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     - With no report, `route_json` is `null`. That is not an override: which route ran is
       self-reported (R-BTN-66).
     - A route reported for a choice that resolved `null` is stored, and is not an override.
-  - **A dead holding.** A leg that finds a holding its advised alternative needs is not real
-    ends `released:blocked` on it (R-BTN-126). The holding leaves the runner's declared set, so
-    the next resolution passes over that alternative.
   - **No advice** leaves the leg on its own default: its `agent_command` and its instructions. The
-    standard courses read
-    `BATON_ADVICE` first and fall back to those (§5.8).
+    standard courses read `BATON_ADVICE` first and fall back to those (§5.8).
   - **Conformance.** R-BTN-175's suite also runs each choice fixture, given as input facts,
-    through `run(text, 0, ["--opt-mode=optN"])` with a harness-only `#show route/2.`.
+    through `run(text, 0, ["--opt-mode=optN"])` with a harness-only `#show route/2. #show
+    available/2. #show demoted/2.`.
     - With an alternative available, it asserts `"OPTIMUM FOUND"`, `Models.Optimal` 1 with
-      `Models.More` `"no"`, and that the last witness's `route/2` equals the evaluator's. Under
+      `Models.More` `"no"`, that the last witness's `route/2` equals the evaluator's first, and
+      that its `available/2` and `demoted/2` equal the evaluator's, which fix `ranked`. Under
       `optN` the witnesses before the optimum come first.
     - With none available, it asserts `"SATISFIABLE"`, one model with no `route` atom, and a
       `null` alternative.
@@ -4025,7 +4051,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     `brt_<id>_<secret>` (256 random bits), stored as its SHA-256 with its scope, valid in the
     minting tenant only (R-BTN-137), revoked with `baton owner token revoke`.
   - `baton runner register --token <t> --name <name> [--key ssh | --key api]` creates a runner
-    credential with a grant inside the token's scope, never wider and never `human-operator`.
+    credential with a grant inside the token's scope, never wider.
     `--key ssh` (default) generates an Ed25519 key in the session and registers its public half;
     `--key api` returns an API key (R-BTN-159). A name bound to another live credential is
     `conflict`; renewing one's own name is a re-key, spends no use, and must be signed by the
@@ -4856,7 +4882,7 @@ is summarized in the principal table (§12.1).
   - **Runners.** A runner credential registers under one name — a machine's hostname, or a
     cloud environment's name shared by its containers — unique in the tenant, one key per name.
     What it may do is in its grants (R-BTN-58). Refused `forbidden`: a heartbeat under another
-    name, a capability outside every grant of its key, a course of a repository no grant of its
+    name, a course of a repository no grant of its
     key covers.
   - **Revocation.** Revoking a key sets `revoked_at`; every runner it registered stops at its
     next call.
@@ -4929,7 +4955,7 @@ is summarized in the principal table (§12.1).
     - register and retire repositories with their first owner keys (R-BTN-47);
     - register instrument keys, external resources and account instances, and post or clear
       readings (R-BTN-76, R-BTN-151);
-    - make or change any grant, `human-operator` included, and change a key's hostname
+    - make or change any grant, and change a key's hostname
       (R-BTN-58);
     - revoke any key at once but an administrator's: revoking an owner key removes it from
       every repository it owns, the last owner included (an administrator then adds one with
@@ -4974,7 +5000,7 @@ is summarized in the principal table (§12.1).
     and acts for that repository only; owning one repository confers nothing on another. An
     owner may:
     - grant a runner key access with the capabilities it may use (a capability, or a whole type
-      `<type>:*`, R-BTN-121; never `human-operator`, never a role name, R-BTN-157) and its
+      `<type>:*`, R-BTN-121; never a role name, R-BTN-157) and its
       `max_tier` (`runner_grants`); revoke a grant; set a grant's `sync` flag and see each key's
       span (R-BTN-146);
     - add and remove owners, never the last;
@@ -4990,8 +5016,9 @@ is summarized in the principal table (§12.1).
     - read the repository's blocks, prerequisites, history, conditions and leg runs
       (R-BTN-75, R-BTN-120, R-BTN-128).
   - **Grants carry the power.** A key's capabilities live in each grant, not on the key, so what
-    one repository's owners grant reaches only that repository's tickets (rule 4, R-BTN-45).
-    `human-operator` goes only into a grant an administrator makes.
+    one repository's owners grant reaches only that repository's tickets (rule 4, R-BTN-45). A
+    grant bounds which statements count for a repository; it confers no ability, and
+    `human-operator` is admitted like any other capability.
   - **A key's hostname binds once.** It binds at the key's first acceptance (R-BTN-146) and is
     unique in the tenant. A later grant naming another hostname for the key is refused
     (`conflict`); only an administrator changes it.
@@ -5509,8 +5536,7 @@ reach it, and the object refuses to serve until every migration is applied (§2)
 | `condition_bindings` | `(repository_id, ticket_id, prefix)`; `ticket_id` `''` for the repository scope | `course_id`, `replaces`, `snapshot_sha` | Bindings as posted (`bindings` and `tickets[].conditions`, §4.4) from `.baton/baton.json` and ticket files; Baton reads them only to file handler tickets for its own conditions (R-BTN-161, R-BTN-171) |
 | `baton_settings` | `key` | `value`: `tenant_id` (written at the first request, R-BTN-135), `frozen_at`, `sealed_at` (R-BTN-88), `instances_version` (R-BTN-99) | Tenant state |
 | `instance_settings` | one row | `link_hosts` JSON, `session_hosts` JSON | Administrator settings (R-BTN-112, R-BTN-113) |
-| `ontologies` | `repository_id` | `digest`, `fixed_json` (the predicates that depend on no core-formed atom, evaluated at acceptance, R-BTN-176), `builtin` (`baton@<n>` or NULL), `program_json` (the validated merged program, ≤ 64 KB), `snapshot_sha`, `accepted_at`, `pending_json` (a changed program waiting out the 5-minute window) | The ontology in force (R-BTN-174, R-BTN-175) |
-| `ontology_proofs` | `(repository_id, atom)` | `entry_id`, `body_json` (the instance's positive body atoms) | The maximal evaluation's canonical proof per atom, at most 5,000, for why-not (R-BTN-174) |
+| `ontologies` | `repository_id` | `digest`, `fixed_json` (the predicates that depend on no core-formed atom, evaluated at acceptance, R-BTN-176), `builtin` (`baton@<n>` or NULL), `program_json` (the validated merged program, ≤ 64 KB), `snapshot_sha`, `accepted_at`, `pending_json` (a changed unit, with its course files, waiting out the 5-minute window) | The ontology in force (R-BTN-174, R-BTN-175) |
 | `code_repo_consents` | `(home_id, repo_id)` | `consented_by` (`owner:<fp>` of `repo_id`'s owner, or `admin:<fp>`), `consented_at` | A registered repository's consent to a home's `code_repos` entry; written only by `POST /v1/owner/{repo_id}/code-repo-consents` or an administrator, never by the home's settings (R-BTN-140) |
 
 **Owner settings** — columns of `repositories`, written by `PUT /v1/owner/{repository}/settings`
@@ -5542,7 +5568,7 @@ and never accepted holds no role (§12.1).
 |---|---|---|---|
 | `credentials` | `id` (fingerprint; `legacy` *adoption*) | `kind` (`runner` — a machine key; `probe` — an instrument key; `courier` — a forge courier; `check-runner`; `legacy` *adoption*), `public_key` (an SSH public key or an API key's public line; unique; NULL only for `legacy`), `label`, `hostname` (machine and check-runner keys; unique among live ones), `token_id`, `expires_at`, `last_used_at`, `created_by`, `revoked_at` | Every key but owners', sync keys and administrators' (R-BTN-13, R-BTN-102, R-BTN-117, R-BTN-159) |
 | `repository_owners` | `(repository_id, fingerprint)` | `public_key`, `added_by`, `added_at`, `removed_at` | Owner keys (R-BTN-58) |
-| `runner_grants` | `(credential_id, repository_id)` | `capabilities` JSON (expanded; `human-operator` only from an administrator), `max_tier`, `sync`, `granted_by`, `granted_at`, `accepted_at` (NULL while pending), `revoked_at` | What a machine key may do where (R-BTN-58, R-BTN-146) |
+| `runner_grants` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `max_tier`, `sync`, `granted_by`, `granted_at`, `accepted_at` (NULL while pending), `revoked_at` | What a machine key may do where (R-BTN-58, R-BTN-146) |
 | `sync_keys` | `fingerprint` | `repository_id`, `role` (`sync`\|`mirror`), `public_key` (unique), `added_by`, `added_at`, `revoked_at` | Sync and mirror keys, one repository each (R-BTN-93) |
 | `check_runners` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `max_tier`, `added_by`, `added_at`, `revoked_at` | Check-runner keys; the row stands in for a grant (R-BTN-114) |
 | `couriers` | `(credential_id, repository_id)` | `added_by`, `added_at`, `revoked_at` | Forge couriers delivering `forge-check` notices (R-BTN-115) |
@@ -5563,12 +5589,12 @@ and never accepted holds no role (§12.1).
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
 | `runners` | `id`; unique `(hostname, session_name)` among rows not of kind `legacy` | `hostname`, `session_name` (1–128), `credential_id`, `secret_hash`, `incarnation` (bumped by a re-key), `harness` (a label), `kind` (`vm`\|`local`\|`cloud`\|`legacy` *adoption*), `isolation` (`attached`\|`process`\|`session`), `profile_json` (opaque), `tier_ceilings` JSON `{repository: tier}`, `lease_timeout_ms` (15 min – 24 h), `settings_hash`, `first_seen_at`, `last_seen_at`, `last_activity_at`, `reaped_at` | One agent session; created at its first heartbeat, never deleted (R-BTN-3, R-BTN-9, R-BTN-14) |
-| `runner_capabilities` | `(runner_id, capability)` | `declared` | Declared capabilities, expanded, within the key's grants |
+| `runner_capabilities` | `(runner_id, capability)` | `declared` | Declared capabilities, expanded; a repository counts only those its grant admits |
 | `runner_tags` | `(runner_id, tag)` | — | R-BTN-60 |
 | `runner_courses` | `(runner_id, repository_id, course_id)` | `version` | What its checkouts can run (R-BTN-48) |
 | `runner_instances` | `(runner_id, instance)` | — | Account instances it declares in `uses` (R-BTN-76) |
 | `runner_reports` | `(runner_id, claim_id, key)`; `claim_id` 0 for none | `received_at`, `payload` (opaque) | Latest report per key, ≤ 200 per claim, kept `report_horizon_h` after the claim ends (R-BTN-99) |
-| `runner_derived` | `(runner_id, repository_id, capability)` | `ontology_digest`, `evaluated_at`; a `(runner_id, repository_id)` row of `runner_derived_state` holds `stale` | Capabilities the repository's ontology derives from the runner's granted holdings, at most 256 (R-BTN-174) |
+| `runner_derived` | `(runner_id, repository_id, capability)` | `ontology_digest`, `evaluated_at` | Capabilities the repository's ontology derives from the runner's granted holdings, at most 256 (R-BTN-174) |
 | `fleet_capabilities` | `(repository_id, capability)` | `runners` | Live granted runners declaring or deriving each capability (R-BTN-75) |
 
 ### 13.4 The board and tickets
@@ -5807,7 +5833,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `POST /v1/probe/readings` | instrument | `{readings: [{instance, kind, available?, until?, valid_for?, detail?}]}` | `{ok, refused: [{instance, code}]}` | R-BTN-101 |
 | **Administrator** | | | | |
 | `POST /v1/admin/repositories` | admin | register `{id, github, forge, remote, web_base?, ci_identity?, dispatch?, sync_keys?, default_branch, sync_workflow?, mirror_workflow?, mirror_pusher?, weight?, tiers?, cut_over?, owner_keys[], forge_repo_id, forge_owner_id, trigger_workflows?}`; change `{id, …, github?, forge_repo_id?, forge_owner_id?, sync_keys_add?, sync_keys_remove?, owner_keys_add?, former_paths_remove?, code_repo_consents_add?, confirm?}` (never `forge`); `{id, retire: true, confirm: true}` | `{ok: true}`; `conflict` | R-BTN-47, R-BTN-92, R-BTN-93, R-BTN-138 |
-| `POST /v1/admin/grants` | admin | a grant, `human-operator` included, or a key's hostname | `{ok, pending: true}` | R-BTN-57, R-BTN-58, R-BTN-146 |
+| `POST /v1/admin/grants` | admin | a grant, or a key's hostname | `{ok, pending: true}` | R-BTN-57, R-BTN-58, R-BTN-146 |
 | `POST /v1/admin/keys/{fingerprint}/revoke` | admin | `{confirm: true}` | `{ok: true}`; the key stops at its next call, an owner key on every repository; `invalid-params` for an administrator's key | R-BTN-57 |
 | `POST /v1/admin/probes` | admin | `{public_key, label}` | `{ok: true}` | R-BTN-101 |
 | `POST /v1/admin/resources` | admin | `{name, scope, detail_schema, atoms_from?, capacity?}` | `{ok: true}` | R-BTN-76, R-BTN-176, R-BTN-178 |
@@ -5968,14 +5994,14 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-110 courses from their sources | the built CLI outside a checkout: `--course create-pr`; a `--source` at a tag with overrides; a copied `course.json`; an off-branch commit; no `sync.mjs`; an outside import | full-commit source, no course file; source read at its commit with home overrides; each fault refused naming it, the commit unfetched |
 | S-BTN-117 bars and renames | bars on `implement` and `*` except `review`; files dropping, swapping, double-renaming, re-adding legs | first two held, raised; collision refused; `except` updated and the new leg barred |
 | S-BTN-139 closure | the built-in ontology; a runner holding `key:anthropic` and `dependency:claude-code`; one holding the key alone; a three-hop transitive rule | the first derives `model:claude-opus-5-5` and `capability:code-generation-llm`; the second only the model; three hops derived |
-| S-BTN-140 a program refused | programs with a cycle through `not`, an unsafe rule, a non-ground fact, `"x" < 3`, a position receiving an integer and a string through a shared variable, a head deriving `credential:X`, `runner:x`, `human-operator` or `model:UPPER`, a negated `holds`, `derived(K) :- target(K), not safe.` with `safe :- holds("dependency:git").`, a `holds` variable bound only by `holds`, an entry or guard naming `route`, `available` or `alt`, a guard depending on `holds` or `derived`, two bindings for `"coding"`, each bound crossed, 257 derived capabilities, an undeclared type; a positively recursive program | each refused naming its entry and rule, `baton.ontology-refused` raised; the recursive one accepted |
+| S-BTN-140 a program refused | programs with a cycle through `not`, an unsafe rule, a non-ground fact, `"x" < 3`, a position receiving an integer and a string through a shared variable, a head deriving `credential:X`, `runner:x`, `human-operator`, `model:UPPER` or a type missing from `derived`, a negated `holds`, `derived(K) :- target(K), not safe.` with `safe :- holds("dependency:git").`, a `holds` variable bound only by `holds`, an entry or guard naming `route`, `available` or `alt`, a guard or `meters` rule depending on `holds` or `derived`, a `credential:` need, a leg listing nine choices, two bindings for `"coding"`, a fixed predicate whose evaluation crosses the bound, each other bound crossed, 257 derived capabilities; a positively recursive program | each refused naming its entry and rule, `baton.ontology-refused` raised; the recursive one accepted |
 | S-BTN-141 bindings narrow | no binding, then `binding("coding", "model:claude-opus-5-5")`; one runner with DeepSeek's chain, one with Opus's | at first both satisfy `capability:code-generation-llm`; then only Opus's |
 | S-BTN-142 the grant before the closure | W1 declares `key:anthropic` and `dependency:claude-code`, granted `key:*` and `dependency:*`; W2 the same, not granted `key:anthropic` | W1 matches a leg requiring `capability:code-generation-llm`; W2 is refused `missing-capability` |
-| S-BTN-143 matching on derived capabilities | a leg requiring the capability; a deriving runner, a non-deriving one, and a direct declarer granted `capability:*`; the only deriving runner leaves, then returns; a repository with no `.baton/ontology.json` | offered to the first and third, not the second; a `capability` block written when it leaves, cleared when it returns; with no file, nothing derived and no refusal |
+| S-BTN-143 matching on derived capabilities | a leg requiring the capability; a deriving runner, a non-deriving one, and a direct declarer granted `capability:*`; the deriving runner and the declarer leave, then the deriving runner returns; a repository with no `.baton/ontology.json` | offered to the first and third, not the second; a `capability` block written when both have left, cleared when the deriving runner returns; with no file, nothing derived and no refusal |
 | S-BTN-144 why not | a leg requiring `capability:code-generation-llm`; a runner holding only `dependency:claude-code`; the fleet with no deriving runner; under `binding("coding", "model:claude-opus-5-5")`, a runner holding only DeepSeek's chain; a positively recursive chain | `not-derived` with the canonical proof's `needs`, `missing` naming the Anthropic credential, `chain` its entry ids, and the direct declaration offered; the fleet answer without `missing`; the Anthropic credential, never ∅; a finite answer from the stored tree |
 | S-BTN-145 the environment is R-BTN-144's | a leg requiring `capability:code-generation-llm`, derived from `key:deepinfra` and `dependency:opencode-v2`, on a runner that also declares `credential:DEPLOY_TOKEN`; the same leg with `choices` | the leg's environment is exactly what R-BTN-144 gives a leg whose `requires` names no credential: `DEPLOY_TOKEN` removed, model-provider credentials kept; the advance answer carries no credential data; identical with `choices` |
-| S-BTN-146 freshness and bounds | a program accepted with 120 live granted runners in two repositories; a claim by a runner not yet re-evaluated, then refused `not-granted`; a `prefer` claim over three stale repositories; a retraction of a wrongly derived capability; three changed programs posted within 5 minutes; a program whose maximal evaluation crosses 200,000 matches; a test-lowered runtime bound crossed, on both hosts; a runner declaring 500 capabilities the program never names; a leg ending `released:blocked` on a dead holding of its canonical proof | carried over turns round-robin, unchanged rows unwritten; the claim's re-evaluation committed despite the refusal; two evaluated, the third's candidate passed over and the alarm prompted; the retracted capability admits nobody from the next claim on; the first accepted, the newest checked when the window ends; refused at post; H alone and one `baton.ontology-limit`, identically; no extra cost, the unnamed holdings never read; the holding removed and the set re-evaluated, no failed attempt |
-| S-BTN-155 merge and acceptance | a file naming `baton@1`, retracting one built-in entry, reusing a built-in choice id and adding a new entry; one naming `baton@9`, which the CLI lacks; one retracting an id the built-in lacks; a post whose program drops choice `codegen` that an accepted course lists; a post whose course makes `model` not derived, with an invalid program; a post adding a course that lists an undefined choice; a scaffolded course declaring `model` without `derived`; the same program posted twice | one merged program, the replaced entry in place and new entries appended, the reused choice replaced whole; the sync fails; the sync fails; the unit refused, program and course kept; the unit refused, the previous program and course kept, consistent; the unit refused, that course kept at its previous version; that course refused and the ontology kept; the second post changes nothing |
+| S-BTN-146 freshness and bounds | W1 heartbeats `key:anthropic` added, then reads recommendations at once; a grant revoked; a program accepted with 120 live granted runners in two repositories, then W2's recommendations, claim and `baton leg why` before the alarm reaches it; a retraction of a wrongly derived capability; three changed units posted within 5 minutes, then a revert to the unit in force; a program whose maximal evaluation crosses 200,000 matches; a lowered runtime bound crossed through the test bindings, on both hosts; a runner declaring 500 capabilities the program never names; a leg ending `released:blocked` on a dead holding | W1's recommendations already offer the codegen leg; its rows go with the grant; W2's reads re-evaluate its sets first, the others re-evaluated by the alarm cycle, unchanged rows unwritten, fleet counts recounted when it ends and `fleet_version` bumped; the retracted capability admits nobody from the next read on; the first accepted and the waiting one discarded by the revert; refused at post; H alone and one `baton.ontology-limit`, identically; no extra cost; the holding removed and the sets re-evaluated in the end's transaction, no failed attempt |
+| S-BTN-155 merge and acceptance | a file naming `baton@1`, retracting one built-in entry, reusing a built-in choice id, adding an entry and a `derived` type; one naming `baton@9`, which the CLI lacks; one retracting an id the built-in lacks; a post whose program drops choice `codegen` that an accepted course lists; a post removing the only course that lists `codegen` with a program dropping it; a post adding a course that lists an undefined choice; a sourced course declaring `model` with other `values` than the derived atoms'; a post with no `ontology` field while courses list choices; the same unit posted twice | one merged program, the replaced entry in place, new entries appended, `derived` extended; `ontology: {error}`, the rest of the board accepted and `baton.ontology-refused` raised; the same; the unit refused, program and course kept; accepted together; the unit refused, that course kept at its previous version; the unit refused naming the course and the atom; the unit refused, the program kept; the second post changes nothing |
 | **§6** | | |
 | S-BTN-10 no reviewer capacity | every seat barred | `review` posted `waiting`; holder ends `suspended:pr-open`; offered again after the lift; `baton.stalled` at 72 h |
 | S-BTN-19 suspend for the window | both lines limited until +2 h when `implement` ends | no advice on `advance`; ranking reads `frees_at`; suspended; first in line at +2 h |
@@ -5998,13 +6024,13 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-95 blocked ends are bounded | `max_blocked` 3 exceeded on one leg; one runner blocked 13 times | ticket held `blocked-exhausted`, `baton.retries`; lifting resets; `baton.blocked-ends` |
 | S-BTN-96 edges, not stations | legs in every state | drawn as edges `ready`, `running`, `blocked: … (before-start / during-run)`, `backing-off`, `not-queued`; no unknown station |
 | S-BTN-108 one primitive per prerequisite | `depends_on`; a parent whose call leg waits on its children beside another leg; an `OP` tag; a post with a reserved `waiting_on`; a course file with `select: "run"` in `requires.tickets` | start leg waits `ticket@done`; the other leg ready; rule 4; post refused naming the ticket; file refused, previous kept |
-| S-BTN-147 a codegen choice | `codegen`: `opencode-go` (DeepSeek through `key:opencode-go`, demoted by `ocg_peak :- now("utc_minute_of_day", T), T >= 120, T < 600.`), then `deepinfra`; off-peak and in peak; each provider's instance unavailable; a runner holding only `key:deepinfra`; one holding neither | off-peak `opencode-go`; in peak `deepinfra`; in peak with DeepInfra blocked, `opencode-go`; off-peak with OpenCode Go blocked, `deepinfra`; `deepinfra`; `null` with `none-available` |
-| S-BTN-148 a reviewer choice with hysteresis | `reviewer-2`: `opus` (needing `model:claude-opus-5-5` and `key:claude-subscription`) demoted by `near_limit` (entered below 200‰, held below 300‰ while `was_demoted`), then `glm`; `anthropic-capacity` registered `atoms_from: any`; W1 resolving at each step of: `remaining_permille` 500; 150; 250; a `state` reading `available: true` with no `detail`; 320; the reading lapsing; the same with a fail-closed rule over `state(I, "unknown")`; the instance unavailable. W2, with no usable instance, resolves between each | W1: `opus`; `glm`; `glm`; `glm` (the field reading kept at 250); `opus`; `opus`; `glm`; `glm`. W2's resolutions never change W1's |
+| S-BTN-147 a codegen choice | `codegen`: `opencode-go` (needing `model:deepseek-v4.1-flash` and `key:opencode-go`, demoted by `ocg_peak :- now("utc_minute_of_day", T), T >= 120, T < 600.`), then `deepinfra`; facts `meters("key:opencode-go", "opencode-go")` and `meters("key:deepinfra", "deepinfra")`; each an `account` instance the runner uses, with administrator `state` readings; off-peak and in peak; each instance unavailable; a runner holding only `key:deepinfra`; one holding neither | off-peak `opencode-go`; in peak `deepinfra` with `ranked` `deepinfra`, `opencode-go`; in peak with DeepInfra unavailable, `opencode-go`; off-peak with OpenCode Go unavailable, `deepinfra`; `deepinfra`; `null` with `none-available` |
+| S-BTN-148 a reviewer choice with hysteresis | `reviewer-2`: `opus` (needing `model:claude-opus-5-5` and `key:claude-subscription`) demoted by `near_limit` (entered below 200‰, held below 300‰ while `was_demoted`), then `glm`; `anthropic-capacity` registered `atoms_from: any`; W1 resolving at each step of: `remaining_permille` 500; 150; 250; a `state` reading `available: true` with no `detail`; 320; every reading lapsed; the same with a fail-closed rule over `state(I, "unknown")`; an administrator's `unavailable`. W2, with no usable instance, resolves between each | W1: `opus`; `glm`; `glm`; `glm` (the field reading kept at 250); `opus`; `opus`; `glm`; `glm`. W2's resolutions never change W1's |
 | S-BTN-149 who steers | a runner's `measure` and `state` readings (`available: false`) for a resource registered `atoms_from: admin`, then re-registered `any`; an administrator's reading over an instrument's | under `admin`: no field atom, and the choice state and `blocked` unmoved while the fleet's `resource` block still hears it; under `any`: atoms and the alternative blocked; the administrator's reading speaks |
 | S-BTN-150 atom shapes | a reading with a non-integer number, `null`, an array, `false` and a nested integer; a rule comparing a `str` value with `<` | only the nested integer forms an atom, by its dotted path; the rule refused |
 | S-BTN-151 refinement | resource schemas naming `std:api-capacity@1` as `x-baton-base`, one tightening a bound and one widening it, a third naming a non-`std:` base; a refining resource; a rule over `refines` and `remaining_permille` | the widening and the non-`std:` base refused at registration; the rule serves both refining resources |
 | S-BTN-152 strata and reserved names | `derived` rules depending on `int`, `now`, `was_demoted` or `route`; a `demote_when` naming `route`; a fact `available("c", "a")`; a repository `meters/3` | each refused, naming the dependency path or the reserved predicate |
-| S-BTN-153 delivery and overrides | a claim, then an advance starting a leg with `choices`; its leg writes another alternative to `BATON_ROUTE`; a second writes none; a third the advised one; a fourth names an unknown alternative; a leg without `choices` reports a route; a leg finding its advised alternative's `key:zai` dead; a choice resolving `none-available`, then a route reported for it | the claim answer carries no advice; the advance's `advice` holds identifiers only and is in `BATON_ADVICE` and `claim_legs.choices_json`; `advice-overridden` with `{choice, advised, taken}`; `route_json` `null` and no override; nothing; `route-invalid` logged and the `advance` accepted; dropped and logged; `released:blocked`, the holding removed, the next resolution passing it over; the route stored, no override |
+| S-BTN-153 delivery and overrides | a claim, then an advance starting a leg with `choices`; its leg finds the advised alternative's `key:zai` dead and takes the next in `ranked`; a second writes no route; a third the advised one; a fourth names an unknown alternative; a fifth writes 10 MB to `BATON_ROUTE`; a leg without `choices` reports a route; a choice resolving `none-available`, then a route reported for it; the next advance also starting a leg with choices | the claim answer carries no advice; the advance's `advice` holds identifiers only, with `ranked`, and is in `BATON_ADVICE` and `claim_legs.choices_json`; `advice-overridden` with `{choice, advised, taken}`, and the runner stops declaring `key:zai` for its session; `route_json` `null`, no override; nothing; `route-invalid` logged, the `advance` accepted; the file dropped and the advance accepted; dropped and logged; stored, no override; each route compared with the finishing leg run's row |
 | S-BTN-154 limits and conformance | a choice evaluation crossing a test-lowered match bound at an advance; every choice fixture through `clingo-wasm`, one with nothing available | `reason: "limit"`, `baton.ontology-limit`, the advance succeeding; one optimum each (`Models.More` `"no"`), `route/2` equal to the evaluator's; `SATISFIABLE` and no `route` for the empty one |
 | **§7** | | |
 | S-BTN-5 retried with backoff | two `cannot-finish:transient` ends | `retry_after` 1 h, then 4 h; the third claim gets both resume records and reuses branch and PR |
@@ -6173,7 +6199,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-156 | Baton uses no credential to write git, and writes git only through outbox entries runners drain with `baton.write`, each carrying `baton_write: <id>` and written at most once, in id order per ticket; a queued entry whose condition closes is dropped, and followed by a `withdraw` when any claim took it; 24 h unlanded raises `baton.outbox-late` | S-BTN-136 |
 | G-BTN-158 | A light question settles once, in the claim or from git, never both; a reply is applied, queued to the ask file or recorded `ignored`, never dropped; no claim of the leg runs while its question is open; a settled answer is carried in `resume` until an end records it in git; an outbox `answer` never overwrites an answer in the file; `model/lightQuestion.qnt`'s `full` holds its safety and no-lost-answer properties | S-BTN-138 |
 | **§8** | | |
-| G-BTN-5 | A heartbeat without its session's secret is refused; a key cannot claim another hostname, an ungranted capability or an ungranted repository's course | hostile-key tests |
+| G-BTN-5 | A heartbeat without its session's secret is refused; a key cannot claim another hostname or an ungranted repository's course; an ungranted capability never counts for a claim | hostile-key tests |
 | G-BTN-17 | A retried first heartbeat is idempotent; a re-key revives a reaped, claimless runner | tests |
 | G-BTN-67 | The runner knows no course: it loads verified trees at the claim's commit, follows only named edges, holds the claim only on `short_waits` (≤ 30 min), suspends on `max-runs` and regression with a hand-off, aborts on release or lost lease, ends `course-changed`; leg sessions never claim | S-BTN-41 |
 | G-BTN-81 | The doorbell carries rings only; a lost socket changes only latency; ≤ 1 ring a second plus a trailing one; it closes on reap, re-key, revocation, liveness loss and seal | S-BTN-53 |
@@ -6467,9 +6493,12 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a per-repository capability ontology in one named fragment of ASP-Core-2 (safe, stratified, default negation, integer comparison), evaluated by a bounded evaluator in core and stored per runner when its inputs change, over capability names alone, provider support in core, fixed compiled shapes, a solver in or beside the Worker, or N3 (2026-10-22; R-BTN-174, R-BTN-175).
 - Chose to grow the ontology language only by ASP-Core-2 constructs, so that narrowing is default negation in the ontology and never a preference (2026-10-22; R-BTN-175).
 - Chose choices as ASP-Core-2 weak constraints evaluated as first-match, with availability hard, guards soft, hysteresis from a stored last demotion, and readings steering advice only from administrators and instrument keys unless a resource admits runners (2026-10-22; R-BTN-176, R-BTN-177).
-- Chose to let the ontology derive past what a grant names, because a capability gate matches ability, not authority: a false derivation only sabotages the runner it misleads, and authority stays in grants, `human-operator` and `runner:`, which are never derived (2026-10-22; R-BTN-174).
+- Chose to let the ontology derive past what a grant names, because a capability gate matches ability, not authority: a false derivation only sabotages the runner it misleads, and authority stays in grants and `runner:`, which are never derived (2026-10-22; R-BTN-174).
 - Chose to leave a leg's environment to R-BTN-144 alone, the ontology and choices passing no credential, over scoping provider keys per leg inside a sandbox the agent can read anyway (2026-10-22; R-BTN-144, R-BTN-174, R-BTN-177).
 - Chose seats on resource instances, billed by the runner at the claim or advance that starts a leg and refused past capacity, over counting bills as advice: a seat is a fact the runner states, not a forecast, and an exclusive device is exactly what a lock is for (2026-10-22; R-BTN-178, R-BTN-100).
+- Chose derived types declared by the ontology over a `derived` flag in course files, so a sourced course never conflicts with the repository's ontology (2026-10-22; R-BTN-174, R-BTN-121).
+- Chose `human-operator` as a runner's own statement, admitted by grants like any capability, over an administrator-only grant: Baton cannot verify a person (2026-10-22; R-BTN-121, R-BTN-58).
+- Chose to evaluate a runner's derived capabilities in the transaction of the write that changes them, and a reader's sets at its read after a program change, over a lazily refreshed cache, so advice is never older than the reader's last accepted write (2026-10-22; R-BTN-174).
 - Chose `clingo-wasm` in `npm test` as the conformance oracle over a pip-installed clingo or another Datalog dialect: none is a standard with preferences or has better TypeScript tooling (2026-10-22; R-BTN-175).
 
 ## Open questions

@@ -38,15 +38,16 @@ Review record).
    state and speaking readings from permitted sources only, typed field atoms by dotted path,
    `refines`, `now` from `this.now`, and `was_demoted` per runner.
 2. **Resource registration.** Add `--atoms-from admin|any` (CLI, `POST /v1/admin/resources`,
-   migration). Teach `src/core/detailSchema.ts` `x-baton-base`, with R-BTN-108's refinement
-   check at registration. Add `std:api-capacity@1` to the standard library.
+   migration). Teach `src/core/detailSchema.ts` to store an `x-baton-base` chain; the
+   CLI's `baton admin resource add` runs R-BTN-108's refinement check. Add `std:api-capacity@1` to the standard library.
 3. **Choices** (R-BTN-177). Generate the encoding, evaluate it as first-match under B-104's
    counters at each advance that starts a leg, write `choice_last` and
-   `claim_legs.choices_json`, and put `advice` in the advance answer. Validate a
+   `claim_legs.choices_json`, and put `advice` (with `ranked`) in the advance answer. Validate a
    leg's `choices` in the course file.
-4. **The runner.** Write `BATON_ADVICE`, read `BATON_ROUTE` and report `route` on advance and
-   end. Record `advice-overridden` in core from a
-   differing route.
+4. **The runner.** Write `BATON_ADVICE`. Create `BATON_ROUTE` empty per leg and report it (one
+   entry per choice, at most 4 KB, never failing an end) on the finishing advance or end. Stop
+   declaring a holding a leg reported dead for the session. In core, record `advice-overridden`
+   from a differing route.
 5. **The standard courses and this repository.** Have `agent_command` and the review leg's
    instructions read `BATON_ADVICE` first, keeping today's models as the fallback. Add this
    repository's `codegen`, `reviewer-1` and `reviewer-2` choices (alternatives as `needs` over `key:` and `model:`

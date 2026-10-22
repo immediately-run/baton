@@ -302,8 +302,23 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     read-your-writes for each runner, and one alarm cycle for fleet-wide views.
 
   These are recorded in the resident context (`product.mdx`, values 12, `architecture.mdx`).
-  The spec changes they imply are pending: `human-operator` self-declared, R-BTN-45's wording,
-  the freshness bound, and round 5's findings under the advisory model.
+  The spec then carried them out:
+  - `human-operator` is a runner's statement that grants admit, and rule 6 is retired;
+  - R-BTN-45 says gates protect the lock;
+  - the freshness bound became evaluation in the write's transaction, plus the reader's read
+    after a program change, and an **alarm cycle** is defined.
+
+  A review on Fable 5.1 (round 6) showed most of round 5 dissolving under the advisory model, and
+  the owner settled the one design change it proposed: **derived types move from course files
+  into `ontology.json`** ("move it as recommended"). The rewrite also:
+  - evaluates derived sets with the write that changes them;
+  - deletes §11.1's refusal of a heartbeat declaring an ungranted capability;
+  - deletes `ontology_proofs`, computing why-not on read;
+  - drops R-BTN-126's proof and choice checks;
+  - lets advice carry a ranked list the leg falls through;
+  - bounds the fixed predicates at acceptance, which was round 5's blocker;
+  - caps `choices` per leg, gives `BATON_ROUTE` limits, and moves the refinement check to the
+    CLI.
 
 - **2026-10-22 — §6.11: seats (owner direction; B-106).** The owner asked how a leg can say it
   needs "a singleton within the runner's VM", such as a Chrome MCP session one agent can use at
@@ -2826,7 +2841,8 @@ bounds and seams. **Not yet resolved**, and B-104 and B-105 are back in review u
 
 *(2026-10-22, round 6 — a review on a different model (Fable 5.1) read the sections against the
 new resident context (values 12) and round 5's open list: 1 blocking, 9 should-fix, 1
-simplify, 6 nits. It reclassified eight of round 5's findings. **Not yet resolved**:)*
+simplify, 6 nits. It reclassified eight of round 5's findings. Resolved in the rewrite that
+followed, which also closed round 5; dispositions below:)*
 
 | Finding | Status |
 |---|---|
@@ -2843,4 +2859,31 @@ simplify, 6 nits. It reclassified eight of round 5's findings. **Not yet resolve
 | 11 Simplify — `ontology_proofs` stores what a read can recompute | open |
 | 12–17 nits | open: the same-digest sentence; `exclude_when` called an invariant; `gatesFor`, not `isEligible`; untyped positions and reflexive "depends on"; S-BTN-147 and S-BTN-153 set-ups; R-BTN-120's prose |
 | Round 5 re-read | #3 cut (any declared capability is an admissible `ref`); #4 a runner-side nit; #5 smaller (refuse a `credential:` need `requires` does not name); #7 subsumed by 1; #8 a runner's own `runner`-scope instance always permitted; #12 halved by 11; #15 resolved by 10; the rest stand |
+
+*(Dispositions of rounds 5 and 6, 2026-10-22, in the rewrite after the owner's decision on
+derived types:)*
+
+| Finding | Resolution |
+|---|---|
+| R5 1 B — unbounded acceptance-time evaluation | fixed predicates and constraints are evaluated within the maximal evaluation, under its bounds, and stored as `fixed_json` (R-BTN-175) |
+| R5 2 absent `ontology` field | absent means none; a merge error posts `ontology: {error}` (R-BTN-174; S-BTN-155) |
+| R5 3, 4, 5 dead holdings and `credential:` needs | any declared capability is an admissible `ref`; the CLI stops declaring a reported-dead holding for its session; needs are never `credential:` (R-BTN-126, R-BTN-177) |
+| R5 6 one end re-evaluating many sets | bounded by the runner's grants and the per-evaluation bound, in the end's transaction (R-BTN-174) |
+| R5 7, R6 1 B, R6 2 stale sets; the freshness bound; the alarm's real bound | evaluation in the write's transaction and at the reader's read after a program change; an alarm cycle defined as back-to-back turns, with fleet views recounted when it ends (R-BTN-174; S-BTN-146) |
+| R5 8 resource blocks per leg | moot for choices: advice ranks alternatives and the leg falls through; a runner's own `runner`-scope instance always steers its advice (R-BTN-176, R-BTN-177) |
+| R5 9, 10, 11 the window, removed courses, merge errors | a revert discards the waiting unit, which is stored with its course files; removal belongs to the unit; a merge error refuses the unit, not the sync (R-BTN-174) |
+| R5 12, R6 11 write amplification; `ontology_proofs` | proofs computed on read and memoised; only changed `runner_derived` rows, counted against R-BTN-149 (R-BTN-174) |
+| R5 13 latency budgets | the load test runs evaluations at the bounds (R-BTN-175, G-BTN-77) |
+| R5 14, R6 14 `gatesFor`, not `isEligible` | named; the grant is checked against H, never D(H) (R-BTN-174) |
+| R5 15, R6 10 refused heartbeats | §11.1's refusal of an ungranted capability deleted; G-BTN-5 narrowed |
+| R5 16 S-BTN-143 | the declarer leaves too |
+| R5 17, R6 3 choice-time rules | the choice stratum defined; none of it depends on `holds` or `derived` (R-BTN-176) |
+| R5 18 bookkeeping | non-live runners are evaluated at their next heartbeat; rows go 30 days after last live, or with the grant (R-BTN-174) |
+| R6 4 uncapped `choices` | at most 8 per leg, one evaluation per advance (R-BTN-177) |
+| R6 5 refinement in core | the CLI checks; core stores the chain (R-BTN-176) |
+| R6 6 `derived` in course files | moved to `ontology.json` (owner); condition 4 checks every course declaring the type (R-BTN-174, R-BTN-175) |
+| R6 7 the fleet view's `ETag` | a `runner_derived` change bumps `fleet_version` (R-BTN-99) |
+| R6 8 a dead choice holding ends the claim | advice carries `ranked`; the leg falls through (R-BTN-177) |
+| R6 9 `BATON_ROUTE` | created empty per leg, one entry per choice, ≤ 4 KB, never fails an end (R-BTN-177) |
+| R5 19–25, R6 12–17 nits | R-BTN-120's prose; S-BTN-146's test seam through the test bindings; the same-digest sentence replaced by unit equality; `exclude_when` filters advice; untyped positions and reflexive "depends on"; S-BTN-147, S-BTN-148 and S-BTN-153 set-ups; a route against `null` advice stored; `choice_last` not written on a refused advance; rule 4 at an advance is intended, as for a lost declaration |
 
