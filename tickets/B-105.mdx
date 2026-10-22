@@ -28,8 +28,8 @@ modifications."
 **Spec:** §6.10, R-BTN-176 (the atoms a route choice reads) and R-BTN-177 (route choices: semantics,
 hysteresis, delivery, overrides, conformance), with the rules it amends: R-BTN-51's and R-BTN-134's course-entry
 `route_choices`, R-BTN-76's `atoms_from` and `std:` base, R-BTN-100, R-BTN-110's
-`std:api-capacity@1`, and R-BTN-144's `BATON_ADVICE` and `BATON_ROUTE`. The data model is in §13: `route_last`, `external_resources.atoms_from`. The API is
-in §14: `advice` and `route`. The history is in `BATON_SPEC_HISTORY.md` (Changelog, 2026-10-22;
+`std:api-capacity@1`, and R-BTN-144's `BATON_ADVICE` and `BATON_TAKEN`. The data model is in §13: `route_last`, `external_resources.atoms_from`. The API is
+in §14: `advice` and `taken`. The history is in `BATON_SPEC_HISTORY.md` (Changelog, 2026-10-22;
 Review record).
 
 ### What to build
@@ -44,10 +44,11 @@ Review record).
    counters at each advance that starts a leg, write `route_last` and
    `claim_legs.route_choices_json`, and put `advice` (with `ranked`) in the advance answer. Validate each course entry's
    `route_choices` with the ontology unit.
-4. **The runner.** Write `BATON_ADVICE`. Create `BATON_ROUTE` empty per leg and report it (one
+4. **The runner.** Write `BATON_ADVICE`. Create `BATON_TAKEN` empty per leg and report it (one
    entry per route choice, with its `dead` holdings, at most 4 KB, never failing an end) on the finishing advance or end. Stop
-   declaring a holding a leg reported dead for the session. In core, record `advice-overridden`
-   from a differing route.
+   declaring a holding a leg reported dead for the session. In core, remove reported `dead`
+   holdings in the reporting advance's transaction and record `advice-overridden` from a
+   differing `taken`.
 5. **The standard courses and this repository.** Have `agent_command` and the review leg's
    instructions read `BATON_ADVICE` first, keeping today's models as the fallback. Add this
    repository's `codegen`, `reviewer-1` and `reviewer-2` route choices, in its `baton.json` course entry (alternatives as `needs` over `key:` and `model:`
