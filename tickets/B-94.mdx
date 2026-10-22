@@ -66,3 +66,35 @@ trace (no log line, no crash report), which is the worst possible post-mortem.
 - [ ] no git call in stubs or runner can outlive a bounded timeout
 - [ ] a wedged close fails its leg while the worker keeps heartbeating
 - [ ] a runner's death always leaves a log line
+
+### Work (2026-10-22, implement leg)
+
+**Built.** (1) `src/defaults/course-markers.ts`: `exec` — what every standard course's `close`
+runs — now passes `timeout: CLOSE_TIMEOUT_MS` (120 s) and `killSignal: 'SIGKILL'` to
+`execFileSync`, and `GIT_NONINTERACTIVE_ENV` (`GIT_TERMINAL_PROMPT=0`,
+`GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=20"`) is merged into its env. (2)
+`src/runner/home.ts`: the runner's own git (`ensureSha`, `courseOf`, `loadCourse`) is bounded at
+`GIT_TIMEOUT_MS` (30 s, under a beat) and carries the same environment; `fetchMain`
+(`src/runner/main.ts`) gains that environment beside its existing 20 s bound. (3)
+`src/runner/runner.ts`: `Runner.lastLine(why)` names the claim, the leg in flight and the last
+beat; `work()` installs one process-wide pair of `uncaughtException`/`unhandledRejection`
+handlers that log that line and exit 1. `src/runner/main.ts`: `stopLine` and `exitHook` are the
+SIGTERM/SIGINT and `exit` lines `runMain` writes. Spec: §8.3 R-BTN-72 gains "a wedged git never
+holds a claim" and "a runner's death always leaves a line"; S-BTN-41's row gains B-94's cases.
+
+**Audit (item 2) — what was found.** The heartbeat timer fires independently, so a silent
+runner is a blocked event loop. The unbounded work on the runner's *own* path is the synchronous
+`git` in `home.ts` (`ensureSha`, `courseOf`, `loadCourse` — `execFileSync`, no timeout), called
+from `runClaim`/`beatOnce`; `fetchMain` already had a bound and `holdHome` does two small reads
+under `git rev-parse`, now bounded too. The `spool` writes in `beatOnce` are `appendFileSync`
+on a file the runner itself spent; the runner cannot bound the kernel's write, and they are not
+the suspect. **The close's `execFileSync` (unbounded, in `src/defaults`, in the runner's process
+when `callClose` runs it) is the named suspect:** a push whose remote stops answering held the
+runner's event loop, so its beats stopped, the claim was reaped, and when the push returned the
+unblocked loop ended with Node's default fatal path and no handler — the traceless death. With
+the close bounded, that path ends in a thrown, logged `close` failure, not a wedge; with the
+fatal hooks, a death leaves a line.
+
+**Not done here:** the branch, the push, the PR and the checks were not run from this session
+(no shell), so the PR is not open.
+

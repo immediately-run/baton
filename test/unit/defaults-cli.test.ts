@@ -242,6 +242,14 @@ describe('baton repo init, through the built CLI', () => {
     // The runner copies each script alone into a scratch directory (src/runner/home.ts). The
     // scaffold's agent_command is B-83's real opencode command — which must not run mid-test —
     // so the settings name a no-op, committed at the snapshot the stub reads.
+    // B-94 (review round 1): every git and gh call the generated stub makes is bounded and
+    // non-interactive — the same bound and environment the close uses, injected at generation.
+    for (const leg of legs) {
+      const text2 = readFileSync(join(root, '.baton', 'courses', 'create-pr', 'legs', leg), 'utf8');
+      expect(text2, leg).toContain('timeout: GIT_BOUND_MS');
+      expect(text2, leg).toContain('killSignal');
+      expect(text2, leg).toContain('GIT_TERMINAL_PROMPT');
+    }
     const settingsFile = join(root, '.baton', 'baton.json');
     const scaffolded = readFileSync(settingsFile, 'utf8');
     const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));

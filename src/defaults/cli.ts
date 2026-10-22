@@ -20,7 +20,7 @@ import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticket
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
-import { MARKERS_FILE, parseMarkers, type Marker } from './course-markers';
+import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, MARKERS_FILE, parseMarkers, type Marker } from './course-markers';
 import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
 import { readItems } from './read-items';
 import { ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
@@ -593,7 +593,13 @@ import { mkdtempSync, ${verify ? 'readFileSync, ' : ''}rmSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};${ask ? `
+import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
+// B-94: every git and gh call this stub makes — the snapshot probes, the override and
+// instructions reads, the forge verification — is bounded and non-interactive, the same bound
+// and environment the close uses, so a wedged call fails the leg within the bound instead of
+// burning the claim to its lease.
+const GIT_BOUND_MS = ${CLOSE_TIMEOUT_MS}, GIT_ENV = ${JSON.stringify(GIT_NONINTERACTIVE_ENV)};
+const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${verify ? `
 import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
@@ -621,11 +627,11 @@ export async function run(ctx) {
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
   // As with the instructions below: only an empty listing means there is no override.
-  if (execFileSync('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel], { encoding: 'utf8' }).trim() === '') return standard(ctx);
+  if (gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() === '') return standard(ctx);
   const dir = mkdtempSync(join(tmpdir(), 'baton-override-'));
   try {
     const file = join(dir, ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)});
-    writeFileSync(file, execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} }));
+    writeFileSync(file, gitRun('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }));
     const mod = await import(pathToFileURL(file).href);
     if (typeof mod.run !== 'function') throw new Error(rel + ' exports no run(ctx, standard)');
     return await mod.run(ctx, standard);
@@ -637,7 +643,7 @@ export async function run(ctx) {
 async function standard(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
-  const show = (rel) => execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} });
+  const show = (rel) => gitRun('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} });
   const settings = JSON.parse(show('.baton/baton.json'));
   // B-83: the snapshot's settings stay authoritative; BATON_AGENT_COMMAND — the harness command
   // \`baton run --harness\` chose — fills their absence, never overrides their choice.
@@ -649,13 +655,13 @@ async function standard(ctx) {
   const entry = (settings.courses ?? []).find((c) => c && c.id === ${JSON.stringify(b.id)}) ?? {};
   const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '');
   const ticketText = (() => { try { return ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), 'utf8') : null; } catch { return null; } })();
-  const legRun = (cmd, args, cwd) => { try { return execFileSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} }).trim(); } catch (e) { const why = e && typeof e.stderr === 'string' && e.stderr.trim() !== '' ? e.stderr.trim().split('\\n')[0] : e && e.message ? e.message : String(e); throw new Error(\`\${cmd} \${args.join(' ')} failed: \${why}\`); } };` : ''}
+  const legRun = (cmd, args, cwd) => { try { return gitRun(cmd, args, { cwd, maxBuffer: ${AGENT_OUTPUT_MAX} }).trim(); } catch (e) { const why = e && typeof e.stderr === 'string' && e.stderr.trim() !== '' ? e.stderr.trim().split('\\n')[0] : e && e.message ? e.message : String(e); throw new Error(\`\${cmd} \${args.join(' ')} failed: \${why}\`); } };` : ''}
   // The instructions, when the repository still has them; it owns them and may delete them. Only
   // a path the snapshot lacks means deleted: \`ls-tree\` lists nothing for it and succeeds (git
   // translates its messages, and \`cat-file -e\` exits 128 for every failure alike), so any
   // failure of the probe itself stops the leg.
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
-  const present = execFileSync('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel], { encoding: 'utf8' }).trim() !== '';
+  const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() !== '';
   const text = present ? show(rel) : null;
   const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
   const instructions = dir == null ? '' : join(dir, ${JSON.stringify(`${leg}.md`)});

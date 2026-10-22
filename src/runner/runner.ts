@@ -10,7 +10,7 @@
 // next safe point first.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
@@ -86,6 +86,8 @@ export class Runner {
     claimId: number;
     ticket: string;
     course: CourseLoad;
+    /** B-94: the leg this claim is running, so a death leaves a line naming it. */
+    leg: string | null;
     child: LegChild | null;
     /** Resolved by the next tick's view of the snapshot's next legs (the short-wait re-read). */
     waiters: ((next: NextLegs) => void)[];
@@ -129,6 +131,17 @@ export class Runner {
     this.stopped = true;
     if (this.beat) clearInterval(this.beat);
     this.beat = null;
+  }
+
+  /** B-94: what a runner says about itself when it leaves — its claim, the leg in flight and the
+   * last beat Baton answered, in one line. `why` names the exit; the leg is `none` between
+   * claims. Cheap and synchronous by design: it runs on a signal or an `exit` hook. */
+  lastLine(why: string): string {
+    const s = this.state.get();
+    const claim = s.claim ? `claim ${s.claim.id} on ${s.claim.ticket_id}` : 'no claim';
+    const leg = this.inflight ? `leg ${this.inflight.leg ?? '?'}` : 'no leg in flight';
+    const beat = s.last_ok == null ? 'never' : new Date(s.last_ok).toISOString();
+    return `${why}: ${claim}, ${leg}, last beat ${beat}`;
   }
 
   /** One heartbeat, by the timer or a test: the §11 answer drives everything local — the lease,
@@ -377,6 +390,7 @@ export class Runner {
    * Idle, the runner asks for recommendations when a heartbeat carried an `unblocked` message
    * (R-BTN-77) and otherwise at its own interval — each idle attempt asks first, then claims. */
   async work(): Promise<void> {
+    this.ensureFatalHooks();
     this.start();
     while (!this.stopped) {
       try {
@@ -387,6 +401,27 @@ export class Runner {
         await this.idleWait();
       }
     }
+  }
+
+  /** B-94: a runner's death always leaves a line. An unhandled rejection the loop did not catch
+   * and an uncaught exception are logged with the claim, the leg in flight and the last beat,
+   * then the process ends as Node would have ended it (code 1). The handlers are process-wide and
+   * installed once across every runner in the process; the picking-up runner's `log` is used. */
+  private ensureFatalHooks(): void {
+    const g = globalThis as { __batonFatalHooks?: boolean };
+    if (g.__batonFatalHooks) return;
+    g.__batonFatalHooks = true;
+    // B-94 (review round 1): the crash report keeps the stack — `msg` alone discards what
+    // Node's default fatal path would have printed — and the line is written to fd 1
+    // synchronously, because nothing pending survives the `process.exit` that follows.
+    const active = this;
+    const fatal = (why: string, e: unknown): never => {
+      const report = e instanceof Error ? (e.stack ?? e.message) : msg(e);
+      try { writeSync(1, `baton: the runner crashed (${report}) — ${active.lastLine(why)}\n`); } catch { /* stdout gone */ }
+      process.exit(1);
+    };
+    process.on('uncaughtException', (e: unknown) => { fatal('uncaught exception', e); });
+    process.on('unhandledRejection', (e: unknown) => { fatal('unhandled rejection', e); });
   }
 
   /** The idle wait: a beat long, unless an `unblocked` message ends it early. */
@@ -463,7 +498,7 @@ export class Runner {
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
     const scratch = claimScratch();
-    this.inflight = { claimId, ticket, course, child: null, waiters: [] };
+    this.inflight = { claimId, ticket, course, leg: null, child: null, waiters: [] };
     this.closedDone = false;
     // §2e/R-BTN-63: the legs git evidences are every earlier attempt's, flattened; the claim's
     // own legs are counted beside them when a leg's run number is taken.
@@ -502,6 +537,7 @@ export class Runner {
         const wait = waitState(nextLegs, legName, course.graph.shortWaits);
         let held: 'cleared' | 'suspend' = wait === 'run' ? 'cleared' : 'suspend';
         if (wait === 'short') {
+          if (this.inflight) this.inflight.leg = legName;
           const out = await this.waitOut(legName, course);
           if (out === 'abort') {
             const signal = this.abortSignal()!;
@@ -520,6 +556,7 @@ export class Runner {
           return await this.finish(claimId, { end_reason: `suspended:${at}`, reached: at, next: legName }, url);
         }
         if (this.closedDone) return await this.finish(claimId, { end_reason: 'done', reached: at }, handoffUrl);
+        if (this.inflight) this.inflight.leg = legName;
         const run = runNumber(course.graph, gitPath, legName, own);
         own.push(legName);
         const ctx = {
