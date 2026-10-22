@@ -260,6 +260,31 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     repositories.
   - Field atoms come from the latest reading that carries a `detail`.
 
+  A fourth review (round 4) raised two blockers that were design questions, and the owner
+  settled both:
+  - **Grants against derivation.** An agent could mark a type derived and derive a capability a
+    grant withheld. The owner: "Runners can work on whatever they choose… Baton has no way to
+    enforce worker activity. Deriving "vpn:corp" when a runner doesn't have it leads to
+    self-sabotage… There are many other ways a runner could sabotage itself or the whole
+    project." Derivation therefore stays past the grant.
+  - **Credential scoping.** The design passed credentials to legs by proof and by choice, which
+    contradicted R-BTN-144, since model-provider keys are kept for every leg. The owner: "Once
+    the credentials are in the sandbox, an agent running in the sandbox will be able to access
+    them even if the runner does not explicitly pass them to the agent. It seems
+    counterproductive to build security theater for this. A better mitigation is to keep model
+    provider credentials out of the runner's sandbox by using a bifrost or litellm proxy… but this
+    is not baton's responsibility."
+
+  So the ontology and choices pass no credential. Provider keys are plain `key:` labels, and the
+  canonical proof serves only why-not. That removed the round's ordering and fallback findings
+  with it. The other fixes:
+  - course files' ontology parts and the program are accepted as one unit;
+  - the evaluator's input is restricted to the program's constants;
+  - guards read capabilities only through `has`;
+  - a request's re-evaluations are capped;
+  - the why-not walk is deduplicated;
+  - `atoms_from` is judged per instance.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -1133,6 +1158,18 @@ changes):
   draining it). Admitting runners is a recorded trust decision per resource. Readings never reach
   a gate, so the harm is bounded to advice. Rejected: atoms from every reporter the spec already
   accepts.
+- **Derivation is not bounded by the grant** (2026-10-22, owner; R-BTN-174). A capability gate
+  matches what a runner can do, and Baton cannot make a runner do anything (R-BTN-66), so a
+  program that derives an ability the runner lacks harms only that runner, which is offered legs
+  it cannot finish. Authority is not derived: grants, `human-operator` and `runner:` stay outside
+  the ontology. Rejected: intersecting D(H) with the grant, and an owner setting that lists the
+  derivable types. Both would treat a statement of ability as a grant of authority.
+- **The ontology passes no credential** (2026-10-22, owner; R-BTN-144, R-BTN-174, R-BTN-177).
+  A credential inside the runner's sandbox is reachable by the agent whether or not the runner
+  sets it in the leg's environment, so scoping it per leg is theater. Keeping provider keys out
+  of the sandbox, behind a proxy, is the real mitigation, and it lies outside Baton. Rejected:
+  passing credentials by canonical proof and by a choice's available alternatives, the rounds
+  2–3 design.
 - **`clingo-wasm` in `npm test` as the conformance oracle** (2026-10-22, owner; R-BTN-175). The
   owner would replace ASP-Core-2 only with "a different data log extension that addresses our
   needs with better TypeScript compatible tooling". Nemo, Soufflé, Logica and Mangle each bring a
@@ -2697,4 +2734,26 @@ on the encoding, which it confirmed valid and equal to first-match: 1 blocking, 
 | 15 the model and vendored `isEligible` | both receive H ∪ D(H) as the runner's capabilities; the evaluation sits outside them (R-BTN-174) |
 | 16 advice reads stale sets | stated as advice that may lag; only rule 4 is guaranteed fresh (R-BTN-174) |
 | 17–24 nits | every string constant held in the maximal evaluation; S-BTN-140's impossible case dropped; empty warnings filtered; `meters/2` reserved in shape; needs checked against types and R-BTN-144; hysteresis's per-runner claim narrowed; `choices_json` and the new variables' aliases; retention of `choice_last` and `runner_derived`, the fleet view's derived capabilities, the condition's closing, no gate re-derivation in a choice, ground facts, and §5.8's sentence |
+
+*(2026-10-22, round 4 — a fourth fresh reviewer, who confirmed the fragment, the evaluator's
+rounds, the canonical proof's well-foundedness and the choice encoding against clingo: 2
+blocking, 12 should-fix, 6 nits. Resolved:)*
+
+| Finding | Resolution |
+|---|---|
+| 1 B — course files can derive past a grant | the owner: a capability states ability, not authority; derivation stays past the grant (R-BTN-174; Decisions in full) |
+| 2 B — R-BTN-144 contradicts credential delivery | the owner: no credential scoping; the ontology and choices pass none; provider keys are `key:` labels (R-BTN-144 unchanged, R-BTN-174, R-BTN-177; S-BTN-145) |
+| 3 joint acceptance can leave a course with an undefined choice | the program and course files' ontology parts are accepted or refused as one unit, consistent by construction; the 5-minute window defers the whole unit (R-BTN-174; S-BTN-155) |
+| 4 course changes do not re-validate the program | a course's ontology part belongs to the unit; changing derived types or `values` marks sets stale (R-BTN-174) |
+| 5 R-BTN-126 contradicts itself | its Invalid bullet defers to the `capability` bullet (R-BTN-126) |
+| 6 the canonical proof depends on open orders | fact, `holds`, merge-position and later-round orders fixed (R-BTN-174, R-BTN-175) |
+| 7 guards over gate predicates undefined | guards may not depend on `holds` or `derived`; holding-independent predicates evaluated at acceptance (R-BTN-176) |
+| 8 the no-advice fallback forces `requires` | moot: choices pass no credential |
+| 9 the alarm budget cannot fit an evaluation; claims unbounded | evaluations always finish and the turn stops starting new ones; at most two re-evaluations per request (R-BTN-174; S-BTN-146) |
+| 10 runtime H unbounded | the input is H restricted to the program's constants (R-BTN-175; S-BTN-146) |
+| 11 why-not's chain exponential | a deduplicated, linear walk; `not-derivable` when no proof exists (R-BTN-174) |
+| 12 `atoms_from` per resource, atoms per instance | a runner's reading is permitted only when every resource the instance serves admits runners (R-BTN-176) |
+| 13 derived needs get no credentials | moot |
+| 14 S-BTN-154 tests the claim | it tests the advance |
+| 15–20 nits | the suite in vitest's Node project and the `Models.Optimal` cast; "one optimal answer set" with the encoding; a strict-syntax parser written from the grammar; path and instance-id length; S-BTN-148 aligned; merge edge cases fail the sync; guard rules obey the limits; the condition closes on acceptance; a route against `null` advice; declared-or-derived rules; `not-derivable` |
 

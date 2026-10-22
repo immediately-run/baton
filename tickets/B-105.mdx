@@ -28,8 +28,7 @@ modifications."
 **Spec:** §6.10, R-BTN-176 (the atoms a choice reads) and R-BTN-177 (choices: semantics,
 hysteresis, delivery, overrides, conformance), with the rules it amends: R-BTN-69's leg
 `choices`, R-BTN-76's `atoms_from` and `std:` base, R-BTN-100, R-BTN-110's
-`std:api-capacity@1`, and R-BTN-144's `BATON_ADVICE`, `BATON_ROUTE` and alternative
-credentials. The data model is in §13: `choice_last`, `external_resources.atoms_from`. The API is
+`std:api-capacity@1`, and R-BTN-144's `BATON_ADVICE` and `BATON_ROUTE`. The data model is in §13: `choice_last`, `external_resources.atoms_from`. The API is
 in §14: `advice` and `route`. The history is in `BATON_SPEC_HISTORY.md` (Changelog, 2026-10-22;
 Review record).
 
@@ -46,12 +45,12 @@ Review record).
    `claim_legs.choices_json`, and put `advice` in the advance answer. Validate a
    leg's `choices` in the course file.
 4. **The runner.** Write `BATON_ADVICE`, read `BATON_ROUTE` and report `route` on advance and
-   end. Keep the available alternatives' credentials. Record `advice-overridden` in core from a
+   end. Record `advice-overridden` in core from a
    differing route.
 5. **The standard courses and this repository.** Have `agent_command` and the review leg's
    instructions read `BATON_ADVICE` first, keeping today's models as the fallback. Add this
-   repository's `codegen`, `reviewer-1` and `reviewer-2` choices (alternatives as `needs`) and the
-   `meters` facts. Register
+   repository's `codegen`, `reviewer-1` and `reviewer-2` choices (alternatives as `needs` over `key:` and `model:`
+   labels), the `meters` facts, and runner `check`s declaring each `key:`. Register
    `anthropic-capacity` refining `std:api-capacity@1`, with `atoms_from: any`. This is an
    operator step: record it in the PR.
 6. **Conformance.** Add choice fixtures to B-104's suite (`--opt-mode=optN`, one optimum, the

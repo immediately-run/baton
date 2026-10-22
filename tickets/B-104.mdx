@@ -21,11 +21,11 @@ enables a runner to execute an opus review." "Course legs specify a high-level c
 code-generation-llm, while the runners know they have an API key for OpenCode Go and DeepInfra
 and an instance of OpenCode 2 installed in the VM. Baton should never store the credentials,
 but it needs to keep track of the ontology of how credentials map."
-**Spec:** §5.9, R-BTN-174 (the ontology, its merge, matching, storage, why-not, credentials) and
+**Spec:** §5.9, R-BTN-174 (the ontology, its merge, matching, storage, why-not) and
 R-BTN-175 (the language, its validation, bounds, evaluator, narrowing and conformance), with the
 rules it amends: R-BTN-121's `derived` types, §6.6 rule 4 and the pipeline, R-BTN-75's
-`fleet_capabilities`, and R-BTN-144's canonical-proof credentials. The data model is in §13: `ontologies`,
-`runner_derived`, `ontology_proofs`. The API is in §14: the advance's `proofs` and the board post's `ontology`. How the design got here,
+`fleet_capabilities`, and R-BTN-126's dead-holding end (a leg's environment stays R-BTN-144's). The data model is in §13: `ontologies`,
+`runner_derived`, `ontology_proofs`. The API is §4.4's board-post `ontology` field and §6.2's `not-derived` answer. How the design got here,
 and the review that shaped it, are in `BATON_SPEC_HISTORY.md` (Changelog, 2026-10-22; Review
 record).
 
@@ -38,19 +38,17 @@ record).
    program. Core computes its digest, runs R-BTN-174's three-step acceptance with the course
    files, enforces the 5-minute window, and stores `ontologies` and `ontology_proofs`.
 3. **Storing the derived set.** Mark `runner_derived` stale on heartbeat changes, grant changes
-   and accepted programs. Re-evaluate in the alarm under its match budget, and in a claim's or
-   advance's transaction when the set is stale. Rule 4's SQL, `isEligible` and
+   and accepted programs. Re-evaluate in the alarm round-robin, and in a separate transaction at
+   a claim or advance (at most two per request) when the set is stale. Rule 4's SQL, `isEligible` and
    `fleet_capabilities` read declared ∪ derived. `isEligible` lives in the vendored decision
    library: change `baton.mjs` in docs first, then run `npm run vendor`.
 4. **Why-not.** R-BTN-174's canonical explanation goes in the blocks index and in `baton leg
    why`.
-5. **The leg environment.** The advance answer carries `proofs`, and the runner keeps those
-   credentials (R-BTN-144).
-6. **Course code.** `src/defaults/ontology/baton@1.json` (the first built-in: model facts,
+5. **Course code.** `src/defaults/ontology/baton@1.json` (the first built-in: model facts,
    `offers`, `usable_with`, the binding idiom), the file's JSON Schema, the sync's merge by id,
    and `repo init` scaffolding a `.baton/ontology.json` that names it. Add R-BTN-126's
    `capability` end on a holding in a canonical proof. R-BTN-121's `derived` key goes in the course-file validator.
-7. **Conformance.** The translator `src/defaults/ontology-asp.ts`, fixtures under
+6. **Conformance.** The translator `src/defaults/ontology-asp.ts`, fixtures under
    `test/fixtures/ontology/`, `test/unit/ontology-conformance.test.ts` on `clingo-wasm@0.6.0`
    (an exact devDependency), and the strict-syntax test.
 
