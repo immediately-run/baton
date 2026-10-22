@@ -151,9 +151,10 @@ RUNNER=$!
 # fresh, the runner healthy, the process alive) while the leg waits forever on an exit that
 # never comes. The signature that catches it: a leg older than LEG_STALL_MIN whose checkout —
 # and any opencode worktree beside it — have been quiet longer than QUIET_MIN. Advice, never
-# action: it prints a line; the human decides. Core's own answer is baton.stalled on a default
-# timer (R-BTN-167) with R-BTN-90's deadlines, still §7's proposal; until it is built, this is
-# the detector.
+# action: it prints a line; the human decides. The detection and the conclusion are the
+# runner's own kit (B-108: the stub ends its wait at the agent's exit or its silence,
+# whichever comes first — the owner, 2026-10-22: the Baton server has no role in this); this
+# watch is the operator's outside view until B-108 lands, its backstop after.
 LEG_STALL_MIN="${LEG_STALL_MIN:-60}"
 QUIET_MIN="${QUIET_MIN:-10}"
 warned_leg=""

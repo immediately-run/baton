@@ -1,5 +1,5 @@
 ---
-title: "B-108 — The runner says what its leg is doing: duration and last activity in the log, and a stalled warning until core's baton.stalled timer exists"
+title: "B-108 — The stub concludes for an agent that finished and will not exit: the agent's stream falls idle, the stub kills it and lets the course's checks judge the work"
 id: B-108
 project: baton
 status: available
@@ -7,8 +7,8 @@ updated: 2026-10-22
 tags:
   - roadmap-item
 order: 510
-tier: routine
-description: "The B-86 incident (2026-10-22): an implement agent finished its work, pushed, opened PR #104, wrote its ticket record — and never exited, so the stub waited forever and every health signal stayed green (lease fresh, runner beating, process alive) for five hours. The runner logs a leg's duration and the time of its last observable activity each beat, warns when a leg runs long while quiet, and pipes the leg child's output (B-23's archive) so 'quiet' is a measured fact, not a guess. start-runner.sh's stalled-leg watch is the operator-side stopgap this builds on. Requires: none."
+tier: judgement
+description: "The B-86 incident (2026-10-22): an implement agent finished its work, pushed, opened PR #104, wrote its ticket record — and never exited, so the stub waited five hours on an exit that never came while every health signal stayed green. The stub — the agent's own parent — streams the agent's output, and when the stream falls idle past a bound it kills the agent and takes what it received: the course's own checks (B-81's forge verify, the last-line contract) then decide whether the work was done. The owner, 2026-10-22: the runner is responsible for detecting this; the Baton server has no role in it. Amends §5.8 R-BTN-131. Requires: none."
 topics:
   - baton
 owns: {}
@@ -16,44 +16,56 @@ prs: []
 depends_on: []
 ---
 
-**Brief:** the owner, 2026-10-22, after the B-86 leg: "im more concerned with how we can detect
-this in the future." The runner held a claim in `implement` for five hours past the agent's last
-output with nothing to show the operator — every signal it logs was green.
-**Spec:** §8.3 R-BTN-72 (the runner: the leg child and its waiting), §7's `baton.stalled`
-(R-BTN-163, R-BTN-167's default timer — the server-side answer, still §7's proposal) and
-R-BTN-90's deadlines; B-23 (the runner's leg-output archive) is the observability half. The
-baton-stalled/… ticket:
-**Depends on:** nothing — the runner-side logging stands alone; the condition lands with §7.
+**Brief:** the owner, 2026-10-22, after the B-86 leg held a claim in `implement` for five hours
+past the agent's last output: "the runner is responsible for detecting that the agent has
+completed its work and wont exit. The baton server has no role in this."
+**Spec:** §5.8 R-BTN-131 (the stubs and `agent_command`) as amended by B-84 ("the command's exit
+is the agent's completion, which its own contract requires it to mean") — this ticket amends
+R-BTN-131 again: an agent's completion is its **exit or its silence**, whichever comes first.
+§8.3 R-BTN-72 (the runner: the leg child and its waiting); B-23 (the runner's leg-output
+archive) is the same piping, arriving with it. **The amendment is this ticket's first
+deliverable.** No §7 condition, no R-BTN-90 deadline: the owner's decision is that this failure
+mode is detected and settled entirely in the runner's kit — `baton.stalled` keeps whatever
+scope §7's own review leaves it, none of it here.
 
 ### What to build
 
-1. **The leg child's output is piped, not ignored.** The leg child spawns with
-   `stdio: ['pipe', 'ignore', 'ignore']` — the runner never sees the agent's stream. B-23's
-   archive (masked per R-BTN-144) is the full answer; the detection half lands first: the
-   runner timestamps every chunk it drains, so "last activity" is a fact.
-2. **A liveness line each beat while a leg runs**: `baton: <ticket>'s <leg> running N min, last
-   output M min ago` — the operator's `tail -f` shows the wedge forming instead of silence.
-3. **A stalled warning**: a leg running past a threshold (default 60 min, the course's to
-   raise) with no output and no checkout change for 10+ minutes logs the B-86-shaped warning
-   naming the claim and the agent's pid — the signature `scripts/start-runner.sh` already
-   watches for from outside; the runner knows it from inside, without pgrep.
-4. **When §7 lands**, the warning becomes core's `baton.stalled` condition (R-BTN-167's timer
-   fires, Needs you carries it) and R-BTN-90's deadline takes the claim — the runner-side line
-   stays as the local view.
+1. **The spec amendment** (R-BTN-131): beside B-84's exit contract, the stub's wait for the
+   agent ends at the earlier of the agent's exit or an idle bound on its output — the bound a
+   constant of the stub, named like `CLOSE_TIMEOUT_MS` with its reason in the comment.
+2. **The stub streams what it now accumulates.** `execFile`'s callback hides the stream; the
+   stub spawns the agent with `spawn`, drains and timestamps stdout (the answer protocol reads
+   the last line either way), and closes stdin at once as B-84 does. An agent still writing is
+   never touched, however long it runs.
+3. **Idle past the bound: conclude.** The stub kills the agent (it is the parent; SIGKILL to
+   the child alone), takes the received stdout as the agent's output, and proceeds exactly as
+   an exit would: the last-line contract for a leg that asks, B-81's forge verify for
+   `implement`. The kill is recorded in the leg's result (`agent_concluded_idle`) so the close,
+   the marker and the review round can see how the leg ended.
+4. **The runner's liveness line** stays as filed here: while a leg runs, each beat logs its
+   duration and the age of its last output — the operator watches the wedge form instead of
+   silence. `start-runner.sh`'s outside watch (2026-10-22) keeps watching; with 2 and 3 it
+   becomes the backstop, not the detector.
 
 ### Do not
 
-- Kill the agent from the runner: a deadline is Baton's word (R-BTN-90: "Baton cannot stop a
-  runner" — and a runner guessing about its agent is the same trap one level down). The
-  warning tells the human; §7's machinery decides.
+- Give Baton any part of this: no condition is raised, no deadline taken, nothing posted —
+  the server learns the leg ended as it learns every leg, by the claim's end (the owner's
+  decision, 2026-10-22).
+- Conclude an agent that is still writing: the bound is on silence, never on duration.
 
 ### Tests
 
-- Unit: a leg child that prints, sleeps past the thresholds and prints again — the liveness
-  lines and the one warning appear in order, and no warning while output flows.
-- The B-86 shape replayed: a child that exits never — the warning fires once per leg.
+- Unit: an agent that prints, goes silent past the bound and never exits — the stub concludes,
+  its output is the received text, the result records `agent_concluded_idle`, and the forge
+  verify runs as after an exit.
+- An agent that keeps printing at a slow cadence — never concluded, however long.
+- The ask-leg contract over concluded output: the last received line is the answer, or the
+  leg fails naming it.
+- The B-86 shape replayed end to end: PR open, agent silent, stub concludes, `pr-open`.
 
 ### Exit criteria
 
-- [ ] a wedged-post-completion agent is visible in the runner's log within minutes, not hours
-- [ ] no warning while a leg is producing output, whatever its duration
+- [ ] a finished-but-never-exiting agent costs its claim minutes, not hours, with no server
+      change at all
+- [ ] an agent that is still producing is never killed, whatever its duration
