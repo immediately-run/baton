@@ -29,7 +29,7 @@ in [`spec/BATON_SPEC_HISTORY.md`](BATON_SPEC_HISTORY.md).
 | 3 | Repositories and forges | registration, forges and their ids, sync credentials, wants and notifications |
 | 4 | Tickets, syncs and the board | ticket sources, the board post, observations, snapshots, discrepancies, child tickets |
 | 5 | Courses | the course file, stations and legs, positions, contracts, sources, the standard courses, the capability ontology |
-| 6 | Prerequisites, blocks and advice | blocks, resources and readings, matching rules, expedite and hold, messages, choices |
+| 6 | Prerequisites, blocks and advice | blocks, resources and readings, matching rules, expedite and hold, messages, choices, seats |
 | 7 | Conditions | conditions, handlers and restarts, retries, calls, choices, timers, compensation, the outbox |
 | 8 | Runners | identity, heartbeats, the runner and its legs, registration, streaming, the doorbell |
 | 9 | Claims | the fenced lease, advancing, ending, reaping, confirming, attempts, activities |
@@ -2537,7 +2537,8 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
   resource is anything outside Baton a leg can be blocked on: a provider's capacity, an API's
   rate limit, disk on a shared server.
   - **Registered** by an administrator: `baton admin resource add <name> --scope
-    runner|account|service --schema <file>`, `name` matching `^[a-z][a-z0-9:._/-]{0,79}$`, the
+    runner|host|account|service --schema <file> [--capacity <n>]` (capacity and `host`:
+    R-BTN-178), `name` matching `^[a-z][a-z0-9:._/-]{0,79}$`, the
     schema (R-BTN-108's subset) its readings' `detail` must satisfy, and `--atoms-from
     admin|any` (default `admin`: whether runners' readings, besides administrators' and
     instrument keys', may steer choices, R-BTN-176). The schema may name a `std:` schema, and
@@ -2550,7 +2551,8 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
     runners may use it; its resources share one `detail` schema, and one reading of it is the
     state of each; one listing several repositories takes only resources whose schema holds
     numbers, booleans and `enum` strings. `runner`: one implicit instance per runner,
-    `<resource>@runner:<id>`. Instances and readings are one tenant's (R-BTN-137) and seen by
+    `<resource>@runner:<id>`. `host`: one implicit instance per runner hostname,
+    `<resource>@host:<hostname>` (R-BTN-178). Instances and readings are one tenant's (R-BTN-137) and seen by
     all its repositories.
   - **`uses`.** Each heartbeat declares the account instances the runner can use; an
     unregistered one, or one listing no repository its key is granted on, is dropped into
@@ -2672,7 +2674,7 @@ its own form (R-BTN-78); a raised **`hitl` condition** when a running leg asks (
 Baton recommends and the runner decides (R-BTN-45): a gate refuses a claim or advance; advice
 never refuses, and acting against it is accepted and recorded `advice-overridden`.
 
-- **The gates.** Rule numbers are stable (code cites them); 11 and 12 are unused. A refusal is
+- **The gates.** Rule numbers are stable (code cites them); 12 is unused. A refusal is
   the code shown, else `not-eligible` with `rule` and `rule_code`.
 
   | Rule | Holds when | At | Refusal |
@@ -2687,6 +2689,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   | 8 | Tags meet none of the leg's posted barred tags, the owner bars in force for its course or `*` (at an advance those with `applies: claim+advance`) and, at an advance, the holder's `bars`; required bars met by posted bars joined with the holder's `bars` (R-BTN-60, R-BTN-67) | claim, advance | `barred-tag`; rule 8 `policy` |
   | 9 | The runner declares the course at `min_runner_version` or later (R-BTN-22, R-BTN-65); not re-checked at an advance | claim | `stale-skills` |
   | 10 | No `retry` block on the leg | claim, advance | `backing-off` with `until` |
+  | 11 | Every instance the claim or advance bills has a free seat for it (R-BTN-178) | claim, advance | `instance-busy`, naming the holder |
   | 13 | No repository of the ticket (home, or a `repos:` entry reaching `code_repos`, R-BTN-140) has a held rename (R-BTN-138) | claim | `rename-held` |
   | `person` | The leg is not a person's (R-BTN-116) | claim, advance | `person` |
 
@@ -2769,8 +2772,10 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   `invalid-params`. It also takes:
   - `bills: [{instance, n?}]` (and `advance` for the leg it starts): instances the leg spends, `n`
     seats (default 1, at most 16), each in the runner's `uses` and listing the repository; any
-    other is dropped and returned in `refused`. A claim bills only its running leg. Core counts
-    active billings per instance for the instance view; what is too many is ranking's call.
+    other is dropped and returned in `refused`. A `host` instance is usable by the runners of its
+    hostname without `uses`. A claim bills only its running leg. A bill takes seats on its
+    instance, and a bill past the instance's capacity is refused by rule 11, `instance-busy`
+    (R-BTN-178); below capacity, how many is too many is ranking's call.
   - `rationale`: opaque JSON ≤ 4 KB, kept in the claim's `advice_json` and history row and
     exported with it (R-BTN-88); Baton never reads it, the fleet view omits it, the dashboard
     shows it as escaped text, and §12.3's free-text rules do not apply to it.
@@ -2986,6 +2991,36 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     - The warnings are filtered as R-BTN-175 says.
   - Ranking claims by what their work costs now is not part of this rule; a course may feed its
     `rank.mjs` from the same readings (R-BTN-98).
+
+### 6.11 Seats: exclusive use of a resource instance *(proposal — B-106)*
+
+- **R-BTN-178 (a bill is a seat on an instance).** Some things a leg uses take one client at a
+  time, or a few: a Chrome MCP session on a VM, an RDP session to a machine, a device. The runner
+  knows what its leg will use, so it says so in the claim or the `advance` that starts the leg,
+  as `bills` (R-BTN-100). Baton holds the seats as it holds a ticket's lease: for every worker
+  that asks, and binding only on them.
+  - **Capacity.** A resource is registered with `--capacity <n>` (1–64; absent, unlimited), the
+    seats on each of its instances. An `account` instance may override it at registration. With
+    capacity 1 an instance is exclusive.
+  - **The `host` scope.** A resource registered `--scope host` has one implicit instance per
+    runner hostname, `<resource>@host:<hostname>`, usable by every runner on that host. Every
+    runner on a VM bills the same name, and no administrator registers anything per machine. The
+    hostname is the runner's own statement (§8).
+  - **Taking seats.** A claim's or advance's `bills` take seats for the leg it starts. If any
+    named instance would exceed its capacity, counting the seats active claims already bill, the
+    claim or advance is refused by rule 11 with `instance-busy` and the holder named. A refusal
+    is never a failed attempt, and a `prefer` claim goes on to its next candidate (R-BTN-100).
+    Claims are serialized in the tenant's object, so the first to bill a free seat holds it.
+  - **Holding and releasing.** Seats belong to the running leg. Each `advance` rewrites them for
+    the leg it starts, and an `advance` that does not name an instance releases it. The claim's
+    end releases every seat, and so does a reap, so a dead runner never strands one.
+  - **Recommendations see seats.** A leg whose `requires.resources` names R is offered to a
+    runner only while one of its usable instances of R (R-BTN-76) has a free seat; otherwise it
+    is `waiting` on R for that runner. `baton leg why` names the holder of each full instance. An
+    instance's active seats are served in `GET /v1/runner/instances` (R-BTN-99).
+  - Baton cannot know what a runner really uses. A runner that uses an instance without billing
+    it, or bills one it never touches, is acting on its own statement. Seats keep cooperating
+    workers from colliding; they confine nothing (values 12).
 
 ## 7. Conditions *(proposal)*
 
@@ -5564,7 +5599,7 @@ and never accepted holds no role (§12.1).
 | `claims` | `id` | `ticket_id`, `runner_id`, `request_id` (unique per `runner_id`), `nonce` (6 hex, public), `snapshot_sha`, `station`, `leg`, `start_path` JSON, `regressed_since`, `claim_observation`, `end_observation`, `claimed_at`, `status` (`active`\|`completed`\|`released`\|`reaped`), `ended_at`, `end_reason`, `end_detail`, `ended_at_sha`, `error_type`, `blocked_kind`, `blocked_ref`, `confirmed_at`, `superseded_at` (R-BTN-168), `fence_pending`, `fence_incarnation`, `fence_deadline` (R-BTN-19), `failed_attempt`, `resume_json`, `deadline_at` (the running leg's interrupting `start` timer, or its re-arm), `cancel_at`, `provisional`, `provisional_json` `{course, leg, sha, declared}` (R-BTN-148), `check_sha`, `advice_json` (the claim's `rationale`, opaque, ≤ 4 KB), `reap_after` *adoption* | The lease, kept forever. `status = 'active'` exactly when `ended_at` is NULL; `confirmed_at` only on `completed` (R-BTN-4, R-BTN-10, R-BTN-90, R-BTN-100, R-BTN-104, R-BTN-126, R-BTN-153) |
 | `adoption_requests` | `(claim_id, runner_id)` | `requested_at`, `confirmed_at` | A runner's request to adopt a legacy claim; the confirmation names one request, and every other on the claim is refused when it moves (*adoption*, R-BTN-28) |
 | `claim_legs` | `(claim_id, seq)` | `leg`, `from_station`, `to_station`, `next_leg`, `head_sha`, `bars` JSON, `session_url`, `leg_log_dir`, `started_at`, `finished_at`, `abandoned_at`, `evidence`, `choices_json` (the leg's resolved choices), `route_json` (its reported route) | The legs a claim started, on the holder's word (R-BTN-63, R-BTN-84, R-BTN-113, R-BTN-128, R-BTN-177) |
-| `claim_bills` | `(claim_id, instance)` | `n` (seats) | What the running leg bills; rewritten at each advance, deleted at the end (R-BTN-100) |
+| `claim_bills` | `(claim_id, instance)` | `n` (seats) | The seats the running leg holds; rewritten at each advance, deleted at the end or reap (R-BTN-100, R-BTN-178) |
 | `leg_outputs` | `(ticket_id, leg, run, name)` | `schema`, `uri` (≤ 1 KB), `digest`, `value_json` (≤ 4 KB, bounded schemas only), `course_version`, `leg_version`, `claim_id`, `source` (`holder`\|`sync`), `confirmed`, `recorded_at` | Output envelopes, by pointer or bounded inline value (R-BTN-82, R-BTN-108) |
 | `leg_run_inputs` | `(claim_id, seq, name)` | `ticket_id`, `from_leg`, `from_run`, `uri`, `digest`, `value_json`, `leg_version` | What each leg run was given; replay reads it (R-BTN-82, R-BTN-84) |
 | `transcripts` | `id`; unique `(runner_id, repo, path, claim_id)` | `runner_id`, `claim_id`, `repo`, `path`, `role` (`session`\|`subagent`), `activity_id`, `first_seen_at`, `last_pushed_at` | Archived transcript pointers (R-BTN-20) |
@@ -5593,8 +5628,8 @@ and never accepted holds no role (§12.1).
 
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
-| `external_resources` | `name` | `scope` (`runner`\|`account`\|`service`), `detail_schema` (≤ 4 KB), `atoms_from` (`admin`\|`any`) | R-BTN-76, R-BTN-176 |
-| `resource_instances` | `name` | `repositories` JSON (an `account` instance's) | Registered instances; `runner` instances are implicit (R-BTN-76) |
+| `external_resources` | `name` | `scope` (`runner`\|`host`\|`account`\|`service`), `detail_schema` (≤ 4 KB), `atoms_from` (`admin`\|`any`), `capacity` (seats per instance; NULL unlimited) | R-BTN-76, R-BTN-176, R-BTN-178 |
+| `resource_instances` | `name` | `repositories` JSON (an `account` instance's), `capacity` (overrides the resource's) | Registered instances; `runner` and `host` instances are implicit (R-BTN-76, R-BTN-178) |
 | `instance_serves` | `(instance, resource)` | — | What each instance serves, many to many (R-BTN-76) |
 | `instance_readings` | `(instance, source, kind)` | `kind` (`state`\|`measure`), `available` (set exactly for `state`), `until`, `observed_at`, `lapses_at`, `detail`, `posted_by`; `source` `admin`, `runner:<id>` or `probe:<fp>` | Every instrument's latest reading and the administrator's (R-BTN-101, R-BTN-151) |
 | `instance_states` | `instance` | `state` (`available`\|`unavailable`\|`unknown`), `until`, `changed_at` | Last evaluated state; a change is one `resource` event and one recount (R-BTN-76) |
@@ -5775,7 +5810,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `POST /v1/admin/grants` | admin | a grant, `human-operator` included, or a key's hostname | `{ok, pending: true}` | R-BTN-57, R-BTN-58, R-BTN-146 |
 | `POST /v1/admin/keys/{fingerprint}/revoke` | admin | `{confirm: true}` | `{ok: true}`; the key stops at its next call, an owner key on every repository; `invalid-params` for an administrator's key | R-BTN-57 |
 | `POST /v1/admin/probes` | admin | `{public_key, label}` | `{ok: true}` | R-BTN-101 |
-| `POST /v1/admin/resources` | admin | `{name, scope, detail_schema, atoms_from?}` | `{ok: true}` | R-BTN-76, R-BTN-176 |
+| `POST /v1/admin/resources` | admin | `{name, scope, detail_schema, atoms_from?, capacity?}` | `{ok: true}` | R-BTN-76, R-BTN-176, R-BTN-178 |
 | `POST /v1/admin/instances` | admin | `{name, serves[], repositories[]}`, re-posted to change | `{ok: true}` | R-BTN-76 |
 | `POST /v1/admin/readings` | admin | a reading, in force ≤ 7 days; or `{instance, clear: {source?}}` | `{ok: true}` | R-BTN-76, R-BTN-151 |
 | `PUT /v1/admin/settings` | admin | `{link_hosts?, session_hosts?}` | `{ok: true}` | R-BTN-112, R-BTN-113 |
@@ -5945,7 +5980,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-10 no reviewer capacity | every seat barred | `review` posted `waiting`; holder ends `suspended:pr-open`; offered again after the lift; `baton.stalled` at 72 h |
 | S-BTN-19 suspend for the window | both lines limited until +2 h when `implement` ends | no advice on `advance`; ranking reads `frees_at`; suspended; first in line at +2 h |
 | S-BTN-20 own line exhausted mid-leg | a rate limit with no reset during `implement` | `released:blocked` on `resource` with a reading, not failed; override accepted; another line continues |
-| S-BTN-21 no overbooking | `max_concurrent` 2, two billing claims, a third runner | the view shows two billings; W3's claim accepted; one billing after an end |
+| S-BTN-21 seats | `chrome-mcp` registered `--scope host --capacity 1`; W1 and W2 on host `vm-12`, W3 on `vm-13`; W1 claims a leg billing `chrome-mcp@host:vm-12`; W2 then claims one billing it, by `ticket_id` and by `prefer` with a second candidate; W3 bills its own host's; W1 advances into a leg not billing it; W1 is reaped while billing; `rdp-lab` a `service` resource with capacity 1 | W1 holds the seat; W2 refused rule 11 `instance-busy` naming W1, no failed attempt, its `prefer` claim taking the second candidate; W2's recommendations omit the leg, `waiting` on `chrome-mcp`; W3 unaffected; the advance releases the seat and W2 then claims; the reap releases it; one `rdp-lab` holder across every host |
 | S-BTN-22 review queue bound | eight tickets wait for review | default order, nothing flagged; override recorded (the bound is docs' ranking) |
 | S-BTN-27 model advice | three lines, one with spare budget near reset | `launch-candidates` serves the ranking code; a claim on another line accepted, recording the model |
 | S-BTN-44 blocks, resources, decisions | `depends_on`, an undeclared capability, a resource on two instances, a posted decision, an `unblocked_trigger`, an idle runner; readings lapse, B closes, the capability comes and goes | rows per kind, fleet-wide only when every instance is down; one index serves `blocked?on=`; claims `blocked`, by-id override accepted; `unblocked` logged, messaged, dispatched once; `baton.capability-missing` after 24 h |
@@ -6118,6 +6153,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-115 | Blocked ends per (ticket, leg) past `max_blocked` in 24 h hold the ticket with `baton.retries`; call blocks are not counted | S-BTN-95 |
 | G-BTN-116 | Every view draws legs as edges with state in colour and text, and no station the file lacks | S-BTN-96 |
 | G-BTN-127 | Ticket prerequisites reach core only as `requires.tickets` (`parent`, `posted`) or `depends_at`, and a parent waits on its children only through a call; `human-operator` by rule 4; `waiting_on` is never `dependencies`, `children`, `owner` or `policy` | S-BTN-108 |
+| G-BTN-162 | No instance ever holds more active seats than its capacity; seats are released at every leg end, claim end and reap; a seat refusal is never a failed attempt | S-BTN-21 |
 | G-BTN-161 | A choice's advice never refuses, carries identifiers only, and a reported route other than the advised one records `advice-overridden` | S-BTN-153 |
 | **§7** | | |
 | G-BTN-31 | Only listed ends are failed attempts; the owners' default backs off 1 h, then 4 h; the third failure or a non-retryable condition holds with `baton.retries` | S-BTN-5, -6, -7 |
@@ -6341,7 +6377,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose a minimal core that acts only on its own vocabulary over course posted data, with course logic in each home repository, over core interpreting courses: a new course must not need a Baton deploy (2026-10-14; R-BTN-50).
 - Chose Baton as an advisor that gates only correctness and the owner's explicit say (the lease, readiness, holds and prerequisites, grants, capabilities and tier, barred tags, course version, person legs, `no_chain_from`) over Baton as gatekeeper of capacity (2026-10-14; R-BTN-45).
 - Chose that Baton runs no repository code and runners rank (`rank.mjs`, from the fleet and instance views) over hooks sandboxed in Baton or hosted: a strict sandbox was useless and still an attack surface; runners ranking with different code is accepted, since it is all advice (2026-10-16; R-BTN-98).
-- Chose provider usage, forecasts and model advice as course logic, with only measured readings and billing counts shared, over core forecasts or reservations: estimates are unverifiable and agents would learn to report low (2026-10-14, 2026-10-16; R-BTN-60, R-BTN-100, R-BTN-101).
+- Chose provider usage, forecasts and model advice as course logic, with only measured readings and billing counts shared, over core forecasts or reservations of future capacity: estimates are unverifiable and agents would learn to report low; a seat a running leg holds now is not a forecast (R-BTN-178) (2026-10-14, 2026-10-16; R-BTN-60, R-BTN-100, R-BTN-101).
 - Chose cooperative gates backed by detection (each marker carries its claim's nonce; git wins) over signed commits, a required lease check or per-runner forge identities: Baton does not fortify git's security model, and whoever can push is a legitimate user (2026-10-14, reaffirmed 2026-10-18; R-BTN-46, R-BTN-66).
 - Chose to keep what agents must not change — owner bars, required bars, tiers, retry bounds, transcript repositories — as Baton settings set by owner and administrator keys, over an owner-only file in git: an agent can write the PR and run the review (2026-10-14; R-BTN-66, R-BTN-67).
 - Chose owner and required bars that name a course (or `*`) over per-repository bars (2026-10-14; R-BTN-67).
@@ -6433,6 +6469,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose choices as ASP-Core-2 weak constraints evaluated as first-match, with availability hard, guards soft, hysteresis from a stored last demotion, and readings steering advice only from administrators and instrument keys unless a resource admits runners (2026-10-22; R-BTN-176, R-BTN-177).
 - Chose to let the ontology derive past what a grant names, because a capability gate matches ability, not authority: a false derivation only sabotages the runner it misleads, and authority stays in grants, `human-operator` and `runner:`, which are never derived (2026-10-22; R-BTN-174).
 - Chose to leave a leg's environment to R-BTN-144 alone, the ontology and choices passing no credential, over scoping provider keys per leg inside a sandbox the agent can read anyway (2026-10-22; R-BTN-144, R-BTN-174, R-BTN-177).
+- Chose seats on resource instances, billed by the runner at the claim or advance that starts a leg and refused past capacity, over counting bills as advice: a seat is a fact the runner states, not a forecast, and an exclusive device is exactly what a lock is for (2026-10-22; R-BTN-178, R-BTN-100).
 - Chose `clingo-wasm` in `npm test` as the conformance oracle over a pip-installed clingo or another Datalog dialect: none is a standard with preferences or has better TypeScript tooling (2026-10-22; R-BTN-175).
 
 ## Open questions

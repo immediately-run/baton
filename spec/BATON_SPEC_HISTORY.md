@@ -305,6 +305,26 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   The spec changes they imply are pending: `human-operator` self-declared, R-BTN-45's wording,
   the freshness bound, and round 5's findings under the advisory model.
 
+- **2026-10-22 — §6.11: seats (owner direction; B-106).** The owner asked how a leg can say it
+  needs "a singleton within the runner's VM", such as a Chrome MCP session one agent can use at
+  a time, or a machine reachable over RDP by "a single client at a time". The owner: "specific
+  capabilities used by the leg about to be completed should travel with the claim request: the
+  runner in the vm is authoritative about this… if they make the claim first, the later claim
+  can fail". Baton had the vocabulary, but billing was only a count: S-BTN-21 accepted a claim
+  past `max_concurrent`.
+
+  R-BTN-178 makes a bill a seat:
+  - capacity per resource, which an `account` instance may override;
+  - a `host` scope, so every runner on a VM names the same instance with no administrator step;
+  - rule 11 (`instance-busy`), which is never a failed attempt;
+  - seats held per leg rather than per claim. This was argued in discussion: a claim may run
+    several legs and only one may need the device;
+  - release at every end and reap;
+  - recommendations that skip full instances.
+
+  S-BTN-21 was rewritten and G-BTN-162 added. The 2026-10-14/16 rejection of reservations now
+  names future capacity: a seat a running leg holds is a fact the runner states, not a forecast.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

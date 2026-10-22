@@ -1,0 +1,60 @@
+---
+title: "B-106 — Seats: a bill takes a seat on a resource instance, a host scope for VM singletons, refused past capacity"
+id: B-106
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 508
+tier: judgement
+description: "Build §6.11 (R-BTN-178): resources gain a capacity and a host scope; the runner's bills at the claim or advance that starts a leg take seats, refused by rule 11 (instance-busy) past capacity, released at leg end, claim end and reap; recommendations skip legs whose usable instances are full. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-22: "how can a leg indicate that it requires a singleton within
+the runner's VM. For instance, a chrome MCP session which can only be used by a single agent
+session… Similar: I want one instance of a leg being completed by all runners at any time (eg:
+the leg required RDP access to a machine which can only be controlled by a single client at a
+time)." And: "specific capabilities used by the leg about to be completed should travel with the
+claim request: the runner in the vm is authoritative about this… if they make the claim first,
+the later claim can fail."
+**Spec:** §6.11 R-BTN-178, with the rules it amends: R-BTN-76 (`--capacity`, the `host`
+scope), R-BTN-100 (`bills` take seats), §6.6 rule 11, §13 (`external_resources.capacity`,
+`resource_instances.capacity`, `claim_bills`) and §14 (`POST /v1/admin/resources`). The history
+is in `BATON_SPEC_HISTORY.md` (Changelog, 2026-10-22, §6.11).
+
+### What to build
+
+1. **Registration.** A migration adds `capacity` to `external_resources` and
+   `resource_instances`, and admits `scope = 'host'`. Add `baton admin resource add --capacity`
+   and the `POST /v1/admin/resources` field.
+2. **Host instances.** `<resource>@host:<hostname>` resolves as a usable instance for every
+   runner of that hostname. Readings for it follow R-BTN-76 as a runner-scope instance does.
+3. **Rule 11.** In the claim's and advance's committing transaction, count each billed
+   instance's active seats from `claim_bills`, and refuse `instance-busy` past capacity, naming
+   the holder. This is never a failed attempt, and a `prefer` claim moves to its next candidate.
+   Add the rule to the matching code and the model (R-BTN-68).
+4. **Release.** Seats are released at each advance that stops naming an instance, at the
+   claim's end, and at a reap.
+5. **Recommendations and why-not.** Skip a leg whose `requires.resources` has no usable instance
+   with a free seat for this runner. `baton leg why` names the holder. The instance view serves
+   active seats.
+6. **The runner.** Add a way for a leg's course code or the runner's config to name the instances
+   it will bill. The CLI runner bills the `host` instance of each resource the starting leg
+   requires that is registered `host`.
+
+### Tests
+
+S-BTN-21 (rewritten) and G-BTN-162, green in `npm test` on both hosts.
+
+### Exit criteria
+
+- [ ] two runners on one VM never hold a capacity-1 `host` instance at once; one `service`
+      instance with capacity 1 has at most one holder across every host
+- [ ] a seat refusal is `instance-busy`, never a failed attempt, and a reap releases every seat
+- [ ] recommendations do not offer a leg whose usable instances are all full
