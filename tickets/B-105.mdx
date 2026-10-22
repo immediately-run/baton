@@ -42,7 +42,8 @@ Review record).
    migration). Teach `src/core/detailSchema.ts` `x-baton-base`, with R-BTN-108's refinement
    check at registration. Add `std:api-capacity@1` to the standard library.
 3. **Choices** (R-BTN-177). Generate the encoding, evaluate it as first-match under B-104's
-   counters, write `choice_last`, and put `advice` in the claim and advance answers. Validate a
+   counters at each advance that starts a leg, write `choice_last` and
+   `claim_legs.choices_json`, and put `advice` in the advance answer. Validate a
    leg's `choices` in the course file.
 4. **The runner.** Write `BATON_ADVICE`, read `BATON_ROUTE` and report `route` on advance and
    end. Keep the available alternatives' credentials. Record `advice-overridden` in core from a

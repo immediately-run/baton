@@ -245,6 +245,21 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - a dead credential ends a leg through R-BTN-126;
   - the clingo assertions are corrected against clingo-wasm's actual output.
 
+  A third fresh review (round 3) found 1 blocking and 15 should-fix findings. Most came from
+  over-specification, and the fixes simplified the design rather than adding to it:
+  - why-not and the credentials a derivation gives a leg now both read one **canonical proof**
+    per atom. The evaluator is fully determined, so this is the instance that first produced the
+    atom. It replaces a set-minimizing fixpoint and a backward walk, neither of which was well
+    defined.
+  - The gate bound no longer claims monotonicity of work: runtime gets twice validation's
+    budget.
+  - Choices are resolved at the `advance` that starts a leg, since a claim runs nothing.
+  - Courses and the program are accepted in a fixed order, and a stale program cannot outlive a
+    course change.
+  - Program changes are rate-limited, and the alarm's budget is shared round-robin between
+    repositories.
+  - Field atoms come from the latest reading that carries a `detail`.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -2658,4 +2673,28 @@ that followed:)*
 | 18 the advice is stored nowhere; routes unvalidated | `claim_legs.advice_json` and `route_json`; an invalid route is dropped and logged `route-invalid`, never refused (R-BTN-177; S-BTN-153) |
 | 19 why-not reads derivations that do not exist | computed over the maximal evaluation's fired instances, as a least fixpoint (R-BTN-174; S-BTN-144) |
 | 20–27 nits | negative integer constants admitted; `not` and variable spelling constrained; `runner:` capabilities in H; sourced courses' choices; empty `needs`; scenario setups stated; `isEligible`'s vendored change and `choice_last` cleanup; the architecture page records that the ontology is data core interprets |
+
+*(2026-10-22, round 3 — a third fresh reviewer read the rewritten §5.9 and §6.10 and ran clingo
+on the encoding, which it confirmed valid and equal to first-match: 1 blocking, 15 should-fix,
+8 nits. Resolved:)*
+
+| Finding | Resolution |
+|---|---|
+| 1 B — why-not's min-of-unions fixpoint can oscillate | replaced by the canonical proof the deterministic evaluator records, one row per atom (R-BTN-174; S-BTN-144) |
+| 2 `via` follows cycles and depends on "fires" | replaced by the canonical proof's holdings; the choice's alternatives supply other routes (R-BTN-174, R-BTN-177; S-BTN-145) |
+| 3 match bounds are not monotone in H | the evaluator, rounds and a match are defined; runtime gate evaluations get twice validation's budget (R-BTN-175) |
+| 4 claim-time resolution against R-BTN-63 | resolved at each `advance` that starts a leg; stored in `claim_legs.choices_json` (R-BTN-177; S-BTN-153) |
+| 5 a dead choice credential cannot block | R-BTN-126 accepts a credential a choice gave the leg (R-BTN-126, R-BTN-177) |
+| 6 credentials under `limit` or `none-available` | none from the choice; a default that needs a credential lists it in `requires` (R-BTN-177) |
+| 7 acceptance order contradicts itself and R-BTN-69 | three ordered steps; R-BTN-69 cites the program in force after the post (R-BTN-174; S-BTN-155) |
+| 8 a refused program can leave an invalid one in force | the previous program survives only if it still validates, else none (R-BTN-174; S-BTN-146) |
+| 9 no wire field, digest or layout entry | §4.4's `ontology` field; core computes the RFC 8785 digest; R-BTN-51 lists the file; merge scenario S-BTN-155 |
+| 10 why-not has no answer shape | `not-derived` with `needs`, `missing` and `chain`; the fleet form; the direct declaration offered (§6.2, R-BTN-174) |
+| 11 `instances_json` unbounded | `ontology_proofs`, one small row per atom, at most 5,000 (§13) |
+| 12 one repository can load the tenant | a program change at most every 5 minutes; a round-robin alarm budget; only changed rows written; 256 derived capabilities; re-evaluation committed apart from the claim (R-BTN-174) |
+| 13 core both reads and never reads `detail` | R-BTN-50 and R-BTN-108 name the one exception (R-BTN-176) |
+| 14 a newer reading without `detail` erases the fields | the field reading is the latest that carries a `detail` (R-BTN-176; S-BTN-148) |
+| 15 the model and vendored `isEligible` | both receive H ∪ D(H) as the runner's capabilities; the evaluation sits outside them (R-BTN-174) |
+| 16 advice reads stale sets | stated as advice that may lag; only rule 4 is guaranteed fresh (R-BTN-174) |
+| 17–24 nits | every string constant held in the maximal evaluation; S-BTN-140's impossible case dropped; empty warnings filtered; `meters/2` reserved in shape; needs checked against types and R-BTN-144; hysteresis's per-runner claim narrowed; `choices_json` and the new variables' aliases; retention of `choice_last` and `runner_derived`, the fleet view's derived capabilities, the condition's closing, no gate re-derivation in a choice, ground facts, and §5.8's sentence |
 
