@@ -14,7 +14,7 @@ module liveness {
 
   // Each is stated under weak fairness of every step that resolves it, per worker, so that
   // no other worker's activity can stand in for it (review gate round 1). R-BTN-19, R-BTN-10,
-  // §6.7, R-BTN-67, R-BTN-45.
+  // §9.6, R-BTN-67, R-BTN-45.
   // R-BTN-19: every fence clears — at the worker's fence-cleared, or once it has been silent
   // past its timeout. Time is bounded (MAX_TIME), so only a fence whose timeout itself falls
   // past the horizon — its worker kept heartbeating — may still stand at the end
@@ -27,10 +27,10 @@ module liveness {
       and 1.to(MAX_CLAIMS).forall(i => weakFair(fenceTimeout(i), st))) implies
       always(TICKETS.forall(t => fencedOf(t).size() > 0
         implies eventually(fencedOf(t).size() == 0 or fencesBeyondHorizon(t))))
-  // R-BTN-10, §6.7: every completed end is eventually confirmed, by a sync or by the owner.
+  // R-BTN-10, §9.6: every completed end is eventually confirmed, by a sync or by the owner.
   // As stated it rests on the owner: weak fairness of ownerResolve implies it alone (round 3,
   // 3-A-2), which is the spec's design — an end no sync can confirm is flagged for the owner
-  // (§6.7). The stronger property — under fairness of the sync cycle and with no owner, every
+  // (§9.6). The stronger property — under fairness of the sync cycle and with no owner, every
   // end whose evidence landed is confirmed — is R3-1254's.
   temporal endsResolveWithOwner =
     1.to(MAX_CLAIMS).forall(i => weakFair(ownerResolve(i), st)) implies

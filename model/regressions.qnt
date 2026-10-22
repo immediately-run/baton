@@ -148,7 +148,7 @@ module regressions {
   run alarmReapClearsRegressedTest =
     regressedClaim.then(sleep("w1")).then(tick).then(tick).then(tick).then(tick).then(alarmReap(1))
       .expect(c1.status == "reaped" and not(c1.regressed) and c1.endedRegressed)
-  // R-BTN-122 (§6.10 counts it): an alarm reap is a failed attempt on the claim's leg, backed off
+  // R-BTN-122 (§7.4 counts it): an alarm reap is a failed attempt on the claim's leg, backed off
   // like a `fail` end, and the backoff's block is logged.
   run alarmReapIsAFailedAttemptTest =
     start.then(claim("w1", "t1")).then(sleep("w1")).then(tick).then(tick).then(tick).then(tick).then(alarmReap(1))
@@ -213,7 +213,7 @@ module regressions {
       .then(claim("w3", "t2"))             // w3 is family a: refused new claims
       .fail()
 
-  // §8, rule 3: a hold refuses the holder's next advance.
+  // §6.6, rule 3: a hold refuses the holder's next advance.
   run holdRefusesAdvanceTest =
     start.then(claim("w1", "t1")).then(setHold("t1", true))
       .then(advance("w1", "implement", NONE))
@@ -406,7 +406,7 @@ module regressions {
       .expect(st.retryRows.get("t1") == Set() and not(st.blocked.get("t1")) and ticketClaimable("t1")
               and st.lastEvent.get("t1") == "unblocked" and not(st.unpairedUnblock))
 
-  // §7.2, R-BTN-75: a `ticket` row refuses a claim, never a holder's advance — a dependency that
+  // §6.6, R-BTN-75: a `ticket` row refuses a claim, never a holder's advance — a dependency that
   // opens mid-claim lets the holder advance, with no gate violation (round 3, 3-r3-2).
   run ticketRowBindsNoAdvanceTest =
     start.then(claim("w1", "t1")).then(leg("w1", "implement"))
@@ -449,7 +449,7 @@ module regressions {
       .then(declare("w1", Set("vpn:corp")))
       .expect(st.capRows.get("t2") == Set() and not(st.blocked.get("t2")) and st.lastEvent.get("t2") == "unblocked"
               and not(st.unpairedUnblock))
-  // §7.2 rule 4: a worker that no longer declares what the ticket requires may not claim it,
+  // §6.6 rule 4: a worker that no longer declares what the ticket requires may not claim it,
   // nor advance on a claim it holds.
   run rule4RefusesTheClaimTest =
     start.then(declare("w1", NONE)).then(claim("w1", "t2")).fail()

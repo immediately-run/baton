@@ -4,15 +4,20 @@
 //
 // Modelled: claims and the lease (R-BTN-4); the course file's stations and legs (R-BTN-69);
 // a claim as one transaction of Baton's own gates — no hook (R-BTN-98, which retired R-BTN-52's
-// await and rule 12) — offering the ticket's queued leg alone (R-BTN-83, §7.2 rule 1); advance
+// await and rule 12) — offering the ticket's queued leg alone (R-BTN-83, §6.6 rule 1); advance
 // on the holder's word with per-leg max_runs counted from start_path (R-BTN-63), the first
 // into the leg the claim was offered (`not-queued`); ends naming the station reached (R-BTN-71); git first
 // (R-BTN-8); observation numbers and whole-post acceptance (R-BTN-62); confirmation by path
 // extension (R-BTN-10, R-BTN-71); staleness only when the ticket is taken away and
-// regressions flagged (R-BTN-35, §2e); holds (§8, rule 3); barred tags — posted, owner and
+// regressions flagged (R-BTN-35, §1); holds (§6.6, rule 3); barred tags — posted, owner and
 // holder bars (R-BTN-60, R-BTN-67, rule 8); required bars (R-BTN-67); reaping a dead worker
-// and force-reaping a live one, with the fence (§6.6, R-BTN-19, R-BTN-26); any pusher writing
-// git (R-BTN-66); the owner resolving a flagged completion (§6.7).
+// and force-reaping a live one, with the fence (§9.5, R-BTN-19, R-BTN-26); any pusher writing
+// git (R-BTN-66); the owner resolving a flagged completion (§9.6).
+// In sync with the 2026-10-22 spec: rule 4 reads H ∪ D(H) — the ontology's derived capabilities
+// join the holdings before the check (R-BTN-174; §5.9 names the model's abstraction: it
+// receives the union as the runner's capabilities); route choices are advice that never
+// refuses (R-BTN-177) and seats are capacity counting (R-BTN-178) — neither an interleaving
+// of modelled state; README.md's *Not modelled* says why.
 // Abstracted: wall-clock time (timeouts and the 30-minute and 6-hour flags are
 // "eventually"), held histories (R-BTN-11), more than one repository (R-BTN-61), course
 // changes and renames (R-BTN-64), tiers, grants and requires (rules 4-7). README.md says why.
@@ -20,7 +25,7 @@ module baton {
   // ---- sizes, set by the instance (instances.qnt; regressions.qnt) ----
   const TICKETS: Set[str]
   const WORKERS: Set[str]
-  const SLOTS: Set[int]          // sync runs that may overlap (§7.1)
+  const SLOTS: Set[int]          // sync runs that may overlap (§4.3)
   const MAX_CLAIMS: int          // bounds the state space
   const GIT_BUDGET: int          // foreign pushes, regressions and withdrawals per run
   const OWNER_BUDGET: int        // holds, owner bars and force-reaps per run
@@ -36,17 +41,22 @@ module baton {
   const MAX_ATTEMPTS: int
   const BACKOFF: int
   const MAX_BLOCKED: int
-  // R3-1254 part 2b. R-BTN-121, §7.2 rule 4: what each runner's configuration declares (its
+  // R3-1254 part 2b. R-BTN-121, §6.6 rule 4: what each runner's configuration declares (its
   // checks drop and re-declare it), what each worker is granted on the repository (R-BTN-58), and
   // each ticket's posted `requires`, expanded. R-BTN-76: the registered resources, one `service`
   // instance each, and each leg's needs — the sync's `needs` and the course's `requires.resources`.
+  // R-BTN-174 (2026-10-22): what a runner has for a repository is H ∪ D(H) — its holdings
+  // (declared ∩ grant, its declared `runner:` capabilities beside them) and what the
+  // repository's ontology derives from them; §5.9 hands the model that union as the runner's
+  // capabilities, so DECLARED stands for it and the ontology's own evaluation, acceptance and
+  // alarm cycle are not modelled (README.md, *Not modelled*).
   const DECLARED: str -> Set[str]
   const GRANTED: str -> Set[str]
   const REQUIRES: str -> Set[str]
   const RESOURCES: Set[str]
   const NEEDS: str -> Set[str]
 
-  // ---- the course: roadmap-pr's course.json (BATON_SPEC §2e, R-BTN-69) ----
+  // ---- the course: roadmap-pr's course.json (BATON_SPEC §5.2, R-BTN-69) ----
   pure val START = "filed"
   pure val START_LEG = "implement"   // the course's start_leg: a new ticket's queued leg (R-BTN-83)
   pure val ENDS = Set("merged")
@@ -91,7 +101,7 @@ module baton {
   pure val courseWellFormed: bool = courseOk(START, START_LEG, ENDS, LEGS, FROM, TO, MAX_RUNS)
 
   // ---- prerequisites (R-BTN-120): what a ticket's source posts it waits for ----
-  // A `depends_at` entry (§7.1): another ticket `at` one of `stations` now, having `reached` one,
+  // A `depends_at` entry (§6.1): another ticket `at` one of `stations` now, having `reached` one,
   // or closed `done`; on one leg of this ticket, or every leg (""). The posted `blocked_by` is the
   // whole-ticket `done` entry. `select: posted` only: `children` and `parent` select the same
   // way over another relation, a column comparison (README).
@@ -142,7 +152,7 @@ module baton {
   pure def extendsPath(p: List[str], q: List[str]): bool = isPrefix(p, q) and validPath(q)
   pure def legsFrom(st: str): Set[str] = LEGS.filter(l => FROM.get(l).contains(st))
   pure def atEnd(p: List[str]): bool = ENDS.contains(stationOf(p))
-  // §2e: the legs a ticket may still run from where path p leaves it
+  // §5.3: the legs a ticket may still run from where path p leaves it
   pure def nextLegs(p: List[str]): Set[str] =
     if (atEnd(p)) Set() else legsFrom(stationOf(p)).filter(l => runs(p, l) < MAX_RUNS.get(l))
 
@@ -159,7 +169,7 @@ module baton {
     finished: List[str], // claim_legs it finished, in order
     claimObs: int,       // counter at the claim or its latest advance (R-BTN-62)
     endObs: int,
-    regressed: bool,     // regressed_since IS NOT NULL (§2e)
+    regressed: bool,     // regressed_since IS NOT NULL (§5.3)
     endedRegressed: bool,
     confirmed: bool,
     confirmObs: int,     // the observation that confirmed it; -1 for the owner
@@ -250,9 +260,9 @@ module baton {
   // R-BTN-67: a covered leg whose bars hold no family tag is waiting on `policy`
   def policyOk(t: str, leg: str, holderBars: Set[str]): bool =
     not(REQUIRED.contains(leg)) or postedBarsOf(t, leg).union(holderBars).intersect(FAMILIES).size() > 0
-  // §2e, R-BTN-70: the ready legs leaving the posted station
+  // §5.3, R-BTN-70: the ready legs leaving the posted station
   def readyLegs(t: str): Set[str] = nextLegs(st.posted.get(t)).filter(l => policyOk(t, l, Set()))
-  // R-BTN-83, §7.2 rule 1: a claim is offered the ticket's queued leg alone, when it is ready
+  // R-BTN-83, §6.6 rule 1: a claim is offered the ticket's queued leg alone, when it is ready
   def queuedReady(t: str): bool = st.queued.get(t) != "" and readyLegs(t).contains(st.queued.get(t))
 
   // ---- blocks (R-BTN-75), read from a state so a transaction can settle the one it makes ----
@@ -274,7 +284,7 @@ module baton {
     s.postedDecisions.get(t).exists(x => onLeg(x, l)),
     s.retryRows.get(t).contains(l),
   }
-  // §7.2, R-BTN-75: what binds an advance — a `decision` row on the leg or the ticket (R-BTN-78)
+  // §6.6, R-BTN-75: what binds an advance — a `decision` row on the leg or the ticket (R-BTN-78)
   // and a backoff on the leg (R-BTN-122), never a `ticket` row, which refuses a claim only
   pure def advanceRowsIn(s: State, t: str, l: str): bool = or {
     s.postedDecisions.get(t).exists(x => onLeg(x, l)),
@@ -387,7 +397,7 @@ module baton {
   // a ticket's leg l refuses a claim or advance into it (rule 1, R-BTN-122's backing-off)
   def gated(t: str, l: str): bool = confirmedRowsIn(st, t, l) or provisionalIn(st, t, l)
 
-  // §7.2 rules 1, 3, 10 and §6.7: the gates of a ticket, whoever asks
+  // §6.6 rules 1, 3, 10 and §9.6: the gates of a ticket, whoever asks
   def ticketClaimable(t: str): bool = and {
     not(st.postedGone.get(t)), not(st.held.get(t)),
     queuedReady(t), not(gated(t, st.queued.get(t))),
@@ -397,8 +407,10 @@ module baton {
   // ... and rule 8 for this worker, on the queued leg (R-BTN-83)
   def claimableBy(t: str, w: str): bool =
     ticketClaimable(t) and barred(t, st.queued.get(t), "claim", Set()).intersect(TAGS.get(w)).size() == 0
-  // §7.2 rule 4: the ticket's `requires` within what the worker declares and is granted (a leg's
-  // own `requires.capabilities` join it for that leg once B-10 builds them)
+  // §6.6 rule 4: the ticket's `requires` within what the worker has — H ∪ D(H) (R-BTN-174:
+  // DECLARED stands for the union, the grant bounding the holdings a derivation starts from;
+  // a derived capability is a capability like any other to this check). A leg's own
+  // `requires.capabilities` join it for that leg once B-10 builds them.
   def rule4(w: str, t: str): bool = REQUIRES.get(t).subseteq(st.declared.get(w).intersect(GRANTED.get(w)))
   def workerFree(w: str): bool =
     st.up.get(w) and not(st.asleep.get(w)) and workerClaim(w).size() == 0 and not(workerFenced(w))
@@ -408,7 +420,7 @@ module baton {
   def workerCanAct(w: str): bool =
     st.up.get(w) and not(st.asleep.get(w)) and st.localClaim.get(w) != 0
       and st.now - st.drift.get(w) < st.localLease.get(w) - MARGIN
-  // §7.1, R-BTN-62 as amended 2026-10-15: one reading in flight per repository
+  // §4.3, R-BTN-62 as amended 2026-10-15: one reading in flight per repository
   def outstanding(s: int): bool =
     (st.syncs.get(s).phase == "numbered" or st.syncs.get(s).phase == "read") and not(st.syncs.get(s).voided)
 
@@ -454,7 +466,7 @@ module baton {
     }
   }
 
-  // ---- claims: one transaction of Baton's own gates (R-BTN-98, §7.2) ----
+  // ---- claims: one transaction of Baton's own gates (R-BTN-98, §6.6) ----
   // R-BTN-98 retired the course's claim hook (R-BTN-52's await, rule 12): a claim computes its
   // candidate and checks every gate in one transaction. It is offered the ticket's queued leg
   // (R-BTN-83), and rule 8 is judged on that leg.
@@ -504,7 +516,7 @@ module baton {
 
   // R-BTN-63: finish the running leg (the claim moves to its `to`) and start `leg` when it
   // leaves that station, its runs — start_path plus claim_legs — are under max_runs, and the
-  // gates that bind a holder hold (§7.2): the hold check of rule 3, rule 8 with claim+advance
+  // gates that bind a holder hold (§6.6): the hold check of rule 3, rule 8 with claim+advance
   // owner bars and the holder's own `bars`, and the required bar over posted plus holder bars.
   // The first advance is into the leg the claim was offered (R-BTN-83: `not-queued`). No leg
   // state is checked: the holder's word.
@@ -519,8 +531,8 @@ module baton {
       not(st.held.get(c.ticket)),
       barred(c.ticket, leg, "advance", bars).intersect(TAGS.get(w)).size() == 0,
       policyOk(c.ticket, leg, bars),
-      not(advanceRowsIn(st, c.ticket, leg)), not(provisionalIn(st, c.ticket, leg)), // decided, backing-off (§7.2; R-BTN-78, -122, -126)
-      rule4(w, c.ticket),                                     // rule 4 at each advance (§7.2)
+      not(advanceRowsIn(st, c.ticket, leg)), not(provisionalIn(st, c.ticket, leg)), // decided, backing-off (§6.6; R-BTN-78, -122, -126)
+      rule4(w, c.ticket),                                     // rule 4 at each advance (§6.6)
     }
     all {
       c.leg == "" or st.pushed.get(w),                        // git first
@@ -608,6 +620,8 @@ module baton {
   // end carrying the reading). The end drops the capability from the runner's declared set, or
   // stores the reading and an `end`-sourced need on the leg; the rows follow in its transaction
   // (R-BTN-75's counts), so the ticket is blocked only when no other live runner can take it.
+  // R-BTN-174: that same transaction re-evaluates the runner's derived sets — D(H) shrinks with
+  // the holding it rested on — which here is the declared set's atomic shrink, by construction.
   // @impl pending — `released:blocked` for capability and resource prerequisites (R-BTN-126, B-21)
   action endBlockedOn(w: str, kind: str, x: str): bool = all {
     workerCanAct(w), workerClaim(w).size() == 1, not(st.pushed.get(w)),
@@ -726,7 +740,7 @@ module baton {
     st' = recount(st.with("unavailable", st.unavailable.set(x, 0))),
   }
   // R-BTN-4, §6.6: the alarm reaps a claim whose lease ran out — its worker dead or silent; a
-  // failed attempt on the claim's leg (§6.10, R-BTN-122), and an end (R-BTN-75).
+  // failed attempt on the claim's leg (§7.4, R-BTN-122), and an end (R-BTN-75).
   // @impl src/core/claims.ts#alarm
   // @impl pending — the attempt counted per leg (R-BTN-122, B-11); `blocked` logged when the reap leaves the ticket blocked (R-BTN-75 as amended by R3-1254, B-26)
   action alarmReap(i: int): bool = all {
@@ -750,7 +764,7 @@ module baton {
   }
   // R-BTN-19: the owner force-reaps a live worker's claim; the ticket is not re-issued until
   // the worker reports `fence-cleared` (or dies and times out, above). Not a failed attempt
-  // (§6.10); fenced, the ticket stays held (R-BTN-75).
+  // (§7.4); fenced, the ticket stays held (R-BTN-75).
   // @impl src/core/claims.ts#forceReap
   action forceReap(w: str): bool = all {
     st.ownerBudget > 0, st.up.get(w), workerClaim(w).size() == 1,
@@ -787,7 +801,7 @@ module baton {
     st' = if (FLEET and st.now >= st.lastSeen.get(w) + TIMEOUT) recount(s) else settle(s, Set()),
   }
 
-  // ---- the owner (§8, R-BTN-67, §6.7) ----
+  // ---- the owner (§5.6, R-BTN-67, §9.6) ----
   // A hold, or its lift — which resets the ticket's attempts and blocked ends (R-BTN-122,
   // R-BTN-126) and clears its backoff (R-BTN-78's `retry`; core's lift writes `retry_after:
   // null`), so a lift can log `unblocked`. A hold is no block: it is listed under `other` (R-BTN-75).
@@ -811,7 +825,7 @@ module baton {
     st.ownerBars.size() > 0,
     st' = st.with("ownerBars", Set()),
   }
-  // §6.7: an unconfirmed completion is flagged; the owner confirms it.
+  // §9.6: an unconfirmed completion is flagged; the owner confirms it.
   // @impl src/core/claims.ts#resolve
   action ownerResolve(i: int): bool = all {
     st.claims.keys().contains(i),
@@ -822,7 +836,7 @@ module baton {
   }
 
   // R-BTN-122: the alarm clears a backoff's row at its retry_after; its `unblocked` follows.
-  // @impl pending — the per-leg backoff row and its alarm (R-BTN-122, B-11; core keeps §6.10's per-ticket backoff)
+  // @impl pending — the per-leg backoff row and its alarm (R-BTN-122, B-11; core keeps §7.4's per-ticket backoff)
   action retryElapse(t: str, l: str): bool = all {
     st.retryRows.get(t).contains(l), st.retryAfter.get(t).get(l) <= st.now,
     st' = settle(st.with("retryRows", st.retryRows.set(t, st.retryRows.get(t).exclude(Set(l)))), Set()),
@@ -874,7 +888,7 @@ module baton {
     st' = st.with("withdrawn", st.withdrawn.set(t, true)).with("gitBudget", st.gitBudget - 1),
   }
 
-  // ---- the sync: number first, then read, then post (§7.1, R-BTN-62) ----
+  // ---- the sync: number first, then read, then post (§4.3, R-BTN-62) ----
   // R-BTN-62 as amended 2026-10-15: no number while another is outstanding (`sync-busy`).
   // @impl src/core/observations.ts#observe
   action syncNumber(s: int): bool = all {
@@ -918,7 +932,7 @@ module baton {
       if (n.contains(picks.get(t))) picks.get(t) else firstOf(n)
     })
 
-  // What an accepted snapshot does to one claim (R-BTN-35, §2e, R-BTN-10, R-BTN-71).
+  // What an accepted snapshot does to one claim (R-BTN-35, §5.3, R-BTN-10, R-BTN-71).
   pure def judge(c: Claim, obs: int, snap: List[str], prev: List[str], gone: bool): Claim =
     if (c.status == "active" and obs > c.claimObs) {
       if (gone) c.with("status", "released").with("kind", "stale").with("leg", "")

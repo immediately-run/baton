@@ -101,7 +101,7 @@ module properties {
     c.kind != "stale" or st.withdrawn.get(c.ticket)
   })
 
-  // §2e: a claim is flagged regressed only when git really lost a leg — lag never is.
+  // §5.3: a claim is flagged regressed only when git really lost a leg — lag never is.
   val regressedOnlyWhenGitRegressed = st.claims.keys().forall(i => {
     val c = st.claims.get(i)
     not(c.regressed) or st.gitRegressedEver.get(c.ticket)

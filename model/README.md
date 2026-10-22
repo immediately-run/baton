@@ -4,7 +4,12 @@ A [Quint](https://quint-lang.org) model of Baton's core state machine, written a
 `BATON_SPEC` (now [`spec/BATON_SPEC.md`](../spec/BATON_SPEC.md); written against it in
 `immediately-run/docs` as merged at `b7537395`, docs#212) and being brought up to the spec's
 §2g–§2m by R3-1254 — so far R-BTN-98's one-transaction claim, R-BTN-83's queued leg, and a leg's
-prerequisites with their blocks, retries and blocked ends (R-BTN-75, -77, -78, -120, -122, -126);
+prerequisites with their blocks, retries and blocked ends (R-BTN-75, -77, -78, -120, -122, -126).
+In sync with the 2026-10-22 spec rewrite: rule 4 reads H ∪ D(H) — the capability ontology's
+derived capabilities join the holdings before the check, and the model receives the union as the
+runner's capabilities (§5.9, R-BTN-174); the ontology's own machinery, route choices (R-BTN-177)
+and seats (R-BTN-178) are not modelled, for the reasons *Not modelled* gives. Section numbers
+below were repointed to the spec's current layout in the same pass.
 *Not modelled* lists the rest. Each action, helper
 and property names the requirement it models (`R-BTN-n`, §n). A counterexample is a spec
 defect: it is filed against BATON_SPEC with the trace, never fixed by weakening a property.
@@ -137,10 +142,10 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   leaving an end (an end is terminal: R3-1254, owner), `start_leg` leaving `start`, every
   station reachable from `start` and reaching an end, a `max_runs` leg in every cycle — and the
   course passes it (`courseIsAcceptedTest`); `courseRulesRefuseTest` breaks each rule alone.
-- **A claim is one transaction** (R-BTN-98, §7.2): `claim` checks every gate and takes the
+- **A claim is one transaction** (R-BTN-98, §6.6): `claim` checks every gate and takes the
   ticket at once. *(R3-1254: it was `claimStart` and `claimFinish` around the course's claim
   hook, R-BTN-52's await and rule 12, which R-BTN-98 retired.)*
-- **The queued leg** (R-BTN-83, §7.2 rule 1): each accepted post sets a ticket's queued leg —
+- **The queued leg** (R-BTN-83, §6.6 rule 1): each accepted post sets a ticket's queued leg —
   one leaving the station git shows, which the course's sync chooses (here, any such leg), or
   none; a new ticket starts at `start_leg`. A claim is offered that leg alone, rule 8 is judged
   on it, and the claim's first advance must be into it (`not-queued`).
@@ -149,7 +154,7 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   holder gates hold: the hold (rule 3), barred tags — the sync's, the owner's `claim+advance`
   bars, the holder's own `bars` (rule 8, R-BTN-60, R-BTN-67) — the required bar over posted plus
   holder bars (R-BTN-67), for the first advance the queued leg, and no open decision, backoff or
-  provisional row on the leg entered (§7.2, R-BTN-78, R-BTN-122, R-BTN-126). Git first (R-BTN-8): a leg's evidence is
+  provisional row on the leg entered (§6.6, R-BTN-78, R-BTN-122, R-BTN-126). Git first (R-BTN-8): a leg's evidence is
   pushed before the advance that finishes it, and may land, be rejected or be lost.
 - **Ends** (R-BTN-71, §6.5): `done`, `suspended` at the `to` reached or the `from` given up,
   `release`. A `done` may come from any station — the runner also ends done when git shows the
@@ -167,7 +172,7 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   claim, which stays fenced — the ticket not re-issued — until that worker reports
   `fence-cleared` or has been silent (dead or asleep) past its timeout, measured in ticks
   from its last heartbeat (`fenceTimeout`; round 2, 2-A-0).
-- **The sync** (§7.1, R-BTN-62): number, then read, then post, as three actions, so every
+- **The sync** (§4.3, R-BTN-62): number, then read, then post, as three actions, so every
   interleaving with workers and git is explored — with at most one reading in flight per
   repository: a second number is refused while one is outstanding, and a voided number's post
   is refused (R-BTN-62 as amended 2026-10-15, after this model found the overlap); the barred tags it posts are any set
@@ -181,7 +186,7 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   be withdrawn, and a ticket's source can gain or lose a `depends_at` entry or open or answer a
   decision. **The owner** holds tickets (a lift resets the attempt and blocked-end counts and clears the backoff, as
   R-BTN-78's `retry` does), sets
-  and lifts owner bars, force-reaps, and resolves flagged completions (§8, R-BTN-67, §6.7).
+  and lifts owner bars, force-reaps, and resolves flagged completions (§5.6, R-BTN-67, §9.6).
 - **A leg's prerequisites** (R-BTN-120): the sync posts each ticket's `depends_at` entries —
   another ticket `at` a station now, having `reached` one, or closed `done`, on one leg or the
   whole ticket — and its open decisions (R-BTN-78), as git holds them; Baton evaluates the
@@ -189,7 +194,7 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   decision on a leg that is not a posted next leg onto the whole ticket. Each unmet prerequisite,
   open decision and backoff is a row on its leg or the ticket; any of them, or a provisional row,
   refuses a claim into its leg, and all but an unmet prerequisite refuse an advance into it too —
-  a `ticket` row binds a claim only (§7.2, R-BTN-75; `ticketRowBindsNoAdvanceTest`). Only `select: posted` entries are modelled:
+  a `ticket` row binds a claim only (§6.6, R-BTN-75; `ticketRowBindsNoAdvanceTest`). Only `select: posted` entries are modelled:
   `children` and `parent` select the same tickets' stations another way.
 - **Blocks** (R-BTN-75, R-BTN-77): `blocked_since` is set when the ticket is not held (an active
   claim, an unconfirmed completion, a fence-pending reap), has a queued leg, and a confirmed row
@@ -211,7 +216,7 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
   (`provisionalLapses`). Blocked ends are no attempts; past `MAX_BLOCKED` the next holds the
   ticket. `resource` and `capability` blocked ends are `endBlockedOn` (*The fleet*, below).
 
-- **The fleet** (R3-1254 part 2b; R-BTN-75, R-BTN-76, R-BTN-121, §7.2 rule 4): Baton records
+- **The fleet** (R3-1254 part 2b; R-BTN-75, R-BTN-76, R-BTN-121, §6.6 rule 4): Baton records
   each worker's last authenticated call — a heartbeat (an idle worker heartbeats too; a fence
   report rides one), a claim, an advance, an end (§5, §11) — and what it declares; a worker is
   live while that call is within `TIMEOUT`. Only a heartbeat recounts, the fence report's
@@ -258,14 +263,14 @@ scenario traces read it from `ticket_stations.next_leg`, so both compare it afte
 | `writingLegsBarred` — every writing leg started under the required bar, by a worker of no barred family | R-BTN-45, R-BTN-60, R-BTN-67 |
 | `gatesHeld` — every claim and advance was granted with every gate in force holding (hold, barred tags, required bar, rule 4, the queued leg, and the leg's rows: an unmet prerequisite at a claim, an open decision, a retry backoff, a provisional row), recorded at the grant apart from the guard | R-BTN-45, R-BTN-83, R-BTN-120, R-BTN-122, R-BTN-126, rules 1, 3, 8 |
 | `noActAfterLoss` — no worker pushes for a claim the alarm reaped (unfenced) | R-BTN-6, R-BTN-26 |
-| `noStuckTicket` — no deadlock: a ticket git has not finished or withdrawn, once the syncs are idle and the head matches git, is held, fenced, owner-held, its queued leg waiting on `policy`, blocked (a row, listed by R-BTN-75) or held off by a provisional row (R-BTN-126), flagged, or claimable | §6.7, R-BTN-10, R-BTN-35, R-BTN-67, R-BTN-75, R-BTN-83, R-BTN-126 |
+| `noStuckTicket` — no deadlock: a ticket git has not finished or withdrawn, once the syncs are idle and the head matches git, is held, fenced, owner-held, its queued leg waiting on `policy`, blocked (a row, listed by R-BTN-75) or held off by a provisional row (R-BTN-126), flagged, or claimable | §9.6, R-BTN-10, R-BTN-35, R-BTN-67, R-BTN-75, R-BTN-83, R-BTN-126 |
 | `blockedIsStored` — `blocked_since` is what the rows, the queued leg and the held state say, after every transaction | R-BTN-75 |
 | `unblockedFollowsBlocked` — every `unblocked` event follows a `blocked` one | R-BTN-77, R-BTN-75 as amended by R3-1254 |
 | `capabilityRowsCounted` — the `capability` rows are what the live set and the declared sets Baton last counted say: no change to either leaves them behind | R-BTN-75, R-BTN-121 |
 | `answerLostOwesUnblocked` — a lost answer is remembered only while the ticket is unblocked with its `blocked` still open, the `unblocked` it is owed | R-BTN-77 as amended by R3-1251 |
 | `attemptsBounded`, `blockedEndsBounded` — at most `MAX_ATTEMPTS` failed attempts, and `MAX_BLOCKED` blocked ends and the one that holds, per ticket and leg between hold lifts | R-BTN-122, R-BTN-126 |
 
-**Liveness** — `fencesClear`, `endsResolveWithOwner` (implied by the owner's fairness alone, by design: §6.7), `barsLiftClaimable`, `readyIsClaimed` — is stated
+**Liveness** — `fencesClear`, `endsResolveWithOwner` (implied by the owner's fairness alone, by design: §9.6), `barsLiftClaimable`, `readyIsClaimed` — is stated
 in `liveness.qnt` under weak fairness of each resolving step, per worker. The item's fifth,
 a held history accepted within 24 hours, is not stated: held histories are not modelled. See
 *Checked how* for what has been run.
@@ -388,7 +393,7 @@ depth 5 back, and with it the `unblocked` event.
 - **The retry policy's details** (R-BTN-122): the backoff's growth, jitter and owners' bounds,
   `max_attempts_s` and `in_claim`, and error types — a constant `BACKOFF` and `MAX_ATTEMPTS` stand
   for the policy in force. The instances that drive the core (the scenario traces and the
-  model-based tests) set `BACKOFF = 0` and the counts to 100000 or 1000: the core keeps §6.10's
+  model-based tests) set `BACKOFF = 0` and the counts to 100000 or 1000: the core keeps §7.4's
   per-ticket policy until B-11 builds R-BTN-122, and holds it makes are carried as the owner's.
 - **Leg outputs and station entry** (R-BTN-108, R-BTN-109): an arrival without its entry
   outputs, or with an invalid inline value, is refused (rule `entry`), and a refusal is no model
@@ -403,6 +408,23 @@ depth 5 back, and with it the `unblocked` event.
   comparisons with no interleaving of their own — a leg's `isolation: session` against the
   worker's latest declared mode; matching tests cover them (G-BTN-40, S-BTN-64). Rule 4 is
   modelled (R3-1254 part 2b).
+- **The capability ontology** (R-BTN-174, R-BTN-175, R-BTN-176): the program, its unit acceptance
+  with the course files, the bounded evaluation, input digests, why-not and the alarm cycle are
+  data core interprets and computation it performs — no interleaving of modelled state. What a
+  runner has for a repository is H ∪ D(H), and §5.9 hands the model that union as the runner's
+  capabilities: `DECLARED` stands for it, the grant bounding the holdings a derivation starts
+  from. A heartbeat, an end that removes a holding (R-BTN-126) or a program change makes sets
+  not current and the read brings them up to date before rule 4 reads them — atomic here — and
+  rule 4 never reads a set that is not current, so no model action separates the two.
+- **Route choices** (R-BTN-177): advice on how a leg runs, resolved at the advance that starts
+  it. Advice never refuses (§6.6), the alternative taken is an event (`advice-overridden`) and
+  `route_last` hysteresis, so no gate or modelled state moves. A dead holding reported in
+  `BATON_TAKEN` is removed in the reporting advance's transaction — another way the declared
+  set shrinks, in the company of the recount causes below.
+- **Seats** (R-BTN-178): an instance's capacity counts the claims billing it, refusing past it
+  by rule 11 (`instance-busy`) — counting over instances with no interleaving of modelled state;
+  each resource stays the one `service` instance below, and B-106 adds rule 11 to the model
+  when it builds it.
 - **A leg's own `requires.capabilities`** (R-BTN-120) and **course `capability_types` and
   roles** (R-BTN-121): core has not built them (B-10); a leg's list joins the ticket's for that
   leg, the same check, and types and roles are the course file's acceptance (`baton course
@@ -428,10 +450,11 @@ depth 5 back, and with it the `unblocked` event.
   record, so it admits a fence report after the live set dropped the worker — a superset of
   core's interleavings, which the safety properties tolerate.
 - **Other causes of a recount** (R-BTN-75, R-BTN-58): a worker registering, a grant made,
-  changed or revoked, a credential revoked (`LIVE` drops it), and a post changing a ticket's
-  `requires` or needs. Each is fixed here — `GRANTED`, `REQUIRES` and `NEEDS` are constants, every
-  worker registered at the start — so the rows change only through declarations, liveness and
-  the ends above.
+  changed or revoked, a credential revoked (`LIVE` drops it), a post changing a ticket's
+  `requires` or needs, and a route choice's dead-holding report (R-BTN-177, removed in the
+  reporting advance's transaction). Each is fixed here — `GRANTED`, `REQUIRES` and `NEEDS` are
+  constants, every worker registered at the start — so the rows change only through
+  declarations, liveness and the ends above.
 - **R-BTN-39** (where a ticket is, replayed from git) is the sync's `syncRead` taking any git
   state as given; **R-BTN-40** (suspend rather than wait on the lease) is a worker's choice, so
   `endClaim(…, "suspended", …)` may happen at any point — both are modelled as nondeterminism,
