@@ -1,4 +1,6 @@
-// S-BTN-60 worker couriers (BATON_SPEC §13a, §2l R-BTN-103; R3-1256), on both hosts. W1 and W2
+// S-BTN-60 worker couriers (BATON_SPEC §15; R3-1256), on both hosts. The scenario is retired —
+// the history's "Retired scenarios and gates" table: a courier is a runner with a capability now,
+// and B-67 deletes this file; check-spec's RETIRED_TESTS_ALLOWED list holds it until then. W1 and W2
 // heartbeat `couriers: [{repository: docs, asks: [owner]}]`; the owner's CLI key is a personal
 // courier; a decision opens; later, `ops` has an `owner` decision and no courier of either kind.
 // Must hold: the decision queued twice — once to the pool and once to the CLI; W1 claims the pool

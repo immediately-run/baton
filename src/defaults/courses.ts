@@ -21,7 +21,8 @@ export interface StationCtx {
 }
 
 /** What a leg's agent must print as its last line, when the leg's result depends on it: the
- * name the result carries it under and the values it may take. */
+ * name the result carries it under and the values it may take. The stub reads the last line that
+ * opens with one of `values`, backwards past any prose after it (B-85, `answer.ts`). */
 export interface Ask {
   name: 'verdict' | 'adjudication' | 'outcome';
   values: string[];

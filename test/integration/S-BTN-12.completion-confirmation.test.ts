@@ -1,4 +1,4 @@
-// S-BTN-12 completion confirmation (BATON_SPEC §13a, §6.7): a worker completes before its push's
+// S-BTN-12 completion confirmation (BATON_SPEC §15, §9.6): a worker completes before its push's
 // sync arrives, and a push that never lands. Must hold: unclaimable until confirmed by ancestry;
 // the never-landed one is flagged at 6 h and never re-issued. The sync is the real decision code
 // (scripts/lib/batonSync.mjs, vendored) over the fixture repository's real ancestry.

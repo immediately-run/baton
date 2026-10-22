@@ -1,4 +1,4 @@
-// S-BTN-13 board ordering (BATON_SPEC §13a R-BTN-30): two pushes whose syncs finish out of
+// S-BTN-13 board ordering (BATON_SPEC §15 R-BTN-30): two pushes whose syncs finish out of
 // order, and a force-push. Must hold: the head never moves backwards; the force-push is held.
 //
 // The sync is the REAL one, in two halves. Its decisions: `syncOnce` from docs

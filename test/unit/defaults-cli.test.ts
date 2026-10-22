@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { courseSchemas, githubFacts, parseSyncArgs, remoteSlug, syncWorkflow } from '../../src/defaults/cli';
+import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { githubFake } from '../githubFake';
@@ -36,7 +37,6 @@ const commitAll = (dir: string): string => {
   execFileSync('git', ['-C', dir, 'commit', '-qm', 'scaffold', '--allow-empty'], { stdio: 'ignore' });
   return execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 };
-const at = (dir: string) => ({ sha: execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() });
 /** A fresh import of an ejected or scaffolded module (the query defeats the module cache). */
 /** The source init writes for `course` (B-33): this CLI's repository at this CLI's commit — not
  * `--pin`'s, which only pins the workflow. */
@@ -119,7 +119,15 @@ describe('baton repo init, through the built CLI', () => {
 
   it('writes the settings with every R-BTN-51 course field, the course file, the pinned workflow and the tickets directory', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
-    expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr', agent_command: 'echo' });
+    // B-83: a fresh scaffold names a real agent — the opencode command by default, never the
+    // bare `echo` stub.
+    expect(settings.agent_command).toBe(HARNESS_AGENTS.opencode);
+    // B-84: the command runs with no shell — it names the BATON_* environment the stub sets
+    // (nothing expands), carries no redirection, and splits into the argv the stub spawns.
+    expect(settings.agent_command).toContain('BATON_INSTRUCTIONS');
+    expect(settings.agent_command).not.toMatch(/[<>|]/);
+    expect(splitWords(settings.agent_command).at(0)).toBe('opencode');
+    expect(settings).toMatchObject({ items: 'tickets', default_course: 'create-pr' });
     expect(settings.courses).toEqual([{ id: 'create-pr', version: 1, min_worker_version: 1, skill: 'baton-create-pr', step_kinds: ['implement', 'review', 'fix', 'adjudicate', 'merge'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('create-pr') }]);
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'create-pr', 'course.json'), 'utf8'))).toEqual(JSON.parse(JSON.stringify(CREATE_PR_COURSE)));
     const workflow = readFileSync(join(root, '.github', 'workflows', 'baton-sync.yml'), 'utf8');
@@ -134,6 +142,11 @@ describe('baton repo init, through the built CLI', () => {
     expect(workflow).toContain("- cron: '*/15 * * * *'");
     expect(workflow).toContain('id-token: write'); // the CLI mints the run's OIDC token itself
     expect(readFileSync(join(root, 'tickets', 'README.md'), 'utf8')).toContain('One `*.md` file per ticket');
+    // B-95: the worked example of agent_wrapper ships, unused until named.
+    const example = readFileSync(join(root, '.baton', 'leg-wrapper.example'), 'utf8');
+    expect(example).toContain('mkdir -p .baton/logs');
+    expect(example).toContain('"$@" | tee ".baton/logs/${ticket}-${leg}.log"');
+    expect(settings.agent_wrapper).toBeUndefined();
   });
 
   it('without --pin, pins the CLI checkout it runs from to its commit; a pin that is not owner/name@commit is refused', () => {
@@ -150,6 +163,71 @@ describe('baton repo init, through the built CLI', () => {
     }
   }, 120_000);
 
+  it('--agent names the harness whose command agent_command is (printed for the unfamiliar); --agent-command names one outright — the bare echo only explicitly (B-83)', () => {
+    /** One scaffold with `flags`; its settings' agent_command, and everything init said. */
+    const scaffold = (...flags: string[]): { dir: string; command: string; said: string } => {
+      const dir = mkdtempSync(join(tmpdir(), 'baton-agent-'));
+      gitInit(dir);
+      const said = baton(dir, 'repo', 'init', '--pin', PIN, ...flags);
+      const command = (JSON.parse(readFileSync(join(dir, '.baton', 'baton.json'), 'utf8')) as { agent_command: string }).agent_command;
+      return { dir, command, said };
+    };
+    const run = (s: { dir: string; command: string; said: string }): string => s.command;
+    // The default is opencode's validated command — model pinned, the briefing naming the
+    // BATON_* environment (no shell expands it, B-84) — and init prints it for the unfamiliar.
+    const def = scaffold();
+    try {
+      expect(def.command).toBe(HARNESS_AGENTS.opencode);
+      expect(def.command).toContain('--model zai-coding-plan/glm-5.3');
+      expect(def.command).toContain('BATON_INSTRUCTIONS');
+      expect(def.command).not.toMatch(/[<>|]/); // no redirection: the stub closes stdin itself
+      expect(def.said).toContain(def.command);
+    } finally {
+      rmSync(def.dir, { recursive: true, force: true });
+    }
+    const cc = scaffold('--agent', 'claude-code');
+    try {
+      expect(cc.command).toBe(HARNESS_AGENTS['claude-code']);
+      expect(cc.command).toContain('--permission-mode bypassPermissions');
+      expect(cc.said).toContain(cc.command);
+    } finally {
+      rmSync(cc.dir, { recursive: true, force: true });
+    }
+    const own = scaffold('--agent-command', 'my-agent --flag');
+    try {
+      expect(own.command).toBe('my-agent --flag');
+    } finally {
+      rmSync(own.dir, { recursive: true, force: true });
+    }
+    // The no-op stub is named explicitly or not at all.
+    const stub = scaffold('--agent-command', 'echo');
+    try {
+      expect(run(stub)).toBe('echo');
+    } finally {
+      rmSync(stub.dir, { recursive: true, force: true });
+    }
+    // A scaffold from before B-83 (agent_command "echo"): re-running init replaces the stub
+    // with the chosen harness's command, loudly; an explicit --agent switches harnesses; a
+    // repository's own command is kept, as its own.
+    const old = scaffold('--agent-command', 'echo');
+    try {
+      const command = (): string => (JSON.parse(readFileSync(join(old.dir, '.baton', 'baton.json'), 'utf8')) as { agent_command: string }).agent_command;
+      const replaced = baton(old.dir, 'repo', 'init', '--pin', PIN);
+      expect(command()).toBe(HARNESS_AGENTS.opencode);
+      expect(replaced).toContain('no-op stub');
+      expect(replaced).toContain(HARNESS_AGENTS.opencode);
+      baton(old.dir, 'repo', 'init', '--pin', PIN, '--agent', 'claude-code');
+      expect(command()).toBe(HARNESS_AGENTS['claude-code']);
+      baton(old.dir, 'repo', 'init', '--pin', PIN, '--agent-command', 'mine');
+      expect(command()).toBe('mine');
+      const kept = baton(old.dir, 'repo', 'init', '--pin', PIN);
+      expect(command()).toBe('mine');
+      expect(kept).toContain('kept .baton/baton.json');
+    } finally {
+      rmSync(old.dir, { recursive: true, force: true });
+    }
+  }, 240_000);
+
   it('each leg stub imports only Node built-ins, so a scratch copy runs as the runner loads it', async () => {
     // A stub and its instructions per leg (R-BTN-131); the runner and the kit read only the .mjs.
     const files = readdirSync(join(root, '.baton', 'courses', 'create-pr', 'legs')).sort();
@@ -161,10 +239,14 @@ describe('baton repo init, through the built CLI', () => {
       const specifiers = [...text.matchAll(/^import .* from ["']([^"']+)["']/gm)].map((m) => m[1]);
       expect(specifiers.every((s) => s.startsWith('node:')), `${leg}: ${specifiers.join(', ')}`).toBe(true);
     }
-    // The runner copies each script alone into a scratch directory (src/runner/home.ts).
+    // The runner copies each script alone into a scratch directory (src/runner/home.ts). The
+    // scaffold's agent_command is B-83's real opencode command — which must not run mid-test —
+    // so the settings name a no-op, committed at the snapshot the stub reads.
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const scaffolded = readFileSync(settingsFile, 'utf8');
     const scratch = mkdtempSync(join(tmpdir(), 'baton-legs-'));
-    // A gh the verification reads, answering the file beside it: the scaffold's agent_command
-    // (`echo`) is the B-81 no-op — exit 0, no PR — so the stub's word for its outcome is gh's.
+    // A gh the verification reads, answering the file beside it: the settings name the no-op
+    // agent `true` at the snapshot — exit 0, no PR — so the stub's word for its outcome is gh's.
     const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegh-'));
     const answer = join(fakeBin, 'answer');
     writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\ncat "$(dirname "$0")/answer"\n');
@@ -172,10 +254,12 @@ describe('baton repo init, through the built CLI', () => {
     const path = process.env.PATH;
     process.env.PATH = `${fakeBin}:${path}`;
     try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(scaffolded), agent_command: 'true' }));
+      const snapshot = { sha: commitAll(root) };
       copyFileSync(join(root, '.baton', 'courses', 'create-pr', 'legs', 'implement.mjs'), join(scratch, 'implement.mjs'));
       const stub = await load(join(scratch, 'implement.mjs'));
       expect(typeof stub.close).toBe('function');
-      const ctx = { ticket: { id: 'A-1' }, checkout: root, snapshot: at(root) };
+      const ctx = { ticket: { id: 'A-1' }, checkout: root, snapshot };
       // An open PR on a branch the pattern maps to A-1: the stub returns its position.
       writeFileSync(answer, JSON.stringify([{ number: 9, headRefName: 'claude/A-1-kit', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
       expect(await stub.run(ctx)).toEqual({ reached: 'pr-open', next: 'review' });
@@ -189,6 +273,8 @@ describe('baton repo init, through the built CLI', () => {
       process.env.PATH = path;
       rmSync(scratch, { recursive: true, force: true });
       rmSync(fakeBin, { recursive: true, force: true });
+      writeFileSync(settingsFile, scaffolded);
+      commitAll(root);
     }
   });
 
@@ -218,6 +304,51 @@ describe('baton repo init, through the built CLI', () => {
     } finally {
       delete process.env.VERDICT;
       writeFileSync(settingsFile, before);
+      commitAll(root);
+    }
+  });
+
+  it('the stub runs BATON_AGENT_COMMAND — what baton run --harness chose — when the snapshot’s settings name no agent_command; the settings win; neither names the fix (B-83)', async () => {
+    const agent = join(root, 'agent.sh');
+    writeFileSync(agent, '#!/bin/sh\necho "$1 $2 $3" > "$(dirname "$0")/agent.args"\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const fix = join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs');
+    const args = join(root, 'agent.args');
+    try {
+      // The settings name no agent_command: the environment's command runs the leg.
+      const noCommand = { ...JSON.parse(before) } as { agent_command?: string };
+      delete noCommand.agent_command;
+      writeFileSync(settingsFile, JSON.stringify(noCommand));
+      const snapshot = { sha: commitAll(root) };
+      process.env.BATON_AGENT_COMMAND = agent;
+      try {
+        expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'review' });
+        expect(readFileSync(args, 'utf8').trim()).toBe(`A-1 fix ${root}`);
+      } finally {
+        delete process.env.BATON_AGENT_COMMAND;
+      }
+      // The snapshot's own naming is authoritative: an environment command that would fail
+      // never runs, because the settings' command does.
+      writeFileSync(args, '');
+      writeFileSync(settingsFile, JSON.stringify({ ...noCommand, agent_command: agent }));
+      const named = { sha: commitAll(root) };
+      process.env.BATON_AGENT_COMMAND = '/nonexistent-baton-agent';
+      try {
+        expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: named })).toEqual({ reached: 'fixed', next: 'review' });
+        expect(readFileSync(args, 'utf8').trim()).toBe(`A-1 fix ${root}`);
+      } finally {
+        delete process.env.BATON_AGENT_COMMAND;
+      }
+      // Neither names one: the leg fails saying how to name one.
+      writeFileSync(settingsFile, JSON.stringify(noCommand));
+      const none = { sha: commitAll(root) };
+      await expect((await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: none })).rejects.toThrow('names no agent_command');
+      await expect((await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: none })).rejects.toThrow('baton repo init --agent opencode');
+    } finally {
+      writeFileSync(settingsFile, before);
+      rmSync(args, { force: true });
       commitAll(root);
     }
   });
@@ -292,6 +423,93 @@ describe('baton repo init, through the built CLI', () => {
       writeFileSync(settingsFile, before);
       rmSync(join(root, 'stdin.facts'), { force: true });
       rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('the stub prepends the agent_wrapper — the host’s BATON_AGENT_WRAPPER over the file — and the example wrapper passes the answer through with a byte-identical log (B-95)', async () => {
+    // A wrapper sees the whole leg command as its arguments. Here it hands them to a reporter
+    // (a node script, so nothing in a shell re-splits them), then runs the agent as its own
+    // contract says and answers as the agent does.
+    const wrapper = join(root, 'wrapper.sh');
+    writeFileSync(join(root, 'report.mjs'), "import { writeFileSync } from 'node:fs';\nwriteFileSync(new URL('wrapper.args', import.meta.url), process.argv.slice(2).map((a, i) => `arg${i + 1}=${a}`).join('\\n') + '\\n');\n");
+    writeFileSync(wrapper, [
+      '#!/bin/sh',
+      `"${process.execPath}" "$(dirname "$0")/report.mjs" "$@"`,
+      'echo "from the host wrapper" >> "$(dirname "$0")/wrapper.ran"',
+      // Its own flags end where the agent's argv begins: `--its-flag <value>`, or nothing.
+      '[ "$1" = --its-flag ] && shift 2',
+      'exec "$@"',
+      '',
+    ].join('\n'));
+    chmodSync(wrapper, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const review = join(root, '.baton', 'courses', 'create-pr', 'legs', 'review.mjs');
+    let unsetRemote: (() => void) | null = null;
+    let fakeGh: string | null = null;
+    const path = process.env.PATH;
+    try {
+      delete process.env.BATON_AGENT_WRAPPER;
+      // B-81: the stub verifies its PR on the forge before returning, so the review needs a gh
+      // answering an open PR on a branch the pattern maps to A-1.
+      execFileSync('git', ['-C', root, 'remote', 'add', 'origin', 'https://github.com/o/r.git'], { stdio: 'ignore' });
+      const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegh-'));
+      fakeGh = fakeBin;
+      writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\ncat "$(dirname "$0")/answer"\n');
+      writeFileSync(join(fakeBin, 'answer'), JSON.stringify([{ number: 5, headRefName: 'claude/A-1-wrapper', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
+      chmodSync(join(fakeBin, 'gh'), 0o755);
+      process.env.PATH = `${fakeBin}:${path}`;
+      unsetRemote = () => execFileSync('git', ['-C', root, 'remote', 'remove', 'origin'], { stdio: 'ignore' });
+      // Unset, today's argv: the agent alone, its own words, the ticket, the leg and the checkout.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: "/bin/sh -c 'echo approve'" }));
+      let snapshot = { sha: commitAll(root) };
+      expect(await (await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
+      expect(existsSync(join(root, 'wrapper.ran'))).toBe(false);
+      // With the setting: the wrapper's words go in front, split as sh would — quotes carry, so a
+      // word holding a space arrives whole.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: "/bin/sh -c 'echo approve'", agent_wrapper: `'${wrapper}'` }));
+      snapshot = { sha: commitAll(root) };
+      expect(await (await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
+      expect(readFileSync(join(root, 'wrapper.args'), 'utf8')).toBe(`arg1=/bin/sh\narg2=-c\narg3=echo approve\narg4=A-1\narg5=review\narg6=${root}\n`);
+      // A wrapper's own arguments, quoted as sh would carry them, come before the agent's words.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: "/bin/sh -c 'echo approve'", agent_wrapper: `${wrapper} --its-flag 'its arg'` }));
+      snapshot = { sha: commitAll(root) };
+      expect(await (await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
+      expect(readFileSync(join(root, 'wrapper.args'), 'utf8')).toBe(`arg1=--its-flag\narg2=its arg\narg3=/bin/sh\narg4=-c\narg5=echo approve\narg6=A-1\narg7=review\narg8=${root}\n`);
+      // The host's environment wins over the file, and is read from the host, not the snapshot.
+      const hostWrapper = join(root, 'host-wrapper.sh');
+      writeFileSync(hostWrapper, '#!/bin/sh\necho "from the host wrapper" >> "$(dirname "$0")/host.ran"\nexec "$@"\n');
+      chmodSync(hostWrapper, 0o755);
+      process.env.BATON_AGENT_WRAPPER = hostWrapper;
+      expect(await (await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
+      expect(readFileSync(join(root, 'host.ran'), 'utf8')).toBe('from the host wrapper\n');
+      // The example init ships: named as the wrapper, it logs the agent's stdout byte for byte —
+      // the answer line last, intact — and hands the same stdout on.
+      const example = join(root, '.baton', 'leg-wrapper.example');
+      chmodSync(example, 0o755);
+      delete process.env.BATON_AGENT_WRAPPER;
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: `${join(root, 'noisy-agent.sh')}`, agent_wrapper: example }));
+      writeFileSync(join(root, 'noisy-agent.sh'), '#!/bin/sh\necho "working on $1"\nprintf \'last line, with a trailing space \\n\'\necho changes\n');
+      chmodSync(join(root, 'noisy-agent.sh'), 0o755);
+      snapshot = { sha: commitAll(root) };
+      expect(await (await load(review)).run({ ticket: { id: 'B-2' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
+      expect(readFileSync(join(root, '.baton', 'logs', 'B-2-review.log'), 'utf8')).toBe('working on B-2\nlast line, with a trailing space \nchanges\n');
+      // A file wrapper that is not a command fails the leg naming the setting.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: 'echo approve', agent_wrapper: '  ' }));
+      const blank = { sha: commitAll(root) };
+      await expect((await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: blank })).rejects.toThrow("agent_wrapper is not a command");
+    } finally {
+      if (path == null) delete process.env.PATH;
+      else process.env.PATH = path;
+      unsetRemote?.();
+      if (fakeGh) rmSync(fakeGh, { recursive: true, force: true });
+      // A host's wrapper is the host's: this process's environment is never left saying so.
+      delete process.env.BATON_AGENT_WRAPPER;
+      writeFileSync(settingsFile, before);
+      for (const f of ['wrapper.sh', 'report.mjs', 'wrapper.args', 'wrapper.ran', 'host-wrapper.sh', 'host.ran', 'noisy-agent.sh']) rmSync(join(root, f), { force: true });
+      rmSync(join(root, '.baton', 'logs'), { recursive: true, force: true });
+      rmSync(join(root, '.baton', 'leg-wrapper.example'), { force: true });
       commitAll(root);
     }
   }, 60_000);
@@ -780,7 +998,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       process.env.OUTCOME = 'new-cause';
       expect(await stub.run({ ticket: { id: 'B-1' }, checkout: root, snapshot })).toEqual({ reached: 'new-cause', next: 'file' });
       process.env.OUTCOME = 'maybe';
-      await expect(stub.run({ ticket: { id: 'B-1' }, checkout: root, snapshot })).rejects.toThrow('the dedupe agent printed no outcome (new-cause or duplicate) as its last line');
+      await expect(stub.run({ ticket: { id: 'B-1' }, checkout: root, snapshot })).rejects.toThrow('the dedupe agent printed no outcome (new-cause or duplicate) as its last line — its last line was "maybe"');
       // A PR course's commenting leg may name the PR after its answer (B-29); anything else after it is refused.
       const review = await load(join(root, '.baton', 'courses', 'review-pr', 'legs', 'review.mjs'));
       process.env.OUTCOME = 'approve https://github.com/o/site/pull/7';
@@ -789,6 +1007,22 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       expect(await review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ suspend: true, reached: 'changes-requested', next: 'review', verdict: 'changes' });
       process.env.OUTCOME = 'approve o/site#7';
       await expect(review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).rejects.toThrow('the review agent\'s last line names no PR URL after its verdict');
+      // B-85: prose around the verdict no longer loses the round (B-80's review). The verdict line
+      // is read wherever it sits; a summary after it is the agent's, and names no PR.
+      for (const [prose, expected] of [
+        ['I reviewed the diff and found nothing blocking.\napprove', {}],
+        ['approve\n\nI read every hunk of the diff; details above.', {}],
+        ['approve https://github.com/o/site/pull/7\nRound 1: the diff is sound, merging is safe.', { pr: 'https://github.com/o/site/pull/7' }],
+        ['I read the diff.\napprove https://github.com/o/site/pull/7\n\n', { pr: 'https://github.com/o/site/pull/7' }],
+      ] as const) {
+        process.env.OUTCOME = prose;
+        expect(await review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot }), prose).toEqual({ reached: 'approved', next: null, verdict: 'approve', ...expected });
+      }
+      process.env.OUTCOME = 'changes https://github.com/o/site/pull/7\nI left two blocking notes above.';
+      expect(await review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ suspend: true, reached: 'changes-requested', next: 'review', verdict: 'changes', pr: 'https://github.com/o/site/pull/7' });
+      // A value word mid-line only is not an answer: a stray mention never stands for a verdict.
+      process.env.OUTCOME = 'My verdict: approve';
+      await expect(review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).rejects.toThrow('the review agent printed no verdict (approve or changes) as its last line — its last line was "My verdict: approve"');
       // A leg with no answer names its PR by a last line that is a URL alone; any other last line names none.
       const conclude = await load(join(root, '.baton', 'courses', 'review-pr', 'legs', 'conclude.mjs'));
       process.env.OUTCOME = 'https://github.com/o/site/pull/7';

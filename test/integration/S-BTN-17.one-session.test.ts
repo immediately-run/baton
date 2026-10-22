@@ -1,4 +1,4 @@
-// S-BTN-17 one session, whole ticket (BATON_SPEC §13a, §2e R-BTN-63, §6.12; R3-1232): every line has
+// S-BTN-17 one session, whole ticket (BATON_SPEC §15, §5.3 R-BTN-63, §9.3; R3-1232): every line has
 // room; the reviews, fixes and checks land in PRs, and no sync runs between the advances. Must
 // hold: one claim makes five advances — implement, review, fix, review, merge — moving filed →
 // pr-open → reviewed → fixed → reviewed, each accepted as an edge on the holder's word, the

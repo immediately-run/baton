@@ -1,4 +1,4 @@
-// S-BTN-28 a course with no reviews — the stations-and-legs runs (BATON_SPEC §13a; R3-1232, round 3,
+// S-BTN-28 a course with no reviews — the stations-and-legs runs (BATON_SPEC §15; R3-1232, round 3,
 // 3-A-2): the toy course `chore` — open → done-once → checked, with `redo` a self-loop on done-once
 // (max_runs 2), no hooks, `verify` barred by a tag — runs S-BTN-17's whole ticket, S-BTN-24's gate
 // case and S-BTN-34's regression in its own terms, in core's default order, with no Baton change.

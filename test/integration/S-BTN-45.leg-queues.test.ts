@@ -1,4 +1,4 @@
-// S-BTN-45 a queue over its bound (BATON_SPEC §13a, §2g R-BTN-79, R-BTN-80; R3-1255), on both
+// S-BTN-45 a queue over its bound (BATON_SPEC §15, §5.4 R-BTN-79; R3-1255), on both
 // hosts: `roadmap-pr`'s course file gives `fix` `max_queue: 2` and three reviewed tickets queue
 // for it, then one is claimed. Must hold: all three enter `fix`'s queue — none is held, blocked or
 // refused — and the third logs `queue-over` and queues one `queue-over` notice per `owner` courier

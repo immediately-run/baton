@@ -1,12 +1,13 @@
 // runner-main.test.ts — `baton run`'s pure half (BATON_SPEC §6.13; R3-1245): the flag parser,
 // the course declarations a heartbeat needs (rule 9), the credential the environment names and
 // the worker secret's shape. Node only: it writes temp checkouts and runs ssh-keygen.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { declareCourses, fetchMain, parseRunArgs, runnerCourse } from '../../src/runner/main';
+import { declareCourses, fetchMain, parseRunArgs, runMain, runnerCourse } from '../../src/runner/main';
+import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { envAuth } from '../../src/runner/api';
 import { courseOf, dropCourse, freshSecret, holdHome, loadCourse } from '../../src/runner/home';
 
@@ -21,7 +22,7 @@ describe('parseRunArgs', () => {
   it('defaults from the environment', () => {
     const a = parseRunArgs([], { BATON_HOME: '/h', BATON_URL: 'https://b', BATON_SESSION: 's', BATON_REPOSITORY: 'docs', BATON_HOSTNAME: 'vm-x' });
     // The IR_BATON_* spellings still serve (B-96's transition): session and hostname, silently.
-    expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: ['agent-venue'] });
+    expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: ['agent-venue'], testHarness: false });
   });
   it('takes its flags, refusing the unknown and the malformed', () => {
     const a = parseRunArgs(['--harness', 'claude-code', '--home', '/x', '--url', 'https://u', '--session', 's2', '--repository', 'ops', '--tier', 'routine', '--capabilities', 'a,b', '--beat-every', '5000'], {});
@@ -31,6 +32,78 @@ describe('parseRunArgs', () => {
     expect(() => parseRunArgs(['--beat-every', '10'], {})).toThrow('at least 50 ms');
     expect(() => parseRunArgs(['--home'], {})).toThrow('needs a value');
     expect(parseRunArgs(['--course', 'bug-report'], {}).course).toBe('bug-report');
+    // B-83: --test-harness permits the bare-echo stub, and says so on the heartbeat.
+    expect(parseRunArgs(['--test-harness'], {}).testHarness).toBe(true);
+  });
+});
+
+// B-83: the agent_command a runner runs. runMain reads process.env directly, and the process
+// running these tests may itself be a leg session (BATON_PARENT) with a credential
+// (BATON_KEY_FILE) — exactly the env it refuses and uses — so each test clears both spellings
+// (B-96's transition) and restores what was there.
+describe('the agent_command a runner runs (B-83)', () => {
+  const LEG_ENV = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE', 'IR_BATON_PARENT', 'IR_BATON_TOKEN', 'IR_BATON_KEY', 'IR_BATON_KEY_FILE'];
+  const clearLegEnv = (): Record<string, string | undefined> => {
+    const saved: Record<string, string | undefined> = {};
+    for (const n of LEG_ENV) {
+      saved[n] = process.env[n];
+      delete process.env[n];
+    }
+    return saved;
+  };
+  const restoreLegEnv = (saved: Record<string, string | undefined>): void => {
+    for (const [n, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[n];
+      else process.env[n] = v;
+    }
+  };
+  /** A home whose settings name `agent_command` (or omit it, for null). */
+  const homeWith = (agent_command: string | null): string => {
+    const dir = home();
+    const settings: Record<string, unknown> = { courses: [{ id: 'relay', version: 1 }] };
+    if (agent_command != null) settings.agent_command = agent_command;
+    writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify(settings));
+    return dir;
+  };
+
+  it('runMain refuses the bare echo — a no-op agent — naming the fix; --test-harness permits the stub', async () => {
+    const dir = homeWith('echo');
+    const saved = clearLegEnv();
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      expect(await runMain(['--home', dir])).toBe(1);
+      const said = err.mock.calls.map((c) => String(c[0])).join('');
+      expect(said).toContain('names agent_command "echo"');
+      expect(said).toContain('baton repo init --agent opencode');
+      expect(said).toContain('--test-harness');
+      // The stub permitted: the run proceeds past the refusal, stopping where every runner
+      // without a credential stops — never at the echo.
+      await expect(runMain(['--home', dir, '--test-harness'])).rejects.toThrow(/no credential/);
+    } finally {
+      err.mockRestore();
+      restoreLegEnv(saved);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('settings naming no agent_command drive from --harness, the command logged; a named one is left to the settings', async () => {
+    const none = homeWith(null);
+    const named = homeWith('my-agent');
+    const lines: string[] = [];
+    const saved = clearLegEnv();
+    try {
+      await expect(runMain(['--home', none, '--harness', 'claude-code'], { log: (l) => lines.push(l) })).rejects.toThrow(/no credential/);
+      expect(lines.join('\n')).toContain('names no agent_command');
+      expect(lines.join('\n')).toContain('claude-code');
+      expect(HARNESS_AGENTS['claude-code']).toContain('--permission-mode bypassPermissions');
+      lines.length = 0;
+      await expect(runMain(['--home', named], { log: (l) => lines.push(l) })).rejects.toThrow(/no credential/);
+      expect(lines.join('\n')).not.toContain('names no agent_command');
+    } finally {
+      restoreLegEnv(saved);
+      rmSync(none, { recursive: true, force: true });
+      rmSync(named, { recursive: true, force: true });
+    }
   });
 });
 

@@ -1,4 +1,4 @@
-// S-BTN-105 a course from its source, one leg overridden (BATON_SPEC §13a S-BTN-105, R-BTN-131,
+// S-BTN-105 a course from its source, one leg overridden (BATON_SPEC §15 S-BTN-105, R-BTN-131,
 // R-BTN-51; B-33): a repository's `create-pr` names its source —
 // `github/<owner>/<name>/<commit>/create-pr`, this CLI's repository at this CLI's commit — and
 // replaces its `review` leg's run with `legs/review.run.mjs`. Must hold: the sync posts it and

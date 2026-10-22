@@ -1,4 +1,4 @@
-// S-BTN-79 schemas refused (BATON_SPEC §13a, §2m.2 R-BTN-108; B-3): a sync posts
+// S-BTN-79 schemas refused (BATON_SPEC §15, §5.5 R-BTN-108; B-3): a sync posts
 // `roadmap-pr:findings@2` again with a changed digest; a schema using `oneOf`; one whose `pattern`
 // has a back-reference; two that `$ref` each other; a `std:object@1` of its own; another
 // repository posts its own `roadmap-pr:findings@2`. Must hold: the first four are refused with the

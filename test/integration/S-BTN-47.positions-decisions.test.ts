@@ -1,5 +1,5 @@
-// S-BTN-47 positions, course changes and the dead-ticket queue (BATON_SPEC §13a, §2h R-BTN-81,
-// R-BTN-83, R-BTN-85, §2g R-BTN-78; R3-1257), on both hosts — the half R3-1257 builds. The holder's
+// S-BTN-47 positions, course changes and the dead-ticket queue (BATON_SPEC §15, §4.7 R-BTN-81,
+// R-BTN-85, §5.3 R-BTN-83, §6.4 R-BTN-78; R3-1257), on both hosts — the half R3-1257 builds. The holder's
 // provisional position, the owner's re-route and the discrepancies they log are B-38's half.
 // In `docs`: a human pushes work with no marker; the course adds a `squash-merge` leg out of
 // `reviewed`, and later removes `adjudicate` while a ticket is queued for it; a ticket's retries

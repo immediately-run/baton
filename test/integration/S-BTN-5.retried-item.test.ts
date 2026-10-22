@@ -1,4 +1,4 @@
-// S-BTN-5 retried item with backoff (BATON_SPEC §13a, §6.10, §6.11), the server half: an item's
+// S-BTN-5 retried item with backoff (BATON_SPEC §15, §9.7, §7.4, §9.8), the server half: an item's
 // claimant releases cannot-finish:transient twice. Must hold: retry_after 1 h then 4 h; the
 // third claim gets previous_attempts with both resume records, which carry the branch and PR
 // it reuses (G-BTN-33: built from the claims' activities). The client half — reusing the

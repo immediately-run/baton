@@ -1,4 +1,4 @@
-// S-BTN-41 the runner (BATON_SPEC §13a S-BTN-41, §6.13 R-BTN-72; R3-1245): `baton run` on a VM
+// S-BTN-41 the runner (BATON_SPEC §15 S-BTN-41, §8.3 R-BTN-72; R3-1245): `baton run` on a VM
 // with a home repository's `.baton/` — stub leg scripts that push evidence into git, `close`
 // writing the closing marker as a commit — claims a ticket and follows its results. Must hold:
 // the runner holds the claim through a `ci` wait and goes on; it takes the leg each result names

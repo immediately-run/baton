@@ -1,4 +1,4 @@
-// S-BTN-65 refinement (BATON_SPEC §13a, §2m.2 R-BTN-108; B-3): a course schema refines
+// S-BTN-65 refinement (BATON_SPEC §15, §5.5 R-BTN-108; B-3): a course schema refines
 // `std:forge.change@1` but drops `head_sha` from `required`; a second keeps it; a leg reports a
 // value missing `url` against the second. Must hold: the value fails both its schema and the base,
 // and the leg ends `released:cannot-finish:contract-output`. (`baton course test` reporting the

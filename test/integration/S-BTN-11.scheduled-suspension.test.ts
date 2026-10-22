@@ -1,4 +1,4 @@
-// S-BTN-11 scheduled and timed suspension (BATON_SPEC §7.4, §13a): a suspension scheduled for
+// S-BTN-11 scheduled and timed suspension (BATON_SPEC §5.6 R-BTN-67, §15): a suspension scheduled for
 // +1 h, ending at +3 h, starts and ends on the fake clock with events. Also the server halves of
 // S-BTN-8 (no-new-work) and S-BTN-9 (stop): a heartbeat during each mode's suspension returns it;
 // only `stop` sends a `release` with reason `provider-suspended`, and only to that account's

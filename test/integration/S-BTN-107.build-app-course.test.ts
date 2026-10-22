@@ -1,4 +1,4 @@
-// S-BTN-107 the build-app course (BATON_SPEC §13a S-BTN-107, R-BTN-131; B-40): a fresh repository
+// S-BTN-107 the build-app course (BATON_SPEC §15 S-BTN-107, R-BTN-131; B-40): a fresh repository
 // runs `baton repo init`, then `--course build-app`, with one request. Must hold: the request starts at
 // `requested` with `define` queued; each drafting leg's successor waits on the owner until the
 // ticket's `answer:` names the document it builds on, and an earlier name holds it; `file`'s

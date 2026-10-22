@@ -1,4 +1,4 @@
-// S-BTN-6 poisoned item (BATON_SPEC §13a, §6.10): three claimants fail — reaped for silence,
+// S-BTN-6 poisoned item (BATON_SPEC §15, §9.7, §7.4): three claimants fail — reaped for silence,
 // lease-lost, cannot-finish:transient. Must hold: held attempts-exhausted (the mirror's note and
 // the owner-inbox report are R3-1218's and the witness's); lifting the hold resets the count.
 import { describe, it, expect, inject, beforeEach } from 'vitest';

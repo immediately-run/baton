@@ -1,4 +1,4 @@
-// S-BTN-10 no reviewer capacity (BATON_SPEC §13a, R-BTN-40, R-BTN-71; R3-1232): every qualifying seat
+// S-BTN-10 no reviewer capacity (BATON_SPEC §15, R-BTN-40, R-BTN-71; R3-1232): every qualifying seat
 // is barred, so the sync posts `review` leaving pr-open as `waiting` on `review-seats`. Must hold:
 // the holder at pr-open finds no ready leg, ends `suspended:pr-open`, and nothing is released —
 // it is a completed end, never a failed attempt; the next sync confirms it; the ticket is not

@@ -13,19 +13,19 @@
   },
   "S-BTN-16.cutover › S-BTN-16 cutover (server) > G-BTN-19: the session the note names asks to adopt; the claim moves only when the owner confirms": {
     "at": 6,
-    "reason": "claim 1 imported at cutover (a legacy claim; §13 step 3, not modelled)"
+    "reason": "claim 1 imported at cutover (a legacy claim; §16.1, not modelled)"
   },
   "S-BTN-16.cutover › S-BTN-16 cutover (server) > a note with no holder: any session may ask; the owner still decides; a session holding another item cannot adopt": {
     "at": 5,
-    "reason": "claim 1 imported at cutover (a legacy claim; §13 step 3, not modelled)"
+    "reason": "claim 1 imported at cutover (a legacy claim; §16.1, not modelled)"
   },
   "S-BTN-16.cutover › S-BTN-16 cutover (server) > an unadopted legacy claim is reaped at its reap_after, not counted as a failed attempt": {
     "at": 4,
-    "reason": "claim 1 imported at cutover (a legacy claim; §13 step 3, not modelled)"
+    "reason": "claim 1 imported at cutover (a legacy claim; §16.1, not modelled)"
   },
   "S-BTN-16.cutover › S-BTN-16 cutover (server) > shadow until the owner cuts over; the in-flight git claim is imported as a legacy claim": {
     "at": 5,
-    "reason": "claim 1 imported at cutover (a legacy claim; §13 step 3, not modelled)"
+    "reason": "claim 1 imported at cutover (a legacy claim; §16.1, not modelled)"
   },
   "S-BTN-26.two-repositories › S-BTN-26 two repositories (registry half) > one repository’s sync confirms no completion of another’s (R-BTN-47)": {
     "at": 6,
@@ -33,7 +33,7 @@
   },
   "S-BTN-26.two-repositories › S-BTN-26 two repositories (registry half) > two in-progress tickets of one local id with no holder: both legacy claims stay adoptable": {
     "at": 4,
-    "reason": "claim 1 imported at cutover (a legacy claim; §13 step 3, not modelled)"
+    "reason": "claim 1 imported at cutover (a legacy claim; §16.1, not modelled)"
   },
   "S-BTN-36.observations › S-BTN-36 (observation half) > a claim is made stale only by a reading numbered after it": {
     "at": 7,
@@ -65,7 +65,7 @@
   },
   "S-BTN-38.course-stats › S-BTN-38 a course measures itself > a key granted on docs reads its course record — aggregates and ids, no worker; an ops-only key is forbidden": {
     "at": 19,
-    "reason": "docs:T-2's posted path review is off the course graph (§2e: git can hold it; Baton logs off-graph — not modelled)"
+    "reason": "docs:T-2's posted path review is off the course graph (§5.3: git can hold it; Baton logs off-graph — not modelled)"
   },
   "S-BTN-39.limits › S-BTN-39 limits agents cannot change > an owner bar on every course, claims only, from +1 h: new Go claims are refused, a held one still advances": {
     "at": 6,

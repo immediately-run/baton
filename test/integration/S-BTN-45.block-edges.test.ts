@@ -1,4 +1,4 @@
-// S-BTN-45 the edges of blocks (BATON_SPEC §13a, §2g R-BTN-75–78, §2l R-BTN-101; R3-1251), on both
+// S-BTN-45 the edges of blocks (BATON_SPEC §15, §6.2–§6.4 R-BTN-75–78, §6.3 R-BTN-101; R3-1251), on both
 // hosts — every case but the leg queues', which are in S-BTN-45.leg-queues.test.ts (R3-1255). In `docs`: `opencode-go:go_plus`
 // serves `llm:deepseek-v4-flash` and `llm:glm-5`, for `docs` only. Must hold: a `$ref` schema is
 // refused at registration; another repository's worker is refused `forbidden` for go_plus; one

@@ -1,4 +1,4 @@
-// S-BTN-44 blocks, resources and decisions (BATON_SPEC §13a, §2g R-BTN-75–78, §2l R-BTN-101;
+// S-BTN-44 blocks, resources and decisions (BATON_SPEC §15, §6.2–§6.4 R-BTN-75–78, §6.3 R-BTN-101;
 // R3-1251), on both hosts. In `docs`: A's posted `blocked_by` is B; C requires `real-iphone`, which
 // no live worker declares; D's `review` leg needs `llm:deepseek-v4-flash`, served by the account
 // instances `opencode-go:go_plus` and `opencode-go:go_plus_2`; W1 uses `go_plus`, W2 both; E posts

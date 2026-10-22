@@ -1,4 +1,4 @@
-// S-BTN-126 API keys beside SSH keys (BATON_SPEC §10.6 R-BTN-159, R-BTN-57, R-BTN-58): an administrator
+// S-BTN-126 API keys beside SSH keys (BATON_SPEC §15, §11.1 R-BTN-159, §11.2 R-BTN-57, §8.2 R-BTN-58): an administrator
 // whose BATON_ADMIN_KEYS line is an API key's public line registers `ops` with an owner API key;
 // that owner grants a worker SSH key K and a worker API key W. Must hold: both people's API keys
 // work as bearers on their own routes; a wrong secret, an unknown key and a malformed bearer are

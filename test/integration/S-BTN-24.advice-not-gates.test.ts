@@ -1,4 +1,4 @@
-// S-BTN-24 advice, not gates (BATON_SPEC §13a, R-BTN-45, §7.2's gate table; R3-1232): a worker claims
+// S-BTN-24 advice, not gates (BATON_SPEC §15, R-BTN-45, §6.6's gate table; R3-1232): a worker claims
 // a ticket ranked fifth; a third claims a ticket above its tier, and a fourth a ticket a suspended
 // line would spend. Must hold: the first is accepted and records what it overrode; the third is
 // refused not-eligible naming the tier rule, the fourth barred-tag. (The second — a line the

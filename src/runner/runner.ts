@@ -45,6 +45,12 @@ export interface RunnerOptions {
   log?: (line: string) => void;
   /** One bounded `git fetch` when the snapshot sha is missing (R-BTN-34). */
   fetch?: (home: string) => void;
+  /** B-83: the harness command `--harness` chose, handed to the legs as BATON_AGENT_COMMAND —
+   * what runs an agent leg when the snapshot's settings name no `agent_command`. */
+  agentCommand?: string;
+  /** B-83: a test harness — declared on the heartbeat (R-BTN-32; Baton refuses it from any
+   * credential but the test one). */
+  testHarness?: boolean;
 }
 
 interface LegChild {
@@ -145,6 +151,7 @@ export class Runner {
     const body: Record<string, unknown> = {
       hostname: this.o.hostname, session_name: this.o.session, harness: this.o.harness, kind: 'vm',
       billing: {}, capabilities: this.o.capabilities ?? ['agent-venue'], tier_ceiling: this.o.tierCeiling ?? 'critical',
+      ...(this.o.testHarness ? { test_harness: true } : {}),
       lease_timeout_s: s.lease_timeout_s ?? 900,
       courses: this.o.courses.map((c) => ({ repository: this.o.repository, course: c.course, version: c.version })),
       ...((s.worker_id == null || this.rekeySecret) ? { secret_hash: await sha256Hex(this.rekeySecret ?? s.secret), ...(this.rekeySecret ? { rekey: true } : {}) } : {}),
@@ -672,7 +679,12 @@ export class Runner {
     // IR_BATON_* spellings are set beside them for the transition (B-96): docs-side skills and
     // harness hooks still read them; nothing breaks until their readers move.
     const parent = String(this.state.get().worker_id ?? '');
-    const childEnv = { ...process.env, BATON_PARENT: parent, BATON_STATE: this.o.stateFile, IR_BATON_PARENT: parent, IR_BATON_STATE: this.o.stateFile };
+    const childEnv = {
+      ...process.env, BATON_PARENT: parent, BATON_STATE: this.o.stateFile, IR_BATON_PARENT: parent, IR_BATON_STATE: this.o.stateFile,
+      // B-83: the harness command of `--harness`, for a stub whose snapshot's settings name no
+      // agent_command — a fill for an absence, never an override.
+      ...(this.o.agentCommand ? { BATON_AGENT_COMMAND: this.o.agentCommand } : {}),
+    };
     const child = spawn(process.execPath, [LEG_PROCESS, script, ctxPath, resultPath], {
       detached: true, stdio: ['pipe', 'ignore', 'ignore'],
       env: childEnv,

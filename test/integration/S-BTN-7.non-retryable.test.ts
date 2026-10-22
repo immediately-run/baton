@@ -1,4 +1,4 @@
-// S-BTN-7 non-retryable failure (BATON_SPEC §13a, §6.10): a claimant releases
+// S-BTN-7 non-retryable failure (BATON_SPEC §15, §9.7, §7.4): a claimant releases
 // cannot-finish:spec. Must hold: held at once; no backoff claim.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { claimItem, cutover, endClaim, payload, register, rows, setClock, syncCall } from '../helpers';

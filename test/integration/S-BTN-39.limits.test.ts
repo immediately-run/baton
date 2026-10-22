@@ -1,4 +1,4 @@
-// S-BTN-39 limits agents cannot change (BATON_SPEC §13a, R-BTN-66, R-BTN-67, R-BTN-23, R-BTN-58;
+// S-BTN-39 limits agents cannot change (BATON_SPEC §15, R-BTN-66, R-BTN-67, R-BTN-23, R-BTN-58;
 // R3-1240): docs' owner sets an owner bar on `account:go_plus` (every course, claims only, from
 // +1 h), an owner bar on `family:x` for the course `chore` only, the required bar
 // `{course: roadmap-pr, leg: *, except: [implement, review, adjudicate], tag_prefix: family:}`,

@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, type Auth, type Transport } from '../runner/api';
+import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type PrFact, type StationsResult } from './course-pr';
@@ -82,6 +83,9 @@ interface BatonJson {
   items?: string;
   repos?: Record<string, string>;
   agent_command?: string;
+  /** A command whose words precede `agent_command`'s in every leg's spawn (B-95);
+   * `BATON_AGENT_WRAPPER` in the host's environment wins over it. */
+  agent_wrapper?: string;
 }
 
 /** The skill a course entry names when its file names none: the course's own (`baton-create-pr`). */
@@ -556,9 +560,16 @@ export default {
 /** The most output a stub keeps from its agent (the review reads only the last line). */
 const AGENT_OUTPUT_MAX = 64 * 1024 * 1024;
 
+/** The environment variable that overrides `.baton/baton.json`'s `agent_wrapper` for one host
+ * (B-95): the runner's environment reaches the stub, so a host wraps its legs without the
+ * repository file naming one. */
+const AGENT_WRAPPER_ENV = 'BATON_AGENT_WRAPPER';
+
 /** One leg stub's source (R-BTN-74, R-BTN-131): run the `agent_command` that
  * `.baton/baton.json` names at the claim's snapshot (`ctx.snapshot.sha`, the commit the runner
- * loads the leg scripts from), with no shell between the stub and the agent and stdin never an
+ * loads the leg scripts from) — or, the settings naming none, the `BATON_AGENT_COMMAND` the
+ * runner passed down (`--harness`'s choice: a fill for an absence, never an override — B-83) —
+ * with no shell between the stub and the agent and stdin never an
  * open pipe (B-84: an open stdin pipe under the old spawn hung real harness CLIs — `opencode
  * run`, deterministically, zero output until the claim was reaped) — the command string splits
  * into words as `sh` would, quotes and no substitutions (`agent-words.ts`), and runs as
@@ -582,18 +593,24 @@ import { mkdtempSync, ${verify ? 'readFileSync, ' : ''}rmSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
+import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};${ask ? `
+import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${verify ? `
 import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
 // The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
 // repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the
 // checkout as its arguments and the leg's instructions in the file BATON_INSTRUCTIONS names. The
 // command runs with no shell between the stub and the agent (B-84), so no substitution or
-// redirection it may carry is executed; its own contract is the header of the leg's .md. Both
-// are read when the leg runs at the claim's snapshot, the commit the runner loaded this script
+// redirection it may carry is executed; its own contract is the header of the leg's .md. Where
+// the repository sets \`agent_wrapper\` (B-95) — or the host sets BATON_AGENT_WRAPPER, which wins
+// — that command's words go in front of the agent's argv, and the rest is the wrapper's. Both are
+// read when the leg runs at the claim's snapshot, the commit the runner loaded this script
 // from, never the working tree an agent may have changed (so a branch under review cannot pick
 // its reviewer or rewrite the reviewer's instructions).${ask ? `
-// The agent's last line of output must be its ${ask.name}: ${values}.` : ''}${verify ? `
+// The agent's last line of output must be its ${ask.name}: ${values}. A line that opens with
+// one of them is read as the answer wherever it sits — prose before or after it is the agent's,
+// not a lost round (B-85) — and that line may name one PR URL after the word. A missing or
+// misspelled ${ask.name} still fails the leg, naming what the agent's output ended with.` : ''}${verify ? `
 // Before returning its position the stub verifies the leg's outcome on the forge (B-81): an
 // open PR on a branch this course's branch patterns map to the ticket, its head pushed; where
 // it cannot verify, the leg fails naming what it looked for.` : ''}
@@ -622,7 +639,10 @@ async function standard(ctx) {
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
   const show = (rel) => execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} });
   const settings = JSON.parse(show('.baton/baton.json'));
-  if (typeof settings.agent_command !== 'string' || settings.agent_command === '') throw new Error('.baton/baton.json names no agent_command');${verify ? `
+  // B-83: the snapshot's settings stay authoritative; BATON_AGENT_COMMAND — the harness command
+  // \`baton run --harness\` chose — fills their absence, never overrides their choice.
+  const agentCommand = typeof settings.agent_command === 'string' && settings.agent_command !== '' ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? '';
+  if (agentCommand === '') throw new Error('.baton/baton.json names no agent_command — run \`baton repo init --agent opencode\` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none');${verify ? `
   // What this leg's verification looks for (B-81): the course's branch patterns, as the
   // snapshot's settings carry them, and the repositories the ticket's repos: names — the
   // ticket file is the checkout's own copy, the one the agent may have just added its PR to.
@@ -646,10 +666,20 @@ async function standard(ctx) {
   // appended last; stdin closes at spawn (below), and stdout and stderr are captured pipes — and
   // the command's exit is the agent's completion, which its own contract (the leg .md's header)
   // requires it to mean.
-  const [command, ...words] = splitWords(settings.agent_command);
+  const [command, ...words] = splitWords(agentCommand);
   if (command === undefined) throw new Error('.baton/baton.json names no agent_command to run');
+  // B-95: the repository's \`agent_wrapper\` — a host's BATON_AGENT_WRAPPER first, else the
+  // snapshot's setting — is one more command, split the same way, whose words go in front of the
+  // agent's argv. Baton only composes it; what it does with stdio, time or the log is its own.
+  const envWrapper = process.env.${AGENT_WRAPPER_ENV};
+  const wrapper = typeof envWrapper === 'string' && envWrapper.trim() !== '' ? envWrapper : settings.agent_wrapper;
+  if (wrapper != null && (typeof wrapper !== 'string' || wrapper.trim() === '')) throw new Error('.baton/baton.json\\'s agent_wrapper is not a command');
+  const [wrapped, ...wrapping] = wrapper == null ? [] : splitWords(wrapper);
+  const argv = wrapped === undefined
+    ? [command, ...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout]
+    : [wrapped, ...wrapping, command, ...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout];
   const out = await new Promise((resolve, reject) => {
-    const child = execFile(command, [...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout], {
+    const child = execFile(argv[0], argv.slice(1), {
       cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX}, stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.path ?? '',${ask ? `
@@ -665,18 +695,19 @@ async function standard(ctx) {
   }).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
   });${names ? `
-  // The last line: the answer, then — optionally — the PR its line goes on. A leg with no answer
-  // names its PR by a last line that is a PR URL alone; any other last line names none.
-  const last = (out.trim().split('\\n').at(-1) ?? '').trim();${ask ? '' : `
-  const on = ${PR_URL}.test(last) ? last : null;`}${ask ? `
-  const [answer, pr, ...rest] = last.split(/\\s+/);
-  if (!${JSON.stringify(ask.values)}.includes(answer)) throw new Error(${JSON.stringify(`the ${leg} agent printed no ${ask.name} (${values}) as its last line`)});
-  if (rest.length || (pr != null && !${PR_URL}.test(pr))) throw new Error(${JSON.stringify(`the ${leg} agent's last line names no PR URL after its ${ask.name}`)});
-  const on = pr ?? null;` : ''}
+  // The answer (B-85): the last line that opens with the leg's value word, wherever it sits —
+  // prose before or after it is the agent's, not a lost round — and, on that line, the PR its
+  // line goes on. A leg with no answer names its PR by a last line that is a PR URL alone; any
+  // other last line names none. A missing or misspelled verdict still fails, naming what was read.${ask ? `
+  const { answer, pr } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});
+  const on = pr;` : `
+  const last = (out.trim().split('\\n').at(-1) ?? '').trim();
+  const on = ${PR_URL}.test(last) ? last : null;`}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
 ` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}) };` : `${ask ? `
-  const answer = out.trim().split('\\n').at(-1)?.trim();
-  if (!${JSON.stringify(ask.values)}.includes(answer)) throw new Error(${JSON.stringify(`the ${leg} agent printed no ${ask.name} (${values}) as its last line`)});` : `
+  // The answer (B-85): the last line that opens with the leg's value word, backwards past any
+  // prose after it; a missing or misspelled verdict still fails, naming what it read.
+  const { answer } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});` : `
   void out;`}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
 ` : ''}  return ${position};`}
@@ -713,6 +744,12 @@ export async function run(ctx, standard) {
 }
 `;
 }
+
+/** The worked example of `agent_wrapper` (B-95): a `tee` to `.baton/logs/<ticket>-<leg>.log`,
+ * shipped but never used until the repository names it in `baton.json`. */
+const WRAPPER_EXAMPLE = 'leg-wrapper.example';
+const wrapperExample = (): string =>
+  readFileSync(fromSource() ? join(packageRoot(), '.baton', WRAPPER_EXAMPLE) : prebuilt(WRAPPER_EXAMPLE), 'utf8');
 
 /** The instructions shipped for one leg of a standard course (R-BTN-131), the Markdown `init`
  * copies into the repository, which owns them from then on. */
@@ -755,8 +792,10 @@ export async function prebuildDefaults(dist: string, build: { repository: string
     files++;
   }
   await bundleSource(WRAPPERS.tickets(DEFAULT_COURSE), join(out, 'tickets.mjs'));
+  // B-95's worked example, beside the stubs: init writes it into .baton/ as leg-wrapper.example.
+  copyFileSync(join(packageRoot(), '.baton', WRAPPER_EXAMPLE), join(out, WRAPPER_EXAMPLE));
   writeFileSync(join(dist, 'build.json'), `${JSON.stringify(build, null, 2)}\n`);
-  return files + 2;
+  return files + 3;
 }
 
 /** The CLI's own version, for the workflow's pin: `owner/name@<commit>` of the checkout this
@@ -782,11 +821,19 @@ function cliPin(): string {
   return `${slug}@${sha}`;
 }
 
-/** `baton repo init [--course <standard course>] [--override <leg>]… [--eject tickets|stations] [--pin owner/name@commit] [--force]`
- * (R-BTN-74, R-BTN-131). Run again with another `--course`, it adds that course beside the first:
+/** `baton repo init [--course <standard course>] [--agent opencode|claude-code]
+ * [--agent-command <cmd>] [--override <leg>]… [--eject tickets|stations] [--pin owner/name@commit]
+ * [--force]` (R-BTN-74, R-BTN-131). Run again with another `--course`, it adds that course beside the first:
  * its files, and its entry in `.baton/baton.json`'s `courses`. With no `--course` it takes the
  * repository's `default_course`, else `create-pr`; a repository still on `pr`, the name
  * `create-pr` replaced, keeps its files and gets the new pin only.
+ *
+ * The `agent_command` the stubs run (B-83): `--agent` names the harness whose command it is
+ * (`opencode` by default, `claude-code` the other), `--agent-command` names any command
+ * outright — including `echo`, the no-op stub for tests, which is never written otherwise. A
+ * fresh repository gets the chosen harness's command, printed for the unfamiliar; an existing
+ * bare `echo` is replaced by it, loudly; any other named command is kept, as the repository's
+ * own.
  *
  * Each standard course's entry names its `source`, `github/<owner>/<name>/<commit>/<course>`: the
  * CLI's own repository at the commit that wrote the files, which the sync holds the course file to
@@ -802,6 +849,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   let eject: 'tickets' | 'stations' | null = null;
   let pin: string | null = null;
   let force = false;
+  let agent: Harness = 'opencode';
+  let agentNamed = false;
+  let agentCommand: string | null = null;
   const overrides: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -814,6 +864,12 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     else if (a === '--pin') pin = value();
     else if (a === '--force') force = true;
     else if (a === '--override') overrides.push(value());
+    else if (a === '--agent') {
+      const v = value();
+      if (v !== 'opencode' && v !== 'claude-code') throw new Error('--agent: opencode or claude-code');
+      agent = v;
+      agentNamed = true;
+    } else if (a === '--agent-command') agentCommand = value();
     else if (a === '--eject') {
       const v = value();
       if (v !== 'tickets' && v !== 'stations') throw new Error('--eject: tickets or stations');
@@ -919,6 +975,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   let settings: BatonJson;
   let changed: string | null = null;
   let rewriteNamed = force;
+  let commandMoved = false;
   const moved: string[] = [];
   if (existing) {
     // A second course joins the first: its entry is added, everything else in the file kept. With
@@ -935,16 +992,38 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
       return c;
     });
     settings = { ...existing, courses: listed ? next : [...next, entry] };
-    if (!listed || force || moved.length) changed = `baton: .baton/baton.json lists course ${b.id}${listed ? (force ? ' afresh' : '') : ' now'}${moved.length ? `; ${moved.join(', ')} now from ${self!.sha.slice(0, 10)}` : ''}`;
-    else kept.push('.baton/baton.json');
+    // B-83: the bare `echo` stub never survives an init — a no-op agent whose every leg
+    // "succeeds". An explicit `--agent-command` names any command (`echo` included, for tests);
+    // an explicit `--agent` switches to that harness's command; without either, the old default
+    // is replaced by the default harness's command, and any other named command — the
+    // repository's own — is kept.
+    const was = typeof existing.agent_command === 'string' ? existing.agent_command : '';
+    const now = agentCommand ?? (agentNamed || was === 'echo' ? HARNESS_AGENTS[agent] : null);
+    if (now != null && now !== was) settings.agent_command = now;
+    commandMoved = now != null && now !== was;
+    if (!listed || force || moved.length || commandMoved) {
+      changed = [
+        !listed || force || moved.length ? `baton: .baton/baton.json lists course ${b.id}${listed ? (force ? ' afresh' : '') : ' now'}${moved.length ? `; ${moved.join(', ')} now from ${self!.sha.slice(0, 10)}` : ''}` : null,
+        commandMoved ? `baton: agent_command ${was === 'echo' ? '"echo" — the no-op stub — ' : ''}is now ${agentCommand != null ? 'the command --agent-command named' : `the ${agent} command`}` : null,
+      ].filter(Boolean).join('; ');
+    } else kept.push('.baton/baton.json');
   } else {
-    settings = { baton_url: process.env.BATON_URL ?? DEFAULT_URL, items: 'tickets', default_course: b.id, repos: {}, agent_command: 'echo', courses: [entry] };
+    // B-83: a fresh repository names a real agent from the start — the chosen harness's command,
+    // printed below for the unfamiliar. The bare `echo` stub is written only when named
+    // explicitly, never by default.
+    const chosen = agentCommand ?? HARNESS_AGENTS[agent];
+    if (chosen === 'echo' && agentCommand !== 'echo') {
+      throw new Error('baton repo init refuses to write the no-op agent_command "echo" — pass --agent opencode or --agent claude-code for a real command, or --agent-command echo to name the stub explicitly');
+    }
+    settings = { baton_url: process.env.BATON_URL ?? DEFAULT_URL, items: 'tickets', default_course: b.id, repos: {}, agent_command: chosen, courses: [entry] };
   }
   refusePin(settings.courses ?? []);
   if (changed) log(changed);
   if (!kept.includes('.baton/baton.json')) {
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+    // B-83: the command printed for the unfamiliar, whenever this init named one.
+    if (!existing || commandMoved) log(`baton: agent_command${agentCommand != null ? ' (--agent-command)' : ` (the ${agent} harness)`}: ${settings.agent_command}`);
   }
   await scaffold(b, rewriteNamed || !existing);
   for (const id of moved.filter((m) => m !== b.id)) await scaffold(builtIn(id)!, true);
@@ -957,6 +1036,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   }
   writeWorkflow();
   await put('tickets/README.md', (abs) => writeFileSync(abs, '# Tickets\n\nOne `*.md` file per ticket; `baton repo init` wrote this directory.\n'));
+  // B-95: the worked example of a leg wrapper, there to be copied and named; a repository already
+  // has one once it is.
+  await put(`.baton/${WRAPPER_EXAMPLE}`, (abs) => writeFileSync(abs, wrapperExample()));
   if (kept.length) log(`baton: kept ${kept.join(', ')} (already there; --force rewrites Baton's files, never your instructions or overrides)`);
   log(`baton: .baton/ scaffolded (course ${b.id}: ${b.summary}) — commit it, add tickets/*.md, and the workflow does the rest`);
   return 0;
