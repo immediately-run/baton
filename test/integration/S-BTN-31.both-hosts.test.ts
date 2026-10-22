@@ -1,4 +1,4 @@
-// S-BTN-31 both hosts (BATON_SPEC §13a, R-BTN-55, R-BTN-56; G-BTN-56): this file, like every
+// S-BTN-31 both hosts (BATON_SPEC §15, R-BTN-55, R-BTN-56; G-BTN-56): this file, like every
 // scenario here, runs on the Cloudflare host and again on the local one (vitest.config.ts).
 // Must hold: the same answers on both; a sync token whose audience names another Baton is
 // refused. The hooks clause — a repository's hooks give the same results in a local `workerd`

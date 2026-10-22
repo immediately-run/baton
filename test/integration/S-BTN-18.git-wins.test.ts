@@ -1,4 +1,4 @@
-// S-BTN-18 git wins (BATON_SPEC §13a, R-BTN-10, R-BTN-35, R-BTN-71; R3-1232): a session suspends at
+// S-BTN-18 git wins (BATON_SPEC §15, R-BTN-10, R-BTN-35, R-BTN-71; R3-1232): a session suspends at
 // reviewed but one seat's review never posted; separately, a peer posts a review Baton never saw.
 // Must hold: the suspension stays unconfirmed while the sync places the ticket at pr-open, and the
 // ticket is not offered, flagged at 6 h; the peer's review moves the ticket to reviewed at the next

@@ -1,4 +1,4 @@
-// S-BTN-23 resume from a hand-off document (BATON_SPEC §13a, R-BTN-24, R-BTN-44, §6.11; R3-1232): W2
+// S-BTN-23 resume from a hand-off document (BATON_SPEC §15, R-BTN-24, R-BTN-44, §9.8; R3-1232): W2
 // resumes a ticket W1 suspended at reviewed. Must hold: W2's claim response carries the hand-off
 // URL and W1's resume record — its branch and PR, the legs it ran, where it rests — so W2 reuses
 // W1's branch and PR; the hand-off is a comment on the primary PR, never in the diff, and Baton

@@ -1,4 +1,4 @@
-// S-BTN-1 claim race (BATON_SPEC §13a): two workers claim the same item at once, and a lost
+// S-BTN-1 claim race (BATON_SPEC §15): two workers claim the same item at once, and a lost
 // claim response is retried. Must hold: one holder; the retry returns the same claim.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { beat, claimItem, cutover, payload, register, requestId, rows, setClock, syncCall } from '../helpers';

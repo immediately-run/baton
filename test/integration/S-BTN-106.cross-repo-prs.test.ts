@@ -1,4 +1,4 @@
-// S-BTN-106 a ticket's PRs in other repositories (BATON_SPEC §13a S-BTN-106, R-BTN-74, R-BTN-96,
+// S-BTN-106 a ticket's PRs in other repositories (BATON_SPEC §15 S-BTN-106, R-BTN-74, R-BTN-96,
 // R-BTN-131; B-29, B-35): a repository whose ticket names two other repositories in `repos:` — its
 // home (docs) gets no PR — syncs against a recorded GitHub. Must hold: the sync reads the home
 // and the two repositories the live ticket names, and no other; the ticket is placed from their

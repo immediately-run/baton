@@ -1,4 +1,4 @@
-// S-BTN-64 isolation floors (BATON_SPEC §13a, §2m.1 R-BTN-107; B-2): a leg requires
+// S-BTN-64 isolation floors (BATON_SPEC §15, §8.3 R-BTN-107; B-2): a leg requires
 // `isolation: session`; an `attached`, a `process` and a `session` worker ask for
 // recommendations. Must hold: only the `session` worker is offered it; the others' claims and
 // advances into it are refused, rule `isolation`. Runs on both hosts.

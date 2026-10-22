@@ -3,7 +3,7 @@ title: "B-71 — Scenario tests against the rewritten §15: stale citations fixe
 id: B-71
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-21
 repos:
   - baton
 tags:
@@ -14,7 +14,8 @@ description: "Audit every `test/integration/S-BTN-*.test.ts` against its current
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/85
 depends_on: []
 ---
 
@@ -98,3 +99,39 @@ test they own, or two tickets edit one file blind.
 ## Status
 
 _(filed 2026-10-20 with the current-state spec, PR #71)_
+
+**2026-10-21 — B-71's audit, confirmed and extended.** Every `test/integration/S-BTN-*.test.ts`
+was read against its current §15 row. The ticket's changed-rows table is confirmed as written;
+each row below states what the row now says and which ticket owns the test's change (that
+ticket edits the file in its own PR — B-71 touches only headers, the two stale texts, the
+S-BTN-2 file name and the check):
+
+| Test | What the row now says | Changed by |
+|---|---|---|
+| S-BTN-6, S-BTN-7 | held with `baton.retries`; a looped leg's count resets at each outcome | B-56; B-11 (the reset) |
+| S-BTN-10 | `baton.stalled` at 72 h, resolved by `baton owner resolve` | B-56, B-61 |
+| S-BTN-47 | spent retries and a 72 h wait as conditions; `course-changed` raised | B-56, B-57, B-61 |
+| S-BTN-44 | a posted decision raises `hitl.decision`; the ticket prerequisite is `depends_on`, not `blocked_by` | B-56, B-41 |
+| S-BTN-12, S-BTN-18 | the 6-h unconfirmed end raises `baton.unconfirmed` | B-57 |
+| S-BTN-34, S-BTN-39, S-BTN-37 | regressed path, `policy` waits and refused course files raised | B-57 (S-BTN-37's timer and held-position carry-over: B-61, B-38) |
+| S-BTN-45 (both files) | the queue over its bound raises `baton.queue-over`; no notice | B-57, then B-67 |
+| S-BTN-64 | `runner:session` through rule 4, a `capability` block | B-70 |
+| S-BTN-104, S-BTN-107 | person and call legs, not `waiting_on: owner\|children` | B-41 (with B-7, B-62) |
+| S-BTN-126 | no `courier` role for API keys or tokens | B-67 |
+| S-BTN-46, S-BTN-60 | retired | B-67 deletes them |
+
+Found beyond the ticket's table — rows the rewrite also changed, with their owners:
+
+| Test | What the row now says | Changed by |
+|---|---|---|
+| S-BTN-16 | adoption is confirmed by an administrator (`{pending: true}` to both asking runners, the confirmed one adopts) — the old row said "owner confirmation" | B-79 |
+| S-BTN-24 | the second advice case is a claim of a leg with a fleet `resource` block (accepted, `advice-overridden`) — the retired hook's short line | R3-1269 |
+| S-BTN-32 | a sign-in code confirmed by its minting key (not a login link); the pending-grant `conflict` without naming the role; `admin.key.revoke` on an administrator line | B-76 (the pending grant: B-46) |
+| S-BTN-66 | the invalid pointer is logged and `baton.output-invalid` raised, its consumer waiting on `input-missing` | B-53 (the raise: B-57) |
+| S-BTN-79 | the refused-schema listing is raised (`baton.<sub>`), not a Needs-you row | B-57 |
+| S-BTN-126 (beside B-67 above) | sign-in by code — the row's "a login link" case is gone | B-76 |
+
+Also: the rows now speak "runner" (`min_runner_version` in S-BTN-15 and S-BTN-26) while the
+tests keep `worker` identifiers — that vocabulary is B-68's rename, not a row change, and every
+other file's row matches its test's assertions today. S-BTN-43's header said "the `pr` course"
+where the row and the test's own assertions say `create-pr`; B-71 fixed that wording.

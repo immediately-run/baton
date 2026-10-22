@@ -1,4 +1,4 @@
-// S-BTN-38 a course measures itself (BATON_SPEC §13a, §2d, §11; R3-1248): after a claim runs legs,
+// S-BTN-38 a course measures itself (BATON_SPEC §15, §5.7, §14; R3-1248): after a claim runs legs,
 // suspends and another resumes and gives the ticket back, a worker key granted on docs reads
 // `GET /v1/repositories/docs/stats`; an `ops`-only key tries the same. Must hold: docs' key gets
 // leg wait and run times, ends by reason and detail, suspensions by station and overridden advice,

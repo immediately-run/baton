@@ -1,4 +1,6 @@
-// S-BTN-46 a decision reaches its owner (BATON_SPEC §13a, §2g R-BTN-80; R3-1256), on both hosts.
+// S-BTN-46 a decision reaches its owner (BATON_SPEC §15; R3-1256), on both hosts. The scenario is
+// retired — the history's "Retired scenarios and gates" table: S-BTN-131 replaces it, and B-67
+// deletes this file; check-spec's RETIRED_TESTS_ALLOWED list holds it until then.
 // docs' owner registers two couriers for `asks: owner` — the owner's CLI key and a phone-push
 // service's key — and the other repository's owner one for theirs; E posts the open decision
 // R3-E-1; the push courier claims and dies before marking; the CLI runs `baton decision list`; a

@@ -1,4 +1,4 @@
-// S-BTN-104 the standard courses (BATON_SPEC §13a S-BTN-104, R-BTN-131; B-28): a fresh repository
+// S-BTN-104 the standard courses (BATON_SPEC §15 S-BTN-104, R-BTN-131; B-28): a fresh repository
 // runs `baton repo init`, then `--course bug-report` and `--course decision`, with three tickets —
 // one on each — and syncs with no course code of its own. The bug report's legs commit their
 // closing markers to `.baton/markers.jsonl`; the decision's owner answers in the ticket's

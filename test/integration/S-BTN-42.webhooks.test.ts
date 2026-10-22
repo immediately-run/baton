@@ -1,4 +1,4 @@
-// S-BTN-42 webhooks (BATON_SPEC §13a, §7.1 R-BTN-73; G-BTN-68; R3-1247): a GitHub App delivery
+// S-BTN-42 webhooks (BATON_SPEC §15, §3.3 R-BTN-73; G-BTN-68; R3-1247): a GitHub App delivery
 // is only a trigger. Must hold: a `pull_request_review` for a code repository a ticket lists
 // dispatches the home repository's sync; the same delivery again and a forged one dispatch
 // nothing; a burst of ten `issue_comment` deliveries over 20 seconds yields one dispatch at

@@ -1,4 +1,4 @@
-// S-BTN-32 owners and grants (BATON_SPEC §13a, §10.6 R-BTN-57, R-BTN-58, R-BTN-16; R3-1240): an
+// S-BTN-32 owners and grants (BATON_SPEC §15, §11.1 R-BTN-57, §8.2 R-BTN-58, §12.4 R-BTN-16; R3-1240): an
 // administrator registers `ops` with one owner and gives `docs` (seeded before owners existed) its
 // owner; docs' owner grants worker key K. Must hold: K is recommended and claims docs tickets,
 // never ops tickets; ops' owner revoking K's docs grant is forbidden; removing the last owner is

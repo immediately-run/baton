@@ -1,4 +1,4 @@
-// S-BTN-36 suspension confirmed from a PR (BATON_SPEC §13a, R-BTN-62), the observation half
+// S-BTN-36 suspension confirmed from a PR (BATON_SPEC §15, R-BTN-62), the observation half
 // R3-1231 part 3 delivers: a reading is judged by the number Baton handed out before the sync read
 // anything. Must hold: an older reading arriving after a newer one is refused stale-observation
 // and changes nothing; an end is confirmed, and a claim made stale, only by a reading numbered

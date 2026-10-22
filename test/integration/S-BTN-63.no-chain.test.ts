@@ -1,4 +1,4 @@
-// S-BTN-63 no review by its author's key (BATON_SPEC §13a, §2m.1 R-BTN-106; B-2): a claim runs
+// S-BTN-63 no review by its author's key (BATON_SPEC §15, §8.3 R-BTN-106; B-2): a claim runs
 // `implement` and reaches `pr-open`; its runner tries to advance into `review`, which names
 // `implement` in `no_chain_from`; it suspends, then claims the ticket again under the same key; the
 // course file drops the list while the owners' `required_independence` names it. Must hold: the
