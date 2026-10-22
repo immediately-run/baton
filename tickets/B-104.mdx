@@ -8,7 +8,7 @@ tags:
   - roadmap-item
 order: 506
 tier: judgement
-description: "Legs require at any altitude (capability, model); runners declare holdings (credential:, dependency:); a per-repo, sync-posted ontology derives capabilities from (holdings ∩ grant) — one named fragment of ASP-Core-2 (safe, stratified, default negation, integer comparison), evaluated by a bounded evaluator in core, materialized at heartbeat, conformance-checked against clingo in CI. Baton maps claims, preflight tests truth, core learns no vocabulary. Requires: none."
+description: "Legs require at any altitude (capability, model); runners declare holdings (credential:, dependency:); a per-repo, sync-posted ontology derives capabilities from (holdings ∩ grant) — one named fragment of ASP-Core-2 (safe, stratified, default negation, integer comparison), evaluated by a bounded evaluator in core, materialized at heartbeat, conformance-checked against clingo (clingo-wasm, in `npm test`). Baton maps claims, preflight tests truth, core learns no vocabulary. Requires: none."
 topics:
   - baton
 owns: {}
@@ -296,21 +296,34 @@ B-104 builds the harness, and B-105 adds fixtures to it.
   constant pattern admits no quote or backslash), an integer stays an integer, `$m` becomes
   `V_m`, and `{"not": …}` becomes `not …`. The emitter is a closed set of templates, and its
   output contains no gringo-only syntax (no `#show`, pools, intervals or scripts).
-- **The CI job** (`.github/workflows/`, a new `ontology-conformance` job) installs a pinned
-  clingo (`pip install clingo==5.7.1`). For every fixture under `test/fixtures/ontology/` it
-  runs the translated program, the fixture's holdings as `holds/1` facts, and a harness-only
-  `#show derived/1.` file, kept apart so `#show` never enters the translation. It asserts
-  exactly one answer set, which is the stratified fragment's guarantee, and that its
-  `derived/1` atoms equal `src/core/ontology.ts`'s result. A refused fixture must be refused by
-  the validator. The job is the R-BTN-68 posture: heavy tooling in CI, never hosted.
+- **The conformance suite** is `test/unit/ontology-conformance.test.ts`, an ordinary vitest
+  file in `npm test`. It needs no separate CI job, no Python and no network, and runs the same
+  on a contributor's machine. It uses **`clingo-wasm`**, pinned exactly as a devDependency
+  (`"clingo-wasm": "0.6.0"`, which bundles Clingo 5.8.1; Node ≥ 22, the repository's engine).
+  For every fixture under `test/fixtures/ontology/` it runs the translated program, the
+  fixture's holdings as `holds/1` facts, and a harness-only `#show derived/1.`, kept apart so
+  `#show` never enters the translation, through `clingo.run(text, 0)`. It asserts `Result` is
+  `"SATISFIABLE"` with exactly one witness, which is the stratified fragment's guarantee, and
+  that the witness's `derived/1` atoms equal `src/core/ontology.ts`'s result. The `Warnings`
+  must hold nothing but clingo's "atom does not occur in any rule head" info for prelude
+  predicates a fixture leaves empty. A refused fixture must be refused by the validator. Heavy
+  tooling stays in tests, never hosted (the R-BTN-68 posture). Upgrading `clingo-wasm` is a
+  deliberate commit that re-runs every fixture.
 - **The strict-syntax lint** backs the "standard" claim, since clingo accepts a superset of
   ASP-Core-2. A unit test parses every emitted fixture with a small recursive-descent parser for
   exactly the ASP-Core-2 productions the emitter uses, and fails on anything else.
-- **Recorded rejections:** clingo-wasm in the Worker (megabytes against the size budget, a
-  cold start per isolate, NP machinery for a polynomial need); a clingo sidecar (core egress, a
-  Baton that needs infrastructure beside it — value 11); an N3/RDF mapping (the first
-  addendum's demotion, completed). The facts read naturally as triples if a consumer ever needs
-  that. It is not built, tested or promised.
+- **Recorded rejections:**
+  - clingo-wasm in the Worker: megabytes against the size budget, a cold start per isolate,
+    NP machinery for a polynomial need. It is adopted in tests only.
+  - A `pip`-installed clingo CI job: Python in a TypeScript repository, and an oracle that
+    contributors do not run locally.
+  - Another Datalog dialect with its own engine (Nemo, Soufflé, Logica, Mangle). None is a
+    standard, none has a preference construct (so B-105 would leave the language), and none
+    offers better TypeScript tooling than clingo-wasm. The owner, 2026-10-22, would replace
+    ASP-Core-2 only for a dialect with better TypeScript tooling.
+  - A clingo sidecar: core egress, and a Baton that needs infrastructure beside it (value 11).
+  - An N3/RDF mapping: the first addendum's demotion, completed. The facts read naturally as
+    triples if a consumer ever needs that. It is not built, tested or promised.
 
 ### Decided defaults (reversible, recorded)
 
@@ -347,7 +360,7 @@ B-104 builds the harness, and B-105 adds fixtures to it.
 - **S-BTN-146 — timing and bounds.** An accepted ontology recomputes runners in alarm batches,
   and a claim in between matches under the previous digest. An evaluation crossing the step
   counter yields holdings only and raises `baton.ontology-limit`, identically on both hosts.
-- **Conformance.** The CI job is green on every fixture, including the worked example, the
+- **Conformance.** The clingo-wasm suite is green in `npm test` on every fixture, including the worked example, the
   binding idiom and a recursive one. The strict-syntax lint passes on all emitted text.
 
 ### Exit criteria
@@ -363,8 +376,8 @@ B-104 builds the harness, and B-105 adds fixtures to it.
 - [ ] a missing capability's why-not names the missing holding and the rule chain, by the
       specified canonical choice
 - [ ] a derived capability's credentials reach the leg's environment, and no others
-- [ ] the ASP-Core-2 translator, the clingo conformance job and the strict-syntax lint are
-      green in CI
+- [ ] the ASP-Core-2 translator, the clingo-wasm conformance suite and the strict-syntax lint
+      are green in `npm test`
 - [ ] no credential material, provider call or vocabulary word ever enters core
 
 ### Review dispositions
@@ -372,7 +385,7 @@ B-104 builds the harness, and B-105 adds fixtures to it.
 | # | Finding | Resolution |
 |---|---|---|
 | 1 | N3 still the deliverable | Title, Brief, tests and exit criteria rewritten around ASP-Core-2; N3 recorded as a rejection (§ Conformance) |
-| 2 | Nobody builds the clingo check | B-104 builds the translator, the CI job and the lint (§ Conformance); B-105 adds fixtures |
+| 2 | Nobody builds the clingo check | B-104 builds the translator, the clingo-wasm suite and the lint (§ Conformance); B-105 adds fixtures |
 | 3 | Fragment named three ways | One sentence (§ The language); nothing in the ticket contradicts it |
 | 4 | Duplicated block | Removed; the join rule appears once, in § Serialization |
 | 5 | "Variables in predicate positions" | Corrected: argument positions, first-order (§ The language, Atoms) |

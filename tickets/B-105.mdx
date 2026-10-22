@@ -104,7 +104,7 @@ Read plainly:
   total order by construction.
 
 **Core evaluates the equivalent first-match.** It filters to available alternatives, sorts by
-(demoted, position) and takes the first. There is no solver. The CI conformance job proves the
+(demoted, position) and takes the first. There is no solver. B-104's clingo-wasm suite proves the
 equivalence on every fixture (§ Conformance). Choice rules and weak constraints are allowed
 only in this generated form. A repository cannot write its own. Admitting them generally would
 be a new ticket, naming the ASP-Core-2 construct (B-104's growth rule).
@@ -287,11 +287,13 @@ they are not deleted. A leg with no advice therefore still has a model.
 
 Each fixture adds its input facts (`has`, `wanted`, `usable`, `state`, `blocked`, the reading
 atoms, `now`, `was_demoted`). The translator emits the choice rule and weak constraints above
-in standard ASP-Core-2. The harness runs clingo with `--opt-mode=optN --models=0` and a
-harness-only `#show route/2.`, and asserts **exactly one optimal model** whose `route/2` equals
-the TypeScript first-match, compared by projection, never as full answer sets. A fixture with
-no available alternative asserts that clingo has no `route` atom and that core returns `null`.
-The strict-syntax lint covers the new productions.
+in standard ASP-Core-2. The harness calls `clingo.run(text, 0, ["--opt-mode=optN"])` with a
+harness-only `#show route/2.`. It asserts `Result` is `"OPTIMUM FOUND"` and `Models.Optimal ===
+1`, and that the **last** witness's `route/2` equals the TypeScript first-match, compared by
+projection, never as full answer sets. Under `optN`, `Witnesses` lists the models found on the
+way to the optimum before the optimal ones, so `Witnesses[0]` is not the answer. A fixture with
+no available alternative asserts that the optimal witness has no `route` atom and that core
+returns `null`. The strict-syntax lint covers the new productions.
 
 ### Non-goals, named
 
@@ -320,14 +322,14 @@ The strict-syntax lint covers the new productions.
   credentials are in the leg environment, and no others.
 - **S-BTN-154 — bounds**: a preference evaluation crossing the step counter answers `reason:
   "limit"` and raises `baton.ontology-limit`, and the claim still succeeds (value 2).
-- **Conformance**: clingo finds exactly one optimal model, whose `route/2` equals core's, on
+- **Conformance**: clingo-wasm finds exactly one optimal model, whose `route/2` equals core's, on
   every fixture above.
 
 ### Exit criteria
 
 - [ ] both owner examples resolve as the tables state, at claim time, from posted state
 - [ ] guards are soft and availability is hard; the ASP-Core-2 reference and the first-match
-      evaluator agree in CI on every fixture
+      evaluator agree in `npm test` on every fixture
 - [ ] an instrument's schema-refined reading drives a guard with stored-demotion hysteresis,
       under the authority rule; readings never reach a gate
 - [ ] a new provider's choice logic needs no Baton code change, one administrator
