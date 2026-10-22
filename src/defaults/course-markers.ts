@@ -135,23 +135,30 @@ export type Exec = (cmd: 'git', args: string[], cwd: string) => string;
 
 /** B-94: the bound on every git (or `gh`) call a standard course's `close` makes. A command
  * that cannot answer in this long is killed and its failure thrown — a wedged push then fails
- * the leg in seconds, never blocks the claim for hours. */
+ * the leg in seconds, never blocks the claim for hours. The close runs in the runner's process
+ * and its git is synchronous, so the bound also blocks the runner's loop (no beat can fire
+ * while it waits): the arithmetic it must satisfy is `callClose`'s three attempts — 3 ×
+ * CLOSE_TIMEOUT_MS — staying under the lease's margin (`lease_timeout` − 4 min, §9.2; 6 min
+ * against 11 at today's 15-minute lease), pinned by test. */
 export const CLOSE_TIMEOUT_MS = 120_000;
 
-/** B-94: git's environment for a close — non-interactive by construction, so a credential
- * prompt or an ssh host-key question can never wait on a terminal the runner does not have:
- * no terminal prompt from git itself, and ssh in batch mode, failing rather than asking. */
+/** B-94: git's environment for every call the close and the runner's own git make —
+ * non-interactive by construction, so a credential prompt or an ssh host-key question can never
+ * wait on a terminal the runner does not have: no terminal prompt from git itself, and ssh in
+ * batch mode, failing rather than asking. One definition (B-94's review round 1): the runner
+ * and the generated stubs import it from here. */
 export const GIT_NONINTERACTIVE_ENV: Record<string, string> = {
   GIT_TERMINAL_PROMPT: '0',
   GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=20',
 };
 
 /** The real command runner every standard course's `close` uses; tests inject their own. B-94: it
- * is bounded — a command still running at `CLOSE_TIMEOUT_MS` is killed with SIGKILL and its
- * failure thrown (Node reports it as a timeout error) — and never interactive. */
-export const exec = (cmd: string, args: string[], cwd: string): string =>
+ * is bounded — a command still running at `timeoutMs` (default `CLOSE_TIMEOUT_MS`) is killed
+ * with SIGKILL and its failure thrown (Node reports it as a timeout error) — and never
+ * interactive. */
+export const exec = (cmd: string, args: string[], cwd: string, timeoutMs: number = CLOSE_TIMEOUT_MS): string =>
   execFileSync(cmd, args, {
-    cwd, encoding: 'utf8', timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL',
+    cwd, encoding: 'utf8', timeout: timeoutMs, killSignal: 'SIGKILL',
     env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
   }).trim();
 

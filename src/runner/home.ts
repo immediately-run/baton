@@ -17,18 +17,15 @@ import { graphOf, type Graph } from '../core/graph';
  * process lives is a claim lost silently. */
 export const GIT_TIMEOUT_MS = 30_000;
 
-/** B-94: git's environment for the runner's own calls — non-interactive by construction (no
- * credential prompt, ssh in batch mode), so nothing here can wait on a terminal. */
-export const GIT_NONINTERACTIVE_ENV: Record<string, string> = {
-  GIT_TERMINAL_PROMPT: '0',
-  GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=20',
-};
+// B-94: git's non-interactive environment is defined once, beside the close's bound — the
+// runner's git and the generated stubs import it from there.
+import { GIT_NONINTERACTIVE_ENV } from '../defaults/course-markers';
 
 /** One git command in the home checkout; throws with stderr when it fails, and is killed at
- * `GIT_TIMEOUT_MS` when it cannot answer (B-94). */
-function git(home: string, args: string[]): string {
+ * `timeoutMs` (default `GIT_TIMEOUT_MS`, under a beat) when it cannot answer (B-94). */
+export function git(home: string, args: string[], timeoutMs: number = GIT_TIMEOUT_MS): string {
   return execFileSync('git', ['-C', home, ...args], {
-    encoding: 'utf8', maxBuffer: 16 << 20, timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL',
+    encoding: 'utf8', maxBuffer: 16 << 20, timeout: timeoutMs, killSignal: 'SIGKILL',
     env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
   });
 }

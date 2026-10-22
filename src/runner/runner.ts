@@ -10,7 +10,7 @@
 // next safe point first.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
@@ -411,15 +411,17 @@ export class Runner {
     const g = globalThis as { __batonFatalHooks?: boolean };
     if (g.__batonFatalHooks) return;
     g.__batonFatalHooks = true;
+    // B-94 (review round 1): the crash report keeps the stack — `msg` alone discards what
+    // Node's default fatal path would have printed — and the line is written to fd 1
+    // synchronously, because nothing pending survives the `process.exit` that follows.
     const active = this;
-    process.on('uncaughtException', (e: unknown) => {
-      active.log(`baton: the runner crashed (${msg(e)}) — ${active.lastLine('uncaught exception')}`);
+    const fatal = (why: string, e: unknown): never => {
+      const report = e instanceof Error ? (e.stack ?? e.message) : msg(e);
+      try { writeSync(1, `baton: the runner crashed (${report}) — ${active.lastLine(why)}\n`); } catch { /* stdout gone */ }
       process.exit(1);
-    });
-    process.on('unhandledRejection', (e: unknown) => {
-      active.log(`baton: the runner crashed (${msg(e)}) — ${active.lastLine('unhandled rejection')}`);
-      process.exit(1);
-    });
+    };
+    process.on('uncaughtException', (e: unknown) => { fatal('uncaught exception', e); });
+    process.on('unhandledRejection', (e: unknown) => { fatal('unhandled rejection', e); });
   }
 
   /** The idle wait: a beat long, unless an `unblocked` message ends it early. */

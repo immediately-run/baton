@@ -8,13 +8,14 @@
 // test/unit/runner-main.test.ts; the wiring is exercised end-to-end by S-BTN-41 against the
 // local host.
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { BatonApi, envAuth } from './api';
 import { HARNESS_AGENTS, type Harness } from './harness';
-import { holdHome, GIT_NONINTERACTIVE_ENV } from './home';
+import { holdHome } from './home';
+import { GIT_NONINTERACTIVE_ENV } from '../defaults/course-markers';
 import { Runner } from './runner';
 
 export interface RunArgs {
@@ -176,6 +177,19 @@ export function exitHook(runner: Pick<Runner, 'lastLine'>, log: (l: string) => v
   return (code) => log(`baton: the runner is exiting, code ${code ?? '?'} (${runner.lastLine('exiting')})`);
 }
 
+/** B-94 (review round 1): a death line must survive `process.exit` — a pipe write is
+ * asynchronous and Node flushes nothing on exit, so a runner under a supervisor's pipe could
+ * die tracelessly exactly as before. The signal, exit and fatal paths therefore write to fd 1
+ * synchronously — or nowhere, if stdout is already gone. */
+export const syncLog = (l: string): void => {
+  try { writeSync(1, `${l}\n`); } catch { /* stdout is gone; the line cannot be written */ }
+};
+
+/** B-94 (review round 1): the exit hook is process-wide and never unregistered by `runMain`'s
+ * return, so a second `runMain` in one process (the tests run four) would stack another
+ * permanent listener. One slot: the previous hook comes off before the next goes on. */
+let exitHookFn: ((code: number | undefined) => void) | null = null;
+
 export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void } = {}): Promise<number> {
   // §6.13: a leg session never claims — the runner that started it does. A nested `baton run`
   // is exactly that session trying, so it is refused before anything else. BATON_PARENT is the
@@ -216,8 +230,9 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   let runner: Runner | null = null;
   const onSignal = (signal: NodeJS.Signals) => {
     // B-94: a runner never goes traceless — the signal, the claim it held, the leg in flight
-    // and the last beat are logged before the process leaves.
-    log(`baton: ${stopLine(runner, signal)}`);
+    // and the last beat are logged before the process leaves, synchronously (review round 1:
+    // `process.exit` flushes no pending pipe write).
+    syncLog(`baton: ${stopLine(runner, signal)}`);
     release();
     process.exit(signal === 'SIGINT' ? 130 : 143);
   };
@@ -241,9 +256,11 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     process.off('SIGTERM', onSignal);
     // B-94: every way out of the loop leaves a line — a normal end, a thrown error on its way
     // out (the CLI prints it), and an `exit` from anywhere once a claim could have been held.
-    const idle = runner.lastLine('idle');
-    log(`baton: the runner's loop ended (${idle})`);
-    process.on('exit', exitHook(runner, log));
+    // The lines and the hook write synchronously: nothing pending is lost to `process.exit`.
+    syncLog(`baton: the runner's loop ended (${runner.lastLine('idle')})`);
+    if (exitHookFn != null) process.removeListener('exit', exitHookFn);
+    exitHookFn = exitHook(runner, syncLog);
+    process.on('exit', exitHookFn);
     release();
   }
   return 0;

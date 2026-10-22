@@ -4176,8 +4176,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     with a connect timeout, and a timeout that kills the process. A stalled remote therefore
     fails the leg within the bound — `close` throws on the killed push, the runner's two retries
     are each bounded too, and then the leg ends `released:cannot-finish:transient` — rather than
-    blocking the runner for hours. Nothing on the heartbeat path runs a git, a filesystem read or
-    a spool write without a bound. **A runner's death always leaves a line:** on SIGTERM, SIGINT,
+    blocking the runner for hours. Nothing on the heartbeat path runs a git without a bound. **A runner's death always leaves a line:** on SIGTERM, SIGINT,
     an uncaught exception or an unhandled rejection it logs its claim id, the leg in flight and
     the time of its last answered beat before the process goes, so "died tracelessly" cannot
     happen.

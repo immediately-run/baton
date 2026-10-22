@@ -1,24 +1,27 @@
 // bounded-git.test.ts — B-94: no git call a stub or the runner makes can outlive its bound, and
 // a runner's death always leaves a line. The defaults' `exec` (what every standard course's
-// `close` runs) is bounded and non-interactive, so a wedged `git push` fails the leg in seconds
-// rather than holding the claim for hours; the runner's own git is bounded the same way; the
-// runner can state its claim, its leg and its last beat in one line for a signal or `exit` hook.
-// Node only: it spawns processes and a real git stand-in.
+// `close` runs) and the runner's own `git` are bounded and non-interactive, so a wedged
+// `git push` fails the leg in seconds rather than holding the claim for hours; the bound the
+// close's three attempts spend is pinned under the lease's margin; the runner can state its
+// claim, its leg and its last beat in one line for a signal or `exit` hook.
+// Node only: it spawns processes and drives the production seams with a real hanging git.
 import { afterAll, afterEach, describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from '../../src/defaults/course-markers';
-import { GIT_NONINTERACTIVE_ENV as RUNNER_GIT_ENV, GIT_TIMEOUT_MS } from '../../src/runner/home';
+import { exec, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from '../../src/defaults/course-markers';
+import { git, GIT_TIMEOUT_MS } from '../../src/runner/home';
 import { BEAT_MS, Runner } from '../../src/runner/runner';
 import type { BatonApi } from '../../src/runner/api';
 import { exitHook, stopLine } from '../../src/runner/main';
 import { StateFile } from '../../src/runner/state';
 
-/** A hanging program on PATH: if an unbounded git call were still the default, a close would
- * block on this forever. With the bound, the same call is killed. */
-const hangingGit = (): { dir: string; git: string } => {
+/** A real git that never returns: `git -c alias.hang='!sleep 3600' hang` shells out to a sleep,
+ * so the production seams (exec, git) meet the wedge they are bounded against. */
+const HANGING_GIT_ARGS = ['-c', 'alias.hang=!sleep 3600', 'hang'];
+/** A stand-in git binary on PATH that hangs outright — for `exec`, which takes any command. */
+const hangingGitBin = (): { dir: string; git: string } => {
   const dir = mkdtempSync(join(tmpdir(), 'baton-hang-'));
   const git = join(dir, 'git');
   writeFileSync(git, '#!/bin/sh\nexec sleep 3600\n');
@@ -36,21 +39,26 @@ describe('the defaults’ close is bounded and non-interactive (B-94)', () => {
     expect(GIT_NONINTERACTIVE_ENV.GIT_SSH_COMMAND).toContain('ConnectTimeout=');
   });
 
-  it('a git that never returns is killed at the bound (the same mechanism `exec` uses, short for a test)', () => {
-    const { dir, git } = hangingGit();
+  it('the real exec kills a hanging git at its bound and throws (review round 1: the production seam, not a replica)', () => {
+    const { dir, git: bin } = hangingGitBin();
     const started = Date.now();
     let killed = false;
     try {
-      execFileSync(git, [], { timeout: 150, killSignal: 'SIGKILL', stdio: 'ignore', env: { ...process.env, ...GIT_NONINTERACTIVE_ENV } });
+      exec(bin, [], dir, 150);
     } catch (e) {
-      // The timeout path: Node kills the child; the error names it as killed (ETIMEDOUT/ABORT_ERR).
-      killed = (e as NodeJS.ErrnoException).code === 'ETIMEDOUT' || (e as { killed?: boolean }).killed === true || String(e).includes('killed') || String(e).includes('ETIMEDOUT');
+      killed = (e as NodeJS.ErrnoException).code === 'ETIMEDOUT' || (e as { killed?: boolean }).killed === true || String(e).includes('SPAWN');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
     expect(killed).toBe(true);
-    // It returned well under the hang, not after an hour.
     expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it('the close’s three attempts stay under the lease’s margin (the bound is lease arithmetic, named and pinned)', () => {
+    // callClose tries three times (src/runner/runner.ts) with the synchronous exec, so the
+    // runner's loop is blocked for 3 × CLOSE_TIMEOUT_MS with no beat possible; the lease goes
+    // at lease_timeout − 4 min (§9.2), 900 s at today's floor.
+    expect(3 * CLOSE_TIMEOUT_MS).toBeLessThan(900_000 - 240_000);
   });
 });
 
@@ -59,9 +67,25 @@ describe('the runner’s own git is bounded and non-interactive (B-94)', () => {
     expect(Number.isInteger(GIT_TIMEOUT_MS)).toBe(true);
     expect(GIT_TIMEOUT_MS).toBeGreaterThan(0);
     expect(GIT_TIMEOUT_MS).toBeLessThan(BEAT_MS);
-    expect(RUNNER_GIT_ENV).toMatchObject({ GIT_TERMINAL_PROMPT: '0' });
-    expect(RUNNER_GIT_ENV.GIT_SSH_COMMAND).toContain('BatchMode=yes');
-    expect(RUNNER_GIT_ENV.GIT_SSH_COMMAND).toContain('ConnectTimeout=');
+    expect(GIT_NONINTERACTIVE_ENV).toMatchObject({ GIT_TERMINAL_PROMPT: '0' });
+    expect(GIT_NONINTERACTIVE_ENV.GIT_SSH_COMMAND).toContain('BatchMode=yes');
+    expect(GIT_NONINTERACTIVE_ENV.GIT_SSH_COMMAND).toContain('ConnectTimeout=');
+  });
+
+  it('the real git kills a hanging git at its bound (review round 1: the production seam)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-hang-'));
+    execFileSync('git', ['-C', dir, 'init', '-q'], { stdio: 'ignore' });
+    const started = Date.now();
+    let killed = false;
+    try {
+      git(dir, HANGING_GIT_ARGS, 150);
+    } catch (e) {
+      killed = (e as NodeJS.ErrnoException).code === 'ETIMEDOUT' || (e as { killed?: boolean }).killed === true || String(e).includes('SPAWN');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    expect(killed).toBe(true);
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 });
 
