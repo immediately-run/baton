@@ -4173,7 +4173,10 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     `released:cannot-finish:transient`. A lost lease aborts the leg and writes no hand-off.
   - **A wedged git never holds a claim (B-94).** Every git call the runner and a standard course's
     `close` make is bounded and non-interactive: `GIT_TERMINAL_PROMPT=0`, ssh in `BatchMode=yes`
-    with a connect timeout, and a timeout that kills the process. A stalled remote therefore
+    with a connect timeout, and a timeout that kills the process; the stubs a standard course
+    generates run every git and gh call they make — the snapshot probes, the override and
+    instructions reads, the forge verification — through the same bound and environment. A
+    stalled remote therefore
     fails the leg within the bound — `close` throws on the killed push, the runner's two retries
     are each bounded too, and then the leg ends `released:cannot-finish:transient` — rather than
     blocking the runner for hours. Nothing on the heartbeat path runs a git without a bound. **A runner's death always leaves a line:** on SIGTERM, SIGINT,

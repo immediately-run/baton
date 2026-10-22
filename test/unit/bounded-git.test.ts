@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { exec, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from '../../src/defaults/course-markers';
+import { exec, markerClose, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from '../../src/defaults/course-markers';
 import { git, GIT_TIMEOUT_MS } from '../../src/runner/home';
 import { BEAT_MS, Runner } from '../../src/runner/runner';
 import type { BatonApi } from '../../src/runner/api';
@@ -59,6 +59,34 @@ describe('the defaults’ close is bounded and non-interactive (B-94)', () => {
     // runner's loop is blocked for 3 × CLOSE_TIMEOUT_MS with no beat possible; the lease goes
     // at lease_timeout − 4 min (§9.2), 900 s at today's floor.
     expect(3 * CLOSE_TIMEOUT_MS).toBeLessThan(900_000 - 240_000);
+  });
+
+  it('the environment is merged in at the real seams, not only named (round 2: a probe sees it)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-env-'));
+    const probe = join(dir, 'probe.sh');
+    writeFileSync(probe, '#!/bin/sh\necho "$GIT_TERMINAL_PROMPT $GIT_SSH_COMMAND"\n');
+    chmodSync(probe, 0o755);
+    try {
+      expect(exec(probe, [], dir).trim()).toBe('0 ssh -o BatchMode=yes -o ConnectTimeout=20');
+      execFileSync('git', ['-C', dir, 'init', '-q'], { stdio: 'ignore' });
+      expect(git(dir, ['var', 'GIT_SSH_COMMAND']).trim()).toBe('ssh -o BatchMode=yes -o ConnectTimeout=20');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a wedged close fails the leg: markerClose with a hanging git at its bound throws (round 2: the timeout becomes the leg’s failure)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-hang-'));
+    execFileSync('git', ['-C', dir, 'init', '-q'], { stdio: 'ignore' });
+    // The injected run ignores what the close asks for and runs a genuinely hanging git through
+    // the real exec at a short bound: the kill and the throw are the production mechanism.
+    const hang: typeof exec = (_cmd, _args, cwd) => exec('git', HANGING_GIT_ARGS, cwd, 150);
+    try {
+      await expect(markerClose({ checkout: dir, ticket: { id: 'docs:B-2' }, leg: 'review' }, { reached: 'reviewed', next: 'merge' }, hang))
+        .rejects.toThrow(/hang|killed|SPAWN|ETIMEDOUT/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
