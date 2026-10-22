@@ -3,7 +3,7 @@ title: "B-10 — Baton leg prerequisites and capability types: one requires per 
 id: B-10
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-22
 repos:
   - baton
 tags:
@@ -55,12 +55,18 @@ ticket builds both.
 5. **Why not.** `GET /v1/repositories/{repository}/tickets/{ticket}/prerequisites[?leg=][&runner=me]`
    and `baton leg why` from the blocks index alone, every prerequisite met or not, with R-BTN-120's
    `why` table. The `condition` and `call` rows are B-59's and B-62's, and show here when they
-   land.
+   land. So do two rows the 2026-10-22 spec adds: a derived capability's `not-derived` (with
+   `needs`, `missing` under `runner=me`, and `chain`, R-BTN-174 — B-104's evaluation answers it)
+   and a resource's `busy` with the holder where the asker may see it (R-BTN-178 — B-106's rule 11
+   writes it); whichever of those tickets lands second adds its row here.
 6. **Capability types and roles** (`capability_types`, `capability_roles`) validated with the
    course file; a course may not declare a type named `runner` or `human-operator`; grants may
    name `<type>:*`, never a role; runners re-run `check` commands while idle. Through the `ROLES`
    window a course without `capability_types` reads through the vendored `ROLES`; `ROLES` is
-   removed once no registered course reads through it.
+   removed once no registered course reads through it. A type's declaration stays the course
+   file's; whether a type is *derived* is the repository's ontology's alone (R-BTN-121 as amended
+   by R-BTN-174, 2026-10-22) — nothing here decides it, and rule 4's "or derives it" joins this
+   ticket's capability check when B-104 lands.
 
 ### Do not
 
@@ -82,3 +88,7 @@ ticket builds both.
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — `select` is `parent` or `posted` only,
 `withdrawn` and `closed` entries join, and cycles and unmeetable entries raise conditions.)_
+
+_(2026-10-22: updated for the ontology and seats spec (§5.9, §6.10, §6.11) — the `why` table
+gains `not-derived` and `busy` rows and R-BTN-121 splits declaration (course file) from
+derivedness (ontology); both named inline above, each arriving with the ticket that builds it.)_

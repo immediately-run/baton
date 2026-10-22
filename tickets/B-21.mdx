@@ -3,7 +3,7 @@ title: "B-21 — Baton blocked edges: a prerequisite that fails during a leg end
 id: B-21
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-22
 repos:
   - baton
 tags:
@@ -34,7 +34,7 @@ R-BTN-126 is specified. This ticket builds it.
 
 1. **The end.** `POST /v1/runner/end` takes `released:blocked` with `prerequisite`, plus `reading` and `commit` where the kind needs them. Build the validation for each kind; an invalid prerequisite is recorded as a counted `cannot-finish:transient` in the refusing call. Readings are dropped (`reading-refused`) or the end found invalid exactly as R-BTN-126 splits them.
 2. **Resource.** Store the reading, add the `end`-sourced need, and write the ticket's row against R-BTN-76's counts, all in one transaction. Stamp `found_at`, and drop the need and its row at the leg's next end that is not blocked on it, or after 7 days.
-3. **Capability.** Remove the capability from the runner's declared set in the end's transaction, updating `fleet_capabilities`.
+3. **Capability.** Remove the capability from the runner's declared set in the end's transaction, updating `fleet_capabilities`. A `ref` is any capability the runner declared — its own statement, never checked against a proof (R-BTN-126 as amended 2026-10-22); the runner declares it again once its `check` passes (R-BTN-121). When B-104 has landed, the same transaction also re-evaluates the runner's derived sets (R-BTN-174) — the capability may have been one a derivation rested on; whichever of the two tickets lands second adds that half.
 4. **Ticket and decision.** Write provisional rows that refuse a claim into the leg (rule 1) and stay outside `blocked_since`. Settle them at the first snapshot containing the end's commit, and drop them with `prerequisite-unconfirmed` after an hour.
 5. **Bounds.** Add `max_blocked` to the owners' `retry` bounds (the owners' alone; a course sets none). Count blocked ends per (ticket, leg) from `claims.blocked_kind` and `claims.blocked_ref`, `call` ends excepted (G-BTN-115); past `max_blocked` in 24 hours apply the `blocked-exhausted` hold and raise `baton.retries`, and raise `baton.blocked-ends` for a runner with more than 4 × `max_blocked` blocked ends across tickets in 24 hours (through today's listing for either if B-56 or B-57 has not landed).
 6. **The runner.** `LegError(type, message, {prerequisite, reading?, commit?})`. Add `baton leg release --blocked --kind … --ref …` and the runner's own checks. A block is never retried in the claim.
@@ -69,3 +69,8 @@ branch, and a test should pin that a bar named `blocked` no longer captures it._
 _(2026-10-20: references moved to the current-state spec, PR #71. A blocked end's `condition` and
 `call` kinds are B-59's and B-62's, and call blocks do not count toward `max_blocked`
 (G-BTN-115).)_
+
+_(2026-10-22: updated for the ontology spec — a capability `ref` is any declared capability (its
+own statement), and the end's transaction re-evaluates the runner's derived sets once B-104 has
+landed (R-BTN-174); both named inline in item 3. A route choice's separately reported `dead`
+holding (R-BTN-177) is B-105's channel, not this end's.)_

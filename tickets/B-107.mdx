@@ -1,0 +1,77 @@
+---
+title: "B-107 — The provider advisory retires: model_providers, peak_schedules, provider_suspensions and the heartbeat's model_provider_id go, replaced by the ontology's readings and route choices"
+id: B-107
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 509
+tier: judgement
+description: "Retire the provider advisory the ontology and route choices replace (§5.9/§6.10, R-BTN-174–177): stop storing the board's providers block, drop the heartbeat's model_provider_id and worker_providers, drop the owner suspension routes and their delivery, serve neither in the views, and drop the tables by migration. Requires: B-105."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-105
+---
+
+**Brief:** B-105's item 7, filed as it directs: "core's existing `model_providers`,
+`peak_schedules` and `provider_suspensions` tables are not read by route choices. File a ticket
+to retire them once this lands." The 2026-10-22 spec (§5.9, §6.10) carries nothing of them: an
+owner's peak-cost preference is a guard over a `std:api-capacity@1` reading inside a route
+choice, and an unavailable provider is a reading `available: false` (R-BTN-76) or an alternative
+a leg reports `dead` (R-BTN-177) — never a table core keeps.
+**Spec:** `spec/BATON_SPEC.md` §5.9 (R-BTN-174), §6.3 (R-BTN-76) and §6.10 (R-BTN-176, R-BTN-177)
+as the replacement; the retirement itself has no rule — the words left the spec in the
+2026-10-22 rewrite (`BATON_SPEC_HISTORY.md`, Changelog). A claim **suspension** (§6.5) is
+untouched: same word, different thing.
+
+### What to build
+
+1. **The board's `providers` block stops being stored** (`src/core/board.ts`'s `ProvidersData`,
+   `src/core/baton.ts`'s writes into `model_providers`, `provider_models`, `peak_schedules`).
+   `checkPayload` ignores an incoming `providers` field rather than refusing it, as it does the
+   hook residue, so a sync that still posts it keeps working through the window; the field is
+   refused once no registered repository posts it.
+2. **The heartbeat loses `model_provider_id`** (`src/core/validate.ts`'s field and checks,
+   `src/core/workerApi.ts`'s `knownAccounts`, `worker_providers` writes and its row in the
+   runner view). The spec's §8.1 names no such field; a heartbeat carrying it is accepted with
+   the field ignored, then refused at the same time as (1)'s refusal.
+3. **The owner suspension routes go** (`workerApi.ts`'s set and lift, the `suspension` events,
+   `suspensionsFor` on the heartbeat, the alarm's suspension logging) with the view's
+   `providers` peaks computation and `suspensions` list (`baton.ts`).
+4. **One migration drops the tables** — `model_providers`, `provider_models`, `peak_schedules`,
+   `provider_suspensions`, `worker_providers` — registered in `src/migrations/index.ts`.
+   Migrations are append-only; nothing reads these after (1)–(3).
+5. **The replacement is B-105's to demonstrate here**: the repository's `reviewer-2` peak
+   preference runs as a route choice over the `anthropic-capacity` resource's readings, and the
+   retirement PR points at the run that shows it.
+
+### Do not
+
+- Put a provider word, a cost figure or a provider id in `src/core/` (R-BTN-50's boundary; the
+  ontology's readings arrive as opaque atoms).
+- Touch claim suspension (§6.5) or any other use of the word.
+
+### Tests
+
+- `test/unit/board.test.ts`: a post with a `providers` block is accepted and stores nothing.
+- `test/unit/worker-api.test.ts`: a heartbeat without `model_provider_id` accepted through the
+  window; the suspension routes answer `not-found`.
+- `git grep -n "model_providers\|peak_schedules\|provider_suspensions\|worker_providers" src/`
+  finds nothing outside `src/migrations/`.
+- `npm test`, `npm run typecheck` green.
+
+### Exit criteria
+
+- [ ] the tables are gone by migration and nothing in `src/` outside migrations names them
+- [ ] a sync posting `providers` and a heartbeat posting `model_provider_id` keep working
+      through the window, and the refusal flips only when the last poster is gone
+- [ ] the owner's peak example resolves through B-105's route choice, not core
+
+## Status
+
+_(filed 2026-10-22, per B-105 item 7, after the spec's 2026-10-22 rewrite removed every provider
+word; depends on B-105 because the replacement must exist before the retirement.)_

@@ -3,7 +3,7 @@ title: "R3-1272 — Baton CLI ranks and syncs on the runner: rank.mjs from the r
 id: R3-1272
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-22
 repos:
   - baton
 tags:
@@ -41,7 +41,7 @@ the runner, the sidecar's claim path and the sync runner.
 ### What to build
 
 1. `loadRanking(repo, course)` in the CLI: fetch the remote default branch, extract that commit's tree (`git archive <sha> | tar -x`) into a fresh temporary directory, import `.baton/courses/<course>/rank.mjs` from it; absent → `null`.
-2. `baton runner start`, before each claim: read `recommendations?all=1`, the fleet view of each candidate's repository and the instance view; call each course's `rank` with R-BTN-98's `view`; order groups by Baton's merge and within a group by `order`; claim with `prefer`; keep the chosen candidate's `advice` for the leg scripts.
+2. `baton runner start`, before each claim: read `recommendations?all=1`, the fleet view of each candidate's repository and the instance view; call each course's `rank` with R-BTN-98's `view`; order groups by Baton's merge and within a group by `order`; claim with `prefer: [{ticket_id, leg?, bills?}]` (R-BTN-100 as amended 2026-10-22 — a ranked entry may name its leg and its bills); keep the chosen candidate's `advice` for the leg scripts.
 3. `baton launch-plan`: the same with `runner: null` over `launch-candidates`, printing `launch` for each course.
 4. `baton repo sync` extracts the commit it posts and reads every input from there; a runner configured to sync a repository polls `wanted` and `git ls-remote` at most once a minute and runs the sync when `wanted` or the head differs from `head_sha`.
 5. `baton owner sync-want <repository>`.
@@ -69,3 +69,10 @@ the runner, the sidecar's claim path and the sync runner.
 _(filed 2026-10-16)_
 
 _2026-10-20 — references repointed to the current-state spec (PR #71); scope unchanged. **Note for the claimant:** R-BTN-98 now loads `rank.mjs` through R-BTN-133/R-BTN-134's verified tree and runs it in a child process with the leg's environment (R-BTN-144), and R-BTN-152 checks its answer; build `extractCommit` on B-42's verified trees if B-42 has landed; otherwise build it as written, and whichever of the two lands second moves `rank.mjs` onto the verified tree._
+
+_2026-10-22 — updated for the seats and route-choice spec: `prefer` entries are
+`{ticket_id, leg?, bills?}` (R-BTN-100), and a bill the ranked entry names takes seats, refused
+`instance-busy` past capacity by rule 11 (R-BTN-178, B-106's to build) — the refusal moves the
+`prefer` claim to its next candidate inside Baton's claim transaction, so the runner's claim
+call needs no new path. `BATON_ADVICE` for leg scripts (R-BTN-177) is B-105's, not this
+ticket's._

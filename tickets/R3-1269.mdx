@@ -3,7 +3,7 @@ title: "R3-1269 — Baton serves state: retire hooks; fleet and instance views, 
 id: R3-1269
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-22
 repos:
   - baton
 tags:
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1100
 tier: critical
-description: "Baton runs no repository code (BATON_SPEC §1 R-BTN-98, §6.7 R-BTN-99–100): drop the hook machinery, serve the fleet and instance views and launch-candidates with ETags, recommendations?all=1, and claims that take prefer, bills and rationale; S-BTN-57, -21, -61, G-BTN-88. Requires: none."
+description: "Baton runs no repository code (BATON_SPEC §1 R-BTN-98, §6.7 R-BTN-99–100): drop the hook machinery, serve the fleet and instance views and launch-candidates with ETags, recommendations?all=1, and claims that take prefer entries ({ticket_id, leg?, bills?}), bills and rationale; S-BTN-57, -21, -61, G-BTN-88. Requires: none."
 topics:
   - baton
 owns: {}
@@ -39,11 +39,11 @@ is Baton serving the state a runner ranks from. Tier: critical — the claim tra
 
 ### What to build
 
-1. `GET /v1/runner/fleet?repository=`, `GET /v1/runner/instances`, `GET /v1/runner/launch-candidates`, signed by the machine key alone, each with an `ETag` from `fleet_version` / `instances_version` plus the key's grant set and the UTC hour; `304` on `If-None-Match`.
+1. `GET /v1/runner/fleet?repository=`, `GET /v1/runner/instances`, `GET /v1/runner/launch-candidates`, signed by the machine key alone, each with an `ETag` from `fleet_version` / `instances_version` plus the key's grant set and the UTC hour; `304` on `If-None-Match`. The fleet view names each runner's capabilities derived for the repository once B-104 has landed (R-BTN-174); until then it names the declared set, as today.
 2. `GET /v1/runner/recommendations?all=1`: every page of each group, at most 500, `truncated` past it; no `score`, `reasons` text beyond Baton's own, or `advice`.
-3. `POST /v1/runner/claim` takes exactly one of `ticket_id`, `prefer` (≤ 50) or neither; `bills: [{instance, n?}]`; `rationale` (opaque JSON ≤ 4 KB). `advance` takes `bills`. `no-eligible-ticket` carries `refusals: [{ticket_id, code, rule?}]`.
-4. `claim_bills` rewritten at each `advance`, deleted at the end; the count per instance in the instance view; an instance not listing the claim's repository returned in `refused`.
-5. The version counters bumped in every write R-BTN-99 lists, and by the alarm at lapses, bar starts and ends.
+3. `POST /v1/runner/claim` takes exactly one of `ticket_id`, `prefer` or neither; `prefer` is `[{ticket_id, leg?, bills?}]` (at most 50 known tickets, R-BTN-100 as amended 2026-10-22 — an entry may name the leg it wants and carry its own `bills`); `bills: [{instance, n?}]`; `rationale` (opaque JSON ≤ 4 KB). `advance` takes `bills`. `no-eligible-ticket` carries `refusals: [{ticket_id, code, rule?}]`.
+4. `claim_bills` rewritten at each `advance`, deleted at the end; the instance view lists each instance's active claims billing it (leg, `claimed_at`, `n`, repository; hostname and ticket only where the key is granted), the caller's own hostname's `host` instances included (R-BTN-178); an instance not listing the claim's repository returned in `refused`. A bill takes seats and is refused `instance-busy` past capacity by rule 11 — B-106's to build; until it lands, this ticket counts bills per instance and leaves the seat refusal to whichever lands second.
+5. The version counters bumped in every write R-BTN-99 lists — a heartbeat changing tags, profile or reports; a billing change; an accepted board post; a reading; and, once B-104 has landed, a `runner_derived` change — and by the alarm at lapses, bar starts and ends.
 
 ### Architecture — the decisions, named
 
@@ -78,3 +78,9 @@ is Baton serving the state a runner ranks from. Tier: critical — the claim tra
 _(filed 2026-10-16; replaces R3-1236)_
 
 _(2026-10-20: extended for the coverage audit — names S-BTN-61 and G-BTN-88, whose bills half this ticket builds.)_
+
+_(2026-10-22: updated for the ontology, route-choice and seats spec (§5.9, §6.10, §6.11) —
+`prefer` entries gain `leg?` and their own `bills` (R-BTN-100); the instance view serves active
+billings with seats and the caller's `host` instances (R-BTN-178, rule 11 arriving with B-106);
+the fleet view and the ETag's bumps gain the ontology's `runner_derived` (R-BTN-174, arriving
+with B-104). Each seam is named inline above; whichever ticket lands second wires its half.)_
