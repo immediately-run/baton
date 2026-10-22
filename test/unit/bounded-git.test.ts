@@ -69,7 +69,9 @@ describe('the defaults’ close is bounded and non-interactive (B-94)', () => {
     try {
       expect(exec(probe, [], dir).trim()).toBe('0 ssh -o BatchMode=yes -o ConnectTimeout=20');
       execFileSync('git', ['-C', dir, 'init', '-q'], { stdio: 'ignore' });
-      expect(git(dir, ['var', 'GIT_SSH_COMMAND']).trim()).toBe('ssh -o BatchMode=yes -o ConnectTimeout=20');
+      // The alias's shell inherits the environment the runner's git merged in.
+      expect(git(dir, ['-c', 'alias.envprobe=!echo $GIT_TERMINAL_PROMPT $GIT_SSH_COMMAND', 'envprobe']).trim())
+        .toBe('0 ssh -o BatchMode=yes -o ConnectTimeout=20');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
