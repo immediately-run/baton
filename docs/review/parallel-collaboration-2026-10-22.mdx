@@ -31,7 +31,7 @@ server-owned state) is fine by construction.
 
 - **`.baton/markers.jsonl`** — every marker-course leg of every ticket appending to one
   file, union-merged precisely because it was shared: the violation that motivated this
-  review. [B-100](../tickets/B-100.mdx) retires it (state in the ticket's frontmatter,
+  review. [B-100](../../tickets/B-100.mdx) retires it (state in the ticket's frontmatter,
   per-leg headings, schema-checked at the boundary).
 
 ## Found by this review: one more ticket
@@ -39,7 +39,7 @@ server-owned state) is fine by construction.
 - **`CHANGELOG.md`** — not in the spec, but in this repository's convention: every
   ticket's PR adds a row to one table at its top, and the convention is imitated by every
   implement agent (PRs #88 and #93 both did). Several dozen parallel PRs each touching
-  the same table's head is a conflict per merge. [B-102](../tickets/B-102.mdx): the leg
+  the same table's head is a conflict per merge. [B-102](../../tickets/B-102.mdx): the leg
   instructions' *Do not* gains the rule ("a leg never edits a file another ticket's leg
   may edit — no CHANGELOG, no index, no aggregate; a release note belongs in the PR
   body"), and this repository's CHANGELOG becomes release-curated.
