@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BatonApi, BatonRefusal, type Auth, type Transport } from '../runner/api';
+import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type PrFact, type StationsResult } from './course-pr';
@@ -558,7 +559,9 @@ const AGENT_OUTPUT_MAX = 64 * 1024 * 1024;
 
 /** One leg stub's source (R-BTN-74, R-BTN-131): run the `agent_command` that
  * `.baton/baton.json` names at the claim's snapshot (`ctx.snapshot.sha`, the commit the runner
- * loads the leg scripts from), with no shell between the stub and the agent and stdin never an
+ * loads the leg scripts from) — or, the settings naming none, the `BATON_AGENT_COMMAND` the
+ * runner passed down (`--harness`'s choice: a fill for an absence, never an override — B-83) —
+ * with no shell between the stub and the agent and stdin never an
  * open pipe (B-84: an open stdin pipe under the old spawn hung real harness CLIs — `opencode
  * run`, deterministically, zero output until the claim was reaped) — the command string splits
  * into words as `sh` would, quotes and no substitutions (`agent-words.ts`), and runs as
@@ -622,7 +625,10 @@ async function standard(ctx) {
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
   const show = (rel) => execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} });
   const settings = JSON.parse(show('.baton/baton.json'));
-  if (typeof settings.agent_command !== 'string' || settings.agent_command === '') throw new Error('.baton/baton.json names no agent_command');${verify ? `
+  // B-83: the snapshot's settings stay authoritative; BATON_AGENT_COMMAND — the harness command
+  // \`baton run --harness\` chose — fills their absence, never overrides their choice.
+  const agentCommand = typeof settings.agent_command === 'string' && settings.agent_command !== '' ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? '';
+  if (agentCommand === '') throw new Error('.baton/baton.json names no agent_command — run \`baton repo init --agent opencode\` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none');${verify ? `
   // What this leg's verification looks for (B-81): the course's branch patterns, as the
   // snapshot's settings carry them, and the repositories the ticket's repos: names — the
   // ticket file is the checkout's own copy, the one the agent may have just added its PR to.
@@ -646,7 +652,7 @@ async function standard(ctx) {
   // appended last; stdin closes at spawn (below), and stdout and stderr are captured pipes — and
   // the command's exit is the agent's completion, which its own contract (the leg .md's header)
   // requires it to mean.
-  const [command, ...words] = splitWords(settings.agent_command);
+  const [command, ...words] = splitWords(agentCommand);
   if (command === undefined) throw new Error('.baton/baton.json names no agent_command to run');
   const out = await new Promise((resolve, reject) => {
     const child = execFile(command, [...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout], {
@@ -782,11 +788,19 @@ function cliPin(): string {
   return `${slug}@${sha}`;
 }
 
-/** `baton repo init [--course <standard course>] [--override <leg>]… [--eject tickets|stations] [--pin owner/name@commit] [--force]`
- * (R-BTN-74, R-BTN-131). Run again with another `--course`, it adds that course beside the first:
+/** `baton repo init [--course <standard course>] [--agent opencode|claude-code]
+ * [--agent-command <cmd>] [--override <leg>]… [--eject tickets|stations] [--pin owner/name@commit]
+ * [--force]` (R-BTN-74, R-BTN-131). Run again with another `--course`, it adds that course beside the first:
  * its files, and its entry in `.baton/baton.json`'s `courses`. With no `--course` it takes the
  * repository's `default_course`, else `create-pr`; a repository still on `pr`, the name
  * `create-pr` replaced, keeps its files and gets the new pin only.
+ *
+ * The `agent_command` the stubs run (B-83): `--agent` names the harness whose command it is
+ * (`opencode` by default, `claude-code` the other), `--agent-command` names any command
+ * outright — including `echo`, the no-op stub for tests, which is never written otherwise. A
+ * fresh repository gets the chosen harness's command, printed for the unfamiliar; an existing
+ * bare `echo` is replaced by it, loudly; any other named command is kept, as the repository's
+ * own.
  *
  * Each standard course's entry names its `source`, `github/<owner>/<name>/<commit>/<course>`: the
  * CLI's own repository at the commit that wrote the files, which the sync holds the course file to
@@ -802,6 +816,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   let eject: 'tickets' | 'stations' | null = null;
   let pin: string | null = null;
   let force = false;
+  let agent: Harness = 'opencode';
+  let agentNamed = false;
+  let agentCommand: string | null = null;
   const overrides: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -814,6 +831,12 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
     else if (a === '--pin') pin = value();
     else if (a === '--force') force = true;
     else if (a === '--override') overrides.push(value());
+    else if (a === '--agent') {
+      const v = value();
+      if (v !== 'opencode' && v !== 'claude-code') throw new Error('--agent: opencode or claude-code');
+      agent = v;
+      agentNamed = true;
+    } else if (a === '--agent-command') agentCommand = value();
     else if (a === '--eject') {
       const v = value();
       if (v !== 'tickets' && v !== 'stations') throw new Error('--eject: tickets or stations');
@@ -919,6 +942,7 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   let settings: BatonJson;
   let changed: string | null = null;
   let rewriteNamed = force;
+  let commandMoved = false;
   const moved: string[] = [];
   if (existing) {
     // A second course joins the first: its entry is added, everything else in the file kept. With
@@ -935,16 +959,38 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
       return c;
     });
     settings = { ...existing, courses: listed ? next : [...next, entry] };
-    if (!listed || force || moved.length) changed = `baton: .baton/baton.json lists course ${b.id}${listed ? (force ? ' afresh' : '') : ' now'}${moved.length ? `; ${moved.join(', ')} now from ${self!.sha.slice(0, 10)}` : ''}`;
-    else kept.push('.baton/baton.json');
+    // B-83: the bare `echo` stub never survives an init — a no-op agent whose every leg
+    // "succeeds". An explicit `--agent-command` names any command (`echo` included, for tests);
+    // an explicit `--agent` switches to that harness's command; without either, the old default
+    // is replaced by the default harness's command, and any other named command — the
+    // repository's own — is kept.
+    const was = typeof existing.agent_command === 'string' ? existing.agent_command : '';
+    const now = agentCommand ?? (agentNamed || was === 'echo' ? HARNESS_AGENTS[agent] : null);
+    if (now != null && now !== was) settings.agent_command = now;
+    commandMoved = now != null && now !== was;
+    if (!listed || force || moved.length || commandMoved) {
+      changed = [
+        !listed || force || moved.length ? `baton: .baton/baton.json lists course ${b.id}${listed ? (force ? ' afresh' : '') : ' now'}${moved.length ? `; ${moved.join(', ')} now from ${self!.sha.slice(0, 10)}` : ''}` : null,
+        commandMoved ? `baton: agent_command ${was === 'echo' ? '"echo" — the no-op stub — ' : ''}is now ${agentCommand != null ? 'the command --agent-command named' : `the ${agent} command`}` : null,
+      ].filter(Boolean).join('; ');
+    } else kept.push('.baton/baton.json');
   } else {
-    settings = { baton_url: process.env.BATON_URL ?? DEFAULT_URL, items: 'tickets', default_course: b.id, repos: {}, agent_command: 'echo', courses: [entry] };
+    // B-83: a fresh repository names a real agent from the start — the chosen harness's command,
+    // printed below for the unfamiliar. The bare `echo` stub is written only when named
+    // explicitly, never by default.
+    const chosen = agentCommand ?? HARNESS_AGENTS[agent];
+    if (chosen === 'echo' && agentCommand !== 'echo') {
+      throw new Error('baton repo init refuses to write the no-op agent_command "echo" — pass --agent opencode or --agent claude-code for a real command, or --agent-command echo to name the stub explicitly');
+    }
+    settings = { baton_url: process.env.BATON_URL ?? DEFAULT_URL, items: 'tickets', default_course: b.id, repos: {}, agent_command: chosen, courses: [entry] };
   }
   refusePin(settings.courses ?? []);
   if (changed) log(changed);
   if (!kept.includes('.baton/baton.json')) {
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+    // B-83: the command printed for the unfamiliar, whenever this init named one.
+    if (!existing || commandMoved) log(`baton: agent_command${agentCommand != null ? ' (--agent-command)' : ` (the ${agent} harness)`}: ${settings.agent_command}`);
   }
   await scaffold(b, rewriteNamed || !existing);
   for (const id of moved.filter((m) => m !== b.id)) await scaffold(builtIn(id)!, true);
