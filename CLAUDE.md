@@ -5,6 +5,16 @@ Baton is specified by `BATON_SPEC`, `spec/BATON_SPEC.md` in this repository (mov
 here, by pull request; docs' `content/specs/BATON_SPEC.mdx` is a stub. Read the item and the spec
 sections it cites before changing anything. See `README.md` for the layout.
 
+## Resident context
+
+Before your first change in a session — and before arguing a design — read
+`docs/context/`: [what Baton is](docs/context/product.mdx), [the architectural
+decisions](docs/context/architecture.mdx) (git is the ledger, the server is the only
+allocator, verification at the boundary, separate tickets never share a write target),
+[the values](docs/context/values.mdx) and [the vocabulary](docs/context/vocabulary.mdx)
+(core's words, one sentence each — `step_kinds` included). A change that contradicts a
+decision there is a change to Baton, not a change in Baton.
+
 ## Rules
 
 - **`src/shared/` is vendored.** Change `baton.mjs`, `vocabulary.mjs` or `sessionUsage.mjs` in docs, then

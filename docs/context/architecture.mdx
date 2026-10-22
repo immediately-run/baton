@@ -1,0 +1,78 @@
+---
+title: Architecture — the decisions Baton is built on
+description: The core architectural decisions, each with its reason — the resident context every agent (and person) working on this codebase starts from, alongside the product proposition and the vocabulary.
+nav: Architecture
+order: 2
+tags: [context]
+---
+
+<Lede>What Baton *is* lives in [product.mdx](product.mdx); the words live in
+[vocabulary.mdx](vocabulary.mdx). This page is the third resident page: the decisions the
+code embodies, each with the reason it was taken — so a change that contradicts one is a
+change to Baton, not a change in Baton.</Lede>
+
+## The ledger and the cache
+
+- **Git is the ledger; the board is a cache.** Every ticket, its evidence and its state
+  live in the repository; Baton's board is rebuilt from it by each sync and can be
+  rebuilt from it at any time. Nothing is true because Baton stored it; Baton stores it
+  because git says it.
+- **One Baton serves a repository.** Two boards for one repository drift and contradict
+  (the owner's decision, 2026-10-21); staging deploys the Worker but registers no
+  repository production serves.
+
+## Who decides what
+
+- **The server is the only allocator.** Claims, heartbeats and advances are the whole of
+  a runner's knowledge: which ticket, which station, which leg — offered by the claim,
+  fenced by the heartbeat (R-BTN-6), validated at the advance (the edge, the run limit,
+  the gates). Runners never derive state from files; the sync derives the board from
+  files.
+- **One live claim per ticket, one runner per checkout, one writer per ticket file.**
+  Serialization is by ownership, not by locks on shared things.
+- **Verification at the boundary, not separation.** Any file in the checkout is writable
+  by the agent, machine-named or not — so the machine checks what it reads: the ticket's
+  schema after every leg, the PR's existence before `pr-open`, the answer line before
+  the verdict. Trust nothing the agent touched; check everything the machine reads.
+
+## Parallel without conflict
+
+- **Separate tickets never share a write target.** A file a leg writes is per-ticket —
+  in its path or on its branch — or it does not exist. This retired `markers.jsonl`
+  (B-100) and shapes every course since; the audit that stated it is
+  [`docs/review/parallel-collaboration-2026-10-22.mdx`](../review/parallel-collaboration-2026-10-22.mdx).
+- **Several dozen parallel workers** — humans and agents — are the load the architecture
+  is for, provided they work separate tickets.
+
+## Where code lives
+
+- **Course code never core.** `src/defaults/` (the standard courses, the CLI's sync and
+  init) is exempt from the boundary test and core imports nothing from it: what a
+  repository does with its tickets is that repository's code, shippable and versioned
+  apart from the engine.
+- **One core, both hosts.** `src/core/` runs unchanged on the Durable Object and the
+  local host (R-BTN-55); migrations are append-only; every behaviour change names its
+  `S-BTN-n` scenario. The enforcement surface is `CLAUDE.md`'s rules — this page is why
+  they are rules.
+- **The formal model names the code.** `model/baton.qnt` and the implementation check
+  each other (`model:links`, traces); a change to what the model checks carries a report.
+
+## The seams, as contracts
+
+- **The agent seam** (`agent_command`): spawned without a shell, stdin never an open
+  pipe, the process's exit the agent's completion (B-84's contract); result-dependent
+  legs' answers are machine-read last lines; the model configuration is the repository's
+  choice (`baton.json`), the wrapper hook the repository's freedom (B-95).
+- **The state seam** (marker courses, B-100): the ticket is the record — frontmatter for
+  the machine, one heading per leg for the work, schema-checked at the boundary.
+- **The conversation seam** (PR courses, B-101): review rounds live on the PR branch as
+  files, mirrored to the forge for humans, deleted before the squash — the channel plain
+  `git` repositories have.
+- **The entry seam** (B-98): a course whose product is tickets or specs starts from a
+  request — one sentence, filed by a command — never ticket-less.
+
+## What Baton is not
+
+- Not a durable-execution engine — the comparison and the boundary are
+  [`compared-to-temporal.mdx`](../compared-to-temporal.mdx); work's durability is git's,
+  and the lease is Baton's.

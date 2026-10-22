@@ -1,0 +1,64 @@
+---
+title: Parallel collaboration review — several dozen workers, separate tickets, no conflicts
+description: The spec and the course code audited for one concern — independent runners on different tickets must never share a write target. What holds by design, what one ticket already fixes, and what one more ticket must.
+tags: [review]
+order: 51
+---
+
+<Lede>The owner's principle, 2026-10-22: Baton's architecture allows several dozen parallel
+collaborators — humans and agents — to work on one repository without conflicts as long as
+they work on separate tickets. This review walks every file a leg can write and asks: do
+two runners on two tickets ever touch the same one?</Lede>
+
+The principle, stated as a rule: **a file a leg writes is per-ticket — in its path or on
+its branch — or it does not exist.** Everything else (read-only inputs, per-runner state,
+server-owned state) is fine by construction.
+
+## Holds by design
+
+| Artifact | Who writes | Why it is safe |
+|---|---|---|
+| Ticket files | one leg at a time | one live claim per ticket, enforced by the server; B-100's per-leg headings make the ticket the only record |
+| PR branches (`claude/{ticket}-*`) | the ticket's claim | one branch per ticket, one claim per branch pattern |
+| Runner state + spool | one runner | per session name (`~/.cache/immediately-run/baton/<session>.json`), never shared |
+| `baton-runner.lock` | one runner | per checkout gitdir (`git rev-parse --absolute-git-dir` — per-worktree) |
+| `.baton/baton.json`, course files, leg instructions | `repo init`, humans, PRs | repo-owned, read-only to legs |
+| `tickets/archive/` moves | the done flow | one file per ticket; the index is generated (`<DirectoryList />`) |
+| `.baton/reviews/<round>.md` (B-101, to build) | the ticket's review/address legs | on the ticket's own branch, per round |
+| `.baton/logs/<ticket>-<leg>.log` (B-95's example) | the ticket's wrapper | per-ticket by naming discipline |
+
+## Fixed by one ticket already filed
+
+- **`.baton/markers.jsonl`** — every marker-course leg of every ticket appending to one
+  file, union-merged precisely because it was shared: the violation that motivated this
+  review. [B-100](../tickets/B-100.mdx) retires it (state in the ticket's frontmatter,
+  per-leg headings, schema-checked at the boundary).
+
+## Found by this review: one more ticket
+
+- **`CHANGELOG.md`** — not in the spec, but in this repository's convention: every
+  ticket's PR adds a row to one table at its top, and the convention is imitated by every
+  implement agent (PRs #88 and #93 both did). Several dozen parallel PRs each touching
+  the same table's head is a conflict per merge. [B-102](../tickets/B-102.mdx): the leg
+  instructions' *Do not* gains the rule ("a leg never edits a file another ticket's leg
+  may edit — no CHANGELOG, no index, no aggregate; a release note belongs in the PR
+  body"), and this repository's CHANGELOG becomes release-curated.
+
+## Throughput notes, not defects
+
+- **Default-branch pushes (marker courses)** — correct under load (push–rebase–retry,
+  bounded once B-94 lands its timeouts) but serialized: every push invalidates other
+  in-flight rebases. At dozens of parallel marker runners this is a ceiling, not a
+  conflict; PR-style branches are the pressure valve, and B-100's per-ticket files keep
+  the commits small.
+- **`spec/BATON_SPEC.md` and prose** — amended by PRs; textual conflicts are review-time
+  content merges, and B-96's create-spec serializes spec edits per spec-PR branch. A
+  single spec document is inherently one writer at a time *in content*; the process
+  around it, not the file, is what parallelizes.
+
+## The principle's place
+
+The rule belongs to the resident context
+([`docs/context/architecture.mdx`](../context/architecture.mdx), created with this
+review): separate tickets never share a write target. A course whose design wants a
+shared file must answer this review before it ships.
