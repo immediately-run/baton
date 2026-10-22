@@ -285,6 +285,26 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - the why-not walk is deduplicated;
   - `atoms_from` is judged per instance.
 
+  After round 5 the owner stated Baton's responsibilities, and the statement was refined in
+  discussion: "Baton is an advisory lock server and capability, instrumentation and message
+  tracker. It does not enforce or directly verify work performed by runners, nor does it assign
+  them permissions or capabilities." Pushed back on and agreed:
+  - the lease stays authoritative for every worker that uses Baton;
+  - grants and roles are access control over Baton's own state, not permission over the work;
+  - adoption, not each worker's obedience, is the optional part.
+
+  The owner added three points:
+  - "human-operator is a self-proclaimed capability of a runner. Baton can't verify a runner is
+    actually human-operated";
+  - "gates protect the lock, not the work";
+  - advice may lag but must be bounded: "post-sync the advice is expected to be up-to-date
+    considering state the sync transferred (same for instrument readings, etc)". This became
+    read-your-writes for each runner, and one alarm cycle for fleet-wide views.
+
+  These are recorded in the resident context (`product.mdx`, values 12, `architecture.mdx`).
+  The spec changes they imply are pending: `human-operator` self-declared, R-BTN-45's wording,
+  the freshness bound, and round 5's findings under the advisory model.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

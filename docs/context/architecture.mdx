@@ -23,10 +23,15 @@ change to Baton, not a change in Baton.</Lede>
 
 ## Who decides what
 
-- **Baton advises; it does not police.** It is an advisory lock and a tracker (values 12): a
-  refusal keeps cooperating workers from colliding, a capability is a runner's own statement of
-  what it can do, and nothing Baton answers verifies or confines the work itself. A threat that
-  needs a runner stopped belongs to the sandbox, the forge or the credential proxy, not here.
+- **Baton holds the lock; it does not police the work.** A refusal keeps cooperating workers
+  from colliding; a capability, `human-operator` included, is a runner's own statement; Baton's
+  permissions cover only its own state — who takes a repository's leases, who changes its
+  settings (values 12). A threat that needs a runner stopped belongs to the sandbox, the forge
+  or the credential proxy, not here.
+- **Advice is fresh for the reader, bounded for the fleet.** A write Baton accepts — a board,
+  a reading, a heartbeat, an ontology — marks what it affects stale, and anything a runner reads
+  afterwards is brought up to date for that runner first; fleet-wide views (counts, blocks,
+  wake-ups, the dashboard) are current within one alarm cycle.
 
 - **The server is the only allocator.** Claims, heartbeats and advances are the whole of
   a runner's knowledge: which ticket, which station, which leg — offered by the claim,

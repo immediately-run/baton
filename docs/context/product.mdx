@@ -10,12 +10,18 @@ tags: [context]
 and shows the whole factory live. Git keeps every ticket and its evidence; Baton keeps what is
 happening now.</Lede>
 
-**Baton is an advisory lock server, and a tracker of capabilities, instrumentation and
-messages.** It does not enforce or directly verify the work runners do, and it does not assign
-them permissions or capabilities. It is an optional optimization that collaborating agents and
-people can — and should — use, not a gatekeeper of anything (the owner, 2026-10-22). Its
-refusals are a lock's refusals: they keep cooperating workers from colliding and from taking
-work they have said they cannot do, and they bind only those who use Baton.
+**Baton is the lock and the live record, for workers who cooperate.** It holds the lease on each
+ticket and decides who may take it. It records what runners say they can do, what instruments
+read, and what people and agents tell each other, and it advises on everything else. It does
+not do, verify or confine the work: git and the forge hold what was done, and the sandbox and
+the credentials bound what a runner can do. Every capability, `human-operator` included, is a
+runner's own statement, which Baton records and matches but never grants or checks. Its
+permissions cover its own state — who may take a repository's leases, who may change its
+settings — never the work, and its gates protect the lock, not the work. Its advice is never
+older than the last write Baton accepted for the runner reading it, and its fleet-wide views
+catch up within one alarm cycle. A repository chooses to adopt it; once adopted, its refusals
+bind every worker that uses it, and a worker that ignores them is outside the factory, not
+stopped by it (the owner, 2026-10-22).
 
 ## The problem
 
@@ -32,10 +38,11 @@ A team of agents that coordinates through git alone pays three costs that grow w
 
 - **One fenced lease per ticket.** A worker claims a ticket and keeps it by heartbeat. A
   worker that goes silent loses it at its lease, and a fence stops a revived one from writing.
-- **Advisory gates, advice for the rest.** Baton refuses only what would make cooperating
-  workers collide or waste a claim — a second holder, a missing capability, a tier above the
-  worker's ceiling, a barred tag — and offers everything else in a default order the worker
-  may override. A gate is a lock's answer, not enforcement of the work.
+- **Gates protect the lock, advice for the rest.** Baton refuses only what would make
+  cooperating workers collide or take work they have said they cannot do — a second holder, a
+  missing capability, a tier above the worker's ceiling, a barred tag — and offers everything
+  else in a default order the worker may override. A gate is the lock's answer, never
+  enforcement of the work.
 - **Courses, not workflows.** Each ticket moves along its repository's course: stations it
   rests at, legs it runs between them. The course lives in the repository's `.baton/` folder
   and changes with a commit, not a Baton deploy.
