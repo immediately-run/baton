@@ -780,7 +780,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       process.env.OUTCOME = 'new-cause';
       expect(await stub.run({ ticket: { id: 'B-1' }, checkout: root, snapshot })).toEqual({ reached: 'new-cause', next: 'file' });
       process.env.OUTCOME = 'maybe';
-      await expect(stub.run({ ticket: { id: 'B-1' }, checkout: root, snapshot })).rejects.toThrow('the dedupe agent printed no outcome (new-cause or duplicate) as its last line');
+      await expect(stub.run({ ticket: { id: 'B-1' }, checkout: root, snapshot })).rejects.toThrow('the dedupe agent printed no outcome (new-cause or duplicate) as its last line — its last line was "maybe"');
       // A PR course's commenting leg may name the PR after its answer (B-29); anything else after it is refused.
       const review = await load(join(root, '.baton', 'courses', 'review-pr', 'legs', 'review.mjs'));
       process.env.OUTCOME = 'approve https://github.com/o/site/pull/7';
@@ -789,6 +789,22 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       expect(await review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ suspend: true, reached: 'changes-requested', next: 'review', verdict: 'changes' });
       process.env.OUTCOME = 'approve o/site#7';
       await expect(review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).rejects.toThrow('the review agent\'s last line names no PR URL after its verdict');
+      // B-85: prose around the verdict no longer loses the round (B-80's review). The verdict line
+      // is read wherever it sits; a summary after it is the agent's, and names no PR.
+      for (const [prose, expected] of [
+        ['I reviewed the diff and found nothing blocking.\napprove', {}],
+        ['approve\n\nI read every hunk of the diff; details above.', {}],
+        ['approve https://github.com/o/site/pull/7\nRound 1: the diff is sound, merging is safe.', { pr: 'https://github.com/o/site/pull/7' }],
+        ['I read the diff.\napprove https://github.com/o/site/pull/7\n\n', { pr: 'https://github.com/o/site/pull/7' }],
+      ] as const) {
+        process.env.OUTCOME = prose;
+        expect(await review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot }), prose).toEqual({ reached: 'approved', next: null, verdict: 'approve', ...expected });
+      }
+      process.env.OUTCOME = 'changes https://github.com/o/site/pull/7\nI left two blocking notes above.';
+      expect(await review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ suspend: true, reached: 'changes-requested', next: 'review', verdict: 'changes', pr: 'https://github.com/o/site/pull/7' });
+      // A value word mid-line only is not an answer: a stray mention never stands for a verdict.
+      process.env.OUTCOME = 'My verdict: approve';
+      await expect(review.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).rejects.toThrow('the review agent printed no verdict (approve or changes) as its last line — its last line was "My verdict: approve"');
       // A leg with no answer names its PR by a last line that is a URL alone; any other last line names none.
       const conclude = await load(join(root, '.baton', 'courses', 'review-pr', 'legs', 'conclude.mjs'));
       process.env.OUTCOME = 'https://github.com/o/site/pull/7';

@@ -582,7 +582,8 @@ import { mkdtempSync, ${verify ? 'readFileSync, ' : ''}rmSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
+import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};${ask ? `
+import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${verify ? `
 import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
 // The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
@@ -593,7 +594,10 @@ import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-ver
 // are read when the leg runs at the claim's snapshot, the commit the runner loaded this script
 // from, never the working tree an agent may have changed (so a branch under review cannot pick
 // its reviewer or rewrite the reviewer's instructions).${ask ? `
-// The agent's last line of output must be its ${ask.name}: ${values}.` : ''}${verify ? `
+// The agent's last line of output must be its ${ask.name}: ${values}. A line that opens with
+// one of them is read as the answer wherever it sits — prose before or after it is the agent's,
+// not a lost round (B-85) — and that line may name one PR URL after the word. A missing or
+// misspelled ${ask.name} still fails the leg, naming what the agent's output ended with.` : ''}${verify ? `
 // Before returning its position the stub verifies the leg's outcome on the forge (B-81): an
 // open PR on a branch this course's branch patterns map to the ticket, its head pushed; where
 // it cannot verify, the leg fails naming what it looked for.` : ''}
@@ -665,18 +669,19 @@ async function standard(ctx) {
   }).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
   });${names ? `
-  // The last line: the answer, then — optionally — the PR its line goes on. A leg with no answer
-  // names its PR by a last line that is a PR URL alone; any other last line names none.
-  const last = (out.trim().split('\\n').at(-1) ?? '').trim();${ask ? '' : `
-  const on = ${PR_URL}.test(last) ? last : null;`}${ask ? `
-  const [answer, pr, ...rest] = last.split(/\\s+/);
-  if (!${JSON.stringify(ask.values)}.includes(answer)) throw new Error(${JSON.stringify(`the ${leg} agent printed no ${ask.name} (${values}) as its last line`)});
-  if (rest.length || (pr != null && !${PR_URL}.test(pr))) throw new Error(${JSON.stringify(`the ${leg} agent's last line names no PR URL after its ${ask.name}`)});
-  const on = pr ?? null;` : ''}
+  // The answer (B-85): the last line that opens with the leg's value word, wherever it sits —
+  // prose before or after it is the agent's, not a lost round — and, on that line, the PR its
+  // line goes on. A leg with no answer names its PR by a last line that is a PR URL alone; any
+  // other last line names none. A missing or misspelled verdict still fails, naming what was read.${ask ? `
+  const { answer, pr } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});
+  const on = pr;` : `
+  const last = (out.trim().split('\\n').at(-1) ?? '').trim();
+  const on = ${PR_URL}.test(last) ? last : null;`}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
 ` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}) };` : `${ask ? `
-  const answer = out.trim().split('\\n').at(-1)?.trim();
-  if (!${JSON.stringify(ask.values)}.includes(answer)) throw new Error(${JSON.stringify(`the ${leg} agent printed no ${ask.name} (${values}) as its last line`)});` : `
+  // The answer (B-85): the last line that opens with the leg's value word, backwards past any
+  // prose after it; a missing or misspelled verdict still fails, naming what it read.
+  const { answer } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});` : `
   void out;`}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
 ` : ''}  return ${position};`}

@@ -2013,7 +2013,12 @@ mean (R-BTN-50).
   - **Stubs** run the repository's `agent_command` (R-BTN-74) with `BATON_COURSE`, `BATON_LEG`,
     `BATON_TICKET_FILE` and `BATON_INSTRUCTIONS` (the source's `legs/<leg>.md` or the home's
     override, at the claim's snapshot); a result-dependent leg reads the agent's last line
-    (`BATON_ANSWER`) and checks it against the course's values. The spawn is shell-free (B-84):
+    (`BATON_ANSWER`) and checks it against the course's values. The read is tolerant of prose and
+     strict about the answer (B-85): scanning backwards from the output's last non-blank line, the
+     first line that **begins** with one of the course's values as a whole word is the answer, with
+     at most one PR URL after it on that line (prose before or after it fails nothing); a value
+     word mid-line only is not an answer, and no such line fails the leg, naming the value wanted
+     and the last line read. The spawn is shell-free (B-84):
     the command string splits into words as `sh` would — quotes, no substitutions — and runs as
     `execFile(command, args)` with the ticket id, the leg and the checkout appended, stdin never
     an open pipe (a closed fd — nothing to read), stdout and stderr captured pipes. The
@@ -5503,7 +5508,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-79 schemas refused | changed digest, `oneOf`, back-reference, `$ref` cycle, own `std:` id; another repository's same id | refused with the file kept, raised; `std:` refused; the other accepted, keyed to it |
 | S-BTN-80 signatures and spawns | a call leg's `spawns` (`provides: [brief]`) of a course whose start requires `brief` and whose ends `done` and `abandoned` produce `result` and nothing; a completion `{of: "all", closed: true}` into a station whose `entry` requires `result` | `course test` prints both signatures and names `abandoned` as not producing `result` |
 | S-BTN-89 an epic | `plan` files three children, one withdrawn; `replan` files a replacement; a second epic's `replan` files none | `plan` settles `planned` once all three closed; `replan` settles `built` when its child merges; `integrate` ends `integrated`; the second reaches `abandoned` |
-| S-BTN-104 the standard courses | `bug-report` with markers (one no edge, one malformed), `decision` with `answer:`, `draft-ticket` with no forge facts | markers move the ticket, bad ones nothing; `carry-out` ready once answered; the third syncs to `requested` |
+| S-BTN-104 the standard courses | `bug-report` with markers (one no edge, one malformed), `decision` with `answer:`, `draft-ticket` with no forge facts; an audit leg answering with prose before and after its outcome, and with none (B-85) | markers move the ticket, bad ones nothing; `carry-out` ready once answered; the third syncs to `requested`; the prose-wrapped outcome is read, none fails naming the last line |
 | S-BTN-105 one leg overridden | `legs/review.run.mjs` on a sourced `create-pr` | the override runs at the snapshot; the standard `close` writes the verdict |
 | S-BTN-107 the build-app course | drafts approved one by one by `answer:`; `file`, a call, files two children on different courses; a verification files a fix; a third failing verification | each draft waits for its stage's approval; `file` settles at `building` only once both close, so `verify` never starts while a child is open; the fix call settles back to `building`; `released:blocked` on the posted decision; `shipped` |
 | S-BTN-110 courses from their sources | the built CLI outside a checkout: `--course create-pr`; a `--source` at a tag with overrides; a copied `course.json`; an off-branch commit; no `sync.mjs`; an outside import | full-commit source, no course file; source read at its commit with home overrides; each fault refused naming it, the commit unfetched |
@@ -5653,7 +5658,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-100 | Renderers escape or text-set every value and link only to `web_base` or `link_hosts` | S-BTN-76 |
 | G-BTN-102 | Schemas with a changed digest, outside the subset, cyclic, or under `std:` or another course's prefix are refused; schemas are per repository | S-BTN-79 |
 | G-BTN-109 | An `epic` call settles `built` only when every child of its run closed `done`, else `planned` once all closed, so `replan` answers every withdrawal | S-BTN-89 |
-| G-BTN-123 | A standard course needs no course code; markers place tickets, bad ones move nothing; instructions are read at the snapshot | S-BTN-104 |
+| G-BTN-123 | A standard course needs no course code; markers place tickets, bad ones move nothing; instructions are read at the snapshot; a stub reads an answer line with prose around it and still fails one missing or misspelled, naming what it read (B-85) | S-BTN-104 |
 | G-BTN-124 | A `<leg>.run.mjs` replaces only that leg's run, never its `close` | S-BTN-105 |
 | G-BTN-126 | A `build-app` leg never starts on an unapproved document; `verify` never while a child is open, because `file` and `verify` are call legs | S-BTN-107 |
 | G-BTN-129 | The CLI holds no course; a course is read from one directory at one full, default-branch-reachable commit, never fetched by id; the home holds only overrides | S-BTN-110 |
