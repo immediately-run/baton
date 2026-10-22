@@ -14,6 +14,7 @@ import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync } from 
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
+import { capabilitiesOf, ROLES } from '../shared/vocabulary.mjs';
 import { BatonApi, BatonRefusal } from './api';
 import { claimScratch, courseOf, dropCourse, ensureSha, freshSecret, loadCourse, type CourseLoad } from './home';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
@@ -35,8 +36,13 @@ export interface RunnerOptions {
   hostname: string;
   harness: 'opencode' | 'claude-code';
   session: string;
-  /** What the runner declares beside the required: capabilities and the tier ceiling. */
+  /** B-86: what the heartbeat declares — `--capabilities`, which narrows. Absent, the runner asks
+   *  once (a beat declaring nothing) and declares the grant the answer carries. */
   capabilities?: string[];
+  /** B-86: the rule 4 names the legs of the course it serves require, read from the home checkout
+   *  each time it is asked, so a runner whose declaration lacks one says so at startup. Injected by
+   *  `baton run`; absent, no such line. */
+  legNeeds?: () => Promise<string[]> | string[];
   tierCeiling?: string;
   courses: { course: string; version: number }[];
   stateFile: string;
@@ -65,6 +71,30 @@ export interface ClaimOutcome {
   end_reason: string;
   reached: string | null;
   handoff: string | null;
+}
+
+/** B-86: what the heartbeat declares when `--capabilities` names nothing — the grant's
+ *  capabilities, so a granted machine never restates what its grant already says. A role granted
+ *  beside all of its own expansions declares the role (and its expansions do not follow: the role
+ *  carries them), which is rule 4 read the way the grant means it — a rule-4 clause naming
+ *  `agent-venue` is satisfied by the role, not lost among its four. Every other name stands in
+ *  place. Exported for its test. */
+export function declarationFrom(held: string[]): string[] {
+  const names = [...new Set(held)].filter((n) => n !== 'none');
+  const roles = ROLES as Record<string, string[] | undefined>;
+  const rises = new Set(names.filter((n) => {
+    const caps = roles[n];
+    return caps != null && caps.length > 0 && caps.every((c) => names.some((m) => m === c));
+  }));
+  const carried = new Set<string>();
+  for (const r of rises) for (const c of roles[r] ?? []) carried.add(c);
+  const out: string[] = [];
+  for (const name of names) {
+    if (roles[name] != null) {
+      if (rises.has(name)) out.push(name);
+    } else if (!carried.has(name) && !out.some((o) => o === name)) out.push(name);
+  }
+  return out;
 }
 
 /** Why the sidecar asked the running leg to stop (§6.13's three signal reasons). `reason` is the
@@ -106,6 +136,12 @@ export class Runner {
   private rekeySecret: string | null = null;
   /** An end Baton never answered (the network went with the lease): retried on every beat. */
   private pendingEnd: { claimId: number; body: Record<string, unknown> } | null = null;
+  /** B-86: the capabilities the beats declare — null until the grant is known. */
+  private declared: string[] | null = null;
+  /** B-86: the never-eligible line has been said for the current declaration (itself said again
+   *  only when the declaration or the courses' needs change; five minutes' bound). */
+  private saidEligible = false;
+  private legNeedsAt = 0;
 
   constructor(options: RunnerOptions) {
     this.o = { beatEvery: BEAT_MS, ...options };
@@ -148,9 +184,13 @@ export class Runner {
     const epoch = this.epoch;
     const s = this.state.get();
     const spool = this.takeSpool();
+    // B-86: `--capabilities` narrows; without it the declaration is the grant's, which the first
+    // answer carries (`grant.capabilities`), so the first beat asks and declares nothing — the
+    // registration has no declaration to widen, and the beat after it serves the grant.
+    const declaring = this.declared ?? this.o.capabilities ?? [];
     const body: Record<string, unknown> = {
       hostname: this.o.hostname, session_name: this.o.session, harness: this.o.harness, kind: 'vm',
-      billing: {}, capabilities: this.o.capabilities ?? ['agent-venue'], tier_ceiling: this.o.tierCeiling ?? 'critical',
+      billing: {}, capabilities: declaring, tier_ceiling: this.o.tierCeiling ?? 'critical',
       ...(this.o.testHarness ? { test_harness: true } : {}),
       lease_timeout_s: s.lease_timeout_s ?? 900,
       courses: this.o.courses.map((c) => ({ repository: this.o.repository, course: c.course, version: c.version })),
@@ -189,6 +229,25 @@ export class Runner {
       throw e;
     }
     rmSync(spool.taken, { force: true });
+    // B-86: the declaration settles on the answer — `--capabilities` as given, else the grant the
+    // answer carries — and again when the grant moves under a runner that named no flag, so a
+    // widened grant needs no restart. Said when it changes, never per beat.
+    const grantValues = Array.isArray(answer.grant?.capabilities) ? (answer.grant.capabilities as string[]) : null;
+    const grant = grantValues?.length ? grantValues : null;
+    // A runner that named no flag declares the grant — an empty one included, which says its key
+    // is granted nothing it declares courses in. An answer with no grant at all (a seed key's)
+    // leaves the declaration as it stands.
+    const settled = this.o.capabilities ?? (grantValues ? declarationFrom(grantValues) : declaring);
+    if (this.declared == null || JSON.stringify(this.declared) !== JSON.stringify(settled)) {
+      this.declared = settled;
+      this.saidEligible = false; // a new declaration may be the one that can claim
+      const held = this.declared.join(', ') || 'none';
+      this.state.set({ declared: this.declared });
+      this.log(this.o.capabilities
+        ? `baton: declaring ${held} (--capabilities, narrowing what the grant allows: ${grant?.join(', ') || 'unknown'})`
+        : `baton: declaring ${held} — the grant's capabilities, no --capabilities given`);
+      await this.reportEligibility();
+    }
     if (this.rekeySecret) {
       // The re-key landed: the new secret serves from here (R-BTN-14), and the new incarnation
       // starts on a fresh lease — the old flag fenced a claim the reap already took.
@@ -268,6 +327,32 @@ export class Runner {
       this.pendingEnd = { claimId, body };
     }
   }
+
+  /** B-86: a runner whose declaration lacks a capability a leg of its course requires says so —
+   *  the failure this ticket is about was total silence, and a startup line is what the ticket
+   *  asks for. `legNeeds` gives the rule 4 names those legs require; the line names the ones the
+   *  declaration lacks. Said when the declaration changes and otherwise at most every five
+   *  minutes, never on every beat; a declaration that covers them says nothing. */
+  private async reportEligibility(): Promise<void> {
+    const tooSoon = this.now() - this.legNeedsAt < 5 * 60_000;
+    if (!this.o.legNeeds || (tooSoon && this.saidEligible)) return;
+    this.legNeedsAt = this.now();
+    this.saidEligible = true;
+    if (this.declared == null) return;
+    const held = new Set(capabilitiesOf(this.declared));
+    const declared = this.declared.join(', ') || 'nothing';
+    let needs: string[];
+    try {
+      needs = await this.o.legNeeds();
+    } catch (e) {
+      this.log(`baton: the course's leg needs could not be read (${msg(e)})`);
+      return;
+    }
+    const short = [...new Set(needs)].filter((n) => !held.has(n));
+    if (!short.length) return;
+    this.log(`baton: this runner declared ${declared}, which lacks ${short.join(', ')} — a leg requiring it refuses rule 4 (missing-capability), so this runner can never claim one: declare what the machine holds (--capabilities) within what the owner granted`);
+  }
+
 
   private loseLease(because: string): void {
     this.lostLease = true;
@@ -408,6 +493,18 @@ export class Runner {
       this.log(`baton: ending the orphaned claim ${orphan.id} on ${orphan.ticket_id} before claiming`);
       this.state.set({ claim: null });
       await this.endQuietly(orphan.id, { end_reason: 'released:lease-lost', next: null });
+    }
+    // B-86: the declaration settles before the first claim. The worker exists (the beat above
+    // registered it, with no declaration to widen), so one beat declares what the grant allows —
+    // a machine told what it may declare is never refused rule 4 for not having said it yet. A
+    // runner named no flag and still declaring nothing has an empty grant to read, not one more
+    // beat to take.
+    if (this.declared == null || (this.o.capabilities == null && this.declared.length === 0)) await this.tick();
+    // A granted key declaring nothing has nothing to declare (no grant on its courses' repositories
+    // yet): it cannot claim until its grant lands, and idling silently is the failure B-86 names.
+    if (this.declared?.length === 0 && this.o.capabilities == null) {
+      this.log(`baton: this runner declared nothing — its key's grant allows no capability on the repositories its courses are in, so every leg requiring one refuses it rule 4 (missing-capability); have the owner grant it (baton owner grant <repository> --key …, R-BTN-58)`);
+      return null;
     }
     // R-BTN-72: it recommends, then claims — the first recommendation is what a claim without
     // an id would take anyway, asked for here so the runner knows what it is going for.

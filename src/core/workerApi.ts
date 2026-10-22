@@ -366,9 +366,7 @@ export class WorkerApi {
     const storedHash = `${settingsHash}:${fnv1a(known)}`;
     const rewrote = storedHash !== w.settings_hash || rekeyed;
     if (rewrote) this.rewriteSettings(w.id, hb, knownAccounts, storedHash);
-    const granted = cred.granted
-      ? this.rows<{ repository_id: string }>('SELECT repository_id FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', cred.id).map((r) => r.repository_id)
-      : null;
+    const granted = this.grantedRepos(cred);
     // R-BTN-76: the instances it uses, each it may use; a refused one never refuses the heartbeat.
     const uses = this.c.uses?.(w.id, granted, hb.uses.names) ?? { changed: false, refused: [] };
     // R-BTN-103: the notices it delivers as a worker courier — a machine key's, on repositories it
@@ -384,10 +382,13 @@ export class WorkerApi {
     // R-BTN-19: only a heartbeat with the secret (never the hash path) clears a fence.
     if (hb.fenced && secretSeen) this.c.fenced?.(w.id, fresh.incarnation, hb.fenced.claim_id);
     const claim = this.activeClaim(w.id);
+    // B-86: the capabilities a runner with no `--capabilities` declares (see `grantCapabilities`).
+    const grantCapabilities = this.grantCapabilities(cred, w.id);
     return {
       worker_id: w.id,
       incarnation: fresh.incarnation,
       lease_timeout_s: fresh.lease_timeout_ms / 1000,
+      grant: { capabilities: grantCapabilities },
       claim: claim ? { ...claim, ...this.c.claimView?.(claim.id), activity: this.currentActivity(w.id) } : null,
       messages: this.deliver(w.id, now),
       // R-BTN-67: the owner bars in force on its repositories, so harness hooks can act on them offline.
@@ -404,6 +405,46 @@ export class WorkerApi {
       ...(refusedCouriers.length ? { refused_couriers: refusedCouriers } : {}),
       ...(unlinked.length ? { transcripts_unlinked: unlinked } : {}),
     };
+  }
+
+  /**
+   * B-86: the answer's `grant.capabilities` — what a runner with no `--capabilities` declares,
+   * so a granted machine never restates what its grant already says. A granted key: its grants on
+   * the repositories it declares courses in, merged (granted on none of them, nothing to declare);
+   * a bearer or seed key, which no grant binds: the allow-list it has always declared within.
+   * `none` (every runner satisfies it) is left out.
+   */
+  private grantCapabilities(cred: { id: string; granted: boolean }, workerId: number): string[] {
+    const repos = this.rows<{ repository_id: string }>(
+      'SELECT repository_id FROM worker_courses WHERE worker_id = ?', workerId).map((r) => r.repository_id);
+    const mine = cred.granted
+      ? repos.flatMap((repository) => this.grantedCapabilities(cred.id, repository))
+      : this.credentialAllowed(cred.id);
+    return [...new Set(mine)].filter((c) => c !== 'none').sort();
+  }
+
+  /** The capabilities one grant gives, expanded as it is stored (§4). */
+  private grantedCapabilities(credential: string, repository: string): string[] {
+    const row = this.rows<{ capabilities: string }>(
+      'SELECT capabilities FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', credential, repository)[0];
+    return row ? (JSON.parse(row.capabilities) as string[]) : [];
+  }
+
+  /** R-BTN-58: a granted key's grants in force, by repository; null for a bearer or seed key,
+   *  whose reach is its own. */
+  private grantedRepos(cred: { id: string; granted: boolean }): string[] | null {
+    return cred.granted
+      ? this.rows<{ repository_id: string }>('SELECT repository_id FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', cred.id).map((r) => r.repository_id)
+      : null;
+  }
+
+  /** A key's allow-list, for B-86's grant answer. A granted key's is what its grants give it,
+   *  stored expanded (`credential()`, R-BTN-58); a bearer or seed key's the list it has always
+   *  declared within. */
+  private credentialAllowed(id: string): string[] {
+    const row = this.rows<{ allowed_capabilities: string; created_by: string | null }>('SELECT allowed_capabilities, created_by FROM credentials WHERE id = ?', id)[0];
+    const allow = row ? (isGrantedKey(row.created_by) ? this.credential(id).allowed : (JSON.parse(row.allowed_capabilities) as string[])) : [];
+    return [...(allow ?? [])];
   }
 
   /** §3's write budget: capabilities and providers rows change only with the settings hash. */

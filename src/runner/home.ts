@@ -111,6 +111,51 @@ export function loadCourse(home: string, sha: string, course: string): CourseLoa
   return { course, graph, scripts, scratch };
 }
 
+/** B-86: the home checkout's head — the snapshot the next claim is most likely to be at, whose
+ *  course lists the legs' needs. Empty when the checkout cannot answer. */
+export function readHead(home: string): string {
+  try {
+    return git(home, ['rev-parse', 'HEAD']).trim();
+  } catch {
+    return '';
+  }
+}
+
+/** B-86: the capabilities every leg of `course` in the snapshot requires — rule 4's names, each
+ *  course leg's `requires.capabilities` expanded through the course's `capability_roles`. A leg
+ *  the file does not describe, or a file that will not parse, adds nothing: this is only the
+ *  never-eligible runner's why, never a gate. An empty `sha` reads the working tree. */
+export function legNeeds(home: string, sha: string, course: string): string[] {
+  const path = `.baton/courses/${course}/course.json`;
+  const file = sha ? readAt(home, sha, path) : (() => {
+    try {
+      return readFileSync(join(home, path), 'utf8');
+    } catch {
+      return null;
+    }
+  })();
+  if (file == null) return [];
+  let parsed: { legs?: Record<string, { requires?: { capabilities?: unknown } }>; capability_roles?: Record<string, unknown> };
+  try {
+    parsed = JSON.parse(file) as typeof parsed;
+  } catch {
+    return [];
+  }
+  const roles = parsed.capability_roles ?? {};
+  const out: string[] = [];
+  for (const leg of Object.values(parsed.legs ?? {})) {
+    const caps = leg?.requires?.capabilities;
+    if (!Array.isArray(caps)) continue;
+    for (const name of caps) {
+      if (typeof name !== 'string') continue;
+      const role = roles[name];
+      if (Array.isArray(role) && role.every((c): c is string => typeof c === 'string')) out.push(...role);
+      else out.push(name);
+    }
+  }
+  return out;
+}
+
 /** Drop a claim's scratch directory. */
 export function dropCourse(scratch: string): void {
   rmSync(scratch, { recursive: true, force: true });

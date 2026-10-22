@@ -3,7 +3,9 @@
 import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import { WorkerApi } from '../../src/core/workerApi';
-import { beat, call, hbBody, ORIGIN, ownerCall, payload, register, rows, seedClaim, setClock, sha256, syncCall, workerCall , tick, withCore } from '../helpers';
+import { beat, call, hbBody, keyCall, ORIGIN, ownerCall, payload, register, rows, seedClaim, setAdminKeys, setClock, sha256, syncCall, workerCall , tick, withCore } from '../helpers';
+import { makeKey, signedRequest } from '../lib/sshKeys';
+import { call as hostCall } from '#host';
 
 const board = inject('board');
 const T0 = Date.parse('2026-10-13T12:00:00Z');
@@ -42,6 +44,39 @@ describe('G-BTN-5: identity — the secret, the hostname and the capability allo
     expect((await workerCall('/v1/runner/heartbeat', { cred: 'mac', body: hbBody('mac', { capabilities: ['human-operator'], secret_hash: await sha256('y') }) })).status).toBe(200);
     const unknown = await call401('tok-nobody');
     expect(unknown).toBe(401);
+  });
+
+  // B-86: the answer names the capabilities a runner with no `--capabilities` declares.
+  it('the heartbeat answer carries the grant: a bearer token its allow-list', async () => {
+    // A bearer token is bound by no grant: the answer carries the reach it has always declared
+    // within (R-BTN-58), `none` left out.
+    const { first } = await register('vm-a');
+    const held = (first as { grant: { capabilities: string[] } }).grant.capabilities;
+    expect(held).toEqual(['agent-venue', 'authentication', 'create-pr', 'drivable-browser', 'llm-call', 'mcp-chrome']);
+    expect(held).not.toContain('none');
+  });
+
+  it('the heartbeat answer carries the grant: a granted key the capabilities of its grants', async () => {
+    const k = await makeKey('ssh-ed25519', 'b86-key');
+    // An administrator lists itself (docs predates owners, so no owner grants there), and grants
+    // the key — the role and a capability no role names, stored expanded as §4 keeps grants.
+    const admin = await makeKey('ssh-ed25519', 'b86-admin');
+    await setAdminKeys(admin);
+    expect((await keyCall(admin, '/v1/admin/grants', { repository: 'docs', public_key: k.publicKey, hostname: 'k-host', capabilities: ['agent-venue', 'mcp-chrome'] })).status).toBe(200);
+    const secret = 'secret-b86';
+    const signed = async (over: Record<string, unknown>) => {
+      const created = Math.floor((await withCore((c) => c.now())) / 1000);
+      const body = JSON.stringify(hbBody('vm-a', { hostname: 'k-host', session_name: 'b86', secret_hash: await sha256(secret), ...over }));
+      const res = await hostCall(await signedRequest(k, `${ORIGIN}/v1/runner/heartbeat`, { created, body }));
+      return { status: res.status, json: (await res.json()) as Record<string, any> };
+    };
+    const answer = await signed({ capabilities: [] });
+    expect(answer.status).toBe(200);
+    // The role's four capabilities and mcp-chrome; `none` never.
+    expect(answer.json.grant.capabilities).toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call', 'mcp-chrome']);
+    // And what it may declare: the role among them, as the machine names one role.
+    expect((await signed({ capabilities: ['agent-venue'] })).status).toBe(200);
+    expect((await signed({ capabilities: ['human-operator'] })).status).toBe(403);
   });
 
   it('R-BTN-32: test_harness is refused from every credential but the test one', async () => {

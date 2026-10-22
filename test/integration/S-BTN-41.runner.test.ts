@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { BatonApi } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
+import { legNeeds, readHead } from '../../src/runner/home';
 import { call as hostCall } from '#host';
 import { course, cutover, ORIGIN, ownerCall, placed, rows, setClock, syncCall, ticket, TOKENS } from '../helpers';
 import relay from '../fixtures/courses/relay/course.json';
@@ -714,6 +715,88 @@ describe('S-BTN-41 the runner', () => {
     home.commit();
     await home.post({});
     expect(await makeRunner().runOnce()).toBeNull();
+    expect(await rows('SELECT * FROM claims')).toEqual([]);
+  }, 30_000);
+
+  // B-86: the heartbeat's declaration defaults to the grant's — `--capabilities` narrows, never
+  // enables — so a granted machine serves what its grant already says. This scenario's Baton
+  // grants nothing (its fleet beats under bearer tokens, whose reach is their own), so these
+  // tests answer the beat as the granted server would — `grant` and nothing else — and name in
+  // the registry what the relay course's legs require. The route from a grant to that answer is
+  // the core's (a unit test of `WorkerApi`), and the needs are the course file's (`legNeeds`).
+  const GRANTED = ['agent-venue', 'create-pr', 'drivable-browser', 'llm-call'];
+  function asGranted(runner: Runner): Runner {
+    const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
+    const beat = api.heartbeat;
+    api.heartbeat = async (body: Record<string, unknown>) => {
+      // Every answer is the granted Baton's: the grant its courses' repositories give it.
+      return { ...await beat.call(api, body), grant: { capabilities: GRANTED } };
+    };
+    return runner;
+  }
+  /** The registry as the granted Baton's: relay's legs require create-pr. */
+  async function legsNeedCreatePr(): Promise<void> {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const res = await realFetch(input, init);
+      if (String(input) !== `${ORIGIN}/v1/registry`) return res;
+      const body = (await res.clone().json()) as Record<string, any>;
+      for (const c of body.courses ?? []) if (c.id === 'relay') c.legs = { ...c.legs, build: { requires: { capabilities: ['create-pr'] } } };
+      return Response.json(body, { status: res.status });
+    };
+  }
+
+  it('a granted worker with no --capabilities declares the grant and claims what it allows', async () => {
+    await legsNeedCreatePr();
+    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    const lines: string[] = [];
+    const runner = asGranted(makeRunner({ log: (l: string) => lines.push(l) }));
+    expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
+    // It claims: before the fix `--capabilities` defaulted to agent-venue alone, the heartbeat
+    // declared it, and a leg requiring create-pr refused rule 4 — with no line saying why.
+    expect(await rows(`SELECT leg FROM claim_legs WHERE leg = 'build'`)).toHaveLength(1);
+    // The declaration is what the grant allows — here the role expanded to its capabilities — said
+    // once, and the leg that requires create-pr runs: never-eligible it is not.
+    const said = lines.join('\n');
+    expect(said).toContain("baton: declaring create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given");
+    expect(said).not.toContain('can never claim');
+    const stateFile = (runner as unknown as { o: { stateFile: string } }).o.stateFile;
+    expect(JSON.parse(readFileSync(stateFile, 'utf8')).declared).toEqual(['create-pr', 'drivable-browser', 'llm-call']);
+    expect(lines.filter((l) => l.includes('baton: declaring'))).toHaveLength(1);
+  }, 30_000);
+
+  it('a narrower --capabilities llm-call idles and says at startup why it can never claim', async () => {
+    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    home.commit();
+    await home.post({});
+    const lines: string[] = [];
+    const needs = legNeeds(home.dir, readHead(home.dir), 'relay');
+    const runner = asGranted(makeRunner({ capabilities: ['llm-call'], log: (l: string) => lines.push(l), legNeeds: () => ['create-pr', ...needs] }));
+    expect(await runner.runOnce()).toBeNull(); // idle: rule 4 refuses the leg
+    expect(await rows('SELECT * FROM claims')).toEqual([]);
+    const said = lines.join('\n');
+    expect(said).toContain('baton: declaring llm-call (--capabilities, narrowing what the grant allows: agent-venue, create-pr, drivable-browser, llm-call)');
+    expect(said).toContain('baton: this runner declared llm-call, which lacks create-pr — a leg requiring it refuses rule 4 (missing-capability), so this runner can never claim one');
+    // Said once, not on every beat.
+    await runner.tick();
+    expect(lines.filter((l) => l.includes('which lacks create-pr'))).toHaveLength(1);
+  }, 30_000);
+
+  it('a granted key whose grant allows nothing is told so at startup rather than idling silently', async () => {
+    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    const lines: string[] = [];
+    const runner = asGranted(makeRunner({ log: (l: string) => lines.push(l) }));
+    // Registers (declaring nothing); every answer after it carries an empty grant — the key granted
+    // on none of the repositories its course is in — so the declaration settles at nothing.
+    const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
+    const beat = api.heartbeat;
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...(await beat.call(api, body) as Record<string, unknown>), grant: { capabilities: [] } });
+    expect(await runner.runOnce()).toBeNull();
+    expect(lines.join('\n')).toContain("baton: this runner declared nothing — its key's grant allows no capability on the repositories its courses are in");
     expect(await rows('SELECT * FROM claims')).toEqual([]);
   }, 30_000);
 

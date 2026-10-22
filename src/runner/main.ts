@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { BatonApi, envAuth } from './api';
 import { HARNESS_AGENTS, type Harness } from './harness';
-import { holdHome } from './home';
+import { holdHome, legNeeds, readHead } from './home';
 import { Runner } from './runner';
 
 export interface RunArgs {
@@ -25,7 +25,9 @@ export interface RunArgs {
   repository: string;
   hostname: string;
   tier: string;
-  capabilities: string[];
+  /** B-86: `--capabilities`, which narrows. Null when the flag is absent — the runner then
+   *  declares what the grant allows (`grant.capabilities` on its first answer). */
+  capabilities: string[] | null;
   beatEvery: number;
   /** The one course this runner serves, of several the home checkout declares (R-BTN-131). */
   course?: string;
@@ -38,13 +40,14 @@ export interface RunArgs {
 /** `baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]
  * [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b] [--beat-every <ms>]
  * [--course <id>] [--test-harness]`.
- * Unknown flags are refused, never dropped. */
+ * Unknown flags are refused, never dropped. `--capabilities` narrows the grant: without it the
+ * runner declares what the grant allows (B-86). */
 export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): RunArgs {
   const out: RunArgs = {
     harness: 'opencode', home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
     session: env.BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
     repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? hostname(),
-    tier: 'critical', capabilities: ['agent-venue'], beatEvery: 2 * 60_000, testHarness: false,
+    tier: 'critical', capabilities: null, beatEvery: 2 * 60_000, testHarness: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -195,6 +198,9 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // One course per runner (the claim response names no course): refused at startup, loudly, not
   // per claim.
   const course = runnerCourse(declareCourses(a.home), a.course);
+  // B-86: the runner asks for nothing (`--capabilities` absent) — the grant speaks, and each
+  // answer's `grant.capabilities` is what it declares. `--capabilities` narrows.
+  if (a.capabilities == null) log('baton: no --capabilities given — the runner declares what the grant allows (narrow it with --capabilities, e.g. a machine without a browser)');
   // One runner per home checkout: its legs run in the working tree (R-BTN-131). Node's default
   // SIGINT/SIGTERM exit skips \`finally\`, so the lock is released on those signals too.
   const release = holdHome(a.home);
@@ -207,8 +213,11 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   const runner = new Runner({
     api: new BatonApi({ url: a.url, transport: (req) => fetch(req), auth }, log),
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
-    tierCeiling: a.tier, capabilities: a.capabilities,
+    tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     courses: [course],
+    // B-86: the legs the runner's course requires, from the home checkout's working tree — what
+    // a never-eligible runner says it lacks at startup.
+    legNeeds: () => legNeeds(a.home, readHead(a.home), course.course),
     stateFile: join(cacheDir(), `${a.session}.json`),
     beatEvery: a.beatEvery, log,
     fetch: io.fetch ?? ((home) => fetchMain(home, log)),
