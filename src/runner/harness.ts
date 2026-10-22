@@ -20,9 +20,11 @@ export type Harness = 'opencode' | 'claude-code';
  * sets — `BATON_COURSE`, `BATON_LEG`, `BATON_TICKET_FILE`, `BATON_INSTRUCTIONS` naming the temp
  * file holding the leg's instructions, `BATON_ANSWER` the last-line contract of a
  * result-dependent leg — which the agent reads with its own tools; the ticket id, the leg and
- * the checkout arrive as the command's trailing arguments. */
+ * the checkout arrive as the command's trailing arguments. B-108's lesson (2026-10-22): the
+ * exit is named in the briefing itself — an agent that finished and sat cost its claim five
+ * hours, so the last sentence tells it to end its process the moment the leg is done. */
 export const AGENT_PROMPT =
-  'You are a Baton leg agent. The file named by the BATON_INSTRUCTIONS environment variable holds your instructions for this leg: read them and follow them exactly. The environment names your course (BATON_COURSE), your leg (BATON_LEG), the ticket\'s file (BATON_TICKET_FILE) and the answer rule for your last line (BATON_ANSWER, when one is set); the arguments after this message are the ticket id, your leg and the repository checkout. Work in the current repository checkout. When BATON_ANSWER is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it.';
+  'You are a Baton leg agent. The file named by the BATON_INSTRUCTIONS environment variable holds your instructions for this leg: read them and follow them exactly. The environment names your course (BATON_COURSE), your leg (BATON_LEG), the ticket\'s file (BATON_TICKET_FILE) and the answer rule for your last line (BATON_ANSWER, when one is set); the arguments after this message are the ticket id, your leg and the repository checkout. Work in the current repository checkout. When BATON_ANSWER is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it. Your process\'s exit is the leg\'s completion: when the leg is done — the work pushed, the checks green, the final line printed — exit immediately, never waiting for further input.';
 
 /** Each harness's `agent_command` (B-83): what `baton repo init --agent <harness>` writes and
  * `baton run --harness <harness>` runs when `.baton/baton.json` names none. `--auto` and
