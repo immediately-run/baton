@@ -1,14 +1,14 @@
 ---
-title: "B-105 — Preferences in the ontology language: preferential fallback from posted state, advised never forced"
+title: "B-105 — Route choices: advice on how a leg runs, from the ontology and the instruments' readings"
 id: B-105
 project: baton
-status: in-review
+status: available
 updated: 2026-10-22
 tags:
   - roadmap-item
 order: 507
 tier: judgement
-description: "Guarded preference lists as ASP-Core-2 optimization: prefer DeepInfra's DeepSeek outside OpenCode Go's peak, fall back on unavailability; Opus as reviewer 2 unless the subscription nears its 5-hour limit, then GLM. Guards read provider peaks (existing) and a new quota-window reading; resolution rides the claim advice channel, replacing static model pins. Requires: B-104."
+description: "Build §6.10: a repository attaches route choices to its legs in its course entries; the ontology orders each choice's alternatives, filtered hard by holdings, blocks and exclusions and demoted softly by guards over typed reading atoms, time and the stored last demotion; resolved at claim and advance as identifiers-only advice; overrides recorded from the reported route; pins become the fallback. Requires: B-104."
 topics:
   - baton
 owns: {}
@@ -17,84 +17,58 @@ depends_on:
   - B-104
 ---
 
-**Review:** [the Opus 5.5 adversarial review, 2026-10-22](../docs/review/opus-ontology-review-2026-10-22.mdx) — 36 findings, 12 blocking, verdict "reworked before claim" — is binding input; B-105 sits in-review until the rework lands.
-
-**Brief:** the owner, 2026-10-22, on the ontology's next question: "how could we use the
-knowledge in this ontology to also rank available legs… I want to use DeepSeek for
-creating PRs. OpenCode Go and Deep Infra both offer it, but OpenCode Go has a peak usage
-period during which DeepSeek costs more. Can the ontology express that within this period
-I would *prefer* DeepSeek from Deep Infra — but fall back to DeepSeek from OpenCode Go if
-Deep Infra is not available? A similar example: Claude Opus as reviewer 2 *unless my
-Claude subscription is nearing its 5-hour limit*, in which case I would fall back to the
-second reviewer also using GLM." And the standard that makes it one language:
-ASP-Core-2's optimization statements (agreed 2026-10-22).
-**Spec:** B-104 (the ontology, whose addendum names ASP-Core-2 and the runtime split);
-§12's provider resources (peaks exist today: `peaks: {schedule, in_peak, next_change}`),
-R-BTN-101 (readings — this adds a kind), §6.2's claim advice and `resourceAdvice`;
-value 2 (advice never refuses) governs the whole mechanism.
-
-### The two worked examples, as the spec's test cases
-
-```
-preference "code generation model":
-  1. model:deepseek-v4.1-flash via credential:deep-infra-api-key
-  2. model:deepseek-v4.1-flash via credential:opencode-go-api-key   unless in_peak(opencode-go)
-  availability is a gate, cost is an ordering: DeepInfra down ⇒ OpenCode Go serves even in peak
-
-preference "reviewer 2":
-  1. model:claude-opus-5-5 via credential:anthropic-subscription   unless near_limit(anthropic-subscription, 5h, 80%)
-  2. model:glm-5.3 via credential:zai-coding-plan
-```
+**Brief:** the owner, 2026-10-22: "I want to use DeepSeek for creating PRs. OpenCode Go and Deep
+Infra both offer it, but OpenCode Go has a peak usage period during which DeepSeek costs more.
+Can the ontology express that within this period I would *prefer* DeepSeek from Deep Infra —
+but fall back to DeepSeek from OpenCode Go if Deep Infra is not available? A similar example:
+Claude Opus as reviewer 2 *unless my Claude subscription is nearing its 5-hour limit*, in which
+case I would fall back to the second reviewer also using GLM." And: "A completely new model
+provider and model-choice logic implemented in a repo using baton, without any baton
+modifications."
+**Spec:** §6.10, R-BTN-176 (the atoms a route choice reads) and R-BTN-177 (route choices: semantics,
+hysteresis, delivery, overrides, conformance), with the rules it amends: R-BTN-51's and R-BTN-134's course-entry
+`route_choices`, R-BTN-76's `atoms_from` and `std:` base, R-BTN-100, R-BTN-110's
+`std:api-capacity@1`, and R-BTN-144's `BATON_ADVICE` and `BATON_TAKEN`. The data model is in §13: `route_last`, `external_resources.atoms_from`. The API is
+in §14: `advice` and `taken`. The history is in `BATON_SPEC_HISTORY.md` (Changelog, 2026-10-22;
+Review record).
 
 ### What to build
 
-1. **Preferences in the ontology language**: an ordered list per named choice, each
-   alternative a closure-derived (model, credential) pair with an optional guard.
-   In ASP-Core-2 terms the guards are default negation and the ordering an optimization
-   statement — B-104's addendum's language, no second formalism. The JSON sugar grows
-   the section; the N3 interop note does not cover it (preferences are outside RDF's
-   world); the ASP mapping documents it as the reference.
-2. **Guards are rules over reading atoms, not baton vocabulary** (the owner's
-   amendment, 2026-10-22: no hardcoded provider support in core). `in_peak(provider)`
-   remains computable from §12's peaks; the 5-hour limit dissolves into an
-   **instrument's reading against a schema extending the base `api-capacity` schema**
-   (fields for the window and what remains of it), and the guard is the rule itself —
-   `reading(anthropic-capacity, remaining) < 0.2` — with hysteresis expressed in the
-   rule's two thresholds so a boundary doesn't flap. A new provider's choice logic is a
-   resource, a schema, an instrument, and rules: repository data, no baton change.
-3. **Evaluation, server-side at claim time**: filter the preference list to alternatives
-   the worker's closure holds, skip failed guards, take the first — availability
-   (the capability gate) filters, guards order, the first survives. Evaluation is
-   first-match over the boundary-compiled lists (B-104's runtime split): microseconds,
-   no solver.
-4. **Delivery over the advice channel**: the resolved preference rides the claim's
-   per-leg advice (`resourceAdvice`'s shape, the leg context's `advice` field — `null`
-   today): *"code generation: deepseek via deep-infra (opencode-go in peak until
-   10:00Z)"*. The leg's instructions and `agent_command` consume it **instead of the
-   static model pins** — the review round's pinned pair and the codegen pin are this
-   mechanism's ancestors, retired by it. **Advice, never refuses** (value 2): a leg may
-   take the other route; the override is logged.
-5. **Conformance**: the translated preferences' optimal answer sets checked against
-   clingo in CI beside B-104's derivation checks.
-
-### Non-goal, named
-
-Ticket-level cost ranking (preferring *claims* whose work is cheap right now) is not
-built; the mechanism could feed it, and the spec says so in one sentence — nothing more.
+1. **Atom formation** (R-BTN-176), in core. Form the atoms per claim and advance: the choice
+   state and speaking readings from permitted sources only, typed field atoms by dotted path,
+   `refines`, `now` from `this.now`, and `was_demoted` per runner.
+2. **Resource registration.** Add `--atoms-from admin|any` (CLI, `POST /v1/admin/resources`,
+   migration). Teach `src/core/detailSchema.ts` to store an `x-baton-base` chain; the
+   CLI's `baton admin resource add` runs R-BTN-108's refinement check. Add `std:api-capacity@1` to the standard library.
+3. **Choices** (R-BTN-177). Generate the encoding, evaluate it as first-match under B-104's
+   counters at each advance that starts a leg, write `route_last` and
+   `claim_legs.route_choices_json`, and put `advice` (with `ranked`) in the advance answer. Validate each course entry's
+   `route_choices` with the ontology unit.
+4. **The runner.** Write `BATON_ADVICE`. Create `BATON_TAKEN` empty per leg and report it (one
+   entry per route choice, with its `dead` holdings, at most 4 KB, never failing an end) on the finishing advance or end. Stop
+   declaring a holding a leg reported dead for the session. In core, remove reported `dead`
+   holdings in the reporting advance's transaction and record `advice-overridden` from a
+   differing `taken`.
+5. **The standard courses and this repository.** Have `agent_command` and the review leg's
+   instructions read `BATON_ADVICE` first, keeping today's models as the fallback. Add this
+   repository's `codegen`, `reviewer-1` and `reviewer-2` route choices, in its `baton.json` course entry (alternatives as `needs` over `key:` and `model:`
+   labels), the `meters` facts, and runner `check`s declaring each `key:`. Register
+   `anthropic-capacity` refining `std:api-capacity@1`, with `atoms_from: any`. This is an
+   operator step: record it in the PR.
+6. **Conformance.** Add choice fixtures to B-104's suite (`--opt-mode=optN`, one optimum, the
+   last witness's `route/2`).
+7. **Out of scope:** core's existing `model_providers`, `peak_schedules` and
+   `provider_suspensions` tables are not read by route choices. File a ticket to retire them once this
+   lands.
 
 ### Tests
 
-- Evaluation: both owner examples as fixtures — peak flips the order, DeepInfra's
-  unavailability outranks the cost preference, the quota reading flips reviewer 2 to GLM,
-  boundary hysteresis holds; a leg overriding the resolved preference logs
-  `advice-overridden` (the existing record).
-- Conformance: clingo's optimal answer sets match the TypeScript evaluation on every
-  fixture ontology.
+S-BTN-147 to S-BTN-154, G-BTN-161 and the choice fixtures of the conformance suite, all green
+in `npm test`.
 
 ### Exit criteria
 
-- [ ] both owner examples resolve as stated, at claim time, from posted state
-- [ ] the static model pins retire in favour of the resolved advice
-- [ ] an instrument's schema-extended reading drives a guard, with hysteresis, and a
-      new provider's choice logic needs no baton change
-- [ ] clingo conformance green in CI beside B-104's
+- [ ] §6.10 is built as specified, and both of the owner's examples resolve as S-BTN-147 and
+      S-BTN-148 state
+- [ ] a reading never reaches a gate, and advice carries identifiers only
+- [ ] the standard courses and this repository read `BATON_ADVICE` before their static models

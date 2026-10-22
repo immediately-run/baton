@@ -173,6 +173,188 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   `advance` and `end`, and `leg-log-push-failed` (now `leg-log-write-failed`). None of it was built
   (B-9, B-23 and B-76 had not started).
 
+- **2026-10-22 — §5.9 and §6.10: the capability ontology and choices (owner direction; B-104,
+  B-105).** The owner: "credentials are capabilities: an anthropic api key is what enables a
+  runner to execute an opus review", and "Baton should never store the credentials, but it needs
+  to keep track of the ontology of how credentials map." Legs should require a high-level
+  capability (`code-generation-llm`), while runners know which keys and harnesses they hold. The
+  design went through these iterations, first in the tickets and then in this spec:
+  1. **Positive Datalog over flat strings** (B-104 as filed). Each rule was a conjunction of
+     capability names deriving one name. Closure ran server-side at matching, and every cycle
+     was refused. The format was JSON with a documented 1:1 mapping to N3 ("let's not reinvent
+     the wheel"; "JSON-with-N3-mapping sounds like a reasonable compromise").
+  2. **A built-in ontology and value bindings.** The owner: "baton should come with a reasonable
+     ontology built-in, any fact of which can be overridden on the repository level". Bindings
+     (`coding model = claude opus 5.5`) became joining facts, and the owner's two-dimension rule —
+     "capability:coding model → credential:provider offering coding model AND harness usable with
+     coding model" — needed variables. The N3 mapping was promoted to the semantic reference.
+  3. **ASP-Core-2 as the one language.** On standards risk the owner wanted "a uniform ontology
+     language", because "complexity creeping in raises the risk that we start deviating from
+     standards in ways which will prevent adoption". ASP-Core-2 covers derivation (Horn rules),
+     guards (default negation) and preference (weak constraints), so N3 was demoted to an interop
+     note. The runtime was split from conformance: the sync was to compile a graph and ordered
+     lists, core was to run a ~50–100-line reachability and first-match evaluator, and clingo was
+     to check conformance in CI.
+  4. **Preferences** (B-105). The owner: prefer DeepSeek from DeepInfra during OpenCode Go's
+     peak, falling back to OpenCode Go if DeepInfra is unavailable; and use Opus as the second
+     reviewer "unless my Claude subscription is nearing its 5-hour limit", falling back to GLM.
+     Ordered alternatives with guards were resolved at the claim and delivered as advice.
+  5. **Readings as atoms, no provider vocabulary in core.** The owner: "I don't want Baton core to
+     have to have hardcoded support for various model providers… A completely new model provider
+     and model-choice logic implemented in a repo using baton, without any baton modifications."
+     Instruments' readings, against schemas that extend a base capacity schema, became atoms that
+     the guards read.
+
+  An adversarial review of iterations 1–5 (Review record, 2026-10-22) found 36 issues, 12 of them
+  blocking. Its verdict was that the direction was sound but the design was not executable: the
+  fragment was never pinned down; a general join needed more than graph reachability; hysteresis
+  needed state; fractions do not exist in clingo; readings belong to instances; and the safety
+  boundaries (rule heads, bounds, strata, grant order, a derived route's credentials) were not
+  drawn. The owner settled the four forks, and the rework wrote the result here as R-BTN-174 to
+  R-BTN-177:
+  - core runs a **bounded general evaluator**, about 300–400 lines, not compiled fixed shapes;
+  - the language **grows only in directions ASP-Core-2 allows**, so a binding narrows by default
+    negation inside the ontology and never through a preference;
+  - **hysteresis reads a stored last demotion**;
+  - **reading atoms come from administrators and instrument keys** unless a resource admits
+    runners.
+
+  Asked whether another Datalog extension had better TypeScript tooling, the rework found none
+  that is a standard with preferences. So the conformance oracle became `clingo-wasm` in `npm
+  test`, replacing a pip-installed clingo job. Rules introduced: R-BTN-174 to R-BTN-177;
+  S-BTN-139 to S-BTN-154; G-BTN-159 to G-BTN-161. Amended: R-BTN-69 (a leg's `choices`), R-BTN-75,
+  R-BTN-76 (`atoms_from`, a `std:` base), R-BTN-100, R-BTN-110 (`std:api-capacity@1`), R-BTN-121
+  (`derived` types), R-BTN-144 (`via` and alternative credentials, `BATON_ADVICE`,
+  `BATON_ROUTE`) and rule 4. The drafts' superseded ideas never entered this spec, and are
+  recorded under Decisions in full: the N3 mapping, the compiled runtime and its line estimate,
+  refusing every cycle, hard-coded functional bindings, guards that drop an alternative, fractional
+  thresholds, and peaks read from provider tables.
+
+  A second fresh review of the written sections (Review record, 2026-10-22, round 2) found 4
+  blocking and 15 should-fix findings, and the sections were rewritten:
+  - the gate stratum is made monotone by forbidding negation over anything that depends on
+    `holds`, not only over `holds` itself;
+  - the encoding's predicates are reserved;
+  - the ontology is opt-in, through `.baton/ontology.json` naming a versioned built-in;
+  - an alternative `needs` capabilities instead of naming a model and a credential, so core
+    keeps R-BTN-50's boundary;
+  - hysteresis is per runner;
+  - the choice state and `blocked` hear only permitted sources;
+  - stale derived sets are re-evaluated at a claim;
+  - `via` is every holding a derivation rests on, independent of evaluation order;
+  - a dead credential ends a leg through R-BTN-126;
+  - the clingo assertions are corrected against clingo-wasm's actual output.
+
+  A third fresh review (round 3) found 1 blocking and 15 should-fix findings. Most came from
+  over-specification, and the fixes simplified the design rather than adding to it:
+  - why-not and the credentials a derivation gives a leg now both read one **canonical proof**
+    per atom. The evaluator is fully determined, so this is the instance that first produced the
+    atom. It replaces a set-minimizing fixpoint and a backward walk, neither of which was well
+    defined.
+  - The gate bound no longer claims monotonicity of work: runtime gets twice validation's
+    budget.
+  - Choices are resolved at the `advance` that starts a leg, since a claim runs nothing.
+  - Courses and the program are accepted in a fixed order, and a stale program cannot outlive a
+    course change.
+  - Program changes are rate-limited, and the alarm's budget is shared round-robin between
+    repositories.
+  - Field atoms come from the latest reading that carries a `detail`.
+
+  A fourth review (round 4) raised two blockers that were design questions, and the owner
+  settled both:
+  - **Grants against derivation.** An agent could mark a type derived and derive a capability a
+    grant withheld. The owner: "Runners can work on whatever they choose… Baton has no way to
+    enforce worker activity. Deriving "vpn:corp" when a runner doesn't have it leads to
+    self-sabotage… There are many other ways a runner could sabotage itself or the whole
+    project." Derivation therefore stays past the grant.
+  - **Credential scoping.** The design passed credentials to legs by proof and by choice, which
+    contradicted R-BTN-144, since model-provider keys are kept for every leg. The owner: "Once
+    the credentials are in the sandbox, an agent running in the sandbox will be able to access
+    them even if the runner does not explicitly pass them to the agent. It seems
+    counterproductive to build security theater for this. A better mitigation is to keep model
+    provider credentials out of the runner's sandbox by using a bifrost or litellm proxy… but this
+    is not baton's responsibility."
+
+  So the ontology and choices pass no credential. Provider keys are plain `key:` labels, and the
+  canonical proof serves only why-not. That removed the round's ordering and fallback findings
+  with it. The other fixes:
+  - course files' ontology parts and the program are accepted as one unit;
+  - the evaluator's input is restricted to the program's constants;
+  - guards read capabilities only through `has`;
+  - a request's re-evaluations are capped;
+  - the why-not walk is deduplicated;
+  - `atoms_from` is judged per instance.
+
+  After round 5 the owner stated Baton's responsibilities, and the statement was refined in
+  discussion: "Baton is an advisory lock server and capability, instrumentation and message
+  tracker. It does not enforce or directly verify work performed by runners, nor does it assign
+  them permissions or capabilities." Pushed back on and agreed:
+  - the lease stays authoritative for every worker that uses Baton;
+  - grants and roles are access control over Baton's own state, not permission over the work;
+  - adoption, not each worker's obedience, is the optional part.
+
+  The owner added three points:
+  - "human-operator is a self-proclaimed capability of a runner. Baton can't verify a runner is
+    actually human-operated";
+  - "gates protect the lock, not the work";
+  - advice may lag but must be bounded: "post-sync the advice is expected to be up-to-date
+    considering state the sync transferred (same for instrument readings, etc)". This became
+    read-your-writes for each runner, and one alarm cycle for fleet-wide views.
+
+  These are recorded in the resident context (`product.mdx`, values 12, `architecture.mdx`).
+  The spec then carried them out:
+  - `human-operator` is a runner's statement that grants admit, and rule 6 is retired;
+  - R-BTN-45 says gates protect the lock;
+  - the freshness bound became evaluation in the write's transaction, plus the reader's read
+    after a program change, and an **alarm cycle** is defined.
+
+  A review on Fable 5.1 (round 6) showed most of round 5 dissolving under the advisory model, and
+  the owner settled the one design change it proposed: **derived types move from course files
+  into `ontology.json`** ("move it as recommended"). The rewrite also:
+  - evaluates derived sets with the write that changes them;
+  - deletes §11.1's refusal of a heartbeat declaring an ungranted capability;
+  - deletes `ontology_proofs`, computing why-not on read;
+  - drops R-BTN-126's proof and choice checks;
+  - lets advice carry a ranked list the leg falls through;
+  - bounds the fixed predicates at acceptance, which was round 5's blocker;
+  - caps `choices` per leg, gives `BATON_ROUTE` limits, and moves the refinement check to the
+    CLI.
+
+  Round 7 (Fable 5.1) found the seams of §6.11 and one blocker, which led to four owner
+  decisions:
+  - route choices are attached by the repository's own course entries, so a sourced standard
+    course runs unchanged;
+  - the advice concept is renamed "route choice", apart from R-BTN-166's choice stations;
+  - the 5-minute window is dropped;
+  - derived atoms are no longer checked against courses' `values`.
+
+  The rewrite also:
+  - makes sets current by an input digest, so a grant change evaluates nothing itself;
+  - stores a crossed evaluation as `limited`;
+  - fences seats through a pending reap;
+  - lets `prefer` candidates carry their own bills;
+  - makes `host` and `service` instances usable and billable.
+
+- **2026-10-22 — §6.11: seats (owner direction; B-106).** The owner asked how a leg can say it
+  needs "a singleton within the runner's VM", such as a Chrome MCP session one agent can use at
+  a time, or a machine reachable over RDP by "a single client at a time". The owner: "specific
+  capabilities used by the leg about to be completed should travel with the claim request: the
+  runner in the vm is authoritative about this… if they make the claim first, the later claim
+  can fail". Baton had the vocabulary, but billing was only a count: S-BTN-21 accepted a claim
+  past `max_concurrent`.
+
+  R-BTN-178 makes a bill a seat:
+  - capacity per resource, which an `account` instance may override;
+  - a `host` scope, so every runner on a VM names the same instance with no administrator step;
+  - rule 11 (`instance-busy`), which is never a failed attempt;
+  - seats held per leg rather than per claim. This was argued in discussion: a claim may run
+    several legs and only one may need the device;
+  - release at every end and reap;
+  - recommendations that skip full instances.
+
+  S-BTN-21 was rewritten and G-BTN-162 added. The 2026-10-14/16 rejection of reservations now
+  names future capacity: a seat a running leg holds is a fact the runner states, not a forecast.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -994,6 +1176,79 @@ changes):
 - m14 fixed: G-BTN-55 cites S-BTN-30 and S-BTN-126.
 
 ## Decisions in full
+
+- **A per-repository capability ontology in one named fragment of ASP-Core-2, evaluated in core**
+  (2026-10-22, owner; R-BTN-174, R-BTN-175). Holdings are labels and the ontology maps them, so
+  core learns no provider and stores no credential. The alternatives rejected:
+  - **Capability names alone**, the state before this change: every runner must declare every
+    altitude a leg might require.
+  - **A flat conjunct-of-strings rule format** cannot express the owner's join over a model
+    class.
+  - **Compiling rules at the sync to fixed shapes** (reachability plus first-match, the third
+    iteration). Core could then run only what the shapes allow, which contradicts "model-choice
+    logic implemented in a repo".
+  - **A solver in the Worker** (clingo-wasm: megabytes against the size budget, a cold start per
+    isolate, NP machinery for a polynomial need) or **beside it** (a sidecar: core egress, and
+    infrastructure Baton needs beside it).
+  - **N3 as the semantic reference.** It has no stratified negation or preference, and the
+    second iteration's promotion of it was reversed by the third.
+
+  The evaluator is general but bounded by counts, never time. Validation runs it on the gate
+  stratum's maximal input, which bounds every runner's evaluation because the stratum is
+  monotone in holdings. Its result is stored per runner when its inputs change, never computed
+  at a claim, so one repository's program cannot stall a tenant's claims. Interpreting a
+  program this total is not running repository code, as interpreting a course file is not. Only
+  cycles through negation are refused: positive recursion is transitivity, and refusing it, as
+  the first iteration did, would have refused the generic transitive rule. The grant bounds the
+  holdings before the closure, because bounding the derived set after it would remove every
+  derived capability under concrete grants.
+- **The language grows only by ASP-Core-2 constructs** (2026-10-22, owner; R-BTN-175). The owner:
+  "I want to ensure we are growing ontology language in the direction ASP core two allows us to
+  grow. This means I do not want to have workarounds using preferences for logic that belongs in
+  the ontology." Positive rules are monotone, so a binding beside an unconditional rule could
+  never narrow it. Narrowing is therefore default-with-exception, and functional bindings are an
+  integrity constraint in the built-in ontology rather than hard-coded validation. Rejected: folding
+  bindings into one-alternative choices, which would make a gate's narrowing depend on advice;
+  and keeping bindings as a separate gate mechanism beside choices.
+- **Choices as ASP-Core-2 weak constraints, evaluated as first-match** (2026-10-22, owner;
+  R-BTN-176, R-BTN-177). Availability is hard and guards are soft. The fourth iteration's
+  "skip failed guards, take the first" could not make DeepInfra's outage outrank OpenCode Go's
+  peak: a dropped alternative cannot serve as the fallback. Positions are a strict order, so the
+  optimum is unique and conformance compares one projected atom, never full answer sets.
+  Hysteresis reads the last demotion, stored per (repository, choice, alternative). Two
+  thresholds over one stateless reading cannot tell which applies. The rejected alternative was
+  an instrument that debounces, which would move hysteresis out of the ontology and into every
+  instrument. Fractions are fixed-point integers (clingo has no other numbers), and reading
+  atoms are typed by predicate, so the evaluator and clingo never compare across types. Atoms
+  are keyed by instance, since readings belong to instances, with R-BTN-76's precedence choosing
+  one speaking reading. Peaks are repository rules over `now`, not core's provider tables.
+- **Readings steer advice only from administrators and instrument keys unless a resource admits
+  runners** (2026-10-22, owner; R-BTN-176). An instrument that may report for an account can
+  steer every listed repository's routing with in-schema lies (a quota reported as full keeps
+  draining it). Admitting runners is a recorded trust decision per resource. Readings never reach
+  a gate, so the harm is bounded to advice. Rejected: atoms from every reporter the spec already
+  accepts.
+- **Derivation is not bounded by the grant** (2026-10-22, owner; R-BTN-174). A capability gate
+  matches what a runner can do, and Baton cannot make a runner do anything (R-BTN-66), so a
+  program that derives an ability the runner lacks harms only that runner, which is offered legs
+  it cannot finish. Authority is not derived: grants, `human-operator` and `runner:` stay outside
+  the ontology. Rejected: intersecting D(H) with the grant, and an owner setting that lists the
+  derivable types. Both would treat a statement of ability as a grant of authority.
+- **The ontology passes no credential** (2026-10-22, owner; R-BTN-144, R-BTN-174, R-BTN-177).
+  A credential inside the runner's sandbox is reachable by the agent whether or not the runner
+  sets it in the leg's environment, so scoping it per leg is theater. Keeping provider keys out
+  of the sandbox, behind a proxy, is the real mitigation, and it lies outside Baton. Rejected:
+  passing credentials by canonical proof and by a choice's available alternatives, the rounds
+  2–3 design.
+- **`clingo-wasm` in `npm test` as the conformance oracle** (2026-10-22, owner; R-BTN-175). The
+  owner would replace ASP-Core-2 only with "a different data log extension that addresses our
+  needs with better TypeScript compatible tooling". Nemo, Soufflé, Logica and Mangle each bring a
+  dialect that is not a standard, none can express the preferences, and none ships better
+  TypeScript tooling. Their stratified-negation engines are in Rust, C++, Python or Go. No npm
+  Datalog engine with stratified negation was found. `clingo-wasm` (Clingo compiled to
+  WebAssembly, an ES module on npm) makes the oracle an ordinary test that contributors run.
+  Rejected: a pip-installed clingo CI job, which brings Python into a TypeScript repository and
+  an oracle nobody runs locally.
 
 - **Leg logs in the owners' bucket, read with the reader's own credentials** (2026-10-21, owner;
   R-BTN-128, retiring R-BTN-118). Objects cannot be appended to, so a run is many create-only chunks
@@ -2453,3 +2708,241 @@ should-fix and 7 nit. Both confirmed the tenancy claim holds. Resolved:)*
 | 4-A-11, 4-A-12, 4-A-14, 4-A-16 nits | no check passes on any runner until a provider gains `exec`, which B-5 adds; scenarios, gates and B-25 extended; the two-machine-key livelock stated; R-BTN-58's and R-BTN-102's banners |
 
 These fixes are not reviewed again.
+
+*(2026-10-22 — the owner commissioned an adversarial review of the ontology design, as tickets
+B-104 and B-105 then stood after iterations 1–5 of the changelog, from a fresh session: 36
+findings, 12 blocking. The review is kept verbatim in
+`docs/review/opus-ontology-review-2026-10-22.mdx`. Resolved in the rework that wrote §5.9 and
+§6.10; B means blocking:)*
+
+| Finding | Resolution |
+|---|---|
+| 1 B — N3 still the deliverable | ASP-Core-2 is the language (R-BTN-175); N3 rejected (Decisions in full) |
+| 2 B — nobody builds the clingo check | the conformance suite is R-BTN-175's, extended by R-BTN-177; built under B-104 |
+| 3 the fragment named three ways | one sentence, in R-BTN-175 |
+| 4 a duplicated block | the drafts' text; not carried over |
+| 5 "variables in predicate positions" | first-order, variables in argument positions (R-BTN-175's terms) |
+| 6 B — which cycles are refused | only cycles through negation, on the predicate graph; positive recursion allowed (R-BTN-175) |
+| 7 B — a 50–100-line runtime cannot join | a bounded general evaluator, about 300–400 lines, parsing in core (R-BTN-175; owner) |
+| 8 B — fractions against clingo's integers | `int` atoms only, fixed point (`remaining_permille`); non-integers form no atom (R-BTN-176) |
+| 9 type mismatch in comparisons | variables typed by their binding literal; ill-typed comparisons refused (R-BTN-175, R-BTN-176) |
+| 10 names are not ASP constants | quoted-string constants, `V_` variables, no gringo-only syntax; ternary typed field atoms (R-BTN-175, R-BTN-176) |
+| 11 B — hysteresis needs state | `choice_last` read as `was_demoted`, an input fact (R-BTN-177; owner) |
+| 12 B — the examples do not flip; soft against hard | guards soft, availability hard; the examples reordered (R-BTN-177; S-BTN-147, -148) |
+| 13 the capability gate confused with provider state | `has(K)` and `blocked(R)` through `meters`, two hard filters (R-BTN-177) |
+| 14 optimal answer sets flake | a strict order, a unique optimum, `route/2` compared by projection (R-BTN-177) |
+| 15 clingo accepts more than ASP-Core-2 | the strict-syntax test; `#show` kept out of the translation (R-BTN-175) |
+| 16 B — readings belong to instances | instance-keyed atoms through `usable`, one speaking reading (R-BTN-176) |
+| 17 B — no schema composition; immutable schemas | `x-baton-base` refinement, checked at registration; `refines/2` (R-BTN-76, R-BTN-176) |
+| 18 nested fields, arrays, booleans, null, partial readings | dotted paths, and the list of what forms no atom (R-BTN-176) |
+| 19 an administrator step; credential to resource | stated: an administrator registers, the repository supplies `meters` (R-BTN-176, R-BTN-177) |
+| 20 a lapsed reading flips the decision | `unknown(I)`; fails open as R-BTN-76 does; the fail-closed idiom (R-BTN-176; S-BTN-148) |
+| 21 malicious instruments | administrators and instrument keys by default, `atoms_from: any` opt-in, advice only (R-BTN-176; owner) |
+| 22 B — the grant intersected after the closure | the closure of (declared ∩ grant) (R-BTN-174; S-BTN-142) |
+| 23 B — rule heads unrestricted | gate-stratum rules 1–2, checked on the maximal input (R-BTN-175) |
+| 24 B — no evaluation bounds | counted bounds, the maximal-input check, stored results, alarm batches (R-BTN-174, R-BTN-175) |
+| 25 readings feeding gates | gate-stratum rule 3 (R-BTN-175; S-BTN-152) |
+| 26 which snapshot governs | the default branch's head, the previous program kept on refusal, the stored set re-read at each advance (R-BTN-174) |
+| 27 advice text as an injection path | identifiers only; text composed by the dashboard (R-BTN-177) |
+| 28 B — a derived route strips its credential | `via` and the available alternatives' credentials kept (R-BTN-144, R-BTN-174, R-BTN-177) |
+| 29 `credential:` pattern; types undeclared | environment-variable names; `derived` types declared in the course file (R-BTN-121) |
+| 30 bindings cannot narrow; bindings against preferences | default negation, the built-in idiom (R-BTN-175; owner) |
+| 31 two override granularities, no `id` | every entry has an `id`; retract and replace by id; the sync merges (R-BTN-174, R-BTN-175) |
+| 32 the why-not algorithm unspecified | the canonical choice (R-BTN-174; S-BTN-144) |
+| 33 an override cannot be detected | `BATON_ROUTE`, `route` on advance and end, `advice-overridden` (R-BTN-177) |
+| 34 pins encode an invariant; null advice | invariants are `exclude_when` or barred tags; no advice leaves the leg's own default (R-BTN-177) |
+| 35 a second naming scheme (`model_name`) | a binding's value is the capability string (R-BTN-175) |
+| 36 advice goes stale in long legs | a snapshot per leg, not refreshed (R-BTN-177) |
+
+*(2026-10-22, round 2 — a second fresh reviewer read §5.9 and §6.10 as first written, with every
+rule they touch, against the code: 4 blocking, 15 should-fix, 8 nits. Resolved in the rewrite
+that followed:)*
+
+| Finding | Resolution |
+|---|---|
+| 1 B — `derived(K) :- target(K), not safe.` escapes the maximal-input check | no negated literal in the gate stratum names a predicate depending on `holds`; derived atoms must match their type's `values`; G-BTN-159 restated (R-BTN-175; S-BTN-140) |
+| 2 B — the encoding's predicates are not reserved | reserved, stratified together with the program, and never named by guards (R-BTN-175, R-BTN-177; S-BTN-152) |
+| 3 B — the built-in is refused where its types are undeclared | the ontology is opt-in through `.baton/ontology.json`, naming a built-in by version (R-BTN-174; S-BTN-143) |
+| 4 B — `model` and `credential` fields put provider words in core | an alternative lists the capabilities it `needs`; R-BTN-50's table gains the ontology's words (R-BTN-177, R-BTN-50) |
+| 5 hysteresis shared across runners | `choice_last` keyed by runner (R-BTN-177; S-BTN-148) |
+| 6 `atoms_from` bypassed through `state` and `blocked` | the choice state and `blocked` hear permitted sources only; `unknown(I)` folded into `state` (R-BTN-176; S-BTN-149) |
+| 7 one repository's program can exhaust the tenant's object | gate bounds 200,000 matches and 5,000 atoms, the choice bound 50,000, and an alarm budget per turn (R-BTN-174, R-BTN-175) |
+| 8 rule 4 reads a stale set | stale sets are re-evaluated in the claim's or advance's transaction; fleet counts recounted once (R-BTN-174; S-BTN-146) |
+| 9 `via` depends on evaluation order | every holding some derivation rests on, from the fired instances (R-BTN-174; S-BTN-145) |
+| 10 preflight unspecified | R-BTN-121's `check`, and R-BTN-126's `released:blocked` on a holding in `via`, not a failed attempt (R-BTN-174, R-BTN-126) |
+| 11 grants cannot narrow derived capabilities | stated: grants bound holdings; the CLI warns, and derived capabilities are shown beside the grant (R-BTN-174) |
+| 12 the program depends on the CLI's version | the built-in is versioned and named by the file; a published version never changes (R-BTN-174) |
+| 13 courses and the ontology judged in no stated order | a three-step joint acceptance; courses must agree on `derived` (R-BTN-174) |
+| 14 merging choices under-specified | one id namespace; a reused choice id replaces the whole choice; the merged program is capped too (R-BTN-174, R-BTN-175) |
+| 15 types of mixed positions undefined | per-position inference; a mixed position refused (R-BTN-175) |
+| 16 the clingo assertions are vacuous or wrong | `run(text, 0, …)`; `Models.More` `"no"`; the none-available case `SATISFIABLE`; both clingo info notices allowed (R-BTN-175, R-BTN-177) |
+| 17 refinement checking absent from resource registration | registration checks a `std:`-only `x-baton-base` with R-BTN-108's check; `refines` defined over the base chain (R-BTN-76, R-BTN-176) |
+| 18 the advice is stored nowhere; routes unvalidated | `claim_legs.advice_json` and `route_json`; an invalid route is dropped and logged `route-invalid`, never refused (R-BTN-177; S-BTN-153) |
+| 19 why-not reads derivations that do not exist | computed over the maximal evaluation's fired instances, as a least fixpoint (R-BTN-174; S-BTN-144) |
+| 20–27 nits | negative integer constants admitted; `not` and variable spelling constrained; `runner:` capabilities in H; sourced courses' choices; empty `needs`; scenario setups stated; `isEligible`'s vendored change and `choice_last` cleanup; the architecture page records that the ontology is data core interprets |
+
+*(2026-10-22, round 3 — a third fresh reviewer read the rewritten §5.9 and §6.10 and ran clingo
+on the encoding, which it confirmed valid and equal to first-match: 1 blocking, 15 should-fix,
+8 nits. Resolved:)*
+
+| Finding | Resolution |
+|---|---|
+| 1 B — why-not's min-of-unions fixpoint can oscillate | replaced by the canonical proof the deterministic evaluator records, one row per atom (R-BTN-174; S-BTN-144) |
+| 2 `via` follows cycles and depends on "fires" | replaced by the canonical proof's holdings; the choice's alternatives supply other routes (R-BTN-174, R-BTN-177; S-BTN-145) |
+| 3 match bounds are not monotone in H | the evaluator, rounds and a match are defined; runtime gate evaluations get twice validation's budget (R-BTN-175) |
+| 4 claim-time resolution against R-BTN-63 | resolved at each `advance` that starts a leg; stored in `claim_legs.choices_json` (R-BTN-177; S-BTN-153) |
+| 5 a dead choice credential cannot block | R-BTN-126 accepts a credential a choice gave the leg (R-BTN-126, R-BTN-177) |
+| 6 credentials under `limit` or `none-available` | none from the choice; a default that needs a credential lists it in `requires` (R-BTN-177) |
+| 7 acceptance order contradicts itself and R-BTN-69 | three ordered steps; R-BTN-69 cites the program in force after the post (R-BTN-174; S-BTN-155) |
+| 8 a refused program can leave an invalid one in force | the previous program survives only if it still validates, else none (R-BTN-174; S-BTN-146) |
+| 9 no wire field, digest or layout entry | §4.4's `ontology` field; core computes the RFC 8785 digest; R-BTN-51 lists the file; merge scenario S-BTN-155 |
+| 10 why-not has no answer shape | `not-derived` with `needs`, `missing` and `chain`; the fleet form; the direct declaration offered (§6.2, R-BTN-174) |
+| 11 `instances_json` unbounded | `ontology_proofs`, one small row per atom, at most 5,000 (§13) |
+| 12 one repository can load the tenant | a program change at most every 5 minutes; a round-robin alarm budget; only changed rows written; 256 derived capabilities; re-evaluation committed apart from the claim (R-BTN-174) |
+| 13 core both reads and never reads `detail` | R-BTN-50 and R-BTN-108 name the one exception (R-BTN-176) |
+| 14 a newer reading without `detail` erases the fields | the field reading is the latest that carries a `detail` (R-BTN-176; S-BTN-148) |
+| 15 the model and vendored `isEligible` | both receive H ∪ D(H) as the runner's capabilities; the evaluation sits outside them (R-BTN-174) |
+| 16 advice reads stale sets | stated as advice that may lag; only rule 4 is guaranteed fresh (R-BTN-174) |
+| 17–24 nits | every string constant held in the maximal evaluation; S-BTN-140's impossible case dropped; empty warnings filtered; `meters/2` reserved in shape; needs checked against types and R-BTN-144; hysteresis's per-runner claim narrowed; `choices_json` and the new variables' aliases; retention of `choice_last` and `runner_derived`, the fleet view's derived capabilities, the condition's closing, no gate re-derivation in a choice, ground facts, and §5.8's sentence |
+
+*(2026-10-22, round 4 — a fourth fresh reviewer, who confirmed the fragment, the evaluator's
+rounds, the canonical proof's well-foundedness and the choice encoding against clingo: 2
+blocking, 12 should-fix, 6 nits. Resolved:)*
+
+| Finding | Resolution |
+|---|---|
+| 1 B — course files can derive past a grant | the owner: a capability states ability, not authority; derivation stays past the grant (R-BTN-174; Decisions in full) |
+| 2 B — R-BTN-144 contradicts credential delivery | the owner: no credential scoping; the ontology and choices pass none; provider keys are `key:` labels (R-BTN-144 unchanged, R-BTN-174, R-BTN-177; S-BTN-145) |
+| 3 joint acceptance can leave a course with an undefined choice | the program and course files' ontology parts are accepted or refused as one unit, consistent by construction; the 5-minute window defers the whole unit (R-BTN-174; S-BTN-155) |
+| 4 course changes do not re-validate the program | a course's ontology part belongs to the unit; changing derived types or `values` marks sets stale (R-BTN-174) |
+| 5 R-BTN-126 contradicts itself | its Invalid bullet defers to the `capability` bullet (R-BTN-126) |
+| 6 the canonical proof depends on open orders | fact, `holds`, merge-position and later-round orders fixed (R-BTN-174, R-BTN-175) |
+| 7 guards over gate predicates undefined | guards may not depend on `holds` or `derived`; holding-independent predicates evaluated at acceptance (R-BTN-176) |
+| 8 the no-advice fallback forces `requires` | moot: choices pass no credential |
+| 9 the alarm budget cannot fit an evaluation; claims unbounded | evaluations always finish and the turn stops starting new ones; at most two re-evaluations per request (R-BTN-174; S-BTN-146) |
+| 10 runtime H unbounded | the input is H restricted to the program's constants (R-BTN-175; S-BTN-146) |
+| 11 why-not's chain exponential | a deduplicated, linear walk; `not-derivable` when no proof exists (R-BTN-174) |
+| 12 `atoms_from` per resource, atoms per instance | a runner's reading is permitted only when every resource the instance serves admits runners (R-BTN-176) |
+| 13 derived needs get no credentials | moot |
+| 14 S-BTN-154 tests the claim | it tests the advance |
+| 15–20 nits | the suite in vitest's Node project and the `Models.Optimal` cast; "one optimal answer set" with the encoding; a strict-syntax parser written from the grammar; path and instance-id length; S-BTN-148 aligned; merge edge cases fail the sync; guard rules obey the limits; the condition closes on acceptance; a route against `null` advice; declared-or-derived rules; `not-derivable` |
+
+*(2026-10-22, round 5 — a fifth fresh reviewer confirmed the formal core against clingo: the
+fragment, stratification, the gate stratum's monotonicity, the canonical proof and the choice
+encoding's equivalence with first-match. It found 1 blocking, 17 should-fix and 7 nits, all in
+bounds and seams. **Not yet resolved**, and B-104 and B-105 are back in review until they are:)*
+
+| Finding | Status |
+|---|---|
+| 1 B — acceptance-time evaluation of holding-independent predicates (and constraints) is unbounded | open |
+| 2 an absent `ontology` field: "none" (§4.4) or "the one in force" (R-BTN-174) | open |
+| 3 R-BTN-126 checks a dead holding against a proof only the maximal evaluation stores; derived needs are not admissible refs | open |
+| 4 a dead holding without a real `check` is re-declared at the next heartbeat | open |
+| 5 a choice may need a `credential:` capability the leg will not receive | open |
+| 6 R-BTN-126 re-evaluates every repository's set in one end | open |
+| 7 candidate selection reads stale sets; "rule 4 never reads a stale set" overstated | open |
+| 8 resource blocks attach to the leg, not the alternative; runner-scope resources cannot steer a choice under `atoms_from: admin` | open |
+| 9 the 5-minute window loses a revert to the program in force, and has no store for waiting course files | open |
+| 10 removing a course is outside unit acceptance | open |
+| 11 merge errors fail the whole sync instead of refusing the unit | open |
+| 12 proof and derived-row writes escape the write budgets | open |
+| 13 the match budgets are not checked against R-BTN-87's latency budgets | open |
+| 14 rule 4 is `gatesFor` (src/core/gates.ts), which re-checks the grant per need, not `isEligible` | open (verified) |
+| 15 S-BTN-142 and S-BTN-146 rely on heartbeats §11.1 refuses | open |
+| 16 S-BTN-143's block cannot appear while a direct declarer is live | open |
+| 17 repository rules over core atoms, and `meters`, can depend on `holds` at choice time | open |
+| 18 derived-set bookkeeping for non-live runners, empty sets and `runner_derived_state` | open |
+| 19–25 nits | open: R-BTN-120's prose, S-BTN-146's wording and test seam, S-BTN-144's fact order, the runtime bound's sufficiency, route-file lifetime, a program change mid-claim, S-BTN-148's lapse |
+
+*(2026-10-22, round 6 — a review on a different model (Fable 5.1) read the sections against the
+new resident context (values 12) and round 5's open list: 1 blocking, 9 should-fix, 1
+simplify, 6 nits. It reclassified eight of round 5's findings. Resolved in the rewrite that
+followed, which also closed round 5; dispositions below:)*
+
+| Finding | Status |
+|---|---|
+| 1 B — lazy derived sets cannot meet the freshness bound (advice no older than the reader's last accepted write); flapping declarations saturate the alarm | open; proposed fix: evaluate D(H) in the transaction of the write that changes H; this drops the per-request cap, the `prefer` pass-over and `runner_derived_state` |
+| 2 "one alarm cycle" is not what the alarm budget delivers after a program change | open |
+| 3 "only the guard rules" omits repository rules over core atoms (`ocg_peak`, `near_limit`) | open (same seam as round 5 #17) |
+| 4 a leg's `choices` uncapped: 500 choices × 50,000 matches per advance | open |
+| 5 refinement check placed in core, which holds no `std:` schema bodies | open; proposed: the CLI checks, core stores chain names |
+| 6 `derived` in course files breaks sourced courses; `values` ambiguous across courses | open; proposed: declare derived types in `ontology.json` |
+| 7 the fleet view's `ETag` omits `runner_derived` changes | open |
+| 8 a dead choice holding costs a whole claim | open; proposed: advice carries the ranked available list, and the leg falls through |
+| 9 `BATON_ROUTE` is agent-written, with no size or parse rule | open |
+| 10 §11.1 refuses a heartbeat declaring an ungranted capability, which polices a statement | open; proposed: delete the refusal (resolves round 5 #15) |
+| 11 Simplify — `ontology_proofs` stores what a read can recompute | open |
+| 12–17 nits | open: the same-digest sentence; `exclude_when` called an invariant; `gatesFor`, not `isEligible`; untyped positions and reflexive "depends on"; S-BTN-147 and S-BTN-153 set-ups; R-BTN-120's prose |
+| Round 5 re-read | #3 cut (any declared capability is an admissible `ref`); #4 a runner-side nit; #5 smaller (refuse a `credential:` need `requires` does not name); #7 subsumed by 1; #8 a runner's own `runner`-scope instance always permitted; #12 halved by 11; #15 resolved by 10; the rest stand |
+
+*(Dispositions of rounds 5 and 6, 2026-10-22, in the rewrite after the owner's decision on
+derived types:)*
+
+| Finding | Resolution |
+|---|---|
+| R5 1 B — unbounded acceptance-time evaluation | fixed predicates and constraints are evaluated within the maximal evaluation, under its bounds, and stored as `fixed_json` (R-BTN-175) |
+| R5 2 absent `ontology` field | absent means none; a merge error posts `ontology: {error}` (R-BTN-174; S-BTN-155) |
+| R5 3, 4, 5 dead holdings and `credential:` needs | any declared capability is an admissible `ref`; the CLI stops declaring a reported-dead holding for its session; needs are never `credential:` (R-BTN-126, R-BTN-177) |
+| R5 6 one end re-evaluating many sets | bounded by the runner's grants and the per-evaluation bound, in the end's transaction (R-BTN-174) |
+| R5 7, R6 1 B, R6 2 stale sets; the freshness bound; the alarm's real bound | evaluation in the write's transaction and at the reader's read after a program change; an alarm cycle defined as back-to-back turns, with fleet views recounted when it ends (R-BTN-174; S-BTN-146) |
+| R5 8 resource blocks per leg | moot for choices: advice ranks alternatives and the leg falls through; a runner's own `runner`-scope instance always steers its advice (R-BTN-176, R-BTN-177) |
+| R5 9, 10, 11 the window, removed courses, merge errors | a revert discards the waiting unit, which is stored with its course files; removal belongs to the unit; a merge error refuses the unit, not the sync (R-BTN-174) |
+| R5 12, R6 11 write amplification; `ontology_proofs` | proofs computed on read and memoised; only changed `runner_derived` rows, counted against R-BTN-149 (R-BTN-174) |
+| R5 13 latency budgets | the load test runs evaluations at the bounds (R-BTN-175, G-BTN-77) |
+| R5 14, R6 14 `gatesFor`, not `isEligible` | named; the grant is checked against H, never D(H) (R-BTN-174) |
+| R5 15, R6 10 refused heartbeats | §11.1's refusal of an ungranted capability deleted; G-BTN-5 narrowed |
+| R5 16 S-BTN-143 | the declarer leaves too |
+| R5 17, R6 3 choice-time rules | the choice stratum defined; none of it depends on `holds` or `derived` (R-BTN-176) |
+| R5 18 bookkeeping | non-live runners are evaluated at their next heartbeat; rows go 30 days after last live, or with the grant (R-BTN-174) |
+| R6 4 uncapped `choices` | at most 8 per leg, one evaluation per advance (R-BTN-177) |
+| R6 5 refinement in core | the CLI checks; core stores the chain (R-BTN-176) |
+| R6 6 `derived` in course files | moved to `ontology.json` (owner); condition 4 checks every course declaring the type (R-BTN-174, R-BTN-175) |
+| R6 7 the fleet view's `ETag` | a `runner_derived` change bumps `fleet_version` (R-BTN-99) |
+| R6 8 a dead choice holding ends the claim | advice carries `ranked`; the leg falls through (R-BTN-177) |
+| R6 9 `BATON_ROUTE` | created empty per leg, one entry per choice, ≤ 4 KB, never fails an end (R-BTN-177) |
+| R5 19–25, R6 12–17 nits | R-BTN-120's prose; S-BTN-146's test seam through the test bindings; the same-digest sentence replaced by unit equality; `exclude_when` filters advice; untyped positions and reflexive "depends on"; S-BTN-147, S-BTN-148 and S-BTN-153 set-ups; a route against `null` advice stored; `choice_last` not written on a refused advance; rule 4 at an advance is intended, as for a lost declaration |
+
+*(2026-10-22, round 7 — Fable 5.1 again, over §5.9, §6.10 and §6.11 after the rewrite. It
+confirmed the formal core with clingo and checked several round 5–6 dispositions in the text:
+1 blocking, 13 should-fix, 2 simplify, 8 nits. The owner accepted the four recommendations
+(route choices belong to the home's course entries; "route choice" renames the advice concept;
+both simplifications), and the rewrite resolved every finding as below:)*
+
+| Finding | Status |
+|---|---|
+| 1 B — a sourced course's home cannot add `choices`; a standard course listing them is refused without an ontology | route choices live in the home's course entry (`route_choices`), never a course file or a source's `entry.json`; standard courses list none (R-BTN-177, R-BTN-134; S-BTN-155) |
+| 2 `human-operator` in G-BTN-57, S-BTN-32 and the vendored `ROLES` | G-BTN-57 and S-BTN-32 amended; the vendored `ROLES` entry is a docs-first change named in B-104 |
+| 3 seats released at a fence-pending reap | held until `fence-cleared` or the fence deadline (R-BTN-178; G-BTN-162) |
+| 4 a claim's own seats counted | seats held by claims other than this one (R-BTN-178) |
+| 5 one `bills` for every `prefer` candidate | `prefer: [{ticket_id, leg?, bills?}]` (R-BTN-100, R-BTN-178) |
+| 6 `service` bills dropped | bills are any usable instance (R-BTN-100) |
+| 7 `host` missing from R-BTN-76 | added to usable instances and to who reports (R-BTN-76) |
+| 8 claim-time seats; rule 11 missing from §6.6; no `why` | a claim's seats are for the leg it is for, until its first advance; rule 11 in the claim and advance re-runs and pipeline step 4; `busy` in R-BTN-120's table |
+| 9 no channel for a dead holding | a `BATON_ROUTE` entry's `dead` (R-BTN-177) |
+| 10 what a runner bills | specified in R-BTN-178 |
+| 11 a crossed evaluation retried at every read | stored empty and `limited` under its input digest (R-BTN-174) |
+| 12 a grant change evaluating many runners | sets are current by input digest; a grant change evaluates nothing itself, and reads and the alarm cycle catch up (R-BTN-174; S-BTN-146) |
+| 13 G-BTN-5 against derivation past the grant | narrowed to holdings (G-BTN-5) |
+| 14 "choice" names two things | renamed "route choice" (`route_choices`, `route_last`); vocabulary amended (R-BTN-177) |
+| 15 Simplify — condition 4's `values` check | dropped; a non-matching atom is inert (R-BTN-175) |
+| 16 Simplify — the 5-minute window | dropped with `pending_json`; a unit is judged at each post (R-BTN-174) |
+| 17–24 nits | grant changes covered by the input digest; the constant alphabet already had `_` (no change); alarm instants added, `capacity` in `POST /v1/admin/instances`, the `{error}` form in §4.4, capacity changes never take back a seat; the holder named only where the asker is granted, `host` instances in the instance view; `seat` off R-BTN-50's banned list; cloud runners use `runner` scope; R-BTN-69's choices check gone with the field, and holds-dependent predicates outside the gate stratum refused; `missing` split from `ungranted` |
+
+*(2026-10-22, round 8 — Fable 5.1, after round 7's rewrite. It confirmed the formal core and the
+hysteresis rules with clingo and found round 7's dispositions in the text: 1 blocking, 7
+should-fix, 1 simplify, 7 nits, none a design question. Resolved:)*
+
+| Finding | Resolution |
+|---|---|
+| 1 B — route choices' `needs` were checked against course files that standard courses lack | needs are shape-checked only; the unit no longer reads course files beyond legs' existence (R-BTN-174, R-BTN-177; S-BTN-155) |
+| 2 the rename reached two choice-station references | restored in R-BTN-120 and R-BTN-12 |
+| 3 "route" named the owner's re-route and the leg's report | the report is `taken` (`BATON_TAKEN`, `taken_json`, `taken-invalid`) |
+| 4 "entry kept at its previous version" | only the `route_choices` field keeps its previous value (R-BTN-174) |
+| 5 the `gatesFor` claim | stated as B-104's amendment, `isEligible` docs-first (R-BTN-174) |
+| 6 a `dead` holding stale at the advance reporting it | removed in that advance's or end's transaction (R-BTN-177; S-BTN-153) |
+| 7 seat statements | G-BTN-162 bounds admission; a silent reap releases at the reap, a fence-pending one after the fence (R-BTN-178) |
+| 8 one read evaluating many repositories | no write evaluates; a claim, advance or why-not evaluates its one repository, a recommendation at most two, leaving out legs of repositories not yet current (R-BTN-174) |
+| 9 Simplify — the input digest over all of H | over H restricted to the program's constants (R-BTN-174) |
+| 10–16 nits | `route_choices_json`; `meters` placement; the instance view and §11.4's runners view; an empty `demote_when` refused, a leg absent from the course refused, needs outside the constant syntax refused; R-BTN-75 recounts derived rows when sets become current; the `derived` list never names `credential`, `runner` or `human-operator`; capacity-less resources billed for ranking |
+
+The owner accepted round 8's verdict without a further review (2026-10-22); B-104 and B-105 returned to `available`.
