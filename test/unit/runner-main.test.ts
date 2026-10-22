@@ -9,7 +9,8 @@ import { join } from 'node:path';
 import { declareCourses, fetchMain, parseRunArgs, runMain, runnerCourse } from '../../src/runner/main';
 import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { envAuth } from '../../src/runner/api';
-import { courseOf, dropCourse, freshSecret, holdHome, loadCourse } from '../../src/runner/home';
+import { courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
+import { declarationFrom } from '../../src/runner/runner';
 
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
@@ -25,7 +26,8 @@ describe('parseRunArgs', () => {
     const legacy = parseRunArgs([], { IR_BATON_SESSION: 'old', IR_BATON_NAME: 'vm-old' });
     expect(legacy.session).not.toBe('old');
     expect(legacy.hostname).not.toBe('vm-old');
-    expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: ['agent-venue'], testHarness: false });
+    // B-86: no --capabilities is null, never a default: the grant's capabilities are declared.
+    expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: null, testHarness: false });
   });
   it('takes its flags, refusing the unknown and the malformed', () => {
     const a = parseRunArgs(['--harness', 'claude-code', '--home', '/x', '--url', 'https://u', '--session', 's2', '--repository', 'ops', '--tier', 'routine', '--capabilities', 'a,b', '--beat-every', '5000'], {});
@@ -37,6 +39,8 @@ describe('parseRunArgs', () => {
     expect(parseRunArgs(['--course', 'bug-report'], {}).course).toBe('bug-report');
     // B-83: --test-harness permits the bare-echo stub, and says so on the heartbeat.
     expect(parseRunArgs(['--test-harness'], {}).testHarness).toBe(true);
+    // B-86: --capabilities narrows; no flag is no declaration (`null`), never `agent-venue` alone.
+    expect(parseRunArgs(['--capabilities', 'llm-call'], {}).capabilities).toEqual(['llm-call']);
   });
 });
 
@@ -131,6 +135,42 @@ describe('one runner per home checkout (R-BTN-131)', () => {
       again();
       // The tree stays clean: the lock lives in the git dir.
       expect(execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8' })).toBe('');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// B-86: the declaration a runner with no --capabilities makes from its grant, and the legs'
+// needs the never-eligible line names (the home checkout's course file).
+describe('the grant\'s declaration (B-86)', () => {
+  it('declarationFrom: a role whose expansions the grant also names folds into the role; the rest stand alone', () => {
+    // The runbook's grant: the role and its four capabilities. Declared as capabilities alone,
+    // `agent-venue` would be lost and a ticket requiring it (rule 4) refused.
+    expect(declarationFrom(['agent-venue', 'create-pr', 'drivable-browser', 'llm-call', 'authentication'])).toEqual(['agent-venue']);
+    // A grant naming no role keeps its capabilities, in their order.
+    expect(declarationFrom(['authentication', 'llm-call', 'create-pr', 'drivable-browser'])).toEqual(['authentication', 'llm-call', 'create-pr', 'drivable-browser']);
+    expect(declarationFrom(['create-pr', 'llm-call'])).toEqual(['create-pr', 'llm-call']);
+    // A partial role is no role: its named capabilities declare what the machine holds.
+    expect(declarationFrom(['llm-call', 'create-pr'])).not.toContain('agent-venue');
+    expect(declarationFrom([])).toEqual([]);
+    // `none` is every runner's and is never declared; an unrelated name keeps its place.
+    expect(declarationFrom(['none', 'vpn:corp', 'llm-call', 'vpn:corp'])).toEqual(['vpn:corp', 'llm-call']);
+    expect(declarationFrom(['agent-venue', 'llm-call'])).toEqual(['llm-call']);
+  });
+  it('legNeeds: each leg\'s requires.capabilities, roles expanded, from the course the checkout carries', () => {
+    const dir = home();
+    writeFileSync(join(dir, '.baton', 'courses', 'relay', 'course.json'), JSON.stringify({
+      start: 'a', start_leg: 'b', end: ['c'],
+      capability_roles: { deployer: ['vpn:corp', 'credential:DEPLOY_TOKEN'] },
+      stations: { a: {}, b: {}, c: {} },
+      legs: { b: { from: ['a'], to: 'c', requires: { capabilities: ['create-pr', 'deployer'] } }, c: { from: ['b'], to: 'c' } },
+    }));
+    const needs = legNeeds(dir, '', 'relay');
+    expect([...needs].sort()).toEqual(['create-pr', 'credential:DEPLOY_TOKEN', 'vpn:corp']);
+    expect(legNeeds(dir, '', 'no-such-course')).toEqual([]);
+    try {
+      expect(readHead(dir)).toBe('');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
