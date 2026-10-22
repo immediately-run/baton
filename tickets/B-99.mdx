@@ -1,0 +1,67 @@
+---
+title: "B-99 — The spec-to-tickets course: a merged spec decomposes into its child tickets"
+id: B-99
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 502
+tier: judgement
+description: "decompose (one draft per spec section, parent:-ed, tests and exit criteria from the spec), check (every requirement exactly once, dependencies as the spec's order implies), file (git, the leg's evidence). Requires: B-96, B-98."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-96
+  - B-98
+---
+
+**Brief:** the owner, 2026-10-22, on the family B-96 opens: "a separate course,
+spec-to-tickets, will take a spec as input and create the necessary tickets."
+**Spec:** §5.8 R-BTN-131 (the standard courses), §4.6 R-BTN-86 (child tickets and
+`parent:`), §5.8's `draft-ticket` course (the closest machinery — research, draft, check),
+B-96's `create-spec` (whose merged PR is this course's input).
+
+### Why
+
+A specification's value is realized when it decomposes into executable tickets — the
+immediately.run roadmap idiom (architecture, tests, anti-patterns and requirements
+prescribed per item) — and that decomposition is itself agent work worth a course:
+read the merged spec, draft each ticket it implies, check the set against the spec's own
+structure, file them as children of the request.
+
+### The course
+
+`spec-to-tickets`: input one merged specification (named by the request's sentence or by
+the spec's PR — the create-spec conversation's merged PR is the usual case). Starts
+`reading`; ends `filed` (and `withdrawn` when the owner decides against filing).
+
+| leg | from → to | kind |
+|---|---|---|
+| `decompose` | `reading` → `drafted` | non-interactive: one ticket draft per spec section or decision, each `parent:`-ed to the request, each with its own tests and exit criteria drafted from the spec |
+| `check` | `drafted` → `checked` | non-interactive: the set against the spec — every requirement covered exactly once, no ticket without a section, dependencies drawn as the spec's order implies |
+| `file` | `checked` → `filed` | non-interactive: commits the tickets (git, as the leg's evidence), `parent:` set |
+
+The owner's hand stays in through the request sentence and the review the filed tickets
+get as ordinary tickets on their own courses (create-pr and the rest); a spec whose
+decomposition needs conversation goes back through B-96's `address` pattern on the spec
+itself, not this course.
+
+### Requires
+
+- B-96 (a spec exists to decompose); B-98 (`baton request` starts it with the spec's
+  name in a sentence).
+
+### Tests
+
+- The kit: the course file validates; the shortest route — a merged spec's ticket from
+  `reading` through `decompose`, `check`, `file` to a confirmed `filed`, children filed
+  with `parent:` — runs green; a spec section with no ticket draft fails `check`.
+
+### Exit criteria
+
+- [ ] a merged specification decomposes into child tickets, each `parent:`-ed, checked
+      against the spec's coverage
+- [ ] R-BTN-131's table names the course beside `create-spec`
