@@ -1,0 +1,72 @@
+---
+title: "B-95 — A leg-command wrapper: transform leg commands without baton core support"
+id: B-95
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 478
+tier: judgement
+description: "The owner's take: std{err,out} capture is not core. agent_wrapper in baton.json (BATON_AGENT_WRAPPER per host) is prepended to the agent argv by the stubs — the wrapper owns tee, upload, timing; an example ships; the answer protocol passes through byte-identical. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-22, on the runs of 2026-10-21: "I thought about std{err,out}
+capture for non-interactive process legs, and my current take is that this shouldn't be
+built into baton core. Baton should allow a hook… to transform leg commands before they
+are executed. In our case, it could use the tee command to send a copy of the std{err,out}
+to a command which uploads the log files to a GCS bucket, but this could be implemented
+without any builtin baton support."
+**Spec:** §2f (R-BTN-74: `agent_command`), §5.8 (R-BTN-131: the stubs' spawn, as B-84
+built it: `execFile(command, args)` after one `sh`-compatible word split, stdin closed);
+the stubs are course code in `src/defaults/`, so nothing here touches core.
+
+### Why
+
+Leg stdout/stderr are the leg's own words, and what a repository does with them — tee to a
+log, upload to object storage, time-box, prefix with a locale — is the repository's
+operational choice, not Baton's. B-84's shell-free spawn made the agent invocation a clean
+argv; a wrapper is one composed command in front of it, and every wrapper concern stays in
+the repository's code where it can be anything a process can be.
+
+### What to build
+
+1. `.baton/baton.json` gains `agent_wrapper` (default unset): a command — word-split by
+   the same `sh`-compatible splitter, so quotes carry — that is **prepended to the agent
+   argv**. With `agent_wrapper` set, the stub execs `[…wrapper, …agent_command]`; the
+   wrapper owns stdio, timing, and anything else, and execs or pipelines the agent as it
+   chooses (`"$@" 2>&1 | tee …` in a committed `.baton/leg-wrapper` script is the worked
+   example).
+2. A per-host override without a synced file: the runner passes the environment through
+   to the stub; `BATON_AGENT_WRAPPER` in the runner's environment wins over the
+   `baton.json` value, so one host can wrap while the repository stays unwrapped. The
+   precedence is written into the leg `.md` headers beside B-84's contract.
+3. The worked example ships as `.baton/leg-wrapper.example` (a `tee` to
+   `.baton/logs/<ticket>-<leg>.log` with `mkdir -p`), and `docs/standard-courses.mdx`
+   documents the setting with it — including the honest note that a wrapper that reads or
+   buffers the agent's stdin breaks B-84's EOF contract and must pass stdin through
+   untouched.
+
+### Do not
+
+- Build capture, upload, retention or redaction into core or the stubs: the wrapper is the
+  whole feature. A wrapper that loses or mangles the last line owns the failure (the
+  answer protocol reads the agent's stdout through it).
+
+### Tests
+
+- Unit (`test/unit/defaults-cli.test.ts`, beside B-84's spawn tests): with the setting,
+  the stub's argv is the wrapper's words followed by the agent's; unset, today's argv; the
+  env override wins over the file; the example wrapper passes a verdict line through
+  byte-identical, last line intact.
+
+### Exit criteria
+
+- [ ] a repository can wrap every leg command with one setting and one script, no core
+      change, the answer protocol intact
+- [ ] the example wrapper's log file holds the agent's stdout byte-for-byte
