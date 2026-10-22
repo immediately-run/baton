@@ -179,6 +179,37 @@ semantic reference is ASP-Core-2.
   budget, per-isolate cold start, NP machinery for a linear need); a clingo sidecar
   service (core egress; a Baton that needs immediately.run's infra beside it — value 11).
 
+### Second addendum, the same day: readings as atoms — no provider vocabulary in core
+
+The owner: "I don't want Baton core to have to have hardcoded support for various model
+providers. An instrument contributing a metric reading — conforming to a custom JSON
+Schema it has declared, extending the general api-capacity schema — can be referred to
+by the ASP clauses which determine leg ranking. A completely new model provider and
+model-choice logic implemented in a repo using baton, without any baton modifications."
+The architecture is possible on three commitments:
+
+1. **Readings form ground atoms** — core's only naming contract: a validated reading of
+   a resource forms `reading(resource, field) = scalar`, the fields named by the
+   resource's declared schema (`baton admin resource add --schema` already carries
+   custom schemas; `detailSchema` already interprets them). Instruments — workers,
+   probes, administrators, the existing reading paths — extend the base `api-capacity`
+   schema with provider-specific fields via ordinary JSON Schema composition, and a rule
+   written against a base field serves every instrument that extends it: schema
+   extension buys rule reuse, which is what makes a new provider a repository change
+   and not a baton change.
+2. **The fragment grows comparison built-ins — from the standard**: arithmetic terms and
+   comparison predicates are ASP-Core-2 built-ins, so value guards stay inside the named
+   language; the TypeScript fragment implements comparisons over schema-validated
+   scalars only, keeping evaluation linear and total. No string cleverness, ever.
+3. **The base schemas ship in `src/defaults`** — course code, repo-overridable like the
+   built-in ontology. Core owns exactly two things: the atom-formation convention and
+   the evaluator. Everything provider-shaped — resource, schema, instrument, rules — is
+   repository data.
+
+Guards therefore evaluate at claim time against the latest posted reading: a stale
+instrument means stale ordering, so reading liveness (already modeled — readings lapse)
+becomes ranking-relevant, and the spec says so in one sentence.
+
 ### What Baton never does
 
 Stores a credential (holdings are labels, never material — value unchanged); learns a

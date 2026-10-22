@@ -1,0 +1,94 @@
+---
+title: "B-105 — Preferences in the ontology language: preferential fallback from posted state, advised never forced"
+id: B-105
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 507
+tier: judgement
+description: "Guarded preference lists as ASP-Core-2 optimization: prefer DeepInfra's DeepSeek outside OpenCode Go's peak, fall back on unavailability; Opus as reviewer 2 unless the subscription nears its 5-hour limit, then GLM. Guards read provider peaks (existing) and a new quota-window reading; resolution rides the claim advice channel, replacing static model pins. Requires: B-104."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-104
+---
+
+**Brief:** the owner, 2026-10-22, on the ontology's next question: "how could we use the
+knowledge in this ontology to also rank available legs… I want to use DeepSeek for
+creating PRs. OpenCode Go and Deep Infra both offer it, but OpenCode Go has a peak usage
+period during which DeepSeek costs more. Can the ontology express that within this period
+I would *prefer* DeepSeek from Deep Infra — but fall back to DeepSeek from OpenCode Go if
+Deep Infra is not available? A similar example: Claude Opus as reviewer 2 *unless my
+Claude subscription is nearing its 5-hour limit*, in which case I would fall back to the
+second reviewer also using GLM." And the standard that makes it one language:
+ASP-Core-2's optimization statements (agreed 2026-10-22).
+**Spec:** B-104 (the ontology, whose addendum names ASP-Core-2 and the runtime split);
+§12's provider resources (peaks exist today: `peaks: {schedule, in_peak, next_change}`),
+R-BTN-101 (readings — this adds a kind), §6.2's claim advice and `resourceAdvice`;
+value 2 (advice never refuses) governs the whole mechanism.
+
+### The two worked examples, as the spec's test cases
+
+```
+preference "code generation model":
+  1. model:deepseek-v4.1-flash via credential:deep-infra-api-key
+  2. model:deepseek-v4.1-flash via credential:opencode-go-api-key   unless in_peak(opencode-go)
+  availability is a gate, cost is an ordering: DeepInfra down ⇒ OpenCode Go serves even in peak
+
+preference "reviewer 2":
+  1. model:claude-opus-5-5 via credential:anthropic-subscription   unless near_limit(anthropic-subscription, 5h, 80%)
+  2. model:glm-5.3 via credential:zai-coding-plan
+```
+
+### What to build
+
+1. **Preferences in the ontology language**: an ordered list per named choice, each
+   alternative a closure-derived (model, credential) pair with an optional guard.
+   In ASP-Core-2 terms the guards are default negation and the ordering an optimization
+   statement — B-104's addendum's language, no second formalism. The JSON sugar grows
+   the section; the N3 interop note does not cover it (preferences are outside RDF's
+   world); the ASP mapping documents it as the reference.
+2. **The guard vocabulary, small and named**: `in_peak(provider)` (already computable
+   from §12's provider peaks) and `near_limit(resource, window, threshold)` — a new
+   **reading kind**: the quota-window reading (a subscription's utilization against a
+   rolling window), posted by whoever can see the account (a probe, the owner, or the
+   worker itself as a reading), with hysteresis so a boundary doesn't flap.
+3. **Evaluation, server-side at claim time**: filter the preference list to alternatives
+   the worker's closure holds, skip failed guards, take the first — availability
+   (the capability gate) filters, guards order, the first survives. Evaluation is
+   first-match over the boundary-compiled lists (B-104's runtime split): microseconds,
+   no solver.
+4. **Delivery over the advice channel**: the resolved preference rides the claim's
+   per-leg advice (`resourceAdvice`'s shape, the leg context's `advice` field — `null`
+   today): *"code generation: deepseek via deep-infra (opencode-go in peak until
+   10:00Z)"*. The leg's instructions and `agent_command` consume it **instead of the
+   static model pins** — the review round's pinned pair and the codegen pin are this
+   mechanism's ancestors, retired by it. **Advice, never refuses** (value 2): a leg may
+   take the other route; the override is logged.
+5. **Conformance**: the translated preferences' optimal answer sets checked against
+   clingo in CI beside B-104's derivation checks.
+
+### Non-goal, named
+
+Ticket-level cost ranking (preferring *claims* whose work is cheap right now) is not
+built; the mechanism could feed it, and the spec says so in one sentence — nothing more.
+
+### Tests
+
+- Evaluation: both owner examples as fixtures — peak flips the order, DeepInfra's
+  unavailability outranks the cost preference, the quota reading flips reviewer 2 to GLM,
+  boundary hysteresis holds; a leg overriding the resolved preference logs
+  `advice-overridden` (the existing record).
+- Conformance: clingo's optimal answer sets match the TypeScript evaluation on every
+  fixture ontology.
+
+### Exit criteria
+
+- [ ] both owner examples resolve as stated, at claim time, from posted state
+- [ ] the static model pins retire in favour of the resolved advice
+- [ ] the quota-window reading kind exists with hysteresis
+- [ ] clingo conformance green in CI beside B-104's
