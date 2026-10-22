@@ -45,9 +45,15 @@ change to Baton, not a change in Baton.</Lede>
   is for, provided they work separate tickets.
 - **Parallelism is horizontal: more runners, not bigger runners.** A runner works one
   leg at a time by design, and scale comes from many runners — the end state being
-  virtual-machine sandboxes (the `fc-opencode` work) each running a runner on its own
-  legs. A single process multiplexing legs across threads or subprocesses is a possible
-  later evolution, decided when the sandbox fleet's evidence is in — not the plan.
+  firecracker sandboxes (the `fc-opencode` work), each hosting **several** runner
+  processes on their own legs: a sandbox's memory is fixed at boot, so runners are
+  packed into it rather than sized per leg, each under a cgroup memory limit and the
+  limits deliberately oversubscribed to use the allocation well. The cgroup is the blast
+  radius — one runner over its limit dies alone, its claim reaps, the sandbox and its
+  siblings keep working — which makes a runner's death legible (B-94's log line) and
+  its recovery routine (the `reaped:silent` path). A single process multiplexing legs
+  across threads or subprocesses is a possible later evolution, decided when the sandbox
+  fleet's evidence is in — not the plan.
 
 ## Where code lives
 
