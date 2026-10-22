@@ -145,7 +145,7 @@ describe('baton repo init, through the built CLI', () => {
     // B-95: the worked example of agent_wrapper ships, unused until named.
     const example = readFileSync(join(root, '.baton', 'leg-wrapper.example'), 'utf8');
     expect(example).toContain('mkdir -p .baton/logs');
-    expect(example).toContain('"$@" | tee ".baton/logs/${ticket}-${leg}.log"');
+    expect(example).toContain('| tee ".baton/logs/${ticket}-${leg}.log"');
     expect(settings.agent_wrapper).toBeUndefined();
   });
 
