@@ -21,7 +21,10 @@ function home(): string {
 describe('parseRunArgs', () => {
   it('defaults from the environment', () => {
     const a = parseRunArgs([], { BATON_HOME: '/h', BATON_URL: 'https://b', BATON_SESSION: 's', BATON_REPOSITORY: 'docs', BATON_HOSTNAME: 'vm-x' });
-    // The IR_BATON_* spellings still serve (B-96's transition): session and hostname, silently.
+    // B-97: the transition's spellings are gone — an IR_ session or hostname is not read.
+    const legacy = parseRunArgs([], { IR_BATON_SESSION: 'old', IR_BATON_NAME: 'vm-old' });
+    expect(legacy.session).not.toBe('old');
+    expect(legacy.hostname).not.toBe('vm-old');
     expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: ['agent-venue'], testHarness: false });
   });
   it('takes its flags, refusing the unknown and the malformed', () => {
@@ -39,10 +42,10 @@ describe('parseRunArgs', () => {
 
 // B-83: the agent_command a runner runs. runMain reads process.env directly, and the process
 // running these tests may itself be a leg session (BATON_PARENT) with a credential
-// (BATON_KEY_FILE) — exactly the env it refuses and uses — so each test clears both spellings
-// (B-96's transition) and restores what was there.
+// (BATON_KEY_FILE) — exactly the env it refuses and uses — so each test clears them and restores
+// what was there.
 describe('the agent_command a runner runs (B-83)', () => {
-  const LEG_ENV = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE', 'IR_BATON_PARENT', 'IR_BATON_TOKEN', 'IR_BATON_KEY', 'IR_BATON_KEY_FILE'];
+  const LEG_ENV = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE'];
   const clearLegEnv = (): Record<string, string | undefined> => {
     const saved: Record<string, string | undefined> = {};
     for (const n of LEG_ENV) {
@@ -222,8 +225,11 @@ describe('envAuth (§6.4, R-BTN-13)', () => {
     expect(auth('POST', 'https://b.test/v1/runner/heartbeat', '', null)).toEqual({ Authorization: 'Bearer tok-1' });
     expect(auth('POST', 'https://b.test/v1/runner/heartbeat', '', 's3cret')).toEqual({ Authorization: 'Bearer tok-1', 'X-Worker-Secret': 's3cret' });
   });
-  it('the IR_BATON_* spellings still serve, the new name winning when both are set (B-96)', () => {
-    expect(envAuth({ IR_BATON_TOKEN: 'legacy' })('POST', 'https://b.test/v1/runner/heartbeat', '', null)).toEqual({ Authorization: 'Bearer legacy' });
+  it('the IR_BATON_* spellings are gone (B-97): a runner handed only them has no credential', () => {
+    for (const env of [{ IR_BATON_TOKEN: 'legacy' }, { IR_BATON_KEY: 'legacy' }, { IR_BATON_KEY_FILE: '/nonexistent/baton.key' }, { IR_BATON_KEY: 'legacy', BATON_TOKEN: '' }]) {
+      expect(() => envAuth(env)).toThrow('no credential: BATON_KEY_FILE, BATON_KEY or BATON_TOKEN');
+    }
+    // The new name alone still serves, and the old one beside it changes nothing.
     expect(envAuth({ BATON_TOKEN: 'new', IR_BATON_TOKEN: 'legacy' })('POST', 'https://b.test/v1/runner/heartbeat', '', null)).toEqual({ Authorization: 'Bearer new' });
     expect(() => envAuth({})).toThrow('no credential: BATON_KEY_FILE, BATON_KEY or BATON_TOKEN');
   });

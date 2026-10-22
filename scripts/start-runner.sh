@@ -50,7 +50,7 @@ done
 # ---- preflight -------------------------------------------------------------
 # §6.13: a leg session never claims. Run this from your own terminal, not from inside a
 # baton leg (an agent shell carries BATON_PARENT) — the runner would refuse itself anyway.
-[ -z "${BATON_PARENT:-}${IR_BATON_PARENT:-}" ] || die "this shell is a baton leg session (BATON_PARENT is set): a leg never claims — run the script from your own terminal"
+[ -z "${BATON_PARENT:-}" ] || die "this shell is a baton leg session (BATON_PARENT is set): a leg never claims — run the script from your own terminal"
 
 # The credential (§6.4): a worker key the owner granted, or a token.
 if [ -n "${BATON_KEY_FILE:-}" ]; then
@@ -140,7 +140,7 @@ cd "$HOME_DIR"
 # only the credential, the endpoints and the identity pass through.
 env -u BATON_COURSE -u BATON_LEG -u BATON_INSTRUCTIONS -u BATON_TICKET_FILE \
     -u BATON_ANSWER -u BATON_VERDICT -u BATON_AGENT_COMMAND -u BATON_TAKEN \
-    -u BATON_ADVICE -u BATON_STATE -u IR_BATON_STATE \
+    -u BATON_ADVICE -u BATON_STATE \
     ${URL:+BATON_URL="$URL"} BATON_REPOSITORY="$REPOSITORY" \
     BATON_HOSTNAME="$HOSTNAME_REPORTED" BATON_SESSION="$SESSION" \
     node "$ROOT/cli/baton.mjs" "${RUN_ARGS[@]}" >"$LOG" 2>&1 &

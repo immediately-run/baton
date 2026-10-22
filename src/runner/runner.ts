@@ -1,7 +1,7 @@
 // runner.ts — `baton run`'s generic worker loop (BATON_SPEC §6.13 R-BTN-72): it heartbeats (it
 // hosts the sidecar of §6.3–6.4), claims, loads the claim's course file and leg scripts from the
 // home checkout at the claim's `snapshot_sha` (R-BTN-34), and runs each leg as a child process
-// that gets `IR_BATON_PARENT` and `IR_BATON_STATE` and an AbortSignal. It knows no course: the
+// that gets `BATON_PARENT` and `BATON_STATE` and an AbortSignal. It knows no course: the
 // graph and the scripts decide, every result is validated against the snapshot's file, the
 // finished leg's `close` writes the closing marker before anything is reported (R-BTN-83), and
 // its `handoff` runs before any suspension or release (R-BTN-44). A lost lease aborts the leg at
@@ -675,12 +675,11 @@ export class Runner {
     writeFileSync(ctxPath, JSON.stringify(ctx));
     // Detached: its own process group, so a lost lease kills the leg and everything it started
     // (§6.13) without touching the runner. The env names the parent every leg session checks
-    // (BATON_PARENT — such a session never claims; BATON_STATE — the fence and the spool). The
-    // IR_BATON_* spellings are set beside them for the transition (B-96): docs-side skills and
-    // harness hooks still read them; nothing breaks until their readers move.
+    // (BATON_PARENT — such a session never claims; BATON_STATE — the fence and the spool). B-97
+    // dropped the transition's IR_BATON_* spellings: these two names are the only ones set.
     const parent = String(this.state.get().worker_id ?? '');
     const childEnv = {
-      ...process.env, BATON_PARENT: parent, BATON_STATE: this.o.stateFile, IR_BATON_PARENT: parent, IR_BATON_STATE: this.o.stateFile,
+      ...process.env, BATON_PARENT: parent, BATON_STATE: this.o.stateFile,
       // B-83: the harness command of `--harness`, for a stub whose snapshot's settings name no
       // agent_command — a fill for an absence, never an override.
       ...(this.o.agentCommand ? { BATON_AGENT_COMMAND: this.o.agentCommand } : {}),
