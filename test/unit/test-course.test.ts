@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { checkCourse, legExports, readInputs, removed, shortestRoute, type KitInput } from '../../src/local/testCourse';
 import { graphOf } from '../../src/core/graph';
+import { BUG_REPORT_COURSE } from '../../src/defaults/courses';
 
 const DOCS = join(import.meta.dirname, '../fixtures/courses/roadmap-pr/course.json'); // docs' .baton course, verbatim
 const roadmapPr = JSON.parse(readFileSync(DOCS, 'utf8'));
@@ -100,6 +101,38 @@ describe('baton test-course', () => {
     const live = [{ id: 'T-7', path: [{ leg: 'implement', reached: 'pr-open' }, { leg: 'review', reached: 'reviewed' }, { leg: 'adjudicate', reached: 'adjudicated' }] }];
     const v = await checkCourse(input({ proposed: WITHOUT_ADJUDICATE, proposedVersions: { version: 4, min_worker_version: 4 }, live }));
     expect(v).toEqual([expect.objectContaining({ rule: 'moves-back', message: expect.stringContaining('T-7') })]);
+  }, 60_000);
+
+  it('a no-op agent_command fails a PR course\'s start leg wherever the course is filed; the marker courses are exempt (B-81)', async () => {
+    // docs' own course id, sourced from create-pr (B-33): still a PR course, wherever it is filed.
+    const dir = mkdtempSync(join(tmpdir(), 'baton-kit-noop-'));
+    dirs.push(dir);
+    const of = (course: string, file: unknown, source: string | null) => {
+      const legs = join(dir, '.baton', 'courses', course, 'legs');
+      mkdirSync(legs, { recursive: true });
+      writeFileSync(join(dir, '.baton', 'courses', course, 'course.json'), JSON.stringify(file));
+      writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ courses: [{ id: course, version: 3, min_worker_version: 3, ...(source ? { source } : {}) }] }));
+      return legs;
+    };
+    const scripts = (legs: string, graph: Record<string, unknown>, run: string): void => {
+      for (const leg of Object.keys(graph)) writeFileSync(join(legs, `${leg}.mjs`), `${run}\nexport async function handoff() { return null; }\nexport const close = () => "";\n`);
+    };
+    const source = `github/immediately-run/baton/${'1'.repeat(40)}/create-pr`;
+    // A stub that trusts the agent's exit 0 — B-81's failure: it returns pr-open for nothing.
+    const legs = of('docs-pr', roadmapPr, source);
+    scripts(legs, roadmapPr.legs, 'export async function run() { return { reached: "pr-open", next: "review" }; }');
+    expect(await checkCourse(await readInputs(dir, 'docs-pr', { base: null }))).toEqual([
+      expect.objectContaining({ rule: 'no-op', message: expect.stringContaining('legs/implement.mjs returned {"reached":"pr-open","next":"review"} for an agent_command that exits 0 with no PR') }),
+    ]);
+    // The standard behaviour: the leg fails on what it cannot verify, and the kit passes.
+    scripts(legs, roadmapPr.legs, 'export async function run() { throw new Error("cannot verify KIT-1’s PR: gh pr list failed"); }');
+    expect(await checkCourse(await readInputs(dir, 'docs-pr', { base: null }))).toEqual([]);
+    rmSync(join(dir, '.baton', 'courses', 'docs-pr'), { recursive: true, force: true });
+    // A marker course reports its agent's reached by design, and the core checks that against
+    // the course graph: the no-op run is not its rule.
+    const markers = of('bug-report', BUG_REPORT_COURSE, null);
+    scripts(markers, BUG_REPORT_COURSE.legs, 'export async function run() { return { reached: "traced", next: "origin" }; }');
+    expect(await checkCourse(await readInputs(dir, 'bug-report', { base: null }))).toEqual([]);
   }, 60_000);
 
   it('reads a checkout: the working tree proposes, git’s base is in force, baton.json gives the versions', async () => {

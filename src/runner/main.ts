@@ -42,8 +42,8 @@ export interface RunArgs {
 export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): RunArgs {
   const out: RunArgs = {
     harness: 'opencode', home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
-    session: env.IR_BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
-    repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.IR_BATON_NAME ?? hostname(),
+    session: env.BATON_SESSION ?? env.IR_BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
+    repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? env.IR_BATON_NAME ?? hostname(),
     tier: 'critical', capabilities: ['agent-venue'], beatEvery: 2 * 60_000, testHarness: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -163,9 +163,11 @@ function namedAgentCommand(home: string): string {
 
 export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void } = {}): Promise<number> {
   // §6.13: a leg session never claims — the runner that started it does. A nested `baton run`
-  // is exactly that session trying, so it is refused before anything else.
-  if (process.env.IR_BATON_PARENT) {
-    process.stderr.write(`baton: this session carries IR_BATON_PARENT=${process.env.IR_BATON_PARENT}: a leg session never claims (§6.13)\n`);
+  // is exactly that session trying, so it is refused before anything else. BATON_PARENT is the
+  // name (IR_BATON_PARENT the transition's alias — the runner sets both).
+  const parent = process.env.BATON_PARENT ?? process.env.IR_BATON_PARENT;
+  if (parent) {
+    process.stderr.write(`baton: this session carries BATON_PARENT=${parent}: a leg session never claims (§6.13)\n`);
     return 1;
   }
   const a = parseRunArgs(argv);

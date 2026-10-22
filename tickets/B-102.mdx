@@ -1,0 +1,51 @@
+---
+title: "B-102 — A leg never edits a file another ticket's leg may edit: the shared-file rule, and a release-curated CHANGELOG"
+id: B-102
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 505
+tier: routine
+description: "Found by the parallel-collaboration review: CHANGELOG.md is a per-PR convention every implement agent imitates — dozens of parallel tickets each touching one table's head is a conflict per merge. The Do-not rule goes into the leg instructions; the CHANGELOG becomes release-curated. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** found by the parallel-collaboration review of 2026-10-22
+([`docs/review/parallel-collaboration-2026-10-22.mdx`](../docs/review/parallel-collaboration-2026-10-22.mdx)):
+`CHANGELOG.md` is this repository's convention — every ticket's PR adds a row to one table
+at its top, and every implement agent imitates it (PRs #88 and #93 both did). Several dozen
+parallel workers on separate tickets each touching the same table's head is a conflict per
+merge: exactly what the architecture forbids.
+**Spec:** the resident context's rule
+([`docs/context/architecture.mdx`](../docs/context/architecture.mdx)): *separate tickets
+never share a write target — a file a leg writes is per-ticket, in its path or on its
+branch, or it does not exist.* No spec section names CHANGELOG; this ticket writes the
+rule where the agents read it.
+
+### What to build
+
+1. The standard courses' implement (and fix) instructions gain one *Do not* line, the
+   same words in each: **a leg never edits a file another ticket's leg may edit — no
+   CHANGELOG, no index, no aggregate; a release note belongs in the PR body.**
+2. This repository's CHANGELOG becomes release-curated: rows are written at release
+   time from the merged PRs' bodies (a person or a release command), not by legs. The
+   file's header says so.
+3. The kit gains the rule's check where it can see it: a leg that edits a file outside
+   its ticket's own paths and the code it was asked to change is a judgment call the
+   review makes — the instruction, not a scanner, is this ticket's instrument. The kit
+   asserts the instruction files carry the line.
+
+### Tests
+
+- The kit's instruction check: the implement and fix `.md`s contain the shared-file rule.
+
+### Exit criteria
+
+- [ ] no leg instruction invites an agent to edit a shared file
+- [ ] this repository's CHANGELOG is written at release, not per PR

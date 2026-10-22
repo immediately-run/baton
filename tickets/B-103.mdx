@@ -1,0 +1,65 @@
+---
+title: "B-103 — A runner serves any course it has the capabilities to serve; one leg at a time is the only limit"
+id: B-103
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 499
+tier: judgement
+description: "The owner's correction of a codified limitation: the server is already multi-course (S-BTN-26's W2 declares two and serves either); the claim answer gains course_id, the runner declares every course its home declares (--course narrows), and loads the claim's course from its snapshot. Spec §6.13 and the standard-courses page amended. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-22, correcting the architecture: "a runner serves one course
+is incorrect. A runner serves any course it has the capabilities to serve. Having a runner
+process a single leg at a time makes sense (at least for now), but that's the only
+limitation."
+**Spec:** amends §6.13 (R-BTN-72, line 2038's "serves and declares one course") and
+`docs/standard-courses.mdx`'s "A runner serves one course, since a claim does not say which
+course its ticket is on"; §6.2's claim answer; rule 9 (§7.2) unchanged — S-BTN-26 already
+drives a worker declaring two courses and being offered either.
+
+### What the server already allows, and the one gap
+
+Matching and rule 9 are multi-course-ready: a worker's declaration carries a list, and
+S-BTN-26's W2 declares both `docs`' and `ops`' courses and is offered either. The
+limitation is the CLI runner's own: `runnerCourse()` picks exactly one course (refusing a
+checkout that declares several without `--course`), the heartbeat therefore declares one,
+and the claim answer — the documented rationale for all of it — names the course's
+*version* but not its *id*, though the core holds `claims.course_id` and joins on it
+elsewhere.
+
+### What to build
+
+1. **The claim answer names the course**: `course_id` beside `course_version` in the
+   claim's row (§6.2's answer shape; the field the whole correction hangs on).
+2. **The runner declares every course its home declares**: `--course`, when given,
+   narrows (a machine serving a subset); absent, all of `.baton/baton.json`'s courses go
+   in the heartbeat, each with its version (rule 9 per course, as W2 already proves).
+   The several-courses-without-`--course` refusal goes.
+3. **The runner loads the claim's course**: `loadCourse` by the claim's named `course_id`
+   from the claim's snapshot — a claim running `create-spec`'s `converse` and the next
+   claim running `create-pr`'s `implement` are one runner's consecutive legs.
+4. **One leg at a time stands** (rule 3, one claim per worker) — stated in the amended
+   §6.13 as the runner's actual parallelism limit, with the owner's "at least for now"
+   beside it.
+5. `docs/standard-courses.mdx`'s "one runner per course, each in its own clone" section
+   becomes the multi-course checkout's one-runner norm; the second-clone advice retires.
+
+### Tests
+
+- Extend S-BTN-26's runner half (or its CLI twin): a runner on a two-course checkout
+  with no `--course` declares both, is offered and serves either's leg; `--course`
+  narrows to one; the claim answer's `course_id` is what the runner loads.
+
+### Exit criteria
+
+- [ ] one runner, one checkout, two courses, consecutive claims on either
+- [ ] the spec and the standard-courses page state the owner's rule: any course the
+      capabilities serve, one leg at a time

@@ -1,0 +1,44 @@
+---
+title: "B-97 — The runner's environment loses the IR_ prefix (PR #96's record)"
+id: B-97
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 477
+tier: routine
+description: "BATON_KEY_FILE, BATON_KEY, BATON_TOKEN, BATON_SESSION, BATON_HOSTNAME, BATON_PARENT, BATON_STATE and the spec's leg-channel rows; IR_BATON_* readable through the transition with a warning, leg markers dual-written; a release drops the aliases. Implemented in PR #96; this is its record. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-22: "I don't like the IR_ prefix in front of baton env var
+names." The `IR_` spellings were immediately.run heritage; the rest of the family
+(`BATON_URL`, `BATON_REPOSITORY`, `BATON_HOME`, `BATON_COURSE`, `BATON_LEG`,
+`BATON_INSTRUCTIONS`, `BATON_TICKET_FILE`, `BATON_ANSWER`) was already unprefixed.
+Implemented in [PR #96](https://github.com/immediately-run/baton/pull/96) — this ticket
+is its record, and its exit criteria are that PR's.
+
+### What built (PR #96)
+
+- New names primary everywhere: `BATON_KEY_FILE`, `BATON_KEY`, `BATON_TOKEN`,
+  `BATON_SESSION`, `BATON_HOSTNAME` (matching `--hostname`, from `IR_BATON_NAME`),
+  `BATON_PARENT`, `BATON_STATE`, and the spec's leg channel rows (`BATON_SOCKET`,
+  `BATON_LEG`, `BATON_ACTIVITY`).
+- The `IR_` spellings remain readable through the transition: credentials warn once
+  naming the new spelling; the leg markers are written under both names (docs-side
+  skills and harness hooks still read the old ones).
+- README, the runbook and the spec's env rows teach only the new names, with one
+  transition note where the aliases are named.
+- A release removes the aliases; that removal closes this ticket's last criterion.
+
+### Exit criteria
+
+- [x] a runner started with only the new names registers and claims (verified against
+      production, 2026-10-22)
+- [x] the legacy spellings warn and keep working; the leg markers dual-written
+- [ ] a release drops the `IR_BATON_*` aliases and the transition note

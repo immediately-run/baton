@@ -1,0 +1,98 @@
+---
+title: "B-96 — A course for creating specs: an interactive design conversation, adversarial review, blocking findings addressed in conversation"
+id: B-96
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 500
+tier: judgement
+description: "create-spec, the seventh standard course: converse (interactive, suspends until the conversation's PR is up), adversarial review (non-interactive), address (interactive on blocking findings, max 3 rounds), adjudicate, merge. Ships on the suspend pattern today; B-34 upgrades the interactive legs in place later. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-22: "I'd like to have a course for creating specs: this
+requires an interactive leg: 1. Initial spec design conversation: interactive claude,
+opencode, etc session with the user which creates a PR that includes the new
+specification file. 2. Adversarial review of spec (noninteractive) — from here it's
+basically the create-pr course with the exception that blocking review findings can
+trigger another interactive session to decide how to address the given shortcoming of
+the spec."
+**Spec:** §5.8 R-BTN-131 (the standard courses — this is the seventh), §5.2 R-BTN-69
+(course files), §5.3 R-BTN-72 (a wait outside the claim suspends, with its pair), §7.2
+(create-pr's rules over PR facts); `src/defaults/courses.ts` (one table entry),
+`create-pr`'s `stationsPr` reused whole.
+
+### The course, as the owner drew it
+
+Stations: `requested` (start) → `spec-open` (the design conversation's PR is up) →
+`reviewed` → `merged`. Ends `merged`. The station function is `create-pr`'s own: a spec's
+PR is a branch-pattern PR like any other; the graph differs, the placement does not.
+
+| leg | from → to | kind |
+|---|---|---|
+| `converse` | `requested` → `spec-open` | **interactive**, suspends |
+| `review` | `spec-open` → `reviewed` or back | non-interactive, adversarial |
+| `address` | after `changes` → `spec-open` | **interactive**, suspends |
+| `adjudicate` | after three address rounds | non-interactive |
+| `merge` | `reviewed` → `merged` | non-interactive |
+
+- **`converse` — the initial design conversation.** The leg's stub prints the exact
+  command for the owner's interactive session in the checkout (claude, opencode —
+  whatever the host has), the leg's prompt beside it, and returns `suspend: true` with
+  its pair: the claim ends, the ticket waits at `requested`→`spec-open` for the
+  conversation's work to land as a PR (the spec file, on the course's branch pattern).
+  The next sync's placement advances the ticket; a fresh claim takes `review`. The
+  instructions name where specifications live in the repository (this repository's are
+  `spec/`; the `.md` is the repository's to point at its own).
+- **`review` — adversarial, non-interactive.** The create-pr review leg's machinery and
+  answer protocol (two blind reviewers round one, rounds after, the verdict line), with
+  spec-adversarial instructions: contradictions with the corpus the spec joins
+  (every cross-reference live, nothing pointing at a deprecated section), security holes
+  inherent in the design, executability (no open architectural decision left to an
+  implementer), conformance to the product's values and vocabulary. The severity ladder
+  is create-pr's.
+- **`address` — the deviation from create-pr.** A `changes` verdict does not run a
+  headless fix: it triggers the second interactive leg — the owner and an agent session
+  decide, in conversation, how to answer each blocking finding (fix the spec, argue it,
+  or split the ticket), amending the PR; `suspend: true` again; the placement returns
+  the ticket to `spec-open` and the next round reviews. `max_runs` 3 on `address`, then
+  `adjudicate` decides (merge or owner) exactly as create-pr's three-fix limit does.
+- **`merge`** is create-pr's merge leg.
+
+### Two stages, one course
+
+This course ships on the **suspend pattern** that `review-pr` and `build-app` already
+use — the owner starts the conversation themselves, the leg's printed command and prompt
+in hand — with no dependency beyond what exists. B-34's launched interactive sessions
+(cloud session as the assignee, the link delivered, idle hand-off) then upgrade both
+interactive legs in place: the instructions carry both forms, "start this session"
+today, "the runner sends the link" once B-34 lands. Nothing about the course changes
+when it does.
+
+### Requires
+
+- none beyond a checkout; the forge is read only by the placement (recorded facts in
+  tests).
+
+### Tests
+
+- The kit: the course file validates; the shortest route — a ticket from `requested`
+  through a suspended converse, a PR appearing, an approving review to a confirmed
+  `merged` — runs green; a `changes` verdict routes to `address`, three rounds to
+  `adjudicate`.
+- S-BTN-n: the scenario that drives it (converse suspends with its pair; the
+  conversation's PR advances the board; the address round-trip).
+
+### Exit criteria
+
+- [ ] a specification travels from an owner's design conversation to a merged PR,
+      adversarially reviewed, blocking findings addressed in conversation, no headless
+      leg touching the spec
+- [ ] R-BTN-131's table names the seventh course
+- [ ] the kit and scenario green on both hosts

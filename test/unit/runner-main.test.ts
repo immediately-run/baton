@@ -20,7 +20,8 @@ function home(): string {
 
 describe('parseRunArgs', () => {
   it('defaults from the environment', () => {
-    const a = parseRunArgs([], { BATON_HOME: '/h', BATON_URL: 'https://b', IR_BATON_SESSION: 's', BATON_REPOSITORY: 'docs', IR_BATON_NAME: 'vm-x' });
+    const a = parseRunArgs([], { BATON_HOME: '/h', BATON_URL: 'https://b', BATON_SESSION: 's', BATON_REPOSITORY: 'docs', BATON_HOSTNAME: 'vm-x' });
+    // The IR_BATON_* spellings still serve (B-96's transition): session and hostname, silently.
     expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: ['agent-venue'], testHarness: false });
   });
   it('takes its flags, refusing the unknown and the malformed', () => {
@@ -37,11 +38,11 @@ describe('parseRunArgs', () => {
 });
 
 // B-83: the agent_command a runner runs. runMain reads process.env directly, and the process
-// running these tests may itself be a leg session (IR_BATON_PARENT) with a credential
-// (IR_BATON_KEY_FILE) — exactly the env it refuses and uses — so each test sets the view it
-// needs and restores what was there.
+// running these tests may itself be a leg session (BATON_PARENT) with a credential
+// (BATON_KEY_FILE) — exactly the env it refuses and uses — so each test clears both spellings
+// (B-96's transition) and restores what was there.
 describe('the agent_command a runner runs (B-83)', () => {
-  const LEG_ENV = ['IR_BATON_PARENT', 'IR_BATON_TOKEN', 'IR_BATON_KEY', 'IR_BATON_KEY_FILE'];
+  const LEG_ENV = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE', 'IR_BATON_PARENT', 'IR_BATON_TOKEN', 'IR_BATON_KEY', 'IR_BATON_KEY_FILE'];
   const clearLegEnv = (): Record<string, string | undefined> => {
     const saved: Record<string, string | undefined> = {};
     for (const n of LEG_ENV) {
@@ -217,15 +218,20 @@ describe('declareCourses (rule 9)', () => {
 
 describe('envAuth (§6.4, R-BTN-13)', () => {
   it('the transition’s bearer token, with the worker secret once known', () => {
-    const auth = envAuth({ IR_BATON_TOKEN: 'tok-1' });
+    const auth = envAuth({ BATON_TOKEN: 'tok-1' });
     expect(auth('POST', 'https://b.test/v1/runner/heartbeat', '', null)).toEqual({ Authorization: 'Bearer tok-1' });
     expect(auth('POST', 'https://b.test/v1/runner/heartbeat', '', 's3cret')).toEqual({ Authorization: 'Bearer tok-1', 'X-Worker-Secret': 's3cret' });
+  });
+  it('the IR_BATON_* spellings still serve, the new name winning when both are set (B-96)', () => {
+    expect(envAuth({ IR_BATON_TOKEN: 'legacy' })('POST', 'https://b.test/v1/runner/heartbeat', '', null)).toEqual({ Authorization: 'Bearer legacy' });
+    expect(envAuth({ BATON_TOKEN: 'new', IR_BATON_TOKEN: 'legacy' })('POST', 'https://b.test/v1/runner/heartbeat', '', null)).toEqual({ Authorization: 'Bearer new' });
+    expect(() => envAuth({})).toThrow('no credential: BATON_KEY_FILE, BATON_KEY or BATON_TOKEN');
   });
   it('a key file signs: ssh-keygen makes one, Baton’s verifier shape comes back', () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-key-'));
     const file = join(dir, 'id_ed25519');
     execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', file], { stdio: 'ignore' });
-    const auth = envAuth({ IR_BATON_KEY_FILE: file });
+    const auth = envAuth({ BATON_KEY_FILE: file });
     const headers = auth('POST', 'https://b.test/v1/runner/heartbeat', '{}', null);
     expect(headers['Content-Digest']).toMatch(/^sha-256=:/);
     expect(headers['Signature-Input']).toMatch(/tag="baton-request"/);
@@ -233,14 +239,14 @@ describe('envAuth (§6.4, R-BTN-13)', () => {
     expect(auth('POST', 'https://b.test/x', '{}', 's')).toHaveProperty('X-Worker-Secret', 's');
     rmSync(dir, { recursive: true, force: true });
   });
-  it('an API key, in IR_BATON_KEY or the key file, goes as a bearer with the secret (R-BTN-159)', () => {
+  it('an API key, in BATON_KEY or the key file, goes as a bearer with the secret (R-BTN-159)', () => {
     const key = `bak_${'a'.repeat(16)}_${'b'.repeat(64)}`;
-    const fromEnv = envAuth({ IR_BATON_KEY: key }, () => { throw new Error('an API key is never written out as an SSH key'); });
+    const fromEnv = envAuth({ BATON_KEY: key }, () => { throw new Error('an API key is never written out as an SSH key'); });
     expect(fromEnv('POST', 'https://b.test/v1/runner/heartbeat', '{}', 's')).toEqual({ Authorization: `Bearer ${key}`, 'X-Worker-Secret': 's' });
     const dir = mkdtempSync(join(tmpdir(), 'baton-key-'));
     const file = join(dir, 'worker.key');
     writeFileSync(file, `${key}\n`);
-    expect(envAuth({ IR_BATON_KEY_FILE: file })('POST', 'https://b.test/v1/runner/heartbeat', '{}', null)).toEqual({ Authorization: `Bearer ${key}` });
+    expect(envAuth({ BATON_KEY_FILE: file })('POST', 'https://b.test/v1/runner/heartbeat', '{}', null)).toEqual({ Authorization: `Bearer ${key}` });
     rmSync(dir, { recursive: true, force: true });
   });
   it('no credential at all is an error, never a silent anonymous call', () => {

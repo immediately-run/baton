@@ -6,6 +6,16 @@ scarcest thing there is: a question that reaches them as a page of history waits
 same question as a packet takes thirty seconds. When you finish, the ticket carries the packet and
 waits for the owner's answer.
 
+> **How the stub runs you** — Baton's contract for the `agent_command` author: your command
+> line splits into words as `sh` would (quotes honoured, no substitutions) and executes
+> **without a shell**, with the ticket id, the leg and the checkout appended as arguments.
+> Stdin is never an open pipe: nothing to read, and a read ends at once. Stdout and stderr are
+> captured pipes, and the course reads stdout's last line. Your process's exit **is** your
+> completion: a harness that is a client of a background service must keep its session in
+> process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
+> work ends leaves truncated output and an orphaned session posting to a claim that no longer
+> exists (B-84).
+
 ## Settle what you can first
 
 A packet is for what the evidence cannot settle, not for what nobody checked. Read everything the

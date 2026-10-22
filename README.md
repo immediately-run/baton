@@ -16,7 +16,7 @@ How Baton differs from a durable-execution engine such as Temporal, and where ea
 `@immediately-run/baton` is the `baton` command, published from this repository:
 
 ```sh
-npx --yes @immediately-run/baton@0.1.1 run   # a runner (§6.13), with IR_BATON_KEY_FILE set
+npx --yes @immediately-run/baton@0.1.1 run   # a runner (§6.13), with BATON_KEY_FILE set
 ```
 
 From the package, `baton run`, `baton repo init`, `baton decision list` and the
@@ -157,7 +157,7 @@ administrator, owner and worker holds an SSH key or an API key, their choice (R-
 key signs every request and reveals nothing reusable. An API key is a shared secret sent as a
 bearer: easier to set up, but anyone who reads one request holds it until it is revoked. `baton
 key create FILE` makes an API key on your machine. `FILE` holds the key (`-i FILE`, or a runner's
-`IR_BATON_KEY_FILE`). `FILE.pub` holds its public line, which goes wherever an SSH public key
+`BATON_KEY_FILE`). `FILE.pub` holds its public line, which goes wherever an SSH public key
 would: `BATON_ADMIN_KEYS`, `--owner-key` or a grant's `--key`. Sync, probe and courier keys stay
 SSH keys. The CLI is the one path:
 

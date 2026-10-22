@@ -1,0 +1,91 @@
+---
+title: "Review — the capability ontology design tickets, by Claude Opus 5.5"
+description: An adversarial design review of B-104 and B-105 (2026-10-22), commissioned by the owner after the readings-as-atoms amendment — 36 findings, 12 blocking, and the verdict that the tickets are reworked before claim.
+tags: [review]
+order: 52
+---
+
+<Lede>Commissioned review: the amended ontology design, read adversarially by
+`anthropic/claude-opus-5-5` in a fresh session with the tickets and the constraints
+(core small, provider-free; fragment semantics; boundary-compiled runtime; CI-side
+clingo). Its findings are binding input to the rework; the two tickets sit `in-review`
+until it lands.</Lede>
+
+1. **Blocking.** B-104, title, description, Brief, "Serialization", Tests and Exit criteria. The first addendum demoted N3 to "an optional interop note for the fact vocabulary", but the title, the Brief's "1:1 N3 mapping", the rule-level test and the exit criterion still make a JSON↔N3 mapping of rules the deliverable, so the ticket's own gate checks the superseded artifact.
+
+2. **Blocking.** B-104, Tests and Exit criteria, against B-105 §5. No test or exit criterion in B-104 mentions the ASP-Core-2 translation or clingo, yet B-105 checks its conformance "beside B-104's derivation checks", so B-105 depends on a check nobody is assigned to build.
+
+3. **Should-fix.** B-104, "Semantics" against both addenda. The section still says "no negation, no built-ins", while the addenda add default-negation guards and comparison built-ins without editing it, so the fragment is named three different ways and the promised one-sentence statement of it is never written.
+
+4. **Nit.** B-104, "The binding names a class…". The whole block appears twice word for word (lines 106–126 and 128–148), so it reads like a merge error and hides which copy is meant to be authoritative.
+
+5. **Should-fix.** B-104, "The binding names a class…". It says the rule needs "variables in predicate positions", but `offers(C, M)` has variables in argument positions; read literally, "predicate positions" means a second-order language, which would leave Datalog.
+
+6. **Blocking.** B-104, "Semantics" ("cycles refused"). Once rules carry variables, it is unclear whether a cycle is checked between ground atoms or between predicates. If it is between predicates, refusing cycles also refuses the recursive rule that generic transitivity needs. Meanwhile the cycles that actually break stratification (cycles through negation) are never singled out.
+
+7. **Blocking.** B-104, first addendum ("~50–100 pure TypeScript lines … precompiled graph and ordered lists"). The 4-way join over `binding`, `holds`, `offers` and `usable_with`, plus comparison guards over claim-time readings, needs a general join engine with stratified negation, not reachability plus first-match. Either core evaluates arbitrary rules, so the line estimate and "no ontology parsing in core" are false, or sync-post compiles them to fixed shapes, so "completely new model-choice logic in a repo" is false.
+
+8. **Blocking.** B-104, second addendum §2, and B-105 §2 (`\< 0.2`). ASP-Core-2 and clingo have integer arithmetic only, so a fractional threshold over a JSON `number` field cannot be written in the reference language. Scalars must be fixed-point integers by convention, and the conformance check would otherwise fail or be quietly rewritten.
+
+9. **Should-fix.** B-104, second addendum §2. ASP-Core-2 orders all terms together (integers before constants and strings), so comparing a string field with a number is defined in clingo. "Comparisons over schema-validated scalars only" does not say what TypeScript does with a type mismatch, so the two evaluators can diverge on conformance.
+
+10. **Should-fix.** B-104 (identifiers) and the ASP mapping. Names like `credential:opencode-go-api-key` and `model:deepseek-v4.1-flash` are not valid ASP constants because of the colon, hyphens and dot, and `reading(resource, field) = scalar` is not ASP-Core-2 syntax. The translation must fix a quoted-string encoding and a ternary `reading(R,F,V)` with a uniqueness constraint, and it prescribes neither.
+
+11. **Blocking.** B-105 §2 ("hysteresis expressed in the rule's two thresholds"). Hysteresis needs the previous decision as input: two thresholds over one stateless current reading cannot tell which threshold applies. The design therefore needs a stored last-resolution atom, and neither ticket prescribes one or puts its storage and feedback loop inside the fragment.
+
+12. **Blocking.** B-105, "worked examples" against §3 and the Tests. The list puts DeepInfra first unconditionally and guards only OpenCode Go, so nothing makes "peak flips the order" happen. "Skip failed guards, take the first" also contradicts "DeepInfra down ⇒ OpenCode Go serves even in peak", because a hard guard would select nothing; the soft-versus-hard nature of a guard is undefined.
+
+13. **Should-fix.** B-105 §3 ("availability (the capability gate) filters"). The capability gate concerns the worker's closure of holdings, but the owner's "Deep Infra is not available" means a provider or account `state` reading. The two are conflated, and nothing says which atom expresses provider unavailability.
+
+14. **Should-fix.** B-105 §5 and Tests ("clingo's optimal answer sets match"). An answer set holds every derived atom, and equal ranks give several optimal sets that clingo picks between arbitrarily. Conformance must project to the selection atom and require a strict total order, or it will flake.
+
+15. **Nit.** B-104, first addendum (Conformance). clingo's gringo language is a superset of ASP-Core-2 (pools, intervals, `#show`, scripting), so a green clingo run does not prove the translator emits standard ASP-Core-2. A strict-syntax lint or a second solver is needed to back up the "adoption" claim.
+
+16. **Blocking.** B-104, second addendum §1 against R-BTN-76/101. Readings belong to instances (`account` instances, and `runner` instances named `\<resource>@runner:\<id>`), each from several sources, so `reading(resource, field)` has no single value. The 5-hour quota, the motivating case, is exactly a per-account or per-runner reading, and the instance-selection and aggregation rule is missing.
+
+17. **Blocking.** B-104, second addendum §1 against `src/core/detailSchema.ts`. The schema subset refuses `$ref`/`allOf`, and a registered resource's schema is immutable (a conflict on re-registration), so "extending the base `api-capacity` schema via ordinary JSON Schema composition" cannot be expressed. "A rule against a base field serves every extension" has no subtype check behind it.
+
+18. **Should-fix.** B-104, second addendum §1 (fields). `detail` may be nested objects and arrays, but the convention names only flat "fields", so path flattening, arrays, booleans and `null` have no atom form. Ill-formed or partial readings also have no defined result.
+
+19. **Should-fix.** B-104 second addendum and B-105 §2 ("repository data, no baton change"). Resources and schemas are registered by a tenant administrator (`baton admin resource add`), not posted by a repository. A new provider therefore needs a tenant-admin step, and nothing maps a preference alternative's credential to the resource whose readings guard it (`anthropic-subscription` → `anthropic-capacity`?).
+
+20. **Should-fix.** B-104, second addendum (staleness). A lapsed reading is `unknown`, and spec history says unknown readings fail open. With absence-as-false and default-negation guards, an instrument going silent flips the decision; for example, "near limit" turns false and Opus is chosen. The design needs an explicit three-valued rule, not "stale ordering".
+
+21. **Should-fix.** B-104 second addendum / B-105 §2 (malicious instruments). Any instrument allowed to report for an account resource can steer every repository's routing in the tenant with in-schema lies, such as reporting `remaining=1.0` to keep draining a quota. Once the pins retire, the advice becomes the de facto model choice, so instrument authority per resource matters and is unaddressed.
+
+22. **Blocking.** B-104, "Matching" against Open decision 1. If grants bound concrete holdings (the stated lean), then intersecting the derived set with the grant after closure removes every derived abstract capability, and nothing matches. The correct order is closure of (holdings ∩ grant), and the two passages contradict each other.
+
+23. **Blocking.** B-104, "Safety" (head restrictions, unstated). A repository's rules, or an empty-body fact, can derive any head. That includes `credential:`, `dependency:`, `human-operator` and `runner:` capabilities, which gate safety under R-BTN-45. Rule heads must be restricted to declared, non-holding, non-built-in types, or a compromised repository turns gates into labels it mints.
+
+24. **Blocking.** B-104/B-105, evaluation bounds (absent). Datalog with variables is polynomial with the exponent set by the number of variables per rule, and it runs at claim time in the tenant's shared Durable Object. One repository's crafted ontology, for example 10-variable rules over thousands of facts, can stall claims for every repository in the tenant. Rules, body length, variables, derived atoms and evaluation time each need a validated cap.
+
+25. **Should-fix.** B-104/B-105, strata boundary. Nothing forbids reading atoms from feeding `satisfies`/gate derivations. If they do, a lapsed or forged reading changes rules 4 and 7 and advice becomes refusal, against value 2; readings must be visible only to the preference stratum.
+
+26. **Should-fix.** B-104, Layers ("posted with the sync, versioned with the snapshot"). The tickets do not say the ontology is taken only from the default branch's accepted snapshot, or which snapshot governs a claim against an `advance` after the ontology changed, so a gate can flip mid-ticket.
+
+27. **Should-fix.** B-105 §4 (advice text). The text "(opencode-go in peak until 10:00Z)" is generated from guard internals and readings, then consumed by `agent_command` and leg instructions. If reading strings or repo strings are interpolated, a cross-repository injection path into agents opens; the advice payload should be identifiers only, from a restricted character set.
+
+28. **Blocking.** B-104 against §10 leg environment (`credential:\<NAME>` kept only when `requires` names it). A leg that requires `capability:code-generation-llm` names no credential, so the runner strips every credential variable and the derived route cannot run. The env-scoping rule must cover credentials on the resolved chain or preference.
+
+29. **Should-fix.** B-104, worked example against R-BTN-121. `credential:` values must match `^[A-Z0-9_]\{1,64}$` (they are env var names), so `credential:opencode-go-api-key` is refused. The `model:`/`capability:` types must also be declared in each course's `capability_types`, which the ontology's relation to typed capabilities and to `capability_roles` expansion never addresses.
+
+30. **Should-fix.** B-104, "Value bindings". Positive Datalog is monotone, so a binding rule only adds derivations: "satisfies when it holds the model the repository bound" cannot narrow anything while the unconditional `model ∧ dependency ⇒ capability` rule stands. Separately, B-104 defers preference lists ("not v1") while B-105 builds them, and the relation between a functional `binding` and a preference list for the same choice is undefined.
+
+31. **Should-fix.** B-104, "Built-in ontology". The tickets mix override "by rule identity" with "precedence per fact" (two granularities), and the JSON shape has no `id` field. The retract and replace semantics therefore cannot be implemented as written.
+
+32. **Should-fix.** B-104, "Matching" (why-not chain). With conjunctive rules and several derivations, the "missing link" is a choice among alternative minimal missing sets, a set-cover-like problem. The explanation algorithm is not specified, nor is a canonical choice such as fewest missing holdings with a tie-break.
+
+33. **Should-fix.** B-105 §4 ("the override is logged"). `advice-overridden` is detectable today only because a claim is a Baton call. Which model a leg actually runs happens locally, and no report field (for example a route on `advance`) is prescribed, so the exit test cannot be met.
+
+34. **Should-fix.** B-105 §4 / exit criteria (retiring pins). The review round's pinned pair encodes an invariant, a reviewer never on the author's model, that becomes overridable advice once moved into preferences. Null advice (no ontology, no readings, no surviving alternative) also leaves a leg with no model and no defined fallback.
+
+35. **Nit.** B-104, binding example. `binding("coding model", "claude-opus-5.5")` sits beside `model:claude-opus-5-5` and needs an unstated `model_name` mapping, a second naming scheme for the same entity.
+
+36. **Nit.** B-105 §3. Advice is resolved once at claim time, but legs run for hours across peak boundaries and quota drain. The spec should say advice is a point-in-time snapshot and whether a long leg may refresh it.
+
+**Verdict:** The direction is sound and defensible: rules as repository data, a small total evaluator in core, a standard reference language, and the solver kept in CI. But the amended tickets are not executable as written. The N3 demotions left B-104's title, tests and exit criteria pointing at the superseded artifact, and nothing assigns the ASP/clingo deliverable B-105 depends on. The "fragment" is never pinned down. Three things in it are not yet supported in core as specified:
+- hysteresis, which needs stored state;
+- fractional comparisons, which need fixed-point integers;
+- a general variable join, which contradicts the ~50–100-line graph-plus-lists runtime.
+
+The reading-atom convention runs into the existing resource model: readings belong to instances, the schema subset has no composition, and schemas are immutable and registered by an administrator. The safety boundaries that matter are not drawn: restrictions on rule heads, evaluation caps per tenant, readings kept out of gate strata, grant intersection before closure, and credential env scoping for derived routes. An implementer would have to invent the compiled form, the atom identity rules, the guard semantics and the override bookkeeping. The tickets should be reworked before anyone claims them.

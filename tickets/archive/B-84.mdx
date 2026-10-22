@@ -2,17 +2,19 @@
 title: "B-84 — The leg stubs spawn the agent through sh -c, an environment that hangs real harness CLIs"
 id: B-84
 project: baton
-status: available
+status: done
 updated: 2026-10-21
 tags:
   - roadmap-item
+  - EXPEDITE
 order: 482
 tier: judgement
 description: "execFile(sh, -c) hangs opencode run deterministically (zero output, forever — root cause unexplained; stdin pipes, signals, trust and the service ruled out). Spawn without the shell and make the stdio contract explicit: stdin never an open pipe."
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/93
 depends_on: []
 ---
 

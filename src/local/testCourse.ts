@@ -6,16 +6,19 @@
 // the shortest route, done, confirmed — goes through the core's own claim, advance and end.
 // It needs no access to production. A violation names its rule; none is a pass.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateCourse } from '../core/course';
 import { graphOf, onGraph, resolvePath, type Graph, type Step } from '../core/graph';
 import { checkPayload, DEFAULT_COURSE } from '../core/board';
+import { builtIn } from '../defaults/courses';
+import { parseSource } from '../defaults/course-source';
 import { LocalHost } from './host';
 import { openStore } from './store';
 
-export type KitRule = 'course' | 'accepted' | 'legs-scripts' | 'min-worker-version' | 'moves-back' | 'generic-run';
+export type KitRule = 'course' | 'accepted' | 'legs-scripts' | 'min-worker-version' | 'moves-back' | 'generic-run' | 'no-op';
 export interface KitViolation {
   rule: KitRule;
   message: string;
@@ -34,6 +37,13 @@ export interface KitInput {
   base: unknown | null;
   proposedVersions: Versions | null;
   baseVersions: Versions | null;
+  /** The repository root the kit read (readInputs); null over constructed inputs. The no-op run
+   * (B-81) needs it to import the working tree's leg scripts. */
+  root?: string | null;
+  /** The course entry's `source` (B-33), when .baton/baton.json names one: the standard course
+   * whose files the repository scaffolds — how the kit tells a PR course filed under another id
+   * (docs' `roadmap-pr`, sourced from `create-pr`) from the marker courses. */
+  source?: string | null;
   /** The leg scripts in `legs/` — each name without `.mjs`, and which of §6.13's `run`, `handoff`
    *  and `close` it exports — or null when the course has no `legs/`. */
   legScripts: { name: string; exports: string[]; error?: string }[] | null;
@@ -235,11 +245,58 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
   return out;
 }
 
+/** B-81: a stub whose leg opens a PR verifies it on the forge before claiming it — an agent
+ * that exits 0 without one is not the leg's outcome. The kit runs the course's start leg in a
+ * scratch checkout whose `agent_command` is a no-op (`true`, exit 0) and whose origin no forge
+ * answers, so nothing can be verified: the leg script must fail its leg (naming what it looked
+ * for), and one that returns a position anyway is the violation the first acceptance run hit —
+ * the claim advanced to a review of nothing. Marker courses are exempt: their stubs report the
+ * agent's `reached`, and the core checks that against the course graph before the marker is
+ * closed — the weaker form the ticket leaves alone. */
+export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
+  if (!k.root) return [];
+  let standard: ReturnType<typeof builtIn> = undefined;
+  try {
+    standard = builtIn(k.source != null ? parseSource(k.source).course : k.course);
+  } catch {
+    standard = undefined; // a source that is not a name: the sync's to refuse, not the kit's
+  }
+  if (standard?.reads !== 'prs') return [];
+  const startLeg = graphOf(k.proposed).startLeg;
+  const script = join(k.root, '.baton', 'courses', k.course, 'legs', `${startLeg}.mjs`);
+  if (!existsSync(script)) return []; // a missing script is the legs-scripts rule's own failure
+  const dir = mkdtempSync(join(tmpdir(), 'baton-kit-noop-'));
+  try {
+    // The scratch checkout: a no-op agent_command at the snapshot, and an origin no forge
+    // answers, so the verification cannot succeed and must say so.
+    const git = (out: boolean, ...args: string[]) =>
+      String(execFileSync('git', ['-C', dir, '-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'], ...(out ? { encoding: 'utf8' } : {}) }));
+    git(false, 'init', '-q', '-b', 'main');
+    git(false, 'remote', 'add', 'origin', 'https://127.0.0.1:1/kit/no-forge.git');
+    mkdirSync(join(dir, '.baton'), { recursive: true });
+    writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ agent_command: 'true', courses: [{ id: k.course, version: 1, min_worker_version: 1 }] }));
+    git(false, 'add', '-A');
+    git(false, 'commit', '-qm', 'kit');
+    const sha = git(true, 'rev-parse', 'HEAD').trim();
+    const mod = (await import(`${pathToFileURL(script).href}?t=${Math.random()}`)) as Record<string, unknown>;
+    const run = mod.run ?? (mod.default != null && typeof mod.default === 'object' ? (mod.default as Record<string, unknown>).run : undefined) ?? (typeof mod.default === 'function' ? mod.default : undefined);
+    if (typeof run !== 'function') return []; // a script that exports no run is the legs-scripts rule's
+    try {
+      const result = await (run as (ctx: unknown) => Promise<unknown>)({ ticket: { id: `${REPO}:KIT-1`, home: REPO }, leg: startLeg, checkout: dir, snapshot: { sha } });
+      return [{ rule: 'no-op', message: `legs/${startLeg}.mjs returned ${JSON.stringify(result)} for an agent_command that exits 0 with no PR — the course opens PRs, so its start leg must verify one on the forge before returning its position, failing the leg naming what it looked for (B-81)` }];
+    } catch {
+      return []; // the leg refused the no-op: what B-81 asks
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** The whole kit over in-memory inputs. */
 export async function checkCourse(k: KitInput): Promise<KitViolation[]> {
   const s = staticViolations(k);
   if (s.some((v) => v.rule === 'course')) return s;
-  return [...s, ...replayViolations(k.proposed, k.live), ...(await coreViolations(k))];
+  return [...s, ...replayViolations(k.proposed, k.live), ...(await coreViolations(k)), ...(await noopViolations(k))];
 }
 
 /** The kit's inputs from a repository checkout: the proposed `.baton/` in the working tree, the
@@ -256,7 +313,12 @@ export async function readInputs(root: string, course: string, opts: { base?: st
     return c && Number.isInteger(c.version) && Number.isInteger(c.min_worker_version) ? { version: c.version, min_worker_version: c.min_worker_version } : null;
   };
   const batonJson = join(root, '.baton', 'baton.json');
-  const proposedVersions = existsSync(batonJson) ? versionsOf(JSON.parse(readFileSync(batonJson, 'utf8'))) : null;
+  const settings = existsSync(batonJson) ? asRecord(JSON.parse(readFileSync(batonJson, 'utf8'))) : {};
+  const proposedVersions = versionsOf(settings);
+  // The course entry's source (B-33), where it names one: the standard course whose files the
+  // repository scaffolds, however the course is filed here.
+  const entry = (settings.courses as unknown[] | undefined)?.map(asRecord).find((x) => x.id === course);
+  const courseSource = typeof entry?.source === 'string' ? entry.source : null;
   const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 << 20 });
   let base: unknown = null;
   let baseVersions: Versions | null = null;
@@ -305,5 +367,5 @@ export async function readInputs(root: string, course: string, opts: { base?: st
     live = Object.entries(asRecord(b.stations)).filter(([id]) => (courseOf.get(id) ?? course) === course)
       .map(([id, st]) => ({ id, path: (asRecord(st).path as Step[] | undefined) ?? [] }));
   }
-  return { course, proposed, base, proposedVersions, baseVersions, legScripts, overrides, live };
+  return { course, proposed, base, proposedVersions, baseVersions, root, source: courseSource, legScripts, overrides, live };
 }

@@ -45,11 +45,12 @@ npx baton run --course bug-report --home ~/src/repo-bug-report
 
 ## The agent that runs the legs
 
-Each leg's stub runs the command `.baton/baton.json` names in `agent_command` — a shell string,
-with the ticket id, the leg and the checkout as `$1`, `$2` and `$3`, and the leg's briefing in
-the environment (`BATON_COURSE`, `BATON_LEG`, `BATON_TICKET_FILE`, `BATON_INSTRUCTIONS`, and
-`BATON_ANSWER` on a leg whose last line is read). `baton repo init` names it for the harness you
-run, and prints the command for the unfamiliar:
+Each leg's stub runs the command `.baton/baton.json` names in `agent_command` — a shell-style
+string the stub splits into words and spawns with **no shell between it and the agent** (B-84),
+with the ticket id, the leg and the checkout appended as its last three arguments, and the leg's
+briefing in the environment (`BATON_COURSE`, `BATON_LEG`, `BATON_TICKET_FILE`,
+`BATON_INSTRUCTIONS`, and `BATON_ANSWER` on a leg whose last line is read). `baton repo init`
+names it for the harness you run, and prints the command for the unfamiliar:
 
 ```
 npx baton repo init --agent opencode      # the default
@@ -57,16 +58,17 @@ npx baton repo init --agent claude-code
 npx baton repo init --agent-command '<your own command>'
 ```
 
-The two shipped commands, both validated on real runs (opencode on the acceptance runs of the
-self-hosting gap analysis; claude-code headless on a checkout, following the instructions file
-and editing the tree):
+The two shipped commands. The shape is the one this repository runs in production (opencode —
+its legs run under exactly these words now); the earlier `sh -c` form was validated on real runs
+(opencode on the acceptance runs of the self-hosting gap analysis; claude-code headless on a
+checkout, following the instructions file and editing the tree):
 
 ```
-opencode run --auto --model zai-coding-plan/glm-5.3 "You are the $BATON_LEG leg of the $BATON_COURSE course for ticket $1. Read the file named by $BATON_INSTRUCTIONS and follow it exactly. The ticket file is $BATON_TICKET_FILE. Work in the current repository checkout. $BATON_ANSWER — when that answer rule is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it." < /dev/null
+opencode run --auto --model zai-coding-plan/glm-5.3 "You are a Baton leg agent. The file named by the BATON_INSTRUCTIONS environment variable holds your instructions for this leg: read them and follow them exactly. The environment names your course (BATON_COURSE), your leg (BATON_LEG), the ticket's file (BATON_TICKET_FILE) and the answer rule for your last line (BATON_ANSWER, when one is set); the arguments after this message are the ticket id, your leg and the repository checkout. Work in the current repository checkout. When BATON_ANSWER is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it."
 ```
 
 ```
-claude -p --permission-mode bypassPermissions --model sonnet "You are the $BATON_LEG leg of the $BATON_COURSE course for ticket $1. Read the file named by $BATON_INSTRUCTIONS and follow it exactly. The ticket file is $BATON_TICKET_FILE. Work in the current repository checkout. $BATON_ANSWER — when that answer rule is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it." < /dev/null
+claude -p --permission-mode bypassPermissions --model sonnet "You are a Baton leg agent. The file named by the BATON_INSTRUCTIONS environment variable holds your instructions for this leg: read them and follow them exactly. The environment names your course (BATON_COURSE), your leg (BATON_LEG), the ticket's file (BATON_TICKET_FILE) and the answer rule for your last line (BATON_ANSWER, when one is set); the arguments after this message are the ticket id, your leg and the repository checkout. Work in the current repository checkout. When BATON_ANSWER is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it."
 ```
 
 Three details carry weight:
@@ -74,9 +76,12 @@ Three details carry weight:
 - **The model is pinned.** An unpinned agent runs whatever the machine defaults to, and the
   default moves under you. Change the pin in the command when your repository should run another
   model.
-- **`< /dev/null` closes stdin.** The stub spawns the command through `sh -c`, an environment
-  that hangs `opencode run` deterministically with an open stdin (root cause unexplained; filed
-  as B-84, whose fix is to spawn without the shell). Until B-84 lands, keep the redirection.
+- **No shell, and stdin is already closed.** The stub splits the command itself and spawns the
+  words as argv (B-84): a redirection like `< /dev/null` is refused — nothing executes it, and
+  the agent's stdin is closed by the stub — and `$BATON_INSTRUCTIONS` would stay those literal
+  characters, never the path. That is why the prompt names the `BATON_*` environment variables
+  for the agent to read itself, and the ticket id, the leg and the checkout ride as the
+  arguments after the message.
 - **The prompt spells the last-line contract.** A result-dependent leg's answer is read from the
   agent's last line; the prompt says so in the words the machine enforces.
 

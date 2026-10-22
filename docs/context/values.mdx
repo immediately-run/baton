@@ -32,3 +32,11 @@ by a review.</Lede>
    test that passes on one passes on the other.
 10. **The code is checked against the model.** Baton's core matches a formal model, and the
     tests prove it on every change.
+11. **Baton works with the factory, and belongs to none of it.** The long run is a stack —
+    baton, sandbox orchestration (`fc-opencode`), agent harnesses (opencode), the wikis
+    (grove) — composing a software factory. Baton must work with each, and be specific to
+    none: what a sandbox, a harness or a wiki needs from Baton lands as a general
+    mechanism any of them could use, and immediately.run's own infrastructure is one
+    consumer among the ones that matter, not a fork in the design. Today the scope is
+    simpler: use baton to build baton. The stack is drawn, not built; nothing lands for
+    it until the dogfood loop needs it.
