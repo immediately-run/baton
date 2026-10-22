@@ -1,5 +1,5 @@
 ---
-title: "B-105 — Preferences in the ontology language: guarded choices as ASP-Core-2 weak constraints over reading atoms, resolved per claim as advice, never forced"
+title: "B-105 — Choices: advice on how a leg runs, from the ontology and the instruments' readings"
 id: B-105
 project: baton
 status: available
@@ -8,7 +8,7 @@ tags:
   - roadmap-item
 order: 507
 tier: judgement
-description: "A leg names the choices it wants advice on; the ontology lists each choice's alternatives in order, filtered hard by holdings, resource blocks and exclusions, demoted softly by guards — the canonical ASP-Core-2 choice rule plus lexicographic weak constraints, evaluated in core as the equivalent first-match. Guards read typed reading atoms (from instances, under an authority rule), time atoms and the stored last demotion (hysteresis). The resolution rides the claim answer as identifiers only. Requires: B-104."
+description: "Build §6.10: a leg names the choices it wants advice on; the ontology orders each choice's alternatives, filtered hard by holdings, blocks and exclusions and demoted softly by guards over typed reading atoms, time and the stored last demotion; resolved at claim and advance as identifiers-only advice; overrides recorded from the reported route; pins become the fallback. Requires: B-104."
 topics:
   - baton
 owns: {}
@@ -17,346 +17,55 @@ depends_on:
   - B-104
 ---
 
-**Review:** [the Opus 5.5 adversarial review, 2026-10-22](../docs/review/opus-ontology-review-2026-10-22.mdx)
-— this text is the rework and replaces the original ticket. [§ Review dispositions](#review-dispositions)
-maps every finding it owns.
+**Brief:** the owner, 2026-10-22: "I want to use DeepSeek for creating PRs. OpenCode Go and Deep
+Infra both offer it, but OpenCode Go has a peak usage period during which DeepSeek costs more.
+Can the ontology express that within this period I would *prefer* DeepSeek from Deep Infra —
+but fall back to DeepSeek from OpenCode Go if Deep Infra is not available? A similar example:
+Claude Opus as reviewer 2 *unless my Claude subscription is nearing its 5-hour limit*, in which
+case I would fall back to the second reviewer also using GLM." And: "A completely new model
+provider and model-choice logic implemented in a repo using baton, without any baton
+modifications."
+**Spec:** §6.10, R-BTN-176 (the atoms a choice reads) and R-BTN-177 (choices: semantics,
+hysteresis, delivery, overrides, conformance), with the rules it amends: R-BTN-69's leg
+`choices`, R-BTN-76's `atoms_from` and `std:` base, R-BTN-100, R-BTN-110's
+`std:api-capacity@1`, and R-BTN-144's `BATON_ADVICE`, `BATON_ROUTE` and alternative
+credentials. The data model is in §13: `choice_last`, `external_resources.atoms_from`. The API is
+in §14: `advice` and `route`. The history is in `BATON_SPEC_HISTORY.md` (Changelog, 2026-10-22;
+Review record).
 
-**Brief:** the owner, 2026-10-22: "how could we use the knowledge in this ontology to also
-rank available legs… I want to use DeepSeek for creating PRs. OpenCode Go and Deep Infra
-both offer it, but OpenCode Go has a peak usage period during which DeepSeek costs more. Can
-the ontology express that within this period I would *prefer* DeepSeek from Deep Infra — but
-fall back to DeepSeek from OpenCode Go if Deep Infra is not available? A similar example:
-Claude Opus as reviewer 2 *unless my Claude subscription is nearing its 5-hour limit*, in
-which case I would fall back to the second reviewer also using GLM." On the provider
-boundary: "I don't want Baton core to have to have hardcoded support for various model
-providers. An instrument contributing a metric reading — conforming to a custom JSON Schema
-it has declared, extending the general api-capacity schema — can be referred to by the ASP
-clauses which determine leg ranking. A completely new model provider and model-choice logic
-implemented in a repo using baton, without any baton modifications."
+### What to build
 
-**Decided in the rework (the owner, 2026-10-22):** hysteresis reads a **stored
-last-demotion atom**. Reading atoms come from **administrator and instrument-key readings by
-default**, and an administrator opts a resource in to runner-reported atoms. The language
-grows only in directions ASP-Core-2 allows. Value 2 (advice never refuses) governs the whole
-mechanism.
+1. **Atom formation** (R-BTN-176), in core. Form the atoms per claim and advance: speaking
+   readings under the authority rule, typed field atoms by dotted path, `unknown`, `refines`,
+   `now` from `this.now`, `was_demoted`.
+2. **Resource registration.** Add `--atoms-from admin|any` (CLI, `POST /v1/admin/resources`,
+   migration). Teach `src/core/detailSchema.ts` `x-baton-base`, with R-BTN-108's refinement
+   check at registration. Add `std:api-capacity@1` to the standard library.
+3. **Choices** (R-BTN-177). Generate the encoding, evaluate it as first-match under B-104's
+   counters, write `choice_last`, and put `advice` in the claim and advance answers. Validate a
+   leg's `choices` in the course file.
+4. **The runner.** Write `BATON_ADVICE`, read `BATON_ROUTE` and report `route` on advance and
+   end. Keep the available alternatives' credentials. Record `advice-overridden` in core from a
+   differing route.
+5. **The standard courses and this repository.** Have `agent_command` and the review leg's
+   instructions read `BATON_ADVICE` first, keeping today's models as the fallback. Add this
+   repository's `codegen`, `reviewer-1` and `reviewer-2` choices and the `meters` facts. Register
+   `anthropic-capacity` refining `std:api-capacity@1`, with `atoms_from: any`. This is an
+   operator step: record it in the PR.
+6. **Conformance.** Add choice fixtures to B-104's suite (`--opt-mode=optN`, one optimum, the
+   last witness's `route/2`).
+7. **Out of scope:** core's existing `model_providers`, `peak_schedules` and
+   `provider_suspensions` tables are not read by choices. File a ticket to retire them once this
+   lands.
 
-**Spec:** B-104's §5.9 (R-BTN-174, R-BTN-175), extended. §6.3 R-BTN-76/101/151 (instances,
-readings, state and blocks, which this reads and never changes). R-BTN-108 (`x-baton-base`
-refinement, which resource schemas gain). R-BTN-110 (`std:api-capacity@1` joins the standard
-library). §6.7 R-BTN-100 (the claim answer and `advice-overridden`). §8.4 R-BTN-144 (the leg
-environment gains `BATON_ADVICE` and `BATON_ROUTE`). §5.2 (a leg's `choices`). New:
-**R-BTN-176** (reading atoms) and **R-BTN-177** (choices, their resolution and delivery), and
-scenarios **S-BTN-147–S-BTN-154**.
+### Tests
 
-### Choices: what a leg asks, and what the ontology answers
-
-A leg lists the choices it wants advice on, in a new course-file key: `"choices":
-["codegen"]` on implement and `"choices": ["reviewer-1", "reviewer-2"]` on review. Every id
-must name a choice in the ontology posted with the same snapshot, or the course file is
-refused (R-BTN-69). The ontology's `choices` section lists the alternatives of each choice
-**in order**:
-
-```json
-"choices": [
-  { "id": "codegen", "alternatives": [
-      { "id": "opencode-go", "model": "model:deepseek-v4.1-flash", "credential": "credential:OPENCODE_GO_API_KEY",
-        "demote_when": [["ocg_peak"]] },
-      { "id": "deepinfra",   "model": "model:deepseek-v4.1-flash", "credential": "credential:DEEPINFRA_API_KEY" } ] },
-  { "id": "reviewer-2", "alternatives": [
-      { "id": "opus", "model": "model:claude-opus-5-5", "credential": "credential:CLAUDE_CODE_OAUTH_TOKEN",
-        "demote_when": [["near_limit", "credential:CLAUDE_CODE_OAUTH_TOKEN"]] },
-      { "id": "glm",  "model": "model:glm-5.3",         "credential": "credential:ZAI_API_KEY" } ] }
-]
-```
-
-Each choice and alternative id matches `^[a-z][a-z0-9-]{0,63}$` and is unique within its
-scope. Each choice and each alternative is an entry for B-104's override-by-id. `demote_when`
-and an optional `exclude_when` are lists of body literals, in B-104's syntax, over the
-repository's own predicates. Choices count against B-104's bounds.
-
-### Semantics: the ASP-Core-2 reference, and the evaluator's equivalent
-
-The sugar translates to facts (`alt(C, A, Pos)`, with `Pos` the list position from 1, and
-`alt_route(C, A, M, K)`) and to one rule per guard (`demoted(C, A) :- <literals>.`,
-`excluded(C, A) :- <literals>.`). A fixed prelude that is core's, not the course's, closes it:
-
-```
-available(C, A) :- wanted(C), alt_route(C, A, M, K), has(M), has(K),
-                   not blocked_by(K), not excluded(C, A).
-blocked_by(K)   :- meters(K, R), blocked(R).
-1 <= { route(C, A) : available(C, A) } <= 1 :- wanted(C), available(C, X).
-:~ route(C, A), demoted(C, A).  [1@2, C, A]
-:~ route(C, A), alt(C, A, P).   [P@1, C, A]
-```
-
-Read plainly:
-
-- **Availability is hard.** An alternative survives only when the runner has both its model and
-  its credential (`has` = holdings ∪ B-104's derived set), the credential's metered resource is
-  not blocked for this runner, and no `exclude_when` holds.
-- **Guards are soft.** A holding `demote_when` moves the alternative behind every undemoted one
-  and keeps the list order among the demoted. It never removes the alternative. This is how
-  "DeepInfra down ⇒ OpenCode Go serves even in peak" holds: in peak, OpenCode Go is demoted but
-  still available.
-- **The optimum is unique.** Positions are distinct within a choice, so the lexicographic
-  objective (demoted first, then position) has exactly one optimal answer set whenever any
-  alternative is available. Validation needs no extra check, because list order is a strict
-  total order by construction.
-
-**Core evaluates the equivalent first-match.** It filters to available alternatives, sorts by
-(demoted, position) and takes the first. There is no solver. B-104's clingo-wasm suite proves the
-equivalence on every fixture (§ Conformance). Choice rules and weak constraints are allowed
-only in this generated form. A repository cannot write its own. Admitting them generally would
-be a new ticket, naming the ASP-Core-2 construct (B-104's growth rule).
-
-**Invariants are exclusions, not preferences.** A constraint that must hold, such as "never
-the author's model", is an `exclude_when`. It removes the alternative from the advice, but the
-leg may still act against the advice (value 2), and that is logged. A constraint that must bind
-the *claimant* stays a barred tag (R-BTN-60). The review round's pinned pair is not an
-invariant. The owner's own example accepts both reviewers on GLM, so moving it into advice is
-the owner's decision, not a lost guarantee. v1 forms no per-ticket route atoms, so an exclusion
-needing "what an earlier leg of this ticket ran" is a later ticket.
-
-### Reading atoms: what core forms, from which instance, under whose authority
-
-These atoms are core's only naming contract with instruments. Core forms them per evaluation,
-for the claiming runner and the ticket's repository, and they are never a rule's head:
-
-| Atom | Meaning |
-|---|---|
-| `has(K)` | K is in the runner's holdings ∪ derived set (B-104) |
-| `wanted(C)` | the leg being claimed or advanced into lists choice C |
-| `usable(R, I)` | instance I of resource R is usable by this runner for this repository: R-BTN-76's definition, unchanged |
-| `state(I, S)` | I's state, `"available"`, `"unavailable"` or `"unknown"`, by R-BTN-76's rule, unchanged |
-| `blocked(R)` | R is blocked for this runner, by R-BTN-76's definition |
-| `unknown(I)` | no reading permitted to form atoms is in force for I |
-| `refines(R, S)` | R's registered schema is, or refines up its `x-baton-base` chain, schema id S |
-| `int(I, P, V)` · `str(I, P, V)` · `flag(I, P)` | a field of I's speaking reading (below) |
-| `now(F, V)` | `F` ∈ `"epoch_min"`, `"utc_minute_of_day"` (0–1439), `"utc_weekday"` (1 = Monday … 7), read from `this.now` (R-BTN-32) |
-| `was_demoted(C, A)` | A was demoted the last time C was resolved in this repository, within 24 hours (§ Hysteresis) |
-
-- **Instance, not resource (finding 16).** Atoms are keyed by instance, and rules reach them
-  through `usable`, so "any usable instance near its limit" and "every one" (by negation) are
-  both expressible, and the rule author chooses. Several instruments still report for one
-  instance, so each instance has one **speaking reading**: the administrator's reading while it
-  is in force, else the most recently observed reading in force among the permitted sources.
-  This is R-BTN-76's state precedence, applied to `detail` of either kind. Core still never sums
-  readings.
-- **Authority (finding 21).** By default only administrator readings and instrument-key
-  readings (`POST /v1/probe/readings`) are permitted to form atoms. `baton admin resource add …
-  --atoms-from any` admits runner-reported readings too. That is a trust decision, recorded on
-  the resource (`external_resources.atoms_from`, a new migration) and shown on the instance
-  view. `anthropic-capacity` needs it, since the runner holding the subscription is what
-  measures the 5-hour window. Readings never reach a gate (§ Strata), so the blast radius of a
-  lying instrument is advice for the repositories that the instance lists.
-- **Typed, fixed-point and flat (findings 8, 9, 18).** A field's path is its property names
-  joined by `.`, each matching `^[a-z][a-z0-9_]{0,31}$`, at most 5 deep (the detail depth). An
-  `integer` within 32-bit range forms `int`. A string of at most 128 characters in B-104's
-  constant charset forms `str`. `true` forms `flag`. Everything else forms no atom: `false`,
-  `null`, arrays, non-integer `number`s, longer strings, and fields absent from a partial
-  reading. Fractions are therefore fixed-point by convention (`remaining_permille`, 0–1000),
-  because clingo has integers only. Each atom's predicate carries its type, which is how B-104's
-  validator types comparison operands.
-- **Absence is three-valued, and the default fails open (finding 20).** A lapsed instrument
-  forms `unknown(I)` and no field atoms, so every guard over its fields is false and nothing is
-  demoted. This matches R-BTN-76's "`unknown` does not block (advice fails open)". The spec
-  says so, and a rule that wants to fail closed names `unknown` explicitly. The built-in shows
-  both idioms.
-- **Schemas refine, by R-BTN-108's mechanism (finding 17).** The resource-schema subset
-  (`src/core/detailSchema.ts`) gains `x-baton-base`, naming a `std:` schema. It is checked
-  statically at registration by R-BTN-108's refinement check (the same or narrower type, base
-  `required` kept, bounds equal or tighter), and an unproven refinement is refused. Resource
-  schemas stay immutable. A rule written against `refines(R, "std:api-capacity@1")` and a base
-  field therefore serves every resource whose schema refines that base. This is a checked
-  subtype relation, which "ordinary JSON Schema composition" (`allOf`, refused by the subset)
-  never was.
-- **`std:api-capacity@1`** joins R-BTN-110's library: `{window_s: integer ≥ 1,
-  remaining_permille: integer 0–1000, resets_at_min?: integer}`, `additionalProperties: true`
-  so that provider schemas can extend it.
-
-### Strata: readings never reach a gate (finding 25)
-
-The predicates in B-104's gate stratum (`derived` and everything it depends on) may not
-depend, at any depth, on any atom in the table above or on the prelude; their only
-core-formed input stays `holds`.
-Validation checks this on the dependency graph and refuses with the offending path named. The
-preference stratum may read the gate stratum's output (`has`). It is evaluated per claim and
-per advance, under B-104's counters. An evaluation that crosses them yields no advice, with
-`reason: "limit"`, and raises `baton.ontology-limit`.
-
-### Hysteresis: the stored last demotion (finding 11)
-
-When core resolves a choice, it writes one row per alternative:
-`choice_last(repository_id, choice, alternative, demoted, resolved_at)`, created by the new
-migration and overwritten on each resolution. The next evaluation in the repository sees
-`was_demoted(C, A)` for rows less than 24 hours old. This is an input fact, not a derived one,
-so the feedback loop crosses evaluations, never strata, and the program stays stratified. Two
-thresholds are then two rules:
-
-```json
-{ "id": "near-limit-enter", "head": ["near_limit", "$k"],
-  "body": [["meters", "$k", "$r"], ["refines", "$r", "std:api-capacity@1"], ["usable", "$r", "$i"],
-           ["int", "$i", "remaining_permille", "$v"], {"cmp": ["$v", "<", 200]}] },
-{ "id": "near-limit-hold", "head": ["near_limit", "$k"],
-  "body": [["was_demoted", "reviewer-2", "opus"], ["meters", "$k", "$r"], ["usable", "$r", "$i"],
-           ["int", "$i", "remaining_permille", "$v"], {"cmp": ["$v", "<", 300]}] }
-```
-
-The state is per (repository, choice, alternative), not per runner. It describes the guard on
-a shared account, which is what hysteresis protects. An alternative filtered out for
-availability is still recorded with its guard's value, so a runner lacking the credential does
-not reset the band.
-
-### The worked examples, as fixtures (finding 12)
-
-**Codegen.** The repository's facts and rules:
-`meters("credential:OPENCODE_GO_API_KEY", "opencode-go")`,
-`meters("credential:DEEPINFRA_API_KEY", "deepinfra")`, and
-`ocg_peak :- now("utc_minute_of_day", T), T >= 120, T < 600.` (the peak window is fixture
-data). The order puts OpenCode Go first: the brief prefers DeepInfra *within* the peak, so
-outside it OpenCode Go is the preference, which is why the peak matters at all.
-
-| Situation | Resolves to | Why |
-|---|---|---|
-| off-peak, both up | `opencode-go` | position 1, undemoted |
-| in peak, both up | `deepinfra` | `opencode-go` demoted |
-| in peak, `deepinfra` blocked | `opencode-go` | demoted but the only available alternative |
-| off-peak, `opencode-go` blocked | `deepinfra` | `opencode-go` unavailable |
-| runner holds only `DEEPINFRA_API_KEY` | `deepinfra` | `opencode-go` unavailable |
-| runner holds neither | `null`, `reason: "none-available"` | — |
-
-Peak schedules are repository rules over `now`, so core's existing `peak_schedules` and
-`model_providers` tables (dashboard heritage) are not atoms and are not read. Retiring them is
-a follow-up, not this ticket.
-
-**Reviewer 2.** `meters("credential:CLAUDE_CODE_OAUTH_TOKEN", "anthropic-capacity")`, with the
-two rules above. `anthropic-capacity` is registered `--atoms-from any`, its schema refining
-`std:api-capacity@1`.
-
-| `remaining_permille` sequence | Resolves to |
-|---|---|
-| 500 | `opus` |
-| 150 | `glm` (entered below 200; `was_demoted` recorded) |
-| 250 | `glm` (held: below 300 and previously demoted) |
-| 320 | `opus` (left the band) |
-| reading lapses | `opus` (fails open; the fixture's fail-closed variant adds `near_limit($k) :- meters($k,$r), usable($r,$i), unknown($i).` and resolves `glm`) |
-| `anthropic-capacity` blocked (`unavailable`) | `glm` (hard filter, whatever the guard) |
-
-**Provider unavailability is a resource state (finding 13).** "Deep Infra is not available"
-means DeepInfra's instance is `unavailable`, through `blocked(R)` reached by `meters`. The
-worker's capability closure is the other filter, `has(K)`. The two are distinct atoms, and
-both are hard.
-
-**A new provider (finding 19), stated honestly:** a resource, its schema refining the base,
-and its instances are registered by a tenant administrator (`baton admin resource add`). The
-instrument is a probe or a runner's reporter, and `meters`, the choice and the guards are
-repository data. That needs no Baton *code* change, but one administrator step, and the spec
-says exactly that.
-
-### Delivery: identifiers only, a point-in-time snapshot (findings 27, 33, 36)
-
-- **The claim answer** (and an `advance` into a leg with `choices`) carries, per leg:
-  `advice: {choices: [{choice, alternative, model, credential, demoted: [alt ids],
-  reason?}], resolved_at}`. `alternative` is `null` with `reason` ∈ `no-ontology`,
-  `none-available` or `limit`. Every value is an id or a capability, validated against its
-  pattern. No reading string, repository prose or free text is interpolated, so the advice
-  payload cannot carry an injection. The dashboard renders any human sentence ("codegen:
-  deepinfra; opencode-go demoted") from the identifiers with `textContent` (§10.4).
-- **The leg environment (R-BTN-144)** gains `BATON_ADVICE`, the path of a JSON file holding
-  that object, which reaches the leg as data, never inside instructions (R-BTN-152). It also
-  gains `BATON_ROUTE`, a path the leg may write `[{choice, alternative}]` to. The runner also
-  keeps the credential of **every available alternative** of the leg's choices, beside B-104's
-  `via` rule, so that a leg overriding the advice can still run its route.
-- **The override is recorded (finding 33).** On `advance` or the claim's end, the runner
-  reports `route` from `BATON_ROUTE` (R-BTN-100 gains the field, validated like `advice`). A
-  reported alternative that differs from the advised one records `advice-overridden` with
-  `{choice, advised, taken}`. If no route is reported, the history row says `route: null`. That
-  is not an override, because "which model a leg ran" is self-reported (R-BTN-66).
-- **A snapshot, not a subscription (finding 36).** Advice is resolved at the claim and at each
-  advance, and holds for that leg. A leg does not refresh it in v1, and the spec says so in one
-  sentence. The next leg gets a fresh resolution.
-
-### Retiring the pins (finding 34)
-
-`agent_command` and the review round's instructions **read `BATON_ADVICE` first**, and their
-current static models (`.baton/baton.json`'s `--model`, `legs/review.md`'s pinned pair) become
-the **fallback** used when `alternative` is `null`. They stop being the primary choice, but
-they are not deleted. A leg with no advice therefore still has a model.
-
-### Conformance (finding 14; B-104's harness)
-
-Each fixture adds its input facts (`has`, `wanted`, `usable`, `state`, `blocked`, the reading
-atoms, `now`, `was_demoted`). The translator emits the choice rule and weak constraints above
-in standard ASP-Core-2. The harness calls `clingo.run(text, 0, ["--opt-mode=optN"])` with a
-harness-only `#show route/2.`. It asserts `Result` is `"OPTIMUM FOUND"` and `Models.Optimal ===
-1`, and that the **last** witness's `route/2` equals the TypeScript first-match, compared by
-projection, never as full answer sets. Under `optN`, `Witnesses` lists the models found on the
-way to the optimum before the optimal ones, so `Witnesses[0]` is not the answer. A fixture with
-no available alternative asserts that the optimal witness has no `route` atom and that core
-returns `null`. The strict-syntax lint covers the new productions.
-
-### Non-goals, named
-
-- Ticket-level cost ranking (preferring *claims* whose work is cheap right now) is not built.
-  The mechanism could feed it, and the spec says so in one sentence.
-- Refreshing advice inside a long leg; per-ticket route atoms; retiring core's provider tables.
-
-### Tests (each names its scenario)
-
-- **S-BTN-147 — codegen**: every row of the codegen table.
-- **S-BTN-148 — reviewer 2**: the whole `remaining_permille` sequence, including the hysteresis
-  hold, the fail-open lapse and the fail-closed variant.
-- **S-BTN-149 — authority**: a runner-reported reading forms no atom for a resource registered
-  without `--atoms-from any`, and does form one with it. An administrator's reading in force
-  speaks over an instrument's.
-- **S-BTN-150 — typing and shape**: a non-integer number, a `null`, an array and a `false` form
-  no atom. A comparison of a `str` value with `<` is refused at post. A nested field's path is
-  dotted.
-- **S-BTN-151 — refinement**: a resource schema whose `x-baton-base` refinement is unproven is
-  refused at registration. A rule over the base field serves two refining resources.
-- **S-BTN-152 — strata**: a `derived` rule depending on `int`, `now` or `was_demoted` is
-  refused, with the path named.
-- **S-BTN-153 — delivery**: the advice payload holds only identifiers. `BATON_ADVICE` is
-  written. A reported route that differs records `advice-overridden` with advised and taken. An
-  unreported route records `route: null` and no override. The available alternatives'
-  credentials are in the leg environment, and no others.
-- **S-BTN-154 — bounds**: a preference evaluation crossing the step counter answers `reason:
-  "limit"` and raises `baton.ontology-limit`, and the claim still succeeds (value 2).
-- **Conformance**: clingo-wasm finds exactly one optimal model, whose `route/2` equals core's, on
-  every fixture above.
+S-BTN-147 to S-BTN-154, G-BTN-161 and the choice fixtures of the conformance suite, all green
+in `npm test`.
 
 ### Exit criteria
 
-- [ ] both owner examples resolve as the tables state, at claim time, from posted state
-- [ ] guards are soft and availability is hard; the ASP-Core-2 reference and the first-match
-      evaluator agree in `npm test` on every fixture
-- [ ] an instrument's schema-refined reading drives a guard with stored-demotion hysteresis,
-      under the authority rule; readings never reach a gate
-- [ ] a new provider's choice logic needs no Baton code change, one administrator
-      registration, and repository data
-- [ ] advice is identifiers only; overrides are recorded from the reported route; the static
-      pins are the fallback, not the primary
-
-### Review dispositions
-
-| # | Finding | Resolution |
-|---|---|---|
-| 8 | Fractions vs clingo integers | `int` atoms only; fixed-point by convention (`remaining_permille`); non-integers form no atom (§ Reading atoms) |
-| 9 | Type mismatch in comparisons | Typed atom predicates; ill-typed comparisons refused at post (§ Reading atoms; B-104 § The language) |
-| 10 | `reading(r, f) = scalar` not ASP | Ternary typed atoms `int/str(I, P, V)`, `flag(I, P)`; one speaking reading per instance gives uniqueness (§ Reading atoms) |
-| 11 | Hysteresis needs state | Owner: stored `choice_last` → `was_demoted`; an input fact, so no stratum cycle (§ Hysteresis) |
-| 12 | Examples don't flip; soft vs hard undefined | Guards soft (demote), availability hard (filter); reordered examples with outcome tables (§ Semantics, § Worked examples) |
-| 13 | Capability gate vs provider state conflated | `has(K)` and `blocked(R)` via `meters`, two distinct hard filters (§ Worked examples) |
-| 14 | Optimal answer sets flake | Strict order by construction; unique optimum; projected `route/2` compared (§ Semantics, § Conformance) |
-| 16 | Readings belong to instances | Instance-keyed atoms through `usable`; one speaking reading by R-BTN-76's precedence (§ Reading atoms) |
-| 17 | No schema composition; immutable schemas | `x-baton-base` with R-BTN-108's static refinement check; `refines/2` atoms; schemas stay immutable (§ Reading atoms) |
-| 18 | Nested, arrays, booleans, null, partial | Dotted paths; explicit list of what forms no atom (§ Reading atoms) |
-| 19 | Tenant admin step; credential → resource | Stated honestly as one administrator step; `meters(K, R)` facts (§ Worked examples) |
-| 20 | Lapsed reading flips the decision | Three-valued with `unknown(I)`; fail-open default stated; fail-closed idiom shown and tested (§ Reading atoms) |
-| 21 | Malicious instruments | Owner: admin + instrument keys by default; `--atoms-from any` opt-in, recorded; advice-only blast radius (§ Reading atoms) |
-| 25 | Readings feeding gates | Stratum dependency check, refused at post (§ Strata) |
-| 27 | Advice text injection | Identifiers only; the dashboard renders text with `textContent` (§ Delivery) |
-| 33 | Override undetectable | `BATON_ROUTE` → `route` on advance/end → `advice-overridden` (§ Delivery) |
-| 34 | Pins encode an invariant; null advice | Invariants are `exclude_when` or barred tags; the pinned pair is not one (the owner's example); pins become the fallback (§ Semantics, § Retiring the pins) |
-| 36 | Advice goes stale in long legs | A point-in-time snapshot per claim/advance; no refresh in v1 (§ Delivery) |
-| 2, 28 | Shared with B-104 | B-104 builds the harness and the `via` rule; this adds fixtures and the available alternatives' credentials |
+- [ ] §6.10 is built as specified, and both of the owner's examples resolve as S-BTN-147 and
+      S-BTN-148 state
+- [ ] a reading never reaches a gate, and advice carries identifiers only
+- [ ] the standard courses and this repository read `BATON_ADVICE` before their static models

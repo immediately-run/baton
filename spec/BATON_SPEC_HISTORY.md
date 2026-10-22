@@ -173,6 +173,63 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   `advance` and `end`, and `leg-log-push-failed` (now `leg-log-write-failed`). None of it was built
   (B-9, B-23 and B-76 had not started).
 
+- **2026-10-22 — §5.9 and §6.10: the capability ontology and choices (owner direction; B-104,
+  B-105).** The owner: "credentials are capabilities: an anthropic api key is what enables a
+  runner to execute an opus review", and "Baton should never store the credentials, but it needs
+  to keep track of the ontology of how credentials map." Legs should require a high-level
+  capability (`code-generation-llm`), while runners know which keys and harnesses they hold. The
+  design went through these iterations, first in the tickets and then in this spec:
+  1. **Positive Datalog over flat strings** (B-104 as filed). Each rule was a conjunction of
+     capability names deriving one name. Closure ran server-side at matching, and every cycle
+     was refused. The format was JSON with a documented 1:1 mapping to N3 ("let's not reinvent
+     the wheel"; "JSON-with-N3-mapping sounds like a reasonable compromise").
+  2. **A built-in ontology and value bindings.** The owner: "baton should come with a reasonable
+     ontology built-in, any fact of which can be overridden on the repository level". Bindings
+     (`coding model = claude opus 5.5`) became joining facts, and the owner's two-dimension rule —
+     "capability:coding model → credential:provider offering coding model AND harness usable with
+     coding model" — needed variables. The N3 mapping was promoted to the semantic reference.
+  3. **ASP-Core-2 as the one language.** On standards risk the owner wanted "a uniform ontology
+     language", because "complexity creeping in raises the risk that we start deviating from
+     standards in ways which will prevent adoption". ASP-Core-2 covers derivation (Horn rules),
+     guards (default negation) and preference (weak constraints), so N3 was demoted to an interop
+     note. The runtime was split from conformance: the sync was to compile a graph and ordered
+     lists, core was to run a ~50–100-line reachability and first-match evaluator, and clingo was
+     to check conformance in CI.
+  4. **Preferences** (B-105). The owner: prefer DeepSeek from DeepInfra during OpenCode Go's
+     peak, falling back to OpenCode Go if DeepInfra is unavailable; and use Opus as the second
+     reviewer "unless my Claude subscription is nearing its 5-hour limit", falling back to GLM.
+     Ordered alternatives with guards were resolved at the claim and delivered as advice.
+  5. **Readings as atoms, no provider vocabulary in core.** The owner: "I don't want Baton core to
+     have to have hardcoded support for various model providers… A completely new model provider
+     and model-choice logic implemented in a repo using baton, without any baton modifications."
+     Instruments' readings, against schemas that extend a base capacity schema, became atoms that
+     the guards read.
+
+  An adversarial review of iterations 1–5 (Review record, 2026-10-22) found 36 issues, 12 of them
+  blocking. Its verdict was that the direction was sound but the design was not executable: the
+  fragment was never pinned down; a general join needed more than graph reachability; hysteresis
+  needed state; fractions do not exist in clingo; readings belong to instances; and the safety
+  boundaries (rule heads, bounds, strata, grant order, a derived route's credentials) were not
+  drawn. The owner settled the four forks, and the rework wrote the result here as R-BTN-174 to
+  R-BTN-177:
+  - core runs a **bounded general evaluator**, about 300–400 lines, not compiled fixed shapes;
+  - the language **grows only in directions ASP-Core-2 allows**, so a binding narrows by default
+    negation inside the ontology and never through a preference;
+  - **hysteresis reads a stored last demotion**;
+  - **reading atoms come from administrators and instrument keys** unless a resource admits
+    runners.
+
+  Asked whether another Datalog extension had better TypeScript tooling, the rework found none
+  that is a standard with preferences. So the conformance oracle became `clingo-wasm` in `npm
+  test`, replacing a pip-installed clingo job. Rules introduced: R-BTN-174 to R-BTN-177;
+  S-BTN-139 to S-BTN-154; G-BTN-159 to G-BTN-161. Amended: R-BTN-69 (a leg's `choices`), R-BTN-75,
+  R-BTN-76 (`atoms_from`, a `std:` base), R-BTN-100, R-BTN-110 (`std:api-capacity@1`), R-BTN-121
+  (`derived` types), R-BTN-144 (`via` and alternative credentials, `BATON_ADVICE`,
+  `BATON_ROUTE`) and rule 4. The drafts' superseded ideas never entered this spec, and are
+  recorded under Decisions in full: the N3 mapping, the compiled runtime and its line estimate,
+  refusing every cycle, hard-coded functional bindings, guards that drop an alternative, fractional
+  thresholds, and peaks read from provider tables.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -994,6 +1051,67 @@ changes):
 - m14 fixed: G-BTN-55 cites S-BTN-30 and S-BTN-126.
 
 ## Decisions in full
+
+- **A per-repository capability ontology in one named fragment of ASP-Core-2, evaluated in core**
+  (2026-10-22, owner; R-BTN-174, R-BTN-175). Holdings are labels and the ontology maps them, so
+  core learns no provider and stores no credential. The alternatives rejected:
+  - **Capability names alone**, the state before this change: every runner must declare every
+    altitude a leg might require.
+  - **A flat conjunct-of-strings rule format** cannot express the owner's join over a model
+    class.
+  - **Compiling rules at the sync to fixed shapes** (reachability plus first-match, the third
+    iteration). Core could then run only what the shapes allow, which contradicts "model-choice
+    logic implemented in a repo".
+  - **A solver in the Worker** (clingo-wasm: megabytes against the size budget, a cold start per
+    isolate, NP machinery for a polynomial need) or **beside it** (a sidecar: core egress, and
+    infrastructure Baton needs beside it).
+  - **N3 as the semantic reference.** It has no stratified negation or preference, and the
+    second iteration's promotion of it was reversed by the third.
+
+  The evaluator is general but bounded by counts, never time. Validation runs it on the gate
+  stratum's maximal input, which bounds every runner's evaluation because the stratum is
+  monotone in holdings. Its result is stored per runner when its inputs change, never computed
+  at a claim, so one repository's program cannot stall a tenant's claims. Interpreting a
+  program this total is not running repository code, as interpreting a course file is not. Only
+  cycles through negation are refused: positive recursion is transitivity, and refusing it, as
+  the first iteration did, would have refused the generic transitive rule. The grant bounds the
+  holdings before the closure, because bounding the derived set after it would remove every
+  derived capability under concrete grants.
+- **The language grows only by ASP-Core-2 constructs** (2026-10-22, owner; R-BTN-175). The owner:
+  "I want to ensure we are growing ontology language in the direction ASP core two allows us to
+  grow. This means I do not want to have workarounds using preferences for logic that belongs in
+  the ontology." Positive rules are monotone, so a binding beside an unconditional rule could
+  never narrow it. Narrowing is therefore default-with-exception, and functional bindings are an
+  integrity constraint in the built-in ontology rather than hard-coded validation. Rejected: folding
+  bindings into one-alternative choices, which would make a gate's narrowing depend on advice;
+  and keeping bindings as a separate gate mechanism beside choices.
+- **Choices as ASP-Core-2 weak constraints, evaluated as first-match** (2026-10-22, owner;
+  R-BTN-176, R-BTN-177). Availability is hard and guards are soft. The fourth iteration's
+  "skip failed guards, take the first" could not make DeepInfra's outage outrank OpenCode Go's
+  peak: a dropped alternative cannot serve as the fallback. Positions are a strict order, so the
+  optimum is unique and conformance compares one projected atom, never full answer sets.
+  Hysteresis reads the last demotion, stored per (repository, choice, alternative). Two
+  thresholds over one stateless reading cannot tell which applies. The rejected alternative was
+  an instrument that debounces, which would move hysteresis out of the ontology and into every
+  instrument. Fractions are fixed-point integers (clingo has no other numbers), and reading
+  atoms are typed by predicate, so the evaluator and clingo never compare across types. Atoms
+  are keyed by instance, since readings belong to instances, with R-BTN-76's precedence choosing
+  one speaking reading. Peaks are repository rules over `now`, not core's provider tables.
+- **Readings steer advice only from administrators and instrument keys unless a resource admits
+  runners** (2026-10-22, owner; R-BTN-176). An instrument that may report for an account can
+  steer every listed repository's routing with in-schema lies (a quota reported as full keeps
+  draining it). Admitting runners is a recorded trust decision per resource. Readings never reach
+  a gate, so the harm is bounded to advice. Rejected: atoms from every reporter the spec already
+  accepts.
+- **`clingo-wasm` in `npm test` as the conformance oracle** (2026-10-22, owner; R-BTN-175). The
+  owner would replace ASP-Core-2 only with "a different data log extension that addresses our
+  needs with better TypeScript compatible tooling". Nemo, Soufflé, Logica and Mangle each bring a
+  dialect that is not a standard, none can express the preferences, and none ships better
+  TypeScript tooling. Their stratified-negation engines are in Rust, C++, Python or Go. No npm
+  Datalog engine with stratified negation was found. `clingo-wasm` (Clingo compiled to
+  WebAssembly, an ES module on npm) makes the oracle an ordinary test that contributors run.
+  Rejected: a pip-installed clingo CI job, which brings Python into a TypeScript repository and
+  an oracle nobody runs locally.
 
 - **Leg logs in the owners' bucket, read with the reader's own credentials** (2026-10-21, owner;
   R-BTN-128, retiring R-BTN-118). Objects cannot be appended to, so a run is many create-only chunks
@@ -2453,3 +2571,48 @@ should-fix and 7 nit. Both confirmed the tenancy claim holds. Resolved:)*
 | 4-A-11, 4-A-12, 4-A-14, 4-A-16 nits | no check passes on any runner until a provider gains `exec`, which B-5 adds; scenarios, gates and B-25 extended; the two-machine-key livelock stated; R-BTN-58's and R-BTN-102's banners |
 
 These fixes are not reviewed again.
+
+*(2026-10-22 — the owner commissioned an adversarial review of the ontology design, as tickets
+B-104 and B-105 then stood after iterations 1–5 of the changelog, from a fresh session: 36
+findings, 12 blocking. The review is kept verbatim in
+`docs/review/opus-ontology-review-2026-10-22.mdx`. Resolved in the rework that wrote §5.9 and
+§6.10; B means blocking:)*
+
+| Finding | Resolution |
+|---|---|
+| 1 B — N3 still the deliverable | ASP-Core-2 is the language (R-BTN-175); N3 rejected (Decisions in full) |
+| 2 B — nobody builds the clingo check | the conformance suite is R-BTN-175's, extended by R-BTN-177; built under B-104 |
+| 3 the fragment named three ways | one sentence, in R-BTN-175 |
+| 4 a duplicated block | the drafts' text; not carried over |
+| 5 "variables in predicate positions" | first-order, variables in argument positions (R-BTN-175's terms) |
+| 6 B — which cycles are refused | only cycles through negation, on the predicate graph; positive recursion allowed (R-BTN-175) |
+| 7 B — a 50–100-line runtime cannot join | a bounded general evaluator, about 300–400 lines, parsing in core (R-BTN-175; owner) |
+| 8 B — fractions against clingo's integers | `int` atoms only, fixed point (`remaining_permille`); non-integers form no atom (R-BTN-176) |
+| 9 type mismatch in comparisons | variables typed by their binding literal; ill-typed comparisons refused (R-BTN-175, R-BTN-176) |
+| 10 names are not ASP constants | quoted-string constants, `V_` variables, no gringo-only syntax; ternary typed field atoms (R-BTN-175, R-BTN-176) |
+| 11 B — hysteresis needs state | `choice_last` read as `was_demoted`, an input fact (R-BTN-177; owner) |
+| 12 B — the examples do not flip; soft against hard | guards soft, availability hard; the examples reordered (R-BTN-177; S-BTN-147, -148) |
+| 13 the capability gate confused with provider state | `has(K)` and `blocked(R)` through `meters`, two hard filters (R-BTN-177) |
+| 14 optimal answer sets flake | a strict order, a unique optimum, `route/2` compared by projection (R-BTN-177) |
+| 15 clingo accepts more than ASP-Core-2 | the strict-syntax test; `#show` kept out of the translation (R-BTN-175) |
+| 16 B — readings belong to instances | instance-keyed atoms through `usable`, one speaking reading (R-BTN-176) |
+| 17 B — no schema composition; immutable schemas | `x-baton-base` refinement, checked at registration; `refines/2` (R-BTN-76, R-BTN-176) |
+| 18 nested fields, arrays, booleans, null, partial readings | dotted paths, and the list of what forms no atom (R-BTN-176) |
+| 19 an administrator step; credential to resource | stated: an administrator registers, the repository supplies `meters` (R-BTN-176, R-BTN-177) |
+| 20 a lapsed reading flips the decision | `unknown(I)`; fails open as R-BTN-76 does; the fail-closed idiom (R-BTN-176; S-BTN-148) |
+| 21 malicious instruments | administrators and instrument keys by default, `atoms_from: any` opt-in, advice only (R-BTN-176; owner) |
+| 22 B — the grant intersected after the closure | the closure of (declared ∩ grant) (R-BTN-174; S-BTN-142) |
+| 23 B — rule heads unrestricted | gate-stratum rules 1–2, checked on the maximal input (R-BTN-175) |
+| 24 B — no evaluation bounds | counted bounds, the maximal-input check, stored results, alarm batches (R-BTN-174, R-BTN-175) |
+| 25 readings feeding gates | gate-stratum rule 3 (R-BTN-175; S-BTN-152) |
+| 26 which snapshot governs | the default branch's head, the previous program kept on refusal, the stored set re-read at each advance (R-BTN-174) |
+| 27 advice text as an injection path | identifiers only; text composed by the dashboard (R-BTN-177) |
+| 28 B — a derived route strips its credential | `via` and the available alternatives' credentials kept (R-BTN-144, R-BTN-174, R-BTN-177) |
+| 29 `credential:` pattern; types undeclared | environment-variable names; `derived` types declared in the course file (R-BTN-121) |
+| 30 bindings cannot narrow; bindings against preferences | default negation, the built-in idiom (R-BTN-175; owner) |
+| 31 two override granularities, no `id` | every entry has an `id`; retract and replace by id; the sync merges (R-BTN-174, R-BTN-175) |
+| 32 the why-not algorithm unspecified | the canonical choice (R-BTN-174; S-BTN-144) |
+| 33 an override cannot be detected | `BATON_ROUTE`, `route` on advance and end, `advice-overridden` (R-BTN-177) |
+| 34 pins encode an invariant; null advice | invariants are `exclude_when` or barred tags; no advice leaves the leg's own default (R-BTN-177) |
+| 35 a second naming scheme (`model_name`) | a binding's value is the capability string (R-BTN-175) |
+| 36 advice goes stale in long legs | a snapshot per leg, not refreshed (R-BTN-177) |
