@@ -230,6 +230,21 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   refusing every cycle, hard-coded functional bindings, guards that drop an alternative, fractional
   thresholds, and peaks read from provider tables.
 
+  A second fresh review of the written sections (Review record, 2026-10-22, round 2) found 4
+  blocking and 15 should-fix findings, and the sections were rewritten:
+  - the gate stratum is made monotone by forbidding negation over anything that depends on
+    `holds`, not only over `holds` itself;
+  - the encoding's predicates are reserved;
+  - the ontology is opt-in, through `.baton/ontology.json` naming a versioned built-in;
+  - an alternative `needs` capabilities instead of naming a model and a credential, so core
+    keeps R-BTN-50's boundary;
+  - hysteresis is per runner;
+  - the choice state and `blocked` hear only permitted sources;
+  - stale derived sets are re-evaluated at a claim;
+  - `via` is every holding a derivation rests on, independent of evaluation order;
+  - a dead credential ends a leg through R-BTN-126;
+  - the clingo assertions are corrected against clingo-wasm's actual output.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -2616,3 +2631,31 @@ findings, 12 blocking. The review is kept verbatim in
 | 34 pins encode an invariant; null advice | invariants are `exclude_when` or barred tags; no advice leaves the leg's own default (R-BTN-177) |
 | 35 a second naming scheme (`model_name`) | a binding's value is the capability string (R-BTN-175) |
 | 36 advice goes stale in long legs | a snapshot per leg, not refreshed (R-BTN-177) |
+
+*(2026-10-22, round 2 — a second fresh reviewer read §5.9 and §6.10 as first written, with every
+rule they touch, against the code: 4 blocking, 15 should-fix, 8 nits. Resolved in the rewrite
+that followed:)*
+
+| Finding | Resolution |
+|---|---|
+| 1 B — `derived(K) :- target(K), not safe.` escapes the maximal-input check | no negated literal in the gate stratum names a predicate depending on `holds`; derived atoms must match their type's `values`; G-BTN-159 restated (R-BTN-175; S-BTN-140) |
+| 2 B — the encoding's predicates are not reserved | reserved, stratified together with the program, and never named by guards (R-BTN-175, R-BTN-177; S-BTN-152) |
+| 3 B — the built-in is refused where its types are undeclared | the ontology is opt-in through `.baton/ontology.json`, naming a built-in by version (R-BTN-174; S-BTN-143) |
+| 4 B — `model` and `credential` fields put provider words in core | an alternative lists the capabilities it `needs`; R-BTN-50's table gains the ontology's words (R-BTN-177, R-BTN-50) |
+| 5 hysteresis shared across runners | `choice_last` keyed by runner (R-BTN-177; S-BTN-148) |
+| 6 `atoms_from` bypassed through `state` and `blocked` | the choice state and `blocked` hear permitted sources only; `unknown(I)` folded into `state` (R-BTN-176; S-BTN-149) |
+| 7 one repository's program can exhaust the tenant's object | gate bounds 200,000 matches and 5,000 atoms, the choice bound 50,000, and an alarm budget per turn (R-BTN-174, R-BTN-175) |
+| 8 rule 4 reads a stale set | stale sets are re-evaluated in the claim's or advance's transaction; fleet counts recounted once (R-BTN-174; S-BTN-146) |
+| 9 `via` depends on evaluation order | every holding some derivation rests on, from the fired instances (R-BTN-174; S-BTN-145) |
+| 10 preflight unspecified | R-BTN-121's `check`, and R-BTN-126's `released:blocked` on a holding in `via`, not a failed attempt (R-BTN-174, R-BTN-126) |
+| 11 grants cannot narrow derived capabilities | stated: grants bound holdings; the CLI warns, and derived capabilities are shown beside the grant (R-BTN-174) |
+| 12 the program depends on the CLI's version | the built-in is versioned and named by the file; a published version never changes (R-BTN-174) |
+| 13 courses and the ontology judged in no stated order | a three-step joint acceptance; courses must agree on `derived` (R-BTN-174) |
+| 14 merging choices under-specified | one id namespace; a reused choice id replaces the whole choice; the merged program is capped too (R-BTN-174, R-BTN-175) |
+| 15 types of mixed positions undefined | per-position inference; a mixed position refused (R-BTN-175) |
+| 16 the clingo assertions are vacuous or wrong | `run(text, 0, …)`; `Models.More` `"no"`; the none-available case `SATISFIABLE`; both clingo info notices allowed (R-BTN-175, R-BTN-177) |
+| 17 refinement checking absent from resource registration | registration checks a `std:`-only `x-baton-base` with R-BTN-108's check; `refines` defined over the base chain (R-BTN-76, R-BTN-176) |
+| 18 the advice is stored nowhere; routes unvalidated | `claim_legs.advice_json` and `route_json`; an invalid route is dropped and logged `route-invalid`, never refused (R-BTN-177; S-BTN-153) |
+| 19 why-not reads derivations that do not exist | computed over the maximal evaluation's fired instances, as a least fixpoint (R-BTN-174; S-BTN-144) |
+| 20–27 nits | negative integer constants admitted; `not` and variable spelling constrained; `runner:` capabilities in H; sourced courses' choices; empty `needs`; scenario setups stated; `isEligible`'s vendored change and `choice_last` cleanup; the architecture page records that the ontology is data core interprets |
+

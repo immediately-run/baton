@@ -65,6 +65,11 @@ change to Baton, not a change in Baton.</Lede>
   local host (R-BTN-55); migrations are append-only; every behaviour change names its
   `S-BTN-n` scenario. The enforcement surface is `CLAUDE.md`'s rules — this page is why
   they are rules.
+- **A repository's ontology is data core interprets, not code it runs.** The capability
+  ontology (spec §5.9) is a total, bounded logic program with no I/O, evaluated by core the
+  way a course file's state machine is, which is why it may decide a gate without breaking
+  "Baton runs no repository code". Its language grows only by ASP-Core-2 constructs, and
+  readings reach advice, never a gate.
 - **The formal model names the code.** `model/baton.qnt` and the implementation check
   each other (`model:links`, traces); a change to what the model checks carries a report.
 

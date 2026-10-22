@@ -35,9 +35,9 @@ Review record).
 
 ### What to build
 
-1. **Atom formation** (R-BTN-176), in core. Form the atoms per claim and advance: speaking
-   readings under the authority rule, typed field atoms by dotted path, `unknown`, `refines`,
-   `now` from `this.now`, `was_demoted`.
+1. **Atom formation** (R-BTN-176), in core. Form the atoms per claim and advance: the choice
+   state and speaking readings from permitted sources only, typed field atoms by dotted path,
+   `refines`, `now` from `this.now`, and `was_demoted` per runner.
 2. **Resource registration.** Add `--atoms-from admin|any` (CLI, `POST /v1/admin/resources`,
    migration). Teach `src/core/detailSchema.ts` `x-baton-base`, with R-BTN-108's refinement
    check at registration. Add `std:api-capacity@1` to the standard library.
@@ -49,7 +49,8 @@ Review record).
    differing route.
 5. **The standard courses and this repository.** Have `agent_command` and the review leg's
    instructions read `BATON_ADVICE` first, keeping today's models as the fallback. Add this
-   repository's `codegen`, `reviewer-1` and `reviewer-2` choices and the `meters` facts. Register
+   repository's `codegen`, `reviewer-1` and `reviewer-2` choices (alternatives as `needs`) and the
+   `meters` facts. Register
    `anthropic-capacity` refining `std:api-capacity@1`, with `atoms_from: any`. This is an
    operator step: record it in the PR.
 6. **Conformance.** Add choice fixtures to B-104's suite (`--opt-mode=optN`, one optimum, the
