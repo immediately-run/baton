@@ -388,7 +388,7 @@ process for development and CI. Nothing crosses a tenant.
     scripts sign as it in the other; Baton cannot see that, so a machine serving several
     Batons runs one runner session and one machine key per Baton.
   - **A runner's origin is its own configuration.** `runner.json` carries `origin`; `--url` and
-    `BATON_URL` override it (a cloud environment sets `BATON_URL` beside `IR_BATON_KEY`). There
+    `BATON_URL` override it (a cloud environment sets `BATON_URL` beside `BATON_KEY`). There
     is no default origin. `baton repo *` takes `baton_url` from `.baton/baton.json` at the
     commit it syncs (`mirror`: at the head it mirrors; `spool`: the working tree's; `init`
     writes it), and a sync run by a runner whose origin differs is skipped and logged; `--url`
@@ -3523,7 +3523,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     state file.
   - **Credentials** are the machine key (R-BTN-13): a VM's generated at provisioning; an owner
     machine's a P-256 key behind an ssh-agent; a cloud environment's in the environment secret
-    `IR_BATON_KEY`, shared by every container, which heartbeat under `IR_BATON_NAME`. No key, no
+    `BATON_KEY`, shared by every container, which heartbeat under `BATON_HOSTNAME`. No key, no
     sidecar, no claim.
 
 ### 8.2 Keys and grants
@@ -3644,8 +3644,8 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     of Baton's outbox the claim response lists under `outbox` and reports them as `written` on
     its end (R-BTN-171) — are the runner's own code with no script; they require the capability
     `runner:baton-legs` (R-BTN-133).
-  - **Leg sessions** a script starts get `IR_BATON_PARENT=<runner id>`, `IR_BATON_SOCKET`
-    (R-BTN-106) and `IR_BATON_STATE`, a read-only state view without the runner secret (the claim
+  - **Leg sessions** a script starts get `BATON_PARENT=<runner id>`, `BATON_SOCKET`
+    (R-BTN-106) and `BATON_STATE`, a read-only state view without the runner secret (the claim
     nonce is public, R-BTN-144). They start no sidecar and register no runner; their harness hooks read the view for
     the fence, owner bars and claim, and append activities and transcript paths to the runner's
     spool; their skills never claim, advance or end.
@@ -3655,7 +3655,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     gated by `runner:` capabilities (R-BTN-133).
 - **R-BTN-106 (a session reports to its runner; the runner checks every move).**
   - **Local channel.** The runner listens on a Unix socket in its state directory, mode 0600,
-    named to the leg's session by `IR_BATON_SOCKET`; JSON lines, wrapped by the CLI. Verbs act on
+    named to the leg's session by `BATON_SOCKET`; JSON lines, wrapped by the CLI. Verbs act on
     that leg only and exit 2 "not inside a leg" elsewhere:
     `baton leg status` (leg, grant, deadline, `refresh`);
     `baton leg output <name> --uri <uri> [--digest …] | --value <json>`;
@@ -3822,32 +3822,34 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     unresolvable import, naming the specifier. Its CI job runs on `pull_request` with a read-only
     token, no `id-token` and no `BATON_SOURCE_TOKEN`, never on `pull_request_target`.
 - **R-BTN-144 (a leg's environment, and the one list of what is masked).**
-  - **The runner's own credentials.** At start the runner reads `IR_BATON_KEY`,
-    `IR_BATON_KEY_FILE`, `IR_BATON_TOKEN` and any API key once, keeps them in memory or its own
+  - **The runner's own credentials.** At start the runner reads `BATON_KEY`,
+    `BATON_KEY_FILE`, `BATON_TOKEN` and any API key once, keeps them in memory or its own
     0600 key file, and deletes them from its environment before loading any repository code. No
     leg, `close`, `handoff` or `rank.mjs` inherits them; `rank.mjs` too runs in a child with the
     leg environment.
-  - **What a leg's environment holds.**
+  - **What a leg's environment holds.** The `BATON_*` names below are
+    the immediately.run heritage, read as aliases through the transition (the runner warns
+    once and sets the leg markers under both names); a release removes them.
 
     | Variable | Value |
     |---|---|
-    | `IR_BATON_PARENT` | the CLI runner's runner id |
-    | `IR_BATON_STATE` | path of the read-only state view (no runner secret) |
-    | `IR_BATON_SOCKET` | the local channel (R-BTN-106) |
-    | `IR_BATON_LEG` | `<claim id>.<leg>.<run>` (R-BTN-145) |
-    | `IR_BATON_ACTIVITY` | set by a launcher for a child session it starts under an activity (§9.9) |
+    | `BATON_PARENT` | the CLI runner's runner id |
+    | `BATON_STATE` | path of the read-only state view (no runner secret) |
+    | `BATON_SOCKET` | the local channel (R-BTN-106) |
+    | `BATON_LEG` | `<claim id>.<leg>.<run>` (R-BTN-145) |
+    | `BATON_ACTIVITY` | set by a launcher for a child session it starts under an activity (§9.9) |
     | `BATON_RESUME` | path of a JSON file holding earlier claimants' text — resume records, end details, hand-off documents, claim `rationale` — which reaches a leg only as data, never inside its instructions |
     | `<NAME>` for `credential:<NAME>` | present only when the leg's `requires`, after role expansion (R-BTN-121), names it; every other declared `credential:` variable is removed |
     | git, forge and model-provider credentials, `SSH_AUTH_SOCK` | kept |
 
     A course may not declare a `credential:` name that is `PATH`, `HOME`, `SSH_AUTH_SOCK`,
-    begins `IR_BATON_`, or is a variable the runner keeps; the course file is held (R-BTN-69).
+    begins `BATON_` (or the transition's `IR_BATON_`), or is a variable the runner keeps; the course file is held (R-BTN-69).
   - **Masking.** Before any byte of a leg's output leaves the runner — to a leg log (R-BTN-128) or
     anywhere else — the runner replaces each exact occurrence of these with `***`:
     1. the runner secret (the claim nonce is public — markers and the mirror's claim note carry
        it — and authenticates nothing);
-    2. the runner's Baton credentials (`IR_BATON_KEY`, the contents of the file
-       `IR_BATON_KEY_FILE` names, `IR_BATON_TOKEN`, an API key);
+    2. the runner's Baton credentials (`BATON_KEY`, the contents of the file
+       `BATON_KEY_FILE` names, `BATON_TOKEN`, an API key);
     3. the value of every declared `credential:<NAME>` variable, given to the leg or not;
     4. the git and forge tokens the runner holds, and `AWS_SECRET_ACCESS_KEY` and
        `AWS_SESSION_TOKEN` when set;
@@ -3858,7 +3860,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
 
     Masking runs on the byte stream before framing, holding back the longest literal's length
     minus one byte. A literal value under 8 bytes is not masked (logged once). An archiver
-    running under a runner (`IR_BATON_PARENT` set) masks classes 5 and 6 in transcripts before
+    running under a runner (`BATON_PARENT` set) masks classes 5 and 6 in transcripts before
     pushing (R-BTN-20).
   - **Replay** (R-BTN-84) builds its environment from an allowlist: `PATH`, `LANG`, `TZ`,
     `TERM`, an isolated `HOME`, the read-only clone credential `runner.json`
@@ -3866,7 +3868,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
   - This keeps a cooperating agent from printing a credential it never needed; a hostile leg
     can read the runner's key file as the same user (R-BTN-14).
 - **R-BTN-145 (every process a leg starts is stopped with it).** Each leg runs with
-  `IR_BATON_LEG=<claim id>.<leg>.<run>`. When a leg stops — Stop, a release, a lost lease, the
+  `BATON_LEG=<claim id>.<leg>.<run>`. When a leg stops — Stop, a release, a lost lease, the
   runner's exit, a supersession — the runner signals its process group and every visible process
   whose environment carries exactly that value (`/proc/<pid>/environ`), comparing start times so
   a reused pid is never signalled. Where `systemd-run --user --scope` exists each leg runs in its
@@ -4236,8 +4238,8 @@ end on an ended claim is refused `claim-ended`.
   `(repo, path, pushed_at)` it pushes to the session's spool; the sidecar reports it on the next
   heartbeat. Baton never derives a path by convention, and keeps every path a session reports;
   the dashboard links the newest.
-  - A child session (a reviewer, a runner's leg session) runs with `IR_BATON_PARENT=<runner id>`
-    and `IR_BATON_ACTIVITY=<activity id>`: no sidecar, no runner; its archiver appends to the
+  - A child session (a reviewer, a runner's leg session) runs with `BATON_PARENT=<runner id>`
+    and `BATON_ACTIVITY=<activity id>`: no sidecar, no runner; its archiver appends to the
     parent's spool with `role: subagent` and the activity id. An in-process subagent has no
     transcript of its own.
   - A path reported during a claim links to it; one reported with no claim links to the runner's
@@ -4424,7 +4426,7 @@ is summarized in the principal table (§12.1).
     or revoked key.
   - **Custody.** Signers sign through `ssh-agent` or the key file and never read the private key
     into a log or transcript. A machine keeps its key as well as it can: in a hardware key, a
-    Secure Enclave P-256 key, or, for a cloud environment, the secret `IR_BATON_KEY`.
+    Secure Enclave P-256 key, or, for a cloud environment, the secret `BATON_KEY`.
 
 - **R-BTN-159 (an SSH key or an API key, the holder's choice).**
   - **Who chooses.** An administrator, an owner and a runner each holds either an SSH key, whose
@@ -4445,7 +4447,7 @@ is summarized in the principal table (§12.1).
   - **How it is sent.** `Authorization: Bearer <key>` in place of a signature, on `/v1/admin/*`,
     `/v1/owner/*`, `/v1/runner/*`, the repository reads and `GET /v1/actions`;
     a runner adds its secret (R-BTN-14).
-    `baton … -i FILE`, `IR_BATON_KEY_FILE` and `IR_BATON_KEY` send it.
+    `baton … -i FILE`, `BATON_KEY_FILE` and `BATON_KEY` send it.
     - Baton hashes the key and compares every byte with the hash on the public line its
       fingerprint names. An unknown fingerprint, a wrong secret or a malformed bearer is
       `unauthenticated`.
@@ -4633,7 +4635,7 @@ is summarized in the principal table (§12.1).
     the signing key's repositories; one matching several exits 2, listing the qualified
     matches. `<leg>` defaults to the running leg, else the queued leg, else the most recent;
     `--run <n>` defaults to the latest.
-  - **Inside a leg.** The channel verbs act on the leg whose socket `IR_BATON_SOCKET` names and
+  - **Inside a leg.** The channel verbs act on the leg whose socket `BATON_SOCKET` names and
     take no ticket; outside a leg they exit 2, "not inside a leg".
   - **Help.** `baton help [<noun> [<verb>]]`, `baton <noun> --help` and an unknown verb print
     that level's commands; an unknown word suggests the nearest name. Every command that reads a
@@ -5551,7 +5553,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-136 the outbox | bound `baton.output-invalid`; no `runner:baton-legs` runner, then one; a write landed by a lost claim; a forge-refused push; a condition closing while queued, and while claimed; an entry undrained 24 h; a `tickets.mjs` that never posts the written file; a foreign file at the handler's path | provisional handler ticket queued `baton.write`; filed with `baton_write: <id>`, `written` then `landed`, the ticket's own `start_leg` then offered; the re-claim writes nothing; `released:cannot-finish:capability`, the ticket held and `baton.retries` naming the runner; `dropped`, and once claimed and reported written a `withdraw` follows; `baton.outbox-late`; no `baton.write` re-offered, held `outbox-unlanded` after 3 snapshots; held `outbox-collision` |
 | S-BTN-138 a light question | `hitl` raised `light` with `ask`/`deliver` bound and two answering channels: a reply within the wait; replies on both channels, different; a delivery leg killed after reading, re-claimed; a report repeated; the parent killed while waiting, then reaped; the parent killed after the answer settled; a reply after the wait; a reply after the person answered in the file; a fire-and-forget channel; a promotion; the ticket re-routed with a settled, unrecorded answer | the question pushed to `refs/baton/questions/…` before the report, Baton storing only the pointer; `open` files its Baton-held `deliver` child, never `spawned-unposted`; the leg goes on in the same session, no git write until its end records the answer; the first reply settles, the second `answer-ignored`; the reply re-read and settled once; `ok`, no second effect; reaped, promoted through the outbox, blocked, never asked again; the next claim resumes with the answer; written to the ask file through an `answer` entry, then resumed; the entry `skipped` and the reply `ignored`; `answers: false` only notifies; the ask file posted at `waiting` from `baton_position` with the question as its body, `open` not re-run; the closed ask written with its answer |
 | **§8** | | |
-| S-BTN-41 the runner | a `ci` wait, `{suspend: true}`, `max_runs`, a closed PR, returned `bars`, a lost lease, a course change, a non-edge `next`, a release, a leg session claiming | holds through `ci`; follows only named edges with their `bars`; suspends at `from` with a hand-off; kills the group on loss; new scripts unrestarted; `released:requested`; session refused (`IR_BATON_PARENT`) |
+| S-BTN-41 the runner | a `ci` wait, `{suspend: true}`, `max_runs`, a closed PR, returned `bars`, a lost lease, a course change, a non-edge `next`, a release, a leg session claiming | holds through `ci`; follows only named edges with their `bars`; suspends at `from` with a hand-off; kills the group on loss; new scripts unrestarted; `released:requested`; session refused (`BATON_PARENT`) |
 | S-BTN-53 the doorbell | rings for a cancel and a follow-up; a deploy; a reap; liveness loss; bad upgrades; eviction | one ring then a trailing ring; reconnect with backoff, heartbeat delivery meanwhile; sockets closed; `unauthenticated`, `forbidden`; state recovered |
 | S-BTN-62 a session reports to its runner | a non-outcome `reached`, a move missing entry output, a valid move | first two answered on the channel only; the third advanced; no secret in the session's view |
 | S-BTN-63 no review by its author's key | `review` names `implement` in `no_chain_from`; same-key re-claim; owners' `required_independence` | refused (`chain`); another key takes it; the owner setting holds without the file |
@@ -5725,7 +5727,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-23 | Transcript `repo`s outside the allow-list and paths with `..` are refused; links only to the transcript repository | tests |
 | G-BTN-24 | Activities upsert; another runner's ids are refused; closes within 10 min of the end accepted; open ones close `abandoned`; `claim-ended` never marks the lease lost | tests |
 | G-BTN-25 | A harness hook records an activity without blocking; offline, the spool keeps it | tests |
-| G-BTN-26 | A reviewer with `IR_BATON_PARENT` starts no sidecar or runner; its transcript lands on the parent's activity | tests |
+| G-BTN-26 | A reviewer with `BATON_PARENT` starts no sidecar or runner; its transcript lands on the parent's activity | tests |
 | G-BTN-27 | Harness hook matchers recognise pushes, PR creates and merges, and reviewer spawns in compound lines | tests |
 | G-BTN-33 | A claim response carries earlier claims' resume records | S-BTN-5, -23 |
 | G-BTN-38 | No environment variable changes `batonNow()`; `clock-offset` only from a loopback `--test-harness` sidecar; `pre-push` asks Baton | tests |
