@@ -132,8 +132,28 @@ export function stationsMarkers(ctx: MarkersCtx): StationsResult {
 
 /** What `close` runs: `git`, in the checkout, answering stdout. Tests inject it. */
 export type Exec = (cmd: 'git', args: string[], cwd: string) => string;
-/** The real command runner every standard course's `close` uses; tests inject their own. */
-export const exec = (cmd: string, args: string[], cwd: string): string => execFileSync(cmd, args, { cwd, encoding: 'utf8' }).trim();
+
+/** B-94: the bound on every git (or `gh`) call a standard course's `close` makes. A command
+ * that cannot answer in this long is killed and its failure thrown — a wedged push then fails
+ * the leg in seconds, never blocks the claim for hours. */
+export const CLOSE_TIMEOUT_MS = 120_000;
+
+/** B-94: git's environment for a close — non-interactive by construction, so a credential
+ * prompt or an ssh host-key question can never wait on a terminal the runner does not have:
+ * no terminal prompt from git itself, and ssh in batch mode, failing rather than asking. */
+export const GIT_NONINTERACTIVE_ENV: Record<string, string> = {
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=20',
+};
+
+/** The real command runner every standard course's `close` uses; tests inject their own. B-94: it
+ * is bounded — a command still running at `CLOSE_TIMEOUT_MS` is killed with SIGKILL and its
+ * failure thrown (Node reports it as a timeout error) — and never interactive. */
+export const exec = (cmd: string, args: string[], cwd: string): string =>
+  execFileSync(cmd, args, {
+    cwd, encoding: 'utf8', timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL',
+    env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
+  }).trim();
 
 /** Appends one marker line to `.baton/markers.jsonl` and commits that file alone, as
  * `baton:close <ticket> <leg>` — the one way every standard course writes a marker line. */
@@ -168,7 +188,10 @@ const movedOnRemote = (e: unknown): boolean => {
  * file by union, so two closes racing on it rebase cleanly: each keeps both lines. Only a push the
  * remote refused because the branch moved is rebased and retried, up to `MARKER_PUSH_TRIES`; a
  * rebase that still stops is aborted, leaving the checkout as it was, and any other failure throws
- * at once — the runner reports the leg failed. Returns the commit's sha, the marker's evidence. */
+ * at once — the runner reports the leg failed. Returns the commit's sha, the marker's evidence.
+ * B-94: every call here is bounded (the default `exec`: `CLOSE_TIMEOUT_MS`, non-interactive), so
+ * the worst case is `MARKER_PUSH_TRIES` pushes, each killed at its own bound — a remote that
+ * stops answering fails the leg, it never holds the runner. */
 export async function markerClose(
   ctx: { checkout: string; ticket: { id: string; home?: string | null }; leg: string; claim?: { nonce?: string } },
   result: { reached?: string; next?: string | null },

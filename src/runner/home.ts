@@ -11,9 +11,26 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { graphOf, type Graph } from '../core/graph';
 
-/** One git command in the home checkout; throws with stderr when it fails. */
+/** B-94: the bound on every git the runner itself runs. The heartbeat path reads the snapshot
+ * here (`ensureSha`, `courseOf`, `loadCourse`), and a state file lock, a hook or a stalled
+ * filesystem must never hold the event loop past a beat — a runner that stops beating while its
+ * process lives is a claim lost silently. */
+export const GIT_TIMEOUT_MS = 30_000;
+
+/** B-94: git's environment for the runner's own calls — non-interactive by construction (no
+ * credential prompt, ssh in batch mode), so nothing here can wait on a terminal. */
+export const GIT_NONINTERACTIVE_ENV: Record<string, string> = {
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=20',
+};
+
+/** One git command in the home checkout; throws with stderr when it fails, and is killed at
+ * `GIT_TIMEOUT_MS` when it cannot answer (B-94). */
 function git(home: string, args: string[]): string {
-  return execFileSync('git', ['-C', home, ...args], { encoding: 'utf8', maxBuffer: 16 << 20 });
+  return execFileSync('git', ['-C', home, ...args], {
+    encoding: 'utf8', maxBuffer: 16 << 20, timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL',
+    env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
+  });
 }
 
 export interface CourseLoad {
