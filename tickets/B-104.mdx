@@ -16,6 +16,8 @@ prs: []
 depends_on: []
 ---
 
+**Review:** [the Opus 5.5 adversarial review, 2026-10-22](../docs/review/opus-ontology-review-2026-10-22.mdx) — 36 findings, 12 blocking, verdict "reworked before claim" — is binding input; B-104 sits in-review until the rework lands.
+
 **Brief:** the owner, 2026-10-22, across the credential-capability discussion: "credentials
 are capabilities: an anthropic api key is what enables a runner to execute an opus review."
 "We need a hierarchy for capabilities… course legs specify a high-level capability like
@@ -75,6 +77,140 @@ The mapping to Notation3 triples-and-rules is written into the spec (one transla
 example beside each construct), so an RDF-shaped consumer — a dashboard querying the
 closure, ontologies merged across repos, an external reasoner — is a mechanical transform
 away, never a migration. Nothing RDF enters core: it stores rules, applies closure.
+
+### The built-in ontology, and value bindings
+
+**Baton ships a reasonable ontology** (the owner, 2026-10-22: "baton should come with a
+reasonable ontology built-in, any fact of which can be overridden on the repository
+level"). It is course code — `src/defaults/`, scaffolded by `repo init`, the sync's
+fallback when a repository posts none — never core. Override is by rule identity on the
+merged program: the repository's file may add rules, retract the built-in's by id, or
+replace one; the built-in's other facts stand; one closure runs over the result.
+Precedence is repository over built-in, per fact.
+
+**Value bindings are facts, and they join.** The ontology stores ground binary facts —
+`binding("coding model", "claude-opus-5.5")` — validated functional (one value per key
+in the merged program; preference lists are a later decision, not v1). Because they are
+facts in the same Datalog program, rules can join them, and the repository's *choices*
+become participants in matching rather than prose in `agent_command`:
+
+```
+holds(W, model:claude-opus-5-5), binding("coding model", M), model_name(M, model:claude-opus-5-5)
+  ⇒ satisfies(W, capability:code-generation-llm)
+```
+
+The worked meaning: a worker satisfies this repository's code-generation requirement when
+it holds the model the repository bound — "coding model = claude opus 5.5" is a binding,
+the credential chain derives the holding, and one closure answers the join. Yesterday's
+pinned-pair review instructions and `agent_command` model pin are this mechanism's
+ancestors; the binding is where such pins live once B-104 is built.
+
+**The binding names a class; the rule joins two dimensions through it** (the owner,
+2026-10-22: "then the rule could be capability:coding model → credential:provider
+offering coding model AND harness usable with coding model"):
+
+```
+satisfies(W, capability:code-generation-llm) :-
+    binding("coding model", M),
+    holds(W, C), offers(C, M),
+    holds(W, D), usable_with(D, M).
+```
+
+Satisfaction is existential over the model: some model meeting the repository's binding,
+for which the worker holds both a credential that reaches it and a harness that can run
+it — `usable_with(dependency:opencode-v2, model:deepseek-v4.1-flash)` and its kin are
+ontology facts like any other, overridable per repository. **The serialization
+consequence, recorded honestly:** the flat conjunct-of-strings sketch above cannot
+express this — the rule needs variables in predicate positions (binary predicates:
+`offers`, `usable_with`, `binding`). The JSON sugar grows a variable syntax (`$m` in
+positions), the semantics do not move (still positive Datalog), and the N3 mapping is
+promoted from illustration to the serialization's semantic reference — variables are
+native there, which is precisely why the mapping exists.
+
+**The binding names a class; the rule joins two dimensions through it** (the owner,
+2026-10-22: "then the rule could be capability:coding model → credential:provider
+offering coding model AND harness usable with coding model"):
+
+```
+satisfies(W, capability:code-generation-llm) :-
+    binding("coding model", M),
+    holds(W, C), offers(C, M),
+    holds(W, D), usable_with(D, M).
+```
+
+Satisfaction is existential over the model: some model meeting the repository's binding,
+for which the worker holds both a credential that reaches it and a harness that can run
+it — `usable_with(dependency:opencode-v2, model:deepseek-v4.1-flash)` and its kin are
+ontology facts like any other, overridable per repository. **The serialization
+consequence, recorded honestly:** the flat conjunct-of-strings sketch above cannot
+express this — the rule needs variables in predicate positions (binary predicates:
+`offers`, `usable_with`, `binding`). The JSON sugar grows a variable syntax (`$m` in
+positions), the semantics do not move (still positive Datalog), and the N3 mapping is
+promoted from illustration to the serialization's semantic reference — variables are
+native there, which is precisely why the mapping exists.
+
+### Addendum, later the same day: ASP-Core-2 is the primary semantic reference
+
+The owner, on standards risk: "it would be fantastic if these constraints could be
+described using a uniform ontology language… complexity creeping in raises the risk that
+we start deviating from standards in ways which will prevent adoption." The uniform
+language exists and covers derivation *and* (B-105's) preferences: **ASP-Core-2**.
+Derivation is its Horn rules; "unless" guards are default negation (the canonical ASP
+idiom); preferential fallback is optimization statements / weak constraints — standard
+constructs, designed for exactly this class (configuration and resource selection are
+ASP's classic applications). This **supersedes the N3 mapping's promotion** above: N3
+remains an optional interop note for the fact vocabulary (names read as triples); the
+semantic reference is ASP-Core-2.
+
+**Runtime and conformance, split deliberately.**
+
+- **Runtime**: the worker-independent structure (which credential reaches which model,
+  the preference lists, the guard vocabulary) is compiled at **sync-post, in course
+  code** (`src/defaults` — plain Node, where tooling weight is fine); core receives a
+  precompiled graph and ordered lists and evaluates the **named fragment** — stratified
+  rules plus guarded optimization over finite alternatives: forward-chaining reachability
+  and first-match, ~50–100 pure TypeScript lines, no ontology parsing and no solver in
+  core, identical on both hosts. No general stable-model solving, ever (NP-complete
+  machinery for a linear fragment); the spec states the fragment in one sentence.
+- **Conformance**: the JSON↔ASP-Core-2 translation is checked in CI by running the
+  translated fixture ontologies through real clingo and asserting its optimal answer set
+  matches the TypeScript evaluation — the same posture as the formal model (R-BTN-68:
+  heavy tooling on the author's machine and in reports, never hosted): *the ontology
+  checked against the standard solver*.
+- **Recorded rejections**: clingo-wasm inside the Worker (megabytes against the size
+  budget, per-isolate cold start, NP machinery for a linear need); a clingo sidecar
+  service (core egress; a Baton that needs immediately.run's infra beside it — value 11).
+
+### Second addendum, the same day: readings as atoms — no provider vocabulary in core
+
+The owner: "I don't want Baton core to have to have hardcoded support for various model
+providers. An instrument contributing a metric reading — conforming to a custom JSON
+Schema it has declared, extending the general api-capacity schema — can be referred to
+by the ASP clauses which determine leg ranking. A completely new model provider and
+model-choice logic implemented in a repo using baton, without any baton modifications."
+The architecture is possible on three commitments:
+
+1. **Readings form ground atoms** — core's only naming contract: a validated reading of
+   a resource forms `reading(resource, field) = scalar`, the fields named by the
+   resource's declared schema (`baton admin resource add --schema` already carries
+   custom schemas; `detailSchema` already interprets them). Instruments — workers,
+   probes, administrators, the existing reading paths — extend the base `api-capacity`
+   schema with provider-specific fields via ordinary JSON Schema composition, and a rule
+   written against a base field serves every instrument that extends it: schema
+   extension buys rule reuse, which is what makes a new provider a repository change
+   and not a baton change.
+2. **The fragment grows comparison built-ins — from the standard**: arithmetic terms and
+   comparison predicates are ASP-Core-2 built-ins, so value guards stay inside the named
+   language; the TypeScript fragment implements comparisons over schema-validated
+   scalars only, keeping evaluation linear and total. No string cleverness, ever.
+3. **The base schemas ship in `src/defaults`** — course code, repo-overridable like the
+   built-in ontology. Core owns exactly two things: the atom-formation convention and
+   the evaluator. Everything provider-shaped — resource, schema, instrument, rules — is
+   repository data.
+
+Guards therefore evaluate at claim time against the latest posted reading: a stale
+instrument means stale ordering, so reading liveness (already modeled — readings lapse)
+becomes ranking-relevant, and the spec says so in one sentence.
 
 ### What Baton never does
 

@@ -17,6 +17,8 @@ depends_on:
   - B-104
 ---
 
+**Review:** [the Opus 5.5 adversarial review, 2026-10-22](../docs/review/opus-ontology-review-2026-10-22.mdx) — 36 findings, 12 blocking, verdict "reworked before claim" — is binding input; B-105 sits in-review until the rework lands.
+
 **Brief:** the owner, 2026-10-22, on the ontology's next question: "how could we use the
 knowledge in this ontology to also rank available legs… I want to use DeepSeek for
 creating PRs. OpenCode Go and Deep Infra both offer it, but OpenCode Go has a peak usage
@@ -52,11 +54,14 @@ preference "reviewer 2":
    statement — B-104's addendum's language, no second formalism. The JSON sugar grows
    the section; the N3 interop note does not cover it (preferences are outside RDF's
    world); the ASP mapping documents it as the reference.
-2. **The guard vocabulary, small and named**: `in_peak(provider)` (already computable
-   from §12's provider peaks) and `near_limit(resource, window, threshold)` — a new
-   **reading kind**: the quota-window reading (a subscription's utilization against a
-   rolling window), posted by whoever can see the account (a probe, the owner, or the
-   worker itself as a reading), with hysteresis so a boundary doesn't flap.
+2. **Guards are rules over reading atoms, not baton vocabulary** (the owner's
+   amendment, 2026-10-22: no hardcoded provider support in core). `in_peak(provider)`
+   remains computable from §12's peaks; the 5-hour limit dissolves into an
+   **instrument's reading against a schema extending the base `api-capacity` schema**
+   (fields for the window and what remains of it), and the guard is the rule itself —
+   `reading(anthropic-capacity, remaining) < 0.2` — with hysteresis expressed in the
+   rule's two thresholds so a boundary doesn't flap. A new provider's choice logic is a
+   resource, a schema, an instrument, and rules: repository data, no baton change.
 3. **Evaluation, server-side at claim time**: filter the preference list to alternatives
    the worker's closure holds, skip failed guards, take the first — availability
    (the capability gate) filters, guards order, the first survives. Evaluation is
@@ -90,5 +95,6 @@ built; the mechanism could feed it, and the spec says so in one sentence — not
 
 - [ ] both owner examples resolve as stated, at claim time, from posted state
 - [ ] the static model pins retire in favour of the resolved advice
-- [ ] the quota-window reading kind exists with hysteresis
+- [ ] an instrument's schema-extended reading drives a guard, with hysteresis, and a
+      new provider's choice logic needs no baton change
 - [ ] clingo conformance green in CI beside B-104's
