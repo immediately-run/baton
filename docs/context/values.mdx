@@ -40,3 +40,9 @@ by a review.</Lede>
     consumer among the ones that matter, not a fork in the design. Today the scope is
     simpler: use baton to build baton. The stack is drawn, not built; nothing lands for
     it until the dogfood loop needs it.
+12. **Baton is advisory, not a gatekeeper.** It is an advisory lock server and a tracker of
+    capabilities, instrumentation and messages. It does not enforce or directly verify the work
+    runners do, and it does not assign them permissions or capabilities: a runner states what it
+    can do, and Baton records and matches it. Baton is an optional optimization that
+    collaborating agents and people can (and should) use. A design that needs Baton to stop a
+    runner from doing something is outside Baton.
