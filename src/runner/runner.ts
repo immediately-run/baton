@@ -668,10 +668,14 @@ export class Runner {
     writeFileSync(ctxPath, JSON.stringify(ctx));
     // Detached: its own process group, so a lost lease kills the leg and everything it started
     // (§6.13) without touching the runner. The env names the parent every leg session checks
-    // (IR_BATON_PARENT — such a session never claims; IR_BATON_STATE — the fence and the spool).
+    // (BATON_PARENT — such a session never claims; BATON_STATE — the fence and the spool). The
+    // IR_BATON_* spellings are set beside them for the transition (B-96): docs-side skills and
+    // harness hooks still read them; nothing breaks until their readers move.
+    const parent = String(this.state.get().worker_id ?? '');
+    const childEnv = { ...process.env, BATON_PARENT: parent, BATON_STATE: this.o.stateFile, IR_BATON_PARENT: parent, IR_BATON_STATE: this.o.stateFile };
     const child = spawn(process.execPath, [LEG_PROCESS, script, ctxPath, resultPath], {
       detached: true, stdio: ['pipe', 'ignore', 'ignore'],
-      env: { ...process.env, IR_BATON_PARENT: String(this.state.get().worker_id ?? ''), IR_BATON_STATE: this.o.stateFile },
+      env: childEnv,
     });
     const inflight = this.inflight!;
     inflight.child = { process: child, resultPath, ctxPath };

@@ -1,0 +1,62 @@
+---
+title: "B-82 — The dashboard answered a logged-in browser with raw JSON"
+id: B-82
+project: baton
+status: done
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 470
+tier: routine
+description: "After a Cloudflare Access login the browser met {ok:false,code:unauthenticated} as the whole page: the front's / pre-flight returned the core's session refusal as the page, and the app could not tell a session question from a load failure. The page is the login page's bytes — serve it, and say what to do. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/84
+depends_on: []
+---
+
+**Brief:** the owner's report, 2026-10-21, after logging into `https://baton.immediately.run`
+with a Cloudflare account: the browser showed
+`{"ok":false,"code":"unauthenticated","message":"the dashboard session ended or is unknown"}`
+— raw JSON as the whole page.
+**Spec:** `spec/BATON_SPEC.md` §10 R-BTN-16 (the dashboard's principals), §11 R-BTN-57 (the
+one-time link), `src/core/front.ts` (the page branch), `src/ui/app.js` (`poll`).
+
+### Why
+
+Two layers failed the operator at once. The front's pre-flight for `/` returned the core's
+session refusal as the page — a browser met JSON, not the dashboard. And the dashboard app
+could not tell a session question from a load failure: `poll()` wrote "Could not load the
+state: HTTP 401. Retrying." into a muted footer and kept going. The security model is right —
+with administrator keys configured, Cloudflare Access alone is not a dashboard principal
+(R-BTN-16) — but the presentation buried the one action that gets an operator in: `baton
+admin open`'s one-time link.
+
+### What to build
+
+1. The dashboard page is served to any browser: it is byte-identical to the already-public
+   `/login` page and holds no data. `/` joins `PUBLIC`; every data call under `/v1/ui/*`
+   keeps its principal and its refusal.
+2. The app knows what a 401 means: on `unauthenticated` from `/v1/ui/state` it says — in the
+   header, not the footer — that the dashboard needs a session, that Access alone does not
+   open one while administrator keys are configured, and to run `baton admin open` and open
+   its link; it keeps polling, so the page recovers by itself when the cookie lands.
+
+### Do not
+
+- Weaken a single data route: the change moves bytes that were already public at `/login`,
+  nothing else.
+
+### Tests
+
+- `test/unit/auth.test.ts`: a browser with no principal at all gets the page (`200`,
+  `text/html`, the module script) while `/v1/ui/state` answers 401 — the field report as a
+  regression test. The suite green on both hosts.
+
+### Exit criteria
+
+- [x] an unauthenticated browser at `/` meets the dashboard page and a one-line way in
+- [x] the page recovers without a reload once a session exists
+- [x] every `/v1/ui/*` refusal unchanged; `npm run test:no-quint` green

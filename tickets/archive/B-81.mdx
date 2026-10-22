@@ -1,0 +1,68 @@
+---
+title: "B-81 — The implement stub trusts the agent's exit code, not its outcome"
+id: B-81
+project: baton
+status: done
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 480
+tier: routine
+description: "The create-pr implement stub returns pr-open on any exit-0 agent; one that committed nothing and opened no PR advanced the claim to a review of nothing (the first acceptance run). The stub verifies a pushed, pattern-matching PR exists before returning its position; the kit fails a no-op implement. Requires: none."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/88
+depends_on: []
+---
+
+**Brief:** the first acceptance run of R3-1266, 2026-10-21
+([`docs/review/gap-analysis-2026-10-21.mdx`](../../docs/review/gap-analysis-2026-10-21.mdx) and
+[`docs/lessons.mdx`](../../docs/lessons.mdx)): B-71's implement agent finished with exit 0 having
+committed nothing and opened no PR; the stub returned `pr-open` anyway, the claim advanced to a
+review of nothing, and the round burned half an hour before a human stopped it.
+**Spec:** `spec/BATON_SPEC.md` §5.8 R-BTN-131 (the standard courses' stubs), §2f R-BTN-74
+(`agent_command`'s contract); `src/defaults/pr-close.ts` and the implement stub
+(`src/defaults/courses.ts` → the bundled stubs) are where it lives.
+
+### Why
+
+The stub's `standard(ctx)` runs `agent_command` and, on exit 0, returns a fixed position
+(`reached: pr-open`, `next: review`) — the agent's word for what its work achieved. An agent
+that exits successfully without doing the work (no branch commit, no PR) advances the claim on
+a lie; the board cannot fence it, because no sync ever showed `pr-open` and so nothing ever
+regressed. The failure surfaced only as a doomed review round.
+
+### What to build
+
+1. The `create-pr` implement stub verifies its outcome before returning `pr-open`: a PR whose
+   head branch matches the course's `branch_pattern` for this ticket exists on the forge (the
+   stub already runs in the checkout with the agent's credentials — `gh` or the API client) and
+   its head is pushed (the review reads what is pushed). Where it cannot verify, it fails the
+   leg naming what it looked for.
+2. The same check runs in the kit: `baton test-course`'s generic run for PR courses must fail
+   an `agent_command` that exits 0 without a PR.
+3. The other courses' marker stubs have the mirror problem in weaker form (`reached` is the
+   agent's word): their `close` already commits the marker — the marker's `reached` is checked
+   against the course graph by the core; say in the ticket's PR whether any strengthening is
+   worth it, and do nothing if not.
+
+### Do not
+
+- Move the verification into core: the stub is course code (§2b), and the forge is the stub's
+  to read.
+- Make the stub retry the agent: a failed leg re-queues through the retry policy; the stub
+  reports, never retries.
+
+### Tests
+
+- Unit (`test/unit/course-pr.test.ts` or the stub's suite): an agent command exiting 0 with no
+  matching PR → the leg fails naming the missing PR; a matching open PR → `pr-open` returned.
+- The kit's generic run with a no-op `agent_command` fails on a PR course.
+
+### Exit criteria
+
+- [ ] an implement leg cannot report `pr-open` without a pushed, matching PR
+- [ ] `baton test-course` fails a no-op implement on `create-pr`
+- [ ] `npm run test:no-quint` green

@@ -1,0 +1,51 @@
+---
+title: "B-89 — The backstop sync never fires on schedule, and a busy sync reads as success"
+id: B-89
+project: baton
+status: available
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 487
+tier: routine
+description: "Three hours of a 15-minute cron: zero scheduled runs; every board refresh came from a push or a dispatch. And after a failed sync, its outstanding observation makes the next sync answer busy — exit 0, nothing posted. A trigger that fires, and a busy that is loud."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the acceptance run (the lessons page): in three hours of a 15-minute schedule,
+GitHub ran the `baton-sync.yml` cron zero times — every board refresh came from a push or a
+manual dispatch. And after the 10:34 failed sync, its outstanding observation made the next
+two push syncs answer `busy` — exit 0, nothing posted — so B-80's filing waited two syncs
+with a green check mark each time.
+**Spec:** §7.1 (the observation, R-BTN-62), `.github/workflows/baton-sync.yml`.
+
+### Why
+
+Board freshness is not cosmetic: the regression fence (R-BTN-6) and the confirmations that
+close tickets both wait on it. A backstop that never fires is no backstop, and a silent
+`busy` reads as success to everyone but the person who greps the log.
+
+### What to build
+
+1. The workflow's schedule is replaced or reinforced by a trigger that fires: the GitHub
+   App webhook now reaches Baton (the Access bypass), so Baton's own dispatch — or a
+   repository dispatch from the webhook — runs the sync on merges; alternatively an
+   external scheduler calls `workflow_dispatch` on the cron. Whichever: the backstop's
+   firing is measured, not assumed.
+2. A run that ended `busy` is loud: the workflow step greps the outcome line and annotates
+   the run (or retries once after a minute) so a held board never looks posted.
+3. The lessons entry flips when the backstop demonstrably fires on schedule for a day.
+
+### Tests
+
+- The workflow's own history is the test: a day of scheduled runs green in the list, and
+  the `busy` annotation visible on a forced case.
+
+### Exit criteria
+
+- [ ] the board advances at most one backstop interval behind main without a push
+- [ ] a `busy` sync is visibly not a post

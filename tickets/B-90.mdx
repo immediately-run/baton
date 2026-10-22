@@ -1,0 +1,50 @@
+---
+title: "B-90 — The CLI has no reads: every answer needs the dashboard behind a human Access login"
+id: B-90
+project: baton
+status: available
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 488
+tier: routine
+description: "No repo list, no grants list, no board dump — an operator or agent with a key cannot see the instance's state from a terminal. admin repos, owner grants and baton board: one signed request, one JSON answer each."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the gap-analysis run (finding 3): the CLI has no reads. No `repo list`, no grants
+list, no board dump — every answer to "what is registered, who is granted, where does the
+ticket sit" needs the dashboard, which sits behind a human Cloudflare Access login a
+machine cannot pass. The session's probes leaned on `blocked` and `ticket history` because
+they were the only readable routes.
+**Spec:** §11 (the routes exist: the registry, the grants, the dashboard state), §5 R-BTN-58
+(grants), `cli/baton.mjs` (the `plan`).
+
+### Why
+
+An operator or an agent with an admin or owner key should be able to see the instance's
+state without a browser; today's answer to a silent runner is guesswork or a human.
+
+### What to build
+
+1. `baton admin repos` (GET the registry), `baton owner grants REPO` (GET its grants and
+   settings), and `baton board REPO` (the dashboard state view's repositories and ready
+   sections, or a new read route over the same queries) — each one signed request, one
+   JSON answer, exit 1 on refusal.
+2. The routes they read are the ones the dashboard serves (`/v1/ui/state`'s sources) behind
+   the signed principal, no new core queries where an existing one serves.
+3. `baton run`'s startup uses `baton board`'s answer for B-86's "why I can never claim"
+   line.
+
+### Tests
+
+- Integration: each command answers for the seeded two-repository instance, and a key
+  without the right role is refused with its code.
+
+### Exit criteria
+
+- [ ] an operator with a key can see repositories, grants and the board from a terminal

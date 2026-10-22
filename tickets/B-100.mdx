@@ -1,0 +1,88 @@
+---
+title: "B-100 — The ticket is the record: marker-course state in frontmatter and per-leg headings, schema-checked at the boundary — markers.jsonl retires"
+id: B-100
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 504
+tier: judgement
+description: "The owner's decision: the close verifies the ticket schema after every leg (trust nothing the agent touched, check everything the machine reads); each leg gets its own body heading and its machine state (station, next, claim nonce) lands in frontmatter — reconstructible, one writer per ticket, no shared file. markers.jsonl, its parser and the union merge retire; B-87 closes superseded; a one-time migration folds in-flight lines. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-22, deciding the markers question: "I believe the runners'
+work must verify the schema of the ticket files after each leg finishes. I don't like the
+idea of having a single file being written to by many different runners, even if this is
+JSONL, not JSON. I believe the ticket should be structured in such a way that each leg
+gets its own heading in the ticket's body, and everything stored in markers.jsonl could
+be reconstructed from ticket frontmatter. Don't forget: if we don't trust the agent not
+to game the system by falsifying the ticket itself, then we are not much better off
+trusting it not to change markers.jsonl."
+**Spec:** amends §5.8 R-BTN-83 (the marker close — this replaces it), §2f R-BTN-74 and
+R-BTN-131 (the station function's input), §5.8's stub contract (the boundary check);
+`src/defaults/course-markers.ts` (retired), the marker courses' stubs and instructions,
+`item.schema.json`'s machine fields.
+
+### The decision, as argued
+
+- **Separation was no boundary.** The agent writes freely in the checkout; a fabricated
+  marker line is exactly as cheap as a forged frontmatter field. The control is not
+  *where* the state lives but *what checks it*: the close verifies the ticket against
+  its schema after every leg, and a ticket that does not validate fails its leg naming
+  what broke. Trust nothing the agent touched; check everything the machine reads.
+- **One writer per ticket.** A shared append-only file written by every runner on every
+  ticket is a contention point that exists only to be a contention point (the union-merge
+  attribute machinery included). Per-ticket state in the ticket's own file has no
+  cross-ticket contention at all; one live claim per ticket already serializes the rest.
+- **The ticket is the record.** Each leg's work lands under its own heading in the
+  ticket's body (some marker courses already write sections — bug-report's `## Trace`);
+  the machine state (station reached, next leg, the claim's nonce as the leg's evidence)
+  lands in frontmatter. Everything markers.jsonl held is reconstructible from the ticket
+  itself; the path history is the file's git history.
+
+### What to build
+
+1. **The marker courses' close writes the ticket, not a file.** After the agent exits,
+   the close writes the leg's frontmatter fields (station, next, claim nonce), commits
+   the ticket file, and pushes — the same rebase-and-retry the marker push has today.
+   The union-merge attribute and `markers.jsonl` parsing are retired with it.
+2. **The schema check at the boundary.** Before committing, the close validates the
+   ticket file — frontmatter against the repository's ticket schema, the machine fields'
+   types, and (where the course names them) the presence of this leg's own body heading.
+   A ticket the agent broke fails the leg with the violated rule named; a ticket the
+   agent tried to advance by forging `station:` fails against the claim's own state the
+   same way. The check is course code, shared by every marker course's stub.
+3. **The station function reads the tickets.** Placement for the marker courses comes
+   from each ticket's frontmatter as the sync reads it — no second input, no markers
+   post field. `baton test-course` gains the same rule (a leg that leaves the ticket
+   invalid fails the kit).
+4. **PR courses' evidence simplifies.** With no marker file, a `create-pr` leg's
+   evidence commit is its own work commit (the branch's), which is what the forge
+   already reads; nothing else changes there.
+5. **Migration:** in-flight marker lines are folded into their tickets' frontmatter once,
+   by the kit or a one-command migration in the CLI, before the release that stops
+   reading the file. B-87 (the retried close's duplicate lines) is superseded by this:
+   per-ticket state written once per claim cannot re-append.
+
+### Tests
+
+- The closes' suite: a leg writes frontmatter + its heading and the ticket validates; an
+  agent-mangled ticket (dropped field, forged station, missing heading) fails the leg
+  naming the rule; two tickets' legs in two checkouts never touch one file.
+- The kit: the shortest route green with tickets as the only state input; the migration
+  turns a markers.jsonl board into frontmatter-state tickets.
+
+### Exit criteria
+
+- [ ] every marker course's state lives in its ticket — frontmatter for the machine,
+      one heading per leg for the work — and nothing else
+- [ ] the schema check runs after every leg, on every host, and a broken or forged
+      ticket fails its leg
+- [ ] `markers.jsonl`, its parser and the union merge are gone; B-87 closes superseded
+- [ ] migration lands in-flight lines once

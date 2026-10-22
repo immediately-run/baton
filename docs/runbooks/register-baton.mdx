@@ -103,14 +103,14 @@ node cli/baton.mjs owner -i ~/.ssh/baton_owner_baton grant baton --key worker.pu
   --hostname <the worker's hostname> --capabilities create-pr,llm-call,agent-venue --max-tier judgement
 ```
 
-The hostname must be what the machine reports (`hostname`, or `IR_BATON_NAME`), or its heartbeats
+The hostname must be what the machine reports (`hostname`, or `BATON_HOSTNAME`), or its heartbeats
 are refused. Capabilities are from `src/shared/vocabulary.mjs` (`authentication`, `llm-call`,
 `create-pr`, `drivable-browser`, `agent-venue`); only an administrator grants `human-operator`.
 
 Once the `pr` course's legs exist (R3-1249), the worker runs:
 
 ```sh
-IR_BATON_KEY_FILE=~/.ssh/baton_worker BATON_REPOSITORY=baton \
+BATON_KEY_FILE=~/.ssh/baton_worker BATON_REPOSITORY=baton \
   node cli/baton.mjs run --harness claude-code --home <a checkout of immediately-run/baton>
 ```
 

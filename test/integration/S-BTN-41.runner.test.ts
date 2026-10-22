@@ -166,7 +166,7 @@ afterEach(async () => {
 
 describe('S-BTN-41 the runner', () => {
   it('claims a ticket and takes the leg each result names, never inferring one', async () => {
-    home.leg('build', `out(ctx, { leg: 'build', parent: process.env.IR_BATON_PARENT ?? null, hasState: !!process.env.IR_BATON_STATE, session: ctx.session ?? null, run: ctx.run });
+    home.leg('build', `out(ctx, { leg: 'build', parent: process.env.BATON_PARENT ?? process.env.IR_BATON_PARENT ?? null, hasState: !!(process.env.BATON_STATE ?? process.env.IR_BATON_STATE), session: ctx.session ?? null, run: ctx.run });
   return { reached: 'built', next: 'check', session: 's-1' };`);
     home.leg('check', `out(ctx, { leg: 'check', session: ctx.session ?? null, run: ctx.run });
   return { reached: 'checked', next: 'merge', bars: ['family:anthropic'] };`);
@@ -667,7 +667,7 @@ describe('S-BTN-41 the runner', () => {
     expect(await runner.runOnce()).toMatchObject({ end_reason: 'suspended:checked' }); // serving again
   }, 30_000);
 
-  it('a leg session never claims: the runner refuses to nest under IR_BATON_PARENT', async () => {
+  it('a leg session never claims: the runner refuses to nest under BATON_PARENT (either spelling)', async () => {
     // Through the real CLI entry (the bundle `baton run` runs), as a leg session would.
     const r = spawnSync(process.execPath, [resolve('cli/baton.mjs'), 'run'], {
       cwd: resolve('.'),
@@ -675,7 +675,7 @@ describe('S-BTN-41 the runner', () => {
       encoding: 'utf8',
     });
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/IR_BATON_PARENT=7: a leg session never claims/);
+    expect(r.stderr).toMatch(/BATON_PARENT=7: a leg session never claims/);
   }, 60_000);
 
   it('the state file carries the runner across a restart: the same worker, not a second one', async () => {

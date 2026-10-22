@@ -1,0 +1,50 @@
+---
+title: "B-88 — baton repo sync cannot sign with a sync key: the server accepts one, only the CLI cannot"
+id: B-88
+project: baton
+status: available
+updated: 2026-10-21
+tags:
+  - roadmap-item
+order: 486
+tier: routine
+description: "R-BTN-93's sync keys sign as workers do — proven by a hand-signed board post — but repo sync produces only CI identity tokens. A --sync-key flag signs the three calls, the no-CI path for bootstrapping repositories."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the gap-analysis run (finding 6): the server accepts a sync key's signature
+(R-BTN-93 — proven by posting a board hand-signed through `syncMain` with the signing auth
+injected), but `baton repo sync` produces only a CI identity token. A repository without
+Actions, or bootstrapping its first board, cannot post one at all.
+**Spec:** §7.1 (the board post), R-BTN-93 (a sync key signs as workers do), `src/runner/api.ts`
+(`BatonApi` already signs), `src/defaults/cli.ts` (`syncMain`'s bearer-only auth).
+
+### Why
+
+The server side and the client library are both done; only the command's wiring is missing.
+The hand-driven script that proved the server is the ticket's map.
+
+### What to build
+
+1. `baton repo sync --sync-key FILE`: `syncMain` builds its `BatonApi` with
+   `envAuth`-style SSH signing (the runner's helper, imported) instead of the bearer when
+   the flag is present; `BATON_SYNC_KEY` serves as the environment form.
+2. The runbook's step 4 notes the flag as the no-CI path, and the sync workflow stays as it
+   is (OIDC in Actions).
+3. The admin runbook/README mention registering the key with `repo add --sync-key` beside
+   the CI identity.
+
+### Tests
+
+- Unit: `parseSyncArgs` accepts the flag; `syncMain` signs the observation/head/board calls
+  when it is set (a recording transport asserts the `Signature-Input` header).
+- Integration: a signed sync post lands the board on the local host (the scenario the
+  hand-driven script performed, made permanent).
+
+### Exit criteria
+
+- [ ] a repository with a registered sync key posts its board from a laptop, one flag

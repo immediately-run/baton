@@ -35,6 +35,10 @@ export interface Ask {
 export interface LegStub {
   ask?: Ask;
   position: string;
+  /** The stub verifies its outcome on the forge before returning its position (B-81): an open
+   * PR on a branch the course's patterns map to the ticket, its head what the checkout pushed.
+   * The agent's exit 0 is not the leg's outcome. */
+  verify?: 'pr';
 }
 
 export interface BuiltIn {
@@ -169,7 +173,9 @@ const CREATE_PR: BuiltIn = {
   reads: 'prs',
   stations: (ctx) => stationsPr({ tickets: ctx.tickets, facts: ctx.facts, closed: ctx.closed, done: ctx.done, branchPatterns: ctx.branchPatterns, repository: ctx.repository, graph: ctx.graph as PrGraph }),
   legs: {
-    implement: { position: "{ reached: 'pr-open', next: 'review' }" },
+    // B-81: the stub verifies its PR on the forge (open, on a branch the patterns map to this
+    // ticket, its head pushed) before returning pr-open — never the agent's exit code alone.
+    implement: { position: "{ reached: 'pr-open', next: 'review' }", verify: 'pr' },
     // The verdict decides what the review queues: merge for approve, fix for changes (once the
     // fixes run out the sync queues adjudicate instead, and a refused fix suspends the claim).
     review: { ask: VERDICT, position: "{ reached: 'reviewed', next: answer === 'approve' ? 'merge' : 'fix', verdict: answer }" },

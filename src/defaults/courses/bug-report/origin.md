@@ -6,6 +6,16 @@ bug lives. The origin says which artifact seeded it — a spec, a ticket, or the
 so the repository can count which stage produces its defects. When you finish, the ticket has an
 `## Origin` section.
 
+> **How the stub runs you** — Baton's contract for the `agent_command` author: your command
+> line splits into words as `sh` would (quotes honoured, no substitutions) and executes
+> **without a shell**, with the ticket id, the leg and the checkout appended as arguments.
+> Stdin is never an open pipe: nothing to read, and a read ends at once. Stdout and stderr are
+> captured pipes, and the course reads stdout's last line. Your process's exit **is** your
+> completion: a harness that is a client of a background service must keep its session in
+> process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
+> work ends leaves truncated output and an orphaned session posting to a claim that no longer
+> exists (B-84).
+
 ## Find the introducing change
 
 - **When a line causes the bug**, find the oldest commit that introduced the behaviour, not the

@@ -2,11 +2,12 @@
 // R-BTN-66/-67): each command's one request (`plan`, pure), and a request signed with a real key
 // file by `ssh-keygen -Y sign` that Baton's verifier accepts. Node only: it runs ssh-keygen.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import * as http from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createApiKey, duration, parseArgs, plan, send } from '../../cli/baton.mjs';
+import { createApiKey, duration, main, parseArgs, plan, send } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
 import { ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
@@ -167,6 +168,100 @@ describe('send: signed with a key file, verified by Baton', () => {
     // The owner-key flag reads the public line from its file, as it reads an SSH public key.
     expect(plan('admin', ['repo', 'add', 'o/r', '--owner-key', `${file}.pub`]).body.owner_keys).toEqual([line]);
   });
+});
+
+describe('a redirect or a non-JSON answer is a refusal, never success (B-80)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'baton-cli-b80-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('send refuses a redirect without following it, and the command exits non-zero naming it', async () => {
+    const file = join(dir, 'admin.key');
+    createApiKey(file);
+    const calls: string[] = [];
+    const fetchImpl = async (url: string | URL, init: RequestInit) => {
+      calls.push(`${init.method} ${String(url)} redirect=${init.redirect}`);
+      return new Response(null, { status: 302, headers: { location: 'https://login.example.com/' } });
+    };
+    // send: the 3xx is an error naming the redirect — one request made, none to the login page.
+    await expect(send(ORIGIN, plan('admin', ['open']), file, fetchImpl as typeof fetch)).rejects.toThrow(/a redirect answered .*\/v1\/admin\/login-links/);
+    expect(calls).toEqual([`POST ${ORIGIN}/v1/admin/login-links redirect=error`]);
+    // The command: main() refuses the same way, so the CLI never exits 0 on it.
+    const was = globalThis.fetch;
+    globalThis.fetch = fetchImpl as typeof fetch;
+    try {
+      await expect(main(['admin', 'open', '-i', file, '--url', ORIGIN])).rejects.toThrow('a redirect answered');
+    } finally {
+      globalThis.fetch = was;
+    }
+  });
+
+  it('a 2xx that is not JSON fails the command printing what it got; a JSON one keeps today’s behaviour', async () => {
+    const file = join(dir, 'admin.key');
+    createApiKey(file);
+    const errs: string[] = [];
+    const outs: string[] = [];
+    const errWrite = process.stderr.write;
+    const outWrite = process.stdout.write;
+    process.stderr.write = ((chunk: any) => { errs.push(String(chunk)); return true; }) as typeof process.stderr.write;
+    process.stdout.write = ((chunk: any) => { outs.push(String(chunk)); return true; }) as typeof process.stdout.write;
+    const was = globalThis.fetch;
+    try {
+      // A login page's 200: non-zero, and what arrived is printed.
+      globalThis.fetch = (async () => new Response('<!DOCTYPE html><html><body>sign in</body></html>', { status: 200, headers: { 'content-type': 'text/html' } })) as typeof fetch;
+      await expect(main(['admin', 'open', '-i', file, '--url', ORIGIN])).resolves.toBe(1);
+      expect(errs.join('')).toContain('answered no JSON');
+      expect(errs.join('')).toContain('sign in');
+      // An empty 2xx body fails the same way, named as empty.
+      globalThis.fetch = (async () => new Response(null)) as typeof fetch;
+      await expect(main(['admin', 'open', '-i', file, '--url', ORIGIN])).resolves.toBe(1);
+      expect(errs.join('')).toContain('(an empty body)');
+      // A JSON 2xx keeps today's behaviour: printed, exit 0, nothing on stderr.
+      errs.length = 0;
+      globalThis.fetch = (async () => new Response(JSON.stringify({ url: 'https://baton.example.com/login#feedface' }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch;
+      await expect(main(['admin', 'open', '-i', file, '--url', ORIGIN])).resolves.toBe(0);
+      expect(outs).toEqual(['https://baton.example.com/login#feedface\n']);
+      expect(errs).toEqual([]);
+    } finally {
+      process.stderr.write = errWrite;
+      process.stdout.write = outWrite;
+      globalThis.fetch = was;
+    }
+  });
+
+  it('baton admin against a URL that redirects exits non-zero and says why (B-80’s exit criterion)', async () => {
+    const file = join(dir, 'admin.key');
+    createApiKey(file);
+    let answer: (res: http.ServerResponse) => void = () => { throw new Error('no answer set'); };
+    const server = http.createServer((_req, res) => answer(res));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    // spawn, not spawnSync: the server answers from this same event loop (B-80).
+    const run = () => new Promise<{ status: number | null; stderr: string }>((resolve) => {
+      const p = spawn('node', [join(import.meta.dirname, '../../cli/baton.mjs'), 'admin', 'open', '-i', file, '--url', url]);
+      let stderr = '';
+      p.stdout.on('data', () => {});   // drained: the child must never block on a full pipe
+      p.stderr.on('data', (d) => { stderr += d; });
+      p.on('error', (e) => resolve({ status: null, stderr: `${e.message}\n${stderr}` }));
+      p.on('close', (status) => resolve({ status, stderr }));
+    });
+    try {
+      // A 302 to an Access-style login page: refused, never followed, and the command says why.
+      answer = (res) => { res.writeHead(302, { location: 'https://login.example.com/' }); res.end(); };
+      const redirected = await run();
+      expect(redirected.status).not.toBe(0);
+      expect(redirected.stderr).toContain('a redirect answered');
+      // The login page that 302 used to lead to, answering 200 HTML: not success either.
+      answer = (res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<!DOCTYPE html><html><body>sign in</body></html>'); };
+      const page = await run();
+      expect(page.status).not.toBe(0);
+      expect(page.stderr).toContain('sign in');
+    } finally {
+      server.close();
+    }
+  }, 30_000);
 });
 
 describe('baton test-course: the command (R3-1248)', () => {

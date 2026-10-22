@@ -558,32 +558,45 @@ const AGENT_OUTPUT_MAX = 64 * 1024 * 1024;
 
 /** One leg stub's source (R-BTN-74, R-BTN-131): run the `agent_command` that
  * `.baton/baton.json` names at the claim's snapshot (`ctx.snapshot.sha`, the commit the runner
- * loads the leg scripts from), through the shell (so it may carry arguments), with the ticket,
- * the leg and the checkout as its arguments, and the leg's instructions — its
+ * loads the leg scripts from), with no shell between the stub and the agent and stdin never an
+ * open pipe (B-84: an open stdin pipe under the old spawn hung real harness CLIs — `opencode
+ * run`, deterministically, zero output until the claim was reaped) — the command string splits
+ * into words as `sh` would, quotes and no substitutions (`agent-words.ts`), and runs as
+ * `execFile(command, args)` with the ticket, the leg and the checkout as its trailing
+ * arguments, its stdin pipe closed at spawn, and the leg's instructions — its
  * `.baton/courses/<id>/legs/<leg>.md`, read at the same snapshot — as a file named in
  * `BATON_INSTRUCTIONS`. A leg whose result depends on the agent (a verdict, an adjudication, an
- * outcome) asks for it as the agent's last line and checks it; the bundled `close` writes the
- * closing marker where the course's convention puts it. */
+ * outcome) asks for it as the agent's last line and checks it; a leg whose stub `verify`es its
+ * outcome (B-81) reads it from the forge before returning its position — the agent's exit 0 is
+ * not the leg's outcome. The bundled `close` writes the closing marker where the course's
+ * convention puts it. */
 function stubSource(b: BuiltIn, course: string, leg: string): string {
-  const { ask, position } = b.legs[leg];
+  const { ask, position, verify } = b.legs[leg];
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
   const closeFrom = b.reads === 'prs' ? ['prClose', 'pr-close.ts'] : ['markerClose', 'course-markers.ts'];
   const values = ask ? ask.values.join(' or ') : '';
   return `import { execFile, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, ${verify ? 'readFileSync, ' : ''}rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};
+import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
+import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${verify ? `
+import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
 // The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
 // repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the
-// checkout as its arguments and the leg's instructions in the file BATON_INSTRUCTIONS names. Both
+// checkout as its arguments and the leg's instructions in the file BATON_INSTRUCTIONS names. The
+// command runs with no shell between the stub and the agent (B-84), so no substitution or
+// redirection it may carry is executed; its own contract is the header of the leg's .md. Both
 // are read when the leg runs at the claim's snapshot, the commit the runner loaded this script
 // from, never the working tree an agent may have changed (so a branch under review cannot pick
 // its reviewer or rewrite the reviewer's instructions).${ask ? `
-// The agent's last line of output must be its ${ask.name}: ${values}.` : ''}
+// The agent's last line of output must be its ${ask.name}: ${values}.` : ''}${verify ? `
+// Before returning its position the stub verifies the leg's outcome on the forge (B-81): an
+// open PR on a branch this course's branch patterns map to the ticket, its head pushed; where
+// it cannot verify, the leg fails naming what it looked for.` : ''}
 // The repository may replace this leg's run, never its close: \`${leg}.run.mjs\` beside this file
 // (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131).
 export async function run(ctx) {
@@ -609,7 +622,14 @@ async function standard(ctx) {
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
   const show = (rel) => execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} });
   const settings = JSON.parse(show('.baton/baton.json'));
-  if (typeof settings.agent_command !== 'string' || settings.agent_command === '') throw new Error('.baton/baton.json names no agent_command');
+  if (typeof settings.agent_command !== 'string' || settings.agent_command === '') throw new Error('.baton/baton.json names no agent_command');${verify ? `
+  // What this leg's verification looks for (B-81): the course's branch patterns, as the
+  // snapshot's settings carry them, and the repositories the ticket's repos: names — the
+  // ticket file is the checkout's own copy, the one the agent may have just added its PR to.
+  const entry = (settings.courses ?? []).find((c) => c && c.id === ${JSON.stringify(b.id)}) ?? {};
+  const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '');
+  const ticketText = (() => { try { return ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), 'utf8') : null; } catch { return null; } })();
+  const legRun = (cmd, args, cwd) => { try { return execFileSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} }).trim(); } catch (e) { const why = e && typeof e.stderr === 'string' && e.stderr.trim() !== '' ? e.stderr.trim().split('\\n')[0] : e && e.message ? e.message : String(e); throw new Error(\`\${cmd} \${args.join(' ')} failed: \${why}\`); } };` : ''}
   // The instructions, when the repository still has them; it owns them and may delete them. Only
   // a path the snapshot lacks means deleted: \`ls-tree\` lists nothing for it and succeeds (git
   // translates its messages, and \`cat-file -e\` exits 128 for every failure alike), so any
@@ -620,13 +640,29 @@ async function standard(ctx) {
   const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
   const instructions = dir == null ? '' : join(dir, ${JSON.stringify(`${leg}.md`)});
   if (dir != null) writeFileSync(instructions, text);
-  const out = await new Promise((resolve, reject) => execFile('sh', ['-c', settings.agent_command + ' "$@"', 'agent', ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout], {
-    cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX},
-    env: {
-      ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.path ?? '',${ask ? `
-      BATON_ANSWER: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},${ask.name === 'verdict' ? ` BATON_VERDICT: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},` : ''}` : ''}
-    },
-  }, (e, stdout) => (e ? reject(e) : resolve(String(stdout))))).finally(() => {
+  // B-84: no shell stands between the stub and the agent, and stdin is never an open pipe — the
+  // two halves of the hang that burned claims to reap. The command string splits into words as
+  // sh would (quotes; no substitutions) and runs as argv, the ticket, the leg and the checkout
+  // appended last; stdin closes at spawn (below), and stdout and stderr are captured pipes — and
+  // the command's exit is the agent's completion, which its own contract (the leg .md's header)
+  // requires it to mean.
+  const [command, ...words] = splitWords(settings.agent_command);
+  if (command === undefined) throw new Error('.baton/baton.json names no agent_command to run');
+  const out = await new Promise((resolve, reject) => {
+    const child = execFile(command, [...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout], {
+      cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX}, stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.path ?? '',${ask ? `
+        BATON_ANSWER: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},${ask.name === 'verdict' ? ` BATON_VERDICT: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},` : ''}` : ''}
+      },
+    }, (e, stdout) => (e ? reject(e) : resolve(String(stdout))));
+    // B-84's root cause, closed here: execFile does not honour 'ignore' for stdin — it leaves an
+    // open pipe the stub never writes and never closes, and an agent that reads stdin (opencode
+    // among them) blocks on it forever, zero output, the claim burning until reap. The pipe is
+    // closed the moment it exists: a reader sees EOF at once, never a wait. stdin is therefore
+    // never an open pipe for the agent, whatever execFile makes of the stdio option.
+    child.stdin?.end();
+  }).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
   });${names ? `
   // The last line: the answer, then — optionally — the PR its line goes on. A leg with no answer
@@ -637,11 +673,13 @@ async function standard(ctx) {
   if (!${JSON.stringify(ask.values)}.includes(answer)) throw new Error(${JSON.stringify(`the ${leg} agent printed no ${ask.name} (${values}) as its last line`)});
   if (rest.length || (pr != null && !${PR_URL}.test(pr))) throw new Error(${JSON.stringify(`the ${leg} agent's last line names no PR URL after its ${ask.name}`)});
   const on = pr ?? null;` : ''}
-  return { ...(${position}), ...(on ? { pr: on } : {}) };` : `${ask ? `
+${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}) };` : `${ask ? `
   const answer = out.trim().split('\\n').at(-1)?.trim();
   if (!${JSON.stringify(ask.values)}.includes(answer)) throw new Error(${JSON.stringify(`the ${leg} agent printed no ${ask.name} (${values}) as its last line`)});` : `
   void out;`}
-  return ${position};`}
+${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+` : ''}  return ${position};`}
 }
 export const close = ${closeFrom[0]};
 export async function handoff() { return null; }

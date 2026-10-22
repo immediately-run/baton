@@ -157,6 +157,22 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   new `blocked_since`. R-BTN-77's lost answer now also silences a transition whose cleared rows
   include a lost one on the queued leg, whatever else cleared; S-BTN-45 gained ticket K.
 
+- **2026-10-21 — leg logs in the owners' bucket (owner direction).** A git transcript
+  repository grows without bound, since every clone carries every log, and a log cannot be deleted
+  without rewriting history; a storage bucket is elastic. R-BTN-128 now has the runner write each
+  `process`-mode run's masked output as create-only JSON-lines chunks, plus a closing `end.json`,
+  to `<leg_log_root>/<repository>/<ticket>/<leg>/<run>-<claim>/`, where `leg_log_root` is an
+  owners' `s3://` or `gs://` URI, or `file://` on the local host. Runners and readers use their own
+  ambient credentials (the AWS default chain, Application Default Credentials). Baton stores only
+  the run's directory: the owner's direction was "baton only needs to store the URI of a directory
+  within a storage bucket (or local file path for a locally running instance)", and that it is
+  "OK if logs cannot be viewed from the web app for now". `baton leg log -f` follows a running leg
+  by polling for the next chunk, so the live relay through Baton (R-BTN-118: the `Stream` port,
+  `/v1/ui/stream`, `/v1/runner/stream`, `/v1/stream`, the `watch`/`unwatch` rings) is retired,
+  along with the `leg_logs` setting and pointer table, `leg_logs_repo`, the pointers on heartbeat,
+  `advance` and `end`, and `leg-log-push-failed` (now `leg-log-write-failed`). None of it was built
+  (B-9, B-23 and B-76 had not started).
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -167,6 +183,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 | R-BTN-59 | local hooks: the same interface, trusted code | R-BTN-98 (2026-10-16) | nothing: the local host runs no hooks |
 | R-BTN-80 | notices: Baton queues requests for people; couriers deliver them | R-BTN-164 (2026-10-20) | conditions and handler courses (R-BTN-160–R-BTN-163, R-BTN-169); the forge-check notice lifecycle moved into R-BTN-114 and R-BTN-115 |
 | R-BTN-103 | worker couriers deliver from a pool | R-BTN-164 (2026-10-20) | a courier is a runner with a capability, running a handler course (R-BTN-161) |
+| R-BTN-118 | a running leg's output streams to its viewers and is never stored | R-BTN-128 (2026-10-21) | `baton leg log -f` follows the run's chunks in the owners' log location; the dashboard shows no live output |
 | R-BTN-164 | Baton queues no notices for people | this rewrite (2026-10-20) | one line in §7's introduction; `baton decision list` in R-BTN-163 |
 | R-BTN-170 | the window | this rewrite (2026-10-20) | **Migrations the implementation still carries**, below |
 
@@ -182,11 +199,13 @@ defined in docs' `BATON_ROADMAP_PR_COURSE` (check-spec's `COURSE_IDS`).
 | S-BTN-35 | a claim during a hook call | R-BTN-98 (2026-10-16) | the one-transaction claim stays (G-BTN-1, G-BTN-2) |
 | S-BTN-46 | a decision reaches its owner through personal couriers | R-BTN-164 (2026-10-20) | `test/integration/S-BTN-46.decision-reaches-owner.test.ts` tests retired behaviour; S-BTN-131 replaces it |
 | S-BTN-60 | worker couriers and the pool | R-BTN-164 (2026-10-20) | `test/integration/S-BTN-60.worker-couriers.test.ts` tests retired behaviour |
+| S-BTN-70 | watching a leg over Baton's relay | R-BTN-128 (2026-10-21) | S-BTN-99 covers following a running leg from the log location |
 | S-BTN-90 | decision severities routed to couriers, reminders | R-BTN-164 (2026-10-20) | ordering by severity survives in S-BTN-131 |
 | S-BTN-135 | the window | this rewrite | migration (R-BTN-170) |
 | G-BTN-54 | hook sandboxing | R-BTN-98 (2026-10-16) | G-BTN-84 |
 | G-BTN-60 | gates re-checked after a hook call | R-BTN-98 (2026-10-16) | one transaction per claim |
 | G-BTN-72 | one notice per courier per open decision, reminders, pool copies | R-BTN-164 (2026-10-20) | G-BTN-154 |
+| G-BTN-95 | leg output relayed only from the holder to authorized same-origin viewers | R-BTN-128 (2026-10-21) | G-BTN-118, G-BTN-119 |
 | G-BTN-110 | notices carry severity; per-severity routing | R-BTN-164 (2026-10-20) | — |
 | G-BTN-28–30, -34, -45, -46, -48, -52, -65 | the `roadmap-pr` course's own logic | moved 2026-10-14 | docs' `BATON_ROADMAP_PR_COURSE` §7 |
 
@@ -976,6 +995,17 @@ changes):
 
 ## Decisions in full
 
+- **Leg logs in the owners' bucket, read with the reader's own credentials** (2026-10-21, owner;
+  R-BTN-128, retiring R-BTN-118). Objects cannot be appended to, so a run is many create-only chunks
+  and a reader follows it by polling for the next one, which works on S3, S3-compatible stores and
+  GCS alike. The rejected alternatives: **the git transcript repository** chosen on 2026-10-17,
+  because it grows without bound and cannot delete; **Baton-presigned URLs** (per object, tied to
+  the claim) and **Baton-minted scoped credentials**, either of which would make Baton hold a bucket
+  key, against keeping Baton free of content and of others' credentials; **long-lived
+  service-account key files** on runners; **vendor append objects** (S3 Express One Zone, GCS
+  appendable objects, Azure append blobs), each tied to one provider; **a multipart or resumable
+  upload finished at leg end**, unreadable while the leg runs; and **keeping the relay through
+  Baton for live viewing**, which the owner gave up along with web-app viewing for now.
 - **Conditions bound dynamically to courses, over delivery policy in core** (2026-10-20, owner;
   R-BTN-160 to R-BTN-164). How a person is reached — which channel, how many tries, when to
   escalate, when to give up — is a project's, not Baton's, and differs between projects. The

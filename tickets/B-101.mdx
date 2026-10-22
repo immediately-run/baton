@@ -1,0 +1,71 @@
+---
+title: "B-101 — Review rounds as a file on the PR branch: the conversation mirrored, the squash kept clean, the plain-git channel"
+id: B-101
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 503
+tier: judgement
+description: "The review close commits the round's findings to .baton/reviews/<round>.md on the PR branch (the same markdown the forge conversation gets); the address leg answers beside it as <round>-addressed.md; the merge close deletes every reviews file before the squash. On a plain git repository the file is the only reviewer-to-addresser channel — the foundation create-pr needs to run without a forge. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-22: "I would like review comments to be saved to the PR
+review conversation as comments on GitHub for humans, but also as a file in the PR branch
+which is deleted from the branch before it is squash merged, so it doesn't pollute the
+main branch. This file would be the only means of communication available between
+reviewer and addresser for plain git repos (no forge)."
+**Spec:** §5.8 R-BTN-131 (the standard courses' stubs and closes — this is course code,
+`src/defaults/pr-close.ts` and the review/address/merge stubs), §7.2 (the review rounds —
+"later rounds get one fresh reviewer, who reads the earlier reviews and their replies"),
+§2k R-BTN-92 (`forge: git`: no `web_base`, no links — no conversation API exists).
+
+### The protocol
+
+- **The review leg's close writes the round to the branch.** The same markdown it posts
+  as the PR review (the findings, each with its severity and `file:line`, merged from the
+  blind reviewers) is committed to the PR's head branch as `.baton/reviews/<round>.md`,
+  the round number and verdict line included. On a forge, the GitHub conversation and the
+  file carry the same content — the conversation for humans, the file for the legs.
+- **The address leg reads the round from the branch** (`git show` at the branch head),
+  not from the conversation API: on a forge both exist and agree; on a plain git
+  repository the file is the channel. Its replies are committed beside the round as
+  `.baton/reviews/<round>-addressed.md` — the next round's reviewer reads the rounds and
+  the replies from the branch, which is exactly §7.2's "reads the earlier reviews and
+  their replies".
+- **The merge leg's close deletes the protocol before the squash.** Every
+  `.baton/reviews/` file leaves the branch in one commit, and the squash merge carries
+  none of it: main never sees the conversation, the branch holds it for the course's
+  life. The deletion is the merge close's first act, before the merge itself.
+
+### What this enables, and what it does not change
+
+- On the forges, nothing observable changes for humans: the GitHub conversation remains
+  exactly what the close posts today (the verdict line, the inline findings).
+- On a plain git repository, this file protocol is the *only* reviewer↔addresser
+  channel — the foundation `create-pr` needs to run there at all (the placement's
+  plain-git reading — verdicts from the file instead of review states — is that
+  follow-on ticket, not this one; this ticket builds the channel it will read).
+
+### Tests
+
+- Unit (the closes' suite): a review close posts the conversation (forge) *and* commits
+  the round file with the same content and the verdict line; an address close commits
+  its replies beside it; a merge close removes every reviews file from the branch in its
+  own commit before merging, and the squashed tree contains no `.baton/reviews/`.
+- The kit: a round-trip — review (file on branch), address (reply file), merge (clean
+  squash) — runs on the local host with no forge token.
+
+### Exit criteria
+
+- [ ] a round's findings live on the PR branch as a file, mirroring the conversation
+- [ ] the addresser answers through the branch, and the next reviewer reads rounds and
+      replies from it
+- [ ] a squash merge lands none of it on the default branch
+- [ ] the kit runs the round-trip with no forge

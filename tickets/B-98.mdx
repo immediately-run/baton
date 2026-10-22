@@ -1,0 +1,67 @@
+---
+title: "B-98 — baton request: start a course from one sentence, no hand-written ticket"
+id: B-98
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 501
+tier: judgement
+description: "Courses whose product is tickets or specs (create-spec, spec-to-tickets, build-app) enter through a request ticket — one sentence, course named — filed by a CLI command that commits and pushes it; the board and the next claim do the rest. The web UI's form is the same command behind the owner role, later. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-22: "we need a way to start courses like create-spec from the
+command line (or in the future the web ui) which have no ticket yet, because courses like
+create-spec are prerequisites for ticket creation."
+**Spec:** §5.8 R-BTN-131 (the standard courses; `build-app`'s request pattern — "a request
+is one ticket, `course: build-app`, saying what to build, often in a sentence"), §2f
+R-BTN-74 (the markdown ticket source — what the command writes), §6.1 (the claim).
+
+### The decision, named
+
+A course is not started ticket-less: it is started by a **request ticket** — one sentence,
+`course:` naming the course, filed by a command instead of a hand-written file. Everything
+downstream then rides the machine that already exists: the board places it, a runner
+claims it, `converse` suspends for the conversation, the spec PR advances it (B-96). The
+alternative — claims with no ticket — was considered and declined: matching, blocks,
+history and the dashboard all assume a ticket, and a request buys the whole machine for
+one sentence. `build-app` already works exactly this way; this ticket makes it a command.
+
+### What to build
+
+1. `baton request "<one sentence>" --course create-spec` (owner or administrator key, as
+   today's writer roles): commits the request ticket to the default branch — the next
+   free id, `status: available`, `course: create-spec`, the sentence as title and
+   description — and pushes, exactly as this repository's `npm run ticket -- new` does
+   (one commit, straight to the default branch, retry on a moved head). The push triggers
+   the sync; the board places it; the next claim starts the course. `--repo`/`BATON_URL`
+   pick the target; the command prints the ticket id and the course's first station.
+2. The course file opts in: courses whose `entry` is a request (create-spec now,
+   build-app already) name `starts_from: request` or equivalent in their entry, and
+   `baton request` refuses a course that does not — an ordinary course keeps its
+   hand-filed tickets.
+3. `docs/standard-courses.mdx` documents the request pattern once, as build-app's made
+   general: a request is the thin end of any course whose product is tickets or specs.
+4. The web UI's later form is this same command behind the owner role (the route files
+   the request through the same commit flow); noted here so the API shape is anticipated,
+   not built.
+
+### Tests
+
+- Unit: the written ticket's frontmatter (id, course, the sentence, status) against the
+  markdown source's rules; a course not marked `starts_from: request` is refused.
+- Integration: a filed request boards at its course's start station and a runner's claim
+  offers the course's start leg.
+
+### Exit criteria
+
+- [ ] `baton request "…" --course create-spec` starts the course from a terminal, one
+      sentence, no hand-written ticket
+- [ ] the request pattern documented as the general entry for courses whose product is
+      tickets or specs

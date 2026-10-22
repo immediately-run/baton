@@ -1,0 +1,73 @@
+---
+title: "B-84 — The leg stubs spawn the agent through sh -c, an environment that hangs real harness CLIs"
+id: B-84
+project: baton
+status: done
+updated: 2026-10-21
+tags:
+  - roadmap-item
+  - EXPEDITE
+order: 482
+tier: judgement
+description: "execFile(sh, -c) hangs opencode run deterministically (zero output, forever — root cause unexplained; stdin pipes, signals, trust and the service ruled out). Spawn without the shell and make the stdio contract explicit: stdin never an open pipe."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/93
+depends_on: []
+---
+
+**Brief:** the same run (finding 9; the lessons page): the leg stubs run
+`execFile("sh", ["-c", agent_command + ' "$@"', …])`, and that environment hangs
+`opencode run` (v2.1.2, macOS, the bun binary) deterministically — zero output, idle event
+loop, forever, burning the claim until reap. Direct `spawn` from node works; the same
+command through `sh -c` hangs; `sh -c '… < /dev/null'` works. Ruled out: stdin pipes
+(`stdio: "ignore"` still hung), signal dispositions (`trap '' PIPE` completes), trust
+prompts, the background service (`--standalone` also hung). Root cause unexplained.
+**Amended the same day, from B-71's review round:** the client's exit is not the agent's
+completion. `opencode run` is a client of the background service; when its subagent
+launches on other providers errored, the client exited at 14:55 mid-review — the stub read
+truncated stdout, found no verdict, refused the round and released the claim — while the
+service kept the session running: it finished twelve minutes later, posted the full review
+(five inline comments, a protocol-perfect last line) to a claim that no longer existed.
+**Spec:** §2f (R-BTN-74), §5.8 (R-BTN-131: the stubs).
+
+### Why
+
+A leg must not depend on its agent CLI tolerating the stub's spawn environment. One real
+harness already fails it silently; the workaround lives in this repository's `baton.json`
+and the lessons page, not in the product. And a leg's completion signal must be the
+agent's, not the client process's: a harness whose client can exit before (or outlive)
+its work makes every exit code a guess.
+
+### What to build
+
+1. The stubs spawn the agent without a shell: `agent_command` parsed as `sh -c` words are
+   today (a shell string is the documented interface — keep accepting it) but executed as
+   `execFile(command, args)` after one `sh -c`-compatible word split (quotes; no
+   substitutions), so no shell process stands between the stub and the agent.
+2. The stdio contract is explicit: stdin is never an open pipe — `ignore` or a closed fd —
+   and stdout/stderr are captured pipes; written into the leg's `.md` header (Baton's
+   contract for `agent_command` authors).
+3. The completion contract is explicit and holds for every harness the docs name: the
+   spawned command's exit means the agent's work has ended. For opencode that means the
+   documented command runs `--standalone` (its private server, in-process — the client
+   cannot exit ahead of the session, and no background service inherits orphaned work), or
+   the equivalent for claude-code; the docs' example commands say so, and the failure mode
+   above is written into the `.md` header beside the stdio lines.
+4. The hang itself reproduced in a test where it can be (a spawn through `sh -c` of a
+   command that reads stdin blocks — assert the stub's stdin is not readable), and the
+   reproduction documented in the PR for the platform where the original hangs.
+
+### Tests
+
+- Unit: the stub's child stdin is not an open pipe; a command string with quoted arguments
+  splits as `sh` would (shared helper with its own table).
+
+### Exit criteria
+
+- [ ] no shell between the stub and the agent; stdin never an open pipe
+- [ ] the documented command's exit is the agent's completion (`--standalone` or
+      equivalent) — an orphaned session cannot outlive or out-post its claim
+- [ ] the opencode invocation works without the manual redirection
