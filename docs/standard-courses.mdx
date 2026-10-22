@@ -117,6 +117,30 @@ names in `agent_command`, with the ticket, the leg and the checkout as its argum
 the agent the instructions, read at the claim's snapshot, through `BATON_INSTRUCTIONS`, so a
 branch under review cannot rewrite its reviewer's instructions.
 
+The agent itself is the repository's too: `.baton/baton.json`'s `agent_command`. So is
+everything around it. When you want every leg's output tee'd to a log, uploaded, timed or
+prefixed, name an `agent_wrapper` beside it — one command, split into words as `agent_command`
+is, whose words run in front of the agent's:
+
+```json
+"agent_command": "opencode run --auto --model <provider>/<model> \"…\"",
+"agent_wrapper": ".baton/leg-wrapper"
+```
+
+The stub runs `[.baton/leg-wrapper, opencode, run, …, <ticket>, <leg>, <checkout>]`: the wrapper
+receives the whole leg command as `"$@"` and owns its stdio, timing and log. Baton builds nothing
+around it — no capture, upload, retention or redaction is built in. `npx baton repo init` writes
+`.baton/leg-wrapper.example`, a `tee` to `.baton/logs/<ticket>-<leg>.log`; copy it to
+`.baton/leg-wrapper`, make it executable, and name it. The repository's setting applies wherever
+the leg runs; `BATON_AGENT_WRAPPER` in the runner's own environment overrides it, so one host can
+wrap while the repository stays unwrapped (it wins over the file, and it is read from the host,
+not the branch).
+
+Two rules, both B-84's contract: the wrapper must pass stdin through untouched — one that reads
+or buffers it holds the agent's stdin open, the hang B-84 closed — and its stdout is what the
+stub reads the answer from, so it must pass the agent's stdout through byte for byte and keep
+stderr off it. A wrapper that loses or mangles the last line fails the leg: it owns that failure.
+
 To change how a course places tickets, `npx baton repo init --course <course> --eject stations`
 copies its station function into `.baton/courses/<course>/sync.mjs`, where you can edit it. The
 course is then yours, not the source's: remove its `source` from `.baton/baton.json` first.

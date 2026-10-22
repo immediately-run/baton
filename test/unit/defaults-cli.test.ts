@@ -134,6 +134,11 @@ describe('baton repo init, through the built CLI', () => {
     expect(workflow).toContain("- cron: '*/15 * * * *'");
     expect(workflow).toContain('id-token: write'); // the CLI mints the run's OIDC token itself
     expect(readFileSync(join(root, 'tickets', 'README.md'), 'utf8')).toContain('One `*.md` file per ticket');
+    // B-95: the worked example of agent_wrapper ships, unused until named.
+    const example = readFileSync(join(root, '.baton', 'leg-wrapper.example'), 'utf8');
+    expect(example).toContain('mkdir -p .baton/logs');
+    expect(example).toContain('"$@" | tee ".baton/logs/${ticket}-${leg}.log"');
+    expect(settings.agent_wrapper).toBeUndefined();
   });
 
   it('without --pin, pins the CLI checkout it runs from to its commit; a pin that is not owner/name@commit is refused', () => {
@@ -292,6 +297,93 @@ describe('baton repo init, through the built CLI', () => {
       writeFileSync(settingsFile, before);
       rmSync(join(root, 'stdin.facts'), { force: true });
       rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  }, 60_000);
+
+  it('the stub prepends the agent_wrapper — the host’s BATON_AGENT_WRAPPER over the file — and the example wrapper passes the answer through with a byte-identical log (B-95)', async () => {
+    // A wrapper sees the whole leg command as its arguments. Here it hands them to a reporter
+    // (a node script, so nothing in a shell re-splits them), then runs the agent as its own
+    // contract says and answers as the agent does.
+    const wrapper = join(root, 'wrapper.sh');
+    writeFileSync(join(root, 'report.mjs'), "import { writeFileSync } from 'node:fs';\nwriteFileSync(new URL('wrapper.args', import.meta.url), process.argv.slice(2).map((a, i) => `arg${i + 1}=${a}`).join('\\n') + '\\n');\n");
+    writeFileSync(wrapper, [
+      '#!/bin/sh',
+      `"${process.execPath}" "$(dirname "$0")/report.mjs" "$@"`,
+      'echo "from the host wrapper" >> "$(dirname "$0")/wrapper.ran"',
+      // Its own flags end where the agent's argv begins: `--its-flag <value>`, or nothing.
+      '[ "$1" = --its-flag ] && shift 2',
+      'exec "$@"',
+      '',
+    ].join('\n'));
+    chmodSync(wrapper, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const review = join(root, '.baton', 'courses', 'create-pr', 'legs', 'review.mjs');
+    let unsetRemote: (() => void) | null = null;
+    let fakeGh: string | null = null;
+    const path = process.env.PATH;
+    try {
+      delete process.env.BATON_AGENT_WRAPPER;
+      // B-81: the stub verifies its PR on the forge before returning, so the review needs a gh
+      // answering an open PR on a branch the pattern maps to A-1.
+      execFileSync('git', ['-C', root, 'remote', 'add', 'origin', 'https://github.com/o/r.git'], { stdio: 'ignore' });
+      const fakeBin = mkdtempSync(join(tmpdir(), 'baton-fakegh-'));
+      fakeGh = fakeBin;
+      writeFileSync(join(fakeBin, 'gh'), '#!/bin/sh\ncat "$(dirname "$0")/answer"\n');
+      writeFileSync(join(fakeBin, 'answer'), JSON.stringify([{ number: 5, headRefName: 'claude/A-1-wrapper', headRefOid: '0123456789abcdef0123456789abcdef01234567' }]));
+      chmodSync(join(fakeBin, 'gh'), 0o755);
+      process.env.PATH = `${fakeBin}:${path}`;
+      unsetRemote = () => execFileSync('git', ['-C', root, 'remote', 'remove', 'origin'], { stdio: 'ignore' });
+      // Unset, today's argv: the agent alone, its own words, the ticket, the leg and the checkout.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: "/bin/sh -c 'echo approve'" }));
+      let snapshot = { sha: commitAll(root) };
+      expect(await (await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
+      expect(existsSync(join(root, 'wrapper.ran'))).toBe(false);
+      // With the setting: the wrapper's words go in front, split as sh would — quotes carry, so a
+      // word holding a space arrives whole.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: "/bin/sh -c 'echo approve'", agent_wrapper: `'${wrapper}'` }));
+      snapshot = { sha: commitAll(root) };
+      expect(await (await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
+      expect(readFileSync(join(root, 'wrapper.args'), 'utf8')).toBe(`arg1=/bin/sh\narg2=-c\narg3=echo approve\narg4=A-1\narg5=review\narg6=${root}\n`);
+      // A wrapper's own arguments, quoted as sh would carry them, come before the agent's words.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: "/bin/sh -c 'echo approve'", agent_wrapper: `${wrapper} --its-flag 'its arg'` }));
+      snapshot = { sha: commitAll(root) };
+      expect(await (await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
+      expect(readFileSync(join(root, 'wrapper.args'), 'utf8')).toBe(`arg1=--its-flag\narg2=its arg\narg3=/bin/sh\narg4=-c\narg5=echo approve\narg6=A-1\narg7=review\narg8=${root}\n`);
+      // The host's environment wins over the file, and is read from the host, not the snapshot.
+      const hostWrapper = join(root, 'host-wrapper.sh');
+      writeFileSync(hostWrapper, '#!/bin/sh\necho "from the host wrapper" >> "$(dirname "$0")/host.ran"\nexec "$@"\n');
+      chmodSync(hostWrapper, 0o755);
+      process.env.BATON_AGENT_WRAPPER = hostWrapper;
+      expect(await (await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'merge', verdict: 'approve' });
+      expect(readFileSync(join(root, 'host.ran'), 'utf8')).toBe('from the host wrapper\n');
+      // The example init ships: named as the wrapper, it logs the agent's stdout byte for byte —
+      // the answer line last, intact — and hands the same stdout on.
+      const example = join(root, '.baton', 'leg-wrapper.example');
+      chmodSync(example, 0o755);
+      delete process.env.BATON_AGENT_WRAPPER;
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: `${join(root, 'noisy-agent.sh')}`, agent_wrapper: example }));
+      writeFileSync(join(root, 'noisy-agent.sh'), '#!/bin/sh\necho "working on $1"\nprintf \'last line, with a trailing space \\n\'\necho changes\n');
+      chmodSync(join(root, 'noisy-agent.sh'), 0o755);
+      snapshot = { sha: commitAll(root) };
+      expect(await (await load(review)).run({ ticket: { id: 'B-2' }, checkout: root, snapshot })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
+      expect(readFileSync(join(root, '.baton', 'logs', 'B-2-review.log'), 'utf8')).toBe('working on B-2\nlast line, with a trailing space \nchanges\n');
+      // A file wrapper that is not a command fails the leg naming the setting.
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: 'echo approve', agent_wrapper: '  ' }));
+      const blank = { sha: commitAll(root) };
+      await expect((await load(review)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: blank })).rejects.toThrow("agent_wrapper is not a command");
+    } finally {
+      if (path == null) delete process.env.PATH;
+      else process.env.PATH = path;
+      unsetRemote?.();
+      if (fakeGh) rmSync(fakeGh, { recursive: true, force: true });
+      // A host's wrapper is the host's: this process's environment is never left saying so.
+      delete process.env.BATON_AGENT_WRAPPER;
+      writeFileSync(settingsFile, before);
+      for (const f of ['wrapper.sh', 'report.mjs', 'wrapper.args', 'wrapper.ran', 'host-wrapper.sh', 'host.ran', 'noisy-agent.sh']) rmSync(join(root, f), { force: true });
+      rmSync(join(root, '.baton', 'logs'), { recursive: true, force: true });
+      rmSync(join(root, '.baton', 'leg-wrapper.example'), { force: true });
       commitAll(root);
     }
   }, 60_000);

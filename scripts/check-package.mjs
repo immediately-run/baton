@@ -12,8 +12,8 @@ import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-const ALLOWED = [/^package\.json$/, /^README\.md$/, /^LICENSE$/, /^NOTICE$/, /^dist\/baton\.mjs$/, /^dist\/legProcess\.mjs$/, /^dist\/build\.json$/, /^dist\/defaults\/[\w./-]+\.(mjs|md)$/];
-const REQUIRED = ['package.json', 'LICENSE', 'NOTICE', 'dist/baton.mjs', 'dist/legProcess.mjs', 'dist/build.json', 'dist/defaults/tickets.mjs', 'dist/defaults/stubs/create-pr/implement.mjs', 'dist/defaults/courses/create-pr/implement.md'];
+const ALLOWED = [/^package\.json$/, /^README\.md$/, /^LICENSE$/, /^NOTICE$/, /^dist\/baton\.mjs$/, /^dist\/legProcess\.mjs$/, /^dist\/build\.json$/, /^dist\/defaults\/[\w./-]+\.(mjs|md)$/, /^dist\/defaults\/leg-wrapper\.example$/];
+const REQUIRED = ['package.json', 'LICENSE', 'NOTICE', 'dist/baton.mjs', 'dist/legProcess.mjs', 'dist/build.json', 'dist/defaults/tickets.mjs', 'dist/defaults/stubs/create-pr/implement.mjs', 'dist/defaults/courses/create-pr/implement.md', 'dist/defaults/leg-wrapper.example'];
 
 const fail = (msg) => {
   process.stderr.write(`check-package: ${msg}\n`);
@@ -58,7 +58,7 @@ try {
     const settings = JSON.parse(readFileSync(join(repo, '.baton', 'baton.json'), 'utf8'));
     const want = `github/${build.repository}/${build.commit}/create-pr`;
     if (settings.courses?.[0]?.source !== want) fail(`init named the source ${settings.courses?.[0]?.source}, not ${want}`);
-    for (const f of ['.baton/courses/create-pr/course.json', '.baton/courses/create-pr/legs/implement.mjs', '.baton/courses/create-pr/legs/implement.md', '.github/workflows/baton-sync.yml']) {
+    for (const f of ['.baton/courses/create-pr/course.json', '.baton/courses/create-pr/legs/implement.mjs', '.baton/courses/create-pr/legs/implement.md', '.github/workflows/baton-sync.yml', '.baton/leg-wrapper.example']) {
       if (!existsSync(join(repo, f))) fail(`the installed \`baton repo init\` wrote no ${f}`);
     }
     if (!readFileSync(join(repo, '.github', 'workflows', 'baton-sync.yml'), 'utf8').includes(`ref: ${build.commit}`)) fail('the sync workflow does not pin the commit the package was built from');
