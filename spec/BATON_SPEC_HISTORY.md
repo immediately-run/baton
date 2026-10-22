@@ -2887,3 +2887,27 @@ derived types:)*
 | R6 9 `BATON_ROUTE` | created empty per leg, one entry per choice, ≤ 4 KB, never fails an end (R-BTN-177) |
 | R5 19–25, R6 12–17 nits | R-BTN-120's prose; S-BTN-146's test seam through the test bindings; the same-digest sentence replaced by unit equality; `exclude_when` filters advice; untyped positions and reflexive "depends on"; S-BTN-147, S-BTN-148 and S-BTN-153 set-ups; a route against `null` advice stored; `choice_last` not written on a refused advance; rule 4 at an advance is intended, as for a lost declaration |
 
+*(2026-10-22, round 7 — Fable 5.1 again, over §5.9, §6.10 and §6.11 after the rewrite. It
+confirmed the formal core with clingo and checked several round 5–6 dispositions in the text:
+1 blocking, 13 should-fix, 2 simplify, 8 nits. **Not yet resolved**:)*
+
+| Finding | Status |
+|---|---|
+| 1 B — a sourced course's home cannot add `choices` (R-BTN-134 allows only leg overrides), and a standard course listing them is refused wherever there is no ontology | open; decision needed: `choices` belong to the home (entry or override file) |
+| 2 G-BTN-57, S-BTN-32 and the vendored `ROLES['human-operator']` still treat `human-operator` as administrator-only, or as a role | open (verified) |
+| 3 seats released at a fence-pending reap | open |
+| 4 rule 11 counts the advancing claim's own seats | open |
+| 5 one claim-level `bills` for every `prefer` candidate | open |
+| 6 R-BTN-100 drops bills on `service` instances | open |
+| 7 R-BTN-76's usable and reporter lists omit `host` | open |
+| 8 claim-time seats against "a claim runs nothing"; rule 11 missing from §6.6's lists; no `why` for a full instance | open |
+| 9 no channel for a leg to name a dead holding without ending | open |
+| 10 what a generic runner bills is unspecified | open |
+| 11 a crossed gate evaluation is retried at every read | open |
+| 12 a grant change re-evaluates every runner of a credential in one transaction | open |
+| 13 G-BTN-5 contradicts derivation past the grant | open |
+| 14 "choice" names both advice choices and choice stations (R-BTN-166) | open; naming decision |
+| 15 Simplify — drop condition 4's cross-course `values` check | open; decision |
+| 16 Simplify — drop the 5-minute window and `pending_json` | open; decision |
+| 17–24 nits | open: grant acceptance and decline as triggers; `_` missing from the constant alphabet; alarm instants, instance `capacity` in §14, the `{error}` form in §4.4, `capacity` changes; the holder named across repositories, and `host` instances in the instance view; `seat` on R-BTN-50's banned list; `host` scope on cloud runners; R-BTN-69's circular wording and holds-dependent predicates outside both strata; `missing` against `not-granted` |
+
