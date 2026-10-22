@@ -1,0 +1,194 @@
+---
+title: "B-104 — The capability ontology: credentials map to capabilities per repository, transitively, server-side — positive Datalog in JSON, mapped to N3"
+id: B-104
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 506
+tier: judgement
+description: "Legs require at any altitude (capability, model); runners declare holdings (credential:, dependency:); a per-repo, sync-posted ontology derives transitively at matching — positive Datalog closure, cycles refused, JSON serialized with a documented N3 mapping. Baton maps claims, preflight tests truth, core learns no vocabulary. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-22, across the credential-capability discussion: "credentials
+are capabilities: an anthropic api key is what enables a runner to execute an opus review."
+"We need a hierarchy for capabilities… course legs specify a high-level capability like
+code-generation-llm, while the runners know they have an API key for OpenCode Go and
+DeepInfra and an instance of OpenCode 2 installed in the VM. Baton should never store the
+credentials, but it needs to keep track of the ontology of how credentials map." And the
+two-level case for transitivity: "anthropic api key → opus model capability → code
+generation llm capability." Settled in discussion: server-side inference at matching;
+transitive; and — "let's not reinvent the wheel" — the semantics are named Datalog, the
+serialization JSON with a documented 1:1 N3 mapping ("JSON-with-N3-mapping sounds like a
+reasonable compromise, lets go with this").
+**Spec:** §7.2 rules 4 and 7 (the capability gates these plug into), §2f R-BTN-74 (a
+sync-posted, validated file beside the course files), §5.6 R-BTN-121 (capability types),
+`docs/context/vocabulary.mdx` (the capability names), new §5.6 text for the ontology.
+
+### The three layers, and who owns each
+
+| Layer | Owner | Example |
+|---|---|---|
+| Abstract requirements | course legs (course files, posted by syncs) | implement requires `capability:code-generation-llm`; a review round may require `model:claude-opus-5-5` directly |
+| Concrete holdings | the runner, in its heartbeat, bounded by its grant | `credential:opencode-go-api-key`, `credential:deep-infra-api-key`, `dependency:opencode-v2` |
+| The ontology | the repository, posted with the sync, versioned with the snapshot | the rules below |
+
+The worked example (the spec's test case, from the owner's message):
+
+```
+credential:opencode-go-api-key  ─⇒ model:deepseek-v4.1-flash ─┐
+credential:deep-infra-api-key   ─⇒ model:deepseek-v4.1-flash ─┤
+credential:anthropic-api-key    ─⇒ model:claude-opus-5-5 ─────┤
+dependency:opencode-v2 ────────────────────────────────────────┴⇒ capability:code-generation-llm
+dependency:claude-code ────────────────────────────────────────┘
+```
+
+### Semantics: positive Datalog, named, not invented
+
+The ontology is a **positive Datalog program** over flat string predicates: conjunctive
+rules (`head :- fact₁ … factₙ`), no negation, no functions, no built-ins. Inference is
+**forward-chaining closure** — deterministic, order-independent, terminating; a worker's
+derived set for a repository is the closure of its declared holdings under that
+repository's posted ontology, and **transitive by construction** (the owner's two-level
+chain needs no special case). Validation at sync-post refuses cycles (meaningless for
+reachability, poison for audit) and malformed rules, exactly as course files are refused.
+The middle layers are addressable: a leg may require any altitude.
+
+### Serialization: JSON rules, documented N3 mapping
+
+`.baton/capabilities.json` — one rule per entry, conjuncts as a list, head a string:
+
+```json
+{ "rules": [
+    { "all": ["credential:opencode-go-api-key"], "derives": "model:deepseek-v4.1-flash" },
+    { "all": ["model:deepseek-v4.1-flash", "dependency:opencode-v2"], "derives": "capability:code-generation-llm" }
+] }
+```
+
+The mapping to Notation3 triples-and-rules is written into the spec (one translated
+example beside each construct), so an RDF-shaped consumer — a dashboard querying the
+closure, ontologies merged across repos, an external reasoner — is a mechanical transform
+away, never a migration. Nothing RDF enters core: it stores rules, applies closure.
+
+### The built-in ontology, and value bindings
+
+**Baton ships a reasonable ontology** (the owner, 2026-10-22: "baton should come with a
+reasonable ontology built-in, any fact of which can be overridden on the repository
+level"). It is course code — `src/defaults/`, scaffolded by `repo init`, the sync's
+fallback when a repository posts none — never core. Override is by rule identity on the
+merged program: the repository's file may add rules, retract the built-in's by id, or
+replace one; the built-in's other facts stand; one closure runs over the result.
+Precedence is repository over built-in, per fact.
+
+**Value bindings are facts, and they join.** The ontology stores ground binary facts —
+`binding("coding model", "claude-opus-5.5")` — validated functional (one value per key
+in the merged program; preference lists are a later decision, not v1). Because they are
+facts in the same Datalog program, rules can join them, and the repository's *choices*
+become participants in matching rather than prose in `agent_command`:
+
+```
+holds(W, model:claude-opus-5-5), binding("coding model", M), model_name(M, model:claude-opus-5-5)
+  ⇒ satisfies(W, capability:code-generation-llm)
+```
+
+The worked meaning: a worker satisfies this repository's code-generation requirement when
+it holds the model the repository bound — "coding model = claude opus 5.5" is a binding,
+the credential chain derives the holding, and one closure answers the join. Yesterday's
+pinned-pair review instructions and `agent_command` model pin are this mechanism's
+ancestors; the binding is where such pins live once B-104 is built.
+
+**The binding names a class; the rule joins two dimensions through it** (the owner,
+2026-10-22: "then the rule could be capability:coding model → credential:provider
+offering coding model AND harness usable with coding model"):
+
+```
+satisfies(W, capability:code-generation-llm) :-
+    binding("coding model", M),
+    holds(W, C), offers(C, M),
+    holds(W, D), usable_with(D, M).
+```
+
+Satisfaction is existential over the model: some model meeting the repository's binding,
+for which the worker holds both a credential that reaches it and a harness that can run
+it — `usable_with(dependency:opencode-v2, model:deepseek-v4.1-flash)` and its kin are
+ontology facts like any other, overridable per repository. **The serialization
+consequence, recorded honestly:** the flat conjunct-of-strings sketch above cannot
+express this — the rule needs variables in predicate positions (binary predicates:
+`offers`, `usable_with`, `binding`). The JSON sugar grows a variable syntax (`$m` in
+positions), the semantics do not move (still positive Datalog), and the N3 mapping is
+promoted from illustration to the serialization's semantic reference — variables are
+native there, which is precisely why the mapping exists.
+
+**The binding names a class; the rule joins two dimensions through it** (the owner,
+2026-10-22: "then the rule could be capability:coding model → credential:provider
+offering coding model AND harness usable with coding model"):
+
+```
+satisfies(W, capability:code-generation-llm) :-
+    binding("coding model", M),
+    holds(W, C), offers(C, M),
+    holds(W, D), usable_with(D, M).
+```
+
+Satisfaction is existential over the model: some model meeting the repository's binding,
+for which the worker holds both a credential that reaches it and a harness that can run
+it — `usable_with(dependency:opencode-v2, model:deepseek-v4.1-flash)` and its kin are
+ontology facts like any other, overridable per repository. **The serialization
+consequence, recorded honestly:** the flat conjunct-of-strings sketch above cannot
+express this — the rule needs variables in predicate positions (binary predicates:
+`offers`, `usable_with`, `binding`). The JSON sugar grows a variable syntax (`$m` in
+positions), the semantics do not move (still positive Datalog), and the N3 mapping is
+promoted from illustration to the serialization's semantic reference — variables are
+native there, which is precisely why the mapping exists.
+
+### What Baton never does
+
+Stores a credential (holdings are labels, never material — value unchanged); learns a
+vocabulary (`anthropic` is an opaque string to core); calls a provider (preflight is
+course code: a leg verifies the credentials it will use, and a failing preflight retracts
+the declaration and fails the leg naming the credential — the ontology maps claims,
+preflight tests truth).
+
+### Matching, and the answers it gives
+
+A leg's requirement matches when it is in the derived set (declared ∪ closure), itself
+intersected with the grant — the existing rules-4/7 gates over a richer set, no new gate
+machinery. The blocks index answers **with its derivation chain**: "requires
+`model:claude-opus-5-5`; holdings derive `model:deepseek-v4.1-flash`; the link is
+`credential:anthropic-api-key`" — the operator's shopping list in one line. Direct
+declarations of any altitude remain (a human-operator machine simply *has*
+code-generation-llm); the ontology translates, it does not gatekeep.
+
+### Open decisions, with leans recorded
+
+1. **Grant level** — lean: grants bound concrete holdings, the ontology derives, the
+   intersection matches (stable abstract grants vs. tight concrete ones; tighter wins).
+2. **`dependency:` verification** — lean: heartbeat self-report plus the leg's preflight;
+   nothing stronger until a fleet lies about it.
+3. **Name scope** — lean: high-level capability names shared across repositories
+   (coherent grants, dashboards, one vocabulary page) with repo-local names permitted
+   beside them.
+
+### Tests
+
+- Closure: the owner's two-level chain derives `capability:code-generation-llm` from
+  `credential:anthropic-api-key` + `dependency:opencode-v2`; conjunctions are required;
+  cycles and malformed rules are refused at post with the rule named.
+- Matching (S-BTN-n): a leg requiring the capability is recommended to a worker whose
+  holdings close over it and not to one whose do not; the why-not answer carries the
+  chain; a direct declaration satisfies without derivation.
+- The N3 mapping: each spec construct's translated example is tested to translate.
+
+### Exit criteria
+
+- [ ] legs require at any altitude; runners declare holdings; per-repo ontologies derive
+      transitively at matching, server-side
+- [ ] a missing capability's why-not names the missing link and its credential
+- [ ] the JSON↔N3 mapping documented in the spec with tested examples
+- [ ] no credential material, provider call or vocabulary word ever enters core
