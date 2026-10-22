@@ -8,7 +8,7 @@ tags:
   - roadmap-item
 order: 478
 tier: judgement
-description: "The owner's take: std{err,out} capture is not core. agent_wrapper in baton.json (BATON_AGENT_WRAPPER per host) is prepended to the agent argv by the stubs — the wrapper owns tee, upload, timing; an example ships; the answer protocol passes through byte-identical. Requires: none."
+description: "The owner's take: std`{err,out}` capture is not core. agent_wrapper in baton.json (BATON_AGENT_WRAPPER per host) is prepended to the agent argv by the stubs — the wrapper owns tee, upload, timing; an example ships; the answer protocol passes through byte-identical. Requires: none."
 topics:
   - baton
 owns: {}
@@ -16,10 +16,10 @@ prs: []
 depends_on: []
 ---
 
-**Brief:** the owner, 2026-10-22, on the runs of 2026-10-21: "I thought about std{err,out}
+**Brief:** the owner, 2026-10-22, on the runs of 2026-10-21: "I thought about std`{err,out}`
 capture for non-interactive process legs, and my current take is that this shouldn't be
 built into baton core. Baton should allow a hook… to transform leg commands before they
-are executed. In our case, it could use the tee command to send a copy of the std{err,out}
+are executed. In our case, it could use the tee command to send a copy of the std`{err,out}`
 to a command which uploads the log files to a GCS bucket, but this could be implemented
 without any builtin baton support."
 **Spec:** §2f (R-BTN-74: `agent_command`), §5.8 (R-BTN-131: the stubs' spawn, as B-84
