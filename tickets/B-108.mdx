@@ -1,0 +1,59 @@
+---
+title: "B-108 — The runner says what its leg is doing: duration and last activity in the log, and a stalled warning until core's baton.stalled timer exists"
+id: B-108
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 510
+tier: routine
+description: "The B-86 incident (2026-10-22): an implement agent finished its work, pushed, opened PR #104, wrote its ticket record — and never exited, so the stub waited forever and every health signal stayed green (lease fresh, runner beating, process alive) for five hours. The runner logs a leg's duration and the time of its last observable activity each beat, warns when a leg runs long while quiet, and pipes the leg child's output (B-23's archive) so 'quiet' is a measured fact, not a guess. start-runner.sh's stalled-leg watch is the operator-side stopgap this builds on. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-22, after the B-86 leg: "im more concerned with how we can detect
+this in the future." The runner held a claim in `implement` for five hours past the agent's last
+output with nothing to show the operator — every signal it logs was green.
+**Spec:** §8.3 R-BTN-72 (the runner: the leg child and its waiting), §7's `baton.stalled`
+(R-BTN-163, R-BTN-167's default timer — the server-side answer, still §7's proposal) and
+R-BTN-90's deadlines; B-23 (the runner's leg-output archive) is the observability half. The
+baton-stalled/… ticket:
+**Depends on:** nothing — the runner-side logging stands alone; the condition lands with §7.
+
+### What to build
+
+1. **The leg child's output is piped, not ignored.** The leg child spawns with
+   `stdio: ['pipe', 'ignore', 'ignore']` — the runner never sees the agent's stream. B-23's
+   archive (masked per R-BTN-144) is the full answer; the detection half lands first: the
+   runner timestamps every chunk it drains, so "last activity" is a fact.
+2. **A liveness line each beat while a leg runs**: `baton: <ticket>'s <leg> running N min, last
+   output M min ago` — the operator's `tail -f` shows the wedge forming instead of silence.
+3. **A stalled warning**: a leg running past a threshold (default 60 min, the course's to
+   raise) with no output and no checkout change for 10+ minutes logs the B-86-shaped warning
+   naming the claim and the agent's pid — the signature `scripts/start-runner.sh` already
+   watches for from outside; the runner knows it from inside, without pgrep.
+4. **When §7 lands**, the warning becomes core's `baton.stalled` condition (R-BTN-167's timer
+   fires, Needs you carries it) and R-BTN-90's deadline takes the claim — the runner-side line
+   stays as the local view.
+
+### Do not
+
+- Kill the agent from the runner: a deadline is Baton's word (R-BTN-90: "Baton cannot stop a
+  runner" — and a runner guessing about its agent is the same trap one level down). The
+  warning tells the human; §7's machinery decides.
+
+### Tests
+
+- Unit: a leg child that prints, sleeps past the thresholds and prints again — the liveness
+  lines and the one warning appear in order, and no warning while output flows.
+- The B-86 shape replayed: a child that exits never — the warning fires once per leg.
+
+### Exit criteria
+
+- [ ] a wedged-post-completion agent is visible in the runner's log within minutes, not hours
+- [ ] no warning while a leg is producing output, whatever its duration

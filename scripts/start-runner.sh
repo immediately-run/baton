@@ -146,6 +146,41 @@ env -u BATON_COURSE -u BATON_LEG -u BATON_INSTRUCTIONS -u BATON_TICKET_FILE \
     node "$ROOT/cli/baton.mjs" "${RUN_ARGS[@]}" >"$LOG" 2>&1 &
 RUNNER=$!
 
+# ---- the stalled-leg watch (the B-86 lesson, 2026-10-22) --------------------------------
+# An agent can finish its work and never exit: every green signal stays green (the lease is
+# fresh, the runner healthy, the process alive) while the leg waits forever on an exit that
+# never comes. The signature that catches it: a leg older than LEG_STALL_MIN whose checkout —
+# and any opencode worktree beside it — have been quiet longer than QUIET_MIN. Advice, never
+# action: it prints a line; the human decides. Core's own answer is baton.stalled on a default
+# timer (R-BTN-167) with R-BTN-90's deadlines, still §7's proposal; until it is built, this is
+# the detector.
+LEG_STALL_MIN="${LEG_STALL_MIN:-60}"
+QUIET_MIN="${QUIET_MIN:-10}"
+warned_leg=""
+newest_change() {
+  # Any file changed inside the quiet window, in the checkout or an agent worktree (.git holds
+  # the runner's own state and log, so it is excluded).
+  find "$HOME_DIR" "$HOME/.local/share/opencode/worktree" -type f -newermt "-${QUIET_MIN} minutes" \
+    -not -path '*/.git/*' -print -quit 2>/dev/null | grep -q . && echo busy || echo quiet
+}
+watch_leg() {
+  [ -d "$HOME/.local/share/opencode/worktree" ] || return 0
+  local legpid agentpid elapsed
+  legpid="$(pgrep -P "$RUNNER" 2>/dev/null | head -1)"
+  [ -n "$legpid" ] || { warned_leg=""; return 0; }
+  agentpid="$(pgrep -P "$legpid" 2>/dev/null | head -1)"
+  [ -n "$agentpid" ] && legpid="$agentpid"
+  elapsed="$(ps -o etimes= -p "$legpid" 2>/dev/null | tr -d ' ')"
+  [ -n "$elapsed" ] && [ "$elapsed" -gt $((LEG_STALL_MIN * 60)) ] || return 0
+  [ "$(newest_change)" = "quiet" ] || return 0
+  if [ "$warned_leg" != "$legpid" ]; then
+    note "WARNING: the leg's agent (pid $legpid) has run $((elapsed / 60)) minutes with no file change anywhere for ${QUIET_MIN}+ minutes — the finished-but-never-exited shape (B-86, 2026-10-22). The stub waits for its exit; the claim cannot advance. Check the agent, or stop the runner and take its PR."
+    warned_leg="$legpid"
+  fi
+}
+( while kill -0 "$RUNNER" 2>/dev/null; do watch_leg; sleep 60; done ) &
+WATCH=$!
+
 shutdown() {
   note "stopping the runner (pid $RUNNER) — it releases its claim with a hand-off and exits"
   kill -INT "$RUNNER" 2>/dev/null || true
@@ -162,6 +197,7 @@ wait "$RUNNER"
 STATUS=$?
 set -e
 [ -z "${TIMER:-}" ] || kill "$TIMER" 2>/dev/null || true
+[ -z "${WATCH:-}" ] || kill "$WATCH" 2>/dev/null || true
 trap - INT TERM
 
 note "the runner exited ($STATUS); the log is kept at $LOG"
