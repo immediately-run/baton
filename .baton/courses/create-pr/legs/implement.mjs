@@ -1,4 +1,4 @@
-// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-iaAoLZ/entry.ts
+// ../../baton-bundle-HYIYy6/entry.ts
 import { execFile, execFileSync as execFileSync2 } from "node:child_process";
 import { mkdtempSync, readFileSync as readFileSync2, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -62,7 +62,18 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, isAbsolute, join } from "node:path";
 var MARKERS_FILE = join(".baton", "markers.jsonl");
-var exec = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: "utf8" }).trim();
+var CLOSE_TIMEOUT_MS = 12e4;
+var GIT_NONINTERACTIVE_ENV = {
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o ConnectTimeout=20"
+};
+var exec = (cmd, args, cwd, timeoutMs = CLOSE_TIMEOUT_MS) => execFileSync(cmd, args, {
+  cwd,
+  encoding: "utf8",
+  timeout: timeoutMs,
+  killSignal: "SIGKILL",
+  env: { ...process.env, ...GIT_NONINTERACTIVE_ENV }
+}).trim();
 function commitMarker(checkout, line, run2 = exec) {
   appendFileSync(join(checkout, MARKERS_FILE), `${JSON.stringify(line)}
 `);
@@ -266,16 +277,19 @@ function verifyPrOpen(ask, run2) {
   throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
 }
 
-// ../../../../../private/var/folders/l5/khd_fnwx431d2p12lyvlqznr0000gn/T/baton-bundle-iaAoLZ/entry.ts
+// ../../baton-bundle-HYIYy6/entry.ts
+var GIT_BOUND_MS = 12e4;
+var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
+var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, ...opts });
 async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read its override at");
   const rel = ".baton/courses/create-pr/legs/implement.run.mjs";
-  if (execFileSync2("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel], { encoding: "utf8" }).trim() === "") return standard(ctx);
+  if (gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel]).trim() === "") return standard(ctx);
   const dir = mkdtempSync(join2(tmpdir(), "baton-override-"));
   try {
     const file = join2(dir, "implement.run.mjs");
-    writeFileSync(file, execFileSync2("git", ["-C", ctx.checkout, "show", sha + ":" + rel], { encoding: "utf8", maxBuffer: 67108864 }));
+    writeFileSync(file, gitRun("git", ["-C", ctx.checkout, "show", sha + ":" + rel], { maxBuffer: 67108864 }));
     const mod = await import(pathToFileURL(file).href);
     if (typeof mod.run !== "function") throw new Error(rel + " exports no run(ctx, standard)");
     return await mod.run(ctx, standard);
@@ -286,7 +300,7 @@ async function run(ctx) {
 async function standard(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read .baton/baton.json at");
-  const show = (rel2) => execFileSync2("git", ["-C", ctx.checkout, "show", sha + ":" + rel2], { encoding: "utf8", maxBuffer: 67108864 });
+  const show = (rel2) => gitRun("git", ["-C", ctx.checkout, "show", sha + ":" + rel2], { maxBuffer: 67108864 });
   const settings = JSON.parse(show(".baton/baton.json"));
   const agentCommand = typeof settings.agent_command === "string" && settings.agent_command !== "" ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? "";
   if (agentCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
@@ -301,22 +315,28 @@ async function standard(ctx) {
   })();
   const legRun = (cmd, args, cwd) => {
     try {
-      return execFileSync2(cmd, args, { cwd, encoding: "utf8", maxBuffer: 67108864 }).trim();
+      return gitRun(cmd, args, { cwd, maxBuffer: 67108864 }).trim();
     } catch (e) {
       const why = e && typeof e.stderr === "string" && e.stderr.trim() !== "" ? e.stderr.trim().split("\n")[0] : e && e.message ? e.message : String(e);
       throw new Error(`${cmd} ${args.join(" ")} failed: ${why}`);
     }
   };
   const rel = ".baton/courses/create-pr/legs/implement.md";
-  const present = execFileSync2("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel], { encoding: "utf8" }).trim() !== "";
+  const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel]).trim() !== "";
   const text = present ? show(rel) : null;
   const dir = text == null ? null : mkdtempSync(join2(tmpdir(), "baton-leg-"));
   const instructions = dir == null ? "" : join2(dir, "implement.md");
   if (dir != null) writeFileSync(instructions, text);
   const [command, ...words] = splitWords(agentCommand);
   if (command === void 0) throw new Error(".baton/baton.json names no agent_command to run");
+  const envWrapper = process.env.BATON_AGENT_WRAPPER;
+  const wrapper = typeof envWrapper === "string" && envWrapper.trim() !== "" ? envWrapper : settings.agent_wrapper;
+  if (wrapper != null && (typeof wrapper !== "string" || wrapper.trim() === "")) throw new Error(".baton/baton.json's agent_wrapper is not a command");
+  const [wrapped, ...wrapping] = wrapper == null ? [] : splitWords(wrapper);
+  const argv = wrapped === void 0 ? [command, ...words, ctx.ticket.id, "implement", ctx.checkout] : [wrapped, ...wrapping, command, ...words, ctx.ticket.id, "implement", ctx.checkout];
+  if (process.env.BATON_VERBOSE) console.error("baton: create-pr/implement ticket " + ctx.ticket.id + ": agent_command: " + agentCommand + (wrapper != null ? "; wrapper: " + wrapper : "") + "; argv: " + argv.join(" "));
   const out = await new Promise((resolve, reject) => {
-    const child = execFile(command, [...words, ctx.ticket.id, "implement", ctx.checkout], {
+    const child = execFile(argv[0], argv.slice(1), {
       cwd: ctx.checkout,
       maxBuffer: 67108864,
       stdio: ["ignore", "pipe", "pipe"],

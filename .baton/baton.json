@@ -23,7 +23,7 @@
       "report_horizon_h": 6,
       "branch_pattern": "claude/{ticket}-*",
       "protocol_files": [],
-      "source": "github/immediately-run/baton/4552f3ff4240209ba3744b55e7e422b034f1d11a/create-pr"
+      "source": "github/immediately-run/baton/93e73316fc1bc777b4afb891d8b8e6f54d996146/create-pr"
     }
   ]
 }
