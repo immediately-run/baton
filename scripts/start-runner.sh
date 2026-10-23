@@ -42,6 +42,7 @@ while [ $# -gt 0 ]; do
     --capabilities) CAPABILITIES="${2:?--capabilities needs a list}"; shift 2 ;;
     --url) URL="${2:?--url needs a URL}"; shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
+    --verbose) VERBOSE=1; shift ;;
     --log) LOG="${2:?--log needs a path}"; shift 2 ;;
     *) die "unknown flag: $1 (see the header of this script)" ;;
   esac
@@ -112,6 +113,7 @@ fi
 
 # ---- start -----------------------------------------------------------------
 RUN_ARGS=(run --harness "$HARNESS" --home "$HOME_DIR" --session "$SESSION")
+[ -n "${VERBOSE:-}" ] && RUN_ARGS+=(--verbose)
 [ -n "$URL" ] && RUN_ARGS+=(--url "$URL")
 [ -n "$CAPABILITIES" ] && RUN_ARGS+=(--capabilities "$CAPABILITIES")
 

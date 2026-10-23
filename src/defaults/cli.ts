@@ -684,6 +684,10 @@ async function standard(ctx) {
   const argv = wrapped === undefined
     ? [command, ...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout]
     : [wrapped, ...wrapping, command, ...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout];
+  // Verbose (B-23's slice): the runner asked, so say on stderr — which it drains into its log —
+  // the one line an operator needs: the local command actually completing this leg, resolved
+  // here at the claim's snapshot, and the wrapper in front of it when one is named.
+  if (process.env.BATON_VERBOSE) console.error('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': agent_command: ' + agentCommand + (wrapper != null ? '; wrapper: ' + wrapper : '') + '; argv: ' + argv.join(' '));
   const out = await new Promise((resolve, reject) => {
     const child = execFile(argv[0], argv.slice(1), {
       cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX}, stdio: ['ignore', 'pipe', 'pipe'],

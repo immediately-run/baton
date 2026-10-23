@@ -7,6 +7,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { declareCourses, fetchMain, parseRunArgs, runMain, runnerCourse } from '../../src/runner/main';
+import { withTimestamps } from '../../src/runner/runner';
 import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { envAuth } from '../../src/runner/api';
 import { courseOf, dropCourse, freshSecret, holdHome, loadCourse } from '../../src/runner/home';
@@ -25,7 +26,7 @@ describe('parseRunArgs', () => {
     const legacy = parseRunArgs([], { IR_BATON_SESSION: 'old', IR_BATON_NAME: 'vm-old' });
     expect(legacy.session).not.toBe('old');
     expect(legacy.hostname).not.toBe('vm-old');
-    expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: ['agent-venue'], testHarness: false });
+    expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: ['agent-venue'], testHarness: false, verbose: false });
   });
   it('takes its flags, refusing the unknown and the malformed', () => {
     const a = parseRunArgs(['--harness', 'claude-code', '--home', '/x', '--url', 'https://u', '--session', 's2', '--repository', 'ops', '--tier', 'routine', '--capabilities', 'a,b', '--beat-every', '5000'], {});
@@ -37,6 +38,8 @@ describe('parseRunArgs', () => {
     expect(parseRunArgs(['--course', 'bug-report'], {}).course).toBe('bug-report');
     // B-83: --test-harness permits the bare-echo stub, and says so on the heartbeat.
     expect(parseRunArgs(['--test-harness'], {}).testHarness).toBe(true);
+    // Verbose logging (2026-10-23): timestamps, the claim's id and nonce, the leg's command.
+    expect(parseRunArgs(['--verbose'], {}).verbose).toBe(true);
   });
 });
 
@@ -269,5 +272,16 @@ describe('the worker secret and the bounded fetch', () => {
     const lines: string[] = [];
     expect(() => fetchMain('/nonexistent-checkout', (l) => lines.push(l))).not.toThrow();
     expect(lines.join('\n')).toMatch(/fetch failed/);
+  });
+});
+
+describe('withTimestamps (verbose logging)', () => {
+  it('prefixes every line with one ISO 8601 instant, whatever the line', () => {
+    const lines: string[] = [];
+    const log = withTimestamps((l) => lines.push(l));
+    log('baton: claimed baton:B-9 at filed, queued leg implement');
+    log('two\nlines');
+    expect(lines[0]).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z baton: claimed baton:B-9 at filed, queued leg implement$/);
+    expect(lines[1]).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z two\nlines$/);
   });
 });

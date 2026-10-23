@@ -11,7 +11,7 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { BatonApi, BatonRefusal } from './api';
@@ -48,6 +48,10 @@ export interface RunnerOptions {
   /** B-83: the harness command `--harness` chose, handed to the legs as BATON_AGENT_COMMAND —
    * what runs an agent leg when the snapshot's settings name no `agent_command`. */
   agentCommand?: string;
+  /** Verbose (the owner, 2026-10-23): timestamp every line, name the claim's id and nonce,
+   * log the leg's local command, and drain the leg child's stderr into the log — where the
+   * stub reports the agent_command it resolved. A slice of B-23's leg observability. */
+  verbose?: boolean;
   /** B-83: a test harness — declared on the heartbeat (R-BTN-32; Baton refuses it from any
    * credential but the test one). */
   testHarness?: boolean;
@@ -79,6 +83,7 @@ export class Runner {
   private readonly o: RunnerOptions & { beatEvery: number };
   private readonly state: StateFile;
   private readonly log: (line: string) => void;
+  private readonly verbose: boolean;
   private readonly now: () => number;
   private beat: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
@@ -111,7 +116,8 @@ export class Runner {
 
   constructor(options: RunnerOptions) {
     this.o = { beatEvery: BEAT_MS, ...options };
-    this.log = options.log ?? (() => {});
+    this.verbose = options.verbose ?? false;
+    this.log = this.verbose ? withTimestamps(options.log ?? (() => {})) : (options.log ?? (() => {}));
     this.now = options.now ?? batonNow;
     this.state = new StateFile(options.stateFile);
     if (!this.state.get().secret) this.state.set({ secret: freshSecret() });
@@ -417,7 +423,8 @@ export class Runner {
     const active = this;
     const fatal = (why: string, e: unknown): never => {
       const report = e instanceof Error ? (e.stack ?? e.message) : msg(e);
-      try { writeSync(1, `baton: the runner crashed (${report}) — ${active.lastLine(why)}\n`); } catch { /* stdout gone */ }
+      const line = `baton: the runner crashed (${report}) — ${active.lastLine(why)}`;
+      try { writeSync(1, (active.verbose ? stampLine(line) : line) + '\n'); } catch { /* stdout gone */ }
       process.exit(1);
     };
     process.on('uncaughtException', (e: unknown) => { fatal('uncaught exception', e); });
@@ -479,7 +486,7 @@ export class Runner {
     const ticket = claim.ticket_id as string;
     const claimId = claim.claim_id as number;
     this.state.set({ claim: { id: claimId, ticket_id: ticket, nonce: claim.nonce } });
-    this.log(`baton: claimed ${ticket} at ${claim.station}, queued leg ${claim.legs?.[0]}`);
+    this.log(`baton: claimed ${ticket} at ${claim.station}, queued leg ${claim.legs?.[0]}${this.verbose ? ` (claim ${claimId}, nonce ${claim.nonce})` : ''}`);
     return this.runClaim(claim);
   }
 
@@ -720,11 +727,17 @@ export class Runner {
       // B-83: the harness command of `--harness`, for a stub whose snapshot's settings name no
       // agent_command — a fill for an absence, never an override.
       ...(this.o.agentCommand ? { BATON_AGENT_COMMAND: this.o.agentCommand } : {}),
+      // Verbose: the stub reports the agent_command it resolved on stderr, which the runner
+      // then drains below — the one place the actual local command completing the leg is
+      // known (it is resolved at the claim's snapshot, not here).
+      ...(this.verbose ? { BATON_VERBOSE: '1' } : {}),
     };
+    if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} ${basename(script)} (ctx ${basename(ctxPath)})`);
     const child = spawn(process.execPath, [LEG_PROCESS, script, ctxPath, resultPath], {
-      detached: true, stdio: ['pipe', 'ignore', 'ignore'],
+      detached: true, stdio: ['pipe', 'ignore', this.verbose ? 'pipe' : 'ignore'],
       env: childEnv,
     });
+    if (this.verbose) child.stderr?.on('data', (c: Buffer) => this.log(`baton: ${leg} stderr: ${String(c).trimEnd()}`));
     const inflight = this.inflight!;
     inflight.child = { process: child, resultPath, ctxPath };
     let done = false;
@@ -836,6 +849,12 @@ export class Runner {
 }
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** B-23's slice (the owner, 2026-10-23): every log line carries the time it was written —
+ * an ISO 8601 instant, one timezone-free spelling on every machine. */
+export const stampLine = (line: string): string => `${new Date().toISOString()} ${line}`;
+export const withTimestamps = (log: (line: string) => void): ((line: string) => void) =>
+  (line) => log(stampLine(line));
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 async function sha256Hex(text: string): Promise<string> {
