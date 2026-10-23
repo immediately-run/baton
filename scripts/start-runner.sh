@@ -164,6 +164,23 @@ newest_change() {
   find "$HOME_DIR" "$HOME/.local/share/opencode/worktree" -type f -newermt "-${QUIET_MIN} minutes" \
     -not -path '*/.git/*' -print -quit 2>/dev/null | grep -q . && echo busy || echo quiet
 }
+# macOS's ps knows no 'etimes' — a procps (Linux) keyword — and answers with its whole
+# keyword list, which is what a runner's terminal saw on 2026-10-23. 'etime', always at least
+# mm:ss, is the portable spelling, parsed to seconds here; 10# forces base ten, because a
+# zero-padded "08" reads as octal to $((…)).
+elapsed_s() {
+  local t d=0 h=0 m=0 s=0
+  t="$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ')"
+  [ -n "$t" ] || return 1
+  # [[dd-]hh:]mm:ss: the colon count names the fields — one colon is mm:ss, not hh:mm.
+  case "$t" in *-*) d="${t%%-*}"; t="${t#*-}" ;; esac
+  case "$t" in
+    *:*:*) h="${t%%:*}"; t="${t#*:}" ; m="${t%%:*}"; s="${t##*:}" ;;
+    *:*)   m="${t%%:*}"; s="${t##*:}" ;;
+    *)     s="$t" ;;
+  esac
+  echo $(( (10#$d) * 86400 + (10#$h) * 3600 + (10#$m) * 60 + (10#$s) ))
+}
 watch_leg() {
   [ -d "$HOME/.local/share/opencode/worktree" ] || return 0
   local legpid agentpid elapsed
@@ -171,8 +188,8 @@ watch_leg() {
   [ -n "$legpid" ] || { warned_leg=""; return 0; }
   agentpid="$(pgrep -P "$legpid" 2>/dev/null | head -1)"
   [ -n "$agentpid" ] && legpid="$agentpid"
-  elapsed="$(ps -o etimes= -p "$legpid" 2>/dev/null | tr -d ' ')"
-  [ -n "$elapsed" ] && [ "$elapsed" -gt $((LEG_STALL_MIN * 60)) ] || return 0
+  elapsed="$(elapsed_s "$legpid")" || return 0
+  [ "$elapsed" -gt $((LEG_STALL_MIN * 60)) ] || return 0
   [ "$(newest_change)" = "quiet" ] || return 0
   if [ "$warned_leg" != "$legpid" ]; then
     note "WARNING: the leg's agent (pid $legpid) has run $((elapsed / 60)) minutes with no file change anywhere for ${QUIET_MIN}+ minutes — the finished-but-never-exited shape (B-86, 2026-10-22). The stub waits for its exit; the claim cannot advance. Check the agent, or stop the runner and take its PR."
