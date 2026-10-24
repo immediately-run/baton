@@ -3,3 +3,4 @@
 {"ticket":"B-84","leg":"merge","reached":"merged","next":null,"claim":"82b20f"}
 {"ticket":"B-86","leg":"implement","reached":"pr-open","next":"review","claim":"e285c1"}
 {"ticket":"B-92","leg":"implement","reached":"pr-open","next":"review","claim":"f5714c"}
+{"ticket":"B-93","leg":"fix","reached":"fixed","next":"review","claim":"85e558"}
