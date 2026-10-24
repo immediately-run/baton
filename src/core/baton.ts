@@ -1192,6 +1192,7 @@ export class BatonCore {
    *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order —
    *  behind a signed principal instead of a browser session. The same queries `uiState` runs;
    *  nothing new is asked of the store. */
+
   /** `GET /v1/owner/{repository}/grants` (R-BTN-146, B-90): the repository's owner keys, the
    *  grants on it, and its owners' settings — the dashboard's state's own reads, for its owners. */
   grantsView(repo: string) {
@@ -1224,6 +1225,11 @@ export class BatonCore {
    *  for a key no grant binds and for an owner's or an administrator's key. */
   boardView(repo: string, granted: string[] | null = null) {
     const now = this.now();
+   *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order —
+   *  behind a signed principal instead of a browser session. The same queries `uiState` runs;
+   *  nothing new is asked of the store. */
+  boardView(repo: string) {
+    const state = this.uiState();
     const repository = this.uiRepo(this.registry.get(repo)!);
     const ready = this.readyRows([repository], repo);
     return {

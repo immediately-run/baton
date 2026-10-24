@@ -3,9 +3,10 @@
 // against it until someone re-adds them by hand. These run a fresh local instance (Node host, an
 // in-memory store, an empty database), as test-course's kit does: with this repository's own
 // wrangler.toml entry the key it names owns `baton` from the first start, and `admin repos` names
-// no seed-only registration; with an instance seeded as before, `baton` is named there before its
-// gap bites. A unit test, not a scenario — the local project's setup is the one that reads
-// wrangler.toml (test/unit/auth.test.ts does the same).
+// `baton` in `seed_owners` — as it names every registration whose owners are all the seed's; with
+// an instance seeded as before, nothing owns it and the answer's owners are empty. A unit test,
+// not a scenario — the local project's setup is the one that reads wrangler.toml
+// (test/unit/auth.test.ts does the same).
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -26,7 +27,9 @@ function batonEntry(): Record<string, unknown> {
   return (JSON.parse(raw) as Record<string, unknown>[]).find((e) => e.id === 'baton')!;
 }
 
-/** A fresh instance: an empty store, this test's administrator key, the seed given. */
+/** A freshly seeded `baton`: an instance with no history. With this repository's entry it is
+ *  owned from its first start — by the key the entry names, `admin:seed` — and `seed_owners` names
+ *  it, as the read names every registration whose owners are all the deploy's. */
 async function fresh(seed: Record<string, unknown>[], admin: TestKey) {
   const { store } = openStore(':memory:');
   const host = new LocalHost({
@@ -52,12 +55,14 @@ describe('B-91: a rebuilt instance serves the owner CLI without a manual re-add'
     const host = await fresh([entry], admin);
     const owners = host.core.store.exec<{ public_key: string; added_by: string }>('SELECT public_key, added_by FROM repository_owners').toArray();
     expect(owners).toEqual([{ public_key: ownerOf(entry), added_by: 'admin:seed' }]);
-    // `baton admin repos` (B-90): the registry, one JSON answer, the repository already owned.
+    // `baton admin repos` (B-90): the registry, one JSON answer, the repository already owned —
+    // and named in `seed_owners`, since the only owner it has is the seed's.
     const res = await registry(host, admin);
     expect(res.status).toBe(200);
     const repos = (await res.json()) as { repositories: { id: string; github: string }[]; seed_owners?: string[] };
     expect(repos.repositories.map((r) => r.id)).toEqual(['baton']);
     expect(repos.repositories[0]).toMatchObject({ github: 'immediately-run/baton' });
+    expect(repos.seed_owners).toEqual(['baton']);
   });
 
   it('a start (BatonCore.start) seeds them before the first request, from the instance\'s own config', async () => {

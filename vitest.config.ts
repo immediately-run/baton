@@ -45,17 +45,13 @@ function wranglerVars(): Record<string, string> {
 
 /** §13a: tests run on an instance whose repositories have no owners — a test's own owner key is
  *  the one it registers (B-91's seed makes an installed deployment's repository owned from its
- *  first start; B-91's own test runs `wrangler.toml`'s entry). */
+ *  first start; B-91's own test runs `wrangler.toml`'s entry). Only the seed's keys go: every
+ *  other var `wrangler.toml` sets is the instance's own. */
 function ownerlessSeed(vars: Record<string, string>): Record<string, string> {
   const out = { ...vars };
   if (out.BATON_REPOSITORIES) {
     out.BATON_REPOSITORIES = JSON.stringify((JSON.parse(out.BATON_REPOSITORIES) as Record<string, unknown>[]).map(({ owner_keys: _o, ...entry }) => entry));
   }
-  // This instance's own Access settings (wrangler.toml) land after this file's bindings: taking
-  // them back keeps the test team's keys and the test audience the ones a test's Access token
-  // carries, and leaves only `owner@example.com` an owner (R-BTN-16).
-  out.ACCESS_AUD = 'baton-test-aud';
-  out.OWNER_EMAILS = 'owner@example.com';
   return out;
 }
 
@@ -114,8 +110,9 @@ export default defineConfig({
   test: {
     projects: [
       {
-        // B-91: `ownerlessSeed` — the same vars, and no seeded owner keys.
-        plugins: [cloudflareTest(async () => ({ wrangler: { configPath: './wrangler.toml' }, miniflare: { bindings: { ...bindings, ...ownerlessSeed(wranglerVars()) } } }))],
+        // B-91: `ownerlessSeed` — the same vars, and no seeded owner keys. The bindings come
+        // last: miniflare's merge lets the second argument win, as the local project's spread does.
+        plugins: [cloudflareTest(async () => ({ wrangler: { configPath: './wrangler.toml' }, miniflare: { bindings: { ...ownerlessSeed(wranglerVars()), ...bindings } } }))],
         resolve: { alias: host('cloudflare') },
         test: {
           name: 'cloudflare',

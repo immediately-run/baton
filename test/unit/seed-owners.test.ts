@@ -53,11 +53,39 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
     });
   });
 
+  it('an entry’s every owner key is written, not only the first', async () => {
+    const second = await makeKey('ssh-ed25519', 'seed-owner-b');
+    const third = await makeKey('ecdsa-sha2-nistp256', 'seed-owner-c');
+    await withCore(async (c) => {
+      const config = seeded([{ ...OPS, owner_keys: [owner.publicKey, second.publicKey, third.publicKey] }]);
+      c.registry.seed(config);
+      await c.registry.seedOwnerKeys(config, new Map());
+      expect(await live()).toEqual([owner.publicKey, second.publicKey, third.publicKey].map((k) => k.split(' ').slice(0, 2).join(' ')).sort());
+      // Each owns the repository: any of them grants.
+      const worker = await makeKey('ssh-ed25519', 'seed-multi-worker');
+      expect((await keyCall(third, '/v1/owner/ops/owners', { public_key: worker.publicKey })).status).toBe(200);
+      // A second start writes nothing new: the repository has its owners.
+      await c.registry.seedOwnerKeys(config, new Map());
+      expect(await rows(`SELECT COUNT(*) AS n FROM repository_owners WHERE repository_id = 'ops' AND added_by = 'admin:seed'`)).toEqual([{ n: 3 }]);
+    });
+  });
+
   it('a malformed second entry registers nothing, so a deploy is never half-seeded', async () => {
     await withCore(async (c) => {
       expect(() => c.registry.seed(seeded([{ ...OPS, owner_keys: [owner.publicKey] }, { ...OPS, id: 'ops2', github: 'immediately-run/ops2', owner_keys: [] }])))
         .toThrow(/BATON_REPOSITORIES\[1\]\.owner_keys/);
       expect(await rows('SELECT id FROM repositories WHERE id = ?', OPS.id)).toEqual([]);
+      expect(await rows('SELECT COUNT(*) AS n FROM repository_owners')).toEqual([{ n: 0 }]);
+    });
+  });
+
+  it('a key the seed cannot parse in a second entry writes nothing at all: the first entry is left unowned, not half-seeded', async () => {
+    await withCore(async (c) => {
+      // The shape passes the regex-only check in `seed`; only `parseSshKey` refuses it.
+      const config = seeded([{ ...OPS, owner_keys: [owner.publicKey] },
+        { ...OPS, id: 'ops2', github: 'immediately-run/ops2', owner_keys: ['ssh-ed25519 AAAA'] }]);
+      c.registry.seed(config);
+      await expect(c.registry.seedOwnerKeys(config, new Map())).rejects.toMatchObject({ code: 'invalid-params' });
       expect(await rows('SELECT COUNT(*) AS n FROM repository_owners')).toEqual([{ n: 0 }]);
     });
   });
@@ -102,6 +130,27 @@ describe('a seed-only registration is named in a read (B-90, B-91)', () => {
     expect(res.json.repositories.find((r: { id: string }) => r.id === 'ops')).toMatchObject({ github: 'immediately-run/ops', default_branch: 'trunk' });
     // A seeded owner, and a registration with no owner at all: both fail as an owner CLI does.
     expect(res.json.seed_owners).toEqual(['baton', 'ops', 'plain']);
+  });
+
+  it('a seed owner beside another owner does not name the repository: the list is the registrations whose owners are all the seed’s', async () => {
+    const admin = await makeKey('ssh-ed25519', 'mixed-admin');
+    const added = await makeKey('ssh-ed25519', 'mixed-owner');
+    await setAdminKeys(admin);
+    await withCore(async (c) => {
+      // docs as production has it: registered by hand, its owner added after.
+      await rows(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES ('docs', ?, ?, 'admin:test', 1)`, added.publicKey, added.fingerprint);
+      const config = seeded([{ ...OPS, owner_keys: [owner.publicKey] }]);
+      c.registry.seed(config);
+      await c.registry.seedOwnerKeys(config, new Map());
+      // Every key of ops is the seed's; docs has an owner a person added. Exactly so.
+      expect((await keyCall(admin, '/v1/admin/repositories')).json.seed_owners).toEqual(['baton', 'ops']);
+      // An owner an administrator adds beside the seed's: the repository no longer leans on the deploy alone.
+      await rows(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES ('ops', ?, ?, 'admin:test', 3)`, added.publicKey, added.fingerprint);
+      expect((await keyCall(admin, '/v1/admin/repositories')).json.seed_owners).toEqual(['baton']);
+      // The added one removed again, the seed's left: all of the owners are the seed's, and it is named.
+      await rows(`UPDATE repository_owners SET removed_at = 4 WHERE repository_id = 'ops' AND added_by = 'admin:test'`);
+      expect((await keyCall(admin, '/v1/admin/repositories')).json.seed_owners).toEqual(['baton', 'ops']);
+    });
   });
 
   it('an owner an administrator added leaves the seed list; one answer per read, none of it for a key outside the role', async () => {
