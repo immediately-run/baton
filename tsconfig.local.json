@@ -48,6 +48,7 @@
     "test/integration/S-BTN-104.standard-courses.test.ts",
     "test/integration/S-BTN-105.course-sources.test.ts",
     "test/integration/S-BTN-106.cross-repo-prs.test.ts",
-    "test/integration/S-BTN-107.build-app-course.test.ts"
+    "test/integration/S-BTN-107.build-app-course.test.ts",
+    "test/integration/S-BTN-157.busy-sync.test.ts"
   ]
 }

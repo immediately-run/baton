@@ -86,7 +86,10 @@ secret.
    `baton sync` at the CLI version it pins. `baton init` (R3-1249) writes it.
 
 Check: `gh workflow run baton-sync.yml -R immediately-run/baton` goes green, and the dashboard
-shows the `baton` board with the live tickets and the next available one.
+shows the `baton` board with the live tickets and the next available one. A run that posted
+nothing is never green: `busy` (another run's reading in flight) waits a minute and retries
+once, and any run that posted nothing — `busy:again` included — ends its step red with an
+annotation saying the board is held (B-89). Check the outcome line, not just the check mark.
 
 ## 5. Workers
 

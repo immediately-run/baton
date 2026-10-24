@@ -37,6 +37,26 @@ jobs:
       - run: npm ci --prefix .baton-cli
       # --latest main: after its observation number the run reads the newest main, so a slow
       # run for an older push still posts the newest board (§7.1 step 2).
-      - run: node .baton-cli/cli/baton.mjs repo sync --latest main
+      # --busy-retry: another run's reading in flight is not this run's post; this waits a minute
+      # and takes a fresh number once (B-89).
+      - id: sync
+        run: |
+          set -o pipefail
+          node .baton-cli/cli/baton.mjs repo sync --latest main --busy-retry 60 2>&1 | tee sync.log
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # B-89: a run that posted nothing is an annotation, never a green check — a held board
+      # from another run's reading in flight (`busy:again`), or any failed post. The step above
+      # fails on either, so this runs even then (`!cancelled()`).
+      - name: A sync that posted nothing is not a success
+        if: ${{ !cancelled() }}
+        run: |
+          outcome="$(grep -oE '^baton: [a-z][a-z:-]* at' sync.log | tail -n 1 | cut -d' ' -f2)"
+          case "$outcome" in
+            advanced|confirmed|held)
+              echo "::notice title=baton sync::the board is posted — $outcome" ;;
+            busy|busy:again)
+              echo "::warning title=baton sync held::another run's reading was in flight (R-BTN-62); this run posted nothing. A stale reading lapses within minutes — dispatch baton-sync.yml to post the board now" ;;
+            *)
+              echo "::error title=baton sync failed::the run posted nothing (outcome: ${outcome:-none}); see the sync step's log" ;;
+          esac
