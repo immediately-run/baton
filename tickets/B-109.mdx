@@ -33,12 +33,16 @@ kill, beside the lease-loss kill it already has).
    runner sets the same `drain()` flag the signal sets and acknowledges. Baton collects and
    recommends — it never supervises a leg's process (§1) — but telling a *worker* to wind down
    is fleet administration, the graceful face of the reap it already owns.
-2. **The immediate stop kills the group.** SIGINT and a second SIGTERM today exit the runner
+2. **SIGHUP joins the handled signals (found live, 2026-10-24: the starved runner of
+   2026-10-23 died at 07:56 with no line at all — a closed terminal's SIGHUP, which the runner
+   never handled, so B-94's every-death-leaves-a-line promise had a hole).** SIGHUP takes the
+   immediate path: the stop line, the group kill, the end.
+3. **The immediate stop kills the group.** SIGINT and a second SIGTERM today exit the runner
    while the detached leg group runs on, orphaned against the claim Baton will reap — its push
    lands as a foreign write. The immediate path should write the hand-off, kill the inflight
    group (the mechanism the lease-loss path already has), and end the claim released — a safe
    point, not an abandonment.
-3. **A dedicated end reason, if the owner wants the drain visible in the board's history:**
+4. **A dedicated end reason, if the owner wants the drain visible in the board's history:**
    the drain ends its claim `released:requested` today; `released:drained` would name the
    operator's wind-down apart from an owner's request — a one-word spec line if wanted.
 
