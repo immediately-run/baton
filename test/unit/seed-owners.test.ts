@@ -70,6 +70,37 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
     });
   });
 
+  it('an owned repository’s keys are checked too: a seed that would stop a rebuild stops this start, and writes nothing', async () => {
+    const admin = await makeKey('ssh-ed25519', 'owned-admin');
+    const worker = await makeKey('ssh-ed25519', 'owned-worker');
+    const another = await makeKey('ssh-ed25519', 'owned-already');
+    await withCore(async (c) => {
+      // `baton` in production: registered by hand, its owner from `admin repo add`. The seed's
+      // entry is checked all the same — one `wrangler.toml` starts on no instance and stops on
+      // another (round two, 1).
+      c.registry.register(OPS);
+      await rows(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES ('ops', ?, ?, 'admin:test', 1)`, another.publicKey, another.fingerprint);
+      await rows(`INSERT INTO credentials (id, hostname, allowed_capabilities, kind, public_key, created_by) VALUES (?, 'h', '[]', 'worker', ?, 'seed')`, worker.fingerprint, worker.publicKey);
+      const admins = new Map([[admin.fingerprint, admin.publicKey]]);
+      for (const [keys, adm] of [
+        [[admin.publicKey], admins], // an administrator's key (R-BTN-57)
+        [[worker.publicKey], new Map()], // a worker's
+        [['ssh-ed25519 AAAA'], new Map()], // right-shaped, no key at all
+        [[another.publicKey], new Map()], // its owner, revoked while it owned the repository
+      ] as const) {
+        await rows('UPDATE repository_owners SET revoked_at = NULL');
+        if (keys[0] === another.publicKey) await rows('UPDATE repository_owners SET revoked_at = 3');
+        await expect(c.registry.seedOwnerKeys(seeded([{ ...OPS, owner_keys: [...keys] }]), adm as Map<string, string>)).rejects.toBeDefined();
+      }
+      // The registration the instance had: untouched by every refused start.
+      expect(await live()).toEqual([another.publicKey]);
+      // Its own key: checks pass, and the write loop's guard keeps the owner it has.
+      await rows('UPDATE repository_owners SET revoked_at = NULL');
+      await c.registry.seedOwnerKeys(seeded([{ ...OPS, owner_keys: [owner.publicKey] }]), new Map());
+      expect(await live()).toEqual([another.publicKey]);
+    });
+  });
+
   it('a malformed second entry registers nothing, so a deploy is never half-seeded', async () => {
     await withCore(async (c) => {
       expect(() => c.registry.seed(seeded([{ ...OPS, owner_keys: [owner.publicKey] }, { ...OPS, id: 'ops2', github: 'immediately-run/ops2', owner_keys: [] }])))

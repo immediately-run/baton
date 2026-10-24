@@ -45,13 +45,19 @@ function wranglerVars(): Record<string, string> {
 
 /** §13a: tests run on an instance whose repositories have no owners — a test's own owner key is
  *  the one it registers (B-91's seed makes an installed deployment's repository owned from its
- *  first start; B-91's own test runs `wrangler.toml`'s entry). Only the seed's keys go: every
- *  other var `wrangler.toml` sets is the instance's own. */
-function ownerlessSeed(vars: Record<string, string>): Record<string, string> {
+ *  first start; B-91's own test runs `wrangler.toml`'s entry). Two groups of vars go: the seed's
+ *  `owner_keys`, and the Access settings `wrangler.toml` carries for the deployed instance —
+ *  `ACCESS_AUD` and `OWNER_EMAILS` are its application's and its one owner's, not the test
+ *  instance's (R-BTN-16: a token this file's `bindings` signs is checked against the test
+ *  audience, and `owner@example.com` is the only owner a test signs as). Every other var
+ *  `wrangler.toml` sets is the instance's own. */
+function testVars(vars: Record<string, string>): Record<string, string> {
   const out = { ...vars };
   if (out.BATON_REPOSITORIES) {
     out.BATON_REPOSITORIES = JSON.stringify((JSON.parse(out.BATON_REPOSITORIES) as Record<string, unknown>[]).map(({ owner_keys: _o, ...entry }) => entry));
   }
+  out.ACCESS_AUD = 'baton-test-aud';
+  out.OWNER_EMAILS = 'owner@example.com';
   return out;
 }
 
@@ -109,9 +115,10 @@ export default defineConfig({
   test: {
     projects: [
       {
-        // B-91: `ownerlessSeed` — the same vars, and no seeded owner keys. The bindings come
-        // last: miniflare's merge lets the second argument win, as the local project's spread does.
-        plugins: [cloudflareTest(async () => ({ wrangler: { configPath: './wrangler.toml' }, miniflare: { bindings: { ...ownerlessSeed(wranglerVars()), ...bindings } } }))],
+        // B-91: `testVars` — the same vars, no seeded owner keys, and the test Access audience
+        // and owner. The bindings come last: miniflare's merge lets the second argument win, as
+        // the local project's spread does.
+        plugins: [cloudflareTest(async () => ({ wrangler: { configPath: './wrangler.toml' }, miniflare: { bindings: { ...testVars(wranglerVars()), ...bindings } } }))],
         resolve: { alias: host('cloudflare') },
         test: {
           name: 'cloudflare',
@@ -131,7 +138,7 @@ export default defineConfig({
           setupFiles: ['./test/setup.ts'],
           include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...NODE_ONLY],
           exclude: [...configDefaults.exclude, ...QUINT_TESTS],
-          provide: { localConfig: { ...ownerlessSeed(wranglerVars()), ...bindings } },
+          provide: { localConfig: { ...testVars(wranglerVars()), ...bindings } },
         },
       },
     ],

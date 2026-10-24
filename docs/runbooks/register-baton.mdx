@@ -73,17 +73,35 @@ node cli/baton.mjs admin -i ~/.ssh/baton_admin repo add immediately-run/baton --
   instance serves the owner CLI with no manual re-add (B-91):
   `{"id":"baton","github":"immediately-run/baton","default_branch":"main","sync_workflow":".github/workflows/baton-sync.yml","owner_keys":["<~/.ssh/baton_owner_baton.pub, as one line>"]}`.
   The owner a seed registers is `added_by: admin:seed`; one an owner or an administrator adds
-  later is not the seed's.
+  later is not the seed's. The key this repository's entry names is the owner key the owner
+  actually signs with — this runbook's `~/.ssh/baton_owner_baton`, whose fingerprint
+  `ssh-keygen -lf ~/.ssh/baton_owner_baton.pub` prints — not a key another run left behind: on
+  a rebuilt instance it is the only key that registers anything, so the entry is the one place
+  the owner CLI is served without a read of the deployed record, and a key the owner does not
+  hold is a failure nothing on the rebuilt instance can repair by hand.
 
 → Check, in the same PR: every entry of `BATON_REPOSITORIES` that this step registered carries
 `owner_keys`, and `node cli/baton.mjs admin -i ~/.ssh/baton_admin repos` names that repository
-under `seed_owners`, and no other it registered. `seed_owners` names every registration whose live
-owner keys are all the deploy's, or that has none at all — a rebuilt instance counts a seeded owner
-as the deploy's — so a correctly seeded repository is named, and a seed missing its `owner_keys`
-is told apart by its `owners` in the same answer: they must be empty only for a repository this
-step did not register. A repository this step registered whose `owners` are empty, or hold no key
-the seed names, stops serving its owner CLI on a rebuilt instance; the PR is not ready until it
-does.
+under `seed_owners`. That name alone does not tell a seeded repository from one seeded without its
+keys — `seed_owners` names every registration whose live owner keys are all the deploy's, or that
+has none at all — so check each of this step's repositories for itself:
+
+```sh
+node cli/baton.mjs admin -i ~/.ssh/baton_admin repos > /tmp/repos.json
+node -e 'const a = JSON.parse(require("fs").readFileSync("/tmp/repos.json")); for (const id of process.argv.slice(1))
+  console.log(id, JSON.stringify((a.owners ?? []).filter((o) => o.repository_id === id)), (a.seed_owners ?? []).includes(id) ? "seed_owners" : "its own owners")' baton
+```
+
+Each repository this step registered must list exactly the keys its entry carries, each as
+`<type> <base64>` (an `owners` entry carries the key's `SHA256:` fingerprint, not the line), or
+the same line a build adds beside it, should one need it too — an owner added later is real, and
+the entry is not the whole answer, only what a rebuild would have; and it is named in
+`seed_owners` while every one of those owners is `admin:seed`. An empty list means the repository serves nobody: its
+owner CLI fails after every rebuild, and no `admin repo add` can re-add it there — the rebuilt
+instance knows the entry, and its `owner_keys` are checked against the role rules on that start.
+A key in the list the entry does not name is the other way: the instance's history owns that
+repository and the deploy would not. The PR is not ready until every repository this step
+registered passes both.
 
 Check: the dashboard lists `baton` under the repositories, with no board yet.
 
