@@ -274,15 +274,21 @@ export class Registry {
   /** BATON_REPOSITORIES' `owner_keys` at start (B-91; R-BTN-58): each entry's keys are its
    *  repository's owners, `added_by: 'admin:seed'`, written only where that repository has no
    *  owner left — so a re-seed after an owner leaves brings the seed's back, and a registration
-   *  that already has one keeps it. One key an administrator revoked, or one that holds another
-   *  role (R-BTN-57), throws as a malformed seed does: the deploy is stopped where a person can
-   *  see it, never serving on with a key the route itself would refuse. */
+   *  that already has one keeps it (every key of the entry, or none). One key an administrator
+   *  revoked, or one that holds another role (R-BTN-57), throws as a malformed seed does: the
+   *  deploy is stopped where a person can see it, never serving on with a key the route itself
+   *  would refuse. Every key of every entry is parsed and checked before the first write, and the
+   *  writes run in one transaction, so a bad entry leaves no half-seeded instance. */
   async seedOwnerKeys(config: Config, admins: Map<string, string>): Promise<void> {
     if (!config.BATON_REPOSITORIES) return;
+    const writes: { id: string; key: { type: string; fingerprint: string }; line: string }[] = [];
     for (const [i, entry] of (JSON.parse(config.BATON_REPOSITORIES) as unknown[]).entries()) {
       const at = `BATON_REPOSITORIES[${i}]`;
       const r = checkRegistration(entry, at);
       const lines = seedOwnerKeysOf(entry, at);
+      if (!lines.length) continue;
+      if (this.rows('SELECT 1 FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', r.id).length) continue;
+      if (this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NOT NULL', r.id).length) continue;
       for (const line of lines) {
         // A line of the right shape whose base64 is no key at all: the seed stops, as on any
         // malformed entry (1-A-7: never dropped in silence).
@@ -290,8 +296,6 @@ export class Registry {
         // `admin repo add` refuses an administrator's key as an owner with `conflict`; so does the
         // seed, so a deploy that would refuse at the route stops at its start instead.
         if (admins.has(key.fingerprint)) throw new BatonError('conflict', `${at}.owner_keys names an administrator key (R-BTN-57: one role per key)`);
-        if (this.rows('SELECT 1 FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', r.id).length) continue;
-        if (this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NOT NULL', r.id).length) continue;
         if (this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND revoked_at IS NOT NULL', key.fingerprint).length) {
           throw new BatonError('conflict', `${at}.owner_keys: this owner key was revoked; its holder needs a new key`);
         }
@@ -301,11 +305,17 @@ export class Registry {
         if (this.rows('SELECT 1 FROM credentials WHERE id = ?', key.fingerprint).length) {
           throw new BatonError('conflict', `${at}.owner_keys: this key is already a worker, probe or courier key (R-BTN-57: one role per key)`);
         }
-        this.c.store.exec(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES (?, ?, ?, 'admin:seed', ?)
-                           ON CONFLICT (repository_id, public_key) DO UPDATE SET removed_at = NULL, added_by = excluded.added_by, added_at = excluded.added_at`,
-          r.id, `${key.type} ${line.trim().split(/\s+/)[1]}`, key.fingerprint, this.c.now());
+        writes.push({ id: r.id, key, line });
       }
     }
+    // One transaction over every entry's keys: no write before the last check passes.
+    this.c.store.transaction(() => {
+      for (const { id, key, line } of writes) {
+        this.c.store.exec(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES (?, ?, ?, 'admin:seed', ?)
+                           ON CONFLICT (repository_id, public_key) DO UPDATE SET removed_at = NULL, added_by = excluded.added_by, added_at = excluded.added_at`,
+          id, `${key.type} ${line.trim().split(/\s+/)[1]}`, key.fingerprint, this.c.now());
+      }
+    });
   }
 
   /** The owner keys of `repositories` whose `added_by` is `addedBy` (B-91): the seed's own, for

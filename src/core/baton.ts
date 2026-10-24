@@ -1155,10 +1155,6 @@ export class BatonCore {
     return { id: repo.id, github: repo.github, forge: repo.forge, web_base: repo.web_base, default_branch: repo.default_branch, weight: repo.weight, head, mode: this.workers.mode(repo.id), courses };
   }
 
-  /** `GET /v1/repositories/{repository}/board` (B-90): the dashboard's view of one repository —
-   *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order —
-   *  behind a signed principal instead of a browser session. The same queries `uiState` runs;
-   *  nothing new is asked of the store. */
   /** `GET /v1/owner/{repository}/grants` (R-BTN-146, B-90): the repository's owner keys, the
    *  grants on it, and its owners' settings — the dashboard's state's own reads, for its owners. */
   grantsView(repo: string) {
@@ -1173,6 +1169,10 @@ export class BatonCore {
     };
   }
 
+  /** `GET /v1/repositories/{repository}/board` (B-90): the dashboard's view of one repository —
+   *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order —
+   *  behind a signed principal instead of a browser session. The same queries `uiState` runs;
+   *  nothing new is asked of the store. */
   boardView(repo: string) {
     const state = this.uiState();
     const repository = this.uiRepo(this.registry.get(repo)!);

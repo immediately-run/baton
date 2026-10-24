@@ -76,10 +76,14 @@ node cli/baton.mjs admin -i ~/.ssh/baton_admin repo add immediately-run/baton --
   later is not the seed's.
 
 → Check, in the same PR: every entry of `BATON_REPOSITORIES` that this step registered carries
-`owner_keys`, and `node cli/baton.mjs admin -i ~/.ssh/baton_admin repos` names no repository this
-step registered under `seed_owners` — a name there is a registration whose owner keys only the
-deploy has, or has none at all, and its owner CLI stops working on a rebuilt instance. The PR is
-not ready while a name it should not have is listed.
+`owner_keys`, and `node cli/baton.mjs admin -i ~/.ssh/baton_admin repos` names that repository
+under `seed_owners`, and no other it registered. `seed_owners` names every registration whose live
+owner keys are all the deploy's, or that has none at all — a rebuilt instance counts a seeded owner
+as the deploy's — so a correctly seeded repository is named, and a seed missing its `owner_keys`
+is told apart by its `owners` in the same answer: they must be empty only for a repository this
+step did not register. A repository this step registered whose `owners` are empty, or hold no key
+the seed names, stops serving its owner CLI on a rebuilt instance; the PR is not ready until it
+does.
 
 Check: the dashboard lists `baton` under the repositories, with no board yet.
 
