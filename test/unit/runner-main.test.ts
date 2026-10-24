@@ -7,7 +7,8 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { declareCourses, fetchMain, parseRunArgs, runMain, runnerCourse } from '../../src/runner/main';
-import { drainLines, withTimestamps } from '../../src/runner/runner';
+import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
+import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { envAuth } from '../../src/runner/api';
 import { courseOf, dropCourse, freshSecret, holdHome, loadCourse } from '../../src/runner/home';
@@ -298,5 +299,45 @@ describe('drainLines (the leg stream forwarder)', () => {
     stream.end('the tail without a newline');  // flushed at the end
     await new Promise((r) => stream.on('end', r));
     expect(lines).toEqual(['working on B-9 line one', 'line two', 'the tail without a newline']);
+  });
+});
+
+describe('draining (SIGTERM\'s graceful path, 2026-10-24)', () => {
+  const fakeApi = (claim: unknown) => ({
+    setSecret: () => {},
+    heartbeat: async () => ({ worker_id: 1, incarnation: 1, messages: [] }),
+    recommendations: async () => ({ recommendations: [] }),
+    claim,
+  }) as unknown as BatonApi;
+
+  it('an idle runner ends its loop within a beat of drain(), claiming nothing after', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-drain-'));
+    let claims = 0;
+    const api = fakeApi(async () => { claims++; throw new BatonRefusal('no-eligible-ticket', undefined, 'none', 400); });
+    const lines: string[] = [];
+    const r = new Runner({ api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'drain',
+      courses: [{ course: 'create-pr', version: 1 }], stateFile: join(dir, 's.json'), beatEvery: 60, log: (l) => lines.push(l) });
+    const done = r.work();
+    await new Promise((res) => setTimeout(res, 150)); // it claims (refused), then idles
+    const claimsBefore = claims;
+    r.drain('test');
+    await Promise.race([done, new Promise((_, rej) => setTimeout(() => rej(new Error('work() did not end after drain')), 2000))]);
+    expect(claims).toBe(claimsBefore); // nothing claimed between the drain and the exit
+    expect(lines.join('\n')).toContain('draining (test)');
+    r.stop();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a runner drained before work() starts claims nothing at all', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-drain-'));
+    let claims = 0;
+    const api = fakeApi(async () => { claims++; throw new BatonRefusal('no-eligible-ticket', undefined, 'none', 400); });
+    const r = new Runner({ api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'drain2',
+      courses: [{ course: 'create-pr', version: 1 }], stateFile: join(dir, 's.json'), beatEvery: 60, log: () => {} });
+    r.drain('before');
+    await r.work();
+    expect(claims).toBe(0);
+    r.stop();
+    rmSync(dir, { recursive: true, force: true });
   });
 });

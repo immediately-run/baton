@@ -239,7 +239,17 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // SIGINT/SIGTERM exit skips \`finally\`, so the lock is released on those signals too.
   const release = holdHome(a.home);
   let runner: Runner | null = null;
+  let draining = false;
   const onSignal = (signal: NodeJS.Signals) => {
+    // 2026-10-24: SIGTERM drains — the current leg completes, the claim ends at its boundary,
+    // and the loop returns to a clean exit 0. A second SIGTERM, or SIGINT any time, is the
+    // immediate path (the leg child's group is the lease's to reap; see B-109's note).
+    if (signal === 'SIGTERM' && runner != null && !draining) {
+      draining = true;
+      syncLogStamped(a.verbose, 'baton: SIGTERM — draining: the current leg completes, then this runner exits (a second SIGTERM stops at once)');
+      runner.drain('SIGTERM');
+      return;
+    }
     // B-94: a runner never goes traceless — the signal, the claim it held, the leg in flight
     // and the last beat are logged before the process leaves, synchronously (review round 1:
     // `process.exit` flushes no pending pipe write).
@@ -247,8 +257,8 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     release();
     process.exit(signal === 'SIGINT' ? 130 : 143);
   };
-  process.once('SIGINT', onSignal);
-  process.once('SIGTERM', onSignal);
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
   runner = new Runner({
     api: new BatonApi({ url: a.url, transport: (req) => fetch(req), auth }, say),
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
@@ -268,7 +278,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     // B-94: every way out of the loop leaves a line — a normal end, a thrown error on its way
     // out (the CLI prints it), and an `exit` from anywhere once a claim could have been held.
     // The lines and the hook write synchronously: nothing pending is lost to `process.exit`.
-    syncLogStamped(a.verbose, `baton: the runner's loop ended (${runner.lastLine('idle')})`);
+    syncLogStamped(a.verbose, `baton: the runner's loop ended (${runner.lastLine(draining ? 'drained' : 'idle')})`);
     if (exitHookFn != null) process.removeListener('exit', exitHookFn);
     exitHookFn = exitHook(runner, (l) => syncLogStamped(a.verbose, l));
     process.on('exit', exitHookFn);

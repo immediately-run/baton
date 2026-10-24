@@ -42,11 +42,24 @@ while [ $# -gt 0 ]; do
     --capabilities) CAPABILITIES="${2:?--capabilities needs a list}"; shift 2 ;;
     --url) URL="${2:?--url needs a URL}"; shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
+    --drain) DRAIN=1; shift ;;
     --verbose) VERBOSE=1; shift ;;
     --log) LOG="${2:?--log needs a path}"; shift 2 ;;
     *) die "unknown flag: $1 (see the header of this script)" ;;
   esac
 done
+
+# --drain: tell the running runner to complete its current leg and exit (SIGTERM's graceful
+# path; a second signal stops at once). Reads the holder's pid from the home's lock.
+if [ "${DRAIN:-}" = 1 ]; then
+  [ -f "$GIT_DIR/baton-runner.lock" ] || { GIT_DIR="$(git -C "$HOME_DIR" rev-parse --absolute-git-dir 2>/dev/null)"; }
+  [ -n "${GIT_DIR:-}" ] && [ -f "$GIT_DIR/baton-runner.lock" ] || die "no runner lock in $HOME_DIR — is a runner running there?"
+  PID="$(tr -d '[:space:]' <"$GIT_DIR/baton-runner.lock")"
+  kill -0 "$PID" 2>/dev/null || die "the lock names pid ${PID:-?}, which is not running — remove $GIT_DIR/baton-runner.lock if no runner is there"
+  kill -TERM "$PID"
+  note "draining pid $PID: the current leg completes, the claim ends at its boundary, then the runner exits (a second 'kill -TERM $PID' stops at once)"
+  exit 0
+fi
 
 # ---- preflight -------------------------------------------------------------
 # §6.13: a leg session never claims. Run this from your own terminal, not from inside a

@@ -87,6 +87,10 @@ export class Runner {
   private readonly now: () => number;
   private beat: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
+  /** 2026-10-24: draining — SIGTERM's path (complete the current leg, then stop). Set once;
+   * the claim loop ends the claim at the next leg boundary with its hand-off, the idle wait
+   * returns, and work() ends without claiming again. */
+  private draining = false;
   private inflight: {
     claimId: number;
     ticket: string;
@@ -395,10 +399,20 @@ export class Runner {
   /** Claim and run tickets until `stop()`; a failure between claims is logged, never fatal.
    * Idle, the runner asks for recommendations when a heartbeat carried an `unblocked` message
    * (R-BTN-77) and otherwise at its own interval — each idle attempt asks first, then claims. */
+  /** Stop taking work, gracefully: the current leg completes, the claim ends at the next leg
+   * boundary with its hand-off, and the runner exits cleanly (the owner, 2026-10-24: 'let the
+   * runner complete the current leg, then gracefully shut down'). A second signal goes the
+   * immediate path — the caller decides what that is. */
+  drain(why: string): void {
+    if (this.draining) return;
+    this.draining = true;
+    this.log(`baton: draining (${why}) — the current leg completes, the claim ends at its boundary, then this runner exits without claiming again`);
+  }
+
   async work(): Promise<void> {
     this.ensureFatalHooks();
     this.start();
-    while (!this.stopped) {
+    while (!this.stopped && !this.draining) {
       try {
         const outcome = await this.runOnce();
         if (!outcome) await this.idleWait();
@@ -434,7 +448,7 @@ export class Runner {
   /** The idle wait: a beat long, unless an `unblocked` message ends it early. */
   private async idleWait(): Promise<void> {
     const until = this.now() + this.o.beatEvery;
-    while (!this.stopped && !this.unblocked && this.now() < until) await sleep(Math.min(50, this.o.beatEvery));
+    while (!this.stopped && !this.draining && !this.unblocked && this.now() < until) await sleep(Math.min(50, this.o.beatEvery));
     this.unblocked = false;
   }
 
@@ -530,6 +544,11 @@ export class Runner {
       nextLegs = (firstAnswer.next ?? nextLegs) as NextLegs;
       advice = firstAnswer.advice ?? advice;
       for (;;) {
+        // A drain (2026-10-24): the leg that ran is complete; the claim ends here with its
+        // hand-off and the runner exits without claiming again — SIGTERM's graceful path.
+        if (this.draining) {
+          return await this.finish(claimId, { end_reason: 'released:requested', reached: at, next: legName }, await this.callHandoff(ranScript, ranCtx ?? {}) ?? handoffUrl);
+        }
         // A signal that landed while no leg was running (a short wait, or the steps between
         // legs) ends the claim just the same — a release is never dropped (§6.13).
         const whileWaiting = this.abortSignal();
