@@ -709,8 +709,15 @@ export class Admin {
 
   /** The dashboard's read-only view (R-BTN-66: no management path but the CLI). */
   view(now: number) {
+    const owners = this.rows<{ repository_id: string; fingerprint: string; added_by: string; added_at: number }>(
+      'SELECT repository_id, fingerprint, added_by, added_at FROM repository_owners WHERE removed_at IS NULL ORDER BY repository_id, added_at');
+    // B-91: a repository whose only owners came from BATON_REPOSITORIES — or that has none at
+    // all — leans on the deploy for its owner keys, and says so wherever the registry is read.
+    const seeded = new Set(this.c.registry.ownerKeysAddedBy([...new Set(owners.map((o) => o.repository_id))], 'admin:seed').map((o) => o.repository_id));
     return {
-      owners: this.rows('SELECT repository_id, fingerprint, added_by, added_at FROM repository_owners WHERE removed_at IS NULL ORDER BY repository_id, added_at'),
+      owners,
+      seed_owners: this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL ORDER BY id')
+        .map((r) => r.id).filter((id) => !owners.some((o) => o.repository_id === id) || seeded.has(id)),
       grants: this.grants(),
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),

@@ -41,7 +41,7 @@ export interface Repository {
 }
 
 /** A registration as `POST /v1/admin/repositories` takes it (§11), less the owner keys
- *  (R3-1240), checked before anything is written (§10.4). */
+ *  (`registration` in admin.ts), checked before anything is written (§10.4). */
 export interface Registration {
   id: string;
   github: string;
@@ -60,6 +60,25 @@ export interface Registration {
   cut_over: boolean;
 }
 
+/** A registered repository's fields — every field a registration has but the owner keys, which
+ *  live in `repository_owners` (R-BTN-58), above a registration's own (B-91). */
+const REGISTRATION_FIELDS = ['github', 'forge', 'remote', 'web_base', 'ci_identity', 'sync_keys', 'default_branch', 'sync_workflow', 'mirror_workflow', 'weight', 'tiers', 'transcript_repos', 'cut_over'] as const;
+
+/** The seed's `owner_keys` (B-91): one to 16 OpenSSH public key lines (`<type> <base64>`), distinct. */
+function checkOwnerKeys(v: unknown, at: string): string[] {
+  if (!Array.isArray(v) || v.length < 1 || v.length > 16 || !v.every((k) => typeof k === 'string' && /^(ssh-ed25519|ecdsa-sha2-nistp256|sk-ssh-ed25519@openssh.com|sk-ecdsa-sha2-nistp256@openssh.com) [A-Za-z0-9+/]+={0,2}( [^{}]*)?$/.test(k))) {
+    bad(`${at}.owner_keys`, 'must be a list of 1–16 OpenSSH public key lines (`<type> <base64>`)');
+  }
+  if (new Set(v as string[]).size !== (v as string[]).length) bad(`${at}.owner_keys`, 'names a key twice');
+  return v as string[];
+}
+
+/** The seed's `owner_keys` of one entry (B-91): theirs, or none. Throws on a malformed list. */
+export function seedOwnerKeysOf(entry: unknown, at: string): string[] {
+  const v = (entry as Record<string, unknown>).owner_keys;
+  return v === undefined ? [] : checkOwnerKeys(v, at);
+}
+
 const bad = (field: string, why: string): never => {
   throw new BatonError('invalid-params', `${field}: ${why}`);
 };
@@ -67,7 +86,7 @@ const bad = (field: string, why: string): never => {
 export function checkRegistration(v: unknown, at = 'repository'): Registration {
   if (!v || typeof v !== 'object' || Array.isArray(v)) bad(at, 'must be an object');
   const r = v as Record<string, unknown>;
-  const known = new Set(['id', 'github', 'forge', 'remote', 'web_base', 'ci_identity', 'sync_keys', 'default_branch', 'sync_workflow', 'mirror_workflow', 'weight', 'tiers', 'transcript_repos', 'cut_over']);
+  const known = new Set(['id', ...REGISTRATION_FIELDS, 'owner_keys']);
   for (const k of Object.keys(r)) if (!known.has(k)) bad(`${at}.${k}`, 'unknown field');
   const str = (k: string, re: RegExp) => (typeof r[k] === 'string' && re.test(r[k] as string) ? (r[k] as string) : bad(`${at}.${k}`, `must match ${re}`));
   const tiers = r.tiers === undefined ? DEFAULT_TIERS
@@ -105,6 +124,9 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
   const ci = checkCiIdentity(r.ci_identity, forge, syncWorkflow, `${at}.ci_identity`);
   // A GitLab token's issuer is the repository's own instance (round 1, 1-A-3).
   if (ci?.kind === 'gitlab-ci' && typeof webBase === 'string' && new URL(ci.issuer).origin !== new URL(webBase).origin) bad(`${at}.ci_identity.issuer`, "must be the web_base's GitLab instance");
+  // B-91: the seed's owner keys (R-BTN-58), beside the registration's own fields; the
+  // administrator's route takes them as `owner_keys` and never through here (admin.ts).
+  if (r.owner_keys !== undefined) checkOwnerKeys(r.owner_keys, at);
   const keys = r.sync_keys === undefined ? []
     : Array.isArray(r.sync_keys) && r.sync_keys.length <= 4 && r.sync_keys.every((k) => k && typeof k === 'object' && typeof (k as Record<string, unknown>).public_key === 'string' && ['sync', 'mirror'].includes((k as Record<string, unknown>).role as string))
       ? (r.sync_keys as Registration['sync_keys']) : bad(`${at}.sync_keys`, 'must be at most 4 {public_key, role: sync|mirror}');
@@ -224,7 +246,9 @@ export class Registry {
   }
 
   /** BATON_REPOSITORIES at start: each entry not yet known is registered; a known one is left
-   *  as it is. A malformed value throws, so a broken deploy is seen at once. */
+   *  as it is. A malformed value throws, so a broken deploy is seen at once. B-91: an entry's
+   *  `owner_keys` (R-BTN-58) are its repository's first owners, written by `seedOwnerKeys` once
+   *  their fingerprints are known. */
   seed(config: Config): string[] {
     const raw = config.BATON_REPOSITORIES;
     if (!raw) return [];
@@ -236,13 +260,61 @@ export class Registry {
     }
     if (!Array.isArray(list)) throw new Error('BATON_REPOSITORIES must be a JSON array');
     const added: string[] = [];
-    for (const [i, entry] of list.entries()) {
-      const r = checkRegistration(entry, `BATON_REPOSITORIES[${i}]`);
+    // Every entry is checked before anything is written (B-91): a malformed second entry leaves
+    // no half-seeded instance behind the first.
+    const entries = list.map((entry, i) => ({ entry, r: checkRegistration(entry, `BATON_REPOSITORIES[${i}]`) }));
+    for (const { entry, r } of entries) {
       if (this.rows('SELECT 1 FROM repositories WHERE id = ?', r.id).length) continue;
       this.register(entry, { keysAddedLater: true });
       added.push(r.id);
     }
     return added;
+  }
+
+  /** BATON_REPOSITORIES' `owner_keys` at start (B-91; R-BTN-58): each entry's keys are its
+   *  repository's owners, `added_by: 'admin:seed'`, written only where that repository has no
+   *  owner left — so a re-seed after an owner leaves brings the seed's back, and a registration
+   *  that already has one keeps it. One key an administrator revoked, or one that holds another
+   *  role (R-BTN-57), throws as a malformed seed does: the deploy is stopped where a person can
+   *  see it, never serving on with a key the route itself would refuse. */
+  async seedOwnerKeys(config: Config, admins: Map<string, string>): Promise<void> {
+    if (!config.BATON_REPOSITORIES) return;
+    for (const [i, entry] of (JSON.parse(config.BATON_REPOSITORIES) as unknown[]).entries()) {
+      const at = `BATON_REPOSITORIES[${i}]`;
+      const r = checkRegistration(entry, at);
+      const lines = seedOwnerKeysOf(entry, at);
+      for (const line of lines) {
+        // A line of the right shape whose base64 is no key at all: the seed stops, as on any
+        // malformed entry (1-A-7: never dropped in silence).
+        const key = await parseSshKey(line).catch(() => bad(`${at}.owner_keys`, `is not an OpenSSH public key: ${line.slice(0, 40)}`));
+        // `admin repo add` refuses an administrator's key as an owner with `conflict`; so does the
+        // seed, so a deploy that would refuse at the route stops at its start instead.
+        if (admins.has(key.fingerprint)) throw new BatonError('conflict', `${at}.owner_keys names an administrator key (R-BTN-57: one role per key)`);
+        if (this.rows('SELECT 1 FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', r.id).length) continue;
+        if (this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NOT NULL', r.id).length) continue;
+        if (this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND revoked_at IS NOT NULL', key.fingerprint).length) {
+          throw new BatonError('conflict', `${at}.owner_keys: this owner key was revoked; its holder needs a new key`);
+        }
+        if (this.rows('SELECT 1 FROM sync_keys WHERE fingerprint = ?', key.fingerprint).length) {
+          throw new BatonError('conflict', `${at}.owner_keys: a key is named both as an owner key and as a sync key (R-BTN-57)`);
+        }
+        if (this.rows('SELECT 1 FROM credentials WHERE id = ?', key.fingerprint).length) {
+          throw new BatonError('conflict', `${at}.owner_keys: this key is already a worker, probe or courier key (R-BTN-57: one role per key)`);
+        }
+        this.c.store.exec(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES (?, ?, ?, 'admin:seed', ?)
+                           ON CONFLICT (repository_id, public_key) DO UPDATE SET removed_at = NULL, added_by = excluded.added_by, added_at = excluded.added_at`,
+          r.id, `${key.type} ${line.trim().split(/\s+/)[1]}`, key.fingerprint, this.c.now());
+      }
+    }
+  }
+
+  /** The owner keys of `repositories` whose `added_by` is `addedBy` (B-91): the seed's own, for
+   *  the read that says which registrations still lean on a deploy (`Admin.view`). */
+  ownerKeysAddedBy(repositories: string[], addedBy: string): { repository_id: string; public_key: string }[] {
+    if (!repositories.length) return [];
+    return this.rows<{ repository_id: string; public_key: string }>(
+      `SELECT repository_id, public_key FROM repository_owners WHERE removed_at IS NULL AND added_by = ? AND repository_id IN (${repositories.map(() => '?').join(', ')})`,
+      addedBy, ...repositories);
   }
 
   /** R-BTN-93: a sync key for `repository` in `role`. A key serves one repository and holds one
