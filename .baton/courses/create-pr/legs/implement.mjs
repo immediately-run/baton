@@ -1,5 +1,5 @@
-// ../../baton-bundle-HYIYy6/entry.ts
-import { execFile, execFileSync as execFileSync2 } from "node:child_process";
+// ../../baton-bundle-gFwnBA/entry.ts
+import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync as readFileSync2, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
@@ -277,7 +277,7 @@ function verifyPrOpen(ask, run2) {
   throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
 }
 
-// ../../baton-bundle-HYIYy6/entry.ts
+// ../../baton-bundle-gFwnBA/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, ...opts });
@@ -334,11 +334,11 @@ async function standard(ctx) {
   if (wrapper != null && (typeof wrapper !== "string" || wrapper.trim() === "")) throw new Error(".baton/baton.json's agent_wrapper is not a command");
   const [wrapped, ...wrapping] = wrapper == null ? [] : splitWords(wrapper);
   const argv = wrapped === void 0 ? [command, ...words, ctx.ticket.id, "implement", ctx.checkout] : [wrapped, ...wrapping, command, ...words, ctx.ticket.id, "implement", ctx.checkout];
-  if (process.env.BATON_VERBOSE) console.error("baton: create-pr/implement ticket " + ctx.ticket.id + ": agent_command: " + agentCommand + (wrapper != null ? "; wrapper: " + wrapper : "") + "; argv: " + argv.join(" "));
+  if (process.env.BATON_VERBOSE) process.stderr.write("baton: create-pr/implement ticket " + ctx.ticket.id + ": agent_command: " + agentCommand + (wrapper != null ? "; wrapper: " + wrapper : "") + "; argv: " + argv.join(" ") + "\n");
   const out = await new Promise((resolve, reject) => {
-    const child = execFile(argv[0], argv.slice(1), {
+    const echo = process.env.BATON_VERBOSE === "1";
+    const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout,
-      maxBuffer: 67108864,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
@@ -347,7 +347,30 @@ async function standard(ctx) {
         BATON_INSTRUCTIONS: instructions,
         BATON_TICKET_FILE: ctx.ticket.path ?? ""
       }
-    }, (e, stdout) => e ? reject(e) : resolve(String(stdout)));
+    });
+    let so = "", se = "";
+    child.stdout.on("data", (c) => {
+      so += c;
+      if (so.length > 67108864) {
+        child.kill("SIGKILL");
+        reject(new Error("the agent printed more than 67108864 bytes"));
+        return;
+      }
+      if (echo) process.stderr.write(c);
+    });
+    child.stderr.on("data", (c) => {
+      if (se.length < 2048) se = (se + String(c)).slice(-2048);
+      if (echo) process.stderr.write(c);
+    });
+    child.on("error", (e) => reject(e));
+    child.on("close", (code, sig) => {
+      if (code === 0) {
+        resolve(so);
+        return;
+      }
+      const why = se.split("\n").filter((l) => l.trim() !== "").at(-1);
+      reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + (why != null ? ": " + why : "")));
+    });
     child.stdin?.end();
   }).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });

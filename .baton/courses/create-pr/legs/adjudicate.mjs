@@ -1,5 +1,5 @@
-// ../../baton-bundle-0WctLN/entry.ts
-import { execFile, execFileSync as execFileSync2 } from "node:child_process";
+// ../../baton-bundle-xYjK3S/entry.ts
+import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
@@ -155,7 +155,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
 }
 
-// ../../baton-bundle-0WctLN/entry.ts
+// ../../baton-bundle-xYjK3S/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, ...opts });
@@ -195,11 +195,11 @@ async function standard(ctx) {
   if (wrapper != null && (typeof wrapper !== "string" || wrapper.trim() === "")) throw new Error(".baton/baton.json's agent_wrapper is not a command");
   const [wrapped, ...wrapping] = wrapper == null ? [] : splitWords(wrapper);
   const argv = wrapped === void 0 ? [command, ...words, ctx.ticket.id, "adjudicate", ctx.checkout] : [wrapped, ...wrapping, command, ...words, ctx.ticket.id, "adjudicate", ctx.checkout];
-  if (process.env.BATON_VERBOSE) console.error("baton: create-pr/adjudicate ticket " + ctx.ticket.id + ": agent_command: " + agentCommand + (wrapper != null ? "; wrapper: " + wrapper : "") + "; argv: " + argv.join(" "));
+  if (process.env.BATON_VERBOSE) process.stderr.write("baton: create-pr/adjudicate ticket " + ctx.ticket.id + ": agent_command: " + agentCommand + (wrapper != null ? "; wrapper: " + wrapper : "") + "; argv: " + argv.join(" ") + "\n");
   const out = await new Promise((resolve, reject) => {
-    const child = execFile(argv[0], argv.slice(1), {
+    const echo = process.env.BATON_VERBOSE === "1";
+    const child = spawn(argv[0], argv.slice(1), {
       cwd: ctx.checkout,
-      maxBuffer: 67108864,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
@@ -209,7 +209,30 @@ async function standard(ctx) {
         BATON_TICKET_FILE: ctx.ticket.path ?? "",
         BATON_ANSWER: "print merge or owner as your last line, then the URL of the PR to write it on when it is not the checkout branch's"
       }
-    }, (e, stdout) => e ? reject(e) : resolve(String(stdout)));
+    });
+    let so = "", se = "";
+    child.stdout.on("data", (c) => {
+      so += c;
+      if (so.length > 67108864) {
+        child.kill("SIGKILL");
+        reject(new Error("the agent printed more than 67108864 bytes"));
+        return;
+      }
+      if (echo) process.stderr.write(c);
+    });
+    child.stderr.on("data", (c) => {
+      if (se.length < 2048) se = (se + String(c)).slice(-2048);
+      if (echo) process.stderr.write(c);
+    });
+    child.on("error", (e) => reject(e));
+    child.on("close", (code, sig) => {
+      if (code === 0) {
+        resolve(so);
+        return;
+      }
+      const why = se.split("\n").filter((l) => l.trim() !== "").at(-1);
+      reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + (why != null ? ": " + why : "")));
+    });
     child.stdin?.end();
   }).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
