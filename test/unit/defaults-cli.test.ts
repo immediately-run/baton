@@ -145,7 +145,7 @@ describe('syncMain’s sync key (B-88, R-BTN-93)', () => {
       const facts = join(keyDir, 'facts.json');
       writeFileSync(facts, '[]');
       const args = parseSyncArgs(['--root', dir, '--url', 'https://baton.test', '--facts', facts], process.env);
-      await syncMain({ ...args, transport, log: () => {} });
+      expect(await syncMain({ ...args, transport, log: () => {} })).toBe(0);
     } finally {
       vi.unstubAllEnvs();
     }
@@ -153,12 +153,43 @@ describe('syncMain’s sync key (B-88, R-BTN-93)', () => {
     for (const req of seen) expect(req.headers.get('Signature-Input')).toMatch(/tag="baton-request"/);
   });
 
-  it('a key file ssh-keygen cannot read is refused before the first call, naming the flag', async () => {
+  it('a key file ssh-keygen cannot sign with is refused before the first call, naming the flag', async () => {
     dir = await scaffold();
     keyDir = mkdtempSync(join(tmpdir(), 'baton-b88-key-'));
     const { transport, seen } = recording();
     await expect(syncMain({ root: dir, url: 'https://baton.test', syncKey: join(keyDir, 'absent'), transport, log: () => {} }))
-      .rejects.toThrow(/--sync-key .*absent: .*(not an SSH key ssh-keygen can read|ENOENT)/);
+      .rejects.toThrow(/--sync-key .*absent: .*not an SSH private key ssh-keygen can sign with|--sync-key .*absent: ENOENT/);
+    expect(seen).toEqual([]);
+  });
+
+  it('an API key in the --sync-key file is refused by name: a worker’s credential, never a sync’s', async () => {
+    dir = await scaffold();
+    keyDir = mkdtempSync(join(tmpdir(), 'baton-b88-key-'));
+    const file = join(keyDir, 'apikey');
+    writeFileSync(file, `bak_${'0'.repeat(16)}_${'a'.repeat(64)}\n`);
+    const { transport, seen } = recording();
+    // Never spent as a bearer: `verifySyncCredential` denies an API key on the sync's routes, so
+    // the operator hears why the file is wrong instead of the server's refusal.
+    await expect(syncMain({ root: dir, url: 'https://baton.test', syncKey: file, transport, log: () => {} }))
+      .rejects.toThrow(/--sync-key .*apikey: an API key is a worker's credential, not a sync key/);
+    expect(seen).toEqual([]);
+  });
+
+  it('with no credential at all, the refusal names --sync-key beside the CI and token forms', async () => {
+    dir = await scaffold();
+    keyDir = mkdtempSync(join(tmpdir(), 'baton-b88-key-'));
+    const { transport, seen } = recording();
+    vi.stubEnv('ACTIONS_ID_TOKEN_REQUEST_URL', '');
+    vi.stubEnv('ACTIONS_ID_TOKEN_REQUEST_TOKEN', '');
+    vi.stubEnv('BATON_SYNC_TOKEN', '');
+    vi.stubEnv('BATON_SYNC_KEY', '');
+    try {
+      // The laptop with no CI is the one that reaches this refusal: it hears its flag.
+      await expect(syncMain({ root: dir, url: 'https://baton.test', transport, log: () => {} }))
+        .rejects.toThrow(/^no sync credential: .*pass --sync-key FILE \(or set BATON_SYNC_KEY\)/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
     expect(seen).toEqual([]);
   });
 

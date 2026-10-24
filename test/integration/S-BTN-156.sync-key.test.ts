@@ -1,20 +1,20 @@
-// S-BTN-108 a board posted by a sync key (B-88, BATON_SPEC §7.1, §11; R-BTN-93): a repository
+// S-BTN-156 a board posted by a sync key (B-88, BATON_SPEC §7.1, §11; R-BTN-93): a repository
 // whose sync key is registered posts its board from a laptop — `baton repo sync --sync-key FILE`.
 // Must hold: with no CI token and no BATON_SYNC_TOKEN — the laptop's run — `syncMain` signs with
 // the flag's key, which is an ed25519 key ssh-keygen made on disk (not one of the harness's
 // WebCrypto keys), and the local host reads that key as its sync credential and the board lands;
 // an unregistered key is refused `unauthenticated` and a key in the mirror role `forbidden`, each
-// before any board is posted; a key registered for another repository posts under that
-// repository's board, never this checkout's (its credential names the repository it acts for,
-// R-BTN-93), and the repository it serves lists the tickets. Node only: it writes a real
-// repository, registers its sync key in the local host and runs git.
+// before any board is posted; a key registered for another repository signs this checkout's sync
+// and the board lands under that repository, never this checkout's (its credential names the
+// repository it acts for, R-BTN-93), and the repository it serves lists the tickets. Node only: it
+// writes a real repository, registers its sync key in the local host and runs git.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
-import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
+import { initMain, parseSyncArgs, syncMain, type SyncArgs } from '../../src/defaults/cli';
 import { envAuth } from '../../src/runner/api';
 import { ORIGIN, rows, setClock, syncToken, withCore } from '../helpers';
 import { githubFake } from '../githubFake';
@@ -84,8 +84,12 @@ afterEach(() => {
 });
 
 /** The laptop's environment for one sync: the recorded facts, the local host, and no CI token
- *  and no BATON_SYNC_TOKEN — only the flag's key can authenticate. */
-async function onLaptop<T>(key: string, fn: (transport: (req: Request) => Promise<Response>) => Promise<T>): Promise<T> {
+ *  and no BATON_SYNC_TOKEN — only the flag's key can authenticate. `fn` gets the cache's args as
+ *  the laptop's own command line parsed them. */
+async function onLaptop<T>(
+  key: string,
+  fn: (transport: (req: Request) => Promise<Response>, args: Omit<SyncArgs, 'log'>) => Promise<T>,
+): Promise<T> {
   const facts = join(dir, '.baton', 'facts.json');
   writeFileSync(facts, '[]');
   const saved = { url: process.env.ACTIONS_ID_TOKEN_REQUEST_URL, token: process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, sync: process.env.BATON_SYNC_KEY, bearer: process.env.BATON_SYNC_TOKEN };
@@ -94,8 +98,11 @@ async function onLaptop<T>(key: string, fn: (transport: (req: Request) => Promis
   delete process.env.BATON_SYNC_TOKEN;
   delete process.env.BATON_SYNC_KEY;
   try {
+    // The laptop's command line, parsed as the CLI parses it: the checkout, the local host, the
+    // recorded facts and the one flag, and no other credential in the environment.
     const args = parseSyncArgs(['--root', dir, '--url', ORIGIN, '--facts', facts, '--sync-key', key], process.env);
-    return await fn((req) => hostCall(req));
+    expect(args).toMatchObject({ root: dir, url: ORIGIN, factsFile: facts, syncKey: key });
+    return await fn((req) => hostCall(req), args);
   } finally {
     for (const [k, v] of [['ACTIONS_ID_TOKEN_REQUEST_URL', saved.url], ['ACTIONS_ID_TOKEN_REQUEST_TOKEN', saved.token], ['BATON_SYNC_KEY', saved.sync], ['BATON_SYNC_TOKEN', saved.bearer]] as const) {
       if (v !== undefined) process.env[k] = v;
@@ -105,7 +112,7 @@ async function onLaptop<T>(key: string, fn: (transport: (req: Request) => Promis
 
 /** One sync from the checkout, signed by `key` alone: its exit code. */
 function signedSync(key: string): Promise<number> {
-  return onLaptop(key, (transport) => syncMain({ root: dir, url: ORIGIN, factsFile: join(dir, '.baton', 'facts.json'), syncKey: key, transport, log: () => {} }));
+  return onLaptop(key, (transport, args) => syncMain({ ...args, transport, log: () => {} }));
 }
 
 /** The first signed call, as the host answered it — the refusal's status and §11 body. */
@@ -119,14 +126,14 @@ function firstSignedCall(key: string): Promise<{ status: number; json: Record<st
   });
 }
 
-describe('S-BTN-108 a board posted by a sync key', () => {
+describe('S-BTN-156 a board posted by a sync key', () => {
   it('a registered sync key posts the board from a laptop, one flag, no CI and no bearer', async () => {
     const key = keyPair(scratch, 'sync');
     // The registration's own fingerprint is the one ssh-keygen gives the file the CLI signs with:
     // one key, so `repo add --sync-key <the .pub>` registers exactly the key `--sync-key <file>`
     // signs with.
     expect(await addSyncKey(key.publicKey, 'docs')).toBe(key.fingerprint);
-    later();
+    await later();
     const before = await headSha();
     const code = await signedSync(key.file);
     expect(code).toBe(0);
@@ -136,8 +143,8 @@ describe('S-BTN-108 a board posted by a sync key', () => {
     expect(before).not.toBe(await headSha());
   });
 
-  it('a key registered for another repository posts nowhere near this repository’s board', async () => {
-    later();
+  it('another repository’s key signs this checkout’s sync, and the board lands under that repository', async () => {
+    await later();
     const key = keyPair(scratch, 'elsewhere');
     // The key serves `baton`; this checkout is `docs`.
     expect(await addSyncKey(key.publicKey, 'baton')).toBe(key.fingerprint);
@@ -149,13 +156,15 @@ describe('S-BTN-108 a board posted by a sync key', () => {
       vi.unstubAllGlobals();
       delete process.env.GITHUB_TOKEN;
     }
-    // The sync's credential names the repository it acts for (R-BTN-93), so the checkout's
-    // tickets land in `baton` — that repository's board — and docs' stays as it was.
+    // The sync's credential names the repository it acts for (R-BTN-93): the key says `baton`, so
+    // this checkout's tickets land on `baton`'s board and exit 0, with no warning — a key is not
+    // checked against the checkout's origin. OIDC cannot do this (the workflow's token names its
+    // own repository); it is the design, and the case pins it.
     expect(await boardOf()).toEqual([{ id: 'baton:T-1' }]);
   });
 
   it('an unregistered key is refused, and no board lands', async () => {
-    later();
+    await later();
     const key = keyPair(scratch, 'stranger');
     const refused = await firstSignedCall(key.file);
     expect(refused.status).toBe(401);
@@ -165,7 +174,7 @@ describe('S-BTN-108 a board posted by a sync key', () => {
   });
 
   it('a key in the mirror role is refused at the sync’s route', async () => {
-    later();
+    await later();
     const key = keyPair(scratch, 'mirror');
     await addSyncKey(key.publicKey, 'docs', 'mirror');
     const refused = await firstSignedCall(key.file);

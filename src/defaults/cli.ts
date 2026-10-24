@@ -123,6 +123,11 @@ export interface SyncArgs {
 /** `BATON_SYNC_KEY`'s environment form of `--sync-key` (B-88). */
 const SYNC_KEY_ENV = 'BATON_SYNC_KEY';
 
+/** R-BTN-159's API key, as `src/runner/api.ts` names it (its `API_KEY` is module-private): a
+ * `--sync-key` file holding one is refused by name — it is a worker's credential, never a
+ * sync's, and `envAuth` would spend it as a bearer the sync routes deny. */
+const API_KEY_FILE = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
+
 export function parseSyncArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): Omit<SyncArgs, 'log'> {
   const out: Omit<SyncArgs, 'log'> = {
     root: env.BATON_HOME ?? process.cwd(),
@@ -363,17 +368,23 @@ async function actionsToken(audience: string): Promise<string | null> {
 }
 
 /** A bearer sync credential (the CI identity token, R-BTN-93's transition before the
- * repository's sync key signs). A missing token is an error, never a silent post. */
+ * repository's sync key signs). A missing token is an error, never a silent post; the laptop
+ * with no CI reaches this one, so it names the flag that serves it. */
 function bearerAuth(token: string | null): Auth {
-  if (!token) throw new Error('no sync credential: run in the sync workflow (id-token: write), pass --token, or set BATON_SYNC_TOKEN');
+  if (!token) {
+    throw new Error(`no sync credential: run in the sync workflow (id-token: write), pass --sync-key FILE (or set ${SYNC_KEY_ENV}), pass --token, or set BATON_SYNC_TOKEN`);
+  }
   return (_m, _u, _b, secret) => ({ Authorization: `Bearer ${token}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) });
 }
 
 /** A sync key (B-88, R-BTN-93): the file's key signs the three sync calls, through the runner's
- * own helper (`envAuth`, imported and not copied), so a sync signs exactly as a worker does. An
- * API key in the file is still a bearer (`envAuth`'s R-BTN-159 rule), so a bootstrap that keeps
- * its credential in a file needs no CI either. */
+ * own helper (`envAuth`, imported and not copied), so a sync signs exactly as a worker does. The
+ * file is an SSH private key; an API key — a worker's credential, never a sync's — is refused by
+ * name here instead of being spent as a bearer the server would deny. */
 function syncKeyAuth(file: string): Auth {
+  if (existsSync(file) && API_KEY_FILE.test(readFileSync(file, 'utf8').trim())) {
+    throw new Error(`--sync-key ${file}: an API key is a worker's credential, not a sync key — register an SSH key (\`baton admin repo add --sync-key <key.pub>\`) and pass its private file`);
+  }
   let auth: Auth;
   try {
     auth = envAuth({ BATON_KEY_FILE: file });
