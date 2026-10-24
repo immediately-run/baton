@@ -601,8 +601,11 @@ export class Runner {
 
   /** One claim's whole run — or one idle attempt, returning null when nothing was claimable. */
   async runOnce(): Promise<ClaimOutcome | null> {
-    // The worker must exist before it can claim (§5): one heartbeat registers it.
-    if (this.state.get().worker_id == null) await this.tick();
+    // The worker must exist before it can claim (§5): one heartbeat registers it. Whether this
+    // attempt is the registration (B-93) is read before the beat: a session's first attempt is
+    // the one whose heartbeat creates the worker, so nothing before it is authenticated.
+    const registered = this.state.get().worker_id != null;
+    if (!registered) await this.tick();
     // A claim the state file still names with nothing in flight is an orphan — a restart, or an
     // end the network ate. It is ended (its resume record already says why) rather than held:
     // Baton would refuse every claim of this worker otherwise (rule 3, one claim per worker).
@@ -647,7 +650,10 @@ export class Runner {
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
       // A worker the gates refuse entirely still claims below: Baton's refusal is the answer.
-      this.log(`baton: no recommendation (${e.message})`);
+      // B-93: the registration beat's own refusal — the first call a new session makes before
+      // Baton has registered it — is not news, and is not logged (2026-10-21's runs: every start
+      // printed `no recommendation (no worker holds this secret)`).
+      if (registered || e.code !== 'unauthenticated') this.log(`baton: no recommendation (${e.message})`);
     }
     let claim: Record<string, any>;
     try {

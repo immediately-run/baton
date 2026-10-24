@@ -446,6 +446,91 @@ describe('drainLines (the leg stream forwarder)', () => {
   });
 });
 
+describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and nothing else)', () => {
+  /** A session's start: no worker yet, the first attempt's beat registering one. Its state lives
+   * in this process's memory — a handful of fields, one heartbeat registers them — and its state
+   * file and spool are its own, under a fresh temp directory. */
+  const runFresh = (api: BatonApi, log: (l: string) => void): Runner => {
+    const home = join(mkdtempSync(join(tmpdir(), 'baton-fb-')), 'home');
+    mkdirSync(home);
+    const r = new Runner({ api, home, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'fresh',
+      courses: [{ course: 'create-pr', version: 1 }], stateFile: join(home, 'fresh.json'), beatEvery: 60_000, log });
+    const state: Record<string, unknown> = { worker_id: null, claim: null };
+    const live = r as unknown as { state: Record<string, unknown> };
+    live.state = {
+      get: () => state,
+      set: (patch: Record<string, unknown>) => { Object.assign(state, patch); },
+      // A spool nobody wrote: the beat takes nothing, and its remove is the runner's own no-op.
+      spool: join(home, 'spool.jsonl'),
+    };
+    return r;
+  };
+
+  /** A Baton that refuses the recommendation until its heartbeat has registered the secret —
+   * `authWorker`'s `no worker holds this secret` (core/workerApi.ts) — and then answers. */
+  const registeringApi = () => {
+    const calls = { heartbeats: 0, recommendations: 0, claims: 0 };
+    let registered = false;
+    const api = {
+      setSecret: () => {},
+      heartbeat: async () => { calls.heartbeats++; registered = true; return { worker_id: 7, incarnation: 1, messages: [] }; },
+      recommendations: async () => {
+        calls.recommendations++;
+        if (!registered) throw new BatonRefusal('unauthenticated', undefined, 'no worker holds this secret', 401);
+        return { recommendations: [] };
+      },
+      claim: async () => { calls.claims++; throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409); },
+    } as unknown as BatonApi;
+    return { api, calls };
+  };
+
+  it('the registration beat’s refusal is not logged: a quiet start says nothing', async () => {
+    const lines: string[] = [];
+    const { api, calls } = registeringApi();
+    const r = runFresh(api, (l) => lines.push(l));
+    expect(await r.runOnce()).toBeNull(); // nothing claimable, on a session whose first beat registered it
+    // The beat registers; the recommendation is the stray the ticket names, then the claim.
+    expect(calls).toEqual({ heartbeats: 1, recommendations: 1, claims: 1 });
+    // Nothing logged — not `no recommendation (no worker holds this secret)` on every start.
+    expect(lines).toEqual([]);
+    r.stop();
+  });
+
+  it('a registered worker still logs the refusal its gates give', async () => {
+    const lines: string[] = [];
+    const asked: (string | null)[] = [];
+    let refuseGates = false;
+    const api = {
+      setSecret: () => {},
+      heartbeat: async () => ({ worker_id: 7, incarnation: 1, messages: [] }),
+      recommendations: async () => {
+        if (refuseGates) throw new BatonRefusal('not-eligible', undefined, 'every gate refused this worker', 403);
+        return { recommendations: [{ ticket_id: 'B-9' }] };
+      },
+      claim: async (body: { ticket_id?: string }) => {
+        asked.push(body.ticket_id ?? null); // the recommendation is what the claim asks for
+        throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409);
+      },
+    } as unknown as BatonApi;
+    const r = runFresh(api, (l) => lines.push(l));
+    // A worker its state names already (a session resumed, or a beat before this attempt).
+    const live = r as unknown as { state: { get(): Record<string, unknown>; set(p: Record<string, unknown>): void; spool: string } };
+    const answered: Record<string, unknown> = { worker_id: 7, claim: null };
+    live.state = {
+      get: () => answered,
+      set: (patch: Record<string, unknown>) => { Object.assign(answered, patch); },
+      spool: live.state.spool,
+    };
+    await r.runOnce();
+    expect(asked).toEqual(['B-9']); // a registered worker is recommended for, and its claim asks for the pick
+    expect(lines).toEqual([]);
+    refuseGates = true;
+    await r.runOnce();
+    expect(lines).toEqual(['baton: no recommendation (every gate refused this worker)']);
+    r.stop();
+  });
+});
+
 describe('draining (SIGTERM\'s graceful path, 2026-10-24)', () => {
   const fakeApi = (claim: unknown) => ({
     setSecret: () => {},
