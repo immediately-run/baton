@@ -66,7 +66,7 @@ jobs:
             held)
               echo "::warning title=baton sync held::a force post was refused into holding; nothing was posted" ;;
             busy|busy:again)
-              echo "::warning title=baton sync held::another run's reading was in flight (R-BTN-62); this run posted nothing. A stale reading lapses ten idle minutes after it was handed out, and a dispatch within that window is refused again — dispatch baton-sync.yml once it has" ;;
+              echo "::warning title=baton sync held::another run's reading was in flight (R-BTN-62); this run posted nothing. A stale reading lapses ten idle minutes after it was handed out, and a dispatch within that window is refused again — dispatch baton-sync.yml once the ten minutes have lapsed" ;;
             "")
               # No outcome line: the sync step failed before the CLI ended a sync (npm ci, the
               # checkout), so its log is the one that says why.

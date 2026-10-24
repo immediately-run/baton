@@ -124,9 +124,11 @@ export interface SyncArgs {
  * meantime; it never waits out a lapse. */
 export const BUSY_RETRY_S = 60;
 
-/** The longest `--busy-retry` waits: a workflow step is minutes, not an hour. The sync step sets
- * `timeout-minutes` well inside this, so a run past the step's patience is killed, never left
- * mid-wait while its job idles. */
+/** The longest `--busy-retry` waits: a workflow step is minutes, not an hour. The sync step's
+ * `timeout-minutes: 10` is this bound, not more than it: at `--busy-retry 600` the step is killed
+ * exactly as the wait ends and the retry gets no time — so no workflow in this repository passes
+ * the flag (round three, 4), and the 60-second default leaves nine minutes of the step for the
+ * two runs. */
 const BUSY_RETRY_MAX_S = 600;
 
 export function parseSyncArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): Omit<SyncArgs, 'log'> {
@@ -1210,7 +1212,7 @@ jobs:
             held)
               echo "::warning title=baton sync held::a force post was refused into holding; nothing was posted" ;;
             busy|busy:again)
-              echo "::warning title=baton sync held::another run's reading was in flight (R-BTN-62); this run posted nothing. A stale reading lapses ten idle minutes after it was handed out, and a dispatch within that window is refused again — dispatch baton-sync.yml once it has" ;;
+              echo "::warning title=baton sync held::another run's reading was in flight (R-BTN-62); this run posted nothing. A stale reading lapses ten idle minutes after it was handed out, and a dispatch within that window is refused again — dispatch baton-sync.yml once the ten minutes have lapsed" ;;
             "")
               # No outcome line: the sync step failed before the CLI ended a sync (npm ci, the
               # checkout), so its log is the one that says why.

@@ -72,12 +72,14 @@ describe('the one parser (R-BTN-73)', () => {
   // Each event's own paths (round 2, 2-A-0): a push's fields are never read from a review.
   const COMMON = ['repository', 'repository.full_name'];
   const ALLOWED: Record<string, Set<string>> = {
+    pull_request: new Set([...COMMON, 'pull_request', 'pull_request.merged']),
     pull_request_review: new Set(COMMON),
     workflow_run: new Set([...COMMON, 'workflow_run', 'workflow_run.path']),
     push: new Set([...COMMON, 'pusher', 'pusher.name', 'head_commit', 'head_commit.author', 'head_commit.author.email']),
   };
 
   it.each([
+    ['pull_request', { repository: { full_name: 'o/r', owner: { login: 'o' } }, pull_request: { merged: true }, sender: { login: 's' }, review: { body: 'b' } }, { repository: 'o/r', merged: true }],
     ['pull_request_review', { repository: { full_name: 'o/r', owner: { login: 'o' } }, review: { body: 'b' }, sender: { login: 's' }, pusher: { name: 'p' }, workflow_run: { path: 'x' } }, { repository: 'o/r' }],
     ['workflow_run', { repository: { full_name: 'o/r' }, workflow_run: { path: '.github/workflows/ci.yml', head_sha: 'x', name: 'ci' } }, { repository: 'o/r', workflow_path: '.github/workflows/ci.yml' }],
     ['push', { repository: { full_name: 'o/r' }, pusher: { name: 'p', email: 'e' }, head_commit: { author: { email: 'a@x', name: 'n' }, message: 'm' }, commits: [{}] }, { repository: 'o/r', pusher: 'p', author_email: 'a@x' }],
@@ -104,10 +106,20 @@ describe('the one parser (R-BTN-73)', () => {
     expect(pickDelivery('pull_request', null, { repository: { full_name: 'o/r' } })).toBeNull();
     expect(pickDelivery('pull_request', 'a b', { repository: { full_name: 'o/r' } })).toBeNull();
   });
+
+  it('reads a pull_request\u2019s merge, and drops one whose `merged` is no boolean (B-89)', () => {
+    const payload = (merged: unknown) => ({ repository: { full_name: 'o/r' }, pull_request: merged === undefined ? { title: 't' } : { merged } });
+    expect(pickDelivery('pull_request', 'id-1', payload(false))).toEqual({ event: 'pull_request', id: 'id-1', repository: 'o/r', merged: false });
+    // A payload without the field is not malformed: a delivery the App sends of a shape older
+    // than the field is a pull_request with no merge to act on.
+    expect(pickDelivery('pull_request', 'id-1', payload(undefined))).toEqual({ event: 'pull_request', id: 'id-1', repository: 'o/r' });
+    expect(pickDelivery('pull_request', 'id-1', payload('yes'))).toBeNull();
+    expect(pickDelivery('pull_request', 'id-1', { repository: { full_name: 'o/r' }, pull_request: null })).toEqual({ event: 'pull_request', id: 'id-1', repository: 'o/r' });
+  });
 });
 
 describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
-  const d = (over: Record<string, unknown>) => ({ event: 'pull_request', id: `d-${Math.random()}`, repository: 'immediately-run/docs', ...over }) as never;
+  const d = (over: Record<string, unknown>) => ({ event: 'pull_request', id: `d-${Math.random()}`, repository: 'immediately-run/docs', merged: true, ...over }) as never;
 
   it('Baton’s own work is dropped; anything else in a registered repository is a trigger', async () => {
     await withCore((c) => {
@@ -127,8 +139,9 @@ describe('the core: self-filter, repository map, window (R-BTN-73)', () => {
       c.store.exec(`INSERT INTO tickets (id, repository_id, local_id, path, title, status, node, queue, tags, requires_clause, depends_on, blocked_by, repos, snapshot_sha, row_hash)
                     SELECT 'docs:X-1', 'docs', 'X-1', 'p', 't', 'available', 'ready', 'ready-autonomous', '[]', 'listed', '[]', '[]', '["baton","immediately-run/sandbox"]', 'a', 'h'`);
       const w = new Webhooks({ store: c.store, now: () => 5_000_000 });
-      // A push to this repository now dispatches its own sync too: baton is a registered
-      // repository whose tickets name it (R3-1266), beside docs'.
+      // A delivery to this repository now dispatches its own sync too: baton is a registered
+      // repository whose tickets name it (R3-1266), beside docs' — one entry, though the merge
+      // (B-89) wants it as well as the merged ticket.
       expect(w.receive(d({ repository: 'immediately-run/baton' }))).toEqual({ outcome: 'dispatched', now: ['baton', 'docs'], trailing: [] });
       const later = new Webhooks({ store: c.store, now: () => 6_000_000 });
       expect(later.receive(d({ repository: 'IMMEDIATELY-RUN/Sandbox' }))).toEqual({ outcome: 'dispatched', now: ['docs'], trailing: [] });

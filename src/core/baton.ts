@@ -152,10 +152,13 @@ export class BatonCore {
 
   /** Send the dispatches a committed transaction asked for — only for a repository after its
    *  cutover, when the mirror writes git; before it, claim.sh does. Never awaited by the
-   *  caller's response. */
+   *  caller's response. B-89: an `unblocked` trigger is its own automation whatever the mode;
+   *  a sync's own asks (`own`) carry the same reason, and are sent the same way. */
   private flushDispatch() {
-    // A repository's unblocked trigger is its own automation, not the mirror's: sent whatever its mode.
-    const due = [...this.pendingDispatch.values()].filter((wf) => wf.kind === 'unblocked' || this.cutover.cutoverAt(wf.repository) != null);
+    // A repository's unblocked trigger is its own automation, not the mirror's: sent whatever its
+    // mode. So is a sync Baton's own webhook path sends (B-89): a merge, and the alarm after one.
+    const own = (wf: Workflow) => wf.kind === 'unblocked' || wf.own === true;
+    const due = [...this.pendingDispatch.values()].filter((wf) => own(wf) || this.cutover.cutoverAt(wf.repository) != null);
     this.pendingDispatch.clear();
     if (!due.length) return;
     this.ports.dispatch.defer(Promise.all(due.map((wf) => this.dispatcher(wf).catch(() => false))));
@@ -226,9 +229,11 @@ export class BatonCore {
   }
 
   /** Dispatch these repositories' syncs after the response; a failure waits for the next
-   *  trigger or the schedule (R-BTN-73: never retried more than once). */
+   *  trigger or the schedule (R-BTN-73: never retried more than once). B-89: a dispatch from
+   *  this path — a merge, the alarm after one, another repository's delivery — is sent whatever
+   *  the repository's mode (`own`). */
   private syncNow(repositories: string[]) {
-    if (repositories.length) this.ports.dispatch.defer(Promise.all(repositories.map((repository) => this.dispatcher({ repository, kind: 'sync' }).catch(() => false))));
+    if (repositories.length) this.ports.dispatch.defer(Promise.all(repositories.map((repository) => this.dispatcher({ repository, kind: 'sync', own: true }).catch(() => false))));
   }
 
   /** The alarm fires by `at` (§3: one alarm; set earlier, never later). */
@@ -243,6 +248,9 @@ export class BatonCore {
   async alarm(): Promise<void> {
     // Re-armed first, so one failing tick never ends the cycle.
     await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
+    // B-89: the webhook path's own backstop, beside R-BTN-73's trailing dispatches — the App's
+    // delivery reached Baton, and a merge's sync never went.
+    this.syncNow(this.store.transaction(() => this.webhooks.dueSync()));
     this.syncNow(this.store.transaction(() => this.webhooks.dueTrailing()));
     await this.armBy(this.webhooks.nextTrailing());
     // Claims first, so a worker reaped this tick has its messages expired in the same tick.
