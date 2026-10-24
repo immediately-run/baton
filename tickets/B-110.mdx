@@ -8,7 +8,7 @@ tags:
   - roadmap-item
 order: 512
 tier: judgement
-description: "Two owner changes to create-pr (2026-10-24): (1) implement and fix are each followed by a run-tests leg — a deterministic `npm run <test_script>` the stub itself runs (bounded, non-interactive, no agent), its green/red landing as a `Baton-Checks:` commit trailer — git, readable on any forge and on plain git — that placeOf routes: green queues review, none queues run-tests, red sends the ticket back to the leg that pushed; (2) when the third review round still finds blockers, the adjudicate leg is queued waiting on the owner — a human in the loop — who answers with a `Baton-Adjudicated: merge|owner` trailer on the branch. Requires: none."
+description: "Two owner changes to create-pr (2026-10-24): (1) implement and fix are each followed by a run-tests leg — a deterministic `npm run <test_script>` the stub itself runs (bounded, non-interactive, no agent), its green/red recorded where every leg's outcome already is — Baton's traversal record, the advance's next leg naming it: green advances to review, red sends the ticket back to the leg that pushed; the close's git marker stays the evidence; (2) when the third review round still finds blockers, the adjudicate leg is queued waiting on the owner — a human in the loop — who answers with a `Baton-Adjudicated: merge|owner` trailer on the branch. Requires: none."
 topics:
   - baton
 owns: {}
@@ -35,24 +35,26 @@ not blocks), §16 S-BTN-1 (the course scenario) and its trace.
    `npm` inherits `GIT_NONINTERACTIVE_ENV` and a `RUN_TESTS_TIMEOUT_MS` of its own, its lease
    arithmetic named and pinned like `CLOSE_TIMEOUT_MS`'s (one run, synchronous, under the
    lease's margin).
-2. **The outcome lives in git — a commit trailer — never in a forge comment (the owner,
-   2026-10-24: "we cannot rely on forge comments to track the repeated entry into a leg because
-   Baton must support the no-forge plain-git setup as well").** The run-tests leg's own commit
-   (its close's marker commit on the branch) carries `Baton-Checks: green|red` — the same
-   channel R3-1265's `branch` course uses for `Baton-Verdict:` trailers on a forge-less
-   repository. The per-forge adapters are readers: GitHub's reads the PR's commit trailers,
-   the plain adapter reads the branch's commits directly, and `placeOf` routes on the latest
-   trailer in the timeline — a push after the trailer resets the gate (the trailer names the
-   head it tested). Routing at `pr-open`/`fixed`:
+2. **The gate's state is Baton's traversal record — the server already knows the history
+   (the owner, 2026-10-24, and §4's rule of the same day: "Baton's traversal record counts").**
+   Repeated entry into a leg is counted from `claim_legs` and confirmed arrivals, never from a
+   forge; and run-tests' *outcome is its advance*: the leg that follows it names it — `review`
+   means green, `implement`/`fix` means red — so `claim_legs` already records the gate's last
+   answer, forge or no forge. A push after the gate opens it again the way any push re-readies
+   a fix (R-BTN-63's arrival counting; plain git included). The close's marker line remains
+   what it always was — evidence in git (`markers_seen`, R-BTN-46), the sync's placement
+   input, never the counter. Routing at `pr-open`/`fixed`:
    - **no marker** → `run-tests` ready (the gate before every review round);
    - **green** → the path gains its `run-tests` step and `review` queues, `ci`-waited as today;
    - **red** → back to the leg that pushed: `implement` (at `pr-open`) or `fix` (at `fixed`),
      ready — the deterministic gate refuses to spend a review round on red checks.
    The stub reads `ctx.claim.station` (already in the leg context) for its return position and
    names the failing script's last lines in its red marker.
-3. **The third round's blockers are the owner's.** Today round-3-changes queues `adjudicate`
-   *ready* — a fresh agent reproducing findings. The change is one routing word and a changed
-   contract: `adjudicate` queues **`waiting`, `waiting_on: 'owner'`** — the human in the loop,
+3. **The third round's blockers are the owner's.** The round count needs no forge either:
+   review's runs are the traversal record's (`max_runs` already reads it — §4). Today
+   round-3-changes queues `adjudicate` *ready* — a fresh agent reproducing findings. The
+   change is one routing word and a changed contract: `adjudicate` queues **`waiting`,
+   `waiting_on: 'owner'`** — the human in the loop,
    carried by Needs you (§14) with the third round's blockers named — and the leg's
    instructions become the owner's: answer with `Baton-Adjudicated: merge|owner` as a trailer
    on a commit pushed to the branch (git, like every durable record — the forge-comment
@@ -73,14 +75,16 @@ not blocks), §16 S-BTN-1 (the course scenario) and its trace.
 - Do not build §7's `hitl` for this: the owner wait plus the trailer is today's
   human-in-the-loop, git-native and dashboard-visible.
 - Never a forge comment as the durable record of a leg's outcome or re-entry: Baton serves
-  plain-git repositories (R3-1265), where comments do not exist. Git is the record; the forge
-  adapters are readers of it.
+  plain-git repositories (R3-1265), where comments do not exist. Counting and the gate's state
+  are Baton's traversal record (§4, 2026-10-24); git (the close's marker, a trailer beside it
+  if useful) is the evidence; the forge adapters are readers.
 
 ### Tests
 
-- `course-pr.test.ts`: the routing table — no marker/green/red at `pr-open` and at `fixed`;
-  a marker older than `pushedAt` is stale (a new push resets the gate); round-3 `changes` →
-  `adjudicate` waiting on the owner; the owner's `merge` marker → merge ready.
+- `course-pr.test.ts`: the routing table — gate open/green/red at `pr-open` and at `fixed`,
+  read from the traversal record (which leg run-tests advanced into); a push after a green
+  gate re-opens it; round-3 `changes` — counted from the same record — → `adjudicate` waiting
+  on the owner; the owner's `merge` answer → merge ready.
 - `defaults-cli.test.ts`: the scaffold carries `run-tests.mjs`/`run-tests.md`; the generated
   stub runs the script itself (a fixture `npm run` that fails/succeeds, asserting the marker
   text and the return position); `test_script` defaults to `test`.
