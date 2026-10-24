@@ -235,6 +235,12 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // One course per runner (the claim response names no course): refused at startup, loudly, not
   // per claim.
   const course = runnerCourse(declareCourses(a.home), a.course);
+  // 2026-10-24: the identity banner — which source, what it declares, which course. Every
+  // historical log this week began with no hint of what code produced it.
+  try {
+    const head = execFileSync('git', ['-C', a.home, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+    say(`baton: runner starting: home ${a.home} @ ${head}, capabilities ${(a.capabilities ?? ['agent-venue']).join(',')}, course ${course.course}@${course.version}, host ${a.hostname}, session ${a.session}`);
+  } catch { /* a home with no git yet: the rest of the banner still names the run */ }
   // One runner per home checkout: its legs run in the working tree (R-BTN-131). Node's default
   // SIGINT/SIGTERM exit skips \`finally\`, so the lock is released on those signals too.
   const release = holdHome(a.home);

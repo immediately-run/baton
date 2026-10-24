@@ -712,8 +712,10 @@ async function standard(ctx) {
     child.on('error', (e) => reject(e));
     child.on('close', (code, sig) => {
       if (code === 0) { resolve(so); return; }
-      const why = se.split('\\n').filter((l) => l.trim() !== '').at(-1);
-      reject(new Error('the agent exited ' + (code != null ? 'with code ' + code : 'on signal ' + sig) + (why != null ? ': ' + why : '')));
+      // The failure names its cause with a tail, not a single line (2026-10-24): the last
+      // lines of both streams, bounded, so the log alone can diagnose the death.
+      const tail = (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
+      reject(new Error('the agent exited ' + (code != null ? 'with code ' + code : 'on signal ' + sig) + '; its last output:\\n  ' + tail));
     });
     // B-84's root cause, closed here: an open stdin pipe is one no agent can wait on — the pipe
     // is closed the moment it exists, so a reader sees EOF at once, never a wait (stdin is
@@ -731,12 +733,14 @@ async function standard(ctx) {
   const last = (out.trim().split('\\n').at(-1) ?? '').trim();
   const on = ${PR_URL}.test(last) ? last : null;`}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
 ` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}) };` : `${ask ? `
   // The answer (B-85): the last line that opens with the leg's value word, backwards past any
   // prose after it; a missing or misspelled verdict still fails, naming what it read.
   const { answer } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});` : `
   void out;`}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
 ` : ''}  return ${position};`}
 }
 export const close = ${closeFrom[0]};
