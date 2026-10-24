@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { BUSY_RETRY_S, initMain, parseSyncArgs, syncMain, syncWorkflow, type SyncArgs } from '../../src/defaults/cli';
-import { ORIGIN, observe, rows, setClock, syncToken, withCore } from '../helpers';
+import { ORIGIN, observe, rows, setClock, syncToken } from '../helpers';
 
 // The harness's clock, a minute behind the real one `syncMain` signs with (S-BTN-156's reason).
 const T0 = Date.now() - 60_000;
@@ -21,8 +21,6 @@ let minutes = 1;
 const later = () => setClock(T0 + (minutes += 1) * 60_000);
 /** The repository the checkout's origin names: `docs`, the local host's. */
 const SLUG = 'immediately-run/docs';
-/** A number no other test of this host handed out: the run owns it, so its post never races. */
-const OWN_NUMBER = 500;
 
 /** A checkout with a tickets/ wiki as `baton repo init` writes it, committed. */
 function repoWithTickets(): string {
@@ -39,7 +37,6 @@ function repoWithTickets(): string {
 
 let dir: string;
 let token: string;
-let own: number;
 beforeEach(async () => {
   minutes = 1;
   await setClock(T0);
@@ -50,54 +47,43 @@ beforeEach(async () => {
   writeFileSync(join(dir, '.baton', 'facts.json'), '[]');
   // The harness's sync token, spent through `--token` as the CI identity's run spends its own.
   token = await syncToken();
-  // The number this scenario's runs own, handed out to the host as a real one (a board post of
-  // it, refused `head-moved` over a foreign parent, uses it up: R-BTN-62 uses a number once).
-  // `obs.busy` refuses a run's observation rather than take one, so its retry's real observation
-  // voids the failed run's held number at once (R-BTN-62) and hands out the next — this one.
-  const taken = await observe();
-  own = taken.json.observation + OWN_NUMBER;
-  // The next number a real observation hands out is `own`: the host's counter stands at the
-  // number before it, free.
-  await withCore((c) => c.store.exec('UPDATE board_head SET last_handed_out = ?, handed_out_at = NULL WHERE repository_id = ?', own - 1, 'docs'));
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-/** The number a failed run leaves outstanding: handed out by the host, never posted. */
+/** The number a failed run leaves outstanding: handed out by the host's route, never posted. */
 async function heldNumber(): Promise<number> {
   const o = await observe();
   expect(o.status).toBe(200);
   return o.json.observation;
 }
 
-/** Its release, as a failed run's own error exit gives it back (R-BTN-62's `release`). */
-async function release(n: number): Promise<void> {
-  await withCore((c) => c.observations.release('docs', n));
-}
-
 /** One sync from the checkout with the workflow's flags plus `extra`, its exit code, every line
- *  it logged and each wait's length. The run's observation calls are the scenario's: `observe`
- *  answers them (`busy` until it says otherwise, then the number the run owns), and `at`, the
- *  retry's wait, is where the failed run's number is released. */
-async function sync(extra: string[], opts: { busy?: boolean; at?: () => Promise<void> } = {}): Promise<{ code: number; lines: string[]; sleeps: number[] }> {
+ *  it logged and each wait's length. `busy` answers the run's first observation `sync-busy` — the
+ *  failed run's number in flight, R-BTN-62 — and lets its retry's observation through to the host;
+ *  `at` runs where the retry waits, and `then` is the host's clock from then on (a run that waited
+ *  past R-BTN-62's ten minutes sees the stale number voided). */
+async function sync(extra: string[], opts: { busy?: boolean; at?: () => Promise<void>; then?: number } = {}): Promise<{ code: number; lines: string[]; sleeps: number[] }> {
   const facts = join(dir, '.baton', 'facts.json');
   const args: Omit<SyncArgs, 'log'> = parseSyncArgs(['--root', dir, '--url', ORIGIN, '--facts', facts, '--token', token, ...extra], {});
   const lines: string[] = [];
   const sleeps: number[] = [];
-  let observations = 0;
-  // The run's own observation while the scenario says the board is held: `sync-busy` for the
-  // first call (R-BTN-62's refusal), and after its wait the number it owns — the board is free
-  // then. The number the wait was for is the one this refuses.
-  const transport = (req: Request): Promise<Response> => (opts.busy && new URL(req.url).pathname === '/v1/sync/observation' && observations++ === 0
-    ? Promise.resolve(new Response(JSON.stringify({ code: 'sync-busy', message: 'observation 7 is still outstanding' }), { status: 409, headers: { 'Content-Type': 'application/json' } }))
-    : hostCall(req));
+  let busyLeft = opts.busy ? 1 : 0;
+  const transport = (req: Request): Promise<Response> => {
+    if (new URL(req.url).pathname === '/v1/sync/observation' && busyLeft > 0) {
+      busyLeft--;
+      return Promise.resolve(new Response(JSON.stringify({ code: 'sync-busy', message: 'observation is still outstanding' }), { status: 409, headers: { 'Content-Type': 'application/json' } }));
+    }
+    return hostCall(req);
+  };
   const code = await syncMain({
     ...args,
     transport,
     sleep: async (ms) => {
       sleeps.push(ms);
       await opts.at?.();
+      if (opts.then) await setClock(opts.then);
     },
     log: (l) => lines.push(l),
   });
@@ -111,22 +97,23 @@ describe('S-BTN-157 a busy sync is not a success', () => {
   it('a held number is waited out, then retried once with a fresh number, and the board lands', async () => {
     await later();
     // The failed run's number, and a run that starts while it is outstanding.
-    const held = await heldNumber();
+    await heldNumber();
     let postsDuringWait = 0;
     const { code, lines, sleeps } = await sync(['--busy-retry', '90'], {
       busy: true,
+      // The retry waits ten minutes (past R-BTN-62's ten, as the run that started long enough ago
+      // would have): the failed run's number is voided, and the retry's own observation takes the
+      // next. Nothing posted before that — the wait is the first thing after the refusal.
+      then: T0 + 12 * 60_000,
       at: async () => {
-        // Nothing has posted yet: the wait comes before the retry's first observation, so the
-        // failed run's number is still the one the board holds out for. Its exit gives it back.
         postsDuringWait = (await boardOf()).length;
-        await release(held);
       },
     });
     expect(postsDuringWait).toBe(0);
     // One wait, of the flag's length, and never a loop.
     expect(sleeps).toEqual([90_000]);
     expect(lines[0]).toBe('baton: busy — another run\'s reading is in flight (R-BTN-62); retrying once in 90s, with a fresh number');
-    // The retry took its number after the wait and posted.
+    // The retry voided the stale number, took its own and posted.
     expect(code).toBe(0);
     expect(lines.at(-1)).toMatch(/^baton: advanced at /);
     expect(await boardOf()).toEqual([{ id: `${SLUG.split('/')[1]}:T-1` }]);
@@ -143,11 +130,11 @@ describe('S-BTN-157 a busy sync is not a success', () => {
 
   it('a second busy is busy:again, and the run exits 1 — a held board is never a green check', async () => {
     await later();
-    const held = await heldNumber();
+    await heldNumber();
+    // The retry's own observation still finds the failed run's number outstanding (under ten
+    // minutes): a `busy` retry is still `busy`, and the run says so — nothing posted never reads
+    // as a green check.
     const { code, lines, sleeps } = await sync(['--busy-retry', '60'], { busy: true });
-    await release(held);
-    // The holder let it go after the retry's wait ended: a `busy` retry is still `busy`, and the
-    // run says so — nothing posted never reads as a green check.
     expect(sleeps).toEqual([60_000]);
     expect(code).toBe(1);
     expect(lines.at(-1)).toMatch(/^baton: busy:again at /);
@@ -156,10 +143,9 @@ describe('S-BTN-157 a busy sync is not a success', () => {
 
   it('--busy-retry 0 waits for nothing: busy is exit 1 at once, and no retry is named', async () => {
     await later();
-    const held = await heldNumber();
-    const { code, lines, sleeps } = await sync(['--busy-retry', '0'], { busy: true });
-    await release(held);
+    await heldNumber();
     // The subject of B-89: `busy` — exit 0 with nothing posted — now exits 1 and says why.
+    const { code, lines, sleeps } = await sync(['--busy-retry', '0'], { busy: true });
     expect(sleeps).toEqual([]);
     expect(code).toBe(1);
     expect(lines.at(-1)).toMatch(/^baton: busy at .*observation: sync-busy$/);
