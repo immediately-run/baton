@@ -466,34 +466,89 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     return r;
   };
 
-  /** A Baton that refuses the recommendation until its heartbeat has registered the secret —
-   * `authWorker`'s `no worker holds this secret` (core/workerApi.ts) — and then answers. */
+  /** A Baton that answers every call as the first beat's ordering makes it: the heartbeat
+   *  registers the worker, and from then on the recommendation and the claim answer. `refuseWith`
+   *  sets what the recommendation throws — counting each throw, so a case can tell the refusal
+   *  was reached — or null for none. The heartbeat answers after a turn of the event loop, as a
+   *  round trip does: what the quiet start guards is that nothing is asked of Baton while it is
+   *  still out. */
   const registeringApi = () => {
     const calls = { heartbeats: 0, recommendations: 0, claims: 0 };
     let registered = false;
+    let refuse: (() => Error) | null = null;
     const api = {
       setSecret: () => {},
-      heartbeat: async () => { calls.heartbeats++; registered = true; return { worker_id: 7, incarnation: 1, messages: [] }; },
+      heartbeat: async () => { await new Promise((r) => setTimeout(r, 5)); calls.heartbeats++; registered = true; return { worker_id: 7, incarnation: 1, messages: [] }; },
       recommendations: async () => {
         calls.recommendations++;
+        if (refuse) throw refuse(); // the case's own record of the refusal Baton gave
         if (!registered) throw new BatonRefusal('unauthenticated', undefined, 'no worker holds this secret', 401);
         return { recommendations: [] };
       },
       claim: async () => { calls.claims++; throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409); },
     } as unknown as BatonApi;
-    return { api, calls };
+    return { api, calls, refuseWith: (f: (() => Error) | null) => { refuse = f; } };
   };
 
   it('the registration beat’s refusal is not logged: a quiet start says nothing', async () => {
     const lines: string[] = [];
-    const { api, calls } = registeringApi();
+    const { api, calls, refuseWith } = registeringApi();
+    // The recommendation about to be refused — so an empty `lines` is the refusal swallowed, not
+    // the recommendation skipped: a change that never asks it leaves `refused` 0 and fails here.
+    let refused = 0;
+    refuseWith(() => { refused++; return new BatonRefusal('unauthenticated', undefined, 'no worker holds this secret', 401); });
     const r = runFresh(api, (l) => lines.push(l));
     expect(await r.runOnce()).toBeNull(); // nothing claimable, on a session whose first beat registered it
     // The beat registers; the recommendation is the stray the ticket names, then the claim.
     expect(calls).toEqual({ heartbeats: 1, recommendations: 1, claims: 1 });
+    expect(refused).toBe(1);
     // Nothing logged — not `no recommendation (no worker holds this secret)` on every start.
     expect(lines).toEqual([]);
     r.stop();
+  });
+
+  it('only that refusal goes quiet: the other unauthenticated answers still name themselves', async () => {
+    const lines: string[] = [];
+    // The recommendation's answer, set per case below.
+    let answer: Error | null = null;
+    const rejecting = (message: string) => new BatonRefusal('unauthenticated', undefined, message, 401);
+    // `authWorker`'s same code for a replayed nonce (core/workerApi.ts), the message to tell apart.
+    const replayed = 'this nonce was already used: a replayed request';
+    const api = {
+      setSecret: () => {},
+      heartbeat: async () => ({ worker_id: 7, incarnation: 1, messages: [] }),
+      recommendations: async () => {
+        if (answer) throw answer;
+        return { recommendations: [{ ticket_id: 'B-9' }] };
+      },
+      claim: async () => { throw new BatonRefusal('no-eligible-ticket', undefined, 'nothing to claim', 409); },
+    } as unknown as BatonApi;
+    // A worker the state names already: the registration's own exemption does not reach it.
+    const r = runFresh(api, (l) => lines.push(l));
+    const live = r as unknown as { state: { get(): Record<string, unknown>; set(p: Record<string, unknown>): void; spool: string } };
+    const answered: Record<string, unknown> = { worker_id: 7, claim: null };
+    live.state = {
+      get: () => answered,
+      set: (patch: Record<string, unknown>) => { Object.assign(answered, patch); },
+      spool: live.state.spool,
+    };
+    answer = rejecting(replayed);
+    await r.runOnce();
+    expect(lines).toEqual([`baton: no recommendation (${replayed})`]);
+    // On a registration attempt too: only the ticket's own refusal is the stray, never the code.
+    lines.length = 0;
+    const fresh = runFresh(api, (l) => lines.push(l));
+    await fresh.runOnce();
+    expect(lines).toEqual([`baton: no recommendation (${replayed})`]);
+    // And the ticket's refusal, on that same registration attempt, is the one that goes quiet.
+    lines.length = 0;
+    answer = rejecting('no worker holds this secret');
+    const quiet = runFresh(api, (l) => lines.push(l));
+    await quiet.runOnce();
+    expect(lines).toEqual([]);
+    r.stop();
+    fresh.stop();
+    quiet.stop();
   });
 
   it('a registered worker still logs the refusal its gates give', async () => {

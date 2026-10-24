@@ -6,10 +6,10 @@
 // imported and called, answering what the defaults answer; and `prClose` in a real git repo.
 // Node only: init writes a real tree and runs git.
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { courseSchemas, githubFacts, initMain, parseSyncArgs, remoteSlug, syncMain, syncWorkflow } from '../../src/defaults/cli';
 import type { Transport } from '../../src/runner/api';
@@ -26,6 +26,11 @@ import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const CLI = join(ROOT, 'cli', 'baton.mjs');
+/** A bundle of this checkout's `src/defaults/cli.ts`, made as scripts/baton-cli.mjs makes it for
+ * `repo sync`, inside the checkout's gitignored `.local/` — where its externals (esbuild)
+ * resolve; a child process reads it where git's stderr would print. */
+mkdirSync(join(ROOT, '.local'), { recursive: true });
+const BUNDLE = join(mkdtempSync(join(ROOT, '.local', 'baton-cli-bundle-')), 'baton-cli.mjs');
 const baton = (cwd: string, ...args: string[]) => execFileSync('node', [CLI, ...args], { cwd, encoding: 'utf8', env: { ...process.env, BATON_HOME: cwd } });
 const gitInit = (dir: string) => {
   execFileSync('git', ['init', '-q', '-b', 'main', dir], { stdio: 'ignore' });
@@ -218,19 +223,39 @@ describe('syncMain’s sync key (B-88, R-BTN-93)', () => {
 });
 
 describe('remoteSlug — a checkout without origin is null and silent (B-93, S-BTN-159)', () => {
-  it('an origin-less repository is null, and nothing is thrown; a remote still reads its slug', () => {
+  beforeAll(async () => {
+    const { build } = await import('esbuild');
+    await build({ entryPoints: [join(ROOT, 'src', 'defaults', 'cli.ts')], outfile: BUNDLE, bundle: true, platform: 'node',
+      format: 'esm', target: 'node22', packages: 'external', loader: { '.json': 'json', '.txt': 'text' }, logLevel: 'silent' });
+  });
+  afterAll(() => rmSync(dirname(BUNDLE), { recursive: true, force: true }));
+
+  /** `remoteSlug(root)` as a fresh process sees it: its answer on stdout, and every byte a git
+   *  it ran wrote on stderr — the line an operator's console shows beside the sync. A child is
+   *  the only observer that tells captured stderr from inherited: an inherited one lands on this
+   *  test process's stderr, which a unit test cannot read back (and which `expect` never sees). */
+  const inChild = (root: string): { slug: string | null | 'error'; stderr: string } => {
+    const probe = `import { remoteSlug } from ${JSON.stringify(pathToFileURL(BUNDLE).href)};
+process.stdout.write(JSON.stringify(remoteSlug(${JSON.stringify(root)})));\n`;
+    const out = spawnSync(process.execPath, ['--input-type=module', '-e', probe], { encoding: 'utf8', cwd: ROOT });
+    return { slug: out.status === 0 ? (JSON.parse(out.stdout || 'null') as string | null) : 'error', stderr: out.stderr ?? '' };
+  };
+
+  it('an origin-less repository is null with empty stderr; a remote still reads its slug', () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-slug-'));
     try {
       // 2026-10-21: git's `error: No such remote 'origin'` reached the operator's log while the
       // sync went on to succeed — a line that reads like a failure and is not one. The null is
-      // the whole answer now: git's complaint to its own stderr is no exception and no message.
+      // the whole answer now, and no line of git's rides with it: a `catch` cannot take back what
+      // the child wrote, so the child's stderr is captured (the default stdio inherits it, which
+      // the child's empty stderr here fails on).
       gitInit(dir);
-      let slug: string | null = 'unasked';
-      expect(() => { slug = remoteSlug(dir); }).not.toThrow();
-      expect(slug).toBeNull();
+      expect(inChild(dir)).toEqual({ slug: null, stderr: '' });
+      expect(remoteSlug(dir)).toBeNull();
       // A remote reads as before.
       execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'git@github.com:immediately-run/baton.git'], { stdio: 'ignore' });
       expect(remoteSlug(dir)).toBe('immediately-run/baton');
+      expect(inChild(dir)).toEqual({ slug: 'immediately-run/baton', stderr: '' });
       // The proxy's `…/git/owner/name` form keeps its `git/` stripped, and an owner named git keeps its name.
       execFileSync('git', ['-C', dir, 'remote', 'set-url', 'origin', 'https://baton.immediately.run/git/o/r.git'], { stdio: 'ignore' });
       expect(remoteSlug(dir)).toBe('o/r');
@@ -239,7 +264,7 @@ describe('remoteSlug — a checkout without origin is null and silent (B-93, S-B
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 });
 
 describe('splitWords — agent_command splits as sh would, quotes and no substitutions (B-84)', () => {
