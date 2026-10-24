@@ -261,6 +261,9 @@ export class Runner {
       }
     }
     for (const m of (answer.messages ?? []) as { id: number; kind: string; payload?: { reason?: string } }[]) {
+      // 2026-10-24: every message is logged on receipt — a release or cue the runner acts on
+      // silently was the hardest class to debug from the log alone.
+      this.log(`baton: message ${m.kind}${m.payload?.reason ? ` (${m.payload.reason})` : ''} received${this.state.get().claim ? ` for ${this.state.get().claim!.ticket_id}` : ''}`);
       if (m.kind === 'release') {
         this.toAck.push(m.id);
         // A release message's payload reason is one of §6.5's own ('requested', 'owner-cancel',
@@ -692,6 +695,9 @@ export class Runner {
         // the evidence `close` wrote; it finishes this leg and starts the next. The finished leg
         // joins the evidenced path only now — the next leg's run number counts what ran.
         const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}) }, verdict.reached);
+        // 2026-10-24: the advance trail — every finished leg names where it landed and what it
+        // queued, so a suspension or an odd end position reads as a trail, not a riddle.
+        this.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : (answer.next?.[0]?.leg ?? verdict.leg)} (run ${run} of ${course.graph.legs.get(legName)?.max_runs ?? 1})`);
         if ('settle' in answer) return await this.finish(claimId, answer.settle, await this.callHandoff(script, ctx) ?? handoffUrl);
         gitPath = [...gitPath, { leg: legName, reached: verdict.reached }];
         at = answer.station ?? verdict.reached;
