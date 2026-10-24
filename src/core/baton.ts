@@ -636,8 +636,8 @@ export class BatonCore {
     if (p.startsWith('/v1/admin/')) {
       if (!admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is required (R-BTN-57)');
       const actor = `admin:${fp}`;
-      // B-90: the registry, for an operator or an agent with a key — no new query: the
-      // dashboard's own `uiState().repositories` answer.
+      // B-90: the registry, for an operator or an agent with a key — no new query: the same
+      // `uiRepo` rows `/v1/ui/state` lists as its `repositories`.
       if (m === 'GET' && p === '/v1/admin/repositories') return json(this.adminView());
       if (m === 'POST' && p === '/v1/admin/repositories') return json(await this.admin.repositories(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/probes') return json(await this.admin.addProbe(actor, await body()));
@@ -773,13 +773,16 @@ export class BatonCore {
       if (role === 'owner' && !this.admin.owns(cred, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
     }
     if (!cred) throw new BatonError('unauthenticated', 'no principal');
+    // B-86: a granted key's board names what its grant allows, as its heartbeat's answer does.
+    let granted: string[] | null = null;
     if (role === 'worker') {
-      this.workers.credential(cred);
+      const c = this.workers.credential(cred);
       if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
         throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
       }
+      granted = c.granted ? c.allowed : null;
     }
-    if (boardRead) return json(this.boardView(repo));
+    if (boardRead) return json(this.boardView(repo, granted));
     if (history) {
       const raw = seg(history[2]);
       const id = raw.includes(':') ? raw : qualify(repo, raw);
@@ -1152,35 +1155,49 @@ export class BatonCore {
     return { id: repo.id, github: repo.github, forge: repo.forge, web_base: repo.web_base, default_branch: repo.default_branch, weight: repo.weight, head, mode: this.workers.mode(repo.id), courses };
   }
 
-  /** `GET /v1/repositories/{repository}/board` (B-90): the dashboard's view of one repository —
-   *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order —
-   *  behind a signed principal instead of a browser session. The same queries `uiState` runs;
-   *  nothing new is asked of the store. */
   /** `GET /v1/admin/repositories` (B-90): the registry as the dashboard's state lists it, every
    *  registered repository with its head, mode and courses. */
   adminView() {
-    return { repositories: this.uiState().repositories };
+    // One section of `uiState`'s answer, built by the same `uiRepo` it maps over.
+    return { repositories: this.registry.all().map((repo) => this.uiRepo(repo)) };
   }
 
   /** `GET /v1/owner/{repository}/grants` (R-BTN-146, B-90): the repository's owner keys, the
    *  grants on it, and its owners' settings — the dashboard's state's own reads, for its owners. */
   grantsView(repo: string) {
-    const { limits } = this.uiState();
+    // The same three reads `uiState().limits` serves, over one repository: owners, grants (their
+    // max_tier as its name in the repository's ladder) and settings.
+    const limits = this.admin.view(this.now());
     return {
       repository: repo,
       owners: limits.owners.filter((o) => o.repository_id === repo),
-      grants: limits.grants.filter((g) => g.repository_id === repo),
+      // R-BTN-58: a key granted here may be granted elsewhere too, and its holder decides once
+      // for all of them — so each row also names the other repositories that key holds
+      // (`other_repositories`, revoked grants excluded).
+      grants: limits.grants.filter((g) => g.repository_id === repo).map((g) => ({
+        credential_id: g.credential_id, hostname: g.hostname, label: g.label, repository_id: g.repository_id,
+        capabilities: g.capabilities, max_tier: g.max_tier, granted_by: g.granted_by, granted_at: g.granted_at,
+        other_repositories: limits.grants.filter((o) => o.credential_id === g.credential_id && o.repository_id !== repo).map((o) => o.repository_id).sort(),
+      })),
       settings: limits.settings.find((s) => s.repository_id === repo) ?? null,
       // R-BTN-67: the bars in force and scheduled, always carrying their repository's id.
-      bars: this.admin.bars([repo], this.now(), true),
+      bars: limits.bars.filter((b) => (b as { repository_id: string }).repository_id === repo),
+      server_time: this.now(),
     };
   }
 
-  boardView(repo: string) {
-    const state = this.uiState();
+  /** `GET /v1/repositories/{repository}/board` (B-90): the dashboard's view of one repository —
+   *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order, the
+   *  same reads `uiState` takes — and two fields the dashboard does not have. `course_files`
+   *  reads each course's stored `course.json` (a leg with nothing queued keeps its clause); it is
+   *  kept because the runner already holds the file locally and B-86 has it name a clause no
+   *  queue shows (B-90's Deviations). `granted_capabilities` is the key's grant's capabilities —
+   *  the heartbeat answer's field — so a granted runner declares its grant and no standing
+   *  default (B-86); null for a key no grant binds and for an owner's or an administrator's key. */
+  boardView(repo: string, granted: string[] | null = null) {
+    const now = this.now();
     const repository = this.uiRepo(this.registry.get(repo)!);
-    // B-90/B-86: each course's `course.json` legs, so a runner can say which clauses its
-    // declaration can never meet (a leg with nothing queued has no row in `queues`).
+    const state = this.uiState();
     const course_files = Object.fromEntries(repository.courses.map((c) => {
       const file = this.sql<{ course_json: string }>('SELECT course_json FROM courses WHERE repository_id = ? AND id = ?', repo, c.id)[0];
       const legs = file ? (JSON.parse(file.course_json) as { legs?: Record<string, unknown> }).legs ?? null : null;
@@ -1192,14 +1209,15 @@ export class BatonCore {
       ready: state.ready.filter((r) => r.repository_id === repo),
       ready_by_tier: Object.fromEntries(Object.entries(state.ready_by_tier).map(([tier, ids]) =>
         [tier, (ids as string[]).filter((id) => id.startsWith(`${repo}:`))])),
-      server_time: state.server_time,
+      granted_capabilities: granted,
+      server_time: now,
     };
   }
 
   uiState() {
     const now = this.now();
     // Each registered repository: its own head and its own mode (R-BTN-47, R-BTN-28).
-    const repositories = this.registry.all().map((repo) => this.uiRepo(repo));
+    const repositories = this.adminView().repositories;
     const where = new Map(repositories.map((r) => [r.id, r]));
     const items = this.sql<Record<string, SqlValue>>(
       // Ready: a ticket whose queued leg its sync posts ready (R-BTN-70), the interim post's

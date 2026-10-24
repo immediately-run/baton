@@ -8,8 +8,9 @@
 // owner's, a worker key granted on the repository reads its board and is told what its grant
 // allows, and a key granted nowhere is refused `forbidden`, an unknown one `unauthenticated`.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
-import { hbBody, keyCall, ORIGIN, payload, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore } from '../helpers';
+import { cutover, hbBody, keyCall, ORIGIN, payload, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
+import { legClauses, startup, type BoardView } from '../../src/runner/eligibility';
 import { call as hostCall } from '#host';
 
 const board = inject('board');
@@ -34,6 +35,15 @@ async function heartbeat(key: TestKey, hostname: string, over: Record<string, un
   const created = Math.floor((await withCore((c) => c.now())) / 1000);
   const body = hbBody('vm-a', { hostname, session_name: hostname, secret_hash: await sha256('secret-reads'), ...over });
   const res = await hostCall(await signedRequest(key, `${ORIGIN}/v1/runner/heartbeat`, { created, body: JSON.stringify(body) }));
+  return { status: res.status, json: (await res.json()) as Record<string, any> };
+}
+
+/** A `GET` signed by `key`, with its worker secret once it registered. */
+async function workerAs(key: TestKey, path: string, body?: unknown, secret?: string) {
+  const created = Math.floor((await withCore((c) => c.now())) / 1000);
+  const res = await hostCall(await signedRequest(key, ORIGIN + path, {
+    created, method: body === undefined ? 'GET' : 'POST', ...(body === undefined ? {} : { body: JSON.stringify(body) }), headers: secret ? { 'X-Worker-Secret': secret } : {},
+  }));
   return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 
@@ -80,9 +90,15 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
       credential_id: granted.fingerprint, hostname: 'granted-host', label: null, repository_id: 'docs',
       capabilities: JSON.stringify(['authentication', 'create-pr', 'drivable-browser', 'llm-call']),
       max_tier: null, granted_by: `owner:${docsOwner.fingerprint}`, granted_at: T0,
+      // R-BTN-58: the other repositories this key is granted on — none yet.
+      other_repositories: [],
     }]);
     expect((res.json.settings as Record<string, unknown>).repository_id).toBe('docs');
     expect(res.json.bars).toEqual([]);
+    // The same key granted on another repository too: its holder's one decision, named here.
+    expect((await keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: granted.publicKey, hostname: 'granted-host', capabilities: ['agent-venue'] })).status).toBe(200);
+    expect(((await read(docsOwner, '/v1/owner/docs/grants')).json.grants as { other_repositories: string[] }[])[0].other_repositories).toEqual(['ops']);
+    expect(((await read(opsOwner, '/v1/owner/ops/grants')).json.grants as { other_repositories: string[] }[])[0].other_repositories).toEqual(['docs']);
     // Owning one repository confers nothing on another (R-BTN-58); an administrator's key is no owner's (R-BTN-57).
     expect((await read(docsOwner, '/v1/owner/ops/grants')).json).toMatchObject({ code: 'forbidden' });
     expect((await read(admin, '/v1/owner/docs/grants')).json.code).toBe('forbidden');
@@ -114,13 +130,52 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
 
   it('a board read is refused where the key holds no role, with its code', async () => {
     expect((await read(opsOwner, '/v1/repositories/ops/board')).status).toBe(200);
-    expect((await read(opsOwner, '/v1/repositories/docs/board')).status).toBe(403);
+    expect((await read(opsOwner, '/v1/repositories/docs/board')).json.code).toBe('forbidden');
     // A key Baton does not know is unauthenticated; a granted key knows its repository only.
-    expect((await read(stranger, '/v1/repositories/docs/board')).status).toBe(401);
+    expect((await read(stranger, '/v1/repositories/docs/board')).json.code).toBe('unauthenticated');
     expect((await read(admin, '/v1/repositories/nope/board')).json.code).toBe('not-found');
     expect((await read(admin, '/v1/admin/repositories/extra')).json.code).toBe('not-found');
     // The grant is the repository's alone: revoked, the read is refused.
     expect((await keyCall(docsOwner, `/v1/owner/docs/grants/${encodeURIComponent(granted.fingerprint)}/revoke`, {})).status).toBe(200);
     expect((await read(granted, '/v1/repositories/docs/board')).json.code).toBe('forbidden');
+  });
+
+  it('a granted key’s board names its grant, as its heartbeat does; an owner’s or an administrator’s names none', async () => {
+    const hb = await heartbeat(granted, 'granted-host');
+    const keyed = await read(granted, '/v1/repositories/docs/board');
+    // One fact, one answer: the board's field is the heartbeat answer's, name for name.
+    expect(keyed.json.granted_capabilities).toEqual(hb.json.granted_capabilities);
+    expect(keyed.json.granted_capabilities).toContain('create-pr');
+    for (const key of [docsOwner, admin]) {
+      const res = await read(key, '/v1/repositories/docs/board');
+      expect(res.status).toBe(200);
+      expect(res.json.granted_capabilities).toBeNull(); // no grant binds an owner's or an admin's key
+    }
+  });
+
+  it('B-86: a granted runner with no --capabilities declares its grant and is offered a create-pr leg; a narrow one idles with the line', async () => {
+    await cutover(1, 'docs');
+    // The board as `API.boardView` reads it — the producer's own answer, not a hand-typed one.
+    const boardOf = async () => (await read(granted, '/v1/repositories/docs/board')).json as unknown as BoardView;
+    const clauses = (b: BoardView) => {
+      const queues = b.repository?.courses?.find((c) => c.id === 'roadmap-pr')?.queues ?? [];
+      return legClauses(b.course_files?.['roadmap-pr'], queues);
+    };
+    const api = { boardView: async () => (await boardOf()) as unknown as Record<string, any> };
+    const started = await startup(api, { repository: 'docs', capabilities: null }, 'roadmap-pr', clauses);
+    // The grant's own set, `none` included as the heartbeat answers it, and no line.
+    expect(started).toEqual({ declare: ['authentication', 'create-pr', 'drivable-browser', 'llm-call', 'none'], line: null });
+    // Declared on the heartbeat as runMain passes it from startup's answer: the grant admits it
+    // (R-BTN-58's expansion), so it registers and is offered work — the register that used to be
+    // refused for declaring `agent-venue` alone.
+    const hb = await heartbeat(granted, 'granted-host', { capabilities: started.declare });
+    expect(hb.status).toBe(200);
+    const offer = await workerAs(granted, '/v1/runner/recommendations?limit=10', undefined, 'secret-reads');
+    expect(offer.status).toBe(200);
+    expect((offer.json.recommendations as { ticket_id: string }[]).length).toBeGreaterThan(0);
+    // The flag narrows only within the grant (B-86 item 2): a declaration the grant does not
+    // allow is refused `forbidden` at the heartbeat, so the flag can never widen.
+    const outside = await heartbeat(granted, 'granted-host', { capabilities: ['mcp-chrome'] });
+    expect(outside.json.code).toBe('forbidden');
   });
 });

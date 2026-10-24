@@ -2,8 +2,8 @@
 title: "B-90 — The CLI has no reads: every answer needs the dashboard behind a human Access login"
 id: B-90
 project: baton
-status: available
-updated: 2026-10-21
+status: in-progress
+updated: 2026-10-24
 tags:
   - roadmap-item
 order: 488
@@ -39,7 +39,8 @@ state without a browser; today's answer to a silent runner is guesswork or a hum
 2. The routes they read are the ones the dashboard serves (`/v1/ui/state`'s sources) behind
    the signed principal, no new core queries where an existing one serves.
 3. `baton run`'s startup uses `baton board`'s answer for B-86's "why I can never claim"
-   line.
+   line, and for B-86 item 1's declaration: the board answers `granted_capabilities` beside the
+   heartbeat, so a granted runner with no `--capabilities` declares its grant's capabilities.
 
 ### Tests
 
@@ -48,4 +49,22 @@ state without a browser; today's answer to a silent runner is guesswork or a hum
 
 ### Exit criteria
 
-- [ ] an operator with a key can see repositories, grants and the board from a terminal
+- [x] an operator with a key can see repositories, grants and the board from a terminal
+
+### Where
+
+Built on baton#108. The three routes read the dashboard's own sections (`uiRepo`, `admin.view`'s
+rows) behind the signed principal. Two fields are choices the ticket's "no new core queries where
+an existing one serves" forces an answer for, and both are kept deliberately:
+
+- `GET /v1/repositories/{repository}/board` carries `course_files`, each course's stored
+  `course.json` legs. No dashboard section serves it, but B-86's "why I can never claim" needs the
+  clause of a leg with nothing queued — exactly the leg no `queues` row shows.
+- The same board carries `granted_capabilities`, which the heartbeat's answer already names, so a
+  runner with no `--capabilities` declares its grant's declaration from one read (B-86 item 1).
+
+The tests are two levels on purpose: `test/unit/eligibility.test.ts` pins the clause logic and the
+startup default against a board typed to the route's fields, and `S-BTN-166` (both hosts) drives
+the real routes and a granted runner's declaration on the heartbeat it makes. The narrowed
+`--capabilities llm-call` case is unit-tested: this repository's fixture courses carry no
+`Requires:` clause, so no seeded ticket can starve on a narrower declaration.
