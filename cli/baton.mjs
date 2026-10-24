@@ -37,6 +37,9 @@
 //   baton owner -i KEY courier add REPO --key PUB --asks owner[,…]      (R-BTN-80: a personal courier)
 //   baton owner -i KEY courier revoke REPO FINGERPRINT
 //   baton owner -i KEY resolve REPO TICKET baton:retries|baton:stalled retry|park   (R-BTN-78)
+//   baton admin -i KEY repos                                         (B-90: the registry — one signed request, one JSON answer)
+//   baton owner -i KEY grants REPO                    (B-90: the repository's owners, grants, settings and bars in force)
+//   baton board -i KEY REPO                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
 //   baton ticket -i KEY history TICKET [--before ID] [--limit N]                    (R-BTN-81)
 //   baton decision list -i KEY [--watch | --all]
 //                — the CLI courier (R-BTN-80): claims the key's notices, prints them as text and
@@ -140,7 +143,18 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     const q = new URLSearchParams({ ...(flags.before ? { before: flags.before } : {}), ...(flags.limit ? { limit: flags.limit } : {}) });
     return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(ticket.slice(0, i))}/tickets/${encodeURIComponent(ticket.slice(i + 1))}/history${q.size ? `?${q}` : ''}` };
   }
+  if (role === 'board') {
+    // B-90: the board of one repository, as the dashboard reads it — a GET any key granted on the
+    // repository, an owner of it or an administrator signs.
+    parseArgs(argv, [], [], 1);
+    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(need(cmd, 'the repository id'))}/board` };
+  }
   if (role === 'admin') {
+    if (cmd === 'repos') {
+      // B-90: the registry, read-only.
+      parseArgs(rest, [], [], 0);
+      return { method: 'GET', path: '/v1/admin/repositories' };
+    }
     if (cmd === 'repo') {
       const [sub, target, ...more] = rest;
       if (sub === 'add') {
@@ -177,7 +191,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
         parseArgs(more, [], [], 0);
         return { method: 'POST', path: '/v1/admin/repositories', body: { id: need(target, 'the repository id'), retire: true } };
       }
-      throw new Error('baton admin repo add|set|retire');
+      throw new Error('baton admin repos | baton admin repo add|set|retire');
     }
     if (cmd === 'grant') {
       const { flags, positional } = parseArgs(rest, [], GRANT_FLAGS, 1);
@@ -214,9 +228,14 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       const { flags, positional } = parseArgs(rest.slice(1), [], ['serves', 'repositories'], 1);
       return { method: 'POST', path: '/v1/admin/instances', body: { name: need(positional[0], 'the instance name'), serves: need(list(flags.serves), '--serves'), repositories: list(flags.repositories) ?? [] } };
     }
-    throw new Error('baton admin repo|grant|probe|resource|instance|revoke|open');
+    throw new Error('baton admin repos|repo|grant|probe|resource|instance|revoke|open');
   }
   if (role === 'owner') {
+    if (cmd === 'grants') {
+      // B-90: the repository's owners, grants, settings and bars in force, read-only.
+      const { positional } = parseArgs(rest, [], [], 1);
+      return { method: 'GET', path: `/v1/owner/${encodeURIComponent(need(positional[0], 'the repository id'))}/grants` };
+    }
     if (cmd === 'grant') {
       const { flags, positional } = parseArgs(rest, [], GRANT_FLAGS, 1);
       return { method: 'POST', path: `/v1/owner/${need(positional[0], 'the repository id')}/grants`, body: grantBody(flags, readKey, {}) };
@@ -293,9 +312,9 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'POST', path: `/v1/owner/${encodeURIComponent(need(repo, 'the repository id'))}/tickets/${encodeURIComponent(local.includes(':') ? local : `${repo}:${local}`)}/resolve`,
         body: { decision: need(decision, 'the decision (baton:retries or baton:stalled)'), answer: need(answer, 'the answer (retry or park)') } };
     }
-    throw new Error('baton owner grant|revoke|owners|bar|settings|courier|resolve');
+    throw new Error('baton owner grants|grant|revoke|owners|bar|settings|courier|resolve');
   }
-  throw new Error('baton admin … | baton owner …');
+  throw new Error('baton admin … | baton owner … | baton board REPO');
 }
 
 const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier'];

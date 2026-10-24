@@ -12,10 +12,11 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileS
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { BatonApi, envAuth } from './api';
+import { BatonApi, BatonRefusal, envAuth } from './api';
 import { HARNESS_AGENTS, type Harness } from './harness';
 import { holdHome } from './home';
 import { GIT_NONINTERACTIVE_ENV } from '../defaults/course-markers';
+import { legClauses, neverClaimable } from './eligibility';
 import { Runner, stampLine, withTimestamps } from './runner';
 
 export interface RunArgs {
@@ -26,7 +27,10 @@ export interface RunArgs {
   repository: string;
   hostname: string;
   tier: string;
-  capabilities: string[];
+  /** B-86: the declaration `--capabilities` made, or null when the flag is absent — then the
+   * heartbeat declares the grant's capabilities (the server's answer carries them) and only a
+   * heartbeat before the first grants landing falls back to `agent-venue`. The flag narrows. */
+  capabilities: string[] | null;
   beatEvery: number;
   /** The one course this runner serves, of several the home checkout declares (R-BTN-131). */
   course?: string;
@@ -43,13 +47,14 @@ export interface RunArgs {
 /** `baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]
  * [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b] [--beat-every <ms>]
  * [--course <id>] [--test-harness] [--verbose]`.
- * Unknown flags are refused, never dropped. */
+ * `--capabilities` narrows what the runner's grant allows (B-86); without it it declares the
+ * grant's. Unknown flags are refused, never dropped. */
 export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): RunArgs {
   const out: RunArgs = {
     harness: 'opencode', home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
     session: env.BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
     repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? hostname(),
-    tier: 'critical', capabilities: ['agent-venue'], beatEvery: 2 * 60_000, testHarness: false, verbose: false,
+    tier: 'critical', capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -176,6 +181,38 @@ export function stopLine(runner: Pick<Runner, 'lastLine'> | null, signal: string
   return runner ? runner.lastLine(`stopping on ${signal}`) : `the runner stopped on ${signal} before its first claim`;
 }
 
+/** What a runner discovers before its first claim (B-86, B-90): the declaration it will start
+ *  with (the grant's capabilities, with nothing narrower named) and why it can never claim. */
+export interface Startup {
+  /** The capabilities the first heartbeat declares: `--capabilities`', or the grant's. */
+  declare: string[];
+  /** The one startup line, when the runner can never claim; null otherwise. */
+  line: string | null;
+}
+
+/** B-86 item 3, off `baton board`'s answer (B-90): a runner whose declaration can match none of
+ *  its course's legs says why in one line at startup instead of idling in silence — and one
+ *  with no `--capabilities` starts by declaring what its grant allows (B-86 item 1), the board
+ *  naming it because that key is granted on the repository. A board Baton refuses — a key
+ *  granted nowhere — is that runner's reason too, said in Baton's own words. Never fatal. */
+export async function startup(
+  api: Pick<BatonApi, 'boardView'>, a: Pick<RunArgs, 'repository' | 'capabilities'>, courseId: string,
+  clauses: (board: import('./eligibility').BoardView) => { leg: string; requires: string }[],
+): Promise<Startup> {
+  try {
+    const board = (await api.boardView(a.repository)) as import('./eligibility').BoardView;
+    const granted = board.granted_capabilities ?? null;
+    // B-86 item 1: no flag declares the grant's capabilities, which its board names; only a key
+    // no grant binds (a bearer token) starts at the standing venue.
+    const declare = a.capabilities ?? (granted?.length ? granted : ['agent-venue']);
+    const why = neverClaimable({ repository: a.repository, board, course: courseId, legs: clauses(board), declared: declare });
+    return { declare, line: why ? `baton: this runner can never claim: ${why}` : null };
+  } catch (e) {
+    if (!(e instanceof BatonRefusal)) return { declare: a.capabilities ?? ['agent-venue'], line: null };
+    return { declare: a.capabilities ?? ['agent-venue'], line: `baton: this runner can never claim: Baton refused the board of ${a.repository} (${e.code}: ${e.message})` };
+  }
+}
+
 /** B-94: the `exit` hook's line, and the log write it goes to. Injected so the hook is tested
  * directly; production passes its `log`. */
 export function exitHook(runner: Pick<Runner, 'lastLine'>, log: (l: string) => void): (code: number | undefined) => void {
@@ -259,10 +296,18 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   };
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
+  const api = new BatonApi({ url: a.url, transport: (req) => fetch(req), auth }, say);
+  // B-86 item 3, off `baton board`'s answer (B-90): a runner whose declaration can match none of
+  // its course's legs says why in one line at startup, instead of idling in silence.
+  const started = await startup(api, a, course.course, (board) => {
+    const queues = board.repository?.courses?.find((c) => c.id === course.course)?.queues ?? [];
+    return legClauses(board.course_files?.[course.course], queues);
+  });
+  if (started.line !== null) say(started.line);
   runner = new Runner({
-    api: new BatonApi({ url: a.url, transport: (req) => fetch(req), auth }, say),
+    api,
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
-    tierCeiling: a.tier, capabilities: a.capabilities,
+    tierCeiling: a.tier, capabilities: started.declare,
     courses: [course],
     stateFile: join(cacheDir(), `${a.session}.json`),
     beatEvery: a.beatEvery, log, verbose: a.verbose, // the Runner stamps its own lines under verbose

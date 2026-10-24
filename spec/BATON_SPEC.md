@@ -5168,6 +5168,9 @@ is summarized in the principal table (§12.1).
     | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise`, `await` | the local channel (R-BTN-106, R-BTN-160, R-BTN-162) | the runner |
     | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | the blocks routes (R-BTN-75) | owner, or runner granted on the repository |
     | `ticket history <ticket>` | `GET …/tickets/{ticket}/history` (R-BTN-81) | owner, or runner granted on the repository |
+    | `board <repository>` | `GET /v1/repositories/{repository}/board` (R-BTN-179) | owner, or runner granted on the repository |
+    | `admin repos` | `GET /v1/admin/repositories` (R-BTN-179) | administrator |
+    | `owner grants <repository>` | `GET /v1/owner/{repository}/grants` (R-BTN-179, R-BTN-146) | owner |
     | `decision list [--all] [--watch]` | `GET /v1/repositories/{repository}/conditions?open=1&person=1` (R-BTN-163) | owner, runner granted on the repository, or administrator |
     | `course test <root> <course> [--base <ref>] [--board <file>]` | local (R-BTN-69) | — |
     | `repo init`, with R-BTN-134's flags | local: writes files | — |
@@ -5403,6 +5406,21 @@ stated once, in the rule it cites.
 
 The repository reads (`GET /v1/repositories/{repository}/…`) are open to any key granted on the
 repository, its owners and administrators, except where a route's rule narrows them.
+
+- **R-BTN-179 (the state is readable with a key; B-90).** What the dashboard's state answers is
+  answered to a signed key too, by the same queries — one request, one JSON answer:
+  `GET /v1/admin/repositories` (administrators: the registry as `/v1/ui/state`'s
+  `repositories`); `GET /v1/owner/{repository}/grants` (its owners: that repository's `owners`,
+  `grants` and `settings`, and the bars in force or scheduled, R-BTN-146); and
+  `GET /v1/repositories/{repository}/board` (the repository reads' principals: the repository,
+  its `ready` tickets and `ready_by_tier`, each of its courses' `course.json` legs, and
+  `server_time`). A key outside the route's role is refused as this section says —
+  `forbidden`, or `unauthenticated` for a key Baton does not know. The CLI's
+  `baton admin repos`, `baton owner grants <repository>` and `baton board <repository>` are those
+  requests. The heartbeat's answer carries `granted_capabilities`, the capabilities the key's
+  grants allow, so a runner that names no `--capabilities` declares them (B-86) rather than the
+  standing venue alone, and its startup reads the board once to log, in one line, why it can
+  never claim (B-86 item 3).
 
 - **One role per key.** In a tenant every key holds exactly one role: administrator, owner,
   runner, check-runner, forge courier, instrument, sync or mirror. Registering a key that holds
@@ -6164,6 +6182,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-103 an MCP key's life | `--ttl 120`; a new read action; idle 8 days; minter revoked; `api_keys: false`; revoke | refused; not listed; dead (`401`); `401` while off; `confirm-required`, then dead |
 | S-BTN-124 MCP, sign-in, tokens | MCP hold edits; a replayed sign-in code; revoke all; token reuse, long TTL; destructive dashboard acts; polled-row eviction; an API key to `http`; an unverifying bearer naming an administrator's `bak_<id>` over `http`; an owner's session on its repository, on a foreign one and on an administrator route; an owner's code typed into `baton admin open`; the session's code confirmed by another owner key; the owner removed; `owner sessions revoke`; a session message of kind `handled`, and a `release` for a ticket the runner does not hold | only add-hold works; only the confirmed browser signs in; sessions ended; `unauthenticated`, `invalid-params`; `202 {confirm_code}` until the minting key confirms, Stop at once; oldest unbound dropped; key not sent; refused, nothing revoked; acts there, `forbidden`, `forbidden`; `not-found`; `not-found`; the session ended; every session of the key ended; `invalid-params`, `forbidden` |
 | S-BTN-126 API keys beside SSH keys | an API-key administrator, owner and runner beside an SSH runner | bearers on their own routes only; runner secret checked; sync and courier `unauthenticated`; one role per key (`conflict`); revocation next call; sign-in by code |
+| S-BTN-166 the state with a key | `baton admin repos`, `baton owner grants` and `baton board` on the seeded two-repository instance; an owner's key on its own repository and a foreign one; an administrator's key on an owner route; a granted worker key's board and heartbeat; an unknown key; a grant revoked | the registry's repositories, the repository's owners, grants and settings, the board's repository and ready sections, each one JSON answer; `forbidden` on the foreign repository and the administrator's key; the board answers and `granted_capabilities` names the grant's; `unauthenticated`; `forbidden` after the revoke |
 | **§16** | | |
 | S-BTN-14 mirror preconditions | a reap after `in-review`; a replay; a stale clone's git claim | no overwrite; no-op; reverted, holder kept |
 | S-BTN-16 cutover | an in-flight git claim at cutover; a clone that saw cutover offline; one session holding two git claims; two runners with one `session_name` on different hosts request one adoption; a silent legacy runner | imported legacy claim, adopted after an administrator confirms; no git claim; two legacy runners; `{pending: true}` to both, the confirmed one adopts, the other `forbidden`; not reaped before `reap_after` |
@@ -6573,6 +6592,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose to evaluate a runner's derived capabilities in the transaction of the write that changes them, and a reader's sets at its read after a program change, over a lazily refreshed cache, so advice is never older than the reader's last accepted write (2026-10-22; R-BTN-174).
 - Chose route choices attached to legs by the repository's own course entries, never by a course file or a source, so a standard course runs unchanged with or without an ontology (2026-10-22; R-BTN-177, R-BTN-134).
 - Chose to judge an ontology unit whole at each post, with no rate window, and to let a derived atom match no course's `values`, since the alarm's bounds already cap the cost of churn and an atom a course cannot require is inert (2026-10-22; R-BTN-174, R-BTN-175).
+- Chose the CLI's reads to return the dashboard's own queries behind the signed principal, with no new core query and no browser session, over a second read model: one answer per fact (R-BTN-1, R-BTN-179) (2026-10-24; B-90).
 - Chose `clingo-wasm` in `npm test` as the conformance oracle over a pip-installed clingo or another Datalog dialect: none is a standard with preferences or has better TypeScript tooling (2026-10-22; R-BTN-175).
 
 ## Open questions

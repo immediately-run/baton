@@ -636,6 +636,9 @@ export class BatonCore {
     if (p.startsWith('/v1/admin/')) {
       if (!admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is required (R-BTN-57)');
       const actor = `admin:${fp}`;
+      // B-90: the registry, for an operator or an agent with a key — no new query: the
+      // dashboard's own `uiState().repositories` answer.
+      if (m === 'GET' && p === '/v1/admin/repositories') return json(this.adminView());
       if (m === 'POST' && p === '/v1/admin/repositories') return json(await this.admin.repositories(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/probes') return json(await this.admin.addProbe(actor, await body()));
       // R-BTN-76: external resources, their account instances, and a reading by hand.
@@ -661,6 +664,8 @@ export class BatonCore {
     if (!this.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
     const actor = `owner:${fp}`;
     const rest = o[2];
+    // B-90: the repository's grants and settings, read before any write below.
+    if (m === 'GET' && rest === 'grants') return json(this.grantsView(repo));
     if (m === 'POST' && rest === 'grants') return json(await this.admin.grant(actor, repo, await body(), 'owner'));
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
     if (m === 'POST' && rg) return json(this.admin.revokeGrant(actor, repo, seg(rg[1])));
@@ -745,7 +750,10 @@ export class BatonCore {
     const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
     // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
     const history = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/history$/.exec(url.pathname);
-    if (req.method !== 'GET' || (!blocks && !blocked && !history)) return null;
+    // B-90: the dashboard's view of one repository, for the same principals — an administrator
+    // sees any, an owner its own, a granted key the repositories it is granted on.
+    const boardRead = /^\/v1\/repositories\/([^/]+)\/board$/.exec(url.pathname);
+    if (req.method !== 'GET' || (!blocks && !blocked && !history && !boardRead)) return null;
     const seg = (raw: string) => {
       try {
         return decodeURIComponent(raw);
@@ -753,7 +761,7 @@ export class BatonCore {
         throw new BatonError('invalid-params', 'a malformed path segment');
       }
     };
-    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history)![1]));
+    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? boardRead)![1]));
     if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
     let cred = req.headers.get('X-Baton-Credential');
     let role: 'admin' | 'owner' | 'worker' = 'worker';
@@ -771,6 +779,7 @@ export class BatonCore {
         throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
       }
     }
+    if (boardRead) return json(this.boardView(repo));
     if (history) {
       const raw = seg(history[2]);
       const id = raw.includes(':') ? raw : qualify(repo, raw);
@@ -1132,17 +1141,65 @@ export class BatonCore {
 
   // ── the dashboard's state (§14: Ready and Providers in rollout step 1) ─────────────────
 
+  /** One registered repository as `/v1/ui/state` lists it (B-90: `baton board` reads the same):
+   *  its own head and its own mode (R-BTN-47, R-BTN-28), and its courses with their queues. */
+  private uiRepo(repo: Repository) {
+    const sha = this.headOf(repo.id);
+    const head = sha ? this.sql('SELECT sha, parent_sha, received_at, ticket_count FROM board_snapshots WHERE repository_id = ? AND sha = ?', repo.id, sha)[0] ?? null : null;
+    const courses = this.courses.all().filter((c) => c.repository_id === repo.id).map(({ id, version, min_worker_version, skill }) => ({ id, version, min_worker_version, skill,
+        // R-BTN-79: the course's intake and each of its queues, for the Courses view.
+        intake: this.queues.intake(repo.id, id), queues: this.queues.legs(repo.id, id).map(({ leg, depth, max_queue }) => ({ leg, depth, max_queue })) }));
+    return { id: repo.id, github: repo.github, forge: repo.forge, web_base: repo.web_base, default_branch: repo.default_branch, weight: repo.weight, head, mode: this.workers.mode(repo.id), courses };
+  }
+
+  /** `GET /v1/repositories/{repository}/board` (B-90): the dashboard's view of one repository —
+   *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order —
+   *  behind a signed principal instead of a browser session. The same queries `uiState` runs;
+   *  nothing new is asked of the store. */
+  /** `GET /v1/admin/repositories` (B-90): the registry as the dashboard's state lists it, every
+   *  registered repository with its head, mode and courses. */
+  adminView() {
+    return { repositories: this.uiState().repositories };
+  }
+
+  /** `GET /v1/owner/{repository}/grants` (R-BTN-146, B-90): the repository's owner keys, the
+   *  grants on it, and its owners' settings — the dashboard's state's own reads, for its owners. */
+  grantsView(repo: string) {
+    const { limits } = this.uiState();
+    return {
+      repository: repo,
+      owners: limits.owners.filter((o) => o.repository_id === repo),
+      grants: limits.grants.filter((g) => g.repository_id === repo),
+      settings: limits.settings.find((s) => s.repository_id === repo) ?? null,
+      // R-BTN-67: the bars in force and scheduled, always carrying their repository's id.
+      bars: this.admin.bars([repo], this.now(), true),
+    };
+  }
+
+  boardView(repo: string) {
+    const state = this.uiState();
+    const repository = this.uiRepo(this.registry.get(repo)!);
+    // B-90/B-86: each course's `course.json` legs, so a runner can say which clauses its
+    // declaration can never meet (a leg with nothing queued has no row in `queues`).
+    const course_files = Object.fromEntries(repository.courses.map((c) => {
+      const file = this.sql<{ course_json: string }>('SELECT course_json FROM courses WHERE repository_id = ? AND id = ?', repo, c.id)[0];
+      const legs = file ? (JSON.parse(file.course_json) as { legs?: Record<string, unknown> }).legs ?? null : null;
+      return [c.id, legs ? { legs } : null];
+    }));
+    return {
+      repository,
+      course_files,
+      ready: state.ready.filter((r) => r.repository_id === repo),
+      ready_by_tier: Object.fromEntries(Object.entries(state.ready_by_tier).map(([tier, ids]) =>
+        [tier, (ids as string[]).filter((id) => id.startsWith(`${repo}:`))])),
+      server_time: state.server_time,
+    };
+  }
+
   uiState() {
     const now = this.now();
     // Each registered repository: its own head and its own mode (R-BTN-47, R-BTN-28).
-    const repositories = this.registry.all().map((repo) => {
-      const sha = this.headOf(repo.id);
-      const head = sha ? this.sql('SELECT sha, parent_sha, received_at, ticket_count FROM board_snapshots WHERE repository_id = ? AND sha = ?', repo.id, sha)[0] ?? null : null;
-      const courses = this.courses.all().filter((c) => c.repository_id === repo.id).map(({ id, version, min_worker_version, skill }) => ({ id, version, min_worker_version, skill,
-          // R-BTN-79: the course's intake and each of its queues, for the Courses view.
-          intake: this.queues.intake(repo.id, id), queues: this.queues.legs(repo.id, id).map(({ leg, depth, max_queue }) => ({ leg, depth, max_queue })) }));
-      return { id: repo.id, github: repo.github, forge: repo.forge, web_base: repo.web_base, default_branch: repo.default_branch, weight: repo.weight, head, mode: this.workers.mode(repo.id), courses };
-    });
+    const repositories = this.registry.all().map((repo) => this.uiRepo(repo));
     const where = new Map(repositories.map((r) => [r.id, r]));
     const items = this.sql<Record<string, SqlValue>>(
       // Ready: a ticket whose queued leg its sync posts ready (R-BTN-70), the interim post's

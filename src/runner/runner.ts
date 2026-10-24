@@ -35,7 +35,8 @@ export interface RunnerOptions {
   hostname: string;
   harness: 'opencode' | 'claude-code';
   session: string;
-  /** What the runner declares beside the required: capabilities and the tier ceiling. */
+  /** What the runner declares beside the required: capabilities and the tier ceiling. B-86:
+   *  `runMain` starts it at the grant's own capabilities when no `--capabilities` narrows them. */
   capabilities?: string[];
   tierCeiling?: string;
   courses: { course: string; version: number }[];
@@ -115,6 +116,8 @@ export class Runner {
   private ticking = false;
   /** R-BTN-14: a reaped worker re-keys on its next beat; the fresh secret until it lands. */
   private rekeySecret: string | null = null;
+  /** B-86: the grant's capabilities, learned from Baton, until they change; null until then. */
+  private declared: string[] | null = null;
   /** An end Baton never answered (the network went with the lease): retried on every beat. */
   private pendingEnd: { claimId: number; body: Record<string, unknown> } | null = null;
 
@@ -173,7 +176,9 @@ export class Runner {
     const spool = this.takeSpool();
     const body: Record<string, unknown> = {
       hostname: this.o.hostname, session_name: this.o.session, harness: this.o.harness, kind: 'vm',
-      billing: {}, capabilities: this.o.capabilities ?? ['agent-venue'], tier_ceiling: this.o.tierCeiling ?? 'critical',
+      // B-86: the declaration is the grant's unless a heartbeat learned it from Baton's answer,
+      // and the standing venue is only what a runner that never learned one falls back to.
+      billing: {}, capabilities: this.declared ?? this.o.capabilities ?? ['agent-venue'], tier_ceiling: this.o.tierCeiling ?? 'critical',
       ...(this.o.testHarness ? { test_harness: true } : {}),
       lease_timeout_s: s.lease_timeout_s ?? 900,
       courses: this.o.courses.map((c) => ({ repository: this.o.repository, course: c.course, version: c.version })),
@@ -212,6 +217,15 @@ export class Runner {
       throw e;
     }
     rmSync(spool.taken, { force: true });
+    // B-86 item 1: no `--capabilities` narrows nothing — the next heartbeat declares what the
+    // grant allows, the re-granted key's capabilities included, once Baton has named them.
+    if (this.o.capabilities === undefined) {
+      const allowed = answer.granted_capabilities;
+      if (Array.isArray(allowed) && allowed.length && JSON.stringify([...allowed].sort()) !== JSON.stringify(this.declared && [...this.declared].sort())) {
+        if (this.declared) this.log(`baton: the grant now allows ${[...allowed].sort().join(', ')} — declaring that from the next heartbeat`);
+        this.declared = [...allowed];
+      }
+    }
     if (this.rekeySecret) {
       // The re-key landed: the new secret serves from here (R-BTN-14), and the new incarnation
       // starts on a fresh lease — the old flag fenced a claim the reap already took.
