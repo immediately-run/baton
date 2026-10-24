@@ -2,8 +2,8 @@
 title: "B-91 — A fresh deployment seeds a registered repository without its owner keys"
 id: B-91
 project: baton
-status: available
-updated: 2026-10-21
+status: in-progress
+updated: 2026-10-24
 tags:
   - roadmap-item
 order: 489
@@ -45,5 +45,18 @@ The divergence is invisible until the day it matters.
 
 ### Exit criteria
 
-- [ ] a rebuilt instance serves the owner CLI without a manual re-add
-- [ ] a seed-only registration is named in a read
+- [x] a rebuilt instance serves the owner CLI without a manual re-add
+- [x] a seed-only registration is named in a read
+
+## Status
+
+_implemented 2026-10-24 — the seed's `owner_keys` (both wrangler.toml environments carry `baton`'s), `seed_owners` in `GET /v1/admin/repositories`, and the runbook's check; PR open._
+- **Deviations.** Item 3 is the runbook's *check*, below, in this repository's copy
+  (`docs/runbooks/register-baton.mdx`, the `docs` content this repository carries); the `docs`
+  repository's copy of the runbook was not changed — no PR there.
+- **B-90.** `GET /v1/admin/repositories` (B-90) is not on `main`; B-91's read is built on branch
+  `claude/B-90-cli-reads` (`f497d06`), and its PR merges before this one.
+- **Not checked live:** no deployed instance was rebuilt for this ticket; a fresh local instance
+  with `wrangler.toml`'s own entry stands in (test/integration/B-91.seed-owners.test.ts). The
+  owner key seeded is `~/.ssh/baton_repo_owner.pub`; if that is not the key `admin repo add` used,
+  replace it with that `.pub`'s line before this merges.
