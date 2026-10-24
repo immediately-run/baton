@@ -2,8 +2,8 @@
 title: "B-91 — A fresh deployment seeds a registered repository without its owner keys"
 id: B-91
 project: baton
-status: available
-updated: 2026-10-21
+status: in-progress
+updated: 2026-10-24
 tags:
   - roadmap-item
 order: 489
@@ -12,7 +12,8 @@ description: "BATON_REPOSITORIES carries a subset of what admin repo add wrote: 
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/109
 depends_on: []
 ---
 
@@ -45,5 +46,45 @@ The divergence is invisible until the day it matters.
 
 ### Exit criteria
 
-- [ ] a rebuilt instance serves the owner CLI without a manual re-add
-- [ ] a seed-only registration is named in a read
+- [x] a rebuilt instance serves the owner CLI without a manual re-add
+- [x] a seed-only registration is named in a read
+
+## Status
+
+_implemented 2026-10-24 — the seed's `owner_keys` (both wrangler.toml environments carry `baton`'s), `seed_owners` in `GET /v1/admin/repositories`, and the runbook's check; PR #109 (on PR #108's branch)._
+- **Deviations.** Item 3 is the runbook's *check*, below, in this repository's copy
+  (`docs/runbooks/register-baton.mdx`, the `docs` content this repository carries); the `docs`
+  repository's copy of the runbook was not changed — no PR there. B-91's tests are
+  `test/unit/seed-owners.test.ts` and `test/unit/seed-owners-fresh.test.ts`, not the
+  `registry.test.ts` "Tests" names — none is a scenario, since a fresh instance needs the store
+  emptied and the seed given what `BatonCore.start` reads.
+- **Round one** (PR #109): `seedOwnerKeys` writes *every* key of an entry (the guard moved out of
+  the key loop), parses and checks every key of every entry before its first write and writes in
+  one transaction; `seed_owners` is the registrations whose live owners are all `admin:seed` (or
+  that have none) — a correctly seeded repository is named, so the runbook's check tells a seed
+  missing its `owner_keys` apart by the answer's empty `owners`; `seed-owners-fresh.test.ts` is
+  out of Workers' tsconfig and into the local one; the cloudflare test project spreads its bindings
+  last. Commit `adb3ad8`.
+- **B-90.** B-91's read extends `GET /v1/admin/repositories` (B-90, PR #108): this branch is based
+  on it, so #108 merges first — this PR's base is B-90's branch.
+- **Round two** (PR #109, finding 1): `seedOwnerKeys` parses and checks every key of every entry
+  before the ownership guard, so a seed that would stop a rebuild stops the start that finds the
+  repository already owned — the guard now only keeps the write loop off. The revoked check keeps
+  its any-revoked-row reach on purpose, and says so where a reader would narrow it. New test: an
+  owned repository's entry naming an administrator's key, a worker's, a line that is no key, or a
+  revoked owner is refused and leaves the owner it has. Finding 2: `ownerlessSeed` is `testVars`
+  — it takes back `ACCESS_AUD`/`OWNER_EMAILS` as round one did, so both projects run the test
+  audience and `owner@example.com`; the bindings still spread last. Finding 5: the runbook's
+  check is the pair — the repository in `seed_owners` **and** its owners in the same answer —
+  with the one-liner that prints it.
+- **Not checked live:** no deployed instance was rebuilt for this ticket; a fresh local instance
+  with `wrangler.toml`'s own entry stands in (test/unit/seed-owners-fresh.test.ts). The owner key
+  seeded is `ssh-ed25519 …+jdf`, `SHA256:iY5pLxsv05FQfhNZdEQrr8NwkZWdaqN5DcOwkkSTOZY`, the
+  content of `~/.ssh/baton_repo_owner.pub` on the owner's machine. Round two, finding 3: whether
+  the deployed instance was registered with that key or another cannot be read from a fresh
+  instance or decided here — `GET /v1/admin/repositories` (B-90) answers only once B-90's PR is
+  deployed, and this B-90 route answers `not-found` on the deployed instance today. Confirm with
+  the fingerprint
+  (`ssh-keygen -lf ~/.ssh/baton_repo_owner.pub` against the line in `wrangler.toml`) before this
+  merges, or replace the entry's line with the `.pub` `admin repo add` took; the runbook's step 3
+  now names the fingerprint as the key's identity.

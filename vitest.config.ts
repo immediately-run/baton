@@ -43,6 +43,24 @@ function wranglerVars(): Record<string, string> {
   return Object.fromEntries([...block.matchAll(/^([A-Z_]+) = (?:"([^"]*)"|'([^']*)')$/gm)].map((m) => [m[1], m[2] ?? m[3]]));
 }
 
+/** §13a: tests run on an instance whose repositories have no owners — a test's own owner key is
+ *  the one it registers (B-91's seed makes an installed deployment's repository owned from its
+ *  first start; B-91's own test runs `wrangler.toml`'s entry). Two groups of vars go: the seed's
+ *  `owner_keys`, and the Access settings `wrangler.toml` carries for the deployed instance —
+ *  `ACCESS_AUD` and `OWNER_EMAILS` are its application's and its one owner's, not the test
+ *  instance's (R-BTN-16: a token this file's `bindings` signs is checked against the test
+ *  audience, and `owner@example.com` is the only owner a test signs as). Every other var
+ *  `wrangler.toml` sets is the instance's own. */
+function testVars(vars: Record<string, string>): Record<string, string> {
+  const out = { ...vars };
+  if (out.BATON_REPOSITORIES) {
+    out.BATON_REPOSITORIES = JSON.stringify((JSON.parse(out.BATON_REPOSITORIES) as Record<string, unknown>[]).map(({ owner_keys: _o, ...entry }) => entry));
+  }
+  out.ACCESS_AUD = 'baton-test-aud';
+  out.OWNER_EMAILS = 'owner@example.com';
+  return out;
+}
+
 /** Schema migrations and the dashboard load as text, as wrangler's Text rule bundles them. */
 const textModules: Plugin = {
   name: 'baton-text-modules',
@@ -57,7 +75,7 @@ const textModules: Plugin = {
 /** The tests only the local project runs: they need Node (the request queue, the file scan,
  *  the runner's leg child processes, the model replay). It also runs every integration scenario
  *  and the mirror's unit tests (S-BTN-14's server half). */
-const NODE_ONLY = ['test/unit/local-queue.test.ts', 'test/unit/boundary-host.test.ts', 'test/unit/cli.test.ts', 'test/model/replay.test.ts', 'test/unit/check-traces.test.ts', 'test/unit/runner-main.test.ts', 'test/unit/runner-bundle.test.ts', 'test/integration/S-BTN-41.runner.test.ts', 'test/unit/test-course.test.ts', 'test/unit/stats-size.test.ts', 'test/integration/S-BTN-43.defaults.test.ts', 'test/unit/defaults-cli.test.ts', 'test/unit/standard-courses.test.ts', 'test/unit/course-markers.test.ts', 'test/unit/bounded-git.test.ts', 'test/integration/S-BTN-104.standard-courses.test.ts', 'test/integration/S-BTN-105.course-sources.test.ts', 'test/integration/S-BTN-106.cross-repo-prs.test.ts', 'test/integration/S-BTN-107.build-app-course.test.ts'];
+const NODE_ONLY = ['test/unit/local-queue.test.ts', 'test/unit/boundary-host.test.ts', 'test/unit/cli.test.ts', 'test/model/replay.test.ts', 'test/unit/check-traces.test.ts', 'test/unit/runner-main.test.ts', 'test/unit/runner-bundle.test.ts', 'test/integration/S-BTN-41.runner.test.ts', 'test/unit/test-course.test.ts', 'test/unit/stats-size.test.ts', 'test/integration/S-BTN-43.defaults.test.ts', 'test/unit/defaults-cli.test.ts', 'test/unit/standard-courses.test.ts', 'test/unit/course-markers.test.ts', 'test/unit/bounded-git.test.ts', 'test/integration/S-BTN-104.standard-courses.test.ts', 'test/integration/S-BTN-105.course-sources.test.ts', 'test/integration/S-BTN-106.cross-repo-prs.test.ts', 'test/integration/S-BTN-107.build-app-course.test.ts', 'test/unit/seed-owners-fresh.test.ts'];
 /** `BATON_SKIP_QUINT=1` (`npm run test:no-quint`, what hosted CI runs) leaves out the one test
  *  that runs quint, the model-drawn replay (R3-1244); `npm test` and `npm run model:full` run it. */
 const QUINT_TESTS = process.env.BATON_SKIP_QUINT === '1' ? ['test/model/replay.test.ts'] : [];
@@ -97,7 +115,10 @@ export default defineConfig({
   test: {
     projects: [
       {
-        plugins: [cloudflareTest(async () => ({ wrangler: { configPath: './wrangler.toml' }, miniflare: { bindings } }))],
+        // B-91: `testVars` — the same vars, no seeded owner keys, and the test Access audience
+        // and owner. The bindings come last: miniflare's merge lets the second argument win, as
+        // the local project's spread does.
+        plugins: [cloudflareTest(async () => ({ wrangler: { configPath: './wrangler.toml' }, miniflare: { bindings: { ...testVars(wranglerVars()), ...bindings } } }))],
         resolve: { alias: host('cloudflare') },
         test: {
           name: 'cloudflare',
@@ -117,7 +138,7 @@ export default defineConfig({
           setupFiles: ['./test/setup.ts'],
           include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...NODE_ONLY],
           exclude: [...configDefaults.exclude, ...QUINT_TESTS],
-          provide: { localConfig: { ...wranglerVars(), ...bindings } },
+          provide: { localConfig: { ...testVars(wranglerVars()), ...bindings } },
         },
       },
     ],
