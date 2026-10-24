@@ -59,6 +59,31 @@ describe('parseSyncArgs', () => {
   });
 });
 
+describe('remoteSlug — a checkout without origin is null and silent (B-93, S-BTN-159)', () => {
+  it('an origin-less repository is null, and nothing is thrown; a remote still reads its slug', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-slug-'));
+    try {
+      // 2026-10-21: git's `error: No such remote 'origin'` reached the operator's log while the
+      // sync went on to succeed — a line that reads like a failure and is not one. The null is
+      // the whole answer now: git's complaint to its own stderr is no exception and no message.
+      gitInit(dir);
+      let slug: string | null = 'unasked';
+      expect(() => { slug = remoteSlug(dir); }).not.toThrow();
+      expect(slug).toBeNull();
+      // A remote reads as before.
+      execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'git@github.com:immediately-run/baton.git'], { stdio: 'ignore' });
+      expect(remoteSlug(dir)).toBe('immediately-run/baton');
+      // The proxy's `…/git/owner/name` form keeps its `git/` stripped, and an owner named git keeps its name.
+      execFileSync('git', ['-C', dir, 'remote', 'set-url', 'origin', 'https://baton.immediately.run/git/o/r.git'], { stdio: 'ignore' });
+      expect(remoteSlug(dir)).toBe('o/r');
+      execFileSync('git', ['-C', dir, 'remote', 'set-url', 'origin', 'https://github.com/git/git.git'], { stdio: 'ignore' });
+      expect(remoteSlug(dir)).toBe('git/git');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('splitWords — agent_command splits as sh would, quotes and no substitutions (B-84)', () => {
   /** Every row with `sh: true` is pure quoting, so real `sh` must split it into exactly the same
    * words. Rows without it use `$`, newlines or continuations where sh would substitute, split
