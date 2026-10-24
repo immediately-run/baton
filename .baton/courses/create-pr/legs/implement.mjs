@@ -1,4 +1,4 @@
-// ../../baton-bundle-gFwnBA/entry.ts
+// ../../baton-bundle-hSbtVW/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync as readFileSync2, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -277,7 +277,7 @@ function verifyPrOpen(ask, run2) {
   throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
 }
 
-// ../../baton-bundle-gFwnBA/entry.ts
+// ../../baton-bundle-hSbtVW/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, ...opts });
