@@ -43,6 +43,22 @@ function wranglerVars(): Record<string, string> {
   return Object.fromEntries([...block.matchAll(/^([A-Z_]+) = (?:"([^"]*)"|'([^']*)')$/gm)].map((m) => [m[1], m[2] ?? m[3]]));
 }
 
+/** §13a: tests run on an instance whose repositories have no owners — a test's own owner key is
+ *  the one it registers (B-91's seed makes an installed deployment's repository owned from its
+ *  first start; B-91's own test runs `wrangler.toml`'s entry). */
+function ownerlessSeed(vars: Record<string, string>): Record<string, string> {
+  const out = { ...vars };
+  if (out.BATON_REPOSITORIES) {
+    out.BATON_REPOSITORIES = JSON.stringify((JSON.parse(out.BATON_REPOSITORIES) as Record<string, unknown>[]).map(({ owner_keys: _o, ...entry }) => entry));
+  }
+  // This instance's own Access settings (wrangler.toml) land after this file's bindings: taking
+  // them back keeps the test team's keys and the test audience the ones a test's Access token
+  // carries, and leaves only `owner@example.com` an owner (R-BTN-16).
+  out.ACCESS_AUD = 'baton-test-aud';
+  out.OWNER_EMAILS = 'owner@example.com';
+  return out;
+}
+
 /** Schema migrations and the dashboard load as text, as wrangler's Text rule bundles them. */
 const textModules: Plugin = {
   name: 'baton-text-modules',
@@ -97,7 +113,8 @@ export default defineConfig({
   test: {
     projects: [
       {
-        plugins: [cloudflareTest(async () => ({ wrangler: { configPath: './wrangler.toml' }, miniflare: { bindings } }))],
+        // B-91: `ownerlessSeed` — the same vars, and no seeded owner keys.
+        plugins: [cloudflareTest(async () => ({ wrangler: { configPath: './wrangler.toml' }, miniflare: { bindings: { ...bindings, ...ownerlessSeed(wranglerVars()) } } }))],
         resolve: { alias: host('cloudflare') },
         test: {
           name: 'cloudflare',
@@ -117,7 +134,7 @@ export default defineConfig({
           setupFiles: ['./test/setup.ts'],
           include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...NODE_ONLY],
           exclude: [...configDefaults.exclude, ...QUINT_TESTS],
-          provide: { localConfig: { ...wranglerVars(), ...bindings } },
+          provide: { localConfig: { ...ownerlessSeed(wranglerVars()), ...bindings } },
         },
       },
     ],

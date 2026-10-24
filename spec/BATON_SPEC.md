@@ -527,6 +527,18 @@ repository reachable over SSH is enough (R-BTN-105).
   Only an administrator registers, changes or retires a repository, with its first owner keys
   (`POST /v1/admin/repositories`, R-BTN-57). A change never alters `forge`; it changes the
   forge path only by R-BTN-138's rules.
+
+  - **The seed (B-91).** `BATON_REPOSITORIES` seeds the registry at start, insert-only, through
+    the same validation: each entry is a registration (`POST /v1/admin/repositories`' body,
+    §11) less its `owner_keys`, or **with** them — the owner keys the administrator registered
+    the repository with (R-BTN-58), written at start as that repository's owners,
+    `added_by: admin:seed`, so a rebuilt instance serves the owner CLI with no manual re-add
+    (S-BTN-30's owner routes). A seeded repository that already has owners at start keeps them,
+    and the seed writes the entry's keys only where that repository has none. An entry that
+    names no `owner_keys` still registers its repository — its owners are added by an
+    administrator. A malformed entry stops the start before any entry registers. A key the
+    seed writes holds no other role, as one the administrator's route takes (R-BTN-57): one
+    that does stops the start `conflict`.
   - **Home.** Every ticket belongs to one registered repository, its **home**. Baton's API,
     events and dashboard name a ticket by its qualified id `<repository id>:<local id>`
     (`docs:R3-1205`); runners, branch names and git use the local id. Two repositories may

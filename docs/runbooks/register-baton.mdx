@@ -68,8 +68,18 @@ node cli/baton.mjs admin -i ~/.ssh/baton_admin repo add immediately-run/baton --
 - Leave out `--cut-over`: step 6 cuts over from the dashboard once a sync and a worker work.
 - `--weight N` sets the share of claims among repositories; the default is fine to start.
 - Registration is insert-only. To make a fresh deployment know the repository too, add the same
-  entry to `BATON_REPOSITORIES` in `wrangler.toml` (both environments) in a PR:
-  `{"id":"baton","github":"immediately-run/baton","default_branch":"main","sync_workflow":".github/workflows/baton-sync.yml"}`.
+  entry to `BATON_REPOSITORIES` in `wrangler.toml` (both environments) in a PR, `--owner-key` and
+  all — the entry carries `owner_keys`, the owner keys `admin repo add` wrote, so a rebuilt
+  instance serves the owner CLI with no manual re-add (B-91):
+  `{"id":"baton","github":"immediately-run/baton","default_branch":"main","sync_workflow":".github/workflows/baton-sync.yml","owner_keys":["<~/.ssh/baton_owner_baton.pub, as one line>"]}`.
+  The owner a seed registers is `added_by: admin:seed`; one an owner or an administrator adds
+  later is not the seed's.
+
+→ Check, in the same PR: every entry of `BATON_REPOSITORIES` that this step registered carries
+`owner_keys`, and `node cli/baton.mjs admin -i ~/.ssh/baton_admin repos` names no repository this
+step registered under `seed_owners` — a name there is a registration whose owner keys only the
+deploy has, or has none at all, and its owner CLI stops working on a rebuilt instance. The PR is
+not ready while a name it should not have is listed.
 
 Check: the dashboard lists `baton` under the repositories, with no board yet.
 

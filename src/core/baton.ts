@@ -121,6 +121,9 @@ export class BatonCore {
   async start(): Promise<void> {
     this.migrate();
     this.store.transaction(() => this.registry.seed(this.ports.config));
+    // B-91: the seed's owner keys (R-BTN-58) need their fingerprints, an await, so they follow
+    // the registration: a rebuilt instance serves its owners without anyone re-adding them.
+    await this.registry.seedOwnerKeys(this.ports.config, await this.admin.adminFingerprints());
     await this.registry.seedSyncKeys(this.ports.config, this.ports.adminKeys.list());
     await this.seedKeys();
     if ((await this.ports.scheduler.get()) == null) await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
@@ -1156,12 +1159,6 @@ export class BatonCore {
    *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order —
    *  behind a signed principal instead of a browser session. The same queries `uiState` runs;
    *  nothing new is asked of the store. */
-  /** `GET /v1/admin/repositories` (B-90): the registry as the dashboard's state lists it, every
-   *  registered repository with its head, mode and courses. */
-  adminView() {
-    return { repositories: this.uiState().repositories };
-  }
-
   /** `GET /v1/owner/{repository}/grants` (R-BTN-146, B-90): the repository's owner keys, the
    *  grants on it, and its owners' settings — the dashboard's state's own reads, for its owners. */
   grantsView(repo: string) {
@@ -1194,6 +1191,14 @@ export class BatonCore {
         [tier, (ids as string[]).filter((id) => id.startsWith(`${repo}:`))])),
       server_time: state.server_time,
     };
+  }
+
+  /** `GET /v1/admin/repositories` (B-90, R-BTN-179): the registry as the dashboard's state lists
+   *  it, and (B-91) the repositories whose owner keys came from BATON_REPOSITORIES alone. */
+  adminView() {
+    const { repositories, limits } = this.uiState();
+    const seedOwners = limits.seed_owners as string[];
+    return { repositories, ...(seedOwners.length ? { seed_owners: seedOwners } : {}) };
   }
 
   uiState() {
