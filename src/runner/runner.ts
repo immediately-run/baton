@@ -737,7 +737,9 @@ export class Runner {
       detached: true, stdio: ['pipe', 'ignore', this.verbose ? 'pipe' : 'ignore'],
       env: childEnv,
     });
-    if (this.verbose) child.stderr?.on('data', (c: Buffer) => this.log(`baton: ${leg} stderr: ${String(c).trimEnd()}`));
+    // B-108's streaming half: the leg child's stderr carries the stub's own verbose lines and
+    // its mirror of the agent's two streams — line-drained, every line timestamped.
+    if (this.verbose) drainLines(child.stderr!, (l) => this.log(`baton: ${leg}: ${l}`));
     const inflight = this.inflight!;
     inflight.child = { process: child, resultPath, ctxPath };
     let done = false;
@@ -853,6 +855,24 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /** B-23's slice (the owner, 2026-10-23): every log line carries the time it was written —
  * an ISO 8601 instant, one timezone-free spelling on every machine. */
 export const stampLine = (line: string): string => `${new Date().toISOString()} ${line}`;
+
+/** B-108's streaming half (2026-10-24): drain a leg child's stream line by line into the log —
+ * chunks are not line-aligned and a stamp per chunk would land mid-prose, so a buffer holds the
+ * partial tail until its newline arrives (the stream's end flushes it; empty lines are dropped,
+ * keeping the log tight). */
+export const drainLines = (stream: NodeJS.ReadableStream, emit: (line: string) => void): void => {
+  let tail = '';
+  stream.on('data', (c) => {
+    tail += String(c);
+    let at: number;
+    while ((at = tail.indexOf('\n')) >= 0) {
+      const line = tail.slice(0, at);
+      tail = tail.slice(at + 1);
+      if (line.trim() !== '') emit(line);
+    }
+  });
+  stream.on('end', () => { if (tail.trim() !== '') emit(tail); });
+};
 export const withTimestamps = (log: (line: string) => void): ((line: string) => void) =>
   (line) => log(stampLine(line));
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));

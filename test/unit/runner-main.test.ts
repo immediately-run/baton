@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { declareCourses, fetchMain, parseRunArgs, runMain, runnerCourse } from '../../src/runner/main';
-import { withTimestamps } from '../../src/runner/runner';
+import { drainLines, withTimestamps } from '../../src/runner/runner';
 import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { envAuth } from '../../src/runner/api';
 import { courseOf, dropCourse, freshSecret, holdHome, loadCourse } from '../../src/runner/home';
@@ -283,5 +283,20 @@ describe('withTimestamps (verbose logging)', () => {
     log('two\nlines');
     expect(lines[0]).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z baton: claimed baton:B-9 at filed, queued leg implement$/);
     expect(lines[1]).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z two\nlines$/);
+  });
+});
+
+describe('drainLines (the leg stream forwarder)', () => {
+  it('emits whole lines whatever the chunking, flushes the tail, drops empties', async () => {
+    const { PassThrough } = await import('node:stream');
+    const stream = new PassThrough();
+    const lines: string[] = [];
+    drainLines(stream, (l) => lines.push(l));
+    stream.write('working on B-9');           // no newline yet — waits
+    stream.write(' line one\nline two');       // completes one, starts another
+    stream.write('\n\n');                     // an empty line drops
+    stream.end('the tail without a newline');  // flushed at the end
+    await new Promise((r) => stream.on('end', r));
+    expect(lines).toEqual(['working on B-9 line one', 'line two', 'the tail without a newline']);
   });
 });

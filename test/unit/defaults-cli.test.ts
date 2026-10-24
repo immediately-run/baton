@@ -522,6 +522,43 @@ describe('baton repo init, through the built CLI', () => {
     }
   }, 60_000);
 
+  it('the stub mirrors the agent\'s two streams to its stderr under BATON_VERBOSE, and keeps the agent\'s last stderr line in a failure (2026-10-24)', async () => {
+    const agent = join(root, 'noisy.sh');
+    writeFileSync(agent, '#!/bin/sh\necho "line one"\necho "to stderr" >&2\necho "line two"\necho done\n');
+    chmodSync(agent, 0o755);
+    const settingsFile = join(root, '.baton', 'baton.json');
+    const before = readFileSync(settingsFile, 'utf8');
+    const fix = join(root, '.baton', 'courses', 'create-pr', 'legs', 'fix.mjs');
+    const wrote: string[] = [];
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation((c) => { wrote.push(String(c)); return true; });
+    try {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(before), agent_command: agent }));
+      const snapshot = { sha: commitAll(root) };
+      process.env.BATON_VERBOSE = '1';
+      try {
+        expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'review' });
+        expect(wrote.join('')).toContain('agent_command: ' + agent);
+        expect(wrote.join('')).toContain('line one\n');
+        expect(wrote.join('')).toContain('to stderr\n');
+      } finally {
+        delete process.env.BATON_VERBOSE;
+      }
+      // Without the flag the streams are silent; the answer protocol is untouched either way.
+      wrote.length = 0;
+      expect(await (await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot })).toEqual({ reached: 'fixed', next: 'review' });
+      expect(wrote.join('')).not.toContain('line one');
+      // A failing agent's last stderr line names why it died.
+      writeFileSync(agent, '#!/bin/sh\necho "boom: no quota left" >&2\nexit 3\n');
+      const fail = { sha: commitAll(root) };
+      await expect((await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: fail })).rejects.toThrow('exited with code 3: boom: no quota left');
+    } finally {
+      err.mockRestore();
+      writeFileSync(settingsFile, before);
+      rmSync(agent, { force: true });
+      commitAll(root);
+    }
+  });
+
   it('the stub hands the agent its instructions in a temp file it removes; deleted instructions run with none; any other failure — the temp dir, the probe — stops the leg', async () => {
     const agent = join(root, 'agent.sh');
     writeFileSync(agent, '#!/bin/sh\necho "$BATON_INSTRUCTIONS" > "$(dirname "$0")/agent.instr"\ntest -z "$BATON_INSTRUCTIONS" || head -1 "$BATON_INSTRUCTIONS" >> "$(dirname "$0")/agent.instr"\n');
