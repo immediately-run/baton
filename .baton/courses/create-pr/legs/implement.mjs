@@ -1,4 +1,4 @@
-// ../../baton-bundle-hSbtVW/entry.ts
+// ../../baton-bundle-9Na4nx/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync as readFileSync2, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -277,7 +277,7 @@ function verifyPrOpen(ask, run2) {
   throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
 }
 
-// ../../baton-bundle-hSbtVW/entry.ts
+// ../../baton-bundle-9Na4nx/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, ...opts });
@@ -368,8 +368,8 @@ async function standard(ctx) {
         resolve(so);
         return;
       }
-      const why = se.split("\n").filter((l) => l.trim() !== "").at(-1);
-      reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + (why != null ? ": " + why : "")));
+      const tail = (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
+      reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + "; its last output:\n  " + tail));
     });
     child.stdin?.end();
   }).finally(() => {
@@ -377,6 +377,7 @@ async function standard(ctx) {
   });
   void out;
   await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+  if (process.env.BATON_VERBOSE) process.stderr.write("baton: create-pr/implement ticket " + ctx.ticket.id + ": the forge verified an open PR on a branch matching " + patterns.join(" or ") + "\n");
   return { reached: "pr-open", next: "review" };
 }
 var close = prClose;
