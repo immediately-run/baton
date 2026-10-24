@@ -53,6 +53,9 @@ export interface Workflow {
   repository: string;
   /** `unblocked`: the repository's unblocked trigger (R-BTN-77), carrying `tickets`. */
   kind: 'sync' | 'mirror' | 'unblocked';
+  /** B-89: a sync Baton's own webhook path sends — a merge, the alarm, a delivery naming the
+   *  repository's tickets — is sent whatever the repository's mode, as `unblocked` is. */
+  own?: boolean;
   tickets?: unknown[];
 }
 export interface DispatchTarget {

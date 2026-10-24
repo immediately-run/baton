@@ -81,12 +81,28 @@ secret.
 
 1. A ticket source for this repository's MDX tickets: `.baton/tickets.mjs` over `tickets/` and
    `tickets/archive/`, or R3-1249's default source taught `.mdx` and the folder (R3-1266).
-2. `.github/workflows/baton-sync.yml`: on a push to `main` that touches `tickets/**` or `.baton/**`,
-   on `workflow_dispatch`, and every 15 minutes; `permissions: id-token: write`; it runs
-   `baton sync` at the CLI version it pins. `baton init` (R3-1249) writes it.
+2. `.github/workflows/baton-sync.yml`: on a push to `main`, on `workflow_dispatch` — which
+   Baton's webhook path dispatches for a merge and the alarm for a stale board — and every 15
+   minutes; `permissions: id-token: write`; it runs `baton sync` at the CLI version it pins.
+   `baton init` (R3-1249) writes it.
 
 Check: `gh workflow run baton-sync.yml -R immediately-run/baton` goes green, and the dashboard
-shows the `baton` board with the live tickets and the next available one.
+shows the `baton` board with the live tickets and the next available one. A run that posted
+nothing is never silent (B-89): a failed post fails its step, and a `busy` run — another run's
+reading in flight — ends with a warning saying the board is held, never a silent pass. Not every
+one of those is red: a `busy` or `held` run ends green whenever the CLI it runs exits 0 for it —
+this repository's pin does for `busy` — and its warning is what says nothing was posted. Read
+the outcome line (`baton: advanced|confirmed at …`), not just the check mark. A run that waits a
+minute and retries once arrives with the CLI release the workflow pins; until the pin carries
+`--busy-retry`, a `busy` run over the old CLI still exits 0, and the annotation is what tells
+you.
+
+The schedule is the backstop, and it is not assumed to fire (§7.1): the App's `pull_request`
+deliveries reach Baton, so a merge of `main` dispatches this workflow (at most one such dispatch
+every 15 minutes — `main` moves itself a dozen times a day), and Baton's alarm dispatches one when
+the repository's last webhook-driven sync is over 10 minutes old. Both are visible as
+`workflow_dispatch` runs in the list beside the `schedule` ones; a day with no dispatch at all is
+the webhook path down, as a day with no scheduled run is GitHub's cron not firing.
 
 ## 5. Workers
 

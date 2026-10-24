@@ -19,6 +19,9 @@ export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 export const MAX_DELIVERY = 25 << 20;
 export const DISPATCH_WINDOW_MS = 30_000;
 export const DELIVERY_TTL_MS = 24 * 3_600_000;
+/** B-89: how stale a repository's last webhook-driven sync may be before the alarm sends
+ *  another — the backstop on the path that reaches Baton, as R-BTN-62's is on the numbers. */
+export const SYNC_STALE_MS = 10 * 60_000;
 /** The mirror's commit identity (§12): its pushes are Baton's own work. */
 export const MIRROR_EMAIL = 'baton-mirror@immediately.run';
 export const ACTIONS_BOT = 'github-actions[bot]';
@@ -30,6 +33,8 @@ export interface Delivery {
   repository: string;
   /** `workflow_run.path`, for a workflow_run. */
   workflow_path?: string;
+  /** `pull_request.merged`, for a pull_request (B-89: a merge moved the default branch). */
+  merged?: boolean;
   /** `pusher.name` and `head_commit.author.email`, for a push (the email null when the push
    *  has no head commit, as a branch deletion has none). */
   pusher?: string;
@@ -71,8 +76,9 @@ const at = (o: unknown, k: string): unknown => (o !== null && typeof o === 'obje
 /**
  * The one parser: R-BTN-73's fields of a verified delivery, or null for one to drop — an event
  * outside the five, a missing or malformed field. It reads `repository.full_name`, and
- * `workflow_run.path` for a workflow_run or `pusher.name` and `head_commit.author.email` for
- * a push, and touches nothing else in the payload.
+ * `workflow_run.path` for a workflow_run, `pusher.name` and `head_commit.author.email` for a
+ * push, or `pull_request.merged` for a pull_request (B-89), and touches nothing else in the
+ * payload.
  */
 export function pickDelivery(event: string | null, id: string | null, payload: unknown): Delivery | null {
   if (!event || !(WEBHOOK_EVENTS as readonly string[]).includes(event)) return null;
@@ -94,6 +100,15 @@ export function pickDelivery(event: string | null, id: string | null, payload: u
     if (email === undefined || (email !== null && email.length > MAX_EMAIL)) return null;
     d.author_email = email;
   }
+  if (event === 'pull_request') {
+    // B-89: a merge moves the default branch, and a push delivery for that merge is not
+    // guaranteed on time — the merge itself is the event the board follows.
+    const merged = at(at(payload, 'pull_request'), 'merged');
+    if (merged !== undefined) {
+      if (typeof merged !== 'boolean') return null;
+      d.merged = merged;
+    }
+  }
   return d;
 }
 
@@ -103,6 +118,7 @@ interface Registered { id: string; github: string; sync_workflow: string; mirror
 export type DeliveryOutcome =
   | { outcome: 'duplicate' }
   | { outcome: 'own-work' }
+  | { outcome: 'not-a-merge' }
   | { outcome: 'dispatched'; now: string[]; trailing: string[] };
 
 export class Webhooks {
@@ -115,7 +131,8 @@ export class Webhooks {
   /** R-BTN-73, in one transaction: drop a repeat and Baton's own feedback, then for each
    *  repository whose tickets name the delivery's, dispatch now or mark the window's trailing
    *  dispatch. Returns which repositories' syncs to dispatch now and which wait for a trailing
-   *  one; the caller sends the first after the response. */
+   *  one; the caller sends the first after the response. A `pull_request` that was not a merge
+   *  (B-89) marks itself and dispatches nothing. */
   receive(d: Delivery): DeliveryOutcome {
     const now = this.c.now();
     this.c.store.exec('DELETE FROM webhook_deliveries WHERE received_at < ?', now - DELIVERY_TTL_MS);
@@ -126,21 +143,68 @@ export class Webhooks {
     const registered = this.rows<Registered>(`SELECT id, github, sync_workflow, mirror_workflow FROM repositories
        WHERE retired_at IS NULL AND forge = 'github' AND lower(web_base) = 'https://github.com/' || lower(github)`);
     if (this.ownWork(d, full, registered)) return { outcome: 'own-work' };
+    // B-89: a merge is the trigger; a pull_request the App sends for an opened, synchronised or
+    // closed-without-merging PR moves the default branch nowhere, so the board owes nothing.
+    if (d.event === 'pull_request' && d.merged !== true) return { outcome: 'not-a-merge' };
     const targets = this.targets(full, registered);
-    const out = { outcome: 'dispatched' as const, now: [] as string[], trailing: [] as string[] };
-    for (const id of targets) {
-      const row = this.rows<{ last_dispatch_at: number }>('SELECT last_dispatch_at FROM webhook_dispatch WHERE repository_id = ?', id)[0];
+    // A merge's own sync is timed here (B-89), whether or not the merged ticket's want already
+    // wrote its window: the row is the webhook path's last send there, what the alarm reads.
+    const own = d.event === 'pull_request' ? registered.find((r) => r.github.toLowerCase() === full)?.id : undefined;
+    if (own) {
+      this.c.store.exec(`INSERT INTO webhook_syncs (repository_id, last_dispatch_at) VALUES (?, ?)
+                         ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at`, own, now);
+    }
+    // B-89: a merge of the repository's own sends its own sync — the trigger that fires
+    // when GitHub's schedule does not. R-BTN-73 held it back before the cutover only because
+    // `claim.sh` sent the syncs then; a sync that reads git from GitHub needs no mirror, so a
+    // merge sends one the moment it arrives, and the schedule is the backstop. Its own want
+    // leads the merged tickets' — as a ticket's `repos:` naming the repository once did — and
+    // is one entry however many of them named it.
+    const nowDue: string[] = [];
+    const trailing: string[] = [];
+    let seenOwn = false;
+    const write = (repository: string): void => {
+      if (nowDue.includes(repository) || trailing.includes(repository)) {
+        if (own === repository) seenOwn = true;
+        return;
+      }
+      const row = this.rows<{ last_dispatch_at: number }>('SELECT last_dispatch_at FROM webhook_dispatch WHERE repository_id = ?', repository)[0];
       if (!row || now - row.last_dispatch_at >= DISPATCH_WINDOW_MS) {
         this.c.store.exec(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES (?, ?, NULL)
-                           ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at, trailing_at = NULL`, id, now);
-        out.now.push(id);
+                           ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at, trailing_at = NULL`, repository, now);
+        nowDue.push(repository);
       } else {
         // One write per window, not one per suppressed delivery (§3's write budget).
-        this.c.store.exec('UPDATE webhook_dispatch SET trailing_at = ? WHERE repository_id = ? AND trailing_at IS NULL', row.last_dispatch_at + DISPATCH_WINDOW_MS, id);
-        out.trailing.push(id);
+        this.c.store.exec('UPDATE webhook_dispatch SET trailing_at = ? WHERE repository_id = ? AND trailing_at IS NULL', row.last_dispatch_at + DISPATCH_WINDOW_MS, repository);
+        trailing.push(repository);
       }
+      if (own === repository) seenOwn = true;
+    };
+    // The merge's own want first, then the tickets' — as a ticket's `repos:` naming the
+    // repository once led.
+    if (own) write(own);
+    for (const id of targets) write(id);
+    if (own && !seenOwn) nowDue.push(own);
+    return { outcome: 'dispatched', now: nowDue, trailing };
+  }
+
+  /** B-89, at the alarm: a repository whose last webhook-driven sync is over ten minutes stale
+   *  is due one — the App's deliveries reached Baton, and this path did not send one. Each due
+   *  repository's send is stamped and its 30-second window opened (the one R-BTN-73's dispatches
+   *  share), so the next tick finds it fresh and a delivery meanwhile waits for its trailing
+   *  dispatch rather than racing it. A repository with no row has never been sent one and takes
+   *  no part: the path only serves repositories its deliveries led it to. */
+  dueSync(): string[] {
+    const now = this.c.now();
+    const due = this.rows<{ repository_id: string }>(`SELECT s.repository_id FROM webhook_syncs s
+       JOIN repositories r ON r.id = s.repository_id AND r.retired_at IS NULL
+       WHERE s.last_dispatch_at <= ? ORDER BY s.repository_id`, now - SYNC_STALE_MS).map((r) => r.repository_id);
+    for (const id of due) {
+      this.c.store.exec(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES (?, ?, NULL)
+                         ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at, trailing_at = NULL`, id, now);
+      this.c.store.exec('UPDATE webhook_syncs SET last_dispatch_at = ? WHERE repository_id = ?', now, id);
     }
-    return out;
+    return due;
   }
 
   /** A workflow_run of a registered repository's own sync or mirror workflow, or a push by the
