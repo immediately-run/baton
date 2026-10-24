@@ -213,9 +213,16 @@ describe('baton repo init, through the built CLI', () => {
     // §7.1: the newest main read after the number, one run at a time, off until registered,
     // and a 15-minute backstop; B-89: a busy run retries once after its wait, and its outcome is
     // annotated either way.
-    expect(workflow).toContain('node .baton-cli/cli/baton.mjs repo sync --latest main --busy-retry 60 2>&1 | tee sync.log');
+    expect(workflow).toContain('node .baton-cli/cli/baton.mjs repo sync --latest main 2>&1 | tee sync.log');
     expect(workflow).toContain('set -o pipefail');
+    // The wait plus an `unavailable` backoff is minutes: the step's own bound says so, rather
+    // than the job's six hours (B-89 round two, finding 13).
+    expect(workflow).toContain('      - id: sync\n        timeout-minutes: 10\n');
     expect(workflow).toContain('if: $' + '{{ !cancelled() }}');
+    // Round two, finding 10: the grep is not anchored, so it reads a prefixed or a traced copy
+    // as well as `tee`'s own, and it demands the sha the outcome line names.
+    expect(workflow).toContain("grep -oE 'baton: [a-z][a-z:-]* at [0-9a-f]' sync.log");
+    expect(workflow).not.toContain("grep -oE '^baton:");
     expect(workflow).toContain('concurrency:\n  group: baton-sync\n  cancel-in-progress: false');
     expect(workflow).toContain("if: vars.BATON_ENABLED == 'true'");
     expect(workflow).toContain("- cron: '*/15 * * * *'");

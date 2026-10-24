@@ -994,17 +994,28 @@ Baton, and it is exportable (R-BTN-88).
     repo sync`); a CLI release changes no repository until it bumps the pin. Courses are
     versioned by their source commit, separately.
   - **The run's outcome is its line and its exit code** (B-89). `baton repo sync` ends with
-    `baton: <outcome> at <sha> — <steps>`: `advanced`, `confirmed` and `held` posted (or were
-    refused into holding), and exit 0; every other outcome posted nothing and exits 1 — `busy`
-    (another run's number outstanding, R-BTN-62) and `busy:again` (its one retry found the same)
-    included, since a run that posted nothing is never a success.
+    `baton: <outcome> at <sha> — <steps>`: `advanced` and `confirmed` posted, and exit 0; `held`
+    refused a force post into holding, so nothing was posted, and exits 0 with the workflow's
+    warning saying so; every other outcome posted nothing and exits 1 — `busy` (another run's
+    number outstanding, R-BTN-62) and `busy:again` (its one retry found the same) included,
+    since a run that posted nothing is never a success.
   - **A `busy` run waits and retries once.** `--busy-retry <s>` (default 60, `0` for none, at
-    most 600) is the wait before a `busy` run takes a fresh number and syncs again, once; the
-    wait comes before the retry's first observation, never between a number and its post.
+    most 600) is the wait before a `busy` run takes a fresh number and syncs again, once. The
+    **retry's** wait comes before its first observation, never between a number and its post;
+    a run's own retry of an `unavailable` answer is the existing in-run backoff
+    (`syncOnce`'s 30 s), unchanged and inside the run.
   - **The workflow annotates the outcome.** The default workflow runs the sync into `sync.log`
-    (its exit preserved through the pipe), then — even on failure — reads the last outcome line:
-    `advanced|confirmed|held` is a notice, `busy|busy:again` a warning naming the board held, and
-    anything else, or no line, an error. A run's failing check is never silent.
+    (its exit preserved through the pipe, the step bounded at ten minutes), then — even on
+    failure — reads the last `baton: <outcome> at <sha>` line, matched anywhere in the line and
+    requiring the sha: `advanced|confirmed` is a notice, `held` and `busy|busy:again` a warning
+    saying the run posted nothing (a busy one names R-BTN-62's ten idle minutes, which a dispatch
+    inside them does not shorten), and anything else, or no line at all, an error. A run's failing
+    check is never silent.
+  - **A flag reaches a workflow with its CLI's pin.** The workflow passes a repository's pinned
+    CLI only flags that CLI knows: a new flag (an outcome word, a retry) ships in the CLI, and a
+    repository's workflow passes it only after `baton repo init` moves the pin to a CLI release
+    that carries it. Until then the annotation alone keeps a run that posted nothing from looking
+    posted — the old CLI's `busy` is still exit 0.
 
 ### 4.3 The sync run and the head
 
@@ -6116,7 +6127,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-152 strata and reserved names | `derived` rules depending on `int`, `now`, `was_demoted` or `route`; a `demote_when` naming `route`; a fact `available("c", "a")`; a repository `meters/3` | each refused, naming the dependency path or the reserved predicate |
 | S-BTN-153 delivery and overrides | a claim, then an advance starting a leg with route choices; its leg finds the advised alternative's `key:zai` dead, takes the next in `ranked` and writes `{choice, alternative, dead: ["key:zai"]}`, and the runner's `advance` both finishes it and starts a leg with the same route choice; a second leg writes nothing to `BATON_TAKEN`; a third the advised one; a fourth names an unknown alternative; a fifth writes 10 MB; a leg without route choices reports one; a route choice resolving `none-available`, then an alternative reported for it | the claim answer carries no advice; the advance's `advice` holds identifiers only, with `ranked`, and is in `BATON_ADVICE` and `claim_legs.route_choices_json`; `advice-overridden` with `{choice, advised, taken}`, `key:zai` removed in that advance's transaction and the next leg advised without it; `taken_json` `null`, no override; nothing; `taken-invalid` logged, the `advance` accepted; the file dropped, the advance accepted; dropped and logged; stored, no override; each compared with the finishing leg run's row |
 | S-BTN-154 limits and conformance | a route-choice evaluation crossing a test-lowered match bound at an advance; every route-choice fixture through `clingo-wasm`, one with nothing available | `reason: "limit"`, `baton.ontology-limit`, the advance succeeding; one optimum each (`Models.More` `"no"`), `route/2` equal to the evaluator's; `SATISFIABLE` and no `route` for the empty one |
-| S-BTN-157 a busy sync is not a success | a run while another's number is outstanding, released during its wait and still held after it; `--busy-retry 0`, and an out-of-range value; a failed run; the workflow's annotation step against a posted, a held and a failed log | the wait is one of the flag's length, before the retry's first observation, and the retry posts under a fresh number, exit 0; `busy` at once, exit 1, nothing posted; `busy:again`, exit 1; the refusal of the value; exit 1; a notice, a warning, and an error naming the outcome |
+| S-BTN-157 a busy sync is not a success | a run while another's number is outstanding, released during its wait and still held after it; `--busy-retry 0`, and an out-of-range value; a failed run; the workflow's annotation step against a posted log (plain and stamped), a held log, a busy log, a failed log, a log with no outcome line, and a line that names no sha; the generated workflow against this repository's own | the wait is one of the flag's length, before the retry's first observation, and the retry posts under a fresh number, exit 0; `busy` at once, exit 1, nothing posted; `busy:again`, exit 1; the refusal of the value; exit 1; a notice, a warning that posted nothing, and an error naming the outcome (or naming that no sync ended); the annotation steps equal, and neither workflow passing a flag its pin lacks |
 | **§7** | | |
 | S-BTN-5 retried with backoff | two `cannot-finish:transient` ends | `retry_after` 1 h, then 4 h; the third claim gets both resume records and reuses branch and PR |
 | S-BTN-6 poisoned ticket | three failed attempts of different kinds; a looped leg failing twice in each of three passes | held `attempts-exhausted`, `baton.retries`; lifting resets; the looped leg never held, its count reset each time it reaches an outcome |

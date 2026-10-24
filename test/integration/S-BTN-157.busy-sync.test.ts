@@ -154,30 +154,54 @@ describe('S-BTN-157 a busy sync is not a success', () => {
   it('the sync workflow annotates what the run posted: a notice, a warning for a held board, an error for a failure', () => {
     const wf = syncWorkflow('immediately-run/baton@' + 'a'.repeat(40));
     // The sync's outcome is kept in a log, its exit preserved, and the annotation runs even so.
-    expect(wf).toContain('node .baton-cli/cli/baton.mjs repo sync --latest main --busy-retry 60 2>&1 | tee sync.log');
+    expect(wf).toContain('node .baton-cli/cli/baton.mjs repo sync --latest main 2>&1 | tee sync.log');
+    // Round one's blocking 1: the workflow must not pass a flag the pinned CLI does not know.
+    expect(wf).not.toContain('--busy-retry');
     expect(wf).toContain('set -o pipefail');
     expect(wf).toContain('if: ${{ !cancelled() }}');
-    // The step's script, run verbatim as GitHub runs it, one annotation per outcome: its one
-    // variable is the outcome the real grep reads from `sync.log`, which the test writes.
-    // The step's script, run verbatim as GitHub runs it, one annotation per outcome: its one
-    // variable is the outcome the real grep reads from `sync.log`, which the test writes.
+    // The step's script, run verbatim as GitHub runs it, one annotation per outcome. `sync.log`
+    // is written as `tee` writes it — the CLI's line without a timestamp — and each case carries
+    // the stamped copy the step's stdout shows beside it: the grep is unanchored, so neither the
+    // stamp nor a traced line hides the outcome (B-89 round two, finding 10).
     const script = 'outcome="' + wf.split('          outcome="')[1].split('\n').map((l) => l.replace(/^ {10}/, '')).join('\n');
-    const annotations = (log: string): string => {
-      writeFileSync(join(dir, 'sync.log'), log);
+    const stamped = (line: string) => `2026-10-24T09:40:43.9024230Z ${line}\n`;
+    const annotations = (lines: string[]): string => {
+      writeFileSync(join(dir, 'sync.log'), lines.join(''));
       return execFileSync('bash', ['-c', script], { encoding: 'utf8', cwd: dir });
     };
-    expect(annotations('baton: busy — another run’s reading is in flight; retrying once in 60s, with a fresh number\nbaton: advanced at 197b21c123 — advance over main; accepted\n')).toBe('::notice title=baton sync::the board is posted — advanced\n');
-    expect(annotations('baton: busy:again at 197b21c123 — observation: sync-busy\n')).toContain('::warning title=baton sync held::');
-    expect(annotations('baton: failed:unavailable at 197b21c123 — observation: unavailable\n')).toContain('::error title=baton sync failed::the run posted nothing (outcome: failed:unavailable)');
-    // No outcome line at all is an error too (the empty expansion here names nothing). The sync
-    // step has already failed a run that printed none, so nothing goes green.
-    expect(annotations('')).toContain('::error title=baton sync failed::the run posted nothing (outcome: none)');
+    const retry = 'baton: busy — another run’s reading is in flight; retrying once in 60s, with a fresh number';
+    const outcome = 'baton: advanced at 197b21c123 — advance over main; accepted';
+    expect(annotations([stamped(retry), retry, stamped(outcome), outcome])).toBe('::notice title=baton sync::the board is posted — advanced\n');
+    // A prefixed copy alone, and a traced line in front: both read the same.
+    expect(annotations([stamped(outcome)])).toContain('the board is posted — advanced');
+    expect(annotations([`+ echo '${outcome}'`])).toContain('the board is posted — advanced');
+    // A line that names no sha is not an outcome, even after the real one: the run's is kept.
+    expect(annotations([outcome, "+ printf '%s\\n' 'baton: busy — retrying once in 60s'\n"])).toContain('the board is posted — advanced');
+    expect(annotations(['baton: busy:again at 197b21c123 — observation: sync-busy\n'])).toContain('::warning title=baton sync held::');
+    expect(annotations(['baton: busy at 197b21c123 — observation: sync-busy\n'])).toContain('::warning title=baton sync held::');
+    // `held` posted nothing: a warning that says so, never "the board is posted" (round one's 5).
+    const held = annotations(['baton: held at 197b21c123 — force over main; snapshot-rejected\n']);
+    expect(held).toContain('::warning title=baton sync held::a force post was refused into holding; nothing was posted');
+    expect(held).not.toContain('the board is posted');
+    expect(annotations(['baton: failed:unavailable at 197b21c123 — observation: unavailable\n'])).toContain('::error title=baton sync failed::the run posted nothing (outcome: failed:unavailable)');
+    // No outcome line at all — `npm ci` failed before the CLI ran — names that case, rather
+    // than sending an operator to a sync step that never ended one (round one's 9).
+    expect(annotations(['added 280 packages, and audited 281 packages in 12s\n'])).toContain('::error title=baton sync failed::the sync ended no sync, so it posted nothing');
+    expect(annotations([''])).toContain('the sync ended no sync');
   });
 
-  it('this repository’s own workflow carries the same retry and annotation', () => {
+  it('this repository’s own workflow carries the same annotation, and passes no flag its pin lacks', () => {
     const ownWf = readFileSync(join(import.meta.dirname, '..', '..', '.github', 'workflows', 'baton-sync.yml'), 'utf8');
-    expect(ownWf).toContain('repo sync --latest main --busy-retry 60 2>&1 | tee sync.log');
+    expect(ownWf).toContain('repo sync --latest main 2>&1 | tee sync.log');
     expect(ownWf).toContain('if: ${{ !cancelled() }}');
     expect(ownWf).toContain('::warning title=baton sync held::');
+    expect(ownWf).toContain('        timeout-minutes: 10\n');
+    // The step's script is the generator's, line for line: one behaviour, two files.
+    const generated = syncWorkflow('immediately-run/baton@' + 'a'.repeat(40));
+    const stepOf = (wf: string) => wf.slice(wf.indexOf('        run: |\n          # The outcome'), wf.indexOf('\n\n', wf.indexOf('          esac')));
+    expect(stepOf(ownWf)).toBe(stepOf(generated));
+    // Neither invokes the CLI with a flag its pin (`838b5ec`) does not know: `--busy-retry`
+    // arrives with the pin, not before it (round one, blocking 1).
+    expect(ownWf).not.toMatch(/repo sync .*--busy-retry/);
   });
 });

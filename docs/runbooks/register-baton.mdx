@@ -87,9 +87,12 @@ secret.
 
 Check: `gh workflow run baton-sync.yml -R immediately-run/baton` goes green, and the dashboard
 shows the `baton` board with the live tickets and the next available one. A run that posted
-nothing is never green: `busy` (another run's reading in flight) waits a minute and retries
-once, and any run that posted nothing — `busy:again` included — ends its step red with an
-annotation saying the board is held (B-89). Check the outcome line, not just the check mark.
+nothing is never green: a failed post fails its step, and a `busy` run — another run's reading
+in flight — ends with a warning saying the board is held, never a silent pass (B-89). Read the
+outcome line (`baton: advanced|confirmed at …`), not just the check mark. A run that waits a
+minute and retries once arrives with the CLI release the workflow pins; until the pin carries
+`--busy-retry`, a `busy` run over the old CLI still exits 0, and the annotation is what tells
+you.
 
 ## 5. Workers
 
