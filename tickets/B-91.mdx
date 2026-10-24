@@ -55,8 +55,8 @@ _implemented 2026-10-24 — the seed's `owner_keys` (both wrangler.toml environm
   (`docs/runbooks/register-baton.mdx`, the `docs` content this repository carries); the `docs`
   repository's copy of the runbook was not changed — no PR there.
 - **B-90.** B-91's read extends `GET /v1/admin/repositories` (B-90, PR #108): this branch is based
-  on `claude/B-90-cli-reads` (`bb7b1e7`), so #108 merges first.
+  on it, so #108 merges first — this PR's base is B-90's branch.
 - **Not checked live:** no deployed instance was rebuilt for this ticket; a fresh local instance
-  with `wrangler.toml`'s own entry stands in (test/integration/B-91.seed-owners.test.ts). The
+  with `wrangler.toml`'s own entry stands in (test/unit/seed-owners-fresh.test.ts). The
   owner key seeded is `~/.ssh/baton_repo_owner.pub`; if that is not the key `admin repo add` used,
   replace it with that `.pub`'s line before this merges.
