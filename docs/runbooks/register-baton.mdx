@@ -21,7 +21,7 @@ says otherwise. Do each step on staging first (`--url https://baton-staging.imme
 | 1. Keys | yes |
 | 2. Make yourself administrator | yes |
 | 3. Register the repository | yes |
-| 4. The sync | **waits on R3-1249** (`baton sync` and a ticket source for `tickets/*.mdx`) |
+| 4. The sync | **waits on R3-1249** (`baton sync` and a ticket source for `tickets/*.mdx`); its webhook half (4a) is ready and has run once by hand (B-92) |
 | 5. Workers | the grant is ready; `baton run` waits on the `pr` course's legs (R3-1249's `baton init`) |
 | 6. Cut over | after 4 and 5 |
 
@@ -87,6 +87,79 @@ secret.
 
 Check: `gh workflow run baton-sync.yml -R immediately-run/baton` goes green, and the dashboard
 shows the `baton` board with the live tickets and the next available one.
+
+## 4a. The GitHub App's webhook (B-92)
+
+The App is the trigger that runs a sync on its own: a push, a review, a comment or a workflow's
+end in a repository whose tickets name another dispatches that repository's sync, windowed to one
+per 30 seconds plus one trailing (R-BTN-73). Configure it once, then check it with one delivery.
+
+1. In the App's settings: **Webhook URL** `/v1/github/webhook` on this instance's origin.
+   **Webhook secret**: a `openssl rand -hex 32` value, never a password. **SSL verification**
+   on. Events: **Push**, **Pull requests**, **Pull request reviews**, **Issue comments**,
+   **Workflow runs**, and nothing else — Baton drops anything outside these five. "Active"
+   ticked. Permissions: **Actions: write** (the dispatch it makes), **Contents**, **Pull
+   requests** and **Issues** read-only — the four its events need, and no Checks (§12.7). If no
+   App exists yet, these are the values to create it with (`tickets/R3-1208.mdx` step 3a); an
+   **organisation owner** of `immediately-run` installs it on `immediately-run/baton` and on the
+   code repositories its tickets name — GitHub's rule, and no Baton key can.
+
+   ```sh
+   openssl rand -hex 32 > ~/baton_github_webhook_secret   # mode 600; the same file both commands below read
+   npx wrangler secret put BATON_GITHUB_WEBHOOK_SECRET < ~/baton_github_webhook_secret
+   npx wrangler secret put BATON_GITHUB_WEBHOOK_SECRET --env staging < ~/baton_github_webhook_secret
+   ```
+
+2. The secret must also be the App's *current* webhook secret: GitHub signs every delivery with
+   it, and Baton answers `403` to every unsigned one. If step 1's file is not what the App holds,
+   rotate it in the App's settings to the same value.
+
+→ Check, before any delivery, on each instance — the body's `code` and `message` say which fault
+   it is, so keep them:
+
+```sh
+curl -s -w '\n%{http_code}\n' -X POST -H 'content-type: application/json' -d '{}' \
+  https://baton.immediately.run/v1/github/webhook    # forbidden: the GitHub App webhook secret is not configured
+```
+
+The unsigned probe is refused before anything is read, so its answer names where the operator is
+stuck: `forbidden` with *the GitHub App webhook secret is not configured* is step 1 not done (or
+not yet deployed — `npx wrangler secret list` names it); `unauthenticated` with *X-Hub-Signature-256
+is required* is step 1 done and the route reachable. Read either as done only when the
+`forbidden` is gone. A `302`, or an HTML page, is Cloudflare Access in front instead: that is
+`.local/access-paths.py` (finding 1 of the 2026-10-21 gap analysis), not this step.
+
+3. One live smoke. Push a throwaway branch to the repository the App is installed on; the App
+   delivers the push to this Baton.
+
+→ Check, in the App's **Advanced → Recent Deliveries** (or its *Redeliver* page): the delivery
+   answers **`204`**. `401` is the App's secret differing from step 1's; `403` is step 1 not
+   deployed; a green `204` is the plumbing.
+
+→ Check, in Baton, that the delivery was *acted on*, which is what the `204` alone does not say.
+   A delivery writes its own trace — its id for 24 hours and its window (`webhook_deliveries`,
+   `webhook_dispatch`) — and that row is not reachable from outside: there is no route for it, and
+   the store is the Durable Object's, not a D1 the CLI can query. What Baton does with the delivery
+   is, and it depends on step 6:
+
+   - **Before the cutover:** nothing. The delivery is received and dispatches nothing: with no
+     claim in the repository a sync has nothing to post, and every other trigger's sync is held
+     until the cutover too (B-92 fixed the webhook to that same rule — it used to dispatch the App
+     whatever the mode). The `204` plus this step's `403` on an unsigned probe is then all a live
+     delivery proves.
+   - **After it:** a second delivery of the same event (App → Advanced → Redeliver) dispatches the
+     sync — once per 30 seconds plus one trailing — and the sync's run is what to read:
+
+     ```sh
+     node cli/baton.mjs board -i ~/.ssh/baton_owner_baton baton    # the board's head, moved by the sync
+     node cli/baton.mjs ticket -i ~/.ssh/baton_owner_baton history baton:B-<n> | head -5   # a claim's sync
+     ```
+
+     The dashboard's Workers view and the ticket histories show the syncs the dispatch ran.
+
+   So run this step's smoke twice: once now, for the `204`, and once after step 6, for the
+   dispatch. A `204` and a redelivery that changes nothing after the cutover is the App's secret,
+   its events or its Active flag — go back to step 1.
 
 ## 5. Workers
 

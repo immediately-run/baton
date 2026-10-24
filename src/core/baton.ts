@@ -219,7 +219,12 @@ export class BatonCore {
     if (!raw) throw new BatonError('unauthenticated', 'no webhook principal');
     const out = this.store.transaction(() => this.webhooks.receive(JSON.parse(raw) as Delivery));
     if (out.outcome === 'dispatched') {
-      this.syncNow(out.now);
+      // B-92: before a repository's cutover no claim exists, so a sync started now would post
+      // nothing a delivery's dispatch could show — the trigger every claim and advance sends is
+      // held already, and a sync is pulled when it is wanted. Only a repository Baton holds gets
+      // the App dispatch (the same rule `flushDispatch` applies to every other trigger); the
+      // delivery's row is what proves it arrived, on either side of the cutover.
+      this.syncNow(out.now.filter((repository) => this.cutover.cutoverAt(repository) != null));
       if (out.trailing.length) await this.armBy(this.webhooks.nextTrailing());
     }
     return out;

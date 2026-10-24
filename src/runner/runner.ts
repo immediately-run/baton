@@ -167,6 +167,13 @@ export class Runner {
     }
   }
 
+  /** B-93: whatever beat was in flight has answered — so the calls after it are a registered
+   * worker's, carrying the secret Baton now holds. A beat still out after a minute has lost its
+   * claim to the timer and the next attempt; the wait is bounded so an attempt can never hang. */
+  private async waitForBeat(): Promise<void> {
+    for (let waited = 0; this.ticking && waited < 60_000; waited += 5) await sleep(5);
+  }
+
   private async beatOnce(): Promise<void> {
     const epoch = this.epoch;
     const s = this.state.get();
@@ -454,8 +461,18 @@ export class Runner {
 
   /** One claim's whole run — or one idle attempt, returning null when nothing was claimable. */
   async runOnce(): Promise<ClaimOutcome | null> {
-    // The worker must exist before it can claim (§5): one heartbeat registers it.
-    if (this.state.get().worker_id == null) await this.tick();
+    // The worker must exist before it can claim (§5): one heartbeat registers it. Whether this
+    // attempt is the registration (B-93) is read before the beat: a session's first attempt is
+    // the one whose heartbeat creates the worker, so nothing before it is authenticated.
+    const registered = this.state.get().worker_id != null;
+    // B-93 (review round 1): the beat must be *finished* here, not merely started. During it
+    // Baton already holds the new worker's secret — `beatOnce` sends `secret_hash` for one the
+    // state does not name yet — but the state names neither the worker nor the re-key until the
+    // answer, so a recommendation that overlapped a slow beat was refused `unauthenticated` and
+    // logged: the first-beat noise again. `tick()` refuses to run beside a beat (it returns at
+    // once while the timer's is out), so a beat in flight is waited for, never skipped.
+    await this.waitForBeat();
+    if (!registered) await this.tick();
     // A claim the state file still names with nothing in flight is an orphan — a restart, or an
     // end the network ate. It is ended (its resume record already says why) rather than held:
     // Baton would refuse every claim of this worker otherwise (rule 3, one claim per worker).
@@ -474,7 +491,14 @@ export class Runner {
     } catch (e) {
       if (!(e instanceof BatonRefusal)) throw e;
       // A worker the gates refuse entirely still claims below: Baton's refusal is the answer.
-      this.log(`baton: no recommendation (${e.message})`);
+      // B-93: the registration beat's own refusal — the recommendation right after the beat that
+      // registered this session, refused `no worker holds this secret` before a worker exists —
+      // is not news, and is not logged (2026-10-21's runs: every start printed it). Only that
+      // refusal goes quiet: `authWorker` answers `unauthenticated` for a missing
+      // `X-Worker-Secret` and a replayed nonce too, and a registered worker's refusal (a
+      // replaced secret) still names itself.
+      const stray = !registered && e.code === 'unauthenticated' && /no worker holds this secret/.test(e.message);
+      if (!stray) this.log(`baton: no recommendation (${e.message})`);
     }
     let claim: Record<string, any>;
     try {
