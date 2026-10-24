@@ -12,7 +12,8 @@ description: "The Access bypass apps let deliveries reach /v1/github/webhook (it
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/110
 depends_on: []
 ---
 
@@ -48,4 +49,4 @@ unconfigured App makes all of that dead code in production, silently.
 ### Exit criteria
 
 - [ ] a push to a registered repository dispatches its sync, observed in Baton
-- [ ] the runbook's webhook step is checkable by a fresh operator
+- [x] the runbook's webhook step is checkable by a fresh operator
