@@ -25,20 +25,23 @@ import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from '
 import { readItems } from './read-items';
 import { ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
-const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8' }).trim();
+const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 /** `owner/name` of a checkout's `origin` remote (an SSH or HTTPS URL, or the proxy's
  * `…/git/owner/name` form), or null when it has none. A repository without `origin` — a
  * markdown course's home, a fresh scaffold — is null and silent (B-93): git's own
- * `error: No such remote 'origin'` reads like a failure and the sync succeeds without it. The
- * caller that needs the slug (a forge sync) says so itself. */
+ * `error: No such remote 'origin'` reads like a failure and the sync succeeds without it, so
+ * the child's stderr is captured (`git` above) and dropped rather than passed to the
+ * operator's log. The caller that needs the slug (a forge sync) says so itself. */
 export function remoteSlug(root: string): string | null {
   try {
     // The proxy's `…/git/owner/name` form drops its `git/` — only when `owner/name` follows, so an
     // owner named `git` keeps its name.
     return git(root, 'remote', 'get-url', 'origin').replace(/^git@[^:]+:/, '').replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '').replace(/^git\/(?=[^/]+\/[^/]+$)/, '');
   } catch {
-    // B-93: git writes `error: No such remote 'origin'` to its stderr, which rides this
-    // process's — the null is the whole answer, so that line never reaches the operator's log.
+    // B-93: the child's stderr is captured, not inherited (review round 1) — a `catch` cannot
+    // take back a line git has already written to this process's stderr, so with `execFileSync`'s
+    // default stdio git's `error: No such remote 'origin'` reached the operator's log while the
+    // sync succeeded. The null is the whole answer, and no line of git's rides this one.
     return null;
   }
 }
