@@ -1,0 +1,97 @@
+---
+title: "B-110 — create-pr's graph, twice revised: a deterministic run-tests leg before every review round, and the third round's blockers go to the owner — a human in the loop — not to another agent"
+id: B-110
+project: baton
+status: available
+updated: 2026-10-24
+tags:
+  - roadmap-item
+order: 512
+tier: judgement
+description: "Two owner changes to create-pr (2026-10-24): (1) implement and fix are each followed by a run-tests leg — a deterministic `npm run <test_script>` the stub itself runs (bounded, non-interactive, no agent), its green/red landing as a `Baton-Checks:` commit trailer — git, readable on any forge and on plain git — that placeOf routes: green queues review, none queues run-tests, red sends the ticket back to the leg that pushed; (2) when the third review round still finds blockers, the adjudicate leg is queued waiting on the owner — a human in the loop — who answers with a `Baton-Adjudicated: merge|owner` trailer on the branch. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-24: "I would like both the implement and fix legs to be followed
+by a run – test leg, which execute an NPM script to run deterministic tests and linting" and
+"I would like the course to explicitly specify that the third round of reviews should trigger a
+human in the loop request if they continue to find blockers."
+**Spec:** §5.8 (R-BTN-131, the standard courses — create-pr's graph and stubs), §5.2 (R-BTN-69,
+the course file: `test_script`), §2f (R-BTN-74, the `pr` station function's forge facts and
+comment markers), §6.1 (R-BTN-120's `why` table gains nothing — run-tests' waits are readiness,
+not blocks), §16 S-BTN-1 (the course scenario) and its trace.
+
+### The design (decided with the owner, 2026-10-24)
+
+1. **`run-tests` is a leg of the graph, and deterministic.** `from: ['pr-open', 'fixed']`,
+   `to: ['pr-open', 'fixed']` — a self-loop, so the claim's path can walk it while the posted
+   station stays forge-computable. The generated stub runs **no agent**: it is new stub kind
+   beside `stubSource`, executing `npm run <test_script>` (the course file's new field,
+   default `test`) in the checkout, bounded and non-interactive exactly as B-94 bounds git —
+   `npm` inherits `GIT_NONINTERACTIVE_ENV` and a `RUN_TESTS_TIMEOUT_MS` of its own, its lease
+   arithmetic named and pinned like `CLOSE_TIMEOUT_MS`'s (one run, synchronous, under the
+   lease's margin).
+2. **The outcome lives in git — a commit trailer — never in a forge comment (the owner,
+   2026-10-24: "we cannot rely on forge comments to track the repeated entry into a leg because
+   Baton must support the no-forge plain-git setup as well").** The run-tests leg's own commit
+   (its close's marker commit on the branch) carries `Baton-Checks: green|red` — the same
+   channel R3-1265's `branch` course uses for `Baton-Verdict:` trailers on a forge-less
+   repository. The per-forge adapters are readers: GitHub's reads the PR's commit trailers,
+   the plain adapter reads the branch's commits directly, and `placeOf` routes on the latest
+   trailer in the timeline — a push after the trailer resets the gate (the trailer names the
+   head it tested). Routing at `pr-open`/`fixed`:
+   - **no marker** → `run-tests` ready (the gate before every review round);
+   - **green** → the path gains its `run-tests` step and `review` queues, `ci`-waited as today;
+   - **red** → back to the leg that pushed: `implement` (at `pr-open`) or `fix` (at `fixed`),
+     ready — the deterministic gate refuses to spend a review round on red checks.
+   The stub reads `ctx.claim.station` (already in the leg context) for its return position and
+   names the failing script's last lines in its red marker.
+3. **The third round's blockers are the owner's.** Today round-3-changes queues `adjudicate`
+   *ready* — a fresh agent reproducing findings. The change is one routing word and a changed
+   contract: `adjudicate` queues **`waiting`, `waiting_on: 'owner'`** — the human in the loop,
+   carried by Needs you (§14) with the third round's blockers named — and the leg's
+   instructions become the owner's: answer with `Baton-Adjudicated: merge|owner` as a trailer
+   on a commit pushed to the branch (git, like every durable record — the forge-comment
+   spelling of `adjudicationOf` joins the adapters as one reader, not the record; `merge` →
+   `adjudicated`, merge ready; `owner` → parked) or push the fixes and let the rounds run
+   again. No agent reproduces anything: the third pair of eyes is the person's.
+4. **Docs and course file follow**: §5.8's create-pr description and graph,
+   `docs/standard-courses.mdx`'s diagram, the shipped `run-tests.md` instructions (one screen:
+   what the script is, that no agent runs, where the marker goes), and `baton repo init`
+   scaffolding the new leg beside the others (the committed `.baton` stubs regenerate).
+
+### What not to do
+
+- Do not run the deterministic script through an agent: the whole point is a gate whose outcome
+  never depends on a model, and B-94's bounds already make it safe unattended.
+- Do not add a station for `verified`: the posted station must stay forge-computable; the
+  self-loop plus the marker is the sound encoding.
+- Do not build §7's `hitl` for this: the owner wait plus the trailer is today's
+  human-in-the-loop, git-native and dashboard-visible.
+- Never a forge comment as the durable record of a leg's outcome or re-entry: Baton serves
+  plain-git repositories (R3-1265), where comments do not exist. Git is the record; the forge
+  adapters are readers of it.
+
+### Tests
+
+- `course-pr.test.ts`: the routing table — no marker/green/red at `pr-open` and at `fixed`;
+  a marker older than `pushedAt` is stale (a new push resets the gate); round-3 `changes` →
+  `adjudicate` waiting on the owner; the owner's `merge` marker → merge ready.
+- `defaults-cli.test.ts`: the scaffold carries `run-tests.mjs`/`run-tests.md`; the generated
+  stub runs the script itself (a fixture `npm run` that fails/succeeds, asserting the marker
+  text and the return position); `test_script` defaults to `test`.
+- The plain-git variant: no forge adapter, the trailers read from the branch's commits —
+  the gate and the owner round work identically with `gh` nowhere in sight.
+- S-BTN-1's steps gain the gate and the owner round.
+
+### Exit criteria
+
+- [ ] no review round starts on red checks, and a red gate returns the ticket to the pushing
+      leg with the failure named — without an agent in the path
+- [ ] the third round's blockers arrive in Needs you naming them, and the owner's marker
+      resolves them — no agent reproduction
+- [ ] the graph, the docs and a fresh scaffold agree
