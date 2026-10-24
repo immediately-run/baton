@@ -114,6 +114,10 @@ BATON_KEY_FILE=~/.ssh/baton_worker BATON_REPOSITORY=baton \
   node cli/baton.mjs run --harness claude-code --home <a checkout of immediately-run/baton>
 ```
 
+`--capabilities` is for a narrower machine: without it the runner declares whatever the grant
+allows, so the flag never has to be kept in step with the grant — and a runner that can match none
+of its course's legs says so in one line at startup (B-86).
+
 Check: the dashboard's Workers view shows the machine heartbeating.
 
 ## 6. Cut over

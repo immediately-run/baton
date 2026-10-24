@@ -398,6 +398,9 @@ export class WorkerApi {
       // §11: each repository's mode (R-BTN-28, per repository).
       mode: Object.fromEntries(this.rows<{ id: string; cutover_at: number | null }>('SELECT id, cutover_at FROM repositories WHERE retired_at IS NULL ORDER BY id')
         .map((r) => [r.id, r.cutover_at == null ? 'shadow' : 'cut-over'])),
+      // B-90/B-86: the capabilities this key's grant allows, so a runner can declare the grant's
+      // instead of restating them (an ungranted key declares only what it holds).
+      granted_capabilities: cred.granted ? cred.allowed : null,
       server_time: now,
       ...(refused.length ? { transcripts_refused: refused } : {}),
       ...(refusedUses.length ? { refused_uses: refusedUses } : {}),

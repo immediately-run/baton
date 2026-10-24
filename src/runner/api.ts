@@ -122,6 +122,13 @@ export class BatonApi {
   board(body: Record<string, unknown>): Promise<Record<string, any>> {
     return this.call('POST', '/v1/sync/board', body);
   }
+  /** B-90: the dashboard's view of one repository — its courses and queues, head, mode and ready
+   *  tickets — signed with the machine's key, as `baton board` reads it. An administrator's or an
+   *  owner's key and a key granted on the repository are answered; a refusal is the answer too,
+   *  and the caller says so rather than idling on it. */
+  boardView(repository: string): Promise<Record<string, any>> {
+    return this.call('GET', `/v1/repositories/${encodeURIComponent(repository)}/board`);
+  }
   claim(body: { request_id: string; ticket_id?: string }): Promise<Record<string, any>> {
     return this.call('POST', '/v1/runner/claim', body);
   }

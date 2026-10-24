@@ -122,6 +122,20 @@ describe('plan: one request per command', () => {
     expect(() => plan('blocked', ['--on', 'resource:x'])).toThrow(/--repository/);
   });
 
+  it('the reads (B-90): the registry, a repository’s grants, its board — one GET each', () => {
+    expect(plan('admin', ['repos'])).toEqual({ method: 'GET', path: '/v1/admin/repositories' });
+    expect(plan('owner', ['grants', 'docs'])).toEqual({ method: 'GET', path: '/v1/owner/docs/grants' });
+    expect(plan('board', ['docs'])).toEqual({ method: 'GET', path: '/v1/repositories/docs/board' });
+    // A read takes no body and no flags it does not name; a missing repository is named.
+    expect(() => plan('admin', ['repos', 'extra'])).toThrow('no further argument');
+    expect(() => plan('owner', ['grants'])).toThrow('the repository id is required');
+    expect(() => plan('board', [])).toThrow('the repository id is required');
+    expect(() => plan('board', ['docs', '--watch'])).toThrow('not a flag of this command');
+    // The writes it sits beside keep their routes.
+    expect(plan('admin', ['repo', 'retire', 'ops']).method).toBe('POST');
+    expect(plan('owner', ['grant', 'docs', '--key', PUB, '--capabilities', 'create-pr'], key).method).toBe('POST');
+  });
+
   it('parseArgs and duration', () => {
     expect(parseArgs(['a', '--x', '1', '--flag'], ['flag'])).toEqual({ flags: { x: '1', flag: true }, positional: ['a'], groups: [] });
     expect(() => parseArgs(['--x'])).toThrow('needs a value');

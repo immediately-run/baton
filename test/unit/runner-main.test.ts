@@ -21,13 +21,13 @@ function home(): string {
 }
 
 describe('parseRunArgs', () => {
-  it('defaults from the environment', () => {
+  it('defaults from the environment (B-86: no --capabilities means the grant’s, not agent-venue’s alone)', () => {
     const a = parseRunArgs([], { BATON_HOME: '/h', BATON_URL: 'https://b', BATON_SESSION: 's', BATON_REPOSITORY: 'docs', BATON_HOSTNAME: 'vm-x' });
     // B-97: the transition's spellings are gone — an IR_ session or hostname is not read.
     const legacy = parseRunArgs([], { IR_BATON_SESSION: 'old', IR_BATON_NAME: 'vm-old' });
     expect(legacy.session).not.toBe('old');
     expect(legacy.hostname).not.toBe('vm-old');
-    expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: ['agent-venue'], testHarness: false, verbose: false });
+    expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: null, testHarness: false, verbose: false });
   });
   it('takes its flags, refusing the unknown and the malformed', () => {
     const a = parseRunArgs(['--harness', 'claude-code', '--home', '/x', '--url', 'https://u', '--session', 's2', '--repository', 'ops', '--tier', 'routine', '--capabilities', 'a,b', '--beat-every', '5000'], {});
