@@ -673,7 +673,7 @@ export class Runner {
         const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}) }, verdict.reached);
         // 2026-10-24: the advance trail — every finished leg names where it landed and what it
         // queued, so a suspension or an odd end position reads as a trail, not a riddle.
-        this.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : (answer.next?.[0]?.leg ?? verdict.leg)} (run ${run} of ${course.graph.legs.get(legName)?.max_runs ?? 1})`);
+        this.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : (answer.next?.[0]?.leg ?? verdict.leg)} (run ${run} of ${course.graph.legs.get(legName)?.maxRuns ?? 1})`);
         if ('settle' in answer) return await this.finish(claimId, answer.settle, await this.callHandoff(script, ctx) ?? handoffUrl);
         gitPath = [...gitPath, { leg: legName, reached: verdict.reached }];
         at = answer.station ?? verdict.reached;
