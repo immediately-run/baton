@@ -54,7 +54,17 @@ The divergence is invisible until the day it matters.
 _implemented 2026-10-24 — the seed's `owner_keys` (both wrangler.toml environments carry `baton`'s), `seed_owners` in `GET /v1/admin/repositories`, and the runbook's check; PR #109 (on PR #108's branch)._
 - **Deviations.** Item 3 is the runbook's *check*, below, in this repository's copy
   (`docs/runbooks/register-baton.mdx`, the `docs` content this repository carries); the `docs`
-  repository's copy of the runbook was not changed — no PR there.
+  repository's copy of the runbook was not changed — no PR there. B-91's tests are
+  `test/unit/seed-owners.test.ts` and `test/unit/seed-owners-fresh.test.ts`, not the
+  `registry.test.ts` "Tests" names — none is a scenario, since a fresh instance needs the store
+  emptied and the seed given what `BatonCore.start` reads.
+- **Round one** (PR #109): `seedOwnerKeys` writes *every* key of an entry (the guard moved out of
+  the key loop), parses and checks every key of every entry before its first write and writes in
+  one transaction; `seed_owners` is the registrations whose live owners are all `admin:seed` (or
+  that have none) — a correctly seeded repository is named, so the runbook's check tells a seed
+  missing its `owner_keys` apart by the answer's empty `owners`; `seed-owners-fresh.test.ts` is
+  out of Workers' tsconfig and into the local one; the cloudflare test project spreads its bindings
+  last. Commit `adb3ad8`.
 - **B-90.** B-91's read extends `GET /v1/admin/repositories` (B-90, PR #108): this branch is based
   on it, so #108 merges first — this PR's base is B-90's branch.
 - **Not checked live:** no deployed instance was rebuilt for this ticket; a fresh local instance
