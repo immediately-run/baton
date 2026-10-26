@@ -776,14 +776,18 @@ export class BatonCore {
       if (role === 'owner' && !this.admin.owns(cred, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
     }
     if (!cred) throw new BatonError('unauthenticated', 'no principal');
-    // B-86: a granted key's board names what its grant allows, as its heartbeat's answer does.
+    // R-BTN-179 (B-90): a granted key's board names its grant on THIS repository — the same grant the
+    // heartbeat's answer names for it (workerApi.grantedCapabilities), 'none' left out — and
+    // null for a key no grant binds there (a bearer's or a seed key's reach is its own).
     let granted: string[] | null = null;
     if (role === 'worker') {
-      const c = this.workers.credential(cred);
       if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
         throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
       }
-      granted = c.granted ? c.allowed : null;
+      const c = this.workers.credential(cred);
+      const row = c.granted ? this.sql<{ capabilities: string }>(
+        'SELECT capabilities FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo)[0] : null;
+      granted = row ? [...new Set(JSON.parse(row.capabilities) as string[])].filter((x) => x !== 'none').sort() : null;
     }
     if (boardRead) return json(this.boardView(repo, granted));
     if (history) {

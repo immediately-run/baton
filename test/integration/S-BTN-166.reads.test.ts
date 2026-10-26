@@ -119,7 +119,7 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
       expect(tiers.length).toBeGreaterThan(0);
       expect(tiers.every((id) => id.startsWith('docs:'))).toBe(true);
       // One fact, one answer: the board's two sections are the dashboard session's own for this
-      // repository — the owner's session reads `GET /v1/ui/state` (`uiRepo` and `readyRows`).
+      // repository — the administrator's session reads `GET /v1/ui/state` (`uiRepo` and `readyRows`).
       const viaSession = await sessionCall(await adminSession(admin), '/v1/ui/state');
       expect(viaSession.status).toBe(200);
       const state = (await viaSession.json()) as Record<string, any>;
