@@ -10,7 +10,7 @@
 
 export type CourseRule =
   | 'shape' | 'unknown-key' | 'id' | 'unknown-station' | 'start-leg' | 'unreachable' | 'no-end' | 'terminal'
-  | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar' | 'no-chain-from' | 'entry' | 'schema';
+  | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar' | 'no-chain-from' | 'entry' | 'schema' | 'role-in-roles';
 
 export interface CourseViolation {
   rule: CourseRule;
@@ -21,6 +21,13 @@ export interface CourseViolation {
 
 import { isFreeText } from './text';
 import { parseSchemaId } from '../shared/schema.mjs';
+import { ROLES } from '../shared/vocabulary.mjs';
+
+/** R-BTN-121, R-BTN-157: the names a vocabulary expansion already means — a vocabulary role, the
+ *  built-in literal `human-operator`, and `none`, which every runner holds. Review round 7,
+ *  finding 3: a role key named one of these would quietly redefine it for legs only (a leg naming
+ *  `create-pr` would ask for the role's list, while a ticket clause naming it kept its meaning). */
+const VOCABULARY = new Set([...Object.keys(ROLES), ...Object.values(ROLES).flat(), 'human-operator', 'none']);
 
 /** A station, leg or course id (R-BTN-69, R-BTN-48). */
 export const COURSE_ID = /^[a-z][a-z0-9-]{0,39}$/;
@@ -40,11 +47,18 @@ const COURSE_LIST_MAX = 64;
  *  you entry (spec-silent, recorded on R3-1231). The list is kept to this while it fills, so a
  *  hostile file's thousand faults cost no more memory than a hundred. */
 const COURSE_VIOLATIONS_MAX = 100;
-const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs']);
+const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs', 'capability_roles']);
 const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
 const ENTRY_KEYS = new Set(['output', 'schema']);
 const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
-  'no_chain_from', 'isolation']);
+  'no_chain_from', 'isolation', 'requires']);
+/** R-BTN-120: what a leg's `requires` holds — its capabilities, which rule 4 reads as its own
+ *  input beside the ticket's clause (`gates.ts`; `claims.ts` passes the leg's list through).
+ *  The spec's `tickets`, `resources` and the other prerequisite kinds are not implemented, so a
+ *  file carrying one is refused rather than silently accepted unread (B-86). */
+const REQUIRES_KEYS = new Set(['capabilities']);
+/** A capability name: a vocabulary name (`create-pr`) or a namespaced one (`vpn:corp`). */
+const CAPABILITY = /^[A-Za-z][A-Za-z0-9._:-]{0,63}$/;
 const INPUT_KEYS = new Set(['from', 'accepts', 'required']);
 const OUTPUT_KEYS = new Set(['schema']);
 /** A schema file in the course directory (R-BTN-82): a relative path whose every segment is
@@ -78,6 +92,34 @@ export function validateCourse(json: unknown): CourseViolation[] {
     return out;
   }
   for (const k of Object.keys(json)) if (!TOP_KEYS.has(k)) add('unknown-key', k, `unknown key "${k}"`);
+  // R-BTN-120, R-BTN-121: a course's capability roles — named capability lists a leg's
+  // `requires.capabilities` may name; `graphOf` expands them (`legCapabilities`), so rule 4, the
+  // candidate query and the runner's never-eligible line all compare capabilities.
+  if ('capability_roles' in json) {
+    const roles = json.capability_roles;
+    if (!isObject(roles)) add('shape', 'capability_roles', 'capability_roles is an object of role names');
+    else if (Object.keys(roles).length > COURSE_LIST_MAX) add('shape', 'capability_roles', `at most ${COURSE_LIST_MAX} capability roles`);
+    else for (const [role, caps] of Object.entries(roles)) {
+      // R-BTN-121: a role expands once — roles do not nest. A role naming one holds the file. So
+      // does one named a name the vocabulary already means (review round 7, finding 3): a bare
+      // capability, `human-operator` or `none`, all of which a leg and a ticket clause read alike.
+      if (VOCABULARY.has(role)) {
+        add('role-in-roles', `capability_roles.${role}`, `a capability role may not be named "${role}": it is a vocabulary name, and a role redefining it would change what a leg asking for it requires (R-BTN-121, R-BTN-157)`);
+        continue;
+      }
+      if (Array.isArray(caps)) {
+        for (const [i, c] of caps.entries()) {
+          // R-BTN-121, R-BTN-157: a role names capabilities, never another role of this file either —
+          // an unexpanded name here reaches rule 4 as a literal capability no grant holds (review
+          // round 6, finding 1).
+          if (typeof c === 'string' && (Object.hasOwn(ROLES, c) || c === 'human-operator' || Object.hasOwn(roles, c))) {
+            add('role-in-roles', `capability_roles.${role}.${i}`, `"${c}" is a ${c === 'human-operator' || Object.hasOwn(ROLES, c) ? 'vocabulary role' : 'capability role of this file'}: a role expands to capabilities, and roles do not nest (R-BTN-121, R-BTN-157)`);
+          }
+        }
+      }
+      capabilityList(caps, `capability_roles.${role}`, role);
+    }
+  }
 
   // Stations.
   const stations = isObject(json.stations) ? json.stations : null;
@@ -149,6 +191,16 @@ export function validateCourse(json: unknown): CourseViolation[] {
     }
     // R-BTN-107: `session` is the one floor a leg may require.
     if ('isolation' in l && l.isolation !== 'session') add('bound', `${at}.isolation`, 'isolation, when given, is "session"');
+    // R-BTN-120: a leg's prerequisites — the capabilities rule 4 must find among the runner's
+    // declaration (B-86), as names or as the course's capability roles.
+    if ('requires' in l) {
+      const r = l.requires;
+      if (!isObject(r)) add('shape', `${at}.requires`, 'requires is an object of prerequisites');
+      else {
+        for (const k of Object.keys(r)) if (!REQUIRES_KEYS.has(k)) add('unknown-key', `${at}.requires.${k}`, `unknown key "${k}"`);
+        if ('capabilities' in r) capabilityList(r.capabilities, `${at}.requires.capabilities`, 'a leg');
+      }
+    }
     if ('label' in l && !isFreeText(l.label)) add('bound', `${at}.label`, 'a label is §10.4 free text: 1–500 characters, no control characters, none of < > { }');
     if ('outputs' in l) {
       if (!isObject(l.outputs)) add('shape', `${at}.outputs`, 'outputs is an object of output names');
@@ -161,6 +213,20 @@ export function validateCourse(json: unknown): CourseViolation[] {
         // R-BTN-108: a named schema `<id>@<version>`, or R-BTN-82's legacy relative path.
         if ('schema' in o && !parseSchemaId(o.schema) && !isSchemaPath(o.schema)) add('shape', `${op}.schema`, 'a schema is <id>@<version>, or a relative path in the course directory, no segment empty, . or ..');
       }
+    }
+  }
+
+  /** A non-empty list of capability names, deduplicated; `what` names where it sits for the
+   *  message ("a leg", a capability role). Bounded like every list a file holds. */
+  function capabilityList(v: unknown, path: string, what: string): void {
+    if (!Array.isArray(v) || v.length === 0 || v.length > COURSE_LIST_MAX) {
+      add('shape', path, `${what}: a list of 1–${COURSE_LIST_MAX} capability names`);
+      return;
+    }
+    // Per element, as `stationList` does: a role of four with one bad name is fixable in place,
+    // and a list that is fine element by element reports nothing.
+    for (const [i, x] of v.entries()) {
+      if (typeof x !== 'string' || !CAPABILITY.test(x)) add('shape', `${path}.${i}`, `${what}: "${String(x)}" is not a capability name (${CAPABILITY.source})`);
     }
   }
 
