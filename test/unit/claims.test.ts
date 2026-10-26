@@ -181,6 +181,37 @@ describe('the claim and end contracts (§6.2, §6.5, §11)', () => {
     expect(await grantedClaim(grantedVenue.key, grantedVenue.secret), 'the granted venue worker claims the leg').toMatchObject({ status: 200, json: { ticket_id: ticketId } });
   });
 
+  it('§7.2 rule 4 holds a human-operator leg the way rule 6 holds an operator-only ticket (R-BTN-121, review round 6)', async () => {
+    // The start leg reserved for a person: an approval or hands-on step no autonomous worker takes.
+    const needs = JSON.parse(JSON.stringify(roadmapPr)) as Record<string, any>;
+    needs.legs.implement.requires = { capabilities: ['human-operator'] };
+    await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { registry: [course(3, 3, { course: needs })] }));
+    const venue = await register('vm-a', { capabilities: ['agent-venue'] });
+    const operator = await register('mac', { capabilities: ['human-operator', 'agent-venue'] });
+    const ticketId = 'docs:R3-9002';
+    // The query does not offer it to the agent venue, and the gate refuses it — the two agree.
+    expect(await recommended(venue.id)).not.toContain(ticketId);
+    expect(await claimItem('vm-a', venue.secret, { ticket_id: ticketId })).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 4 } });
+    // The operator is offered it and claims it.
+    expect(await recommended(operator.id)).toContain(ticketId);
+    expect((await claimItem('mac', operator.secret, { ticket_id: ticketId })).status).toBe(200);
+  });
+
+  it('the courses row holds the course file as posted; the leg needs the query reads are its derived view (review round 6)', async () => {
+    const file = JSON.parse(JSON.stringify(roadmapPr)) as Record<string, any>;
+    file.legs.implement.requires = { capabilities: ['deployer'] };
+    file.capability_roles = { deployer: ['vpn:corp', 'credential:DEPLOY_TOKEN'] };
+    const post = () => syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { registry: [course(3, 3, { course: file })] }));
+    expect((await post()).status).toBe(200);
+    expect(JSON.parse((await rows<{ course_json: string }>('SELECT course_json FROM courses WHERE id = ?', 'roadmap-pr'))[0].course_json)).toEqual(file);
+    const { leg_needs_json: needs } = (await rows<{ leg_needs_json: string }>('SELECT leg_needs_json FROM courses WHERE id = ?', 'roadmap-pr'))[0];
+    expect(JSON.parse(needs).implement).toEqual(['vpn:corp', 'credential:DEPLOY_TOKEN']);
+    // A re-post of the same file is a fixed point: the row is byte-identical.
+    const before = await rows<{ course_json: string; leg_needs_json: string }>('SELECT course_json, leg_needs_json FROM courses WHERE id = ?', 'roadmap-pr');
+    expect((await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.C, { registry: [course(3, 3, { course: file })] }))).status).toBe(200);
+    expect(await rows<{ course_json: string; leg_needs_json: string }>('SELECT course_json, leg_needs_json FROM courses WHERE id = ?', 'roadmap-pr')).toEqual(before);
+  });
+
   it('§7.2 rule 6: an operator-only item goes only to a worker that declared human-operator', async () => {
     const mac = await register('mac', { capabilities: ['human-operator', 'agent-venue'] });
     const vm = await register('vm-a');

@@ -91,6 +91,22 @@ describe('gatesFor: every gate of the table', () => {
     expect(gatesFor(worker({ declared: ['agent-venue'], grants: { docs: { capabilities: ['authentication', 'drivable-browser', 'llm-call'] } } }), ticket({ requires: [] }), leg({ requires: ['create-pr'] }), 'claim', facts())).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
   });
 
+  it('rule 4 reads human-operator on the leg side as rule 6 reads it (R-BTN-121, review round 6)', () => {
+    const hands = leg({ requires: ['human-operator'] });
+    // An autonomous agent-venue worker is refused: the venue's four are never the operator, whether
+    // the key is ungranted, granted the venue's four, or granted them plus the literal.
+    for (const grants of [null, { docs: { capabilities: ['authentication', 'llm-call', 'create-pr', 'drivable-browser'] } }, { docs: { capabilities: ['authentication', 'llm-call', 'create-pr', 'drivable-browser', 'human-operator'] } }]) {
+      expect(gatesFor(worker({ declared: ['agent-venue'], grants }), ticket({ requires: [] }), hands, 'claim', facts()), JSON.stringify(grants)).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
+      expect(gatesFor(worker({ declared: ['agent-venue'], grants }), ticket({ requires: [] }), hands, 'advance', facts())).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
+    }
+    // A worker declaring the literal passes, ungranted or granted it.
+    expect(gatesFor(worker({ declared: ['human-operator'], grants: null }), ticket({ requires: [] }), hands, 'claim', facts())).toEqual({ ok: true });
+    expect(gatesFor(worker({ declared: ['human-operator'], grants: null }), ticket({ requires: [] }), hands, 'advance', facts())).toEqual({ ok: true });
+    expect(gatesFor(worker({ declared: ['human-operator', 'agent-venue'], grants: { docs: { capabilities: [...['authentication', 'llm-call', 'create-pr', 'drivable-browser'], 'human-operator'] } } }), ticket({ requires: [] }), hands, 'claim', facts())).toEqual({ ok: true });
+    // Within the grant as rule 6 checks it: declaring it is not enough for a granted key the grant leaves out.
+    expect(gatesFor(worker({ declared: ['human-operator'], grants: { docs: { capabilities: ['llm-call'] } } }), ticket({ requires: [] }), hands, 'claim', facts())).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
+  });
+
   it('an untiered ticket fits only the top tier; a role in the clause needs all its capabilities', () => {
     expect(gatesFor(worker({ tier_ceiling: 'judgement' }), ticket({ tier: null }), leg(), 'claim', facts())).toMatchObject({ rule: 5 });
     expect(gatesFor(worker({ declared: ['agent-venue'] }), ticket({ requires: ['authentication', 'llm-call'] }), leg(), 'claim', facts())).toEqual({ ok: true });

@@ -101,8 +101,11 @@ export function validateCourse(json: unknown): CourseViolation[] {
       }
       if (Array.isArray(caps)) {
         for (const [i, c] of caps.entries()) {
-          if (typeof c === 'string' && (Object.hasOwn(ROLES, c) || c === 'human-operator')) {
-            add('role-in-roles', `capability_roles.${role}.${i}`, `"${c}" is a vocabulary role: a role expands to capabilities, and roles do not nest (R-BTN-121, R-BTN-157)`);
+          // R-BTN-121, R-BTN-157: a role names capabilities, never another role of this file either —
+          // an unexpanded name here reaches rule 4 as a literal capability no grant holds (review
+          // round 6, finding 1).
+          if (typeof c === 'string' && (Object.hasOwn(ROLES, c) || c === 'human-operator' || Object.hasOwn(roles, c))) {
+            add('role-in-roles', `capability_roles.${role}.${i}`, `"${c}" is a ${c === 'human-operator' || Object.hasOwn(ROLES, c) ? 'vocabulary role' : 'capability role of this file'}: a role expands to capabilities, and roles do not nest (R-BTN-121, R-BTN-157)`);
           }
         }
       }

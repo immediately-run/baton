@@ -23,9 +23,10 @@ export interface Leg {
   /** R-BTN-107: the isolation a worker must declare to take it, or null for any. */
   isolation: 'session' | null;
   /** R-BTN-120, R-BTN-121: the capabilities the leg requires of whoever takes it — rule 4's own
-   *  input beside the ticket's clause (B-86); empty when it requires none. Stored expanded, as
-   *  §5.6 stores a ticket's: the course's `capability_roles` named here are replaced by their
-   *  capabilities and a vocabulary role by its four, so no role name is left (§12.5). */
+   *  input beside the ticket's clause (B-86); empty when it requires none. Read as
+   *  `legCapabilities` reads them: the course's `capability_roles` named here are replaced by
+   *  their capabilities and a vocabulary role by its four, so no role name is left (§12.5) —
+   *  except `human-operator`, which is no role and stands literal (R-BTN-121). */
   requires: string[];
 }
 
@@ -55,6 +56,13 @@ const names = (v: unknown): string[] => (typeof v === 'string' ? [v] : Array.isA
  * the vocabulary's `capabilitiesOf` — a vocabulary role (`agent-venue`) becomes the capabilities
  * it carries. What is left is capabilities only, never a role name (§12.5). Names that are
  * neither are taken as themselves (a namespaced capability such as `vpn:corp`).
+ *
+ * `human-operator` is the one name that is never expanded (review round 6, finding 0): R-BTN-121
+ * makes it a built-in bare capability "compared as a string", and the ticket side keeps it so —
+ * `board.ts` sets `operator_only` for a clause naming it and rule 6 compares the literal. The
+ * vocabulary happens to give it the agent venue's four, so expanding it here let any autonomous
+ * `agent-venue` worker take a leg the course reserved for a person. It stands literal, and rule 4
+ * and the candidate query check that literal the way rule 6 does.
  */
 export function legCapabilities(requires: unknown, capabilityRoles: unknown): string[] {
   const listed = (requires as { capabilities?: unknown } | null | undefined)?.capabilities;
@@ -65,7 +73,7 @@ export function legCapabilities(requires: unknown, capabilityRoles: unknown): st
   for (const name of listed) {
     if (typeof name !== 'string') continue;
     const own = Object.hasOwn(roles, name) ? roles[name] : null;
-    for (const c of capabilitiesOf(Array.isArray(own) ? (own as string[]) : [name])) out.add(c);
+    for (const c of name === 'human-operator' ? [name] : capabilitiesOf(Array.isArray(own) ? (own as string[]) : [name])) out.add(c);
   }
   return [...out];
 }
@@ -114,12 +122,28 @@ export function graphOf(json: unknown): Graph {
 }
 
 /**
- * §5.6, §12.5, R-BTN-121: a course file with every leg's `requires.capabilities` stored expanded —
- * the same two-step expansion `graphOf` reads (`legCapabilities`), written back where `graphOf`
- * reads each leg, and `capability_roles` left out (no role name is stored). The registry stores
- * this form, so the candidate query (a SQL mirror of `gatesFor`, which cannot expand a role) and
- * every reader of the stored file compare capability names only. A file with nothing to expand
- * is returned unchanged.
+ * R-BTN-120, R-BTN-121, §12.5: every leg's needs as `graphOf` reads them, by leg id — the view the
+ * registry derives beside the course file it stores (`courses.ts` writes it to `leg_needs_json`)
+ * so the candidate query (`claims.ts`, SQL that cannot expand a role) compares the same
+ * capabilities rule 4 does. The course file itself is stored as posted: this is never the file.
+ */
+export function legNeedsOf(json: unknown): Record<string, string[]> {
+  if (typeof json !== 'object' || json === null || Array.isArray(json)) return {};
+  const f = json as { legs?: unknown; capability_roles?: unknown };
+  if (typeof f.legs !== 'object' || f.legs === null || Array.isArray(f.legs)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [id, l] of Object.entries(f.legs as Record<string, unknown>)) {
+    out[id] = legCapabilities(typeof l === 'object' && l !== null ? (l as { requires?: unknown }).requires : undefined, f.capability_roles);
+  }
+  return out;
+}
+
+/**
+ * §5.6, §12.5, R-BTN-121: every leg's `requires.capabilities` replaced by its expansion, by leg
+ * id, with `capability_roles` left out — the course file as a reader compares it once no role name
+ * is in it. A view of the file, never the file the registry stores (review round 6, finding 2: the
+ * `courses` row holds the file as posted, §12's table); `legNeedsOf` is what the candidate query
+ * reads, and this keeps the same shape for a reader that wants one file.
  */
 export function expandedCourse(json: unknown): unknown {
   if (typeof json !== 'object' || json === null || Array.isArray(json)) return json;
@@ -134,7 +158,8 @@ export function expandedCourse(json: unknown): unknown {
     const kept = typeof req === 'object' && req !== null && !Array.isArray(req) ? { ...(req as Record<string, unknown>) } : req;
     if (typeof kept === 'object' && kept !== null && !Array.isArray(kept)) {
       (kept as Record<string, unknown>).capabilities = legCapabilities(req, f.capability_roles);
-    }    legs[id] = { ...(l as Record<string, unknown>), requires: kept };
+    }
+    legs[id] = { ...(l as Record<string, unknown>), requires: kept };
   }
   out.legs = legs;
   return out;

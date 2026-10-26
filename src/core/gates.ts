@@ -49,7 +49,9 @@ export interface GateLeg {
   /** R-BTN-120, R-BTN-121: the capabilities the leg requires of whoever takes it — rule 4's own
    *  input beside the ticket's clause (`spec/BATON_SPEC.md` §2e); empty or absent, nothing extra.
    *  Capabilities only, never a role name: `graphOf` expands the course's `capability_roles` and
-   *  the vocabulary (§12.5), and rule 4 checks each one as the clause's names are checked. */
+   *  the vocabulary (§12.5), and rule 4 checks each one as the clause's names are checked. The one
+   *  literal name is `human-operator`, which R-BTN-121 compares as a string; rule 4 checks it as
+   *  rule 6 checks the ticket side (review round 6, finding 0). */
   requires?: string[];
 }
 
@@ -139,9 +141,17 @@ export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, p
   // so only capabilities are left (§12.5). Every name needs a capability the declaration carries,
   // and one the grant holds when the key is granted (review round 5, finding 0: `.some()` let one
   // capability of a role named in a leg stand for the whole role).
+  // `human-operator` is the exception on both sides (review round 6, finding 0): R-BTN-121 compares
+  // it as a string, and `capabilitiesOf` drops the literal, so it is met exactly as rule 6 meets it
+  // — declared by that name, and granted by that name when the key is granted.
   const held = capabilitiesOf(worker.declared);
   const granted = grant ? new Set(grant.capabilities) : null;
+  const operator = worker.declared.includes('human-operator') && !(granted && !granted.has('human-operator'));
   for (const need of new Set([...capabilitiesOf(ticket.requires), ...(leg.requires ?? [])])) {
+    if (need === 'human-operator') {
+      if (!operator) return refuse(4);
+      continue;
+    }
     if (!held.has(need) || (granted && !granted.has(need))) return refuse(4);
   }
 

@@ -370,13 +370,15 @@ export class Claims {
                                 OR (:granted = 1 AND r.name NOT IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j
                                                                     WHERE g.credential_id = :credential AND g.repository_id = w.repository_id
                                                                       AND g.revoked_at IS NULL))))             -- rule 4, within the grant
-           AND NOT EXISTS (SELECT 1 FROM courses k, json_each(k.course_json, '$.legs') l                               -- rule 4's leg input (R-BTN-120, B-86), as gatesFor reads it
-                           WHERE k.repository_id = w.repository_id AND k.id = w.course_id AND l.key = a.leg              -- its names as graphOf expanded them (§12.5): capabilities only, never a role
-                             AND EXISTS (SELECT 1 FROM json_each(l.value, '$.requires.capabilities') q                -- a capability the leg asks for,
-                                         WHERE (q.value NOT IN (SELECT capability FROM worker_capabilities WHERE worker_id = :worker)
-                                            OR (:granted = 1 AND q.value NOT IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j
-                                                                                  WHERE g.credential_id = :credential AND g.repository_id = w.repository_id
-                                                                                    AND g.revoked_at IS NULL)))))                                        -- or outside the grant
+           AND NOT EXISTS (SELECT 1 FROM courses k, json_each(k.leg_needs_json) l                           -- rule 4's leg input (R-BTN-120, B-86), the view the registry
+                           WHERE k.repository_id = w.repository_id AND k.id = w.course_id AND l.key = a.leg      -- derives from the one expansion: capabilities only
+                             AND EXISTS (SELECT 1 FROM json_each(l.value) q                                      -- A leg that asks for human-operator (R-BTN-121)
+                                         WHERE (q.value <> 'human-operator'                                                  -- asks for it literally, as rule 6 asks a ticket's —
+                                             AND (q.value NOT IN (SELECT capability FROM worker_capabilities WHERE worker_id = :worker)          -- declared, and granted when the key is
+                                               OR (:granted = 1 AND q.value NOT IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j  -- granted. Every other name is a capability,
+                                                                                     WHERE g.credential_id = :credential AND g.repository_id = w.repository_id   -- within the grant
+                                                                                       AND g.revoked_at IS NULL)))
+                                           OR (q.value = 'human-operator' AND NOT :human_operator))))
            AND COALESCE(w.tier_position, json_array_length(p.tiers) - 1)
                <= json_extract(:ceiling, '$."' || w.repository_id || '"')                                      -- rule 5, per repository
            AND (w.operator_only = 0 OR (:human_operator AND (:granted = 0 OR EXISTS (
@@ -388,9 +390,10 @@ export class Claims {
        WHERE n > :page * 50 AND n <= (:page + 1) * 50
        ORDER BY repository_id, course_id, n`,
       { worker: w.id, now: this.c.now(), ceiling: JSON.stringify(this.ceilingPositions(w)), human_operator: w.declared.includes('human-operator') ? 1 : 0, rule9: rule9 ? 1 : 0, page,
-        // A leg's `requires` is compared as capability names only: `graphOf` expands the course's
-        // `capability_roles` and a vocabulary role when it builds the graph (§12.5, review round
-        // 5, findings 1 and 3), and a grant stores capabilities only, so no role list is bound.
+        // A leg's `requires` is compared as `graphOf` expanded it: the registry writes that view to
+        // `leg_needs_json` from `legNeedsOf` when it accepts a file (§12.5), so the query reads
+        // capabilities only, and `human-operator` stays the literal rule 6 compares (review round
+        // 6, finding 0). A grant stores capabilities only, so no role list is bound.
         granted: w.grants ? 1 : 0, credential: w.credential_id });
   }
 

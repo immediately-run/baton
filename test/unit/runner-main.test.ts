@@ -260,6 +260,16 @@ describe('the grant\'s declaration (B-86)', () => {
     // Review round 3, finding 3: the keys are the core's own — the file `legNeeds` reads is one
     // `validateCourse` accepts (a role a leg requires is no unknown key).
     expect(validateCourse(JSON.parse(readFileSync(join(dir, '.baton', 'courses', 'relay', 'course.json'), 'utf8')))).toEqual([]);
+    // Review round 6, finding 0: `human-operator` is never expanded — a runner declaring the
+    // agent venue is told it lacks it, and one declaring it by name has it.
+    const before = JSON.parse(readFileSync(join(dir, '.baton', 'courses', 'relay', 'course.json'), 'utf8'));
+    before.legs.c.requires = { capabilities: ['human-operator'] };
+    writeFileSync(join(dir, '.baton', 'courses', 'relay', 'course.json'), JSON.stringify(before));
+    const reserved = legNeeds(dir, '', 'relay');
+    expect(reserved).toContain('human-operator');
+    expect(capabilitiesOf(['agent-venue']).has('human-operator')).toBe(false);
+    expect(capabilitiesOf(['human-operator']).has('human-operator')).toBe(false); // the expansion drops the literal
+    expect(['human-operator'].includes('human-operator')).toBe(true);
     try {
       expect(readHead(dir)).toBe('');
     } finally {

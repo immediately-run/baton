@@ -288,6 +288,30 @@ describe('migration 0013: stations and legs (R3-1232, round 1, 1-B-2)', () => {
   });
 });
 
+describe('migration 0022: the leg needs derived beside the course file (B-86, review round 6)', () => {
+  it('gives every held course an empty derived view, leaving its stored file untouched', async () => {
+    const id = env.BATON.idFromName('migrations-0022');
+    await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      const objects = sql.exec("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type = 'table'").toArray() as { name: string }[];
+      for (const o of objects) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id <= 21)) sql.exec(m.sql);
+      sql.exec(`INSERT INTO repositories (id, github, default_branch, sync_workflow) VALUES ('docs', 'immediately-run/docs', 'main', '.github/workflows/baton-sync.yml')`);
+      const file = JSON.stringify({ capability_roles: { deployer: ['vpn:corp'] }, legs: { work: { requires: { capabilities: ['deployer'] } } } });
+      sql.exec(`INSERT INTO courses (repository_id, id, version, skill, course_json, step_kinds, min_worker_version) VALUES ('docs', 'roadmap-pr', 3, 's', ?, '[]', 3)`, file);
+
+      sql.exec('PRAGMA foreign_keys = ON');
+      sql.exec(MIGRATIONS.find((x) => x.id === 22)!.sql);
+
+      // The file is still the one the repository posted, roles and all (§12.1); the view is written
+      // by the next accepted post, which alone can expand a role in code.
+      expect(sql.exec('SELECT course_json, leg_needs_json FROM courses').toArray()).toEqual([{ course_json: file, leg_needs_json: '{}' }]);
+      expect(sql.exec(`SELECT dflt_value FROM pragma_table_info('courses') WHERE name = 'leg_needs_json'`).toArray()).toEqual([{ dflt_value: "'{}'" }]);
+    });
+  });
+});
+
 describe('migration 0021: leg queues (R3-1255)', () => {
   it('counts the tickets already queued and unheld, leaving the bound to the next course file; keeps the events and admits the new kinds', async () => {
     const id = env.BATON.idFromName('migrations-0021');

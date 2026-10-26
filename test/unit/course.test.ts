@@ -102,6 +102,13 @@ describe('validateCourse (R-BTN-69)', () => {
     // An ordinary named list is the whole point and passes.
     c.capability_roles = { deployer: ['vpn:corp', 'credential:DEPLOY_TOKEN'] };
     expect(validateCourse(c)).toEqual([]);
+    // Review round 6, finding 1: a value naming another role of the same file too — it would be
+    // stored unexpanded and read by rule 4 as a literal capability no grant holds.
+    c.capability_roles = { deployer: ['admin'], admin: ['vpn:corp'] };
+    expect(rules(c)).toEqual(['role-in-roles capability_roles.deployer.0']);
+    // A key that is neither a vocabulary role nor a value of another role is a plain name.
+    c.capability_roles = { deployer: ['vpn:corp'], architecture: ['create-pr'] };
+    expect(validateCourse(c)).toEqual([]);
   });
 
   it('a station names its entry outputs by name and schema id; an output may name an id or a legacy path (R-BTN-108, R-BTN-109)', () => {
