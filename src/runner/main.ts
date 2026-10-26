@@ -46,7 +46,7 @@ export interface RunArgs {
  * [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b] [--beat-every <ms>]
  * [--course <id>] [--test-harness] [--verbose]`.
  * Unknown flags are refused, never dropped. `--capabilities` narrows the grant: without it the
- * runner declares what the grant allows (B-86). */
+ * runner declares what the grant allows (B-86). `--help` prints this, before any credential. */
 export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): RunArgs {
   const out: RunArgs = {
     harness: 'opencode', home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
@@ -84,8 +84,26 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
   return out;
 }
 
+/** B-86: `baton run --help` (and `-h`) — the usage `parseRunArgs` reads, and what the ticket's
+ * What-to-build 2 asks the runner to say: `--capabilities` narrows the grant, it never enables
+ * what the grant does not allow, and absent it the runner declares the grant. Printed before any
+ * credential or network work, and the exit is 0. */
+export const RUN_USAGE = [
+  'usage: baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]',
+  '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
+  '                 [--beat-every <ms>] [--course <id>] [--test-harness] [--verbose]',
+  '',
+  'Runs this machine\'s worker: it heartbeats, claims a ticket of its course and runs each leg.',
+  '',
+  '  --capabilities a,b  narrows what the grant allows; it never enables what the grant does not.',
+  '                      Absent, the runner declares what the grant allows — no flag is needed to',
+  '                      serve the grant. A machine without a browser narrows, e.g. llm-call,create-pr.',
+].join('\n');
+
+/** B-86: whether the arguments ask for the usage — `--help` or `-h`, anywhere in them. */
+export const asksHelp = (argv: string[]): boolean => argv.includes('--help') || argv.includes('-h');
+
 /** A repository's course declarations for the heartbeat (rule 9): the spec's
- * `.baton/baton.json` `courses: [{id, version}]` (§2c/R-BTN-51) first; docs' interim is the
  * skills_version every course runs at (`{course}` naming one, or the single directory). The
  * runner refuses to guess a version it cannot find — a wrong declaration silences rule 9. */
 export function declareCourses(home: string): { course: string; version: number }[] {
@@ -211,8 +229,15 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     process.stderr.write(`baton: this session carries BATON_PARENT=${parent}: a leg session never claims (§6.13)\n`);
     return 1;
   }
+  // B-86: `--help` answers the usage and returns before any credential or network work — a
+  // machine asking what the flags mean needs no key and no Baton.
+  if (asksHelp(argv)) {
+    (io.log ?? ((l: string) => process.stdout.write(`${l}\n`)))(RUN_USAGE);
+    return 0;
+  }
   const a = parseRunArgs(argv);
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
+  // Verbose (the owner, 2026-10-23): every line carries the time it was written.
   // Verbose (the owner, 2026-10-23): every line carries the time it was written.
   const say = a.verbose ? withTimestamps(log) : log;
   // B-83: a settings file whose `agent_command` is exactly `echo` is the no-op stub — the agent

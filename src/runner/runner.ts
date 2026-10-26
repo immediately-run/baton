@@ -78,25 +78,31 @@ export interface ClaimOutcome {
 }
 
 /** B-86: what the heartbeat declares when `--capabilities` names nothing — the grant's
- *  capabilities, so a granted machine never restates what its grant already says. A role granted
- *  beside all of its own expansions declares the role (and its expansions do not follow: the role
- *  carries them), which is rule 4 read the way the grant means it — a rule-4 clause naming
- *  `agent-venue` is satisfied by the role, not lost among its four. Every other name stands in
- *  place. Exported for its test. */
+ *  capabilities, so a granted machine never restates what its grant already says. Every name
+ *  here must pass the heartbeat's check (`workerApi.ts`): a role when all of its capabilities
+ *  are granted, any other name when it is granted itself — a name the check would refuse is a
+ *  beat `forbidden`, and a `forbidden` beat costs the lease (review round 3, finding 1). So a
+ *  role whose every capability is present stands as the role (rule 4 read the way the grant
+ *  means it — a clause naming `agent-venue` is satisfied by the role, not lost among its four);
+ *  a role named beside only some of them is dropped, its named capabilities standing in its
+ *  place; and a capability a kept role already carries is not declared twice. The server expands
+ *  the roles again (gates.ts:130), so the set declares the same capabilities it was given.
+ *  Exported for its test. */
 export function declarationFrom(held: string[]): string[] {
   const names = [...new Set(held)].filter((n) => n !== 'none');
   const roles = ROLES as Record<string, string[] | undefined>;
-  const rises = new Set(names.filter((n) => {
+  const stands = (n: string): boolean => {
     const caps = roles[n];
-    return caps != null && caps.length > 0 && caps.every((c) => names.some((m) => m === c));
-  }));
-  const carried = new Set<string>();
-  for (const r of rises) for (const c of roles[r] ?? []) carried.add(c);
+    // `human-operator` is rule 6's own row (workerApi.ts: it is admitted by its own name, and
+    // stored as itself), never folded into its expansions.
+    return caps == null || n === 'human-operator' || caps.every((c) => names.some((m) => m === c));
+  };
+  const kept = names.filter(stands);
+  const carried = new Set(kept.flatMap((n) => (roles[n] != null && n !== 'human-operator' ? roles[n]! : [])));
   const out: string[] = [];
-  for (const name of names) {
-    if (roles[name] != null) {
-      if (rises.has(name)) out.push(name);
-    } else if (!carried.has(name) && !out.some((o) => o === name)) out.push(name);
+  for (const name of kept) {
+    // A role keeps its place; a capability stands unless a kept role carries it.
+    if (roles[name] != null ? !out.some((o) => o === name) : !carried.has(name) && !out.some((o) => o === name)) out.push(name);
   }
   return out;
 }
@@ -147,12 +153,21 @@ export class Runner {
   private rekeySecret: string | null = null;
   /** An end Baton never answered (the network went with the lease): retried on every beat. */
   private pendingEnd: { claimId: number; body: Record<string, unknown> } | null = null;
-  /** B-86: the capabilities the beats declare — null until the grant is known. */
-  private declared: string[] | null = null;
-  /** B-86: the never-eligible line has been said for the current declaration (itself said again
-   *  only when the declaration or the courses' needs change; five minutes' bound). */
+  /** B-86: the capabilities the beats declare — null until the grant is known; a restart reads
+   *  what the last process settled (state.ts's `declared`) rather than asking again. */
+  private declared: string[] | null;
+  /** B-86: the declaring list of the last beat Baton answered with a full answer — what the
+   *  server will have recorded (`rewriteSettings`), null while no answer has landed. A beat that
+   *  carried another list leaves the server on this one until the next answered beat. */
+  private sent: string[] | null = null;
+  /** B-86: an answer carried no `grant` — the declaration stays unsettled and the next beat is
+   *  forced, so a grant that arrives later is still read. */
+  private grantAsked = false;
+  /** B-86: the startup never-eligible line has been said for the current declaration (itself said
+   *  again only when the declaration changes) — never per beat. */
   private saidEligible = false;
-  private legNeedsAt = 0;
+  /** B-86: the empty-declaration line has been said, once, since `runOnce` would ask each time. */
+  private saidEmpty = false;
 
   constructor(options: RunnerOptions) {
     this.o = { beatEvery: BEAT_MS, ...options };
@@ -162,6 +177,18 @@ export class Runner {
     this.state = new StateFile(options.stateFile);
     if (!this.state.get().secret) this.state.set({ secret: freshSecret() });
     this.o.api.setSecret(this.state.get().secret);
+    // B-86: a restart keeps the declaration the last process settled — a granted runner does not
+    // ask again, and `runOnce` has no stale `[]` to force a beat for. `--capabilities` still
+    // narrows what was read: a flag is the operator's word, the state file's a past answer.
+    this.declared = options.capabilities ?? this.state.get().declared ?? null;
+    if (options.capabilities != null && JSON.stringify(options.capabilities) !== JSON.stringify(this.state.get().declared)) {
+      this.state.set({ declared: options.capabilities });
+      // Settled before any answer, so the first beat already declares the flag's list — and an
+      // answer that matches it settles nothing, so the line is said here, once (a restart over
+      // the same state file says nothing). The never-eligible line waits for the first answer,
+      // which is where the grant (and so `legNeeds`' question) is said with it.
+      this.log(`baton: declaring ${options.capabilities.join(', ') || 'none'} (--capabilities — it narrows what the grant allows, never enables what the grant does not)`);
+    }
   }
 
   // ── the sidecar (§6.3–6.4) ───────────────────────────────────────────────────────────────
@@ -252,23 +279,42 @@ export class Runner {
       throw e;
     }
     rmSync(spool.taken, { force: true });
+    // What Baton recorded from this beat: `rewriteSettings` writes the rows of the list a beat
+    // carried, so an answer to this beat leaves the server on `declaring` (B-86: `runOnce` reads
+    // this to know whether the next claim would go out on a stale declaration).
+    this.sent = [...declaring];
     // B-86: the declaration settles on the answer — `--capabilities` as given, else the grant the
     // answer carries — and again when the grant moves under a runner that named no flag, so a
     // widened grant needs no restart. Said when it changes, never per beat.
     const grantValues = Array.isArray(answer.grant?.capabilities) ? (answer.grant.capabilities as string[]) : null;
     const grant = grantValues?.length ? grantValues : null;
     // A runner that named no flag declares the grant — an empty one included, which says its key
-    // is granted nothing it declares courses in. An answer with no grant at all (a seed key's)
-    // leaves the declaration as it stands.
-    const settled = this.o.capabilities ?? (grantValues ? declarationFrom(grantValues) : declaring);
-    if (this.declared == null || JSON.stringify(this.declared) !== JSON.stringify(settled)) {
+    // is granted nothing it declares courses in. An answer with no grant at all (a seed key's) is
+    // not an answer of "nothing": it settles nothing, the declaration stays as it stands and the
+    // next beat asks again, so a grant that arrives later is still read (review round 3).
+    const settled = this.o.capabilities ?? (grantValues ? declarationFrom(grantValues) : null);
+    if (settled == null) {
+      // Said once per stretch of grant-less answers, never per beat. The declaration is not an
+      // empty grant: it is unsettled, and `gates.ts` reads a runner that declared nothing as
+      // satisfying only what needs nothing.
+      if (!this.grantAsked) this.log('baton: the heartbeat answered no grant — the declaration stays unsettled and the next beat asks again (a seed key is granted nothing; a machine key is granted by its owner)');
+      this.grantAsked = true;
+    } else {
+      this.grantAsked = false;
+    }
+    if (settled != null && (this.declared == null || JSON.stringify(this.declared) !== JSON.stringify(settled))) {
       this.declared = settled;
       this.saidEligible = false; // a new declaration may be the one that can claim
       const held = this.declared.join(', ') || 'none';
       this.state.set({ declared: this.declared });
+      // The grant the answer carried, when it carried one: what the flag narrowed.
       this.log(this.o.capabilities
-        ? `baton: declaring ${held} (--capabilities, narrowing what the grant allows: ${grant?.join(', ') || 'unknown'})`
+        ? `baton: declaring ${held} (--capabilities, narrowing what the grant allows: ${grantValues ? (grant?.join(', ') || 'none') : 'unknown'})`
         : `baton: declaring ${held} — the grant's capabilities, no --capabilities given`);
+      await this.reportEligibility();
+    } else if (settled != null && !this.saidEligible) {
+      // The first answer settled nothing (a `--capabilities` list it agrees with): the
+      // never-eligible line is still owed once, against the grant this answer names.
       await this.reportEligibility();
     }
     if (this.rekeySecret) {
@@ -357,12 +403,12 @@ export class Runner {
   /** B-86: a runner whose declaration lacks a capability a leg of its course requires says so —
    *  the failure this ticket is about was total silence, and a startup line is what the ticket
    *  asks for. `legNeeds` gives the rule 4 names those legs require; the line names the ones the
-   *  declaration lacks. Said when the declaration changes and otherwise at most every five
-   *  minutes, never on every beat; a declaration that covers them says nothing. */
+   *  declaration lacks. Said when the declaration settles and when it changes, never per beat
+   *  (review round 3: the re-say could never recur, so it is gone); a declaration that covers
+   *  them says nothing, and an empty one is not asked about here — a ticket with no clause is
+   *  still claimable, and `runOnce` is where an empty declaration is told what it means. */
   private async reportEligibility(): Promise<void> {
-    const tooSoon = this.now() - this.legNeedsAt < 5 * 60_000;
-    if (!this.o.legNeeds || (tooSoon && this.saidEligible)) return;
-    this.legNeedsAt = this.now();
+    if (!this.o.legNeeds) return;
     this.saidEligible = true;
     if (this.declared == null) return;
     const held = new Set(capabilitiesOf(this.declared));
@@ -378,7 +424,6 @@ export class Runner {
     if (!short.length) return;
     this.log(`baton: this runner declared ${declared}, which lacks ${short.join(', ')} — a leg requiring it refuses rule 4 (missing-capability), so this runner can never claim one: declare what the machine holds (--capabilities) within what the owner granted`);
   }
-
 
   private loseLease(because: string): void {
     this.lostLease = true;
@@ -553,17 +598,21 @@ export class Runner {
       this.state.set({ claim: null });
       await this.endQuietly(orphan.id, { end_reason: 'released:lease-lost', next: null });
     }
-    // B-86: the declaration settles before the first claim. The worker exists (the beat above
-    // registered it, with no declaration to widen), so one beat declares what the grant allows —
-    // a machine told what it may declare is never refused rule 4 for not having said it yet. A
-    // runner named no flag and still declaring nothing has an empty grant to read, not one more
-    // beat to take.
-    if (this.declared == null || (this.o.capabilities == null && this.declared.length === 0)) await this.tick();
-    // A granted key declaring nothing has nothing to declare (no grant on its courses' repositories
-    // yet): it cannot claim until its grant lands, and idling silently is the failure B-86 names.
-    if (this.declared?.length === 0 && this.o.capabilities == null) {
+    // B-86: the claim goes out only on the declaration the server holds — `sent` is the list the
+    // last answered beat carried, which is what `rewriteSettings` recorded. A runner whose grant
+    // arrived on a beat that declared nothing must beat once more before claiming (review round
+    // 3): the first claim, and every idle attempt, otherwise goes out while the server still sees
+    // `[]` and rule 4 refuses each leg. A grant-less answer leaves the declaration unsettled, so
+    // each attempt asks again until a grant arrives (finding 6).
+    const claimOn = this.declared ?? this.o.capabilities ?? [];
+    const stale = this.grantAsked || this.sent == null || JSON.stringify(this.sent) !== JSON.stringify(claimOn);
+    if (stale) await this.tick();
+    // An empty declaration is not "nothing to do" (finding 5): rule 4 passes any declaration for
+    // a ticket with no `Requires:` clause, so it still claims — the line below explains what it
+    // can never take, once, since every idle attempt returns here.
+    if (this.declared?.length === 0 && this.o.capabilities == null && !this.saidEmpty) {
+      this.saidEmpty = true;
       this.log(`baton: this runner declared nothing — its key's grant allows no capability on the repositories its courses are in, so every leg requiring one refuses it rule 4 (missing-capability); have the owner grant it (baton owner grant <repository> --key …, R-BTN-58)`);
-      return null;
     }
     // R-BTN-72: it recommends, then claims — the first recommendation is what a claim without
     // an id would take anyway, asked for here so the runner knows what it is going for.

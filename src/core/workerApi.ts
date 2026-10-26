@@ -438,13 +438,12 @@ export class WorkerApi {
       : null;
   }
 
-  /** A key's allow-list, for B-86's grant answer. A granted key's is what its grants give it,
-   *  stored expanded (`credential()`, R-BTN-58); a bearer or seed key's the list it has always
-   *  declared within. */
+  /** A bearer or seed key's allow-list, for B-86's grant answer — the reach it has always
+   *  declared within. A granted key never comes here (its reach is its grants, `credential()`),
+   *  so this is the row's list as mirrored (§4). */
   private credentialAllowed(id: string): string[] {
-    const row = this.rows<{ allowed_capabilities: string; created_by: string | null }>('SELECT allowed_capabilities, created_by FROM credentials WHERE id = ?', id)[0];
-    const allow = row ? (isGrantedKey(row.created_by) ? this.credential(id).allowed : (JSON.parse(row.allowed_capabilities) as string[])) : [];
-    return [...(allow ?? [])];
+    const row = this.rows<{ allowed_capabilities: string }>('SELECT allowed_capabilities FROM credentials WHERE id = ?', id)[0];
+    return row ? [...(JSON.parse(row.allowed_capabilities) as string[])] : [];
   }
 
   /** §3's write budget: capabilities and providers rows change only with the settings hash. */

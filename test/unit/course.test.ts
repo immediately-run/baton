@@ -48,6 +48,46 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(rules(c)).toEqual(['bound legs.review.isolation']);
   });
 
+  it('a leg requires capabilities and the course names capability roles (R-BTN-120, B-86)', () => {
+    const c = copy();
+    // What the runner reads: the names rule 4 must find among its declaration, roles included.
+    c.legs.review.requires = { capabilities: ['create-pr', 'deployer'] };
+    c.capability_roles = { deployer: ['vpn:corp', 'credential:DEPLOY_TOKEN'] };
+    expect(validateCourse(c)).toEqual([]);
+    // Absent and empty are fine — a leg that requires nothing, a course with no roles.
+    delete c.legs.review.requires;
+    expect(validateCourse(c)).toEqual([]);
+    c.legs.review.requires = {};
+    c.capability_roles = {};
+    expect(validateCourse(c)).toEqual([]);
+  });
+
+  it('a leg\'s requires and a course\'s capability_roles are checked in shape (R-BTN-120, B-86)', () => {
+    const c = copy();
+    c.legs.review.requires = { tickets: [] };
+    c.legs.deploy = { from: ['approved'], to: 'merged', requires: { capabilities: ['create-pr'], resources: ['llm:x'] } };
+    c.capability_roles = { deployer: ['vpn:corp', ''], empty: [], tooMany: Array.from({ length: 65 }, () => 'x'), notList: 'create-pr' };
+    expect(rules(c)).toEqual([
+      'shape capability_roles.empty',
+      'shape capability_roles.notList',
+      'shape capability_roles.tooMany',
+      'shape capability_roles.deployer.1',
+      'unknown-key legs.deploy.requires.resources',
+      'unknown-key legs.review.requires.tickets',
+    ]);
+    // A requires that is not an object, a capability list that is empty or holds a non-name.
+    c.capability_roles = {};
+    delete c.legs.deploy;
+    c.legs.review.requires = 'create-pr';
+    expect(rules(c)).toEqual(['shape legs.review.requires']);
+    c.legs.review.requires = { capabilities: [] };
+    expect(rules(c)).toEqual(['shape legs.review.requires.capabilities']);
+    c.legs.review.requires = { capabilities: ['ok', 7] };
+    expect(rules(c)).toEqual(['shape legs.review.requires.capabilities']);
+    c.legs.review.requires = { capabilities: 'create-pr' };
+    expect(rules(c)).toEqual(['shape legs.review.requires.capabilities']);
+  });
+
   it('a station names its entry outputs by name and schema id; an output may name an id or a legacy path (R-BTN-108, R-BTN-109)', () => {
     const c = copy();
     c.stations.reviewed.entry = [{ output: 'findings', schema: 'roadmap-pr:findings@2' }, { output: 'change', schema: 'std:forge.change@1' }];

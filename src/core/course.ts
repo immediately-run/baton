@@ -40,11 +40,17 @@ const COURSE_LIST_MAX = 64;
  *  you entry (spec-silent, recorded on R3-1231). The list is kept to this while it fills, so a
  *  hostile file's thousand faults cost no more memory than a hundred. */
 const COURSE_VIOLATIONS_MAX = 100;
-const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs']);
+const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs', 'capability_roles']);
 const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
 const ENTRY_KEYS = new Set(['output', 'schema']);
 const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
-  'no_chain_from', 'isolation']);
+  'no_chain_from', 'isolation', 'requires']);
+/** R-BTN-120: what a leg's `requires` holds — and what the core reads today: its capabilities.
+ *  The spec's `tickets`, `resources` and the other prerequisite kinds are not implemented, so a
+ *  file carrying one is refused rather than silently accepted unread (B-86). */
+const REQUIRES_KEYS = new Set(['capabilities']);
+/** A capability name: a vocabulary name (`create-pr`) or a namespaced one (`vpn:corp`). */
+const CAPABILITY = /^[A-Za-z][A-Za-z0-9._:-]{0,63}$/;
 const INPUT_KEYS = new Set(['from', 'accepts', 'required']);
 const OUTPUT_KEYS = new Set(['schema']);
 /** A schema file in the course directory (R-BTN-82): a relative path whose every segment is
@@ -78,6 +84,14 @@ export function validateCourse(json: unknown): CourseViolation[] {
     return out;
   }
   for (const k of Object.keys(json)) if (!TOP_KEYS.has(k)) add('unknown-key', k, `unknown key "${k}"`);
+  // R-BTN-120: a course's capability roles — named capability lists a leg's `requires.capabilities`
+  // may name (B-86: the runner reads them to say what its legs need).
+  if ('capability_roles' in json) {
+    const roles = json.capability_roles;
+    if (!isObject(roles)) add('shape', 'capability_roles', 'capability_roles is an object of role names');
+    else if (Object.keys(roles).length > COURSE_LIST_MAX) add('shape', 'capability_roles', `at most ${COURSE_LIST_MAX} capability roles`);
+    else for (const [role, caps] of Object.entries(roles)) capabilityList(caps, `capability_roles.${role}`, role);
+  }
 
   // Stations.
   const stations = isObject(json.stations) ? json.stations : null;
@@ -149,6 +163,16 @@ export function validateCourse(json: unknown): CourseViolation[] {
     }
     // R-BTN-107: `session` is the one floor a leg may require.
     if ('isolation' in l && l.isolation !== 'session') add('bound', `${at}.isolation`, 'isolation, when given, is "session"');
+    // R-BTN-120: a leg's prerequisites — the capabilities rule 4 must find among the runner's
+    // declaration (B-86), as names or as the course's capability roles.
+    if ('requires' in l) {
+      const r = l.requires;
+      if (!isObject(r)) add('shape', `${at}.requires`, 'requires is an object of prerequisites');
+      else {
+        for (const k of Object.keys(r)) if (!REQUIRES_KEYS.has(k)) add('unknown-key', `${at}.requires.${k}`, `unknown key "${k}"`);
+        if ('capabilities' in r) capabilityList(r.capabilities, `${at}.requires.capabilities`, 'a leg');
+      }
+    }
     if ('label' in l && !isFreeText(l.label)) add('bound', `${at}.label`, 'a label is §10.4 free text: 1–500 characters, no control characters, none of < > { }');
     if ('outputs' in l) {
       if (!isObject(l.outputs)) add('shape', `${at}.outputs`, 'outputs is an object of output names');
@@ -161,6 +185,14 @@ export function validateCourse(json: unknown): CourseViolation[] {
         // R-BTN-108: a named schema `<id>@<version>`, or R-BTN-82's legacy relative path.
         if ('schema' in o && !parseSchemaId(o.schema) && !isSchemaPath(o.schema)) add('shape', `${op}.schema`, 'a schema is <id>@<version>, or a relative path in the course directory, no segment empty, . or ..');
       }
+    }
+  }
+
+  /** A non-empty list of capability names, deduplicated; `what` names where it sits for the
+   *  message ("a leg", a capability role). Bounded like every list a file holds. */
+  function capabilityList(v: unknown, path: string, what: string): void {
+    if (!Array.isArray(v) || v.length === 0 || v.length > COURSE_LIST_MAX || !v.every((x) => typeof x === 'string' && CAPABILITY.test(x))) {
+      add('shape', path, `${what}: a list of 1–${COURSE_LIST_MAX} capability names`);
     }
   }
 

@@ -6,13 +6,15 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { declareCourses, fetchMain, parseRunArgs, runMain, runnerCourse } from '../../src/runner/main';
+import { capabilitiesOf, ROLES } from '../../src/shared/vocabulary.mjs';
+import { asksHelp, declareCourses, fetchMain, parseRunArgs, runMain, runnerCourse } from '../../src/runner/main';
 import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { envAuth } from '../../src/runner/api';
 import { courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
 import { declarationFrom } from '../../src/runner/runner';
+import { validateCourse } from '../../src/core/course';
 
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
@@ -97,6 +99,28 @@ describe('the agent_command a runner runs (B-83)', () => {
     }
   });
 
+  it('--help and -h print the usage — what --capabilities narrows — and exit 0 before any credential (B-86)', async () => {
+    const saved = clearLegEnv();
+    const lines: string[] = [];
+    try {
+      expect(await runMain(['--help'], { log: (l) => lines.push(l) })).toBe(0);
+      const said = lines.join('\n');
+      expect(said).toContain('usage: baton run');
+      expect(said).toContain('[--capabilities a,b]');
+      // What-to-build 2: the flag narrows, never enables; absent it the grant speaks.
+      expect(said).toContain('narrows what the grant allows; it never enables what the grant does not');
+      expect(said).toContain('Absent, the runner declares what the grant allows');
+      lines.length = 0;
+      expect(await runMain(['-h'], { log: (l) => lines.push(l) })).toBe(0);
+      expect(lines.join('\n')).toBe(said);
+      // Nothing else ran: a help run with no credential would otherwise throw past the usage.
+      expect(asksHelp(['--home', '/x', '--help'])).toBe(true);
+      expect(asksHelp(['--home', '/x'])).toBe(false);
+    } finally {
+      restoreLegEnv(saved);
+    }
+  });
+
   it('the identity banner names the grant where no --capabilities was given, and the flag\'s own list when it was (B-86)', async () => {
     // B-86's seam: the banner's capabilities field is the flag when given, and the grant (not
     // `agent-venue` alone) when it is not — `runMain` says both.
@@ -164,12 +188,62 @@ describe('the grant\'s declaration (B-86)', () => {
     // A grant naming no role keeps its capabilities, in their order.
     expect(declarationFrom(['authentication', 'llm-call', 'create-pr', 'drivable-browser'])).toEqual(['authentication', 'llm-call', 'create-pr', 'drivable-browser']);
     expect(declarationFrom(['create-pr', 'llm-call'])).toEqual(['create-pr', 'llm-call']);
-    // A partial role is no role: its named capabilities declare what the machine holds.
+    // A partial role is no role: declaring it would lose the lease on every beat; its named
+    // capabilities declare what the machine holds.
     expect(declarationFrom(['llm-call', 'create-pr'])).not.toContain('agent-venue');
     expect(declarationFrom([])).toEqual([]);
     // `none` is every runner's and is never declared; an unrelated name keeps its place.
     expect(declarationFrom(['none', 'vpn:corp', 'llm-call', 'vpn:corp'])).toEqual(['vpn:corp', 'llm-call']);
+    // Review round 3, finding 1: a grant naming a role beside *some* of its expansions — the
+    // answer `grantCapabilities` gives for `agent-venue, llm-call`. The role is not dropped (its
+    // capabilities are not all in the list) and its named expansions are not declared twice.
     expect(declarationFrom(['agent-venue', 'llm-call'])).toEqual(['llm-call']);
+    expect(declarationFrom(['agent-venue', 'create-pr', 'llm-call'])).toEqual(['create-pr', 'llm-call']);
+  });
+
+  it('declarationFrom: what it returns is what the heartbeat accepts, and what rule 4 must see (review round 3, finding 1)', () => {
+    // The heartbeat's own check (workerApi.ts: a role passes when all of its capabilities are
+    // granted, any other name when it is granted itself), and rule 4's reading of the
+    // declaration (capabilitiesOf). The declaration must keep the granted capabilities exactly,
+    // and every name in it must pass the check — a `forbidden` beat loses the lease.
+    const accepted = (held: string[]) => {
+      // `cred.allowed` for a granted key is the union of its grants plus `none` (workerApi.ts
+      // `credential()`); the heartbeat admits a declared name in it, and a role whose capabilities
+      // are all in it (workerApi.ts's `outside` filter). `capabilitiesOf` is that union's
+      // capabilities, so a name is carried when the union has it, or a role's when all it
+      // expands to is carried.
+      const carried = (n: string): boolean =>
+        capabilitiesOf(held).has(n) || ((ROLES as Record<string, string[]>)[n] ?? []).length > 0 && (ROLES as Record<string, string[]>)[n].every((c) => capabilitiesOf(held).has(c));
+      return (decl: string[]) => decl.every((n) => carried(n));
+    };
+    const grantedSets = [
+      ['agent-venue', 'llm-call'],
+      ['agent-venue', 'create-pr', 'llm-call'],
+      ['agent-venue'],
+      ['human-operator'],
+      ['human-operator', 'llm-call'],
+      ['agent-venue', 'human-operator', 'create-pr', 'drivable-browser', 'llm-call', 'authentication'],
+      ['authentication', 'llm-call', 'create-pr', 'drivable-browser'],
+    ];
+    for (const held of grantedSets) {
+      const decl = declarationFrom(held);
+      expect(accepted(held)(decl), `${JSON.stringify(held)} → ${JSON.stringify(decl)}`).toBe(true);
+      // Nothing is declared that was not granted — a role stands only when it was, whole.
+      const carries = capabilitiesOf(held);
+      for (const cap of capabilitiesOf(decl)) expect(carries.has(cap), `${JSON.stringify(held)} → ${JSON.stringify(decl)}`).toBe(true);
+      // A name stands exactly when declaring it passes the heartbeat's check — which is what
+      // `declarationFrom` must keep, or the runner loses its lease on every beat. `human-operator`
+      // is rule 6's own row: declared when the grant names it. `agent-venue` stands when every one
+      // of its capabilities is in the list too (the round-three refusal: a role named beside only
+      // some of them, declared as itself, is `forbidden` — so it is not declared at all).
+      for (const role of ['agent-venue', 'human-operator']) if (held.includes(role)) {
+        const stands = role === 'human-operator' || (ROLES as Record<string, string[]>)[role].every((c) => held.includes(c));
+        expect(decl.includes(role), `${JSON.stringify(held)} → ${JSON.stringify(decl)}`).toBe(stands);
+      }
+    }
+    // `human-operator` is rule 6's own row, declared as itself (workerApi.ts), never folded into
+    // its expansions — and it is accepted by its own name.
+    expect(declarationFrom(['human-operator', 'create-pr', 'llm-call'])).toEqual(['human-operator', 'create-pr', 'llm-call']);
   });
   it('legNeeds: each leg\'s requires.capabilities, roles expanded, from the course the checkout carries', () => {
     const dir = home();
@@ -177,11 +251,14 @@ describe('the grant\'s declaration (B-86)', () => {
       start: 'a', start_leg: 'b', end: ['c'],
       capability_roles: { deployer: ['vpn:corp', 'credential:DEPLOY_TOKEN'] },
       stations: { a: {}, b: {}, c: {} },
-      legs: { b: { from: ['a'], to: 'c', requires: { capabilities: ['create-pr', 'deployer'] } }, c: { from: ['b'], to: 'c' } },
+      legs: { b: { from: ['a'], to: 'b', requires: { capabilities: ['create-pr', 'deployer'] } }, c: { from: ['b'], to: 'c' } },
     }));
     const needs = legNeeds(dir, '', 'relay');
     expect([...needs].sort()).toEqual(['create-pr', 'credential:DEPLOY_TOKEN', 'vpn:corp']);
     expect(legNeeds(dir, '', 'no-such-course')).toEqual([]);
+    // Review round 3, finding 3: the keys are the core's own — the file `legNeeds` reads is one
+    // `validateCourse` accepts (a role a leg requires is no unknown key).
+    expect(validateCourse(JSON.parse(readFileSync(join(dir, '.baton', 'courses', 'relay', 'course.json'), 'utf8')))).toEqual([]);
     try {
       expect(readHead(dir)).toBe('');
     } finally {
