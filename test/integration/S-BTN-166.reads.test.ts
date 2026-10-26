@@ -8,7 +8,7 @@
 // owner's, a worker key granted on the repository reads its board and is told what its grant
 // allows, and a key granted nowhere is refused `forbidden`, an unknown one `unauthenticated`.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
-import { cutover, hbBody, keyCall, ORIGIN, payload, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore } from '../helpers';
+import { adminSession, cutover, hbBody, keyCall, ORIGIN, payload, sessionCall, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
 import { call as hostCall } from '#host';
 
@@ -73,9 +73,12 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     const docs = (res.json.repositories as { id: string; head: { sha: string } | null; courses: { id: string }[] }[]).find((r) => r.id === 'docs')!;
     expect(docs.head?.sha).toBe(board.shas.A);
     expect(docs.courses.map((c) => c.id)).toContain('roadmap-pr');
-    // The dashboard's own answer, not a second one (no new core query).
-    const again = await read(admin, '/v1/admin/repositories');
-    expect(JSON.stringify(again.json.repositories)).toBe(JSON.stringify(res.json.repositories));
+    // The dashboard's own answer, not a second one (no new core query): an administrator's
+    // session, minted from the same key, reads its `GET /v1/ui/state` — the same repositories.
+    const session = await adminSession(admin);
+    const viaSession = await sessionCall(session, '/v1/ui/state');
+    expect(viaSession.status).toBe(200);
+    expect(res.json.repositories).toEqual(((await viaSession.json()) as Record<string, unknown>).repositories);
     // Writes keep their route: the read is a GET, and a GET of a write is not a silent success.
     expect((await read(docsOwner, '/v1/admin/repositories')).json.code).toBe('forbidden');
   });
@@ -115,8 +118,18 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
       const tiers = Object.values(res.json.ready_by_tier as Record<string, string[]>).flat();
       expect(tiers.length).toBeGreaterThan(0);
       expect(tiers.every((id) => id.startsWith('docs:'))).toBe(true);
-      // B-86: the courses' legs with their clauses, for the startup line.
-      expect(Object.keys(res.json.course_files['roadmap-pr'].legs)).toContain('implement');
+      // One fact, one answer: the board's two sections are the dashboard session's own for this
+      // repository — the owner's session reads `GET /v1/ui/state` (`uiRepo` and `readyRows`).
+      const viaSession = await sessionCall(await adminSession(admin), '/v1/ui/state');
+      expect(viaSession.status).toBe(200);
+      const state = (await viaSession.json()) as Record<string, any>;
+      expect(res.json.repository).toEqual(state.repositories.find((r: { id: string }) => r.id === 'docs'));
+      expect(res.json.ready).toEqual((state.ready as { repository_id: string }[]).filter((r) => r.repository_id === 'docs'));
+      expect(res.json.ready_by_tier).toEqual(Object.fromEntries(Object.entries(state.ready_by_tier as Record<string, string[]>)
+        .map(([tier, ids]) => [tier, ids.filter((id) => id.startsWith('docs:'))])));
+      // A section the dashboard never serves is not invented here: the board is these two, the
+      // repository and the key's grant.
+      expect(Object.keys(res.json).sort()).toEqual(['granted_capabilities', 'ready', 'ready_by_tier', 'repository', 'server_time']);
     }
     // A key Baton does not know cannot heartbeat at all — the board read above is its only answer.
     expect((await heartbeat(stranger, 'stranger-host')).status).toBe(401);
@@ -124,14 +137,18 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
 
   it('a board read is refused where the key holds no role, with its code', async () => {
     expect((await read(opsOwner, '/v1/repositories/ops/board')).status).toBe(200);
-    expect((await read(opsOwner, '/v1/repositories/docs/board')).json.code).toBe('forbidden');
+    // Owning another repository confers nothing (R-BTN-58): forbidden, and the status says so.
+    const foreign = await read(opsOwner, '/v1/repositories/docs/board');
+    expect([foreign.status, foreign.json.code]).toEqual([403, 'forbidden']);
     // A key Baton does not know is unauthenticated; a granted key knows its repository only.
-    expect((await read(stranger, '/v1/repositories/docs/board')).json.code).toBe('unauthenticated');
+    const unknown = await read(stranger, '/v1/repositories/docs/board');
+    expect([unknown.status, unknown.json.code]).toEqual([401, 'unauthenticated']);
     expect((await read(admin, '/v1/repositories/nope/board')).json.code).toBe('not-found');
     expect((await read(admin, '/v1/admin/repositories/extra')).json.code).toBe('not-found');
     // The grant is the repository's alone: revoked, the read is refused.
     expect((await keyCall(docsOwner, `/v1/owner/docs/grants/${encodeURIComponent(granted.fingerprint)}/revoke`, {})).status).toBe(200);
-    expect((await read(granted, '/v1/repositories/docs/board')).json.code).toBe('forbidden');
+    const revoked = await read(granted, '/v1/repositories/docs/board');
+    expect([revoked.status, revoked.json.code]).toEqual([403, 'forbidden']);
   });
 
   it('a granted key’s board names its grant, as its heartbeat does; an owner’s or an administrator’s names none', async () => {

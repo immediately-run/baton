@@ -38,9 +38,9 @@ state without a browser; today's answer to a silent runner is guesswork or a hum
    JSON answer, exit 1 on refusal.
 2. The routes they read are the ones the dashboard serves (`/v1/ui/state`'s sources) behind
    the signed principal, no new core queries where an existing one serves.
-3. `baton run`'s startup uses `baton board`'s answer for B-86's "why I can never claim"
-   line, and for B-86 item 1's declaration: the board answers `granted_capabilities` beside the
-   heartbeat, so a granted runner with no `--capabilities` declares its grant's capabilities.
+3. The board answers `granted_capabilities` beside the heartbeat, so a reader sees the key's
+   grant from the read alone. (B-86's "why I can never claim" line and its declaration are
+   baton#104's; this PR is the reads.)
 
 ### Tests
 
@@ -53,18 +53,14 @@ state without a browser; today's answer to a silent runner is guesswork or a hum
 
 ### Where
 
-Built on baton#108. The three routes read the dashboard's own sections (`uiRepo`, `admin.view`'s
-rows) behind the signed principal. Two fields are choices the ticket's "no new core queries where
-an existing one serves" forces an answer for, and both are kept deliberately:
+Built on baton#108. The three routes read the dashboard's own helpers (`uiRepo`, `readyRows`,
+`readyByTier`, `admin.view`'s rows) behind the signed principal: `boardView` derives its ready
+and per-tier sections from `readyRows(repository_id)` for its own repository, never by computing
+the whole `uiState` and filtering it. One field is deliberately the board's own:
 
-- `GET /v1/repositories/{repository}/board` carries `course_files`, each course's stored
-  `course.json` legs. No dashboard section serves it, but B-86's "why I can never claim" needs the
-  clause of a leg with nothing queued — exactly the leg no `queues` row shows.
-- The same board carries `granted_capabilities`, which the heartbeat's answer already names, so a
-  runner with no `--capabilities` declares its grant's declaration from one read (B-86 item 1).
+- `granted_capabilities`, which the heartbeat's answer already names, so a reader knows what the
+  key's grant allows from the read alone — one fact, one answer.
 
-The tests are two levels on purpose: `test/unit/eligibility.test.ts` pins the clause logic and the
-startup default against a board typed to the route's fields, and `S-BTN-166` (both hosts) drives
-the real routes and a granted runner's declaration on the heartbeat it makes. The narrowed
-`--capabilities llm-call` case is unit-tested: this repository's fixture courses carry no
-`Requires:` clause, so no seeded ticket can starve on a narrower declaration.
+`S-BTN-166` (both hosts) drives the real routes: each read against its refusal codes, an owner's
+read of its own and a foreign repository, an administrator on an owner route, a granted key's
+board beside the dashboard session's own state and its heartbeat's answer.

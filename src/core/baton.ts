@@ -1190,57 +1190,47 @@ export class BatonCore {
   }
 
   /** `GET /v1/repositories/{repository}/board` (B-90): the dashboard's view of one repository —
-   *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order, the
-   *  same reads `uiState` takes — and two fields the dashboard does not have. `course_files`
-   *  reads each course's stored `course.json` (a leg with nothing queued keeps its clause); it is
-   *  kept because the runner already holds the file locally and B-86 has it name a clause no
-   *  queue shows (B-90's Deviations). `granted_capabilities` is the key's grant's capabilities —
-   *  the heartbeat answer's field — so a granted runner declares its grant and no standing
-   *  default (B-86); null for a key no grant binds and for an owner's or an administrator's key. */
+   *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order,
+   *  derived by the same `readyRows` it derives them with, for one repository — and one field the
+   *  dashboard does not have. `granted_capabilities` is the key's grant's capabilities — the
+   *  heartbeat answer's field — so a granted runner knows its grant from the read alone; null
+   *  for a key no grant binds and for an owner's or an administrator's key. */
   boardView(repo: string, granted: string[] | null = null) {
     const now = this.now();
     const repository = this.uiRepo(this.registry.get(repo)!);
-    const state = this.uiState();
-    const course_files = Object.fromEntries(repository.courses.map((c) => {
-      const file = this.sql<{ course_json: string }>('SELECT course_json FROM courses WHERE repository_id = ? AND id = ?', repo, c.id)[0];
-      const legs = file ? (JSON.parse(file.course_json) as { legs?: Record<string, unknown> }).legs ?? null : null;
-      return [c.id, legs ? { legs } : null];
-    }));
+    const ready = this.readyRows([repository], repo);
     return {
       repository,
-      course_files,
-      ready: state.ready.filter((r) => r.repository_id === repo),
-      ready_by_tier: Object.fromEntries(Object.entries(state.ready_by_tier).map(([tier, ids]) =>
-        [tier, (ids as string[]).filter((id) => id.startsWith(`${repo}:`))])),
+      ready,
+      ready_by_tier: this.readyByTier(ready, [repo]),
       granted_capabilities: granted,
       server_time: now,
     };
   }
 
-  uiState() {
-    const now = this.now();
-    // Each registered repository: its own head and its own mode (R-BTN-47, R-BTN-28).
-    const repositories = this.adminView().repositories;
-    const where = new Map(repositories.map((r) => [r.id, r]));
+  /** Ready: a ticket whose queued leg its sync posts ready (R-BTN-70), the interim post's
+   *  included — it places each ready item at its course's start (round 2, 2-A-4). For one
+   *  repository when `repository_id` is given (B-90's board), every one otherwise. */
+  private readyRows(repositories: ReturnType<BatonCore['uiRepo']>[], repository_id?: string) {
+    const byId = new Map(repositories.map((r) => [r.id, r]));
     const items = this.sql<Record<string, SqlValue>>(
-      // Ready: a ticket whose queued leg its sync posts ready (R-BTN-70), the interim post's
-      // included — it places each ready item at its course's start (round 2, 2-A-4).
       `SELECT t.id, t.repository_id, t.local_id, t.path, t.title, t.project, t.status, t.node, t.queue, t.tags, t.tier, t.requires_clause, t.operator_only, t.ord, t.rank,
               t.expedite, t.snapshot_sha, s.station, s.next_leg, s.to_end
        FROM tickets t JOIN repositories p ON p.id = t.repository_id
        JOIN ticket_stations s ON s.ticket_id = t.id
        JOIN ticket_next_legs a ON a.ticket_id = t.id AND a.leg = s.next_leg AND a.state = 'ready'
-       WHERE p.retired_at IS NULL ORDER BY p.weight DESC, t.expedite DESC, s.to_end, t.rank IS NULL, t.rank, t.repository_id, t.id`);
+       WHERE p.retired_at IS NULL${repository_id ? ' AND t.repository_id = ?' : ''} ORDER BY p.weight DESC, t.expedite DESC, s.to_end, t.rank IS NULL, t.rank, t.repository_id, t.id`,
+      ...(repository_id ? [repository_id] : []));
     const requires = new Map<string, string[]>();
     for (const r of this.sql<{ ticket_id: string; name: string }>('SELECT ticket_id, name FROM ticket_requires ORDER BY name')) {
       requires.set(r.ticket_id, [...(requires.get(r.ticket_id) ?? []), r.name]);
     }
-    const ready = items.map((r) => ({
+    return items.map((r) => ({
       id: r.id,
       repository_id: r.repository_id,
       local_id: r.local_id,
       title: r.title,
-      url: ((w) => fileUrl(w.forge, w.web_base, w.default_branch, r.path as string))(where.get(r.repository_id as string)!),
+      url: ((w) => fileUrl(w.forge, w.web_base, w.default_branch, r.path as string))(byId.get(r.repository_id as string)!),
       project: r.project,
       tier: r.tier,
       // The commit that last changed the ticket's row — a re-tier shows beside it (S-BTN-39).
@@ -1256,14 +1246,27 @@ export class BatonCore {
       requires: requires.get(r.id as string) ?? [],
       operator_only: r.operator_only === 1,
     }));
-    // Per tier ceiling, the order a worker under it would be offered (§13 step 1's exit).
-    // Each tier name of any ladder, lowest first; a ticket appears under the names of its own
-    // repository's ladder that it fits (R-BTN-66).
-    const names = [...new Set(this.registry.all().flatMap((x) => x.tiers))];
-    const byTier = Object.fromEntries(names.map((t) => [t, ready.filter((r) => {
-      const ladder = this.registry.get(r.repository_id as string)?.tiers ?? [...TIERS];
+  }
+
+  /** Per tier ceiling, the order a worker under it would be offered (§13 step 1's exit). Each
+   *  tier name of any ladder, lowest first; a ticket appears under the names of its own
+   *  repository's ladder that it fits (R-BTN-66). Derived from the `ready` rows given, so the
+   *  board's tier order is its own repository's and never a filtering of another's (B-90). */
+  private readyByTier(ready: { id: unknown; repository_id: unknown; tier: unknown }[], only?: string[]) {
+    const ladders = new Map(this.registry.all().filter((x) => !only || only.includes(x.id)).map((x) => [x.id, x.tiers]));
+    const names = [...new Set([...ladders.values()].flat())];
+    return Object.fromEntries(names.map((t) => [t, ready.filter((r) => {
+      const ladder = ladders.get(r.repository_id as string) ?? [...TIERS];
       return ladder.includes(t) && fitsTier((r.tier as string | null) ?? null, t, ladder);
     }).map((r) => r.id)]));
+  }
+
+  uiState() {
+    const now = this.now();
+    // Each registered repository: its own head and its own mode (R-BTN-47, R-BTN-28).
+    const repositories = this.adminView().repositories;
+    const ready = this.readyRows(repositories);
+    const byTier = this.readyByTier(ready);
 
     const schedules = new Map(this.sql<{ id: string; rules_json: string; factor: number }>('SELECT id, rules_json, factor FROM peak_schedules').map((s) => [s.id, s]));
     const providers = this.sql<{ id: string; name: string; billing: string; window_limits_json: string | null }>('SELECT id, name, billing, window_limits_json FROM model_providers ORDER BY id').map((a) => {
