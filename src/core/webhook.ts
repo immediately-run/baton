@@ -27,16 +27,11 @@ export const MIRROR_EMAIL = 'baton-mirror@immediately.run';
 export const ACTIONS_BOT = 'github-actions[bot]';
 
 // B-89's statements on `webhook_syncs`, named constants like their neighbours': what each compares
-// and what it writes read the same in the code and in §7.1. The stale threshold goes in as a SQL
-// number of the statement's own, never a `?` binding: a Workers-host binding is an SQLite REAL, and
-// an INTEGER storage class compared with a REAL is not compared numerically below 2^40 (round 4:
-// `last_dispatch_at < ?` read a stamp equal to the threshold as already past it) — a threshold
-// written into the text compares the same and numerically on both hosts. It is a clock's reading,
-// so nothing a caller controls reaches the text.
+// and what it writes read the same in the code and in §7.1.
 /** The live repositories whose stamp is stale — strictly, `<` the threshold's milliseconds. */
-const STALE_QUERY = (at: number) => `SELECT s.repository_id FROM webhook_syncs s
+const STALE_QUERY = `SELECT s.repository_id FROM webhook_syncs s
   JOIN repositories r ON r.id = s.repository_id AND r.retired_at IS NULL
-  WHERE s.last_dispatch_at < ${Math.trunc(at)} ORDER BY s.repository_id`;
+  WHERE s.last_dispatch_at < ? ORDER BY s.repository_id`;
 /** A send's stamp. */
 const STAMP_UPSERT = `INSERT INTO webhook_syncs (repository_id, last_dispatch_at) VALUES (?, ?)
   ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at`;
@@ -170,10 +165,9 @@ export class Webhooks {
     if (d.event === 'pull_request' && d.merged !== true) return { outcome: 'not-a-merge' };
     const targets = this.targets(full, registered);
     // B-89: every sync this path sends is timed here — a merge's own, another repository's
-    // want's, the alarm's backstop resend included — in the transaction that decides to send
-    // it, so the row is the path's last send and what the alarm reads. It is written whether or
-    // not the dispatch below is the one inside R-BTN-73's window: a dispatch the window only
-    // makes trailing is sent by the alarm a moment later, and the row is no older for it.
+    // want's, the alarm's backstop resend and a window's trailing send included — in the
+    // transaction that decides to send it (the trailing send stamps when the window closes
+    // and the alarm sends it), so the row is the path's last send and what the alarm reads.
     const own = d.event === 'pull_request' ? registered.find((r) => r.github.toLowerCase() === full)?.id : undefined;
     // B-89: a merge of the repository's own sends its own sync — the trigger that fires
     // when GitHub's schedule does not. R-BTN-73 held it back before the cutover only because
@@ -226,7 +220,7 @@ export class Webhooks {
    *  the path only serves repositories its deliveries led it to. */
   dueSync(): string[] {
     const now = this.c.now();
-    const due = this.rows<{ repository_id: string }>(STALE_QUERY(now - SYNC_STALE_MS)).map((r) => r.repository_id);
+    const due = this.rows<{ repository_id: string }>(STALE_QUERY, now - SYNC_STALE_MS).map((r) => r.repository_id);
     for (const id of due) {
       this.c.store.exec(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES (?, ?, NULL)
                          ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at, trailing_at = NULL`, id, now);
@@ -282,6 +276,10 @@ export class Webhooks {
                        AND repository_id IN (SELECT id FROM repositories WHERE retired_at IS NOT NULL)`);
     const due = this.rows<{ repository_id: string }>('SELECT repository_id FROM webhook_dispatch WHERE trailing_at IS NOT NULL AND trailing_at <= ? ORDER BY repository_id', now).map((r) => r.repository_id);
     for (const id of due) this.c.store.exec('UPDATE webhook_dispatch SET last_dispatch_at = ?, trailing_at = NULL WHERE repository_id = ?', now, id);
+    // The window's send is the path's own too: §7.1 times every dispatch here, and a backstop
+    // counting from the delivery's stamp — up to a window early — would resend a just-sent
+    // sync (round 5, 5-r1-2).
+    this.stamp(due, now);
     return due;
   }
 

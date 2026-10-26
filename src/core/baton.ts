@@ -261,7 +261,7 @@ export class BatonCore {
     this.syncNow(stale);
     this.syncNow(this.store.transaction(() => this.webhooks.dueTrailing()));
     await this.armBy(this.webhooks.nextTrailing());
-    await this.armBy(this.webhooks.nextDue());    // Claims first, so a worker reaped this tick has its messages expired in the same tick.
+    await this.armBy(this.webhooks.nextDue());
     let lapse: number | null = null;
     try {
       this.store.transaction(() => {

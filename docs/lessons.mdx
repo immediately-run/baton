@@ -60,7 +60,7 @@ These are its lessons, newest understanding first.
   board is not just missing news — it is what the regression fence needs to do its work.
   **Between pushes, dispatch `baton-sync.yml` when freshness matters.** *Status: the cron
   still is not the backstop. Baton's webhook receives the App's `pull_request` deliveries
-  again (§7.1), so a merge dispatches the sync itself, at most one every 15 minutes, and
+  again (§7.1), so a merge dispatches the sync itself (one per merge, inside R-BTN-73's 30-second window), and
   the alarm dispatches one when the repository's last is over 10 minutes old — a run of
   the fifteen-minute cron alone would now leave the board at most that far behind. The
   delivery half waits on B-92's verified App; the channel itself is

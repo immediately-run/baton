@@ -137,8 +137,8 @@ describe('S-BTN-167 a merge dispatches the sync', () => {
       // alarm is armed for.
       expect(at(B + 1).nextDue()).toBe(B + 1);
       expect(at(B + 1).dueSync()).toEqual(['baton']);
-      // Stamped `now - 1`, a millisecond past the boundary: the same tick's and the next tick's
-      // comparison do not send again.
+      // The tick that sent stamped `now`: the same comparison again, and the next tick's, do
+      // not send a second time (a stamp is never due on the tick that wrote it).
       expect(at(B + 1).dueSync()).toEqual([]);
       expect(at(B + 60_001).dueSync()).toEqual([]);
     });
