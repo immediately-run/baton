@@ -10,10 +10,9 @@ repos:
 tags:
   - roadmap-item
   - EXPEDITE
-  - OP
 order: 516
 tier: judgement
-description: "Every ticket repository (docs, baton, fieldhouse, hq) copies the same ten board components into its wiki. Build immediately-run/baton-board, a small library-mode Grove shell app that owns those components and registers them with extendComponents; it opts in to being named by markers (opens: self), so render: safe ticket wikis anywhere — Baton's own included — render their board through it. Baton's tickets wiki switches to it and its tickets/components/ goes. Expedited: it changes the ticketing system itself. Requires: github-admin."
+description: "Every ticket repository (docs, baton, fieldhouse, hq) copies the same ten board components into its wiki. Build immediately-run/baton-board, a small library-mode Grove shell app that owns those components and registers them with extendComponents; it opts in to being named by markers (opens: self), so render: safe ticket wikis anywhere — Baton's own included — render their board through it. Baton's tickets wiki switches to it and its tickets/components/ goes. Expedited: it changes the ticketing system itself. Requires: none."
 topics:
   - baton
 owns: {}
@@ -41,7 +40,7 @@ in docs and hq.
 
 ### What to build
 
-1. **`immediately-run/baton-board`** (the owner creates it, public, like Baton): an ordinary
+1. **`immediately-run/baton-board`** (created public by the owner on 2026-10-26): an ordinary
    immediately.run app on the Grove thin-shell pattern (`examples/thin-shell` in
    `immediately-run/grove`):
    - `src/main.tsx` / boot — `boot({ mdxComponents: COMPONENTS, children: <App /> })`;
@@ -89,8 +88,8 @@ in docs and hq.
 
 ### Exit criteria
 
-- [ ] `immediately-run/baton-board` exists with the shell, the components and the test above passing
-      (**operator**: the owner creates the repository — `github-admin`)
+- [ ] `immediately-run/baton-board` holds the shell, the components and the test above, passing
+      (the repository itself was created by the owner on 2026-10-26)
 - [ ] `git ls-files tickets/components` empty in Baton; the marker names `baton-board`
 - [ ] `npm run check:wiki` and `npm test` green in Baton
 - [ ] **live**: Baton's tickets wiki opens on immediately.run in `baton-board`, its board rendered
@@ -99,4 +98,5 @@ in docs and hq.
 ## Status
 
 _(filed 2026-10-26, expedited; rewritten the same day when the owner moved the viewer from Baton's
-repository to its own, `immediately-run/baton-board`)_
+repository to its own, `immediately-run/baton-board`; the owner created it, public, the same day —
+the ticket's one operator step, so the OP tag is gone)_
