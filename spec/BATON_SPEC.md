@@ -51,7 +51,11 @@ Git keeps every durable record; Baton keeps only what git cannot hold without be
 server — who holds which ticket now, which runners are alive and what they may do — and the
 limits agents must not change. A ticket follows a **course** whose logic is code in its home
 repository; Baton knows only the course's contract (§5), runs no repository code (R-BTN-98)
-and writes no git itself (R-BTN-171). One Baton is one tenant (§2).
+and writes no git itself (R-BTN-171). The division of labor is fixed (the owner, 2026-10-22):
+the **runner** is responsible for the leg processes — launching them, terminating them when
+necessary, and realizing they are stuck; **Baton** is responsible for collecting information
+(the ticket sync, instruments' metrics, claims) and recommending pending ticket legs for
+runners to work on. Nothing else supervises a leg's process. One Baton is one tenant (§2).
 
 **Names.** A **ticket** is the unit Baton hands out, `<repository id>:<local id>` to Baton
 (R-BTN-47). A **course** is the process it follows: **stations**, where a ticket rests and a
@@ -4120,7 +4124,9 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
 - **R-BTN-72 (the runner).** `baton runner start` is a generic runner loop. It hosts the
   sidecar, heartbeats, asks for recommendations, claims, and runs the ticket's legs one at a
   time, each by **the script for that leg**, then advances, suspends or ends as the script's
-  result and the course file allow. It knows no course. Idle, it asks for recommendations when
+  result and the course file allow. It knows no course. It owns the leg processes themselves —
+  launching them, terminating them when necessary, and realizing they are stuck (§1's division
+  of labor; B-108) — and nothing else does. Idle, it asks for recommendations when
   a heartbeat carries `unblocked`, else at its own interval (R-BTN-77).
   - **Course directory** (R-BTN-69, R-BTN-134):
 
@@ -5033,7 +5039,9 @@ is summarized in the principal table (§12.1).
     - freeze, seal, export and import (R-BTN-88);
     - bind a sign-in code to an administrator's session, confirm that session's actions, and
       end every session, owners' included (R-BTN-155);
-    - read everything, including any claim's leg runs (R-BTN-128).
+    - read everything, including any claim's leg runs (R-BTN-128), and what the dashboard
+      draws — `GET /v1/admin/state`, the same answer an administrator's session reads from
+      `GET /v1/ui/state`, with no session and so no sign-in (B-118).
 
     Each act is an `admin` event. No administrator action is reachable over MCP (R-BTN-130).
   - **An administrator key is out of every agent's reach.** It is a key of its own, never added
@@ -5910,6 +5918,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `POST /v1/admin/confirm` | the administrator key that minted the session | `{code, dry_run?}` | performs the action; with `dry_run`, `{action, target}`; `not-found` for another session's code | R-BTN-155 |
 | `POST /v1/admin/sessions/revoke` | admin | `{all: true, confirm: true}` | `{ok: true}` | R-BTN-155 |
 | `POST /v1/admin/freeze`, `…/unfreeze`, `…/seal` | admin | — | `{ok: true}`; seal `conflict` naming active claims and lagging mirrors | R-BTN-88 |
+| `GET /v1/admin/state` | admin | — | what `GET /v1/ui/state` answers an administrator's session, from the same state | R-BTN-57 |
 | `GET /v1/admin/export` | admin | `?with_history=1` | `baton.owner-state/v1` | R-BTN-88 |
 | `POST /v1/admin/import` | admin | an export | `{ok: true}`; `conflict`, `invalid-params` | R-BTN-88, R-BTN-158 |
 | **Dashboard** | | | | |
@@ -6159,7 +6168,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-124 MCP, sign-in, tokens | MCP hold edits; a replayed sign-in code; revoke all; token reuse, long TTL; destructive dashboard acts; polled-row eviction; an API key to `http`; an unverifying bearer naming an administrator's `bak_<id>` over `http`; an owner's session on its repository, on a foreign one and on an administrator route; an owner's code typed into `baton admin open`; the session's code confirmed by another owner key; the owner removed; `owner sessions revoke`; a session message of kind `handled`, and a `release` for a ticket the runner does not hold | only add-hold works; only the confirmed browser signs in; sessions ended; `unauthenticated`, `invalid-params`; `202 {confirm_code}` until the minting key confirms, Stop at once; oldest unbound dropped; key not sent; refused, nothing revoked; acts there, `forbidden`, `forbidden`; `not-found`; `not-found`; the session ended; every session of the key ended; `invalid-params`, `forbidden` |
 | S-BTN-126 API keys beside SSH keys | an API-key administrator, owner and runner beside an SSH runner | bearers on their own routes only; runner secret checked; sync and courier `unauthenticated`; one role per key (`conflict`); revocation next call; sign-in by code |
 | S-BTN-156 a board posted by a sync key | a checkout with no CI token and no `BATON_SYNC_TOKEN`; an ssh-keygen ed25519 key registered for it, a key of another repository, an unregistered key and one in the mirror role; an API-key file passed as `--sync-key` | with the one flag every call is an SSHSIG in `baton-request`, keyid the key's fingerprint, and the board lands under the key's repository (that of another repository too, never this checkout's); `unauthenticated` and `forbidden`, each posting nothing; the file refused by name before any call |
-| **§16** | | |
+| S-BTN-170 the dashboard state read with an administrator's key | an administrator, an owner of `ops`, a runner it granted that heartbeats | the administrator's signed `GET /v1/admin/state`, and its API key's, equal its session's `GET /v1/ui/state` at the same instant; an owner's key `forbidden`; an unknown key and no principal `unauthenticated`; a POST `not-found` || **§16** | | |
 | S-BTN-14 mirror preconditions | a reap after `in-review`; a replay; a stale clone's git claim | no overwrite; no-op; reverted, holder kept |
 | S-BTN-16 cutover | an in-flight git claim at cutover; a clone that saw cutover offline; one session holding two git claims; two runners with one `session_name` on different hosts request one adoption; a silent legacy runner | imported legacy claim, adopted after an administrator confirms; no git claim; two legacy runners; `{pending: true}` to both, the confirmed one adopts, the other `forbidden`; not reaped before `reap_after` |
 

@@ -3,7 +3,9 @@
 You are running the `review` leg of the `create-pr` course: one review round of the ticket's PR.
 The ticket's file is `$BATON_TICKET_FILE`. You did not write this PR, and you will not fix it.
 Your output is a set of verified findings and a verdict. **Print the verdict as your last line,
-alone: `approve` or `changes`.** A machine reads that line: the line must be exactly the one
+alone: `approve` or `changes`** — the verdict itself, in whatever formatting you like, but never
+a status update or a promise of work to come: if your own subagents are still running, wait for
+them and print the verdict after. An output that ends on anything else loses the round. A machine reads that line: the line must be exactly the one
 word, or the word followed by one PR URL (`approve https://github.com/<owner>/<name>/pull/<n>`)
 — no other word before or after, no punctuation, nothing else after it in your whole output;
 if it does not parse, the leg fails and the round is lost. Baton writes the verdict line on

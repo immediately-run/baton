@@ -1,0 +1,115 @@
+---
+title: "B-108 — The stub concludes for an agent that will not exit or never ends: an idle bound across every activity signal, and a much longer absolute bound on the leg"
+id: B-108
+project: baton
+status: available
+updated: 2026-10-22
+tags:
+  - roadmap-item
+order: 510
+tier: judgement
+description: "The B-86 incident (2026-10-22): an implement agent finished its work, pushed, opened PR #104, wrote its ticket record — and never exited, so the stub waited five hours on an exit that never came while every health signal stayed green. Two bounds end the wait, the owner's numbers: idle for 15 minutes across every activity signal (stdout, the wrapper's log, the harness's own store) concludes a finished agent that will not exit; an absolute bound of 5 hours concludes one that never ends however chatty — a live agent is never touched before it. The owner, 2026-10-22: the runner is responsible for this; the Baton server has no role in it. Amends §5.8 R-BTN-131. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-22, after the B-86 leg held a claim in `implement` for five hours
+past the agent's last output: "the runner is responsible for detecting that the agent has
+completed its work and wont exit. The baton server has no role in this." Generalized, the same
+day: "it is the runner's responsibility to launch leg processes, terminate them if necessary
+and realize they are stuck. Baton is responsible for collecting information (ticket sync,
+instrument metrics, claims) and recommending pending ticket legs for runners to work on" — now
+§1's fixed division of labor and R-BTN-72's own words. And the bounds, the same day: "we should
+still have an absolute leg timeout, but it should be *much* longer than the idle timeout. Eg:
+leg timeout: 5 hours, idle timeout: 15 minutes" — idle concludes a finished agent that will not
+exit; the absolute bound ends one that never converges, however chatty.
+**Spec:** §5.8 R-BTN-131 (the stubs and `agent_command`) as amended by B-84 ("the command's exit
+is the agent's completion, which its own contract requires it to mean") — this ticket amends
+R-BTN-131 again: an agent's completion is its **exit or its silence**, whichever comes first.
+§8.3 R-BTN-72 (the runner: the leg child and its waiting); B-23 (the runner's leg-output
+archive) is the same piping, arriving with it. **The amendment is this ticket's first
+deliverable.** No §7 condition, no R-BTN-90 deadline: the owner's decision is that this failure
+mode is detected and settled entirely in the runner's kit — `baton.stalled` keeps whatever
+scope §7's own review leaves it, none of it here.
+
+## Status
+
+_(2026-10-24: item 2's streaming half shipped early — the stub spawns the agent and mirrors both
+streams to the runner's log under `--verbose` (commit below, B-23's slice beside it); the bounds
+of items 1 and 3 — idle across every signal, the absolute ceiling, the conclusion and its record
+— remain this ticket's.)_
+
+### What to build
+
+1. **The spec amendment** (R-BTN-131): beside B-84's exit contract, the stub's wait for the
+   agent ends at the earliest of the agent's exit, the **idle bound** (15 minutes of silence
+   across every activity signal) and the **absolute bound** (5 hours of the leg, whatever the
+   agent is doing) — the owner's numbers, 2026-10-22; both constants of the stub, named like
+   `CLOSE_TIMEOUT_MS` with their reasons in the comment, a course's to raise or lower.
+2. **Liveness is a fact, not a guess — and stdout alone is not it.** A harness CLI may
+   legitimately print nothing on stdout until it exits (the answer protocol reads the last
+   line; some clients buffer the whole run), so an idle *stream* can mean a healthy long agent.
+   The stub therefore watches every signal available and concludes on idle only when **all**
+   are quiet past the bound:
+   - the agent's **stdout**, streamed (spawn, not `execFile`; drained and timestamped);
+   - the **wrapper's log**, when the repository runs one — B-95's example tees stdout to
+     `.baton/logs/<ticket>-<leg>.log`, and its mtime is streamed activity even when the stub
+     cannot see the pipe;
+   - the **harness's own activity record**, when the agent's command names one: `opencode`
+     writes its sessions under a project-scoped directory keyed by the working directory the
+     stub spawned the agent in (tonight, the agent's session went quiet at 22:44 while its
+     process lived five hours — the db was the true signal). The stub needs no session id: the
+     project-scoped store's newest write is the agent's activity, and the working directory is
+     the stub's own `cwd`.
+3. **Either bound concluding is the same act.** The stub kills the agent (it is the parent;
+   SIGKILL to the child alone), takes the received stdout as the agent's output, and proceeds
+   exactly as an exit would: the last-line contract for a leg that asks, B-81's forge verify
+   for `implement`. The conclusion is recorded in the leg's result with its cause —
+   `agent_concluded_idle` (with which signals were quiet) or `agent_concluded_absolute` (the
+   leg's ceiling, the one conclusion that may catch an agent still working, which is its
+   point: a chatty agent that never converges is never idle, and only the absolute bound ends
+   it) — so the close, the marker and the review round can see how the leg ended. Work the
+   checks then judge as done stands; work they refuse fails the leg as any failed attempt
+   would.
+4. **The briefing says to exit** (shipped with this filing, 2026-10-22): `AGENT_PROMPT`'s last
+   sentence now tells the agent its process's exit is the leg's completion and to exit
+   immediately when done — the leg instructions always carried the contract; the briefing, the
+   one thing guaranteed in every command, now carries it too. Prevention beside detection.
+5. **The runner's liveness line** stays as filed here: while a leg runs, each beat logs its
+   duration and the age of its newest activity signal — the operator watches a wedge form, and
+   sees the absolute bound approaching, instead of silence. `start-runner.sh`'s outside watch
+   (2026-10-22) keeps watching; with 2 and 3 it is the backstop, not the detector.
+
+### Do not
+
+- Give Baton any part of this: no condition is raised, no deadline taken, nothing posted —
+  the server learns the leg ended as it learns every leg, by the claim's end (the owner's
+  decision, 2026-10-22).
+- Conclude on idle an agent with any live signal: stdout, the wrapper's log, the harness's
+  store — idle is silence everywhere. The absolute bound is the one duration-based conclusion,
+  the leg's ceiling; before it, a working agent is never touched, however long it runs.
+
+### Tests
+
+- Unit: an agent that prints, goes silent on every signal past the idle bound (15 min) and
+  never exits — the stub concludes, its output is the received text, the result records
+  `agent_concluded_idle` with the idle signals, and the forge verify runs as after an exit.
+- An agent whose stdout is silent the whole run but whose harness store keeps updating — never
+  concluded on idle, however long (the stdout-silence trap, the owner's point, 2026-10-22).
+- An agent that produces output every minute and never converges — concluded at the absolute
+  bound (5 h), recorded `agent_concluded_absolute`, its received output judged by the same
+  checks.
+- An agent that keeps printing at a slow cadence — never concluded on idle, however long.
+- The ask-leg contract over concluded output: the last received line is the answer, or the
+  leg fails naming it.
+- The B-86 shape replayed end to end: PR open, every signal quiet, stub concludes, `pr-open`.
+
+### Exit criteria
+
+- [ ] a finished-but-never-exiting agent costs its claim minutes, not hours, with no server
+      change at all
+- [ ] a working agent is never concluded before the absolute bound, idle or not
+- [ ] a leg that never converges ends at the absolute bound, its work judged by the checks

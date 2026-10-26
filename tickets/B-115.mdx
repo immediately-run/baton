@@ -1,0 +1,104 @@
+---
+title: "B-115 — Cloud runner: a script and a skill that make a Claude Code cloud session a process-mode Baton runner"
+id: B-115
+project: baton
+status: available
+updated: 2026-10-26
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1104
+tier: judgement
+description: "A preflight-and-launch script (scripts/cloud-runner.sh) that checks the key, claude -p, gh and git push, declares only the capabilities it checked and starts baton run --harness claude-code detached; and a skill (skills/baton-cloud-runner) that hosts it — a re-armed watcher under the 2-hour background cap, never doing legs itself, stopping on request — measured over a 24-hour hosting run. Requires: claude-cloud-session, human-operator."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-26: a Claude Code cloud session should be able to become a Baton
+runner. The owner registers the key; everything else is a script and a skill. Non-interactive
+legs run as they do on any process-mode runner: the leg's `agent_command` (or `baton run
+--harness claude-code`'s default) starts a headless `claude -p` child per leg. Verified in a cloud
+container the same day: `claude -p` answers with the session's own model login and no setup. In
+the same check the child had no GitHub tools and `gh` refused the container's `GH_TOKEN`, so a
+leg that opens a PR or comments on one fails there; the owner will supply a token.
+**Spec:** `spec/BATON_SPEC.md` §8.1 (R-BTN-3 `cloud` hosts, R-BTN-9, the heartbeat, the
+sidecar's credentials: `BATON_KEY` and `BATON_HOSTNAME` as environment secrets), §8.3 R-BTN-72,
+R-BTN-107 (`process` isolation), §8.4 R-BTN-144 (a leg's environment keeps forge credentials),
+§9.5 (reaping).
+**Depends on:** none — `baton run` exists.
+**Used by:** B-117's spike, which hosts its launcher in the same session.
+
+### Requires
+
+- claude-cloud-session — the hosting run is measured in a real Claude Code cloud container.
+- human-operator — registering the machine key and adding `BATON_KEY`, `BATON_HOSTNAME` and
+  `GH_TOKEN` as the cloud environment's secrets.
+
+### Why
+
+A cloud container holds everything a process-mode runner needs except the means to stay up.
+The runner is a plain process; only the model in the session can keep the session alive, re-arm
+its background tasks and stop the runner when asked. So the work splits by who can do it: the
+deterministic part is a script, whose checks pass or fail, and the hosting part is a skill.
+
+### What to build
+
+1. **The script**, `scripts/cloud-runner.sh`, shipped in the package. Preflight, each check
+   exiting non-zero and naming the failure:
+   - `BATON_KEY` (or `BATON_KEY_FILE`) and `BATON_HOSTNAME` set; `CLAUDE_CODE_SESSION_ID` set
+     (the runner's `session_name`, R-BTN-3);
+   - `claude -p` answers a one-line probe within 2 minutes;
+   - `gh auth status` succeeds, and `git push --dry-run` to a scratch ref of the home repository
+     succeeds;
+   - the home checkout (`--home`) is a clean clone of the registered repository.
+
+   Then it starts `baton run --harness claude-code --hostname "$BATON_HOSTNAME" --session
+   "$CLAUDE_CODE_SESSION_ID" --capabilities <list>` **detached** (`setsid nohup`), writing its
+   pid and log under `~/.cache/immediately-run/baton/cloud-runner/`, and returns.
+2. **Capabilities are only what was checked.** The script builds `--capabilities` from the
+   checks that passed, never `baton run`'s default `agent-venue`, which a cloud container does
+   not hold unless the venue is up (`bash docs/scripts/venue.sh status` healthy).
+3. **The skill**, `skills/baton-cloud-runner/SKILL.md`, shipped in the package. Consuming
+   repositories link it into `.claude/skills/` from `node_modules/@immediately-run/baton/skills/`.
+   It tells the session:
+   - run the script once, then start a **watcher** as a background task: it exits when the
+     runner's pid is gone (printing the log's last lines) or after 100 minutes, below the
+     harness's 2-hour cap. The runner never runs as the background task itself, so the cap never
+     kills a leg in flight;
+   - on each watcher exit: if the runner is alive, re-arm the watcher; if it died, read the log's
+     death line (R-BTN-72) and report it in one line; never restart a runner that died twice in
+     an hour;
+   - never claim, advance, end or do a leg itself; never print or echo `BATON_KEY` or `GH_TOKEN`;
+   - stop on the user's request: `kill -TERM` the runner's pid, wait for it to exit, report it.
+4. **No change to `baton run` or core.** If one proves necessary, it is a separate ticket.
+
+### Do not
+
+- Run `baton run` as the harness's background task: the 2-hour cap would kill a leg mid-run.
+- Declare a capability the script did not check.
+- Use `baton runner register --token` inside the container: the key is lost when the container
+  is reclaimed. The key is the environment's secret (§8.1).
+
+### Tests
+
+- The script's preflight, with each external command replaced by a stub on `PATH`: every failing
+  check exits non-zero naming itself, and the capability list holds only checks that passed.
+- **A hosting run**, measured: one cloud session hosts the runner for 24 hours against the docs
+  repository. Record how long the container survives with only the watcher running, how many
+  legs ran, and whether the lease was ever reaped. Append the result to `docs/lessons.mdx`
+  (this repository's rule for operating Baton).
+
+### Exit criteria
+
+- [ ] the stubbed preflight tests pass in `npm test`
+- [ ] the hosting run's measurements are recorded in `docs/lessons.mdx`, with at least one
+      `claude -p` leg run to its end by the cloud runner
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-26)_

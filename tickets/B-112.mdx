@@ -1,0 +1,98 @@
+---
+title: "B-112 — baton tickets new | claim | set | done: the ticket commands in the CLI, replacing every repository's copy"
+id: B-112
+project: baton
+status: available
+updated: 2026-10-25
+repos:
+  - baton
+tags:
+  - roadmap-item
+  - EXPEDITE
+order: 514
+tier: judgement
+description: "Move the git-as-the-lock ticket commands — file, claim, set status, done and archive — from each repository's scripts/ticket.mjs (this one, fieldhouse's copy) and docs' claim.sh into the CLI as baton tickets new|claim|set|done, configured from .baton/baton.json (items, ticket_prefix, accepted legacy id patterns), with new writing the conventional body skeleton (its **Depends on:** line from the flag) and checking it with B-111 before pushing, --help listing the tags Baton reads, and baton repo init writing one generated How-tickets-work page into every repository. Expedited: it changes the ticketing system itself. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-111
+---
+
+**Brief:** the owner, 2026-10-25, with B-111: the ticket tooling lives once, in Baton.
+`scripts/ticket.mjs` says of itself that it is a stopgap "until Baton itself claims this
+repository's tickets"; until then, the stopgap belongs in the CLI every ticket repository
+already depends on, not in three copies. Fieldhouse's copy reads its id prefix from
+`.baton/baton.json`'s `ticket_prefix`; this repository's hard-codes `B-` beside the legacy
+`R3-n` ids; docs' `claim.sh` is a third implementation.
+Expedited: a ticket that changes the ticketing system itself is finished first.
+**Spec:** `spec/BATON_SPEC.md` R-BTN-74 (the ticket source, its `file(ticket)` export),
+R-BTN-31 (the scenarios), R-BTN-12 (expedite).
+**Depends on:** B-111 (`new` runs its check before pushing).
+**Used by:** fieldhouse FLDH-27 (the switch-over).
+
+### What to build
+
+1. **The commands**, behaviour-for-behaviour with `scripts/ticket.mjs`: each one commit
+   pushed straight to the default branch from a throwaway worktree at the fresh head;
+   retried only on a lost race; `claim` refusing a ticket that is not available or whose
+   dependencies are not done (archived, or live `done`/`superseded`); `new` taking the
+   next free id on the head it pushes to.
+2. **Configured, not copied.** `items` and `ticket_prefix` from `.baton/baton.json`, plus
+   the id patterns a repository still accepts but no longer allocates (this repository's
+   `R3-n`), so one implementation serves docs, baton and fieldhouse.
+3. **Filing writes the body skeleton.** Without `--body-file`, `new` writes the
+   conventional body instead of today's placeholder: `**Brief:**`, `**Spec:**`,
+   `**Depends on:**` (from `--depends-on`, `none.` when empty), `**Used by:**`, then
+   `### What to build`, `### Tests`, `### Exit criteria` and `## Status` with the filing
+   date. With `--body-file`, `new` keeps the given body and refuses one whose
+   `**Depends on:**` line disagrees with the flag. Either way it runs B-111's check on the
+   result before pushing — so a filing can never introduce a cycle or an undeclared
+   dependency. The skeleton is how the format is taught: at the moment of filing, by the
+   tool that is maintained with the code, not by a separate skill (the owner, 2026-10-25).
+4. **Tags at filing.** `new --tags EXPEDITE,OP` (today's copies write `roadmap-item` only,
+   so an expedited ticket needs a second edit). `--help` lists the tags Baton reads and
+   what each means — `EXPEDITE` (R-BTN-12) and `OP` (`human-operator` in `requires`) —
+   and the `Requires:` clause that ends a `description`.
+5. **Projects at filing.** `new --project <id>` sets `project:` and refuses an id with no
+   `kind: project` page in the items folder's `projects/`; there is no hard-coded default
+   (fieldhouse's copy writes `project: fieldhouse` into every ticket, so the field said
+   nothing). Without the flag, a repository's `.baton/baton.json` may name a default
+   project; with neither, `new` refuses.
+6. **One "How tickets work" page, generated.** `baton repo init` (which already writes
+   `tickets/README.md`) writes the conventions into the items folder too, the same text in
+   every repository: the frontmatter keys and statuses; the id prefix and accepted legacy
+   patterns from `.baton/baton.json`; the tags Baton reads; the body's header lines —
+   `**Depends on:**` naming exactly `depends_on`, reverse mentions on `**Used by:**`, and a
+   wait on another repository's ticket on `**Waits on:**`, since relations stay inside one
+   repository (§4); projects — when filing more than one related ticket, choose or create
+   their project first, since a session is when it is plain which tickets belong
+   together; and the commands. `baton tickets check` reports a page that has
+   drifted from the release's text, so docs, baton and fieldhouse cannot diverge.
+7. **This repository's `scripts/ticket.mjs` removed**, its suite ported to the CLI's.
+
+### Tests
+
+- The ported suite against a throwaway bare remote: claim and its refusals, the PR
+  record, done archiving, id allocation from the configured prefix with a legacy pattern
+  present, `--tags`, `--project` (an unknown project refused, no default without
+  configuration), the written skeleton (its **Depends on:** line from the flag), a
+  `--body-file` whose line disagrees with the flag refused, and a filing refused by the
+  check.
+- The generated page: `baton repo init` writes it; an edited copy is reported by
+  `baton tickets check`.
+- New `S-BTN-n` scenarios for the commands (R-BTN-31).
+
+### Exit criteria
+
+- [ ] `baton tickets new|claim|set|done` released in `@immediately-run/baton`
+- [ ] `scripts/ticket.mjs` gone from this repository, its tickets' docs (`tickets/home.mdx`)
+      pointing at the commands
+- [ ] the generated "How tickets work" page in this repository's `tickets/`, written by
+      `baton repo init`
+
+## Status
+
+_(filed 2026-10-25, expedited; the same day the owner added the body skeleton and the
+generated conventions page, in place of a ticket-writing skill)_

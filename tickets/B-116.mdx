@@ -1,0 +1,88 @@
+---
+title: "B-116 — Person legs worked interactively: a skill that works a waiting person leg in conversation and commits its answer in git"
+id: B-116
+project: baton
+status: available
+updated: 2026-10-26
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1111
+tier: judgement
+description: "Interactive legs as person legs (R-BTN-116), worked in the person's own session: a skill (skills/baton-person-legs) lists the person legs waiting on them from Baton's open decisions, works one with the course's leg instructions, and commits the answer only on the person's confirmation; a std:decision@1 refinement carries a document's path and digest. The pull route B-34 names option C. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-7
+---
+
+**Brief:** the owner, 2026-10-26: interactive legs need a person in the conversation, which a
+`claude -p` runner cannot give. The fallback that needs no new session machinery: an interactive
+leg is a person leg answered in git (R-BTN-116), and the person works it in their own session
+with a skill, as docs' `process-decision-packets` skill works decision packets today. B-34 names
+this route its later "option C" and says it needs nothing beyond B-7; this ticket is that route
+with a skill in place of an in-app pane. B-117 may later add a launcher on the same contract.
+**Spec:** `spec/BATON_SPEC.md` §6.4 R-BTN-116 (person legs), R-BTN-78 (posted decisions),
+§5.5 R-BTN-108 and R-BTN-109 (contracts and entry requirements), §4.5 (reading the ticket).
+**Depends on:** B-7 (person legs: rule `person`, the answer read from git).
+
+### Requires
+
+- none — the skill's answer is checked by `baton tickets check` and the sync's validation
+  against a fixture course; no exit criterion needs a person.
+
+### Why
+
+Today a leg is either a headless agent's or a person's typed answer. A specification or a
+product definition is neither: an agent does the work while a person shapes and approves it.
+Modelled as a person leg, no runner is ever offered it (rule `person`), so a cloud runner of
+`claude -p` legs (B-115) runs every other leg and leaves this one waiting. The person's own
+session does the leg, holds no runner credential, and the answer reaches Baton the only way a
+person leg's answer does: committed to git.
+
+### What to build
+
+1. **The skill**, `skills/baton-person-legs/SKILL.md`, shipped in the package. Consuming
+   repositories link it into `.claude/skills/` from `node_modules/@immediately-run/baton/skills/`.
+   It:
+   - lists the person legs waiting on the person, from Baton's open decisions
+     (`cli/decisions.mjs`), each in one line: ticket, leg, `asks`, waiting since;
+   - for the one picked, reads the ticket, its course's instructions for the leg
+     (`legs/<leg>.md`, as agent legs have) and the latest hand-off, and works the leg in
+     conversation;
+   - writes the answer where the ticket source reads it (B-7), shows the person the exact
+     answer, and commits only after the person says so in the conversation;
+   - never claims, advances or ends anything through Baton: the sync reads the answer.
+2. **Answers that carry a document.** A course declares a refinement of `std:decision@1`
+   (R-BTN-108) for a leg whose output is a document, naming its path and digest; the reached
+   station may require it (R-BTN-109). One such refinement ships with the standard courses.
+3. **Instructions for interactive legs** state the person's part: interview, draft in git, show
+   the draft, and commit the answer only on the person's confirmation.
+
+### Do not
+
+- Give the skill a Baton credential or a claim: a person leg is answered in git (R-BTN-116).
+- Make the leg wait on a notice or a delivery: it waits on the answer in git.
+- Build a runner-launched session here: that is B-117's spike.
+
+### Tests
+
+- A fixture course with one person leg, its instructions and the document refinement: an answer
+  in the skill's format passes `baton tickets check` and the sync's output validation; one
+  without the document's path is refused `output-invalid`.
+- The skill's steps run against the fixture by hand once, the transcript linked from the PR.
+
+### Exit criteria
+
+- [ ] the fixture tests pass in `npm test`, with an `S-BTN-n` scenario for the refinement
+      (R-BTN-31)
+- [ ] one fixture person leg worked end to end through the skill, its commit and the sync's
+      acceptance linked from the PR
+- [ ] merged under the review gate
+
+## Status
+
+_(filed 2026-10-26)_
