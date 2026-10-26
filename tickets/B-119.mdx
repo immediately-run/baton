@@ -48,8 +48,10 @@ verdict and push are on the PR, is invisible for the same reason.
    `MANNEQUIN` cannot push and are dropped without a read. Every other association is
    looked up.
 2. One read per author per repository per run, cached for the run, inside `MAX_REQUESTS`.
-3. Failures follow R-BTN-139. A `404` means the person is not a collaborator: untrusted. Any
-   other error aborts the run, which posts nothing.
+3. Failures follow R-BTN-139. A `404` means the person is not a collaborator: untrusted. A
+   `403` that is no rate limit is a token without the scope: it degrades, failing closed (no
+   verdict in that repository counts, logged once). Any other error aborts the run, which posts
+   nothing.
 4. Out of scope (stay with B-46): forks by id, editors (`userContentEdits`),
    `trusted_identities`, `code_repos`, other forges, the `trusted` flag exported to `sync.mjs`.
 
@@ -63,6 +65,6 @@ verdict and push are on the PR, is invisible for the same reason.
 
 ### Exit criteria
 
-- [ ] a private org member's verdict counts in the sync, and a reader's does not
+- [x] a private org member's verdict counts in the sync, and a reader's does not: `test/unit/defaults-cli.test.ts`, "counts a verdict from anyone who can push…"
 - [ ] after the sync workflow's CLI pin moves to the merge, baton#106 and baton#108 sit at
   `fixed`

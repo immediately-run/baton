@@ -764,7 +764,9 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     calls.length = 0;
   });
   const pr = (number: number, head: string, state: string, merged = false) => ({ number, head: { ref: head, sha: `s${number}` }, state, merged_at: merged ? '2026-10-01T00:00:00Z' : null });
-  const who = (author_association: string, body: string, at: string) => ({ user: { login: 'x' }, author_association, body, created_at: at, submitted_at: at, state: 'COMMENTED' });
+  const who = (author_association: string, body: string, at: string, login = 'x') => ({ user: { login }, author_association, body, created_at: at, submitted_at: at, state: 'COMMENTED' });
+  /** R-BTN-139: what the forge says `login` may do in `repo` — the read that decides a verdict's author. */
+  const may = (repo: string, login: string, permission: string) => ({ [`/repos/${repo}/collaborators/${login}/permission`]: { permission } });
 
   it('pages the PR list, reads detail only for PRs a live ticket owns — closed unmerged ones too — and keeps verdicts from people with a say', async () => {
     serve({
@@ -778,6 +780,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
       '/repos/o/r/pulls/3/commits': [],
       '/repos/o/r/pulls/3/reviews': [],
       '/repos/o/r/issues/3/comments': [who('MEMBER', '<!-- baton:concluded -->', '2026-10-06T00:00:00Z')],
+      ...may('o/r', 'x', 'write'),
     });
     const facts = await githubFacts(dir, () => {}, (p) => p.head.startsWith('claude/A-1-'));
     expect(facts.map((f) => [f.number, f.state])).toEqual([[1, 'open'], [2, 'merged'], [3, 'closed']]);
@@ -787,7 +790,8 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     // The closed unmerged PR a live ticket owns is read: review-pr concludes on it (R-BTN-131).
     expect(facts[2].reviews.map((r) => r.body)).toEqual(['<!-- baton:concluded -->']);
     // The two owned PRs' detail is one GraphQL query (B-35); the unowned merged PR costs nothing beyond the list.
-    expect(calls).toEqual(['/repos/o/r/pulls?state=all', '/repos/o/r/pulls?state=all&page=2', 'graphql o/r 1,3']);
+    // The author's permission is read once for both PRs; the NONE author's never (R-BTN-139).
+    expect(calls).toEqual(['/repos/o/r/pulls?state=all', '/repos/o/r/pulls?state=all&page=2', 'graphql o/r 1,3', '/repos/o/r/collaborators/x/permission']);
   });
 
   it('reads each other repository a live ticket names, and only those, tagging every fact with its repository (B-29)', async () => {
@@ -798,12 +802,13 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
       '/repos/o/site/pulls/7/commits': [],
       '/repos/o/site/pulls/7/reviews': [],
       '/repos/o/site/issues/7/comments': [who('MEMBER', '<!-- baton:verdict approve -->', '2026-10-05T00:00:00Z')],
+      ...may('o/site', 'x', 'write'),
     });
     const facts = await githubFacts(dir, () => {}, (p) => p.repository === 'o/site' && p.head.startsWith('claude/A-1-'), [{ repository: 'o/site', tickets: ['A-1'] }, { repository: 'O/R', tickets: ['A-1'] }]);
     expect(facts.map((f) => [f.repository, f.number])).toEqual([['o/site', 7], ['o/site', 8]]);
     expect(facts[0].reviews.map((r) => r.body)).toEqual(['<!-- baton:verdict approve -->']);
     // The home in another case is no sibling; the unowned sibling PR costs nothing beyond the list.
-    expect(calls).toEqual(['/repos/o/r/pulls?state=all', '/repos/o/site/pulls?state=all', 'graphql o/site 7']);
+    expect(calls).toEqual(['/repos/o/r/pulls?state=all', '/repos/o/site/pulls?state=all', 'graphql o/site 7', '/repos/o/site/collaborators/x/permission']);
   });
 
   /** `pages` pages of 100 open PRs in `repo`, every one on a ticket's branch: a list request a page,
@@ -853,11 +858,13 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     const routes: Record<string, unknown> = { '/repos/o/r/pulls?state=all': [...owned, pr(99, 'feature/other', 'open')] };
     routes['/repos/o/r/commits/s1/check-runs'] = { check_runs: [{ conclusion: 'success' }, { conclusion: 'timed_out' }, { conclusion: null }] };
     routes['/repos/o/r/pulls/1/commits'] = [{ commit: { committer: { date: '2026-10-02T00:00:00Z' } } }];
-    routes['/repos/o/r/pulls/1/reviews'] = [{ ...who('COLLABORATOR', '<!-- baton:verdict approve -->', '2026-10-03T00:00:00Z'), state: 'APPROVED' }, who('CONTRIBUTOR', 'drive-by', '2026-10-03T01:00:00Z')];
+    routes['/repos/o/r/pulls/1/reviews'] = [{ ...who('COLLABORATOR', '<!-- baton:verdict approve -->', '2026-10-03T00:00:00Z'), state: 'APPROVED' }, who('CONTRIBUTOR', 'drive-by', '2026-10-03T01:00:00Z', 'y')];
     routes['/repos/o/r/issues/1/comments'] = [who('OWNER', '<!-- baton:verdict changes -->', '2026-10-04T00:00:00Z')];
+    Object.assign(routes, may('o/r', 'x', 'admin'), may('o/r', 'y', 'read'));
     serve(routes);
     const facts = await githubFacts(dir, () => {}, (p) => p.head.startsWith('claude/'));
-    expect(calls).toEqual(['/repos/o/r/pulls?state=all', `graphql o/r ${owned.slice(0, 25).map((p) => p.number).join(',')}`, 'graphql o/r 26,27,28,29,30']);
+    expect(calls).toEqual(['/repos/o/r/pulls?state=all', `graphql o/r ${owned.slice(0, 25).map((p) => p.number).join(',')}`,
+      '/repos/o/r/collaborators/x/permission', '/repos/o/r/collaborators/y/permission', 'graphql o/r 26,27,28,29,30']);
     expect(facts).toHaveLength(31);
     expect(facts[0]).toEqual({
       number: 1, head: 'claude/A-1-x', state: 'open', repository: 'o/r',
@@ -879,10 +886,11 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
       '/repos/o/r/issues/1/comments': [many.slice(0, 100), '/repos/o/r/issues/1/comments?page=2'],
       '/repos/o/r/issues/1/comments?page=2': many.slice(100),
       '/repos/o/r/commits/s1/check-runs': { check_runs: [{ conclusion: 'failure' }] },
+      ...may('o/r', 'x', 'write'),
     });
     const [fact] = await githubFacts(dir, () => {}, () => true);
     expect(fact.reviews.map((r) => r.body)).toEqual(many.map((c) => c.body));
-    expect(calls).toEqual(['/repos/o/r/pulls?state=all', 'graphql o/r 1', '/repos/o/r/issues/1/comments', '/repos/o/r/issues/1/comments?page=2']);
+    expect(calls).toEqual(['/repos/o/r/pulls?state=all', 'graphql o/r 1', '/repos/o/r/issues/1/comments', '/repos/o/r/issues/1/comments?page=2', '/repos/o/r/collaborators/x/permission']);
     // The list's head moved on after the batch read the PR: its checks are read at the list's head.
     const routes = { '/repos/o/r/pulls?state=all': [pr(1, 'claude/A-1-x', 'open')], '/repos/o/r/commits/s1/check-runs': { check_runs: [{ conclusion: 'failure' }] } };
     const real = githubFake(routes);
@@ -933,6 +941,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
       '/repos/o/r/pulls/1/reviews?page=2': reviews.slice(100),
       '/repos/o/r/commits/s1/check-runs': [{ check_runs: runs.slice(0, 100) }, '/repos/o/r/commits/s1/check-runs?page=2'],
       '/repos/o/r/commits/s1/check-runs?page=2': { check_runs: runs.slice(100) },
+      ...may('o/r', 'x', 'write'),
     });
     const [fact] = await githubFacts(dir, () => {}, () => true);
     expect(fact.pushes).toHaveLength(150);
@@ -941,6 +950,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     expect(fact.checks).toHaveLength(150);
     expect(fact.checks.at(-1)).toBe('failure');
     expect(calls.filter((c) => !c.startsWith('graphql ')).sort()).toEqual([
+      '/repos/o/r/collaborators/x/permission',
       '/repos/o/r/commits/s1/check-runs', '/repos/o/r/commits/s1/check-runs?page=2',
       '/repos/o/r/pulls/1/commits', '/repos/o/r/pulls/1/commits?page=2',
       '/repos/o/r/pulls/1/reviews', '/repos/o/r/pulls/1/reviews?page=2',
@@ -948,7 +958,7 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     ]);
   });
 
-  it('maps an answer in GitHub\'s GraphQL shape: runs across suites, a run not completed null, enums lowercased, a ghost author, untrusted authors dropped (B-35)', async () => {
+  it('maps an answer in GitHub\'s GraphQL shape: runs across suites, a run not completed null, enums lowercased, a ghost author and untrusted authors dropped (B-35, B-119)', async () => {
     // Written to GitHub's public GraphQL schema, not built from the REST fixtures: the runs sit in
     // several check suites, one of them empty, and a deleted user is a null author.
     const runs = (nodes: unknown[]) => ({ checkRuns: { pageInfo: { hasNextPage: false }, nodes } });
@@ -967,15 +977,15 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
         comments: { pageInfo: { hasNextPage: false }, nodes: [{ author: { login: 'own' }, authorAssociation: 'OWNER', createdAt: '2026-10-07T12:00:00Z', body: null }] },
       } } },
     };
-    const lists = githubFake({ '/repos/o/r/pulls?state=all': [pr(4, 'claude/A-4-x', 'open')] });
+    const lists = githubFake({ '/repos/o/r/pulls?state=all': [pr(4, 'claude/A-4-x', 'open')], ...may('o/r', 'own', 'admin') });
     vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.endsWith('/graphql') ? Response.json(answer) : lists(url, init)));
     const [fact] = await githubFacts(dir, () => {}, () => true);
+    // A deleted user's verdict cannot be asked of the forge, so it does not count (R-BTN-139).
     expect(fact).toEqual({
       number: 4, head: 'claude/A-4-x', state: 'open', repository: 'o/r',
       checks: ['success', null, 'action_required'],
       pushes: [Date.parse('2026-10-07T10:00:00Z'), Date.parse('2026-10-07T09:00:00Z')], pushedAt: Date.parse('2026-10-07T10:00:00Z'),
       reviews: [
-        { author: '?', state: 'CHANGES_REQUESTED', submittedAt: Date.parse('2026-10-07T11:00:00Z'), body: '<!-- baton:verdict changes -->' },
         { author: 'own', state: 'COMMENTED', submittedAt: Date.parse('2026-10-07T12:00:00Z'), body: '' },
       ],
     });
@@ -994,6 +1004,44 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     const lists = githubFake({ '/repos/o/r/pulls?state=all': [pr(1, 'claude/A-1-x', 'open')] });
     vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.endsWith('/graphql') ? Response.json({ data: null, errors: [{ message: 'Something went wrong' }] }) : lists(url, init)));
     await expect(githubFacts(dir, () => {}, () => true)).rejects.toThrow('GitHub GraphQL (o/r): Something went wrong');
+  });
+
+  it('counts a verdict from anyone who can push, a private org member included, and from no one else (R-BTN-139, B-119)', async () => {
+    // baton#108, 2026-10-26: the owner's private membership reads as CONTRIBUTOR to the sync's
+    // token, and the verdict was dropped — no create-pr ticket ever reached reviewed from git.
+    const routes = {
+      '/repos/o/r/pulls?state=all': [pr(1, 'claude/A-1-x', 'open')],
+      '/repos/o/r/pulls/1/commits': [{ commit: { committer: { date: '2026-10-01T00:00:00Z' } } }, { commit: { committer: { date: '2026-10-03T00:00:00Z' } } }],
+      '/repos/o/r/pulls/1/reviews': [],
+      '/repos/o/r/issues/1/comments': [
+        who('CONTRIBUTOR', '<!-- baton:verdict changes -->', '2026-10-02T00:00:00Z', 'owner'),
+        who('COLLABORATOR', '<!-- baton:verdict approve -->', '2026-10-02T01:00:00Z', 'reader'),
+        who('CONTRIBUTOR', '<!-- baton:verdict approve -->', '2026-10-02T02:00:00Z', 'gone'),
+        who('FIRST_TIMER', '<!-- baton:verdict approve -->', '2026-10-02T03:00:00Z', 'new'),
+        who('CONTRIBUTOR', 'and another thing', '2026-10-02T04:00:00Z', 'owner'),
+      ],
+      ...may('o/r', 'owner', 'write'),
+      ...may('o/r', 'reader', 'read'),
+    };
+    serve(routes);
+    const facts = await githubFacts(dir, () => {}, () => true);
+    // The writer's two comments; not the read-only collaborator's, not a non-collaborator's (404),
+    // and the first-timer is never asked. One read per author.
+    expect(facts[0].reviews.map((r) => [r.author, r.body])).toEqual([['owner', '<!-- baton:verdict changes -->'], ['owner', 'and another thing']]);
+    expect(calls.filter((c) => c.includes('/collaborators/'))).toEqual(['/repos/o/r/collaborators/owner/permission', '/repos/o/r/collaborators/reader/permission', '/repos/o/r/collaborators/gone/permission']);
+    // From these facts the ticket stands where the work is: a verdict, then a push — fixed.
+    const ticket = ticketsMarkdown([{ path: 'tickets/a1.md', text: '---\nid: A-1\ntitle: A\n---\n' }]).tickets[0];
+    expect(stationsPr({ tickets: [ticket], facts, closed: new Set(), graph: CREATE_PR_COURSE }).stations['A-1']).toMatchObject({ station: 'fixed' });
+
+    // A token that cannot read permissions (403, no rate limit) fails closed: no verdict counts,
+    // said once, and the run goes on.
+    const lines: string[] = [];
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.includes('/collaborators/') ? new Response('{}', { status: 403 }) : githubFake(routes)(url, init)));
+    expect((await githubFacts(dir, (l) => lines.push(l), () => true))[0].reviews).toEqual([]);
+    expect(lines.filter((l) => l.includes('cannot read collaborator permissions'))).toHaveLength(1);
+    // Any other failure aborts the run: nothing partial is posted.
+    vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => (url.includes('/collaborators/') ? new Response('{}', { status: 502 }) : githubFake(routes)(url, init)));
+    await expect(githubFacts(dir, () => {}, () => true)).rejects.toThrow('/repos/o/r/collaborators/owner/permission: 502');
   });
 });
 

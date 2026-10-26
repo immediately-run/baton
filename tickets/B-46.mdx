@@ -49,6 +49,9 @@ push".
 Split into reviewed PRs along four parts. Each is independent.
 
 1. **People without push** (R-BTN-139 to R-BTN-142).
+   - *Done by B-119:* GitHub's author trust — every author past the `author_association`
+     pre-filter is read from `collaborators/{login}/permission` (`admin` or `write`), once per
+     run. Editors, forks, `trusted_identities` and the other forges remain here.
    - The fact adapters' `trusted` flag and fork detection, by ids; `trusted_identities`; the
      default station functions read trusted facts only.
    - `code_repos`.
