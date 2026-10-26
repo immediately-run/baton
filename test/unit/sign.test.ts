@@ -92,7 +92,7 @@ function withAgentOnly<T>(fn: () => T): T {
 }
 
 /** Load `file` (which may be passphrase-protected) into this test's agent. */
-const addToAgent = (file: string): void => withAgent(() => execFileSync('ssh-add', [file], { stdio: 'ignore', env: process.env }));
+const addToAgent = (file: string): void => withAgent(() => { execFileSync('ssh-add', [file], { stdio: 'ignore', env: process.env }); });
 
 /** An SSHSIG the verifier can open: its magic and this signer's namespace. */
 const opens = (headers: { Signature?: string }): void => {
