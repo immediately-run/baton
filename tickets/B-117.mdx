@@ -1,0 +1,77 @@
+---
+title: "B-117 — Spike: runner-launched interactive sessions that report through git"
+id: B-117
+project: baton
+status: available
+updated: 2026-10-26
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1112
+tier: judgement
+description: "Measure whether the session hosting a cloud runner (B-115) can launch a child cloud session per interactive leg, in an environment without BATON_KEY, and have it report through a branch the runner polls: the clean child, the git channel's latency, the wake path, a waiting session's resume, stopping, and confirmed_by from events. Go/no-go recorded on B-34. Requires: claude-cloud-session, human-operator."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-115
+---
+
+**Brief:** the owner, 2026-10-26: for interactive legs, the runner could start a new cloud
+session that runs the leg, and the two sessions communicate through git. The runner is a plain
+process with no session API of its own; the session that hosts it (B-115) holds the
+remote-session tools (`create_session`, `send_message`, `list_events`, `interrupt_session`,
+`archive_session`). So the launcher is the hosting session acting for the runner, and the
+result channel is a branch the child pushes and the runner polls. This spike measures whether
+that works before B-34 and B-47's session mode are amended to name it.
+**Spec:** `spec/BATON_SPEC.md` §8.3 R-BTN-107 (`session` mode, the child holds no Baton
+credential), R-BTN-113 (session links), R-BTN-106 (the runner checks every move); B-34 (the
+interactive leg, `confirmed_by`).
+**Depends on:** B-115 (the hosting session and its skill).
+
+### Requires
+
+- claude-cloud-session — the remote-session tools exist only in a Claude Code cloud session.
+- human-operator — a person must take part in the child session for questions 4 and 6.
+
+### The questions, each answered with a measurement
+
+1. **A clean child.** Can the hosting session create the child in a separate cloud environment
+   that holds no `BATON_KEY` (`create_session` with `environment_id`)? The child prints
+   whether `BATON_KEY` is set; it must not be.
+2. **The git channel.** Does a child created with `outcome_branch` push to exactly that branch?
+   How long from the child's push to the runner's bounded `git ls-remote` seeing the result
+   commit?
+3. **The wake path.** The runner writes a launch request to its state directory; a background
+   watcher in the hosting session exits when it appears, waking the model, which calls
+   `create_session` and writes the session's id and link back. How long from request to link?
+4. **A waiting session.** The child waits an hour for the person, who then replies: does it
+   resume on a fresh container with its branch intact?
+5. **Stopping.** On a release, do `interrupt_session` and `archive_session` stop a waiting
+   child, and is anything it pushed left behind?
+6. **Confirmation.** Can `list_events` show a message from the person after the output's last
+   write, which is what B-34's `confirmed_by` needs?
+
+### What to deliver
+
+- The measurements and a go/no-go, appended to `docs/lessons.mdx`.
+- On go: amendments filed to B-34 and B-47 naming the hosting session as the Claude session
+  provider and git as the result channel, building on B-116's answer contract. On no-go: the
+  reason recorded on B-34, which stays on B-116's pull route.
+
+### Do not
+
+- Give the child the runner's secret, a Baton key, the claim id or `GH_TOKEN` beyond what its
+  own environment holds.
+- Build the launcher into `baton run` during the spike: the spike's code is a throwaway script.
+
+### Exit criteria
+
+- [ ] all six questions answered with measurements in `docs/lessons.mdx`
+- [ ] the go/no-go recorded on B-34
+
+## Status
+
+_(filed 2026-10-26)_
