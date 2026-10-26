@@ -19,27 +19,29 @@ const KEYGEN = { command: 'ssh-keygen', timeout: KEYGEN_TIMEOUT_MS };
 const run = (args, options, { command, timeout }) =>
   spawnSync(command, args, { encoding: 'utf8', ...options, timeout, killSignal: 'SIGKILL' });
 
-/** The lines of ssh-keygen's own answer, without a banner. A fault — a private key another user
- *  can read, a file with no private half — opens with ssh-keygen's `@@@@…` warning box and the
- *  reason comes after it; the first line is a banner, never the fault. */
+/** The lines of ssh-keygen's own answer, without a banner. A fault — a key another user can
+ *  read, a file that is no key — opens with ssh-keygen's `@@@@…` warning box and the reason comes
+ *  after it; the first line is a banner, never the fault. Its trailing blank line is no part of
+ *  the reason. */
 function reason(r) {
   const lines = (r.stderr || '').split(/\r?\n/).map((l) => l.trim());
   const i = lines.findIndex((l) => l && !l.startsWith('@'));
-  return i === -1 ? (r.error?.code ?? '') : lines.slice(i).join(' ');
+  const rest = i === -1 ? [] : lines.slice(i).filter((l) => l);
+  return rest.length ? rest.join(' ') : (r.error?.code ?? '');
 }
 
 /** The key at `file`: `{file, fingerprint}`, or throws. Bounded like every git and forge call:
  * a key on a stalled mount or behind a busy agent fails the call, it never waits for ever.
- * `-y` rather than `-l` reads the private half: `-l` answers from a `.pub` alone, and the error
- * names a private key ssh-keygen will not sign with — a `.pub` with no private half beside it,
- * one another user can read — before the first signature instead of at it. */
+ * `-l` alone — the fingerprint is all signing needs, and `-l` answers for every key
+ * `ssh-keygen -Y sign` signs with: a private file (passphrase-protected or not) and a `.pub`
+ * whose private half an ssh-agent holds (R-BTN-13, §8.1: signers sign "through ssh-agent or the
+ * key file"). No probe reads the private half: `-y` decrypts the file itself, never the agent,
+ * so it would refuse the agent-held keys the spec prescribes. A key that cannot sign is named at
+ * the first signature, by `-Y sign`'s own reason (round 4, 4-r0-1). */
 export function signingKey(file, keygen = KEYGEN) {
-  const probe = run(['-y', '-f', file], {}, keygen);
-  // Its fingerprint is `-l`'s, the one `repo add --sync-key` registers; `-y` answers only that
-  // ssh-keygen would sign with it.
-  const listing = probe.status === 0 ? run(['-l', '-E', 'sha256', '-f', file], {}, keygen).stdout : '';
-  const fingerprint = /\b(SHA256:[A-Za-z0-9+/]{43})\b/.exec(listing)?.[1] ?? null;
-  if (!fingerprint) throw new Error(`${file} is not an SSH private key ssh-keygen can sign with${reason(probe) ? ` (${reason(probe)})` : ''}`);
+  const listing = run(['-l', '-E', 'sha256', '-f', file], {}, keygen);
+  const fingerprint = listing.status === 0 ? /\b(SHA256:[A-Za-z0-9+/]{43})\b/.exec(listing.stdout)?.[1] ?? null : null;
+  if (!fingerprint) throw new Error(`${file} is not an SSH key ssh-keygen can read${reason(listing) ? ` (${reason(listing)})` : ''}`);
   return { file, fingerprint };
 }
 

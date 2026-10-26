@@ -202,14 +202,14 @@ describe('syncMain’s sync key (B-88, R-BTN-93)', () => {
     const facts = join(keyDir, 'facts.json');
     writeFileSync(facts, '[]');
     const signed = recording();
-    await syncMain({ root: dir, url: 'https://baton.test', factsFile: facts, syncKey: keyFile, token: 'ci-token', transport: signed.transport, log: () => {} });
+    await expect(syncMain({ root: dir, url: 'https://baton.test', factsFile: facts, syncKey: keyFile, token: 'ci-token', transport: signed.transport, log: () => {} })).resolves.toBe(0);
     expect(signed.seen.every((r) => r.headers.get('Signature-Input') !== null && r.headers.get('Authorization') === null)).toBe(true);
     // Without the key the transition's bearer is unchanged: the token, in Authorization.
     const bearer = recording();
     vi.stubEnv('ACTIONS_ID_TOKEN_REQUEST_URL', '');
     vi.stubEnv('ACTIONS_ID_TOKEN_REQUEST_TOKEN', '');
     try {
-      await syncMain({ root: dir, url: 'https://baton.test', factsFile: facts, token: 'ci-token', transport: bearer.transport, log: () => {} });
+      await expect(syncMain({ root: dir, url: 'https://baton.test', factsFile: facts, token: 'ci-token', transport: bearer.transport, log: () => {} })).resolves.toBe(0);
     } finally {
       vi.unstubAllEnvs();
     }

@@ -102,8 +102,10 @@ BATON_SYNC_KEY=~/.ssh/baton_sync node cli/baton.mjs repo sync --root <a checkout
 
 `--sync-key FILE` (or `BATON_SYNC_KEY`) signs the sync's observation, head and board calls with
 the file's key, exactly as a worker signs (R-BTN-93; B-88); it is the no-CI path, and a CI token
-beside it is never spent. The file is the **private** key (`~/.ssh/baton_sync`, never the `.pub`):
-a public-only file, or one other users can read, is refused before the first call, naming
+beside it is never spent. The file is normally the **private** key (`~/.ssh/baton_sync`, never the
+`.pub`); a `.pub` whose private half an `ssh-agent` holds signs just as well — `ssh-add
+~/.ssh/baton_sync` first — as does a passphrase-protected key loaded in the agent. A file that is
+no SSH key at all, or a key ssh-keygen cannot sign with, is refused before the first call, naming
 ssh-keygen's reason. The sync workflow stays as it is — in Actions the OIDC token is the
 credential, and no key secret is needed.
 

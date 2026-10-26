@@ -163,6 +163,36 @@ describe('S-BTN-156 a board posted by a sync key', () => {
     expect(await boardOf()).toEqual([{ id: 'baton:T-1' }]);
   });
 
+  it('an API-key file passed as --sync-key is refused by name, before any call is made', async () => {
+    // R-BTN-159's API key is a worker's credential, and `verifySyncCredential` denies it on the
+    // sync's routes: the operator hears why the file is wrong instead of a bearer the server
+    // rejects. The file exists and reads as a key to nothing else, so the refusal is by name.
+    await later();
+    const file = join(scratch, 'apikey');
+    writeFileSync(file, `bak_${'0'.repeat(16)}_${'a'.repeat(64)}\n`);
+    // The real sync, on the local host: no `transport` of the test's, no call made at all.
+    let calls = 0;
+    const facts = join(dir, '.baton', 'facts.json');
+    writeFileSync(facts, '[]');
+    const saved = { url: process.env.ACTIONS_ID_TOKEN_REQUEST_URL, token: process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, sync: process.env.BATON_SYNC_KEY, bearer: process.env.BATON_SYNC_TOKEN };
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    delete process.env.BATON_SYNC_TOKEN;
+    delete process.env.BATON_SYNC_KEY;
+    try {
+      const args = parseSyncArgs(['--root', dir, '--url', ORIGIN, '--facts', facts, '--sync-key', file], process.env);
+      await expect(syncMain({ ...args, transport: (req) => (calls++, hostCall(req)), log: () => {} }))
+        .rejects.toThrow(/--sync-key .*apikey: an API key is a worker's credential, not a sync key/);
+    } finally {
+      for (const [k, v] of [['ACTIONS_ID_TOKEN_REQUEST_URL', saved.url], ['ACTIONS_ID_TOKEN_REQUEST_TOKEN', saved.token], ['BATON_SYNC_KEY', saved.sync], ['BATON_SYNC_TOKEN', saved.bearer]] as const) {
+        if (v !== undefined) process.env[k] = v;
+      }
+    }
+    // Nothing was posted, under any credential.
+    expect(calls).toBe(0);
+    expect(await boardOf()).toEqual([]);
+  });
+
   it('an unregistered key is refused, and no board lands', async () => {
     await later();
     const key = keyPair(scratch, 'stranger');
