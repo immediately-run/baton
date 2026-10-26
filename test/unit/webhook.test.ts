@@ -107,14 +107,34 @@ describe('the one parser (R-BTN-73)', () => {
     expect(pickDelivery('pull_request', 'a b', { repository: { full_name: 'o/r' } })).toBeNull();
   });
 
-  it('reads a pull_request\u2019s merge, and drops one whose `merged` is no boolean (B-89)', () => {
+  it('reads a pull_request\u2019s merge, and drops one whose `merged` is neither a boolean nor null (B-89, round 4 nit 4)', () => {
     const payload = (merged: unknown) => ({ repository: { full_name: 'o/r' }, pull_request: merged === undefined ? { title: 't' } : { merged } });
+    expect(pickDelivery('pull_request', 'id-1', payload(true))).toEqual({ event: 'pull_request', id: 'id-1', repository: 'o/r', merged: true });
     expect(pickDelivery('pull_request', 'id-1', payload(false))).toEqual({ event: 'pull_request', id: 'id-1', repository: 'o/r', merged: false });
-    // A payload without the field is not malformed: a delivery the App sends of a shape older
-    // than the field is a pull_request with no merge to act on.
-    expect(pickDelivery('pull_request', 'id-1', payload(undefined))).toEqual({ event: 'pull_request', id: 'id-1', repository: 'o/r' });
-    expect(pickDelivery('pull_request', 'id-1', payload('yes'))).toBeNull();
-    expect(pickDelivery('pull_request', 'id-1', { repository: { full_name: 'o/r' }, pull_request: null })).toEqual({ event: 'pull_request', id: 'id-1', repository: 'o/r' });
+    // GitHub documents `merged` as a boolean or null, and sends null for a pull request that is
+    // not (or not yet) merged: a null is no merge, not a malformed delivery.
+    expect(pickDelivery('pull_request', 'id-1', payload(null))).toEqual({ event: 'pull_request', id: 'id-1', repository: 'o/r', merged: false });
+    // A payload without the field is not malformed either: a delivery the App sends of a shape
+    // older than the field is a pull_request with no merge to act on.
+    expect(pickDelivery('pull_request', 'id-1', payload(undefined))).toEqual({ event: 'pull_request', id: 'id-1', repository: 'o/r', merged: false });
+    for (const bad of ['yes', 1, 0, {}, []]) expect(pickDelivery('pull_request', 'id-1', payload(bad))).toBeNull();
+    expect(pickDelivery('pull_request', 'id-1', { repository: { full_name: 'o/r' }, pull_request: null })).toEqual({ event: 'pull_request', id: 'id-1', repository: 'o/r', merged: false });
+  });
+
+  it('B-92’s first real deliveries: the shapes GitHub sends reach the core as a merge or not', async () => {
+    // The App's own payloads, cut to the fields R-BTN-73 lists, as `merge_commit_sha` and
+    // `merged_at` accompany `merged` in the real delivery.
+    const delivered = (pull_request: unknown) => ({ action: 'closed', number: 107, repository: { full_name: 'immediately-run/baton', id: 1 }, pull_request, sender: { login: 's' }, installation: { id: 2 } });
+    const merged = delivered({ number: 107, merged: true, state: 'closed', merge_commit_sha: 'abc', merged_at: '2026-10-24T16:00:00Z', head: { sha: 'h' }, base: { ref: 'main' } });
+    const closed = delivered({ number: 108, merged: false, state: 'closed', merge_commit_sha: null, merged_at: null, head: { sha: 'h' }, base: { ref: 'main' } });
+    // An opened or synchronised pull_request: `merged` null, `merged_at` null.
+    const opened = { ...delivered({ number: 109, merged: null, state: 'open', merge_commit_sha: null, merged_at: null }), action: 'opened' };
+    expect(pickDelivery('pull_request', 'b-92-1', merged)).toEqual({ event: 'pull_request', id: 'b-92-1', repository: 'immediately-run/baton', merged: true });
+    expect(pickDelivery('pull_request', 'b-92-2', closed)).toEqual({ event: 'pull_request', id: 'b-92-2', repository: 'immediately-run/baton', merged: false });
+    expect(pickDelivery('pull_request', 'b-92-3', opened)).toEqual({ event: 'pull_request', id: 'b-92-3', repository: 'immediately-run/baton', merged: false });
+    // The real push delivery B-92 smokes: no `merged` field at all, and a head commit.
+    const push = { ref: 'refs/heads/probe', repository: { full_name: 'immediately-run/baton', id: 1 }, pusher: { name: 'dev' }, head_commit: { id: 'abc', author: { email: 'd@x', name: 'd' } } };
+    expect(pickDelivery('push', 'b-92-4', push)).toEqual({ event: 'push', id: 'b-92-4', repository: 'immediately-run/baton', pusher: 'dev', author_email: 'd@x' });
   });
 });
 

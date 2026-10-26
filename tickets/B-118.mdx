@@ -1,0 +1,63 @@
+---
+title: "B-118 — An administrator's key reads the dashboard state: GET /v1/admin/state, signed, no session or Access login"
+id: B-118
+project: baton
+status: in-review
+updated: 2026-10-26
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1090
+tier: routine
+description: "The dashboard's state — runners, claims, timeline, Needs you — is GET /v1/ui/state, session-only, behind a login Access fronts: a terminal holding the administrator's key cannot read it. One signed GET /v1/admin/state answers what an administrator's session gets, from the same uiState(); baton admin state prints it."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/113
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-26: a Claude Code session holding the administrator's SSH key
+could not see why three tickets sat `attempts-exhausted`. The signed reads it had (`blocked`,
+`ticket history`) named the ends but not the runners, the running claims, the timeline or Needs
+you. Everything else the dashboard draws is `GET /v1/ui/state`, which takes only a dashboard
+session. The session is minted at `POST /v1/login`, which Cloudflare Access fronts, so a
+terminal holding the key cannot get one (§12.4: Access covers only the pages, `POST /v1/login`
+and `/v1/ui/*`). Even with Access gone, a session costs a one-time link, a cookie jar and an
+`Origin`, all to read what the key's own principal already may.
+**Spec:** §11 (the route table: `GET /v1/ui/state`, `/v1/admin/*`), §12.1 R-BTN-57
+(administrators), §12.4 (where Access stands).
+
+### Why
+
+A key that can mint a dashboard session can already read everything the dashboard draws. The
+session adds a browser step, and with Access in front it adds a human login. An agent or an
+operator with the key should get the same answer from one signed request. This is the read half of
+what an agent needs. The MCP endpoint (B-25, B-73) is the full agent surface and is not started.
+B-90 (PR #108) adds narrower reads (the registry, grants, the board) and does not reach the
+runners, claims, timeline or Needs you.
+
+### What to build
+
+1. `GET /v1/admin/state`: signed with an administrator's key (or its API key, R-BTN-159),
+   answering exactly what `GET /v1/ui/state` answers an administrator's session, from the same
+   `uiState()`, with no second read model. An owner's key is `forbidden` (§12.1, one role per
+   key). The owner-scoped state is B-76's, with owner sign-in. `/v1/admin/*` is outside Access
+   by §12.4, so no Cloudflare change is needed.
+2. `baton admin -i KEY state`: one signed GET, the JSON on stdout, exit 1 on a refusal.
+3. The spec: the route-table row beside `GET /v1/ui/state`, and R-BTN-57 naming the read.
+
+### Tests
+
+- Integration S-BTN-170, both hosts: an administrator's signed GET equals the answer an
+  administrator's session gets from `/v1/ui/state` at the same instant. An owner's key is
+  `forbidden`, an unknown key `unauthenticated`. A POST is `not-found`.
+- Unit: the CLI plan is one GET of `/v1/admin/state`, with any extra argument refused.
+
+### Exit criteria
+
+- [x] an administrator's key reads the dashboard state from a terminal with one signed request,
+  no session and no Access login: `baton admin -i KEY state` (a plan in `test/unit/cli.test.ts`;
+  the answer equal to the session's in S-BTN-170, both hosts)

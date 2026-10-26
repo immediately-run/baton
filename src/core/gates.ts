@@ -46,6 +46,13 @@ export interface GateLeg {
   noChainFrom?: string[];
   /** R-BTN-107: the course file's floor, `session`, or null. */
   isolation?: 'session' | null;
+  /** R-BTN-120, R-BTN-121: the capabilities the leg requires of whoever takes it — rule 4's own
+   *  input beside the ticket's clause (`spec/BATON_SPEC.md` §2e); empty or absent, nothing extra.
+   *  Capabilities only, never a role name: `graphOf` expands the course's `capability_roles` and
+   *  the vocabulary (§12.5), and rule 4 checks each one as the clause's names are checked. The one
+   *  literal name is `human-operator`, which R-BTN-121 compares as a string; rule 4 checks it as
+   *  rule 6 checks the ticket side (review round 6, finding 0). */
+  requires?: string[];
 }
 
 export interface GateContext {
@@ -126,10 +133,27 @@ export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, p
   const grant = worker.grants ? worker.grants[ticket.repository] ?? null : undefined;
   if (grant === null) return refuse(7);
 
-  // Rule 4: what it declared, within what this repository granted it.
+  // Rule 4: what it declared, within what this repository granted it. The leg's own
+  // `requires.capabilities` is an input beside the ticket's clause (R-BTN-120, B-86), and both are
+  // read the same way: the clause's names are expanded here (`capabilitiesOf`: it names a role or
+  // a capability, and a role is satisfied by its capabilities), while the leg's arrive expanded
+  // — `graphOf` runs the course's `capability_roles` and the vocabulary through `legCapabilities`,
+  // so only capabilities are left (§12.5). Every name needs a capability the declaration carries,
+  // and one the grant holds when the key is granted (review round 5, finding 0: `.some()` let one
+  // capability of a role named in a leg stand for the whole role).
+  // `human-operator` is the exception on both sides (review round 6, finding 0): R-BTN-121 compares
+  // it as a string, and `capabilitiesOf` drops the literal, so it is met exactly as rule 6 meets it
+  // — declared by that name, and granted by that name when the key is granted.
   const held = capabilitiesOf(worker.declared);
   const granted = grant ? new Set(grant.capabilities) : null;
-  for (const need of capabilitiesOf(ticket.requires)) if (!held.has(need) || (granted && !granted.has(need))) return refuse(4);
+  const operator = worker.declared.includes('human-operator') && !(granted && !granted.has('human-operator'));
+  for (const need of new Set([...capabilitiesOf(ticket.requires), ...(leg.requires ?? [])])) {
+    if (need === 'human-operator') {
+      if (!operator) return refuse(4);
+      continue;
+    }
+    if (!held.has(need) || (granted && !granted.has(need))) return refuse(4);
+  }
 
   // Rule 5: the caller passes the lower of the declared ceiling and the grant's max_tier.
   if (!fitsTier(ticket.tier, worker.tier_ceiling, ticket.tiers)) return refuse(5);

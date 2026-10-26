@@ -636,7 +636,7 @@ describe('baton repo init, through the built CLI', () => {
       // A failing agent's last stderr line names why it died.
       writeFileSync(agent, '#!/bin/sh\necho "boom: no quota left" >&2\nexit 3\n');
       const fail = { sha: commitAll(root) };
-      await expect((await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: fail })).rejects.toThrow('exited with code 3: boom: no quota left');
+      await expect((await load(fix)).run({ ticket: { id: 'A-1' }, checkout: root, snapshot: fail })).rejects.toThrow(/exited with code 3; its last output:[\s\S]*boom: no quota left/);
     } finally {
       err.mockRestore();
       writeFileSync(settingsFile, before);

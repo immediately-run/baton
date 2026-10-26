@@ -1,0 +1,92 @@
+---
+title: "B-120 — Baton owns a ticket's course history: git writes cannot rewrite it; baton owner ticket adopt makes Baton take git's"
+id: B-120
+project: baton
+status: available
+updated: 2026-10-26
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1095
+tier: judgement
+description: "The owner's ruling, 2026-10-26: git is authoritative in everything except a ticket's course history (the station→leg pairs traversed). A snapshot that disagrees is a discrepancy, not a move; an owner's signed adopt command (and MCP's, later) replaces Baton's history with git's. Amends value 1, the architecture page and R-BTN-85."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-26, verbatim: "blindly accepting git updates as tickets status in
+Baton is *NOT* desired as this allows an agent with write access to the headquarter repo's
+tickets/ directory to overwrite ticket course traversal history in baton. Git is authorative in
+everything *except* the ticket's course history (the specific station -> leg pairs traveled so
+far in the history encountered). A baton CLI command (or MCP of course) will force the baton
+server to override it's own ticket history with the contents of the ticket file in git."
+
+The case that prompted it: legs completed outside the runner, in an interactive session or
+during stale-PR cleanup. They should be a deliberate act of a key holder, never a side effect of
+whoever can push.
+
+**This is a change to Baton, not in Baton.** It amends:
+- `docs/context/values.mdx` value 1 ("git wins… Baton owns only what git cannot");
+- `docs/context/architecture.mdx` ("Git is the ledger; the board is a cache");
+- spec R-BTN-85 (every disagreement logged, then git wins), R-BTN-46 ("then git wins"), R-BTN-81
+  (`git-moved`), §2e (snapshot paths), and the Decisions entries dated 2026-10-14/-15/-18 that
+  chose git-wins.
+The implementing PR amends them first, with this ruling cited.
+
+**Spec:** §2e (stations and paths, R-BTN-39, R-BTN-70), R-BTN-81/-84/-85 (history,
+discrepancies), §7.1 (the board post), §12.1 (who may run the override), R-BTN-130 (MCP).
+
+### Why
+
+Today every accepted snapshot overwrites `ticket_stations`. A snapshot's path that neither
+extends the last one nor is shorter is stored anyway (`off-graph`, "git wins"). Anyone who can
+push to the home repository can therefore rewrite where a ticket is and how it got there. That
+covers the ticket files, `.baton/` markers, and PR comments for PR courses. Leases, retries,
+holds and run counts all key off that traversal, so the write is a way around them. One example:
+reset a path to escape `max_runs` or a retry hold.
+
+### What to decide and build (a judgement ticket: the open points first)
+
+1. **What Baton owns.** The course history: the ordered `(station, leg)` pairs a ticket has
+   traversed, and its current station. Git keeps everything else: the ticket's existence,
+   frontmatter, body, closure, and the evidence of the work.
+2. **What a snapshot may still do to a ticket's position.** Proposed:
+   - a snapshot that agrees with Baton's history, or only confirms what a claim reported,
+     is accepted;
+   - a snapshot that disagrees is recorded as a discrepancy (R-BTN-85's event, both values)
+     and listed under Needs you. It does not change the station.
+   - Closure (done or withdrawn) stays git's (value 1's remainder). Decide whether a closure
+     from git ends an active claim.
+3. **The override: `baton owner -i KEY ticket adopt REPO TICKET`**, and the same action over MCP
+   once B-25 lands. A repository owner's signed request makes Baton replace the ticket's
+   history and station with what git shows at the current head. An administrator can also
+   run it. Baton logs the before and after (`history-adopted`), ends or fences an active
+   claim first, and resets the retry count's window.
+4. **Open: "the contents of the ticket file".** On the marker courses (B-100) the ticket file is
+   the record, so adopting reads it. On `create-pr`, the position comes from PR facts (verdicts,
+   pushes, merge), not the ticket file. Decide whether `adopt` reads the snapshot's posted path
+   for the ticket (any course), or the ticket file alone (which would need PR courses to write
+   their position into the file, B-101's direction).
+5. **Runner advances** remain the normal writer of history. Nothing here changes the lease or
+   the advance.
+
+### Tests
+
+- Scenarios, both hosts:
+  - a push that rewrites a held ticket's position changes nothing in Baton and raises a
+    discrepancy under Needs you;
+  - `adopt` by the owner moves it and records the before and after;
+  - `adopt` by a granted runner's key is `forbidden`;
+  - `adopt` during an active claim fences the claim first.
+- The model: `adopt` as an action, and snapshot disagreement as no-op plus discrepancy, with
+  `model:pr`'s report.
+
+### Exit criteria
+
+- [ ] values, architecture and spec amended with this ruling cited
+- [ ] git writes cannot change a ticket's course history; `baton owner ticket adopt` can
+- [ ] a leg finished outside the runner is brought into Baton by one owner command

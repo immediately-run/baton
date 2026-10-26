@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { graphOf, type Graph } from '../core/graph';
+import { graphOf, legCapabilities, type Graph } from '../core/graph';
 
 /** B-94: the bound on every git the runner itself runs. The heartbeat path reads the snapshot
  * here (`ensureSha`, `courseOf`, `loadCourse`), and a state file lock, a hook or a stalled
@@ -123,6 +123,47 @@ export function loadCourse(home: string, sha: string, course: string): CourseLoa
     scripts.set(leg, to);
   }
   return { course, graph, scripts, scratch };
+}
+
+/** B-86: the home checkout's head — the snapshot the next claim is most likely to be at, whose
+ *  course lists the legs' needs. Empty when the checkout cannot answer. */
+export function readHead(home: string): string {
+  try {
+    return git(home, ['rev-parse', 'HEAD']).trim();
+  } catch {
+    return '';
+  }
+}
+
+/** B-86: the capabilities every leg of `course` in the snapshot requires — rule 4's names, each
+ *  course leg's `requires.capabilities` read as `graphOf` reads it: `legCapabilities` replaces the
+ *  course's `capability_roles` names with their capabilities and a vocabulary role (`agent-venue`)
+ *  with the capabilities it carries, so a leg naming a role asks for what the role carries — never
+ *  for a literal capability of the role's name (review round 5, finding 3). `human-operator` is the
+ *  one name that stands literal (review round 6, finding 0): rule 4 compares it as a string, so a
+ *  leg needing it is this runner's never-eligible reason unless it declares it by that name — and
+ *  the line's held set adds the literal exactly when the declaration carries it (review round 7,
+ *  finding 1). One file that will not parse, or one the file does not describe, adds nothing: this
+ *  is only the never-eligible runner's why, never a gate. An empty `sha` reads the working tree. */
+export function legNeeds(home: string, sha: string, course: string): string[] {
+  const path = `.baton/courses/${course}/course.json`;
+  const file = sha ? readAt(home, sha, path) : (() => {
+    try {
+      return readFileSync(join(home, path), 'utf8');
+    } catch {
+      return null;
+    }
+  })();
+  if (file == null) return [];
+  let parsed: { capability_roles?: unknown; legs?: Record<string, { requires?: { capabilities?: unknown } }> };
+  try {
+    parsed = JSON.parse(file) as typeof parsed;
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  for (const leg of Object.values(parsed.legs ?? {})) out.push(...legCapabilities(leg?.requires, parsed.capability_roles));
+  return out;
 }
 
 /** Drop a claim's scratch directory. */

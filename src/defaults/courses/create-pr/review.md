@@ -3,7 +3,9 @@
 You are running the `review` leg of the `create-pr` course: one review round of the ticket's PR.
 The ticket's file is `$BATON_TICKET_FILE`. You did not write this PR, and you will not fix it.
 Your output is a set of verified findings and a verdict. **Print the verdict as your last line,
-alone: `approve` or `changes`.** Baton writes the verdict line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on the same line: `changes https://github.com/<owner>/<name>/pull/<n>`. The ticket's PRs are one change: review them together, and post your review once, on that PR.
+alone: `approve` or `changes`** — the verdict itself, in whatever formatting you like, but never
+a status update or a promise of work to come: if your own subagents are still running, wait for
+them and print the verdict after. An output that ends on anything else loses the round. Baton writes the verdict line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the answer with the URL of the PR to write it on, on the same line: `changes https://github.com/<owner>/<name>/pull/<n>`. The ticket's PRs are one change: review them together, and post your review once, on that PR.
 
 > **How the stub runs you** — Baton's contract for the `agent_command` author: your command
 > line splits into words as `sh` would (quotes honoured, no substitutions) and executes

@@ -16,9 +16,13 @@
 #   --for         stop gracefully after a duration (s, m or h; default: until Ctrl-C). Stopping
 #                 is safe at any point: the runner releases its claim with a hand-off.
 #   --check       run the preflight only and print what would start; nothing runs.
+#   --capabilities  narrows what the runner declares; without it the runner declares what the
+#                 grant allows on the repositories it serves (B-86). It never enables: a name the
+#                 grant does not allow is refused at the heartbeat.
 #
 # Environment: BATON_KEY_FILE (or BATON_KEY / BATON_TOKEN) must name the worker key the owner
-# granted — hostname and capabilities must match the grant (runbook step 5). BATON_HOSTNAME
+# granted — the hostname must match the grant, and the grant is what the runner declares unless
+# --capabilities narrows it (runbook step 5). BATON_HOSTNAME
 # overrides the reported hostname; BATON_URL, BATON_REPOSITORY have defaults.
 set -eu
 

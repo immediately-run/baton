@@ -98,11 +98,14 @@ minute and retries once arrives with the CLI release the workflow pins; until th
 you.
 
 The schedule is the backstop, and it is not assumed to fire (§7.1): the App's `pull_request`
-deliveries reach Baton, so a merge of `main` dispatches this workflow (at most one such dispatch
-every 15 minutes — `main` moves itself a dozen times a day), and Baton's alarm dispatches one when
-the repository's last webhook-driven sync is over 10 minutes old. Both are visible as
-`workflow_dispatch` runs in the list beside the `schedule` ones; a day with no dispatch at all is
-the webhook path down, as a day with no scheduled run is GitHub's cron not firing.
+deliveries reach Baton, so a merge of `main` dispatches this workflow (at most one per
+R-BTN-73's 30-second window, and so one per merge at most — `main` moves itself a dozen times a
+day), and Baton's alarm dispatches one when the repository's last webhook-driven sync is ten
+minutes old: the alarm is armed for that instant, so a quiet repository sees one an interval and
+not one a tick. A dispatch that fails is not silently dropped: its stamp stands, and the alarm's
+ten-minute backstop sends it again — the schedule adds only an attempt of its own. Both are
+visible as `workflow_dispatch` runs in the list beside the `schedule` ones; a day with no dispatch
+at all is the webhook path down, as a day with no scheduled run is GitHub's cron not firing.
 
 ## 5. Workers
 
@@ -123,6 +126,13 @@ The hostname must be what the machine reports (`hostname`, or `BATON_HOSTNAME`),
 are refused. Capabilities are from `src/shared/vocabulary.mjs` (`authentication`, `llm-call`,
 `create-pr`, `drivable-browser`, `agent-venue`); only an administrator grants `human-operator`.
 
+The grant *is* the machine's capability declaration (B-86): `baton run` with no `--capabilities`
+declares what the grant allows on the repositories it serves, so the runner and the grant cannot
+disagree. `--capabilities` exists to **narrow** — a machine without a browser passes
+`--capabilities authentication,llm-call,create-pr` — never to enable: a name the grant does not
+allow is refused at the heartbeat (`forbidden`). A runner whose declaration misses a capability a
+leg requires says so in one line at startup (`missing-capability`) rather than idling.
+
 Once the `pr` course's legs exist (R3-1249), the worker runs:
 
 ```sh
@@ -130,7 +140,8 @@ BATON_KEY_FILE=~/.ssh/baton_worker BATON_REPOSITORY=baton \
   node cli/baton.mjs run --harness claude-code --home <a checkout of immediately-run/baton>
 ```
 
-Check: the dashboard's Workers view shows the machine heartbeating.
+Check: the dashboard's Workers view shows the machine heartbeating, and the log's first lines say
+what it declares (`baton: declaring … — the grant's capabilities`).
 
 ## 6. Cut over
 

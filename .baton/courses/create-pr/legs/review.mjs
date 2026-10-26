@@ -1,4 +1,4 @@
-// ../../baton-bundle-JDoRR5/entry.ts
+// ../../baton-bundle-OGsuZZ/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,10 +59,14 @@ function splitWords(command) {
 
 // src/defaults/answer.ts
 var PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
+var WRAPPED = /^([`'"*_]+)(.+)\1$/;
 function answerOn(line, values) {
   const words = line.split(/\s+/);
-  const answer = words[0];
-  if (answer === void 0 || !values.includes(answer)) return null;
+  let answer = words[0];
+  if (answer === void 0) return null;
+  const wrapped = WRAPPED.exec(answer);
+  if (wrapped && values.includes(wrapped[2])) answer = wrapped[2];
+  if (!values.includes(answer)) return null;
   const rest = words.slice(1);
   if (rest.length === 0) return { answer, pr: null, line };
   if (rest.length === 1 && PR_URL.test(rest[0])) return { answer, pr: rest[0], line };
@@ -155,7 +159,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
 }
 
-// ../../baton-bundle-JDoRR5/entry.ts
+// ../../baton-bundle-OGsuZZ/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, ...opts });
@@ -231,8 +235,8 @@ async function standard(ctx) {
         resolve(so);
         return;
       }
-      const why = se.split("\n").filter((l) => l.trim() !== "").at(-1);
-      reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + (why != null ? ": " + why : "")));
+      const tail = (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
+      reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + "; its last output:\n  " + tail));
     });
     child.stdin?.end();
   }).finally(() => {

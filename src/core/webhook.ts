@@ -26,6 +26,26 @@ export const SYNC_STALE_MS = 10 * 60_000;
 export const MIRROR_EMAIL = 'baton-mirror@immediately.run';
 export const ACTIONS_BOT = 'github-actions[bot]';
 
+// B-89's statements on `webhook_syncs`, named constants like their neighbours': what each compares
+// and what it writes read the same in the code and in §7.1. The stale threshold goes in as a SQL
+// number of the statement's own, never a `?` binding: a Workers-host binding is an SQLite REAL, and
+// an INTEGER storage class compared with a REAL is not compared numerically below 2^40 (round 4:
+// `last_dispatch_at < ?` read a stamp equal to the threshold as already past it) — a threshold
+// written into the text compares the same and numerically on both hosts. It is a clock's reading,
+// so nothing a caller controls reaches the text.
+/** The live repositories whose stamp is stale — strictly, `<` the threshold's milliseconds. */
+const STALE_QUERY = (at: number) => `SELECT s.repository_id FROM webhook_syncs s
+  JOIN repositories r ON r.id = s.repository_id AND r.retired_at IS NULL
+  WHERE s.last_dispatch_at < ${Math.trunc(at)} ORDER BY s.repository_id`;
+/** A send's stamp. */
+const STAMP_UPSERT = `INSERT INTO webhook_syncs (repository_id, last_dispatch_at) VALUES (?, ?)
+  ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at`;
+/** The backstop's stamp, by repository. */
+const STAMP_UPDATE = 'UPDATE webhook_syncs SET last_dispatch_at = ? WHERE repository_id = ?';
+/** The earliest live repository's stamp. */
+const EARLIEST_STAMP = `SELECT min(s.last_dispatch_at) AS at FROM webhook_syncs s
+  JOIN repositories r ON r.id = s.repository_id AND r.retired_at IS NULL`;
+
 /** What the core may know of a delivery: R-BTN-73's fields, and nothing more. */
 export interface Delivery {
   event: WebhookEvent;
@@ -102,12 +122,14 @@ export function pickDelivery(event: string | null, id: string | null, payload: u
   }
   if (event === 'pull_request') {
     // B-89: a merge moves the default branch, and a push delivery for that merge is not
-    // guaranteed on time — the merge itself is the event the board follows.
-    const merged = at(at(payload, 'pull_request'), 'merged');
-    if (merged !== undefined) {
-      if (typeof merged !== 'boolean') return null;
-      d.merged = merged;
-    }
+    // guaranteed on time — the merge itself is the event the board follows. `merged` is
+    // documented as a boolean or null (null for a pull request that never merged), and absent
+    // from a delivery older than the field: null and absent both mean no merge, and any other
+    // shape drops the delivery (round 4, nit 4).
+    const pr = at(payload, 'pull_request');
+    const merged = at(pr, 'merged');
+    if (merged !== undefined && merged !== null && typeof merged !== 'boolean') return null;
+    d.merged = merged === true;
   }
   return d;
 }
@@ -147,13 +169,12 @@ export class Webhooks {
     // closed-without-merging PR moves the default branch nowhere, so the board owes nothing.
     if (d.event === 'pull_request' && d.merged !== true) return { outcome: 'not-a-merge' };
     const targets = this.targets(full, registered);
-    // A merge's own sync is timed here (B-89), whether or not the merged ticket's want already
-    // wrote its window: the row is the webhook path's last send there, what the alarm reads.
+    // B-89: every sync this path sends is timed here — a merge's own, another repository's
+    // want's, the alarm's backstop resend included — in the transaction that decides to send
+    // it, so the row is the path's last send and what the alarm reads. It is written whether or
+    // not the dispatch below is the one inside R-BTN-73's window: a dispatch the window only
+    // makes trailing is sent by the alarm a moment later, and the row is no older for it.
     const own = d.event === 'pull_request' ? registered.find((r) => r.github.toLowerCase() === full)?.id : undefined;
-    if (own) {
-      this.c.store.exec(`INSERT INTO webhook_syncs (repository_id, last_dispatch_at) VALUES (?, ?)
-                         ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at`, own, now);
-    }
     // B-89: a merge of the repository's own sends its own sync — the trigger that fires
     // when GitHub's schedule does not. R-BTN-73 held it back before the cutover only because
     // `claim.sh` sent the syncs then; a sync that reads git from GitHub needs no mirror, so a
@@ -185,26 +206,43 @@ export class Webhooks {
     if (own) write(own);
     for (const id of targets) write(id);
     if (own && !seenOwn) nowDue.push(own);
+    this.stamp(nowDue, now);
     return { outcome: 'dispatched', now: nowDue, trailing };
   }
 
-  /** B-89, at the alarm: a repository whose last webhook-driven sync is over ten minutes stale
-   *  is due one — the App's deliveries reached Baton, and this path did not send one. Each due
-   *  repository's send is stamped and its 30-second window opened (the one R-BTN-73's dispatches
-   *  share), so the next tick finds it fresh and a delivery meanwhile waits for its trailing
-   *  dispatch rather than racing it. A repository with no row has never been sent one and takes
-   *  no part: the path only serves repositories its deliveries led it to. */
+  /** B-89: the path's own clock for each repository it sends this delivery's sync to — the row
+   *  `dueSync` reads. A push that sends `baton`'s sync and a `docs` delivery that sends `docs`'
+   *  each stamp their own (round 4, blocking 2). */
+  private stamp(repositories: string[], now: number): void {
+    for (const id of repositories) this.c.store.exec(STAMP_UPSERT, id, now);
+  }
+
+  /** B-89, at the alarm: a repository whose last webhook-driven sync is **stale** — its stamp
+   *  under `now - SYNC_STALE_MS`, strictly, so a stamp is never due again on the very tick that
+   *  wrote it — is sent one: the App's deliveries reached Baton, and this path, for ten minutes,
+   *  did not send one. Each due repository's send is stamped and its 30-second window opened (the
+   *  one R-BTN-73's dispatches share), so a delivery meanwhile waits for its trailing dispatch
+   *  rather than racing it. A repository with no row has never been sent one and takes no part:
+   *  the path only serves repositories its deliveries led it to. */
   dueSync(): string[] {
     const now = this.c.now();
-    const due = this.rows<{ repository_id: string }>(`SELECT s.repository_id FROM webhook_syncs s
-       JOIN repositories r ON r.id = s.repository_id AND r.retired_at IS NULL
-       WHERE s.last_dispatch_at <= ? ORDER BY s.repository_id`, now - SYNC_STALE_MS).map((r) => r.repository_id);
+    const due = this.rows<{ repository_id: string }>(STALE_QUERY(now - SYNC_STALE_MS)).map((r) => r.repository_id);
     for (const id of due) {
       this.c.store.exec(`INSERT INTO webhook_dispatch (repository_id, last_dispatch_at, trailing_at) VALUES (?, ?, NULL)
                          ON CONFLICT (repository_id) DO UPDATE SET last_dispatch_at = excluded.last_dispatch_at, trailing_at = NULL`, id, now);
-      this.c.store.exec('UPDATE webhook_syncs SET last_dispatch_at = ? WHERE repository_id = ?', now, id);
+      this.c.store.exec(STAMP_UPDATE, now, id);
     }
     return due;
+  }
+
+  /** B-89: the instant the earliest live repository's stamp falls stale — one millisecond after
+   *  `last_dispatch_at + SYNC_STALE_MS`, the first `now` its strict comparison holds — for the
+   *  alarm to fire at, as `blocks.nextDue()` and `resources.nextLapse()` are. With the minute
+   *  alarm alone the send lands up to `ALARM_EVERY_MS` late, and ten minutes plus a tick is not
+   *  "over 10 minutes" (§7.1). Null when no live repository has a stamp. */
+  nextDue(): number | null {
+    const at = this.rows<{ at: number | null }>(EARLIEST_STAMP)[0]?.at;
+    return at == null ? null : at + SYNC_STALE_MS + 1;
   }
 
   /** A workflow_run of a registered repository's own sync or mirror workflow, or a push by the
