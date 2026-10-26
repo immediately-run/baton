@@ -7,6 +7,8 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { declareCourses, fetchMain, parseRunArgs, runMain, runnerCourse } from '../../src/runner/main';
+import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
+import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { envAuth } from '../../src/runner/api';
 import { courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
@@ -27,7 +29,7 @@ describe('parseRunArgs', () => {
     expect(legacy.session).not.toBe('old');
     expect(legacy.hostname).not.toBe('vm-old');
     // B-86: no --capabilities is null, never a default: the grant's capabilities are declared.
-    expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: null, testHarness: false });
+    expect(a).toMatchObject({ harness: 'opencode', home: '/h', url: 'https://b', session: 's', repository: 'docs', hostname: 'vm-x', tier: 'critical', capabilities: null, testHarness: false, verbose: false });
   });
   it('takes its flags, refusing the unknown and the malformed', () => {
     const a = parseRunArgs(['--harness', 'claude-code', '--home', '/x', '--url', 'https://u', '--session', 's2', '--repository', 'ops', '--tier', 'routine', '--capabilities', 'a,b', '--beat-every', '5000'], {});
@@ -41,6 +43,8 @@ describe('parseRunArgs', () => {
     expect(parseRunArgs(['--test-harness'], {}).testHarness).toBe(true);
     // B-86: --capabilities narrows; no flag is no declaration (`null`), never `agent-venue` alone.
     expect(parseRunArgs(['--capabilities', 'llm-call'], {}).capabilities).toEqual(['llm-call']);
+    // Verbose logging (2026-10-23): timestamps, the claim's id and nonce, the leg's command.
+    expect(parseRunArgs(['--verbose'], {}).verbose).toBe(true);
   });
 });
 
@@ -91,6 +95,15 @@ describe('the agent_command a runner runs (B-83)', () => {
       restoreLegEnv(saved);
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('the identity banner names the grant where no --capabilities was given, and the flag\'s own list when it was (B-86)', async () => {
+    // B-86's seam: the banner's capabilities field is the flag when given, and the grant (not
+    // `agent-venue` alone) when it is not — `runMain` says both.
+    const src = readFileSync(join(import.meta.dirname, '../../src/runner/main.ts'), 'utf8');
+    expect(src).toContain("a.capabilities?.join(',') ?? 'grant (--capabilities to narrow)'");
+    expect(src).not.toContain("a.capabilities ?? ['agent-venue']");
+    expect(src).toContain('capabilities ${declared}, course ${course.course}@${course.version}');
   });
 
   it('settings naming no agent_command drive from --harness, the command logged; a named one is left to the settings', async () => {
@@ -309,5 +322,71 @@ describe('the worker secret and the bounded fetch', () => {
     const lines: string[] = [];
     expect(() => fetchMain('/nonexistent-checkout', (l) => lines.push(l))).not.toThrow();
     expect(lines.join('\n')).toMatch(/fetch failed/);
+  });
+});
+
+describe('withTimestamps (verbose logging)', () => {
+  it('prefixes every line with one ISO 8601 instant, whatever the line', () => {
+    const lines: string[] = [];
+    const log = withTimestamps((l) => lines.push(l));
+    log('baton: claimed baton:B-9 at filed, queued leg implement');
+    log('two\nlines');
+    expect(lines[0]).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z baton: claimed baton:B-9 at filed, queued leg implement$/);
+    expect(lines[1]).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z two\nlines$/);
+  });
+});
+
+describe('drainLines (the leg stream forwarder)', () => {
+  it('emits whole lines whatever the chunking, flushes the tail, drops empties', async () => {
+    const { PassThrough } = await import('node:stream');
+    const stream = new PassThrough();
+    const lines: string[] = [];
+    drainLines(stream, (l) => lines.push(l));
+    stream.write('working on B-9');           // no newline yet — waits
+    stream.write(' line one\nline two');       // completes one, starts another
+    stream.write('\n\n');                     // an empty line drops
+    stream.end('the tail without a newline');  // flushed at the end
+    await new Promise((r) => stream.on('end', r));
+    expect(lines).toEqual(['working on B-9 line one', 'line two', 'the tail without a newline']);
+  });
+});
+
+describe('draining (SIGTERM\'s graceful path, 2026-10-24)', () => {
+  const fakeApi = (claim: unknown) => ({
+    setSecret: () => {},
+    heartbeat: async () => ({ worker_id: 1, incarnation: 1, messages: [] }),
+    recommendations: async () => ({ recommendations: [] }),
+    claim,
+  }) as unknown as BatonApi;
+
+  it('an idle runner ends its loop within a beat of drain(), claiming nothing after', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-drain-'));
+    let claims = 0;
+    const api = fakeApi(async () => { claims++; throw new BatonRefusal('no-eligible-ticket', undefined, 'none', 400); });
+    const lines: string[] = [];
+    const r = new Runner({ api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'drain',
+      courses: [{ course: 'create-pr', version: 1 }], stateFile: join(dir, 's.json'), beatEvery: 60, log: (l) => lines.push(l) });
+    const done = r.work();
+    await new Promise((res) => setTimeout(res, 150)); // it claims (refused), then idles
+    const claimsBefore = claims;
+    r.drain('test');
+    await Promise.race([done, new Promise((_, rej) => setTimeout(() => rej(new Error('work() did not end after drain')), 2000))]);
+    expect(claims).toBe(claimsBefore); // nothing claimed between the drain and the exit
+    expect(lines.join('\n')).toContain('draining (test)');
+    r.stop();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a runner drained before work() starts claims nothing at all', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-drain-'));
+    let claims = 0;
+    const api = fakeApi(async () => { claims++; throw new BatonRefusal('no-eligible-ticket', undefined, 'none', 400); });
+    const r = new Runner({ api, home: dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode', session: 'drain2',
+      courses: [{ course: 'create-pr', version: 1 }], stateFile: join(dir, 's.json'), beatEvery: 60, log: () => {} });
+    r.drain('before');
+    await r.work();
+    expect(claims).toBe(0);
+    r.stop();
+    rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -22,8 +22,12 @@ set -eu
 ticket="$2"   # after the agent's words: the ticket id, the leg, the checkout
 leg="$3"
 mkdir -p .baton/logs
-# A pipe belongs here, in the wrapper's own shell: the same word split as `agent_command`, and
-# the stub still runs this script without a shell. tee passes stdout through byte for byte and
-# writes the copy; the pipe's status (`set -o pipefail`, POSIX shell) is the agent's.
-set -o pipefail 2>/dev/null || true
-"$@" | tee ".baton/logs/${ticket}-${leg}.log"
+# The agent's stdout goes to the answer and the log byte for byte, and the exit status must stay
+# the agent's — which a plain pipe hands to `tee`. `set -o pipefail` is not the answer: dash
+# (Ubuntu's /bin/sh) exits the whole script on the unknown option before any `|| true` runs,
+# and `${PIPESTATUS[…]}` is bash's alone. So the agent runs in a subshell that parks its status
+# in a file beside the log, `tee` streams the bytes on whatever the shell is, and this script
+# exits with the parked status — POSIX shell, any host.
+status="$(mktemp "${TMPDIR:-/tmp}/baton-leg-status.XXXXXX")"
+( r=0; "$@" || r=$?; printf '%s\n' "$r" >"$status" ) | tee ".baton/logs/${ticket}-${leg}.log"
+exit "$(cat "$status")"

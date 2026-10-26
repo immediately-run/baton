@@ -1,0 +1,59 @@
+---
+title: "B-109 — Stopping a runner from afar: a wind-down message over the ring; and the immediate stop leaves no orphan"
+id: B-109
+project: baton
+status: available
+updated: 2026-10-24
+tags:
+  - roadmap-item
+order: 511
+tier: routine
+description: "SIGTERM drains locally (2026-10-24: the current leg completes, the claim ends at its boundary, exit 0) — but a runner on a machine no shell reaches cannot be signalled, and the immediate stop (SIGINT, a second SIGTERM) exits while the detached leg group still runs, leaving the leg to finish orphaned against a reaped claim. A wind-down message over R-BTN-91's ring — an owner's action enqueues it, the next heartbeat delivers it, the runner treats it as the same drain flag — and the immediate path kills the inflight group after its hand-off. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-24: "I would like a way to let the runner complete the current
+leg, but then gracefully shut down… There are baton messages that workers can pull. That was my
+plan but feel free to suggest something different." The suggestion taken: the drain is the
+runner's own lifecycle — §1's fixed division keeps it local — so SIGTERM carries it today
+(`scripts/start-runner.sh --drain`); the message ring remains the right carrier the day runners
+run where no shell reaches them.
+**Spec:** §6.9 (R-BTN-91, the ring and its message kinds — a `wind-down` kind joins the list),
+§10.1/§14 (the owner's route that enqueues one), §8.3 R-BTN-72 (the immediate stop's group
+kill, beside the lease-loss kill it already has).
+
+### What to build
+
+1. **The `wind-down` message.** An owner (dashboard action beside Cancel, or the owner CLI)
+   enqueues it for one worker; the next heartbeat delivers it (the ring prompts one); the
+   runner sets the same `drain()` flag the signal sets and acknowledges. Baton collects and
+   recommends — it never supervises a leg's process (§1) — but telling a *worker* to wind down
+   is fleet administration, the graceful face of the reap it already owns.
+2. **SIGHUP joins the handled signals (found live, 2026-10-24: the starved runner of
+   2026-10-23 died at 07:56 with no line at all — a closed terminal's SIGHUP, which the runner
+   never handled, so B-94's every-death-leaves-a-line promise had a hole).** SIGHUP takes the
+   immediate path: the stop line, the group kill, the end.
+3. **The immediate stop kills the group.** SIGINT and a second SIGTERM today exit the runner
+   while the detached leg group runs on, orphaned against the claim Baton will reap — its push
+   lands as a foreign write. The immediate path should write the hand-off, kill the inflight
+   group (the mechanism the lease-loss path already has), and end the claim released — a safe
+   point, not an abandonment.
+4. **A dedicated end reason, if the owner wants the drain visible in the board's history:**
+   the drain ends its claim `released:requested` today; `released:drained` would name the
+   operator's wind-down apart from an owner's request — a one-word spec line if wanted.
+
+### Tests
+
+- The wind-down message sets the drain flag through the same path as the signal; the
+  acknowledgement lands; a second wind-down is a no-op.
+- The immediate stop: the inflight group is killed, the hand-off written, the claim ended —
+  S-BTN-41's scenario steps.
+
+### Exit criteria
+
+- [ ] a remote runner can be drained from the dashboard, completing its leg first
+- [ ] an immediate stop leaves no orphaned leg process and no foreign write

@@ -17,6 +17,12 @@ describe('findAnswer — the last line that opens with a value word, prose aroun
     ['trailing blank lines', 'approve\n\n   \n', { answer: 'approve', pr: null, line: 'approve' }],
     ['prose after a word and a URL', `I looked at both PRs.\nchanges ${PR}\nTwo blocking findings, listed above: a leaked handle, a missing test.`, { answer: 'changes', pr: PR, line: `changes ${PR}` }],
     ['CRLF output', 'prose\r\napprove\r\n', { answer: 'approve', pr: null, line: 'approve' }],
+    ['backticks around the word (found live, 2026-10-24)', '`changes`', { answer: 'changes', pr: null, line: '`changes`' }],
+    ['bold around the word', '**approve**', { answer: 'approve', pr: null, line: '**approve**' }],
+    ['quotes around the word', '"changes"', { answer: 'changes', pr: null, line: '"changes"' }],
+    ['backticks around the word, a PR URL after', '`changes` https://github.com/o/r/pull/7', { answer: 'changes', pr: 'https://github.com/o/r/pull/7', line: '`changes` https://github.com/o/r/pull/7' }],
+    ['an unbalanced backtick is not a wrapper', '`changes', null],
+    ['a wrapper around a wrong word is not the answer', '`approved`', null],
     ['the last of two answer lines', 'approve\nOn reflection, after the fix round:\nchanges', { answer: 'changes', pr: null, line: 'changes' }],
   ])('reads %s', (_name, out, expected) => {
     expect(findAnswer(out, VERDICT.values)).toEqual(expected);

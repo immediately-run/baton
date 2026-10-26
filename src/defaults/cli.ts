@@ -20,7 +20,7 @@ import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticket
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
-import { MARKERS_FILE, parseMarkers, type Marker } from './course-markers';
+import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, MARKERS_FILE, parseMarkers, type Marker } from './course-markers';
 import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
 import { readItems } from './read-items';
 import { ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
@@ -588,12 +588,18 @@ function stubSource(b: BuiltIn, course: string, leg: string): string {
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
   const closeFrom = b.reads === 'prs' ? ['prClose', 'pr-close.ts'] : ['markerClose', 'course-markers.ts'];
   const values = ask ? ask.values.join(' or ') : '';
-  return `import { execFile, execFileSync } from 'node:child_process';
+  return `import { execFile, execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, ${verify ? 'readFileSync, ' : ''}rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};${ask ? `
+import { splitWords } from ${JSON.stringify(source('agent-words.ts'))};
+// B-94: every git and gh call this stub makes — the snapshot probes, the override and
+// instructions reads, the forge verification — is bounded and non-interactive, the same bound
+// and environment the close uses, so a wedged call fails the leg within the bound instead of
+// burning the claim to its lease.
+const GIT_BOUND_MS = ${CLOSE_TIMEOUT_MS}, GIT_ENV = ${JSON.stringify(GIT_NONINTERACTIVE_ENV)};
+const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${verify ? `
 import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
@@ -621,11 +627,11 @@ export async function run(ctx) {
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
   // As with the instructions below: only an empty listing means there is no override.
-  if (execFileSync('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel], { encoding: 'utf8' }).trim() === '') return standard(ctx);
+  if (gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() === '') return standard(ctx);
   const dir = mkdtempSync(join(tmpdir(), 'baton-override-'));
   try {
     const file = join(dir, ${JSON.stringify(`${leg}${OVERRIDE_SUFFIX}`)});
-    writeFileSync(file, execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} }));
+    writeFileSync(file, gitRun('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} }));
     const mod = await import(pathToFileURL(file).href);
     if (typeof mod.run !== 'function') throw new Error(rel + ' exports no run(ctx, standard)');
     return await mod.run(ctx, standard);
@@ -637,7 +643,7 @@ export async function run(ctx) {
 async function standard(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read .baton/baton.json at');
-  const show = (rel) => execFileSync('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} });
+  const show = (rel) => gitRun('git', ['-C', ctx.checkout, 'show', sha + ':' + rel], { maxBuffer: ${AGENT_OUTPUT_MAX} });
   const settings = JSON.parse(show('.baton/baton.json'));
   // B-83: the snapshot's settings stay authoritative; BATON_AGENT_COMMAND — the harness command
   // \`baton run --harness\` chose — fills their absence, never overrides their choice.
@@ -649,13 +655,13 @@ async function standard(ctx) {
   const entry = (settings.courses ?? []).find((c) => c && c.id === ${JSON.stringify(b.id)}) ?? {};
   const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '');
   const ticketText = (() => { try { return ctx.ticket?.path ? readFileSync(join(ctx.checkout, ctx.ticket.path), 'utf8') : null; } catch { return null; } })();
-  const legRun = (cmd, args, cwd) => { try { return execFileSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: ${AGENT_OUTPUT_MAX} }).trim(); } catch (e) { const why = e && typeof e.stderr === 'string' && e.stderr.trim() !== '' ? e.stderr.trim().split('\\n')[0] : e && e.message ? e.message : String(e); throw new Error(\`\${cmd} \${args.join(' ')} failed: \${why}\`); } };` : ''}
+  const legRun = (cmd, args, cwd) => { try { return gitRun(cmd, args, { cwd, maxBuffer: ${AGENT_OUTPUT_MAX} }).trim(); } catch (e) { const why = e && typeof e.stderr === 'string' && e.stderr.trim() !== '' ? e.stderr.trim().split('\\n')[0] : e && e.message ? e.message : String(e); throw new Error(\`\${cmd} \${args.join(' ')} failed: \${why}\`); } };` : ''}
   // The instructions, when the repository still has them; it owns them and may delete them. Only
   // a path the snapshot lacks means deleted: \`ls-tree\` lists nothing for it and succeeds (git
   // translates its messages, and \`cat-file -e\` exits 128 for every failure alike), so any
   // failure of the probe itself stops the leg.
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}.md`)};
-  const present = execFileSync('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel], { encoding: 'utf8' }).trim() !== '';
+  const present = gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() !== '';
   const text = present ? show(rel) : null;
   const dir = text == null ? null : mkdtempSync(join(tmpdir(), 'baton-leg-'));
   const instructions = dir == null ? '' : join(dir, ${JSON.stringify(`${leg}.md`)});
@@ -678,19 +684,42 @@ async function standard(ctx) {
   const argv = wrapped === undefined
     ? [command, ...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout]
     : [wrapped, ...wrapping, command, ...words, ctx.ticket.id, ${JSON.stringify(leg)}, ctx.checkout];
+  // Verbose (B-23's slice): the runner asked, so say on stderr — which it drains into its log —
+  // the one line an operator needs: the local command actually completing this leg, resolved
+  // here at the claim's snapshot, and the wrapper in front of it when one is named.
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': agent_command: ' + agentCommand + (wrapper != null ? '; wrapper: ' + wrapper : '') + '; argv: ' + argv.join(' ') + '\\n');
+  // B-108's streaming half (2026-10-24): the agent runs under spawn — its stdout accumulated
+  // here for the answer protocol, and when the runner asked (BATON_VERBOSE) both streams
+  // mirrored to this stub's stderr, which the runner pipes and drains into its log: a live
+  // leg is watchable line by line instead of silence until the exit. The bound execFile kept
+  // is kept too: an agent whose output outgrows the cap is killed and refused.
   const out = await new Promise((resolve, reject) => {
-    const child = execFile(argv[0], argv.slice(1), {
-      cwd: ctx.checkout, maxBuffer: ${AGENT_OUTPUT_MAX}, stdio: ['ignore', 'pipe', 'pipe'],
+    const echo = process.env.BATON_VERBOSE === '1';
+    const child = spawn(argv[0], argv.slice(1), {
+      cwd: ctx.checkout, stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env, BATON_COURSE: ${JSON.stringify(b.id)}, BATON_LEG: ${JSON.stringify(leg)}, BATON_INSTRUCTIONS: instructions, BATON_TICKET_FILE: ctx.ticket.path ?? '',${ask ? `
         BATON_ANSWER: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},${ask.name === 'verdict' ? ` BATON_VERDICT: ${JSON.stringify(`print ${values} as your last line${names ? ', then the URL of the PR to write it on when it is not the checkout branch\'s' : ''}`)},` : ''}` : ''}
       },
-    }, (e, stdout) => (e ? reject(e) : resolve(String(stdout))));
-    // B-84's root cause, closed here: execFile does not honour 'ignore' for stdin — it leaves an
-    // open pipe the stub never writes and never closes, and an agent that reads stdin (opencode
-    // among them) blocks on it forever, zero output, the claim burning until reap. The pipe is
-    // closed the moment it exists: a reader sees EOF at once, never a wait. stdin is therefore
-    // never an open pipe for the agent, whatever execFile makes of the stdio option.
+    });
+    let so = '', se = '';
+    child.stdout.on('data', (c) => {
+      so += c;
+      if (so.length > ${AGENT_OUTPUT_MAX}) { child.kill('SIGKILL'); reject(new Error('the agent printed more than ${AGENT_OUTPUT_MAX} bytes')); return; }
+      if (echo) process.stderr.write(c);
+    });
+    child.stderr.on('data', (c) => { if (se.length < 2048) se = (se + String(c)).slice(-2048); if (echo) process.stderr.write(c); });
+    child.on('error', (e) => reject(e));
+    child.on('close', (code, sig) => {
+      if (code === 0) { resolve(so); return; }
+      // The failure names its cause with a tail, not a single line (2026-10-24): the last
+      // lines of both streams, bounded, so the log alone can diagnose the death.
+      const tail = (so + '\\n' + se).split('\\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '').slice(-20).join('\\n  ');
+      reject(new Error('the agent exited ' + (code != null ? 'with code ' + code : 'on signal ' + sig) + '; its last output:\\n  ' + tail));
+    });
+    // B-84's root cause, closed here: an open stdin pipe is one no agent can wait on — the pipe
+    // is closed the moment it exists, so a reader sees EOF at once, never a wait (stdin is
+    // therefore never an open pipe for the agent, whatever spawn makes of the stdio option).
     child.stdin?.end();
   }).finally(() => {
     if (dir != null) rmSync(dir, { recursive: true, force: true });
@@ -704,12 +733,14 @@ async function standard(ctx) {
   const last = (out.trim().split('\\n').at(-1) ?? '').trim();
   const on = ${PR_URL}.test(last) ? last : null;`}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
 ` : ''}  return { ...(${position}), ...(on ? { pr: on } : {}) };` : `${ask ? `
   // The answer (B-85): the last line that opens with the leg's value word, backwards past any
   // prose after it; a missing or misspelled verdict still fails, naming what it read.
   const { answer } = requireAnswer(out, ${JSON.stringify({ name: ask.name, values: ask.values })}, ${JSON.stringify(leg)});` : `
   void out;`}
 ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
 ` : ''}  return ${position};`}
 }
 export const close = ${closeFrom[0]};

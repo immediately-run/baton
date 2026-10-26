@@ -169,7 +169,7 @@ export class Resources {
    * answered with its code, never the post. A `state` reading posted while an administrator's is
    * in force is stored and answered `overridden`.
    */
-  // @model reading sha256:b527775c403a
+  // @model reading sha256:f9345e5715a2
   post(who: Instrument, body: unknown, repos: string[] | null) {
     const readings = checkReadings(body, who.kind === 'admin' ? VALID_FOR.admin_s : VALID_FOR.state_s);
     return this.c.store.transaction(() => {
@@ -264,7 +264,7 @@ export class Resources {
 
   /** The alarm's share: lapsed readings are dropped (every reading in force is kept, R-BTN-101),
    *  and the states they held change. Returns when the next one lapses. */
-  // @model readingLapses sha256:945fc1da2c1b
+  // @model readingLapses sha256:5a264f29fafa
   alarm(): number | null {
     const now = this.c.now();
     const lapsed = this.rows<{ instance: string }>('SELECT DISTINCT instance FROM instance_readings WHERE lapses_at <= ?', now).map((r) => r.instance);

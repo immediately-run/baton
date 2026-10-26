@@ -1,0 +1,81 @@
+---
+title: "B-111 — baton tickets check: one ticket check for every repository, and no dependency cycle on any board"
+id: B-111
+project: baton
+status: available
+updated: 2026-10-25
+repos:
+  - baton
+tags:
+  - roadmap-item
+  - EXPEDITE
+order: 513
+tier: judgement
+description: "A CLI command, baton tickets check, that runs a repository's ticket source (the markdown default or an ejected .baton/tickets.mjs) and checks what it would post — ids, required fields, depends_on targets, dependency cycles, and for the markdown source the **Depends on:** body line against depends_on (a .baton/baton.json setting) — so docs, baton and fieldhouse share one check instead of copies; and board validation refuses a post whose depends_on graph has a cycle, for every ticket source. Expedited: it changes the ticketing system itself. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-25. Three repositories hold tickets for Baton's runners —
+`immediately-run/docs`, `immediately-run/baton` and `immediately-run/fieldhouse` — and they
+must work the same way. Their checks are copies today: Fieldhouse's `scripts/check-wiki.mjs`
+and `scripts/ticket.mjs` are copies of this repository's, already drifted, and docs has its
+own set (`check-roadmap-ids.mjs`, `claim.sh`). Fieldhouse just added two dependency checks
+to its copy (fieldhouse `874a44a`): a cycle check, and a check that a ticket's
+`**Depends on:**` body line names exactly its `depends_on` — the second because a
+dependency written only in prose hid a loop the first cannot see. The owner chose Baton as
+the one home, because Baton already owns the ticket format (R-BTN-74's markdown source).
+Expedited: a ticket that changes the ticketing system itself is finished first.
+**Spec:** `spec/BATON_SPEC.md` R-BTN-74 (the ticket source and the markdown source), §4.4
+(the board post and its validation), R-BTN-120 (`depends_on` → `depends_at`), R-BTN-31 (the
+scenarios), R-BTN-12 (expedite).
+**Depends on:** none.
+**Used by:** B-112 (the ticket commands join the same `baton tickets` family); fieldhouse
+FLDH-27 (the switch-over).
+
+### What to build
+
+1. **`baton tickets check [--repo DIR]`.** Loads the repository's ticket source exactly as
+   `baton repo sync` does (an ejected `.baton/tickets.mjs`, else the CLI's markdown
+   default), builds the tickets and closed list it would post, and checks them without
+   posting. Exit 1 with one line per finding, `path: message`; exit 0 with a count.
+2. **What it checks, for every source:**
+   - the board-post validation that `src/core/board.ts` applies (ids, `course_id`, paths,
+     lists), run locally so a finding fails the pull request instead of the sync;
+   - every `depends_on` names a live or closed ticket of the same repository;
+   - **no dependency cycle**, each reported once as its path
+     (`B-1 → B-2 → B-1`).
+3. **What it checks for the markdown source**, behind a `.baton/baton.json` setting
+   (`check.depends_line`, default off, so docs — where 61 of 251 items carry the line —
+   can turn it on after a cleanup):
+   - the ids named on a body's `**Depends on:**` line — which runs to the next blank line
+     or `**Label:**` line — equal its `depends_on`; a ticket without the line is not
+     compared; reverse mentions go on a `**Used by:**` line, which is not read.
+   Port fieldhouse's implementation and its fixture tests (`scripts/check-wiki.mjs`'s
+   `bodyDependencies` and `cycles`, `scripts/check-wiki.test.mjs`).
+4. **Board validation refuses a cycle.** `src/core/board.ts` rejects a board post whose
+   `depends_on` graph has a cycle, naming it, so no ticket source can post a loop that
+   would hold every ticket on it out of the default order unseen. Spec amendment in §4.4.
+5. **Not in scope:** page checks (MDX compilation, components, links) — those are Grove's,
+   not Baton's.
+
+### Tests
+
+- Each check on fixture repositories: a cycle (reported once, as its path); a body line
+  naming an undeclared id, and the reverse; a multi-line line; a `**Used by:**` line; no
+  line at all; the setting off.
+- A board post with a cycle is refused by the core, through both hosts.
+- New `S-BTN-n` scenarios for the refused post and for the check command (R-BTN-31).
+
+### Exit criteria
+
+- [ ] `baton tickets check` released in `@immediately-run/baton`
+- [ ] the cycle refusal in board validation, with its scenario and spec amendment
+- [ ] this repository's own CI runs `baton tickets check` on `tickets/`
+
+## Status
+
+_(filed 2026-10-25, expedited)_

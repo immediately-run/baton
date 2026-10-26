@@ -7,6 +7,8 @@
 #
 # Usage: scripts/start-runner.sh [--home <checkout>] [--for 45m|2h|90s] [--session <name>]
 #                                [--harness opencode|claude-code] [--capabilities a,b]
+#                                (capabilities default to the runbook's grant:
+#                                 create-pr,llm-call,agent-venue)
 #                                [--url <https://…>] [--check] [--log <file>]
 #
 #   --home        the checkout the runner works in (default: this repository). One runner per
@@ -29,7 +31,11 @@ HOME_DIR="$ROOT"
 FOR=""
 SESSION="run-$(date +%Y%m%d-%H%M%S)-$$"
 HARNESS="opencode"
-CAPABILITIES=""
+# What the runner declares (rule 4 checks declared ∩ granted): the runbook's grant names
+# exactly these (step 5), so the default keeps the intersection non-empty; --capabilities
+# overrides — and the grant must name what you name, or every leg refuses rule 4
+# (missing-capability), which is the 2026-10-24 starvation the banner now shows beside them.
+CAPABILITIES="create-pr,llm-call,agent-venue"
 URL="${BATON_URL:-}"         # empty: the CLI's default (production)
 CHECK_ONLY=0
 LOG=""
@@ -46,10 +52,24 @@ while [ $# -gt 0 ]; do
     --capabilities) CAPABILITIES="${2:?--capabilities needs a list}"; shift 2 ;;
     --url) URL="${2:?--url needs a URL}"; shift 2 ;;
     --check) CHECK_ONLY=1; shift ;;
+    --drain) DRAIN=1; shift ;;
+    --verbose) VERBOSE=1; shift ;;
     --log) LOG="${2:?--log needs a path}"; shift 2 ;;
     *) die "unknown flag: $1 (see the header of this script)" ;;
   esac
 done
+
+# --drain: tell the running runner to complete its current leg and exit (SIGTERM's graceful
+# path; a second signal stops at once). Reads the holder's pid from the home's lock.
+if [ "${DRAIN:-}" = 1 ]; then
+  [ -f "$GIT_DIR/baton-runner.lock" ] || { GIT_DIR="$(git -C "$HOME_DIR" rev-parse --absolute-git-dir 2>/dev/null)"; }
+  [ -n "${GIT_DIR:-}" ] && [ -f "$GIT_DIR/baton-runner.lock" ] || die "no runner lock in $HOME_DIR — is a runner running there?"
+  PID="$(tr -d '[:space:]' <"$GIT_DIR/baton-runner.lock")"
+  kill -0 "$PID" 2>/dev/null || die "the lock names pid ${PID:-?}, which is not running — remove $GIT_DIR/baton-runner.lock if no runner is there"
+  kill -TERM "$PID"
+  note "draining pid $PID: the current leg completes, the claim ends at its boundary, then the runner exits (a second 'kill -TERM $PID' stops at once)"
+  exit 0
+fi
 
 # ---- preflight -------------------------------------------------------------
 # §6.13: a leg session never claims. Run this from your own terminal, not from inside a
@@ -116,6 +136,7 @@ fi
 
 # ---- start -----------------------------------------------------------------
 RUN_ARGS=(run --harness "$HARNESS" --home "$HOME_DIR" --session "$SESSION")
+[ -n "${VERBOSE:-}" ] && RUN_ARGS+=(--verbose)
 [ -n "$URL" ] && RUN_ARGS+=(--url "$URL")
 [ -n "$CAPABILITIES" ] && RUN_ARGS+=(--capabilities "$CAPABILITIES")
 
@@ -124,6 +145,7 @@ note "url:          ${URL:-default (https://baton.immediately.run)}"
 note "repository:   $REPOSITORY (course: what .baton/baton.json declares)"
 note "home:         $HOME_DIR"
 note "hostname:     $HOSTNAME_REPORTED  (must match the grant; BATON_HOSTNAME overrides)"
+note "capabilities: $CAPABILITIES  (must be granted to the key, or every leg refuses rule 4; --capabilities overrides)"
 note "harness:      $HARNESS (fills in only when the settings name no agent_command)"
 note "agent:        $AGENT_COMMAND"
 note "session:      $SESSION"
@@ -150,6 +172,59 @@ env -u BATON_COURSE -u BATON_LEG -u BATON_INSTRUCTIONS -u BATON_TICKET_FILE \
     node "$ROOT/cli/baton.mjs" "${RUN_ARGS[@]}" >"$LOG" 2>&1 &
 RUNNER=$!
 
+# ---- the stalled-leg watch (the B-86 lesson, 2026-10-22) --------------------------------
+# An agent can finish its work and never exit: every green signal stays green (the lease is
+# fresh, the runner healthy, the process alive) while the leg waits forever on an exit that
+# never comes. The signature that catches it: a leg older than LEG_STALL_MIN whose checkout —
+# and any opencode worktree beside it — have been quiet longer than QUIET_MIN. Advice, never
+# action: it prints a line; the human decides. The detection and the conclusion are the
+# runner's own kit (B-108: the stub ends its wait at the agent's exit or its silence,
+# whichever comes first — the owner, 2026-10-22: the Baton server has no role in this); this
+# watch is the operator's outside view until B-108 lands, its backstop after.
+LEG_STALL_MIN="${LEG_STALL_MIN:-60}"
+QUIET_MIN="${QUIET_MIN:-10}"
+warned_leg=""
+newest_change() {
+  # Any file changed inside the quiet window, in the checkout or an agent worktree (.git holds
+  # the runner's own state and log, so it is excluded).
+  find "$HOME_DIR" "$HOME/.local/share/opencode/worktree" -type f -newermt "-${QUIET_MIN} minutes" \
+    -not -path '*/.git/*' -print -quit 2>/dev/null | grep -q . && echo busy || echo quiet
+}
+# macOS's ps knows no 'etimes' — a procps (Linux) keyword — and answers with its whole
+# keyword list, which is what a runner's terminal saw on 2026-10-23. 'etime', always at least
+# mm:ss, is the portable spelling, parsed to seconds here; 10# forces base ten, because a
+# zero-padded "08" reads as octal to $((…)).
+elapsed_s() {
+  local t d=0 h=0 m=0 s=0
+  t="$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ')"
+  [ -n "$t" ] || return 1
+  # [[dd-]hh:]mm:ss: the colon count names the fields — one colon is mm:ss, not hh:mm.
+  case "$t" in *-*) d="${t%%-*}"; t="${t#*-}" ;; esac
+  case "$t" in
+    *:*:*) h="${t%%:*}"; t="${t#*:}" ; m="${t%%:*}"; s="${t##*:}" ;;
+    *:*)   m="${t%%:*}"; s="${t##*:}" ;;
+    *)     s="$t" ;;
+  esac
+  echo $(( (10#$d) * 86400 + (10#$h) * 3600 + (10#$m) * 60 + (10#$s) ))
+}
+watch_leg() {
+  [ -d "$HOME/.local/share/opencode/worktree" ] || return 0
+  local legpid agentpid elapsed
+  legpid="$(pgrep -P "$RUNNER" 2>/dev/null | head -1)"
+  [ -n "$legpid" ] || { warned_leg=""; return 0; }
+  agentpid="$(pgrep -P "$legpid" 2>/dev/null | head -1)"
+  [ -n "$agentpid" ] && legpid="$agentpid"
+  elapsed="$(elapsed_s "$legpid")" || return 0
+  [ "$elapsed" -gt $((LEG_STALL_MIN * 60)) ] || return 0
+  [ "$(newest_change)" = "quiet" ] || return 0
+  if [ "$warned_leg" != "$legpid" ]; then
+    note "WARNING: the leg's agent (pid $legpid) has run $((elapsed / 60)) minutes with no file change anywhere for ${QUIET_MIN}+ minutes — the finished-but-never-exited shape (B-86, 2026-10-22). The stub waits for its exit; the claim cannot advance. Check the agent, or stop the runner and take its PR."
+    warned_leg="$legpid"
+  fi
+}
+( while kill -0 "$RUNNER" 2>/dev/null; do watch_leg; sleep 60; done ) &
+WATCH=$!
+
 shutdown() {
   note "stopping the runner (pid $RUNNER) — it releases its claim with a hand-off and exits"
   kill -INT "$RUNNER" 2>/dev/null || true
@@ -166,6 +241,7 @@ wait "$RUNNER"
 STATUS=$?
 set -e
 [ -z "${TIMER:-}" ] || kill "$TIMER" 2>/dev/null || true
+[ -z "${WATCH:-}" ] || kill "$WATCH" 2>/dev/null || true
 trap - INT TERM
 
 note "the runner exited ($STATUS); the log is kept at $LOG"

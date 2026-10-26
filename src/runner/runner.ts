@@ -10,8 +10,8 @@
 // next safe point first.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf, ROLES } from '../shared/vocabulary.mjs';
@@ -54,6 +54,10 @@ export interface RunnerOptions {
   /** B-83: the harness command `--harness` chose, handed to the legs as BATON_AGENT_COMMAND —
    * what runs an agent leg when the snapshot's settings name no `agent_command`. */
   agentCommand?: string;
+  /** Verbose (the owner, 2026-10-23): timestamp every line, name the claim's id and nonce,
+   * log the leg's local command, and drain the leg child's stderr into the log — where the
+   * stub reports the agent_command it resolved. A slice of B-23's leg observability. */
+  verbose?: boolean;
   /** B-83: a test harness — declared on the heartbeat (R-BTN-32; Baton refuses it from any
    * credential but the test one). */
   testHarness?: boolean;
@@ -109,13 +113,20 @@ export class Runner {
   private readonly o: RunnerOptions & { beatEvery: number };
   private readonly state: StateFile;
   private readonly log: (line: string) => void;
+  private readonly verbose: boolean;
   private readonly now: () => number;
   private beat: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
+  /** 2026-10-24: draining — SIGTERM's path (complete the current leg, then stop). Set once;
+   * the claim loop ends the claim at the next leg boundary with its hand-off, the idle wait
+   * returns, and work() ends without claiming again. */
+  private draining = false;
   private inflight: {
     claimId: number;
     ticket: string;
     course: CourseLoad;
+    /** B-94: the leg this claim is running, so a death leaves a line naming it. */
+    leg: string | null;
     child: LegChild | null;
     /** Resolved by the next tick's view of the snapshot's next legs (the short-wait re-read). */
     waiters: ((next: NextLegs) => void)[];
@@ -145,7 +156,8 @@ export class Runner {
 
   constructor(options: RunnerOptions) {
     this.o = { beatEvery: BEAT_MS, ...options };
-    this.log = options.log ?? (() => {});
+    this.verbose = options.verbose ?? false;
+    this.log = this.verbose ? withTimestamps(options.log ?? (() => {})) : (options.log ?? (() => {}));
     this.now = options.now ?? batonNow;
     this.state = new StateFile(options.stateFile);
     if (!this.state.get().secret) this.state.set({ secret: freshSecret() });
@@ -165,6 +177,17 @@ export class Runner {
     this.stopped = true;
     if (this.beat) clearInterval(this.beat);
     this.beat = null;
+  }
+
+  /** B-94: what a runner says about itself when it leaves — its claim, the leg in flight and the
+   * last beat Baton answered, in one line. `why` names the exit; the leg is `none` between
+   * claims. Cheap and synchronous by design: it runs on a signal or an `exit` hook. */
+  lastLine(why: string): string {
+    const s = this.state.get();
+    const claim = s.claim ? `claim ${s.claim.id} on ${s.claim.ticket_id}` : 'no claim';
+    const leg = this.inflight ? `leg ${this.inflight.leg ?? '?'}` : 'no leg in flight';
+    const beat = s.last_ok == null ? 'never' : new Date(s.last_ok).toISOString();
+    return `${why}: ${claim}, ${leg}, last beat ${beat}`;
   }
 
   /** One heartbeat, by the timer or a test: the §11 answer drives everything local — the lease,
@@ -290,6 +313,9 @@ export class Runner {
       }
     }
     for (const m of (answer.messages ?? []) as { id: number; kind: string; payload?: { reason?: string } }[]) {
+      // 2026-10-24: every message is logged on receipt — a release or cue the runner acts on
+      // silently was the hardest class to debug from the log alone.
+      this.log(`baton: message ${m.kind}${m.payload?.reason ? ` (${m.payload.reason})` : ''} received${this.state.get().claim ? ` for ${this.state.get().claim!.ticket_id}` : ''}`);
       if (m.kind === 'release') {
         this.toAck.push(m.id);
         // A release message's payload reason is one of §6.5's own ('requested', 'owner-cancel',
@@ -461,9 +487,20 @@ export class Runner {
   /** Claim and run tickets until `stop()`; a failure between claims is logged, never fatal.
    * Idle, the runner asks for recommendations when a heartbeat carried an `unblocked` message
    * (R-BTN-77) and otherwise at its own interval — each idle attempt asks first, then claims. */
+  /** Stop taking work, gracefully: the current leg completes, the claim ends at the next leg
+   * boundary with its hand-off, and the runner exits cleanly (the owner, 2026-10-24: 'let the
+   * runner complete the current leg, then gracefully shut down'). A second signal goes the
+   * immediate path — the caller decides what that is. */
+  drain(why: string): void {
+    if (this.draining) return;
+    this.draining = true;
+    this.log(`baton: draining (${why}) — the current leg completes, the claim ends at its boundary, then this runner exits without claiming again`);
+  }
+
   async work(): Promise<void> {
+    this.ensureFatalHooks();
     this.start();
-    while (!this.stopped) {
+    while (!this.stopped && !this.draining) {
       try {
         const outcome = await this.runOnce();
         if (!outcome) await this.idleWait();
@@ -474,10 +511,32 @@ export class Runner {
     }
   }
 
+  /** B-94: a runner's death always leaves a line. An unhandled rejection the loop did not catch
+   * and an uncaught exception are logged with the claim, the leg in flight and the last beat,
+   * then the process ends as Node would have ended it (code 1). The handlers are process-wide and
+   * installed once across every runner in the process; the picking-up runner's `log` is used. */
+  private ensureFatalHooks(): void {
+    const g = globalThis as { __batonFatalHooks?: boolean };
+    if (g.__batonFatalHooks) return;
+    g.__batonFatalHooks = true;
+    // B-94 (review round 1): the crash report keeps the stack — `msg` alone discards what
+    // Node's default fatal path would have printed — and the line is written to fd 1
+    // synchronously, because nothing pending survives the `process.exit` that follows.
+    const active = this;
+    const fatal = (why: string, e: unknown): never => {
+      const report = e instanceof Error ? (e.stack ?? e.message) : msg(e);
+      const line = `baton: the runner crashed (${report}) — ${active.lastLine(why)}`;
+      try { writeSync(1, (active.verbose ? stampLine(line) : line) + '\n'); } catch { /* stdout gone */ }
+      process.exit(1);
+    };
+    process.on('uncaughtException', (e: unknown) => { fatal('uncaught exception', e); });
+    process.on('unhandledRejection', (e: unknown) => { fatal('unhandled rejection', e); });
+  }
+
   /** The idle wait: a beat long, unless an `unblocked` message ends it early. */
   private async idleWait(): Promise<void> {
     const until = this.now() + this.o.beatEvery;
-    while (!this.stopped && !this.unblocked && this.now() < until) await sleep(Math.min(50, this.o.beatEvery));
+    while (!this.stopped && !this.draining && !this.unblocked && this.now() < until) await sleep(Math.min(50, this.o.beatEvery));
     this.unblocked = false;
   }
 
@@ -541,7 +600,7 @@ export class Runner {
     const ticket = claim.ticket_id as string;
     const claimId = claim.claim_id as number;
     this.state.set({ claim: { id: claimId, ticket_id: ticket, nonce: claim.nonce } });
-    this.log(`baton: claimed ${ticket} at ${claim.station}, queued leg ${claim.legs?.[0]}`);
+    this.log(`baton: claimed ${ticket} at ${claim.station}, queued leg ${claim.legs?.[0]}${this.verbose ? ` (claim ${claimId}, nonce ${claim.nonce})` : ''}`);
     return this.runClaim(claim);
   }
 
@@ -560,7 +619,7 @@ export class Runner {
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
     }
     const scratch = claimScratch();
-    this.inflight = { claimId, ticket, course, child: null, waiters: [] };
+    this.inflight = { claimId, ticket, course, leg: null, child: null, waiters: [] };
     this.closedDone = false;
     // §2e/R-BTN-63: the legs git evidences are every earlier attempt's, flattened; the claim's
     // own legs are counted beside them when a leg's run number is taken.
@@ -585,6 +644,11 @@ export class Runner {
       nextLegs = (firstAnswer.next ?? nextLegs) as NextLegs;
       advice = firstAnswer.advice ?? advice;
       for (;;) {
+        // A drain (2026-10-24): the leg that ran is complete; the claim ends here with its
+        // hand-off and the runner exits without claiming again — SIGTERM's graceful path.
+        if (this.draining) {
+          return await this.finish(claimId, { end_reason: 'released:requested', reached: at, next: legName }, await this.callHandoff(ranScript, ranCtx ?? {}) ?? handoffUrl);
+        }
         // A signal that landed while no leg was running (a short wait, or the steps between
         // legs) ends the claim just the same — a release is never dropped (§6.13).
         const whileWaiting = this.abortSignal();
@@ -599,6 +663,7 @@ export class Runner {
         const wait = waitState(nextLegs, legName, course.graph.shortWaits);
         let held: 'cleared' | 'suspend' = wait === 'run' ? 'cleared' : 'suspend';
         if (wait === 'short') {
+          if (this.inflight) this.inflight.leg = legName;
           const out = await this.waitOut(legName, course);
           if (out === 'abort') {
             const signal = this.abortSignal()!;
@@ -617,6 +682,7 @@ export class Runner {
           return await this.finish(claimId, { end_reason: `suspended:${at}`, reached: at, next: legName }, url);
         }
         if (this.closedDone) return await this.finish(claimId, { end_reason: 'done', reached: at }, handoffUrl);
+        if (this.inflight) this.inflight.leg = legName;
         const run = runNumber(course.graph, gitPath, legName, own);
         own.push(legName);
         const ctx = {
@@ -702,6 +768,9 @@ export class Runner {
         // the evidence `close` wrote; it finishes this leg and starts the next. The finished leg
         // joins the evidenced path only now — the next leg's run number counts what ran.
         const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}) }, verdict.reached);
+        // 2026-10-24: the advance trail — every finished leg names where it landed and what it
+        // queued, so a suspension or an odd end position reads as a trail, not a riddle.
+        this.log(`baton: ${ticket}'s ${legName} finished: reached ${verdict.reached}, next ${'settle' in answer ? 'the end' : (answer.next?.[0]?.leg ?? verdict.leg)} (run ${run} of ${course.graph.legs.get(legName)?.maxRuns ?? 1})`);
         if ('settle' in answer) return await this.finish(claimId, answer.settle, await this.callHandoff(script, ctx) ?? handoffUrl);
         gitPath = [...gitPath, { leg: legName, reached: verdict.reached }];
         at = answer.station ?? verdict.reached;
@@ -780,11 +849,19 @@ export class Runner {
       // B-83: the harness command of `--harness`, for a stub whose snapshot's settings name no
       // agent_command — a fill for an absence, never an override.
       ...(this.o.agentCommand ? { BATON_AGENT_COMMAND: this.o.agentCommand } : {}),
+      // Verbose: the stub reports the agent_command it resolved on stderr, which the runner
+      // then drains below — the one place the actual local command completing the leg is
+      // known (it is resolved at the claim's snapshot, not here).
+      ...(this.verbose ? { BATON_VERBOSE: '1' } : {}),
     };
+    if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} ${basename(script)} (ctx ${basename(ctxPath)})`);
     const child = spawn(process.execPath, [LEG_PROCESS, script, ctxPath, resultPath], {
-      detached: true, stdio: ['pipe', 'ignore', 'ignore'],
+      detached: true, stdio: ['pipe', 'ignore', this.verbose ? 'pipe' : 'ignore'],
       env: childEnv,
     });
+    // B-108's streaming half: the leg child's stderr carries the stub's own verbose lines and
+    // its mirror of the agent's two streams — line-drained, every line timestamped.
+    if (this.verbose) drainLines(child.stderr!, (l) => this.log(`baton: ${leg}: ${l}`));
     const inflight = this.inflight!;
     inflight.child = { process: child, resultPath, ctxPath };
     let done = false;
@@ -896,6 +973,30 @@ export class Runner {
 }
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** B-23's slice (the owner, 2026-10-23): every log line carries the time it was written —
+ * an ISO 8601 instant, one timezone-free spelling on every machine. */
+export const stampLine = (line: string): string => `${new Date().toISOString()} ${line}`;
+
+/** B-108's streaming half (2026-10-24): drain a leg child's stream line by line into the log —
+ * chunks are not line-aligned and a stamp per chunk would land mid-prose, so a buffer holds the
+ * partial tail until its newline arrives (the stream's end flushes it; empty lines are dropped,
+ * keeping the log tight). */
+export const drainLines = (stream: NodeJS.ReadableStream, emit: (line: string) => void): void => {
+  let tail = '';
+  stream.on('data', (c) => {
+    tail += String(c);
+    let at: number;
+    while ((at = tail.indexOf('\n')) >= 0) {
+      const line = tail.slice(0, at);
+      tail = tail.slice(at + 1);
+      if (line.trim() !== '') emit(line);
+    }
+  });
+  stream.on('end', () => { if (tail.trim() !== '') emit(tail); });
+};
+export const withTimestamps = (log: (line: string) => void): ((line: string) => void) =>
+  (line) => log(stampLine(line));
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 async function sha256Hex(text: string): Promise<string> {

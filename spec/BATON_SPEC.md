@@ -51,7 +51,11 @@ Git keeps every durable record; Baton keeps only what git cannot hold without be
 server — who holds which ticket now, which runners are alive and what they may do — and the
 limits agents must not change. A ticket follows a **course** whose logic is code in its home
 repository; Baton knows only the course's contract (§5), runs no repository code (R-BTN-98)
-and writes no git itself (R-BTN-171). One Baton is one tenant (§2).
+and writes no git itself (R-BTN-171). The division of labor is fixed (the owner, 2026-10-22):
+the **runner** is responsible for the leg processes — launching them, terminating them when
+necessary, and realizing they are stuck; **Baton** is responsible for collecting information
+(the ticket sync, instruments' metrics, claims) and recommending pending ticket legs for
+runners to work on. Nothing else supervises a leg's process. One Baton is one tenant (§2).
 
 **Names.** A **ticket** is the unit Baton hands out, `<repository id>:<local id>` to Baton
 (R-BTN-47). A **course** is the process it follows: **stations**, where a ticket rests and a
@@ -4120,7 +4124,9 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
 - **R-BTN-72 (the runner).** `baton runner start` is a generic runner loop. It hosts the
   sidecar, heartbeats, asks for recommendations, claims, and runs the ticket's legs one at a
   time, each by **the script for that leg**, then advances, suspends or ends as the script's
-  result and the course file allow. It knows no course. Idle, it asks for recommendations when
+  result and the course file allow. It knows no course. It owns the leg processes themselves —
+  launching them, terminating them when necessary, and realizing they are stuck (§1's division
+  of labor; B-108) — and nothing else does. Idle, it asks for recommendations when
   a heartbeat carries `unblocked`, else at its own interval (R-BTN-77).
   - **Course directory** (R-BTN-69, R-BTN-134):
 
@@ -4184,6 +4190,21 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     startup — the missing ones and `missing-capability` (rule 4) — and a runner whose grant allows
     nothing says that instead of idling in silence. A worker registered before the answer carried
     `grant` asks by declaring nothing on its next beat, so the answer fills the declaration in.
+    The identity banner `baton run` logs at startup names the declaration this way: the granted
+    name (`grant`, or `grant:*` read as the grant) where no flag was given, the flag's own list
+    where one was, beside the home checkout's HEAD, course, host and session.
+  - **A wedged git never holds a claim (B-94).** Every git call the runner and a standard course's
+    `close` make is bounded and non-interactive: `GIT_TERMINAL_PROMPT=0`, ssh in `BatchMode=yes`
+    with a connect timeout, and a timeout that kills the process; the stubs a standard course
+    generates run every git and gh call they make — the snapshot probes, the override and
+    instructions reads, the forge verification — through the same bound and environment. A
+    stalled remote therefore
+    fails the leg within the bound — `close` throws on the killed push, the runner's two retries
+    are each bounded too, and then the leg ends `released:cannot-finish:transient` — rather than
+    blocking the runner for hours. Nothing on the heartbeat path runs a git without a bound. **A runner's death always leaves a line:** on SIGTERM, SIGINT,
+    an uncaught exception or an unhandled rejection it logs its claim id, the leg in flight and
+    the time of its last answered beat before the process goes, so "died tracelessly" cannot
+    happen.
   - **Built-in legs** — `baton.cancel` (R-BTN-168) and `baton.write`, which writes the entries
     of Baton's outbox the claim response lists under `outbox` and reports them as `written` on
     its end (R-BTN-171) — are the runner's own code with no script; they require the capability
@@ -6120,7 +6141,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-136 the outbox | bound `baton.output-invalid`; no `runner:baton-legs` runner, then one; a write landed by a lost claim; a forge-refused push; a condition closing while queued, and while claimed; an entry undrained 24 h; a `tickets.mjs` that never posts the written file; a foreign file at the handler's path | provisional handler ticket queued `baton.write`; filed with `baton_write: <id>`, `written` then `landed`, the ticket's own `start_leg` then offered; the re-claim writes nothing; `released:cannot-finish:capability`, the ticket held and `baton.retries` naming the runner; `dropped`, and once claimed and reported written a `withdraw` follows; `baton.outbox-late`; no `baton.write` re-offered, held `outbox-unlanded` after 3 snapshots; held `outbox-collision` |
 | S-BTN-138 a light question | `hitl` raised `light` with `ask`/`deliver` bound and two answering channels: a reply within the wait; replies on both channels, different; a delivery leg killed after reading, re-claimed; a report repeated; the parent killed while waiting, then reaped; the parent killed after the answer settled; a reply after the wait; a reply after the person answered in the file; a fire-and-forget channel; a promotion; the ticket re-routed with a settled, unrecorded answer | the question pushed to `refs/baton/questions/…` before the report, Baton storing only the pointer; `open` files its Baton-held `deliver` child, never `spawned-unposted`; the leg goes on in the same session, no git write until its end records the answer; the first reply settles, the second `answer-ignored`; the reply re-read and settled once; `ok`, no second effect; reaped, promoted through the outbox, blocked, never asked again; the next claim resumes with the answer; written to the ask file through an `answer` entry, then resumed; the entry `skipped` and the reply `ignored`; `answers: false` only notifies; the ask file posted at `waiting` from `baton_position` with the question as its body, `open` not re-run; the closed ask written with its answer |
 | **§8** | | |
-| S-BTN-41 the runner | a `ci` wait, `{suspend: true}`, `max_runs`, a closed PR, returned `bars`, a lost lease, a course change, a non-edge `next`, a release, a leg session claiming, a granted runner with no `--capabilities`, a `--capabilities` a leg's need refuses, a grant of nothing (B-86) | holds through `ci`; follows only named edges with their `bars`; suspends at `from` with a hand-off; kills the group on loss; new scripts unrestarted; `released:requested`; session refused (`BATON_PARENT`); declares the grant and claims, declares the narrower set and says why no leg can be taken, and says a grant of nothing |
+| S-BTN-41 the runner | a `ci` wait, `{suspend: true}`, `max_runs`, a closed PR, returned `bars`, a lost lease, a course change, a non-edge `next`, a release, a leg session claiming, a granted runner with no `--capabilities`, a `--capabilities` a leg's need refuses, a grant of nothing (B-86); a `git` that never returns (B-94) | holds through `ci`; follows only named edges with their `bars`; suspends at `from` with a hand-off; kills the group on loss; new scripts unrestarted; `released:requested`; session refused (`BATON_PARENT`); declares the grant and claims, declares the narrower set and says why no leg can be taken, and says a grant of nothing; the close and the runner's own git killed at their bound, the leg failing, the heartbeat still beating; a stop on a signal or an `exit` leaves a line naming the claim, the leg and the last beat |
 | S-BTN-53 the doorbell | rings for a cancel and a follow-up; a deploy; a reap; liveness loss; bad upgrades; eviction | one ring then a trailing ring; reconnect with backoff, heartbeat delivery meanwhile; sockets closed; `unauthenticated`, `forbidden`; state recovered |
 | S-BTN-62 a session reports to its runner | a non-outcome `reached`, a move missing entry output, a valid move | first two answered on the channel only; the third advanced; no secret in the session's view |
 | S-BTN-63 no review by its author's key | `review` names `implement` in `no_chain_from`; same-key re-claim; owners' `required_independence` | refused (`chain`); another key takes it; the owner setting holds without the file |

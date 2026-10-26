@@ -12,14 +12,14 @@ description: "repo init writes agent_command: echo and baton run --harness only 
 topics:
   - baton
 owns: {}
-prs: [90]
+prs:
   - https://github.com/immediately-run/baton/pull/90
 depends_on: []
 ---
 
 **Brief:** the gap-analysis run of 2026-10-21
-([`docs/review/gap-analysis-2026-10-21.mdx`](../docs/review/gap-analysis-2026-10-21.mdx), findings 8–9;
-[`docs/lessons.mdx`](../docs/lessons.mdx)): `baton repo init` writes `agent_command: "echo"`, and
+([`docs/review/gap-analysis-2026-10-21.mdx`](../../docs/review/gap-analysis-2026-10-21.mdx), findings 8–9;
+[`docs/lessons.mdx`](../../docs/lessons.mdx)): `baton repo init` writes `agent_command: "echo"`, and
 `baton run --harness` is telemetry — reported in the heartbeat, never used to spawn anything.
 **Spec:** `spec/BATON_SPEC.md` §2f (R-BTN-74: `agent_command`), §5.8 (R-BTN-131: the standard
 courses), §6.13 (R-BTN-72: the runner).
