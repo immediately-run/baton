@@ -4,11 +4,12 @@ import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { confirmations } from '../../src/shared/batonSync.mjs';
 import { gatesFor } from '../../src/core/gates';
 import {
-  beat, claimItem, claimRow, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload, recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, withCore, workerCall, tick,
+  beat, claimItem, claimRow, course, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload, recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, withCore, workerCall, tick,
 } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
+import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 
 const board = inject('board');
 type Item = { id: string; status: string; tier: string | null; tags: string[]; requires: string[] | null; queue: string; node: string };
@@ -102,6 +103,113 @@ describe('the claim and end contracts (§6.2, §6.5, §11)', () => {
     await rows(`DELETE FROM courses`); // a head posted before the registry existed
     expect(await recommended(id)).toEqual([]);
     expect(await claimItem('vm-a', secret, { ticket_id: 'docs:R3-9001' })).toMatchObject({ status: 409, json: { code: 'stale-skills', rule: 9 } });
+  });
+
+  it('§7.2 rule 4 reads a leg\'s `requires.capabilities` (R-BTN-120, B-86): accepted by the validator, enforced by the gate and its query', async () => {
+    const { id, secret } = await register('vm-a', { capabilities: ['llm-call'] });
+    // A course whose start leg requires a capability the worker does not hold, posted as the
+    // registry's — the key `validateCourse` accepts.
+    const needs = JSON.parse(JSON.stringify(roadmapPr)) as Record<string, any>;
+    needs.legs.implement.requires = { capabilities: ['terraform'] };
+    // A new head carries a registry: a repeat of the head is a refresh, and applies none.
+    await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { registry: [course(3, 3, { course: needs })] }));
+    expect(await rows('SELECT id FROM courses WHERE id = ?', 'roadmap-pr')).toHaveLength(1);
+    // Stored as posted: the core reads the leg's list (it is in the file the registry applied).
+    expect(await rows(`SELECT length(course_json) AS n FROM courses WHERE id = ?`, 'roadmap-pr')).toEqual([{ n: expect.any(Number) }]);
+    expect((await rows(`SELECT instr(course_json, '"requires"') AS r FROM courses WHERE id = ?`, 'roadmap-pr'))[0].r).toBeGreaterThan(0);
+    // Rule 4 refuses the queued leg, and the candidate query agrees (G-BTN-40) — a runner that
+    // lacks the capability is never offered the ticket its leg would refuse.
+    // A ticket whose queued leg is ready (rule 1 passes, so the refusal is rule 4's).
+    const ticketId = 'docs:R3-9002';
+    expect(await recommended(id)).not.toContain(ticketId);
+    const refused = await claimItem('vm-a', secret, { ticket_id: ticketId });
+    expect(refused, JSON.stringify(refused.json)).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 4 } });
+    // A worker declaring agent-venue has llm-call but not terraform: still refused.
+    const role = await register('vm-b', { capabilities: ['agent-venue'] });
+    expect((await claimItem('vm-b', role.secret, { ticket_id: ticketId })).json.rule).toBe(4);
+    // The role a leg's requires names is met by a declaration that carries it: `agent-venue` for
+    // a leg naming the role.
+    needs.legs.implement.requires = { capabilities: ['agent-venue'] };
+    await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.C, { registry: [course(3, 3, { course: needs })] }));
+    const held = await register('vm-a', { session_name: 'held', capabilities: ['agent-venue'] });
+    expect(await recommended(held.id)).toContain(ticketId);
+    const kept = await claimItem('vm-a', held.secret, { ticket_id: ticketId });
+    expect(kept.status).toBe(200);
+    // The claim above holds the leg (rule 3): a granted worker is offered it only once that claim
+    // has ended, so it ends here as a real one would.
+    expect((await endClaim('vm-a', held.secret, kept.json.claim_id, { end_reason: 'released:requested' })).status).toBe(200);
+    // §6.7: claimable again only after a sync since that end.
+    await syncCall('/v1/sync/board', payload(sha.D, sha.C, board.states.D));
+    // Review round 5, finding 1: the same leg for a GRANTED key. Grants store capabilities only
+    // (`admin.ts`), so the query reads the role the leg names as the capabilities `graphOf`
+    // expanded it to — a granted venue worker is a candidate and claims it, and a worker holding
+    // none of the role's capabilities is neither.
+    const admin = await makeKey('ssh-ed25519', 'admin-r5');
+    const docsOwner = await makeKey('ssh-ed25519', 'docs-owner-r5');
+    await setAdminKeys(admin);
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [docsOwner.publicKey] })).status).toBe(200);
+    const workerKey = async (name: string, capabilities: string[]) => {
+      const key = await makeKey('ssh-ed25519', name);
+      expect((await keyCall(admin, '/v1/admin/grants', { repository: 'docs', public_key: key.publicKey, hostname: name, capabilities })).status).toBe(200);
+      // A granted key declares the courses of the repositories it is granted on (§10.1).
+      const body = hbBody('vm-a', { hostname: name, session_name: name, secret_hash: await sha256(name), capabilities, model_id: 'opencode-go/kimi-k3', model_provider_id: 'opencode_go_plus', courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }] });
+      const res = await hostCall(await signedRequest(key, `${ORIGIN}/v1/runner/heartbeat`, { created: Math.floor((await withCore((x) => x.now())) / 1000), body: JSON.stringify(body) }));
+      expect([name, res.status]).toEqual([name, 200]);
+      return { worker_id: (await res.json() as { worker_id: number }).worker_id, key, secret: name };
+    };
+    // `claimItem` speaks a batch credential's token; a granted worker's is its key's own, so its
+    // claim is signed here.
+    const grantedClaim = async (key: Awaited<ReturnType<typeof makeKey>>, secret: string) => {
+      const sec = Math.floor((await withCore((x) => x.now())) / 1000);
+      const signed = await signedRequest(key, `${ORIGIN}/v1/runner/claim`, { created: sec, body: JSON.stringify({ request_id: requestId(), ticket_id: ticketId }) });
+      // The worker secret joins a signature (§5, `runner/api.ts`'s `Auth`): the key names the
+      // credential, the secret names the worker.
+      signed.headers.set('X-Worker-Secret', secret);
+      const res = await hostCall(signed);
+      return { status: res.status, json: (await res.json()) as Record<string, any> };
+    };
+    // A worker granted only `llm-call` is not offered the leg and is refused it: one of the role's
+    // four is not the role (the round-5 probe: `llm-call` alone passed a leg naming a role).
+    const grantedPartial = await workerKey('r5-granted-partial', ['llm-call']);
+    expect(await recommended(grantedPartial.worker_id)).not.toContain(ticketId);
+    expect(await grantedClaim(grantedPartial.key, grantedPartial.secret)).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 4 } });
+    // A worker granted the venue is: the query reads the role the leg names as the capabilities
+    // `graphOf` expanded it to, and a grant stores capabilities, so it is a candidate and claims.
+    const grantedVenue = await workerKey('r5-granted-venue', ['agent-venue']);
+    expect(await recommended(grantedVenue.worker_id)).toContain(ticketId);
+
+    expect(await grantedClaim(grantedVenue.key, grantedVenue.secret), 'the granted venue worker claims the leg').toMatchObject({ status: 200, json: { ticket_id: ticketId } });
+  });
+
+  it('§7.2 rule 4 holds a human-operator leg the way rule 6 holds an operator-only ticket (R-BTN-121, review round 6)', async () => {
+    // The start leg reserved for a person: an approval or hands-on step no autonomous worker takes.
+    const needs = JSON.parse(JSON.stringify(roadmapPr)) as Record<string, any>;
+    needs.legs.implement.requires = { capabilities: ['human-operator'] };
+    await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { registry: [course(3, 3, { course: needs })] }));
+    const venue = await register('vm-a', { capabilities: ['agent-venue'] });
+    const operator = await register('mac', { capabilities: ['human-operator', 'agent-venue'] });
+    const ticketId = 'docs:R3-9002';
+    // The query does not offer it to the agent venue, and the gate refuses it — the two agree.
+    expect(await recommended(venue.id)).not.toContain(ticketId);
+    expect(await claimItem('vm-a', venue.secret, { ticket_id: ticketId })).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 4 } });
+    // The operator is offered it and claims it.
+    expect(await recommended(operator.id)).toContain(ticketId);
+    expect((await claimItem('mac', operator.secret, { ticket_id: ticketId })).status).toBe(200);
+  });
+
+  it('the courses row holds the course file as posted; the leg needs the query reads are its derived view (review round 6)', async () => {
+    const file = JSON.parse(JSON.stringify(roadmapPr)) as Record<string, any>;
+    file.legs.implement.requires = { capabilities: ['deployer'] };
+    file.capability_roles = { deployer: ['vpn:corp', 'credential:DEPLOY_TOKEN'] };
+    const post = () => syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { registry: [course(3, 3, { course: file })] }));
+    expect((await post()).status).toBe(200);
+    expect(JSON.parse((await rows<{ course_json: string }>('SELECT course_json FROM courses WHERE id = ?', 'roadmap-pr'))[0].course_json)).toEqual(file);
+    const { leg_capabilities_json: needs } = (await rows<{ leg_capabilities_json: string }>('SELECT leg_capabilities_json FROM courses WHERE id = ?', 'roadmap-pr'))[0];
+    expect(JSON.parse(needs).implement).toEqual(['vpn:corp', 'credential:DEPLOY_TOKEN']);
+    // A re-post of the same file is a fixed point: the row is byte-identical.
+    const before = await rows<{ course_json: string; leg_capabilities_json: string }>('SELECT course_json, leg_capabilities_json FROM courses WHERE id = ?', 'roadmap-pr');
+    expect((await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.C, { registry: [course(3, 3, { course: file })] }))).status).toBe(200);
+    expect(await rows<{ course_json: string; leg_capabilities_json: string }>('SELECT course_json, leg_capabilities_json FROM courses WHERE id = ?', 'roadmap-pr')).toEqual(before);
   });
 
   it('§7.2 rule 6: an operator-only item goes only to a worker that declared human-operator', async () => {
@@ -352,6 +460,64 @@ describe('G-BTN-40: the matching query and gatesFor agree; git overtaking a clai
       if (c.name === 'venue-judgement') expect(expected.length).toBeGreaterThan(0);
       if (c.name === 'ops-only') expect(expected).toEqual([]);
     }
+  });
+
+  // Review round 7, finding 0: a key granted `human-operator` on one repository and not on another
+  // declares it (its own answer is the union of its grants), so the query's leg half asks it of the
+  // grant on the TICKET's repository, as rule 6 does — never the declaration alone.
+  it('G-BTN-40 on a human-operator leg: a key granted it on another repository only is no candidate, and the gate agrees', async () => {
+    const needs = JSON.parse(JSON.stringify(roadmapPr)) as Record<string, any>;
+    needs.legs.implement.requires = { capabilities: ['human-operator'] };
+    await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { registry: [course(3, 3, { course: needs })] }));
+    const admin = await makeKey('ssh-ed25519', 'admin-r7');
+    const docsOwner = await makeKey('ssh-ed25519', 'docs-owner-r7');
+    const opsOwner = await makeKey('ssh-ed25519', 'ops-owner-r7');
+    await setAdminKeys(admin);
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [docsOwner.publicKey] })).status).toBe(200);
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', owner_keys: [opsOwner.publicKey] })).status).toBe(200);
+    // One key: the venue on docs, the venue and the literal on ops. Its declaration names both.
+    const key = await makeKey('ssh-ed25519', 'r7-two-repos');
+    const declared = ['agent-venue', 'human-operator'];
+    for (const [repository, capabilities] of [['docs', ['agent-venue']], ['ops', ['agent-venue', 'human-operator']]] as const) {
+      expect((await keyCall(admin, '/v1/admin/grants', { repository, public_key: key.publicKey, hostname: 'r7-two-repos', capabilities: [...capabilities] })).status).toBe(200);
+    }
+    const body = hbBody('vm-a', { hostname: 'r7-two-repos', session_name: 'r7-two-repos', secret_hash: await sha256('r7-two-repos'), capabilities: declared,
+      courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }, { repository: 'ops', course: 'roadmap-pr', version: 3 }] });
+    const res = await hostCall(await signedRequest(key, `${ORIGIN}/v1/runner/heartbeat`, { created: Math.floor((await withCore((x) => x.now())) / 1000), body: JSON.stringify(body) }));
+    expect(res.status).toBe(200);
+    const { worker_id } = (await res.json()) as { worker_id: number };
+    const ticketId = 'docs:R3-9002';
+    // The query itself (not only `recommended`, which filters through the gate): docs' leg asks for
+    // a literal the docs grant does not hold, so it is no candidate there — and the gate refuses it.
+    const atDocs = await withCore((o) => {
+      const c = o.claims as unknown as { candidates: (w: unknown, page: number) => { id: string }[]; worker: (id: number) => unknown;
+        item: (id: string) => unknown; gate: (w: unknown, item: unknown, leg: string, phase: string) => { ok: boolean; rule?: number } };
+      const facts = c.worker(worker_id);
+      const item = c.item(ticketId);
+      return { query: c.candidates(facts, 0).map((r) => r.id), gate: c.gate(facts, item, 'implement', 'claim') };
+    });
+    expect(atDocs).toEqual({ query: [], gate: { ok: false, rule: 4, code: 'missing-capability' } });
+    expect(await recommended(worker_id)).not.toContain(ticketId);
+    // On ops the grant holds the literal: the same ticket is a candidate whose leg names it, and the
+    // gate admits it there — the two faces of one name, agreeing on the repository that holds it.
+    // The ops posting of the same course, whose one leg asks for the literal too: ops' registry
+    // entry is written directly (this scenario posts docs' boards), the other clause of rule 4's
+    // leg input satisfied so that the literal is the only reading left.
+    await withCore((c) => c.store.exec(`INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, step_kinds, min_worker_version) VALUES ('ops', 'roadmap-pr', 3, 's', ?, ?, '[]', 3)`,
+      JSON.stringify(needs), JSON.stringify({ implement: ['human-operator'], review: [], fix: [], adjudicate: [], merge: [] })));
+    // A raw move to a cut-over ops, with a sync since the last end — every other clause of the
+    // query satisfied, so the leg's literal is the only reading left.
+    await rows(`UPDATE tickets SET repository_id = 'ops', course_id = 'roadmap-pr', path = 'content/roadmap/R3-9002.mdx' WHERE id = ?`, ticketId);
+    await cutover(1, 'ops');
+    await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.C, { registry: [course(3, 3, { course: needs })] }));
+    const atOps = await withCore((o) => {
+      const c = o.claims as unknown as { candidates: (w: unknown, page: number) => { id: string }[]; worker: (id: number) => unknown;
+        item: (id: string) => unknown; gate: (w: unknown, item: unknown, leg: string, phase: string) => { ok: boolean; rule?: number } };
+      const facts = c.worker(worker_id);
+      const item = c.item(ticketId);
+      return { query: c.candidates(facts, 0).map((r) => r.id), gate: c.gate(facts, item, 'implement', 'claim') };
+    });
+    expect(atOps).toEqual({ query: [ticketId], gate: { ok: true } });
   });
 
   const overtaken = (mutate: (items: any[]) => any[]) => {
