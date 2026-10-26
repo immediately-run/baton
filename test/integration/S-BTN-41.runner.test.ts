@@ -812,7 +812,7 @@ describe('S-BTN-41 the runner', () => {
     let atClaim: { declared: string; capabilities: string }[] | null = null;
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const claim = api.claim;
-    api.claim = async (body: Record<string, unknown>) => {
+    api.claim = async (body: { request_id: string; ticket_id?: string }) => {
       const worker = (await rows<{ id: number }>('SELECT id FROM workers ORDER BY id DESC LIMIT 1'))[0];
       atClaim = worker
         ? await rows<{ declared: string; capabilities: string }>(`SELECT DISTINCT declared, (SELECT group_concat(capability) FROM (SELECT capability FROM worker_capabilities c WHERE c.worker_id = worker_capabilities.worker_id ORDER BY capability)) AS capabilities
@@ -1075,7 +1075,7 @@ describe('S-BTN-41 the runner', () => {
     let grant = ['create-pr'];
     api.heartbeat = async (body: Record<string, unknown>) => ({
       ...await beat.call(api, body) as Record<string, unknown>,
-      grant: { capabilities: (body.capabilities ?? []).length ? grant : ['create-pr'] },
+      grant: { capabilities: ((body.capabilities as string[] | undefined) ?? []).length ? grant : ['create-pr'] },
     });
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
