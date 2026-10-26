@@ -1,17 +1,19 @@
 ---
-title: "B-114 — The ticket-wiki viewer: Baton's board components once, as Baton's own immediately.run program"
+title: "B-114 — The ticket-wiki viewer, immediately-run/baton-board: the board components once, in their own app repository"
 id: B-114
 project: baton
 status: available
 updated: 2026-10-26
 repos:
   - baton
+  - baton-board
 tags:
   - roadmap-item
   - EXPEDITE
+  - OP
 order: 516
 tier: judgement
-description: "Every ticket repository (docs, baton, fieldhouse, hq) copies the same ten board components into its wiki. Move them once into viewer/, a library-mode Grove shell that is this repository's immediately.run program (immediately.run.entry, with its own immediately.run.dependencies so the CLI's npm install stays Grove-free), registered with extendComponents so render: safe ticket wikis elsewhere render their board through it, and render Baton's own tickets/ as its fork. Expedited: it changes the ticketing system itself. Requires: none."
+description: "Every ticket repository (docs, baton, fieldhouse, hq) copies the same ten board components into its wiki. Build immediately-run/baton-board, a small library-mode Grove shell app that owns those components and registers them with extendComponents; it opts in to being named by markers (opens: self), so render: safe ticket wikis anywhere — Baton's own included — render their board through it. Baton's tickets wiki switches to it and its tickets/components/ goes. Expedited: it changes the ticketing system itself. Requires: github-admin."
 topics:
   - baton
 owns: {}
@@ -20,79 +22,81 @@ depends_on: []
 ---
 
 **Brief:** the owner, 2026-10-26: ticket repositories should be plain `render: safe` wikis with
-no components of their own, whose board still renders — from components Baton supplies, like a
-plugin. The components belong to the **viewer**, not the content, which keeps the platform's
-rule that a repository cannot choose the code that renders it; Baton owns the ticket format, so
-it ships the viewer, as its one immediately.run program beside its CLI.
+no components of their own, whose board still renders — from one viewer, like a plugin. The
+components belong to the **viewer**, not the content, which keeps the platform's rule that a
+repository cannot choose the code that renders it. The owner first placed the viewer in
+Baton's repository, then chose a **separate app repository**, `immediately-run/baton-board`, as
+the cleaner design: Baton's package keeps one entry (`bin`) and one dependency list, and the
+viewer is an ordinary app.
 Expedited: a ticket that changes the ticketing system itself is finished first.
 **Spec:** `immediately-run/docs` `PLATFORM_LAYERING_SPEC` §1.1 (M3 library mode),
-`SPACES_UI_SPEC` §6 (a marker may name an app; `opens: self`), `BOOT_SCAFFOLDING_SPEC` §4.1 as
-amended by R3-1292; R-BTN-74 (the markdown ticket format the components read); R-BTN-31.
+`SPACES_UI_SPEC` §6 (a marker may name an app; `opens: self`; an unbound app is offered, never
+run); R-BTN-74 (the markdown ticket format the components read).
 **Depends on:** none in this repository.
-**Waits on:** docs R3-1290 (`extendComponents`, the safe renderer drawing with a shell's map,
-`setForkContentRoot`), R3-1292 (`immediately.run.entry` and `immediately.run.dependencies`) and
-R3-1294 (Grove as an `open-declared` opener), each merged and released — written here rather
-than in `depends_on` until B-113 lets a dependency name another repository's ticket.
+**Waits on:** docs R3-1290 (`extendComponents`, and the safe renderer drawing with a shell's
+map) and R3-1294 (Grove as an `open-declared` opener), each merged and released — written here
+rather than in `depends_on` until B-113 lets a dependency name another repository's ticket.
 **Used by:** fieldhouse FLDH-36 (its tickets wiki switches to this viewer), and the same switch
 in docs and hq.
 
 ### What to build
 
-1. **`viewer/`**, the shell:
-   - `viewer/platform.tsx` — `setForkContentRoot('/app/tickets/')`, then
-     `boot({ mdxComponents: COMPONENTS, children: <App /> })` (the thin-shell pattern, Grove's
-     `examples/thin-shell/src/main.tsx`);
-   - `viewer/App.tsx` — default-exports a component rendering `<GroveApp />`, and nothing else
-     (the Fast Refresh rule: a file that exports a component exports only components);
-   - `viewer/components.ts` — `COMPONENTS = extendComponents(GROVE_MDX, { RoadmapBoard,
+1. **`immediately-run/baton-board`** (the owner creates it, public, like Baton): an ordinary
+   immediately.run app on the Grove thin-shell pattern (`examples/thin-shell` in
+   `immediately-run/grove`):
+   - `src/main.tsx` / boot — `boot({ mdxComponents: COMPONENTS, children: <App /> })`;
+   - `src/App.tsx` — default-exports a component rendering `<GroveApp />`, and nothing else
+     (the Fast Refresh rule);
+   - `src/components.ts` — `COMPONENTS = extendComponents(GROVE_MDX, { RoadmapBoard,
      RoadmapMeta, NextAvailable, Dependencies, ProjectIndex, ProjectItems, ProjectMembers,
-     ProjectMeta, StatusBadge, TopicIndex })`, the ten names every ticket marker registers today.
-2. **The components move, they are not copied**: `tickets/components/*` (the ten components,
-   their helpers `InlineProse`, `ItemCard`, `QueueChips`, `roadmapData.ts`, `roadmapLib.ts`,
-   `useProjectId.ts`, `useRoadmapRows.ts`, and `roadmap.css`) move to `viewer/components/` with
-   `git mv`, so their history follows. `tickets/immediately.run.json` loses its `components` key.
-3. **`package.json`'s `immediately.run` block** gains
-   `"entry": "viewer/platform.tsx"`, `"opens": [{ "app": "self", "version": "^1" }]`, and
-   `"dependencies"` naming `@immediately-run/grove` (pinned by commit, `github:` form) and the
-   React the shell needs. npm's own `dependencies`, `bin` and `files` are unchanged: the published
-   CLI gains no dependency.
-4. **Baton's own tickets** render through the viewer as its fork: `tickets/home.mdx` declares
-   `render: safe`, and opening this repository shows the board.
+     ProjectMeta, StatusBadge, TopicIndex })`, the ten names every ticket marker registers today;
+   - `src/components/` — the components and their helpers;
+   - `package.json` — `@immediately-run/grove` pinned by commit (`github:` form, LIBRARY_MOUNTS
+     §6), and `"immediately.run": { "opens": [{ "app": "self", "version": "^1" }] }`.
+2. **The components move to `baton-board`, they are not copied**: the ten components, their
+   helpers (`InlineProse`, `ItemCard`, `QueueChips`, `roadmapData.ts`, `roadmapLib.ts`,
+   `useProjectId.ts`, `useRoadmapRows.ts`) and `roadmap.css`, from this repository's
+   `tickets/components/` — the most complete of the copies; the PR body names the Baton commit
+   they came from, since history does not cross repositories.
+3. **Baton's own tickets switch**: `tickets/immediately.run.json`'s `opensWith` becomes
+   `{ "app": "github:immediately-run/baton-board", "version": "^1" }` and loses its `components`
+   key; `tickets/home.mdx` declares `render: safe`; `tickets/components/` is deleted. `docs/`,
+   Baton's second wiki, keeps stock Grove.
 
 ### Architecture — the decisions, named
 
-- **The viewer is Baton's only program, not a second entry point.** Multiple entry points per
-  repository (`AGENT_AUTHORING_ARCHITECTURE` §5) are not built; one `immediately.run.entry`
-  suffices, and becomes the entry map's default when that lands.
-- **Baton's own tickets are a fork, never a dispatch.** A marker in this repository naming
-  `github:immediately-run/baton` would be self-dispatch, which the platform refuses; the shell's
-  `setForkContentRoot` serves `tickets/` instead. `docs/`, Baton's second corpus, keeps its own
-  marker and stock Grove.
-- **Components stay app code.** They run in the viewer's frame with the viewer's authority, which
-  is exactly why they may render safe content: the corpus contributes data only.
-- **Do not:** leave a copy of any component in `tickets/`; add Grove or React to npm's
-  `dependencies` (the CLI would install them); mark stock Grove's components or the manifest;
-  name a mutable branch in the viewer's Grove dependency (pin a commit, LIBRARY_MOUNTS §6).
+- **The viewer is a separate repository, not a program in Baton's** (the owner, 2026-10-26).
+  Baton stays a CLI and Worker package with its own wikis; it gains no app entry, no React and
+  no Grove dependency. Docs R3-1292 (an app entry and dependencies beside npm's) was superseded
+  for this reason.
+- **Baton's own tickets are dispatched like everyone's.** `baton-board` is another repository,
+  so naming it is not self-dispatch; Baton's wiki has no special case.
+- **Components stay app code.** They run in the viewer's frame with the viewer's authority,
+  which is why they may render safe content: the corpus contributes data only.
+- **Do not:** leave a copy of any component in `tickets/`; add the viewer or its dependencies to
+  Baton's `package.json`; name a mutable branch in `baton-board`'s Grove dependency; register the
+  board components in Grove's `viewer.manifest.json`.
 
 ### Tests
 
-- Scenarios: none run yet — the viewer changes no Baton core behaviour (R-BTN-50); the board it
-  renders is checked by the ticket repositories' switch-overs.
-- `viewer/components.test.ts` (vitest): `COMPONENTS` carries all ten names and still resolves
-  `Callout` to Grove's stock component; input: the REAL `tickets/immediately.run.json` from
-  before the move (its `components` keys, saved as a fixture) — the list the viewer must cover.
-- `npm run check:package`: the packed tarball contains no `viewer/` and its `dependencies` are
-  unchanged.
+- Scenarios: none run yet — the viewer changes no Baton core behaviour (R-BTN-50).
+- In `baton-board`, `src/components.test.ts` (vitest): `COMPONENTS` carries all ten names and still
+  resolves `Callout` to Grove's stock component; input: this repository's REAL
+  `tickets/immediately.run.json` `components` keys from before the switch, saved as a fixture —
+  the list the viewer must cover.
+- In Baton: `npm run check:wiki` green with the marker naming `baton-board` and no `components`
+  key; `npm run check:package` unchanged.
 
 ### Exit criteria
 
-- [ ] `git ls-files tickets/components` empty; `viewer/components/` holds the moved files
-- [ ] `viewer/components.test.ts` passes; `npm test` and `npm run typecheck` green
-- [ ] `npm run check:package` green with the tarball's `dependencies` unchanged
-- [ ] `npm run check:wiki` green
-- [ ] **live**: this repository opens on immediately.run showing its board under `render: safe`
-      (run by the session that merges, with a drivable browser)
+- [ ] `immediately-run/baton-board` exists with the shell, the components and the test above passing
+      (**operator**: the owner creates the repository — `github-admin`)
+- [ ] `git ls-files tickets/components` empty in Baton; the marker names `baton-board`
+- [ ] `npm run check:wiki` and `npm test` green in Baton
+- [ ] **live**: Baton's tickets wiki opens on immediately.run in `baton-board`, its board rendered
+      under `render: safe` (run by the session that merges, with a drivable browser)
 
 ## Status
 
-_(filed 2026-10-26, expedited)_
+_(filed 2026-10-26, expedited; rewritten the same day when the owner moved the viewer from Baton's
+repository to its own, `immediately-run/baton-board`)_
