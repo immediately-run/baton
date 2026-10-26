@@ -20,6 +20,9 @@ export interface Leg {
   noChainFrom: string[];
   /** R-BTN-107: the isolation a worker must declare to take it, or null for any. */
   isolation: 'session' | null;
+  /** R-BTN-120: the capabilities the leg requires of whoever takes it — rule 4's own input
+   *  beside the ticket's clause (B-86); empty when it requires none. */
+  requires: string[];
 }
 
 export interface Graph {
@@ -45,14 +48,14 @@ export function graphOf(json: unknown): Graph {
   const f = json as {
     start: string; start_leg: string; end: string[]; short_waits?: string[];
     stations: Record<string, { renamed_from?: string | string[]; entry?: { output: string; schema: string }[] }>;
-    legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session' }>;
+    legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session'; requires?: { capabilities?: string[] } }>;
   };
   const legs = new Map<string, Leg>();
   const legRenames = new Map<string, string>();
   const stationRenames = new Map<string, string>();
   for (const [id, l] of Object.entries(f.legs)) {
     legs.set(id, { from: [...new Set(l.from)], to: [...new Set(names(l.to))], maxRuns: l.max_runs ?? null, maxQueue: l.max_queue ?? null,
-      noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null });
+      noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null, requires: [...new Set(l.requires?.capabilities ?? [])] });
     for (const old of names(l.renamed_from)) legRenames.set(old, id);
   }
   const entry = new Map<string, { output: string; schema: string }[]>();

@@ -65,13 +65,15 @@ describe('validateCourse (R-BTN-69)', () => {
   it('a leg\'s requires and a course\'s capability_roles are checked in shape (R-BTN-120, B-86)', () => {
     const c = copy();
     c.legs.review.requires = { tickets: [] };
-    c.legs.deploy = { from: ['approved'], to: 'merged', requires: { capabilities: ['create-pr'], resources: ['llm:x'] } };
+    c.legs.deploy = { from: ['adjudicated'], to: 'merged', requires: { capabilities: ['create-pr'], resources: ['llm:x'] } };
     c.capability_roles = { deployer: ['vpn:corp', ''], empty: [], tooMany: Array.from({ length: 65 }, () => 'x'), notList: 'create-pr' };
+    // Per element, as `stationList` reports a station list: the empty and non-list roles are the
+    // list's own fault, the single bad name is the name's.
     expect(rules(c)).toEqual([
+      'shape capability_roles.deployer.1',
       'shape capability_roles.empty',
       'shape capability_roles.notList',
       'shape capability_roles.tooMany',
-      'shape capability_roles.deployer.1',
       'unknown-key legs.deploy.requires.resources',
       'unknown-key legs.review.requires.tickets',
     ]);
@@ -83,7 +85,7 @@ describe('validateCourse (R-BTN-69)', () => {
     c.legs.review.requires = { capabilities: [] };
     expect(rules(c)).toEqual(['shape legs.review.requires.capabilities']);
     c.legs.review.requires = { capabilities: ['ok', 7] };
-    expect(rules(c)).toEqual(['shape legs.review.requires.capabilities']);
+    expect(rules(c)).toEqual(['shape legs.review.requires.capabilities.1']);
     c.legs.review.requires = { capabilities: 'create-pr' };
     expect(rules(c)).toEqual(['shape legs.review.requires.capabilities']);
   });

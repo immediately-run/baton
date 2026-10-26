@@ -14,7 +14,7 @@ import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync, writeS
 import { basename, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
-import { capabilitiesOf, ROLES } from '../shared/vocabulary.mjs';
+import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { BatonApi, BatonRefusal } from './api';
 import { claimScratch, courseOf, dropCourse, ensureSha, freshSecret, loadCourse, type CourseLoad } from './home';
 import { decide, refusalKind, runNumber, shortWaitSpent, waitState } from './protocol';
@@ -23,6 +23,10 @@ import { StateFile, leaseLostFrom } from './state';
 const LEG_PROCESS = fileURLToPath(new URL('./legProcess.mjs', import.meta.url));
 /** §6.3: the sidecar's cadence — every beat 2 minutes. */
 export const BEAT_MS = 2 * 60_000;
+/** B-86: how many beats one claim attempt spends making the server's record of the declaration
+ *  match the list the claim will carry — one for a fresh or legacy runner, one for the change it
+ *  settles (review round 4, finding 4). */
+const MAX_STALE_BEATS = 2;
 /** What one leg's snapshot shows of the legs leaving the claim's station (R-BTN-70). */
 type NextLegs = { leg: string; state: string; waiting_on?: string }[];
 
@@ -77,34 +81,18 @@ export interface ClaimOutcome {
   handoff: string | null;
 }
 
-/** B-86: what the heartbeat declares when `--capabilities` names nothing — the grant's
- *  capabilities, so a granted machine never restates what its grant already says. Every name
- *  here must pass the heartbeat's check (`workerApi.ts`): a role when all of its capabilities
- *  are granted, any other name when it is granted itself — a name the check would refuse is a
- *  beat `forbidden`, and a `forbidden` beat costs the lease (review round 3, finding 1). So a
- *  role whose every capability is present stands as the role (rule 4 read the way the grant
- *  means it — a clause naming `agent-venue` is satisfied by the role, not lost among its four);
- *  a role named beside only some of them is dropped, its named capabilities standing in its
- *  place; and a capability a kept role already carries is not declared twice. The server expands
- *  the roles again (gates.ts:130), so the set declares the same capabilities it was given.
+/** B-86: what the heartbeat declares when `--capabilities` names nothing — exactly the set the
+ *  answer carried, deduplicated, with `none` dropped (it says nothing, `vocabulary.mjs`). Every
+ *  name in it is one the server answered: a grant is stored as the roles the owner named and the
+ *  capabilities they stay as (admin.ts:423), and the heartbeat admits each name by the same
+ *  logic that answered it — a role by its own name in a bearer or seed key's allow-list, a
+ *  capability when its expansion is all granted (`credentialAllowed`, workerApi.ts). So a role
+ *  the answer carries is declared as the role: rule 4 and the grant check both expand it
+ *  gates-side (`capabilitiesOf`), which is why folding it into (or dropping it for) its
+ *  capabilities could only lose names the server would have accepted (review round 4, finding 1).
  *  Exported for its test. */
 export function declarationFrom(held: string[]): string[] {
-  const names = [...new Set(held)].filter((n) => n !== 'none');
-  const roles = ROLES as Record<string, string[] | undefined>;
-  const stands = (n: string): boolean => {
-    const caps = roles[n];
-    // `human-operator` is rule 6's own row (workerApi.ts: it is admitted by its own name, and
-    // stored as itself), never folded into its expansions.
-    return caps == null || n === 'human-operator' || caps.every((c) => names.some((m) => m === c));
-  };
-  const kept = names.filter(stands);
-  const carried = new Set(kept.flatMap((n) => (roles[n] != null && n !== 'human-operator' ? roles[n]! : [])));
-  const out: string[] = [];
-  for (const name of kept) {
-    // A role keeps its place; a capability stands unless a kept role carries it.
-    if (roles[name] != null ? !out.some((o) => o === name) : !carried.has(name) && !out.some((o) => o === name)) out.push(name);
-  }
-  return out;
+  return [...new Set(held)].filter((n) => n !== 'none');
 }
 
 /** Why the sidecar asked the running leg to stop (§6.13's three signal reasons). `reason` is the
@@ -168,6 +156,9 @@ export class Runner {
   private saidEligible = false;
   /** B-86: the empty-declaration line has been said, once, since `runOnce` would ask each time. */
   private saidEmpty = false;
+  /** B-86: the `forbidden` line has been said for this stretch of refusals (reset by the next
+   *  answered beat), so asking again is not narrated on every beat. */
+  private saidForbidden = false;
 
   constructor(options: RunnerOptions) {
     this.o = { beatEvery: BEAT_MS, ...options };
@@ -273,6 +264,21 @@ export class Runner {
         // §6.3: a refused heartbeat marks the lease lost exactly as a missed timeout does; a
         // reaped worker re-keys on the beat after (R-BTN-14).
         if (e.code === 'worker-reaped') this.rekeySecret = freshSecret();
+        // B-86 (review round 4, finding 3): `forbidden` is a name the server no longer admits —
+        // the owner narrowed the grant under this runner (`admin.ts` replaces the list). A
+        // refused beat carries no grant, so settling here would replay the stale declaration on
+        // every beat and after every restart. A runner that named no flag asks again with none —
+        // the first-beat path — and the next answer re-settles its declaration from the grant as
+        // it now stands. A flagged runner keeps its word: its list is the operator's, and the
+        // grant refusing it is theirs to change.
+        if (e.code === 'forbidden' && this.o.capabilities == null) {
+          this.declared = null;
+          this.sent = null;
+          this.saidEligible = false;
+          this.state.set({ declared: null });
+          if (!this.saidForbidden) this.log('baton: the grant moved under this runner — asking again with no declaration, so the next answer re-settles what this machine may declare');
+          this.saidForbidden = true;
+        }
         this.loseLease(e.code);
         return;
       }
@@ -283,6 +289,7 @@ export class Runner {
     // carried, so an answer to this beat leaves the server on `declaring` (B-86: `runOnce` reads
     // this to know whether the next claim would go out on a stale declaration).
     this.sent = [...declaring];
+    this.saidForbidden = false;
     // B-86: the declaration settles on the answer — `--capabilities` as given, else the grant the
     // answer carries — and again when the grant moves under a runner that named no flag, so a
     // widened grant needs no restart. Said when it changes, never per beat.
@@ -604,9 +611,19 @@ export class Runner {
     // 3): the first claim, and every idle attempt, otherwise goes out while the server still sees
     // `[]` and rule 4 refuses each leg. A grant-less answer leaves the declaration unsettled, so
     // each attempt asks again until a grant arrives (finding 6).
-    const claimOn = this.declared ?? this.o.capabilities ?? [];
-    const stale = this.grantAsked || this.sent == null || JSON.stringify(this.sent) !== JSON.stringify(claimOn);
-    if (stale) await this.tick();
+    // Review round 4 (finding 4): one beat may not be enough — a restart from a pre-B-86 state
+    // file (`worker_id` set, no `declared`) beats at that moment declaring `[]` and settles the
+    // grant, which leaves `sent` ≠ the list this claim carries. So beat again while they differ,
+    // at most MAX_STALE_BEATS times a claim attempt; a grant-less answer (`grantAsked`) ends the
+    // loop after its one beat, as it always did — the declaration is unsettled and the claim goes
+    // out on what this runner named.
+    for (let n = 0; n < MAX_STALE_BEATS; n++) {
+      const claimOn = this.declared ?? this.o.capabilities ?? [];
+      const stale = this.grantAsked || this.sent == null || JSON.stringify(this.sent) !== JSON.stringify(claimOn);
+      if (!stale) break;
+      await this.tick();
+      if (this.grantAsked) break;
+    }
     // An empty declaration is not "nothing to do" (finding 5): rule 4 passes any declaration for
     // a ticket with no `Requires:` clause, so it still claims — the line below explains what it
     // can never take, once, since every idle attempt returns here.

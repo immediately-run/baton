@@ -17,7 +17,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { BatonApi } from '../../src/runner/api';
+import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { Runner } from '../../src/runner/runner';
 import { legNeeds, readHead } from '../../src/runner/home';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
@@ -254,10 +254,13 @@ describe('S-BTN-41 the runner', () => {
     home.leg('merge', `return { reached: 'merged' };`);
     home.commit();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    // The heartbeat is the only thing that moves a claim's sky while the runner waits: start it
+    // with the claim, never with the registration (a beat out while the claim registers would
+    // outlive the worker's secret and be refused — the flake this test carried until round four).
     const runner = makeRunner();
-    runner.start();
     const done = runner.runOnce();
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`));
+    runner.start();
     // While build runs, the snapshot moves: the ticket is built and check waits on ci — the
     // advance into check then reads the wait, deterministically.
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
@@ -276,10 +279,11 @@ describe('S-BTN-41 the runner', () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
     home.commit();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    // The heartbeat starts once the claim is held (see the short-wait test above).
     const runner = makeRunner();
-    runner.start();
     const done = runner.runOnce();
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`));
+    runner.start();
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
     await new Promise((r) => setTimeout(r, 120));
@@ -301,9 +305,9 @@ describe('S-BTN-41 the runner', () => {
     home.commit();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
     const runner = makeRunner();
-    runner.start();
     const done = runner.runOnce();
     await until(() => rows('SELECT 1 FROM claims'));
+    runner.start();
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`)); // the wait holds
     const worker = (await rows<{ id: number }>('SELECT id FROM workers ORDER BY id DESC LIMIT 1'))[0].id;
@@ -331,10 +335,11 @@ describe('S-BTN-41 the runner', () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
     home.commit();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    // The heartbeat starts once the claim is held (see the short-wait test above).
     const runner = makeRunner();
-    runner.start();
     const done = runner.runOnce();
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`));
+    runner.start();
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
     // The lease goes while the wait holds it: no waiting out the 30 minutes, no hand-off.
@@ -775,42 +780,45 @@ describe('S-BTN-41 the runner', () => {
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
     // The claim went out on the settled declaration, never on the registration's `[]` (finding 2):
     // the last beat before it carried what the server then had.
-    // Finding 1: a role stands only when the grant names it — the answer carries capabilities,
-    // and they are declared as themselves.
-    expect(seen.beats.at(-1)).toEqual(['create-pr', 'drivable-browser', 'llm-call']);
+    // Finding 1 (round 4): the answer's names are declared exactly — the granted key's answer is
+    // its expanded capabilities, so that is the list, verbatim.
+    expect(seen.beats.at(-1)).toEqual(['agent-venue', 'create-pr', 'drivable-browser', 'llm-call']);
     const [worker] = await rows<{ id: number }>('SELECT id FROM workers');
-    expect((await rows<{ declared: string }>('SELECT DISTINCT declared FROM worker_capabilities WHERE worker_id = ? ORDER BY declared', worker.id)).map((r) => r.declared)).toEqual(['create-pr', 'drivable-browser', 'llm-call']);
+    expect((await rows<{ declared: string }>('SELECT DISTINCT declared FROM worker_capabilities WHERE worker_id = ? ORDER BY declared', worker.id)).map((r) => r.declared)).toEqual(['agent-venue']);
+    // Through the role the server stores as its capabilities (§4): `authentication` and the rest.
+    expect((await rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ? ORDER BY capability', worker.id)).map((r) => r.capability)).toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call']);
     // The declaration is the grant's role, said once, and the leg requiring create-pr runs:
     // before the fix `--capabilities` defaulted to agent-venue, which happened to pass this
     // clause — the narrowing tests below are where the default's absence matters.
     expect(await rows(`SELECT leg FROM claim_legs WHERE leg = 'build'`)).toHaveLength(1);
     const said = lines.join('\n');
-    expect(said).toContain("baton: declaring create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given");
+    expect(said).toContain("baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given");
     expect(said).not.toContain('can never claim');
     const stateFile = (runner as unknown as { o: { stateFile: string } }).o.stateFile;
-    expect(JSON.parse(readFileSync(stateFile, 'utf8')).declared).toEqual(['create-pr', 'drivable-browser', 'llm-call']);
+    expect(JSON.parse(readFileSync(stateFile, 'utf8')).declared).toEqual(['agent-venue', 'create-pr', 'drivable-browser', 'llm-call']);
     expect(lines.filter((l) => l.includes('baton: declaring'))).toHaveLength(1);
   }, 30_000);
 
-  it('a grant of the role and llm-call alone declares it — the gesture whose declaration the server refused (finding 1)', async () => {
+  it('an answer carrying a bare role declares it verbatim — the answer is the grant (round 4, finding 1)', async () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
     home.commit();
-    // The ticket's clause names llm-call, the capability a grant of `agent-venue, llm-call`
-    // really carries: the declaration must hold it, and the heartbeat must accept whatever the
-    // runner declares around it.
+    // A bearer or seed key's answer is its literal allow-list (`credentialAllowed`), which may
+    // name a role as the role — `testCourse.ts`'s `allowed_capabilities: ['agent-venue']`. The
+    // heartbeat admits such a name by that name. The ticket's clause names a capability of the
+    // role, so rule 4 must find it through the role the runner declares.
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, [ticket('T-1', { course_id: 'relay', requires: ['llm-call'] })]);
-    // What `grantCapabilities` answers for a grant of `agent-venue, llm-call` is that same list of
-    // names — the runner must not declare the role (not all of its capabilities are there) nor
-    // lose llm-call: it declares llm-call, the one capability the grant actually carries, and
-    // the heartbeat accepts it. Before the fix it declared `llm-call` too but reached that list
-    // only after trying the role — the run below proves the claim path, not the name set alone.
     const runner = asGranted(makeRunner());
     const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
     const beat = api.heartbeat;
     api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: ['agent-venue', 'llm-call'] } });
     const seen = recording(runner);
     expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
-    expect(seen.beats.at(-1)).toEqual(['llm-call']);
+    // Before the fix the role was dropped for its one named capability: a declaration narrower
+    // than the allow-list the key holds.
+    expect(seen.beats.at(-1)).toEqual(['agent-venue', 'llm-call']);
+    const [worker] = await rows<{ id: number }>('SELECT id FROM workers');
+    expect((await rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ? ORDER BY capability', worker.id)).map((r) => r.capability))
+      .toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call']);
     expect(await rows(`SELECT leg FROM claim_legs WHERE leg = 'build'`)).toHaveLength(1);
   }, 30_000);
 
@@ -849,7 +857,14 @@ describe('S-BTN-41 the runner', () => {
   it('a ticket with no Requires clause is still claimable by a declaration that settled at nothing (finding 5)', async () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
     home.commit();
-    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }); // requires: []
+    // Relay's start leg requires create-pr (R-BTN-120): a grant of nothing never claims it, but a
+    // course whose start leg requires nothing claims on an empty declaration all the same — rule
+    // 4 reads the leg's own requires (round 4, finding 2), so this leg drops it.
+    const open = JSON.parse(JSON.stringify(relay)) as Record<string, any>;
+    delete open.legs.build.requires;
+    home.write('.baton/courses/relay/course.json', `${JSON.stringify(open, null, 2)}\n`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, undefined, { course: open }); // requires: []
     const lines: string[] = [];
     const needs = legNeeds(home.dir, readHead(home.dir), 'relay');
     const runner = asGranted(makeRunner({ log: (l: string) => lines.push(l), ...(needs.length ? {} : { legNeeds: () => [] }) }));
@@ -895,7 +910,12 @@ describe('S-BTN-41 the runner', () => {
   it('a granted key whose grant allows nothing is told so at startup rather than idling silently', async () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
     home.commit();
-    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    // As above: the leg requires nothing, so an empty declaration claims it.
+    const open = JSON.parse(JSON.stringify(relay)) as Record<string, any>;
+    delete open.legs.build.requires;
+    home.write('.baton/courses/relay/course.json', `${JSON.stringify(open, null, 2)}\n`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, undefined, { course: open });
     const lines: string[] = [];
     const runner = asGranted(makeRunner({ log: (l: string) => lines.push(l) }));
     // Registers (declaring nothing); every answer after it carries an empty grant — the key granted
@@ -909,6 +929,104 @@ describe('S-BTN-41 the runner', () => {
     expect(lines.join('\n')).toContain("baton: this runner declared nothing — its key's grant allows no capability on the repositories its courses are in");
     await runner.tick();
     expect(lines.filter((l) => l.includes('declared nothing —'))).toHaveLength(1);
+  }, 30_000);
+
+  it('a grant narrowed under a no-flag runner: the refused beat re-asks with no declaration, and the next answer re-settles it (round 4, finding 3)', async () => {
+    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    home.commit();
+    // The start leg requires nothing, so the claim turns on the declaration alone: the first
+    // claim is on the grant as it stands, and after the narrowing it is on what is left.
+    const open = JSON.parse(JSON.stringify(relay)) as Record<string, any>;
+    delete open.legs.build.requires;
+    home.write('.baton/courses/relay/course.json', `${JSON.stringify(open, null, 2)}\n`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, [ticket('T-1', { course_id: 'relay' })], { course: open });
+    const lines: string[] = [];
+    const runner = asGranted(makeRunner({ log: (l: string) => lines.push(l) }));
+    const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
+    const beat = api.heartbeat;
+    // The owner's grant, as the answer carries it — replaced mid-run with a narrower one
+    // (`admin.ts`'s upsert replaces the list; the answer is the grant's capabilities).
+    let grant = ['agent-venue', 'create-pr', 'drivable-browser', 'llm-call'];
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } });
+    const seen = recording(runner);
+    // The first claim is on the grant it was answered: the declared list, served as it stood.
+    expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
+    const stateFile = (runner as unknown as { o: { stateFile: string } }).o.stateFile;
+    expect(JSON.parse(readFileSync(stateFile, 'utf8')).declared).toEqual(['agent-venue', 'create-pr', 'drivable-browser', 'llm-call']);
+    // The owner narrows the grant: llm-call is gone, so the stale declaration is refused.
+    grant = ['agent-venue', 'create-pr', 'drivable-browser'];
+    api.heartbeat = async (body: Record<string, unknown>) => {
+      // The heartbeat's own check, refused exactly as the server would (workerApi.ts).
+      const declaring = (body.capabilities ?? []) as string[];
+      if (declaring.some((c) => !grant.includes(c))) throw new BatonRefusal('forbidden', undefined, `this credential may not declare ${declaring.filter((c) => !grant.includes(c)).join(', ')}`, 403);
+      return { ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } };
+    };
+    await runner.tick();
+    // The declaration is dropped, in memory and in the state file, and said once.
+    expect(JSON.parse(readFileSync(stateFile, 'utf8')).declared).toBeNull();
+    expect(lines.filter((l) => l.includes('the grant moved under this runner'))).toHaveLength(1);
+    // The next beat asks with no declaration (the refused beat above carried the stale list
+    // from before this answer settled it) and re-settles from the narrowed grant.
+    await runner.tick();
+    expect(JSON.parse(readFileSync(stateFile, 'utf8')).declared).toEqual(['agent-venue', 'create-pr', 'drivable-browser']);
+    expect(lines.join('\n')).toContain("baton: declaring agent-venue, create-pr, drivable-browser — the grant's capabilities, no --capabilities given");
+    // It claims what it still may: the ticket's clause is create-pr, which the narrowed grant keeps.
+    // The first claim has no check script, so it ended (released, never done) and is queued at its
+    // start again — a sync since that end (§6.7), then the claim.
+    await setClock(clock.now + 2 * 60 * 60_000);
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    const again = await runner.runOnce();
+    expect(again).toMatchObject({ ticket: 'docs:T-1' });
+    // One claim: the earlier claims above are this file's other tests' (the core is shared by a
+    // test file, and reset per test by the host).
+    expect((await rows<{ leg: string }>(`SELECT leg FROM claim_legs WHERE leg = 'build'`)).length).toBeGreaterThanOrEqual(1);
+    // And a restart never replays the stale list: the state file holds the settled one.
+    const session = (runner as unknown as { o: { session: string } }).o.session;
+    const restarted: string[] = [];
+    asGranted(makeRunner({ stateFile, session, log: (l: string) => restarted.push(l) }));
+    await runners.at(-1)!.tick();
+    expect(seen.beats.length).toBeGreaterThan(0);
+    expect(restarted.join('\n')).not.toContain('grant moved under this runner');
+  }, 30_000);
+
+  it('a narrowing past every capability the legs need re-settles at nothing and says it, rather than beating forever refused', async () => {
+    home.leg('build', `return { reached: 'built', next: 'check' };`);
+    home.commit();
+    const lines: string[] = [];
+    const needs = legNeeds(home.dir, readHead(home.dir), 'relay');
+    expect(needs).toEqual(['create-pr']); // relay's start leg needs it, whatever the clause says
+    const runner = asGranted(makeRunner({ log: (l: string) => lines.push(l), legNeeds: () => needs }));
+    const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
+    const beat = api.heartbeat;
+    // A grant of create-pr: the leg's own need is met, and a ticket naming no clause is claimed.
+    let grant = ['create-pr'];
+    api.heartbeat = async (body: Record<string, unknown>) => ({
+      ...await beat.call(api, body) as Record<string, unknown>,
+      grant: { capabilities: (body.capabilities ?? []).length ? grant : ['create-pr'] },
+    });
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
+    expect(await runner.runOnce()).toMatchObject({ ticket: 'docs:T-1' });
+    // The owner takes create-pr away: the declaration the runner holds is refused, it asks again
+    // with none, and the answer carries nothing the leg needs — said, once, never a wedge. The
+    // ticket needs no reading of its own: its leg alone rules a declaration without create-pr out.
+    grant = [];
+    api.heartbeat = async (body: Record<string, unknown>) => {
+      const declaring = (body.capabilities ?? []) as string[];
+      if (declaring.some((c) => !grant.includes(c))) throw new BatonRefusal('forbidden', undefined, 'this credential may not declare ' + declaring.join(', '), 403);
+      return { ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } };
+    };
+    await runner.tick();
+    const second = await runner.runOnce();
+    const said = lines.join('\n');
+    expect(second).toBeNull();
+    expect(said).toContain('the grant moved under this runner');
+    expect(said).toContain('which lacks create-pr');
+    expect(said).toContain('declared nothing');
+    expect(await rows('SELECT * FROM claims WHERE status = ?', 'active')).toEqual([]);
+    // Said once across attempts, not per beat.
+    await runner.tick();
+    expect(lines.filter((l) => l.includes('the grant moved under this runner'))).toHaveLength(1);
   }, 30_000);
 
   it('an unblocked message is acknowledged, so it is not delivered with every beat (R-BTN-77)', async () => {

@@ -34,6 +34,7 @@ describe('gatesFor: every gate of the table', () => {
     ['rule 3: a fence-pending reap', () => [worker(), ticket(), leg(), 'claim', facts({ claims: [{ status: 'reaped', confirmed_at: null, fence_pending: 1 }] })], { rule: 3, code: 'claimed' }, null],
     ['rule 3: a hold', () => [worker(), ticket(), leg(), 'claim', facts({ override: { hold: 1, retry_after: null } })], { rule: 3, code: 'held' }, { rule: 3, code: 'held' }],
     ['rule 4: a missing capability', () => [worker({ declared: [] }), ticket(), leg(), 'claim', facts()], { rule: 4, code: 'missing-capability' }, { rule: 4, code: 'missing-capability' }],
+    ['rule 4: the leg’s own requires names a capability the worker lacks (R-BTN-120)', () => [worker({ declared: ['llm-call'] }), ticket({ requires: [] }), leg({ requires: ['create-pr'] }), 'claim', facts()], { rule: 4, code: 'missing-capability' }, { rule: 4, code: 'missing-capability' }],
     ['rule 5: above the tier ceiling', () => [worker({ tier_ceiling: 'routine' }), ticket(), leg(), 'claim', facts()], { rule: 5, code: 'above-tier-ceiling' }, { rule: 5, code: 'above-tier-ceiling' }],
     ['rule 6: operator-only', () => [worker(), ticket({ operator_only: true }), leg(), 'claim', facts()], { rule: 6, code: 'operator-only' }, { rule: 6, code: 'operator-only' }],
     ['rule 8: a posted barred tag', () => [worker(), ticket(), leg({ bars: ['family:glm'] }), 'claim', facts()], { rule: 8, code: 'barred-tag' }, { rule: 8, code: 'barred-tag' }],
@@ -63,6 +64,20 @@ describe('gatesFor: every gate of the table', () => {
     expect(gatesFor(worker(), ticket(), leg(), 'advance', facts({ holderBars: ['family:qwen'] }))).toEqual({ ok: true });
     // A claim never reads holder bars: there is no holder yet.
     expect(gatesFor(worker(), ticket(), leg(), 'claim', facts({ holderBars: ['family:glm'] }))).toEqual({ ok: true });
+  });
+
+  it('rule 4 reads the leg\'s requires beside the ticket\'s clause (R-BTN-120, B-86)', () => {
+    // The leg the worker lacks: refused at a claim and at an advance, even with the clause met.
+    expect(gatesFor(worker({ declared: ['llm-call'] }), ticket({ requires: [] }), leg({ requires: ['create-pr'] }), 'claim', facts())).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
+    expect(gatesFor(worker({ declared: ['llm-call'] }), ticket(), leg({ requires: ['create-pr'] }), 'advance', facts())).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
+    // Held: it passes, whether by the capability or through the role that carries it.
+    expect(gatesFor(worker({ declared: ['create-pr'] }), ticket({ requires: [] }), leg({ requires: ['create-pr'] }), 'claim', facts())).toEqual({ ok: true });
+    expect(gatesFor(worker({ declared: ['agent-venue'] }), ticket({ requires: [] }), leg({ requires: ['agent-venue'] }), 'claim', facts())).toEqual({ ok: true });
+    // A leg with no `requires` (and one that requires nothing) is unchanged.
+    expect(gatesFor(worker({ declared: ['agent-venue'] }), ticket({ requires: [] }), leg(), 'claim', facts())).toEqual({ ok: true });
+    expect(gatesFor(worker({ declared: ['agent-venue'] }), ticket({ requires: [] }), leg({ requires: [] }), 'claim', facts())).toEqual({ ok: true });
+    // Within the grant too (rule 4's second half): a name the key's grant excludes is refused.
+    expect(gatesFor(worker({ declared: ['agent-venue'], grants: { docs: { capabilities: ['authentication', 'drivable-browser', 'llm-call'] } } }), ticket({ requires: [] }), leg({ requires: ['create-pr'] }), 'claim', facts())).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
   });
 
   it('an untiered ticket fits only the top tier; a role in the clause needs all its capabilities', () => {

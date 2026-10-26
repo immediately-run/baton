@@ -45,7 +45,8 @@ const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
 const ENTRY_KEYS = new Set(['output', 'schema']);
 const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
   'no_chain_from', 'isolation', 'requires']);
-/** R-BTN-120: what a leg's `requires` holds — and what the core reads today: its capabilities.
+/** R-BTN-120: what a leg's `requires` holds — its capabilities, which rule 4 reads as its own
+ *  input beside the ticket's clause (`gates.ts`; `claims.ts` passes the leg's list through).
  *  The spec's `tickets`, `resources` and the other prerequisite kinds are not implemented, so a
  *  file carrying one is refused rather than silently accepted unread (B-86). */
 const REQUIRES_KEYS = new Set(['capabilities']);
@@ -191,8 +192,14 @@ export function validateCourse(json: unknown): CourseViolation[] {
   /** A non-empty list of capability names, deduplicated; `what` names where it sits for the
    *  message ("a leg", a capability role). Bounded like every list a file holds. */
   function capabilityList(v: unknown, path: string, what: string): void {
-    if (!Array.isArray(v) || v.length === 0 || v.length > COURSE_LIST_MAX || !v.every((x) => typeof x === 'string' && CAPABILITY.test(x))) {
+    if (!Array.isArray(v) || v.length === 0 || v.length > COURSE_LIST_MAX) {
       add('shape', path, `${what}: a list of 1–${COURSE_LIST_MAX} capability names`);
+      return;
+    }
+    // Per element, as `stationList` does: a role of four with one bad name is fixable in place,
+    // and a list that is fine element by element reports nothing.
+    for (const [i, x] of v.entries()) {
+      if (typeof x !== 'string' || !CAPABILITY.test(x)) add('shape', `${path}.${i}`, `${what}: "${String(x)}" is not a capability name (${CAPABILITY.source})`);
     }
   }
 

@@ -10,6 +10,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { graphOf, type Graph } from '../core/graph';
+import { capabilitiesOf } from '../shared/vocabulary.mjs';
 
 /** B-94: the bound on every git the runner itself runs. The heartbeat path reads the snapshot
  * here (`ensureSha`, `courseOf`, `loadCourse`), and a state file lock, a hook or a stalled
@@ -136,9 +137,11 @@ export function readHead(home: string): string {
 }
 
 /** B-86: the capabilities every leg of `course` in the snapshot requires — rule 4's names, each
- *  course leg's `requires.capabilities` expanded through the course's `capability_roles`. A leg
- *  the file does not describe, or a file that will not parse, adds nothing: this is only the
- *  never-eligible runner's why, never a gate. An empty `sha` reads the working tree. */
+ *  course leg's `requires.capabilities` read as rule 4 reads it (`gates.ts`): an ordinary name as
+ *  itself, a vocabulary role (`agent-venue`) as the capabilities it carries, since a leg naming a
+ *  role asks that whoever takes it can do those things. A leg the file does not describe, or a
+ *  file that will not parse, adds nothing: this is only the never-eligible runner's why, never a
+ *  gate. An empty `sha` reads the working tree. */
 export function legNeeds(home: string, sha: string, course: string): string[] {
   const path = `.baton/courses/${course}/course.json`;
   const file = sha ? readAt(home, sha, path) : (() => {
@@ -149,23 +152,17 @@ export function legNeeds(home: string, sha: string, course: string): string[] {
     }
   })();
   if (file == null) return [];
-  let parsed: { legs?: Record<string, { requires?: { capabilities?: unknown } }>; capability_roles?: Record<string, unknown> };
+  let parsed: { legs?: Record<string, { requires?: { capabilities?: unknown } }> };
   try {
     parsed = JSON.parse(file) as typeof parsed;
   } catch {
     return [];
   }
-  const roles = parsed.capability_roles ?? {};
   const out: string[] = [];
   for (const leg of Object.values(parsed.legs ?? {})) {
     const caps = leg?.requires?.capabilities;
     if (!Array.isArray(caps)) continue;
-    for (const name of caps) {
-      if (typeof name !== 'string') continue;
-      const role = roles[name];
-      if (Array.isArray(role) && role.every((c): c is string => typeof c === 'string')) out.push(...role);
-      else out.push(name);
-    }
+    for (const name of caps) if (typeof name === 'string') out.push(...capabilitiesOf([name]));
   }
   return out;
 }

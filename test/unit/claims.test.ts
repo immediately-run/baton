@@ -4,11 +4,12 @@ import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { confirmations } from '../../src/shared/batonSync.mjs';
 import { gatesFor } from '../../src/core/gates';
 import {
-  beat, claimItem, claimRow, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload, recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, withCore, workerCall, tick,
+  beat, claimItem, claimRow, course, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload, recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, withCore, workerCall, tick,
 } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { call as hostCall } from '#host';
+import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 
 const board = inject('board');
 type Item = { id: string; status: string; tier: string | null; tags: string[]; requires: string[] | null; queue: string; node: string };
@@ -102,6 +103,37 @@ describe('the claim and end contracts (§6.2, §6.5, §11)', () => {
     await rows(`DELETE FROM courses`); // a head posted before the registry existed
     expect(await recommended(id)).toEqual([]);
     expect(await claimItem('vm-a', secret, { ticket_id: 'docs:R3-9001' })).toMatchObject({ status: 409, json: { code: 'stale-skills', rule: 9 } });
+  });
+
+  it('§7.2 rule 4 reads a leg\'s `requires.capabilities` (R-BTN-120, B-86): accepted by the validator, enforced by the gate and its query', async () => {
+    const { id, secret } = await register('vm-a', { capabilities: ['llm-call'] });
+    // A course whose start leg requires a capability the worker does not hold, posted as the
+    // registry's — the key `validateCourse` accepts.
+    const needs = JSON.parse(JSON.stringify(roadmapPr)) as Record<string, any>;
+    needs.legs.implement.requires = { capabilities: ['terraform'] };
+    // A new head carries a registry: a repeat of the head is a refresh, and applies none.
+    await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { registry: [course(3, 3, { course: needs })] }));
+    expect(await rows('SELECT id FROM courses WHERE id = ?', 'roadmap-pr')).toHaveLength(1);
+    // Stored as posted: the core reads the leg's list (it is in the file the registry applied).
+    expect(await rows(`SELECT length(course_json) AS n FROM courses WHERE id = ?`, 'roadmap-pr')).toEqual([{ n: expect.any(Number) }]);
+    expect((await rows(`SELECT instr(course_json, '"requires"') AS r FROM courses WHERE id = ?`, 'roadmap-pr'))[0].r).toBeGreaterThan(0);
+    // Rule 4 refuses the queued leg, and the candidate query agrees (G-BTN-40) — a runner that
+    // lacks the capability is never offered the ticket its leg would refuse.
+    // A ticket whose queued leg is ready (rule 1 passes, so the refusal is rule 4's).
+    const ticketId = 'docs:R3-9002';
+    expect(await recommended(id)).not.toContain(ticketId);
+    const refused = await claimItem('vm-a', secret, { ticket_id: ticketId });
+    expect(refused, JSON.stringify(refused.json)).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 4 } });
+    // A worker declaring agent-venue has llm-call but not terraform: still refused.
+    const role = await register('vm-b', { capabilities: ['agent-venue'] });
+    expect((await claimItem('vm-b', role.secret, { ticket_id: ticketId })).json.rule).toBe(4);
+    // The role a leg's requires names is met by a declaration that carries it: `agent-venue` for
+    // a leg naming the role.
+    needs.legs.implement.requires = { capabilities: ['agent-venue'] };
+    await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.C, { registry: [course(3, 3, { course: needs })] }));
+    const held = await register('vm-a', { session_name: 'held', capabilities: ['agent-venue'] });
+    expect(await recommended(held.id)).toContain(ticketId);
+    expect((await claimItem('vm-a', held.secret, { ticket_id: ticketId })).status).toBe(200);
   });
 
   it('§7.2 rule 6: an operator-only item goes only to a worker that declared human-operator', async () => {

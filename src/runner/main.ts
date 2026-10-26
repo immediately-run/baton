@@ -104,6 +104,7 @@ export const RUN_USAGE = [
 export const asksHelp = (argv: string[]): boolean => argv.includes('--help') || argv.includes('-h');
 
 /** A repository's course declarations for the heartbeat (rule 9): the spec's
+ * `.baton/baton.json` `courses: [{id, version}]` (§2c/R-BTN-51) first; docs' interim is the
  * skills_version every course runs at (`{course}` naming one, or the single directory). The
  * runner refuses to guess a version it cannot find — a wrong declaration silences rule 9. */
 export function declareCourses(home: string): { course: string; version: number }[] {
@@ -237,7 +238,6 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   }
   const a = parseRunArgs(argv);
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
-  // Verbose (the owner, 2026-10-23): every line carries the time it was written.
   // Verbose (the owner, 2026-10-23): every line carries the time it was written.
   const say = a.verbose ? withTimestamps(log) : log;
   // B-83: a settings file whose `agent_command` is exactly `echo` is the no-op stub — the agent

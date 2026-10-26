@@ -6,7 +6,7 @@
 import { BatonError } from './http';
 import { transcriptUrl } from './links';
 import { isUniqueViolation, logEvent, randomHex } from './db';
-import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
+import { fitsTier, ROLES, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
 import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
@@ -276,7 +276,8 @@ export class Claims {
     const owners = Object.entries(this.c.admin.requiredIndependence(item.repository))
       .filter(([key]) => (g ? resolveLeg(g, key) ?? key : key) === leg).flatMap(([, from]) => from);
     const noChainFrom = [...new Set([...(def?.noChainFrom ?? []), ...owners].map((l) => (g ? resolveLeg(g, l) ?? l : l)))];
-    return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...this.ownerBarTags(item, leg, phase)])], noChainFrom, isolation: def?.isolation ?? null };
+    // R-BTN-120: the file's own `requires.capabilities`, which rule 4 reads beside the clause.
+    return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...this.ownerBarTags(item, leg, phase)])], noChainFrom, isolation: def?.isolation ?? null, requires: def?.requires ?? [] };
   }
 
   /** R-BTN-106: the legs `credential` has run on the ticket, in this claim or an earlier one —
@@ -369,6 +370,15 @@ export class Claims {
                                 OR (:granted = 1 AND r.name NOT IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j
                                                                     WHERE g.credential_id = :credential AND g.repository_id = w.repository_id
                                                                       AND g.revoked_at IS NULL))))             -- rule 4, within the grant
+           AND NOT EXISTS (SELECT 1 FROM courses k, json_each(k.course_json, '$.legs') l                               -- rule 4's leg input (R-BTN-120, B-86), as gatesFor reads it
+                           WHERE k.repository_id = w.repository_id AND k.id = w.course_id AND l.key = a.leg
+                             AND EXISTS (SELECT 1 FROM json_each(CASE WHEN json_type(l.value, '$.requires.capabilities') = 'array'
+                                                                      THEN json_extract(l.value, '$.requires.capabilities') ELSE NULL END) q
+                                         WHERE (q.value NOT IN (SELECT capability FROM worker_capabilities WHERE worker_id = :worker)        -- a name not held,
+                                                AND NOT EXISTS (SELECT 1 FROM json_each(:roles) qr WHERE qr.value = q.value))               -- and not a role held through them,
+                                            OR (:granted = 1 AND q.value NOT IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j
+                                                                                  WHERE g.credential_id = :credential AND g.repository_id = w.repository_id
+                                                                                    AND g.revoked_at IS NULL))))                                        -- outside the grant
            AND COALESCE(w.tier_position, json_array_length(p.tiers) - 1)
                <= json_extract(:ceiling, '$."' || w.repository_id || '"')                                      -- rule 5, per repository
            AND (w.operator_only = 0 OR (:human_operator AND (:granted = 0 OR EXISTS (
@@ -380,7 +390,10 @@ export class Claims {
        WHERE n > :page * 50 AND n <= (:page + 1) * 50
        ORDER BY repository_id, course_id, n`,
       { worker: w.id, now: this.c.now(), ceiling: JSON.stringify(this.ceilingPositions(w)), human_operator: w.declared.includes('human-operator') ? 1 : 0, rule9: rule9 ? 1 : 0, page,
-        granted: w.grants ? 1 : 0, credential: w.credential_id });
+        granted: w.grants ? 1 : 0, credential: w.credential_id,
+        // A vocabulary role a leg's `requires` may name (R-BTN-120), which a declaration satisfies
+        // through its capabilities; the query cannot expand a role itself.
+        roles: JSON.stringify(Object.keys(ROLES)) });
   }
 
   /** The worker's ceiling's position in every repository's ladder: the query's rule 5. */
