@@ -70,6 +70,27 @@ function withAgent<T>(fn: () => T): T {
   }
 }
 
+/** Run `fn` with the agent and NOTHING ELSE: no askpass, so ssh-keygen cannot decrypt a
+ *  passphrase file itself — the signature can only come from the agent. This is the signer's
+ *  real shape in production (round 5, 5-r1-1: an askpass left set lets the test pass with no
+ *  agent at all, guarding nothing). */
+function withAgentOnly<T>(fn: () => T): T {
+  if (!agent) throw new Error('no agent');
+  const saved = { sock: process.env.SSH_AUTH_SOCK, askpass: process.env.SSH_ASKPASS, display: process.env.DISPLAY, require: process.env.SSH_ASKPASS_REQUIRE };
+  process.env.SSH_AUTH_SOCK = agent.sock;
+  delete process.env.SSH_ASKPASS;
+  delete process.env.SSH_ASKPASS_REQUIRE;
+  delete process.env.DISPLAY;
+  try {
+    return fn();
+  } finally {
+    for (const [k, v] of [['SSH_AUTH_SOCK', saved.sock], ['SSH_ASKPASS', saved.askpass], ['DISPLAY', saved.display], ['SSH_ASKPASS_REQUIRE', saved.require]] as const) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
 /** Load `file` (which may be passphrase-protected) into this test's agent. */
 const addToAgent = (file: string): void => withAgent(() => execFileSync('ssh-add', [file], { stdio: 'ignore', env: process.env }));
 
@@ -107,12 +128,13 @@ describe('cli/sign.mjs — the one signer (B-88)', () => {
   it('a passphrase-protected key loaded in ssh-agent reads and signs (R-BTN-13, §8.1)', () => {
     // The case round 4's 4-r0-1 caught: the private file is encrypted, its private half is the
     // agent's, and `ssh-keygen -Y sign -f <file>` asks the agent to sign. Reading the key is
-    // `-l` alone, which never decrypts.
+    // `-l` alone, which never decrypts. The signing runs with the agent and NOTHING else — no
+    // askpass — so the signature can only be the agent's (round 5, 5-r1-1).
     dir = mkdtempSync(join(tmpdir(), 'baton-sign-'));
     startAgent();
     const file = keyPair('sealed', PASSPHRASE);
     addToAgent(file);
-    withAgent(() => {
+    withAgentOnly(() => {
       const key = signingKey(file);
       expect(key.fingerprint).toMatch(/^SHA256:[A-Za-z0-9+/]{43}$/);
       const headers = signHeaders({ method: 'POST', url: 'https://baton.test/v1/sync/observation', body: '{}', key });
@@ -142,42 +164,46 @@ describe('cli/sign.mjs — the one signer (B-88)', () => {
     });
   });
 
-  it('a .pub with no private half anywhere is refused at the first signature, naming ssh-keygen’s reason', () => {
+  it('a .pub whose private half no file and no agent holds reads, and the signature names ssh-keygen’s reason', () => {
     // `-l` answers from the public half alone, so the read passes; the signature is where a
     // key neither the file nor any agent holds is named — and it is named, not silently unsigned.
-    dir = mkdtempSync(join(tmpdir(), 'baton-sign-'));
-    startAgent();
-    const file = keyPair();
-    const publicOnly = join(dir, 'elsewhere.pub');
-    writeFileSync(publicOnly, execFileSync('cat', [`${file}.pub`], { encoding: 'utf8' }));
-    rmSync(file, { force: true });
-    withAgent(() => {
-      const key = signingKey(publicOnly);
-      expect(key.fingerprint).toMatch(/^SHA256:[A-Za-z0-9+/]{43}$/);
-      expect(() => signHeaders({ method: 'POST', url: 'https://baton.test/v1/sync/observation', body: '{}', key })).toThrow(/ssh-keygen -Y sign failed \(/);
-    });
-  });
-
-  it('a key ssh-keygen cannot sign with — a .pub no agent holds — is refused at the signature, naming ssh-keygen’s reason', () => {
-    // `-l` reads the public half alone, so a `.pub` whose private half is nowhere still reads;
-    // the signature is where it is refused. The read names a file that is no key only.
     dir = mkdtempSync(join(tmpdir(), 'baton-sign-'));
     const file = keyPair();
     const publicOnly = `${file}.pub`;
     rmSync(file, { force: true });
     const key = signingKey(publicOnly);
+    expect(key.fingerprint).toMatch(/^SHA256:[A-Za-z0-9+/]{43}$/);
     let message = '';
     try {
       signHeaders({ method: 'POST', url: 'https://baton.test/v1/sync/observation', body: '{}', key });
     } catch (e) {
       message = (e as Error).message;
     }
-    // ssh-keygen writes its `@@@@` warning box first: the operator hears the reason beneath it.
     expect(message).toContain('ssh-keygen -Y sign failed');
-    expect(message).toMatch(/No private key found|bad permissions/);
-    // And no banner, and no stderr's trailing blank line inside the parenthesis (4-r0-5).
-    expect(message).not.toContain('@');
+    expect(message).toMatch(/No private key found|check_passphrase|incorrect passphrase/);
+    // And no stderr's trailing blank line inside the parenthesis (4-r0-5).
     expect(message).toMatch(/\)$/);
+    expect(message).not.toMatch(/ \)$/);
+  });
+
+  it('a private key another user can read signs nothing: the @@@@ banner is stripped, the reason kept (5-r1-2)', () => {
+    // The one input that really opens with ssh-keygen's `@@@@` warning box: ssh-keygen refuses
+    // a too-open private key at the signature (the `-l` read answers from its public half).
+    dir = mkdtempSync(join(tmpdir(), 'baton-sign-'));
+    const file = keyPair();
+    chmodSync(file, 0o644);
+    const key = signingKey(file);
+    expect(key.fingerprint).toMatch(/^SHA256:[A-Za-z0-9+/]{43}$/);
+    let message = '';
+    try {
+      signHeaders({ method: 'POST', url: 'https://baton.test/v1/sync/observation', body: '{}', key });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toContain('ssh-keygen -Y sign failed');
+    expect(message).toMatch(/bad permissions|Permissions 0644/);
+    // The banner never reaches the operator, and no trailing blank rides along.
+    expect(message).not.toContain('@');
     expect(message).not.toMatch(/ \)$/);
   });
 

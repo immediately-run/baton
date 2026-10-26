@@ -153,12 +153,12 @@ describe('syncMain’s sync key (B-88, R-BTN-93)', () => {
     for (const req of seen) expect(req.headers.get('Signature-Input')).toMatch(/tag="baton-request"/);
   });
 
-  it('a key file ssh-keygen cannot sign with is refused before the first call, naming the flag', async () => {
+  it('an absent --sync-key file is refused before the first call, naming the flag', async () => {
     dir = await scaffold();
     keyDir = mkdtempSync(join(tmpdir(), 'baton-b88-key-'));
     const { transport, seen } = recording();
     await expect(syncMain({ root: dir, url: 'https://baton.test', syncKey: join(keyDir, 'absent'), transport, log: () => {} }))
-      .rejects.toThrow(/--sync-key .*absent: .*not an SSH private key ssh-keygen can sign with|--sync-key .*absent: ENOENT/);
+      .rejects.toThrow(/--sync-key .*absent: ENOENT/);
     expect(seen).toEqual([]);
   });
 

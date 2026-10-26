@@ -112,7 +112,7 @@ export interface SyncArgs {
   /** A CI identity token's place. It serves only a sync with no `syncKey` (B-88): a registered
    * sync key signs, and a CI token beside it is never spent. */
   token?: string;
-  /** The repository's sync key (B-88, R-BTN-93): the private key file the three calls are signed
+  /** The repository's sync key (B-88, R-BTN-93): the key file the three calls are signed
    * with, as a worker's are. Set, it is the sync's credential — the no-CI path. */
   syncKey?: string;
   transport?: Transport;
@@ -379,8 +379,9 @@ function bearerAuth(token: string | null): Auth {
 
 /** A sync key (B-88, R-BTN-93): the file's key signs the three sync calls, through the runner's
  * own helper (`envAuth`, imported and not copied), so a sync signs exactly as a worker does. The
- * file is an SSH private key; an API key — a worker's credential, never a sync's — is refused by
- * name here instead of being spent as a bearer the server would deny. */
+ * file is an SSH key — a private key, or a `.pub` whose private half an `ssh-agent` holds; an API
+ * key — a worker's credential, never a sync's — is refused by name here instead of being spent as
+ * a bearer the server would deny. */
 function syncKeyAuth(file: string): Auth {
   if (existsSync(file) && API_KEY_FILE.test(readFileSync(file, 'utf8').trim())) {
     throw new Error(`--sync-key ${file}: an API key is a worker's credential, not a sync key — register an SSH key (\`baton admin repo add --sync-key <key.pub>\`) and pass its private file`);
