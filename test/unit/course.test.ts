@@ -96,9 +96,15 @@ describe('validateCourse (R-BTN-69)', () => {
     // human-operator — would put a role inside a role, and a role never reaches a grant.
     c.capability_roles = { human: ['human-operator'], venue: ['agent-venue', 'create-pr'] };
     expect(rules(c)).toEqual(['role-in-roles capability_roles.human.0', 'role-in-roles capability_roles.venue.0']);
-    // A role named as a role: the key itself.
+    // A role named as a role: the key itself — and one named a name the vocabulary already means
+    // (review round 7, finding 3): a bare capability, `none`, or `human-operator`. Each would
+    // redefine a leg's reading of that name while a ticket clause kept the vocabulary's.
     c.capability_roles = { 'agent-venue': ['llm-call'], 'human-operator': ['llm-call'] };
     expect(rules(c)).toEqual(['role-in-roles capability_roles.agent-venue', 'role-in-roles capability_roles.human-operator']);
+    for (const name of ['create-pr', 'llm-call', 'authentication', 'drivable-browser', 'none']) {
+      c.capability_roles = { [name]: ['vpn:corp'] };
+      expect([name, rules(c)]).toEqual([name, [`role-in-roles capability_roles.${name}`]]);
+    }
     // An ordinary named list is the whole point and passes.
     c.capability_roles = { deployer: ['vpn:corp', 'credential:DEPLOY_TOKEN'] };
     expect(validateCourse(c)).toEqual([]);
@@ -108,6 +114,9 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(rules(c)).toEqual(['role-in-roles capability_roles.deployer.0']);
     // A key that is neither a vocabulary role nor a value of another role is a plain name.
     c.capability_roles = { deployer: ['vpn:corp'], architecture: ['create-pr'] };
+    expect(validateCourse(c)).toEqual([]);
+    // A namespaced name is nobody else's either way (R-BTN-121's `<type>:<value>`).
+    c.capability_roles = { 'vpn:corp': ['llm-call'] };
     expect(validateCourse(c)).toEqual([]);
   });
 

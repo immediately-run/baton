@@ -204,12 +204,12 @@ describe('the claim and end contracts (§6.2, §6.5, §11)', () => {
     const post = () => syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { registry: [course(3, 3, { course: file })] }));
     expect((await post()).status).toBe(200);
     expect(JSON.parse((await rows<{ course_json: string }>('SELECT course_json FROM courses WHERE id = ?', 'roadmap-pr'))[0].course_json)).toEqual(file);
-    const { leg_needs_json: needs } = (await rows<{ leg_needs_json: string }>('SELECT leg_needs_json FROM courses WHERE id = ?', 'roadmap-pr'))[0];
+    const { leg_capabilities_json: needs } = (await rows<{ leg_capabilities_json: string }>('SELECT leg_capabilities_json FROM courses WHERE id = ?', 'roadmap-pr'))[0];
     expect(JSON.parse(needs).implement).toEqual(['vpn:corp', 'credential:DEPLOY_TOKEN']);
     // A re-post of the same file is a fixed point: the row is byte-identical.
-    const before = await rows<{ course_json: string; leg_needs_json: string }>('SELECT course_json, leg_needs_json FROM courses WHERE id = ?', 'roadmap-pr');
+    const before = await rows<{ course_json: string; leg_capabilities_json: string }>('SELECT course_json, leg_capabilities_json FROM courses WHERE id = ?', 'roadmap-pr');
     expect((await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.C, { registry: [course(3, 3, { course: file })] }))).status).toBe(200);
-    expect(await rows<{ course_json: string; leg_needs_json: string }>('SELECT course_json, leg_needs_json FROM courses WHERE id = ?', 'roadmap-pr')).toEqual(before);
+    expect(await rows<{ course_json: string; leg_capabilities_json: string }>('SELECT course_json, leg_capabilities_json FROM courses WHERE id = ?', 'roadmap-pr')).toEqual(before);
   });
 
   it('§7.2 rule 6: an operator-only item goes only to a worker that declared human-operator', async () => {
@@ -460,6 +460,64 @@ describe('G-BTN-40: the matching query and gatesFor agree; git overtaking a clai
       if (c.name === 'venue-judgement') expect(expected.length).toBeGreaterThan(0);
       if (c.name === 'ops-only') expect(expected).toEqual([]);
     }
+  });
+
+  // Review round 7, finding 0: a key granted `human-operator` on one repository and not on another
+  // declares it (its own answer is the union of its grants), so the query's leg half asks it of the
+  // grant on the TICKET's repository, as rule 6 does — never the declaration alone.
+  it('G-BTN-40 on a human-operator leg: a key granted it on another repository only is no candidate, and the gate agrees', async () => {
+    const needs = JSON.parse(JSON.stringify(roadmapPr)) as Record<string, any>;
+    needs.legs.implement.requires = { capabilities: ['human-operator'] };
+    await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { registry: [course(3, 3, { course: needs })] }));
+    const admin = await makeKey('ssh-ed25519', 'admin-r7');
+    const docsOwner = await makeKey('ssh-ed25519', 'docs-owner-r7');
+    const opsOwner = await makeKey('ssh-ed25519', 'ops-owner-r7');
+    await setAdminKeys(admin);
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [docsOwner.publicKey] })).status).toBe(200);
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', owner_keys: [opsOwner.publicKey] })).status).toBe(200);
+    // One key: the venue on docs, the venue and the literal on ops. Its declaration names both.
+    const key = await makeKey('ssh-ed25519', 'r7-two-repos');
+    const declared = ['agent-venue', 'human-operator'];
+    for (const [repository, capabilities] of [['docs', ['agent-venue']], ['ops', ['agent-venue', 'human-operator']]] as const) {
+      expect((await keyCall(admin, '/v1/admin/grants', { repository, public_key: key.publicKey, hostname: 'r7-two-repos', capabilities: [...capabilities] })).status).toBe(200);
+    }
+    const body = hbBody('vm-a', { hostname: 'r7-two-repos', session_name: 'r7-two-repos', secret_hash: await sha256('r7-two-repos'), capabilities: declared,
+      courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }, { repository: 'ops', course: 'roadmap-pr', version: 3 }] });
+    const res = await hostCall(await signedRequest(key, `${ORIGIN}/v1/runner/heartbeat`, { created: Math.floor((await withCore((x) => x.now())) / 1000), body: JSON.stringify(body) }));
+    expect(res.status).toBe(200);
+    const { worker_id } = (await res.json()) as { worker_id: number };
+    const ticketId = 'docs:R3-9002';
+    // The query itself (not only `recommended`, which filters through the gate): docs' leg asks for
+    // a literal the docs grant does not hold, so it is no candidate there — and the gate refuses it.
+    const atDocs = await withCore((o) => {
+      const c = o.claims as unknown as { candidates: (w: unknown, page: number) => { id: string }[]; worker: (id: number) => unknown;
+        item: (id: string) => unknown; gate: (w: unknown, item: unknown, leg: string, phase: string) => { ok: boolean; rule?: number } };
+      const facts = c.worker(worker_id);
+      const item = c.item(ticketId);
+      return { query: c.candidates(facts, 0).map((r) => r.id), gate: c.gate(facts, item, 'implement', 'claim') };
+    });
+    expect(atDocs).toEqual({ query: [], gate: { ok: false, rule: 4, code: 'missing-capability' } });
+    expect(await recommended(worker_id)).not.toContain(ticketId);
+    // On ops the grant holds the literal: the same ticket is a candidate whose leg names it, and the
+    // gate admits it there — the two faces of one name, agreeing on the repository that holds it.
+    // The ops posting of the same course, whose one leg asks for the literal too: ops' registry
+    // entry is written directly (this scenario posts docs' boards), the other clause of rule 4's
+    // leg input satisfied so that the literal is the only reading left.
+    await withCore((c) => c.store.exec(`INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, step_kinds, min_worker_version) VALUES ('ops', 'roadmap-pr', 3, 's', ?, ?, '[]', 3)`,
+      JSON.stringify(needs), JSON.stringify({ implement: ['human-operator'], review: [], fix: [], adjudicate: [], merge: [] })));
+    // A raw move to a cut-over ops, with a sync since the last end — every other clause of the
+    // query satisfied, so the leg's literal is the only reading left.
+    await rows(`UPDATE tickets SET repository_id = 'ops', course_id = 'roadmap-pr', path = 'content/roadmap/R3-9002.mdx' WHERE id = ?`, ticketId);
+    await cutover(1, 'ops');
+    await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.C, { registry: [course(3, 3, { course: needs })] }));
+    const atOps = await withCore((o) => {
+      const c = o.claims as unknown as { candidates: (w: unknown, page: number) => { id: string }[]; worker: (id: number) => unknown;
+        item: (id: string) => unknown; gate: (w: unknown, item: unknown, leg: string, phase: string) => { ok: boolean; rule?: number } };
+      const facts = c.worker(worker_id);
+      const item = c.item(ticketId);
+      return { query: c.candidates(facts, 0).map((r) => r.id), gate: c.gate(facts, item, 'implement', 'claim') };
+    });
+    expect(atOps).toEqual({ query: [ticketId], gate: { ok: true } });
   });
 
   const overtaken = (mutate: (items: any[]) => any[]) => {

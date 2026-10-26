@@ -231,10 +231,10 @@ export class Courses {
         continue;
       }
       this.c.store.exec(
-        `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_needs_json, step_kinds, min_worker_version, report_horizon_h, branch_pattern, previous_branch_pattern)
+        `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, step_kinds, min_worker_version, report_horizon_h, branch_pattern, previous_branch_pattern)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (repository_id, id) DO UPDATE SET version = excluded.version, skill = excluded.skill, course_json = excluded.course_json,
-           leg_needs_json = excluded.leg_needs_json,
+           leg_capabilities_json = excluded.leg_capabilities_json,
            step_kinds = excluded.step_kinds, min_worker_version = excluded.min_worker_version, report_horizon_h = excluded.report_horizon_h,
            branch_pattern = excluded.branch_pattern, previous_branch_pattern = excluded.previous_branch_pattern`,
         // §12.1's `courses` row holds the validated file as the repository posted it — its

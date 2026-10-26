@@ -141,9 +141,10 @@ export function readHead(home: string): string {
  *  with the capabilities it carries, so a leg naming a role asks for what the role carries — never
  *  for a literal capability of the role's name (review round 5, finding 3). `human-operator` is the
  *  one name that stands literal (review round 6, finding 0): rule 4 compares it as a string, so a
- *  leg needing it is this runner's never-eligible reason unless it declares it by that name. One
- *  file that will not parse, or one the file does not describe, adds nothing: this is only the
- *  never-eligible runner's why, never a gate. An empty `sha` reads the working tree. */
+ *  leg needing it is this runner's never-eligible reason unless it declares it by that name — and
+ *  the line's held set adds the literal exactly when the declaration carries it (review round 7,
+ *  finding 1). One file that will not parse, or one the file does not describe, adds nothing: this
+ *  is only the never-eligible runner's why, never a gate. An empty `sha` reads the working tree. */
 export function legNeeds(home: string, sha: string, course: string): string[] {
   const path = `.baton/courses/${course}/course.json`;
   const file = sha ? readAt(home, sha, path) : (() => {

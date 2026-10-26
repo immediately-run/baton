@@ -422,7 +422,10 @@ export class Runner {
     if (!this.o.legNeeds) return;
     this.saidEligible = true;
     if (this.declared == null) return;
-    const held = new Set(capabilitiesOf(this.declared));
+    // The literal `human-operator` is never expanded (`capabilitiesOf` drops it) and no role carries
+    // it, so a declaration that names it holds it by that name — as rule 4's gate and rule 6 read it
+    // (review round 7, finding 1).
+    const held = new Set([...capabilitiesOf(this.declared), ...(this.declared.includes('human-operator') ? ['human-operator'] : [])]);
     const declared = this.declared.join(', ') || 'nothing';
     let needs: string[];
     try {

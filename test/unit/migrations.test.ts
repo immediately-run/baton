@@ -306,8 +306,8 @@ describe('migration 0022: the leg needs derived beside the course file (B-86, re
 
       // The file is still the one the repository posted, roles and all (§12.1); the view is written
       // by the next accepted post, which alone can expand a role in code.
-      expect(sql.exec('SELECT course_json, leg_needs_json FROM courses').toArray()).toEqual([{ course_json: file, leg_needs_json: '{}' }]);
-      expect(sql.exec(`SELECT dflt_value FROM pragma_table_info('courses') WHERE name = 'leg_needs_json'`).toArray()).toEqual([{ dflt_value: "'{}'" }]);
+      expect(sql.exec('SELECT course_json, leg_capabilities_json FROM courses').toArray()).toEqual([{ course_json: file, leg_capabilities_json: '{}' }]);
+      expect(sql.exec(`SELECT dflt_value FROM pragma_table_info('courses') WHERE name = 'leg_capabilities_json'`).toArray()).toEqual([{ dflt_value: "'{}'" }]);
     });
   });
 });

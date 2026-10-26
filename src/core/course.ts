@@ -23,6 +23,12 @@ import { isFreeText } from './text';
 import { parseSchemaId } from '../shared/schema.mjs';
 import { ROLES } from '../shared/vocabulary.mjs';
 
+/** R-BTN-121, R-BTN-157: the names a vocabulary expansion already means — a vocabulary role, the
+ *  built-in literal `human-operator`, and `none`, which every runner holds. Review round 7,
+ *  finding 3: a role key named one of these would quietly redefine it for legs only (a leg naming
+ *  `create-pr` would ask for the role's list, while a ticket clause naming it kept its meaning). */
+const VOCABULARY = new Set([...Object.keys(ROLES), ...Object.values(ROLES).flat(), 'human-operator', 'none']);
+
 /** A station, leg or course id (R-BTN-69, R-BTN-48). */
 export const COURSE_ID = /^[a-z][a-z0-9-]{0,39}$/;
 const ID = COURSE_ID;
@@ -94,9 +100,11 @@ export function validateCourse(json: unknown): CourseViolation[] {
     if (!isObject(roles)) add('shape', 'capability_roles', 'capability_roles is an object of role names');
     else if (Object.keys(roles).length > COURSE_LIST_MAX) add('shape', 'capability_roles', `at most ${COURSE_LIST_MAX} capability roles`);
     else for (const [role, caps] of Object.entries(roles)) {
-      // R-BTN-121: a role expands once — roles do not nest. A role naming one holds the file.
-      if (Object.hasOwn(ROLES, role) || role === 'human-operator') {
-        add('role-in-roles', `capability_roles.${role}`, `a capability role may not be named "${role}": it is a vocabulary role, and a role naming a role never reaches a grant (R-BTN-157)`);
+      // R-BTN-121: a role expands once — roles do not nest. A role naming one holds the file. So
+      // does one named a name the vocabulary already means (review round 7, finding 3): a bare
+      // capability, `human-operator` or `none`, all of which a leg and a ticket clause read alike.
+      if (VOCABULARY.has(role)) {
+        add('role-in-roles', `capability_roles.${role}`, `a capability role may not be named "${role}": it is a vocabulary name, and a role redefining it would change what a leg asking for it requires (R-BTN-121, R-BTN-157)`);
         continue;
       }
       if (Array.isArray(caps)) {

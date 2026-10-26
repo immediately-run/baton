@@ -370,7 +370,7 @@ export class Claims {
                                 OR (:granted = 1 AND r.name NOT IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j
                                                                     WHERE g.credential_id = :credential AND g.repository_id = w.repository_id
                                                                       AND g.revoked_at IS NULL))))             -- rule 4, within the grant
-           AND NOT EXISTS (SELECT 1 FROM courses k, json_each(k.leg_needs_json) l                           -- rule 4's leg input (R-BTN-120, B-86), the view the registry
+           AND NOT EXISTS (SELECT 1 FROM courses k, json_each(k.leg_capabilities_json) l                           -- rule 4's leg input (R-BTN-120, B-86), the view the registry
                            WHERE k.repository_id = w.repository_id AND k.id = w.course_id AND l.key = a.leg      -- derives from the one expansion: capabilities only
                              AND EXISTS (SELECT 1 FROM json_each(l.value) q                                      -- A leg that asks for human-operator (R-BTN-121)
                                          WHERE (q.value <> 'human-operator'                                                  -- asks for it literally, as rule 6 asks a ticket's —
@@ -378,7 +378,11 @@ export class Claims {
                                                OR (:granted = 1 AND q.value NOT IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j  -- granted. Every other name is a capability,
                                                                                      WHERE g.credential_id = :credential AND g.repository_id = w.repository_id   -- within the grant
                                                                                        AND g.revoked_at IS NULL)))
-                                           OR (q.value = 'human-operator' AND NOT :human_operator))))
+                                           OR (q.value = 'human-operator'                                                     -- asks for it literally, as rule 6 meets it:
+                                               AND NOT :human_operator                                                         -- declared by that name, and granted by that
+                                               OR (:granted = 1 AND NOT EXISTS (SELECT 1 FROM worker_grants g, json_each(g.capabilities) j  -- name when the key is granted (round 7, finding 0:
+                                                 WHERE g.credential_id = :credential AND g.repository_id = w.repository_id           -- the declaration alone let a key granted it
+                                                   AND g.revoked_at IS NULL AND j.value = 'human-operator'))))))                       -- on another repository pass)
            AND COALESCE(w.tier_position, json_array_length(p.tiers) - 1)
                <= json_extract(:ceiling, '$."' || w.repository_id || '"')                                      -- rule 5, per repository
            AND (w.operator_only = 0 OR (:human_operator AND (:granted = 0 OR EXISTS (
@@ -391,9 +395,10 @@ export class Claims {
        ORDER BY repository_id, course_id, n`,
       { worker: w.id, now: this.c.now(), ceiling: JSON.stringify(this.ceilingPositions(w)), human_operator: w.declared.includes('human-operator') ? 1 : 0, rule9: rule9 ? 1 : 0, page,
         // A leg's `requires` is compared as `graphOf` expanded it: the registry writes that view to
-        // `leg_needs_json` from `legNeedsOf` when it accepts a file (§12.5), so the query reads
+        // `leg_capabilities_json` from `legNeedsOf` when it accepts a file (§12.5), so the query reads
         // capabilities only, and `human-operator` stays the literal rule 6 compares (review round
-        // 6, finding 0). A grant stores capabilities only, so no role list is bound.
+        // 6, finding 0) — declared by that name, and granted by that name on this ticket's
+        // repository (review round 7, finding 0). A grant stores capabilities only, so no role is bound.
         granted: w.grants ? 1 : 0, credential: w.credential_id });
   }
 

@@ -1872,9 +1872,10 @@ mean (R-BTN-50).
     A type id matches `^[a-z][a-z0-9-]{0,31}$`; `values` is a pattern in R-BTN-108's engine; a
     role expands to its list once (roles do not nest). Baton accepts the file only if every
     capability a leg lists, after expansion, is of a declared type with a matching value, or is
-    built-in. A role naming `human-operator` or another role holds the file (R-BTN-157). A
-    course may not declare a type named `runner` or `human-operator`. Whether a type is derived
-    is the repository's ontology's (R-BTN-174), never the course file's.
+    built-in. A role naming `human-operator` or another role holds the file (R-BTN-157); so does a
+    role named a vocabulary name — a capability, `human-operator` or `none` — which would redefine
+    that name for legs only. A course may not declare a type named `runner` or `human-operator`.
+    Whether a type is derived is the repository's ontology's (R-BTN-174), never the course file's.
   - **Built-ins:** `human-operator`, a runner's own statement that a person operates it, which
     Baton cannot verify and grants admit like any capability (R-BTN-58), and the type
     `runner` (R-BTN-133). `credential:<NAME>` names an environment variable a leg receives only
@@ -5556,10 +5557,10 @@ Every value below is validated on write; a value over its cap is refused `invali
 - **R-BTN-157 (capability roles never reach a grant; links are bounded).** Registration
   tokens' bounds — role `runner` only, uses, lifetime, re-keys and bursts — are R-BTN-117's.
   - **Roles never reach a grant.** A course file whose `capability_roles` (R-BTN-121) names
-    `human-operator` or another role is held (R-BTN-69). A grant holds capabilities only: the
-    CLI expands a role from the repository's latest accepted snapshot (`GET …/courses`), never
-    the working tree. Before signing a `<type>:*` grant the CLI prints every course defining the
-    type, and asks for confirmation when their definitions differ.
+    `human-operator`, another role, a capability or `none` is held (R-BTN-69). A grant holds
+    capabilities only: the CLI expands a role from the repository's latest accepted snapshot
+    (`GET …/courses`), never the working tree. Before signing a `<type>:*` grant the CLI prints
+    every course defining the type, and asks for confirmation when their definitions differ.
   - **Links.** A `link_hosts` link (R-BTN-112) is an `https` URL with no userinfo.
     `context-handoff` links and `handoff_url` pass R-BTN-113's or R-BTN-92's rule, or are dropped
     and logged.
@@ -5618,7 +5619,7 @@ reach it, and the object refuses to serve until every migration is applied (§2)
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
 | `repositories` | `id` (`^[a-z][a-z0-9-]{0,39}$`) | `github` (the forge path, case-insensitive; `~retired/<id>` on a retired row), `forge` (`github`\|`gitlab`\|`gitea`\|`git`, fixed), `remote`, `web_base`, `forge_host`, `forge_repo_id`, `forge_owner_id` (decimal strings), `forge_ids_seen` JSON (`{mismatch}`: the last 5 distinct mismatched ids, R-BTN-138), `former_paths` JSON (latest 10), `ci_identity` JSON, `dispatch` JSON, `default_branch`, `sync_workflow`, `mirror_workflow`, `mirror_pusher` (the mirror's forge login, R-BTN-73), `mirror_acked_seq`, `sync_wanted_at`, `sync_wanted_after`, `weight` (100), `tiers` JSON (lowest first), `trigger_workflows` JSON, `cutover_at`, `retired_at`, and the owner settings below | A registered repository (R-BTN-47, R-BTN-92, R-BTN-93, R-BTN-94, R-BTN-138). Unique: `(forge, forge_host, forge_repo_id)` among live rows; a forge path among live rows |
-| `courses` | `(repository_id, id)` | `version`, `skill`, `course_json` (the validated course file: stations, legs, contracts, capability types and roles, conditions, timers), `step_kinds` JSON, `min_runner_version`, `report_horizon_h` (6), `branch_pattern` (`claude/{ticket}-*`), `previous_branch_pattern` | Each course as the repository's last accepted snapshot posted it (R-BTN-48, R-BTN-69, R-BTN-121, R-BTN-134) |
+| `courses` | `(repository_id, id)` | `version`, `skill`, `course_json` (the validated course file: stations, legs, contracts, capability types and roles, conditions, timers), `leg_capabilities_json` (each leg id → the capabilities its `requires` names, roles expanded as `graphOf` expands them; `{}` on a row written before migration 0022 until its next accepted post), `step_kinds` JSON, `min_runner_version`, `report_horizon_h` (6), `branch_pattern` (`claude/{ticket}-*`), `previous_branch_pattern` | Each course as the repository's last accepted snapshot posted it (R-BTN-48, R-BTN-69, R-BTN-121, R-BTN-134); the derived leg capabilities are written in the statement that writes the file, the input rule 4's candidate query reads (R-BTN-120) |
 | `course_schemas` | `(repository_id, id)`, `id` = `<course>:<name>@<n>` | `course_id`, `digest`, `schema_json`, `snapshot_sha`, `posted_at` | Named schemas; immutable — a different digest for a stored id refuses the course file (R-BTN-108) |
 | `course_data` | `repository_id` | `payload` (opaque JSON), `snapshot_sha` | The courses' opaque board data, served in the fleet view (R-BTN-99) |
 | `condition_bindings` | `(repository_id, ticket_id, prefix)`; `ticket_id` `''` for the repository scope | `course_id`, `replaces`, `snapshot_sha` | Bindings as posted (`bindings` and `tickets[].conditions`, §4.4) from `.baton/baton.json` and ticket files; Baton reads them only to file handler tickets for its own conditions (R-BTN-161, R-BTN-171) |

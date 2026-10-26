@@ -894,6 +894,35 @@ describe('S-BTN-41 the runner', () => {
     expect(restarted.filter((l) => l.includes('which lacks create-pr'))).toHaveLength(1);
   }, 30_000);
 
+  it('the never-eligible line holds the literal human-operator when the declaration names it (review round 7, finding 1)', async () => {
+    // Review round 6, finding 0: `human-operator` is never expanded — `capabilitiesOf` drops it,
+    // and no role carries it. So a declaration that names it holds it by that name, exactly as
+    // rule 4's gate reads it; before this the line told such a runner it lacked what it declared.
+    home.leg('build', `return { suspend: true, reached: 'built' };`);
+    home.commit();
+    // The course's one leg requires the literal (the file is the one the core accepts).
+    const literal = JSON.parse(JSON.stringify(relay)) as Record<string, any>;
+    literal.legs.build.requires = { capabilities: ['human-operator'] };
+    home.write('.baton/courses/relay/course.json', `${JSON.stringify(literal, null, 2)}\n`);
+    home.commit();
+    const needs = legNeeds(home.dir, readHead(home.dir), 'relay');
+    expect(needs).toContain('human-operator');
+    // An agent-venue declaration is told it lacks the literal.
+    const venue: string[] = [];
+    asGranted(makeRunner({ capabilities: ['agent-venue'], log: (l: string) => venue.push(l), legNeeds: () => needs }));
+    await runners.at(-1)!.tick();
+    expect(venue.join('\n')).toContain('baton: this runner declared agent-venue, which lacks human-operator — a leg requiring it refuses rule 4 (missing-capability), so this runner can never claim one');
+    // One that declares the literal says nothing: it is not told it lacks what it holds.
+    const operator: string[] = [];
+    const granted = makeRunner({ capabilities: ['human-operator'], log: (l: string) => operator.push(l), legNeeds: () => needs });
+    const api = (granted as unknown as { o: { api: BatonApi } }).o.api;
+    const beat = api.heartbeat;
+    api.heartbeat = async (body: Record<string, unknown>) => ({ ...await beat.call(api, body), grant: { capabilities: ['human-operator'] } });
+    await granted.tick();
+    expect(operator.join('\n')).toContain('baton: declaring human-operator');
+    expect(operator.join('\n')).not.toContain('can never claim');
+  }, 30_000);
+
   it('a ticket with no Requires clause is still claimable by a declaration that settled at nothing (finding 5)', async () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
     home.commit();

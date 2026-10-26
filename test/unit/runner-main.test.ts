@@ -269,7 +269,14 @@ describe('the grant\'s declaration (B-86)', () => {
     expect(reserved).toContain('human-operator');
     expect(capabilitiesOf(['agent-venue']).has('human-operator')).toBe(false);
     expect(capabilitiesOf(['human-operator']).has('human-operator')).toBe(false); // the expansion drops the literal
-    expect(['human-operator'].includes('human-operator')).toBe(true);
+    // Review round 7, finding 1: the never-eligible line's held set (runner.ts `reportEligibility`)
+    // adds the literal exactly when the declaration carries it — so the answer to "does this
+    // declaration lack human-operator" is the one rule 4's gate gives. Driven end to end by
+    // S-BTN-41's "the never-eligible line holds the literal human-operator" row.
+    const heldBy = (declared: string[]) => new Set([...capabilitiesOf(declared), ...(declared.includes('human-operator') ? ['human-operator'] : [])]);
+    expect(heldBy(['human-operator']).has('human-operator')).toBe(true);
+    expect(heldBy(['agent-venue']).has('human-operator')).toBe(false);
+    expect(heldBy(['human-operator', 'agent-venue']).has('create-pr')).toBe(true); // the role still expands
     try {
       expect(readHead(dir)).toBe('');
     } finally {

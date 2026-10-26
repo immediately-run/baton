@@ -21,7 +21,7 @@ import history from './0018_history.sql';
 import independence from './0019_independence.sql';
 import schemas from './0020_schemas.sql';
 import legQueues from './0021_leg_queues.sql';
-import zz from './0022_leg_needs.sql';
+import zz from './0022_leg_capabilities.sql';
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },

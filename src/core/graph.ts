@@ -123,7 +123,7 @@ export function graphOf(json: unknown): Graph {
 
 /**
  * R-BTN-120, R-BTN-121, §12.5: every leg's needs as `graphOf` reads them, by leg id — the view the
- * registry derives beside the course file it stores (`courses.ts` writes it to `leg_needs_json`)
+ * registry derives beside the course file it stores (`courses.ts` writes it to `leg_capabilities_json`)
  * so the candidate query (`claims.ts`, SQL that cannot expand a role) compares the same
  * capabilities rule 4 does. The course file itself is stored as posted: this is never the file.
  */
