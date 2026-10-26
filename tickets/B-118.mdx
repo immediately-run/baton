@@ -57,5 +57,6 @@ runners, claims, timeline or Needs you.
 
 ### Exit criteria
 
-- [ ] an administrator's key reads the dashboard state from a terminal with one signed request,
-  no session and no Access login
+- [x] an administrator's key reads the dashboard state from a terminal with one signed request,
+  no session and no Access login: `baton admin -i KEY state` (a plan in `test/unit/cli.test.ts`;
+  the answer equal to the session's in S-BTN-170, both hosts)
