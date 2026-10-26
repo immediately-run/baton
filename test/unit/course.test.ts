@@ -90,6 +90,20 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(rules(c)).toEqual(['shape legs.review.requires.capabilities']);
   });
 
+  it('a capability role naming a role holds the file (R-BTN-121, R-BTN-157)', () => {
+    const c = copy();
+    // A role expands once, to capabilities: one naming a vocabulary role — or the built-in
+    // human-operator — would put a role inside a role, and a role never reaches a grant.
+    c.capability_roles = { human: ['human-operator'], venue: ['agent-venue', 'create-pr'] };
+    expect(rules(c)).toEqual(['role-in-roles capability_roles.human.0', 'role-in-roles capability_roles.venue.0']);
+    // A role named as a role: the key itself.
+    c.capability_roles = { 'agent-venue': ['llm-call'], 'human-operator': ['llm-call'] };
+    expect(rules(c)).toEqual(['role-in-roles capability_roles.agent-venue', 'role-in-roles capability_roles.human-operator']);
+    // An ordinary named list is the whole point and passes.
+    c.capability_roles = { deployer: ['vpn:corp', 'credential:DEPLOY_TOKEN'] };
+    expect(validateCourse(c)).toEqual([]);
+  });
+
   it('a station names its entry outputs by name and schema id; an output may name an id or a legacy path (R-BTN-108, R-BTN-109)', () => {
     const c = copy();
     c.stations.reviewed.entry = [{ output: 'findings', schema: 'roadmap-pr:findings@2' }, { output: 'change', schema: 'std:forge.change@1' }];

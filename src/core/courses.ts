@@ -4,7 +4,7 @@
 // file. A posted file that fails `validateCourse` keeps the previous one in force and is listed
 // under Needs you; with no previous one there is nothing to keep, so the post is refused.
 import { validateCourse, type CourseViolation } from './course';
-import { graphOf, resolveLeg } from './graph';
+import { expandedCourse, graphOf, resolveLeg } from './graph';
 import { BatonError } from './http';
 import { FREE_TEXT_MAX } from './text';
 import type { Store } from './ports';
@@ -236,7 +236,11 @@ export class Courses {
          ON CONFLICT (repository_id, id) DO UPDATE SET version = excluded.version, skill = excluded.skill, course_json = excluded.course_json,
            step_kinds = excluded.step_kinds, min_worker_version = excluded.min_worker_version, report_horizon_h = excluded.report_horizon_h,
            branch_pattern = excluded.branch_pattern, previous_branch_pattern = excluded.previous_branch_pattern`,
-        repo, e.id, e.version, e.skill, JSON.stringify(e.course), JSON.stringify(e.step_kinds), e.min_worker_version, e.report_horizon_h,
+        // §12.5, R-BTN-121: the file is stored with every leg's capabilities expanded and its
+        // `capability_roles` dropped — no role name reaches a stored row, so the candidate query
+        // (`claims.ts`, a SQL mirror of rule 4) compares capabilities as `graphOf` does. Its
+        // length and its `requires` bytes are what the board reported, so the store keeps them.
+        repo, e.id, e.version, e.skill, JSON.stringify(expandedCourse(e.course)), JSON.stringify(e.step_kinds), e.min_worker_version, e.report_horizon_h,
         e.branch_pattern, e.previous_branch_pattern);
       this.c.store.exec('DELETE FROM course_refusals WHERE repository_id = ? AND course_id = ?', repo, e.id);
       // Immutable: a schema already held has the same digest (schemaViolations), so it is kept.

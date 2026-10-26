@@ -133,7 +133,52 @@ describe('the claim and end contracts (§6.2, §6.5, §11)', () => {
     await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.C, { registry: [course(3, 3, { course: needs })] }));
     const held = await register('vm-a', { session_name: 'held', capabilities: ['agent-venue'] });
     expect(await recommended(held.id)).toContain(ticketId);
-    expect((await claimItem('vm-a', held.secret, { ticket_id: ticketId })).status).toBe(200);
+    const kept = await claimItem('vm-a', held.secret, { ticket_id: ticketId });
+    expect(kept.status).toBe(200);
+    // The claim above holds the leg (rule 3): a granted worker is offered it only once that claim
+    // has ended, so it ends here as a real one would.
+    expect((await endClaim('vm-a', held.secret, kept.json.claim_id, { end_reason: 'released:requested' })).status).toBe(200);
+    // §6.7: claimable again only after a sync since that end.
+    await syncCall('/v1/sync/board', payload(sha.D, sha.C, board.states.D));
+    // Review round 5, finding 1: the same leg for a GRANTED key. Grants store capabilities only
+    // (`admin.ts`), so the query reads the role the leg names as the capabilities `graphOf`
+    // expanded it to — a granted venue worker is a candidate and claims it, and a worker holding
+    // none of the role's capabilities is neither.
+    const admin = await makeKey('ssh-ed25519', 'admin-r5');
+    const docsOwner = await makeKey('ssh-ed25519', 'docs-owner-r5');
+    await setAdminKeys(admin);
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [docsOwner.publicKey] })).status).toBe(200);
+    const workerKey = async (name: string, capabilities: string[]) => {
+      const key = await makeKey('ssh-ed25519', name);
+      expect((await keyCall(admin, '/v1/admin/grants', { repository: 'docs', public_key: key.publicKey, hostname: name, capabilities })).status).toBe(200);
+      // A granted key declares the courses of the repositories it is granted on (§10.1).
+      const body = hbBody('vm-a', { hostname: name, session_name: name, secret_hash: await sha256(name), capabilities, model_id: 'opencode-go/kimi-k3', model_provider_id: 'opencode_go_plus', courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }] });
+      const res = await hostCall(await signedRequest(key, `${ORIGIN}/v1/runner/heartbeat`, { created: Math.floor((await withCore((x) => x.now())) / 1000), body: JSON.stringify(body) }));
+      expect([name, res.status]).toEqual([name, 200]);
+      return { worker_id: (await res.json() as { worker_id: number }).worker_id, key, secret: name };
+    };
+    // `claimItem` speaks a batch credential's token; a granted worker's is its key's own, so its
+    // claim is signed here.
+    const grantedClaim = async (key: Awaited<ReturnType<typeof makeKey>>, secret: string) => {
+      const sec = Math.floor((await withCore((x) => x.now())) / 1000);
+      const signed = await signedRequest(key, `${ORIGIN}/v1/runner/claim`, { created: sec, body: JSON.stringify({ request_id: requestId(), ticket_id: ticketId }) });
+      // The worker secret joins a signature (§5, `runner/api.ts`'s `Auth`): the key names the
+      // credential, the secret names the worker.
+      signed.headers.set('X-Worker-Secret', secret);
+      const res = await hostCall(signed);
+      return { status: res.status, json: (await res.json()) as Record<string, any> };
+    };
+    // A worker granted only `llm-call` is not offered the leg and is refused it: one of the role's
+    // four is not the role (the round-5 probe: `llm-call` alone passed a leg naming a role).
+    const grantedPartial = await workerKey('r5-granted-partial', ['llm-call']);
+    expect(await recommended(grantedPartial.worker_id)).not.toContain(ticketId);
+    expect(await grantedClaim(grantedPartial.key, grantedPartial.secret)).toMatchObject({ status: 409, json: { code: 'not-eligible', rule: 4 } });
+    // A worker granted the venue is: the query reads the role the leg names as the capabilities
+    // `graphOf` expanded it to, and a grant stores capabilities, so it is a candidate and claims.
+    const grantedVenue = await workerKey('r5-granted-venue', ['agent-venue']);
+    expect(await recommended(grantedVenue.worker_id)).toContain(ticketId);
+
+    expect(await grantedClaim(grantedVenue.key, grantedVenue.secret), 'the granted venue worker claims the leg').toMatchObject({ status: 200, json: { ticket_id: ticketId } });
   });
 
   it('§7.2 rule 6: an operator-only item goes only to a worker that declared human-operator', async () => {

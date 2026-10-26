@@ -4,6 +4,8 @@
 // ever given a file `validateCourse` accepted (courses.ts stores no other), so it trusts the
 // shape. To core a station and a leg are names: nothing here reads what one means.
 
+import { capabilitiesOf } from '../shared/vocabulary.mjs';
+
 /** One step of a ticket's path: the leg run and the station it reached (R-BTN-70). */
 export interface Step {
   leg: string;
@@ -20,8 +22,10 @@ export interface Leg {
   noChainFrom: string[];
   /** R-BTN-107: the isolation a worker must declare to take it, or null for any. */
   isolation: 'session' | null;
-  /** R-BTN-120: the capabilities the leg requires of whoever takes it — rule 4's own input
-   *  beside the ticket's clause (B-86); empty when it requires none. */
+  /** R-BTN-120, R-BTN-121: the capabilities the leg requires of whoever takes it — rule 4's own
+   *  input beside the ticket's clause (B-86); empty when it requires none. Stored expanded, as
+   *  §5.6 stores a ticket's: the course's `capability_roles` named here are replaced by their
+   *  capabilities and a vocabulary role by its four, so no role name is left (§12.5). */
   requires: string[];
 }
 
@@ -43,10 +47,34 @@ export interface Graph {
 
 const names = (v: unknown): string[] => (typeof v === 'string' ? [v] : Array.isArray(v) ? (v as string[]) : []);
 
+/**
+ * R-BTN-120, R-BTN-121: a leg's `requires.capabilities` as the capabilities rule 4 compares —
+ * one normalization, used by `graphOf` and by the runner's own reading of the course file, so
+ * every reader of a leg's needs sees the same list. Each name is replaced by the course's
+ * `capability_roles` entry when it has one (a role expands once; roles do not nest), then by
+ * the vocabulary's `capabilitiesOf` — a vocabulary role (`agent-venue`) becomes the capabilities
+ * it carries. What is left is capabilities only, never a role name (§12.5). Names that are
+ * neither are taken as themselves (a namespaced capability such as `vpn:corp`).
+ */
+export function legCapabilities(requires: unknown, capabilityRoles: unknown): string[] {
+  const listed = (requires as { capabilities?: unknown } | null | undefined)?.capabilities;
+  if (!Array.isArray(listed)) return [];
+  const roles = typeof capabilityRoles === 'object' && capabilityRoles !== null && !Array.isArray(capabilityRoles)
+    ? (capabilityRoles as Record<string, unknown>) : {};
+  const out = new Set<string>();
+  for (const name of listed) {
+    if (typeof name !== 'string') continue;
+    const own = Object.hasOwn(roles, name) ? roles[name] : null;
+    for (const c of capabilitiesOf(Array.isArray(own) ? (own as string[]) : [name])) out.add(c);
+  }
+  return [...out];
+}
+
 /** The graph of a validated course file. */
 export function graphOf(json: unknown): Graph {
   const f = json as {
     start: string; start_leg: string; end: string[]; short_waits?: string[];
+    capability_roles?: Record<string, string[]>;
     stations: Record<string, { renamed_from?: string | string[]; entry?: { output: string; schema: string }[] }>;
     legs: Record<string, { from: string[]; to: string | string[]; max_runs?: number; max_queue?: number; renamed_from?: string | string[]; no_chain_from?: string[]; isolation?: 'session'; requires?: { capabilities?: string[] } }>;
   };
@@ -55,7 +83,7 @@ export function graphOf(json: unknown): Graph {
   const stationRenames = new Map<string, string>();
   for (const [id, l] of Object.entries(f.legs)) {
     legs.set(id, { from: [...new Set(l.from)], to: [...new Set(names(l.to))], maxRuns: l.max_runs ?? null, maxQueue: l.max_queue ?? null,
-      noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null, requires: [...new Set(l.requires?.capabilities ?? [])] });
+      noChainFrom: [...new Set(l.no_chain_from ?? [])], isolation: l.isolation ?? null, requires: legCapabilities(l.requires, f.capability_roles) });
     for (const old of names(l.renamed_from)) legRenames.set(old, id);
   }
   const entry = new Map<string, { output: string; schema: string }[]>();
@@ -83,6 +111,33 @@ export function graphOf(json: unknown): Graph {
     frontier = next;
   }
   return { start: f.start, startLeg: f.start_leg, ends, shortWaits: f.short_waits ?? [], stations, legs, legRenames, stationRenames, toEnd, entry };
+}
+
+/**
+ * §5.6, §12.5, R-BTN-121: a course file with every leg's `requires.capabilities` stored expanded —
+ * the same two-step expansion `graphOf` reads (`legCapabilities`), written back where `graphOf`
+ * reads each leg, and `capability_roles` left out (no role name is stored). The registry stores
+ * this form, so the candidate query (a SQL mirror of `gatesFor`, which cannot expand a role) and
+ * every reader of the stored file compare capability names only. A file with nothing to expand
+ * is returned unchanged.
+ */
+export function expandedCourse(json: unknown): unknown {
+  if (typeof json !== 'object' || json === null || Array.isArray(json)) return json;
+  const f = json as { legs?: unknown; capability_roles?: unknown };
+  if (typeof f.legs !== 'object' || f.legs === null || Array.isArray(f.legs)) return json;
+  const out = { ...(json as Record<string, unknown>) };
+  delete out.capability_roles;
+  const legs: Record<string, unknown> = {};
+  for (const [id, l] of Object.entries(f.legs as Record<string, unknown>)) {
+    if (typeof l !== 'object' || l === null || Array.isArray(l) || !('requires' in l)) { legs[id] = l; continue; }
+    const req = (l as { requires?: unknown }).requires;
+    const kept = typeof req === 'object' && req !== null && !Array.isArray(req) ? { ...(req as Record<string, unknown>) } : req;
+    if (typeof kept === 'object' && kept !== null && !Array.isArray(kept)) {
+      (kept as Record<string, unknown>).capabilities = legCapabilities(req, f.capability_roles);
+    }    legs[id] = { ...(l as Record<string, unknown>), requires: kept };
+  }
+  out.legs = legs;
+  return out;
 }
 
 /** A leg's current name: itself, or the leg whose `renamed_from` names it; null when neither. */

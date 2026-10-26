@@ -244,14 +244,18 @@ describe('the grant\'s declaration (B-86)', () => {
       stations: { a: {}, b: {}, c: {} },
       // The vocabulary role `agent-venue` stands (round 4, finding 5): a runner declaring it is
       // never told it lacks it; a namespaced name is taken as itself.
-      legs: { b: { from: ['a'], to: 'b', requires: { capabilities: ['create-pr', 'agent-venue', 'vpn:corp'] } }, c: { from: ['b'], to: 'c' } },
+      // A course role expands through `capability_roles` (R-BTN-121, round 5, finding 3): a leg
+      // naming `deployer` asks for what it carries, never a capability called `deployer`.
+      capability_roles: { deployer: ['vpn:corp', 'credential:DEPLOY_TOKEN'] },
+      legs: { b: { from: ['a'], to: 'b', requires: { capabilities: ['create-pr', 'agent-venue', 'deployer'] } }, c: { from: ['b'], to: 'c' } },
     }));
     const needs = legNeeds(dir, '', 'relay');
-    expect([...new Set(needs)].sort()).toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call', 'vpn:corp']);
+    expect([...new Set(needs)].sort()).toEqual(['authentication', 'create-pr', 'credential:DEPLOY_TOKEN', 'drivable-browser', 'llm-call', 'vpn:corp']);
+    expect(needs).not.toContain('deployer');
     // A declaration carrying the role meets every need the role carries — the never-eligible
     // line (runner.ts `reportEligibility`) compares needs with `capabilitiesOf(declared)`.
     const held = capabilitiesOf(['agent-venue']);
-    expect([...new Set(needs)].filter((n) => !held.has(n))).toEqual(['vpn:corp']);
+    expect([...new Set(needs)].filter((n) => !held.has(n))).toEqual(['vpn:corp', 'credential:DEPLOY_TOKEN']);
     expect(legNeeds(dir, '', 'no-such-course')).toEqual([]);
     // Review round 3, finding 3: the keys are the core's own — the file `legNeeds` reads is one
     // `validateCourse` accepts (a role a leg requires is no unknown key).

@@ -72,7 +72,18 @@ describe('gatesFor: every gate of the table', () => {
     expect(gatesFor(worker({ declared: ['llm-call'] }), ticket(), leg({ requires: ['create-pr'] }), 'advance', facts())).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
     // Held: it passes, whether by the capability or through the role that carries it.
     expect(gatesFor(worker({ declared: ['create-pr'] }), ticket({ requires: [] }), leg({ requires: ['create-pr'] }), 'claim', facts())).toEqual({ ok: true });
-    expect(gatesFor(worker({ declared: ['agent-venue'] }), ticket({ requires: [] }), leg({ requires: ['agent-venue'] }), 'claim', facts())).toEqual({ ok: true });
+    // Review round 5, finding 0: a role on the leg side is read as on the clause side — one of the
+    // role's four does not stand for the role. `graphOf` hands rule 4 the role's capabilities
+    // (`legCapabilities` is the one expansion point, `graph.test` covers it), so a leg carries the
+    // four; a partial declaration is refused at a claim and at an advance, the full one passes.
+    const venue = ['authentication', 'llm-call', 'create-pr', 'drivable-browser'];
+    expect(gatesFor(worker({ declared: ['agent-venue'] }), ticket({ requires: [] }), leg({ requires: venue }), 'claim', facts())).toEqual({ ok: true });
+    expect(gatesFor(worker({ declared: ['llm-call'] }), ticket({ requires: [] }), leg({ requires: venue }), 'claim', facts())).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
+    expect(gatesFor(worker({ declared: ['llm-call'] }), ticket({ requires: [] }), leg({ requires: venue }), 'advance', facts())).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
+    // A partial grant is refused too: the declaration holds all four, the grant three.
+    expect(gatesFor(worker({ declared: ['agent-venue'], grants: { docs: { capabilities: ['authentication', 'llm-call', 'create-pr'] } } }), ticket({ requires: [] }), leg({ requires: venue }), 'claim', facts())).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
+    // The full declaration on the full grant passes.
+    expect(gatesFor(worker({ declared: ['agent-venue'], grants: { docs: { capabilities: venue } } }), ticket({ requires: [] }), leg({ requires: venue }), 'claim', facts())).toEqual({ ok: true });
     // A leg with no `requires` (and one that requires nothing) is unchanged.
     expect(gatesFor(worker({ declared: ['agent-venue'] }), ticket({ requires: [] }), leg(), 'claim', facts())).toEqual({ ok: true });
     expect(gatesFor(worker({ declared: ['agent-venue'] }), ticket({ requires: [] }), leg({ requires: [] }), 'claim', facts())).toEqual({ ok: true });

@@ -10,7 +10,7 @@
 
 export type CourseRule =
   | 'shape' | 'unknown-key' | 'id' | 'unknown-station' | 'start-leg' | 'unreachable' | 'no-end' | 'terminal'
-  | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar' | 'no-chain-from' | 'entry' | 'schema';
+  | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar' | 'no-chain-from' | 'entry' | 'schema' | 'role-in-roles';
 
 export interface CourseViolation {
   rule: CourseRule;
@@ -21,6 +21,7 @@ export interface CourseViolation {
 
 import { isFreeText } from './text';
 import { parseSchemaId } from '../shared/schema.mjs';
+import { ROLES } from '../shared/vocabulary.mjs';
 
 /** A station, leg or course id (R-BTN-69, R-BTN-48). */
 export const COURSE_ID = /^[a-z][a-z0-9-]{0,39}$/;
@@ -85,13 +86,28 @@ export function validateCourse(json: unknown): CourseViolation[] {
     return out;
   }
   for (const k of Object.keys(json)) if (!TOP_KEYS.has(k)) add('unknown-key', k, `unknown key "${k}"`);
-  // R-BTN-120: a course's capability roles — named capability lists a leg's `requires.capabilities`
-  // may name (B-86: the runner reads them to say what its legs need).
+  // R-BTN-120, R-BTN-121: a course's capability roles — named capability lists a leg's
+  // `requires.capabilities` may name; `graphOf` expands them (`legCapabilities`), so rule 4, the
+  // candidate query and the runner's never-eligible line all compare capabilities.
   if ('capability_roles' in json) {
     const roles = json.capability_roles;
     if (!isObject(roles)) add('shape', 'capability_roles', 'capability_roles is an object of role names');
     else if (Object.keys(roles).length > COURSE_LIST_MAX) add('shape', 'capability_roles', `at most ${COURSE_LIST_MAX} capability roles`);
-    else for (const [role, caps] of Object.entries(roles)) capabilityList(caps, `capability_roles.${role}`, role);
+    else for (const [role, caps] of Object.entries(roles)) {
+      // R-BTN-121: a role expands once — roles do not nest. A role naming one holds the file.
+      if (Object.hasOwn(ROLES, role) || role === 'human-operator') {
+        add('role-in-roles', `capability_roles.${role}`, `a capability role may not be named "${role}": it is a vocabulary role, and a role naming a role never reaches a grant (R-BTN-157)`);
+        continue;
+      }
+      if (Array.isArray(caps)) {
+        for (const [i, c] of caps.entries()) {
+          if (typeof c === 'string' && (Object.hasOwn(ROLES, c) || c === 'human-operator')) {
+            add('role-in-roles', `capability_roles.${role}.${i}`, `"${c}" is a vocabulary role: a role expands to capabilities, and roles do not nest (R-BTN-121, R-BTN-157)`);
+          }
+        }
+      }
+      capabilityList(caps, `capability_roles.${role}`, role);
+    }
   }
 
   // Stations.

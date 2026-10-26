@@ -135,8 +135,9 @@ export class Runner {
   private unblocked = false;
   /** Bumps with every claim: an answer a beat started before the claim cannot fence it. */
   private epoch = 0;
-  /** One beat at a time — the sidecar's answers stay ordered against the loop. */
-  private ticking = false;
+  /** One beat at a time — the sidecar's answers stay ordered against the loop. The in-flight
+   *  beat's promise while one is out, so a caller that needs a beat waits for it (`tick`). */
+  private ticking: Promise<void> | null = null;
   /** R-BTN-14: a reaped worker re-keys on its next beat; the fresh secret until it lands. */
   private rekeySecret: string | null = null;
   /** An end Baton never answered (the network went with the lease): retried on every beat. */
@@ -210,15 +211,15 @@ export class Runner {
 
   /** One heartbeat, by the timer or a test: the §11 answer drives everything local — the lease,
    * the claim git shows, the messages and the snapshot's next legs. Never concurrent with
-   * another beat, so an answer always post-dates the claim state it is judged against. */
+   * another beat, so an answer always post-dates the claim state it is judged against. A caller
+   * that arrives while a beat is out waits for it and returns — review round 5, finding 2:
+   * `work()` starts the sidecar and then claims at once, and the boot beat must have landed
+   * (registering the worker, settling the declaration) before `runOnce` reads `sent`; returning
+   * on the guard let the first claims go out on `null` and `[]`. */
   async tick(): Promise<void> {
-    if (this.ticking) return;
-    this.ticking = true;
-    try {
-      await this.beatOnce();
-    } finally {
-      this.ticking = false;
-    }
+    if (this.ticking) return this.ticking;
+    this.ticking = this.beatOnce().finally(() => { this.ticking = null; });
+    return this.ticking;
   }
 
   private async beatOnce(): Promise<void> {
@@ -276,7 +277,10 @@ export class Runner {
           this.sent = null;
           this.saidEligible = false;
           this.state.set({ declared: null });
-          if (!this.saidForbidden) this.log('baton: the grant moved under this runner — asking again with no declaration, so the next answer re-settles what this machine may declare');
+          // Review round 5, finding 4: the server's message names the cause — a hostname this
+          // key is not registered for, a revoked key, a course in an ungranted repository — and
+          // not every refusal is a grant that moved. Said once per stretch of refusals.
+          if (!this.saidForbidden) this.log(`baton: the heartbeat was refused (forbidden): ${e.message} — asking again with no declaration, so the next answer re-settles what this machine may declare`);
           this.saidForbidden = true;
         }
         this.loseLease(e.code);

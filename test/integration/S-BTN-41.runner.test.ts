@@ -254,13 +254,13 @@ describe('S-BTN-41 the runner', () => {
     home.leg('merge', `return { reached: 'merged' };`);
     home.commit();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
-    // The heartbeat is the only thing that moves a claim's sky while the runner waits: start it
-    // with the claim, never with the registration (a beat out while the claim registers would
-    // outlive the worker's secret and be refused — the flake this test carried until round four).
+    // The heartbeat is the only thing that moves a claim's sky while the runner waits. It starts
+    // before the claim, as `work()` starts it (round 5, finding 2: `tick` awaits the beat in
+    // flight, so the boot beat registers and settles before the claim goes out).
     const runner = makeRunner();
+    runner.start();
     const done = runner.runOnce();
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`));
-    runner.start();
     // While build runs, the snapshot moves: the ticket is built and check waits on ci — the
     // advance into check then reads the wait, deterministically.
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
@@ -279,11 +279,11 @@ describe('S-BTN-41 the runner', () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
     home.commit();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
-    // The heartbeat starts once the claim is held (see the short-wait test above).
+    // The heartbeat starts before the claim (see the short-wait test above).
     const runner = makeRunner();
+    runner.start();
     const done = runner.runOnce();
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`));
-    runner.start();
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
     await new Promise((r) => setTimeout(r, 120));
@@ -305,9 +305,9 @@ describe('S-BTN-41 the runner', () => {
     home.commit();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
     const runner = makeRunner();
+    runner.start();
     const done = runner.runOnce();
     await until(() => rows('SELECT 1 FROM claims'));
-    runner.start();
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`)); // the wait holds
     const worker = (await rows<{ id: number }>('SELECT id FROM workers ORDER BY id DESC LIMIT 1'))[0].id;
@@ -335,11 +335,11 @@ describe('S-BTN-41 the runner', () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
     home.commit();
     await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) });
-    // The heartbeat starts once the claim is held (see the short-wait test above).
+    // The heartbeat starts before the claim (see the short-wait test above).
     const runner = makeRunner();
+    runner.start();
     const done = runner.runOnce();
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`));
-    runner.start();
     await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'waiting', 'ci']]) });
     await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
     // The lease goes while the wait holds it: no waiting out the 30 minutes, no hand-off.
@@ -799,6 +799,46 @@ describe('S-BTN-41 the runner', () => {
     expect(lines.filter((l) => l.includes('baton: declaring'))).toHaveLength(1);
   }, 30_000);
 
+  it('work() starts the heartbeat before it claims: the first claim\'s beats carried the settled declaration (round 5, finding 2)', async () => {
+    home.leg('build', `return { suspend: true, reached: 'built' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('filed', [], [['build', 'ready']]) }, [ticket('T-1', { course_id: 'relay', requires: ['create-pr'] })]);
+    const needs = legNeeds(home.dir, readHead(home.dir), 'relay');
+    const runner = asGranted(makeRunner({ legNeeds: () => needs }));
+    const seen = recording(runner);
+    // The server's own record at the moment of the claim, read by the gate: `rewriteSettings`
+    // writes `worker_capabilities` per answered beat, so this is what rule 4 saw — never the
+    // client's word about what it sent.
+    let atClaim: { declared: string; capabilities: string }[] | null = null;
+    const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
+    const claim = api.claim;
+    api.claim = async (body: Record<string, unknown>) => {
+      const worker = (await rows<{ id: number }>('SELECT id FROM workers ORDER BY id DESC LIMIT 1'))[0];
+      atClaim = worker
+        ? await rows<{ declared: string; capabilities: string }>(`SELECT DISTINCT declared, (SELECT group_concat(capability) FROM (SELECT capability FROM worker_capabilities c WHERE c.worker_id = worker_capabilities.worker_id ORDER BY capability)) AS capabilities
+                                                                   FROM worker_capabilities WHERE worker_id = ?`, worker.id)
+        : [];
+      return claim.call(api, body);
+    };
+    // `work()` is the production path: it starts the sidecar and claims at once. Before round
+    // five's fix the boot beat was still in flight, `tick` returned on its guard, and the first
+    // claims went out while the server recorded `null` and then `[]`.
+    const running = runner.work();
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'build'`));
+    runner.stop();
+    await running;
+    // The boot beat asks with nothing (the grant is unknown: `runner.ts`'s `declaring`), the next
+    // carries the grant — and the claim went out only after that one had landed, so the server
+    // held the grant's list when rule 4 judged it. Before the fix the claim went out on the boot
+    // beat's `[]` (and, on a restart from a pre-B-86 state file, on `null`).
+    expect(seen.beats.at(-1)).toEqual(['agent-venue', 'create-pr', 'drivable-browser', 'llm-call']);
+    // The claim never went out on the unsettled starts: no beat before the last was all this
+    // runner could claim on (`[]` or `null`), and exactly one settled beat precedes the claim.
+    expect(seen.beats.filter((b) => !b.length)).toHaveLength(1);
+    expect(atClaim).toEqual([{ declared: 'agent-venue', capabilities: 'authentication,create-pr,drivable-browser,llm-call' }]);
+    expect(await rows(`SELECT leg FROM claim_legs WHERE leg = 'build'`)).toHaveLength(1);
+  }, 30_000);
+
   it('an answer carrying a bare role declares it verbatim — the answer is the grant (round 4, finding 1)', async () => {
     home.leg('build', `return { reached: 'built', next: 'check' };`);
     home.commit();
@@ -963,9 +1003,12 @@ describe('S-BTN-41 the runner', () => {
       return { ...await beat.call(api, body) as Record<string, unknown>, grant: { capabilities: grant } };
     };
     await runner.tick();
-    // The declaration is dropped, in memory and in the state file, and said once.
+    // The declaration is dropped, in memory and in the state file, and said once — with the
+    // server's own message, which names the cause (round 5, finding 4: a wrong hostname, a revoked
+    // key and a grant that moved are all `forbidden`, and only the message tells them apart).
     expect(JSON.parse(readFileSync(stateFile, 'utf8')).declared).toBeNull();
-    expect(lines.filter((l) => l.includes('the grant moved under this runner'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('the heartbeat was refused (forbidden)'))).toHaveLength(1);
+    expect(lines.join('\n')).toContain('baton: the heartbeat was refused (forbidden): this credential may not declare llm-call — asking again with no declaration');
     // The next beat asks with no declaration (the refused beat above carried the stale list
     // from before this answer settled it) and re-settles from the narrowed grant.
     await runner.tick();
@@ -1020,13 +1063,14 @@ describe('S-BTN-41 the runner', () => {
     const second = await runner.runOnce();
     const said = lines.join('\n');
     expect(second).toBeNull();
-    expect(said).toContain('the grant moved under this runner');
+    // Round 5, finding 4: the line says the heartbeat was refused and names the server's reason.
+    expect(said).toContain('baton: the heartbeat was refused (forbidden): this credential may not declare ');
     expect(said).toContain('which lacks create-pr');
     expect(said).toContain('declared nothing');
     expect(await rows('SELECT * FROM claims WHERE status = ?', 'active')).toEqual([]);
     // Said once across attempts, not per beat.
     await runner.tick();
-    expect(lines.filter((l) => l.includes('the grant moved under this runner'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('the heartbeat was refused (forbidden)'))).toHaveLength(1);
   }, 30_000);
 
   it('an unblocked message is acknowledged, so it is not delivered with every beat (R-BTN-77)', async () => {
