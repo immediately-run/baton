@@ -1,0 +1,68 @@
+---
+title: "B-119 — A verdict counts from anyone who can push: the GitHub adapter reads the collaborator permission, not author_association alone"
+id: B-119
+project: baton
+status: available
+updated: 2026-10-26
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1085
+tier: routine
+description: "A private org member's verdict reads as CONTRIBUTOR to the sync's token and is dropped, so git never places a create-pr ticket at reviewed or fixed. R-BTN-139's permission read, GitHub only — a slice of B-46 item 1."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-26, choosing "the code fix only" after the diagnosis below. This is
+the GitHub author-trust part of B-46 item 1 (R-BTN-139), split out because it is live breakage
+and not hardening.
+**Spec:** §4 R-BTN-139 ("a trusted person… someone the forge reports can push to the PR's base —
+GitHub `GET /repos/{owner}/{repo}/collaborators/{username}/permission` is `admin` or `write`
+(`author_association` only pre-filters)"; "Failures"), §2e R-BTN-74 (verdicts).
+
+### Why
+
+The sync counts a verdict only when GitHub's `author_association` is `OWNER`, `MEMBER` or
+`COLLABORATOR` (`src/defaults/cli.ts`, `TRUSTED`). An org member whose membership is private
+looks like `CONTRIBUTOR` to any token outside the org, the sync's Actions `GITHUB_TOKEN`
+included. On 2026-10-26 an unauthenticated read of baton#108's comments showed the owner's
+`<!-- baton:verdict changes -->` as `CONTRIBUTOR`.
+
+So every verdict in `immediately-run/baton` is dropped as untrusted. Git never places a
+`create-pr` ticket at `reviewed` or `fixed`: every git move in its history is `filed → pr-open`
+or `→ merged`. When a claim ends, the ticket falls back to `pr-open` and review runs again. This
+fed the `attempts-exhausted` holds on B-86, B-88 and B-90. A leg finished by hand, whose
+verdict and push are on the PR, is invisible for the same reason.
+
+### What to build
+
+1. In the GitHub fact adapter (`githubFacts`, `src/defaults/cli.ts`), a review's or comment's
+   author counts when the forge reports they can push: `GET
+   /repos/{repo}/collaborators/{login}/permission` returns `admin` or `write`.
+   `author_association` only pre-filters. `NONE`, `FIRST_TIMER`, `FIRST_TIME_CONTRIBUTOR` and
+   `MANNEQUIN` cannot push and are dropped without a read. Every other association is
+   looked up.
+2. One read per author per repository per run, cached for the run, inside `MAX_REQUESTS`.
+3. Failures follow R-BTN-139. A `404` means the person is not a collaborator: untrusted. Any
+   other error aborts the run, which posts nothing.
+4. Out of scope (stay with B-46): forks by id, editors (`userContentEdits`),
+   `trusted_identities`, `code_repos`, other forges, the `trusted` flag exported to `sync.mjs`.
+
+### Tests
+
+- Unit, with recorded payload shapes: a `CONTRIBUTOR` author with `write` counts; one with
+  `read` does not; a `NONE` author is dropped with no permission read; two comments by one
+  author make one read; a `404` is untrusted; a `500` aborts.
+- The station function, from such facts: a verdict and a later push place the ticket at
+  `fixed`.
+
+### Exit criteria
+
+- [ ] a private org member's verdict counts in the sync, and a reader's does not
+- [ ] after the sync workflow's CLI pin moves to the merge, baton#106 and baton#108 sit at
+  `fixed`
