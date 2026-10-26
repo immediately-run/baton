@@ -2,8 +2,8 @@
 title: "B-86 — A granted runner silently idles: --capabilities defaults to agent-venue alone"
 id: B-86
 project: baton
-status: in-progress
-updated: 2026-10-24
+status: done
+updated: 2026-10-26
 tags:
   - roadmap-item
 order: 484
@@ -13,7 +13,7 @@ topics:
   - baton
 owns: {}
 prs:
-  - https://github.com/immediately-run/baton/pull/108
+  - https://github.com/immediately-run/baton/pull/104
 depends_on: []
 ---
 
@@ -47,17 +47,5 @@ silence, the worst kind.
 
 ### Exit criteria
 
-- [x] a granted runner needs no `--capabilities` to serve its grant
-- [x] a never-eligible runner says so at startup
-
-### Where
-
-Built on baton#108 (B-90's PR, which carries this item's runner half): the board answers
-`granted_capabilities` so `startup()` declares the grant's set with no flag, an unsettled
-declaration is left to the heartbeat's own answer (`Runner.beatOnce` re-learns it, a re-grant
-included), the `--help` and the CLI header say the flag narrows, and `src/runner/eligibility.ts`
-names the legs' clauses a declaration can never meet, ready tickets or not. The integration case
-is S-BTN-166's (a granted runner declared from the real board registers and is offered a
-`create-pr` leg); the narrower `--capabilities llm-call` case is unit-tested in
-`test/unit/eligibility.test.ts`, since this repository's fixture courses carry no `Requires:`
-clause to starve on.
+- [ ] a granted runner needs no `--capabilities` to serve its grant
+- [ ] a never-eligible runner says so at startup

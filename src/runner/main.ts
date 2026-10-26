@@ -12,11 +12,10 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileS
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { BatonApi, BatonRefusal, envAuth } from './api';
+import { BatonApi, envAuth } from './api';
 import { HARNESS_AGENTS, type Harness } from './harness';
-import { holdHome } from './home';
+import { holdHome, legNeeds, readHead } from './home';
 import { GIT_NONINTERACTIVE_ENV } from '../defaults/course-markers';
-import { legClauses, startup } from './eligibility';
 import { Runner, stampLine, withTimestamps } from './runner';
 
 export interface RunArgs {
@@ -27,9 +26,8 @@ export interface RunArgs {
   repository: string;
   hostname: string;
   tier: string;
-  /** B-86: the declaration `--capabilities` made, or null when the flag is absent — then the
-   * heartbeat declares the grant's capabilities (the server's answer carries them) and only a
-   * heartbeat before the first grants landing falls back to `agent-venue`. The flag narrows. */
+  /** B-86: `--capabilities`, which narrows. Null when the flag is absent — the runner then
+   *  declares what the grant allows (`grant.capabilities` on its first answer). */
   capabilities: string[] | null;
   beatEvery: number;
   /** The one course this runner serves, of several the home checkout declares (R-BTN-131). */
@@ -47,9 +45,8 @@ export interface RunArgs {
 /** `baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]
  * [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b] [--beat-every <ms>]
  * [--course <id>] [--test-harness] [--verbose]`.
- * `--capabilities` narrows what the runner's grant allows — it exists to narrow, never to enable:
- * without it the runner declares the grant's own capabilities (B-86). Unknown flags are refused,
- * never dropped. */
+ * Unknown flags are refused, never dropped. `--capabilities` narrows the grant: without it the
+ * runner declares what the grant allows (B-86). `--help` prints this, before any credential. */
 export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): RunArgs {
   const out: RunArgs = {
     harness: 'opencode', home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
@@ -86,6 +83,25 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
   }
   return out;
 }
+
+/** B-86: `baton run --help` (and `-h`) — the usage `parseRunArgs` reads, and what the ticket's
+ * What-to-build 2 asks the runner to say: `--capabilities` narrows the grant, it never enables
+ * what the grant does not allow, and absent it the runner declares the grant. Printed before any
+ * credential or network work, and the exit is 0. */
+export const RUN_USAGE = [
+  'usage: baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]',
+  '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
+  '                 [--beat-every <ms>] [--course <id>] [--test-harness] [--verbose]',
+  '',
+  'Runs this machine\'s worker: it heartbeats, claims a ticket of its course and runs each leg.',
+  '',
+  '  --capabilities a,b  narrows what the grant allows; it never enables what the grant does not.',
+  '                      Absent, the runner declares what the grant allows — no flag is needed to',
+  '                      serve the grant. A machine without a browser narrows, e.g. llm-call,create-pr.',
+].join('\n');
+
+/** B-86: whether the arguments ask for the usage — `--help` or `-h`, anywhere in them. */
+export const asksHelp = (argv: string[]): boolean => argv.includes('--help') || argv.includes('-h');
 
 /** A repository's course declarations for the heartbeat (rule 9): the spec's
  * `.baton/baton.json` `courses: [{id, version}]` (§2c/R-BTN-51) first; docs' interim is the
@@ -214,6 +230,12 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     process.stderr.write(`baton: this session carries BATON_PARENT=${parent}: a leg session never claims (§6.13)\n`);
     return 1;
   }
+  // B-86: `--help` answers the usage and returns before any credential or network work — a
+  // machine asking what the flags mean needs no key and no Baton.
+  if (asksHelp(argv)) {
+    (io.log ?? ((l: string) => process.stdout.write(`${l}\n`)))(RUN_USAGE);
+    return 0;
+  }
   const a = parseRunArgs(argv);
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   // Verbose (the owner, 2026-10-23): every line carries the time it was written.
@@ -241,6 +263,19 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // One course per runner (the claim response names no course): refused at startup, loudly, not
   // per claim.
   const course = runnerCourse(declareCourses(a.home), a.course);
+  // B-86: no `--capabilities` asks for nothing — the grant speaks, and each answer's
+  // `grant.capabilities` is what the runner declares. The flag narrows that.
+  if (a.capabilities == null) say('baton: no --capabilities given — the runner declares what the grant allows (narrow it with --capabilities, e.g. a machine without a browser)');
+  // The banner's capabilities field reads the same way: a run with no flag declares the grant,
+  // which is only known once its first answer arrives, so it says so rather than implying
+  // `agent-venue` alone (B-86).
+  const declared = a.capabilities?.join(',') ?? 'grant (--capabilities to narrow)';
+  // 2026-10-24: the identity banner — which source, what it declares, which course. Every
+  // historical log this week began with no hint of what code produced it.
+  try {
+    const head = execFileSync('git', ['-C', a.home, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+    say(`baton: runner starting: home ${a.home} @ ${head}, capabilities ${declared}, course ${course.course}@${course.version}, host ${a.hostname}, session ${a.session}`);
+  } catch { /* a home with no git yet: the rest of the banner still names the run */ }
   // One runner per home checkout: its legs run in the working tree (R-BTN-131). Node's default
   // SIGINT/SIGTERM exit skips \`finally\`, so the lock is released on those signals too.
   const release = holdHome(a.home);
@@ -265,19 +300,14 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   };
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
-  const api = new BatonApi({ url: a.url, transport: (req) => fetch(req), auth }, say);
-  // B-86 item 3, off `baton board`'s answer (B-90): a runner whose declaration can match none of
-  // its course's legs says why in one line at startup, instead of idling in silence.
-  const started = await startup(api, a, course.course, (board) => {
-    const queues = board.repository?.courses?.find((c) => c.id === course.course)?.queues ?? [];
-    return legClauses(board.course_files?.[course.course], queues);
-  });
-  if (started.line !== null) say(started.line);
   runner = new Runner({
-    api,
+    api: new BatonApi({ url: a.url, transport: (req) => fetch(req), auth }, say),
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
-    tierCeiling: a.tier, capabilities: started.declare ?? undefined,
+    tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     courses: [course],
+    // B-86: the legs the runner's course requires, from the home checkout's working tree — what
+    // a never-eligible runner says it lacks at startup.
+    legNeeds: () => legNeeds(a.home, readHead(a.home), course.course),
     stateFile: join(cacheDir(), `${a.session}.json`),
     beatEvery: a.beatEvery, log, verbose: a.verbose, // the Runner stamps its own lines under verbose
     fetch: io.fetch ?? ((home) => fetchMain(home, say)),

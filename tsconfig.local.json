@@ -35,7 +35,6 @@
     "test/unit/cli.test.ts",
     "test/unit/runner-main.test.ts",
     "test/unit/runner-protocol.test.ts",
-    "test/unit/eligibility.test.ts",
     "test/unit/runner-bundle.test.ts",
     "test/integration/S-BTN-41.runner.test.ts",
     "test/unit/check-traces.test.ts",

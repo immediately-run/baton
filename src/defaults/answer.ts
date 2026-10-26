@@ -31,12 +31,23 @@ export interface ReadAnswer {
 /** A PR URL, as `pr-close.ts` writes and reads it (B-29). */
 const PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
 
+/** Markdown and quote marks an agent may wrap a lone value word in — `` `changes` ``,
+ *  `**approve**`, `"changes"`: a balanced pair, stripped before the whole-word check. Found
+ *  live 2026-10-24: a review's last line `` `changes` `` failed its round — the verdict was
+ *  right and the reader was wrong, B-85's tolerance exactly where the answer is right. The
+ *  wrapper never widens what counts: the word inside must still be one of `values`, whole. */
+const WRAPPED = /^([`'"*_]+)(.+)\1$/;
+
 /** `line` split on whitespace, or null when `line` is not an answer: it must open with one of
- *  `values` as a whole word, and the rest must be nothing or exactly one PR URL. */
+ *  `values` as a whole word (a balanced wrapper pair around it is unwrapped), and the rest
+ *  must be nothing or exactly one PR URL. */
 function answerOn(line: string, values: readonly string[]): ReadAnswer | null {
   const words = line.split(/\s+/);
-  const answer = words[0];
-  if (answer === undefined || !values.includes(answer)) return null;
+  let answer = words[0];
+  if (answer === undefined) return null;
+  const wrapped = WRAPPED.exec(answer);
+  if (wrapped && values.includes(wrapped[2])) answer = wrapped[2];
+  if (!values.includes(answer)) return null;
   const rest = words.slice(1);
   if (rest.length === 0) return { answer, pr: null, line };
   if (rest.length === 1 && PR_URL.test(rest[0])) return { answer, pr: rest[0], line };

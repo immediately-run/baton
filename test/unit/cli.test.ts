@@ -27,6 +27,10 @@ describe('plan: one request per command', () => {
       .toEqual({ repository: 'docs', public_key: PUB, hostname: 'h', capabilities: ['human-operator'] });
     expect(plan('admin', ['revoke', 'SHA256:a/b'], key).path).toBe('/v1/admin/keys/SHA256%3Aa%2Fb/revoke');
     expect(plan('admin', ['open'], key)).toEqual({ method: 'POST', path: '/v1/admin/login-links', body: {} });
+    // B-118: the dashboard's state is one signed GET, and takes nothing more.
+    expect(plan('admin', ['state'], key)).toEqual({ method: 'GET', path: '/v1/admin/state' });
+    expect(() => plan('admin', ['state', 'docs'], key)).toThrow('takes no further argument');
+    expect(() => plan('admin', ['state', '--repository', 'docs'], key)).toThrow('not a flag');
     expect(() => plan('admin', ['repo', 'add', 'x/y'], key)).toThrow('--owner-key is required');
   });
 

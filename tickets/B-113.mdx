@@ -1,0 +1,79 @@
+---
+title: "B-113 — Dependencies on another repository's tickets: depends_on names a qualified id"
+id: B-113
+project: baton
+status: available
+updated: 2026-10-25
+repos:
+  - baton
+tags:
+  - roadmap-item
+  - EXPEDITE
+order: 515
+tier: critical
+description: "Relax §4's relations-stay-home rule for depends_on (parent stays home): a ticket may depend on a ticket of another repository registered with the same Baton, named by its qualified id <repository id>:<local id>. Gating resolves against that repository's board; a dependency on a less visible repository needs its owner's consent; an unknown target is refused at the post; cross-repository cycles are refused by board validation; baton tickets claim and check resolve qualified ids through the repos map. Expedited: it changes the ticketing system itself. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-111
+  - B-112
+---
+
+**Brief:** the owner, 2026-10-25: work that belongs together crosses repositories — a
+Fieldhouse ticket waiting on two Baton tickets (fieldhouse FLDH-27 on B-111 and B-112), the
+headquarters' instance tickets waiting on the product changes they build (fieldhouse
+FLDH-30's split). Today the wait can only be written as prose (a `**Waits on:**` line), so
+nothing stops a claim before the other repository's work is done. The owner asked for a
+dependency that is not just a local id. A file URL was considered and rejected: a done
+ticket moves to `archive/`, so the URL breaks exactly when the dependency is met, and it
+ties identity to a forge, branch and path that Baton cannot resolve. Baton already names
+tickets by **qualified id** (`docs:R3-1205`, §4); this ticket lets `depends_on` use it.
+Expedited: a ticket that changes the ticketing system itself is finished first.
+**Spec:** `spec/BATON_SPEC.md` §4 (*Home*, *Relations stay home*), R-BTN-120 (a leg's
+prerequisites, `depends_at`), R-BTN-140 and S-BTN-116 (cross-repository reach and its
+consent), R-BTN-12, R-BTN-31.
+**Depends on:** B-111 (board validation and `baton tickets check`, which this extends) and
+B-112 (`baton tickets claim`, which this extends).
+**Used by:** fieldhouse FLDH-27 and FLDH-30, whose waits become declared dependencies.
+
+### What to build
+
+1. **The spec amendment**: `depends_on` (and so `depends_at`) may name a ticket of another
+   repository registered with the same Baton by its qualified id
+   `<repository id>:<local id>`; an unqualified id stays local. `parent` stays home.
+2. **Gating** (R-BTN-120): a cross-repository prerequisite resolves against the other
+   repository's board — done, reached or at a leg, as for a local one.
+3. **Visibility and consent**: a dependency is accepted when the target's repository is at
+   least as visible as the dependent's; otherwise it needs the target repository owner's
+   consent, recorded as R-BTN-140's cross-repository consent is (S-BTN-116's precedent).
+   A board never shows a less visible repository's ticket without that consent.
+4. **Unknown targets refused** at the board post: an unregistered repository id, or an id
+   that is neither live nor closed there.
+5. **Cycles across repositories** refused by board validation (B-111's item 4, across
+   boards), named as their path with qualified ids.
+6. **The git-only commands**: `baton tickets claim` resolves a qualified dependency through
+   `.baton/baton.json`'s `repos` map and treats it as done when the target is archived or
+   live `done`/`superseded` there; `baton tickets check` accepts qualified ids in
+   `depends_on` and on the `**Depends on:**` line. The markdown source posts them as
+   written.
+7. **Display**: the dashboard and the wiki board render a qualified dependency as a link
+   built from the target's registration (`web_base`, forge path), never a stored URL.
+
+### Tests
+
+- A cross-repository dependency gates a claim until the target is done; an unknown target
+  is refused; a cycle through two repositories is refused with its path; a dependency on a
+  less visible repository is refused without consent and accepted with it.
+- New `S-BTN-n` scenarios for each (R-BTN-31).
+
+### Exit criteria
+
+- [ ] the §4 amendment merged with its scenarios
+- [ ] released in `@immediately-run/baton`; fieldhouse FLDH-27's wait expressible as
+      `depends_on: [baton:B-111, baton:B-112]`
+
+## Status
+
+_(filed 2026-10-25, expedited)_

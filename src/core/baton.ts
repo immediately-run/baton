@@ -639,6 +639,9 @@ export class BatonCore {
       // B-90: the registry, for an operator or an agent with a key — no new query: the same
       // `uiRepo` rows `/v1/ui/state` lists as its `repositories`.
       if (m === 'GET' && p === '/v1/admin/repositories') return json(this.adminView());
+      // B-118: what an administrator's dashboard session reads, for the key itself — the same
+      // `uiState()`, so the dashboard and a terminal cannot drift.
+      if (m === 'GET' && p === '/v1/admin/state') return json(this.uiState());
       if (m === 'POST' && p === '/v1/admin/repositories') return json(await this.admin.repositories(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/probes') return json(await this.admin.addProbe(actor, await body()));
       // R-BTN-76: external resources, their account instances, and a reading by hand.

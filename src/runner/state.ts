@@ -20,9 +20,12 @@ export interface RunnerState {
   /** Set when the sidecar's own computation — or a refused heartbeat — lost the lease. */
   lease_lost: boolean;
   lease_lost_because: string | null;
+  /** B-86: the capabilities the last answered heartbeat declared — what `--capabilities`
+   *  chose, narrowed from the grant. Null until a beat answers. */
+  declared: string[] | null;
 }
 
-export const emptyState = (): RunnerState => ({ worker_id: null, incarnation: null, secret: '', claim: null, last_ok: null, lease_timeout_s: null, lease_lost: false, lease_lost_because: null });
+export const emptyState = (): RunnerState => ({ worker_id: null, incarnation: null, secret: '', claim: null, last_ok: null, lease_timeout_s: null, lease_lost: false, lease_lost_because: null, declared: null });
 
 /** §6.3's margin (R-BTN-6): two missed beats of the 2-minute cadence. */
 export const LEASE_MARGIN_MS = 4 * 60_000;

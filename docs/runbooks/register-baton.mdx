@@ -107,6 +107,13 @@ The hostname must be what the machine reports (`hostname`, or `BATON_HOSTNAME`),
 are refused. Capabilities are from `src/shared/vocabulary.mjs` (`authentication`, `llm-call`,
 `create-pr`, `drivable-browser`, `agent-venue`); only an administrator grants `human-operator`.
 
+The grant *is* the machine's capability declaration (B-86): `baton run` with no `--capabilities`
+declares what the grant allows on the repositories it serves, so the runner and the grant cannot
+disagree. `--capabilities` exists to **narrow** — a machine without a browser passes
+`--capabilities authentication,llm-call,create-pr` — never to enable: a name the grant does not
+allow is refused at the heartbeat (`forbidden`). A runner whose declaration misses a capability a
+leg requires says so in one line at startup (`missing-capability`) rather than idling.
+
 Once the `pr` course's legs exist (R3-1249), the worker runs:
 
 ```sh
@@ -114,11 +121,8 @@ BATON_KEY_FILE=~/.ssh/baton_worker BATON_REPOSITORY=baton \
   node cli/baton.mjs run --harness claude-code --home <a checkout of immediately-run/baton>
 ```
 
-`--capabilities` is for a narrower machine: without it the runner declares whatever the grant
-allows, so the flag never has to be kept in step with the grant — and a runner that can match none
-of its course's legs says so in one line at startup (B-86).
-
-Check: the dashboard's Workers view shows the machine heartbeating.
+Check: the dashboard's Workers view shows the machine heartbeating, and the log's first lines say
+what it declares (`baton: declaring … — the grant's capabilities`).
 
 ## 6. Cut over
 
@@ -139,3 +143,5 @@ When Baton itself is down, agents cannot claim the ticket that fixes it. Then:
   it;
 - `npx wrangler rollback` puts the previous version back, but only to a version at the same
   migration number (`npx wrangler deployments list`): the schema does not roll back.
+
+allows, so the flag never has to be kept in step with the grant — and a runner that can match none

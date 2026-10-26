@@ -1,0 +1,12 @@
+-- 0022_leg_capabilities.sql — rule 4's leg input, derived beside the course file (BATON_SPEC §2e R-BTN-120,
+-- R-BTN-121, §12.1, §12.5; B-86, review round 6, finding 2).
+-- The `courses` row keeps the validated file exactly as the repository posted it — its
+-- `capability_roles` and its own lists (§12.1). What the candidate query's SQL cannot do is expand a
+-- role, so the same expansion `graphOf` reads is derived beside the file: each leg id mapped to the
+-- capabilities that leg requires, written by the registry in the statement that writes the file.
+-- Named for the capabilities it holds, never `leg_needs` — that is R-BTN-76's table (§13.6,
+-- review round 7, finding 2).
+-- A deployed file's legs and roles can only be expanded in code, so an existing row reads empty
+-- until its next accepted post; the query's leg clause then checks no name for a leg it does not
+-- describe. An accepted post is a sync, and every runner beats against the same Baton.
+ALTER TABLE courses ADD COLUMN leg_capabilities_json TEXT NOT NULL DEFAULT '{}';

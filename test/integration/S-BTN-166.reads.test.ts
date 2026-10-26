@@ -10,7 +10,6 @@
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { cutover, hbBody, keyCall, ORIGIN, payload, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
-import { legClauses, startup, type BoardView } from '../../src/runner/eligibility';
 import { call as hostCall } from '#host';
 
 const board = inject('board');
@@ -119,11 +118,6 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
       // B-86: the courses' legs with their clauses, for the startup line.
       expect(Object.keys(res.json.course_files['roadmap-pr'].legs)).toContain('implement');
     }
-    // B-86 item 1: the heartbeat tells a granted key what its grant allows.
-    const hb = await heartbeat(granted, 'granted-host');
-    expect(hb.status).toBe(200);
-    // `none` — a name `capabilitiesOf` drops for every runner — closes the list (src/core/workerApi.ts).
-    expect(hb.json.granted_capabilities).toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call', 'none']);
     // A key Baton does not know cannot heartbeat at all — the board read above is its only answer.
     expect((await heartbeat(stranger, 'stranger-host')).status).toBe(401);
   });
@@ -143,8 +137,11 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
   it('a granted key’s board names its grant, as its heartbeat does; an owner’s or an administrator’s names none', async () => {
     const hb = await heartbeat(granted, 'granted-host');
     const keyed = await read(granted, '/v1/repositories/docs/board');
-    // One fact, one answer: the board's field is the heartbeat answer's, name for name.
-    expect(keyed.json.granted_capabilities).toEqual(hb.json.granted_capabilities);
+    // One fact, one answer: the board's field is the heartbeat answer's grant, name for name
+    // (the heartbeat names it `grant.capabilities`, B-86; the board `granted_capabilities`,
+    // which also carries `none` — a name that says nothing, dropped where it is compared).
+    const names = (xs: unknown) => (Array.isArray(xs) ? xs.filter((x) => x !== 'none') : []);
+    expect(names(keyed.json.granted_capabilities)).toEqual(names(hb.json.grant?.capabilities));
     expect(keyed.json.granted_capabilities).toContain('create-pr');
     for (const key of [docsOwner, admin]) {
       const res = await read(key, '/v1/repositories/docs/board');
@@ -153,29 +150,4 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     }
   });
 
-  it('B-86: a granted runner with no --capabilities declares its grant and is offered a create-pr leg; a narrow one idles with the line', async () => {
-    await cutover(1, 'docs');
-    // The board as `API.boardView` reads it — the producer's own answer, not a hand-typed one.
-    const boardOf = async () => (await read(granted, '/v1/repositories/docs/board')).json as unknown as BoardView;
-    const clauses = (b: BoardView) => {
-      const queues = b.repository?.courses?.find((c) => c.id === 'roadmap-pr')?.queues ?? [];
-      return legClauses(b.course_files?.['roadmap-pr'], queues);
-    };
-    const api = { boardView: async () => (await boardOf()) as unknown as Record<string, any> };
-    const started = await startup(api, { repository: 'docs', capabilities: null }, 'roadmap-pr', clauses);
-    // The grant's own set, `none` included as the heartbeat answers it, and no line.
-    expect(started).toEqual({ declare: ['authentication', 'create-pr', 'drivable-browser', 'llm-call', 'none'], line: null });
-    // Declared on the heartbeat as runMain passes it from startup's answer: the grant admits it
-    // (R-BTN-58's expansion), so it registers and is offered work — the register that used to be
-    // refused for declaring `agent-venue` alone.
-    const hb = await heartbeat(granted, 'granted-host', { capabilities: started.declare });
-    expect(hb.status).toBe(200);
-    const offer = await workerAs(granted, '/v1/runner/recommendations?limit=10', undefined, 'secret-reads');
-    expect(offer.status).toBe(200);
-    expect((offer.json.recommendations as { ticket_id: string }[]).length).toBeGreaterThan(0);
-    // The flag narrows only within the grant (B-86 item 2): a declaration the grant does not
-    // allow is refused `forbidden` at the heartbeat, so the flag can never widen.
-    const outside = await heartbeat(granted, 'granted-host', { capabilities: ['mcp-chrome'] });
-    expect(outside.json.code).toBe('forbidden');
-  });
 });

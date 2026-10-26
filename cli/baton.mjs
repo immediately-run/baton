@@ -24,6 +24,7 @@
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
 //                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
 //   baton admin -i KEY revoke FINGERPRINT                          baton admin -i KEY open
+//   baton admin -i KEY state      — what the dashboard draws, as JSON, read with the key (B-118)
 //   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T]
 //   baton owner -i KEY revoke REPO FINGERPRINT
 //   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
@@ -213,6 +214,11 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     if (cmd === 'open') {
       parseArgs(rest, [], [], 0);
       return { method: 'POST', path: '/v1/admin/login-links', body: {} };
+    }
+    if (cmd === 'state') {
+      // B-118: the dashboard's state, read with the key — no session, no Access login.
+      parseArgs(rest, [], [], 0);
+      return { method: 'GET', path: '/v1/admin/state' };
     }
     if (cmd === 'resource' && rest[0] === 'add') {
       const { flags, positional } = parseArgs(rest.slice(1), [], ['scope', 'schema'], 1);

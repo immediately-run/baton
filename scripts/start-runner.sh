@@ -7,8 +7,8 @@
 #
 # Usage: scripts/start-runner.sh [--home <checkout>] [--for 45m|2h|90s] [--session <name>]
 #                                [--harness opencode|claude-code] [--capabilities a,b]
-#                                (B-86: no --capabilities is the default — the runner declares
-#                                 whatever its grant allows, so nothing to keep in step)
+#                                (capabilities default to the runbook's grant:
+#                                 create-pr,llm-call,agent-venue)
 #                                [--url <https://…>] [--check] [--log <file>]
 #
 #   --home        the checkout the runner works in (default: this repository). One runner per
@@ -16,9 +16,13 @@
 #   --for         stop gracefully after a duration (s, m or h; default: until Ctrl-C). Stopping
 #                 is safe at any point: the runner releases its claim with a hand-off.
 #   --check       run the preflight only and print what would start; nothing runs.
+#   --capabilities  narrows what the runner declares; without it the runner declares what the
+#                 grant allows on the repositories it serves (B-86). It never enables: a name the
+#                 grant does not allow is refused at the heartbeat.
 #
 # Environment: BATON_KEY_FILE (or BATON_KEY / BATON_TOKEN) must name the worker key the owner
-# granted — hostname and capabilities must match the grant (runbook step 5). BATON_HOSTNAME
+# granted — the hostname must match the grant, and the grant is what the runner declares unless
+# --capabilities narrows it (runbook step 5). BATON_HOSTNAME
 # overrides the reported hostname; BATON_URL, BATON_REPOSITORY have defaults.
 set -eu
 
@@ -27,10 +31,11 @@ HOME_DIR="$ROOT"
 FOR=""
 SESSION="run-$(date +%Y%m%d-%H%M%S)-$$"
 HARNESS="opencode"
-# B-86: the runner declares what its grant allows unless --capabilities narrows it — the old
-# list cut the runner down to the runbook's grant and starved every leg the grant did not name
-# (the 2026-10-24 starvation), so the default here is now empty: nothing narrowed.
-CAPABILITIES=""
+# What the runner declares (rule 4 checks declared ∩ granted): the runbook's grant names
+# exactly these (step 5), so the default keeps the intersection non-empty; --capabilities
+# overrides — and the grant must name what you name, or every leg refuses rule 4
+# (missing-capability), which is the 2026-10-24 starvation the banner now shows beside them.
+CAPABILITIES="create-pr,llm-call,agent-venue"
 URL="${BATON_URL:-}"         # empty: the CLI's default (production)
 CHECK_ONLY=0
 LOG=""
@@ -140,7 +145,7 @@ note "url:          ${URL:-default (https://baton.immediately.run)}"
 note "repository:   $REPOSITORY (course: what .baton/baton.json declares)"
 note "home:         $HOME_DIR"
 note "hostname:     $HOSTNAME_REPORTED  (must match the grant; BATON_HOSTNAME overrides)"
-note "capabilities: ${CAPABILITIES:-the grant's own (B-86)}  (--capabilities narrows what the grant allows; it never widens it)"
+note "capabilities: $CAPABILITIES  (must be granted to the key, or every leg refuses rule 4; --capabilities overrides)"
 note "harness:      $HARNESS (fills in only when the settings name no agent_command)"
 note "agent:        $AGENT_COMMAND"
 note "session:      $SESSION"
