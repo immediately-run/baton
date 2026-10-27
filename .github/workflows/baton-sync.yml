@@ -45,7 +45,11 @@ jobs:
           set -o pipefail
           node .baton-cli/cli/baton.mjs repo sync --latest main 2>&1 | tee sync.log
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The sync reads every repository a live ticket names in `repos:`; the Actions token
+          # reads this repository only, so a private sibling (docs, fieldhouse) 404s and fails
+          # the run (docs/standard-courses.mdx). BATON_SYNC_TOKEN is a fine-grained, read-only
+          # token over the repositories `.baton/baton.json` maps; without it, the Actions token.
+          GITHUB_TOKEN: ${{ secrets.BATON_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
       # B-89: a run that posted nothing is an annotation, never a green check — a held board
       # from another run's reading in flight (`busy`), or any failed post. The step above
       # fails on a failed post, so this runs even then (`!cancelled()`). A `busy` run over a CLI

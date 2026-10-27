@@ -107,7 +107,10 @@ its harness, and with no command named, it is the command.
   stands for all of them, and the ticket is merged when every PR is. A leg whose line goes on a
   PR names it after its answer (`approve https://github.com/<owner>/<name>/pull/<n>`) when the
   checkout's branch has none. The workflow's token reads public repositories; a private one
-  needs a token that can read it.
+  needs a token that can read it. This repository's workflow takes it from the `BATON_SYNC_TOKEN`
+  secret: a fine-grained token, read-only (Pull requests, Checks, Contents, Metadata), over every
+  repository its `repos` map names, this one included — a collaborator's permission is read
+  through it too (R-BTN-139).
 - **`bug-report`, `draft-ticket`, `decision` and `build-app` open no PR.** Their legs commit their work to the
   default branch, and each leg's `close` appends a line to `.baton/markers.jsonl` saying where the
   ticket got to and which leg comes next. The sync reads that file, so these courses need no forge

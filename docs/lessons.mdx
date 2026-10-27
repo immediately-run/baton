@@ -176,3 +176,15 @@ These are its lessons, newest understanding first.
   had the fault. **A check over prose matches an id-SHAPED token, never the list grammar,** and
   `none` is the empty list. *Status: fixed with
   [B-111](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-111.mdx).*
+
+## 2026-10-27 — a ticket that names a private repository turns the sync red
+
+- **A ticket's `repos:` is a read the sync's token must be able to make.** B-130 named
+  `fieldhouse` and `docs`; the map lacked `fieldhouse` (fixed in #123), and then the run on
+  `e082b9f` failed `404 — immediately-run/fieldhouse is named in repos: by B-130; the sync's
+  token cannot read it` — the workflow's `GITHUB_TOKEN` reads this repository alone, and both
+  siblings are private. The failure is right (no partial reading), and it lands on whoever pushes
+  next, not on the ticket that caused it. **Before a live ticket names a private repository, the
+  sync's token must read it** — here `BATON_SYNC_TOKEN`, a fine-grained read-only token
+  (docs/standard-courses.mdx). *Status: the workflow reads the secret; the token is the
+  owner's to create.*
