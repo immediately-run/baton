@@ -186,5 +186,9 @@ These are its lessons, newest understanding first.
   siblings are private. The failure is right (no partial reading), and it lands on whoever pushes
   next, not on the ticket that caused it. **Before a live ticket names a private repository, the
   sync's token must read it** — here `BATON_GITHUB_READ_TOKEN`, a fine-grained read-only token
-  (docs/standard-courses.mdx). *Status: the workflow reads the secret; the token is the
-  owner's to create.*
+  (docs/standard-courses.mdx). A fine-grained token that reaches a repository without the
+  permission an endpoint needs answers `403 Resource not accessible by personal access token`,
+  where a missing repository answered 404: the first run after #125 read `baton` and
+  `baton-board` and was refused on `fieldhouse` until its Pull requests permission was granted.
+  The token expires; an expired one is a 401 on the home repository's PR list. *Status: fixed —
+  run 40572091880 on `dd7a2f0` read `fieldhouse` and posted the board (#125, the owner's token).*
