@@ -38,6 +38,7 @@ describe('check-wiki: the component vocabulary (B-114)', () => {
     expect(plain.out).toMatch(/<RoadmapBoard> is neither a Grove component nor registered/);
     const typo = bundle({ ...WIKI, opensWith: { task: 'open-wiki', version: '1.0' }, components: { RoadmapBoard: './components/RoadmapBoard.tsx' } }, '# Page\n\n<Calout>hi</Calout>\n');
     expect(typo.code).toBe(1);
+    expect(typo.out).toMatch(/<Calout> is neither a Grove component/);
   });
 
   it('a bundle with its own components map accepts the names it lists', () => {

@@ -38,7 +38,7 @@ const errors = [];
 const fail = (file, msg) => errors.push(`${relative(REPO, file) || file}: ${msg}`);
 const processor = createProcessor();
 
-/** Every .mdx under a bundle, except `_`-prefixed folders (and a `components` folder, if one exists). */
+/** Every .mdx under a bundle, except `_`-prefixed folders. */
 function pages(dir) {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
@@ -75,7 +75,7 @@ async function checkBundle(root) {
   const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
   const components = new Set([...GROVE, ...Object.keys(marker.components ?? {})]);
   // B-114: a wiki whose marker names a viewer app (`opensWith.app`, e.g.
-  // `github:immediately-run/baton-board`) takes its WHOLE component vocabulary from that app,
+  // `github:immediately-run/baton-board`) takes its whole component vocabulary from that app,
   // and keeps no `components` map of its own. The components are the viewer's code in another
   // repository, which this offline check cannot read, so the unknown-component rule is off for
   // such a bundle — including for a misspelling (`<Calout>`), which is now the viewer's to
