@@ -31,7 +31,7 @@ beforeEach(async () => {
   await cutover();
 });
 
-describe('the claim and end contracts (§6.2, §6.5, §11)', () => {
+describe('the claim and end contracts (§11, §6.5, §11)', () => {
   it('a claim before cutover is not-cut-over; after it, the response names the path and snapshot, never content', async () => {
     const { secret } = await register('vm-a');
     await rows(`UPDATE repositories SET cutover_at = NULL`);
@@ -52,7 +52,7 @@ describe('the claim and end contracts (§6.2, §6.5, §11)', () => {
   // the claim's snapshot (`course_version`) — the field the runner loads a claim's course by, so
   // one runner serves several courses. A ticket on a course other than the board's proves both
   // are read from the claim, not from a default.
-  it('the claim answer names the ticket’s course and its version (B-103, §6.2)', async () => {
+  it('the claim answer names the ticket’s course and its version (B-103, §11)', async () => {
     // ops' board, its ticket on `runbook` at version 2 — a course that is not the docs board's.
     const ops = { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml' };
     await withCore((c) => {
