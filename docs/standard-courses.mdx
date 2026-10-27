@@ -35,13 +35,16 @@ one Markdown file of instructions per leg. It also adds the course to `.baton/ba
 ticket picks its course with `course:` in its frontmatter, and the repository's `default_course`
 covers the rest.
 
-A runner serves one course, since a claim does not say which course its ticket is on. A
-repository on several courses runs one runner for each, each in its own clone, because a
-runner's legs work in its checkout's working tree (a second runner on a checkout is refused):
+A runner serves every course its home checkout declares — any course its capabilities can serve —
+since the claim answer names the ticket's `course_id` and the runner loads that course from the
+claim's snapshot. One checkout on two courses is one runner on two courses; `--course` narrows it
+to one, for a machine that should serve only part of what the checkout declares. Its only limit
+is one leg at a time (at least for now): a runner's legs work in its checkout's working tree, so
+a second runner on the same checkout is still refused:
 
 ```
-npx baton run --course create-pr  --home ~/src/repo
-npx baton run --course bug-report --home ~/src/repo-bug-report
+npx baton run                    --home ~/src/repo   # every course .baton/baton.json declares
+npx baton run --course create-pr --home ~/src/repo   # narrowed to create-pr
 ```
 
 ## The agent that runs the legs

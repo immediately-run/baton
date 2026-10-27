@@ -43,11 +43,15 @@ export interface RunnerOptions {
   /** B-86: what the heartbeat declares — `--capabilities`, which narrows. Absent, the runner asks
    *  once (a beat declaring nothing) and declares the grant the answer carries. */
   capabilities?: string[];
-  /** B-86: the rule 4 names the legs of the course it serves require, read from the home checkout
+  /** B-86: the rule 4 names the legs of the courses it serves require, read from the home checkout
    *  each time it is asked, so a runner whose declaration lacks one says so at startup. Injected by
-   *  `baton run`; absent, no such line. */
+   *  `baton run`; absent, no such line. B-103: every served course's legs, not one course's. */
   legNeeds?: () => Promise<string[]> | string[];
   tierCeiling?: string;
+  /** The courses this runner serves and declares (B-103, rule 9): every course its home checkout
+   *  declares, or the one `--course` narrowed it to. The claim it takes names the ticket's course
+   *  (`course_id`), which `runClaim` loads from the claim's snapshot — so one runner, one checkout,
+   *  serves several courses, one leg at a time (rule 3). */
   courses: { course: string; version: number }[];
   stateFile: string;
   beatEvery?: number;
@@ -735,6 +739,29 @@ export class Runner {
     return this.runClaim(claim);
   }
 
+  /** The course a claim runs (B-103, §11's claim answer): the one its answer names — `course_id`, the ticket's
+   *  course at the claim's snapshot — which one runner loads per claim, so a `create-spec` leg and
+   *  the next claim's `create-pr` leg are consecutive legs of the same runner. A claim answered
+   *  with no course (a pre-B-103 answer) falls back to the one course the runner declares, and is
+   *  refused loudly with several rather than guessed: the snapshot's own several-course list is
+   *  never a choice the runner may make (`courseOf`). */
+  private claimCourse(claim: Record<string, any>): string {
+    const named = claim.course_id as string | null | undefined;
+    // A narrowed runner (--course) serves ONE course; a claim answered for another is refused
+    // here as well as by the server's rule 9 — the two must agree on their own, and a server
+    // bug or an older instance must never make a narrowed machine run a course it never
+    // declared (round 1, 1-A-1).
+    if (named != null && named !== '' && !this.o.courses.some((c) => c.course === named)) {
+      throw new Error(`the claim is for course ${named}, but this runner serves ${this.o.courses.map((c) => c.course).join(', ')} — a --course runner never runs one it did not declare`);
+    }
+    // The claim's own course; a pre-B-103 answer's fallback is the one course a one-course runner
+    // declares — and with several the refusal below, never a guess at the snapshot's list.
+    const want = named != null && named !== '' ? named : this.o.courses.length === 1 ? this.o.courses[0].course : null;
+    if (want == null) throw new Error(`the claim names no course and this runner declares ${this.o.courses.length} (${this.o.courses.map((c) => c.course).join(', ')}) — the runner never guesses which course a claim is on`);
+    // The snapshot must carry it — `courseOf`'s refusal is what makes a moved course loud.
+    return courseOf(this.o.home, claim.snapshot_sha as string, want);
+  }
+
   private async runClaim(claim: Record<string, any>): Promise<ClaimOutcome> {
     const claimId = claim.claim_id as number;
     const ticket = claim.ticket_id as string;
@@ -744,7 +771,7 @@ export class Runner {
       if (!ensureSha(this.o.home, claim.snapshot_sha, () => this.o.fetch?.(this.o.home))) {
         return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);
       }
-      course = loadCourse(this.o.home, claim.snapshot_sha, courseOf(this.o.home, claim.snapshot_sha, this.o.courses.length === 1 ? this.o.courses[0].course : undefined));
+      course = loadCourse(this.o.home, claim.snapshot_sha, this.claimCourse(claim));
     } catch (e) {
       this.log(`baton: the claim's course would not load (${msg(e)})`);
       return await this.finish(claimId, { end_reason: 'released:stale-board', reached: claim.station, ...(claim.legs?.[0] ? { next: claim.legs[0] } : {}) }, null);

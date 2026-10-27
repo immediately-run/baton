@@ -4,7 +4,7 @@ import { describe, it, expect, inject, beforeEach } from 'vitest';
 import { confirmations } from '../../src/shared/batonSync.mjs';
 import { gatesFor } from '../../src/core/gates';
 import {
-  beat, claimItem, claimRow, course, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload, recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, withCore, workerCall, tick,
+  beat, claimItem, claimRow, course, cutover, q, endClaim, hbBody, keyCall, ORIGIN, ownerCall, payload, recommended, refresh, register, requestId, rows, setAdminKeys, setClock, sha256, syncCall, syncToken, withCore, workerCall, tick,
 } from '../helpers';
 import { makeKey, signedRequest } from '../lib/sshKeys';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
@@ -31,7 +31,7 @@ beforeEach(async () => {
   await cutover();
 });
 
-describe('the claim and end contracts (§6.2, §6.5, §11)', () => {
+describe('the claim and end contracts (§11, §6.5, §11)', () => {
   it('a claim before cutover is not-cut-over; after it, the response names the path and snapshot, never content', async () => {
     const { secret } = await register('vm-a');
     await rows(`UPDATE repositories SET cutover_at = NULL`);
@@ -40,10 +40,49 @@ describe('the claim and end contracts (§6.2, §6.5, §11)', () => {
     const c = await claimItem('vm-a', secret);
     expect(c.status).toBe(200);
     // §11, R3-1232: where the ticket starts and its queued leg, the snapshot's next legs.
-    expect(c.json).toEqual({ claim_id: expect.any(Number), ticket_id: 'docs:R3-9001', station: 'filed', legs: ['implement'], next: [{ leg: 'implement', state: 'ready' }],
+    // B-103: the answer names the ticket's course and that course's version at the claim's
+    // snapshot (`roadmap-pr` is the board's course, registered at 3 — `helpers.course()`).
+    expect(c.json).toEqual({ claim_id: expect.any(Number), ticket_id: 'docs:R3-9001', course_id: 'roadmap-pr', course_version: 3, station: 'filed', legs: ['implement'], next: [{ leg: 'implement', state: 'ready' }],
       path: 'content/roadmap/R3-9001.mdx', nonce: expect.stringMatching(/^[0-9a-f]{6}$/), snapshot_sha: sha.A, previous_attempts: [], advice: null });
     expect((await beat('vm-a', secret)).json.claim).toMatchObject({ id: c.json.claim_id, ticket_id: 'docs:R3-9001', nonce: c.json.nonce, station: 'filed',
       git: { station: 'filed', path: [], path_len: 0, regressed: false, next: [{ leg: 'implement', state: 'ready' }] } });
+  });
+
+  // B-103: the claim answer names the ticket's course (`course_id`) and that course's version at
+  // the claim's snapshot (`course_version`) — the field the runner loads a claim's course by, so
+  // one runner serves several courses. A ticket on a course other than the board's proves both
+  // are read from the claim, not from a default.
+  it('the claim answer names the ticket’s course and its version (B-103, §11)', async () => {
+    // ops' board, its ticket on `runbook` at version 2 — a course that is not the docs board's.
+    const ops = { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml' };
+    await withCore((c) => {
+      c.registry.register(ops);
+    });
+    const runbook = course(2, 2, { id: 'runbook', skill: 'run-runbook', step_kinds: ['orient', 'other-step'], course: {
+      start: 'filed', start_leg: 'prepare', end: ['done'],
+      stations: { filed: { label: 'Filed' }, prepared: { label: 'Prepared' }, done: { label: 'Done' } },
+      legs: { prepare: { from: ['filed'], to: 'prepared' }, run: { from: ['prepared'], to: 'done' } },
+    } });
+    const opsSha = 'f'.repeat(40);
+    const token = await syncToken({ repository: 'immediately-run/ops', job_workflow_ref: 'immediately-run/ops/.github/workflows/baton-sync.yml@refs/heads/main' });
+    const posted = await syncCall('/v1/sync/board', payload(opsSha, null, {
+      items: [{ ...(board.states.A.state.items[0] as Record<string, unknown>), course: 'runbook' }], ready: ['R3-9001'], registry: [runbook],
+    }), token);
+    expect(posted.status).toBe(200);
+    await cutover(1, 'ops');
+    const { secret } = await register('vm-a', { courses: [{ repository: 'ops', course: 'runbook', version: 2 }] });
+    const c = await claimItem('vm-a', secret);
+    expect(c.status).toBe(200);
+    expect(c.json).toMatchObject({ ticket_id: 'ops:R3-9001', course_id: 'runbook', course_version: 2, snapshot_sha: opsSha });
+    expect(await rows('SELECT course_id FROM claims WHERE id = ?', c.json.claim_id)).toEqual([{ course_id: 'runbook' }]);
+    // A retried claim is the same answer, the course beside the version (G-BTN-2).
+    expect(await withCore((o) => (o.claims as unknown as { claimResponse: (id: number) => Record<string, unknown> }).claimResponse(c.json.claim_id)))
+      .toMatchObject({ course_id: 'runbook', course_version: 2 });
+    // A claim the core holds with no course names none — null both fields, never a default.
+    expect(await withCore((o) => {
+      o.store.exec(`UPDATE claims SET course_id = NULL WHERE id = ?`, c.json.claim_id);
+      return (o.claims as unknown as { claimResponse: (id: number) => Record<string, unknown> }).claimResponse(c.json.claim_id);
+    })).toMatchObject({ course_id: null, course_version: null });
   });
 
   it('GET next answers what a claim would, without claiming; a named item that is not ready is refused with its rule', async () => {
