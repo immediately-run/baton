@@ -42,8 +42,9 @@ describe('a board post with a dependency cycle is refused (B-111)', () => {
     expect(() => post([ticket('B-1', { depends_on: ['B-2'] }), ticket('B-2', { depends_on: ['B-1'] })], [{ id: 'B-2', as: 'done' }])).toThrow('B-2 is also live');
   });
 
-  it('refuses a cycle in the interim state.items shape not at all: it has no depends_on', () => {
-    // The interim post carries no dependencies; the check bites the normative one alone.
+  it('accepts an interim state.items post with no cycles (and refuses one with, below)', () => {
+    // An interim post carries no `dependsOn` here; a loop among them is refused since round 1
+    // (1-A-4) — the case below — and this one pins that a clean interim post still passes.
     expect(() => checkPayload({ sha: '0'.repeat(40), parent_sha: null, observation: 1, state: { items: [{ id: 'T-1', title: 'T', status: 'available', queue: 'q', node: 'n' }] }, ready: ['T-1'] })).not.toThrow();
   });
 });

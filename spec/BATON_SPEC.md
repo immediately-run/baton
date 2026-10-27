@@ -1244,7 +1244,9 @@ Baton, and it is exportable (R-BTN-88).
   (R-BTN-153).
 - A post whose live tickets' `depends_on` form a cycle is refused `invalid-params`, naming it once
   as its path (`B-1 → B-2 → B-1`); an edge to a closed ticket, or to an id the post does not name,
-  is no cycle here — the latter is `baton tickets check`'s finding (B-111).
+  is no cycle here — the latter is `baton tickets check`'s finding (B-111). The interim shape's
+  `state.items[].dependsOn` is the same graph and is refused the same way (B-111, round 1): no
+  ticket source can post a loop, whichever shape it posts.
 - Free text and identifiers are validated on write (§12.3).
 
 ### 4.5 Reading the ticket, and open-world claims

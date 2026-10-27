@@ -321,11 +321,15 @@ describe('dependsLine and bodyDependencies: the line’s bounds', () => {
     expect(bodyDependencies('see **Depends on:** A-1\n', id)).toBeNull();
   });
 
-  it('reads the body past the frontmatter, by the id grammar prose uses — never a bare word', () => {
+  it('reads the body past the frontmatter, by the id grammar prose uses — never a bare word, never a partial id', () => {
+    // A whole token only: `R-BTN-83` is never `BTN-83`, and a dotted sub-id (`B-4.1`) is not
+    // its parent `B-4` (2-r0-1).
+    expect(dependsLine('**Depends on:** R-BTN-83, B-4.1, see B-2\n')).toEqual(['R-BTN-83', 'B-2']);
     const file = '---\nid: B-111\ntitle: A ticket with depends_on in prose\n---\n\n**Depends on:** B-1, R3-1205 and B-2.\n\n**Used by:** B-3\n';
     // The line is prose: an id-SHAPED token (`B-1`, `R3-1205`) is a dependency, and "and" is
     // not (round 1, 1-A-0: the board's `LOCAL_ID` un-anchored read `none.`, `the` and `and`).
-    expect(dependsLine(file)).toEqual(['B-1', 'R3-1205', 'B-2']);
+    // A sentence-final full stop is not part of the id: `B-2.` is prose (round 2, 2-r0-1).
+    expect(dependsLine(file)).toEqual(['B-1', 'R3-1205']);
     // 'none' is the empty list, as `depends_on: []` is.
     expect(dependsLine('**Depends on:** none\n')).toEqual([]);
     // There is no separator after the marker: a first id keeps its first letter (`B-1`, never `1`).

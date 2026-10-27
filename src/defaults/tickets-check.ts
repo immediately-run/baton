@@ -17,39 +17,34 @@ import { readItems } from './read-items';
 import { ticketsMarkdown, type MarkdownFile, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
 /** The ids a `**Depends on:**` line may name, as prose writes them (B-111, round 1): an
- *  id-shaped token — a prefix and a number, `B-2`, `R3-1205`, `FLDH-27` — never a bare word.
- *  The board's own `LOCAL_ID` is `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, right for `depends_on`'s
- *  list and wrong for prose: un-anchored it reads "none.", "the" and "and" as ids (1-A-0).
- *  A body line's ids are compared with `depends_on` as sets; a token the board would not admit
- *  is left for the board's own validation to refuse. */
-const DEPENDS_ID = /^[A-Za-z][A-Za-z0-9]*-\d+$/;
+ *  id-shaped token — a prefix and a number, `B-2`, `R3-1205`, `R-BTN-83` — which the board
+ *  would admit once its prefix is whole. The board's own `LOCAL_ID`
+ *  (`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`) is right for `depends_on`'s list and wrong for prose: read
+ *  over a sentence it takes `none.`, `the` and `and` for ids (round 1, 1-A-0). The prefix's own
+ *  dashes are part of it (`R-BTN-83` is never `BTN-83`), so the pattern refuses a token that
+ *  starts mid-id: a `-` or an alphanumeric directly before the match, or a `.`/letter directly
+ *  after the number, means the token is something else (round 2, 2-r0-1). */
+const ID_TOKEN = /(?<![A-Za-z0-9._-])([A-Za-z](?:[A-Za-z0-9]*|[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)-\d+)(?![A-Za-z0-9_.])/g;
+
+/** `pattern` over `text`, as the ids it names (deduped, in order): a global match with the
+ *  boundary lookarounds above, never a bare word. */
+function idsIn(text: string, pattern: RegExp): string[] {
+  return [...new Set([...text.matchAll(pattern)].map((m) => m[1]))];
+}
 
 /** The ticket ids a markdown ticket's body names on its `**Depends on:**` line, or null when it
- *  has no such line (B-111). The body is the file's text with its frontmatter blanked; the ids
- *  are matched by `DEPENDS_ID`, the board's own grammar. The one algorithm is core's
- *  `bodyDependencies` (`src/core/board.ts`), which fieldhouse's `scripts/check-wiki.mjs` gave. */
-export function dependsLine(text: string, idPattern: RegExp = DEPENDS_ID): string[] | null {
-  // The body, its frontmatter blanked. The line is looked for from the END — a `**Depends on:**`
-  // that opens a paragraph has the marker at its start — where `bodyDependencies` looks from the
-  // top and so reads a mention inside prose first. Of two such lines, the last is read.
+ *  has no such line (B-111). The body is the file's text with its frontmatter blanked; the line
+ *  itself — the first marker outside a fenced block, running to the next blank or `**Label:**`
+ *  line — is core's `bodyDependencies` (`src/core/board.ts`), the one algorithm, so this and the
+ *  board's own reading cannot disagree (rounds 1-2). `none` is the empty list, as `depends_on:
+ *  []` is (§4.4's own spelling). */
+export function dependsLine(text: string, idPattern: RegExp = ID_TOKEN): string[] | null {
+  // The body, its frontmatter blanked.
   const fence = /^---\r?\n[\s\S]*?\r?\n---/.exec(text);
   const body = fence ? '\n'.repeat(fence[0].split('\n').length - 1) + text.slice(fence[0].length) : text;
-  const lines = body.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (!lines[i].startsWith('**Depends on:**')) continue;
-    let start = i;
-    while (start > 0 && lines[start - 1].trim() !== '') start--;
-    // The line runs from its marker to the next blank line or the next `**Label:**` line.
-    let end = i + 1;
-    while (end < lines.length && lines[end].trim() !== '' && !/^\*\*[^*]+:\*\*/.test(lines[end])) end++;
-    // Blank lines above the marker, never the prose: `bodyDependencies` reads its first line.
-    const blank = Array<string>(i - start).fill('');
-    const line = lines.slice(i, end).join(' ');
-    const named = bodyDependencies([...blank, line].join('\n'), idPattern);
-    // `**Depends on:** none` is the empty list, as `depends_on: []` is (§4.4's own spelling).
-    return named == null ? null : named.filter((id) => id.toLowerCase() !== 'none');
-  }
-  return null;
+  // A pattern without the token boundary would read prose words; the boundary is this module's.
+  const cited = bodyDependencies(body, new RegExp(idPattern.source, idPattern.flags.includes('g') ? idPattern.flags : `${idPattern.flags}g`));
+  return cited == null ? null : cited.filter((id) => id.toLowerCase() !== 'none');
 }
 
 /** One finding, as `baton tickets check` prints it: `path: message`. */
