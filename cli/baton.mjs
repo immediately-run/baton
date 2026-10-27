@@ -43,9 +43,6 @@
 //   baton board -i KEY REPO                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
 //   baton run [--home <checkout>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
 //             [--harness opencode|claude-code] [--verbose]   (R-BTN-72: the worker loop)
-//                — --capabilities narrows what the key's grant allows; it never enables. Without it
-//                the runner declares the grant's own capabilities, and a runner that can match
-//                none of its course's legs says why in one line at startup (B-86).
 //   baton ticket -i KEY history TICKET [--before ID] [--limit N]                    (R-BTN-81)
 //   baton decision list -i KEY [--watch | --all]
 //                — the CLI courier (R-BTN-80): claims the key's notices, prints them as text and

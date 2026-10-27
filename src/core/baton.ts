@@ -785,9 +785,9 @@ export class BatonCore {
         throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
       }
       const c = this.workers.credential(cred);
-      const row = c.granted ? this.sql<{ capabilities: string }>(
-        'SELECT capabilities FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo)[0] : null;
-      granted = row ? [...new Set(JSON.parse(row.capabilities) as string[])].filter((x) => x !== 'none').sort() : null;
+      granted = c.granted
+        ? [...new Set(this.workers.grantedCapabilities(cred, repo))].filter((x) => x !== 'none').sort()
+        : null;
     }
     if (boardRead) return json(this.boardView(repo, granted));
     if (history) {
@@ -1172,8 +1172,8 @@ export class BatonCore {
   /** `GET /v1/owner/{repository}/grants` (R-BTN-146, B-90): the repository's owner keys, the
    *  grants on it, and its owners' settings — the dashboard's state's own reads, for its owners. */
   grantsView(repo: string) {
-    // The same three reads `uiState().limits` serves, over one repository: owners, grants (their
-    // max_tier as its name in the repository's ladder) and settings.
+    // The same four sections `uiState().limits` serves, over one repository: owners, grants
+    // (their max_tier as its name in the repository's ladder), settings and the bars in force.
     const limits = this.admin.view(this.now());
     return {
       repository: repo,

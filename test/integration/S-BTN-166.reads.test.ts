@@ -151,14 +151,28 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     expect([revoked.status, revoked.json.code]).toEqual([403, 'forbidden']);
   });
 
+  it('a key granted different sets on two repositories is named each one’s own, never the union (R-BTN-179)', async () => {
+    // The pin for round 2's finding 5: the board must read THE repository's grant row, not the
+    // credential's cross-repository allow-list — a key granted agent-venue on docs and only
+    // mcp-chrome on ops (a name the venue's expansion does not carry) is named each set by each
+    // board, and no board answers the other's.
+    expect((await keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: granted.publicKey, hostname: 'granted-host', capabilities: ['mcp-chrome'] })).status).toBe(200);
+    const docsBoard = await read(granted, '/v1/repositories/docs/board');
+    const opsBoard = await read(granted, '/v1/repositories/ops/board');
+    expect(docsBoard.json.granted_capabilities).toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call']);
+    expect(opsBoard.json.granted_capabilities).toEqual(['mcp-chrome']);
+    // Neither board answers the union: docs' does not carry ops' llm-call, ops' does not carry
+    // the venue's four.
+    expect(docsBoard.json.granted_capabilities).not.toContain('mcp-chrome');
+    expect(opsBoard.json.granted_capabilities).not.toContain('create-pr');
+  });
+
   it('a granted key’s board names its grant, as its heartbeat does; an owner’s or an administrator’s names none', async () => {
     const hb = await heartbeat(granted, 'granted-host');
     const keyed = await read(granted, '/v1/repositories/docs/board');
-    // One fact, one answer: the board's field is the heartbeat answer's grant, name for name
-    // (the heartbeat names it `grant.capabilities`, B-86; the board `granted_capabilities`,
-    // which also carries `none` — a name that says nothing, dropped where it is compared).
-    const names = (xs: unknown) => (Array.isArray(xs) ? xs.filter((x) => x !== 'none') : []);
-    expect(names(keyed.json.granted_capabilities)).toEqual(names(hb.json.grant?.capabilities));
+    // One fact, one answer: the board's field is the heartbeat answer's grant for this
+    // repository, name for name — both sides drop `none`, so the lists are equal as they are.
+    expect(keyed.json.granted_capabilities).toEqual(hb.json.grant?.capabilities);
     expect(keyed.json.granted_capabilities).toContain('create-pr');
     for (const key of [docsOwner, admin]) {
       const res = await read(key, '/v1/repositories/docs/board');
