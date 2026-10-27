@@ -63,6 +63,17 @@ above the VM level.** A runner on an owner's machine (`scripts/start-runner.sh` 
 runs that code with the owner's credentials. A VM-level push then executes at the human level,
 which is the upward crossing Axiom 6 forbids.
 
+**Agent configuration does the same in the owner's own sessions** (found in the OWASP review,
+2026-10-27). Claude Code loads and executes what a repository carries:
+- `.claude/settings.json` hooks (docs runs `.claude/hooks/session-context.sh` at every session
+  start, and `archive-transcript.sh` at every stop);
+- the plugins it enables (docs enables one from `immediately-run/claude-plugins`);
+- `.claude/skills/`, `.claude/memory/` and every `CLAUDE.md`.
+
+A push to docs' session hook is code execution with the owner's credentials in their next
+session on docs, and runners push docs' main (15 commits by "OpenCode Agent" since
+2026-10-21). **Rated critical, with reach 3's privileged case.**
+
 ### 2. CI secrets
 
 A pushed workflow file runs on `push` to any branch with the repository's Actions secrets,
@@ -272,6 +283,28 @@ can reach*. Baton is early, and its runners mostly work Baton's own tickets. Mea
 - the CLAUDE.md rule (baton#122, fieldhouse#5, docs#223) stops the most dangerous instructions;
 - privileged sessions check who last wrote a ticket (`git log`) before acting on its body.
 
+## The OWASP Top 10 for Agentic Applications
+
+The owner asked (2026-10-27) for Baton to be checked against the OWASP Top 10 for Agentic
+Applications (2026). Category names are taken from secondary sources, which agree on all ten.
+
+| OWASP | Here | Covered by | Gap and ticket |
+|---|---|---|---|
+| ASI01 Agent goal hijack | injected tickets, briefs, PR text | reach 3; the CLAUDE.md rule; B-126 provenance; B-127 signed briefs; B-130 owner-merged tickets | memory and hand-offs, under ASI06 |
+| ASI02 Tool misuse | shell, git, `gh`, network, the in-leg socket, MCP | grants and gates; the fence (FLDH-16); MCP by credential (B-124) | a forge token valid everywhere, at any time: B-131 |
+| ASI03 Identity and privilege abuse | one shared worker identity; the owner's account in sessions | B-128; per-slot keys (FLDH-17); one role per key; option 12 | long-lived broad credentials: B-131, per-claim tokens |
+| ASI04 Supply chain | course sources, the CLI, images, models, dependencies, plugins | course pins and verified trees (R-BTN-133, R-BTN-134); the CLI pinned in the sync; digests (R-FH-12, FLDH-20) | install scripts and new dependencies in legs: B-132; plugin manifests as control inputs: B-126, B-127, B-130 |
+| ASI05 Unexpected code execution | agents run code by design | the VM; Baton runs no repository code (R-BTN-98); B-127 | agent configuration in privileged sessions: B-126, B-127, B-130; reviewers running PR code: B-128 item 6; runners on owner machines: option 1 |
+| ASI06 Memory and context poisoning | hand-offs, `.claude/memory`, `lessons.mdx`, transcripts | none before this review | provenance for hand-offs and memory: B-126; memory as a control path: B-130 |
+| ASI07 Insecure inter-agent communication | runner and Baton, verdicts on PRs, hand-offs | signed requests, nonces and fences (R-BTN-13, R-BTN-19); verdicts only from pushers (R-BTN-139) | the reviewer executing implementer code: B-128 item 6 |
+| ASI08 Cascading failures | a bad course change, a broken main, a provider outage | retries and holds, `max_runs`, `max_queue`, leases and reaps, budgets, the course test kit, required checks | mostly covered; one shared identity is a blunt kill switch: B-125, FLDH-17 |
+| ASI09 Human-agent trust exploitation | decision packets, PR summaries, owner approvals | B-127's signed briefs; text-only rendering | agents write what the owner approves: B-133 |
+| ASI10 Rogue agents | an agent acting outside its ticket | leases, heartbeats, fences, reaps, stop, holds, cancel; B-108; B-109; transcripts | nothing checks a leg stays in scope: B-134; B-131 prevents the forge half |
+
+**Now, with no code:** a push ruleset on docs' `.claude/**` and every `CLAUDE.md` (docs is private,
+so rulesets apply), and a check of who can push `immediately-run/claude-plugins`. Until then, a
+session on docs is only as trusted as docs' last push.
+
 ## Recommendation
 
 1. **Keep the perimeter**, and record the residual risk below as accepted.
@@ -284,9 +317,12 @@ can reach*. Baton is early, and its runners mostly work Baton's own tickets. Mea
    its ticket-write half waits on Baton claiming its own tickets (R3-1266).
 6. **For privileged readers, now:** 11 and 12, a paragraph and a settings change. Then 9
    and 10 with B-126 and B-127. Keep 13 for the sweeping skills if 9 to 12 prove thin.
-7. **Runners stop writing default branches:** (a), B-130, after R3-1266 and B-128. See *Should
+7. **Agent configuration, this week** (OWASP review): the ruleset on docs' `.claude/**` and
+   `CLAUDE.md` now, then B-127's verifier outside the repository; B-131 (per-claim
+   credentials) as the next structural step after B-128.
+8. **Runners stop writing default branches:** (a), B-130, after R3-1266 and B-128. See *Should
    runners write the home repository at all?*
-8. **Leave D and E** unless C proves too heavy in practice.
+9. **Leave D and E** unless C proves too heavy in practice.
 
 ## Accepted residual risk
 
