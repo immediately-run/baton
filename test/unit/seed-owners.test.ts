@@ -86,19 +86,40 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
         [[admin.publicKey], admins], // an administrator's key (R-BTN-57)
         [[worker.publicKey], new Map()], // a worker's
         [['ssh-ed25519 AAAA'], new Map()], // right-shaped, no key at all
-        [[another.publicKey], new Map()], // its owner, revoked while it owned the repository
       ] as const) {
-        await rows('UPDATE repository_owners SET revoked_at = NULL');
-        if (keys[0] === another.publicKey) await rows('UPDATE repository_owners SET revoked_at = 3');
         await expect(c.registry.seedOwnerKeys(seeded([{ ...OPS, owner_keys: [...keys] }]), adm as Map<string, string>)).rejects.toBeDefined();
       }
       // The registration the instance had: untouched by every refused start.
       expect(await live()).toEqual([another.publicKey]);
       // Its own key: checks pass, and the write loop's guard keeps the owner it has.
-      await rows('UPDATE repository_owners SET revoked_at = NULL');
       await c.registry.seedOwnerKeys(seeded([{ ...OPS, owner_keys: [owner.publicKey] }]), new Map());
       expect(await live()).toEqual([another.publicKey]);
     });
+  });
+
+  it('a revoked seed key is skipped, never a failed start: a rotation keeps the instance serving, and an ownerless repository is named (the owner, 2026-10-27)', async () => {
+    const admin = await makeKey('ssh-ed25519', 'revoke-admin');
+    const second = await makeKey('ssh-ed25519', 'revoke-second');
+    await setAdminKeys(admin);
+    await withCore(async (c) => {
+      const config = seeded([{ ...OPS, owner_keys: [owner.publicKey] }]);
+      c.registry.seed(config);
+      await c.registry.seedOwnerKeys(config, new Map());
+      // A rotation: a second owner beside the seed's, then the administrator revokes the seed's
+      // key through the real route's function (`removed_at` and `revoked_at`, R-BTN-57).
+      await c.admin.owners(`owner:${owner.fingerprint}`, 'ops', { public_key: second.publicKey });
+      c.admin.revokeKey('admin:test', owner.fingerprint);
+      // The next start reads the same seed: it starts, writes nothing, and the rotation stands.
+      await c.registry.seedOwnerKeys(config, new Map());
+      // (The route stores the line without its comment.)
+      expect(await live()).toEqual([second.publicKey.split(' ').slice(0, 2).join(' ')]);
+      // A leaked only key: revoked with no owner beside it, the start still succeeds…
+      c.admin.revokeKey('admin:test', second.fingerprint);
+      await c.registry.seedOwnerKeys(config, new Map());
+      expect(await live()).toEqual([]);
+    });
+    // …and the gap is named in the read, not hidden by a failed boot.
+    expect((await keyCall(admin, '/v1/admin/repositories')).json.seed_owners).toContain('ops');
   });
 
   it('a malformed second entry registers nothing, so a deploy is never half-seeded', async () => {

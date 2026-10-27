@@ -274,10 +274,11 @@ export class Registry {
   /** BATON_REPOSITORIES' `owner_keys` at start (B-91; R-BTN-58): each entry's keys are its
    *  repository's owners, `added_by: 'admin:seed'`, written only where that repository has no
    *  owner left — so a re-seed after an owner leaves brings the seed's back, and a registration
-   *  that already has one keeps it (every key of the entry, or none). One key an administrator
-   *  revoked, or one that holds another role (R-BTN-57), throws as a malformed seed does: the
-   *  deploy is stopped where a person can see it, never serving on with a key the route itself
-   *  would refuse. Every key of every entry is parsed and checked — even where the repository
+   *  that already has one keeps it (every key of the entry, or none). A key an administrator
+   *  revoked is skipped, never written and never a stop: a revocation made after the seed was
+   *  written must not take the instance down (the owner, 2026-10-27), and a repository it leaves
+   *  with no owner is named in `seed_owners`. A key that holds another role (R-BTN-57) or is no
+   *  key throws as a malformed seed does — a mistake in the seed itself, seen at once. Every key of every entry is parsed and checked — even where the repository
    *  already has an owner and nothing will be written, so the same `wrangler.toml` does not start
    *  on one instance and stop a rebuild of another — and the writes run in one transaction, so a
    *  bad entry leaves no half-seeded instance. */
@@ -301,13 +302,10 @@ export class Registry {
         // seed, so a deploy that would refuse at the route stops at its start instead.
         if (admins.has(key.fingerprint)) throw new BatonError('conflict', `${at}.owner_keys names an administrator key (R-BTN-57: one role per key)`);
         // Any revoked owner row, not only one of this repository's: the seed writes no key a
-        // revocation retired (R-BTN-58). An administrator who revoked a repository's only owner
-        // has said that holder needs a new key, so the start stops on every deploy until
-        // `wrangler.toml` names one — as the route refuses it — and a reader must not narrow this
-        // to live rows to "fix" that.
-        if (this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND revoked_at IS NOT NULL', key.fingerprint).length) {
-          throw new BatonError('conflict', `${at}.owner_keys: this owner key was revoked; its holder needs a new key`);
-        }
+        // revocation retired (R-BTN-58), and skips it rather than stopping the start — a
+        // revocation is the administrator's act after the seed, not a broken seed (the owner,
+        // 2026-10-27). The gap it leaves is `seed_owners`' to name.
+        if (this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND revoked_at IS NOT NULL', key.fingerprint).length) continue;
         if (this.rows('SELECT 1 FROM sync_keys WHERE fingerprint = ?', key.fingerprint).length) {
           throw new BatonError('conflict', `${at}.owner_keys: a key is named both as an owner key and as a sync key (R-BTN-57)`);
         }
@@ -325,15 +323,6 @@ export class Registry {
           id, `${key.type} ${line.trim().split(/\s+/)[1]}`, key.fingerprint, this.c.now());
       }
     });
-  }
-
-  /** The owner keys of `repositories` whose `added_by` is `addedBy` (B-91): the seed's own, for
-   *  the read that says which registrations still lean on a deploy (`Admin.view`). */
-  ownerKeysAddedBy(repositories: string[], addedBy: string): { repository_id: string; public_key: string }[] {
-    if (!repositories.length) return [];
-    return this.rows<{ repository_id: string; public_key: string }>(
-      `SELECT repository_id, public_key FROM repository_owners WHERE removed_at IS NULL AND added_by = ? AND repository_id IN (${repositories.map(() => '?').join(', ')})`,
-      addedBy, ...repositories);
   }
 
   /** R-BTN-93: a sync key for `repository` in `role`. A key serves one repository and holds one
