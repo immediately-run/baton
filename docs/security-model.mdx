@@ -1,0 +1,232 @@
+---
+title: Security model
+description: Push access to a home repository is the perimeter of a Baton fleet. What a push can reach, how far a compromised worker or an untrusted pusher gets, and the options for narrowing it.
+nav: Security model
+order: 5
+tags: [security]
+---
+
+<Lede>Whoever can push a home repository is a legitimate user of the fleet that serves it.
+The owner keeps that decision (2026-10-27). This page states it as a security model: who
+holds push, what a push can reach, the blast radius when a pusher is compromised, and the
+mitigations, with what each costs.</Lede>
+
+## The decision
+
+- **The perimeter is push.** Whoever can push a registered repository's default branch, or
+  is in its `trusted_identities`, is a legitimate user of it (BATON_SPEC R-BTN-66, §12
+  "Pushers are legitimate"). Baton does not fortify git: people without push gain nothing,
+  and people with push are trusted with everything git controls.
+- **What agents must not change lives in Baton, not in git** (R-BTN-66): keys, grants and
+  capabilities, owner bars and required bars, holds and cancels, `retry`,
+  `trusted_identities`, `code_repos`, tiers and weights. No push changes them.
+- **Fieldhouse adds trust levels** (*What Fieldhouse is*, Axioms 4 and 6). A sandbox VM is the
+  least trusted level, the host above it, humans at the top, and a credential never crosses
+  downward. Agents in VMs write the home repository without approval.
+
+Put together: **push is held at the VM level, so everything git controls is controlled at
+the VM level.** A compromised VM, a prompt-injected leg, a leaked worker token or a careless
+pusher has the whole of that power. The rest of this page is what that power is.
+
+## Who holds push
+
+For irfldhv1's homes (`fieldhouse`, `docs`, `baton`, `hq`), as of 2026-10-27:
+
+| Holder | Level | How |
+|---|---|---|
+| The owner | human | their own account |
+| `immediately-run-worker` | VM | an org member with `write`: every VM's SSH key and `gh` token |
+| Claude Code sessions | host (`local`) or below (`cloud`) | the owner's account, or the Claude GitHub App |
+| GitHub Actions workflows | the workflow's | `GITHUB_TOKEN` and the repository's secrets |
+| Any other org member or installed App with `write` | theirs | their grant |
+
+Every VM shares one GitHub identity, so a push cannot be traced to a slot from git alone,
+and revoking that identity stops every VM at once.
+
+## What a push can reach
+
+Ordered by blast radius, largest first.
+
+### 1. Code execution on every runner that serves the home
+
+A runner executes what the home repository names:
+
+- `.baton/baton.json`'s `agent_command` and `agent_wrapper`, run for every leg;
+- a course's `legs/<leg>.run.<ext>` overrides (R-BTN-131) and `rank.mjs` (R-BTN-98), loaded
+  from the default branch's head;
+- the course `source` pin, which picks the leg stubs and instructions;
+- a course's `sync.mjs`, run by the sync.
+
+So one push runs code on every runner granted on that home, at the next leg. Bounded by the
+runner's level, that is the VM: its keys and the output repositories. **Unless a runner runs
+above the VM level.** A runner on an owner's machine (`scripts/start-runner.sh` on a laptop)
+runs that code with the owner's credentials. A VM-level push then executes at the human level,
+which is the upward crossing Axiom 6 forbids.
+
+### 2. CI secrets
+
+A pushed workflow file runs on `push` to any branch with the repository's Actions secrets,
+the organisation secrets it may read included (for example `DEPLOY_APP_PRIVATE_KEY`, the
+deploy App with Pages and Administration write). A token without the `workflow` scope cannot
+push a workflow over HTTPS, but SSH pushes are not scope-limited, and every VM pushes over SSH.
+
+### 3. Instructions to agents
+
+A ticket's body and a leg's instructions are the task an agent carries out. BATON_SPEC §12.3
+keeps forge and runner text as quoted data, but the ticket is not quoted data: it is the
+instruction. A pushed ticket can direct the next runner that claims it to do anything that
+runner's credentials allow. In effect it is a prompt injection laundered through the ledger,
+and Baton cannot tell it from real work.
+
+### 4. Reviews and merges
+
+A verdict counts from anyone who can push (R-BTN-139, B-119). The worker can push, so a
+compromised leg can post the approving verdict on its own PR, and the `merge` leg merges it.
+Baton's independence rule (R-BTN-106) binds runner keys inside claims, not comments posted
+outside them. Branch protection on the output repositories is then the only stop.
+
+### 5. Scheduling
+
+Every scheduling input in git can be set by a push:
+
+- `EXPEDITE` (R-BTN-12, from the snapshot) and `order`;
+- a goal's `priority` and `exclusive` (B-122, not built). An `exclusive` goal starves
+  every other ticket in its home;
+- `tier` and requirements: a judgement ticket marked routine reaches runners granted only
+  routine work;
+- `depends_on`: blocks any ticket;
+- new tickets, and re-filing a held ticket under a new id to escape its hold (R-BTN-12's
+  stated residual risk).
+
+The damage here is denial of service and misdirection, not data access. It also hides
+whatever 1 to 4 do.
+
+### 6. The record
+
+A push can rewrite where a ticket is and how it got there (B-120, open), and the evidence
+git holds: markers, ticket records, changelogs.
+
+### What a push cannot reach
+
+Baton's own state (R-BTN-66), so a push cannot:
+
+- grant itself a capability or a tier its key does not hold;
+- lift an owner bar, clear a hold or an owner's cancel;
+- add a trusted identity;
+- reach a repository outside `code_repos`;
+- mint a key.
+
+Those limits bound 1 to 5: what a compromised runner can do is what its grant allows.
+
+## Mitigations
+
+Each mitigation names what it closes, what it costs, and where it works.
+
+### A. Push rulesets on control paths
+
+A GitHub **push ruleset** can reject any push that changes listed paths, with a bypass list of
+roles, teams or Apps. Candidate paths: `.baton/**`, `.github/workflows/**`, `goals/**` and
+`*/goals/**`. The owners' team bypasses; `immediately-run-worker` does not.
+
+- **Closes:** 1 and 2 for pushes by the worker, and goals in 5. It is enforced at the push,
+  so direct pushes are covered too.
+- **Cost:** no Baton change. Changing a course or a workflow becomes an owner's push, or a
+  PR an owner merges.
+- **Where:** GitHub Team plans or above, on private and internal repositories only (GitHub
+  Docs, *About rulesets*). That covers `fieldhouse`, `docs` and `hq`, but not `baton`, which is
+  public. Path rules cannot see inside a file: `EXPEDITE`, `tier` and `depends_on` in a
+  ticket's frontmatter stay open.
+
+### B. Required reviews on control paths
+
+CODEOWNERS plus a ruleset requiring code-owner review on the default branch.
+
+- **Closes:** 1 and 2 when changes arrive by PR.
+- **Cost:** it binds only merges. Direct pushes must then be blocked, and the ticket commands
+  push straight to main. That makes an approval queue, which Axiom 4 rejects, unless it is
+  scoped to control paths only.
+- **Where:** every plan and visibility. A complement to A, not a replacement.
+
+### C. Owner-signed control (a Baton change)
+
+The sync accepts control inputs only from a commit **signed by an owner key of that
+repository**: `.baton/`, goals and `EXPEDITE`, and ticket `tier` if the owners choose. Owner
+keys are SSH keys Baton already holds, and git's SSH commit signatures use the SSHSIG format
+Baton already verifies for signed requests (R-BTN-13).
+Runners load `agent_command`, overrides and `rank.mjs` only from such a commit, by extending
+the verified tree they already check (R-BTN-133, R-BTN-134). An unsigned change keeps the
+last signed version and raises a notice under Needs you.
+
+- **Closes:** 1 and 5 on every forge and every visibility, `baton` included. It follows
+  R-BTN-66's own logic: a limit binds when it rests on a key held in Baton, not on git.
+- **Cost:** a Baton ticket; owners sign their commits; agents can no longer improve courses
+  unreviewed (R-BTN-66 says they may today), so an agent's course change becomes a proposal
+  an owner signs.
+
+### D. Control as Baton state
+
+Goals, expedite and exclusivity become owner actions (`baton owner goal set`). Git may carry a
+proposal that an owner adopts, the way B-120's `adopt` takes git's course history.
+
+- **Closes:** 5 completely.
+- **Cost:** these fields leave the ledger. B-120 already makes that trade for course history.
+
+### E. A separate control repository
+
+`.baton/` and goals live in a repository only owners can write, as Fieldhouse did for host
+state (FLDH-25, `immediately-run/runner-hosts`). The home keeps the tickets.
+
+- **Closes:** 1 and 5, on any plan.
+- **Cost:** Baton reads courses from a second repository, so a ticket's home and its course
+  diverge. More moving parts than C.
+
+### F. Trust-level hygiene (no Baton change)
+
+- **No runner above the VM level on a home the VM level can push.** Owner-machine runners
+  serve only homes whose pushers are all human-level, or stop. This closes the upward
+  crossing in 1.
+- **Actions secrets in environments** with protection rules and a deployment-branch policy,
+  so a workflow on an agent's branch gets none (closes most of 2). Combined with A on
+  `.github/workflows/**`, the default branch is covered too.
+- **One GitHub identity per slot**, so a push is attributable and revocable per VM (FLDH-17's
+  open item).
+- **Branch protection on every output repository**: required checks, and no merge without
+  them. This bounds 4.
+
+### G. Detection
+
+The sync raises a notice when a board post changes a control input (`.baton/`, goals,
+`EXPEDITE`, a ticket's tier) and the push's pusher is not an owner. The pusher comes from the
+forge's push event, not the commit author, which anyone can set.
+
+- **Closes:** nothing, but it makes 1, 3 and 5 visible within one sync.
+- **Cost:** a small Baton change.
+
+## Recommendation
+
+1. **Keep the perimeter**, and record the residual risk below as accepted.
+2. **Now, with no code:** F (no owner-machine runner on worker-writable homes; secrets in
+   environments; output-branch protection) and A on the private homes.
+3. **Baton:** C, owner-signed control, as the one mitigation that works on every forge and on
+   the public `baton` repository. Start with goals, since B-122 is not built yet: goals can be
+   signed from their first version, and `EXPEDITE` and `.baton/` follow. Add G alongside, as it
+   is cheap.
+4. **Leave D and E** unless C proves too heavy in practice.
+
+## Accepted residual risk
+
+Even with all of the above:
+
+- **A pushed ticket can instruct the runner that claims it** (3). No mitigation here closes it
+  short of reviewing every ticket before it is claimable, which Axiom 4 rejects. The bound is
+  the runner's grant and level.
+- **A compromised worker can approve and merge its own work** (4), up to what the output
+  repositories' branch protection allows.
+- **A held ticket can be re-filed under a new id** (R-BTN-12).
+
+## Decisions for the owner
+
+- Which of A to G to adopt, and in what order.
+- Under C: whether ticket `tier` counts as a control input that needs a signature.
+- Whether runners on owners' machines stop serving `fieldhouse` and `docs` until A or C
+  is in place (F, first bullet).
