@@ -327,6 +327,84 @@ try { process.stdout.write(JSON.stringify(remoteSlug(${JSON.stringify(dir)}))); 
   }, 60_000);
 });
 
+
+describe('syncMain’s busy retry (B-89, R-BTN-62)', () => {
+  /** A scaffolded repository, as the B-88 block's: one ticket, an origin, no course code. */
+  const scaffold = async (): Promise<string> => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-b89-'));
+    gitInit(dir);
+    mkdirSync(join(dir, 'tickets'), { recursive: true });
+    writeFileSync(join(dir, 'tickets', 'one.mdx'), '---\nid: T-1\ntitle: One\n---\n');
+    execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/immediately-run/docs.git'], { stdio: 'ignore' });
+    expect(await initMain([], { root: dir, log: () => {} })).toBe(0);
+    commitAll(dir);
+    writeFileSync(join(dir, '.baton', 'facts.json'), '[]');
+    return dir;
+  };
+  /** A transport answering the sync's three calls: the first observation `busy` when `f` says so
+   *  (every later one free, except `always`), then a fresh number each time and a head to advance
+   *  from. Every call is recorded. */
+  const scripted = (f: { busy?: 'first' | 'always' }) => {
+    const seen: string[] = [];
+    let n = 0;
+    const transport = async (req: Request): Promise<Response> => {
+      const path = new URL(req.url).pathname;
+      seen.push(`${req.method} ${path}`);
+      if (path === '/v1/sync/observation') {
+        const busy = f.busy === 'always' || (f.busy === 'first' && seen.filter((s) => s.startsWith('POST /v1/sync/observation')).length === 1);
+        return busy
+          ? new Response(JSON.stringify({ code: 'sync-busy', message: 'observation 7 is still outstanding' }), { status: 409, headers: { 'Content-Type': 'application/json' } })
+          : new Response(JSON.stringify({ sha: null, observation: ++n, bars: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ sha: null }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    return { transport, seen };
+  };
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('a busy run waits the flag’s seconds, then syncs again from a fresh number', async () => {
+    dir = await scaffold();
+    const { transport, seen } = scripted({ busy: 'first' });
+    const waits: number[] = [];
+    const logged: string[] = [];
+    const code = await syncMain({
+      root: dir, url: 'https://baton.test', factsFile: join(dir, '.baton', 'facts.json'), token: 't', transport,
+      busyRetryS: 5,
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
+      log: (l) => logged.push(l),
+    });
+    expect(waits).toEqual([5000]);
+    // The retry is a whole second sync, from a fresh number: observation, head, board.
+    expect(seen).toEqual(['POST /v1/sync/observation', 'POST /v1/sync/observation', 'GET /v1/sync/head', 'POST /v1/sync/board']);
+    expect(code).toBe(0);
+    expect(logged[0]).toContain('retrying once in 5s, with a fresh number');
+    expect(logged.at(-1)).toMatch(/^baton: advanced at /);
+  });
+
+  it('a busy retry that is busy again exits 1 and says busy:again; 0 waits for nothing', async () => {
+    dir = await scaffold();
+    const always = scripted({ busy: 'always' });
+    const logged: string[] = [];
+    const retried = await syncMain({ root: dir, url: 'https://baton.test', token: 't', transport: always.transport, busyRetryS: 1, sleep: async () => {}, log: (l) => logged.push(l) });
+    expect(retried).toBe(1);
+    expect(always.seen.filter((s) => s.startsWith('POST /v1/sync/observation'))).toHaveLength(2);
+    expect(logged.at(-1)).toMatch(/^baton: busy:again at /);
+    // No retry: one observation, no wait, `busy` — the exit 0 that B-89 is about, gone.
+    const none = scripted({ busy: 'always' });
+    const waits: number[] = [];
+    const once = await syncMain({ root: dir, url: 'https://baton.test', token: 't', transport: none.transport, busyRetryS: 0, sleep: async (ms) => {
+      waits.push(ms);
+    }, log: () => {} });
+    expect(once).toBe(1);
+    expect(waits).toEqual([]);
+    expect(none.seen).toEqual(['POST /v1/sync/observation']);
+  });
+});
+
+
 describe('splitWords — agent_command splits as sh would, quotes and no substitutions (B-84)', () => {
   /** Every row with `sh: true` is pure quoting, so real `sh` must split it into exactly the same
    * words. Rows without it use `$`, newlines or continuations where sh would substitute, split
