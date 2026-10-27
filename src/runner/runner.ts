@@ -674,9 +674,10 @@ export class Runner {
       if (!stale) break;
       await this.tick();
       // B-93: this may have been the first beat Baton has an answer of a just-registered worker
-      // for (the boot beat carried no grant, so `grantAsked` sent this one), so the recommendation
-      // after it is a registration's for `stray`.
-      beating = true;
+      // for (the boot beat carried no grant, so `grantAsked` sent this one). Only an attempt that
+      // BEGAN unregistered is a registration's (round 3, 3-r0-2): a settled worker's own forced
+      // beat is not one, and its refusal is news like any other.
+      beating = !registered;
       if (this.grantAsked) break;
     }
     // An empty declaration is not "nothing to do" (finding 5): rule 4 passes any declaration for

@@ -542,8 +542,9 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     refuseWith(() => new BatonRefusal('unauthenticated', undefined, 'no worker holds this secret', 401));
     const r = runFresh(api, (l) => lines.push(l));
     expect(await r.runOnce()).toBeNull();
-    // The boot beat declares nothing and is answered no grant; the settle beat it forces is the
-    // one that registers Baton's worker; then the recommendation is the stray, then the claim.
+    // The boot beat declares nothing and is answered no grant; it is itself the beat that
+    // registers the worker in `registeringApi`; the settle beat it forces is answered no grant
+    // again — then the recommendation is the stray, then the claim.
     expect(calls).toEqual({ heartbeats: 2, recommendations: 1, claims: 1 });
     expect(lines).toEqual(['baton: the heartbeat answered no grant — the declaration stays unsettled and the next beat asks again (a seed key is granted nothing; a machine key is granted by its owner)']);
     r.stop();

@@ -299,7 +299,7 @@ const { spawnSync } = require('node:child_process');
 const args = process.argv.slice(2);
 if (args.includes('remote') && args.includes('get-url')) {
   process.stderr.write("fatal: detected dubious ownership in repository\\n");
-  process.exit(1);
+  process.exit(128);
 }
 const out = spawnSync(${JSON.stringify(REAL_GIT)}, args, { stdio: 'inherit' });
 process.exit(out.status ?? 1);

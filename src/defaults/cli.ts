@@ -61,10 +61,12 @@ export function remoteSlug(root: string): string | null {
   } catch (e) {
     const { status, stderr } = (e ?? {}) as GitFailure;
     const said = typeof stderr === 'string' ? stderr : stderr ? new TextDecoder().decode(stderr) : (e instanceof Error ? e.message : '');
-    // Exit 2 with no remote to print is `git remote get-url`'s answer for a repository that has
-    // no `origin`; 128 is git's "not a repository" for a directory that belongs to none.
+    // Quiet only the two shapes a repository without an origin can answer with, matched by git's
+    // own words (its exit codes are shared — 128 is every fatal error, `dubious ownership` and a
+    // corrupt config among them, so the code alone would quiet those too, round 3, 3-r0-1):
+    // `git remote get-url`'s "No such remote" (exit 2), and "not a git repository".
     const noRemote = status === 2 || /No such remote 'origin'/.test(said);
-    const noRepository = status === 128 || /not a git repository/.test(said);
+    const noRepository = /not a git repository/.test(said);
     if (noRemote || noRepository) return null;
     // Any other failure is the operator's to see, with git's own words (git is not installed, the
     // ownership check refused the checkout, the repository is corrupt): rethrown as an Error
