@@ -62,10 +62,11 @@ class Home {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, text);
   }
-  /** A leg of one course: `run` is the body, and the evidence line names the course it belonged
-   *  to (`ctx.course` is the loaded course, so a wrong load shows up as the wrong name). */
+  /** A leg of one course: `run` is the body, and the leg is written under ITS course directory —
+   *  each course has its own legs/ file, so a claim served by the wrong course fails to run it
+   *  at all, which is a sharper signal than a name in the evidence. */
   leg(course: string, name: string, run: string): void {
-    this.write(`.baton/courses/${course}/legs/${name}.mjs`, legFile(`out(ctx, { course: ctx.course ?? '${course}', leg: '${name}', ticket: ctx.ticket.id, run: ctx.run });
+    this.write(`.baton/courses/${course}/legs/${name}.mjs`, legFile(`out(ctx, { course: '${course}', leg: '${name}', ticket: ctx.ticket.id, run: ctx.run });
 ${run}`));
   }
   sha(): string {
@@ -231,5 +232,27 @@ describe('S-BTN-26 the runner half (B-103): one runner, one checkout, two course
     expect(await rows(`SELECT ticket_id FROM claims`)).toEqual([{ ticket_id: 'docs:C-1' }]);
     expect(await runner.runOnce()).toBeNull();
     expect(home.evidence().map((e) => e.course)).toEqual(['chore']);
+  }, 60_000);
+
+  it('a narrowed runner refuses a claim answered for a course it does not serve (round 1, 1-A-1)', async () => {
+    home.leg('chore', 'do', `return { suspend: true, reached: 'done-once' };`);
+    home.commit();
+    await home.post(TWO, STATIONS);
+    // A --course chore runner; the server answers a roadmap-pr claim (a server bug, or an
+    // instance that predates the narrowing). Rule 9 should never offer it — this pins that the
+    // runner refuses it on its own too, so the two agree rather than one being the only guard.
+    const runner = makeRunner(servedCourses(home.dir, 'chore'));
+    const api = (runner as unknown as { o: { api: BatonApi } }).o.api;
+    const claim = api.claim;
+    api.claim = async (body: { request_id: string; ticket_id?: string }) => ({
+      ...await claim.call(api, body) as Record<string, unknown>,
+      course_id: 'roadmap-pr',
+    });
+    const lines: string[] = [];
+    (runner as unknown as { log: (l: string) => void }).log = (l: string) => lines.push(l);
+    const out = await runner.runOnce();
+    expect(out).toMatchObject({ end_reason: 'released:stale-board' });
+    expect(lines.join('\n')).toContain('the claim is for course roadmap-pr, but this runner serves chore');
+    expect(home.evidence()).toEqual([]);
   }, 60_000);
 });

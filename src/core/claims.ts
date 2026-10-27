@@ -614,7 +614,7 @@ export class Claims {
   }
 
   /** The claim response (§11, R-BTN-34): where the ticket starts or resumes, its course and that
-   *  course's version at the claim's snapshot (B-103, §6.2 — the runner serves every course its
+   *  course's version as the registry holds it (B-103, §11's claim answer — the runner serves every course its
    *  home declares and needs this to load the claim's one), its queued leg, the latest snapshot's
    *  next legs, its hand-off document, its path and the snapshot the claim was decided on — never
    *  its content — and the earlier attempts, newest first, each with its resume record and the legs

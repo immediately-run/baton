@@ -739,7 +739,7 @@ export class Runner {
     return this.runClaim(claim);
   }
 
-  /** The course a claim runs (B-103, §6.2): the one its answer names — `course_id`, the ticket's
+  /** The course a claim runs (B-103, §11's claim answer): the one its answer names — `course_id`, the ticket's
    *  course at the claim's snapshot — which one runner loads per claim, so a `create-spec` leg and
    *  the next claim's `create-pr` leg are consecutive legs of the same runner. A claim answered
    *  with no course (a pre-B-103 answer) falls back to the one course the runner declares, and is
@@ -747,6 +747,13 @@ export class Runner {
    *  never a choice the runner may make (`courseOf`). */
   private claimCourse(claim: Record<string, any>): string {
     const named = claim.course_id as string | null | undefined;
+    // A narrowed runner (--course) serves ONE course; a claim answered for another is refused
+    // here as well as by the server's rule 9 — the two must agree on their own, and a server
+    // bug or an older instance must never make a narrowed machine run a course it never
+    // declared (round 1, 1-A-1).
+    if (named != null && named !== '' && !this.o.courses.some((c) => c.course === named)) {
+      throw new Error(`the claim is for course ${named}, but this runner serves ${this.o.courses.map((c) => c.course).join(', ')} — a --course runner never runs one it did not declare`);
+    }
     // The claim's own course; a pre-B-103 answer's fallback is the one course a one-course runner
     // declares — and with several the refusal below, never a guess at the snapshot's list.
     const want = named != null && named !== '' ? named : this.o.courses.length === 1 ? this.o.courses[0].course : null;
