@@ -3,7 +3,7 @@
 // its course file, the facts its station function reads, how each leg's stub turns the agent's
 // answer into a position, and the Markdown instructions shipped for each leg. One table, so a
 // course is added in one place. Course code in the CLI, never core (§2b).
-import { CREATE_PR_COURSE, REVIEW_PR_COURSE, stationsPr, stationsReviewPr, type PrFact, type PrGraph, type StationsResult } from './course-pr';
+import { CREATE_PR_COURSE, CREATE_SPEC_COURSE, REVIEW_PR_COURSE, stationsPr, stationsReviewPr, stationsSpec, type PrFact, type PrGraph, type StationsResult } from './course-pr';
 import { stationsMarkers, type CourseGraph, type Marker } from './course-markers';
 import type { SourceTicket } from './tickets-markdown';
 
@@ -265,6 +265,29 @@ export const BUILT_INS: BuiltIn[] = [
       verify: { ask: { name: 'outcome', values: ['shipped', 'building'] }, position: "{ ...(answer === 'building' ? { suspend: true } : {}), reached: answer, next: answer === 'shipped' ? null : 'verify' }" },
     },
     skill: 'baton-build-app',
+  },
+  {
+    id: 'create-spec',
+    summary: 'design a specification in conversation with the owner, review it adversarially, address blocking findings in conversation, merge',
+    course: CREATE_SPEC_COURSE,
+    reads: 'prs',
+    stations: (ctx) => stationsSpec({ tickets: ctx.tickets, facts: ctx.facts, branchPatterns: ctx.branchPatterns, closed: ctx.closed, done: ctx.done, repository: ctx.repository, graph: ctx.graph as PrGraph, markers: ctx.markers }),
+    legs: {
+      // The design conversation is the owner's session, which Baton neither runs nor waits for:
+      // the leg writes its marker at `requested`, ends the claim, and the ticket waits there —
+      // on the owner, the sync reading the marker — until the conversation's work lands as a PR.
+      converse: { position: "{ suspend: true, reached: 'requested', next: 'converse' }" },
+      // The verdict decides what the review queues: merge for approve, address for changes (once
+      // the address rounds run out the sync queues adjudicate instead, and a refused fix suspends).
+      review: { ask: VERDICT, position: "{ reached: 'reviewed', next: answer === 'approve' ? 'merge' : 'address', verdict: answer }" },
+      // The owner's second conversation: the findings are answered, suspended like `converse`.
+      address: { position: "{ suspend: true, reached: 'reviewed', next: 'address' }" },
+      // `merge`: no open blocking finding reproduced; `owner`: one did, and the owner decides —
+      // the claim suspends until they do.
+      adjudicate: { ask: { name: 'adjudication', values: ['merge', 'owner'] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
+      merge: { position: "{ reached: 'merged', next: null }" },
+    },
+    skill: 'baton-create-spec',
   },
 ];
 

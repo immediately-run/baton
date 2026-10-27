@@ -1497,7 +1497,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
 
   it('--course pr is refused, naming create-pr; an unknown course names the choices', () => {
     expect(() => baton(root, 'repo', 'init', '--course', 'pr', '--pin', PIN)).toThrow(/renamed create-pr/);
-    expect(() => baton(root, 'repo', 'init', '--course', 'chore', '--pin', PIN)).toThrow(/scaffolds create-pr, review-pr, bug-report, draft-ticket, decision/);
+    expect(() => baton(root, 'repo', 'init', '--course', 'chore', '--pin', PIN)).toThrow(/scaffolds create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec/);
   });
 
   it('a repository still on pr: init with no --course moves the pin and keeps every file', () => {

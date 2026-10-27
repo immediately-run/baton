@@ -1,0 +1,212 @@
+// S-BTN-174 the create-spec course (BATON_SPEC §15 S-BTN-174, R-BTN-131, R-BTN-72, R-BTN-74; B-96):
+// a fresh repository runs `baton repo init --course create-spec`, with one request. Must hold: the
+// ticket starts at `requested` with `converse` queued and ready (a claim runs it: the owner's
+// session); the claim suspends (`{ suspend: true, reached: 'requested', next: 'converse' }`) and
+// the leg's marker line lands in `.baton/markers.jsonl`, so the next sync places the ticket at
+// `requested` with `converse` waiting on the `owner` and never offers it again — the owner's
+// session is one, not one per sync; the conversation's PR, on the course's branch pattern, places
+// the ticket at `spec-open` with `review` ready (waiting on `ci` while its checks run); a `changes`
+// verdict places `reviewed` with `address` ready, and the push a round leaves sends it back to
+// `spec-open`; once its three address rounds are spent, a round still asking for changes queues
+// `adjudicate` rather than a fourth `address`, an `owner` adjudication waits on the owner and a
+// `merge` one queues `merge`; an `approve` queues `merge`; and the merged PR is the end, `merged`.
+// Node only: it writes a real repository and runs git.
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { call as hostCall } from '#host';
+import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
+import type { PrFact } from '../../src/defaults/course-pr';
+import { BUILT_INS } from '../../src/defaults/courses';
+import { MARKERS_FILE, parseMarkers } from '../../src/defaults/course-markers';
+import { ORIGIN, rows, setClock, syncToken } from '../helpers';
+
+const T0 = Date.parse('2026-10-27T12:00:00Z');
+// No --pin: the CLI pins its own commit, the one its courses' sources name (B-33).
+const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: () => {} });
+
+class Repo {
+  readonly dir = mkdtempSync(join(tmpdir(), 'baton-s174-'));
+  facts: PrFact[] = [];
+  constructor() {
+    const g = (...a: string[]) => execFileSync('git', ['-C', this.dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
+    g('init', '-q', '-b', 'main');
+    g('config', 'user.email', 's174@test');
+    g('config', 'user.name', 's174 test');
+    mkdirSync(join(this.dir, 'tickets'), { recursive: true });
+  }
+  write(path: string, text: string): void {
+    writeFileSync(join(this.dir, path), text);
+  }
+  commit(): void {
+    execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', this.dir, 'commit', '--allow-empty', '-qm', 'step'], { stdio: 'ignore' });
+  }
+  /** The `converse` leg's own work, before it suspends (the course's instructions): append the
+   *  marker line it writes — the ticket bare, at the station it opened, `review` queued — to
+   *  `.baton/markers.jsonl` and commit that file, on the default branch the sync reads. Exactly
+   *  the line the instructions name. */
+  converse(id: string): void {
+    mkdirSync(join(this.dir, '.baton'), { recursive: true });
+    appendFileSync(join(this.dir, MARKERS_FILE), `${JSON.stringify({ ticket: id, leg: 'converse', reached: 'requested', next: 'review', claim: null })}\n`);
+    execFileSync('git', ['-C', this.dir, 'add', '--', MARKERS_FILE], { stdio: 'ignore' });
+    execFileSync('git', ['-C', this.dir, 'commit', '--no-gpg-sign', '-qm', `baton:converse ${id} requested`], { stdio: 'ignore' });
+  }
+  /** One sync: recorded facts, the harness's sync credential and the local host's transport. */
+  async sync(): Promise<void> {
+    const facts = join(this.dir, '.baton', 'facts.json');
+    writeFileSync(facts, JSON.stringify(this.facts));
+    const token = await syncToken();
+    const args = parseSyncArgs(['--root', this.dir, '--url', ORIGIN, '--facts', facts], {});
+    const log: string[] = [];
+    const code = await syncMain({ ...args, auth: () => ({ Authorization: `Bearer ${token}` }), transport: (req) => hostCall(req), log: (l) => log.push(l) });
+    if (code !== 0) throw new Error(`sync exited ${code}: ${log.join('\n')}`);
+  }
+}
+
+let repo: Repo;
+let minutes = 0;
+/** Each sync takes an observation number; the next is refused until ten minutes pass (R-BTN-62). */
+const later = () => setClock(T0 + (minutes += 11) * 60_000);
+beforeEach(async () => {
+  minutes = 0;
+  await setClock(T0);
+  repo = new Repo();
+});
+afterEach(() => rmSync(repo.dir, { recursive: true, force: true }));
+
+type StationRow = { station: string; next_leg: string | null; next_source: string; path_len: number };
+const stationOf = async (id: string): Promise<StationRow> => (await rows<StationRow>('SELECT station, next_leg, next_source, path_len FROM ticket_stations WHERE ticket_id = ?', `docs:${id}`))[0];
+const nextOf = (id: string) => rows<{ leg: string; state: string; waiting_on: string | null }>('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', `docs:${id}`);
+
+/** The ticket's one spec request. */
+const request = '---\nid: SPEC-1\ntitle: Specify the export format\ncourse: create-spec\n---\n\nWrite down what an export file must contain, so two implementations agree.\n';
+
+/** One fact in the shape R-BTN-96's adapter records, on the course's branch pattern. */
+function fact(state: PrFact['state'], checks: (string | null)[], reviews: PrFact['reviews'], pushes?: number[]): PrFact {
+  return { number: 7, head: 'claude/SPEC-1-export-format', state, pushedAt: pushes?.at(-1) ?? reviews.at(-1)?.submittedAt ?? T0, ...(pushes ? { pushes } : {}), checks, reviews };
+}
+const verdict = (v: 'approve' | 'changes', at: number): PrFact['reviews'][number] =>
+  ({ author: 'r1', state: 'COMMENTED', submittedAt: at, body: `<!-- baton:verdict ${v} -->` });
+const adjudicated = (v: 'merge' | 'owner', at: number): PrFact['reviews'][number] =>
+  ({ author: 'a1', state: 'COMMENTED', submittedAt: at, body: `<!-- baton:adjudicated ${v} -->` });
+
+describe('S-BTN-174 the create-spec course', () => {
+  it('converse suspends with its pair; the conversation’s PR advances the board; the address round-trip to merged', async () => {
+    expect(await init(repo.dir, '--course', 'create-spec')).toBe(0);
+    repo.write('tickets/spec-1.md', request);
+    repo.commit();
+    await repo.sync();
+
+    // No PR, no marker: `requested`, `converse` queued and ready — a claim runs it, which is the
+    // owner's design session.
+    expect(await rows('SELECT id, course_id FROM tickets')).toEqual([{ id: 'docs:SPEC-1', course_id: 'create-spec' }]);
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'requested', next_leg: 'converse', next_source: 'course', path_len: 0 });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'converse', state: 'ready', waiting_on: null }]);
+
+    // A claim takes `converse`. Its stub prints the session's command and prompt, writes the
+    // marker and returns `{ suspend: true, reached: 'requested', next: 'converse' }` (BUILT_INS):
+    // the claim ends at `requested` and nothing else moves. The stub says `suspend`, so no
+    // position of its own is read; the one line the leg leaves in git is the marker.
+    const spec = BUILT_INS.find((b) => b.id === 'create-spec')!;
+    const stub = new Function('answer', `return (${spec.legs.converse.position});`)(undefined) as { suspend: boolean; reached: string; next: string };
+    expect(stub).toEqual({ suspend: true, reached: 'requested', next: 'converse' });
+    repo.converse('SPEC-1');
+    // The composed line is what `parseMarkers` reads back as the leg's marker.
+    expect(parseMarkers(readFileSync(join(repo.dir, MARKERS_FILE), 'utf8'))).toEqual([{ ticket: 'SPEC-1', leg: 'converse', reached: 'requested', next: 'review', claim: null }]);
+
+    // The marker is committed, the PR still is not: still `requested` with `converse` queued, now
+    // waiting on the owner — and a second sync does not offer it again: one conversation, not one
+    // per sync.
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'requested', next_leg: 'converse', next_source: 'course', path_len: 1 });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'converse', state: 'waiting', waiting_on: 'owner' }]);
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'requested', next_leg: 'converse', path_len: 1 });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'converse', state: 'waiting', waiting_on: 'owner' }]);
+
+    // The conversation's work lands as a PR: `spec-open`, `review` queued — waiting on ci while
+    // the head's checks run, ready once they finish.
+    repo.facts = [fact('open', [null], [])];
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'spec-open', next_leg: 'review', next_source: 'course', path_len: 1 });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'review', state: 'waiting', waiting_on: 'ci' }]);
+    repo.facts = [fact('open', ['success'], [])];
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'spec-open', next_leg: 'review' });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
+
+    // A round asks for changes: `reviewed`, `address` queued — the owner's conversation, whose
+    // claim ends with `{ suspend: true, reached: 'reviewed', next: 'address' }` (BUILT_INS): one
+    // conversation per round, with nothing pushed between rounds but the rounds' own legs.
+    repo.facts = [fact('open', ['success'], [verdict('changes', T0 - 100)])];
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'reviewed', next_leg: 'address', path_len: 2 });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'address', state: 'ready', waiting_on: null }]);
+    const addressStub = new Function('answer', `return (${spec.legs.address.position});`)(undefined) as { suspend: boolean; reached: string; next: string };
+    expect(addressStub).toEqual({ suspend: true, reached: 'reviewed', next: 'address' });
+
+    // The amendment is pushed: back to `spec-open`, the next round ready.
+    repo.facts = [fact('open', ['success'], [verdict('changes', T0 - 100)], [T0 - 50])];
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'spec-open', next_leg: 'review', path_len: 3 });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
+    repo.facts = [fact('open', ['success'], [verdict('changes', T0 - 100), verdict('changes', T0 - 40)], [T0 - 50])];
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'reviewed', next_leg: 'address', path_len: 4 });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'address', state: 'ready', waiting_on: null }]);
+    repo.facts = [fact('open', ['success'], [verdict('changes', T0 - 100), verdict('changes', T0 - 40)], [T0 - 60, T0 - 50, T0 - 30])];
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'spec-open', next_leg: 'review', path_len: 5 });
+
+    // A third round asks for changes: `reviewed`, `address` queued.
+    repo.facts = [fact('open', ['success'], [verdict('changes', T0 - 100), verdict('changes', T0 - 40), verdict('changes', T0 - 10)], [T0 - 60, T0 - 35])];
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'reviewed', next_leg: 'address', path_len: 6 });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'address', state: 'ready', waiting_on: null }]);
+    // A further round still asking for changes, once all three address rounds have run: the
+    // board queues `adjudicate`, not a fourth `address`.
+    repo.facts = [fact('open', ['success'], [verdict('changes', T0 - 100), verdict('changes', T0 - 40), verdict('changes', T0 - 10), verdict('changes', T0 - 3)], [T0 - 60, T0 - 35, T0 - 5])];
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'reviewed', next_leg: 'adjudicate', path_len: 8 });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'adjudicate', state: 'ready', waiting_on: null }]);
+
+    // An adjudication that reproduces a finding waits on the owner; `merge` queues the merge.
+    repo.facts = [fact('open', ['success'], [verdict('changes', T0 - 100), verdict('changes', T0 - 40), verdict('changes', T0 - 10), adjudicated('owner', T0 - 1)], [T0 - 60, T0 - 35])];
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'adjudicated', next_leg: 'merge' });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'merge', state: 'waiting', waiting_on: 'owner' }]);
+    repo.facts = [fact('open', ['success'], [verdict('changes', T0 - 100), verdict('changes', T0 - 40), verdict('changes', T0 - 10), adjudicated('merge', T0 - 1)], [T0 - 60, T0 - 35])];
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'adjudicated', next_leg: 'merge' });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'merge', state: 'ready', waiting_on: null }]);
+
+    // A fresh review approves: `reviewed` with `merge` ready — the stub queues it from the verdict.
+    repo.facts = [fact('open', ['success'], [verdict('approve', T0 - 1)], [T0 - 20])];
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'reviewed', next_leg: 'merge', path_len: 2 });
+    expect(await nextOf('SPEC-1')).toEqual([{ leg: 'merge', state: 'ready', waiting_on: null }]);
+
+    // Merged: the end.
+    repo.facts = [fact('merged', ['success'], [verdict('approve', T0 - 1)], [T0 - 20])];
+    await later();
+    await repo.sync();
+    expect(await stationOf('SPEC-1')).toMatchObject({ station: 'merged', next_leg: null });
+    expect(await nextOf('SPEC-1')).toEqual([]);
+  }, 180_000);
+});

@@ -13,8 +13,8 @@ const instructionsDir = (id: string) => join(__dirname, '..', '..', 'src', 'defa
 const tosOf = (to: string | string[]): string[] => (Array.isArray(to) ? to : [to]);
 
 describe('the standard courses (R-BTN-131)', () => {
-  it('are create-pr, review-pr, bug-report, draft-ticket, decision and build-app; create-pr is the default', () => {
-    expect(BUILT_INS.map((b) => b.id)).toEqual(['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision', 'build-app']);
+  it('are create-pr, review-pr, bug-report, draft-ticket, decision, build-app and create-spec; create-pr is the default', () => {
+    expect(BUILT_INS.map((b) => b.id)).toEqual(['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision', 'build-app', 'create-spec']);
     expect(DEFAULT_COURSE).toBe('create-pr');
   });
 
@@ -36,7 +36,10 @@ describe('the standard courses (R-BTN-131)', () => {
           const answers = stub.ask?.values ?? [undefined];
           for (const answer of answers) {
             const pos = new Function('answer', `return (${stub.position});`)(answer) as { reached: string; next: string | null; [k: string]: unknown };
-            expect(tosOf(b.course.legs[leg].to), `${leg} → ${pos.reached}`).toContain(pos.reached);
+            // A suspension may rest where the leg started (R-BTN-71: a give-up), which the file's
+            // `to` does not list; every other reached station is an outcome. S-BTN-174 drives
+            // create-spec's such stubs end to end.
+            expect([...tosOf(b.course.legs[leg].to), ...(pos.suspend === true ? tosOf(b.course.legs[leg].from) : [])], `${leg} → ${pos.reached}`).toContain(pos.reached);
             if (b.course.end.includes(pos.reached)) expect(pos.next, `${leg} at an end`).toBeNull();
             else expect(b.course.legs[pos.next as string]?.from, `${leg} queues ${pos.next}`).toContain(pos.reached);
             // The answer reaches close under the name close reads.
@@ -70,6 +73,9 @@ describe('the standard courses (R-BTN-131)', () => {
     const waits = new Set([
       'create-pr adjudicate owner', 'review-pr review changes', 'decision prepare',
       'build-app define', 'build-app design', 'build-app architect', 'build-app plan', 'build-app file', 'build-app verify building',
+      // create-spec's two interactive legs: the owner's session is run by the owner, so the claim
+      // ends where the leg starts and the ticket waits for the work it produces.
+      'create-spec converse', 'create-spec address', 'create-spec adjudicate owner',
     ]);
     for (const b of BUILT_INS) {
       for (const [leg, stub] of Object.entries(b.legs)) {
@@ -90,7 +96,7 @@ describe('the standard courses (R-BTN-131)', () => {
   it('pr names create-pr for a repository scaffolded before, and is no longer scaffolded', () => {
     expect(builtIn('pr')?.id).toBe('create-pr');
     expect(() => scaffoldable('pr')).toThrow('--course pr: renamed create-pr');
-    expect(() => scaffoldable('epic')).toThrow('the CLI scaffolds create-pr, review-pr, bug-report, draft-ticket, decision, build-app');
+    expect(() => scaffoldable('epic')).toThrow('the CLI scaffolds create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec');
     expect(builtIn('epic')).toBeUndefined();
   });
 

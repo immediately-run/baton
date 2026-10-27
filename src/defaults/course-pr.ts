@@ -1,9 +1,10 @@
 // course-pr.ts — the station functions of the standard courses that read PRs (BATON_SPEC §2f
-// R-BTN-74, R-BTN-131): `create-pr` (and `pr`, the name it replaced) and `review-pr` — where each
-// ticket is, from git and PR facts alone. Pure over injected facts (R-BTN-96's fact adapter
-// gathers them from the forge in the sync command), so the same functions serve an ejected
-// `.baton/courses/<id>/sync.mjs` through its default export. Course code in the CLI, never core
-// (§2b): it may read what a ticket's opaque `course` fields carry.
+// R-BTN-74, R-BTN-131): `create-pr` (and `pr`, the name it replaced), `review-pr` and
+// `create-spec` — where each ticket is, from git and PR facts alone (`create-spec` reads, beside
+// them, the markers its own start leg writes: course-markers.ts). Pure over injected facts
+// (R-BTN-96's fact adapter gathers them from the forge in the sync command), so the same
+// functions serve an ejected `.baton/courses/<id>/sync.mjs` through its default export. Course
+// code in the CLI, never core (§2b): it may read what a ticket's opaque `course` fields carry.
 import type { PostedStation } from '../core/board';
 import type { SourceTicket } from './tickets-markdown';
 import type { Step } from '../core/graph';
@@ -64,6 +65,29 @@ export const CREATE_PR_COURSE = {
   },
 };
 
+/** The `create-spec` course's graph (R-BTN-131, B-96): a specification from the owner's design
+ * conversation to a merged PR — `converse` (the interactive session that writes the spec file and
+ * opens its PR), `review` (adversarial, non-interactive), `address` (the owner's second
+ * conversation, on blocking findings, at most three rounds), `adjudicate` after the third, and
+ * `merge`. `review`'s verdict chooses: approve queues `merge`, changes queue `address`. */
+export const CREATE_SPEC_COURSE = {
+  start: 'requested',
+  start_leg: 'converse',
+  end: ['merged'],
+  short_waits: ['ci'],
+  stations: {
+    requested: { label: 'Requested, no PR yet' }, 'spec-open': { label: 'Spec PR open' }, reviewed: { label: 'Reviewed' },
+    adjudicated: { label: 'Open findings adjudicated' }, merged: { label: 'Merged' },
+  },
+  legs: {
+    converse: { from: ['requested'], to: 'spec-open', label: 'Design the specification with the owner' },
+    review: { from: ['spec-open'], to: 'reviewed', max_runs: 3, label: 'Adversarial review round' },
+    address: { from: ['reviewed'], to: 'spec-open', max_runs: 3, label: 'Address the blocking findings with the owner' },
+    adjudicate: { from: ['reviewed'], to: 'adjudicated', label: 'Reproduce the findings left open' },
+    merge: { from: ['reviewed', 'adjudicated'], to: 'merged', label: 'Merge and close the ticket' },
+  },
+};
+
 /** The `review-pr` course's graph (R-BTN-131): review a PR someone else opened, in rounds — each
  * round's verdict approves (the end) or asks for changes, after which the next round waits on the
  * author's push — and conclude with a summary once the rounds run out or the PR closes. */
@@ -113,27 +137,66 @@ export const checksDone = (f: PrFact): boolean => f.checks.every((c) => c != nul
 /** A PR's verdicts, oldest first. */
 const verdictsOf = (f: PrFact) => [...f.reviews].filter((r) => verdictOf(r) != null).sort((a, b) => a.submittedAt - b.submittedAt);
 
+/** A PR course's names for the legs its timeline walks (R-BTN-74's steps are the graph's legs,
+ *  named): `create-pr`'s `implement` / `fix`, or `create-spec`'s `converse` / `address`, which
+ *  open the PR and take a round's findings back to the owner. Everything else about a change's
+ *  timeline — the reviews, the verdicts, the adjudication, the merge — is the same shape. */
+interface TimelineLegs {
+  /** The leg that opened the PR, reaching the station an open PR rests at. */
+  open: string;
+  /** The station an open PR rests at (`pr-open`, `spec-open`). */
+  opened: string;
+  /** The leg a push after a verdict counts as: the graph's only way back to `review`. */
+  back: string;
+  /** The station that leg reaches (`fixed`). */
+  backTo: string;
+}
+
+const CREATE_PR_LEGS: TimelineLegs = { open: 'implement', opened: 'pr-open', back: 'fix', backTo: 'fixed' };
+
 /** The path a change's timeline implies (R-BTN-74: "the change's timeline in order" — one PR,
- * or `together`'s several): `implement` opened it; each verdict is a `review`; a push after a verdict, before the next
- * one, was a `fix` (the graph's only way back to `review`), whatever that verdict said, since a
+ * or `together`'s several): the `open` leg opened it; each verdict is a `review`; a push after a verdict, before the next
+ * one, was a `back` leg (the graph's only way back to `review`), whatever that verdict said, since a
  * verdict is on the head it was given on. Verdicts with no push between them — two reviewers of
  * one head — are one review. */
-function timelineOf(f: PrFact): Step[] {
-  const path: Step[] = [{ leg: 'implement', reached: 'pr-open' }];
+function timelineOf(f: PrFact, legs: TimelineLegs = CREATE_PR_LEGS): Step[] {
+  const path: Step[] = [{ leg: legs.open, reached: legs.opened }];
   const pushes = f.pushes?.length ? f.pushes : [f.pushedAt];
   const verdicts = verdictsOf(f);
   verdicts.forEach((v, i) => {
     if (path.at(-1)!.reached !== 'reviewed') path.push({ leg: 'review', reached: 'reviewed' });
     const until = verdicts[i + 1]?.submittedAt ?? Number.POSITIVE_INFINITY;
-    if (pushes.some((p) => p > v.submittedAt && p < until)) path.push({ leg: 'fix', reached: 'fixed' });
+    if (pushes.some((p) => p > v.submittedAt && p < until)) path.push({ leg: legs.back, reached: legs.backTo });
   });
   return path;
 }
 
-const fixRunsOf = (path: Step[]): number => path.filter((s) => s.leg === 'fix').length;
+const backRunsOf = (path: Step[], legs: TimelineLegs = CREATE_PR_LEGS): number => path.filter((s) => s.leg === legs.back).length;
+
+/** A station function's reading of where a ticket is under its course file's bounds: the legs
+ *  the timeline walks and the leg a verdict asking for changes queues (`fix` on `create-pr`,
+ *  `address` on `create-spec`). */
+interface PrBounds {
+  legs: TimelineLegs;
+  /** The leg a `changes` verdict queues. */
+  back: string;
+  /** How many rounds of that leg precede an adjudication, when the file has an `adjudicate` leg. */
+  rounds: number;
+  /** Whether the file has an `adjudicate` leg. */
+  adjudicates: boolean;
+}
+
+/** `create-pr`'s bounds, and the `pr` course's: `review` 4, `fix` 3, no adjudicate. */
+const boundsOf = (graph: PrGraph): PrBounds => ({
+  legs: CREATE_PR_LEGS, back: 'fix', rounds: graph.legs?.fix?.max_runs ?? 3, adjudicates: graph.legs?.adjudicate != null,
+});
 
 const at = (station: string, path: Step[], next: PostedStation['next']): PostedStation =>
   ({ station, path, next_leg: next[0]?.leg ?? null, next_source: 'course', handoff_url: null, next, bars: {} });
+
+/** A station function's return with no PR markers: the PR courses write none (no seats or bars),
+ *  so `markers` is empty and `course_data` an empty object. */
+const noMarkers = (stations: Record<string, PostedStation>): StationsResult => ({ stations, markers: [], course_data: {} });
 
 /** The adjudication after the last verdict, when one was written: `merge` (no open blocking
  * finding reproduced) or `owner` (one did — the owner decides). */
@@ -145,14 +208,13 @@ function adjudicationOf(fact: PrFact): 'merge' | 'owner' | null {
 }
 
 /** Where one PR puts the ticket: the end of its timeline, and the queued leg leaving it. The
- * course file's bounds decide what follows a verdict asking for changes once the fixes run out:
- * the `adjudicate` leg when the course has one (`create-pr`), else merge waiting on the owner
- * (`pr`). */
-function placeOf(fact: PrFact, graph: PrGraph): PostedStation {
-  const path = timelineOf(fact);
-  const adjudicates = graph.legs?.adjudicate != null;
-  const fixes = graph.legs?.fix?.max_runs ?? 3;
-  const adjudication = adjudicates && path.at(-1)!.reached === 'reviewed' ? adjudicationOf(fact) : null;
+ *  course file's bounds decide what follows a verdict asking for changes once the rounds run out:
+ *  the `adjudicate` leg when the course has one (`create-pr`, `create-spec`), else merge waiting
+ *  on the owner (`pr`). `bounds.legs` names the timeline's legs, so the same walk places a
+ *  `create-spec` PR as a `create-pr` one. */
+function placeOf(fact: PrFact, graph: PrGraph, bounds: PrBounds = boundsOf(graph)): PostedStation {
+  const path = timelineOf(fact, bounds.legs);
+  const adjudication = bounds.adjudicates && path.at(-1)!.reached === 'reviewed' ? adjudicationOf(fact) : null;
   if (adjudication) path.push({ leg: 'adjudicate', reached: 'adjudicated' });
   if (fact.state === 'merged') {
     // Every PR merged is `merged` — the end station: done for Baton (R-BTN-70) whether or not
@@ -167,14 +229,15 @@ function placeOf(fact: PrFact, graph: PrGraph): PostedStation {
   // `review` waits on ci while the head's checks run, and is ready once they finish.
   const wait = checksDone(fact) ? null : 'ci';
   const last = path.at(-1)!.reached;
-  if (last === 'pr-open' || last === 'fixed') return at(last, path, [{ leg: 'review', state: wait ? 'waiting' : 'ready', waiting_on: wait }]);
+  if (last === bounds.legs.opened || last === bounds.legs.backTo) return at(last, path, [{ leg: 'review', state: wait ? 'waiting' : 'ready', waiting_on: wait }]);
   if (verdictOf(verdictsOf(fact).at(-1)!) === 'approve') return at('reviewed', path, [{ leg: 'merge', state: 'ready', waiting_on: null }]);
-  // Changes requested: fix, until the course's fixes run out; then adjudicate, or merge waiting
-  // on the owner (listed under Needs you, §14) on a course with no adjudicate leg.
-  if (fixRunsOf(path) >= fixes) {
-    return at('reviewed', path, [adjudicates ? { leg: 'adjudicate', state: 'ready', waiting_on: null } : { leg: 'merge', state: 'waiting', waiting_on: 'owner' }]);
+  // Changes requested: the back leg (`fix`, `address`), until the course's rounds run out; then
+  // adjudicate, or merge waiting on the owner (listed under Needs you, §14) on a course with no
+  // adjudicate leg.
+  if (backRunsOf(path, bounds.legs) >= bounds.rounds) {
+    return at('reviewed', path, [bounds.adjudicates ? { leg: 'adjudicate', state: 'ready', waiting_on: null } : { leg: 'merge', state: 'waiting', waiting_on: 'owner' }]);
   }
-  return at('reviewed', path, [{ leg: 'fix', state: 'ready', waiting_on: null }]);
+  return at('reviewed', path, [{ leg: bounds.back, state: 'ready', waiting_on: null }]);
 }
 
 /** A wildcard match, not a regex: `*` matches any run of characters (the same walk the core's
@@ -300,7 +363,69 @@ export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; bran
     }
     stations[t.id] = placeOf(together(mine), graph);
   }
-  return { stations, markers: [], course_data: {} };
+  return noMarkers(stations);
+}
+
+/** The `create-spec` course's stations (R-BTN-131, B-96): a specification's PR is a branch-pattern
+ *  PR like any other, so an open or merged one is placed by `create-pr`'s own walk (`placeOf` with
+ *  this course's leg names: `converse` opened the PR at `spec-open`, `address` takes a round's
+ *  findings to the owner and a push back to `spec-open`, a `changes` verdict queues `address`
+ *  until three rounds are spent and then `adjudicate`, and an `approve` queues `merge`).
+ *
+ *  A ticket with no PR has not left `requested`, and the design conversation — the leg that opens
+ *  the PR — is the owner's session, which Baton neither runs nor waits for inside a claim. Whether
+ *  it has run is read from the repository's own marker file: the leg's instructions append
+ *  `{ticket, leg: 'converse', reached: 'requested', next: 'review'}` to `.baton/markers.jsonl` and
+ *  commit it before the owner's session starts, so
+ *  - no such line, the ticket's `converse` is `ready` (a claim runs it: it prints the session's
+ *    command and prompt, writes the line and suspends), a dependency still open or an open child
+ *    holding it as `stationsPr` holds `implement` (`dependencies`, `children`); and
+ *  - such a line, the ticket waits on the `owner` — the sync does not offer `converse` again
+ *    while the line stands, so one conversation, not one per sync — until its PR lands and the
+ *    next reading places it at `spec-open`. */
+export function stationsSpec(ctx: {
+  tickets: SourceTicket[];
+  facts: PrFact[];
+  branchPatterns?: string[];
+  closed: Set<string>;
+  done?: Set<string>;
+  repository?: string | null;
+  graph?: PrGraph;
+  /** `.baton/markers.jsonl` as the checkout has it: the start leg's own record that a
+   *  conversation has begun. */
+  // The marker lines the sync parsed (B-96): a structural type, never an import —
+  // course-markers.ts is Node code, and this module is type-checked in both hosts.
+  markers?: { ticket: string; leg: string; reached: string }[];
+}): StationsResult {
+  const graph = ctx.graph ?? {};
+  const stations: Record<string, PostedStation> = {};
+  const patterns = matchPatterns(ctx.branchPatterns);
+  const done = ctx.done ?? ctx.closed;
+  const bounds: PrBounds = {
+    legs: { open: 'converse', opened: 'spec-open', back: 'address', backTo: 'spec-open' },
+    back: 'address', rounds: graph.legs?.address?.max_runs ?? 3, adjudicates: graph.legs?.adjudicate != null,
+  };
+  // The tickets whose design conversation has begun: one marker line the leg wrote, for the
+  // ticket, at the station it opened. A malformed line is `parseMarkers`' to skip, never this
+  // function's.
+  const conversed = new Set((ctx.markers ?? []).filter((m) => m.leg === 'converse' && m.reached === 'requested').map((m) => m.ticket));
+  for (const t of ctx.tickets) {
+    if (ctx.closed.has(t.id)) continue;
+    // As `stationsPr`: a closed unmerged PR counts as none.
+    const mine = ctx.facts.filter((f) => f.state !== 'closed' && ticketOwns(t, f, patterns, ctx.repository));
+    if (!mine.length) {
+      const waiting = t.depends_on.filter((d) => !done.has(d));
+      const blocked = waiting.length ? 'dependencies' : t.blocked_by.length ? 'children' : null;
+      // A blocked start is `waiting` whatever the conversation did; an unblocked one that has
+      // begun waits on the owner in the session; one that has not is ready for its claim.
+      const wait = blocked ?? (conversed.has(t.id) ? 'owner' : null);
+      stations[t.id] = at('requested', conversed.has(t.id) ? [{ leg: 'converse', reached: 'requested' }] : [],
+        [{ leg: 'converse', state: wait ? 'waiting' : 'ready', waiting_on: wait }]);
+      continue;
+    }
+    stations[t.id] = placeOf(together(mine), graph, bounds);
+  }
+  return noMarkers(stations);
 }
 
 /** The `review-pr` course's stations (R-BTN-131). The ticket names the PR to review in `prs:`

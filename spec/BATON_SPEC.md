@@ -2072,6 +2072,7 @@ mean (R-BTN-50).
   | `draft-ticket` | `research`, `draft`, `check` (`requested` → `researched` → `drafted` → `filed`) | `filed` | markers |
   | `decision` | `prepare` (`raised` → `asked`); `carry-out` (`asked` → `decided`) | `decided` | markers |
   | `build-app` | `define`, `design`, `architect`, `plan` (`requested` → `defined` → `designed` → `architected` → `planned`); `file` (`planned` → `building`, a call leg); `verify` (`building` → `shipped` \| `building`, a call leg, `max_runs` 3) | `shipped` | markers |
+  | `create-spec` | `converse` (`requested` → `spec-open`, an interactive leg that suspends); `review` (`spec-open` → `reviewed`, `max_runs` 3); `address` (`reviewed` → `spec-open`, an interactive leg that suspends, `max_runs` 3); `adjudicate` (`reviewed` → `adjudicated`); `merge` (`reviewed`, `adjudicated` → `merged`) | `merged` | PRs |
   | `epic` | R-BTN-124 | `integrated`, `abandoned` | children |
   | `branch` | R-BTN-96 | R-BTN-96 | branches |
   | `ask`, `deliver`, `announce` | condition handlers (R-BTN-169) | R-BTN-169 | — |
@@ -2122,6 +2123,19 @@ mean (R-BTN-50).
     posts a decision for the owner and ends `released:blocked` on it (R-BTN-126).
   - **A wait outside the claim suspends:** a leg whose next leg waits on someone the claim
     cannot wait for returns `suspend: true` with its pair, ending the claim there (R-BTN-72).
+  - **The start leg that opens a PR.** `create-pr`'s `implement` and `create-spec`'s `converse`
+    wait at their course's start station (`filed`, `requested`) until the PR they open exists, and
+    the forge alone cannot tell a start leg that has run and left no PR yet from one that has not:
+    placed on PR facts alone the leg would be offered again, a new claim and a new session each
+    sync. Each such leg leaves its own record in git instead, and the station function reads that:
+    `create-spec`'s `converse` instructions append
+    `{ticket, leg: "converse", reached: "requested", next: "review"}` to `.baton/markers.jsonl`
+    and commit it before the owner's session starts, so one marker line for the ticket means the
+    design conversation is under way: `converse` then waits on the `owner` and is not offered
+    again while the line stands (the marker courses' line, read by a PR course's function; it is
+    a record that the leg ran, never a station the ticket moves to — the path stays at
+    `requested` until the PR lands and the next reading places it at `spec-open`). A ticket with
+    no such line is ready for `converse`, its dependency and child waits as any start leg's.
   - The standard courses declare `error.no-answer` (`interrupt`, `retryable: false`, R-BTN-162).
   - **Stubs** run the repository's `agent_command` (R-BTN-74) with `BATON_COURSE`, `BATON_LEG`,
     `BATON_TICKET_FILE` and `BATON_INSTRUCTIONS` (the source's `legs/<leg>.md` or the home's
@@ -6206,6 +6220,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-104 the standard courses | `bug-report` with markers (one no edge, one malformed), `decision` with `answer:`, `draft-ticket` with no forge facts; an audit leg answering with prose before and after its outcome, and with none (B-85) | markers move the ticket, bad ones nothing; `carry-out` ready once answered; the third syncs to `requested`; the prose-wrapped outcome is read, none fails naming the last line |
 | S-BTN-105 one leg overridden | `legs/review.run.mjs` on a sourced `create-pr` | the override runs at the snapshot; the standard `close` writes the verdict |
 | S-BTN-107 the build-app course | drafts approved one by one by `answer:`; `file`, a call, files two children on different courses; a verification files a fix; a third failing verification | each draft waits for its stage's approval; `file` settles at `building` only once both close, so `verify` never starts while a child is open; the fix call settles back to `building`; `released:blocked` on the posted decision; `shipped` |
+| S-BTN-174 the create-spec course | a request with no PR and no marker; a run of `converse` that writes its marker and suspends, then a second sync; its PR on the branch pattern, checks running and then done; a verdict asking for changes and an address round begun and suspended; its push; a second round; a third round asking for changes; a round still asking for changes with all three address rounds spent; an adjudication reproducing a finding, then one that does not; a fresh approval; the merge | `converse` ready, then — its marker committed — waiting on `owner` and not offered again; `spec-open` with `review` waiting on `ci`, then ready; `reviewed` with `address` ready; back to `spec-open` after the push; `adjudicate` once the address rounds run out; `merge` waiting on `owner` for a reproduced finding, ready for none; `merge` ready on a fresh approval; `merged` |
 | S-BTN-110 courses from their sources | the built CLI outside a checkout: `--course create-pr`; a `--source` at a tag with overrides; a copied `course.json`; an off-branch commit; no `sync.mjs`; an outside import | full-commit source, no course file; source read at its commit with home overrides; each fault refused naming it, the commit unfetched |
 | S-BTN-117 bars and renames | bars on `implement` and `*` except `review`; files dropping, swapping, double-renaming, re-adding legs | first two held, raised; collision refused; `except` updated and the new leg barred |
 | S-BTN-139 closure | the built-in ontology; a runner holding `key:anthropic` and `dependency:claude-code`; one holding the key alone; a three-hop transitive rule | the first derives `model:claude-opus-5-5` and `capability:code-generation-llm`; the second only the model; three hops derived |
