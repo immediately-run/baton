@@ -245,9 +245,8 @@ recorded when a claim goes against them (`advice-overridden`), never refused.
 name the delivery's repository — at most once per repository per 30 seconds, plus one trailing
 dispatch when a window that suppressed a delivery closes. A repeated delivery id, a
 `workflow_run` of a registered repository's own sync or mirror workflow, and the mirror's push
-dispatch nothing. Like every other trigger, the dispatch waits for the repository's cutover: before
-it, a delivery is recorded and dispatches nothing, because with no claim in the repository its sync
-would have nothing to post (B-92).
+dispatch nothing. The dispatch goes out whatever the repository's mode (§7.1 R-BTN-73): the sync
+posts the board snapshot before the cutover too.
 
 ## Running locally
 

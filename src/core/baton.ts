@@ -223,12 +223,13 @@ export class BatonCore {
     if (!raw) throw new BatonError('unauthenticated', 'no webhook principal');
     const out = this.store.transaction(() => this.webhooks.receive(JSON.parse(raw) as Delivery));
     if (out.outcome === 'dispatched') {
-      // B-92: before a repository's cutover no claim exists, so a sync started now would post
-      // nothing a delivery's dispatch could show — the trigger every claim and advance sends is
-      // held already, and a sync is pulled when it is wanted. Only a repository Baton holds gets
-      // the App dispatch (the same rule `flushDispatch` applies to every other trigger); the
-      // delivery's row is what proves it arrived, on either side of the cutover.
-      this.syncNow(out.now.filter((repository) => this.cutover.cutoverAt(repository) != null));
+      // B-92's live run: the delivery's row is what proves it arrived, on either side of the
+      // cutover. The dispatch itself goes to every repository the path named, whatever its mode
+      // (§7.1 R-BTN-73: the sync posts the board snapshot before the cutover too, and a snapshot
+      // under 15 minutes old is what cutover.ts needs when its day comes — the round-1 filter
+      // held shadow repositories back while the alarm's own backstop sent them 30 seconds
+      // later, so the code, the spec and the runbook disagreed until it went).
+      this.syncNow(out.now);
       if (out.trailing.length) await this.armBy(this.webhooks.nextTrailing());
       // B-89: the stamp this delivery wrote arms the alarm for the backstop's instant.
       await this.armBy(this.webhooks.nextDue());
