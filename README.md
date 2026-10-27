@@ -207,7 +207,12 @@ repository in one role, signing as workers do — or a CI identity token: GitHub
 the repository's `sync_workflow`/`mirror_workflow`, or a GitLab CI `id_tokens` JWT whose audience
 is `<origin>#sync` or `<origin>#mirror`, from an issuer `BATON_FORGE_SECRETS` lists
 (`{"<repository>": {"forge": "gitlab", "gitlab_issuer": "https://gitlab.example.com"}}`). A key
-holds one role: a sync key is never a worker's, nor the reverse.
+holds one role: a sync key is never a worker's, nor the reverse. Register one with
+`baton admin repo add … --sync-key <the key's .pub>` (or `repo set <id> --add-sync-key`), beside
+the CI identity when the repository has one, and post its board without CI by
+`baton repo sync --sync-key FILE` — or `BATON_SYNC_KEY=FILE`, which is the same flag from the
+environment (B-88). The flag signs the sync's observation, head and board calls as a worker signs;
+it is the path for a repository without Actions, or for bootstrapping a first board.
 
 ## Stations and legs
 
