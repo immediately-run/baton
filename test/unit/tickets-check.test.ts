@@ -344,6 +344,8 @@ describe('dependsLine and bodyDependencies: the line’s bounds', () => {
     // parent `B-4` (2-r0-1); and a sentence-final full stop is punctuation, not part of the id
     // (3-r1-1 — this repository's own B-38 writes `R3-1254.`).
     expect(dependsLine('**Depends on:** R-BTN-83, B-4.1, see B-2.\n')).toEqual(['R-BTN-83', 'B-2']);
+    // A letter-suffixed id is an id (docs' R3-277c, R3-633d — round 5, 5-r3-1).
+    expect(dependsLine('**Depends on:** R3-277c, R3-633d\n')).toEqual(['R3-277c', 'R3-633d']);
     const file = '---\nid: B-111\ntitle: A ticket with depends_on in prose\n---\n\n**Depends on:** B-1, R3-1205 and B-2.\n\n**Used by:** B-3\n';
     // The line is prose: an id-SHAPED token (`B-1`, `R3-1205`) is a dependency, and "and" is
     // not (round 1, 1-A-0: the board's `LOCAL_ID` un-anchored read `none.`, `the` and `and`).

@@ -27,7 +27,7 @@ import { ticketsMarkdown, type MarkdownFile, type MarkdownSettings, type Tickets
  *  A full stop after it is usually the sentence's (`… see B-2.`), so only a stop followed by
  *  more token (`B-4.1`) is part of the id (round 3, 3-r1-1) — except a wiki link's `.md`/`.mdx`
  *  (`[[R3-1128.mdx]]`, docs' form: 117 of its 218 lines, round 4, 4-r2-0). */
-const ID_TOKEN = /(?<![A-Za-z0-9._-])([A-Za-z](?:[A-Za-z0-9]*|[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)-\d+)(?![A-Za-z0-9_]|\.(?!mdx?(?![A-Za-z0-9]))[A-Za-z0-9])/g;
+const ID_TOKEN = /(?<![A-Za-z0-9._-])([A-Za-z](?:[A-Za-z0-9]*|[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)-\d+[a-z]?)(?![A-Za-z0-9_]|\.(?!mdx?(?![A-Za-z0-9]))[A-Za-z0-9])/g;
 
 /** The ticket ids a markdown ticket's body names on its `**Depends on:**` line, or null when it
  *  has no such line (B-111). The body is the file's text with its frontmatter blanked; the line
@@ -171,9 +171,9 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
     // 4-r2-1: only this repository's own ticket ids count. A line cites requirement and scenario
     // ids too (`R-FH-40/41/42`, `S-BTN-62`) — fieldhouse's check reads ids of its own prefix
     // (`^FLDH-\d+$`, `.baton/baton.json`'s ticket_prefix), so those are prose there and here.
-    const own = new Set([...result.tickets.map((t) => t.id), ...result.closed.map((c) => c.id)]);
-    const prefixes = new Set([...own].map((id) => id.replace(/\d+$/, '')));
-    const isMine = (id: string): boolean => own.has(id) || prefixes.has(id.replace(/\d+$/, ''));
+    const ownIds = new Set([...result.tickets.map((t) => t.id), ...result.closed.map((c) => c.id)]);
+    const prefixes = new Set([...ownIds].map((id) => id.replace(/\d+[a-z]?$/, '')));
+    const isMine = (id: string): boolean => ownIds.has(id) || prefixes.has(id.replace(/\d+[a-z]?$/, ''));
     const texts = new Map(files.map((f) => [`${(used.items ?? 'tickets').replace(/\/$/, '')}/${f.path}`, f.text]));
     for (const t of result.tickets) {
       const text = texts.get(t.path);
