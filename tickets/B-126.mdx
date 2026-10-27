@@ -30,7 +30,9 @@ a compromise visible within one sync, at small cost.
 ### What to build
 
 1. **Control inputs**, a fixed list per repository: `.baton/**`, goal files, `.github/workflows/**`,
-   and ticket frontmatter fields `EXPEDITE`, `tier`, `requires` and `depends_on`. Owners may
+   agent configuration (`.claude/**` (hooks, settings, skills, memory), every `CLAUDE.md` and `AGENTS.md`, and plugin manifests, which privileged
+   interactive sessions load or execute: security model, OWASP ASI05 and ASI06), dependency
+   manifests and lockfiles (ASI04), and ticket frontmatter fields `EXPEDITE`, `tier`, `requires` and `depends_on`. Owners may
    add paths in their settings (R-BTN-66).
 2. **The check.** When an accepted board post's head changes a control input, Baton looks up the
    pushers of the commits since the last accepted head, from the forge's push deliveries (R-BTN-73;
@@ -49,7 +51,9 @@ a compromise visible within one sync, at small cost.
    the ticket (`last_written_by: {pusher, signer?, commit, at}`) in the board, the recommendations
    and the dashboard. `baton ticket show` prints it first, so a privileged session sees "last
    written by `immediately-run-worker`" before it reads the body. Provenance is information,
-   not a gate.
+   not a gate. **Hand-off documents and agent memory carry it too** (OWASP ASI06): a hand-off
+   (R-BTN-44) is served with the claim and runner that wrote it, and a memory file with its
+   last pusher, so the next reader knows whose words steer it.
 
 ### Tests
 

@@ -61,6 +61,13 @@ makes a single compromised runner unable to land code alone.
 5. **Control paths stay owner-only** (security model A or B, or B-127), so the reviewer identity
    cannot change `.baton/` or workflows either. Then reaches 1, 2 and 5 also need two
    compromises.
+6. **The reviewer identity never executes code under review** (security model, OWASP ASI05 and
+   ASI07). A review that runs the PR's tests (B-110's run-tests leg) executes the implementer's
+   code; on a runner holding the reviewer set, a compromised implementer would gain the
+   reviewer's credentials and undo the split. Tests run in a credential-free sandbox (no forge
+   credential, no Baton key with review rights), whose results the reviewer reads; or on the
+   implementer's side, with the results reproduced by a check the reviewer does not execute.
+   **Decide** which; the scenario proves the reviewer runner never runs PR code.
 
 ### Tests
 

@@ -34,7 +34,13 @@ from where), R-BTN-12 (expedite), §7.1 (the board post); B-122 (goals); `docs/s
 ### What to build
 
 1. **Control inputs**: `.baton/**` (`agent_command`, `agent_wrapper`, course sources, overrides,
-   `rank.mjs`, `sync.mjs`), goal files, and the `EXPEDITE` tag. **Not ticket `tier`**
+   `rank.mjs`, `sync.mjs`), goal files, the `EXPEDITE` tag, and agent configuration (`.claude/**` (hooks, settings, skills, memory), every `CLAUDE.md` and `AGENTS.md`, and plugin manifests): a pushed session hook runs with the owner's credentials in their
+   next interactive session (security model, OWASP ASI05). Baton cannot stop Claude Code
+   loading an unsigned file, and a check kept in the same repository can be rewritten by the
+   push it guards. For these paths the deliverable is a verifier the owner installs outside the
+   repository (user-level settings, or the environment's setup script) that refuses to open a
+   privileged session on a checkout whose agent configuration was last changed in a commit no
+   owner key signed, plus the notice. **Not ticket `tier`**
    (decided, the owner, 2026-10-27). A tier routes work by quality, not privilege: a runner
    granted a higher tier also takes every lower one, so a changed tier sends a ticket to no
    runner whose credentials it could not already reach through its body (security model,

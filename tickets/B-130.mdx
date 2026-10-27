@@ -57,8 +57,9 @@ default branch, so a change that has not reached it is not claimable and not in 
    - **`tickets/**` and goal files are merged only on an owner's approval**: CODEOWNERS naming
      the owners, and the ruleset requiring code-owner review. A model never approves a ticket's
      text, since its danger is its meaning.
-   - `.baton/**` and `.github/workflows/**` need an owner's approval too (security model A or B;
-     B-127 signs what A cannot cover on public repositories).
+   - `.baton/**`, `.github/workflows/**` and agent configuration (`.claude/**` (hooks, settings, skills, memory), every `CLAUDE.md` and `AGENTS.md`, and plugin manifests) need an owner's approval too (security model A or B; B-127 signs what A cannot
+     cover on public repositories). Agent configuration is what privileged sessions execute
+     (OWASP ASI05).
 3. **Agent-filed tickets are PRs.** `bug-report`, `draft-ticket` and `epic` (children) open a PR
    adding the ticket instead of pushing it; the ticket becomes claimable when an owner merges it.
    **Decide:** whether a deterministic check may auto-merge a ticket PR that changes only status
