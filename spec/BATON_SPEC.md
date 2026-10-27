@@ -958,7 +958,8 @@ Baton, and it is exportable (R-BTN-88).
                         #   protocol_files, source?, facts?, route_choices?}]; imports?;
                         #   conditions? (bindings,
                         #   R-BTN-161); for the CLI's defaults (R-BTN-74): items, default_course,
-                        #   repos, agent_command, agent_wrapper (B-95)
+                        #   repos, agent_command, agent_wrapper (B-95); check: {depends_line}
+                        #   (B-111, `baton tickets check` alone reads it; default off)
     tickets.mjs         # optional ticket source; absent, the CLI's markdown source (R-BTN-74)
     ontology.json       # optional capability ontology and route choices; absent, none (R-BTN-174)
     courses/<course>/   # an own course; a sourced course's directory holds only overrides (R-BTN-134)
@@ -1040,6 +1041,16 @@ Baton, and it is exportable (R-BTN-88).
     Other fields are ignored. Two files with one `id`, or a `repos` name with no mapping, fail
     the sync: nothing is posted and the run names the file. `file(ticket)` writes
     `<items>/<local id>.md`; `withdraw` sets `status: withdrawn` and `withdrawn_reason`.
+  - **`baton tickets check [--repo DIR] [--quiet]`** (B-111) reads that source as a sync does — an
+    ejected `.baton/tickets.mjs`, else the markdown default — and checks what it would post, without
+    posting: the source's own refusal (a duplicate `id`, an unknown `repos` short name, an `order`
+    that is not a number), the board post's validation (§4.4, the cycle among it), every
+    `depends_on` naming a live or a closed ticket, and no cycle (named once or more, `B-1 → B-2 → B-1`). With
+    `check: {depends_line: true}` in `.baton/baton.json` (default off) it also holds each markdown
+    ticket's `**Depends on:**` body line — which runs to the next blank line or `**Label:**` line;
+    a `**Used by:**` line is never read — to its `depends_on`, both ways; a ticket with no such line
+    is not compared. Exit 1 with one `path: message` line per finding, 0 without; an unreadable
+    root or a malformed `baton.json` is an error (exit 2). It reads; it never writes.
   - Standard courses' legs are stubs that run `agent_command` (R-BTN-131); the CLI ships no leg
     scripts and no station functions.
   - The sync workflow pins the CLI's npm version (`npx --yes @immediately-run/baton@<version>
@@ -1246,6 +1257,11 @@ Baton, and it is exportable (R-BTN-88).
   board clears it and gets its kept owner state back (R-BTN-12).
 - A check ticket whose `check.head_repo_id` is not the repository's `forge_repo_id` is dropped
   (R-BTN-153).
+- A post whose live tickets' `depends_on` form a cycle is refused `invalid-params`, naming it once
+  as its path (`B-1 → B-2 → B-1`); an edge to a closed ticket, or to an id the post does not name,
+  is no cycle here — the latter is `baton tickets check`'s finding (B-111). The interim shape's
+  `state.items[].dependsOn` is the same graph and is refused the same way (B-111, round 1): no
+  ticket source can post a loop, whichever shape it posts.
 - Free text and identifiers are validated on write (§12.3).
 
 ### 4.5 Reading the ticket, and open-world claims
@@ -6141,6 +6157,8 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | **§3** | | |
 | S-BTN-26 two repositories, two courses | `ops` (weight 50, course `runbook`) beside `docs`, both with `T-1`; W1 declares one course, W2 both | distinct tickets; W1 never offered `ops`; `docs` first, each in default order, per-group limit; tokens per repository; a shared branch blocks pushes while either is held; `min_runner_version` gates W2 |
 | S-BTN-42 webhooks | a review delivery, its repeat, a forgery, a 10-delivery burst, Baton's own events, extra fields | one dispatch, then one trailing after 30 s; repeat, forgery and own events dispatch nothing; only R-BTN-73's fields read |
+| S-BTN-171 a dependency cycle is refused | a board post whose live tickets depend on each other in a loop; two of them; a self-dependency; a diamond; a post closing the very ticket it depends on | `invalid-params`, naming `B-1 → B-2 → B-1` once, and nothing of the post stored: no head, no ticket; `B-1 → B-1` alike; the diamond and the closed edge accepted |
+| S-BTN-172 the ticket check | `baton tickets check` on a clean repository, on one whose tickets loop, on one with no `.baton/baton.json`, and on this repository's own `tickets/` | exit 0 with the count, `✓ no findings`; exit 1 with one `path: message` line (the loop at its first ticket's file) and the count; the CLI's error, exit 2; this repository passes, which CI's `npm run check:tickets` runs |
 | S-BTN-54 a Baton without GitHub | `plain` with a `post-receive` running `baton repo sync --defaults-only` on the `branch` course; `Baton-Verdict:` trailers, one without `Baton-Claim`; `--if-wanted` cron | the ticket moves to `merged` on push syncs alone; the unclaimed verdict counts and logs `foreign-write`; `wanted` holds until a later-numbered post; no forge credential or link |
 | S-BTN-55 the sync key | a sync key posts; it is registered for a second repository; machine (sync off), mirror and revoked keys post; a replay | accepted; `conflict`; `forbidden`; `unauthenticated` |
 | S-BTN-56 other forges, edges of a want | `lab` and `tea` notifications, good and bad; `#mirror` vs `#sync` tokens; a dispatch answering 500; near-miss URLs; `--defaults-only` with a `sync.mjs`; a push by another pusher with the mirror's author email | bad refused in the Worker, good record wants, the spoofed push's included; `#mirror` `forbidden`; one dispatch retry; only `web_base` URLs kept; the ticket fails |
