@@ -46,12 +46,12 @@ The divergence is invisible until the day it matters.
 
 ### Exit criteria
 
-- [ ] a rebuilt instance serves the owner CLI without a manual re-add (the owner confirms the entry's key is the one they sign with — see the note below — before this is ticked)
+- [x] a rebuilt instance serves the owner CLI without a manual re-add (the entry's key is production's owner — checked 2026-10-27, below)
 - [x] a seed-only registration is named in a read
 
 ## Status
 
-_implemented 2026-10-24, rebased onto main 2026-10-27 after #108 merged — the seed's `owner_keys` (both wrangler.toml environments carry `baton`'s), `seed_owners` in `GET /v1/admin/repositories`, and the runbook's check; PR #109 (rebased onto main after #108 merged)._
+_implemented 2026-10-24, main merged in 2026-10-27 — the seed's `owner_keys` (both wrangler.toml environments carry `baton`'s), `seed_owners` in `GET /v1/admin/repositories`, and the runbook's check; PR #109._
 - **Deviations.** Item 3 is the runbook's *check*, below, in this repository's copy
   (`docs/runbooks/register-baton.mdx`, the `docs` content this repository carries); the `docs`
   repository's copy of the runbook was not changed — no PR there. B-91's tests are
@@ -65,8 +65,8 @@ _implemented 2026-10-24, rebased onto main 2026-10-27 after #108 merged — the 
   missing its `owner_keys` apart by the answer's empty `owners`; `seed-owners-fresh.test.ts` is
   out of Workers' tsconfig and into the local one; the cloudflare test project spreads its bindings
   last. Commit `adb3ad8`.
-- **B-90.** B-91's read extends `GET /v1/admin/repositories` (B-90, PR #108): this branch is based
-  on it, so #108 merges first — this PR's base is B-90's branch.
+- **B-90.** B-91's read extends `GET /v1/admin/repositories` (B-90, PR #108, merged); the branch
+  carries main by merge.
 - **Round two** (PR #109, finding 1): `seedOwnerKeys` parses and checks every key of every entry
   before the ownership guard, so a seed that would stop a rebuild stops the start that finds the
   repository already owned — the guard now only keeps the write loop off. The revoked check keeps
@@ -77,14 +77,12 @@ _implemented 2026-10-24, rebased onto main 2026-10-27 after #108 merged — the 
   audience and `owner@example.com`; the bindings still spread last. Finding 5: the runbook's
   check is the pair — the repository in `seed_owners` **and** its owners in the same answer —
   with the one-liner that prints it.
-- **Not checked live:** no deployed instance was rebuilt for this ticket; a fresh local instance
-  with `wrangler.toml`'s own entry stands in (test/unit/seed-owners-fresh.test.ts). The owner key
-  seeded is `ssh-ed25519 …+jdf`, `SHA256:iY5pLxsv05FQfhNZdEQrr8NwkZWdaqN5DcOwkkSTOZY`, the
-  content of `~/.ssh/baton_repo_owner.pub` on the owner's machine. Round two, finding 3: whether
-  the deployed instance was registered with that key or another is readable now: `baton admin repos`
-  (B-90, merged) names each registered repository's `owners` and `seed_owners` on the deployed
-  instance. Confirm that the deployed owner's fingerprint equals the entry's —
-  `ssh-keygen -lf` both, or read `owners[]` from the command — before this merges; comparing the
-  `wrangler.toml` line against its own source file proves nothing. If they differ, replace the
-  entry's line with the `.pub` `admin repo add` took. The runbook's step 3 names the fingerprint
-  as the key's identity.
+- **Checked live (2026-10-27).** No deployed instance was rebuilt; a fresh local instance with
+  `wrangler.toml`'s own entry stands in (`test/unit/seed-owners-fresh.test.ts`). The entry's key is
+  production's: `baton admin state`'s `limits.owners` names one live owner of `baton`,
+  `SHA256:iY5pLxsv05FQfhNZdEQrr8NwkZWdaqN5DcOwkkSTOZY`, and `ssh-keygen -lf` gives the same
+  fingerprint for `~/.ssh/baton_repo_owner.pub` and for the entry's line — the runbook's step-3
+  check, run as written. The runbook named `baton_owner_baton`, a file that does not exist; it is
+  `baton_repo_owner` throughout now, and the check reads owners from `admin state` (`admin repos`
+  answers no `owners`, so round five's one-liner always printed none). The same read shows `docs`
+  with no owner in production — outside this ticket, which seeds `baton`'s entry.
