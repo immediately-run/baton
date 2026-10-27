@@ -344,8 +344,10 @@ export function bodyDependencies(body: string, idPattern: RegExp): string[] | nu
  *  and to no other: an id that is neither live nor closed cannot be a cycle, and naming it is
  *  the ticket check's business (`baton tickets check`), not the board's. Depth-first from the
  *  ids in sorted order, so the cycles named are the same on every run; a self-dependency is
- *  `A → A`. Every DISTINCT loop is named — grouped by the tickets it holds, so two cycles over
- *  the same members are one finding (round 2, 2-r0-2) — and the walk keeps its own stack — a legal board of TICKETS_MAX tickets may be one 10 000-long chain,
+ *  `A → A`. Cycles are grouped by the tickets they hold, so two loops over the same members
+ *  are one finding (round 2, 2-r0-2) and a loop that is not the first found over a shared
+ *  member may go unnamed — the board names the first, and the check's job is to fail the
+ *  build, not to enumerate every walk. The stack is the walk's own — a legal board of TICKETS_MAX tickets may be one 10 000-long chain,
  *  which recursion cannot walk (1-A-3). Fieldhouse's algorithm, made iterative. Pure, so
  *  `src/defaults/tickets-check.ts` runs it too (defaults may import core, never the reverse). */
 export function dependsCycles(tickets: readonly { id: string; depends_on: readonly string[] }[]): string[][] {

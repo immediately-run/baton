@@ -22,15 +22,11 @@ import { ticketsMarkdown, type MarkdownFile, type MarkdownSettings, type Tickets
  *  (`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`) is right for `depends_on`'s list and wrong for prose: read
  *  over a sentence it takes `none.`, `the` and `and` for ids (round 1, 1-A-0). The prefix's own
  *  dashes are part of it (`R-BTN-83` is never `BTN-83`), so the pattern refuses a token that
- *  starts mid-id: a `-` or an alphanumeric directly before the match, or a `.`/letter directly
- *  after the number, means the token is something else (round 2, 2-r0-1). */
-const ID_TOKEN = /(?<![A-Za-z0-9._-])([A-Za-z](?:[A-Za-z0-9]*|[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)-\d+)(?![A-Za-z0-9_.])/g;
-
-/** `pattern` over `text`, as the ids it names (deduped, in order): a global match with the
- *  boundary lookarounds above, never a bare word. */
-function idsIn(text: string, pattern: RegExp): string[] {
-  return [...new Set([...text.matchAll(pattern)].map((m) => m[1]))];
-}
+ *  starts mid-id: a `-` or an alphanumeric directly before the match, or a letter, digit or
+ *  underscore directly after the number, means the token is something else (round 2, 2-r0-1).
+ *  A full stop after it is usually the sentence's (`… see B-2.`), so only a stop followed by
+ *  more token (`B-4.1`) is part of the id (round 3, 3-r1-1). */
+const ID_TOKEN = /(?<![A-Za-z0-9._-])([A-Za-z](?:[A-Za-z0-9]*|[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)-\d+)(?![A-Za-z0-9_]|\.[A-Za-z0-9])/g;
 
 /** The ticket ids a markdown ticket's body names on its `**Depends on:**` line, or null when it
  *  has no such line (B-111). The body is the file's text with its frontmatter blanked; the line

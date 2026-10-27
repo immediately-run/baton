@@ -1030,7 +1030,7 @@ Baton, and it is exportable (R-BTN-88).
     ejected `.baton/tickets.mjs`, else the markdown default — and checks what it would post, without
     posting: the source's own refusal (a duplicate `id`, an unknown `repos` short name, an `order`
     that is not a number), the board post's validation (§4.4, the cycle among it), every
-    `depends_on` naming a live or a closed ticket, and no cycle (named once, `B-1 → B-2 → B-1`). With
+    `depends_on` naming a live or a closed ticket, and no cycle (named once or more, `B-1 → B-2 → B-1`). With
     `check: {depends_line: true}` in `.baton/baton.json` (default off) it also holds each markdown
     ticket's `**Depends on:**` body line — which runs to the next blank line or `**Label:**` line;
     a `**Used by:**` line is never read — to its `depends_on`, both ways; a ticket with no such line
