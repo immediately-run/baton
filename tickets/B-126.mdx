@@ -43,9 +43,18 @@ a compromise visible within one sync, at small cost.
    (owner-signed control inputs) is the gate.
 5. **Forges without push events** (a plain git remote) record `pusher-unknown` and raise the
    notice for every control change.
+6. **Provenance on every ticket** (the owner, 2026-10-27; security model reach 3, option 9). For
+   each ticket the sync records who last changed its body and its brief: the pusher of that
+   commit, from the same push deliveries, and its signing key if any (B-127). Baton serves it with
+   the ticket (`last_written_by: {pusher, signer?, commit, at}`) in the board, the recommendations
+   and the dashboard. `baton ticket show` prints it first, so a privileged session sees "last
+   written by `immediately-run-worker`" before it reads the body. Provenance is information,
+   not a gate.
 
 ### Tests
 
+- A scenario: a ticket body last pushed by the worker identity is served with that pusher, and one
+  an owner signed with the signer; a later push by the worker replaces both.
 - A scenario (the next free S-BTN number): a non-owner's push changing `.baton/baton.json` raises
   one notice naming the path and the pusher; an owner's push raises none; a ticket's `EXPEDITE`
   set by a non-owner raises one; a forged commit author with a non-owner pusher still raises it.
