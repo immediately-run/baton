@@ -1,0 +1,66 @@
+---
+title: "B-127 — Owner-signed control inputs: .baton/, goals and EXPEDITE count only at a commit an owner key signed"
+id: B-127
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1151
+tier: judgement
+description: "The owner, 2026-10-27, hardening against a compromised runner (security model option 7, mitigation C): a control input counts only from a commit SSH-signed by an owner key of the repository; an unsigned change keeps the last signed version and raises a notice; runners load agent_command, overrides and rank.mjs only from the signed commit. Opt-in per repository (require_signed_control). Narrows R-BTN-66. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-27, on hardening against a compromised runner. The security model
+(`docs/security-model.mdx`, hardening option 7, mitigation C) recommends it as the one mitigation
+that works on every forge and visibility, the public `baton` repository included: a push alone
+can no longer change what every runner executes or how work is scheduled.
+
+**This is a change to Baton, not in Baton.** It narrows R-BTN-66 ("the rest stays in git, where
+agents may improve it: course files…"): an agent's change to a control input becomes a proposal
+an owner signs.
+
+**Spec:** R-BTN-66, R-BTN-13 (SSHSIG), R-BTN-98, R-BTN-133 and R-BTN-134 (what a runner loads and
+from where), R-BTN-12 (expedite), §7.1 (the board post); B-122 (goals); `docs/security-model.mdx`.
+**Depends on:** none.
+
+### What to build
+
+1. **Control inputs**: `.baton/**` (`agent_command`, `agent_wrapper`, course sources, overrides,
+   `rank.mjs`, `sync.mjs`), goal files, and the `EXPEDITE` tag. **Decide:** whether ticket
+   `tier` is one (the security model's open decision).
+2. **Signed by an owner.** A control input counts only at a commit carrying a valid SSH signature
+   (git's `gpg.format ssh`, the SSHSIG format R-BTN-13 already verifies) by an owner key of that
+   repository, for the commit that last changed it. Baton checks this in the sync (CLI side, with
+   the owner keys from Baton) and records the signing key with the board post.
+3. **Otherwise, the last signed version.** An unsigned change keeps the last signed version in
+   force, and raises an `unsigned-control` notice naming the paths and commits. A repository with
+   no signed version yet keeps today's behaviour until its owners opt in (`require_signed_control`,
+   an R-BTN-66 setting, default off), so adoption is per repository.
+4. **Runners load the same.** A runner loads `agent_command`, overrides and `rank.mjs` only from
+   the signed commit the board post names, extending the verified tree it already checks
+   (R-BTN-133, R-BTN-134).
+5. **Goals from their first version.** If B-122 has not landed, goals are control inputs from the
+   start; if it has, they join item 1.
+6. **Tooling.** `baton owner sign` (or plain `git commit -S`) and a doc on configuring git with an
+   owner key.
+
+### Tests
+
+- A scenario (the next free S-BTN number): with `require_signed_control` on, an unsigned change to
+  `agent_command` leaves the runner running the signed one and raises the notice; an owner-signed
+  change takes effect; a commit signed by a non-owner key, or a forged signature, counts as
+  unsigned; an `EXPEDITE` added unsigned does not expedite.
+
+### Exit criteria
+
+- [ ] R-BTN-66 amended, citing this ticket
+- [ ] the scenario passes on both hosts; `npm test` and `npm run typecheck` green
+- [ ] `fieldhouse` runs with `require_signed_control` on
