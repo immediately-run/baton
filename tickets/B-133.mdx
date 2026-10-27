@@ -1,0 +1,57 @@
+---
+title: "B-133 — Approvals show computed changes, not agent summaries: decisions, ticket PRs and status-only labels"
+id: B-133
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+  - docs
+tags:
+  - roadmap-item
+order: 1156
+tier: judgement
+description: "OWASP agentic mapping, hole 6 (ASI09): where an owner approves, a machine-computed view (the tickets, bodies, briefs and fields a PR changes with provenance; the exact action each decision option takes) sits beside the agent's words; options touching credentials, grants, CI, deploys or another repository are never pre-selected; status-only is a check, not a description. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-27, OWASP agentic mapping, hole 6 (ASI09 human-agent trust
+exploitation): agents write the decision packets the owner answers "with one letter, from a
+phone", the PR descriptions the owner approves under B-130, and the summaries of what changed.
+A packet whose recommended option is harmful, or a "status-only" ticket PR that rewrites a body,
+exploits exactly the quick approval the process is designed for.
+
+**Spec:** R-BTN-80 and R-BTN-103 (decisions and notices), R-BTN-155 (dashboard confirmations);
+B-130 (owner-approved ticket PRs), B-126 (provenance); `docs/security-model.mdx` (OWASP mapping,
+hole 6); docs' `prepare-decision-packet` and `process-decision-packets` skills.
+**Depends on:** none.
+
+### What to build
+
+1. **Approvals show what changes, computed, not summarised.** Wherever an owner approves (a
+   decision, a ticket PR, a hold's release), Baton or the skill shows a machine-computed view
+   beside the agent's words:
+   - for a ticket PR: which tickets change, whether a body or brief changed (with the diff),
+     which frontmatter fields changed, and the provenance of each (B-126);
+   - for a decision: the exact action each option takes (the commands or API calls), not only
+     its description.
+2. **The recommendation is marked as the agent's.** A packet shows who prepared it (provenance)
+   and never pre-selects an option whose action touches credentials, grants, CI, deploys or
+   another repository; those need the owner to read the action and choose it.
+3. **A status-only PR is checked, not described.** A ticket PR is labelled status-only by a check
+   that verifies no body, brief or control field changed, never by the PR's own description.
+
+### Tests
+
+- A decision packet whose recommended option revokes a grant is shown with that action spelled
+  out and not pre-selected; a ticket PR described as status-only but changing a body is shown as a
+  body change, and the status-only label is absent.
+
+### Exit criteria
+
+- [ ] the dashboard's decisions and the docs decision skills show computed actions
+- [ ] the ticket-PR check runs on `fieldhouse`, `docs` and `baton`

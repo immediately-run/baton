@@ -1,0 +1,58 @@
+---
+title: "B-131 — Per-claim forge credentials: a host-level broker mints a token scoped to the claim's repositories; no long-lived forge credential in a VM"
+id: B-131
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+  - fieldhouse
+tags:
+  - roadmap-item
+order: 1154
+tier: critical
+description: "OWASP agentic mapping, hole 3 (ASI02, ASI03, ASI10): a host-level broker holding a GitHub App key mints, per claim, an installation token scoped to the ticket's home and repos (contents and pull requests only, no workflows), expiring with the leg and revoked when the claim ends; hosts.yml and the worker's SSH key leave the VM. Amends R-FH-11. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-27, asked for the OWASP Top 10 for Agentic Applications to be mapped
+onto Baton. Hole 3 (ASI02 tool misuse, ASI03 identity and privilege abuse, ASI10 rogue agents):
+every VM holds a long-lived `gh` token and SSH key of `immediately-run-worker`, valid on every
+repository that identity can write, at any time, whatever the claim. A compromised leg's reach
+is the worker's whole reach, not its ticket's.
+
+**Spec:** R-BTN-100 (a claim), R-BTN-140 (`code_repos`), R-BTN-58 (grants); FIELDHOUSE_SPEC
+R-FH-11 (what a VM holds) and Axiom 6; `docs/security-model.mdx` (OWASP mapping, hole 3).
+**Depends on:** none.
+
+### What to build
+
+1. **A credential broker at host level** (Fieldhouse's host, beside the gateway). It holds a
+   GitHub App's private key; no VM ever does.
+2. **Per-claim tokens.** When a runner's claim starts or advances a leg, the runner asks the broker
+   (over the VM's allowlisted path, authenticated by the runner's Baton key) for a token. The broker
+   asks Baton which claim that key holds, its ticket's home and `repos:` (within `code_repos`), and
+   mints a GitHub App installation token scoped to exactly those repositories, with `contents` and
+   `pull_requests` write (and nothing on `workflows` or `administration`), expiring with the leg
+   (at most one hour, renewed while the claim lives).
+3. **No standing token in the VM.** `hosts.yml` and the worker's SSH key leave the image; git
+   pushes over HTTPS with the per-claim token. R-FH-11 is amended: a VM holds its runners'
+   virtual keys and Baton keys, and per-claim forge tokens it is handed, nothing long-lived.
+4. **Baton's part**: an endpoint the broker calls, signed by the broker's own key (a new
+   principal, scope: read a claim's repositories), answering for an active claim only.
+5. **Revocation**: ending, reaping or fencing a claim tells the broker, which revokes the token.
+
+### Tests
+
+- A scenario (the next free S-BTN number): a runner with a claim on a `fieldhouse` ticket gets a
+  token that can push `fieldhouse` and is refused on `baton`; after the claim ends the token is
+  revoked; a runner with no claim gets nothing; the token cannot change a workflow file.
+
+### Exit criteria
+
+- [ ] the broker running on irfldhv1's first host; no long-lived forge credential in any VM
+- [ ] R-FH-11 amended; the scenario passes

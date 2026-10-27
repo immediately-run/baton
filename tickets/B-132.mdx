@@ -1,0 +1,54 @@
+---
+title: "B-132 — Dependency hygiene in legs: install scripts off, lockfile-only installs, new dependencies flagged"
+id: B-132
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+  - fieldhouse
+tags:
+  - roadmap-item
+order: 1155
+tier: judgement
+description: "OWASP agentic mapping, hole 4 (ASI04): legs install with ignore-scripts by default (an allow list in .baton/ for packages that need them), npm ci rather than npm install, every added dependency named in review with its publisher and age, and an optional registry age floor. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-27, OWASP agentic mapping, hole 4 (ASI04 supply chain): legs run
+`npm install` (and peers) with lifecycle scripts on dependencies a PR may add, through package
+registries the VM fence allows, so a malicious package runs code in the VM at install, and in
+the reviewer's VM when the review runs tests.
+
+**Spec:** R-BTN-131 (the standard courses' leg instructions), R-BTN-133 (a leg's checkout);
+FLDH-16 (the fence's registries); `docs/security-model.mdx` (OWASP mapping, hole 4); B-126
+(lockfiles as control inputs); B-128 item 6 (the reviewer never runs PR code).
+**Depends on:** none.
+
+### What to build
+
+1. **Scripts off by default in legs.** The standard courses' instructions and the Sand Pit image's
+   npm configuration set `ignore-scripts=true`; a repository that needs a package's install script
+   lists it in `.baton/` (`allow_install_scripts: [<package>]`, a control input under B-127).
+2. **A new dependency is a flagged change.** The review leg's instructions require naming every
+   added or upgraded dependency, its publisher and its age; B-126 raises a notice on a lockfile
+   change by a non-owner pusher.
+3. **Lockfile-only installs** (`npm ci`, never `npm install` that rewrites the lockfile) in every
+   leg except one whose ticket asks for a dependency change.
+4. **A registry age floor.** Optional per repository: refuse versions published less than N days
+   ago (a proxy or `npm`'s `before` setting), the common window for typosquats and hijacked
+   releases.
+
+### Tests
+
+- A leg installs a fixture package with a `postinstall` that writes a marker: no marker under the
+  default; with the package allowed, the marker. A review leg's report names a dependency the PR
+  added.
+
+### Exit criteria
+
+- [ ] the standard courses and the Sand Pit image install with scripts off; the test passes
