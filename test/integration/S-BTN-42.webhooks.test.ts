@@ -22,9 +22,9 @@ const comment = { action: 'created', repository: { full_name: 'immediately-run/s
 
 beforeEach(async () => {
   await setClock(T0);
-  // B-92: the delivery's row is its trace, either side of the cutover
-  // (test/integration/B-92.webhook-live.test.ts); these cases are the dispatch, which goes
-  // out whatever the repository's mode (§7.1 R-BTN-73).
+  // B-92: the delivery's row is its trace, either side of the cutover, and B-92.webhook-live
+  // covers the not-cut-over shape; these cases are the dispatch after it, which goes out
+  // whatever the repository's mode (§7.1 R-BTN-73).
   await cutover(T0, 'docs');
   // docs' board with a ticket that lists the code repository immediately-run/sandbox.
   const items = [...(board.states.A.state.items as Record<string, unknown>[]), { ...fixture, id: 'T-1', title: 'docs: T-1', repos: ['immediately-run/sandbox'] }];

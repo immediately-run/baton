@@ -13,12 +13,14 @@ const dispatchRow = () => rows<{ last_dispatch_at: number; trailing_at: number |
 
 const push = { repository: { full_name: 'immediately-run/docs' }, pusher: { name: 'alice' }, head_commit: { author: { email: 'alice@example.com' } } };
 
+let T0 = 0;
 beforeEach(async () => {
   // Ahead of the real clock, as S-BTN-42 arms its windows (one set in the past fires at once).
-  await setClock(Math.ceil(Date.now() / 1000) * 1000 + 600_000);
+  T0 = Math.ceil(Date.now() / 1000) * 1000 + 600_000;
+  await setClock(T0);
 });
 
-describe(`a live delivery before the cutover (B-92, ${HOST})`, () => {
+describe(`a live delivery, either side of the cutover (B-92, ${HOST})`, () => {
   it('is recorded where a person can check it, and dispatches the sync — the snapshot is what the cutover will need', async () => {
     // docs is the harness's registered repository, not cut over: the sync still posts the
     // board snapshot (§7.1), and the delivery's row is the trace either side of the cutover.
@@ -29,8 +31,9 @@ describe(`a live delivery before the cutover (B-92, ${HOST})`, () => {
     const row = await dispatchRow();
     expect(row).toHaveLength(1);
     expect(row[0]).toEqual({ last_dispatch_at: expect.any(Number), trailing_at: null });
-    // The same delivery id again changes nothing: one row, and its window is not moved.
-    await setClock(Date.now() + 60_000);
+    // The same delivery id again changes nothing: one row, and its window is not moved. The
+    // core clock moves the minute (T0-relative), never the real one beneath it.
+    await setClock(T0 + 60_000);
     expect((await webhookCall('push', push, { id: 'live-1' })).status).toBe(204);
     expect(sent).toEqual(['docs:sync']);
     expect(await dispatchRow()).toEqual(row);

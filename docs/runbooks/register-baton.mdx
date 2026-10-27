@@ -152,10 +152,13 @@ per 30 seconds plus one trailing (R-BTN-73). Configure it once, then check it wi
 
 1b. **`GITHUB_DISPATCH_TOKEN`**, in both environments — every dispatch the webhook path makes is
    sent with it (`src/cloudflare/baton.ts`; without it the dispatch fails and the ten-minute
-   backstop retries into the same missing token):
+   backstop retries into the same missing token). A delivery dispatches not only its own
+   repository but every registered repository whose tickets name it, and this one token sends
+   them all — so its **Actions: write** must cover every registered repository the delivery may
+   dispatch: `baton` and `docs` in production, `docs` on staging:
 
    ```sh
-   npx wrangler secret put GITHUB_DISPATCH_TOKEN        # a fine-grained token with Actions: write on immediately-run/baton
+   npx wrangler secret put GITHUB_DISPATCH_TOKEN        # Actions: write on baton AND docs (production); docs alone on staging
    npx wrangler secret put GITHUB_DISPATCH_TOKEN --env staging
    ```
 
@@ -190,28 +193,32 @@ is required* is step 1 done and the route reachable. Read either as done only wh
    A delivery writes its own trace — its id for 24 hours and its window (`webhook_deliveries`,
    `webhook_dispatch`) — and that row is not reachable from outside: there is no route for it, and
    the store is the Durable Object's, not a D1 the CLI can query. What Baton does with the delivery
-   is, and it depends on step 6:
+   is:
 
    - **Either side of the cutover:** the delivery dispatches the sync (§7.1 R-BTN-73: the sync
      posts the board snapshot whatever the mode, and a snapshot under 15 minutes old is what the
-     cutover needs when its day comes). The `204` plus this step's `401 unauthenticated` on an
-     unsigned probe is all a live delivery proves on its own.
-   - **The dispatch itself:** a **fresh push or PR merge** in the repository (GitHub's Redeliver
-     reuses the delivery id, which Baton drops as a repeat for 24 hours — a redelivery can only
-     count more than a day after the original) dispatches the sync — once per 30 seconds plus one
-     trailing — and the sync's run is what to read:
+     cutover needs when its day comes) — no other step of this runbook needs to happen first.
+     The `204` plus this step's `401 unauthenticated` on an unsigned probe is all a live
+     delivery proves on its own.
+   - **The dispatch's evidence is the sync workflow's run**: a **fresh push or PR merge** in the
+     repository (GitHub's Redeliver reuses the delivery id, which Baton drops as a repeat for
+     24 hours — a redelivery can only count more than a day after the original) makes Baton
+     dispatch the repository's `baton sync` workflow within a minute — once per 30 seconds plus
+     one trailing. Read it where it ran:
 
      ```sh
-     node cli/baton.mjs board -i ~/.ssh/baton_owner_baton baton    # the board's head, moved by the sync
-     node cli/baton.mjs ticket -i ~/.ssh/baton_owner_baton history baton:B-<n> | head -5   # a claim's sync
+     gh run list --repo immediately-run/baton --workflow baton-sync.yml --limit 3   # a dispatch's run, its event 'workflow_dispatch'
      ```
 
-     The dashboard's Workers view and the ticket histories show the syncs the dispatch ran.
+     and, from a key this runbook made, the dashboard's Workers view shows the dispatches the
+     instance sent. A claim's own syncs read in its ticket history (`baton ticket … history`).
 
-   So run this step's smoke twice: once now, for the `204`, and once after step 6, with a fresh
-   push, for the dispatch. A `204` and a fresh delivery that dispatches nothing is the App's
-   secret, its events or its Active flag — check `GITHUB_DISPATCH_TOKEN` first (below), then
-   step 1.
+   So the smoke is: push, then the two lines above. A `204` with no dispatch after a minute is
+   the token (step 1b covers every registered repository the delivery may dispatch — a push that
+   names another registered repository's tickets dispatches that one too), a second delivery
+   inside the 30-second window (suppressed into the trailing one), or a repository no ticket
+   names — in that order; the App's secret, its events or its Active flag were already answered
+   by the `204` itself.
 
 ## 5. Workers
 
