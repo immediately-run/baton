@@ -50,6 +50,8 @@
     "test/unit/standard-courses.test.ts",
     "test/unit/course-markers.test.ts",
     "test/unit/bounded-git.test.ts",
+    "test/unit/tickets-check.test.ts",
+    "test/integration/S-BTN-172.ticket-check.test.ts",
     "test/integration/S-BTN-104.standard-courses.test.ts",
     "test/integration/S-BTN-105.course-sources.test.ts",
     "test/integration/S-BTN-106.cross-repo-prs.test.ts",

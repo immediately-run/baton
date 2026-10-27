@@ -129,6 +129,9 @@ interface BatonJson {
   /** A command whose words precede `agent_command`'s in every leg's spawn (B-95);
    * `BATON_AGENT_WRAPPER` in the host's environment wins over it. */
   agent_wrapper?: string;
+  /** The ticket check's settings (B-111); every one is off. Read by `baton tickets check` alone,
+   * never by a sync. */
+  check?: { depends_line?: boolean };
 }
 
 /** The skill a course entry names when its file names none: the course's own (`baton-create-pr`). */

@@ -48,6 +48,16 @@
 //                — the CLI courier (R-BTN-80): claims the key's notices, prints them as text and
 //                marks them sent; --watch asks once a minute; --all lists every open decision it delivers
 //
+//   baton repo sync [--root DIR] [--url URL] [--latest BRANCH] [--facts FILE] [--sync-key FILE] [--busy-retry S]
+//   baton repo init [--course C] [--agent opencode|claude-code] [--agent-command CMD] [--override LEG]…
+//                   [--eject tickets|stations] [--pin owner/name@commit] [--force]
+//                — a repository's own sync and scaffold (§2f R-BTN-74, R-BTN-131)
+//   baton tickets check [--repo DIR] [--quiet]
+//                — check this repository's ticket source without posting it: ids, the board
+//                post's validation, depends_on targets and cycles, and (with
+//                check.depends_line in .baton/baton.json) each **Depends on:** line; exit 1
+//                naming every finding (B-111)
+//
 //   baton test-course <repository root> <course> [--base REF] [--board FILE]
 //                — the course test kit (§2d, R-BTN-64/-65; R3-1248): the working tree's .baton/ is
 //                the proposal, REF's the course in force (default: origin/HEAD, else origin/main;
@@ -491,6 +501,11 @@ export async function main(argv) {
     // §2f, R-BTN-127's names: the defaults are TypeScript under src/defaults, bundled the same way.
     const { parseSyncArgs, syncMain, initMain } = await import('../scripts/baton-cli.mjs');
     return argv[1] === 'sync' ? syncMain(parseSyncArgs(argv.slice(2))) : initMain(argv.slice(2));
+  }
+  if (argv[0] === 'tickets' && argv[1] === 'check') {
+    // B-111: sibling of `baton repo sync`, its ticket source and the board post's own validation.
+    const { checkTicketsMain } = await import('../scripts/baton-cli.mjs');
+    return checkTicketsMain(argv.slice(2));
   }
   const [role, ...rest] = argv;
   const { flags } = parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));

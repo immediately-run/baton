@@ -36,6 +36,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:no-quint
       - run: npm run check:wiki   # content/, the tickets' wiki
+      - run: npm run check:tickets   # tickets/: the board post's validation, depends_on, no cycle (B-111)
       - run: npm run check:spec   # spec/BATON_SPEC.md defines every R-BTN-n the code cites
       - run: npm run check:package   # the npm tarball installs and its `baton` starts
 

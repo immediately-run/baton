@@ -261,6 +261,13 @@ function checkNormative(p: BoardPayload) {
       if (seen.has(c.id)) fail(`closed[${i}]`, `${c.id} is also live`);
     }
   }
+  // B-111: a post whose live tickets' `depends_on` form a cycle is refused, naming it — no
+  // ticket source posts a loop that would hold every ticket on it out of the default order
+  // unseen. After `closed` is seen, so the graph is the live one exactly.
+  const live = new Set(p.tickets!.map((t) => t.id));
+  for (const c of p.closed ?? []) live.delete(c.id);
+  const loop = dependsCycle(p.tickets!.filter((t) => live.has(t.id)).map((t) => ({ id: t.id, depends_on: t.depends_on })));
+  if (loop) fail('tickets.depends_on', `a dependency cycle: ${loop.join(' → ')}`);
   if (p.stations !== undefined) {
     if (!isObj(p.stations) || Object.keys(p.stations).length > TICKETS_MAX) fail('stations', 'must be an object of local ids');
     for (const [id, st] of Object.entries(p.stations)) {
@@ -303,6 +310,62 @@ function checkNormative(p: BoardPayload) {
       }
     }
   }
+}
+
+/** A ticket's `**Depends on:**` line: the ticket ids it names, or null when the body has no
+ *  such line. The line is the one starting `**Depends on:**` and runs to the next blank line or
+ *  the next `**Label:**` line (B-111); ids are matched by `idPattern`, the same grammar the board
+ *  reads `depends_on` with. A reverse mention belongs on a `**Used by:**` line, which this never
+ *  reads. Ported from fieldhouse's `scripts/check-wiki.mjs`, so the two agree. */
+const LABEL = '**Depends on:**'; // 15 characters: slicing 14 leaves the space, and the next id without its first letter
+export function bodyDependencies(body: string, idPattern: RegExp): string[] | null {
+  const lines = body.split('\n');
+  const start = lines.findIndex((l) => l.startsWith(LABEL));
+  if (start < 0) return null;
+  let end = start + 1;
+  while (end < lines.length && lines[end].trim() !== '' && !/^\*\*[^*]+:\*\*/.test(lines[end])) end++;
+  const text = lines.slice(start, end).join(' ').slice(LABEL.length);
+  const word = new RegExp(idPattern.source.replace(/^\^|\$$/g, ''), 'g');
+  return [...new Set(text.match(word) ?? [])];
+}
+
+/** One dependency cycle among `tickets` — each `{id, depends_on}` — as its path, `B-1 → B-2 →
+ *  B-1`, or null when there is none (B-111). An edge is taken to an id in `tickets` and to no
+ *  other: an id that is neither live nor closed cannot be a cycle, and naming it is the ticket
+ *  check's business (`baton tickets check`), not the board's. Depth-first from the ids in sorted
+ *  order, so the cycle named is the same on every run; a self-dependency is `A → A`. Pure, so
+ *  `src/defaults/tickets-check.ts` runs it too (defaults may import core, never the reverse). */
+export function dependsCycle(tickets: readonly { id: string; depends_on: readonly string[] }[]): string[] | null {
+  const deps = new Map(tickets.map((t) => [t.id, t.depends_on ?? []]));
+  const state = new Map<string, 'open' | 'closed'>(); // id → 'open' while on the current path, 'closed' once explored
+  const path: string[] = [];
+  let found: string[] | null = null;
+  // The path's own position of each id on it, so a cycle is the path from the dependency to here.
+  const onPath = new Map<string, number>();
+  const visit = (id: string): void => {
+    state.set(id, 'open');
+    onPath.set(id, path.length);
+    path.push(id);
+    for (const dep of deps.get(id) ?? []) {
+      if (!deps.has(dep)) continue;
+      if (state.get(dep) === 'open') {
+        found = [...path.slice(onPath.get(dep)), dep];
+        return;
+      }
+      if (!state.has(dep)) {
+        visit(dep);
+        if (found) return;
+      }
+    }
+    path.pop();
+    onPath.delete(id);
+    state.set(id, 'closed');
+  };
+  for (const id of [...deps.keys()].sort()) {
+    if (found) break;
+    if (!state.has(id)) visit(id);
+  }
+  return found;
 }
 
 /** A posted station as stored: optional fields filled. */

@@ -94,6 +94,12 @@ checkout, run the CLI as `node cli/baton.mjs`.
   (`scripts/ticket.mjs`; usage in `tickets/home.mdx`), until Baton claims them (R3-1266).
 - `npm run check:wiki` — every page in `tickets/` and `docs/` compiles as MDX, uses only known
   components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
+- `npm run check:tickets` (or `node cli/baton.mjs tickets check [--repo DIR]`) — check this
+  repository's ticket source without posting it, as `baton repo sync` reads it: the board post's
+  validation, every `depends_on` target and dependency cycle, and — with
+  `check.depends_line` in `.baton/baton.json` — each ticket's `**Depends on:**` line against its
+  `depends_on` (B-111). One `path: message` line per finding, exit 1 with findings; CI runs it on
+  `tickets/`.
 - `npm run vendor` — re-copy `baton.mjs`, `vocabulary.mjs` and `sessionUsage.mjs` from a sibling `../docs`
   checkout (or `DOCS_DIR`) and rewrite `src/shared/manifest.json`. Do this in a PR here after
   docs changes any of them.

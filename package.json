@@ -44,6 +44,7 @@
     "traces": "node scripts/check-traces.mjs",
     "model:verify": "node model/verify.mjs",
     "check:wiki": "node scripts/check-wiki.mjs",
+    "check:tickets": "node cli/baton.mjs tickets check --repo .",
     "check:spec": "node scripts/check-spec.mjs",
     "ticket": "node scripts/ticket.mjs"
   },

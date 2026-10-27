@@ -27,6 +27,7 @@ keeps until it switches.
 ```
 npx baton repo init                       # create-pr, the settings (agent_command among them) and the sync workflow
 npx baton repo init --course bug-report   # a second course beside the first
+npx baton tickets check                   # check the tickets as the sync reads them; exit 1 naming every finding (B-111)
 ```
 
 Each `init --course` writes `.baton/courses/<course>/`: the course file, one stub per leg, and
