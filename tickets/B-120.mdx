@@ -19,13 +19,11 @@ depends_on: []
 ---
 
 **Brief:** the owner, 2026-10-26, verbatim: "blindly accepting git updates as tickets status in
-Baton is *NOT* desired as this allows an agent with write access to the headquarter repo's
+Baton is *NOT* desired as this allows an agent with write access to the home repo's
 tickets/ directory to overwrite ticket course traversal history in baton. Git is authorative in
 everything *except* the ticket's course history (the specific station -> leg pairs traveled so
 far in the history encountered). A baton CLI command (or MCP of course) will force the baton
 server to override it's own ticket history with the contents of the ticket file in git."
-
-("The headquarter repo" is the tickets' home repository, Baton's word for it.)
 
 The case that prompted it: legs completed outside the runner, in an interactive session or
 during stale-PR cleanup. They should be a deliberate act of a key holder, never a side effect of
