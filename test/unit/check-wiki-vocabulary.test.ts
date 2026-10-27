@@ -1,6 +1,6 @@
 // check-wiki.mjs's component-vocabulary rule (B-114): a bundle that declares its own components
 // is checked against them; a bundle that names a viewer app takes the whole vocabulary from that
-// viewer, so the rule is off — except that a viewer-named bundle may not ALSO keep a components
+// viewer, so the rule is off — except that a viewer-named bundle may not also keep a components
 // map (the copy B-114 forbids). Node only: it runs the real script against throwaway bundles.
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
