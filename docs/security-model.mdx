@@ -241,6 +241,37 @@ The options, cheapest first; 9 to 13 cover a privileged session reading what a r
 | 12 | Least privilege for interactive sessions: no administrator keys in a session that reads the board; approval per action (no auto mode, or permission rules) for credential, CI, deploy and cross-repository actions; privileged work in a session that has not just read agent-written tickets | a settings change and a habit | turns a successful injection into a prompt the owner sees | practice |
 | 13 | A quarantined reader for bulk sweeps: a low-privilege agent reads tickets and returns structured fields; the privileged session acts only on those | the largest of these; slower sweeps | closes reach 3's privileged case for the sweeping skills | not filed |
 
+## Should runners write the home repository at all?
+
+The owner, 2026-10-27, questioned giving VM runners write access to the home repository. The line
+that matters is not home versus code repository but the **default branch versus agent
+branches**. Baton's sync reads only the default branch (R-BTN-105), so a change that has not
+reached it is neither claimable nor in force. Three versions were weighed:
+
+- **(a) Protected main, agent branches.** The worker identities push only agent refs, and the
+  default branch changes only by merge. Code is merged by the reviewer identity (B-128).
+  Tickets, goals, `.baton/` and workflows are merged only with an owner's approval, because a
+  model reviewing a ticket's text is reading a payload whose danger is its meaning. Closes
+  reaches 1, 5 and 6 on main, and reach 3 against runners. It needs ticket claims in Baton
+  (R3-1266) and the second identity (B-128).
+- **(b) Fork-only.** The worker reads org repositories and pushes only to its own forks. Workflows
+  on fork PRs get no secrets, so this also closes reach 2. It needs Baton to trust a registered
+  worker's fork PRs, and forking of private repositories.
+- **(c) Quarantine by provenance.** Writes stay, but Baton holds any ticket a VM identity last
+  wrote until an owner releases it. Cheap, but it leaves reaches 1 and 2 open.
+
+**Chosen: (a), directly (B-130).** (c) is not built as a bridge: its one strength, an owner in
+front of every agent-written ticket, is kept inside (a) by the owner-approval rule for
+`tickets/**`. (b) stays in reserve for a repository whose CI holds secrets that cannot move into
+protected environments.
+
+**The interim is accepted** (the owner, 2026-10-27). Until B-130 lands, VM runners, vm0 among
+them, hold `write` on the default branch of the homes they serve, with everything in *What a push
+can reach*. Baton is early, and its runners mostly work Baton's own tickets. Meanwhile:
+
+- the CLAUDE.md rule (baton#122, fieldhouse#5, docs#223) stops the most dangerous instructions;
+- privileged sessions check who last wrote a ticket (`git log`) before acting on its body.
+
 ## Recommendation
 
 1. **Keep the perimeter**, and record the residual risk below as accepted.
@@ -253,7 +284,9 @@ The options, cheapest first; 9 to 13 cover a privileged session reading what a r
    its ticket-write half waits on Baton claiming its own tickets (R3-1266).
 6. **For privileged readers, now:** 11 and 12, a paragraph and a settings change. Then 9
    and 10 with B-126 and B-127. Keep 13 for the sweeping skills if 9 to 12 prove thin.
-7. **Leave D and E** unless C proves too heavy in practice.
+7. **Runners stop writing default branches:** (a), B-130, after R3-1266 and B-128. See *Should
+   runners write the home repository at all?*
+8. **Leave D and E** unless C proves too heavy in practice.
 
 ## Accepted residual risk
 
