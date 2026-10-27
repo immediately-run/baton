@@ -450,8 +450,12 @@ const MAX_PAGES = 50;
  * hour and the workflow runs at least four times an hour, so a run stays well inside a quarter;
  * one that would need more fails before it is spent rather than starve the next runs. */
 const MAX_REQUESTS = 200;
-/** The `author_association` values whose reviews and comments carry a verdict. */
-const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+/** R-BTN-139's pre-filter: the `author_association` values that cannot push, dropped without a
+ * read. Every other author is asked of the forge — a private org member reads as `CONTRIBUTOR` to
+ * a token outside the org, so the association alone never makes an author trusted (B-119). */
+const CANNOT_PUSH = new Set(['NONE', 'FIRST_TIMER', 'FIRST_TIME_CONTRIBUTOR', 'MANNEQUIN']);
+/** R-BTN-139: the collaborator permissions that can push to the base. */
+const PUSHERS = new Set(['admin', 'write']);
 /** The most PRs one GraphQL query reads (B-35). One PR asks for up to 10 check suites of 100 runs
  * and 100 each of commits, reviews and comments — 15 connection requests, so a full batch is 375,
  * about 4 of the token's GraphQL points an hour, and some 32,500 nodes, far inside GitHub's
@@ -527,6 +531,37 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     }
     return out;
   };
+  /** R-BTN-139: whether `login` can push to `repo` — the forge's collaborator permission, read
+   * once per author per repository per run. A 404 is no collaborator. A 403 that is no rate limit
+   * is a token without the scope: it degrades, failing closed — no verdict of that repository
+   * counts, said once. Any other failure aborts the run, which posts nothing. */
+  const pushers = new Map<string, Promise<boolean>>();
+  const unreadable = new Set<string>();
+  const canPush = (repo: string, login: string): Promise<boolean> => {
+    const key = `${repo.toLowerCase()}\u0000${login}`;
+    if (!pushers.has(key)) {
+      pushers.set(key, get(`${GITHUB_API}/repos/${repo}/collaborators/${encodeURIComponent(login)}/permission`)
+        .then(async (res) => PUSHERS.has(String(((await res.json()) as { permission?: unknown }).permission)))
+        .catch((e) => {
+          const { status, limited } = e as { status?: number; limited?: boolean };
+          if (status === 404) return false;
+          if (status === 403 && !limited) {
+            if (!unreadable.has(repo.toLowerCase())) log(`baton: ${repo}: this token cannot read collaborator permissions (403) — no verdict there counts (R-BTN-139, fail closed)`);
+            unreadable.add(repo.toLowerCase());
+            return false;
+          }
+          throw e;
+        }));
+    }
+    return pushers.get(key)!;
+  };
+  /** The facts whose author is trusted, in their order (R-BTN-139). An author GitHub no longer
+   * names (a deleted account) cannot be asked, so does not count. */
+  const trustedOnly = async <T extends { login?: string | null; association?: string }>(repo: string, facts: T[]): Promise<T[]> => {
+    const out: T[] = [];
+    for (const f of facts) if (f.login != null && !CANNOT_PUSH.has(String(f.association)) && (await canPush(repo, f.login))) out.push(f);
+    return out;
+  };
   const out: PrFact[] = [];
   // The home, then each other repository a live ticket names in `repos:` (B-29), under the one
   // budget: a sync that would exceed it refuses rather than post a partial reading.
@@ -575,17 +610,15 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
     const pushes = node.commits.pageInfo.hasNextPage
       ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/commits`)).map((c) => Date.parse(c.commit.committer.date))
       : node.commits.nodes.map((c: any) => Date.parse(c.commit.committedDate));
-    // A verdict counts only from someone with a say over the repository — its owner, a member
-    // or a collaborator (GitHub's author_association) — never a drive-by comment on a public PR.
-    const reviews = (node.reviews.pageInfo.hasNextPage
+    // A verdict counts only from someone who can push to the repository (R-BTN-139) — never a
+    // drive-by comment on a public PR.
+    const reviews = (await trustedOnly(repo, node.reviews.pageInfo.hasNextPage
       ? (await all<any>(`/repos/${repo}/pulls/${pr.number}/reviews`)).map((r) => ({ login: r.user?.login, association: r.author_association, state: r.state, at: r.submitted_at, body: r.body }))
-      : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body })))
-      .filter((r: any) => TRUSTED.has(r.association))
+      : node.reviews.nodes.map((r: any) => ({ login: r.author?.login, association: r.authorAssociation, state: r.state, at: r.submittedAt, body: r.body }))))
       .map((r: any) => ({ author: r.login ?? '?', state: r.state, submittedAt: Date.parse(r.at), body: r.body ?? '' }));
-    const comments = (node.comments.pageInfo.hasNextPage
+    const comments = (await trustedOnly(repo, node.comments.pageInfo.hasNextPage
       ? (await all<any>(`/repos/${repo}/issues/${pr.number}/comments`)).map((c) => ({ login: c.user?.login, association: c.author_association, at: c.created_at, body: c.body }))
-      : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body })))
-      .filter((c: any) => TRUSTED.has(c.association))
+      : node.comments.nodes.map((c: any) => ({ login: c.author?.login, association: c.authorAssociation, at: c.createdAt, body: c.body }))))
       .map((c: any) => ({ author: c.login ?? '?', state: 'COMMENTED' as const, submittedAt: Date.parse(c.at), body: c.body ?? '' }));
     return { pushedAt: Math.max(0, ...pushes), pushes, checks, reviews: [...reviews, ...comments] };
   }
