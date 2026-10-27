@@ -1,7 +1,7 @@
 {
   "opensWith": {
-    "task": "open-wiki",
-    "version": "1.0"
+    "app": "github:immediately-run/baton-board",
+    "version": "^1"
   },
   "kind": "wiki",
   "views": [
@@ -51,18 +51,6 @@
       }
     }
   ],
-  "components": {
-    "RoadmapBoard": "./components/RoadmapBoard.tsx",
-    "RoadmapMeta": "./components/RoadmapMeta.tsx",
-    "NextAvailable": "./components/NextAvailable.tsx",
-    "Dependencies": "./components/Dependencies.tsx",
-    "ProjectIndex": "./components/ProjectIndex.tsx",
-    "ProjectItems": "./components/ProjectItems.tsx",
-    "ProjectMembers": "./components/ProjectMembers.tsx",
-    "ProjectMeta": "./components/ProjectMeta.tsx",
-    "StatusBadge": "./components/StatusBadge.tsx",
-    "TopicIndex": "./components/TopicIndex.tsx"
-  },
   "layout": {
     "version": 1,
     "recordSets": {

@@ -110,16 +110,17 @@ checkout, run the CLI as `node cli/baton.mjs`.
 
 The repository holds two [Grove](https://github.com/immediately-run/grove) wikis, which
 immediately.run opens: `package.json`'s `"immediately.run": {"content": ["tickets", "docs"]}`
-lists them, and each folder's `immediately.run.json` opens it with the wiki viewer.
+lists them, and each folder's `immediately.run.json` opens it with the viewer it names —
+`tickets/` with `immediately-run/baton-board` (B-114), `docs/` with the wiki viewer.
 
 - **`tickets/`**, the tickets:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/home.mdx>.
   A ticket is `tickets/<id>.mdx`. New tickets are `B-n`; tickets that moved here from the
   immediately.run docs roadmap keep their `R3-NNNN` ids. A finished one moves to
   `tickets/archive/` with `status: done`. Its frontmatter follows `tickets/item.schema.json`;
-  the body is prose for people and agents. The board's components (`tickets/components/`) are
-  registered in `tickets/immediately.run.json`, as are the board view and the ticket record
-  sets.
+  the body is prose for people and agents. The wiki is a plain `render: safe` corpus: its board
+  components are the viewer's, `immediately-run/baton-board`, which `tickets/immediately.run.json`
+  names in `opensWith` (B-114) — this repository holds no component code for it.
 - **`docs/`**, the documentation:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/home.mdx>.
 
