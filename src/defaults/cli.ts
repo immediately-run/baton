@@ -28,7 +28,11 @@ import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from '
 import { readItems } from './read-items';
 import { ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
-const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+// LC_ALL=C on every git call (B-93, round 4): git translates its messages, and the two shapes
+// remoteSlug quiets are matched by their words — under a German catalog 'not a git repository'
+// is 'Kein Git-Repository', and the quiet case would throw instead. The C catalog is git's own
+// stable one, whatever the operator's locale.
+const git = (root: string, ...a: string[]): string => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LC_ALL: 'C' } }).trim();
 /** Why `git` failed, as `execFileSync` reports it: the exit status, and the stderr it captured
  * (`string` under `encoding: 'utf8'`; `Uint8Array`, which `Buffer` is, if an encoding is ever
  * dropped — named that rather than `Buffer` so this file types under both tsconfigs the repo ships,
@@ -62,11 +66,13 @@ export function remoteSlug(root: string): string | null {
     const { status, stderr } = (e ?? {}) as GitFailure;
     const said = typeof stderr === 'string' ? stderr : stderr ? new TextDecoder().decode(stderr) : (e instanceof Error ? e.message : '');
     // Quiet only the two shapes a repository without an origin can answer with, matched by git's
-    // own words (its exit codes are shared — 128 is every fatal error, `dubious ownership` and a
-    // corrupt config among them, so the code alone would quiet those too, round 3, 3-r0-1):
-    // `git remote get-url`'s "No such remote" (exit 2), and "not a git repository".
+    // own words under the C catalog (its exit codes are shared — 128 is every fatal error,
+    // `dubious ownership` and a corrupt config among them, so the code alone would quiet those
+    // too, round 3, 3-r0-1): `git remote get-url`'s "No such remote" (exit 2), and "not a git
+    // repository (" — anchored to the parenthesised continuation, so a broken worktree link
+    // ("not a git repository: /gone/…", no parenthesis) stays loud (round 4, 4-r1-3).
     const noRemote = status === 2 || /No such remote 'origin'/.test(said);
-    const noRepository = /not a git repository/.test(said);
+    const noRepository = /not a git repository \(/.test(said);
     if (noRemote || noRepository) return null;
     // Any other failure is the operator's to see, with git's own words (git is not installed, the
     // ownership check refused the checkout, the repository is corrupt): rethrown as an Error

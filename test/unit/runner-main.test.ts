@@ -533,6 +533,23 @@ describe('the first beat (B-93, S-BTN-159: a runner start says what it does, and
     r.stop();
   });
 
+  it('a settled worker’s forced beat does not make the refusal a stray: it is logged (round 4, 4-r1-2)', async () => {
+    const lines: string[] = [];
+    // Registered already, its declaration settled, but the server has not recorded it (`sent:
+    // null`), so the settle loop forces one beat — and that beat is not a registration's. The
+    // refusal that follows is news: the pin for `beating = !registered`, which a revert to the
+    // unconditional `beating = true` would swallow as a stray.
+    const { api, calls, refuseWith } = registeringApi();
+    refuseWith(() => new BatonRefusal('unauthenticated', undefined, 'no worker holds this secret', 401));
+    const r = runFresh(api, (l) => lines.push(l));
+    const live = r as unknown as { state: Record<string, unknown> };
+    live.state = { get: () => ({ worker_id: 7, claim: null, declared: ['agent-venue'], sent: null }), set: () => {}, spool: live.state.spool };
+    expect(await r.runOnce()).toBeNull();
+    expect(calls.heartbeats).toBeGreaterThanOrEqual(1);
+    expect(lines.some((l) => l.includes('no recommendation (no worker holds this secret)'))).toBe(true);
+    r.stop();
+  });
+
   it('a seed key’s start says the grant settle line once, and still nothing of the refusal', async () => {
     const lines: string[] = [];
     // A seed key's answer: no `grant` at all, so the declaration stays unsettled, the settle line
