@@ -178,8 +178,26 @@ describe('checkTickets: the board post’s validation, run locally', () => {
   });
 });
 
+
 describe('checkTickets: the markdown source’s **Depends on:** line (check.depends_line)', () => {
   const on = { check: { depends_line: true } };
+
+  it('reads a wiki link as its ticket, and a requirement or scenario id as prose (round 4, 4-r2-0/-1)', async () => {
+    // docs writes the line as a wiki link; requirement ids (R-BTN-83) and scenario ids
+    // (S-BTN-62) are cited on the line too but are not this repository's dependencies.
+    const dir = repo({
+      'tickets/A-1.md': ticket('id: A-1\ndepends_on: [B-2]', '**Depends on:** [[B-2.mdx]] (R-BTN-83, S-BTN-62).\n'),
+      'tickets/B-2.md': ticket('id: B-2'),
+    }, on);
+    expect((await checkTickets(dir, {}, { depends_line: true })).findings).toEqual([]);
+    // The link's id is read: a link to a ticket the field omits is a finding.
+    const bad = repo({
+      'tickets/A-1.md': ticket('id: A-1', '**Depends on:** [[B-2.mdx]]\n'),
+      'tickets/B-2.md': ticket('id: B-2'),
+    }, on);
+    expect((await checkTickets(bad, {}, { depends_line: true })).findings.map((x) => x.message))
+      .toEqual(['**Depends on:** names B-2, which depends_on does not']);
+  });
 
   it('a line naming an id depends_on does not, and depends_on naming one the line does not, are both findings', async () => {
     const dir = repo({
