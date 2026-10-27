@@ -186,9 +186,13 @@ These are its lessons, newest understanding first.
   siblings are private. The failure is right (no partial reading), and it lands on whoever pushes
   next, not on the ticket that caused it. **Before a live ticket names a private repository, the
   sync's token must read it** — here `BATON_GITHUB_READ_TOKEN`, a fine-grained read-only token
-  (docs/standard-courses.mdx). A fine-grained token that reaches a repository without the
-  permission an endpoint needs answers `403 Resource not accessible by personal access token`,
-  where a missing repository answered 404: the first run after #125 read `baton` and
-  `baton-board` and was refused on `fieldhouse` until its Pull requests permission was granted.
-  The token expires; an expired one is a 401 on the home repository's PR list. *Status: fixed —
-  run 40572091880 on `dd7a2f0` read `fieldhouse` and posted the board (#125, the owner's token).*
+  (docs/standard-courses.mdx). The token was in use at once — the first run after #125 read
+  `baton` and `baton-board` — and then logged `…/fieldhouse/pulls…: 403 — … the sync's token
+  cannot read it, or it does not exist` (the sync prints the status, never GitHub's body; the
+  same text follows a 404). The body, read by hand with the token, was `Resource not accessible
+  by personal access token`: the token reached the repository without the permission listing
+  PRs needs, and four runs failed so until the owner granted it. An expired token should instead
+  be a 401 on the home repository's PR list, which is read first and passed through unwrapped
+  (`list` in src/defaults/cli.ts) — not yet seen. `docs` is still never read: `.baton/tickets.mjs`
+  drops it from every ticket's `repos:` (b2a70cd) until the token can read it. *Status: fixed for
+  `fieldhouse` — run 40572091880 on `dd7a2f0` read it and posted the board.*
