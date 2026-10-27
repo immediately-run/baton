@@ -120,8 +120,13 @@ export class BatonCore {
    *  they are — and the one alarm armed. The host runs this before it lets a request in. */
   async start(): Promise<void> {
     this.migrate();
+    // B-91: the seed's owner keys (R-BTN-58) are parsed first — a malformed one stops the start
+    // before any entry registers — and written after the registration and its sync keys, so a
+    // rebuilt instance serves its owners without anyone re-adding them.
+    const seedOwners = await this.admin.readSeedOwners(this.ports.config);
     this.store.transaction(() => this.registry.seed(this.ports.config));
     await this.registry.seedSyncKeys(this.ports.config, this.ports.adminKeys.list());
+    await this.admin.seedOwners(seedOwners);
     await this.seedKeys();
     if ((await this.ports.scheduler.get()) == null) await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
     // A trailing webhook dispatch owed from before a restart keeps its time (round 1, 1-A-4);
@@ -659,8 +664,12 @@ export class BatonCore {
       if (!admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is required (R-BTN-57)');
       const actor = `admin:${fp}`;
       // B-90: the registry, for an operator or an agent with a key — no new query: the same
-      // `uiRepo` rows `/v1/ui/state` lists as its `repositories`.
-      if (m === 'GET' && p === '/v1/admin/repositories') return json(this.adminView());
+      // `uiRepo` rows `/v1/ui/state` lists as its `repositories`. B-91 adds `seed_owners`, the
+      // registrations that lean on the deploy for their owner keys (`Admin.seedOwnedRepositories`).
+      if (m === 'GET' && p === '/v1/admin/repositories') {
+        const seed_owners = this.admin.seedOwnedRepositories();
+        return json({ ...this.adminView(), ...(seed_owners.length ? { seed_owners } : {}) });
+      }
       // B-118: what an administrator's dashboard session reads, for the key itself — the same
       // `uiState()`, so the dashboard and a terminal cannot drift.
       if (m === 'GET' && p === '/v1/admin/state') return json(this.uiState());
@@ -1184,10 +1193,9 @@ export class BatonCore {
     return { id: repo.id, github: repo.github, forge: repo.forge, web_base: repo.web_base, default_branch: repo.default_branch, weight: repo.weight, head, mode: this.workers.mode(repo.id), courses };
   }
 
-  /** `GET /v1/admin/repositories` (B-90): the registry as the dashboard's state lists it, every
-   *  registered repository with its head, mode and courses. */
+  /** `GET /v1/admin/repositories` (B-90, R-BTN-179): the registry as the dashboard's state lists
+   *  it — one section of `uiState`'s answer, built by the same `uiRepo` it maps over. */
   adminView() {
-    // One section of `uiState`'s answer, built by the same `uiRepo` it maps over.
     return { repositories: this.registry.all().map((repo) => this.uiRepo(repo)) };
   }
 

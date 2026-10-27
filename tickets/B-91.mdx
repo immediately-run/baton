@@ -46,5 +46,63 @@ The divergence is invisible until the day it matters.
 
 ### Exit criteria
 
-- [ ] a rebuilt instance serves the owner CLI without a manual re-add
-- [ ] a seed-only registration is named in a read
+- [x] a rebuilt instance serves the owner CLI without a manual re-add (the entry's key is production's owner — checked 2026-10-27, below)
+- [x] a seed-only registration is named in a read
+
+## Status
+
+_implemented 2026-10-24, main merged in 2026-10-27 — the seed's `owner_keys` (both wrangler.toml environments carry `baton`'s), `seed_owners` in `GET /v1/admin/repositories`, and the runbook's check; PR #109._
+- **Deviations.** Item 3 is the runbook's *check*, below, in this repository's copy
+  (`docs/runbooks/register-baton.mdx`, the `docs` content this repository carries); the `docs`
+  repository's copy of the runbook was not changed — no PR there. B-91's tests are
+  `test/unit/seed-owners.test.ts` and `test/unit/seed-owners-fresh.test.ts`, not the
+  `registry.test.ts` "Tests" names — none is a scenario, since a fresh instance needs the store
+  emptied and the seed given what `BatonCore.start` reads.
+- **Round one** (PR #109): `seedOwnerKeys` writes *every* key of an entry (the guard moved out of
+  the key loop), parses and checks every key of every entry before its first write and writes in
+  one transaction; `seed_owners` is the registrations whose live owners are all `admin:seed` (or
+  that have none) — a correctly seeded repository is named, so the runbook's check tells a seed
+  missing its `owner_keys` apart by the answer's empty `owners`; `seed-owners-fresh.test.ts` is
+  out of Workers' tsconfig and into the local one; the cloudflare test project spreads its bindings
+  last. Commit `adb3ad8`.
+- **B-90.** B-91's read extends `GET /v1/admin/repositories` (B-90, PR #108, merged); the branch
+  carries main by merge.
+- **Round two** (PR #109, finding 1): `seedOwnerKeys` parses and checks every key of every entry
+  before the ownership guard, so a seed that would stop a rebuild stops the start that finds the
+  repository already owned — the guard now only keeps the write loop off. The revoked check keeps
+  its any-revoked-row reach on purpose, and says so where a reader would narrow it. New test: an
+  owned repository's entry naming an administrator's key, a worker's, a line that is no key, or a
+  revoked owner is refused and leaves the owner it has. Finding 2: `ownerlessSeed` is `testVars`
+  — it takes back `ACCESS_AUD`/`OWNER_EMAILS` as round one did, so both projects run the test
+  audience and `owner@example.com`; the bindings still spread last. Finding 5: the runbook's
+  check is the pair — the repository in `seed_owners` **and** its owners in the same answer —
+  with the one-liner that prints it.
+- **Checked live (2026-10-27).** No deployed instance was rebuilt; a fresh local instance with
+  `wrangler.toml`'s own entry stands in (`test/unit/seed-owners-fresh.test.ts`). The entry's key is
+  production's: `baton admin state`'s `limits.owners` names one live owner of `baton`,
+  `SHA256:iY5pLxsv05FQfhNZdEQrr8NwkZWdaqN5DcOwkkSTOZY`, and `ssh-keygen -lf` gives the same
+  fingerprint for `~/.ssh/baton_repo_owner.pub` and for the entry's line — the runbook's step-3
+  check, run as written. The runbook named `baton_owner_baton`, a file that does not exist; it is
+  `baton_repo_owner` throughout now, and the check reads owners from `admin state` (`admin repos`
+  answers no `owners`, so round five's one-liner always printed none). The same read shows `docs`
+  with no owner in production — outside this ticket, which seeds `baton`'s entry.
+- **Round six** (PR #109, the owner's ruling 2026-10-27): a revoked seed key is **skipped**, not a
+  failed start (6-r6-0) — round two's "stops the start on every deploy" took the whole Durable
+  Object down on a rotation or a leaked-key revoke; the ownerless repository it can leave is
+  named in `seed_owners`. Test: "a revoked seed key is skipped, never a failed start", through
+  `Admin.revokeKey`; it fails on the previous `registry.ts` with the boot error. Also: the
+  duplicate CHANGELOG row (6-r6-1), `ownerKeysAddedBy` and the `seeded` set dropped from
+  `Admin.view` (6-r6-2, no change in the answer), and the spec's `seed_owners` names the
+  no-live-owner case (6-r6-3).
+- **One owner-key check** (the owner, 2026-10-27): the seed's owner pass moved from `Registry` into
+  `Admin` — `readSeedOwners` parses each entry's `owner_keys` with the route's `ownerKeys`, before
+  `Registry.seed` runs, so a malformed key still stops the start before any entry registers; and
+  `seedOwners` writes with the route's `mayOwn` and `insertOwner` in one transaction. `Registry`'s
+  second copy of the one-role checks and its regex key validator (`checkOwnerKeys`,
+  `seedOwnerKeysOf`) are gone. The start's order is tested in `seed-owners-fresh.test.ts` ("stops
+  the start before any entry registers"), which fails if the parse follows the seed.
+- **Round seven** (PR #109): `Registry.seedEntries` is the one read of `BATON_REPOSITORIES` (its
+  named errors), used by the seed, its sync keys and `Admin.readSeedOwners` — a start-level test
+  feeds `x` and `{}` (7-r7-0); `Admin.revokedOwner` is the one revoked-owner query, for `mayOwn`
+  and the seed (7-r7-1); `seed_owners` is `Admin.seedOwnedRepositories`, read by the route alone,
+  and `Admin.view` is main's again (7-r7-5); the re-seed test asserts the re-seed (7-r7-3).

@@ -12,9 +12,9 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
-import { checkRegistration, tierPosition, type Registration, type Registry } from './registry';
+import { checkRegistration, seedEntries, tierPosition, type Registration, type Registry } from './registry';
 import { graphOf, resolveLeg, type Graph } from './graph';
-import type { Store } from './ports';
+import type { Config, Store } from './ports';
 import { sha256Hex } from './workerApi';
 
 /** A one-time link lives 5 minutes; a session 12 hours (R-BTN-57). */
@@ -169,13 +169,17 @@ export class Admin {
     return c ? c.kind : null;
   }
 
+  /** Whether an administrator revoked `fingerprint` as an owner key, on any repository (R-BTN-57):
+   *  the route refuses it (`mayOwn`), the seed skips it (`seedOwners`). */
+  private revokedOwner(fingerprint: string): boolean {
+    return this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND revoked_at IS NOT NULL', fingerprint).length > 0;
+  }
+
   /** Whether `fingerprint` may become an owner of `repository` (null: a new one): no other role
    *  (R-BTN-57), and not an owner key an administrator revoked — another owner never brings it
    *  back (round 1, 1-A-3). Throws `conflict`. */
   private mayOwn(fingerprint: string, admins: Map<string, string>) {
-    if (this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND revoked_at IS NOT NULL', fingerprint).length) {
-      throw new BatonError('conflict', 'this owner key was revoked; its holder needs a new key');
-    }
+    if (this.revokedOwner(fingerprint)) throw new BatonError('conflict', 'this owner key was revoked; its holder needs a new key');
     const role = this.roleOf(fingerprint, admins);
     if (role && role !== 'owner') throw new BatonError('conflict', `this key is already a ${role} key (R-BTN-57: one role per key)`);
   }
@@ -301,6 +305,46 @@ export class Admin {
         ...(linked ? Object.fromEntries(LINK_FIELDS.filter((k) => b[k] !== undefined).map((k) => [k, (linked as unknown as Record<string, unknown>)[k]])) : {}) }, id);
     });
     return { ok: true };
+  }
+
+  /** BATON_REPOSITORIES' `owner_keys` at start (B-91; R-BTN-47, R-BTN-58), read and parsed before
+   *  the seed registers anything: each entry's keys as the administrator's route reads `owner_keys`
+   *  (`ownerKeys`; at least one where the field is given), so a malformed key stops the start
+   *  before any entry registers. `seedOwners` writes what this returns. */
+  async readSeedOwners(config: Config): Promise<{ id: string; keys: { fingerprint: string; line: string }[] }[]> {
+    const out: { id: string; keys: { fingerprint: string; line: string }[] }[] = [];
+    for (const { entry, r: { id }, at } of seedEntries(config)) {
+      const v = (entry as Record<string, unknown>).owner_keys;
+      if (v === undefined) continue;
+      const keys = await this.ownerKeys(v, `${at}.owner_keys`);
+      if (!keys.length) bad(`${at}.owner_keys`, 'names at least one key, or is left out');
+      out.push({ id, keys });
+    }
+    return out;
+  }
+
+  /** The seed's owner keys written (B-91), after the seed and its sync keys: each entry's keys are
+   *  its repository's owners, `added_by: 'admin:seed'`, written only where that repository has no
+   *  live owner and is not retired — so a registration that has owners keeps them. Every key of
+   *  every entry is checked as the route checks an owner (`mayOwn`, R-BTN-57), owned repository or
+   *  not, and the whole pass is one transaction: a key that holds another role stops the start
+   *  with nothing written. A key an administrator revoked is skipped, never written and never a
+   *  stop — a revocation after the seed was written must not take the instance down (the owner,
+   *  2026-10-27); a repository it leaves with no owner is named in `seed_owners`. */
+  async seedOwners(entries: { id: string; keys: { fingerprint: string; line: string }[] }[]): Promise<void> {
+    if (!entries.length) return;
+    const admins = await this.adminFingerprints();
+    this.c.store.transaction(() => {
+      for (const { id, keys } of entries) {
+        const write = !this.rows('SELECT 1 FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', id).length
+          && !this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NOT NULL', id).length;
+        for (const key of keys) {
+          if (this.revokedOwner(key.fingerprint)) continue;
+          this.mayOwn(key.fingerprint, admins);
+          if (write) this.insertOwner(id, key, 'admin:seed');
+        }
+      }
+    });
   }
 
   /** `POST /v1/admin/probes`: a probe key with its label. Since R-BTN-101 a probe reports on any
@@ -705,6 +749,18 @@ export class Admin {
   retry(repository: string): RetryPolicy | null {
     const r = this.rows<{ retry: string | null }>('SELECT retry FROM repositories WHERE id = ?', repository)[0]?.retry;
     return r ? JSON.parse(r) : null;
+  }
+
+  /** `seed_owners` (B-91, R-BTN-179): the unretired repositories whose live owners are all
+   *  BATON_REPOSITORIES' (`admin:seed`), or that have none — the registrations that lean on the
+   *  deploy for their owner keys. `GET /v1/admin/repositories` alone reads it. */
+  seedOwnedRepositories(): string[] {
+    const owners = this.rows<{ repository_id: string; added_by: string }>('SELECT repository_id, added_by FROM repository_owners WHERE removed_at IS NULL');
+    return this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL ORDER BY id')
+      .map((r) => r.id).filter((id) => {
+        const live = owners.filter((o) => o.repository_id === id);
+        return !live.length || live.every((o) => o.added_by === 'admin:seed');
+      });
   }
 
   /** The dashboard's read-only view (R-BTN-66: no management path but the CLI). */

@@ -52,6 +52,7 @@
     "test/integration/S-BTN-107.build-app-course.test.ts",
     "test/integration/S-BTN-156.sync-key.test.ts",
     "test/integration/S-BTN-157.busy-sync.test.ts",
-    "test/integration/S-BTN-159.quiet-start.test.ts"
+    "test/integration/S-BTN-159.quiet-start.test.ts",
+    "test/unit/seed-owners-fresh.test.ts"
   ]
 }
