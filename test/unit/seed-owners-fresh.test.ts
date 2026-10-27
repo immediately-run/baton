@@ -4,7 +4,7 @@
 // in-memory store, an empty database), as test-course's kit does: with this repository's own
 // wrangler.toml entry the key it names owns `baton` from the first start, and `admin repos` names
 // `baton` in `seed_owners` — as it names every registration whose owners are all the seed's; with
-// an instance seeded as before, nothing owns it and the answer's owners are empty. A unit test,
+// an instance seeded as before, nothing owns it and `seed_owners` names it. A unit test,
 // not a scenario — the local project's setup is the one that reads wrangler.toml
 // (test/unit/auth.test.ts does the same).
 import { describe, it, expect } from 'vitest';

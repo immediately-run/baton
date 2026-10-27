@@ -46,12 +46,12 @@ The divergence is invisible until the day it matters.
 
 ### Exit criteria
 
-- [x] a rebuilt instance serves the owner CLI without a manual re-add
+- [ ] a rebuilt instance serves the owner CLI without a manual re-add (the owner confirms the entry's key is the one they sign with — see the note below — before this is ticked)
 - [x] a seed-only registration is named in a read
 
 ## Status
 
-_implemented 2026-10-24 — the seed's `owner_keys` (both wrangler.toml environments carry `baton`'s), `seed_owners` in `GET /v1/admin/repositories`, and the runbook's check; PR #109 (on PR #108's branch)._
+_implemented 2026-10-24 — the seed's `owner_keys` (both wrangler.toml environments carry `baton`'s), `seed_owners` in `GET /v1/admin/repositories`, and the runbook's check; PR #109 (rebased onto main after #108 merged)._
 - **Deviations.** Item 3 is the runbook's *check*, below, in this repository's copy
   (`docs/runbooks/register-baton.mdx`, the `docs` content this repository carries); the `docs`
   repository's copy of the runbook was not changed — no PR there. B-91's tests are

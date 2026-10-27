@@ -656,8 +656,13 @@ export class BatonCore {
       if (!admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is required (R-BTN-57)');
       const actor = `admin:${fp}`;
       // B-90: the registry, for an operator or an agent with a key — no new query: the same
-      // `uiRepo` rows `/v1/ui/state` lists as its `repositories`.
-      if (m === 'GET' && p === '/v1/admin/repositories') return json(this.adminView());
+      // `uiRepo` rows `/v1/ui/state` lists as its `repositories`. B-91 names the repositories
+      // whose owners are all the seed's in `seed_owners` — the one whole-`view()` read this rare
+      // operator route makes (the dashboard's own state never pays for it).
+      if (m === 'GET' && p === '/v1/admin/repositories') {
+        const { seed_owners } = this.admin.view(this.now());
+        return json({ ...this.adminView(), ...(seed_owners.length ? { seed_owners } : {}) });
+      }
       // B-118: what an administrator's dashboard session reads, for the key itself — the same
       // `uiState()`, so the dashboard and a terminal cannot drift.
       if (m === 'GET' && p === '/v1/admin/state') return json(this.uiState());
@@ -1184,12 +1189,9 @@ export class BatonCore {
   /** `GET /v1/admin/repositories` (B-90): the registry as the dashboard's state lists it, every
    *  registered repository with its head, mode and courses. */
   /** `GET /v1/admin/repositories` (B-90, R-BTN-179): the registry as the dashboard's state lists
-   *  it, and (B-91) the repositories whose owner keys came from BATON_REPOSITORIES alone. */
+   *  it — one section of `uiState`'s answer, built by the same `uiRepo` it maps over. */
   adminView() {
-    // One section of `uiState`'s answer, built by the same `uiRepo` it maps over.
-    const repositories = this.registry.all().map((repo) => this.uiRepo(repo));
-    const seedOwners = this.admin.view(this.now()).seed_owners as string[];
-    return { repositories, ...(seedOwners.length ? { seed_owners: seedOwners } : {}) };
+    return { repositories: this.registry.all().map((repo) => this.uiRepo(repo)) };
   }
 
   /** `GET /v1/owner/{repository}/grants` (R-BTN-146, B-90): the repository's owner keys, the

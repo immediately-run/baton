@@ -72,8 +72,7 @@ node cli/baton.mjs admin -i ~/.ssh/baton_admin repo add immediately-run/baton --
   all — the entry carries `owner_keys`, the owner keys `admin repo add` wrote, so a rebuilt
   instance serves the owner CLI with no manual re-add (B-91):
   `{"id":"baton","github":"immediately-run/baton","default_branch":"main","sync_workflow":".github/workflows/baton-sync.yml","owner_keys":["<~/.ssh/baton_owner_baton.pub, as one line>"]}`.
-  The owner a seed registers is `added_by: admin:seed`; one an owner or an administrator adds
-  later is not the seed's. The key this repository's entry names is the owner key the owner
+  The key this repository's entry names is the owner key the owner
   actually signs with — this runbook's `~/.ssh/baton_owner_baton`, whose fingerprint
   `ssh-keygen -lf ~/.ssh/baton_owner_baton.pub` prints — not a key another run left behind: on
   a rebuilt instance it is the only key that registers anything, so the entry is the one place
