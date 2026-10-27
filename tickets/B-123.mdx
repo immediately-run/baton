@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1147
 tier: routine
-description: "The owner, 2026-10-27: until instruments and route choices exist, owners need to tell the fleet a temporary fact (GLM out of tokens until tomorrow, use two Opus reviewers). One message per repository, Baton state set by an owner key (never git, never MCP), at most 1,000 characters, required expiry at most 7 days; served in recommendations, the fleet view and the heartbeat; the runner passes it to each leg as BATON_MOTD. S-BTN-173. Requires: none."
+description: "The owner, 2026-10-27: until instruments and route choices exist, owners need to tell the fleet a temporary fact (GLM out of tokens until tomorrow, use two Opus reviewers). One message per repository, Baton state set by an owner's or administrator's credential, on any surface (never by a push), at most 1,000 characters, required expiry at most 7 days; served in recommendations, the fleet view and the heartbeat; the runner passes it to each leg as BATON_MOTD. S-BTN-173. Requires: none."
 topics:
   - baton
 owns: {}
@@ -51,10 +51,14 @@ agent chooses for itself, so a leg whose `agent_command` pins the model keeps it
    days ahead; the message lapses at `until` with no action.
 2. **Owner actions**: `baton owner motd set <repository> --until <time> --text <text>`,
    `baton owner motd clear <repository>` and `baton owner motd show <repository>`, through the
-   action registry (R-BTN-129), callers `owner` and `owner-session`. Administrators may also set
-   and clear. **Not over MCP**: an MCP key may not add one (R-BTN-130), since an agent's tool
-   must not instruct the fleet. Each change is logged (`motd-set`, `motd-cleared`) with its
-   text.
+   action registry (R-BTN-129), callers `administrator`, `owner` and `owner-session`.
+   **Authority is the credential's, not the channel's** (the owner, 2026-10-27: "I want the
+   invoker's credentials (runner, repo owner, baton admin) to make the difference in which
+   operations are available, not the channel"): the CLI, the API, the dashboard and MCP all
+   offer the actions as the registry derives them, and a runner's key may never set one. Over
+   MCP that means an MCP key the owner minted with `motd.set` listed; this needs R-BTN-130's
+   closed list retired (B-124), so until B-124 lands the MCP tool is absent rather than a
+   different rule. Each change is logged (`motd-set`, `motd-cleared`) with its text.
 3. **Served with the work**: `GET /v1/runner/recommendations` and `/next` carry
    `motd: {repository: {text, until}}` for each repository in the answer that has one in force;
    so do R-BTN-99's fleet view and the heartbeat response, so a runner mid-leg sees a change at
@@ -73,8 +77,8 @@ agent chooses for itself, so a leg whose `agent_command` pins the model keeps it
   - an owner sets a message until tomorrow: recommendations, the fleet view and the heartbeat
     carry it; the leg's environment has `BATON_MOTD`;
   - at `until` it lapses: no view carries it, with no call;
-  - a runner key and an MCP key setting one are `forbidden`; a push changing any file sets
-    nothing;
+  - a runner key setting one is `forbidden`, from every surface; an MCP key its owner minted
+    without `motd.set` is `forbidden`; a push changing any file sets nothing;
   - text over 1,000 characters, with a control character or a banned character, or an `until`
     past 7 days, is `invalid-params`;
   - the owner of another repository cannot set this one's.
