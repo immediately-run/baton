@@ -161,7 +161,7 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
     const opsBoard = await read(granted, '/v1/repositories/ops/board');
     expect(docsBoard.json.granted_capabilities).toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call']);
     expect(opsBoard.json.granted_capabilities).toEqual(['mcp-chrome']);
-    // Neither board answers the union: docs' does not carry ops' llm-call, ops' does not carry
+    // Neither board answers the union: docs' does not carry ops' mcp-chrome, ops' does not carry
     // the venue's four.
     expect(docsBoard.json.granted_capabilities).not.toContain('mcp-chrome');
     expect(opsBoard.json.granted_capabilities).not.toContain('create-pr');

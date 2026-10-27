@@ -423,7 +423,6 @@ export class WorkerApi {
     return [...new Set(mine)].filter((c) => c !== 'none').sort();
   }
 
-  /** The capabilities one grant gives, expanded as it is stored (§4). */
   /** R-BTN-179 (B-90): the capabilities one grant gives on one repository, expanded as it is
    *  stored — the same rows the heartbeat's grantCapabilities unions over. Public: the board
    *  route names the same grant the heartbeat names (src/core/baton.ts). */
