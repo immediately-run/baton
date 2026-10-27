@@ -94,3 +94,10 @@ _implemented 2026-10-24, main merged in 2026-10-27 — the seed's `owner_keys` (
   duplicate CHANGELOG row (6-r6-1), `ownerKeysAddedBy` and the `seeded` set dropped from
   `Admin.view` (6-r6-2, no change in the answer), and the spec's `seed_owners` names the
   no-live-owner case (6-r6-3).
+- **One owner-key check** (the owner, 2026-10-27): the seed's owner pass moved from `Registry` into
+  `Admin` — `readSeedOwners` parses each entry's `owner_keys` with the route's `ownerKeys`, before
+  `Registry.seed` runs, so a malformed key still stops the start before any entry registers; and
+  `seedOwners` writes with the route's `mayOwn` and `insertOwner` in one transaction. `Registry`'s
+  second copy of the one-role checks and its regex key validator (`checkOwnerKeys`,
+  `seedOwnerKeysOf`) are gone. The start's order is tested in `seed-owners-fresh.test.ts` ("stops
+  the start before any entry registers"), which fails if the parse follows the seed.

@@ -64,21 +64,6 @@ export interface Registration {
  *  live in `repository_owners` (R-BTN-58), above a registration's own (B-91). */
 const REGISTRATION_FIELDS = ['github', 'forge', 'remote', 'web_base', 'ci_identity', 'sync_keys', 'default_branch', 'sync_workflow', 'mirror_workflow', 'weight', 'tiers', 'transcript_repos', 'cut_over'] as const;
 
-/** The seed's `owner_keys` (B-91): one to 16 OpenSSH public key lines (`<type> <base64>`), distinct. */
-function checkOwnerKeys(v: unknown, at: string): string[] {
-  if (!Array.isArray(v) || v.length < 1 || v.length > 16 || !v.every((k) => typeof k === 'string' && /^(ssh-ed25519|ecdsa-sha2-nistp256|sk-ssh-ed25519@openssh.com|sk-ecdsa-sha2-nistp256@openssh.com) [A-Za-z0-9+/]+={0,2}( [^{}]*)?$/.test(k))) {
-    bad(`${at}.owner_keys`, 'must be a list of 1–16 OpenSSH public key lines (`<type> <base64>`)');
-  }
-  if (new Set(v as string[]).size !== (v as string[]).length) bad(`${at}.owner_keys`, 'names a key twice');
-  return v as string[];
-}
-
-/** The seed's `owner_keys` of one entry (B-91): theirs, or none. Throws on a malformed list. */
-export function seedOwnerKeysOf(entry: unknown, at: string): string[] {
-  const v = (entry as Record<string, unknown>).owner_keys;
-  return v === undefined ? [] : checkOwnerKeys(v, at);
-}
-
 const bad = (field: string, why: string): never => {
   throw new BatonError('invalid-params', `${field}: ${why}`);
 };
@@ -124,9 +109,8 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
   const ci = checkCiIdentity(r.ci_identity, forge, syncWorkflow, `${at}.ci_identity`);
   // A GitLab token's issuer is the repository's own instance (round 1, 1-A-3).
   if (ci?.kind === 'gitlab-ci' && typeof webBase === 'string' && new URL(ci.issuer).origin !== new URL(webBase).origin) bad(`${at}.ci_identity.issuer`, "must be the web_base's GitLab instance");
-  // B-91: the seed's owner keys (R-BTN-58), beside the registration's own fields; the
-  // administrator's route takes them as `owner_keys` and never through here (admin.ts).
-  if (r.owner_keys !== undefined) checkOwnerKeys(r.owner_keys, at);
+  // B-91: a seed entry's `owner_keys` (R-BTN-58) ride beside the registration; they are read and
+  // checked by `Admin.readSeedOwners`, the parse the administrator's route applies (admin.ts).
   const keys = r.sync_keys === undefined ? []
     : Array.isArray(r.sync_keys) && r.sync_keys.length <= 4 && r.sync_keys.every((k) => k && typeof k === 'object' && typeof (k as Record<string, unknown>).public_key === 'string' && ['sync', 'mirror'].includes((k as Record<string, unknown>).role as string))
       ? (r.sync_keys as Registration['sync_keys']) : bad(`${at}.sync_keys`, 'must be at most 4 {public_key, role: sync|mirror}');
@@ -247,8 +231,8 @@ export class Registry {
 
   /** BATON_REPOSITORIES at start: each entry not yet known is registered; a known one is left
    *  as it is. A malformed value throws, so a broken deploy is seen at once. B-91: an entry's
-   *  `owner_keys` (R-BTN-58) are its repository's first owners, written by `seedOwnerKeys` once
-   *  their fingerprints are known. */
+   *  `owner_keys` (R-BTN-58) are its repository's first owners — read before this runs and
+   *  written after it by `Admin.readSeedOwners` / `Admin.seedOwners`. */
   seed(config: Config): string[] {
     const raw = config.BATON_REPOSITORIES;
     if (!raw) return [];
@@ -269,60 +253,6 @@ export class Registry {
       added.push(r.id);
     }
     return added;
-  }
-
-  /** BATON_REPOSITORIES' `owner_keys` at start (B-91; R-BTN-58): each entry's keys are its
-   *  repository's owners, `added_by: 'admin:seed'`, written only where that repository has no
-   *  owner left — so a re-seed after an owner leaves brings the seed's back, and a registration
-   *  that already has one keeps it (every key of the entry, or none). A key an administrator
-   *  revoked is skipped, never written and never a stop: a revocation made after the seed was
-   *  written must not take the instance down (the owner, 2026-10-27), and a repository it leaves
-   *  with no owner is named in `seed_owners`. A key that holds another role (R-BTN-57) or is no
-   *  key throws as a malformed seed does — a mistake in the seed itself, seen at once. Every key of every entry is parsed and checked — even where the repository
-   *  already has an owner and nothing will be written, so the same `wrangler.toml` does not start
-   *  on one instance and stop a rebuild of another — and the writes run in one transaction, so a
-   *  bad entry leaves no half-seeded instance. */
-  async seedOwnerKeys(config: Config, admins: Map<string, string>): Promise<void> {
-    if (!config.BATON_REPOSITORIES) return;
-    const writes: { id: string; key: { type: string; fingerprint: string }; line: string }[] = [];
-    for (const [i, entry] of (JSON.parse(config.BATON_REPOSITORIES) as unknown[]).entries()) {
-      const at = `BATON_REPOSITORIES[${i}]`;
-      const r = checkRegistration(entry, at);
-      const lines = seedOwnerKeysOf(entry, at);
-      if (!lines.length) continue;
-      // The write loop alone is guarded (B-91): a registration that already has an owner keeps it,
-      // and a retired repository is not owned again. Its keys are checked first, either way.
-      const write = !this.rows('SELECT 1 FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', r.id).length
-        && !this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NOT NULL', r.id).length;
-      for (const line of lines) {
-        // A line of the right shape whose base64 is no key at all: the seed stops, as on any
-        // malformed entry (1-A-7: never dropped in silence).
-        const key = await parseSshKey(line).catch(() => bad(`${at}.owner_keys`, `is not an OpenSSH public key: ${line.slice(0, 40)}`));
-        // `admin repo add` refuses an administrator's key as an owner with `conflict`; so does the
-        // seed, so a deploy that would refuse at the route stops at its start instead.
-        if (admins.has(key.fingerprint)) throw new BatonError('conflict', `${at}.owner_keys names an administrator key (R-BTN-57: one role per key)`);
-        // Any revoked owner row, not only one of this repository's: the seed writes no key a
-        // revocation retired (R-BTN-58), and skips it rather than stopping the start — a
-        // revocation is the administrator's act after the seed, not a broken seed (the owner,
-        // 2026-10-27). The gap it leaves is `seed_owners`' to name.
-        if (this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND revoked_at IS NOT NULL', key.fingerprint).length) continue;
-        if (this.rows('SELECT 1 FROM sync_keys WHERE fingerprint = ?', key.fingerprint).length) {
-          throw new BatonError('conflict', `${at}.owner_keys: a key is named both as an owner key and as a sync key (R-BTN-57)`);
-        }
-        if (this.rows('SELECT 1 FROM credentials WHERE id = ?', key.fingerprint).length) {
-          throw new BatonError('conflict', `${at}.owner_keys: this key is already a worker, probe or courier key (R-BTN-57: one role per key)`);
-        }
-        if (write) writes.push({ id: r.id, key, line });
-      }
-    }
-    // One transaction over every entry's keys: no write before the last check passes.
-    this.c.store.transaction(() => {
-      for (const { id, key, line } of writes) {
-        this.c.store.exec(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES (?, ?, ?, 'admin:seed', ?)
-                           ON CONFLICT (repository_id, public_key) DO UPDATE SET removed_at = NULL, added_by = excluded.added_by, added_at = excluded.added_at`,
-          id, `${key.type} ${line.trim().split(/\s+/)[1]}`, key.fingerprint, this.c.now());
-      }
-    });
   }
 
   /** R-BTN-93: a sync key for `repository` in `role`. A key serves one repository and holds one

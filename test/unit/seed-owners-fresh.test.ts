@@ -30,8 +30,7 @@ function batonEntry(): Record<string, unknown> {
 /** A freshly seeded `baton`: an instance with no history. With this repository's entry it is
  *  owned from its first start — by the key the entry names, `admin:seed` — and `seed_owners` names
  *  it, as the read names every registration whose owners are all the deploy's. */
-async function fresh(seed: Record<string, unknown>[], admin: TestKey) {
-  const { store } = openStore(':memory:');
+async function fresh(seed: Record<string, unknown>[], admin: TestKey, store = openStore(':memory:').store) {
   const host = new LocalHost({
     store, alarm: 'manual',
     config: {
@@ -110,5 +109,17 @@ describe('B-91: a rebuilt instance serves the owner CLI without a manual re-add'
     const admin = await makeKey('ssh-ed25519', 'broken-admin');
     const entry = { ...batonEntry(), owner_keys: ['not a key'] };
     await expect(fresh([entry], admin)).rejects.toMatchObject({ code: 'invalid-params' });
+  });
+});
+
+describe('the start’s order (B-91)', () => {
+  it('a malformed owner key in a second entry stops the start before any entry registers', async () => {
+    const admin = await makeKey('ssh-ed25519', 'fresh-order-admin');
+    const { store } = openStore(':memory:');
+    const second = { id: 'ops', github: 'immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/s.yml', owner_keys: ['ssh-ed25519 AAAA'] };
+    // `Admin.readSeedOwners` parses every entry before `Registry.seed` runs (BatonCore.start).
+    await expect(fresh([batonEntry(), second], admin, store)).rejects.toMatchObject({ code: 'invalid-params' });
+    expect(store.exec('SELECT id FROM repositories').toArray()).toEqual([]);
+    expect(store.exec('SELECT COUNT(*) AS n FROM repository_owners').toArray()).toEqual([{ n: 0 }]);
   });
 });

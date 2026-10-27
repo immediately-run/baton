@@ -120,11 +120,13 @@ export class BatonCore {
    *  they are — and the one alarm armed. The host runs this before it lets a request in. */
   async start(): Promise<void> {
     this.migrate();
+    // B-91: the seed's owner keys (R-BTN-58) are parsed first — a malformed one stops the start
+    // before any entry registers — and written after the registration and its sync keys, so a
+    // rebuilt instance serves its owners without anyone re-adding them.
+    const seedOwners = await this.admin.readSeedOwners(this.ports.config);
     this.store.transaction(() => this.registry.seed(this.ports.config));
     await this.registry.seedSyncKeys(this.ports.config, this.ports.adminKeys.list());
-    // B-91: the seed's owner keys (R-BTN-58) need their fingerprints, an await, so they follow
-    // the registration: a rebuilt instance serves its owners without anyone re-adding them.
-    await this.registry.seedOwnerKeys(this.ports.config, await this.admin.adminFingerprints());
+    await this.admin.seedOwners(seedOwners);
     await this.seedKeys();
     if ((await this.ports.scheduler.get()) == null) await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
     // A trailing webhook dispatch owed from before a restart keeps its time (round 1, 1-A-4);
