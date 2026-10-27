@@ -1,0 +1,52 @@
+---
+title: "B-134 — Leg scope audit: a leg's pushes, PRs and egress outside its ticket's repositories are reported, and optionally held"
+id: B-134
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1157
+tier: judgement
+description: "OWASP agentic mapping, hole 7 (ASI10): at each leg end the runner audits refs pushed, PRs touched and egress against the ticket's home and repos, from evidence the agent does not supply; scope-exceeded is raised under Needs you and with scope_policy: hold holds the ticket; Baton flags worker pushes no open claim covers. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-27, OWASP agentic mapping, hole 7 (ASI10 rogue agents): nothing
+checks that a leg's actions stay within its ticket. A leg on a `fieldhouse` ticket can push to any
+repository the worker can write, open PRs elsewhere, or reach any allowlisted host, and Baton sees
+only its heartbeats.
+
+**Spec:** R-BTN-106 (the runner checks every move), R-BTN-133 (a leg's checkout), R-BTN-140
+(`code_repos`), R-BTN-81 and R-BTN-85 (history and discrepancies); `docs/security-model.mdx`
+(OWASP mapping, hole 7). Per-claim tokens (the broker ticket filed with this one) prevent the
+forge half; this ticket detects the rest and covers the time before them.
+**Depends on:** none.
+
+### What to build
+
+1. **The leg's scope** is its ticket's home and `repos:` within `code_repos`.
+2. **The runner audits what the leg did**, at the leg's end, from evidence it does not get from
+   the agent: the refs pushed (the runner's git wrapper or the forge's push deliveries for the
+   worker identity in the leg's window), PRs opened or commented on, and the VM's egress log where
+   Sand Pit exports one. Each action outside the scope is reported with the claim
+   (`scope-exceeded`), raised under Needs you, and, with the owners' `scope_policy: hold`, holds
+   the ticket.
+3. **Baton cross-checks** what the forge reports for the worker identity against the claims open
+   at the time: a push by the worker to a repository no active claim covers is `unclaimed-write`.
+
+### Tests
+
+- A scenario (the next free S-BTN number): a leg on a `fieldhouse` ticket that pushes a branch to
+  `docs` is reported `scope-exceeded`; with `scope_policy: hold` the ticket is held; a worker push
+  when no claim is open is `unclaimed-write`.
+
+### Exit criteria
+
+- [ ] the audit runs at every leg end; the scenario passes on both hosts
