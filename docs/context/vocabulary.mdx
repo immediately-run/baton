@@ -12,6 +12,11 @@ belongs to a course, and Baton passes it through unread.</Lede>
 **Repository.** A git repository registered with Baton. Its `.baton/` folder describes its
 courses; its sync tells Baton where every ticket is.
 
+**Home, code repository.** Every ticket lives in one repository, its **home**, which holds its
+board, its courses and its owners. The repositories a ticket's work changes are its **code
+repositories**: the home's owners list them in `code_repos`, and they hold no tickets of their
+own. What a home covers is its owners' choice; Baton has no word for it.
+
 **Ticket.** A unit of work, filed in git. Baton knows its id, course, tier and requirements,
 never its body.
 
