@@ -185,6 +185,6 @@ These are its lessons, newest understanding first.
   token cannot read it` — the workflow's `GITHUB_TOKEN` reads this repository alone, and both
   siblings are private. The failure is right (no partial reading), and it lands on whoever pushes
   next, not on the ticket that caused it. **Before a live ticket names a private repository, the
-  sync's token must read it** — here `BATON_SYNC_TOKEN`, a fine-grained read-only token
+  sync's token must read it** — here `BATON_GITHUB_READ_TOKEN`, a fine-grained read-only token
   (docs/standard-courses.mdx). *Status: the workflow reads the secret; the token is the
   owner's to create.*
