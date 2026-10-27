@@ -127,6 +127,7 @@ export class BatonCore {
     // A trailing webhook dispatch owed from before a restart keeps its time (round 1, 1-A-4);
     // so do a trailing unblocked dispatch and the next reading to lapse (R-BTN-76, R-BTN-77).
     await this.armBy(this.webhooks.nextTrailing());
+    await this.armBy(this.webhooks.nextDue());
     await this.armBy(this.blocks.nextDue());
     await this.armBy(this.resources.nextLapse());
   }
@@ -152,10 +153,13 @@ export class BatonCore {
 
   /** Send the dispatches a committed transaction asked for — only for a repository after its
    *  cutover, when the mirror writes git; before it, claim.sh does. Never awaited by the
-   *  caller's response. */
+   *  caller's response. B-89: an `unblocked` trigger is its own automation whatever the mode;
+   *  a sync's own asks (`own`) carry the same reason, and are sent the same way. */
   private flushDispatch() {
-    // A repository's unblocked trigger is its own automation, not the mirror's: sent whatever its mode.
-    const due = [...this.pendingDispatch.values()].filter((wf) => wf.kind === 'unblocked' || this.cutover.cutoverAt(wf.repository) != null);
+    // A repository's unblocked trigger is its own automation, not the mirror's: sent whatever its
+    // mode. So is a sync Baton's own webhook path sends (B-89): a merge, and the alarm after one.
+    const own = (wf: Workflow) => wf.kind === 'unblocked' || wf.own === true;
+    const due = [...this.pendingDispatch.values()].filter((wf) => own(wf) || this.cutover.cutoverAt(wf.repository) != null);
     this.pendingDispatch.clear();
     if (!due.length) return;
     this.ports.dispatch.defer(Promise.all(due.map((wf) => this.dispatcher(wf).catch(() => false))));
@@ -219,16 +223,28 @@ export class BatonCore {
     if (!raw) throw new BatonError('unauthenticated', 'no webhook principal');
     const out = this.store.transaction(() => this.webhooks.receive(JSON.parse(raw) as Delivery));
     if (out.outcome === 'dispatched') {
+      // B-92's live run: the delivery's row is what proves it arrived, on either side of the
+      // cutover. The dispatch itself goes to every repository the path named, whatever its mode
+      // (§7.1 R-BTN-73: the sync posts the board snapshot before the cutover too, and a snapshot
+      // under 15 minutes old is what cutover.ts needs when its day comes — the round-1 filter
+      // held shadow repositories back while the alarm's own backstop sent them 30 seconds
+      // later, so the code, the spec and the runbook disagreed until it went).
       this.syncNow(out.now);
       if (out.trailing.length) await this.armBy(this.webhooks.nextTrailing());
+      // B-89: the stamp this delivery wrote arms the alarm for the backstop's instant.
+      await this.armBy(this.webhooks.nextDue());
     }
     return out;
   }
 
-  /** Dispatch these repositories' syncs after the response; a failure waits for the next
-   *  trigger or the schedule (R-BTN-73: never retried more than once). */
+  /** Dispatch these repositories' syncs after the response; a failure waits for the webhook
+   *  path's own backstop or the schedule (R-BTN-73: never retried more than once). B-89: a
+   *  dispatch from this path — a merge, the alarm after one, another repository's delivery — is
+   *  sent whatever the repository's mode (`own`). A failure is not silently dropped: the stamp
+   *  `receive`/`dueSync` wrote stands, and the alarm's `nextDue()` sends it again at
+   *  `last_dispatch_at + SYNC_STALE_MS` (§7.1, round 4 finding 3). */
   private syncNow(repositories: string[]) {
-    if (repositories.length) this.ports.dispatch.defer(Promise.all(repositories.map((repository) => this.dispatcher({ repository, kind: 'sync' }).catch(() => false))));
+    if (repositories.length) this.ports.dispatch.defer(Promise.all(repositories.map((repository) => this.dispatcher({ repository, kind: 'sync', own: true }).catch(() => false))));
   }
 
   /** The alarm fires by `at` (§3: one alarm; set earlier, never later). */
@@ -238,14 +254,20 @@ export class BatonCore {
     if (current == null || at < current) await this.ports.scheduler.set(at);
   }
 
-  /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch is due. */
+  /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
+   *  webhook path's own backstop is due. */
   // @model alarmLive sha256:ca9f6ccd8aa0
   async alarm(): Promise<void> {
     // Re-armed first, so one failing tick never ends the cycle.
     await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
+    // B-89: the webhook path's own backstop, beside R-BTN-73's trailing dispatches — the App's
+    // delivery reached Baton, and a merge's sync never went. Armed at the instant the earliest
+    // stamp goes stale, so a tick that lands late does not make the send up to a minute later.
+    const stale = this.store.transaction(() => this.webhooks.dueSync());
+    this.syncNow(stale);
     this.syncNow(this.store.transaction(() => this.webhooks.dueTrailing()));
     await this.armBy(this.webhooks.nextTrailing());
-    // Claims first, so a worker reaped this tick has its messages expired in the same tick.
+    await this.armBy(this.webhooks.nextDue());
     let lapse: number | null = null;
     try {
       this.store.transaction(() => {
@@ -636,6 +658,9 @@ export class BatonCore {
     if (p.startsWith('/v1/admin/')) {
       if (!admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is required (R-BTN-57)');
       const actor = `admin:${fp}`;
+      // B-90: the registry, for an operator or an agent with a key — no new query: the same
+      // `uiRepo` rows `/v1/ui/state` lists as its `repositories`.
+      if (m === 'GET' && p === '/v1/admin/repositories') return json(this.adminView());
       // B-118: what an administrator's dashboard session reads, for the key itself — the same
       // `uiState()`, so the dashboard and a terminal cannot drift.
       if (m === 'GET' && p === '/v1/admin/state') return json(this.uiState());
@@ -664,6 +689,8 @@ export class BatonCore {
     if (!this.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
     const actor = `owner:${fp}`;
     const rest = o[2];
+    // B-90: the repository's grants and settings, read before any write below.
+    if (m === 'GET' && rest === 'grants') return json(this.grantsView(repo));
     if (m === 'POST' && rest === 'grants') return json(await this.admin.grant(actor, repo, await body(), 'owner'));
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
     if (m === 'POST' && rg) return json(this.admin.revokeGrant(actor, repo, seg(rg[1])));
@@ -748,7 +775,10 @@ export class BatonCore {
     const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
     // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
     const history = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/history$/.exec(url.pathname);
-    if (req.method !== 'GET' || (!blocks && !blocked && !history)) return null;
+    // B-90: the dashboard's view of one repository, for the same principals — an administrator
+    // sees any, an owner its own, a granted key the repositories it is granted on.
+    const boardRead = /^\/v1\/repositories\/([^/]+)\/board$/.exec(url.pathname);
+    if (req.method !== 'GET' || (!blocks && !blocked && !history && !boardRead)) return null;
     const seg = (raw: string) => {
       try {
         return decodeURIComponent(raw);
@@ -756,7 +786,7 @@ export class BatonCore {
         throw new BatonError('invalid-params', 'a malformed path segment');
       }
     };
-    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history)![1]));
+    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? boardRead)![1]));
     if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
     let cred = req.headers.get('X-Baton-Credential');
     let role: 'admin' | 'owner' | 'worker' = 'worker';
@@ -768,12 +798,20 @@ export class BatonCore {
       if (role === 'owner' && !this.admin.owns(cred, repo)) throw new BatonError('forbidden', `this key does not own ${repo}`);
     }
     if (!cred) throw new BatonError('unauthenticated', 'no principal');
+    // R-BTN-179 (B-90): a granted key's board names its grant on THIS repository — the same grant the
+    // heartbeat's answer names for it (workerApi.grantedCapabilities), 'none' left out — and
+    // null for a key no grant binds there (a bearer's or a seed key's reach is its own).
+    let granted: string[] | null = null;
     if (role === 'worker') {
-      this.workers.credential(cred);
       if (!this.sql('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred, repo).length) {
         throw new BatonError('forbidden', `the key is not granted on ${repo} (R-BTN-58)`);
       }
+      const c = this.workers.credential(cred);
+      granted = c.granted
+        ? [...new Set(this.workers.grantedCapabilities(cred, repo))].filter((x) => x !== 'none').sort()
+        : null;
     }
+    if (boardRead) return json(this.boardView(repo, granted));
     if (history) {
       const raw = seg(history[2]);
       const id = raw.includes(':') ? raw : qualify(repo, raw);
@@ -1135,37 +1173,90 @@ export class BatonCore {
 
   // ── the dashboard's state (§14: Ready and Providers in rollout step 1) ─────────────────
 
-  uiState() {
+  /** One registered repository as `/v1/ui/state` lists it (B-90: `baton board` reads the same):
+   *  its own head and its own mode (R-BTN-47, R-BTN-28), and its courses with their queues. */
+  private uiRepo(repo: Repository) {
+    const sha = this.headOf(repo.id);
+    const head = sha ? this.sql('SELECT sha, parent_sha, received_at, ticket_count FROM board_snapshots WHERE repository_id = ? AND sha = ?', repo.id, sha)[0] ?? null : null;
+    const courses = this.courses.all().filter((c) => c.repository_id === repo.id).map(({ id, version, min_worker_version, skill }) => ({ id, version, min_worker_version, skill,
+        // R-BTN-79: the course's intake and each of its queues, for the Courses view.
+        intake: this.queues.intake(repo.id, id), queues: this.queues.legs(repo.id, id).map(({ leg, depth, max_queue }) => ({ leg, depth, max_queue })) }));
+    return { id: repo.id, github: repo.github, forge: repo.forge, web_base: repo.web_base, default_branch: repo.default_branch, weight: repo.weight, head, mode: this.workers.mode(repo.id), courses };
+  }
+
+  /** `GET /v1/admin/repositories` (B-90): the registry as the dashboard's state lists it, every
+   *  registered repository with its head, mode and courses. */
+  adminView() {
+    // One section of `uiState`'s answer, built by the same `uiRepo` it maps over.
+    return { repositories: this.registry.all().map((repo) => this.uiRepo(repo)) };
+  }
+
+  /** `GET /v1/owner/{repository}/grants` (R-BTN-146, B-90): the repository's owner keys, the
+   *  grants on it, and its owners' settings — the dashboard's state's own reads, for its owners. */
+  grantsView(repo: string) {
+    // The same four sections `uiState().limits` serves, over one repository: owners, grants
+    // (their max_tier as its name in the repository's ladder), settings and the bars in force.
+    const limits = this.admin.view(this.now());
+    return {
+      repository: repo,
+      owners: limits.owners.filter((o) => o.repository_id === repo),
+      // R-BTN-58: a key granted here may be granted elsewhere too, and its holder decides once
+      // for all of them — so each row also names the other repositories that key holds
+      // (`other_repositories`, revoked grants excluded).
+      grants: limits.grants.filter((g) => g.repository_id === repo).map((g) => ({
+        credential_id: g.credential_id, hostname: g.hostname, label: g.label, repository_id: g.repository_id,
+        capabilities: g.capabilities, max_tier: g.max_tier, granted_by: g.granted_by, granted_at: g.granted_at,
+        other_repositories: limits.grants.filter((o) => o.credential_id === g.credential_id && o.repository_id !== repo).map((o) => o.repository_id).sort(),
+      })),
+      settings: limits.settings.find((s) => s.repository_id === repo) ?? null,
+      // R-BTN-67: the bars in force and scheduled, always carrying their repository's id.
+      bars: limits.bars.filter((b) => (b as { repository_id: string }).repository_id === repo),
+      server_time: this.now(),
+    };
+  }
+
+  /** `GET /v1/repositories/{repository}/board` (B-90): the dashboard's view of one repository —
+   *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order,
+   *  derived by the same `readyRows` it derives them with, for one repository — and one field the
+   *  dashboard does not have. `granted_capabilities` is the key's grant's capabilities — the
+   *  heartbeat answer's field — so a granted runner knows its grant from the read alone; null
+   *  for a key no grant binds and for an owner's or an administrator's key. */
+  boardView(repo: string, granted: string[] | null = null) {
     const now = this.now();
-    // Each registered repository: its own head and its own mode (R-BTN-47, R-BTN-28).
-    const repositories = this.registry.all().map((repo) => {
-      const sha = this.headOf(repo.id);
-      const head = sha ? this.sql('SELECT sha, parent_sha, received_at, ticket_count FROM board_snapshots WHERE repository_id = ? AND sha = ?', repo.id, sha)[0] ?? null : null;
-      const courses = this.courses.all().filter((c) => c.repository_id === repo.id).map(({ id, version, min_worker_version, skill }) => ({ id, version, min_worker_version, skill,
-          // R-BTN-79: the course's intake and each of its queues, for the Courses view.
-          intake: this.queues.intake(repo.id, id), queues: this.queues.legs(repo.id, id).map(({ leg, depth, max_queue }) => ({ leg, depth, max_queue })) }));
-      return { id: repo.id, github: repo.github, forge: repo.forge, web_base: repo.web_base, default_branch: repo.default_branch, weight: repo.weight, head, mode: this.workers.mode(repo.id), courses };
-    });
-    const where = new Map(repositories.map((r) => [r.id, r]));
+    const repository = this.uiRepo(this.registry.get(repo)!);
+    const ready = this.readyRows([repository], repo);
+    return {
+      repository,
+      ready,
+      ready_by_tier: this.readyByTier(ready, [repo]),
+      granted_capabilities: granted,
+      server_time: now,
+    };
+  }
+
+  /** Ready: a ticket whose queued leg its sync posts ready (R-BTN-70), the interim post's
+   *  included — it places each ready item at its course's start (round 2, 2-A-4). For one
+   *  repository when `repository_id` is given (B-90's board), every one otherwise. */
+  private readyRows(repositories: ReturnType<BatonCore['uiRepo']>[], repository_id?: string) {
+    const byId = new Map(repositories.map((r) => [r.id, r]));
     const items = this.sql<Record<string, SqlValue>>(
-      // Ready: a ticket whose queued leg its sync posts ready (R-BTN-70), the interim post's
-      // included — it places each ready item at its course's start (round 2, 2-A-4).
       `SELECT t.id, t.repository_id, t.local_id, t.path, t.title, t.project, t.status, t.node, t.queue, t.tags, t.tier, t.requires_clause, t.operator_only, t.ord, t.rank,
               t.expedite, t.snapshot_sha, s.station, s.next_leg, s.to_end
        FROM tickets t JOIN repositories p ON p.id = t.repository_id
        JOIN ticket_stations s ON s.ticket_id = t.id
        JOIN ticket_next_legs a ON a.ticket_id = t.id AND a.leg = s.next_leg AND a.state = 'ready'
-       WHERE p.retired_at IS NULL ORDER BY p.weight DESC, t.expedite DESC, s.to_end, t.rank IS NULL, t.rank, t.repository_id, t.id`);
+       WHERE p.retired_at IS NULL${repository_id ? ' AND t.repository_id = ?' : ''} ORDER BY p.weight DESC, t.expedite DESC, s.to_end, t.rank IS NULL, t.rank, t.repository_id, t.id`,
+      ...(repository_id ? [repository_id] : []));
     const requires = new Map<string, string[]>();
     for (const r of this.sql<{ ticket_id: string; name: string }>('SELECT ticket_id, name FROM ticket_requires ORDER BY name')) {
       requires.set(r.ticket_id, [...(requires.get(r.ticket_id) ?? []), r.name]);
     }
-    const ready = items.map((r) => ({
+    return items.map((r) => ({
       id: r.id,
       repository_id: r.repository_id,
       local_id: r.local_id,
       title: r.title,
-      url: ((w) => fileUrl(w.forge, w.web_base, w.default_branch, r.path as string))(where.get(r.repository_id as string)!),
+      url: ((w) => fileUrl(w.forge, w.web_base, w.default_branch, r.path as string))(byId.get(r.repository_id as string)!),
       project: r.project,
       tier: r.tier,
       // The commit that last changed the ticket's row — a re-tier shows beside it (S-BTN-39).
@@ -1181,14 +1272,27 @@ export class BatonCore {
       requires: requires.get(r.id as string) ?? [],
       operator_only: r.operator_only === 1,
     }));
-    // Per tier ceiling, the order a worker under it would be offered (§13 step 1's exit).
-    // Each tier name of any ladder, lowest first; a ticket appears under the names of its own
-    // repository's ladder that it fits (R-BTN-66).
-    const names = [...new Set(this.registry.all().flatMap((x) => x.tiers))];
-    const byTier = Object.fromEntries(names.map((t) => [t, ready.filter((r) => {
-      const ladder = this.registry.get(r.repository_id as string)?.tiers ?? [...TIERS];
+  }
+
+  /** Per tier ceiling, the order a worker under it would be offered (§13 step 1's exit). Each
+   *  tier name of any ladder, lowest first; a ticket appears under the names of its own
+   *  repository's ladder that it fits (R-BTN-66). Derived from the `ready` rows given, so the
+   *  board's tier order is its own repository's and never a filtering of another's (B-90). */
+  private readyByTier(ready: { id: unknown; repository_id: unknown; tier: unknown }[], only?: string[]) {
+    const ladders = new Map(this.registry.all().filter((x) => !only || only.includes(x.id)).map((x) => [x.id, x.tiers]));
+    const names = [...new Set([...ladders.values()].flat())];
+    return Object.fromEntries(names.map((t) => [t, ready.filter((r) => {
+      const ladder = ladders.get(r.repository_id as string) ?? [...TIERS];
       return ladder.includes(t) && fitsTier((r.tier as string | null) ?? null, t, ladder);
     }).map((r) => r.id)]));
+  }
+
+  uiState() {
+    const now = this.now();
+    // Each registered repository: its own head and its own mode (R-BTN-47, R-BTN-28).
+    const repositories = this.adminView().repositories;
+    const ready = this.readyRows(repositories);
+    const byTier = this.readyByTier(ready);
 
     const schedules = new Map(this.sql<{ id: string; rules_json: string; factor: number }>('SELECT id, rules_json, factor FROM peak_schedules').map((s) => [s.id, s]));
     const providers = this.sql<{ id: string; name: string; billing: string; window_limits_json: string | null }>('SELECT id, name, billing, window_limits_json FROM model_providers ORDER BY id').map((a) => {

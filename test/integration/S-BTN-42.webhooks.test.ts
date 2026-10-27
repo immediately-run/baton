@@ -10,7 +10,7 @@
 // "The ticket's station moves within the run" is the sync's (docs) and R3-1232's stations: here,
 // the dispatch that starts that run.
 import { describe, it, expect, inject, beforeEach } from 'vitest';
-import { armedAt, captureDispatches, HOST, payload, rows, setClock, syncCall, tick, webhookCall, withCore } from '../helpers';
+import { armedAt, captureDispatches, cutover, HOST, payload, rows, setClock, syncCall, tick, webhookCall, withCore } from '../helpers';
 
 const board = inject('board');
 // Ahead of the real clock, so an alarm armed for a window's close is still in the future on
@@ -22,6 +22,10 @@ const comment = { action: 'created', repository: { full_name: 'immediately-run/s
 
 beforeEach(async () => {
   await setClock(T0);
+  // B-92: the delivery's row is its trace, either side of the cutover, and B-92.webhook-live
+  // covers the not-cut-over shape; these cases are the dispatch after it, which goes out
+  // whatever the repository's mode (§7.1 R-BTN-73).
+  await cutover(T0, 'docs');
   // docs' board with a ticket that lists the code repository immediately-run/sandbox.
   const items = [...(board.states.A.state.items as Record<string, unknown>[]), { ...fixture, id: 'T-1', title: 'docs: T-1', repos: ['immediately-run/sandbox'] }];
   expect((await syncCall('/v1/sync/board', payload(board.shas.A, null, { ...board.states.A, state: { items } }))).status).toBe(200);
@@ -84,7 +88,9 @@ describe(`S-BTN-42 webhooks (${HOST})`, () => {
     expect(sent).toEqual([]);
     // Dropped deliveries are not even remembered: only the one that reached the core is.
     expect(await rows('SELECT count(*) AS n FROM webhook_deliveries')).toEqual([{ n: 1 }]);
-    expect((await webhookCall('pull_request', { ...review, sender: { login: 'x' }, pull_request: { title: 'y', body: 'z' }, installation: { id: 1 } })).status).toBe(204);
+    // A merged one reaches the core: only the five fields are read, and sandbox's ticket names
+    // docs (B-89: `merged` is read too — a pull request that did not merge dispatches nothing).
+    expect((await webhookCall('pull_request', { ...review, sender: { login: 'x' }, pull_request: { merged: true, title: 'y', body: 'z' }, installation: { id: 1 } })).status).toBe(204);
     expect(sent).toEqual(['docs:sync']);
   });
 });

@@ -152,14 +152,32 @@ export interface SyncArgs {
   /** A CI identity token's place. It serves only a sync with no `syncKey` (B-88): a registered
    * sync key signs, and a CI token beside it is never spent. */
   token?: string;
+  /** `--busy-retry <seconds>` (B-89): how long to wait before the one retry a `busy` run gets —
+   * another reading was in flight (R-BTN-62), not this run's to post. `0` takes no retry.
+   * Defaults to `BUSY_RETRY_S`. */
+  busyRetryS?: number;
   /** The repository's sync key (B-88, R-BTN-93): the key file the three calls are signed
    * with, as a worker's are. Set, it is the sync's credential — the no-CI path. */
   syncKey?: string;
   transport?: Transport;
   auth?: Auth;
+  sleep?: (ms: number) => Promise<void>;
   log?: (line: string) => void;
 }
 
+/** A `busy` run's wait before its one retry (B-89, `--busy-retry`): another run's number is
+ * outstanding (R-BTN-62), and a minute is long enough for that run to post, while a reading that
+ * lapses instead (ten idle minutes, `OBSERVATION_TTL_MS`) is still held `busy:again` — which the
+ * run exits 1 on and the workflow annotates. The retry posts whenever the holder posted in the
+ * meantime; it never waits out a lapse. */
+export const BUSY_RETRY_S = 60;
+
+/** The longest `--busy-retry` waits: a workflow step is minutes, not an hour. The sync step's
+ * `timeout-minutes: 10` is this bound, not more than it: at `--busy-retry 600` the step is killed
+ * exactly as the wait ends and the retry gets no time — so no workflow in this repository passes
+ * the flag (round three, 4), and the 60-second default leaves nine minutes of the step for the
+ * two runs. */
+const BUSY_RETRY_MAX_S = 600;
 /** `BATON_SYNC_KEY`'s environment form of `--sync-key` (B-88). */
 const SYNC_KEY_ENV = 'BATON_SYNC_KEY';
 
@@ -186,7 +204,12 @@ export function parseSyncArgs(argv: string[], env: NodeJS.ProcessEnv = process.e
     else if (a === '--facts') out.factsFile = value();
     else if (a === '--latest') out.latest = value();
     else if (a === '--token') out.token = value();
-    else if (a === '--sync-key') out.syncKey = value();
+    else if (a === '--busy-retry') {
+      const v = value();
+      const s = Number(v);
+      if (!/^[0-9]+$/.test(v) || !Number.isSafeInteger(s) || s > BUSY_RETRY_MAX_S) throw new Error(`--busy-retry ${v}: a whole number of seconds, at most ${BUSY_RETRY_MAX_S} — the workflow step's own patience (B-89)`);
+      out.busyRetryS = s;
+    } else if (a === '--sync-key') out.syncKey = value();
     else throw new Error(`${a}: not a flag of baton repo sync`);
   }
   return out;
@@ -366,7 +389,11 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   const auth = args.auth ?? (args.syncKey ? syncKeyAuth(args.syncKey) : bearerAuth(args.token ?? process.env.BATON_SYNC_TOKEN ?? (await actionsToken(url))));
   const api = new BatonApi({ url, transport: args.transport ?? ((req) => fetch(req)), auth }, log);
   let board: Board | null = null;
-  const { outcome, steps, next } = await syncOnce(git(root, 'rev-parse', 'HEAD'), {
+  // B-89: `busy` is another run's reading, not this run's post, and R-BTN-62 lets no number this
+  // run takes be used while that one is out. So the wait comes before the first `observe`, and
+  // the retry is a whole second sync from a fresh number.
+  const sleep = args.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const once = () => syncOnce(git(root, 'rev-parse', 'HEAD'), {
     observe: () => asResult(() => api.observation()),
     // Everything posted under a number is read after it (§7.1 steps 1–2): the commit and the board.
     fetchNext: async () => {
@@ -390,10 +417,25 @@ export async function syncMain(args: SyncArgs): Promise<number> {
     },
     buildPayload: async () => board!.payload,
     statusOf: (id: string) => board!.statusOf(id),
-    sleep: (ms: number) => new Promise((r) => setTimeout(r, ms)),
+    sleep,
   });
+  const retryS = args.busyRetryS ?? BUSY_RETRY_S;
+  let { outcome, steps, next } = await once();
+  // `busy` alone is still `busy` (a run with the retry turned off, whose log says one was never
+  // tried); `busy:again` is the one retry holding too — both exit non-zero below. The wait is the
+  // retry's alone: a run's own `unavailable` backoff inside `syncOnce` is unchanged.
+  if (outcome === 'busy' && retryS > 0) {
+    log(`baton: busy — another run's reading is in flight (R-BTN-62); retrying once in ${retryS}s, with a fresh number`);
+    await sleep(retryS * 1000);
+    const retried = await once();
+    ({ steps, next } = retried);
+    outcome = retried.outcome === 'busy' ? 'busy:again' : retried.outcome;
+  }
   log(`baton: ${outcome} at ${String(next).slice(0, 10)} — ${steps.join('; ')}`);
-  return outcome === 'advanced' || outcome === 'confirmed' || outcome === 'held' || outcome === 'busy' ? 0 : 1;
+  // B-89: a run that posted nothing says so in its exit code too — `busy` used to be exit 0 with
+  // nothing posted, a green check for a held board. The workflow step reads the outcome line as
+  // well: it is what the retry and the annotation are for.
+  return outcome === 'advanced' || outcome === 'confirmed' || outcome === 'held' ? 0 : 1;
 }
 
 /** This workflow run's GitHub Actions OIDC token for Baton (R-BTN-15), audience Baton's origin
@@ -1234,9 +1276,41 @@ jobs:
       - run: npm ci --prefix .baton-cli
       # --latest main: after its observation number the run reads the newest main, so a slow
       # run for an older push still posts the newest board (§7.1 step 2).
-      - run: node .baton-cli/cli/baton.mjs repo sync --latest main
+      # \`tee\` keeps the CLI's own output for the annotation step below; \`pipefail\` keeps its
+      # exit code, so a failed sync still fails this step.
+      - id: sync
+        timeout-minutes: 10
+        run: |
+          set -o pipefail
+          node .baton-cli/cli/baton.mjs repo sync --latest main 2>&1 | tee sync.log
         env:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+      # B-89: a run that posted nothing is an annotation, never a green check — a held board
+      # from another run's reading in flight (\`busy\`), or any failed post. The step above
+      # fails on a failed post, so this runs even then (\`!cancelled()\`).
+      - name: A sync that posted nothing is not a success
+        if: \${{ !cancelled() }}
+        run: |
+          # The outcome is any \`baton: <outcome> at <sha>\` line, matched anywhere — never only at
+          # the start of a line: a copy the step's own log prefixes, or a retry's line that opens
+          # the same way, sits beside the one \`tee\` wrote, so the last such line is the outcome.
+          # The \`[0-9a-f]\` demands the sha the outcome line names, which a trace or a retry's
+          # line has not (B-89).
+          outcome="$(grep -oE 'baton: [a-z][a-z:-]* at [0-9a-f]' sync.log | tail -n 1 | cut -d' ' -f2)"
+          case "$outcome" in
+            advanced|confirmed)
+              echo "::notice title=baton sync::the board is posted — \$outcome" ;;
+            held)
+              echo "::warning title=baton sync held::a force post was refused into holding; nothing was posted" ;;
+            busy|busy:again)
+              echo "::warning title=baton sync held::another run's reading was in flight (R-BTN-62); this run posted nothing. A stale reading lapses ten idle minutes after it was handed out, and a dispatch within that window is refused again — dispatch baton-sync.yml once the ten minutes have lapsed" ;;
+            "")
+              # No outcome line: the sync step failed before the CLI ended a sync (npm ci, the
+              # checkout), so its log is the one that says why.
+              echo "::error title=baton sync failed::the sync ended no sync, so it posted nothing; see the sync step's log" ;;
+            *)
+              echo "::error title=baton sync failed::the run posted nothing (outcome: \$outcome); see the sync step's log" ;;
+          esac
 `;
 }
 
