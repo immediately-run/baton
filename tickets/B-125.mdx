@@ -46,6 +46,13 @@ cheapest measures: today revocation is improvised.
    workflow could have read, re-mint keys, lift the bars.
 5. **Record it** in `docs/lessons.mdx`.
 
+**After the adversarial review** (2026-10-27, `docs/security-model.mdx` *Review*):
+
+- **The runbook starts with the key, not the identity** (finding 18): revoke the compromised
+  runner key, set `machine_sync: false` (B-137), then bar and revoke as written. It covers a
+  compromised server or Cloudflare account too (B-135): rotate the GitHub App key, the webhook
+  secrets and the administrator keys, and redeploy from a known commit.
+
 ### Tests
 
 - A drill, run once on a scratch repository: every command in the runbook executes as written

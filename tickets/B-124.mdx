@@ -61,6 +61,13 @@ owner cannot do through an MCP client. That is the distinction the owner rejects
 5. **`check:actions`** checks the new rule: every action's surfaces follow from its `callers`
    and the mechanical exceptions, and no surface carries a policy of its own.
 
+**After the adversarial review** (2026-10-27, `docs/security-model.mdx` *Review*):
+
+- **R-BTN-66's protected settings stay out of every delegated key** (finding 11), as item 3 does
+  for credential management: owner bars and required bars, holds' release, `trusted_identities`,
+  `code_repos`, `retry` and `machine_sync` are never in an MCP key's allowlist. A rule about
+  delegated credentials, not channels.
+
 ### Tests
 
 - A scenario (the next free S-BTN number): one owner, one action, each surface:

@@ -30,7 +30,9 @@ a compromise visible within one sync, at small cost.
 ### What to build
 
 1. **Control inputs**, a fixed list per repository: `.baton/**`, goal files, `.github/workflows/**`,
-   and ticket frontmatter fields `EXPEDITE`, `tier`, `requires` and `depends_on`. Owners may
+   agent configuration (`.claude/**` (hooks, settings, skills, memory), every `CLAUDE.md` and `AGENTS.md`, and plugin manifests, which privileged
+   interactive sessions load or execute: security model, OWASP ASI05 and ASI06), dependency
+   manifests and lockfiles (ASI04), and ticket frontmatter fields `EXPEDITE`, `tier`, `requires` and `depends_on`. Owners may
    add paths in their settings (R-BTN-66).
 2. **The check.** When an accepted board post's head changes a control input, Baton looks up the
    pushers of the commits since the last accepted head, from the forge's push deliveries (R-BTN-73;
@@ -43,9 +45,33 @@ a compromise visible within one sync, at small cost.
    (owner-signed control inputs) is the gate.
 5. **Forges without push events** (a plain git remote) record `pusher-unknown` and raise the
    notice for every control change.
+6. **Provenance on every ticket** (the owner, 2026-10-27; security model reach 3, option 9). For
+   each ticket the sync records who last changed its body and its brief: the pusher of that
+   commit, from the same push deliveries, and its signing key if any (B-127). Baton serves it with
+   the ticket (`last_written_by: {pusher, signer?, commit, at}`) in the board, the recommendations
+   and the dashboard. `baton ticket show` prints it first, so a privileged session sees "last
+   written by `immediately-run-worker`" before it reads the body. Provenance is information,
+   not a gate. **Hand-off documents and agent memory carry it too** (OWASP ASI06): a hand-off
+   (R-BTN-44) is served with the claim and runner that wrote it, and a memory file with its
+   last pusher, so the next reader knows whose words steer it.
+
+**After the adversarial review** (2026-10-27, `docs/security-model.mdx` *Review*):
+
+- **Provenance names who introduced the change** (finding 9): the author of the PR that brought
+  it to the default branch, and its pusher, by immutable `sender.id`, not `pusher.name`. Under
+  B-130 every merged ticket's pusher is the merger, so the pusher alone would credit worker text
+  to the owner. The owner's agent sessions are shown as "owner's agent", not "owner" (B-136).
+- **The changed paths are Baton's own reading** of the push deliveries (B-137), fail closed
+  (`pusher-unknown`) when a delivery is missing; a board post's claim about what changed is not
+  trusted.
+- **What this ticket can see** (finding 19): control changes on the default branch, after the
+  fact. Not ticket bodies (item 6's provenance covers those), not workflows run on agent
+  branches, not code run in a PR-branch checkout.
 
 ### Tests
 
+- A scenario: a ticket body last pushed by the worker identity is served with that pusher, and one
+  an owner signed with the signer; a later push by the worker replaces both.
 - A scenario (the next free S-BTN number): a non-owner's push changing `.baton/baton.json` raises
   one notice naming the path and the pusher; an owner's push raises none; a ticket's `EXPEDITE`
   set by a non-owner raises one; a forged commit author with a non-owner pusher still raises it.

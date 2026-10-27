@@ -34,7 +34,13 @@ from where), R-BTN-12 (expedite), §7.1 (the board post); B-122 (goals); `docs/s
 ### What to build
 
 1. **Control inputs**: `.baton/**` (`agent_command`, `agent_wrapper`, course sources, overrides,
-   `rank.mjs`, `sync.mjs`), goal files, and the `EXPEDITE` tag. **Not ticket `tier`**
+   `rank.mjs`, `sync.mjs`), goal files, the `EXPEDITE` tag, and agent configuration (`.claude/**` (hooks, settings, skills, memory), every `CLAUDE.md` and `AGENTS.md`, and plugin manifests): a pushed session hook runs with the owner's credentials in their
+   next interactive session (security model, OWASP ASI05). Baton cannot stop Claude Code
+   loading an unsigned file, and a check kept in the same repository can be rewritten by the
+   push it guards. For these paths the deliverable is a verifier the owner installs outside the
+   repository (user-level settings, or the environment's setup script) that refuses to open a
+   privileged session on a checkout whose agent configuration was last changed in a commit no
+   owner key signed, plus the notice. **Not ticket `tier`**
    (decided, the owner, 2026-10-27). A tier routes work by quality, not privilege: a runner
    granted a higher tier also takes every lower one, so a changed tier sends a ticket to no
    runner whose credentials it could not already reach through its body (security model,
@@ -55,9 +61,33 @@ from where), R-BTN-12 (expedite), §7.1 (the board post); B-122 (goals); `docs/s
    start; if it has, they join item 1.
 6. **Tooling.** `baton owner sign` (or plain `git commit -S`) and a doc on configuring git with an
    owner key.
+7. **Verifiable owner statements** (the owner, 2026-10-27; security model reach 3, option 10). A
+   ticket's `**Brief:** the owner …` line, and any line quoting the owner as authority, counts as
+   the owner's only in a commit signed by an owner key. The sync marks each ticket's brief
+   `signed` or `unsigned` with its provenance (B-126). The standing CLAUDE.md rule tells agents
+   that an unsigned owner quote is a claim, not the owner. This applies whether or not
+   `require_signed_control` is on: it marks, it does not refuse.
+
+**After the adversarial review** (2026-10-27, `docs/security-model.mdx` *Review*):
+
+- **First-parent history** (finding 13, reproduced): "the commit that last changed it" is read
+  along the default branch's first parents. An unsigned merge whose result differs from its first
+  parent on a control path is unsigned, even when it restores an older owner-signed version;
+  otherwise a crafted merge rolls a control input back to any earlier signed state.
+- **The signature is verified where it is trusted** (finding 4): by Baton over the raw commit
+  objects the sync posts (B-137), and by each runner before it loads configuration, never only by
+  the sync that posts it. SSHSIG namespace `git`, distinct from Baton's request namespace.
+- **Only a human-only key counts** (finding 3): owner keys that agent sessions hold would let an
+  injected session sign. B-127 accepts only the hardware key of B-136; API-key owners cannot sign.
+- **Tier, revisited** (finding 12): the settled decision holds only while no runner above the VM
+  level serves a home the VM level pushes (security model option 1). If higher tiers run on owner
+  machines, `tier` routes a pushed ticket upward and becomes a control input. The owner decides
+  which precondition to keep.
 
 ### Tests
 
+- A scenario: a brief added in an owner-signed commit is `signed`; the same text pushed unsigned
+  by the worker is `unsigned`; editing a signed brief in an unsigned commit makes it `unsigned`.
 - A scenario (the next free S-BTN number): with `require_signed_control` on, an unsigned change to
   `agent_command` leaves the runner running the signed one and raises the notice; an owner-signed
   change takes effect; a commit signed by a non-owner key, or a forged signature, counts as
