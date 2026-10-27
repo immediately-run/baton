@@ -283,6 +283,53 @@ can reach*. Baton is early, and its runners mostly work Baton's own tickets. Mea
 - the CLAUDE.md rule (baton#122, fieldhouse#5, docs#223) stops the most dangerous instructions;
 - privileged sessions check who last wrote a ticket (`git log`) before acting on its body.
 
+## Authority and data
+
+The owner asked (2026-10-27) whether memory written by a compromised runner and read by a
+privileged session is the ticket-body problem again. It is, and worse:
+
+- **Authority.** A ticket is a task the reader judges. A memory reads as the session's own
+  prior learning ("we decided", "always", "the owner prefers"), which models trust more than a
+  stranger's request.
+- **Scope.** A ticket steers the session working it. A memory steers every later session.
+- **Loading.** A ticket is read when picked up. Memory loads at the start of a session, before
+  any task is known.
+- **Persistence and review.** A ticket closes and has an owner. A poisoned memory stays until an
+  audit finds it, among a hundred real ones nobody reviewed.
+
+Provenance (B-126) helps a reader judge what they chose to read; it does nothing for what is
+injected before judgement starts. Tickets were one case of a general rule, the dual of
+Axiom 6:
+
+> **Credentials never cross downward; content never crosses upward without a gate.** A
+> privileged session takes authority only from owner-gated content. Everything else is data.
+
+What privileged sessions read as authority, and who writes it today:
+
+| Read as authority | Written by today | Gate (B-130) |
+|---|---|---|
+| agent memory (`.claude/memory/`) | any session, runners included | owner tier: owner-approved |
+| the context corpus (values, threat model, ways of working, vocabulary) | sessions and runners, by PR | owner-approved |
+| `lessons.mdx` ("read before operational work") | whoever operated Baton | owner-approved |
+| `CLAUDE.md`, skills, hooks, settings | sessions and runners | owner-approved; B-127 signs |
+| the specs' decision sections | sessions and runners, by PR | owner-approved |
+| ticket bodies and briefs | anyone who pushes | owner-approved tickets; B-127 signs briefs |
+| decision packets | agents | B-133 shows the computed action |
+
+**Two memory tiers.**
+- **The owner tier** is loaded by privileged sessions and written only through an owner-approved
+  PR or an owner-signed commit. It lives with the skills, in the owner-only plugin repository,
+  once docs is decomposed.
+- **The fleet tier** is written by runners freely, at a path outside every owner-gated one
+  (proposed: `hq`'s `memory/fleet/**`). No privileged session's configuration loads it; a
+  privileged session may read it deliberately, as data with provenance.
+- **Promotion is a gate.** A runner's lesson reaches the owner tier only as a PR the owner merges,
+  as agent-filed tickets do under B-130. Most runner learnings are operational and stay in the
+  fleet tier, so the queue is small.
+
+**Until B-130 lands**, privileged sessions treat memory, lessons and the context corpus in a
+repository runners push as unverified claims, as they treat tickets.
+
 ## The OWASP Top 10 for Agentic Applications
 
 The owner asked (2026-10-27) for Baton to be checked against the OWASP Top 10 for Agentic
@@ -295,7 +342,7 @@ Applications (2026). Category names are taken from secondary sources, which agre
 | ASI03 Identity and privilege abuse | one shared worker identity; the owner's account in sessions | B-128; per-slot keys (FLDH-17); one role per key; option 12 | long-lived broad credentials: B-131, per-claim tokens |
 | ASI04 Supply chain | course sources, the CLI, images, models, dependencies, plugins | course pins and verified trees (R-BTN-133, R-BTN-134); the CLI pinned in the sync; digests (R-FH-12, FLDH-20) | install scripts and new dependencies in legs: B-132; plugin manifests as control inputs: B-126, B-127, B-130 |
 | ASI05 Unexpected code execution | agents run code by design | the VM; Baton runs no repository code (R-BTN-98); B-127 | agent configuration in privileged sessions: B-126, B-127, B-130; reviewers running PR code: B-128 item 6; runners on owner machines: option 1 |
-| ASI06 Memory and context poisoning | hand-offs, `.claude/memory`, `lessons.mdx`, transcripts | none before this review | provenance for hand-offs and memory: B-126; memory as a control path: B-130 |
+| ASI06 Memory and context poisoning | hand-offs, `.claude/memory`, `lessons.mdx`, transcripts | none before this review | two memory tiers and owner-gated authority (*Authority and data*): B-130; provenance for hand-offs and memory: B-126 |
 | ASI07 Insecure inter-agent communication | runner and Baton, verdicts on PRs, hand-offs | signed requests, nonces and fences (R-BTN-13, R-BTN-19); verdicts only from pushers (R-BTN-139) | the reviewer executing implementer code: B-128 item 6 |
 | ASI08 Cascading failures | a bad course change, a broken main, a provider outage | retries and holds, `max_runs`, `max_queue`, leases and reaps, budgets, the course test kit, required checks | mostly covered; one shared identity is a blunt kill switch: B-125, FLDH-17 |
 | ASI09 Human-agent trust exploitation | decision packets, PR summaries, owner approvals | B-127's signed briefs; text-only rendering | agents write what the owner approves: B-133 |
@@ -317,6 +364,8 @@ session on docs is only as trusted as docs' last push.
    its ticket-write half waits on Baton claiming its own tickets (R3-1266).
 6. **For privileged readers, now:** 11 and 12, a paragraph and a settings change. Then 9
    and 10 with B-126 and B-127. Keep 13 for the sweeping skills if 9 to 12 prove thin.
+   Memory, lessons and the context corpus are read under the same rule (*Authority and
+   data*); the memory tiers land with B-130 and the docs decomposition.
 7. **Agent configuration, this week** (OWASP review): the ruleset on docs' `.claude/**` and
    `CLAUDE.md` now, then B-127's verifier outside the repository; B-131 (per-claim
    credentials) as the next structural step after B-128.
