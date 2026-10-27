@@ -43,6 +43,12 @@ them and print the verdict after. An output that ends on anything else loses the
    mechanism is a guess, and guesses cost the author a round.
 3. Where the ticket prescribed a decision and the diff took another, that is a finding whatever
    the merits of the alternative.
+4. **Check the change fits the codebase.** Check the PR body's **Fit** answers against the diff
+   instead of trusting them. A finding here names the existing code the diff should have reused or
+   followed, the coordinator object that takes most of the others as collaborators, the concrete
+   class taken where a narrow type or function would do, the one-implementation abstraction
+   nothing needs, or the module-level state a second instance breaks. These are should-fix, or
+   blocking when they duplicate a helper the ticket named or break a second instance.
 
 Severity: **blocking** (wrong behaviour, a security hole, a broken exit criterion, a missing test
 for a behaviour change), **should-fix** (a real defect of smaller consequence), **nit** (style,
