@@ -207,13 +207,12 @@ is required* is step 1 done and the route reachable. Read either as done only wh
      one trailing. Read it where it ran:
 
      ```sh
-     gh run list --repo immediately-run/baton --workflow baton-sync.yml --limit 3   # a dispatch's run, its event 'workflow_dispatch'
+     gh run list --repo immediately-run/baton --workflow baton-sync.yml --limit 10 --json event,createdAt,headBranch -q '.[] | select(.event == "workflow_dispatch") | .createdAt'   # the dispatch's runs; staging reads the registered repository's (docs)
      ```
 
-     and, from a key this runbook made, the dashboard's Workers view shows the dispatches the
-     instance sent. A claim's own syncs read in its ticket history (`baton ticket … history`).
+     A claim's own syncs read in its ticket history (`baton ticket … history`).
 
-   So the smoke is: push, then the two lines above. A `204` with no dispatch after a minute is
+   So the smoke is: push, then the line above. A `204` with no dispatch after a minute is
    the token (step 1b covers every registered repository the delivery may dispatch — a push that
    names another registered repository's tickets dispatches that one too), a second delivery
    inside the 30-second window (suppressed into the trailing one), or a repository no ticket

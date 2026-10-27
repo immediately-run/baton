@@ -41,7 +41,7 @@ describe(`a live delivery, either side of the cutover (B-92, ${HOST})`, () => {
 
   it('a second delivery inside the window is the trailing one, whichever side of the cutover', async () => {
     const sent = await captureDispatches();
-    await cutover(Date.now(), 'docs');
+    await cutover(T0, 'docs');
     expect((await webhookCall('push', push, { id: 'live-2' })).status).toBe(204);
     expect(sent).toEqual(['docs:sync']);
     const first = await dispatchRow();

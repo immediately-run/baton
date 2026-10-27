@@ -48,5 +48,5 @@ unconfigured App makes all of that dead code in production, silently.
 
 ### Exit criteria
 
-- [ ] a push to a registered repository dispatches its sync, observed in Baton
+- [ ] a push to a registered repository dispatches its sync, observed as the baton-sync workflow's workflow_dispatch run on the repository's Actions page
 - [x] the runbook's webhook step is checkable by a fresh operator (round 1: the check is a fresh push — GitHub's Redeliver reuses the delivery id, which Baton drops as a repeat for 24 hours)
