@@ -1,0 +1,49 @@
+---
+title: "B-138 — Owners, administrators and runners run a pinned released CLI, never a working tree"
+id: B-138
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1161
+tier: judgement
+description: "Adversarial review finding 5 (2026-10-27): owner and administrator commands are documented as node cli/baton.mjs from a baton checkout the worker pushes, and runners run the CLI from the leg checkout. The docs name only npx @immediately-run/baton@<pinned>; start-runner.sh installs a pinned release outside the leg checkout; the CLI refuses an owner or administrator key from a working tree without --dev. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the adversarial review of the security model (2026-10-27, finding 5): owners and
+administrators run `node cli/baton.mjs owner|admin -i KEY` from a checkout of `baton`, which the
+worker pushes (the README and `scripts/start-runner.sh` say so), and runners run the CLI from the
+leg checkout. Code a VM pushed then runs with the owner's and administrator's keys, and a leg that
+checks out a branch changes the runner code that runs at the next restart.
+
+**Spec:** R-BTN-134 (what a course is), the npm release (`ci.yml`); `docs/security-model.mdx`
+(reach 1).
+**Depends on:** none.
+
+### What to build
+
+1. **Owners and administrators run a released CLI only**: `npx @immediately-run/baton@<pinned>`
+   (or an installed copy verified against the release's provenance), never `node cli/baton.mjs`
+   from a working tree. The README, the runbooks and every error message that prints a command are
+   changed to say so.
+2. **Runners run a pinned CLI outside the leg checkout**: `start-runner.sh` installs a pinned
+   release into a directory legs never write, and refuses to start from a checkout's `cli/`.
+3. **The CLI refuses an owner or administrator key when it runs from a git working tree** (a
+   `.git` beside it), unless `--dev` is given, with a message naming the pinned command.
+
+### Tests
+
+- The CLI run from a checkout with `-i` an owner key exits 2 without `--dev`; `start-runner.sh`
+  refuses a checkout CLI.
+
+### Exit criteria
+
+- [ ] docs and runbooks name only the pinned CLI; the tests pass
