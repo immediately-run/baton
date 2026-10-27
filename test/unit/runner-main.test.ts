@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
-import { asksHelp, declareCourses, fetchMain, parseRunArgs, runMain, runnerCourse } from '../../src/runner/main';
+import { asksHelp, declareCourses, fetchMain, parseRunArgs, runMain, servedCourses } from '../../src/runner/main';
 import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
 import { HARNESS_AGENTS } from '../../src/runner/harness';
@@ -110,6 +110,9 @@ describe('the agent_command a runner runs (B-83)', () => {
       // What-to-build 2: the flag narrows, never enables; absent it the grant speaks.
       expect(said).toContain('narrows what the grant allows; it never enables what the grant does not');
       expect(said).toContain('Absent, the runner declares what the grant allows');
+      // B-103: --course narrows the courses served; absent it, every course the home declares.
+      expect(said).toContain('narrows the courses served to this one, of those the home declares');
+      expect(said).toContain('Absent, the runner serves and declares every course the home declares');
       lines.length = 0;
       expect(await runMain(['-h'], { log: (l) => lines.push(l) })).toBe(0);
       expect(lines.join('\n')).toBe(said);
@@ -127,7 +130,9 @@ describe('the agent_command a runner runs (B-83)', () => {
     const src = readFileSync(join(import.meta.dirname, '../../src/runner/main.ts'), 'utf8');
     expect(src).toContain("a.capabilities?.join(',') ?? 'grant (--capabilities to narrow)'");
     expect(src).not.toContain("a.capabilities ?? ['agent-venue']");
-    expect(src).toContain('capabilities ${declared}, course ${course.course}@${course.version}');
+    // B-103: the banner's course field names every served course (`create-pr@1, create-spec@2`),
+    // in the singular only when `--course` (or a one-course home) left one.
+    expect(src).toContain("course${courses.length === 1 ? '' : 's'} ${courses.map((c) => `${c.course}@${c.version}`).join(', ')}");
   });
 
   it('settings naming no agent_command drive from --harness, the command logged; a named one is left to the settings', async () => {
@@ -307,15 +312,42 @@ describe('loadCourse (R-BTN-72)', () => {
   });
 });
 
-describe('one course per runner (R-BTN-131)', () => {
-  const two = [{ course: 'create-pr', version: 1 }, { course: 'bug-report', version: 2 }];
-  it('runnerCourse: --course picks one of the declared; without it, exactly one must be declared', () => {
-    expect(runnerCourse(two, 'bug-report')).toEqual({ course: 'bug-report', version: 2 });
-    expect(runnerCourse([two[0]])).toEqual(two[0]);
-    expect(() => runnerCourse(two)).toThrow('runs 2 courses (create-pr, bug-report); baton run serves one — pass --course <id>');
-    expect(() => runnerCourse(two, 'decision')).toThrow('--course decision: the home checkout declares create-pr, bug-report');
+describe('the courses a runner serves (R-BTN-131, B-103)', () => {
+  /** A home whose `.baton/baton.json` declares `courses` (with or without versions), in a git
+   *  checkout — `runMain` takes the home's lock (`holdHome`) before its first beat. */
+  const declaring = (json: Record<string, unknown>): string => {
+    const dir = home();
+    const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: 'ignore' });
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'runner@test');
+    git('config', 'user.name', 'runner test');
+    git('add', '-A');
+    git('commit', '--no-gpg-sign', '-qm', 'a home');
+    writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify(json));
+    return dir;
+  };
+  it('servedCourses: without --course, every course the home declares; --course narrows to that one', () => {
+    // B-103 (the owner's correction, 2026-10-22): a runner serves any course its capabilities
+    // serve — several from one checkout, one leg at a time. The several-without-`--course`
+    // refusal is gone; before this test it was `runnerCourse`'s error.
+    const dir = declaring({ courses: [{ id: 'create-pr', version: 1 }, { id: 'bug-report', version: 2 }] });
+    try {
+      expect(servedCourses(dir)).toEqual([{ course: 'create-pr', version: 1 }, { course: 'bug-report', version: 2 }]);
+      expect(servedCourses(dir, 'bug-report')).toEqual([{ course: 'bug-report', version: 2 }]);
+      expect(() => servedCourses(dir, 'decision')).toThrow('--course decision: the home checkout declares create-pr, bug-report');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    // One course is one course, flag or not.
+    const one = declaring({ courses: [{ id: 'create-pr', version: 1 }] });
+    try {
+      expect(servedCourses(one)).toEqual([{ course: 'create-pr', version: 1 }]);
+      expect(servedCourses(one, 'create-pr')).toEqual([{ course: 'create-pr', version: 1 }]);
+    } finally {
+      rmSync(one, { recursive: true, force: true });
+    }
   });
-  it('courseOf at the claim\'s snapshot loads the runner\'s course of several, and refuses one the snapshot no longer carries', () => {
+  it('courseOf at the claim\'s snapshot loads the claim\'s course of several, and refuses one the snapshot no longer carries', () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-main-'));
     try {
       const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' }).trim();
@@ -325,13 +357,75 @@ describe('one course per runner (R-BTN-131)', () => {
       git('add', '-A');
       git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'two courses');
       const sha = git('rev-parse', 'HEAD');
+      // The claim's `course_id` is what the runner loads (B-103): each of the two, by name.
       expect(courseOf(dir, sha, 'bug-report')).toBe('bug-report');
+      expect(courseOf(dir, sha, 'create-pr')).toBe('create-pr');
+      // With no name and several courses it is refused, never guessed.
       expect(() => courseOf(dir, sha)).toThrow('names 2 courses: create-pr, bug-report');
       expect(() => courseOf(dir, sha, 'decision')).toThrow('carries no course decision');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // The wiring: `runMain` passes every served course to the heartbeat. A recording transport
+  // answers the calls itself (no Baton), so what it sees is the body the heartbeat path composed.
+  // `runMain`'s loop runs until stopped, so the probe drains it the way SIGTERM does: one signal,
+  // the first path, which ends `work()` without exiting.
+  const probe = async (dir: string, argv: string[] = []) => {
+    const seen = { heartbeats: [] as Record<string, unknown>[] };
+    const lines: string[] = [];
+    const saved = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE'].map((n) => [n, process.env[n]] as const);
+    for (const [n] of saved) delete process.env[n];
+    process.env.BATON_TOKEN = 'tok-vm-a'; // a credential, so the run gets as far as its beats
+    try {
+      const running = runMain(['--home', dir, '--test-harness', '--beat-every', '50', '--session', 'courses-probe', ...argv], {
+        log: (l) => lines.push(l),
+        fetch: () => {}, // the home's snapshot is never needed: no ticket is claimable
+        transport: async (req: Request) => {
+          const path = new URL(req.url).pathname;
+          const body = JSON.parse(req.body ? await new Response(req.body).text() : '{}') as Record<string, unknown>;
+          if (path.endsWith('/heartbeat')) seen.heartbeats.push(body);
+          // An idle answer throughout: nothing to recommend, nothing to claim.
+          const answer = path.endsWith('/heartbeat')
+            ? { runner_id: 1, incarnation: 1, grant: { capabilities: ['agent-venue'] }, claim: null, messages: [], stale_courses: [], mode: 'cut-over', server_time: 0 }
+            : path.endsWith('/recommendations') ? { recommendations: [] } : { code: 'no-eligible-ticket', message: 'nothing to claim' };
+          return new Response(JSON.stringify(answer), { status: path.endsWith('/claim') ? 404 : 200, headers: { 'Content-Type': 'application/json' } });
+        },
+      });
+      // Wait for the first beat, then drain: the SIGTERM handler's own first path, called
+      // directly (an emitted signal also reaches vitest's warning wrapper, which unregisters the
+      // handler between the two deliveries).
+      for (let i = 0; i < 400 && !seen.heartbeats.length; i++) await new Promise((r) => setTimeout(r, 10));
+      (process.listeners('SIGTERM').at(-1) as (s: NodeJS.Signals) => void)('SIGTERM');
+      expect(await running).toBe(0);
+      return { lines, seen };
+    } finally {
+      for (const [n, v] of saved) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  it('runMain without --course declares every declared course in the heartbeat, and the banner names them (B-103)', async () => {
+    const dir = declaring({ skills_version: 3, courses: [{ id: 'create-pr', version: 1 }, { id: 'create-spec', version: 2 }], agent_command: 'true' });
+    const { lines, seen } = await probe(dir);
+    // Rule 9, per course: the heartbeat carries both, at their declared versions.
+    expect(seen.heartbeats.length).toBeGreaterThan(0);
+    expect(seen.heartbeats[0].courses).toEqual([
+      { repository: 'docs', course: 'create-pr', version: 1 },
+      { repository: 'docs', course: 'create-spec', version: 2 }]);
+    // The banner names them, so a log says what the runner serves.
+    expect(lines.join('\n')).toContain('courses create-pr@1, create-spec@2');
+  }, 30_000);
+  it('runMain --course narrows the declaration to that course alone (B-103)', async () => {
+    const dir = declaring({ skills_version: 3, courses: [{ id: 'create-pr', version: 1 }, { id: 'create-spec', version: 2 }], agent_command: 'true' });
+    const { lines, seen } = await probe(dir, ['--course', 'create-spec']);
+    expect(seen.heartbeats[0].courses).toEqual([{ repository: 'docs', course: 'create-spec', version: 2 }]);
+    // One course reads as one, in the banner's singular field as before.
+    expect(lines.join('\n')).toContain('course create-spec@2, host');
+  }, 30_000);
 });
 
 describe('declareCourses (rule 9)', () => {
@@ -356,7 +450,12 @@ describe('declareCourses (rule 9)', () => {
     const several = home();
     mkdirSync(join(several, '.baton', 'courses', 'other'), { recursive: true });
     writeFileSync(join(several, '.baton', 'courses', 'other', 'course.json'), '{}');
+    // No baton.json naming the courses: the one-directory fallback cannot choose between them.
     expect(() => declareCourses(several)).toThrow(/2 courses/);
+    // B-103: the several-directory refusal is the runner's to answer too — both are served, so
+    // neither is refused once the home names them (below and `servedCourses`).
+    writeFileSync(join(several, '.baton', 'baton.json'), JSON.stringify({ skills_version: 5, courses: [{ id: 'relay' }, { id: 'other' }] }));
+    expect(declareCourses(several)).toEqual([{ course: 'relay', version: 5 }, { course: 'other', version: 5 }]);
     rmSync(several, { recursive: true, force: true });
     const noVersion = home(); // one course, no version anywhere
     expect(() => declareCourses(noVersion)).toThrow(/no course version/);
@@ -364,6 +463,25 @@ describe('declareCourses (rule 9)', () => {
     const empty = mkdtempSync(join(tmpdir(), 'baton-main-'));
     expect(() => declareCourses(empty)).toThrow(/no .baton\/courses/);
     rmSync(empty, { recursive: true, force: true });
+  });
+  it('B-103: a course entry naming no version runs at the version the home names — never a guess', () => {
+    const interim = home();
+    writeFileSync(join(interim, '.baton', 'baton.json'), JSON.stringify({ skills_version: 3, courses: [{ id: 'create-pr', version: 1 }, { id: 'create-spec' }] }));
+    expect(declareCourses(interim)).toEqual([{ course: 'create-pr', version: 1 }, { course: 'create-spec', version: 3 }]);
+    // Both without a version are served at skills_version too (the docs repository's shape).
+    writeFileSync(join(interim, '.baton', 'baton.json'), JSON.stringify({ skills_version: 3, courses: [{ id: 'create-pr' }, { id: 'create-spec' }] }));
+    expect(declareCourses(interim)).toEqual([{ course: 'create-pr', version: 3 }, { course: 'create-spec', version: 3 }]);
+    rmSync(interim, { recursive: true, force: true });
+    // No version anywhere: refused, naming the course — a wrong declaration silences rule 9.
+    const bare = home();
+    writeFileSync(join(bare, '.baton', 'baton.json'), JSON.stringify({ courses: [{ id: 'relay' }] }));
+    expect(() => declareCourses(bare)).toThrow(/names no course version for relay/);
+    rmSync(bare, { recursive: true, force: true });
+    // A version that is not a number is still malformed.
+    const malformed = home();
+    writeFileSync(join(malformed, '.baton', 'baton.json'), JSON.stringify({ skills_version: 3, courses: [{ id: 'relay', version: 'three' }] }));
+    expect(() => declareCourses(malformed)).toThrow(/must be \{id, version/);
+    rmSync(malformed, { recursive: true, force: true });
   });
 });
 

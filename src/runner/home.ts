@@ -41,8 +41,8 @@ export interface CourseLoad {
 /** The course id the home repository runs, from the snapshot's `.baton/baton.json`: the spec's
  * `courses: [{id, …}]` (§2c/R-BTN-51) when it lists one; docs' interim `{course}` key; else —
  * no baton.json at all yet — the one course under `.baton/courses/`. `want` is the course the
- * runner serves (R-BTN-131), which the snapshot must still carry; with no `want`, several courses
- * are refused loudly, never guessed at: the claim response names no course. */
+ * runner serves (R-BTN-131) — since B-103, the claim answer's `course_id`, which the snapshot
+ * must still carry; with no `want`, several courses are refused loudly, never guessed at. */
 export function courseOf(home: string, sha: string, want?: string): string {
   const at = sha.slice(0, 10);
   const pick = (ids: string[], where: string): string => {

@@ -613,20 +613,28 @@ export class Claims {
       'SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', ticketId).map((n) => (n.waiting_on ? n : { leg: n.leg, state: n.state }));
   }
 
-  /** The claim response (§11, R-BTN-34): where the ticket starts or resumes, its queued leg, the
-   *  latest snapshot's next legs, its hand-off document, its path and the snapshot the claim was
-   *  decided on — never its content — and the earlier attempts, newest first, each with its resume
-   *  record and the legs it ran (§6.11, R-BTN-24). */
+  /** The claim response (§11, R-BTN-34): where the ticket starts or resumes, its course and that
+   *  course's version at the claim's snapshot (B-103, §6.2 — the runner serves every course its
+   *  home declares and needs this to load the claim's one), its queued leg, the latest snapshot's
+   *  next legs, its hand-off document, its path and the snapshot the claim was decided on — never
+   *  its content — and the earlier attempts, newest first, each with its resume record and the legs
+   *  it ran (§6.11, R-BTN-24). */
   private claimResponse(id: number) {
-    const c = this.rows<{ id: number; ticket_id: string; nonce: string; snapshot_sha: string; station: string; offered_leg: string | null; advice_json: string | null }>(
-      'SELECT id, ticket_id, nonce, snapshot_sha, station, offered_leg, advice_json FROM claims WHERE id = ?', id)[0];
+    const c = this.rows<{ id: number; ticket_id: string; nonce: string; snapshot_sha: string; station: string; offered_leg: string | null; advice_json: string | null; course_id: string | null }>(
+      'SELECT id, ticket_id, nonce, snapshot_sha, station, offered_leg, advice_json, course_id FROM claims WHERE id = ?', id)[0];
+    // R-BTN-81's reading of the same two facts (`legFacts`): the course in force for the claim's
+    // repository, at the version the snapshot's head registered.
+    const courseVersion = c.course_id
+      ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(c.ticket_id), c.course_id)[0]?.version ?? null
+      : null;
     const path = this.rows<{ path: string }>('SELECT path FROM tickets WHERE id = ?', c.ticket_id)[0]?.path ?? null;
     const handoff = this.rows<{ handoff_url: string | null }>('SELECT handoff_url FROM ticket_stations WHERE ticket_id = ?', c.ticket_id)[0]?.handoff_url ?? null;
     const previous = this.rows<{ id: number; status: string; end_reason: string | null; end_detail: string | null; ended_at: number | null; resume_json: string | null }>(
       `SELECT id, status, end_reason, end_detail, ended_at, resume_json FROM claims WHERE ticket_id = ? AND id < ? AND status != 'active' ORDER BY id DESC`, c.ticket_id, id);
     const advice = c.advice_json ? (JSON.parse(c.advice_json) as { recommendation?: Recommendation | null }) : null;
     return {
-      claim_id: c.id, ticket_id: c.ticket_id, station: c.station, legs: c.offered_leg ? [c.offered_leg] : [], next: this.nextLegs(c.ticket_id, c.station),
+      claim_id: c.id, ticket_id: c.ticket_id, course_id: c.course_id, course_version: courseVersion,
+      station: c.station, legs: c.offered_leg ? [c.offered_leg] : [], next: this.nextLegs(c.ticket_id, c.station),
       ...(handoff ? { handoff_url: handoff } : {}), path, nonce: c.nonce, snapshot_sha: c.snapshot_sha,
       previous_attempts: previous.map((p) => ({
         claim_id: p.id, status: p.status, end_reason: p.end_reason, detail: p.end_detail, ended_at: p.ended_at,

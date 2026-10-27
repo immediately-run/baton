@@ -4,7 +4,7 @@
 // --test-harness) and hands the legs the `--harness` flag's command when the settings name none,
 // wires the API client (the machine's key, or the transition's token),
 // the state file, the home checkout and R-BTN-34's bounded fetch, and runs the loop. The pure
-// half (`parseRunArgs`, `declareCourses`, `envAuth`) is unit-tested in
+// half (`parseRunArgs`, `declareCourses`, `servedCourses`, `envAuth`) is unit-tested in
 // test/unit/runner-main.test.ts; the wiring is exercised end-to-end by S-BTN-41 against the
 // local host.
 import { execFileSync } from 'node:child_process';
@@ -30,7 +30,8 @@ export interface RunArgs {
    *  declares what the grant allows (`grant.capabilities` on its first answer). */
   capabilities: string[] | null;
   beatEvery: number;
-  /** The one course this runner serves, of several the home checkout declares (R-BTN-131). */
+  /** B-103: narrows the courses this runner serves to this one, of those its home checkout
+   *  declares (R-BTN-131); absent, it serves and declares every one of them. */
   course?: string;
   /** B-83: the run is a test harness — the heartbeat says so (R-BTN-32, refused from any
    * credential but the test one), and the bare `echo` agent_command is permitted as the stub
@@ -86,49 +87,65 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
 
 /** B-86: `baton run --help` (and `-h`) — the usage `parseRunArgs` reads, and what the ticket's
  * What-to-build 2 asks the runner to say: `--capabilities` narrows the grant, it never enables
- * what the grant does not allow, and absent it the runner declares the grant. Printed before any
- * credential or network work, and the exit is 0. */
+ * what the grant does not allow, and absent it the runner declares the grant; `--course` narrows
+ * the courses served, and absent it the runner serves every course its home declares (B-103).
+ * Printed before any credential or network work, and the exit is 0. */
 export const RUN_USAGE = [
   'usage: baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]',
   '                 [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b]',
   '                 [--beat-every <ms>] [--course <id>] [--test-harness] [--verbose]',
   '',
-  'Runs this machine\'s worker: it heartbeats, claims a ticket of its course and runs each leg.',
+  'Runs this machine\'s worker: it heartbeats, claims a ticket of a course its home checkout',
+  'declares and runs each leg — one leg at a time.',
   '',
   '  --capabilities a,b  narrows what the grant allows; it never enables what the grant does not.',
   '                      Absent, the runner declares what the grant allows — no flag is needed to',
   '                      serve the grant. A machine without a browser narrows, e.g. llm-call,create-pr.',
+  '  --course <id>       narrows the courses served to this one, of those the home declares.',
+  '                      Absent, the runner serves and declares every course the home declares.',
 ].join('\n');
 
 /** B-86: whether the arguments ask for the usage — `--help` or `-h`, anywhere in them. */
 export const asksHelp = (argv: string[]): boolean => argv.includes('--help') || argv.includes('-h');
 
+/** A home checkout's settings files, as JSON (null for one that is absent or not JSON —
+ *  `declareCourses` names that failure its own way). */
+function settingsOf(home: string, path: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(readFileSync(join(home, path), 'utf8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** The version the home checkout names for every course it declares: `.baton/baton.json`'s
+ *  `skills_version` first, then docs' interim `scripts/data/baton.json`; null when neither does. */
+const homeVersion = (home: string): number | null => {
+  const batonJson = settingsOf(home, '.baton/baton.json');
+  if (batonJson && typeof batonJson.skills_version === 'number') return batonJson.skills_version;
+  const data = settingsOf(home, 'scripts/data/baton.json');
+  return typeof data?.skills_version === 'number' ? data.skills_version : null;
+};
+
 /** A repository's course declarations for the heartbeat (rule 9): the spec's
  * `.baton/baton.json` `courses: [{id, version}]` (§2c/R-BTN-51) first; docs' interim is the
  * skills_version every course runs at (`{course}` naming one, or the single directory). The
- * runner refuses to guess a version it cannot find — a wrong declaration silences rule 9. */
+ * runner refuses to guess a version it cannot find — a wrong declaration silences rule 9.
+ * B-103: an entry that names no version (`{"courses": [{"id": "create-spec"}]}`) is served at
+ * the version the home names — skills_version is every course's version — never at a guess. */
 export function declareCourses(home: string): { course: string; version: number }[] {
-  const read = (p: string): Record<string, unknown> | null => {
-    try {
-      return JSON.parse(readFileSync(join(home, p), 'utf8')) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  };
-  const batonJson = read('.baton/baton.json');
+  const batonJson = settingsOf(home, '.baton/baton.json');
+  const version = homeVersion(home);
   if (batonJson && Array.isArray(batonJson.courses) && batonJson.courses.length) {
-    const out: { course: string; version: number }[] = [];
+    const named: { course: string; version: number | null }[] = [];
     for (const c of batonJson.courses as Record<string, unknown>[]) {
-      if (typeof c.id !== 'string' || typeof c.version !== 'number') throw new Error('.baton/baton.json courses[] entries must be {id, version}');
-      out.push({ course: c.id, version: c.version });
+      if (typeof c.id !== 'string' || (c.version !== undefined && typeof c.version !== 'number')) throw new Error('.baton/baton.json courses[] entries must be {id, version?, ...}');
+      named.push({ course: c.id, version: typeof c.version === 'number' ? c.version : version });
     }
-    return out;
+    const missing = named.filter((c) => c.version == null).map((c) => c.course);
+    if (missing.length) throw new Error(`the home checkout names no course version for ${missing.join(', ')} (.baton/baton.json courses[] or skills_version, or scripts/data/baton.json)`);
+    return named.map((c) => ({ course: c.course, version: c.version as number }));
   }
-  const version = (() => {
-    if (batonJson && typeof batonJson.skills_version === 'number') return batonJson.skills_version;
-    const data = read('scripts/data/baton.json');
-    return typeof data?.skills_version === 'number' ? data.skills_version : null;
-  })();
   if (typeof batonJson?.course === 'string') {
     if (version == null) throw new Error('the home checkout names no course version (.baton/baton.json courses[] or skills_version, or scripts/data/baton.json)');
     return [{ course: batonJson.course, version }];
@@ -141,19 +158,18 @@ export function declareCourses(home: string): { course: string; version: number 
   return [{ course: listed[0], version }];
 }
 
-/** The one course a runner serves (R-BTN-131): `--course` picks it from the declared ones; with no
- * flag the home checkout must declare exactly one. The claim response names no course, so a
- * runner declares — and rule 9 hands it tickets on — only the course it will load at the claim;
- * a repository on several courses runs one runner for each. */
-export function runnerCourse(declared: { course: string; version: number }[], chosen?: string): { course: string; version: number } {
-  const names = declared.map((c) => c.course).join(', ');
-  if (chosen != null) {
-    const one = declared.find((c) => c.course === chosen);
-    if (!one) throw new Error(`--course ${chosen}: the home checkout declares ${names || 'no course'}`);
-    return one;
-  }
-  if (declared.length !== 1) throw new Error(`the home checkout runs ${declared.length} courses (${names}); baton run serves one — pass --course <id>, one runner for each`);
-  return declared[0];
+/** The courses a runner serves (B-103): every course the home checkout declares, or — when
+ * `--course` names one — that one alone, a machine serving a subset of what its home declares.
+ * The claim answer names its ticket's `course_id` (and the course's version at the snapshot), so
+ * one runner loads each claim's course from the snapshot and serves several courses from one
+ * checkout; its only limit is one leg at a time (rule 3, §6.13). The flag is a loud refusal when
+ * it names a course the home does not declare — the one thing the runner cannot serve. */
+export function servedCourses(home: string, chosen?: string): { course: string; version: number }[] {
+  const declared = declareCourses(home);
+  if (chosen == null) return declared;
+  const one = declared.find((c) => c.course === chosen);
+  if (!one) throw new Error(`--course ${chosen}: the home checkout declares ${declared.map((c) => c.course).join(', ')}`);
+  return [one];
 }
 
 /** The one place `~/.cache/immediately-run` is materialised for a cloud key (§6.4). */
@@ -221,7 +237,7 @@ export const syncLogStamped = (verbose: boolean, l: string): void => syncLog(ver
  * permanent listener. One slot: the previous hook comes off before the next goes on. */
 let exitHookFn: ((code: number | undefined) => void) | null = null;
 
-export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void } = {}): Promise<number> {
+export async function runMain(argv: string[], io: { log?: (l: string) => void; fetch?: (home: string) => void; transport?: (req: Request) => Promise<Response> } = {}): Promise<number> {
   // §6.13: a leg session never claims — the runner that started it does. A nested `baton run`
   // is exactly that session trying, so it is refused before anything else. BATON_PARENT is the
   // runner's name for it (B-97: the transition's IR_BATON_PARENT is gone).
@@ -260,9 +276,9 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     chmodSync(file, 0o600);
     return file;
   });
-  // One course per runner (the claim response names no course): refused at startup, loudly, not
-  // per claim.
-  const course = runnerCourse(declareCourses(a.home), a.course);
+  // Every course the home declares, or the one `--course` narrows to (B-103): refused at startup,
+  // loudly, when the flag names one the home does not declare — not per claim.
+  const courses = servedCourses(a.home, a.course);
   // B-86: no `--capabilities` asks for nothing — the grant speaks, and each answer's
   // `grant.capabilities` is what the runner declares. The flag narrows that.
   if (a.capabilities == null) say('baton: no --capabilities given — the runner declares what the grant allows (narrow it with --capabilities, e.g. a machine without a browser)');
@@ -271,10 +287,11 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   // `agent-venue` alone (B-86).
   const declared = a.capabilities?.join(',') ?? 'grant (--capabilities to narrow)';
   // 2026-10-24: the identity banner — which source, what it declares, which course. Every
-  // historical log this week began with no hint of what code produced it.
+  // historical log this week began with no hint of what code produced it. B-103: the courses
+  // field names every course the heartbeat declares (`--course` narrowed it, or the home's list).
   try {
     const head = execFileSync('git', ['-C', a.home, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
-    say(`baton: runner starting: home ${a.home} @ ${head}, capabilities ${declared}, course ${course.course}@${course.version}, host ${a.hostname}, session ${a.session}`);
+    say(`baton: runner starting: home ${a.home} @ ${head}, capabilities ${declared}, course${courses.length === 1 ? '' : 's'} ${courses.map((c) => `${c.course}@${c.version}`).join(', ')}, host ${a.hostname}, session ${a.session}`);
   } catch { /* a home with no git yet: the rest of the banner still names the run */ }
   // One runner per home checkout: its legs run in the working tree (R-BTN-131). Node's default
   // SIGINT/SIGTERM exit skips \`finally\`, so the lock is released on those signals too.
@@ -300,14 +317,19 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   };
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
+  // B-103: the transport the runner's API calls go through. Production builds each call's
+  // `fetch` (the Worker, or the local host); a test hands one in and sees the bodies the
+  // heartbeat path composed without a Baton behind it.
+  const transport = io.transport ?? ((req: Request) => fetch(req));
   runner = new Runner({
-    api: new BatonApi({ url: a.url, transport: (req) => fetch(req), auth }, say),
+    api: new BatonApi({ url: a.url, transport, auth }, say),
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
-    courses: [course],
-    // B-86: the legs the runner's course requires, from the home checkout's working tree — what
-    // a never-eligible runner says it lacks at startup.
-    legNeeds: () => legNeeds(a.home, readHead(a.home), course.course),
+    courses,
+    // B-86: the legs the runner's courses require, from the home checkout's working tree — what
+    // a never-eligible runner says it lacks at startup. B-103: every served course's legs, as each
+    // of them must declare by its own version (rule 9 per course).
+    legNeeds: () => courses.flatMap((c) => legNeeds(a.home, readHead(a.home), c.course)),
     stateFile: join(cacheDir(), `${a.session}.json`),
     beatEvery: a.beatEvery, log, verbose: a.verbose, // the Runner stamps its own lines under verbose
     fetch: io.fetch ?? ((home) => fetchMain(home, say)),
