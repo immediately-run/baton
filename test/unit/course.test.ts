@@ -48,6 +48,78 @@ describe('validateCourse (R-BTN-69)', () => {
     expect(rules(c)).toEqual(['bound legs.review.isolation']);
   });
 
+  it('a leg requires capabilities and the course names capability roles (R-BTN-120, B-86)', () => {
+    const c = copy();
+    // What the runner reads: the names rule 4 must find among its declaration, roles included.
+    c.legs.review.requires = { capabilities: ['create-pr', 'deployer'] };
+    c.capability_roles = { deployer: ['vpn:corp', 'credential:DEPLOY_TOKEN'] };
+    expect(validateCourse(c)).toEqual([]);
+    // Absent and empty are fine — a leg that requires nothing, a course with no roles.
+    delete c.legs.review.requires;
+    expect(validateCourse(c)).toEqual([]);
+    c.legs.review.requires = {};
+    c.capability_roles = {};
+    expect(validateCourse(c)).toEqual([]);
+  });
+
+  it('a leg\'s requires and a course\'s capability_roles are checked in shape (R-BTN-120, B-86)', () => {
+    const c = copy();
+    c.legs.review.requires = { tickets: [] };
+    c.legs.deploy = { from: ['adjudicated'], to: 'merged', requires: { capabilities: ['create-pr'], resources: ['llm:x'] } };
+    c.capability_roles = { deployer: ['vpn:corp', ''], empty: [], tooMany: Array.from({ length: 65 }, () => 'x'), notList: 'create-pr' };
+    // Per element, as `stationList` reports a station list: the empty and non-list roles are the
+    // list's own fault, the single bad name is the name's.
+    expect(rules(c)).toEqual([
+      'shape capability_roles.deployer.1',
+      'shape capability_roles.empty',
+      'shape capability_roles.notList',
+      'shape capability_roles.tooMany',
+      'unknown-key legs.deploy.requires.resources',
+      'unknown-key legs.review.requires.tickets',
+    ]);
+    // A requires that is not an object, a capability list that is empty or holds a non-name.
+    c.capability_roles = {};
+    delete c.legs.deploy;
+    c.legs.review.requires = 'create-pr';
+    expect(rules(c)).toEqual(['shape legs.review.requires']);
+    c.legs.review.requires = { capabilities: [] };
+    expect(rules(c)).toEqual(['shape legs.review.requires.capabilities']);
+    c.legs.review.requires = { capabilities: ['ok', 7] };
+    expect(rules(c)).toEqual(['shape legs.review.requires.capabilities.1']);
+    c.legs.review.requires = { capabilities: 'create-pr' };
+    expect(rules(c)).toEqual(['shape legs.review.requires.capabilities']);
+  });
+
+  it('a capability role naming a role holds the file (R-BTN-121, R-BTN-157)', () => {
+    const c = copy();
+    // A role expands once, to capabilities: one naming a vocabulary role — or the built-in
+    // human-operator — would put a role inside a role, and a role never reaches a grant.
+    c.capability_roles = { human: ['human-operator'], venue: ['agent-venue', 'create-pr'] };
+    expect(rules(c)).toEqual(['role-in-roles capability_roles.human.0', 'role-in-roles capability_roles.venue.0']);
+    // A role named as a role: the key itself — and one named a name the vocabulary already means
+    // (review round 7, finding 3): a bare capability, `none`, or `human-operator`. Each would
+    // redefine a leg's reading of that name while a ticket clause kept the vocabulary's.
+    c.capability_roles = { 'agent-venue': ['llm-call'], 'human-operator': ['llm-call'] };
+    expect(rules(c)).toEqual(['role-in-roles capability_roles.agent-venue', 'role-in-roles capability_roles.human-operator']);
+    for (const name of ['create-pr', 'llm-call', 'authentication', 'drivable-browser', 'none']) {
+      c.capability_roles = { [name]: ['vpn:corp'] };
+      expect([name, rules(c)]).toEqual([name, [`role-in-roles capability_roles.${name}`]]);
+    }
+    // An ordinary named list is the whole point and passes.
+    c.capability_roles = { deployer: ['vpn:corp', 'credential:DEPLOY_TOKEN'] };
+    expect(validateCourse(c)).toEqual([]);
+    // Review round 6, finding 1: a value naming another role of the same file too — it would be
+    // stored unexpanded and read by rule 4 as a literal capability no grant holds.
+    c.capability_roles = { deployer: ['admin'], admin: ['vpn:corp'] };
+    expect(rules(c)).toEqual(['role-in-roles capability_roles.deployer.0']);
+    // A key that is neither a vocabulary role nor a value of another role is a plain name.
+    c.capability_roles = { deployer: ['vpn:corp'], architecture: ['create-pr'] };
+    expect(validateCourse(c)).toEqual([]);
+    // A namespaced name is nobody else's either way (R-BTN-121's `<type>:<value>`).
+    c.capability_roles = { 'vpn:corp': ['llm-call'] };
+    expect(validateCourse(c)).toEqual([]);
+  });
+
   it('a station names its entry outputs by name and schema id; an output may name an id or a legacy path (R-BTN-108, R-BTN-109)', () => {
     const c = copy();
     c.stations.reviewed.entry = [{ output: 'findings', schema: 'roadmap-pr:findings@2' }, { output: 'change', schema: 'std:forge.change@1' }];

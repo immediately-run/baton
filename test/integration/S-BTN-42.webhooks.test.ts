@@ -88,7 +88,9 @@ describe(`S-BTN-42 webhooks (${HOST})`, () => {
     expect(sent).toEqual([]);
     // Dropped deliveries are not even remembered: only the one that reached the core is.
     expect(await rows('SELECT count(*) AS n FROM webhook_deliveries')).toEqual([{ n: 1 }]);
-    expect((await webhookCall('pull_request', { ...review, sender: { login: 'x' }, pull_request: { title: 'y', body: 'z' }, installation: { id: 1 } })).status).toBe(204);
+    // A merged one reaches the core: only the five fields are read, and sandbox's ticket names
+    // docs (B-89: `merged` is read too — a pull request that did not merge dispatches nothing).
+    expect((await webhookCall('pull_request', { ...review, sender: { login: 'x' }, pull_request: { merged: true, title: 'y', body: 'z' }, installation: { id: 1 } })).status).toBe(204);
     expect(sent).toEqual(['docs:sync']);
   });
 });

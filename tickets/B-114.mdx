@@ -1,0 +1,102 @@
+---
+title: "B-114 — The ticket-wiki viewer, immediately-run/baton-board: the board components once, in their own app repository"
+id: B-114
+project: baton
+status: available
+updated: 2026-10-26
+repos:
+  - baton
+  - baton-board
+tags:
+  - roadmap-item
+  - EXPEDITE
+order: 516
+tier: judgement
+description: "Every ticket repository (docs, baton, fieldhouse, hq) copies the same ten board components into its wiki. Build immediately-run/baton-board, a small library-mode Grove shell app that owns those components and registers them with extendComponents; it opts in to being named by markers (opens: self), so render: safe ticket wikis anywhere — Baton's own included — render their board through it. Baton's tickets wiki switches to it and its tickets/components/ goes. Expedited: it changes the ticketing system itself. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-26: ticket repositories should be plain `render: safe` wikis with
+no components of their own, whose board still renders — from one viewer, like a plugin. The
+components belong to the **viewer**, not the content, which keeps the platform's rule that a
+repository cannot choose the code that renders it. The owner first placed the viewer in
+Baton's repository, then chose a **separate app repository**, `immediately-run/baton-board`, as
+the cleaner design: Baton's package keeps one entry (`bin`) and one dependency list, and the
+viewer is an ordinary app.
+Expedited: a ticket that changes the ticketing system itself is finished first.
+**Spec:** `immediately-run/docs` `PLATFORM_LAYERING_SPEC` §1.1 (M3 library mode),
+`SPACES_UI_SPEC` §6 (a marker may name an app; `opens: self`; an unbound app is offered, never
+run); R-BTN-74 (the markdown ticket format the components read).
+**Depends on:** none in this repository.
+**Waits on:** docs R3-1290 (`extendComponents`, and the safe renderer drawing with a shell's
+map) and R3-1294 (Grove as an `open-declared` opener), each merged and released — written here
+rather than in `depends_on` until B-113 lets a dependency name another repository's ticket.
+**Used by:** fieldhouse FLDH-36 (its tickets wiki switches to this viewer), and the same switch
+in docs and hq.
+
+### What to build
+
+1. **`immediately-run/baton-board`** (created public by the owner on 2026-10-26): an ordinary
+   immediately.run app on the Grove thin-shell pattern (`examples/thin-shell` in
+   `immediately-run/grove`):
+   - `src/main.tsx` / boot — `boot({ mdxComponents: COMPONENTS, children: <App /> })`;
+   - `src/App.tsx` — default-exports a component rendering `<GroveApp />`, and nothing else
+     (the Fast Refresh rule);
+   - `src/components.ts` — `COMPONENTS = extendComponents(GROVE_MDX, { RoadmapBoard,
+     RoadmapMeta, NextAvailable, Dependencies, ProjectIndex, ProjectItems, ProjectMembers,
+     ProjectMeta, StatusBadge, TopicIndex })`, the ten names every ticket marker registers today;
+   - `src/components/` — the components and their helpers;
+   - `package.json` — `@immediately-run/grove` pinned by commit (`github:` form, LIBRARY_MOUNTS
+     §6), and `"immediately.run": { "opens": [{ "app": "self", "version": "^1" }] }`.
+2. **The components move to `baton-board`, they are not copied**: the ten components, their
+   helpers (`InlineProse`, `ItemCard`, `QueueChips`, `roadmapData.ts`, `roadmapLib.ts`,
+   `useProjectId.ts`, `useRoadmapRows.ts`) and `roadmap.css`, from this repository's
+   `tickets/components/` — the most complete of the copies; the PR body names the Baton commit
+   they came from, since history does not cross repositories.
+3. **Baton's own tickets switch**: `tickets/immediately.run.json`'s `opensWith` becomes
+   `{ "app": "github:immediately-run/baton-board", "version": "^1" }` and loses its `components`
+   key; `tickets/home.mdx` declares `render: safe`; `tickets/components/` is deleted. `docs/`,
+   Baton's second wiki, keeps stock Grove.
+
+### Architecture — the decisions, named
+
+- **The viewer is a separate repository, not a program in Baton's** (the owner, 2026-10-26).
+  Baton stays a CLI and Worker package with its own wikis; it gains no app entry, no React and
+  no Grove dependency. Docs R3-1292 (an app entry and dependencies beside npm's) was superseded
+  for this reason.
+- **Baton's own tickets are dispatched like everyone's.** `baton-board` is another repository,
+  so naming it is not self-dispatch; Baton's wiki has no special case.
+- **Components stay app code.** They run in the viewer's frame with the viewer's authority,
+  which is why they may render safe content: the corpus contributes data only.
+- **Do not:** leave a copy of any component in `tickets/`; add the viewer or its dependencies to
+  Baton's `package.json`; name a mutable branch in `baton-board`'s Grove dependency; register the
+  board components in Grove's `viewer.manifest.json`.
+
+### Tests
+
+- Scenarios: none run yet — the viewer changes no Baton core behaviour (R-BTN-50).
+- In `baton-board`, `src/components.test.ts` (vitest): `COMPONENTS` carries all ten names and still
+  resolves `Callout` to Grove's stock component; input: this repository's REAL
+  `tickets/immediately.run.json` `components` keys from before the switch, saved as a fixture —
+  the list the viewer must cover.
+- In Baton: `npm run check:wiki` green with the marker naming `baton-board` and no `components`
+  key; `npm run check:package` unchanged.
+
+### Exit criteria
+
+- [ ] `immediately-run/baton-board` holds the shell, the components and the test above, passing
+      (the repository itself was created by the owner on 2026-10-26)
+- [ ] `git ls-files tickets/components` empty in Baton; the marker names `baton-board`
+- [ ] `npm run check:wiki` and `npm test` green in Baton
+- [ ] **live**: Baton's tickets wiki opens on immediately.run in `baton-board`, its board rendered
+      under `render: safe` (run by the session that merges, with a drivable browser)
+
+## Status
+
+_(filed 2026-10-26, expedited; rewritten the same day when the owner moved the viewer from Baton's
+repository to its own, `immediately-run/baton-board`; the owner created it, public, the same day —
+the ticket's one operator step, so the OP tag is gone)_

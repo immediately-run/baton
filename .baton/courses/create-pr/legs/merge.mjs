@@ -1,4 +1,4 @@
-// ../../baton-bundle-NbGZWu/entry.ts
+// ../../baton-bundle-pVn2yu/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -119,7 +119,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
 }
 
-// ../../baton-bundle-NbGZWu/entry.ts
+// ../../baton-bundle-pVn2yu/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, ...opts });
@@ -193,8 +193,8 @@ async function standard(ctx) {
         resolve(so);
         return;
       }
-      const why = se.split("\n").filter((l) => l.trim() !== "").at(-1);
-      reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + (why != null ? ": " + why : "")));
+      const tail = (so + "\n" + se).split("\n").map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-20).join("\n  ");
+      reject(new Error("the agent exited " + (code != null ? "with code " + code : "on signal " + sig) + "; its last output:\n  " + tail));
     });
     child.stdin?.end();
   }).finally(() => {

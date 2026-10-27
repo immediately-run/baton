@@ -21,7 +21,7 @@ says otherwise. Do each step on staging first (`--url https://baton-staging.imme
 | 1. Keys | yes |
 | 2. Make yourself administrator | yes |
 | 3. Register the repository | yes |
-| 4. The sync | **waits on R3-1249** (`baton sync` and a ticket source for `tickets/*.mdx`); its webhook half (4a) is ready and has run once by hand (B-92) |
+| 4. The sync | **waits on R3-1249** (`baton sync` and a ticket source for `tickets/*.mdx`); a sync key works today, from a laptop (see below); its webhook half (4a) is ready and has run once by hand (B-92) |
 | 5. Workers | the grant is ready; `baton run` waits on the `pr` course's legs (R3-1249's `baton init`) |
 | 6. Cut over | after 4 and 5 |
 
@@ -81,12 +81,52 @@ secret.
 
 1. A ticket source for this repository's MDX tickets: `.baton/tickets.mjs` over `tickets/` and
    `tickets/archive/`, or R3-1249's default source taught `.mdx` and the folder (R3-1266).
-2. `.github/workflows/baton-sync.yml`: on a push to `main` that touches `tickets/**` or `.baton/**`,
-   on `workflow_dispatch`, and every 15 minutes; `permissions: id-token: write`; it runs
-   `baton sync` at the CLI version it pins. `baton init` (R3-1249) writes it.
+2. `.github/workflows/baton-sync.yml`: on a push to `main`, on `workflow_dispatch` — which
+   Baton's webhook path dispatches for a merge and the alarm for a stale board — and every 15
+   minutes; `permissions: id-token: write`; it runs `baton sync` at the CLI version it pins.
+   `baton init` (R3-1249) writes it.
 
 Check: `gh workflow run baton-sync.yml -R immediately-run/baton` goes green, and the dashboard
-shows the `baton` board with the live tickets and the next available one.
+shows the `baton` board with the live tickets and the next available one. A run that posted
+nothing is never silent (B-89): a failed post fails its step, and a `busy` run — another run's
+reading in flight — ends with a warning saying the board is held, never a silent pass. Not every
+one of those is red: a `busy` or `held` run ends green whenever the CLI it runs exits 0 for it —
+this repository's pin does for `busy` — and its warning is what says nothing was posted. Read
+the outcome line (`baton: advanced|confirmed at …`), not just the check mark. A run that waits a
+minute and retries once arrives with the CLI release the workflow pins; until the pin carries
+`--busy-retry`, a `busy` run over the old CLI still exits 0, and the annotation is what tells
+you.
+
+The schedule is the backstop, and it is not assumed to fire (§7.1): the App's `pull_request`
+deliveries reach Baton, so a merge of `main` dispatches this workflow (at most one per
+R-BTN-73's 30-second window, and so one per merge at most — `main` moves itself a dozen times a
+day), and Baton's alarm dispatches one when the repository's last webhook-driven sync is ten
+minutes old: the alarm is armed for that instant, so a quiet repository sees one an interval and
+not one a tick. A dispatch that fails is not silently dropped: its stamp stands, and the alarm's
+ten-minute backstop sends it again — the schedule adds only an attempt of its own. Both are
+visible as `workflow_dispatch` runs in the list beside the `schedule` ones; a day with no dispatch
+at all is the webhook path down, as a day with no scheduled run is GitHub's cron not firing.
+
+A repository with no Actions — or a first board to post before any workflow exists — needs no
+CI identity: register a sync key and sign the sync by hand. The key holds one role, so it can be
+neither a worker's nor an administrator's.
+
+```sh
+ssh-keygen -t ed25519 -f ~/.ssh/baton_sync -C "sync of baton"
+node cli/baton.mjs admin -i ~/.ssh/baton_admin repo add immediately-run/baton --id baton \
+  --owner-key ~/.ssh/baton_owner_baton.pub --sync-key ~/.ssh/baton_sync.pub   # or, on a registered repository:
+node cli/baton.mjs admin -i ~/.ssh/baton_admin repo set baton --add-sync-key ~/.ssh/baton_sync.pub
+BATON_SYNC_KEY=~/.ssh/baton_sync node cli/baton.mjs repo sync --root <a checkout of immediately-run/baton>
+```
+
+`--sync-key FILE` (or `BATON_SYNC_KEY`) signs the sync's observation, head and board calls with
+the file's key, exactly as a worker signs (R-BTN-93; B-88); it is the no-CI path, and a CI token
+beside it is never spent. The file is normally the **private** key (`~/.ssh/baton_sync`); a `.pub`
+whose private half an `ssh-agent` holds signs just as well — `ssh-add ~/.ssh/baton_sync` first —
+as does a passphrase-protected key loaded in the agent. A file that is no SSH key at all is
+refused before the first call; a key ssh-keygen cannot sign with is named by the first
+signature's own reason, before any request leaves. The sync workflow stays as it is — in Actions
+the OIDC token is the credential, and no key secret is needed.
 
 ## 4a. The GitHub App's webhook (B-92)
 
@@ -180,6 +220,13 @@ The hostname must be what the machine reports (`hostname`, or `BATON_HOSTNAME`),
 are refused. Capabilities are from `src/shared/vocabulary.mjs` (`authentication`, `llm-call`,
 `create-pr`, `drivable-browser`, `agent-venue`); only an administrator grants `human-operator`.
 
+The grant *is* the machine's capability declaration (B-86): `baton run` with no `--capabilities`
+declares what the grant allows on the repositories it serves, so the runner and the grant cannot
+disagree. `--capabilities` exists to **narrow** — a machine without a browser passes
+`--capabilities authentication,llm-call,create-pr` — never to enable: a name the grant does not
+allow is refused at the heartbeat (`forbidden`). A runner whose declaration misses a capability a
+leg requires says so in one line at startup (`missing-capability`) rather than idling.
+
 Once the `pr` course's legs exist (R3-1249), the worker runs:
 
 ```sh
@@ -187,7 +234,8 @@ BATON_KEY_FILE=~/.ssh/baton_worker BATON_REPOSITORY=baton \
   node cli/baton.mjs run --harness claude-code --home <a checkout of immediately-run/baton>
 ```
 
-Check: the dashboard's Workers view shows the machine heartbeating.
+Check: the dashboard's Workers view shows the machine heartbeating, and the log's first lines say
+what it declares (`baton: declaring … — the grant's capabilities`).
 
 ## 6. Cut over
 

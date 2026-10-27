@@ -33,6 +33,7 @@
     "test/unit/local-queue.test.ts",
     "test/unit/boundary-host.test.ts",
     "test/unit/cli.test.ts",
+    "test/unit/sign.test.ts",
     "test/unit/runner-main.test.ts",
     "test/unit/runner-bundle.test.ts",
     "test/integration/S-BTN-41.runner.test.ts",
@@ -48,6 +49,8 @@
     "test/integration/S-BTN-104.standard-courses.test.ts",
     "test/integration/S-BTN-105.course-sources.test.ts",
     "test/integration/S-BTN-106.cross-repo-prs.test.ts",
-    "test/integration/S-BTN-107.build-app-course.test.ts"
+    "test/integration/S-BTN-107.build-app-course.test.ts",
+    "test/integration/S-BTN-156.sync-key.test.ts",
+    "test/integration/S-BTN-157.busy-sync.test.ts"
   ]
 }

@@ -32,11 +32,45 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: immediately-run/baton
-          ref: fbd75eeb5c013cedc42f2d96a1ccf5f848c97e37
+          ref: 22692625d6e7a183f22e1aaf3c25734e652511c5
           path: .baton-cli
       - run: npm ci --prefix .baton-cli
       # --latest main: after its observation number the run reads the newest main, so a slow
       # run for an older push still posts the newest board (§7.1 step 2).
-      - run: node .baton-cli/cli/baton.mjs repo sync --latest main
+      # `tee` keeps the CLI's own output for the annotation step below; `pipefail` keeps its
+      # exit code, so a failed sync still fails this step.
+      - id: sync
+        timeout-minutes: 10
+        run: |
+          set -o pipefail
+          node .baton-cli/cli/baton.mjs repo sync --latest main 2>&1 | tee sync.log
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # B-89: a run that posted nothing is an annotation, never a green check — a held board
+      # from another run's reading in flight (`busy`), or any failed post. The step above
+      # fails on a failed post, so this runs even then (`!cancelled()`). A `busy` run over a CLI
+      # without `--busy-retry` (this repository's pin) still exits 0; here it is the warning
+      # that keeps it from looking posted. The retry and its flag arrive with the pin.
+      - name: A sync that posted nothing is not a success
+        if: ${{ !cancelled() }}
+        run: |
+          # The outcome is any `baton: <outcome> at <sha>` line, matched anywhere — never only at
+          # the start of a line: a copy the step's own log prefixes, or a retry's line that opens
+          # the same way, sits beside the one `tee` wrote, so the last such line is the outcome.
+          # The `[0-9a-f]` demands the sha the outcome line names, which a trace or a retry's
+          # line has not (B-89).
+          outcome="$(grep -oE 'baton: [a-z][a-z:-]* at [0-9a-f]' sync.log | tail -n 1 | cut -d' ' -f2)"
+          case "$outcome" in
+            advanced|confirmed)
+              echo "::notice title=baton sync::the board is posted — $outcome" ;;
+            held)
+              echo "::warning title=baton sync held::a force post was refused into holding; nothing was posted" ;;
+            busy|busy:again)
+              echo "::warning title=baton sync held::another run's reading was in flight (R-BTN-62); this run posted nothing. A stale reading lapses ten idle minutes after it was handed out, and a dispatch within that window is refused again — dispatch baton-sync.yml once the ten minutes have lapsed" ;;
+            "")
+              # No outcome line: the sync step failed before the CLI ended a sync (npm ci, the
+              # checkout), so its log is the one that says why.
+              echo "::error title=baton sync failed::the sync ended no sync, so it posted nothing; see the sync step's log" ;;
+            *)
+              echo "::error title=baton sync failed::the run posted nothing (outcome: $outcome); see the sync step's log" ;;
+          esac
