@@ -657,8 +657,9 @@ export class BatonCore {
       const actor = `admin:${fp}`;
       // B-90: the registry, for an operator or an agent with a key — no new query: the same
       // `uiRepo` rows `/v1/ui/state` lists as its `repositories`. B-91 names the repositories
-      // whose owners are all the seed's in `seed_owners` — the one whole-`view()` read this rare
-      // operator route makes (the dashboard's own state never pays for it).
+      // whose owners are all the seed's in `seed_owners` — computed by the same `Admin.view()`
+      // `uiState` already runs for its limits (`limits.seed_owners`), so this route adds no
+      // query the dashboard does not make; it only lifts the field to the top level.
       if (m === 'GET' && p === '/v1/admin/repositories') {
         const { seed_owners } = this.admin.view(this.now());
         return json({ ...this.adminView(), ...(seed_owners.length ? { seed_owners } : {}) });
@@ -1186,8 +1187,6 @@ export class BatonCore {
     return { id: repo.id, github: repo.github, forge: repo.forge, web_base: repo.web_base, default_branch: repo.default_branch, weight: repo.weight, head, mode: this.workers.mode(repo.id), courses };
   }
 
-  /** `GET /v1/admin/repositories` (B-90): the registry as the dashboard's state lists it, every
-   *  registered repository with its head, mode and courses. */
   /** `GET /v1/admin/repositories` (B-90, R-BTN-179): the registry as the dashboard's state lists
    *  it — one section of `uiState`'s answer, built by the same `uiRepo` it maps over. */
   adminView() {

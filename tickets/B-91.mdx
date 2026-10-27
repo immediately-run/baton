@@ -51,7 +51,7 @@ The divergence is invisible until the day it matters.
 
 ## Status
 
-_implemented 2026-10-24 — the seed's `owner_keys` (both wrangler.toml environments carry `baton`'s), `seed_owners` in `GET /v1/admin/repositories`, and the runbook's check; PR #109 (rebased onto main after #108 merged)._
+_implemented 2026-10-24, rebased onto main 2026-10-27 after #108 merged — the seed's `owner_keys` (both wrangler.toml environments carry `baton`'s), `seed_owners` in `GET /v1/admin/repositories`, and the runbook's check; PR #109 (rebased onto main after #108 merged)._
 - **Deviations.** Item 3 is the runbook's *check*, below, in this repository's copy
   (`docs/runbooks/register-baton.mdx`, the `docs` content this repository carries); the `docs`
   repository's copy of the runbook was not changed — no PR there. B-91's tests are
@@ -81,10 +81,10 @@ _implemented 2026-10-24 — the seed's `owner_keys` (both wrangler.toml environm
   with `wrangler.toml`'s own entry stands in (test/unit/seed-owners-fresh.test.ts). The owner key
   seeded is `ssh-ed25519 …+jdf`, `SHA256:iY5pLxsv05FQfhNZdEQrr8NwkZWdaqN5DcOwkkSTOZY`, the
   content of `~/.ssh/baton_repo_owner.pub` on the owner's machine. Round two, finding 3: whether
-  the deployed instance was registered with that key or another cannot be read from a fresh
-  instance or decided here — `GET /v1/admin/repositories` (B-90) answers only once B-90's PR is
-  deployed, and this B-90 route answers `not-found` on the deployed instance today. Confirm with
-  the fingerprint
-  (`ssh-keygen -lf ~/.ssh/baton_repo_owner.pub` against the line in `wrangler.toml`) before this
-  merges, or replace the entry's line with the `.pub` `admin repo add` took; the runbook's step 3
-  now names the fingerprint as the key's identity.
+  the deployed instance was registered with that key or another is readable now: `baton admin repos`
+  (B-90, merged) names each registered repository's `owners` and `seed_owners` on the deployed
+  instance. Confirm that the deployed owner's fingerprint equals the entry's —
+  `ssh-keygen -lf` both, or read `owners[]` from the command — before this merges; comparing the
+  `wrangler.toml` line against its own source file proves nothing. If they differ, replace the
+  entry's line with the `.pub` `admin repo add` took. The runbook's step 3 names the fingerprint
+  as the key's identity.
