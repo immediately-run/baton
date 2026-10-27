@@ -711,10 +711,7 @@ export class Admin {
   view(now: number) {
     return {
       owners: this.rows('SELECT repository_id, fingerprint, added_by, added_at FROM repository_owners WHERE removed_at IS NULL ORDER BY repository_id, added_at'),
-      // max_tier as its name in the repository's ladder (stored as a position, R-BTN-66).
-      grants: this.rows<{ repository_id: string; max_tier: number | null }>(`SELECT g.credential_id, c.hostname, c.label, g.repository_id, g.capabilities, g.max_tier, g.granted_by, g.granted_at
-                         FROM worker_grants g JOIN credentials c ON c.id = g.credential_id WHERE g.revoked_at IS NULL ORDER BY g.repository_id, c.hostname`)
-        .map((g) => ({ ...g, max_tier: g.max_tier == null ? null : this.c.registry.get(g.repository_id)?.tiers[g.max_tier] ?? null })),
+      grants: this.grants(),
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
@@ -722,6 +719,15 @@ export class Admin {
       // R-BTN-80: the personal channels, by repository.
       couriers: this.c.notices?.couriers() ?? [],
     };
+  }
+
+  /** Every grant in force, the dashboard's `limits.grants` (R-BTN-66, R-BTN-146) — the one read
+   *  `GET /v1/owner/{repository}/grants` narrows to a repository (R-BTN-179, B-90). */
+  grants() {
+    // max_tier as its name in the repository's ladder (stored as a position, R-BTN-66).
+    return this.rows<{ credential_id: string; hostname: string | null; label: string | null; repository_id: string; capabilities: string; max_tier: number | null; granted_by: string; granted_at: number }>(`SELECT g.credential_id, c.hostname, c.label, g.repository_id, g.capabilities, g.max_tier, g.granted_by, g.granted_at
+                       FROM worker_grants g JOIN credentials c ON c.id = g.credential_id WHERE g.revoked_at IS NULL ORDER BY g.repository_id, c.hostname`)
+      .map((g) => ({ ...g, max_tier: g.max_tier == null ? null : this.c.registry.get(g.repository_id)?.tiers[g.max_tier] ?? null }));
   }
 
   // ── keys ────────────────────────────────────────────────────────────────────────────────

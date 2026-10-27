@@ -2,8 +2,8 @@
 title: "B-90 — The CLI has no reads: every answer needs the dashboard behind a human Access login"
 id: B-90
 project: baton
-status: available
-updated: 2026-10-21
+status: in-progress
+updated: 2026-10-24
 tags:
   - roadmap-item
 order: 488
@@ -12,7 +12,8 @@ description: "No repo list, no grants list, no board dump — an operator or age
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/108
 depends_on: []
 ---
 
@@ -37,8 +38,9 @@ state without a browser; today's answer to a silent runner is guesswork or a hum
    JSON answer, exit 1 on refusal.
 2. The routes they read are the ones the dashboard serves (`/v1/ui/state`'s sources) behind
    the signed principal, no new core queries where an existing one serves.
-3. `baton run`'s startup uses `baton board`'s answer for B-86's "why I can never claim"
-   line.
+3. The board answers `granted_capabilities` beside the heartbeat, so a reader sees the key's
+   grant from the read alone. (B-86's "why I can never claim" line and its declaration are
+   baton#104's; this PR is the reads.)
 
 ### Tests
 
@@ -47,4 +49,18 @@ state without a browser; today's answer to a silent runner is guesswork or a hum
 
 ### Exit criteria
 
-- [ ] an operator with a key can see repositories, grants and the board from a terminal
+- [x] an operator with a key can see repositories, grants and the board from a terminal
+
+### Where
+
+Built on baton#108. The three routes read the dashboard's own helpers (`uiRepo`, `readyRows`,
+`readyByTier`, `admin.view`'s rows) behind the signed principal: `boardView` derives its ready
+and per-tier sections from `readyRows(repository_id)` for its own repository, never by computing
+the whole `uiState` and filtering it. One field is deliberately the board's own:
+
+- `granted_capabilities`, which the heartbeat's answer already names, so a reader knows what the
+  key's grant allows from the read alone — one fact, one answer.
+
+`S-BTN-166` (both hosts) drives the real routes: each read against its refusal codes, an owner's
+read of its own and a foreign repository, an administrator on an owner route, a granted key's
+board beside the dashboard session's own state and its heartbeat's answer.
