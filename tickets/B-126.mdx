@@ -55,6 +55,19 @@ a compromise visible within one sync, at small cost.
    (R-BTN-44) is served with the claim and runner that wrote it, and a memory file with its
    last pusher, so the next reader knows whose words steer it.
 
+**After the adversarial review** (2026-10-27, `docs/security-model.mdx` *Review*):
+
+- **Provenance names who introduced the change** (finding 9): the author of the PR that brought
+  it to the default branch, and its pusher, by immutable `sender.id`, not `pusher.name`. Under
+  B-130 every merged ticket's pusher is the merger, so the pusher alone would credit worker text
+  to the owner. The owner's agent sessions are shown as "owner's agent", not "owner" (B-136).
+- **The changed paths are Baton's own reading** of the push deliveries (B-137), fail closed
+  (`pusher-unknown`) when a delivery is missing; a board post's claim about what changed is not
+  trusted.
+- **What this ticket can see** (finding 19): control changes on the default branch, after the
+  fact. Not ticket bodies (item 6's provenance covers those), not workflows run on agent
+  branches, not code run in a PR-branch checkout.
+
 ### Tests
 
 - A scenario: a ticket body last pushed by the worker identity is served with that pusher, and one

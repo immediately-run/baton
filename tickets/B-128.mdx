@@ -69,6 +69,18 @@ makes a single compromised runner unable to land code alone.
    implementer's side, with the results reproduced by a check the reviewer does not execute.
    **Decide** which; the scenario proves the reviewer runner never runs PR code.
 
+**After the adversarial review** (2026-10-27, `docs/security-model.mdx` *Review*):
+
+- **What this buys, stated exactly** (finding 7): one compromised runner cannot land code
+  without either a second compromise or a successful injection of the reviewer model, which reads
+  attacker-written code, comments and PR text. So merges also need deterministic checks
+  (Fieldhouse's fourth practice) run by the executor, not only a model verdict.
+- **Two Apps, not one** (with B-131): if both roles mint tokens from one GitHub App they are one
+  identity, and the rule collapses. Separate Apps, separate broker keys.
+- **The implementer cannot approve at all** on GitHub: required reviews come from a team only the
+  reviewer identity (and the humans) belong to, so the implementer's approval of a reviewer's push
+  does not satisfy "someone other than the pusher".
+
 ### Tests
 
 - A scenario (the next free S-BTN number): a runner with only `forge-implementer` is never

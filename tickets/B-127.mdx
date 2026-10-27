@@ -68,6 +68,22 @@ from where), R-BTN-12 (expedite), §7.1 (the board post); B-122 (goals); `docs/s
    that an unsigned owner quote is a claim, not the owner. This applies whether or not
    `require_signed_control` is on: it marks, it does not refuse.
 
+**After the adversarial review** (2026-10-27, `docs/security-model.mdx` *Review*):
+
+- **First-parent history** (finding 13, reproduced): "the commit that last changed it" is read
+  along the default branch's first parents. An unsigned merge whose result differs from its first
+  parent on a control path is unsigned, even when it restores an older owner-signed version;
+  otherwise a crafted merge rolls a control input back to any earlier signed state.
+- **The signature is verified where it is trusted** (finding 4): by Baton over the raw commit
+  objects the sync posts (B-137), and by each runner before it loads configuration, never only by
+  the sync that posts it. SSHSIG namespace `git`, distinct from Baton's request namespace.
+- **Only a human-only key counts** (finding 3): owner keys that agent sessions hold would let an
+  injected session sign. B-127 accepts only the hardware key of B-136; API-key owners cannot sign.
+- **Tier, revisited** (finding 12): the settled decision holds only while no runner above the VM
+  level serves a home the VM level pushes (security model option 1). If higher tiers run on owner
+  machines, `tier` routes a pushed ticket upward and becomes a control input. The owner decides
+  which precondition to keep.
+
 ### Tests
 
 - A scenario: a brief added in an owner-signed commit is `signed`; the same text pushed unsigned

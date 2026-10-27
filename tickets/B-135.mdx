@@ -33,7 +33,7 @@ deploy); `docs/security-model.mdx` (reach 0).
 ### What to build
 
 1. **A deploy is a human act.** `baton-deploy.yml` deploys production only from a tag signed by a
-   human-only key (the human-only identity ticket filed with this one), or after an approval in
+   human-only key (B-136), or after an approval in
    the `production` environment by a reviewer whose credentials no agent session holds. A push to
    `main` deploys staging only.
 2. **Scope the Cloudflare token** to Baton's Worker scripts and routes, not the account; a second
@@ -45,6 +45,10 @@ deploy); `docs/security-model.mdx` (reach 0).
    Baton's answers (claims, snapshot shas, the message of the day, recommendations), what the
    GitHub App key reaches, and how to recover (rotate the App key, the webhook secrets, the
    administrator keys; redeploy from a known commit).
+
+**After the adversarial review** (2026-10-27, `docs/security-model.mdx` *Review*):
+
+- The human-only identity is B-136.
 
 ### Tests
 

@@ -79,6 +79,20 @@ default branch, so a change that has not reached it is not claimable and not in 
 5. **The interim is a decision** (recorded in the security model): until this lands, VM runners
    hold `write` on main and the exposure is accepted.
 
+**After the adversarial review** (2026-10-27, `docs/security-model.mdx` *Review*):
+
+- **Tags too** (finding 15): a tag ruleset forbids the worker identities to create or update
+  tags, and any `on: push: tags` workflow sits behind it.
+- **"Not in force" means Baton's board** (finding 8): a review or fix leg that checks out the PR
+  branch loads that branch's agent configuration, nested `CLAUDE.md` and test code, so the PR
+  branch is in force there (B-128 item 6, B-132).
+- **This contradicts Fieldhouse's Axiom 4** ("never by an approval queue") and Axiom 1 for
+  tickets (finding 8). The implementing PR amends the axioms in FIELDHOUSE_SPEC first, citing the
+  owner's choice of option (a), and estimates the owner queue (agent-filed tickets, memory
+  promotions, corpus changes) against Axiom 0.
+- **"Owner's approval" means the human-only identity** (B-136), not the account the owner's agent
+  sessions use.
+
 ### Tests
 
 - A drill on a scratch repository, scripted: the worker's push to main is refused; its push to an

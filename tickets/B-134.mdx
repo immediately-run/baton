@@ -41,6 +41,12 @@ forge half; this ticket detects the rest and covers the time before them.
 3. **Baton cross-checks** what the forge reports for the worker identity against the claims open
    at the time: a push by the worker to a repository no active claim covers is `unclaimed-write`.
 
+**After the adversarial review** (2026-10-27, `docs/security-model.mdx` *Review*):
+
+- **Item 2 is a cooperative aid, not a control** (finding 16): it runs as the runner's OS user,
+  inside the trust domain it audits, so a hostile leg can defeat it. Item 3, Baton's server-side
+  cross-check of forge deliveries against open claims, is the security control.
+
 ### Tests
 
 - A scenario (the next free S-BTN number): a leg on a `fieldhouse` ticket that pushes a branch to
