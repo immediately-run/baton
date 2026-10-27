@@ -3,7 +3,7 @@
 // ticket accepted; and `bodyDependencies`, the `**Depends on:**` line that B-111 checks the
 // markdown source's `depends_on` against. Pure and host-neutral: the validator, no route.
 import { describe, it, expect } from 'vitest';
-import { bodyDependencies, checkPayload } from '../../src/core/board';
+import { bodyDependencies, checkPayload, dependsCycles } from '../../src/core/board';
 import { ticket } from '../helpers';
 
 /** A normative post of `tickets`, with `closed` as given: what `checkPayload` reads. */
@@ -65,5 +65,44 @@ describe('bodyDependencies: the **Depends on:** line (B-111)', () => {
 
   it('keeps the first id whole: the marker is 15 characters, so B-1 never reads as 1', () => {
     expect(bodyDependencies('**Depends on:** B-1, B-22\n', ID)).toEqual(['B-1', 'B-22']);
+  });
+});
+
+describe('B-111 round 1: every cycle, and the stack', () => {
+  it('two disjoint cycles are both named, each once', () => {
+    const loops = dependsCycles([
+      { id: 'A', depends_on: ['B'] }, { id: 'B', depends_on: ['A'] },
+      { id: 'C', depends_on: ['D'] }, { id: 'D', depends_on: ['C'] },
+    ]);
+    expect(loops).toEqual([['A', 'B', 'A'], ['C', 'D', 'C']]);
+  });
+
+  it('a self-edge is A → A, and a diamond is no loop', () => {
+    expect(dependsCycles([{ id: 'A', depends_on: ['A'] }])).toEqual([['A', 'A']]);
+    expect(dependsCycles([
+      { id: 'A', depends_on: ['B', 'C'] }, { id: 'B', depends_on: ['D'] }, { id: 'C', depends_on: ['D'] }, { id: 'D', depends_on: [] },
+    ])).toEqual([]);
+  });
+
+  it('a legal 10 000-ticket chain is walked, not overflowed (TICKETS_MAX)', () => {
+    // The board admits 10 000 tickets; one chain that long must answer "no cycle", not a
+    // RangeError from the engine (round 1, 1-A-3).
+    const chain = Array.from({ length: 10_000 }, (_, i) => ({ id: `T${i + 1}`, depends_on: i + 1 < 10_000 ? [`T${i + 2}`] : [] }));
+    expect(dependsCycles(chain)).toEqual([]);
+    // And the same chain closed into a loop is one cycle, named.
+    chain[chain.length - 1].depends_on = ['T1'];
+    expect(dependsCycles(chain)).toHaveLength(1);
+  });
+
+  it('the interim state.items shape refuses a cycle too (round 1, 1-A-4)', () => {
+    const post = {
+      sha: 'a'.repeat(40), parent_sha: null, observation: 1,
+      state: { items: [
+        { id: 'A', title: 'A', status: 'ready', queue: 'q', node: 'n', dependsOn: ['B'] },
+        { id: 'B', title: 'B', status: 'ready', queue: 'q', node: 'n', dependsOn: ['A'] },
+      ] },
+      ready: ['A', 'B'],
+    };
+    expect(() => checkPayload(post)).toThrow(/state\.items: a dependency cycle: A → B → A/);
   });
 });

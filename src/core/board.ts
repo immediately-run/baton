@@ -206,6 +206,10 @@ function checkInterim(p: BoardPayload) {
     if (it.course !== undefined && (typeof it.course !== 'string' || !COURSE_ID.test(it.course))) throw new BatonError('invalid-params', `${it.id}: course must be a course id`);
   }
   for (const id of p.ready) if (!seen.has(id)) throw new BatonError('invalid-params', `ready names ${id}, which is not in state.items`);
+  // B-111: the interim shape carries `dependsOn` too, and a loop is a loop whichever shape posts
+  // it — no ticket source can hold its tickets out of the default order unseen (§4.4, round 1).
+  const loop = dependsCycle(p.state.items.map((it) => ({ id: it.id, depends_on: it.dependsOn ?? [] })));
+  if (loop) throw new BatonError('invalid-params', `state.items: a dependency cycle: ${loop.join(' → ')}`);
 }
 
 /** Posted lists' bounds (spec-silent, recorded on R3-1232): a board of 10 000 tickets, a path of
@@ -313,14 +317,20 @@ function checkNormative(p: BoardPayload) {
 }
 
 /** A ticket's `**Depends on:**` line: the ticket ids it names, or null when the body has no
- *  such line. The line is the one starting `**Depends on:**` and runs to the next blank line or
- *  the next `**Label:**` line (B-111); ids are matched by `idPattern`, the same grammar the board
- *  reads `depends_on` with. A reverse mention belongs on a `**Used by:**` line, which this never
- *  reads. Ported from fieldhouse's `scripts/check-wiki.mjs`, so the two agree. */
-const LABEL = '**Depends on:**'; // 15 characters: slicing 14 leaves the space, and the next id without its first letter
+ *  such line. The FIRST such line outside a fenced code block, which runs to the next blank line
+ *  or the next `**Label:**` line (B-111); ids are matched by `idPattern`. A reverse mention
+ *  belongs on a `**Used by:**` line, which this never reads. Fieldhouse's
+ *  `scripts/check-wiki.mjs` gave the algorithm, kept as theirs (round 1). */
+const LABEL = '**Depends on:**';
 export function bodyDependencies(body: string, idPattern: RegExp): string[] | null {
   const lines = body.split('\n');
-  const start = lines.findIndex((l) => l.startsWith(LABEL));
+  let start = -1;
+  let fenced = false;
+  for (let i = 0; i < lines.length; i++) {
+    // A fence toggles: a marker inside a code block is an example, never the ticket's own line.
+    if (/^\s*(\x60\x60\x60|~~~)/.test(lines[i])) { fenced = !fenced; continue; }
+    if (!fenced && lines[i].startsWith(LABEL)) { start = i; break; }
+  }
   if (start < 0) return null;
   let end = start + 1;
   while (end < lines.length && lines[end].trim() !== '' && !/^\*\*[^*]+:\*\*/.test(lines[end])) end++;
@@ -329,43 +339,60 @@ export function bodyDependencies(body: string, idPattern: RegExp): string[] | nu
   return [...new Set(text.match(word) ?? [])];
 }
 
-/** One dependency cycle among `tickets` — each `{id, depends_on}` — as its path, `B-1 → B-2 →
- *  B-1`, or null when there is none (B-111). An edge is taken to an id in `tickets` and to no
- *  other: an id that is neither live nor closed cannot be a cycle, and naming it is the ticket
- *  check's business (`baton tickets check`), not the board's. Depth-first from the ids in sorted
- *  order, so the cycle named is the same on every run; a self-dependency is `A → A`. Pure, so
+/** Every dependency cycle among `tickets` — each `{id, depends_on}` — each once, as its path,
+ *  `B-1 → B-2 → B-1`; `[]` when there is none (B-111). An edge is taken to an id in `tickets`
+ *  and to no other: an id that is neither live nor closed cannot be a cycle, and naming it is
+ *  the ticket check's business (`baton tickets check`), not the board's. Depth-first from the
+ *  ids in sorted order, so the cycles named are the same on every run; a self-dependency is
+ *  `A → A`. EVERY cycle is collected (round 1: two disjoint loops must both be named), and the
+ *  walk keeps its own stack — a legal board of TICKETS_MAX tickets may be one 10 000-long chain,
+ *  which recursion cannot walk (1-A-3). Fieldhouse's algorithm, made iterative. Pure, so
  *  `src/defaults/tickets-check.ts` runs it too (defaults may import core, never the reverse). */
-export function dependsCycle(tickets: readonly { id: string; depends_on: readonly string[] }[]): string[] | null {
+export function dependsCycles(tickets: readonly { id: string; depends_on: readonly string[] }[]): string[][] {
   const deps = new Map(tickets.map((t) => [t.id, t.depends_on ?? []]));
-  const state = new Map<string, 'open' | 'closed'>(); // id → 'open' while on the current path, 'closed' once explored
-  const path: string[] = [];
-  let found: string[] | null = null;
-  // The path's own position of each id on it, so a cycle is the path from the dependency to here.
-  const onPath = new Map<string, number>();
-  const visit = (id: string): void => {
-    state.set(id, 'open');
-    onPath.set(id, path.length);
-    path.push(id);
-    for (const dep of deps.get(id) ?? []) {
+  const state = new Map<string, 'open' | 'closed'>(); // 'open' while on the current path
+  const found: string[][] = [];
+  const seen = new Set<string>(); // a cycle's canonical key, so one loop is named once
+  for (const root of [...deps.keys()].sort()) {
+    if (state.has(root)) continue;
+    // An explicit stack: each frame is an id, the position it reached in its dependency list,
+    // and its own place on the walk's path (the cycle starts where a dependency is open).
+    const stack: { id: string; at: number }[] = [{ id: root, at: 0 }];
+    const path: string[] = [root];
+    const onPath = new Map<string, number>([[root, 0]]);
+    state.set(root, 'open');
+    while (stack.length) {
+      const frame = stack[stack.length - 1];
+      const list = deps.get(frame.id) ?? [];
+      if (frame.at >= list.length) {
+        stack.pop();
+        path.pop();
+        onPath.delete(frame.id);
+        state.set(frame.id, 'closed');
+        continue;
+      }
+      const dep = list[frame.at++];
       if (!deps.has(dep)) continue;
       if (state.get(dep) === 'open') {
-        found = [...path.slice(onPath.get(dep)), dep];
-        return;
+        const loop = [...path.slice(onPath.get(dep)!), dep];
+        // The same loop reached from another entry point has the same members: one finding.
+        const key = [...new Set(loop)].sort().join('\u0000');
+        if (!seen.has(key)) { seen.add(key); found.push(loop); }
+        continue;
       }
-      if (!state.has(dep)) {
-        visit(dep);
-        if (found) return;
-      }
+      if (state.has(dep)) continue;
+      state.set(dep, 'open');
+      onPath.set(dep, path.length);
+      path.push(dep);
+      stack.push({ id: dep, at: 0 });
     }
-    path.pop();
-    onPath.delete(id);
-    state.set(id, 'closed');
-  };
-  for (const id of [...deps.keys()].sort()) {
-    if (found) break;
-    if (!state.has(id)) visit(id);
   }
   return found;
+}
+
+/** The first dependency cycle, `dependsCycles`' first — the board's refusal names one (§4.4). */
+export function dependsCycle(tickets: readonly { id: string; depends_on: readonly string[] }[]): string[] | null {
+  return dependsCycles(tickets)[0] ?? null;
 }
 
 /** A posted station as stored: optional fields filled. */

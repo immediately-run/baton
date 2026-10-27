@@ -166,15 +166,13 @@ These are its lessons, newest understanding first.
   [B-84](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-84.mdx);
   the reproduction and diagnosis are in its PR.*
 
-- **Ported code keeps its bugs: fieldhouse's `**Depends on:**` parser read no id's first letter.**
-  B-111 ported `bodyDependencies` from fieldhouse's `scripts/check-wiki.mjs` verbatim, and the
-  check then named `see`, `there.` and `and` as dependencies: the function splits on ' ' and then
-  `.slice(fn.length)` — a 15th character — past the 15-character `**Depends on:**` marker, so
-  `**Depends on:** B-2, A-1` read `2` and `1`. With `[A-Z]+-\d+` (fieldhouse's own pattern) the
-  slice ate only the marker's space and its ids were never alphabetic at the front; with the
-  board's id grammar (`[A-Za-z0-9]…`) every first id lost its first letter, and the same parser
-  in fieldhouse's `check-wiki.mjs` reads no id whose first letter is not stripped. **When a parser
-  is ported, test it with actual ticket ids, not with prose around them** — the unit fixture caught
-  this the first run. *Status: fixed with
-  [B-111](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-111.mdx);
-  fieldhouse's copy is its own to fix (FLDH-27).*
+- **A grammar borrowed for its checker is not a grammar for prose.** B-111's ticket check
+  compared each ticket body's `**Depends on:**` line with its `depends_on` by matching the
+  board's own id pattern — `LOCAL_ID`, `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` — un-anchored over the
+  line, which is right for a `depends_on` list and wrong for a sentence: `**Depends on:** none.
+  (the store) and B-3` named `none.`, `the`, `store`, `and` and `B-3` as dependencies, and on a
+  copy of this repository's tickets the setting produced 1250 findings across 67 tickets. The
+  first round of review found it before release; fieldhouse's own pattern (`[A-Z]+-\d+`) never
+  had the fault. **A check over prose matches an id-SHAPED token, never the list grammar,** and
+  `none` is the empty list. *Status: fixed with
+  [B-111](https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/B-111.mdx).*

@@ -229,12 +229,16 @@ describe('checkTickets: the markdown source’s **Depends on:** line (check.depe
     ]);
   });
 
-  it('the ejected source is not compared: the line is the markdown source’s check', async () => {
+  it('the ejected source is not compared, and the setting says so instead of silently doing nothing', async () => {
     const dir = repo({
       'tickets/A-1.md': ticket('id: A-1', '**Depends on:** A-9\n'),
       '.baton/tickets.mjs': `export default { async tickets() { return { tickets: [${JSON.stringify(tkt('A-1'))}], closed: [] }; } };\n`,
     }, on);
-    expect((await checkTickets(dir, {}, { depends_line: true })).findings).toEqual([]);
+    // Round 1, 1-A-6: one note, never the markdown comparison (which would compare a file the
+    // source does not read).
+    const found = (await checkTickets(dir, {}, { depends_line: true })).findings;
+    expect(found.map((f) => f.path)).toEqual(['.baton/tickets.mjs']);
+    expect(found[0].message).toMatch(/check.depends_line is on, but this repository's tickets come from its own source/);
   });
 });
 
@@ -317,11 +321,13 @@ describe('dependsLine and bodyDependencies: the line’s bounds', () => {
     expect(bodyDependencies('see **Depends on:** A-1\n', id)).toBeNull();
   });
 
-  it('reads the body past the frontmatter, by the board’s id grammar', () => {
+  it('reads the body past the frontmatter, by the id grammar prose uses — never a bare word', () => {
     const file = '---\nid: B-111\ntitle: A ticket with depends_on in prose\n---\n\n**Depends on:** B-1, R3-1205 and B-2.\n\n**Used by:** B-3\n';
-    // The board's grammar includes `.`, so a trailing full stop is the id's (`B-2.`), as the
-    // markdown source's own `depends_on: [B-2.]` would be: the line and the field agree.
-    expect(dependsLine(file)).toEqual(['B-1', 'R3-1205', 'and', 'B-2.']);
+    // The line is prose: an id-SHAPED token (`B-1`, `R3-1205`) is a dependency, and "and" is
+    // not (round 1, 1-A-0: the board's `LOCAL_ID` un-anchored read `none.`, `the` and `and`).
+    expect(dependsLine(file)).toEqual(['B-1', 'R3-1205', 'B-2']);
+    // 'none' is the empty list, as `depends_on: []` is.
+    expect(dependsLine('**Depends on:** none\n')).toEqual([]);
     // There is no separator after the marker: a first id keeps its first letter (`B-1`, never `1`).
     expect(dependsLine('**Depends on:** B-1\n')).toEqual(['B-1']);
     expect(dependsLine('---\nid: B-1\n---\n\nno line\n')).toBeNull();

@@ -11,14 +11,18 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { bodyDependencies, checkPayload, dependsCycle } from '../core/board';
-import { LOCAL_ID } from '../core/validate';
+import { bodyDependencies, checkPayload, dependsCycle, dependsCycles } from '../core/board';
+import { LOCAL_ID } from '../core/validate'; // the board's own grammar, cited below (§4.4)
 import { readItems } from './read-items';
 import { ticketsMarkdown, type MarkdownFile, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
-/** The ticket id grammar the board reads `depends_on` with (§4.4, R-BTN-47): `LOCAL_ID`, which
- *  `bodyDependencies` un-anchors itself. */
-const DEPENDS_ID = new RegExp(`^${LOCAL_ID.source.slice(1, -1)}$`);
+/** The ids a `**Depends on:**` line may name, as prose writes them (B-111, round 1): an
+ *  id-shaped token — a prefix and a number, `B-2`, `R3-1205`, `FLDH-27` — never a bare word.
+ *  The board's own `LOCAL_ID` is `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, right for `depends_on`'s
+ *  list and wrong for prose: un-anchored it reads "none.", "the" and "and" as ids (1-A-0).
+ *  A body line's ids are compared with `depends_on` as sets; a token the board would not admit
+ *  is left for the board's own validation to refuse. */
+const DEPENDS_ID = /^[A-Za-z][A-Za-z0-9]*-\d+$/;
 
 /** The ticket ids a markdown ticket's body names on its `**Depends on:**` line, or null when it
  *  has no such line (B-111). The body is the file's text with its frontmatter blanked; the ids
@@ -41,7 +45,9 @@ export function dependsLine(text: string, idPattern: RegExp = DEPENDS_ID): strin
     // Blank lines above the marker, never the prose: `bodyDependencies` reads its first line.
     const blank = Array<string>(i - start).fill('');
     const line = lines.slice(i, end).join(' ');
-    return bodyDependencies([...blank, line].join('\n'), idPattern);
+    const named = bodyDependencies([...blank, line].join('\n'), idPattern);
+    // `**Depends on:** none` is the empty list, as `depends_on: []` is (§4.4's own spelling).
+    return named == null ? null : named.filter((id) => id.toLowerCase() !== 'none');
   }
   return null;
 }
@@ -136,19 +142,23 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
   for (const c of result.closed) liveIds.delete(c.id);
   const live = result.tickets.filter((t) => liveIds.has(t.id));
   const fileOf = new Map(result.tickets.map((t) => [t.id, t.path]));
-  const loop = dependsCycle(live.map((t) => ({ id: t.id, depends_on: t.depends_on ?? [] })));
-  const cycle = loop ? `a dependency cycle: ${loop.join(' → ')}` : null;
-  // The cycle is checked first so that its finding takes a file, and the board's own answer for
-  // it — the same sentence, after `tickets.depends_on:` — is then not printed a second time. A
-  // cycle does not stop the rest: the validator is one throw, and the findings after it are the
-  // same post's.
-  if (cycle) findings.push({ path: fileOf.get(loop![0]) ?? 'board', message: cycle });
+  const loops = dependsCycles(live.map((t) => ({ id: t.id, depends_on: t.depends_on ?? [] })));
+  const cycles = loops.map((loop) => `a dependency cycle: ${loop.join(' → ')}`);
+  // Each cycle is checked first so that its finding takes a file, and the board's own answer for
+  // it — the same sentence, after `tickets.depends_on:` — is then not printed a second time (the
+  // board names the first, so a second loop is the check's alone: round 1, 1-A-2). A cycle does
+  // not stop the rest: the validator is one throw, and the findings after it are the same post's.
+  for (const [i, message] of cycles.entries()) findings.push({ path: fileOf.get(loops[i][0]) ?? 'board', message });
   try {
     checkPayload({ sha: '0'.repeat(40), parent_sha: null, observation: 1, tickets: result.tickets, closed: result.closed });
   } catch (e) {
     const message = (e as Error).message ?? String(e);
-    if (!(cycle && message.includes(`: ${cycle}`))) findings.push({ path: 'board', message });
+    if (!cycles.some((cycle) => message.includes(`: ${cycle}`))) findings.push({ path: 'board', message });
   }
+
+  // 1-A-6: a repository with its own source has no markdown body to compare — the setting does
+  // nothing there, and saying so once beats a silent no-op for the operator who set it.
+  if (check?.depends_line && ownSource) findings.push({ path: '.baton/tickets.mjs', message: 'check.depends_line is on, but this repository\'s tickets come from its own source — there is no markdown **Depends on:** line to compare' });
 
   // Every dependency names a live or a closed ticket of this repository (all of these are). A
   // source may post an id twice (the board says so), so the same sentence on the same file is
