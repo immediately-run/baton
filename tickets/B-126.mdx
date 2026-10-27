@@ -1,0 +1,56 @@
+---
+title: "B-126 — Detection: a notice when a non-owner's push changes a control input (.baton/, goals, workflows, EXPEDITE, tier)"
+id: B-126
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1150
+tier: judgement
+description: "The owner, 2026-10-27, hardening against a compromised runner (security model option 6): when an accepted board post changes a control input, Baton reads the pushers from the forge's push deliveries, not commit authors, and raises a control-changed notice for any pusher who is not an owner. Detection only, no gate. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-27, on hardening against a compromised runner. The security model
+(`docs/security-model.mdx`, hardening option 6, mitigation G): detection closes nothing but makes
+a compromise visible within one sync, at small cost.
+
+**Spec:** R-BTN-73 (GitHub App deliveries and the fields Baton reads, `pusher` among them),
+§7.1 (the board post), R-BTN-80 and R-BTN-103 (notices), R-BTN-85 (events), R-BTN-139
+(trusted identities); `docs/security-model.mdx`.
+**Depends on:** none.
+
+### What to build
+
+1. **Control inputs**, a fixed list per repository: `.baton/**`, goal files, `.github/workflows/**`,
+   and ticket frontmatter fields `EXPEDITE`, `tier`, `requires` and `depends_on`. Owners may
+   add paths in their settings (R-BTN-66).
+2. **The check.** When an accepted board post's head changes a control input, Baton looks up the
+   pushers of the commits since the last accepted head, from the forge's push deliveries (R-BTN-73;
+   the commit author is not trusted, anyone sets it). A change whose pusher is not an owner's
+   recorded forge identity raises a `control-changed` event and a notice under Needs you, naming
+   the paths, the commits and the pusher.
+3. **Owners' identities**: each owner records the forge user ids that are theirs
+   (`baton owner identity add`), the same kind of id `trusted_identities` holds.
+4. **No gate.** The post is accepted as today; this is detection only. Hardening option 7
+   (owner-signed control inputs) is the gate.
+5. **Forges without push events** (a plain git remote) record `pusher-unknown` and raise the
+   notice for every control change.
+
+### Tests
+
+- A scenario (the next free S-BTN number): a non-owner's push changing `.baton/baton.json` raises
+  one notice naming the path and the pusher; an owner's push raises none; a ticket's `EXPEDITE`
+  set by a non-owner raises one; a forged commit author with a non-owner pusher still raises it.
+
+### Exit criteria
+
+- [ ] the spec amended citing this ticket
+- [ ] the scenario passes on both hosts; `npm test` and `npm run typecheck` green
