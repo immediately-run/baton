@@ -189,7 +189,10 @@ export class Runner {
     if (this.beat) return;
     this.beat = setInterval(() => void this.tick().catch((e) => this.log(`baton: heartbeat failed (${msg(e)})`)), this.o.beatEvery);
     this.beat.unref?.();
-    void this.tick().catch((e) => this.log(`baton: heartbeat failed (${msg(e)})`));
+    // The boot beat, as a promise `runOnce` can wait on before it asks Baton anything (B-93).
+    const boot = this.tick().catch((e) => this.log(`baton: heartbeat failed (${msg(e)})`));
+    this.booting = boot;
+    void boot.finally(() => { if (this.booting === boot) this.booting = null; });
   }
 
   stop(): void {
@@ -222,11 +225,26 @@ export class Runner {
     return this.ticking;
   }
 
+  /** B-93: the beat a `start()` issued, and that registers the worker (review round 2, finding
+   * 3). A session's first attempt finds a beat already out — the sidecar's boot beat — and read
+   * its worker id before the answer, so `!registered` sent a second, redundant heartbeat and
+   * `stray` never applied. This is the promise `waitForBeat` waits on. */
+  private booting: Promise<void> | null = null;
+
   /** B-93: whatever beat was in flight has answered — so the calls after it are a registered
    * worker's, carrying the secret Baton now holds. A beat still out after a minute has lost its
    * claim to the timer and the next attempt; the wait is bounded so an attempt can never hang. */
   private async waitForBeat(): Promise<void> {
-    for (let waited = 0; this.ticking && waited < 60_000; waited += 5) await sleep(5);
+    // A beat's own `finally` may clear the flag before this loop first reads it, so the boot beat is
+    // followed through its promise whenever one was issued (taken on the first pass, before it can
+    // settle) and through the flag for one armed later.
+    let awaited: Promise<void> | null = null;
+    for (let waited = 0; waited < 60_000; waited += 5) {
+      const beat = this.booting;
+      if (beat && beat !== awaited) { awaited = beat; await beat.catch(() => {}); continue; }
+      if (!beat && !this.ticking) return;
+      await sleep(5);
+    }
   }
 
   private async beatOnce(): Promise<void> {
@@ -609,8 +627,9 @@ export class Runner {
   /** One claim's whole run — or one idle attempt, returning null when nothing was claimable. */
   async runOnce(): Promise<ClaimOutcome | null> {
     // The worker must exist before it can claim (§5): one heartbeat registers it. Whether this
-    // attempt is the registration (B-93) is read before the beat: a session's first attempt is
-    // the one whose heartbeat creates the worker, so nothing before it is authenticated.
+    // attempt is the registration (B-93) is read before this attempt's own beat: an attempt that
+    // finds no worker is the one whose heartbeat creates it, so nothing it asks before that beat
+    // is authenticated.
     const registered = this.state.get().worker_id != null;
     // B-93 (review round 1): the beat must be *finished* here, not merely started. During it
     // Baton already holds the new worker's secret — `beatOnce` sends `secret_hash` for one the
@@ -619,7 +638,15 @@ export class Runner {
     // logged: the first-beat noise again. `tick()` refuses to run beside a beat (it returns at
     // once while the timer's is out), so a beat in flight is waited for, never skipped.
     await this.waitForBeat();
-    if (!registered) await this.tick();
+    // The wait may have been the boot beat that registered this worker (review round 2, finding
+    // 3): its answer names the worker in the state, so the id is read again here — never before
+    // the wait, or every `start()` → `work()` start beat a second time for nothing — and by
+    // `stray` too, so a registration attempt is the one that began with no worker at all.
+    const worker = this.state.get().worker_id;
+    // A beat of the attempt's own, when no worker is named yet; the recommendation after it is the
+    // first ask of one Baton may hold no secret for, so it is a registration attempt too.
+    let beating = false;
+    if (worker == null) { await this.tick(); beating = true; }
     // A claim the state file still names with nothing in flight is an orphan — a restart, or an
     // end the network ate. It is ended (its resume record already says why) rather than held:
     // Baton would refuse every claim of this worker otherwise (rule 3, one claim per worker).
@@ -646,6 +673,10 @@ export class Runner {
       const stale = this.grantAsked || this.sent == null || JSON.stringify(this.sent) !== JSON.stringify(claimOn);
       if (!stale) break;
       await this.tick();
+      // B-93: this may have been the first beat Baton has an answer of a just-registered worker
+      // for (the boot beat carried no grant, so `grantAsked` sent this one), so the recommendation
+      // after it is a registration's for `stray`.
+      beating = true;
       if (this.grantAsked) break;
     }
     // An empty declaration is not "nothing to do" (finding 5): rule 4 passes any declaration for
@@ -669,8 +700,10 @@ export class Runner {
       // is not news, and is not logged (2026-10-21's runs: every start printed it). Only that
       // refusal goes quiet: `authWorker` answers `unauthenticated` for a missing
       // `X-Worker-Secret` and a replayed nonce too, and a registered worker's refusal (a
-      // replaced secret) still names itself.
-      const stray = !registered && e.code === 'unauthenticated' && /no worker holds this secret/.test(e.message);
+      // replaced secret) still names itself. The registration is either a state with no worker
+      // before this attempt or a beat of this attempt's own, whose answer Baton may have no
+      // secret for — never a resumed worker's ordinary attempt.
+      const stray = (beating || !registered) && e.code === 'unauthenticated' && /no worker holds this secret/.test(e.message);
       if (!stray) this.log(`baton: no recommendation (${e.message})`);
     }
     let claim: Record<string, any>;

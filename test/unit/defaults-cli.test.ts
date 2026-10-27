@@ -26,6 +26,8 @@ import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const CLI = join(ROOT, 'cli', 'baton.mjs');
+/** This machine's real git, for the PATH shim below to hand every call it is not testing to. */
+const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
 /** A bundle of this checkout's `src/defaults/cli.ts`, made as scripts/baton-cli.mjs makes it for
  * `repo sync`, inside the checkout's gitignored `.local/` — where its externals (esbuild)
  * resolve; a child process reads it where git's stderr would print. */
@@ -230,15 +232,17 @@ describe('remoteSlug — a checkout without origin is null and silent (B-93, S-B
   });
   afterAll(() => rmSync(dirname(BUNDLE), { recursive: true, force: true }));
 
-  /** `remoteSlug(root)` as a fresh process sees it: its answer on stdout, and every byte a git
-   *  it ran wrote on stderr — the line an operator's console shows beside the sync. A child is
-   *  the only observer that tells captured stderr from inherited: an inherited one lands on this
-   *  test process's stderr, which a unit test cannot read back (and which `expect` never sees). */
-  const inChild = (root: string): { slug: string | null | 'error'; stderr: string } => {
+  /** `remoteSlug(root)` as a fresh process sees it: its answer on stdout, its thrown error's
+   *  message (the loud path) — and every byte a git it ran wrote on stderr, which is the line an
+   *  operator's console shows beside the sync. A child is the only observer that tells captured
+   *  stderr from inherited: an inherited one lands on this test process's stderr, which a unit
+   *  test cannot read back (and which `expect` never sees). The git it runs is this bundle's own
+   *  `remoteSlug`, so the shim `bin` below is how a broken git reaches it. */
+  const inChild = (root: string, bin = process.env.PATH ?? ''): { slug: string | null | 'error'; stderr: string | null } => {
     const probe = `import { remoteSlug } from ${JSON.stringify(pathToFileURL(BUNDLE).href)};
-process.stdout.write(JSON.stringify(remoteSlug(${JSON.stringify(root)})));\n`;
-    const out = spawnSync(process.execPath, ['--input-type=module', '-e', probe], { encoding: 'utf8', cwd: ROOT });
-    return { slug: out.status === 0 ? (JSON.parse(out.stdout || 'null') as string | null) : 'error', stderr: out.stderr ?? '' };
+try { process.stdout.write(JSON.stringify(remoteSlug(${JSON.stringify(root)}))); } catch (e) { process.stdout.write(JSON.stringify(String(e.message))); }\n`;
+    const out = spawnSync(process.execPath, ['--input-type=module', '-e', probe], { encoding: 'utf8', cwd: ROOT, env: { ...process.env, PATH: bin } });
+    return { slug: out.status === 0 ? (JSON.parse(out.stdout || 'null') as string | null) : 'error', stderr: out.status === 0 ? null : (out.stderr ?? '') };
   };
 
   it('an origin-less repository is null with empty stderr; a remote still reads its slug', () => {
@@ -250,18 +254,74 @@ process.stdout.write(JSON.stringify(remoteSlug(${JSON.stringify(root)})));\n`;
       // the child wrote, so the child's stderr is captured (the default stdio inherits it, which
       // the child's empty stderr here fails on).
       gitInit(dir);
-      expect(inChild(dir)).toEqual({ slug: null, stderr: '' });
+      expect(inChild(dir)).toEqual({ slug: null, stderr: null });
       expect(remoteSlug(dir)).toBeNull();
       // A remote reads as before.
       execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'git@github.com:immediately-run/baton.git'], { stdio: 'ignore' });
       expect(remoteSlug(dir)).toBe('immediately-run/baton');
-      expect(inChild(dir)).toEqual({ slug: 'immediately-run/baton', stderr: '' });
+      expect(inChild(dir)).toEqual({ slug: 'immediately-run/baton', stderr: null });
       // The proxy's `…/git/owner/name` form keeps its `git/` stripped, and an owner named git keeps its name.
       execFileSync('git', ['-C', dir, 'remote', 'set-url', 'origin', 'https://baton.immediately.run/git/o/r.git'], { stdio: 'ignore' });
       expect(remoteSlug(dir)).toBe('o/r');
       execFileSync('git', ['-C', dir, 'remote', 'set-url', 'origin', 'https://github.com/git/git.git'], { stdio: 'ignore' });
       expect(remoteSlug(dir)).toBe('git/git');
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('a directory in no repository at all is null and silent too (review round 2, nit 6)', () => {
+    // Its own temp tree outside every checkout — not a missing path inside one, which would make
+    // git fail on the path and never reach the repository question.
+    const outside = mkdtempSync(join(tmpdir(), 'baton-norepo-'));
+    try {
+      expect(inChild(outside)).toEqual({ slug: null, stderr: null });
+      expect(remoteSlug(outside)).toBeNull();
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('a git that fails for any other reason is loud, never a quiet null (review round 2, nit 7)', () => {
+    // The quieting is the missing remote's two answers and no more: in a repository that has an
+    // `origin`, a git that cannot read it is the operator's to see, never a quiet null that reads
+    // as "no origin" and sends the sync on without one.
+    const bin = mkdtempSync(join(tmpdir(), 'baton-nogit-'));
+    const dir = mkdtempSync(join(tmpdir(), 'baton-slug-'));
+    try {
+      gitInit(dir);
+      execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', 'git@github.com:immediately-run/baton.git'], { stdio: 'ignore' });
+      // A git that refuses the checkout (ownership, a corrupt repository, a broken install): the
+      // shape of every such failure is a non-zero exit with git's reason on stderr. Every other
+      // call goes to the real git, so the shim is the only thing this case changes.
+      writeFileSync(join(bin, 'git'), `#!${process.execPath}
+const { spawnSync } = require('node:child_process');
+const args = process.argv.slice(2);
+if (args.includes('remote') && args.includes('get-url')) {
+  process.stderr.write("fatal: detected dubious ownership in repository\\n");
+  process.exit(1);
+}
+const out = spawnSync(${JSON.stringify(REAL_GIT)}, args, { stdio: 'inherit' });
+process.exit(out.status ?? 1);
+`, { mode: 0o755 });
+      const oldPath = process.env.PATH;
+      process.env.PATH = `${bin}:${oldPath}`;
+      try {
+        expect(() => remoteSlug(dir)).toThrow(/dubious ownership/);
+      } finally {
+        process.env.PATH = oldPath;
+      }
+      // Through the bundle too: the probe answers its thrown message on stdout (its own error, not
+      // a null), and nothing of git's reaches the child's stderr — captured, never inherited.
+      const out = spawnSync(process.execPath, ['--input-type=module', '-e', `import { remoteSlug } from ${JSON.stringify(pathToFileURL(BUNDLE).href)};
+try { process.stdout.write(JSON.stringify(remoteSlug(${JSON.stringify(dir)}))); } catch (e) { process.stdout.write(JSON.stringify(String(e.message))); }`],
+      { encoding: 'utf8', cwd: ROOT, env: { ...process.env, PATH: bin } });
+      expect(JSON.parse(out.stdout)).toMatch(/dubious ownership/);
+      expect(out.stderr).toBe('');
+      // And with the real git, the same checkout answers as before — the shim is the only change.
+      expect(inChild(dir)).toEqual({ slug: 'immediately-run/baton', stderr: null });
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
       rmSync(dir, { recursive: true, force: true });
     }
   }, 60_000);

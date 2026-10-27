@@ -71,9 +71,13 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
     const lines: string[] = [];
     const calls = { heartbeats: 0, recommendations: 0, claims: 0 };
     let registered = false;
+    // B-86's grant (as S-BTN-41 answers it): a granted machine's first answer settles the
+    // declaration the beat declared nothing of, so one beat serves the whole start.
+    const GRANT = { grant: { capabilities: ['agent-venue', 'create-pr', 'drivable-browser', 'llm-call'] } };
     const api = {
       setSecret: () => {},
-      heartbeat: async () => { calls.heartbeats++; registered = true; return { worker_id: 7, incarnation: 1, messages: [] }; },
+      // `sent`: the list this beat carried, as B-86's `rewriteSettings` records it server-side.
+      heartbeat: async (body: Record<string, unknown>) => { calls.heartbeats++; registered = true; return { worker_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], ...GRANT }; },
       // `authWorker`'s refusal (src/core/workerApi.ts) — a secret no registered worker holds.
       recommendations: async () => {
         calls.recommendations++;
@@ -84,10 +88,13 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
     } as unknown as BatonApi;
     const r = start(api, (l) => lines.push(l));
     expect(await r.runOnce()).toBeNull(); // nothing claimable, on a session whose first beat registered it
-    // The beat registers; the recommendation is the stray the ticket names, then the claim.
-    expect(calls).toEqual({ heartbeats: 1, recommendations: 1, claims: 1 });
-    // Nothing logged — not `no recommendation (no worker holds this secret)` on every start.
-    expect(lines).toEqual([]);
+    // Two beats, as B-86's grant-driven declaration spends them (#104): the first declares nothing
+    // and is answered the grant, the second carries the settled list before the claim. Then the
+    // recommendation is the stray the ticket names, then the claim.
+    expect(calls).toEqual({ heartbeats: 2, recommendations: 1, claims: 1 });
+    // The only line is the declaration the grant settles — not `no recommendation (no worker
+    // holds this secret)` on every start.
+    expect(lines).toEqual(["baton: declaring agent-venue, create-pr, drivable-browser, llm-call — the grant's capabilities, no --capabilities given"]);
     r.stop();
   });
 
@@ -97,7 +104,7 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
     let refuseGates = false;
     const api = {
       setSecret: () => {},
-      heartbeat: async () => ({ worker_id: 7, incarnation: 1, messages: [] }),
+      heartbeat: async (body: Record<string, unknown>) => ({ worker_id: 7, incarnation: 1, messages: [], sent: body.capabilities ?? [], grant: { capabilities: ['create-pr'] } }),
       recommendations: async () => {
         if (refuseGates) throw new BatonRefusal('not-eligible', undefined, 'every gate refused this worker', 403);
         return { recommendations: [{ ticket_id: 'B-9' }] };
@@ -110,8 +117,11 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
     const r = start(api, (l) => lines.push(l), { worker_id: 7, claim: null });
     await r.runOnce();
     expect(asked).toEqual(['B-9']); // registered: recommended for, and its claim asked for the pick
-    expect(lines).toEqual([]);
+    // B-86's once-per-declaration line, and nothing else: the state names the worker, so its
+    // refusal would have been logged had it come — and none was due.
+    expect(lines).toEqual(["baton: declaring create-pr — the grant's capabilities, no --capabilities given"]);
     refuseGates = true;
+    lines.length = 0;
     await r.runOnce();
     expect(lines).toEqual(['baton: no recommendation (every gate refused this worker)']);
     r.stop();
@@ -129,12 +139,19 @@ describe.skipIf(!nodeOnly)('S-BTN-159 a quiet start', () => {
       // A remote still reads as before — nothing was made quiet by a wrong slug.
       spawnSync('git', ['-C', dir, 'remote', 'add', 'origin', 'https://github.com/o/r.git'], { stdio: 'ignore' });
       expect(remoteSlug(dir)).toBe('o/r');
-      // And a checkout that is not a git repository at all: null, nothing printed.
-      const plain = join(dir, 'plain');
-      mkdirSync(plain);
-      expect(inChild(bundle, join(plain, 'subdir')).slug).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+    // And a directory that belongs to no repository at all — its own temp tree outside every
+    // checkout, not a missing path inside one — is null too, and git's `fatal: not a git
+    // repository` (exit 128) stays out of the operator's log: there is no repository that should
+    // have an origin, so there is nothing to report.
+    const outside = mkdtempSync(join(tmpdir(), 'baton-norepo-'));
+    try {
+      expect(inChild(bundle, outside)).toEqual({ slug: null, stderr: '' });
+      expect(remoteSlug(outside)).toBeNull();
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
     }
   }, 60_000);
 });
