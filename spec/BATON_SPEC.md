@@ -736,7 +736,7 @@ repository reachable over SSH is enough (R-BTN-105).
 
     | forge | events | fields |
     |---|---|---|
-    | GitHub | `push`, `pull_request`, `pull_request_review`, `issue_comment`, `workflow_run` | `X-GitHub-Event`, `X-GitHub-Delivery`, `repository.full_name`, `repository.id`, `workflow_run.path`; push: `pusher.name`, `head_commit.author.email` |
+    | GitHub | `push`, `pull_request`, `pull_request_review`, `issue_comment`, `workflow_run` | `X-GitHub-Event`, `X-GitHub-Delivery`, `repository.full_name`, `repository.id`, `workflow_run.path`; push: `pusher.name`, `head_commit.author.email`; pull_request: `pull_request.merged`, a boolean or null (B-89) |
     | GitLab | `Push Hook`, `Merge Request Hook`, `Note Hook` | `X-Gitlab-Event`, `X-Gitlab-Event-UUID`, `project.path_with_namespace`, `project.id`; push: `user_username`, head commit `author.email` |
     | Gitea | `push`, `pull_request`, `pull_request_review_*`, `issue_comment` | `X-Gitea-Event`, `X-Gitea-Delivery`, `repository.full_name`, `repository.id`, `repository.owner.id`; push: `pusher.login`, `head_commit.author.email` |
 
@@ -751,6 +751,43 @@ repository reachable over SSH is enough (R-BTN-105).
     and for each registered repository whose `code_repos` lists it (by id once stored). A
     delivery to `/v1/forges/{repository}/notify` records a want for `{repository}` only, and only
     when its project is `{repository}` or one of its `code_repos`.
+  - **A merge dispatches the sync (B-89).** A `pull_request` delivery that is not a merge
+    (`pull_request.merged` anything but `true`) records nothing. When it is a merge, and the
+    delivery names a registered repository's own home repository, that repository joins the
+    want's set and its sync is dispatched — the trigger that fires when the workflow's
+    `schedule` does not: 14 runs of a `*/15` cron in 51 hours (2026-10-22T10:22Z to 2026-10-24
+    13:34Z), gaps of 2–5 hours, measured on the workflow's own history. The delivery names only
+    `repository.full_name`, so the pull request's base branch is not read: a merge into another
+    branch of the same repository sends the same sync, which reads the head it is dispatched
+    against and posts the board it falls back to. It is dispatched whether or not the
+    repository has cut over: §7.1's reason for holding a sync back (the mirror writes git after
+    the cutover, and a sync that reads git from GitHub needs no mirror) does not hold for a sync
+    that carries no mirror write. Every dispatch the webhook path sends, a merge's and another
+    repository's want's alike, is timed in `webhook_syncs`: one row stamped by every repository
+    the delivery dispatches, at the instant it decides — a push's sync of the delivery's own
+    repository and another repository's want included — and stamped again by the alarm when the
+    path sends on the backstop below. It shares R-BTN-73's 30-second window with the want's
+    dispatches, and is sent whatever the repository's mode. A dispatch that fails is not
+    dropped: its stamp stands, and the backstop sends it again once the stamp is stale, whatever
+    the schedule does.
+  - **The webhook path's own backstop (B-89).** A registered repository whose `webhook_syncs`
+    row is stale — `last_dispatch_at` under the alarm's `now` less 10 minutes, strictly, so a
+    stamp is never due again on the tick that wrote it, and a row exactly ten minutes old is not
+    yet due — is dispatched a sync at R-BTN-73's alarm: the App's deliveries reached Baton, and
+    this path did not send one. The alarm is armed for the earliest live stamp's
+    `last_dispatch_at + SYNC_STALE_MS` (the first instant the strict comparison holds), as it is
+    for a trailing dispatch and a lapsed reading, so the send lands at ten minutes rather than up
+    to a minute later on the ordinary path; a tick that lands late sends once, not on every tick
+    after. Sending opens the repository's 30-second window, so
+    a delivery arriving meanwhile waits for the trailing dispatch rather than racing it. A
+    repository with no row has never had one sent and takes no part in the backstop, which
+    keeps it on the repository's own triggers: a row exists only where the App's deliveries led
+    the path to a repository, and ten minutes without a send there is what the row being ten
+    minutes old means (this repository merges up to a dozen times a day; `docs`, whose tickets
+    name this repository, is sent a sync for each of them, while its own pushes are its
+    workflow's).
+  - **The schedule is the backstop of last resort.** The default workflow's `schedule` stays:
+    what it adds over the two above is independence of the App, and it is not assumed to fire.
 
 - **R-BTN-105 (a sync reads the commit it syncs; a plain server needs nothing).**
   - **Every input from the commit.** A sync reads tickets, `.baton/`, each course's
@@ -993,6 +1030,29 @@ Baton, and it is exportable (R-BTN-88).
   - The sync workflow pins the CLI's npm version (`npx --yes @immediately-run/baton@<version>
     repo sync`); a CLI release changes no repository until it bumps the pin. Courses are
     versioned by their source commit, separately.
+  - **The run's outcome is its line and its exit code** (B-89). `baton repo sync` ends with
+    `baton: <outcome> at <sha> — <steps>`: `advanced` and `confirmed` posted, and exit 0; `held`
+    refused a force post into holding, so nothing was posted, and exits 0 with the workflow's
+    warning saying so; every other outcome posted nothing and exits 1 — `busy` (another run's
+    number outstanding, R-BTN-62) and `busy:again` (its one retry found the same) included,
+    since a run that posted nothing is never a success.
+  - **A `busy` run waits and retries once.** `--busy-retry <s>` (default 60, `0` for none, at
+    most 600) is the wait before a `busy` run takes a fresh number and syncs again, once. The
+    **retry's** wait comes before its first observation, never between a number and its post;
+    a run's own retry of an `unavailable` answer is the existing in-run backoff
+    (`syncOnce`'s 30 s), unchanged and inside the run.
+  - **The workflow annotates the outcome.** The default workflow runs the sync into `sync.log`
+    (its exit preserved through the pipe, the step bounded at ten minutes), then — even on
+    failure — reads the last `baton: <outcome> at <sha>` line, matched anywhere in the line and
+    requiring the sha: `advanced|confirmed` is a notice, `held` and `busy|busy:again` a warning
+    saying the run posted nothing (a busy one names R-BTN-62's ten idle minutes, which a dispatch
+    inside them does not shorten), and anything else, or no line at all, an error. A run's failing
+    check is never silent.
+  - **A flag reaches a workflow with its CLI's pin.** The workflow passes a repository's pinned
+    CLI only flags that CLI knows: a new flag (an outcome word, a retry) ships in the CLI, and a
+    repository's workflow passes it only after `baton repo init` moves the pin to a CLI release
+    that carries it. Until then the annotation alone keeps a run that posted nothing from looking
+    posted — the old CLI's `busy` is still exit 0.
 
 ### 4.3 The sync run and the head
 
@@ -5670,6 +5730,7 @@ and never accepted holds no role (§12.1).
 | `action_confirmations` | `code_hash` | `session_id`, `action`, `params` JSON, `created_at`, `expires_at`, `used_at` | A session's action awaiting confirmation by the session's minting key, through `POST /v1/admin/confirm` or `POST /v1/owner/confirm` by its role (R-BTN-155) |
 | `request_nonces` | `(key_fingerprint, nonce)` | `seen_at`; pruned after 11 minutes | Replay cache for every signed request (R-BTN-13) |
 | `webhook_deliveries` | `delivery_id` | `received_at`; pruned after 24 h | R-BTN-73 |
+| `webhook_syncs` | `repository_id` | `last_dispatch_at` — when the webhook path last sent the repository a sync (a delivery's own dispatch or the alarm's backstop); stale at `last_dispatch_at + 10 minutes`, when the alarm sends one | R-BTN-73 (B-89) |
 | `write_budgets` | `(credential_id, repository_id, day)` | `writes` | Non-upkeep row writes per UTC day (R-BTN-149) |
 | `observation_lapses` | `(repository_id, number)` | `credential_id`, `at` | Observation numbers a credential let lapse (R-BTN-150) |
 | `open_world_bars` | `ticket_id` (qualified) | `until`, `credential_id` (whose claim set it) | A ticket barred from open-world claims by every key (R-BTN-148) |
@@ -6124,6 +6185,8 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-152 strata and reserved names | `derived` rules depending on `int`, `now`, `was_demoted` or `route`; a `demote_when` naming `route`; a fact `available("c", "a")`; a repository `meters/3` | each refused, naming the dependency path or the reserved predicate |
 | S-BTN-153 delivery and overrides | a claim, then an advance starting a leg with route choices; its leg finds the advised alternative's `key:zai` dead, takes the next in `ranked` and writes `{choice, alternative, dead: ["key:zai"]}`, and the runner's `advance` both finishes it and starts a leg with the same route choice; a second leg writes nothing to `BATON_TAKEN`; a third the advised one; a fourth names an unknown alternative; a fifth writes 10 MB; a leg without route choices reports one; a route choice resolving `none-available`, then an alternative reported for it | the claim answer carries no advice; the advance's `advice` holds identifiers only, with `ranked`, and is in `BATON_ADVICE` and `claim_legs.route_choices_json`; `advice-overridden` with `{choice, advised, taken}`, `key:zai` removed in that advance's transaction and the next leg advised without it; `taken_json` `null`, no override; nothing; `taken-invalid` logged, the `advance` accepted; the file dropped, the advance accepted; dropped and logged; stored, no override; each compared with the finishing leg run's row |
 | S-BTN-154 limits and conformance | a route-choice evaluation crossing a test-lowered match bound at an advance; every route-choice fixture through `clingo-wasm`, one with nothing available | `reason: "limit"`, `baton.ontology-limit`, the advance succeeding; one optimum each (`Models.More` `"no"`), `route/2` equal to the evaluator's; `SATISFIABLE` and no `route` for the empty one |
+| S-BTN-157 a busy sync is not a success | a run while another's number is outstanding, lapsed past R-BTN-62's ten minutes during its wait; `--busy-retry 0`, and an out-of-range value; a run that fails; the workflow's annotation step against a posted log (plain and stamped), a held log, a busy log, a failed log, a log with no outcome line, and a line that names no sha; the generated workflow against this repository's own | the wait is one of the flag's length, before the retry's first observation, and the retry posts under a fresh number, exit 0; `busy` at once, exit 1, nothing posted; `busy:again`, exit 1; the refusal of the value; exit 1; a notice, a warning that posted nothing, and an error naming the outcome (or naming that no sync ended); the annotation steps equal, and neither workflow passing a flag its pin lacks |
+| S-BTN-167 a merge dispatches the sync | a `pull_request` merge of this repository and one of `docs`' own; a `pull_request_closed_without_merging`; `pull_request.merged` absent, one that is null, and one that is no boolean; a push that dispatches this repository's sync and a `docs` delivery that dispatches `docs`'; a second delivery inside R-BTN-73's 30 seconds; at the alarm, a repository's last webhook dispatch 11 minutes old, one 9 minutes old, one exactly 10 minutes old, the second after a tick that landed late, a retired one's, and a repository never sent one; the repository before and after its cutover | the merge's repository dispatched once; nothing for the unmerged delivery; the absent and null ones dispatch nothing and the non-boolean is dropped with no dispatch; each repository's own row stamped by its delivery; the second suppressed into the window's trailing dispatch; the alarm dispatches exactly the 11-minute-old one, once, and a later alarm none — never the exact-10-minute-old one, and the late tick's stamp not again; a repository with no row untouched; the sync sent before the cutover and after it alike.
 | **§7** | | |
 | S-BTN-5 retried with backoff | two `cannot-finish:transient` ends | `retry_after` 1 h, then 4 h; the third claim gets both resume records and reuses branch and PR |
 | S-BTN-6 poisoned ticket | three failed attempts of different kinds; a looped leg failing twice in each of three passes | held `attempts-exhausted`, `baton.retries`; lifting resets; the looped leg never held, its count reset each time it reaches an outcome |
@@ -6577,6 +6640,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose one machine key that may work, sync and report readings, a key granted on several repositories syncing only where each grant opts in, over one role per machine key (2026-10-16, 2026-10-18; R-BTN-102, R-BTN-146).
 - Chose a pulled sync (Baton records a want; any runner pulls it) and a sync key usable on any forge over forge dispatch alone or a stored bearer secret (2026-10-16; R-BTN-93, R-BTN-94).
 - Chose forge webhooks that only trigger a sync over stations built from payloads (2026-10-14; R-BTN-73).
+- Chose a merge's `pull_request` delivery to dispatch its repository's own sync, and the alarm to dispatch one when the webhook path's last send is 10 minutes stale, over GitHub's `schedule` alone: three hours of a `*/15` cron ran nothing, and 14 runs in 51 hours is not a backstop (2026-10-24; R-BTN-73, B-89).
 - Chose a passive plain git server, synced by runners (2026-10-16; R-BTN-105).
 - Chose a hibernating WebSocket doorbell over server-sent events or push delivery: the heartbeat stays the one delivery and fence path (2026-10-15; R-BTN-91).
 - Chose one tenant per Baton, named by its origin, with a router for many tenants later, over a tenant id on the wire or a shared object (2026-10-18; R-BTN-135–R-BTN-138).

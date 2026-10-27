@@ -21,7 +21,8 @@ import history from './0018_history.sql';
 import independence from './0019_independence.sql';
 import schemas from './0020_schemas.sql';
 import legQueues from './0021_leg_queues.sql';
-import zz from './0022_leg_capabilities.sql';
+import legCapabilities from './0022_leg_capabilities.sql';
+import webhookSyncs from './0023_webhook_syncs.sql';
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },
@@ -45,5 +46,6 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 19, sql: independence },
   { id: 20, sql: schemas },
   { id: 21, sql: legQueues },
-  { id: 22, sql: zz },
+  { id: 22, sql: legCapabilities },
+  { id: 23, sql: webhookSyncs },
 ];
