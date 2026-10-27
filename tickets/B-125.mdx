@@ -1,0 +1,57 @@
+---
+title: "B-125 — A compromised-runner runbook: bar, revoke, find what changed, undo — and a drill that runs it"
+id: B-125
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1149
+tier: routine
+description: "The owner, 2026-10-27: a runner will be compromised sooner or later, and revocation is improvised today. docs/runbooks/compromised-runner.mdx: owner bars on every grant, revoke runner keys, GitHub keys and tokens and virtual keys, list what the identity changed, revert and rotate, record the lesson; a scripted drill on a scratch repository. Security model hardening option 3. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-27: "Baton as currently designed is completely unprotected against
+scenarios where a runner is compromised (and this will happen sooner or later)." The security
+model (`docs/security-model.mdx`, hardening option 3) ranks a written kill switch among the
+cheapest measures: today revocation is improvised.
+
+**Spec:** R-BTN-67 (owner bars), R-BTN-58 (grants and revocation), R-BTN-12 (holds), §12.2
+(destructive actions), R-BTN-85 (discrepancies); `docs/security-model.mdx`.
+**Depends on:** none.
+
+### What to write
+
+`docs/runbooks/compromised-runner.mdx`, a runbook a person follows under pressure, in order:
+
+1. **Stop the fleet's hands.** An owner bar on every grant of the affected homes (one command
+   per repository, listed), so nothing new is claimed; then `release` every active claim. State
+   what keeps running (a leg mid-step) and how long until it stops.
+2. **Cut the credentials.** Revoke the runner keys (`baton owner grant revoke`), the GitHub
+   identity's SSH keys and `gh` tokens (the GitHub settings pages, named), and the slot's
+   gateway virtual keys. Say which of these an agent may do and which a human must (Fieldhouse's
+   fourth practice: credentials never enter an agent's context).
+3. **Find what changed.** Commands that list, since a given time, every push to each home and
+   output repository by the affected identity, every change to `.baton/`, goals, workflows and
+   ticket frontmatter, every verdict and merge it made, and Baton's `discrepancy` and
+   `foreign-write` events.
+4. **Undo and resume.** Revert the identified commits, rotate any Actions secret a pushed
+   workflow could have read, re-mint keys, lift the bars.
+5. **Record it** in `docs/lessons.mdx`.
+
+### Tests
+
+- A drill, run once on a scratch repository: every command in the runbook executes as written
+  against a local Baton and a test GitHub repository, scripted as `scripts/drill-compromise.sh`.
+
+### Exit criteria
+
+- [ ] the runbook merged and linked from `docs/security-model.mdx`
+- [ ] the drill script passes

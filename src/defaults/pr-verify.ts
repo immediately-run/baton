@@ -55,6 +55,11 @@ function originSlug(run: PrExec, checkout: string): string | null {
     const url = run('git', ['remote', 'get-url', 'origin'], checkout);
     return /[:/]([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\s*$/.exec(url)?.[1] ?? null;
   } catch {
+    // B-93 (review round 2, should-fix 5): a checkout with no `origin` is the answer this asks
+    // for — a ticket's PRs may sit in other repositories, and its home may have none — so the
+    // failure is the null. The stub's `gitRun` now captures git's stderr
+    // (`stdio: ['ignore', 'pipe', 'pipe']`, `src/defaults/cli.ts`), so the `error: No such remote
+    // 'origin'` that used to print here reaches only the message this catch drops.
     return null;
   }
 }

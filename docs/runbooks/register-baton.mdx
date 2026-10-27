@@ -21,7 +21,7 @@ says otherwise. Do each step on staging first (`--url https://baton-staging.imme
 | 1. Keys | yes |
 | 2. Make yourself administrator | yes |
 | 3. Register the repository | yes |
-| 4. The sync | **waits on R3-1249** (`baton sync` and a ticket source for `tickets/*.mdx`); a sync key works today, from a laptop (see below) |
+| 4. The sync | **waits on R3-1249** (`baton sync` and a ticket source for `tickets/*.mdx`); a sync key works today, from a laptop (see below); its webhook half (4a) is ready — its smoke needs only the App's secret and the token (B-92) |
 | 5. Workers | the grant is ready; `baton run` waits on the `pr` course's legs (R3-1249's `baton init`) |
 | 6. Cut over | after 4 and 5 |
 
@@ -158,6 +158,97 @@ as does a passphrase-protected key loaded in the agent. A file that is no SSH ke
 refused before the first call; a key ssh-keygen cannot sign with is named by the first
 signature's own reason, before any request leaves. The sync workflow stays as it is — in Actions
 the OIDC token is the credential, and no key secret is needed.
+
+## 4a. The GitHub App's webhook (B-92)
+
+The App is the trigger that runs a sync on its own: a push, a review, a comment or a workflow's
+end in a repository whose tickets name another dispatches that repository's sync, windowed to one
+per 30 seconds plus one trailing (R-BTN-73). Configure it once, then check it with one delivery.
+
+1. In the App's settings: **Webhook URL** `/v1/github/webhook` on this instance's origin.
+   **Webhook secret**: a `openssl rand -hex 32` value, never a password. **SSL verification**
+   on. Events: **Push**, **Pull requests**, **Pull request reviews**, **Issue comments**,
+   **Workflow runs**, and nothing else — Baton drops anything outside these five. "Active"
+   ticked. Permissions: **Actions: write** (the dispatch it makes), **Contents**, **Pull
+   requests** and **Issues** read-only — the four its events need, and no Checks (§12.7). If no
+   App exists yet, these are the values to create it with (`tickets/R3-1208.mdx` step 3a); an
+   **organisation owner** of `immediately-run` installs it on `immediately-run/baton` and on the
+   code repositories its tickets name — GitHub's rule, and no Baton key can.
+
+   ```sh
+   (umask 077; openssl rand -hex 32 > ~/baton_github_webhook_secret)   # mode 600; the same file both commands below read
+   npx wrangler secret put BATON_GITHUB_WEBHOOK_SECRET < ~/baton_github_webhook_secret
+   npx wrangler secret put BATON_GITHUB_WEBHOOK_SECRET --env staging < ~/baton_github_webhook_secret
+   ```
+
+1b. **`GITHUB_DISPATCH_TOKEN`**, in both environments — every dispatch the webhook path makes is
+   sent with it (`src/cloudflare/baton.ts`; without it the dispatch fails and the ten-minute
+   backstop retries into the same missing token). A delivery dispatches not only its own
+   repository but every registered repository whose tickets name it, and this one token sends
+   them all — so its **Actions: write** must cover every registered repository the delivery may
+   dispatch: `baton` and `docs` in production, `docs` on staging:
+
+   ```sh
+   npx wrangler secret put GITHUB_DISPATCH_TOKEN        # Actions: write on baton AND docs (production); docs alone on staging
+   npx wrangler secret put GITHUB_DISPATCH_TOKEN --env staging
+   ```
+
+2. The secret must also be the App's *current* webhook secret: GitHub signs every delivery with
+   it, and Baton answers `401 unauthenticated` to every unsigned one when the secret is set
+   (`403` only when it is not). If step 1's file is not what the App holds, rotate it in the
+   App's settings to the same value.
+
+→ Check, before any delivery, on each instance — the body's `code` and `message` say which fault
+   it is, so keep them:
+
+```sh
+curl -s -w '\n%{http_code}\n' -X POST -H 'content-type: application/json' -d '{}' \
+  https://baton.immediately.run/v1/github/webhook    # forbidden: the GitHub App webhook secret is not configured
+```
+
+The unsigned probe is refused before anything is read, so its answer names where the operator is
+stuck: `forbidden` with *the GitHub App webhook secret is not configured* is step 1 not done (or
+not yet deployed — `npx wrangler secret list` names it); `unauthenticated` with *X-Hub-Signature-256
+is required* is step 1 done and the route reachable. Read either as done only when the
+`forbidden` is gone. A `302`, or an HTML page, is Cloudflare Access in front instead: that is
+`.local/access-paths.py` (finding 1 of the 2026-10-21 gap analysis), not this step.
+
+3. One live smoke. Push a throwaway branch to the repository the App is installed on; the App
+   delivers the push to this Baton.
+
+→ Check, in the App's **Advanced → Recent Deliveries** (or its *Redeliver* page): the delivery
+   answers **`204`**. `401` is the App's secret differing from step 1's; `403` is step 1 not
+   deployed; a green `204` is the plumbing.
+
+→ Check, in Baton, that the delivery was *acted on*, which is what the `204` alone does not say.
+   A delivery writes its own trace — its id for 24 hours and its window (`webhook_deliveries`,
+   `webhook_dispatch`) — and that row is not reachable from outside: there is no route for it, and
+   the store is the Durable Object's, not a D1 the CLI can query. What Baton does with the delivery
+   is:
+
+   - **Either side of the cutover:** the delivery dispatches the sync (§7.1 R-BTN-73: the sync
+     posts the board snapshot whatever the mode, and a snapshot under 15 minutes old is what the
+     cutover needs when its day comes) — no other step of this runbook needs to happen first.
+     The `204` plus this step's `401 unauthenticated` on an unsigned probe is all a live
+     delivery proves on its own.
+   - **The dispatch's evidence is the sync workflow's run**: a **fresh push or PR merge** in the
+     repository (GitHub's Redeliver reuses the delivery id, which Baton drops as a repeat for
+     24 hours — a redelivery can only count more than a day after the original) makes Baton
+     dispatch the repository's `baton sync` workflow within a minute — once per 30 seconds plus
+     one trailing. Read it where it ran:
+
+     ```sh
+     gh run list --repo immediately-run/baton --workflow baton-sync.yml --limit 10 --json event,createdAt,headBranch -q '.[] | select(.event == "workflow_dispatch") | .createdAt'   # the dispatch's runs; staging reads the registered repository's (docs)
+     ```
+
+     A claim's own syncs read in its ticket history (`baton ticket … history`).
+
+   So the smoke is: push, then the line above. A `204` with no dispatch after a minute is
+   the token (step 1b covers every registered repository the delivery may dispatch — a push that
+   names another registered repository's tickets dispatches that one too), a second delivery
+   inside the 30-second window (suppressed into the trailing one), or a repository no ticket
+   names — in that order; the App's secret, its events or its Active flag were already answered
+   by the `204` itself.
 
 ## 5. Workers
 

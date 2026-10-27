@@ -1,0 +1,78 @@
+---
+title: "B-128 — Two forge identities, implementer and reviewer: one compromised runner cannot land code alone"
+id: B-128
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1152
+tier: critical
+description: "The owner, 2026-10-27 (security model hardening option 8): the fleet's GitHub identity splits into an implementer (pushes, opens PRs) and a reviewer (verdicts, approvals, merges); a runner holds one, courses route legs by it, and a default-branch ruleset requires approval of the latest push by someone other than the pusher, with no bypass for either. Ticket writes move off direct pushes to main (R3-1266). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-27: "Baton as currently designed is completely unprotected against
+scenarios where a runner is compromised (and this will happen sooner or later)", then, on the
+security model's hardening option 8: "file it now".
+
+**Spec:** R-BTN-106 (independence by credential), R-BTN-139 (whose words count), R-BTN-58 and
+R-BTN-146 (grants and capabilities), R-BTN-131 (the standard courses' legs), R-BTN-66;
+`docs/security-model.mdx` (what a push can reach, 4; hardening option 8).
+**Depends on:** none.
+**Waits on:** R3-1266 (Baton claims its own tickets), for item 4.
+
+### Why
+
+Every VM shares one GitHub identity with `write` on the home and every output repository. A
+compromised runner can therefore approve its own PR (B-119 counts a verdict from anyone who can
+push) and merge it, and Baton's independence rule binds runner keys inside claims, not what that
+identity posts outside them. Every other hardening option bounds or detects this. Only this one
+makes a single compromised runner unable to land code alone.
+
+### What to build
+
+1. **Two GitHub identities per fleet**, at two credential sets: an **implementer** (pushes
+   branches, opens PRs) and a **reviewer** (posts verdicts, approves, merges). A runner holds one
+   set, never both, and declares which by a holding (B-104) or a granted capability
+   (`forge-implementer`, `forge-reviewer`).
+2. **The courses route by it.** `create-pr`'s `implement` and `fix` legs require
+   `forge-implementer`; `review`, `adjudicate` and `merge` require `forge-reviewer`. The same for
+   `review-pr`. A ticket's review is never run by a runner holding the implementer set.
+3. **GitHub enforces it.** On each home and output repository, a branch ruleset on the default
+   branch:
+   - requires a pull request with one approval;
+   - requires approval of the most recent push by someone other than the pusher;
+   - lets neither identity bypass.
+
+   So the implementer cannot merge, and the reviewer cannot push the code it approves. Baton's
+   sync counts a verdict only from the reviewer identity, or an owner (R-BTN-139's
+   `trusted_identities`, narrowed for these repositories).
+4. **Ticket moves off direct pushes to main.** The ticket commands push straight to main today,
+   which the ruleset forbids. With R3-1266 claims happen in Baton and no ticket write needs a
+   direct push; until then, decide between a pushable `tickets/**` exemption (a push ruleset
+   allowing only that path, private repositories only) and ticket writes by PR.
+5. **Control paths stay owner-only** (security model A or B, or B-127), so the reviewer identity
+   cannot change `.baton/` or workflows either. Then reaches 1, 2 and 5 also need two
+   compromises.
+
+### Tests
+
+- A scenario (the next free S-BTN number): a runner with only `forge-implementer` is never
+  offered `review` or `merge`; a verdict posted by the implementer identity does not count; the
+  review leg's claim on a reviewer runner moves the ticket.
+- A drill on a scratch repository, scripted: the implementer identity's attempt to merge, or to
+  approve its own PR, is refused by GitHub; the reviewer identity's push to the PR branch is not
+  counted as approved.
+
+### Exit criteria
+
+- [ ] the spec amended (credential sets, routing, the verdict rule) citing this ticket
+- [ ] the scenario passes on both hosts; the drill script passes
+- [ ] irfldhv1 runs with two identities on `fieldhouse` and one output repository

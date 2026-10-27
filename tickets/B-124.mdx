@@ -1,0 +1,79 @@
+---
+title: "B-124 — Authority by credential, not channel: an action is available on every surface to the principals its callers list; R-BTN-130's MCP closed list retires"
+id: B-124
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1148
+tier: judgement
+description: "The owner, 2026-10-27: the invoker's credentials (runner, owner, administrator) decide which operations are available, not the channel (CLI, API, dashboard, MCP). Retires R-BTN-130/R-BTN-154's closed list of MCP writes; an MCP key acts as its minting owner for the actions listed at minting. Open: whether delegated bearer keys may hold credential-management actions (proposed: no, as a rule about delegated credentials). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-27, on B-123: "CLI / API / MCP is just a mechanism for
+interfacing with baton. I want the invoker's credentials (runner, repo owner, baton admin) to
+make the difference in which operations are available, not the channel."
+
+**This is a change to Baton, not in Baton.** It amends R-BTN-130 / R-BTN-154 ("Baton serves MCP;
+its only writes add a hold and stop a leg"), whose closed list decides by channel: whatever an
+owner lists, MCP never reaches a write beyond `ticket.hold` and `leg.stop`. The implementing PR
+amends the spec first, citing this ruling, and records the retired rule in the Decisions.
+
+**Spec:** §11.3 R-BTN-129 (one registry; every surface derived from it) and R-BTN-130 /
+R-BTN-154 (MCP); §12.1 (principals); R-BTN-66 (what owners hold against agents); R-BTN-155
+(dashboard confirmations); §12.2 (destructive actions).
+**Depends on:** none.
+
+### Why
+
+R-BTN-129 already makes the CLI, the HTTP API, the dashboard and MCP projections of one action
+registry, authorized by one `authorize(principal, action, target)`. The closed list then adds a
+second, channel-shaped rule on top: an owner can do something from a terminal that the same
+owner cannot do through an MCP client. That is the distinction the owner rejects.
+
+### What to build
+
+1. **One rule: an action's `callers` decide.** An action is available on every surface
+   to every principal its `callers` list, and to no other. `mcp: true` stops being a policy
+   flag. A surface can still lack an action for a mechanical reason (a WebSocket upgrade over
+   MCP), named as such in the registry.
+2. **The MCP key is a credential, scoped by its owner.** It acts as its minting owner, on one
+   repository, for the action ids listed at minting (R-BTN-130's allowlist stays). An owner may
+   list any action whose `callers` include `owner`. Administrator actions stay out of reach
+   because an MCP key's principal is an owner, never because the channel is MCP.
+3. **Decide: credential-management actions.** Today minting, granting and revoking keys are
+   unreachable by MCP keys. Under the principle, whether an MCP key may hold them is the owner's
+   choice at minting. **Proposed:** keep them out of any delegated key's allowlist (an MCP key
+   is a bearer secret held by a tool, so a leaked key must not mint further keys). That is a
+   rule about delegated credentials, not channels: it applies equally to any future bearer
+   delegation.
+4. **Confirmations by credential too.** §12.2's `confirm: true` and R-BTN-155's confirmation
+   codes apply by action and principal on every surface. Over MCP, `confirm` stops being only a
+   schema check if a confirmation code can be carried; otherwise the destructive action is
+   absent from MCP mechanically, and the registry says why.
+5. **`check:actions`** checks the new rule: every action's surfaces follow from its `callers`
+   and the mechanical exceptions, and no surface carries a policy of its own.
+
+### Tests
+
+- A scenario (the next free S-BTN number): one owner, one action, each surface:
+  - the CLI, the HTTP API and an MCP key minted with the action all succeed;
+  - an MCP key minted without it is `forbidden`;
+  - a runner key is `forbidden` on every surface;
+  - an administrator action is `forbidden` to every owner credential, MCP or not.
+- `check:actions` fails a registry entry that sets a surface-only policy.
+
+### Exit criteria
+
+- [ ] R-BTN-130 / R-BTN-154 amended with this ruling cited; the Decisions record the retired
+      closed list
+- [ ] the scenario passes on both hosts; `npm test`, `npm run typecheck` and `check:actions`
+      green

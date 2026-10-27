@@ -2,8 +2,8 @@
 title: "B-80 — The CLI reports a redirect as success"
 id: B-80
 project: baton
-status: available
-updated: 2026-10-21
+status: done
+updated: 2026-10-27
 tags:
   - roadmap-item
 order: 500
@@ -18,7 +18,7 @@ depends_on: []
 ---
 
 **Brief:** the gap-analysis run of 2026-10-21
-([`docs/review/gap-analysis-2026-10-21.mdx`](../docs/review/gap-analysis-2026-10-21.mdx), finding 2):
+([`docs/review/gap-analysis-2026-10-21.mdx`](../../docs/review/gap-analysis-2026-10-21.mdx), finding 2):
 while Cloudflare Access covered the machine API, `baton admin repo add …` printed `null`
 and **exited 0** — fetch had followed the 302 to the Access login page, the page answers
 `200`, `res.json()` fails, and the CLI reports success for a request that never reached

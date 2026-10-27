@@ -1,0 +1,89 @@
+---
+title: "B-121 — the CLI's home in force: homes.json, baton home list|use, one --home, a default for REPO and bare ticket ids"
+id: B-121
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1145
+tier: judgement
+description: "The owner, 2026-10-27: the baton CLI switches between home repositories (docs, fieldhouse, baton) in ~/.config/baton/homes.json and uses the one in force when no repository is named. --home NAME|PATH, then BATON_HOME, then default; a positional REPO or qualified id wins. Never guesses across origins. Amends R-BTN-127; S-BTN-171. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-27. The `baton` CLI should switch between home repositories in
+its configuration and use the chosen one as the default when no home is named on the command
+line. There are three today: immediately.run's (`docs`), Fieldhouse's (`fieldhouse`) and Baton's
+own (`baton`). The word for what is switched is **home**, Baton's existing word (R-BTN-47's
+"its **home**"), now in the vocabulary page. No new noun: a home determines its repository id,
+its origin (its checkout's `baton_url`, R-BTN-56) and so its key (`keys.json`, R-BTN-127), so
+there is nothing else to bundle.
+
+**Spec:** R-BTN-127 (the CLI tree, keys, "a leg is named by its ticket"), R-BTN-47 (home,
+qualified ids), R-BTN-56 and R-BTN-137 (one Baton per repository; how a command finds its
+origin), R-BTN-131 (`baton runner start --home <checkout>`), S-BTN-97 (the command tree).
+
+### Why
+
+Every repository-scoped command takes the repository positionally (`baton board REPO`,
+`baton owner grants REPO`) or a qualified ticket (`docs:R3-1205`). A bare local id resolves
+only when it is unique among the signing key's repositories, so an owner of all three homes
+types the repository on almost every command. Moving between `docs`, `fieldhouse` and `baton`
+work should be one command, as `kubectl config use-context` or `gh repo set-default` are.
+
+### What to build
+
+1. **`~/.config/baton/homes.json`**, beside `keys.json`, `origins.json` and `runner.json`:
+   `{default?: <name>, homes: {<name>: {origin, repository, checkout?}}}`. `<name>` defaults to
+   the repository id and matches its pattern. It is a convenience, never a boundary: it grants
+   nothing, and every request is still signed and checked as today.
+2. **`baton home list | use <name> | add <name> --repository <id> [--origin <url>] [--checkout
+   <path>] | remove <name> | show`**. `add` with `--checkout` reads `origin` from the
+   checkout's `.baton/baton.json` and refuses an `--origin` that differs; without a checkout,
+   `--origin` is required. `use` refuses an unknown name and exits 2 listing the names.
+   `show` prints the home in force and where it came from (flag, `BATON_HOME`, `default`).
+3. **Resolution, in order:** `--home <name|path>`, then `BATON_HOME`, then `default`. A
+   positional `REPO` or a qualified ticket id always wins over all three. The home in force
+   supplies:
+   - the repository for commands that take `REPO`, which becomes optional;
+   - the repository a bare ticket id is read in. **Decide:** a bare id resolves in the home in
+     force, and the R-BTN-127 rule (unique among the key's repositories) applies only when no
+     home is in force. Proposed, because "the default" should mean what it says;
+   - the origin, unless `--url` or `BATON_URL` is given, and the key for that origin.
+4. **One `--home`.** `--home` takes a home name or a checkout path (a value containing `/` or
+   naming an existing directory is a path). `baton run` and `baton runner start` keep their
+   meaning: a name resolves to its `checkout`, and a home with no `checkout` exits 2 naming the
+   home.
+5. **Never guess across origins.** A home whose `origin` differs from `--url`/`BATON_URL`
+   exits 2, naming both, as R-BTN-56's runner check does. With several homes and none in force,
+   a command that needs a repository exits 2 listing the homes, never picking one.
+6. **The spec first:** amend R-BTN-127 (keys bullet, tree, ticket naming) with `homes.json`,
+   the `home` noun and the resolution order, and add S-BTN-171. The new actions go through
+   `src/shared/actions.mjs` (R-BTN-129) only if they call the server; `home *` is local and
+   calls none.
+
+### Tests
+
+- **S-BTN-171, the home in force:**
+  - `home use fieldhouse`, then `baton board` reads `fieldhouse`'s board;
+  - a bare ticket id resolves in the home in force;
+  - `--home docs` and `BATON_HOME=baton` override `default`, in that order;
+  - a qualified id or a positional `REPO` overrides all three;
+  - a home whose origin differs from `--url` exits 2 naming both;
+  - several homes with none in force exits 2 listing them;
+  - `--home <path>` still starts a runner on that checkout.
+- Unit: `homes.json` parsing and validation through `src/core/validate.ts`'s patterns
+  (repository id, origin); a malformed file exits 2 naming the file and the field.
+
+### Exit criteria
+
+- [ ] R-BTN-127 amended and S-BTN-171 added, citing this ticket
+- [ ] `baton home use fieldhouse && baton board` shows Fieldhouse's board with no other argument
+- [ ] S-BTN-171 passes; `npm test` and `npm run typecheck` green

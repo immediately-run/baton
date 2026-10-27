@@ -77,7 +77,8 @@ describe('S-BTN-106 a ticket\'s PRs in other repositories', () => {
     expect(asked.filter((k) => /\/(pulls|issues)\/3\/|\/check-runs/.test(k))).toEqual([]);
 
     // The review wrote its verdict line on the SDK's PR alone: the change is reviewed.
-    github = { ...github, ...detail('o/sdk', 3, [verdict]) };
+    // Its author can push to the SDK (R-BTN-139, B-119): the verdict counts.
+    github = { ...github, ...detail('o/sdk', 3, [verdict]), '/repos/o/sdk/collaborators/baton/permission': { permission: 'write' } };
     await sync();
     expect(await at()).toMatchObject({ station: 'reviewed', next_leg: 'merge' });
 
