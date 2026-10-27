@@ -9,8 +9,9 @@
 // Every page:
 //   - has YAML frontmatter with `title` and `description` (a `_layout.mdx` needs only the latter);
 //   - compiles as MDX — a bare `<word>` or `{word}` in prose fails here, as it would in Grove;
-//   - uses only Grove's built-in components and the ones its bundle's immediately.run.json registers,
-//     or — when the marker names a viewer app (opensWith.app, B-114) — the viewer's own;
+//   - uses only Grove's built-in components and the ones its bundle's immediately.run.json
+//     registers — or, when the marker names a viewer app (opensWith.app, B-114), the viewer's
+//     own (and then no components map of its own);
 //   - has no `import`/`export` and no `{expression}` other than a `{/* comment */}`;
 //   - links ([text](path), [[path]] and [[label|path]]) only to files that exist, relative to the page.
 // In a bundle with an item.schema.json (tickets/), every ticket — a file named like an id, in
@@ -37,11 +38,11 @@ const errors = [];
 const fail = (file, msg) => errors.push(`${relative(REPO, file) || file}: ${msg}`);
 const processor = createProcessor();
 
-/** Every .mdx under a bundle, except its components folder and `_`-prefixed folders. */
+/** Every .mdx under a bundle, except `_`-prefixed folders (and a `components` folder, if one exists). */
 function pages(dir) {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
-    if (statSync(path).isDirectory()) return name === 'components' || name.startsWith('_') ? [] : pages(path);
+    if (statSync(path).isDirectory()) return name.startsWith('_') ? [] : pages(path);
     return name.endsWith('.mdx') ? [path] : [];
   });
 }
@@ -73,13 +74,17 @@ async function checkBundle(root) {
   if (!existsSync(markerPath)) { fail(root, 'no immediately.run.json'); return { pages: 0, tickets: 0 }; }
   const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
   const components = new Set([...GROVE, ...Object.keys(marker.components ?? {})]);
-  // B-114: a wiki whose marker names a VIEWER APP (`opensWith.app`, e.g.
-  // `github:immediately-run/baton-board`) takes its component vocabulary from that app, and
-  // drops the local `components` map — the components are the viewer's code in another
-  // repository, which this check cannot read. The stock Grove names are still known here;
-  // every other PascalCase name is the viewer's to render (a typo in one is the viewer's to
-  // surface at render time, the way a page-level typo used to be this check's).
+  // B-114: a wiki whose marker names a viewer app (`opensWith.app`, e.g.
+  // `github:immediately-run/baton-board`) takes its WHOLE component vocabulary from that app,
+  // and keeps no `components` map of its own. The components are the viewer's code in another
+  // repository, which this offline check cannot read, so the unknown-component rule is off for
+  // such a bundle — including for a misspelling (`<Calout>`), which is now the viewer's to
+  // surface at render time. Every other page check still runs. A marker that names an app AND
+  // keeps a components map is refused: that is the copy the ticket forbids.
   const viewerApp = typeof marker.opensWith?.app === 'string' && marker.opensWith.app !== '';
+  if (viewerApp && marker.components && Object.keys(marker.components).length) {
+    fail(markerPath, 'names a viewer app (opensWith.app) and a components map — a component belongs to the viewer, never to the corpus (B-114)');
+  }
   const schemaPath = join(root, 'item.schema.json');
   const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, 'utf8')) : null;
   const idPattern = schema && new RegExp(schema.definitions.itemId.pattern);

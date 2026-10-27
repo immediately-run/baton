@@ -110,7 +110,8 @@ checkout, run the CLI as `node cli/baton.mjs`.
 
 The repository holds two [Grove](https://github.com/immediately-run/grove) wikis, which
 immediately.run opens: `package.json`'s `"immediately.run": {"content": ["tickets", "docs"]}`
-lists them, and each folder's `immediately.run.json` opens it with the wiki viewer.
+lists them, and each folder's `immediately.run.json` opens it with the viewer it names —
+`tickets/` with `immediately-run/baton-board` (B-114), `docs/` with the wiki viewer.
 
 - **`tickets/`**, the tickets:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/home.mdx>.
