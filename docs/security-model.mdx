@@ -199,7 +199,7 @@ The sync raises a notice when a board post changes a control input (`.baton/`, g
 `EXPEDITE`, a ticket's tier) and the push's pusher is not an owner. The pusher comes from the
 forge's push event, not the commit author, which anyone can set.
 
-- **Closes:** nothing, but it makes 1, 3 and 5 visible within one sync.
+- **Closes:** nothing, but it makes reaches 1, 3 and 5 visible within one sync.
 - **Cost:** a small Baton change.
 
 ## Hardening against a compromised runner
@@ -208,21 +208,21 @@ Assume a runner will be compromised sooner or later (the owner, 2026-10-27). Bat
 bounds its key: it claims only what its grant allows, and it cannot touch keys, bars, holds or
 trusted identities. What is unbounded is the GitHub identity. Every VM shares one, with `write`
 on the home and every output repository, so one compromised runner is all of them and has
-everything in *What a push can reach*. The weak point is one identity that both writes the
+everything in *What a push can reach* (reaches 1 to 6 below cite its sections). The weak point is one identity that both writes the
 control plane and lands code, not Baton's server.
 
 The options, cheapest first:
 
 | # | Option | Cost | Benefit | Where |
 |---|---|---|---|---|
-| 1 | No runner on an owner's machine serving a home the VMs can push (F) | none, a practice | closes the upward crossing in 1, the worst case | practice |
-| 2 | Actions secrets in protected environments, deployment branch main only (F) | an hour | a pushed workflow on an agent's branch gets no secret; closes most of 2 | repository settings |
+| 1 | No runner on an owner's machine serving a home the VMs can push (F) | none, a practice | closes the upward crossing in reach 1, the worst case | practice |
+| 2 | Actions secrets in protected environments, deployment branch main only (F) | an hour | a pushed workflow on an agent's branch gets no secret; closes most of reach 2 | repository settings |
 | 3 | A compromised-runner runbook and drill: bar, revoke, find what changed, undo | half a day | shortens how long a compromise lasts; today revocation is improvised | B-125 |
 | 4 | The VM fence and a fresh root disk at every launch | already planned | limits exfiltration and persistence | fieldhouse FLDH-16, FLDH-19 |
 | 5 | One GitHub identity and key per slot (F) | a day, then some administration | contains and attributes a compromise to one VM, revocable alone; prevents nothing by itself | fieldhouse FLDH-17 |
-| 6 | Detection: a notice when a non-owner's push changes a control input (G) | a small Baton ticket | makes 1, 3 and 5 visible within one sync | B-126 |
-| 7 | Owner-signed control inputs (C) | about a week of Baton work; owners sign control commits | closes 1 and 5 on every forge and visibility, `baton` included | B-127 |
-| 8 | Two identities, implementer and reviewer/merger: GitHub requires approval of the latest push by someone other than the pusher, and review legs go to reviewer-identity runners by a Baton capability | the largest: a second identity, review routing, and ticket claims off direct pushes to main (R3-1266) | the only option where one compromised runner cannot land code alone; closes 4, and with A or B on control paths makes 1, 2 and 5 need two compromises | not filed |
+| 6 | Detection: a notice when a non-owner's push changes a control input (G) | a small Baton ticket | makes reaches 1, 3 and 5 visible within one sync | B-126 |
+| 7 | Owner-signed control inputs (C) | about a week of Baton work; owners sign control commits | closes reaches 1 and 5 on every forge and visibility, `baton` included | B-127 |
+| 8 | Two identities, implementer and reviewer/merger: GitHub requires approval of the latest push by someone other than the pusher, and review legs go to reviewer-identity runners by a Baton capability | the largest: a second identity, review routing, and ticket claims off direct pushes to main (R3-1266) | the only option where one compromised runner cannot land code alone; closes reach 4, and with A or B on control paths makes reaches 1, 2 and 5 need two compromises | not filed |
 
 ## Recommendation
 
