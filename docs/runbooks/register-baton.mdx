@@ -21,7 +21,7 @@ says otherwise. Do each step on staging first (`--url https://baton-staging.imme
 | 1. Keys | yes |
 | 2. Make yourself administrator | yes |
 | 3. Register the repository | yes |
-| 4. The sync | **waits on R3-1249** (`baton sync` and a ticket source for `tickets/*.mdx`); a sync key works today, from a laptop (see below); its webhook half (4a) is ready and has run once by hand (B-92) |
+| 4. The sync | **waits on R3-1249** (`baton sync` and a ticket source for `tickets/*.mdx`); a sync key works today, from a laptop (see below); its webhook half (4a) is ready — its smoke needs only the App's secret and the token (B-92) |
 | 5. Workers | the grant is ready; `baton run` waits on the `pr` course's legs (R3-1249's `baton init`) |
 | 6. Cut over | after 4 and 5 |
 
