@@ -186,5 +186,14 @@ These are its lessons, newest understanding first.
   siblings are private. The failure is right (no partial reading), and it lands on whoever pushes
   next, not on the ticket that caused it. **Before a live ticket names a private repository, the
   sync's token must read it** — here `BATON_GITHUB_READ_TOKEN`, a fine-grained read-only token
-  (docs/standard-courses.mdx). *Status: the workflow reads the secret; the token is the
-  owner's to create.*
+  (docs/standard-courses.mdx). The token was in use at once — `fieldhouse`'s answer went from
+  404 (run 40542988875, the Actions token) to 403 (40558126421, the first run after #125; the
+  public `baton` and `baton-board` read either way) — and that run logged `…/fieldhouse/pulls…: 403 — … the sync's token
+  cannot read it, or it does not exist` (the sync prints the status, never GitHub's body; the
+  same text follows a 404). The body, read by hand with the token, was `Resource not accessible
+  by personal access token`: the token reached the repository without the permission listing
+  PRs needs, and four runs failed so until the owner granted it. An expired token should instead
+  be a 401 on the home repository's PR list, which is read first and passed through unwrapped
+  (`list` in src/defaults/cli.ts) — not yet seen. `docs` is still never read: `.baton/tickets.mjs`
+  drops it from every ticket's `repos:` (b2a70cd) until the token can read it. *Status: fixed for
+  `fieldhouse` — run 40572091880 on `dd7a2f0` read it and posted the board.*
