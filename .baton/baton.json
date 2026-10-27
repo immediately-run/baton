@@ -5,7 +5,8 @@
   "repos": {
     "baton": "immediately-run/baton",
     "baton-board": "immediately-run/baton-board",
-    "docs": "immediately-run/docs"
+    "docs": "immediately-run/docs",
+    "fieldhouse": "immediately-run/fieldhouse"
   },
   "agent_command": "opencode run --auto --model deepinfra/deepseek-ai/DeepSeek-V4.1-Flash-1017 \"You are a Baton leg agent. The file named by the BATON_INSTRUCTIONS environment variable holds your instructions for this leg: read them and follow them exactly. The environment names your course (BATON_COURSE), your leg (BATON_LEG), the ticket's file (BATON_TICKET_FILE) and the answer rule for your last line (BATON_ANSWER, when one is set); the arguments after this message are the ticket id, your leg and the repository checkout. Work in the current repository checkout. When BATON_ANSWER is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it. Your process's exit is the leg's completion: when the leg is done — the work pushed, the checks green, the final line printed — exit immediately, never waiting for further input.\"",
   "courses": [
