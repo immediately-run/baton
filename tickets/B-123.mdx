@@ -1,0 +1,88 @@
+---
+title: "B-123 — A message of the day per repository: owner-set, expiring, served with the work and passed to every leg"
+id: B-123
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1147
+tier: routine
+description: "The owner, 2026-10-27: until instruments and route choices exist, owners need to tell the fleet a temporary fact (GLM out of tokens until tomorrow, use two Opus reviewers). One message per repository, Baton state set by an owner key (never git, never MCP), at most 1,000 characters, required expiry at most 7 days; served in recommendations, the fleet view and the heartbeat; the runner passes it to each leg as BATON_MOTD. S-BTN-173. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-27: "can we have a 'message of the day' (MOTD) per repository
+which baton hands out along with the recommended pending ticket legs to runners? Use case which
+made this relevant: we don't have instruments implemented yet, but zAI's GLM subscription is out
+of tokens until tomorrow. I'd like to tell runners to use 2 Opus reviewers instead of 1 opus 1
+glm. MOTD could be a simple mechanism for this."
+
+**Spec:** R-BTN-66 (what owners hold against agents lives in Baton); §6.6 recommendations and
+R-BTN-99 (the views a runner reads); §6.9 (messages, the heartbeat's delivery); R-BTN-131 (the
+stubs and their environment); §12.3 (untrusted text) and R-BTN-152 (what a view serves is data);
+R-BTN-130 (MCP); R-BTN-101 and B-105 (readings and route choices, the structured successor).
+**Depends on:** none.
+
+### Why
+
+Until instruments post readings and route choices act on them (B-105), owners have no way to
+tell the fleet a temporary fact ("GLM is out of tokens until tomorrow; use two Opus reviewers")
+short of editing `agent_command` in git and reverting it later. A per-repository message, set
+by an owner, expiring on its own, served with the work, covers that gap cheaply.
+
+**It is an instruction, not data.** The message reaches leg agents as guidance, so it is
+trusted text. That is why it is Baton state set by an owner key, never read from git: a push
+must not be able to speak to every agent of a home (`docs/security-model.mdx`, what a push can
+reach, 3). It is advice to a model, not configuration: it changes behaviour only where the
+agent chooses for itself, so a leg whose `agent_command` pins the model keeps it.
+
+### What to build
+
+1. **The message**: per repository, at most one in force: `{text, until, set_by, set_at}`.
+   `text` is at most 1,000 characters, under §12.3's free-text rules except the length (no
+   control characters; none of the angle brackets, braces or backticks). `until` is required, at most 7
+   days ahead; the message lapses at `until` with no action.
+2. **Owner actions**: `baton owner motd set <repository> --until <time> --text <text>`,
+   `baton owner motd clear <repository>` and `baton owner motd show <repository>`, through the
+   action registry (R-BTN-129), callers `owner` and `owner-session`. Administrators may also set
+   and clear. **Not over MCP**: an MCP key may not add one (R-BTN-130), since an agent's tool
+   must not instruct the fleet. Each change is logged (`motd-set`, `motd-cleared`) with its
+   text.
+3. **Served with the work**: `GET /v1/runner/recommendations` and `/next` carry
+   `motd: {repository: {text, until}}` for each repository in the answer that has one in force;
+   so do R-BTN-99's fleet view and the heartbeat response, so a runner mid-leg sees a change at
+   its next beat. The ETag covers it.
+4. **Passed to the leg**: the runner writes the message in force for the claim's home to the
+   leg's environment as `BATON_MOTD` (and `BATON_MOTD_UNTIL`), and the standard courses' stub
+   instructions say: "If `BATON_MOTD` is set, it is an instruction from this repository's
+   owners for today; follow it where it applies to this leg." A message that changes during a
+   leg reaches the next leg, not the running one.
+5. **Shown to people**: the dashboard shows each repository's message, its expiry and who set
+   it; `baton board` prints it.
+
+### Tests
+
+- **S-BTN-173, the message of the day:**
+  - an owner sets a message until tomorrow: recommendations, the fleet view and the heartbeat
+    carry it; the leg's environment has `BATON_MOTD`;
+  - at `until` it lapses: no view carries it, with no call;
+  - a runner key and an MCP key setting one are `forbidden`; a push changing any file sets
+    nothing;
+  - text over 1,000 characters, with a control character or a banned character, or an `until`
+    past 7 days, is `invalid-params`;
+  - the owner of another repository cannot set this one's.
+
+### Exit criteria
+
+- [ ] the spec amended (the message, its actions, the views and the leg environment) citing
+      this ticket
+- [ ] S-BTN-173 passes on both hosts; `npm test` and `npm run typecheck` green
+- [ ] `baton owner motd set fieldhouse --until … --text …` reaches a running leg's
+      `BATON_MOTD`
