@@ -121,10 +121,10 @@ export class BatonCore {
   async start(): Promise<void> {
     this.migrate();
     this.store.transaction(() => this.registry.seed(this.ports.config));
+    await this.registry.seedSyncKeys(this.ports.config, this.ports.adminKeys.list());
     // B-91: the seed's owner keys (R-BTN-58) need their fingerprints, an await, so they follow
     // the registration: a rebuilt instance serves its owners without anyone re-adding them.
     await this.registry.seedOwnerKeys(this.ports.config, await this.admin.adminFingerprints());
-    await this.registry.seedSyncKeys(this.ports.config, this.ports.adminKeys.list());
     await this.seedKeys();
     if ((await this.ports.scheduler.get()) == null) await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
     // A trailing webhook dispatch owed from before a restart keeps its time (round 1, 1-A-4);
@@ -1183,15 +1183,14 @@ export class BatonCore {
 
   /** `GET /v1/admin/repositories` (B-90): the registry as the dashboard's state lists it, every
    *  registered repository with its head, mode and courses. */
+  /** `GET /v1/admin/repositories` (B-90, R-BTN-179): the registry as the dashboard's state lists
+   *  it, and (B-91) the repositories whose owner keys came from BATON_REPOSITORIES alone. */
   adminView() {
     // One section of `uiState`'s answer, built by the same `uiRepo` it maps over.
-    return { repositories: this.registry.all().map((repo) => this.uiRepo(repo)) };
+    const repositories = this.registry.all().map((repo) => this.uiRepo(repo));
+    const seedOwners = this.admin.view(this.now()).seed_owners as string[];
+    return { repositories, ...(seedOwners.length ? { seed_owners: seedOwners } : {}) };
   }
-
-  /** `GET /v1/repositories/{repository}/board` (B-90): the dashboard's view of one repository —
-   *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order —
-   *  behind a signed principal instead of a browser session. The same queries `uiState` runs;
-   *  nothing new is asked of the store. */
 
   /** `GET /v1/owner/{repository}/grants` (R-BTN-146, B-90): the repository's owner keys, the
    *  grants on it, and its owners' settings — the dashboard's state's own reads, for its owners. */
@@ -1225,11 +1224,6 @@ export class BatonCore {
    *  for a key no grant binds and for an owner's or an administrator's key. */
   boardView(repo: string, granted: string[] | null = null) {
     const now = this.now();
-   *  the repository as `/v1/ui/state` lists it, its `ready` tickets and the per-tier order —
-   *  behind a signed principal instead of a browser session. The same queries `uiState` runs;
-   *  nothing new is asked of the store. */
-  boardView(repo: string) {
-    const state = this.uiState();
     const repository = this.uiRepo(this.registry.get(repo)!);
     const ready = this.readyRows([repository], repo);
     return {
@@ -1246,19 +1240,6 @@ export class BatonCore {
    *  repository when `repository_id` is given (B-90's board), every one otherwise. */
   private readyRows(repositories: ReturnType<BatonCore['uiRepo']>[], repository_id?: string) {
     const byId = new Map(repositories.map((r) => [r.id, r]));
-  /** `GET /v1/admin/repositories` (B-90, R-BTN-179): the registry as the dashboard's state lists
-   *  it, and (B-91) the repositories whose owner keys came from BATON_REPOSITORIES alone. */
-  adminView() {
-    const { repositories, limits } = this.uiState();
-    const seedOwners = limits.seed_owners as string[];
-    return { repositories, ...(seedOwners.length ? { seed_owners: seedOwners } : {}) };
-  }
-
-  uiState() {
-    const now = this.now();
-    // Each registered repository: its own head and its own mode (R-BTN-47, R-BTN-28).
-    const repositories = this.registry.all().map((repo) => this.uiRepo(repo));
-    const where = new Map(repositories.map((r) => [r.id, r]));
     const items = this.sql<Record<string, SqlValue>>(
       `SELECT t.id, t.repository_id, t.local_id, t.path, t.title, t.project, t.status, t.node, t.queue, t.tags, t.tier, t.requires_clause, t.operator_only, t.ord, t.rank,
               t.expedite, t.snapshot_sha, s.station, s.next_leg, s.to_end

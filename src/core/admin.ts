@@ -721,10 +721,6 @@ export class Admin {
           const live = owners.filter((o) => o.repository_id === id);
           return !live.length || (seeded.has(id) && live.every((o) => o.added_by === 'admin:seed'));
         }),
-      // max_tier as its name in the repository's ladder (stored as a position, R-BTN-66).
-      grants: this.rows<{ repository_id: string; max_tier: number | null }>(`SELECT g.credential_id, c.hostname, c.label, g.repository_id, g.capabilities, g.max_tier, g.granted_by, g.granted_at
-                         FROM worker_grants g JOIN credentials c ON c.id = g.credential_id WHERE g.revoked_at IS NULL ORDER BY g.repository_id, c.hostname`)
-        .map((g) => ({ ...g, max_tier: g.max_tier == null ? null : this.c.registry.get(g.repository_id)?.tiers[g.max_tier] ?? null })),
       grants: this.grants(),
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
