@@ -1,0 +1,99 @@
+---
+title: "B-122 — Goals: a named objective in git steers the default order to the tickets that close it, with no model in the loop"
+id: B-122
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1146
+tier: judgement
+description: "The owner, 2026-10-27: a goal file in a home repository names the tickets an objective needs and its priority; Baton ranks the goal's open work (needs plus their open transitive depends_on) right after expedite, critical path first, in the default order and R-BTN-61's merge. A model writes the goal once, in a reviewed PR; Baton only walks the graph. Soft by default, exclusive opt-in; a goals view shows progress and blocks. S-BTN-172. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-27, on steering ticket selection: "how I can steer the ticket
+selection process to ensure that Sandpit completion has precedence to less urgent matters …
+the objective I have can only be attained by completing multiple projects, or some projects
+completely, others only partially. A language model is clearly capable of determining which
+tickets close the gap, which is most pressing, but I do not want Baton to be invoking a
+language model during the ticket recommendation process." The owner approved this design the
+same day.
+
+**Spec:** §6 the default order and R-BTN-61 (the merge across groups); R-BTN-12 (expedite and
+its lane bound); §6.1 (prerequisites, `depends_on`); R-BTN-98 (Baton runs no repository code);
+R-BTN-33 (filter fields only); R-BTN-47 (home, qualified ids); §7.1 (the board post).
+**Depends on:** none.
+**Waits on:** B-113 (a dependency naming another repository's ticket). A goal whose `needs`
+stay in its own home works without it.
+
+### Why
+
+Expedite is per ticket and bounded: an owner can expedite every Sand Pit ticket by hand, but
+it does not follow the dependency chain, has to be redone as tickets are filed, and competes
+with real emergencies (Fieldhouse's ticketing-system tickets already hold the lane). A
+project is a label nothing ranks by, and an objective cuts across projects: the first Sand Pit
+runner needs part of `sand-pit-hardening` and a ticket from `fieldhouse`. A repository's
+`weight` is too coarse, and `rank.mjs` covers one course in one repository.
+
+The judgement of which tickets close the gap is a model's, and belongs where the plan is
+written: once, in a pull request the owner reviews. Everything after that is a graph walk.
+
+### What to build
+
+1. **A goal**: a file in a home repository, `<bundle>/goals/<id>.mdx`, carrying filter
+   fields only (R-BTN-33): `id`, `title`, `status` (`active` | `paused` | `met` |
+   `withdrawn`), `priority` (an integer, lower first among the active goals), `needs` (ticket
+   ids, qualified once B-113 lands) and optionally `exclusive` (item 5). The body is prose
+   for people; Baton never reads it. The sync posts goals beside tickets.
+2. **A goal's open work** is every ticket in `needs` and, transitively, every open ticket
+   they `depend_on`, computed by Baton at each accepted board post. `needs` names tickets,
+   never projects: a project reference would grow silently as tickets are filed into it.
+   **Decide** whether the repository's ticket check warns when a project a goal draws on
+   gains a ticket the goal does not name (proposed: yes, a warning).
+3. **The default order** (§6) and **R-BTN-61's merge** gain one step after expedite: a ticket
+   in an active goal's open work ranks by its best goal's `priority`, before every ticket in
+   no goal. Within a goal, the ticket with the longest chain of open goal work behind it
+   (critical path) ranks first, then the existing steps. A ticket in no goal keeps today's
+   order unchanged.
+4. **No model, no repository code.** The ordering is computed in core from posted fields; a
+   course's `rank.mjs` still reorders within its group on the runner, and receives each
+   candidate's goal and critical-path length in its view so it can keep the goal order.
+5. **Soft by default.** Goal work ranks first; other work still runs when no goal ticket
+   passes the gates (waiting on review, on a person, on a capability no runner holds).
+   `exclusive: true` makes it hard: Baton offers no ticket outside the goal's open work in
+   that home while the goal is active. Logged as a goal setting, not a hold per ticket.
+6. **Progress and blocks.** `GET /v1/repositories/{repository}/goals` and the dashboard: per
+   goal, its open work and done count, the ready tickets in order, and the blocked ones with
+   their blocks (R-BTN-75), so Needs you shows when a goal waits on a person rather than on
+   runners. A goal whose `needs` are all done is shown as met; the file's `status: met` is
+   git's to write.
+7. **The vocabulary page** gains **Goal**: "A named objective in a home repository: the
+   tickets it needs, and its priority. Baton ranks a goal's open work first, by priority."
+
+### Tests
+
+- **S-BTN-172, goals steer the order:**
+  - a goal needing T1, where T1 depends on T2 and T3: T2 and T3 are offered before an older,
+    unrelated ready ticket, and T1 once they are done;
+  - two active goals: the lower `priority`'s open work first; a ticket in both ranks by the
+    better one;
+  - within a goal, the ticket that unblocks more goal work first;
+  - expedite still wins over goal work;
+  - a goal ticket blocked on a person: unrelated work is offered (soft), nothing outside the
+    goal is offered with `exclusive: true`, and the goal view lists the block;
+  - a goal set `paused` changes nothing in the order; one whose needs are done reads as met;
+  - a goal naming an unknown ticket is reported on the board post, not accepted silently.
+- The model: goal ordering as a pure function of the posted board, with `model:pr`'s report.
+
+### Exit criteria
+
+- [ ] the spec amended (a goals section, the default order, R-BTN-61) citing this ticket
+- [ ] S-BTN-172 passes on both hosts; `npm test` and `npm run typecheck` green
+- [ ] Fieldhouse's `sandpit-runner` goal orders its open work first on the shared Baton
