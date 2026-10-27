@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1148
 tier: judgement
-description: "The owner, 2026-10-27: the invoker's credentials (runner, owner, administrator) decide which operations are available, not the channel (CLI, API, dashboard, MCP). Retires R-BTN-130/R-BTN-154's closed list of MCP writes; an MCP key acts as its minting owner for the actions listed at minting. Open: whether delegated bearer keys may hold credential-management actions (proposed: no, as a rule about delegated credentials). Requires: none."
+description: "The owner, 2026-10-27: the invoker's credentials (runner, owner, administrator) decide which operations are available, not the channel (CLI, API, dashboard, MCP). Retires R-BTN-130/R-BTN-154's closed list of MCP writes; an MCP key acts as its minting owner for the actions listed at minting. Delegated bearer keys never hold credential-management actions (the owner, 2026-10-27). Requires: none."
 topics:
   - baton
 owns: {}
@@ -49,12 +49,11 @@ owner cannot do through an MCP client. That is the distinction the owner rejects
    repository, for the action ids listed at minting (R-BTN-130's allowlist stays). An owner may
    list any action whose `callers` include `owner`. Administrator actions stay out of reach
    because an MCP key's principal is an owner, never because the channel is MCP.
-3. **Decide: credential-management actions.** Today minting, granting and revoking keys are
-   unreachable by MCP keys. Under the principle, whether an MCP key may hold them is the owner's
-   choice at minting. **Proposed:** keep them out of any delegated key's allowlist (an MCP key
-   is a bearer secret held by a tool, so a leaked key must not mint further keys). That is a
-   rule about delegated credentials, not channels: it applies equally to any future bearer
-   delegation.
+3. **Credential-management actions stay out of delegated keys** (decided, the owner,
+   2026-10-27: "no is fine for now"). Minting, granting and revoking keys never enter an MCP
+   key's allowlist: an MCP key is a bearer secret held by a tool, so a leaked key must not mint
+   further keys. That is a rule about delegated credentials, not channels: it applies equally
+   to any future bearer delegation. Revisit when a delegated key can be bound to its holder.
 4. **Confirmations by credential too.** §12.2's `confirm: true` and R-BTN-155's confirmation
    codes apply by action and principal on every surface. Over MCP, `confirm` stops being only a
    schema check if a confirmation code can be carried; otherwise the destructive action is
