@@ -60,6 +60,15 @@ default branch, so a change that has not reached it is not claimable and not in 
    - `.baton/**`, `.github/workflows/**` and agent configuration (`.claude/**` (hooks, settings, skills, memory), every `CLAUDE.md` and `AGENTS.md`, and plugin manifests) need an owner's approval too (security model A or B; B-127 signs what A cannot
      cover on public repositories). Agent configuration is what privileged sessions execute
      (OWASP ASI05).
+   - **Everything a privileged session reads as authority** needs an owner's approval too
+     (the owner, 2026-10-27; security model, *Authority and data*): the context corpus
+     (`docs/context/**`, docs' `content/context/**`, Fieldhouse's `docs/context/**`),
+     `lessons.mdx`, the owner tier of agent memory wherever it lives, and the specs' decision
+     sections. Content never crosses upward without a gate.
+   - **The fleet tier of memory is the exception that proves the rule.** Runners write it
+     without approval, at a path outside every owner-gated one (proposed: `hq`'s
+     `memory/fleet/**`), and no privileged session's configuration loads it; a lesson reaches
+     the owner tier only as a PR the owner merges.
 3. **Agent-filed tickets are PRs.** `bug-report`, `draft-ticket` and `epic` (children) open a PR
    adding the ticket instead of pushing it; the ticket becomes claimable when an owner merges it.
    **Decide:** whether a deterministic check may auto-merge a ticket PR that changes only status
@@ -74,7 +83,9 @@ default branch, so a change that has not reached it is not claimable and not in 
 
 - A drill on a scratch repository, scripted: the worker's push to main is refused; its push to an
   agent ref succeeds; a ticket PR approved by the reviewer identity cannot merge, and one approved
-  by an owner can; a workflow change from the worker cannot merge without an owner.
+  by an owner can; a workflow change from the worker cannot merge without an owner; nor can a
+  change to the context corpus, `lessons.mdx` or owner-tier memory, while a fleet-tier memory
+  write lands without approval.
 - A scenario (the next free S-BTN number): a ticket added on an agent branch never appears on the
   board; merged, it does.
 
