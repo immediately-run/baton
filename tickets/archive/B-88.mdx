@@ -2,8 +2,8 @@
 title: "B-88 — baton repo sync cannot sign with a sync key: the server accepts one, only the CLI cannot"
 id: B-88
 project: baton
-status: available
-updated: 2026-10-21
+status: done
+updated: 2026-10-26
 tags:
   - roadmap-item
 order: 486
@@ -12,7 +12,8 @@ description: "R-BTN-93's sync keys sign as workers do — proven by a hand-signe
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/106
 depends_on: []
 ---
 
@@ -47,4 +48,9 @@ The hand-driven script that proved the server is the ticket's map.
 
 ### Exit criteria
 
-- [ ] a repository with a registered sync key posts its board from a laptop, one flag
+- [x] a repository with a registered sync key posts its board from a laptop, one flag —
+  S-BTN-156 (`test/integration/S-BTN-156.sync-key.test.ts`, "a registered sync key posts the
+  board from a laptop, one flag, no CI and no bearer"): an ssh-keygen ed25519 key, registered
+  through `Registry.addSyncKey`, posts the board with no CI token and no `BATON_SYNC_TOKEN` in
+  the environment, and each of the three calls carries a `Signature-Input` naming that key's
+  fingerprint; `test/unit/defaults-cli.test.ts` asserts the same at the CLI's seam.
