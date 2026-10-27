@@ -55,9 +55,17 @@ from where), R-BTN-12 (expedite), §7.1 (the board post); B-122 (goals); `docs/s
    start; if it has, they join item 1.
 6. **Tooling.** `baton owner sign` (or plain `git commit -S`) and a doc on configuring git with an
    owner key.
+7. **Verifiable owner statements** (the owner, 2026-10-27; security model reach 3, option 10). A
+   ticket's `**Brief:** the owner …` line, and any line quoting the owner as authority, counts as
+   the owner's only in a commit signed by an owner key. The sync marks each ticket's brief
+   `signed` or `unsigned` with its provenance (B-126). The standing CLAUDE.md rule tells agents
+   that an unsigned owner quote is a claim, not the owner. This applies whether or not
+   `require_signed_control` is on: it marks, it does not refuse.
 
 ### Tests
 
+- A scenario: a brief added in an owner-signed commit is `signed`; the same text pushed unsigned
+  by the worker is `unsigned`; editing a signed brief in an unsigned commit makes it `unsigned`.
 - A scenario (the next free S-BTN number): with `require_signed_control` on, an unsigned change to
   `agent_command` leaves the runner running the signed one and raises the notice; an owner-signed
   change takes effect; a commit signed by a non-owner key, or a forged signature, counts as
