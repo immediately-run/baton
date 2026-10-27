@@ -69,7 +69,12 @@ export const CREATE_PR_COURSE = {
  * conversation to a merged PR — `converse` (the interactive session that writes the spec file and
  * opens its PR), `review` (adversarial, non-interactive), `address` (the owner's second
  * conversation, on blocking findings, at most three rounds), `adjudicate` after the third, and
- * `merge`. `review`'s verdict chooses: approve queues `merge`, changes queue `address`. */
+ * `merge`. `review`'s verdict chooses: approve queues `merge`, changes queue `address`.
+ *
+ * The runs mirror `create-pr`'s rule, rounds equal review runs minus one: three address rounds are
+ * each followed by a review, so `review` runs four times and the fourth place — a round still
+ * asking for changes after the third address — queues `adjudicate`. `review` at 3 would refuse the
+ * fourth `max-runs` and leave the ticket offered a review it can never run. */
 export const CREATE_SPEC_COURSE = {
   start: 'requested',
   start_leg: 'converse',
@@ -81,7 +86,7 @@ export const CREATE_SPEC_COURSE = {
   },
   legs: {
     converse: { from: ['requested'], to: 'spec-open', label: 'Design the specification with the owner' },
-    review: { from: ['spec-open'], to: 'reviewed', max_runs: 3, label: 'Adversarial review round' },
+    review: { from: ['spec-open'], to: 'reviewed', max_runs: 4, label: 'Adversarial review round' },
     address: { from: ['reviewed'], to: 'spec-open', max_runs: 3, label: 'Address the blocking findings with the owner' },
     adjudicate: { from: ['reviewed'], to: 'adjudicated', label: 'Reproduce the findings left open' },
     merge: { from: ['reviewed', 'adjudicated'], to: 'merged', label: 'Merge and close the ticket' },
@@ -191,12 +196,41 @@ const boundsOf = (graph: PrGraph): PrBounds => ({
   legs: CREATE_PR_LEGS, back: 'fix', rounds: graph.legs?.fix?.max_runs ?? 3, adjudicates: graph.legs?.adjudicate != null,
 });
 
+/** The `create-spec` course's bounds: `converse` opened the PR at `spec-open`, `address` is the
+ *  back leg, and its rounds are the file's (3). */
+const SPEC_BOUNDS: PrBounds = {
+  legs: { open: 'converse', opened: 'spec-open', back: 'address', backTo: 'spec-open' },
+  back: 'address', rounds: CREATE_SPEC_COURSE.legs.address.max_runs, adjudicates: true,
+};
+
 const at = (station: string, path: Step[], next: PostedStation['next']): PostedStation =>
   ({ station, path, next_leg: next[0]?.leg ?? null, next_source: 'course', handoff_url: null, next, bars: {} });
 
 /** A station function's return with no PR markers: the PR courses write none (no seats or bars),
  *  so `markers` is empty and `course_data` an empty object. */
 const noMarkers = (stations: Record<string, PostedStation>): StationsResult => ({ stations, markers: [], course_data: {} });
+
+/** `create-spec`'s record that a leg has run and is now waiting outside the claim: the closing
+ *  marker its `close` commits (R-BTN-83) — `converse`'s at `requested`, `address`'s at `reviewed` —
+ *  read from `.baton/markers.jsonl` beside the PR facts. Each is a signal, never a step: the path
+ *  stays where the PR facts put it. */
+interface SpecMarkers {
+  /** The tickets whose design conversation has begun (a `converse` marker at `requested`). */
+  conversed: Set<string>;
+  /** How many times each ticket's `address` leg has ended in the owner's hands (an `address`
+   *  marker at `reviewed`): one more than the timeline's `address` steps while none of its work
+   *  has landed as a push. */
+  addressed: Map<string, number>;
+}
+
+const specMarkersOf = (markers: { ticket: string; leg: string; reached: string }[]): SpecMarkers => {
+  const out: SpecMarkers = { conversed: new Set(), addressed: new Map() };
+  for (const m of markers) {
+    if (m.leg === 'converse' && m.reached === 'requested') out.conversed.add(m.ticket);
+    if (m.leg === 'address' && m.reached === 'reviewed') out.addressed.set(m.ticket, (out.addressed.get(m.ticket) ?? 0) + 1);
+  }
+  return out;
+};
 
 /** The adjudication after the last verdict, when one was written: `merge` (no open blocking
  * finding reproduced) or `owner` (one did — the owner decides). */
@@ -212,7 +246,7 @@ function adjudicationOf(fact: PrFact): 'merge' | 'owner' | null {
  *  the `adjudicate` leg when the course has one (`create-pr`, `create-spec`), else merge waiting
  *  on the owner (`pr`). `bounds.legs` names the timeline's legs, so the same walk places a
  *  `create-spec` PR as a `create-pr` one. */
-function placeOf(fact: PrFact, graph: PrGraph, bounds: PrBounds = boundsOf(graph)): PostedStation {
+function placeOf(fact: PrFact, graph: PrGraph, bounds: PrBounds = boundsOf(graph), pending = false): PostedStation {
   const path = timelineOf(fact, bounds.legs);
   const adjudication = bounds.adjudicates && path.at(-1)!.reached === 'reviewed' ? adjudicationOf(fact) : null;
   if (adjudication) path.push({ leg: 'adjudicate', reached: 'adjudicated' });
@@ -233,10 +267,13 @@ function placeOf(fact: PrFact, graph: PrGraph, bounds: PrBounds = boundsOf(graph
   if (verdictOf(verdictsOf(fact).at(-1)!) === 'approve') return at('reviewed', path, [{ leg: 'merge', state: 'ready', waiting_on: null }]);
   // Changes requested: the back leg (`fix`, `address`), until the course's rounds run out; then
   // adjudicate, or merge waiting on the owner (listed under Needs you, §14) on a course with no
-  // adjudicate leg.
+  // adjudicate leg. `pending`: the back leg's last claim ended and its work has not landed yet —
+  // the owner's conversation (`create-spec`'s `address`) is under way — so the leg waits on the
+  // `owner` rather than being offered again on every sync.
   if (backRunsOf(path, bounds.legs) >= bounds.rounds) {
     return at('reviewed', path, [bounds.adjudicates ? { leg: 'adjudicate', state: 'ready', waiting_on: null } : { leg: 'merge', state: 'waiting', waiting_on: 'owner' }]);
   }
+  if (pending) return at('reviewed', path, [{ leg: bounds.back, state: 'waiting', waiting_on: 'owner' }]);
   return at('reviewed', path, [{ leg: bounds.back, state: 'ready', waiting_on: null }]);
 }
 
@@ -372,17 +409,25 @@ export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; bran
  *  findings to the owner and a push back to `spec-open`, a `changes` verdict queues `address`
  *  until three rounds are spent and then `adjudicate`, and an `approve` queues `merge`).
  *
- *  A ticket with no PR has not left `requested`, and the design conversation — the leg that opens
- *  the PR — is the owner's session, which Baton neither runs nor waits for inside a claim. Whether
- *  it has run is read from the repository's own marker file: the leg's instructions append
- *  `{ticket, leg: 'converse', reached: 'requested', next: 'review'}` to `.baton/markers.jsonl` and
- *  commit it before the owner's session starts, so
- *  - no such line, the ticket's `converse` is `ready` (a claim runs it: it prints the session's
- *    command and prompt, writes the line and suspends), a dependency still open or an open child
- *    holding it as `stationsPr` holds `implement` (`dependencies`, `children`); and
+ *  Both interactive legs are the owner's session, which Baton neither runs nor waits for inside a
+ *  claim; each one's `close` commits a marker line (R-BTN-83, `prClose`) — `{ticket, leg:
+ *  'converse', reached: 'requested'}` when the design conversation begins, `{ticket, leg:
+ *  'address', reached: 'reviewed'}` when an address round ends in the owner's hands. Both are
+ *  signals, never steps: no posted path ever carries them, so the board sees no path off the graph
+ *  (§2e) and the ticket's path stays where the PR facts put it.
+ *
+ *  A ticket with no PR has not left `requested`, so:
+ *  - no `converse` line, its `converse` is `ready` (a claim runs it: it prints the session's
+ *    command and prompt and suspends; its close writes the line), a dependency still open or an
+ *    open child holding it as `stationsPr` holds `implement` (`dependencies`, `children`); and
  *  - such a line, the ticket waits on the `owner` — the sync does not offer `converse` again
  *    while the line stands, so one conversation, not one per sync — until its PR lands and the
- *    next reading places it at `spec-open`. */
+ *    next reading places it at `spec-open`.
+ *
+ *  An `address` round, once suspended, is the same: `placeOf` reads the ticket's `address` lines
+ *  against its timeline's `address` steps, and one more line than steps means the last round's
+ *  claim ended and its work has not landed — `address` waits on the `owner` until the push lands
+ *  and the timeline's steps catch it up. */
 export function stationsSpec(ctx: {
   tickets: SourceTicket[];
   facts: PrFact[];
@@ -391,8 +436,7 @@ export function stationsSpec(ctx: {
   done?: Set<string>;
   repository?: string | null;
   graph?: PrGraph;
-  /** `.baton/markers.jsonl` as the checkout has it: the start leg's own record that a
-   *  conversation has begun. */
+  /** `.baton/markers.jsonl` as the checkout has it: the interactive legs' own records. */
   // The marker lines the sync parsed (B-96): a structural type, never an import —
   // course-markers.ts is Node code, and this module is type-checked in both hosts.
   markers?: { ticket: string; leg: string; reached: string }[];
@@ -402,28 +446,36 @@ export function stationsSpec(ctx: {
   const patterns = matchPatterns(ctx.branchPatterns);
   const done = ctx.done ?? ctx.closed;
   const bounds: PrBounds = {
-    legs: { open: 'converse', opened: 'spec-open', back: 'address', backTo: 'spec-open' },
-    back: 'address', rounds: graph.legs?.address?.max_runs ?? 3, adjudicates: graph.legs?.adjudicate != null,
+    legs: SPEC_BOUNDS.legs, back: SPEC_BOUNDS.back,
+    rounds: graph.legs?.address?.max_runs ?? SPEC_BOUNDS.rounds, adjudicates: graph.legs?.adjudicate != null,
   };
-  // The tickets whose design conversation has begun: one marker line the leg wrote, for the
-  // ticket, at the station it opened. A malformed line is `parseMarkers`' to skip, never this
-  // function's.
-  const conversed = new Set((ctx.markers ?? []).filter((m) => m.leg === 'converse' && m.reached === 'requested').map((m) => m.ticket));
+  // A malformed line is `parseMarkers`' to skip, never this function's.
+  const marks = specMarkersOf(ctx.markers ?? []);
   for (const t of ctx.tickets) {
     if (ctx.closed.has(t.id)) continue;
-    // As `stationsPr`: a closed unmerged PR counts as none.
+    // A closed unmerged PR counts as none — the same reading as `stationsPr`, and the rule that
+    // takes a conversation's PR closed unmerged back to `requested`: the line still says the
+    // conversation ran, so such a ticket waits on the owner until its spec lands; an `address` PR
+    // so closed leaves the ticket waiting on the owner at its round, exactly as before the close
+    // (closing the PR is not an answer the board can read; the owner re-files or reopens).
     const mine = ctx.facts.filter((f) => f.state !== 'closed' && ticketOwns(t, f, patterns, ctx.repository));
     if (!mine.length) {
       const waiting = t.depends_on.filter((d) => !done.has(d));
       const blocked = waiting.length ? 'dependencies' : t.blocked_by.length ? 'children' : null;
       // A blocked start is `waiting` whatever the conversation did; an unblocked one that has
-      // begun waits on the owner in the session; one that has not is ready for its claim.
-      const wait = blocked ?? (conversed.has(t.id) ? 'owner' : null);
-      stations[t.id] = at('requested', conversed.has(t.id) ? [{ leg: 'converse', reached: 'requested' }] : [],
-        [{ leg: 'converse', state: wait ? 'waiting' : 'ready', waiting_on: wait }]);
+      // begun waits on the owner in the session; one that has not is ready for its claim. The
+      // path stays empty: `converse`'s only outcome is `spec-open`, which no PR has reached.
+      const wait = blocked ?? (marks.conversed.has(t.id) ? 'owner' : null);
+      stations[t.id] = at('requested', [], [{ leg: 'converse', state: wait ? 'waiting' : 'ready', waiting_on: wait }]);
       continue;
     }
-    stations[t.id] = placeOf(together(mine), graph, bounds);
+    const fact = together(mine);
+    const path = timelineOf(fact, bounds.legs);
+    // A suspended address round: the leg's lines outrun the timeline's address steps — the push
+    // that lands the round's work is the next `address` step, and until it appears the round's
+    // claim has ended with its evidence not on the PR.
+    const pending = (marks.addressed.get(t.id) ?? 0) > backRunsOf(path, bounds.legs);
+    stations[t.id] = placeOf(fact, graph, bounds, pending);
   }
   return noMarkers(stations);
 }

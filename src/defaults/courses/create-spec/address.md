@@ -4,11 +4,12 @@ You are running the `address` leg of the `create-spec` course. The last review r
 changes on the ticket's specification, and someone has to decide how each blocking finding is
 answered. Unlike `create-pr`'s `fix`, this is **not** a headless fix: the owner and an agent
 session decide, together, what the specification should say. The ticket's file is
-`$BATON_TICKET_FILE`. This leg ends with the ticket waiting: when you return, Baton's stub closes
-the claim at `reviewed` and the ticket waits on the owner until the amendment lands as a push on
-the PR; the next sync moves it back to `spec-open` and the next round reviews it. `address` runs at
-most three times: after the third round that still asks for changes, the course queues
-`adjudicate` instead, and a fresh reader decides whether what is left reproduces.
+`$BATON_TICKET_FILE`. This leg ends with the ticket waiting: when you return, Baton's `close`
+records the round in the marker file and ends the claim, and the ticket waits on the owner until
+the amendment lands as a push on the PR; the next sync moves it back to `spec-open` and the next
+round reviews it. `address` runs at most three times: after the third round that still asks for
+changes, the course queues `adjudicate` instead, and a fresh reader decides whether what is left
+reproduces.
 
 > **How the stub runs you** — Baton's contract for the `agent_command` author: your command
 > line splits into words as `sh` would (quotes honoured, no substitutions) and executes
@@ -36,6 +37,16 @@ prompt:
 Once Baton launches interactive legs itself, the runner sends the link to the session instead —
 "the runner sends the link once B-34 lands" — and the rules do not change.
 
+## How the ticket waits
+
+**Baton records the round, not you**: when you return, this leg's `close` appends
+`{"ticket": "<the ticket's bare id>","leg":"address","reached":"reviewed"}` to
+`.baton/markers.jsonl`, commits it alone on the default branch, and pushes it. From that line on
+the sync holds `address` **waiting on the owner** — one conversation per round, not one per sync —
+until the amendment's push lands and the ticket moves back to `spec-open`. Do not write, amend or
+delete that line. If the PR is closed without merging, the ticket keeps waiting on the owner:
+closing a PR answers no finding, so the owner reopens it, or files a fresh request.
+
 ## The conversation
 
 *This part is for the owner's interactive session, not for a headless leg.*
@@ -60,11 +71,12 @@ Once Baton launches interactive legs itself, the runner sends the link to the se
   what changed — and ask whether to push. **Only on their yes**: commit on the PR's branch (with
   explicit paths, never `git add -A`; add commits, never rewrite the branch's history), push once
   with every answer in it, reply on the threads you fixed naming the commit, and end the session.
-- Mark the ticket `done`: this leg decides nothing about the ticket. The review round and the
-  merge read the PR — its reviews, their verdicts, the pushes between them — not a field.
 
 ## Do not
 
+- Mark the ticket `done`: this leg decides nothing about the ticket, and the board reads the PR —
+  its reviews, their verdicts, the pushes between them — not a field. The `merge` leg closes the
+  ticket once the PR is merged.
 - Push without the owner's yes, or make a decision the owner reserved for themselves.
 - Skip, disable or weaken a check to get green.
 - Merge, approve or adjudicate the review. Later legs do that.

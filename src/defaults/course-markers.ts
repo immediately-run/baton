@@ -209,26 +209,37 @@ export async function markerClose(
   const line: Marker = { ticket: id, leg: ctx.leg, reached: result.reached, next: result.next ?? null, claim: ctx.claim?.nonce ?? null };
   unionMerge(ctx.checkout, run);
   commitMarker(ctx.checkout, line, run);
+  return pushMarker(ctx.checkout, run);
+}
+
+/** Push the checkout's branch — the default branch, where a marker line is read from — with
+ *  `markerClose`'s one recovery: a push the remote refused because the branch moved is rebased
+ *  onto it and retried, up to `MARKER_PUSH_TRIES` (the checkout merges the markers file by
+ *  union, so two closes racing on it rebase cleanly); a rebase that still stops is aborted,
+ *  leaving the checkout as it was, and any other failure throws at once. Returns the pushed
+ *  commit's sha, the marker's evidence. Every call is bounded (`CLOSE_TIMEOUT_MS`), so a remote
+ *  that stops answering fails the leg in seconds. */
+export async function pushMarker(checkout: string, run: Exec = exec): Promise<string> {
   for (let tries = 1; ; tries++) {
     try {
-      run('git', ['push', 'origin', 'HEAD'], ctx.checkout);
+      run('git', ['push', 'origin', 'HEAD'], checkout);
       break;
     } catch (e) {
       if (!movedOnRemote(e) || tries >= MARKER_PUSH_TRIES) throw e;
     }
-    const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], ctx.checkout);
+    const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], checkout);
     try {
-      run('git', ['pull', '--rebase', 'origin', branch], ctx.checkout);
+      run('git', ['pull', '--rebase', 'origin', branch], checkout);
     } catch (e) {
       try {
-        run('git', ['rebase', '--abort'], ctx.checkout);
+        run('git', ['rebase', '--abort'], checkout);
       } catch {
         // No rebase in progress: the pull failed before starting one.
       }
       throw e;
     }
   }
-  return run('git', ['rev-parse', 'HEAD'], ctx.checkout);
+  return run('git', ['rev-parse', 'HEAD'], checkout);
 }
 
 /** The line that makes git merge the markers file by union (gitattributes(5), `merge=union`). */

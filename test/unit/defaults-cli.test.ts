@@ -1032,20 +1032,69 @@ describe('baton repo init, through the built CLI', () => {
 });
 
 describe('prClose', () => {
-  it('a non-review leg appends its marker line, commits it, and returns the commit sha', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'baton-close-'));
+  /** A bare origin with one commit, and a clone of it — a close's marker is pushed to the
+   *  default branch the sync reads (B-96 review round 1), so it needs a remote to push to. */
+  const withOrigin = (): { root: string; bare: string; dir: string } => {
+    const root = mkdtempSync(join(tmpdir(), 'baton-close-'));
+    const bare = join(root, 'origin.git');
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]);
+    const seed = join(root, 'seed');
+    execFileSync('git', ['clone', '-q', bare, seed], { stdio: 'ignore' });
+    const g = (...a: string[]) => execFileSync('git', ['-C', seed, ...a], { encoding: 'utf8', stdio: 'ignore' });
+    g('config', 'user.email', 't@t');
+    g('config', 'user.name', 't');
+    mkdirSync(join(seed, '.baton'), { recursive: true });
+    g('add', '-A');
+    g('commit', '--allow-empty', '-qm', 'base');
+    g('push', '-q', 'origin', 'main');
+    const dir = join(root, 'clone');
+    execFileSync('git', ['clone', '-q', bare, dir], { stdio: 'ignore' });
+    execFileSync('git', ['-C', dir, 'config', 'user.email', 't@t'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', dir, 'config', 'user.name', 't'], { stdio: 'ignore' });
+    execFileSync('mkdir', ['-p', join(dir, '.baton')]);
+    return { root, bare, dir };
+  };
+
+  it('a marker leg (converse/address) appends its line, commits it, pushes it to the default branch, and returns the pushed commit sha', async () => {
+    const { root, bare, dir } = withOrigin();
     try {
-      gitInit(dir);
-      execFileSync('git', ['-C', dir, 'commit', '--allow-empty', '-qm', 'base'], { stdio: 'ignore' });
-      execFileSync('mkdir', ['-p', join(dir, '.baton')]);
       // The claim's id is repository-qualified; the marker names the ticket as its file does.
-      const sha = await prClose({ checkout: dir, ticket: { id: 'docs:A-1', home: 'docs' }, leg: 'implement', claim: { nonce: 'n1' } }, { reached: 'pr-open', next: 'review' });
+      const sha = await prClose({ checkout: dir, ticket: { id: 'docs:A-1', home: 'docs' }, leg: 'converse', claim: { nonce: 'n1' } }, { reached: 'requested', next: 'converse' });
       expect(sha).toBe(execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());
-      expect(readFileSync(join(dir, '.baton', 'markers.jsonl'), 'utf8')).toBe('{"ticket":"A-1","leg":"implement","reached":"pr-open","next":"review","claim":"n1"}\n');
-      expect(execFileSync('git', ['-C', dir, 'log', '-1', '--format=%s'], { encoding: 'utf8' }).trim()).toBe('baton:close A-1 implement');
+      expect(readFileSync(join(dir, '.baton', 'markers.jsonl'), 'utf8')).toBe('{"ticket":"A-1","leg":"converse","reached":"requested","next":"converse","claim":"n1"}\n');
+      expect(execFileSync('git', ['-C', dir, 'log', '-1', '--format=%s'], { encoding: 'utf8' }).trim()).toBe('baton:close A-1 converse');
       expect(execFileSync('git', ['-C', dir, 'show', '--name-only', '--format=', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('.baton/markers.jsonl');
+      // The line is on the origin's default branch — what a sync reads — not only in the checkout.
+      expect(execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(sha);
+      expect(execFileSync('git', ['-C', bare, 'show', 'main:.baton/markers.jsonl'], { encoding: 'utf8' })).toBe('{"ticket":"A-1","leg":"converse","reached":"requested","next":"converse","claim":"n1"}\n');
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('an ordinary PR-course leg (implement) writes no marker and pushes nothing — its PR is its evidence', async () => {
+    const { root, bare, dir } = withOrigin();
+    try {
+      const before = execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
+      const sha = await prClose({ checkout: dir, ticket: { id: 'docs:A-1', home: 'docs' }, leg: 'implement', claim: { nonce: 'n1' } }, { reached: 'pr-open', next: 'review' });
+      // Its evidence is the head it ran on, unchanged: no baton: commit on the branch and none
+      // on the default branch (round 1: a pushed marker here would move the head past the one
+      // `verify: 'pr'` checked, a change no course asked for).
+      expect(sha).toBe(execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());
+      expect(() => readFileSync(join(dir, '.baton', 'markers.jsonl'), 'utf8')).toThrow();
+      expect(execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(before);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a close whose push the remote declines fails the leg rather than returning an unpushed marker', async () => {
+    const { root, dir } = withOrigin();
+    try {
+      execFileSync('git', ['-C', dir, 'remote', 'set-url', 'origin', join(root, 'nowhere.git')], { stdio: 'ignore' });
+      await expect(prClose({ checkout: dir, ticket: { id: 'A-1' }, leg: 'converse' }, { reached: 'requested', next: 'converse' })).rejects.toThrow('git push');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

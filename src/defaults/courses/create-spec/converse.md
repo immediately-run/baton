@@ -3,11 +3,10 @@
 You are running the `converse` leg of the `create-spec` course: the design conversation that turns
 a ticket's request into **one new specification file** in this repository's pull request. The
 ticket's file is `$BATON_TICKET_FILE`. This leg is **interactive** — the owner is in the session
-with you — and it ends with the ticket waiting: when you return, Baton's stub closes the claim at
-`requested`, the marker line below tells every later sync that the conversation has begun, and the
-ticket sits there waiting on the owner until the conversation's work lands as a PR on the course's
-branch pattern. The next sync then places the ticket at `spec-open` and a fresh claim takes the
-`review` leg.
+with you — and it ends with the ticket waiting: when you return, Baton's `close` writes the marker
+line below at `requested` and ends the claim, and the ticket sits there waiting on the owner until
+the conversation's work lands as a PR on the course's branch pattern. The next sync then places the
+ticket at `spec-open` and a fresh claim takes the `review` leg.
 
 > **How the stub runs you** — Baton's contract for the `agent_command` author: your command
 > line splits into words as `sh` would (quotes honoured, no substitutions) and executes
@@ -21,44 +20,23 @@ branch pattern. The next sync then places the ticket at `spec-open` and a fresh 
 > `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
 > your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95).
 
-## Before the conversation: mark it begun
+## The marker Baton writes for you
 
 `converse` is the leg that opens the specification's PR, and it runs as the owner's own session —
 a process Baton neither launches nor watches. Its one durable record that the conversation has
-begun is the repository's marker file, `.baton/markers.jsonl`, which every sync already reads
-(`parseMarkers`) and every leg of every marker course already commits. So, **before the owner's
-session starts**, do exactly this, in order:
-
-1. Append this line to `.baton/markers.jsonl` — one JSON object on one line, the ticket id bare
-   (no repository prefix), nothing else on the line:
-
-   ```
-   {"ticket": "<the ticket id>","leg":"converse","reached":"requested","next":"review","claim":null}
-   ```
-
-   With no shell reaching your command, the ticket id is the one in the arguments the stub
-   appends — `<ticket id> <leg> <checkout>` — or the file name `$BATON_TICKET_FILE` names. Write
-   the line with a `sh -c` of your own (or the equivalent in your harness), substituting the id:
-
-   ```
-   sh -c 'printf %s\\n "{\"ticket\":\"'"$TICKET"'\",\"leg\":\"converse\",\"reached\":\"requested\",\"next\":\"review\",\"claim\":null}" >> .baton/markers.jsonl'
-   ```
-
-   Run it in the checkout, with `$TICKET` set to the bare id. The file may not exist yet
-   (`.baton/` does; `repo init` writes it): `>>` creates it.
-2. Commit that file alone — `git add .baton/markers.jsonl` then
-   `git commit --no-gpg-sign -m 'baton:converse <ticket id> requested'` — on the default branch,
-   the branch the sync reads, and push it. A push refused because the branch moved is the marker
-   courses' own race: pull `--rebase` (the checkout merges the file by union) and push again, at
-   most three times; any other refusal fails the leg.
-3. Print the command and the prompt below for the owner, and **return**: Baton's stub ends the
-   claim with `{ suspend: true, reached: 'requested', next: 'converse' }`. Nothing else moves —
-   not the ticket, not the board, not the PR.
+begun is a line in the repository's marker file, `.baton/markers.jsonl`, which every sync reads.
+**Baton writes that line, not you**: when you return, this leg's `close` appends
+`{"ticket": "<the ticket's bare id>","leg":"converse","reached":"requested","next":"review"}` to
+the file, commits it alone on the default branch, and pushes it. Do not write, amend or delete it
+(see `## Do not`).
 
 From that line on, the sync offers `converse` **waiting on the owner** rather than ready, sync
 after sync, until the specification's PR exists: this leg runs once, not once per sync. If the
 owner's session ends before the PR is open, the line stands and the ticket waits; the next
-conversation continues from the branch it pushed, and the reviewer sees one PR either way.
+conversation continues from the branch it pushed, and the reviewer sees one PR either way. If the
+session's PR is closed without merging, the ticket stays waiting on the owner — closing the PR is
+no answer the board can read, and a second `converse` would be a second conversation — so the owner
+reopens that PR, or files a fresh request whose conversation starts from the branch.
 
 ## Starting the conversation
 
@@ -69,8 +47,7 @@ prompt:
 > Follow the `## The conversation` section of `.baton/courses/create-spec/legs/converse.md` in this
 > checkout for ticket `<ticket id>`; its file is named by `BATON_TICKET_FILE`, or under the
 > repository's ticket directory. You and I will design one specification together, then you open
-> its PR. The `.baton/markers.jsonl` line for this ticket is already committed: do not write or
-> amend it.
+> its PR. Do not write the `.baton/markers.jsonl` line for this ticket: Baton's close writes it.
 
 Once Baton launches interactive legs itself, the runner sends the link to the session instead —
 "the runner sends the link once B-34 lands" — and the conversation's rules and where the work
@@ -127,14 +104,15 @@ carries, in an order the corpus already uses:
   default branch, so the sync finds it without a merge — and push that too. Then end the session.
 - **Release the claim**: the leg's stub has to see its agent return. When the PR is open and
   pushed, exit the agent session (the prompt's harness exits on its own: it has nothing left to
-  read). If the owner stops before the PR is open, say so and exit anyway — the ticket waits at
-  `requested`, its marker committed, and nothing is lost: the next conversation continues from the
-  branch.
+  read). If the owner stops before the PR is open, say so and exit anyway — Baton's close commits
+  the marker, the ticket waits at `requested`, and nothing is lost: the next conversation continues
+  from the branch.
 
 ## Do not
 
-- Rewrite, delete or amend the `.baton/markers.jsonl` line: it is what tells the sync the
-  conversation is under way. A second line for this ticket would make a second conversation.
+- Write, amend or delete the `.baton/markers.jsonl` line for this ticket: Baton's `close` writes
+  it, and it is what tells the sync the conversation is under way. A line you add would be a
+  second one, or a second conversation.
 - Open a second PR for the ticket, or rewrite a branch an earlier attempt pushed: continue it.
 - Write code in this session. This course produces a specification; building it is another
   ticket's course.

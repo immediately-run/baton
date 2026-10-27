@@ -2,12 +2,21 @@
 // course file passes R-BTN-69's acceptance; every leg has a stub and shipped instructions; every
 // stub's position is an edge of its course for every answer its agent may give; the instructions
 // carry none of the docs repository's own machinery; `pr` names `create-pr`.
+//
+// B-96's kit (this ticket's Tests): create-spec's shortest route runs green through the real
+// claim, advance and end, and a `changes` verdict routes to `address` — three rounds of it, then
+// `adjudicate`, which the kit's shortest route never reaches: only a fourth `review` after three
+// `address` rounds does (B-96 review round 1, 1-A-1: `review` at 3 refused that fourth
+// `max-runs` and left `adjudicate` unreachable).
 import { describe, it, expect } from 'vitest';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { validateCourse } from '../../src/core/course';
+import { graphOf, onGraph, type Step } from '../../src/core/graph';
+import { checkCourse, shortestRoute, type KitInput } from '../../src/local/testCourse';
 import { APPROVAL_STAGES, BUILT_INS, DEFAULT_COURSE, buildAppWaits, builtIn, scaffoldable } from '../../src/defaults/courses';
-import type { SourceTicket } from '../../src/defaults/tickets-markdown';
+import { CREATE_SPEC_COURSE, stationsSpec, type PrFact, type PrGraph } from '../../src/defaults/course-pr';
+import { ticketsMarkdown, type SourceTicket } from '../../src/defaults/tickets-markdown';
 
 const instructionsDir = (id: string) => join(__dirname, '..', '..', 'src', 'defaults', 'courses', id);
 const tosOf = (to: string | string[]): string[] => (Array.isArray(to) ? to : [to]);
@@ -131,4 +140,84 @@ describe('the standard courses (R-BTN-131)', () => {
       expect(buildAppWaits(ticket('plan', ['A-1-1']), 'verify')).toBe('children');
     });
   });
+
+  describe('create-spec’s kit (B-96)', () => {
+    const KIT: KitInput = {
+      course: 'create-spec', proposed: CREATE_SPEC_COURSE, base: null,
+      proposedVersions: { version: 1, min_worker_version: 1 }, baseVersions: null,
+      legScripts: null, live: null,
+    };
+    /** Where the course's own station function puts a ticket, from the facts and markers it reads
+     *  (the same call the sync and an ejected `sync.mjs` make). */
+    const placed = (fact: PrFact | null, markers: { ticket: string; leg: string; reached: string }[], id = 'A-1') =>
+      stationsSpec({
+        tickets: [ticketOf(id)], facts: fact ? [fact] : [], closed: new Set(), done: new Set(), branchPatterns: ['claude/{ticket}-*'],
+        repository: null, graph: CREATE_SPEC_COURSE as unknown as PrGraph, markers,
+      }).stations[id];
+
+    it('its shortest route is converse → review → merge, and the route runs green through the core’s claim, advance and end', async () => {
+      expect(shortestRoute(graphOf(CREATE_SPEC_COURSE))!.map((s) => `${s.leg}→${s.reached}`)).toEqual(['converse→spec-open', 'review→reviewed', 'merge→merged']);
+      // The kit's whole run: the file accepted by the core, the route claimed leg by leg, ended
+      // done and confirmed by the next post — no violation.
+      expect(await checkCourse(KIT)).toEqual([]);
+    }, 60_000);
+
+    it('a changes verdict routes to address — three rounds of it, then adjudicate, each an edge the core accepts', () => {
+      // The longest path the course allows before adjudicating: the design conversation, then an
+      // address round after each of four changes verdicts — the fourth review is the one that finds
+      // the rounds spent. Every step is an edge, and neither cap is exceeded: the arithmetic that
+      // makes `adjudicate` reachable (B-96 review round 1, 1-A-1).
+      const steps: Step[] = ['converse→spec-open', 'review→reviewed',
+        'address→spec-open', 'review→reviewed', 'address→spec-open', 'review→reviewed',
+        'address→spec-open', 'review→reviewed', 'adjudicate→adjudicated', 'merge→merged']
+        .map((s) => { const [leg, reached] = s.split('→'); return { leg, reached }; });
+      expect(onGraph(graphOf(CREATE_SPEC_COURSE), steps)).toBe(true);
+      const runs = (leg: string) => steps.filter((s) => s.leg === leg).length;
+      expect(runs('review')).toBe(CREATE_SPEC_COURSE.legs.review.max_runs);
+      expect(runs('address')).toBe(CREATE_SPEC_COURSE.legs.address.max_runs);
+      // And the board, given the same rounds as PR facts (four verdicts, a push after each of the
+      // first three, three address markers), places the ticket where the fourth verdict leaves it:
+      // `adjudicate` ready, never a fourth `address`.
+      const reviews = [verdict('changes', 100), verdict('changes', 200), verdict('changes', 300), verdict('changes', 400)];
+      const markers = ['address', 'address', 'address'].map(() => ({ ticket: 'A-1', leg: 'address', reached: 'reviewed' }));
+      expect(placed(factOf(reviews, [150, 250, 350]), markers)).toMatchObject({
+        station: 'reviewed', path: steps.slice(0, 8), next_leg: 'adjudicate', next: [{ leg: 'adjudicate', state: 'ready', waiting_on: null }],
+      });
+    });
+
+    it('a suspended address round is not re-offered: the board holds it waiting on the owner until its push lands', () => {
+      // One changes verdict, one address round claimed and suspended: the leg's close wrote its
+      // marker and no push has landed, so `address` waits on the owner rather than being ready.
+      const changes = factOf([verdict('changes', 100)], []);
+      const marker = [{ ticket: 'A-1', leg: 'address', reached: 'reviewed' }];
+      expect(placed(changes, marker)).toMatchObject({ station: 'reviewed', next: [{ leg: 'address', state: 'waiting', waiting_on: 'owner' }] });
+      // A round whose push landed but whose next verdict has not been posted yet: the ticket is
+      // at `spec-open`, `review` ready — the round is not offered again, and no marker is needed,
+      // because the push itself is the signal the timeline reads.
+      expect(placed(factOf([verdict('changes', 100)], [150]), marker)).toMatchObject({ next: [{ leg: 'review', state: 'ready', waiting_on: null }] });
+    });
+
+    it('the design conversation’s marker is no step: the posted path stays empty, and the ticket waits on the owner', () => {
+      // `converse`'s only outcome is `spec-open`; a marker at `requested` is a signal, so the path
+      // posted with it must be one the graph accepts (`[]`), or every sync logs `off-graph` (B-96
+      // review round 1, 1-A-3).
+      const placedAtRequest = placed(null, [{ ticket: 'A-1', leg: 'converse', reached: 'requested' }]);
+      expect(placedAtRequest).toMatchObject({ station: 'requested', path: [], next_leg: 'converse', next: [{ leg: 'converse', state: 'waiting', waiting_on: 'owner' }] });
+      expect(onGraph(graphOf(CREATE_SPEC_COURSE), placedAtRequest.path)).toBe(true);
+      // No marker: ready for the first claim.
+      expect(placed(null, [])).toMatchObject({ path: [], next: [{ leg: 'converse', state: 'ready', waiting_on: null }] });
+      // The conversation's PR landing moves it, the marker still standing.
+      expect(placed(factOf([], []), [{ ticket: 'A-1', leg: 'converse', reached: 'requested' }])).toMatchObject({ station: 'spec-open', path: [{ leg: 'converse', reached: 'spec-open' }] });
+    });
+  });
+});
+
+const ticketOf = (id: string): SourceTicket => ticketsMarkdown([{ path: `tickets/${id.toLowerCase()}.md`, text: `---\nid: ${id}\ntitle: A\ncourse: create-spec\n---\n` }]).tickets[0];
+
+const verdict = (v: 'approve' | 'changes', at: number): PrFact['reviews'][number] => ({ author: 'r1', state: 'COMMENTED', submittedAt: at, body: `<!-- baton:verdict ${v} -->` });
+
+/** One open PR on the course's branch pattern, its checks green, `pushes` its commits' dates. */
+const factOf = (reviews: PrFact['reviews'], pushes: number[]): PrFact => ({
+  number: 7, head: 'claude/A-1-spec', state: 'open', pushedAt: pushes.at(-1) ?? reviews.at(-1)?.submittedAt ?? 0,
+  ...(pushes.length ? { pushes } : {}), checks: ['success'], reviews,
 });

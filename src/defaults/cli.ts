@@ -750,6 +750,10 @@ function stubSource(b: BuiltIn, course: string, leg: string): string {
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
   const closeFrom = b.reads === 'prs' ? ['prClose', 'pr-close.ts'] : ['markerClose', 'course-markers.ts'];
+  // `prClose` writes its line through the marker courses' own commit and push (course-markers.ts),
+  // so a PR course's close names that module too — one implementation of the push, and of its
+  // rebase-and-retry, for a line the sync must find on the default branch.
+  const closeHelpers = b.reads === 'prs' ? `\nimport { commitMarker, pushMarker } from ${JSON.stringify(source('course-markers.ts'))};` : '';
   const values = ask ? ask.values.join(' or ') : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, ${verify ? 'readFileSync, ' : ''}rmSync, writeFileSync } from 'node:fs';
@@ -767,7 +771,7 @@ const GIT_BOUND_MS = ${CLOSE_TIMEOUT_MS}, GIT_ENV = ${JSON.stringify(GIT_NONINTE
 // reads it from the error (\`e.stderr\`); nothing else of git's rides the log unasked.
 const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
-import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${verify ? `
+import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
 import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
 // The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
 // repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the

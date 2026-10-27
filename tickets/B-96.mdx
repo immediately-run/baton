@@ -26,7 +26,8 @@ the spec."
 **Spec:** §5.8 R-BTN-131 (the standard courses — this is the seventh), §5.2 R-BTN-69
 (course files), §5.3 R-BTN-72 (a wait outside the claim suspends, with its pair), §7.2
 (create-pr's rules over PR facts); `src/defaults/courses.ts` (one table entry),
-`create-pr`'s `stationsPr` reused whole.
+`create-pr`'s `stationsPr` and `placeOf` reused whole for the PR facts, with the graph's leg
+names (`converse`/`address`) and its marker signal beside them.
 
 ### The course, as the owner drew it
 
@@ -61,9 +62,28 @@ PR is a branch-pattern PR like any other; the graph differs, the placement does 
   headless fix: it triggers the second interactive leg — the owner and an agent session
   decide, in conversation, how to answer each blocking finding (fix the spec, argue it,
   or split the ticket), amending the PR; `suspend: true` again; the placement returns
-  the ticket to `spec-open` and the next round reviews. `max_runs` 3 on `address`, then
-  `adjudicate` decides (merge or owner) exactly as create-pr's three-fix limit does.
-- **`merge`** is create-pr's merge leg.
+  the ticket to `spec-open` and the next round reviews. The rounds are `create-pr`'s rule —
+  rounds equal review runs minus one, which is why `create-pr` has `review` 4 and `fix` 2:
+  `address` has `max_runs` 3 and `review` 4, so the fourth review is the one that finds the
+  rounds spent. Then `adjudicate` decides (merge or owner). With `review` at 3 the fourth review
+  would be refused `max-runs` and `adjudicate` could never be reached (B-96's review round 1).
+- **`converse` and `address` are recorded, not hand-written.** Both interactive legs' `close`
+  writes their marker line — `prClose`'s marker half, `commitMarker` plus the marker courses'
+  push (rebase and union-merge retry included) — so the line reaches the default branch the
+  sync reads, and the agent writes nothing. `address`'s line
+  (`{leg: "address", reached: "reviewed"}`) is compared with the timeline's `address` steps: one
+  more line than steps means the round's claim ended and its push has not landed, so `address`
+  waits on the owner rather than being offered again on every sync (a second conversation per
+  sync, the failure `converse`'s marker already prevents). Markers are signals, never steps: the
+  posted path stays empty at `requested` and the PR facts' path after it, so no `off-graph` is
+  logged for a marker.
+- **A PR closed unmerged counts as none**, as in `create-pr` (`stationsPr` reads `f.state !==
+  'closed'`): a `converse` marker with no PR left keeps the ticket waiting on the owner — a second
+  `converse` would be a second conversation, and closing a PR is no answer the board can read — so
+  the owner reopens it or files a fresh request; the same close on `address` leaves the ticket
+  waiting where its round left it.
+- **`merge`** is create-pr's merge leg; it (or the owner) closes the ticket, never the interactive
+  legs.
 
 ### Two stages, one course
 
@@ -82,12 +102,16 @@ when it does.
 
 ### Tests
 
-- The kit: the course file validates; the shortest route — a ticket from `requested`
-  through a suspended converse, a PR appearing, an approving review to a confirmed
-  `merged` — runs green; a `changes` verdict routes to `address`, three rounds to
-  `adjudicate`.
-- S-BTN-n: the scenario that drives it (converse suspends with its pair; the
-  conversation's PR advances the board; the address round-trip).
+- The kit (`test/unit/standard-courses.test.ts`): the course file validates; the shortest
+  route — a ticket from `requested` through a suspended converse, a PR appearing, an
+  approving review to a confirmed `merged` — runs green through the core's own claim,
+  advance and end (`checkCourse`); a `changes` verdict routes to `address`, and four
+  changes verdicts with three `address` rounds reach `adjudicate` — every step an edge,
+  neither cap exceeded; a suspended `address` round (its marker, no push) is placed waiting
+  on the `owner`, not offered again, and the push returns it to `spec-open`.
+- S-BTN-174: the scenario that drives it (converse suspends with its pair; the
+  conversation's PR advances the board; the address round-trip; the second sync after each
+  suspension; no `off-graph` logged; a conversation's PR closed unmerged).
 
 ### Exit criteria
 
