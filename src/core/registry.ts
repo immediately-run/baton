@@ -41,7 +41,7 @@ export interface Repository {
 }
 
 /** A registration as `POST /v1/admin/repositories` takes it (§11), less the owner keys
- *  (R3-1240), checked before anything is written (§10.4). */
+ *  (`registration` in admin.ts), checked before anything is written (§10.4). */
 export interface Registration {
   id: string;
   github: string;
@@ -60,6 +60,30 @@ export interface Registration {
   cut_over: boolean;
 }
 
+/** A registered repository's fields — every field a registration has but the owner keys, which
+ *  live in `repository_owners` (R-BTN-58), above a registration's own (B-91). */
+const REGISTRATION_FIELDS = ['github', 'forge', 'remote', 'web_base', 'ci_identity', 'sync_keys', 'default_branch', 'sync_workflow', 'mirror_workflow', 'weight', 'tiers', 'transcript_repos', 'cut_over'] as const;
+
+/** BATON_REPOSITORIES' entries, each with its checked registration and its place (`at`), for the
+ *  start's three passes over the seed — the registration, its sync keys and its owner keys
+ *  (`Admin.readSeedOwners`, B-91). A value that is not a JSON array, or any malformed entry,
+ *  throws before anything is written, so a broken deploy is seen at once. */
+export function seedEntries(config: Config): { entry: unknown; r: Registration; at: string }[] {
+  const raw = config.BATON_REPOSITORIES;
+  if (!raw) return [];
+  let list: unknown;
+  try {
+    list = JSON.parse(raw);
+  } catch {
+    throw new Error('BATON_REPOSITORIES is not JSON');
+  }
+  if (!Array.isArray(list)) throw new Error('BATON_REPOSITORIES must be a JSON array');
+  return list.map((entry, i) => {
+    const at = `BATON_REPOSITORIES[${i}]`;
+    return { entry, r: checkRegistration(entry, at), at };
+  });
+}
+
 const bad = (field: string, why: string): never => {
   throw new BatonError('invalid-params', `${field}: ${why}`);
 };
@@ -67,7 +91,7 @@ const bad = (field: string, why: string): never => {
 export function checkRegistration(v: unknown, at = 'repository'): Registration {
   if (!v || typeof v !== 'object' || Array.isArray(v)) bad(at, 'must be an object');
   const r = v as Record<string, unknown>;
-  const known = new Set(['id', 'github', 'forge', 'remote', 'web_base', 'ci_identity', 'sync_keys', 'default_branch', 'sync_workflow', 'mirror_workflow', 'weight', 'tiers', 'transcript_repos', 'cut_over']);
+  const known = new Set(['id', ...REGISTRATION_FIELDS, 'owner_keys']);
   for (const k of Object.keys(r)) if (!known.has(k)) bad(`${at}.${k}`, 'unknown field');
   const str = (k: string, re: RegExp) => (typeof r[k] === 'string' && re.test(r[k] as string) ? (r[k] as string) : bad(`${at}.${k}`, `must match ${re}`));
   const tiers = r.tiers === undefined ? DEFAULT_TIERS
@@ -105,6 +129,8 @@ export function checkRegistration(v: unknown, at = 'repository'): Registration {
   const ci = checkCiIdentity(r.ci_identity, forge, syncWorkflow, `${at}.ci_identity`);
   // A GitLab token's issuer is the repository's own instance (round 1, 1-A-3).
   if (ci?.kind === 'gitlab-ci' && typeof webBase === 'string' && new URL(ci.issuer).origin !== new URL(webBase).origin) bad(`${at}.ci_identity.issuer`, "must be the web_base's GitLab instance");
+  // B-91: a seed entry's `owner_keys` (R-BTN-58) ride beside the registration; they are read and
+  // checked by `Admin.readSeedOwners`, the parse the administrator's route applies (admin.ts).
   const keys = r.sync_keys === undefined ? []
     : Array.isArray(r.sync_keys) && r.sync_keys.length <= 4 && r.sync_keys.every((k) => k && typeof k === 'object' && typeof (k as Record<string, unknown>).public_key === 'string' && ['sync', 'mirror'].includes((k as Record<string, unknown>).role as string))
       ? (r.sync_keys as Registration['sync_keys']) : bad(`${at}.sync_keys`, 'must be at most 4 {public_key, role: sync|mirror}');
@@ -224,20 +250,12 @@ export class Registry {
   }
 
   /** BATON_REPOSITORIES at start: each entry not yet known is registered; a known one is left
-   *  as it is. A malformed value throws, so a broken deploy is seen at once. */
+   *  as it is. A malformed value throws, so a broken deploy is seen at once. B-91: an entry's
+   *  `owner_keys` (R-BTN-58) are its repository's first owners — read before this runs and
+   *  written after it by `Admin.readSeedOwners` / `Admin.seedOwners`. */
   seed(config: Config): string[] {
-    const raw = config.BATON_REPOSITORIES;
-    if (!raw) return [];
-    let list: unknown;
-    try {
-      list = JSON.parse(raw);
-    } catch {
-      throw new Error('BATON_REPOSITORIES is not JSON');
-    }
-    if (!Array.isArray(list)) throw new Error('BATON_REPOSITORIES must be a JSON array');
     const added: string[] = [];
-    for (const [i, entry] of list.entries()) {
-      const r = checkRegistration(entry, `BATON_REPOSITORIES[${i}]`);
+    for (const { entry, r } of seedEntries(config)) {
       if (this.rows('SELECT 1 FROM repositories WHERE id = ?', r.id).length) continue;
       this.register(entry, { keysAddedLater: true });
       added.push(r.id);
@@ -298,9 +316,7 @@ export class Registry {
    *  added for its repository; one already serving that repository in that role is left; any other
    *  conflict throws, as a malformed seed does. */
   async seedSyncKeys(config: Config, adminKeys: string[]): Promise<void> {
-    if (!config.BATON_REPOSITORIES) return;
-    for (const [i, entry] of (JSON.parse(config.BATON_REPOSITORIES) as unknown[]).entries()) {
-      const r = checkRegistration(entry, `BATON_REPOSITORIES[${i}]`);
+    for (const { r } of seedEntries(config)) {
       for (const k of r.sync_keys) {
         const fp = (await parseSshKey(k.public_key)).fingerprint;
         const known = this.rows<{ repository_id: string; role: string }>('SELECT repository_id, role FROM sync_keys WHERE fingerprint = ?', fp)[0];

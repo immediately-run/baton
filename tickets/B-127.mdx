@@ -34,8 +34,12 @@ from where), R-BTN-12 (expedite), §7.1 (the board post); B-122 (goals); `docs/s
 ### What to build
 
 1. **Control inputs**: `.baton/**` (`agent_command`, `agent_wrapper`, course sources, overrides,
-   `rank.mjs`, `sync.mjs`), goal files, and the `EXPEDITE` tag. **Decide:** whether ticket
-   `tier` is one (the security model's open decision).
+   `rank.mjs`, `sync.mjs`), goal files, and the `EXPEDITE` tag. **Not ticket `tier`**
+   (decided, the owner, 2026-10-27). A tier routes work by quality, not privilege: a runner
+   granted a higher tier also takes every lower one, so a changed tier sends a ticket to no
+   runner whose credentials it could not already reach through its body (security model,
+   reach 3). Revisit if tiers ever map to different credential sets; barred tags, Baton
+   state, are the tool for keeping work off a runner.
 2. **Signed by an owner.** A control input counts only at a commit carrying a valid SSH signature
    (git's `gpg.format ssh`, the SSHSIG format R-BTN-13 already verifies) by an owner key of that
    repository, for the commit that last changed it. Baton checks this in the sync (CLI side, with

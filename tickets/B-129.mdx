@@ -1,0 +1,133 @@
+---
+title: "B-129 — A pickup asks Baton, not the frontmatter: ticket claim continues a ticket where Baton holds it — its station, leg, PR and branch"
+id: B-129
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1096
+tier: routine
+description: "B-91's duplicate (2026-10-27): a release wrote status: available, prs: [] over open PR #109 while Baton had the ticket at pr-open; the claim script trusted the frontmatter and the session started over. claim reads Baton first and continues the ticket where Baton holds it (station, leg, PR, branch, hand-off), refusing only another live claim; a release cannot drop an open PR; the disagreement is a discrepancy; the docs send agents to Baton's board first."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the B-91 duplicate, 2026-10-27. The owner asked the runner holding B-91 (DeepSeek,
+PR #109, five review rounds) to release its claim. The release wrote `status: available` and,
+by mistake, `prs: []`. #109 was still open. Baton was right all along: its board had B-91 at
+station `pr-open`, the `review` leg ready ("review from pr-open · rank 489"). A Baton-routed
+runner would have been offered that review. The interactive session that picked B-91 up read
+the frontmatter instead, `npm run ticket -- claim` accepted, and it wrote a second
+implementation (11 files, +169) before a local branch-name collision exposed #109. Only the
+git-lock pickup path was fooled.
+
+The owner, 2026-10-27: "I want baton to be robust enough to be able to route around false git
+metadata when baton can be trusted to contain the real ticket history / state."
+
+**Spec:** §2e (stations and paths), R-BTN-81/-85 (history, discrepancies), §9 (the
+branch-holder query), R-BTN-179 (the reads), the vocabulary's **hand-off**. Related: B-120
+(Baton owns the course history, so a git write cannot rewrite it; this ticket is the pickup
+side of the same ruling) and R3-1266 (Baton claims this repository's tickets and
+`scripts/ticket.mjs` goes; the guard below is what Baton's own claim already does, so it
+retires with the script).
+
+### Why
+
+A ticket's frontmatter is written by whoever can push, including a runner that is
+releasing its claim in a hurry. Baton's record of where the ticket stands comes from claims,
+advances and the forge's PR facts, not from that hand-edited field. For any ticket past its
+course's start station, Baton is the better witness. Today the claim script, and an agent
+following `tickets/home.mdx`, consult only the frontmatter, so one wrong `status:` line
+wastes a whole implementation and opens a second PR for one ticket.
+
+### What to build
+
+1. **`ticket claim` asks Baton first, and continues where Baton holds the ticket**
+   (`scripts/ticket.mjs`). Before it writes, it reads the ticket from Baton with the session's key
+   (`-i KEY` or `BATON_KEY_FILE`). It uses the routes that already exist:
+   `GET /v1/repositories/{repo}/board` for the station and ready leg,
+   `GET …/tickets/{ticket}/history` for the path, and the branch-holder query for a branch or PR
+   holding it.
+   - **A ticket past its start station is claimable: the claim is a takeover, not a fresh
+     start.** Moving a ticket's next leg to the session that holds what it needs is normal; B-91
+     itself had to move here because only this machine held the repository owner's key.
+     The claim succeeds and prints Baton's position as the session's starting point:
+     the station, the leg it is ready for, each PR URL, the branch to check out and the last
+     hand-off. It keeps every `prs:` entry and writes any that Baton knows and the frontmatter
+     lost. The session then works that leg on that branch, never `checkout -b` a new one.
+   - **It refuses only another live claim**, the lock Baton holds: a claim whose lease has not
+     ended belongs to its holder until it is released or reaped. The refusal names the holder
+     and when the lease ends.
+   - **Starting over is not a claim flag.** Discarding Baton's position (abandoning the PR,
+     re-implementing from `filed`) is B-120's owner command `baton owner ticket adopt`, a
+     deliberate act of a key holder. The claim never does it silently, and no
+     `--trust-git`-style override exists.
+   - **An unanswered read is undetermined, not "no record".** Baton unreachable, no key,
+     `forbidden`: refuse, naming which, unless `--offline` is passed. A silent fall-through
+     to the frontmatter is the failure this ticket exists to end.
+   - No new core query unless an existing route cannot answer the position or the holder; if
+     one is needed, it is a field on an existing read (R-BTN-179's one-answer rule), and it
+     names its `S-BTN-n` scenario.
+2. **A release cannot drop an open PR.** Releasing a claim with its PR open is normal (B-91's
+   release was right; only its `prs: []` was wrong). `ticket set <id> available` (the release)
+   keeps every `prs:` entry, and the script refuses a write that removes an entry whose PR is
+   still open. Releasing a claim on a PR course is a hand-off to the next claimant: the
+   commit message carries the PR URL, the station and what is left (the hand-off document's
+   content), so the next session reads it at `git log -1 tickets/<id>.mdx`.
+3. **Snapshot side.** A board post whose frontmatter says `available` / `prs: []` while
+   Baton's history has the ticket past its start is a **discrepancy** (R-BTN-85's event with
+   both values) and is listed under Needs you. Under B-120 it does not move the ticket; until
+   B-120 lands, it is at least named. If B-120 has merged, this item is B-120's rule applied
+   to `status`/`prs`; check its implementation covers them, and add the case to its scenario
+   rather than a second writer.
+4. **The agent's first read is Baton's.** `tickets/home.mdx` ("Claiming a ticket") and
+   `CLAUDE.md` say: before claiming, run `node cli/baton.mjs board <repo>` (or
+   `ticket history`) and trust its station over the frontmatter; a ticket at a station past
+   `filed` already has work and a PR to continue: take it over there, on its branch. The wiki's
+   `<NextAvailable />` is labelled as git's view of the board.
+
+### Anti-patterns
+
+- Reading the forge directly (`gh pr list --search <id>`) **instead of** Baton. That is a
+  fine extra check for a human, but Baton must work without GitHub (value 8), and the
+  branch-holder query already maps branches to tickets.
+- Letting the frontmatter win when the two disagree "because git is the ledger". For a
+  ticket's position, the owner's ruling (B-120) puts Baton first.
+- A warning that prints and claims anyway, leaving the session to start from `filed`. The
+  duplicate happened with every signal available; the claim must hand the session Baton's
+  position, not a note about it.
+- Refusing a ticket because it is past its start. Handing a leg to the session that holds its
+  resources is the takeover the factory needs; only another live lease refuses.
+
+### Tests
+
+- `test/unit/ticket-script.test.ts` (node only), against a fake Baton (`node:http`) and a bare
+  git origin. The B-91 replay: frontmatter `available` / `prs: []`, Baton at `pr-open` with
+  `review` ready, no live claim, #109 on `claude/B-91-seed-owner-keys`. `claim` succeeds,
+  prints #109, `pr-open`, `review` and that branch, and its commit writes `prs:` back to
+  #109. The same state with a live claim by another worker refuses, naming the holder and the
+  lease's end. A ticket at its start station with no holder claims as today. Baton unreachable
+  refuses, and claims with `--offline`. `set <id> available` with #109 open succeeds and keeps
+  `prs:`; a write removing #109 while it is open is refused.
+- The discrepancy (item 3): a board post with the false frontmatter logs `discrepancy` with
+  both values and lists the ticket under Needs you. This goes in B-120's scenario if it has
+  landed, otherwise in a new `S-BTN-n` row (both hosts).
+
+### Exit criteria
+
+- [ ] replaying B-91's 2026-10-27 state, `npm run ticket -- claim B-91` takes it over at
+  `pr-open`: it prints PR #109, the `review` leg and the PR's branch, and restores `prs:`
+- [ ] a ticket another live claim holds is refused, naming the holder
+- [ ] a release cannot write `prs: []` over an open PR
+- [ ] the claiming docs send an agent to Baton's board before the frontmatter
+
+### Resources
+
+A Baton key the session can sign with (a granted worker key, or an owner key) for the reads.
+No forge credential, Terraform or human operator is needed.
