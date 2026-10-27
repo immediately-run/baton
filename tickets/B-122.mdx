@@ -55,8 +55,8 @@ written: once, in a pull request the owner reviews. Everything after that is a g
 2. **A goal's open work** is every ticket in `needs` and, transitively, every open ticket
    they `depend_on`, computed by Baton at each accepted board post. `needs` names tickets,
    never projects: a project reference would grow silently as tickets are filed into it.
-   **Decide** whether the repository's ticket check warns when a project a goal draws on
-   gains a ticket the goal does not name (proposed: yes, a warning).
+   No warning when a project a goal draws on gains a ticket the goal does not name: the
+   owner, 2026-10-27, "I don't think we see proof that this warning is required yet."
 3. **The default order** (§6) and **R-BTN-61's merge** gain one step after expedite: a ticket
    in an active goal's open work ranks by its best goal's `priority`, before every ticket in
    no goal. Within a goal, the ticket with the longest chain of open goal work behind it
@@ -69,6 +69,7 @@ written: once, in a pull request the owner reviews. Everything after that is a g
    passes the gates (waiting on review, on a person, on a capability no runner holds).
    `exclusive: true` makes it hard: Baton offers no ticket outside the goal's open work in
    that home while the goal is active. Logged as a goal setting, not a hold per ticket.
+   (`exclusive` accepted by the owner, 2026-10-27.)
 6. **Progress and blocks.** `GET /v1/repositories/{repository}/goals` and the dashboard: per
    goal, its open work and done count, the ready tickets in order, and the blocked ones with
    their blocks (R-BTN-75), so Needs you shows when a goal waits on a person rather than on
