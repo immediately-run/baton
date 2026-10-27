@@ -140,17 +140,21 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
 
   it('a repository that already has owners keeps them; one whose owners all left is seeded again from the entry', async () => {
     const another = await makeKey('ssh-ed25519', 'already-owned');
+    const syncKey = await makeKey('ssh-ed25519', 'seed-as-sync');
     await withCore(async (c) => {
       c.registry.register(OPS);
       await rows(`INSERT INTO repository_owners (repository_id, public_key, fingerprint, added_by, added_at) VALUES ('ops', ?, ?, 'admin:test', 1)`, another.publicKey, another.fingerprint);
       const config = seeded([{ ...OPS, owner_keys: [owner.publicKey] }]);
       await seedOwners(c, config);
       expect(await live()).toEqual([another.publicKey]);
-      // The seeded owner removed by another owner: a later start brings it back, as a deploy does.
+      // Its only owner removed (by an owner, not revoked): the next start owns it from the entry again.
       await rows('UPDATE repository_owners SET removed_at = 2 WHERE fingerprint = ?', another.fingerprint);
-      // The key the seed wrote is a sync key now: it holds one role (R-BTN-57), as a worker's.
-      await c.registry.registerWithKeys({ ...OPS, id: 'heat', github: 'immediately-run/heat', sync_keys: [{ public_key: owner.publicKey, role: 'sync' }] }, 'admin:t', []);
-      await expect(seedOwners(c, config)).rejects.toMatchObject({ code: 'conflict' });
+      await seedOwners(c, config);
+      expect(await live()).toEqual([owner.publicKey.split(' ').slice(0, 2).join(' ')]);
+      // An entry naming a key that is a sync key holds two roles (R-BTN-57): the start stops, nothing written.
+      await c.registry.registerWithKeys({ ...OPS, id: 'heat', github: 'immediately-run/heat', sync_keys: [{ public_key: syncKey.publicKey, role: 'sync' }] }, 'admin:t', []);
+      await rows('UPDATE repository_owners SET removed_at = 3 WHERE repository_id = ?', 'ops');
+      await expect(seedOwners(c, seeded([{ ...OPS, owner_keys: [syncKey.publicKey] }]))).rejects.toMatchObject({ code: 'conflict' });
       expect(await live()).toEqual([]);
     });
   });

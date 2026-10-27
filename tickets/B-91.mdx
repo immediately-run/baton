@@ -101,3 +101,8 @@ _implemented 2026-10-24, main merged in 2026-10-27 — the seed's `owner_keys` (
   second copy of the one-role checks and its regex key validator (`checkOwnerKeys`,
   `seedOwnerKeysOf`) are gone. The start's order is tested in `seed-owners-fresh.test.ts` ("stops
   the start before any entry registers"), which fails if the parse follows the seed.
+- **Round seven** (PR #109): `Registry.seedEntries` is the one read of `BATON_REPOSITORIES` (its
+  named errors), used by the seed, its sync keys and `Admin.readSeedOwners` — a start-level test
+  feeds `x` and `{}` (7-r7-0); `Admin.revokedOwner` is the one revoked-owner query, for `mayOwn`
+  and the seed (7-r7-1); `seed_owners` is `Admin.seedOwnedRepositories`, read by the route alone,
+  and `Admin.view` is main's again (7-r7-5); the re-seed test asserts the re-seed (7-r7-3).

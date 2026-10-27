@@ -122,4 +122,16 @@ describe('the start’s order (B-91)', () => {
     expect(store.exec('SELECT id FROM repositories').toArray()).toEqual([]);
     expect(store.exec('SELECT COUNT(*) AS n FROM repository_owners').toArray()).toEqual([{ n: 0 }]);
   });
+  it('a seed that is not JSON, or not an array, stops the start with its named error (one parse of the seed)', async () => {
+    const admin = await makeKey('ssh-ed25519', 'fresh-json-admin');
+    for (const [raw, why] of [['x', /BATON_REPOSITORIES is not JSON/], ['{}', /BATON_REPOSITORIES must be a JSON array/]] as const) {
+      const { store } = openStore(':memory:');
+      const host = new LocalHost({
+        store, alarm: 'manual',
+        config: { BATON_ORIGIN: ORIGIN, OIDC_ISSUER: '', OIDC_JWKS_URL: '', ACCESS_TEAM_DOMAIN: '', ACCESS_AUD: '', OWNER_EMAILS: '', BATON_REPOSITORIES: raw },
+        adminKeys: { list: () => [admin.publicKey] },
+      });
+      await expect(host.start()).rejects.toThrow(why);
+    }
+  });
 });

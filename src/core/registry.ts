@@ -64,6 +64,26 @@ export interface Registration {
  *  live in `repository_owners` (R-BTN-58), above a registration's own (B-91). */
 const REGISTRATION_FIELDS = ['github', 'forge', 'remote', 'web_base', 'ci_identity', 'sync_keys', 'default_branch', 'sync_workflow', 'mirror_workflow', 'weight', 'tiers', 'transcript_repos', 'cut_over'] as const;
 
+/** BATON_REPOSITORIES' entries, each with its checked registration and its place (`at`), for the
+ *  start's three passes over the seed — the registration, its sync keys and its owner keys
+ *  (`Admin.readSeedOwners`, B-91). A value that is not a JSON array, or any malformed entry,
+ *  throws before anything is written, so a broken deploy is seen at once. */
+export function seedEntries(config: Config): { entry: unknown; r: Registration; at: string }[] {
+  const raw = config.BATON_REPOSITORIES;
+  if (!raw) return [];
+  let list: unknown;
+  try {
+    list = JSON.parse(raw);
+  } catch {
+    throw new Error('BATON_REPOSITORIES is not JSON');
+  }
+  if (!Array.isArray(list)) throw new Error('BATON_REPOSITORIES must be a JSON array');
+  return list.map((entry, i) => {
+    const at = `BATON_REPOSITORIES[${i}]`;
+    return { entry, r: checkRegistration(entry, at), at };
+  });
+}
+
 const bad = (field: string, why: string): never => {
   throw new BatonError('invalid-params', `${field}: ${why}`);
 };
@@ -234,20 +254,8 @@ export class Registry {
    *  `owner_keys` (R-BTN-58) are its repository's first owners — read before this runs and
    *  written after it by `Admin.readSeedOwners` / `Admin.seedOwners`. */
   seed(config: Config): string[] {
-    const raw = config.BATON_REPOSITORIES;
-    if (!raw) return [];
-    let list: unknown;
-    try {
-      list = JSON.parse(raw);
-    } catch {
-      throw new Error('BATON_REPOSITORIES is not JSON');
-    }
-    if (!Array.isArray(list)) throw new Error('BATON_REPOSITORIES must be a JSON array');
     const added: string[] = [];
-    // Every entry is checked before anything is written (B-91): a malformed second entry leaves
-    // no half-seeded instance behind the first.
-    const entries = list.map((entry, i) => ({ entry, r: checkRegistration(entry, `BATON_REPOSITORIES[${i}]`) }));
-    for (const { entry, r } of entries) {
+    for (const { entry, r } of seedEntries(config)) {
       if (this.rows('SELECT 1 FROM repositories WHERE id = ?', r.id).length) continue;
       this.register(entry, { keysAddedLater: true });
       added.push(r.id);
@@ -308,9 +316,7 @@ export class Registry {
    *  added for its repository; one already serving that repository in that role is left; any other
    *  conflict throws, as a malformed seed does. */
   async seedSyncKeys(config: Config, adminKeys: string[]): Promise<void> {
-    if (!config.BATON_REPOSITORIES) return;
-    for (const [i, entry] of (JSON.parse(config.BATON_REPOSITORIES) as unknown[]).entries()) {
-      const r = checkRegistration(entry, `BATON_REPOSITORIES[${i}]`);
+    for (const { r } of seedEntries(config)) {
       for (const k of r.sync_keys) {
         const fp = (await parseSshKey(k.public_key)).fingerprint;
         const known = this.rows<{ repository_id: string; role: string }>('SELECT repository_id, role FROM sync_keys WHERE fingerprint = ?', fp)[0];

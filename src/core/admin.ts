@@ -12,7 +12,7 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
-import { checkRegistration, tierPosition, type Registration, type Registry } from './registry';
+import { checkRegistration, seedEntries, tierPosition, type Registration, type Registry } from './registry';
 import { graphOf, resolveLeg, type Graph } from './graph';
 import type { Config, Store } from './ports';
 import { sha256Hex } from './workerApi';
@@ -169,13 +169,17 @@ export class Admin {
     return c ? c.kind : null;
   }
 
+  /** Whether an administrator revoked `fingerprint` as an owner key, on any repository (R-BTN-57):
+   *  the route refuses it (`mayOwn`), the seed skips it (`seedOwners`). */
+  private revokedOwner(fingerprint: string): boolean {
+    return this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND revoked_at IS NOT NULL', fingerprint).length > 0;
+  }
+
   /** Whether `fingerprint` may become an owner of `repository` (null: a new one): no other role
    *  (R-BTN-57), and not an owner key an administrator revoked — another owner never brings it
    *  back (round 1, 1-A-3). Throws `conflict`. */
   private mayOwn(fingerprint: string, admins: Map<string, string>) {
-    if (this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND revoked_at IS NOT NULL', fingerprint).length) {
-      throw new BatonError('conflict', 'this owner key was revoked; its holder needs a new key');
-    }
+    if (this.revokedOwner(fingerprint)) throw new BatonError('conflict', 'this owner key was revoked; its holder needs a new key');
     const role = this.roleOf(fingerprint, admins);
     if (role && role !== 'owner') throw new BatonError('conflict', `this key is already a ${role} key (R-BTN-57: one role per key)`);
   }
@@ -308,11 +312,8 @@ export class Admin {
    *  (`ownerKeys`; at least one where the field is given), so a malformed key stops the start
    *  before any entry registers. `seedOwners` writes what this returns. */
   async readSeedOwners(config: Config): Promise<{ id: string; keys: { fingerprint: string; line: string }[] }[]> {
-    if (!config.BATON_REPOSITORIES) return [];
     const out: { id: string; keys: { fingerprint: string; line: string }[] }[] = [];
-    for (const [i, entry] of (JSON.parse(config.BATON_REPOSITORIES) as unknown[]).entries()) {
-      const at = `BATON_REPOSITORIES[${i}]`;
-      const { id } = checkRegistration(entry, at);
+    for (const { entry, r: { id }, at } of seedEntries(config)) {
       const v = (entry as Record<string, unknown>).owner_keys;
       if (v === undefined) continue;
       const keys = await this.ownerKeys(v, `${at}.owner_keys`);
@@ -338,7 +339,7 @@ export class Admin {
         const write = !this.rows('SELECT 1 FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', id).length
           && !this.rows('SELECT 1 FROM repositories WHERE id = ? AND retired_at IS NOT NULL', id).length;
         for (const key of keys) {
-          if (this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND revoked_at IS NOT NULL', key.fingerprint).length) continue;
+          if (this.revokedOwner(key.fingerprint)) continue;
           this.mayOwn(key.fingerprint, admins);
           if (write) this.insertOwner(id, key, 'admin:seed');
         }
@@ -750,19 +751,22 @@ export class Admin {
     return r ? JSON.parse(r) : null;
   }
 
+  /** `seed_owners` (B-91, R-BTN-179): the unretired repositories whose live owners are all
+   *  BATON_REPOSITORIES' (`admin:seed`), or that have none — the registrations that lean on the
+   *  deploy for their owner keys. `GET /v1/admin/repositories` alone reads it. */
+  seedOwnedRepositories(): string[] {
+    const owners = this.rows<{ repository_id: string; added_by: string }>('SELECT repository_id, added_by FROM repository_owners WHERE removed_at IS NULL');
+    return this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL ORDER BY id')
+      .map((r) => r.id).filter((id) => {
+        const live = owners.filter((o) => o.repository_id === id);
+        return !live.length || live.every((o) => o.added_by === 'admin:seed');
+      });
+  }
+
   /** The dashboard's read-only view (R-BTN-66: no management path but the CLI). */
   view(now: number) {
-    const owners = this.rows<{ repository_id: string; fingerprint: string; added_by: string; added_at: number }>(
-      'SELECT repository_id, fingerprint, added_by, added_at FROM repository_owners WHERE removed_at IS NULL ORDER BY repository_id, added_at');
-    // B-91: a repository whose live owners are all BATON_REPOSITORIES' — or that has none at
-    // all — leans on the deploy for its owner keys, and says so wherever the registry is read.
     return {
-      owners,
-      seed_owners: this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL ORDER BY id')
-        .map((r) => r.id).filter((id) => {
-          const live = owners.filter((o) => o.repository_id === id);
-          return !live.length || live.every((o) => o.added_by === 'admin:seed');
-        }),
+      owners: this.rows('SELECT repository_id, fingerprint, added_by, added_at FROM repository_owners WHERE removed_at IS NULL ORDER BY repository_id, added_at'),
       grants: this.grants(),
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),

@@ -664,12 +664,10 @@ export class BatonCore {
       if (!admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is required (R-BTN-57)');
       const actor = `admin:${fp}`;
       // B-90: the registry, for an operator or an agent with a key — no new query: the same
-      // `uiRepo` rows `/v1/ui/state` lists as its `repositories`. B-91 names the repositories
-      // whose owners are all the seed's in `seed_owners` — computed by the same `Admin.view()`
-      // `uiState` already runs for its limits (`limits.seed_owners`), so this route adds no
-      // query the dashboard does not make; it only lifts the field to the top level.
+      // `uiRepo` rows `/v1/ui/state` lists as its `repositories`. B-91 adds `seed_owners`, the
+      // registrations that lean on the deploy for their owner keys (`Admin.seedOwnedRepositories`).
       if (m === 'GET' && p === '/v1/admin/repositories') {
-        const { seed_owners } = this.admin.view(this.now());
+        const seed_owners = this.admin.seedOwnedRepositories();
         return json({ ...this.adminView(), ...(seed_owners.length ? { seed_owners } : {}) });
       }
       // B-118: what an administrator's dashboard session reads, for the key itself — the same
