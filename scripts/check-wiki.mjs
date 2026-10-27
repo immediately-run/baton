@@ -9,7 +9,8 @@
 // Every page:
 //   - has YAML frontmatter with `title` and `description` (a `_layout.mdx` needs only the latter);
 //   - compiles as MDX — a bare `<word>` or `{word}` in prose fails here, as it would in Grove;
-//   - uses only Grove's built-in components and the ones its bundle's immediately.run.json registers;
+//   - uses only Grove's built-in components and the ones its bundle's immediately.run.json registers,
+//     or — when the marker names a viewer app (opensWith.app, B-114) — the viewer's own;
 //   - has no `import`/`export` and no `{expression}` other than a `{/* comment */}`;
 //   - links ([text](path), [[path]] and [[label|path]]) only to files that exist, relative to the page.
 // In a bundle with an item.schema.json (tickets/), every ticket — a file named like an id, in
@@ -72,6 +73,13 @@ async function checkBundle(root) {
   if (!existsSync(markerPath)) { fail(root, 'no immediately.run.json'); return { pages: 0, tickets: 0 }; }
   const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
   const components = new Set([...GROVE, ...Object.keys(marker.components ?? {})]);
+  // B-114: a wiki whose marker names a VIEWER APP (`opensWith.app`, e.g.
+  // `github:immediately-run/baton-board`) takes its component vocabulary from that app, and
+  // drops the local `components` map — the components are the viewer's code in another
+  // repository, which this check cannot read. The stock Grove names are still known here;
+  // every other PascalCase name is the viewer's to render (a typo in one is the viewer's to
+  // surface at render time, the way a page-level typo used to be this check's).
+  const viewerApp = typeof marker.opensWith?.app === 'string' && marker.opensWith.app !== '';
   const schemaPath = join(root, 'item.schema.json');
   const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, 'utf8')) : null;
   const idPattern = schema && new RegExp(schema.definitions.itemId.pattern);
@@ -108,7 +116,7 @@ async function checkBundle(root) {
 
     walk(processor.parse(body), (node) => {
       const line = node.position?.start.line;
-      if ((node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') && node.name && /^[A-Z]/.test(node.name) && !components.has(node.name)) {
+      if (!viewerApp && (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') && node.name && /^[A-Z]/.test(node.name) && !components.has(node.name)) {
         fail(file, `line ${line}: <${node.name}> is neither a Grove component nor registered in immediately.run.json`);
       }
       if (node.type === 'mdxjsEsm') fail(file, `line ${line}: import/export is not allowed in a page`);
