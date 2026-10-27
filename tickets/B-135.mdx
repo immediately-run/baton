@@ -1,0 +1,58 @@
+---
+title: "B-135 — Baton's production deploy is a human act: a signed tag or a human-only approval, a scoped Cloudflare token, and no secret in the build"
+id: B-135
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1158
+tier: critical
+description: "Adversarial review finding 1 (2026-10-27): a push to baton main deploys production for every tenant with an account-wide Cloudflare token. Production deploys only from a human-only signed tag or approval; main deploys staging; the token is scoped to Baton's Worker; the job holding it installs nothing from the pushed lockfile; the security model gains a compromised-server section. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the adversarial review of the security model (2026-10-27, finding 1), confirmed:
+`.github/workflows/baton-deploy.yml` runs `wrangler deploy` on every push to `main`, with
+`CLOUDFLARE_API_TOKEN` from the `production` environment ("Workers Scripts: Edit on the account").
+The worker identity can push `baton`, which is public, so no push ruleset can protect it. A push
+to `baton` main therefore deploys the server every tenant trusts: its database of keys, grants,
+bars and holds, `BATON_GITHUB_APP_KEY`, the webhook secrets, and every answer runners act on.
+The security model said a push cannot reach Baton's state; through this repository, it can.
+
+**Spec:** R-BTN-55 (the platform shell), §12 and §12.7 (the GitHub App), R3-1207 and R3-1208 (the
+deploy); `docs/security-model.mdx` (reach 0).
+**Depends on:** none.
+
+### What to build
+
+1. **A deploy is a human act.** `baton-deploy.yml` deploys production only from a tag signed by a
+   human-only key (the human-only identity ticket filed with this one), or after an approval in
+   the `production` environment by a reviewer whose credentials no agent session holds. A push to
+   `main` deploys staging only.
+2. **Scope the Cloudflare token** to Baton's Worker scripts and routes, not the account; a second
+   token for staging.
+3. **Build before secrets.** The job that holds `CLOUDFLARE_API_TOKEN` runs no `npm ci` of the
+   pushed lockfile: it deploys an artifact built and checked by an earlier job without the secret,
+   so a poisoned dependency cannot read the token.
+4. **Model a compromised server** in the security model: what runners and owners trust from
+   Baton's answers (claims, snapshot shas, the message of the day, recommendations), what the
+   GitHub App key reaches, and how to recover (rotate the App key, the webhook secrets, the
+   administrator keys; redeploy from a known commit).
+
+### Tests
+
+- A drill on a fork or staging: a push to `main` deploys staging and not production; a production
+  deploy without the signed tag or the human approval is refused.
+
+### Exit criteria
+
+- [ ] production deploys only from the human gate; the drill passes
+- [ ] the Cloudflare token scoped; the build job holds no secret
+- [ ] the security model's reach 0 states the recovery

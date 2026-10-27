@@ -1,0 +1,57 @@
+---
+title: "B-136 — A human-only identity for owner gates: a hardware signing key, an approval account no agent session holds, and sessions on an identity of their own"
+id: B-136
+project: baton
+status: available
+updated: 2026-10-27
+repos:
+  - baton
+  - fieldhouse
+tags:
+  - roadmap-item
+order: 1159
+tier: critical
+description: "Adversarial review finding 3 (2026-10-27): every owner gate (ruleset bypass, code-owner approval, environment approval, owner pusher, owner signature) is passable by the owner's agent sessions, which hold the owner's credentials. A touch-required hardware SSH key signs; approvals come from an account in no session; sessions act as an owner's-agent identity that can propose, not approve. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the adversarial review of the security model (2026-10-27, finding 3): every "owner"
+gate the model proposes can be passed by the owner's own agent sessions, which hold the owner's
+GitHub account and keys. That covers push-ruleset bypass (A), code-owner approval (B, B-130),
+environment approvals, the "owner pusher" check (B-126) and owner signatures (B-127). A
+prompt-injected session (reach 3) passes all of them, and B-127 would mark an injected brief
+signed. Owner gates are not human gates until the human holds something their agents do not.
+
+**Spec:** Fieldhouse Axiom 6 (trust levels) and its Decisions (local sessions hold the owner's
+credentials); BATON_SPEC §11.1 (keys) and R-BTN-58; `docs/security-model.mdx` (*The decision*).
+**Depends on:** none.
+
+### What to build
+
+1. **A human-only signing key**: a hardware-backed SSH key (`sk-ssh-ed25519`, verify-required,
+   touch on every use) registered as the owner's signing key in Baton. No agent session can sign
+   with it, since every signature needs a touch. B-127 and the deploy gate accept only it.
+2. **A human-only approval identity**: approvals that gate merges (B-130's code-owner review),
+   environment deployments and ruleset bypass come from a GitHub account whose token is in no
+   agent session (a separate account, or the owner's account with every session using a
+   different, lesser identity). The account sessions use holds no bypass and is not a code owner.
+3. **Sessions get their own identity.** Interactive agent sessions act as an "owner's agent"
+   GitHub identity and Baton key, below the human: they can propose, not approve. Under Axiom 6
+   this fixes the credential crossing downward that reach 3 exploits.
+4. **B-126 reports the difference**: "owner" means the human-only identity; the session identity
+   is shown as "owner's agent".
+
+### Tests
+
+- A scripted check: the session identity's attempt to approve a ticket PR, approve a deployment or
+  bypass a ruleset is refused by GitHub; a commit signed by any key but the hardware key is
+  `unsigned` to B-127.
+
+### Exit criteria
+
+- [ ] the hardware key registered; the approval identity in place; sessions on their own identity
+- [ ] the check passes; the security model's *The decision* states the separation
