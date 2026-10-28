@@ -355,6 +355,26 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   S-BTN-21 was rewritten and G-BTN-162 added. The 2026-10-14/16 rejection of reservations now
   names future capacity: a seat a running leg holds is a fact the runner states, not a forecast.
 
+- **2026-10-27 to 2026-10-28 — §12.8: the core guarantee (owner direction; B-124, B-127, B-130,
+  B-136, B-137, B-139, B-140).** The owner kept push access to a home as the perimeter of a
+  fleet, but asked for an explicit security model (`docs/security-model.mdx`) and an adversarial
+  review of it, which found 21 problems, five critical: a push to `baton` deploys the server;
+  docs held a repository secret with Administration write; every owner gate was passable by the
+  owner's agent sessions; any runner key could post the board, so client-side checks were the
+  attacker's; the CLI ran from a pushed checkout. Then it was found that `baton repo init` copies a
+  sourced course's leg scripts into the home and runners run those copies, so the source pin bound
+  nothing (B-139). The owner rejected verifying signatures on pushes that had already landed
+  ("counterintuitive to how most software engineers reason about code") and a git proxy (an
+  operational burden for getting started with Fieldhouse), and asked for "a protected main
+  branch … a dedicated runner type, which runs only deterministic code … taking the merge approval
+  logic out of GitHub and placing it into Baton", customisable per course. On courses: "As an
+  initial step and before human in the loop support is built out, I think it makes sense to
+  require these changes to be done outside of Baton." On tickets: "I would like to be able to
+  create tickets in Baton the same way code can be created, but in this case a human approval is
+  necessary." On surfaces: "I want the invoker's credentials (runner, repo owner, baton admin) to
+  make the difference in which operations are available, not the channel." Rules introduced:
+  R-BTN-180–R-BTN-185. The §12 summary gained two bullets; §12.1 the merge runner.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
