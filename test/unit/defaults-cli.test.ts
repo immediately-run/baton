@@ -1102,6 +1102,10 @@ describe('prClose', () => {
     const second = join(root, 'second');
     try {
       execFileSync('git', ['clone', '-q', root + '/origin.git', second], { stdio: 'ignore' });
+      // A fresh clone has no identity of its own: CI has none globally, and its commit must
+      // succeed wherever this runs.
+      execFileSync('git', ['-C', second, 'config', 'user.email', 't@t'], { stdio: 'ignore' });
+      execFileSync('git', ['-C', second, 'config', 'user.name', 't'], { stdio: 'ignore' });
       // The other close lands between this one's fetch and its push: the first push is refused,
       // and the retry re-reads the default branch and appends over the line it found there.
       let refused = 0;
