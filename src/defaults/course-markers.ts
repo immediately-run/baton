@@ -288,9 +288,16 @@ export function markersBranch(checkout: string, named: string | null | undefined
   }
 }
 
-/** `commitMarkerOnDefault`'s temporary index, in the checkout's own git dir: the tree is built
- *  there and nowhere else, so the real index, `HEAD` and the working tree are never touched. */
-export const TMP_INDEX = '.git/baton-marker-index';
+/** `commitMarkerOnDefault`'s temporary index: git's own path for it in this checkout, asked of
+ *  git and never assumed. A linked worktree or a submodule has a `.git` FILE, not a directory,
+ *  so `<checkout>/.git/…` is ENOTDIR there (B-96's review round 3 — and this repository's own
+ *  development checkouts are worktrees). The tree is built there and nowhere else, so the real
+ *  index, `HEAD` and the working tree are never touched. */
+const tmpIndexName = 'baton-marker-index';
+export function tmpIndex(checkout: string, run: Exec = exec): string {
+  const rel = run('git', ['rev-parse', '--git-path', tmpIndexName], checkout).trim();
+  return /^\//.test(rel) ? rel : join(checkout, rel);
+}
 
 /** B-96's review round 2: the line committed on the default branch itself — the checkout's
  *  `HEAD` and working tree are never read or moved.
@@ -317,7 +324,7 @@ export const TMP_INDEX = '.git/baton-marker-index';
 export async function commitMarkerOnDefault(checkout: string, line: Marker, run: Exec = exec, defaultBranch: string = markersBranch(checkout, null, run)): Promise<string> {
   const git = (args: string[], opts: { env?: Record<string, string>; input?: string } = {}): string => run('git', args, checkout, opts);
   const ref = `origin/${defaultBranch}`;
-  const index = join(checkout, TMP_INDEX);
+  const index = tmpIndex(checkout, run);
   const env = { GIT_INDEX_FILE: index };
   try {
     for (let tries = 1; ; tries++) {
@@ -331,7 +338,6 @@ export async function commitMarkerOnDefault(checkout: string, line: Marker, run:
       const tree = git(['write-tree'], { env });
       const commit = git(['commit-tree', tree, '-p', parent, '-m', `baton:close ${line.ticket} ${line.leg}`]);
       try {
-        git(['update-ref', `refs/remotes/${ref}`, commit]);
         git(['push', 'origin', `${commit}:refs/heads/${defaultBranch}`]);
         return commit;
       } catch (e) {
@@ -339,7 +345,10 @@ export async function commitMarkerOnDefault(checkout: string, line: Marker, run:
       }
     }
   } finally {
+    // The index and git's lock for it: a close killed at its timeout leaves the lock, and every
+    // later close in this checkout would fail on it (B-96's review round 3).
     rmSync(index, { force: true });
+    rmSync(`${index}.lock`, { force: true });
   }
 }
 

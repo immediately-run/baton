@@ -68,9 +68,10 @@ PR is a branch-pattern PR like any other; the graph differs, the placement does 
   rounds spent. Then `adjudicate` decides (merge or owner). With `review` at 3 the fourth review
   would be refused `max-runs` and `adjudicate` could never be reached (B-96's review round 1).
 - **`converse` and `address` are recorded, not hand-written.** Both interactive legs' `close`
-  writes their marker line — `prClose`'s marker half, `commitMarker` plus the marker courses'
-  push (rebase and union-merge retry included) — so the line reaches the default branch the
-  sync reads, and the agent writes nothing. `address`'s line
+  writes their marker line — `prClose`'s marker half, git plumbing that commits on the DEFAULT
+  branch itself (fetch, append over the fetched file, temp-index tree, `commit-tree`, push) — so
+  the line reaches the branch the sync reads however the checkout's `HEAD` was left, and the
+  agent writes nothing. `address`'s line
   (`{leg: "address", reached: "reviewed"}`) is compared with the timeline's `address` steps: one
   more line than steps means the round's claim ended and its push has not landed, so `address`
   waits on the owner rather than being offered again on every sync (a second conversation per

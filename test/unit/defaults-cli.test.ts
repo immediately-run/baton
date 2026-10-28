@@ -1082,6 +1082,21 @@ describe('prClose', () => {
     }
   });
 
+  it('a marker close works from a LINKED WORKTREE, where .git is a file: the temp index is git’s own path (round 3)', async () => {
+    const { root, bare, dir } = withOrigin();
+    const wt = join(root, 'wt');
+    try {
+      // A linked worktree of the same repository: `dir` is a real clone; `wt` shares its git dir
+      // through a .git FILE, so `<checkout>/.git/…` is ENOTDIR there.
+      execFileSync('git', ['-C', dir, 'worktree', 'add', '-q', '-b', 'claude/wt-spec', wt], { stdio: 'ignore' });
+      const sha = await prClose({ checkout: wt, ticket: { id: 'A-1' }, leg: 'converse', claim: { nonce: 'wt' } }, { reached: 'requested', next: 'converse' });
+      expect(execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(sha);
+      expect(execFileSync('git', ['-C', bare, 'show', 'main:.baton/markers.jsonl'], { encoding: 'utf8' })).toContain('"claim":"wt"');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('a marker close that races another push rewrites the line over the fresh default and keeps both', async () => {
     const { root, dir } = withOrigin();
     const second = join(root, 'second');

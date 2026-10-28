@@ -2127,9 +2127,14 @@ mean (R-BTN-50).
     (`create-spec`'s `converse` and `address`) is the owner's own session, which Baton neither runs
     nor waits for inside a claim; the PR facts alone cannot tell it from one whose work has not
     landed, so the leg's `close` — never the agent — appends a line to `.baton/markers.jsonl` and
-    pushes it to the default branch (`prClose` writes it through `commitMarker` and the marker
-    courses' push, rebase-and-retry included; the id is the ticket's bare local id, never the
-    claim's qualified one). The station function reads the lines beside the PR facts, and each is a
+    pushes it to the default branch. `prClose` writes it through git plumbing, never through the
+    checkout's own branch: fetch the default branch, append the line over the file it fetched (the
+    union merge by construction), build the tree on a temporary index at git's own path for it,
+    `commit-tree` it onto the fetched head and push `<commit>:refs/heads/<default>` — retried whole
+    when the remote moved. So a checkout left on a PR's branch, detached at a claim's snapshot, or
+    itself a linked worktree still reaches the branch a sync reads, and `HEAD`, the index and the
+    working tree are never touched. The id is the ticket's bare local id, never the claim's
+    qualified one; the branch is the claim answer's `default_branch`. The station function reads the lines beside the PR facts, and each is a
     signal, never a step: no posted path carries it, so the board sees no path off the graph (§2e).
     `converse` writes `{ticket, leg: "converse", reached: "requested", next: "review"}` as the
     claim ends before the owner's session starts, so one such line for the ticket means the design
