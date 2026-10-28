@@ -81,6 +81,15 @@ makes a single compromised runner unable to land code alone.
   reviewer identity (and the humans) belong to, so the implementer's approval of a reviewer's push
   does not satisfy "someone other than the pusher".
 
+**After the merge-runner design** (the owner, 2026-10-28; B-140):
+
+- **The second GitHub identity is dropped.** Under B-140 the merge runner reads approvals from
+  Baton's claim records, signed by distinct runner keys and checked for independence (R-BTN-106),
+  and never from PR comments or forge reviews. All runners may share one GitHub identity; what
+  this ticket keeps is independence by Baton key, the routing of review legs, and item 6 (the
+  reviewer never executes code under review). Items 1, 3 and the reviewer-only team are
+  superseded by B-140's protected default branch.
+
 ### Tests
 
 - A scenario (the next free S-BTN number): a runner with only `forge-implementer` is never
