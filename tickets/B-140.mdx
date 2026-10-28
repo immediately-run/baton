@@ -102,6 +102,20 @@ branch).
    runners push, since a workflow pushed to an agent branch runs with them. Every secret, the merge
    runner's included, sits in an environment limited to the default branch.
 
+**Approvals are new Baton state** (the owner, 2026-10-28: "when you wrote approvals come from
+Baton's records, this indicates that Baton must track a new type of state, which is human
+approval"). Specified as R-BTN-186 (baton#134):
+- review approvals, written by the `advance` that ends an approving review leg, bound to its
+  `head_sha` and runner key;
+- human approvals, written only by `baton owner approve <ticket> --head <sha>` signed with a
+  `human_only` key (B-136), the record carrying the signature;
+- an `approvals` table (a migration), exported with the owner state, failing closed when lost;
+- R-BTN-116's person leg, answered in git by any pusher, never counts as a human approval: without
+  this, a runner could commit its own approval.
+
+This is a second exception to git being the ledger, after course history (B-120); the
+implementing PR amends `docs/context/architecture.mdx` and `values.mdx` with it.
+
 ### Tests
 
 - A scenario (the next free S-BTN number): an approved PR outside the protected paths merges at
