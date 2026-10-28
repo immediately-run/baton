@@ -96,7 +96,8 @@ const scalar = (v: string): string => {
   const one = v.replace(/\s+/g, ' ').trim();
   // One quote pair and nothing else: a JSON escape puts backslashes in, which the source keeps
   // (round 3, 3-r1-3: a quoted Windows path came back doubled).
-  const quoted = (t: string) => (t.includes('"') ? "'" + t + "'" : '"' + t + '"');
+  // No quote of its own reaches here (checked above), so one pair of double quotes is enough.
+  const quoted = (t: string) => '"' + t + '"';
   if (!/["']/.test(one)) return /^[:#\s]/.test(one) || /^\[.*\]$/.test(one) || one === '' ? quoted(one) : one;
   if (!one.includes('"')) return '"' + one + '"';
   if (!one.includes("'")) return "'" + one + "'";
@@ -337,7 +338,8 @@ export function requestMain(
       if (v === undefined) throw new Error(`${a} needs a value`);
       return v;
     };
-    // A sentence may start with a dash: everything after `--` is words, never flags.
+    // A sentence may start with a dash: everything after `--` is words, never flags — flags
+    // BEFORE it still apply (round 4, 3-r1-2: `--` used to swallow a later --course).
     if (a === '--') {
       sentence.push(...argv.slice(i + 1));
       break;
@@ -364,7 +366,9 @@ export function requestMain(
   if (!existsSync(root)) throw new Error(`--repo ${root}: no such directory`);
   const top = topOf(root);
   if (top == null) throw new Error(`${resolve(root)} is not a git checkout — \`baton request\` commits the ticket and pushes it, so it needs the repository's checkout`);
-  // A subdirectory of a checkout is that checkout (round 2, 2-r0-6).
+  // A subdirectory of a checkout is that checkout (round 2, 2-r0-6): git resolves -C to the top
+  // level itself, and this is the root the worktree and the push run in.
+  root = top;
   // The caller's checkout answers only what the caller can know (it is a git checkout — above).
   // The course, its `items` and the id prefix are the LANDING tree's word, read in the worktree
   // (round 1, 1-A-2; round 2, 2-r0-1: judging them here both duplicated the check and refused

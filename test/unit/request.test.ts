@@ -183,7 +183,7 @@ describe('baton request: the ticket it files (B-98)', () => {
     expect(parseFrontmatter(atOrigin(dir2, 'tickets/B-1.mdx')!)!).not.toHaveProperty('tier');
   });
 
-  it('the item schema’s keys are exactly what it writes: its required keys, and no key outside its list', () => {
+  it('every key the request writes is one the item schema admits, and the ticket-shaped ones are there', () => {
     const schema = JSON.parse(readFileSync(join(ROOT, 'tickets', 'item.schema.json'), 'utf8')) as { required: string[]; propertyNames: { enum: string[] } };
     const fm = parseFrontmatter(requestFile('B-9', 'create-spec', SENTENCE, 'routine', '2026-10-28'))!;
     // The ticket's own required keys are Baton's wiki's, not every repository's: a request
@@ -216,7 +216,7 @@ describe('baton request: what it refuses (B-98)', () => {
     expect(request(dir, ['--course', 'create-spec', '   ']).threw).toBe('the request is one sentence, in quotes: baton request "<what to do>" --course <id>');
     expect(request(dir, [SENTENCE]).threw).toBe('--course is required: the course the request starts (a course whose course.json says starts_from: request)');
     const bare = repo({ settings: false });
-    expect(request(bare, ['--course', 'create-spec', SENTENCE]).threw).toMatch(/^\/.* has no \.baton\/baton\.json — `baton request` files a ticket into a repository the sync reads/);
+    expect(request(bare, ['--course', 'create-spec', SENTENCE]).threw).toMatch(/^origin\/main has no \.baton\/baton\.json — `baton request` files a ticket into a repository the sync reads/);
   });
 
   it('a directory that is no checkout, and a flag it does not take', () => {
