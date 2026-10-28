@@ -158,7 +158,7 @@ describe('markerClose', () => {
     const refused = Object.assign(new Error('Command failed: git push origin HEAD'), { stderr: ' ! [rejected]        HEAD -> main (fetch first)\nerror: failed to push some refs to \'origin\'' });
     const fake = (onPush: () => void, onPull: () => void = () => {}) => {
       const calls: string[] = [];
-      const run = (_cmd: 'git', args: string[]) => {
+      const run = (_cmd: string, args: string[]): string => {
         calls.push(args[0] === 'rev-parse' ? args.join(' ') : args[0] + (args[1] === '--abort' ? ' --abort' : ''));
         if (args[0] === 'push') onPush();
         if (args[0] === 'pull') onPull();
@@ -167,7 +167,7 @@ describe('markerClose', () => {
       };
       return { calls, run };
     };
-    const close = (run: (cmd: 'git', args: string[]) => string) => markerClose({ checkout: dir, ticket: { id: 'B-1' }, leg: 'trace' }, { reached: 'traced' }, run);
+    const close = (run: (cmd: string, args: string[]) => string) => markerClose({ checkout: dir, ticket: { id: 'B-1' }, leg: 'trace' }, { reached: 'traced' }, run as never);
     try {
       const always = fake(() => { throw refused; });
       await expect(close(always.run)).rejects.toThrow('git push');

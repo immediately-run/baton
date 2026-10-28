@@ -2143,8 +2143,9 @@ mean (R-BTN-50).
     the step and the leg is ready again at `spec-open`. A PR closed unmerged counts as none (as for
     `create-pr`): a `converse` line with no PR keeps the ticket waiting on the owner — closing a PR
     is no answer the board can read, and a second `converse` would be a second conversation, so the
-    owner reopens it or files a fresh request — and the same close on `address` leaves the ticket
-    waiting where its round left it. `create-pr`'s `implement` leaves no marker: it is headless and
+    owner reopens it or files a fresh request. An `address` PR closed unmerged lands the same
+    way — the ticket comes back to `requested` with `converse` waiting on the owner, its marker
+    still there — so a closed spec never becomes a `review` with no PR to read. `create-pr`'s `implement` leaves no marker: it is headless and
     opens its PR inside the claim, so it leaves the PR itself, which `verify: "pr"` refuses a claim
     without.
   - The standard courses declare `error.no-answer` (`interrupt`, `retryable: false`, R-BTN-162).

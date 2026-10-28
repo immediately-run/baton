@@ -57,6 +57,11 @@ const OTHER_PIN = 'immediately-run/baton@abababababababababababababababababababa
 const sourceOf = (course: string) => `github/${SELF.slug}/${SELF.sha}/${course}`;
 const load = async (file: string) => import(`${pathToFileURL(file).href}?t=${Math.random()}`);
 
+/** A scaffolded leg stub's text: which close it routes to is what the stub's source says. */
+const stubSourceOf = (root: string, course: string, leg: string): string =>
+  readFileSync(join(root, '.baton', 'courses', course, 'legs', `${leg}.mjs`), 'utf8');
+
+
 describe('parseSyncArgs', () => {
   it('defaults from the environment, takes its flags, refuses the unknown', () => {
     expect(parseSyncArgs([], { BATON_HOME: '/h', BATON_URL: 'https://b' })).toMatchObject({ root: '/h', url: 'https://b' });
@@ -1055,18 +1060,69 @@ describe('prClose', () => {
     return { root, bare, dir };
   };
 
-  it('a marker leg (converse/address) appends its line, commits it, pushes it to the default branch, and returns the pushed commit sha', async () => {
+  it('a marker leg writes its line on the default branch, from a checkout left on a PR branch: HEAD and the tree untouched', async () => {
     const { root, bare, dir } = withOrigin();
     try {
+      // The checkout is on a PR's branch, as a create-spec leg's often is — the branch the
+      // conversation or an earlier implement left behind.
+      execFileSync('git', ['-C', dir, 'checkout', '-q', '-b', 'claude/spec-A-1'], { stdio: 'ignore' });
+      const headBefore = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      const defaultBefore = execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
       // The claim's id is repository-qualified; the marker names the ticket as its file does.
       const sha = await prClose({ checkout: dir, ticket: { id: 'docs:A-1', home: 'docs' }, leg: 'converse', claim: { nonce: 'n1' } }, { reached: 'requested', next: 'converse' });
-      expect(sha).toBe(execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());
-      expect(readFileSync(join(dir, '.baton', 'markers.jsonl'), 'utf8')).toBe('{"ticket":"A-1","leg":"converse","reached":"requested","next":"converse","claim":"n1"}\n');
-      expect(execFileSync('git', ['-C', dir, 'log', '-1', '--format=%s'], { encoding: 'utf8' }).trim()).toBe('baton:close A-1 converse');
-      expect(execFileSync('git', ['-C', dir, 'show', '--name-only', '--format=', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('.baton/markers.jsonl');
-      // The line is on the origin's default branch — what a sync reads — not only in the checkout.
+      // The marker commit is on the default branch — what a sync reads — and HEAD never moved.
       expect(execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(sha);
+      expect(sha).not.toBe(defaultBefore);
       expect(execFileSync('git', ['-C', bare, 'show', 'main:.baton/markers.jsonl'], { encoding: 'utf8' })).toBe('{"ticket":"A-1","leg":"converse","reached":"requested","next":"converse","claim":"n1"}\n');
+      expect(execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(headBefore);
+      // The checkout's own working tree is not a marker file it did not have.
+      expect(() => readFileSync(join(dir, '.baton', 'markers.jsonl'), 'utf8')).toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a marker close that races another push rewrites the line over the fresh default and keeps both', async () => {
+    const { root, dir } = withOrigin();
+    const second = join(root, 'second');
+    try {
+      execFileSync('git', ['clone', '-q', root + '/origin.git', second], { stdio: 'ignore' });
+      // The other close lands between this one's fetch and its push: the first push is refused,
+      // and the retry re-reads the default branch and appends over the line it found there.
+      let refused = 0;
+      const racing = (cmd: 'git' | 'gh', args: string[], cwd: string, opts?: { env?: Record<string, string>; input?: string }) => {
+        // A push that would be refused once: the competing clone has already pushed.
+        if (args[0] === 'push' && refused === 0) {
+          refused++;
+          execFileSync('git', ['-C', second, 'pull', '-q', '--rebase'], { stdio: 'ignore' });
+          mkdirSync(join(second, '.baton'), { recursive: true });
+          writeFileSync(join(second, '.baton', 'markers.jsonl'), '{"ticket":"Z-9","leg":"converse","reached":"requested","next":"converse","claim":"other"}\n');
+          execFileSync('git', ['-C', second, 'add', '.baton/markers.jsonl'], { stdio: 'ignore' });
+          execFileSync('git', ['-C', second, 'commit', '-q', '--no-gpg-sign', '-m', 'baton:close Z-9 converse'], { stdio: 'ignore' });
+          execFileSync('git', ['-C', second, 'push', '-q', 'origin', 'main'], { stdio: 'ignore' });
+        }
+        return execFileSync(cmd, args, {
+          cwd, encoding: 'utf8',
+          ...(opts?.input != null ? { input: opts.input } : { stdio: ['ignore', 'pipe', 'pipe'] }),
+          ...(opts?.env ? { env: { ...process.env, ...opts.env } } : {}),
+        }).trim();
+      };
+      await prClose({ checkout: dir, ticket: { id: 'A-1' }, leg: 'converse', claim: { nonce: 'mine' } }, { reached: 'requested', next: 'converse' }, racing);
+      const raw = execFileSync('git', ['-C', root + '/origin.git', 'show', 'main:.baton/markers.jsonl'], { encoding: 'utf8' });
+      const lines = raw.trim().split('\n').map((l) => JSON.parse(l) as { ticket: string; claim: string });
+      // Both lines, each once: the union by construction, and no duplicate from the retry.
+      expect(lines.map((l) => l.ticket).sort()).toEqual(['A-1', 'Z-9']);
+      expect(new Set(lines.map((l) => l.claim)).size).toBe(2);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a marker close whose push the remote declines fails the leg rather than returning an unpushed marker', async () => {
+    const { root, dir } = withOrigin();
+    try {
+      execFileSync('git', ['-C', dir, 'remote', 'set-url', 'origin', join(root, 'nowhere.git')], { stdio: 'ignore' });
+      await expect(prClose({ checkout: dir, ticket: { id: 'A-1' }, leg: 'converse' }, { reached: 'requested', next: 'converse' })).rejects.toThrow(/git (push|fetch)/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1083,16 +1139,6 @@ describe('prClose', () => {
       expect(sha).toBe(execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());
       expect(() => readFileSync(join(dir, '.baton', 'markers.jsonl'), 'utf8')).toThrow();
       expect(execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(before);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it('a close whose push the remote declines fails the leg rather than returning an unpushed marker', async () => {
-    const { root, dir } = withOrigin();
-    try {
-      execFileSync('git', ['-C', dir, 'remote', 'set-url', 'origin', join(root, 'nowhere.git')], { stdio: 'ignore' });
-      await expect(prClose({ checkout: dir, ticket: { id: 'A-1' }, leg: 'converse' }, { reached: 'requested', next: 'converse' })).rejects.toThrow('git push');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1527,9 +1573,10 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       expect(await conclude.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ reached: 'concluded', next: null, pr: 'https://github.com/o/site/pull/7' });
       process.env.OUTCOME = 'summary posted';
       expect(await conclude.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ reached: 'concluded', next: null });
-      // A marker course's stub closes with markerClose; a PR course's with prClose.
-      expect(stub.close.name).toBe('markerClose');
-      expect((await load(join(root, '.baton', 'courses', 'review-pr', 'legs', 'conclude.mjs'))).close.name).toBe('prClose');
+      // A marker course's stub closes through markerClose; a PR course's through prClose (the
+      // stub wraps either to hand the default branch in, so the source is what names it).
+      expect(stubSourceOf(root, 'bug-report', 'trace')).toContain('markerClose(closeCtx2(');
+      expect(stubSourceOf(root, 'review-pr', 'conclude')).toContain('prClose(closeCtx2(');
     } finally {
       delete process.env.OUTCOME;
       writeFileSync(instructions, shipped);
@@ -1685,7 +1732,11 @@ export async function run(ctx, standard) {
       const stub = await load(script);
       expect(await stub.run({ ticket: { id: 'A-1' }, checkout: root, snapshot, leg: 'review' })).toEqual({ reached: 'reviewed', next: 'fix', verdict: 'changes' });
       expect(readFileSync(join(root, 'override.ran'), 'utf8')).toBe('review');
-      expect(stub.close.name).toBe('prClose'); // the course's close, whatever the override does
+      // The course's close is what the stub exports, whatever the override adds: the stub
+      // wraps it to hand the default branch in (so its name is 'close'), and the override's
+      // own close is not it.
+      expect(typeof stub.close).toBe('function');
+      expect(readFileSync(script, 'utf8')).toContain('prClose(closeCtx2(');
       // An override exporting no run fails the leg, naming the file.
       writeFileSync(override, 'export const nothing = 1;\n');
       const broken = { sha: commitAll(root) };

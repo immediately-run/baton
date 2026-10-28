@@ -848,6 +848,10 @@ export class Runner {
           claim: { id: claimId, nonce: claim.nonce, station: at },
           leg: legName, run,
           snapshot: { sha: claim.snapshot_sha, path: gitPath, next: nextLegs },
+          // The claim answer names the repository's default branch (R-BTN-34; §5.8's marker
+          // legs, B-96's review round 2): the stub hands it to the close, so a marker line goes
+          // to the branch the sync reads whatever branch this checkout is on.
+          ...(typeof claim.default_branch === 'string' && claim.default_branch !== '' ? { default_branch: claim.default_branch } : {}),
           handoff: handoffUrl, resume, advice,
           checkout: this.o.home, session,
           state: this.o.stateFile, worker: this.state.get().worker_id,
@@ -1011,6 +1015,10 @@ export class Runner {
       // then drains below — the one place the actual local command completing the leg is
       // known (it is resolved at the claim's snapshot, not here).
       ...(this.verbose ? { BATON_VERBOSE: '1' } : {}),
+      // The claim's own `default_branch` (B-96's review round 2): the stub hands it to the
+      // close, so a marker line is committed on the branch the sync reads however the checkout's
+      // HEAD was left — the close runs in this process, after the leg child is gone.
+      ...(typeof ctx.default_branch === 'string' && ctx.default_branch !== '' ? { BATON_DEFAULT_BRANCH: ctx.default_branch } : {}),
     };
     if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} ${basename(script)} (ctx ${basename(ctxPath)})`);
     const child = spawn(process.execPath, [LEG_PROCESS, script, ctxPath, resultPath], {

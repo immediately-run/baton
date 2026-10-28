@@ -48,6 +48,15 @@ class Repo {
   commit(): void {
     execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
     execFileSync('git', ['-C', this.dir, 'commit', '--allow-empty', '-qm', 'step'], { stdio: 'ignore' });
+    // Before a test adds its origin there is none to push to (the fixture's own setup commits).
+    if (this.git('remote').includes('origin')) execFileSync('git', ['-C', this.dir, 'push', '-q', 'origin', 'main'], { stdio: 'ignore' });
+  }
+  /** The checkout as a sync sees it: main, including the marker a close pushed there. The
+   *  marker close commits on the default branch, never on this checkout's HEAD (B-96's review
+   *  round 2), so the sync's fresh checkout of main is what carries it into the tree. */
+  pull(): void {
+    execFileSync('git', ['-C', this.dir, 'fetch', '-q', 'origin'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', this.dir, 'reset', '-q', '--hard', 'origin/main'], { stdio: 'ignore' });
   }
   git(...args: string[]): string {
     return execFileSync('git', ['-C', this.dir, ...args], { encoding: 'utf8' }).trim();
@@ -57,7 +66,8 @@ class Repo {
    *  default branch, which is what the sync reads. The origin is this repository's own bare
    *  clone, so the push is a real one and its commit is what the next sync parses. */
   async close(leg: string, result: { reached: string; next: string | null }): Promise<void> {
-    await prClose({ checkout: this.dir, ticket: { id: 'docs:SPEC-1', home: 'docs' }, leg, claim: { nonce: 'n1' } }, result);
+    await prClose({ checkout: this.dir, ticket: { id: 'docs:SPEC-1', home: 'docs' }, leg, claim: { nonce: 'n1' }, default_branch: 'main' }, result);
+    this.pull();
   }
   /** The markers the checkout's default branch carries, as the sync parses them. */
   markers(): { ticket: string; leg: string; reached: string; next?: string | null; claim?: string | null }[] {

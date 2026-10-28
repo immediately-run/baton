@@ -1,6 +1,6 @@
 # create-spec · adjudicate — reproduce what three rounds left open
 
-You are running the `adjudicate` leg of the `create-spec` course. Three review rounds have run on
+You are running the `adjudicate` leg of the `create-spec` course. Four review rounds have run on
 the ticket's specification, and three address rounds answered them, and the last round still asked
 for changes. The ticket's file is `$BATON_TICKET_FILE`. You decide whether the open blocking
 findings are real. **Print your adjudication as your last line, alone:**
