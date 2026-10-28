@@ -80,29 +80,34 @@ const today = (): string => new Date().toISOString().slice(0, 10);
 export const requestMessage = (id: string, course: string, sentence: string): string =>
   `${id}: request — ${sentence.slice(0, 60).trim()} — ${course}`;
 
-/** A frontmatter value as the markdown source reads it back: a double-quoted JSON string when it
- *  holds anything the one-line, unquoted form would lose (a `: `, a `#`, a leading quote), else
- *  bare. Both are read identically by `parseFrontmatter` (`unquote`), so the file stays a plain
- *  `key: value` page a person can edit. */
-const scalar = (v: string): string => (/^[A-Za-z0-9][^"'\n]*$/.test(v) && !/: |\s#|^\s|\s$/.test(v) ? v : JSON.stringify(v));
+/** A frontmatter value as the markdown source reads it back. `parseFrontmatter`'s `unquote` strips
+ *  ONE surrounding pair of quotes and unescapes nothing, so a JSON-escaped value would come back
+ *  with its backslashes in it (B-98's review round 1). A value with no quote of its own and no
+ *  newline is written bare when that is safe, else in double quotes; a `"`-bearing value goes in
+ *  single quotes; two kinds of quote in one value cannot round-trip this format, so its double
+ *  quotes become curly ones rather than a backslash a person would have to read. */
+const scalar = (v: string): string => {
+  const one = v.replace(/\s+/g, ' ').trim();
+  if (!/["']/.test(one)) return /[:#]/.test(one) || one === '' ? JSON.stringify(one) : one;
+  if (!one.includes('"')) return '"' + one + '"';
+  if (!one.includes("'")) return "'" + one + "'";
+  return '"' + one.replace(/"/g, '\u201d') + '"';
+};
 
 /** The request ticket's file (§2f): the sentence as title and description, the course, `available`,
  *  `tags: [request]`; the body names the course and the command that filed it. */
 export function requestFile(id: string, course: string, sentence: string, tier?: string, date = today()): string {
   return [
     '---',
-    `title: ${JSON.stringify(`${id} — ${sentence}`)}`,
+    `title: ${scalar(`${id} — ${sentence}`)}`,
     `id: ${id}`,
-    'project: baton',
     'status: available',
     `updated: ${date}`,
     'tags:',
     '  - request',
     ...(tier ? [`tier: ${scalar(tier)}`] : []),
     `course: ${scalar(course)}`,
-    `description: ${JSON.stringify(sentence)}`,
-    'topics:',
-    '  - baton',
+    `description: ${scalar(sentence)}`,
     'owns: {}',
     'prs: []',
     'depends_on: []',
@@ -122,16 +127,27 @@ export function nextId(root: string, items: string): string {
   const taken = [items, join(items, 'archive')]
     .filter((sub) => existsSync(join(root, sub)))
     .flatMap((sub) => readdirSync(join(root, sub)))
-    .map((f) => /^B-(\d+)\.mdx$/.exec(f)?.[1])
+    .map((f) => /^[A-Za-z][A-Za-z0-9]*-(\d+)\.mdx$/.exec(f)?.[1])
     .filter((n): n is string => n != null)
     .map(Number);
-  return `B-${Math.max(0, ...taken) + 1}`;
+  // The prefix the repository's own tickets use (`S-`, `T-`, `B-`): the commonest one, else B.
+  const prefixes = [items, join(items, 'archive')]
+    .filter((sub) => existsSync(join(root, sub)))
+    .flatMap((sub) => readdirSync(join(root, sub)))
+    .map((f) => /^([A-Za-z][A-Za-z0-9]*)-\d+\.mdx$/.exec(f)?.[1])
+    .filter((p): p is string => p != null);
+  const counts = new Map<string, number>();
+  for (const p of prefixes) counts.set(p, (counts.get(p) ?? 0) + 1);
+  const prefix = [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0] ?? 'B';
+  return `${prefix}-${Math.max(0, ...taken) + 1}`;
 }
 
 /** Read and judge the checkout before any git runs: the `.baton/baton.json` the request must be
  *  listed in, the course file that must opt in. Each refusal names what to do. */
-export function readRequestPlan(root: string, course: string, sentence: string): RequestPlan {
-  const at = resolve(root);
+export function readRequestPlan(root: string, course: string, sentence: string, at = resolve(root)): RequestPlan {
+  // `at` is the tree judged: the caller's checkout, or the fetched worktree a request is
+  // committed in (B-98's review round 1: the course must be listed and opted in on the branch
+  // the ticket LANDS on, never only on a branch the caller happens to be standing on).
   const settingsPath = join(at, '.baton', 'baton.json');
   if (!existsSync(settingsPath)) throw new Error(`${at} has no .baton/baton.json — \`baton request\` files a ticket into a repository the sync reads; run \`baton repo init\` there first`);
   let settings: BatonJson;
@@ -155,7 +171,7 @@ export function readRequestPlan(root: string, course: string, sentence: string):
   // R-BTN-131 (B-98): the course opts in. An ordinary course keeps its hand-filed tickets — its
   // start leg is written by whoever knows the work, not by one sentence.
   if (graph.starts_from !== REQUEST_ENTRY) {
-    throw new Error(`course ${course} does not start from a request — its course.json carries no starts_from: request; an ordinary course keeps its hand-filed tickets`);
+    throw new Error(`course ${course} does not start from a request — its course.json carries no starts_from: request. An ordinary course keeps its hand-filed tickets; a course that has gained one (create-spec, build-app) refreshes it with \`baton repo init --course ${course} --force\``);
   }
   if (typeof graph.start !== 'string' || typeof graph.start_leg !== 'string') {
     throw new Error(`.baton/courses/${course}/course.json names no start and start_leg`);
@@ -208,8 +224,12 @@ export function fileRequest(plan: RequestPlan, opts: RequestOptions = {}): Filed
       // remote-tracking ref: a stale `origin/main` would have the commit refused as no fast-forward
       // every try, while this is the head the push must extend.
       git(plan.root, 'worktree', 'add', '-q', '--detach', dir, 'FETCH_HEAD');
-      const id = nextId(dir, plan.items);
-      const text = requestFile(id, plan.course, plan.sentence, opts.tier, opts.date);
+      // The landing tree's own word (round 1, 1-A-2): the course must be listed and opted in on
+      // the branch this ticket will be read from, never only on one the caller stands on. The
+      // plan's root is swapped for the worktree for this try.
+      const atHead = readRequestPlan(plan.root, plan.course, plan.sentence, dir);
+      const id = nextId(dir, atHead.items);
+      const text = requestFile(id, atHead.course, plan.sentence, opts.tier, opts.date);
       const message = requestMessage(id, plan.course, plan.sentence);
       const file = join(dir, plan.items, `${id}.mdx`);
       mkdirSync(dirname(file), { recursive: true });
@@ -227,7 +247,12 @@ export function fileRequest(plan: RequestPlan, opts: RequestOptions = {}): Filed
         // Only a push refused because the branch moved is retried: git's `stderr` on a
         // non-fast-forward is its own words for it (`rejected`, `fetch first`). Any other failure
         // (no remote, no permission, a missing branch) is the operator's to fix, and passes up.
-        if (!/non-fast-forward|fetch first|stale info|\[rejected\]/.test(detail)) throw new Error(`the push was refused: ${detail.trim().split('\n').filter((l) => /^(fatal|error):/.test(l)).join('; ') || 'no reason given'}`);
+        // A hook or a protected branch: git says why in its `remote:` / ` ! [remote rejected]`
+        // lines, and those are what the operator needs — not only `failed to push some refs`.
+        if (!/non-fast-forward|fetch first|stale info/.test(detail)) {
+          const why = detail.trim().split('\n').map((l) => l.trim()).filter((l) => l !== '' && !/^To /.test(l) && !/failed to push some refs/.test(l));
+          throw new Error(`the push was refused: ${why.join('; ') || 'no reason given'}`);
+        }
         if (attempt === REQUEST_TRIES) throw new Error(`push refused ${REQUEST_TRIES} times: ${detail.trim().split('\n').at(-1)}`);
         warn(`baton request: ${remote}/${branch()} moved; retrying on the new head (${attempt}/${REQUEST_TRIES})`);
       }
