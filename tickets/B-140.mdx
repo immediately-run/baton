@@ -66,14 +66,22 @@ branch).
      (`merge-base` to head, and the merge result), never from a runner's report.
    It merges only that commit, with the forge's expected-head parameter or a compare-and-swap
    push; a branch that moved since approval is refused, and the ticket goes back to review.
-   **A PR touching a protected path is never merged by the merge runner, with or without
-   approvals** (the owner, 2026-10-28: "The best practice for working on baton courses or custom
-   leg logic is to either push to main directly or manually create a PR. And merge outside of
-   baton."). The leg ends at a station `human-merge`, with a notice naming the protected paths, and
-   the ticket moves on when git shows the human's merge. Baton holds no human-approval record for
-   protected paths: the human lands them, outside Baton, by pushing to the default branch or
-   merging the PR, as the human-only identity (B-136) that the default branch's protection lets
-   through.
+   **Protected paths come in two classes** (the owner, 2026-10-28):
+   - **Control paths** (`.baton/**`, agent configuration, `.github/workflows/**`): **for now, never
+     merged by the merge runner.** "The best practice for working on baton courses or custom leg
+     logic is to either push to main directly or manually create a PR. And merge outside of
+     baton." The leg ends at a station `human-merge`, with a notice naming the paths, and the
+     ticket moves on when git shows the human's merge, made as the human-only identity (B-136)
+     that the default branch's protection lets through. **Later**, once human-in-the-loop support
+     is built, a course may change courses and leg logic with a human approval, under the rule
+     for tickets below; that is a separate decision, not part of this ticket.
+   - **Tickets** (`tickets/**`, goal files): created and edited through Baton courses like code
+     ("Ticket creation is something that is almost certainly performed with assistance of a
+     language model … there may be multiple stages from specification to ticket, potentially with
+     reviews"): `draft-ticket`, and the spec-to-tickets course (B-99). The merge runner lands such a
+     PR only with **a human approval at its exact head**: a person leg (R-BTN-116, `asks: owner`)
+     answered by the human-only identity (B-136), recorded by Baton like any other approval. Until
+     that is available, the PR ends at `human-merge` and a human merges it.
 4. **Customisable per course and per home.** The merge leg's criteria are course data: required
    approvals and from which legs, required checks, the merge strategy (merge, squash, rebase),
    extra protected paths, and an optional deterministic override `legs/merge.run.mjs` that the
