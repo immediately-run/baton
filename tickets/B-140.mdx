@@ -82,6 +82,12 @@ branch).
      PR only with **a human approval at its exact head**: a person leg (R-BTN-116, `asks: owner`)
      answered by the human-only identity (B-136), recorded by Baton like any other approval. Until
      that is available, the PR ends at `human-merge` and a human merges it.
+   - **A leg's own progress** (the owner, 2026-10-28: "a runner branch working on a specific
+     ticket should be able to update its own ticket … to document the ticket's progression"): a
+     claim's branch may change its own ticket file, and no other, without a human approval, when
+     the change only appends after the file's `## Status` heading, with the frontmatter and
+     everything before that heading byte-identical. The merge runner checks it from git, for the
+     one path the claim's ticket names (R-BTN-182, baton#134).
 4. **Customisable per course and per home.** The merge leg's criteria are course data: required
    approvals and from which legs, required checks, the merge strategy (merge, squash, rebase),
    extra protected paths, and an optional deterministic override `legs/merge.run.mjs` that the

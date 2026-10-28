@@ -55,8 +55,11 @@ is that an unauthorised change never lands, not that it lands and is ignored.
      support, a course may change courses with a human approval, as tickets do.
    - **Tickets** (`tickets/**`, goals): created through Baton courses like code (`draft-ticket`,
      spec-to-tickets), with their own stages and reviews. The merge runner lands one only with a
-     human approval at its exact head: a person leg answered by the human-only identity, or, until
-     that exists, a human merging the PR.
+     human approval at its exact head (R-BTN-186), or, until that exists, a human merging the PR.
+     One exception: a claim's branch may append its leg's progress to its own ticket's
+     `## Status` section, frontmatter and everything above untouched, which the merge runner
+     checks from git. The brief and frontmatter stay human-approved, since a brief reads as the
+     owner's instruction.
 3. **Status is Baton's.** Runners never write a ticket's status, claims or course history; those
    live in Baton (R3-1266, B-120). What runners write about tickets is a proposal on a branch,
    landed under rule 2.
