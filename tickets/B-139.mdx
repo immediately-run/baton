@@ -1,0 +1,90 @@
+---
+title: "B-139 — Sourced courses run from their source: homes refer to Baton's legs instead of copying them, the sync refuses copies, runners never run a home's copy"
+id: B-139
+project: baton
+status: available
+updated: 2026-10-28
+repos:
+  - baton
+  - docs
+  - fieldhouse
+  - hq
+tags:
+  - roadmap-item
+order: 1162
+tier: critical
+description: "Found 2026-10-28: baton repo init copies every leg script of a standard course into the home, the runner executes the home's copies, and the sync checks only course.json, so an edited legs/implement.mjs runs on every runner unnoticed and the source pin binds nothing. The owner: refer to Baton's legs when the home has no modifications. Homes hold only the entry and overrides (R-BTN-134 as written); the sync refuses copies; runners load the source's code (their built-in copy at the same commit first, then R-BTN-134's verified fetch); init --prune migrates. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-28: "I'm wondering if we really need to copy the source of each leg,
+if there are no modifications compared to what's in Baton. Can we not just refer to legs defined in
+the Baton repository if there are no modifications in the given home repository?" Found the same
+day while answering whether `.baton/` course files are covered: they are, as policy (security
+model reach 1; A, B-126, B-127, B-130), but the course's source pin does not bind what runs.
+
+**What the spec says** (R-BTN-134): a sourced course's code is the source's, at its pinned commit,
+fetched and checked to be an ancestor of the source's default branch. The home holds only the
+course's entry and its overrides, `legs/<leg>.run.<ext>` and `legs/<leg>.md`; "any other course
+file there beside a `source` fails the sync".
+
+**What the code does:**
+- `baton repo init` copies `course.json`, every `legs/<leg>.mjs` and every `legs/<leg>.md` into the
+  home (`src/defaults/cli.ts`, `scaffold`);
+- the runner executes the home's copies from the snapshot (`src/runner/home.ts`, `loadCourse`);
+- the sync compares only `course.json` with the CLI's built-in copy (`src/defaults/cli.ts:368`);
+- R-BTN-134's source fetching is not built: no reader clones or verifies a source.
+
+So a push that edits `.baton/courses/create-pr/legs/implement.mjs` in any home runs on every runner
+at the next leg, and nothing reports it. The pin to a reviewed Baton commit protects nothing.
+
+**Spec:** R-BTN-134 (a course is what its source names), R-BTN-133 (the verified tree), R-BTN-131
+(the standard courses, overrides), R-BTN-64 and R-BTN-65 (course changes); `docs/security-model.mdx`
+(reach 1). **This is a change in Baton**: it builds the spec as written.
+**Depends on:** none.
+
+### What to build
+
+1. **Refer, don't copy.** A sourced course's home holds its `courses[]` entry and nothing else
+   unless it overrides a leg: `legs/<leg>.run.<ext>` (a run override) or `legs/<leg>.md` (its
+   instructions). `baton repo init` writes no `course.json`, no leg script and no instructions for a
+   sourced course; `--override <leg>` and a new `--instructions <leg>` write the one file asked for.
+   `baton course show <course> [<leg>]` prints the source's graph, scripts and instructions, so a
+   reader can still see what runs.
+2. **The sync refuses copies**, as R-BTN-134 says: any file under `.baton/courses/<course>/` beside a
+   `source`, other than an override, fails the sync naming the file. To migrate, `baton repo init
+   --prune` deletes the copies that are byte-identical to the source's and lists any that differ,
+   which the owners turn into overrides or drop.
+3. **Runners load a sourced course from its source, never from the home**:
+   - **first step**: when the source names `immediately-run/baton` at the runner's own CLI commit,
+     the runner uses its built-in copy of the standard course (what `init` copied from). A source
+     at any other commit ends the claim `released:cannot-finish:capability`, naming both commits,
+     so a runner never runs a course it cannot verify;
+   - **then**: R-BTN-134's fetch, for every reader: one cache clone per source repository, the
+     commit an ancestor of the fetched default branch (never fetched by id), R-BTN-133's read-only
+     verified tree, re-checked on reuse. The built-in shortcut stays as a cache.
+   Overrides and instructions still come from the home's snapshot, as R-BTN-131 says.
+4. **The sync reads the same**: the station function, `course.json` and `entry.json` from the source,
+   not from a home copy.
+5. **The security model** (reach 1) narrows `.baton/` to what a home legitimately holds:
+   `baton.json` (`agent_command`, `agent_wrapper`, the source pins, which can roll a course back to
+   an older Baton commit), the overrides, and the instructions, which are prompts (reach 3).
+
+### Tests
+
+- A scenario (the next free S-BTN number): a home whose `legs/implement.mjs` differs from the
+  source's fails the sync naming the file; a runner given a snapshot that carries such a file runs
+  the source's script, not the home's; a home with only its entry runs the standard course; an
+  override and an instructions file still apply; a source at a commit the runner cannot verify ends
+  the claim `cannot-finish:capability`.
+- `baton repo init` on a fresh repository writes no file under `.baton/courses/<sourced course>/`;
+  `--prune` on a home with byte-identical copies deletes them all.
+
+### Exit criteria
+
+- [ ] the scenario passes on both hosts; `npm test` and `npm run typecheck` green
+- [ ] `baton`, `docs`, `fieldhouse` and `hq` pruned to their entries and overrides
