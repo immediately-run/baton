@@ -48,6 +48,8 @@
     "test/unit/course-markers.test.ts",
     "test/unit/bounded-git.test.ts",
     "test/unit/tickets-check.test.ts",
+    "test/unit/request.test.ts",
+    "test/integration/S-BTN-175.request.test.ts",
     "test/integration/S-BTN-172.ticket-check.test.ts",
     "test/unit/check-wiki-vocabulary.test.ts",
     "test/integration/S-BTN-104.standard-courses.test.ts",

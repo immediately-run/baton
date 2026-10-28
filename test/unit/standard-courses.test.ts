@@ -102,6 +102,23 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(readdirSync(root).filter((d) => existsSync(join(root, d, '.'))).sort()).toEqual(BUILT_INS.map((b) => b.id).sort());
   });
 
+  it('create-spec and build-app carry starts_from: request, and no other course does (B-98)', () => {
+    expect(BUILT_INS.filter((b) => b.course.starts_from !== undefined).map((b) => [b.id, b.course.starts_from])).toEqual([['build-app', 'request'], ['create-spec', 'request']]);
+    for (const b of BUILT_INS) if (b.id !== 'build-app' && b.id !== 'create-spec') expect(b.course).not.toHaveProperty('starts_from');
+    // The course file a repository scaffolds is the built-in's own JSON, so the key is in the file
+    // `baton request` reads from the checkout.
+    expect(JSON.parse(JSON.stringify(CREATE_SPEC_COURSE))).toMatchObject({ starts_from: 'request', start: 'requested', start_leg: 'converse' });
+  });
+
+  it('the core accepts starts_from: request and refuses any other value (B-98, R-BTN-131)', () => {
+    const base = { start: 'a', start_leg: 'b', end: ['z'], stations: { a: { label: 'A' }, z: { label: 'Z' } }, legs: { b: { from: ['a'], to: 'z', label: 'B' } } };
+    expect(validateCourse(base)).toEqual([]);
+    expect(validateCourse({ ...base, starts_from: 'request' })).toEqual([]);
+    for (const bad of ['hand', 'Request', '', 1, null, ['request'], { request: true }]) {
+      expect(validateCourse({ ...base, starts_from: bad }), JSON.stringify(bad)).toEqual([{ rule: 'starts-from', path: 'starts_from', message: 'starts_from, when given, is one of request' }]);
+    }
+  });
+
   it('pr names create-pr for a repository scaffolded before, and is no longer scaffolded', () => {
     expect(builtIn('pr')?.id).toBe('create-pr');
     expect(() => scaffoldable('pr')).toThrow('--course pr: renamed create-pr');

@@ -100,6 +100,14 @@ checkout, run the CLI as `node cli/baton.mjs`.
   `check.depends_line` in `.baton/baton.json` — each ticket's `**Depends on:**` line against its
   `depends_on` (B-111). One `path: message` line per finding, exit 1 with findings; CI runs it on
   `tickets/`.
+- `node cli/baton.mjs request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B]` —
+  start a course whose product is a spec or a ticket — `create-spec`, `build-app` — from one
+  sentence (B-98). Files one request ticket (the sentence as title and description, `course: C`,
+  `tags: [request]`, the next free `B-n`) as one commit pushed straight to the repository's default
+  branch, retrying on a moved head; prints the ticket id and the course's first station. A
+  repository command, not an API call: the push triggers the sync, the board places the ticket, and
+  the next claim starts the course. The course's file must say `starts_from: request`.
+  `docs/standard-courses.mdx` has the pattern.
 - `npm run vendor` — re-copy `baton.mjs`, `vocabulary.mjs` and `sessionUsage.mjs` from a sibling `../docs`
   checkout (or `DOCS_DIR`) and rewrite `src/shared/manifest.json`. Do this in a PR here after
   docs changes any of them.
@@ -117,7 +125,9 @@ lists them, and each folder's `immediately.run.json` opens it with the viewer it
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/home.mdx>.
   A ticket is `tickets/<id>.mdx`. New tickets are `B-n`; tickets that moved here from the
   immediately.run docs roadmap keep their `R3-NNNN` ids. A finished one moves to
-  `tickets/archive/` with `status: done`. Its frontmatter follows `tickets/item.schema.json`;
+  `tickets/archive/` with `status: done`. A ticket on a course whose file says
+  `starts_from: request` — `create-spec`, `build-app` — is usually filed by `baton request`
+  (above), never written by hand. Its frontmatter follows `tickets/item.schema.json`;
   the body is prose for people and agents. The wiki is a plain `render: safe` corpus: its board
   components are the viewer's, `immediately-run/baton-board`, which `tickets/immediately.run.json`
   names in `opensWith` (B-114) — this repository holds no component code for it.
