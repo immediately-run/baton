@@ -87,7 +87,15 @@ A runner executes what the home repository names:
 - a course's `legs/<leg>.run.<ext>` overrides (R-BTN-131) and `rank.mjs` (R-BTN-98), loaded
   from the default branch's head;
 - the course `source` pin, which picks the leg stubs and instructions;
-- a course's `sync.mjs`, run by the sync.
+- a course's `sync.mjs`, run by the sync;
+- **the leg scripts of a sourced course, copied into the home** (found 2026-10-28). The spec
+  (R-BTN-134) says a sourced course's code is the source's, at its pinned and verified commit, and
+  the home holds only overrides. The code does otherwise: `baton repo init` copies every
+  `legs/<leg>.mjs` into the home, the runner executes those copies (`src/runner/home.ts`), and the
+  sync checks only `course.json`. Source fetching is not built. So an edited
+  `.baton/courses/create-pr/legs/implement.mjs` runs on every runner at the next leg, unreported,
+  and the pin to a reviewed Baton commit binds nothing. B-139 makes homes refer to the source
+  instead of copying it, and runners run only the source's code.
 
 So one push runs code on every runner granted on that home, at the next leg. Bounded by the
 runner's level, that is the VM: its keys and the output repositories. **Unless a runner runs
@@ -353,6 +361,7 @@ The options, cheapest first; 9 to 13 cover a privileged session reading what a r
 | 16 | Board posts: `machine_sync` off below the human level, changed paths and signatures computed server-side, per-key limits | a Baton ticket; the setting today | closes reaches 7 and 8 | B-137 |
 | 17 | Owners, administrators and runners run a pinned released CLI, never a working tree | a day | closes the owner-key path in reach 1 | B-138 |
 | 18 | Owner session transcripts masked before archiving and readable at the human level only | a day | closes a credential crossing downward | FLDH-38 |
+| 19 | Sourced courses run from their source: homes refer to Baton's legs instead of copying them; the sync refuses copies; runners never run a home's copy | a Baton ticket; a prune per home | removes the leg scripts from reach 1, leaving `baton.json`, the overrides and the instructions | B-139 |
 
 ## Should runners write the home repository at all?
 
@@ -484,7 +493,8 @@ session on docs is only as trusted as docs' last push.
    - push rulesets on `.claude/**` and `CLAUDE.md` in docs, fieldhouse and hq.
 3. **This week:** options 1, 2 and 3. Keep a copy of the CLAUDE.md rule in `~/.claude/CLAUDE.md`.
 4. **First in Baton and Fieldhouse:** B-135 (the deploy), B-136 (the human-only identity),
-   B-137 (board posts) and B-138 (the pinned CLI). Every owner-gated mitigation below depends on
+   B-137 (board posts), B-138 (the pinned CLI) and B-139 (sourced courses run from their
+   source, the cheapest large cut in reach 1). Every owner-gated mitigation below depends on
    B-136, and B-126 and B-127 depend on B-137.
 5. **With the Sand Pit work:** options 4 and 5, mostly filed already.
 6. **Then:** B-126 and B-127, with goals (B-122) as control inputs from their first version.
@@ -554,6 +564,7 @@ version of this page, five critical. Each is addressed above or in a ticket:
 | 19. G overclaims | medium | G; table; B-126 |
 | 20. The CLAUDE.md rule is pushable | low | interim advice |
 | 21. Smaller points (commit count, R-FH-11 divergence, session levels, option 1's cost, ruleset patterns, plan) | low | throughout |
+| (after the review, 2026-10-28) A sourced course's leg scripts are copied into the home and run from there | critical | reach 1; B-139 |
 
 The review confirmed: leg instructions and `agent_command` come from the snapshot commit, not
 the working tree; push rulesets apply to private and internal repositories and the fork
