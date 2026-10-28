@@ -169,9 +169,9 @@ describe('baton request: the ticket it files (B-98)', () => {
     const read = ticketsMarkdown([{ path: 'B-1.mdx', text }]).tickets[0];
     expect(read.title).toBe(`B-1 — ${sentence}`);
     expect(parseFrontmatter(text)!.description).toBe(sentence);
-    // The quoted page compiles as MDX: its title's `#` and `:` are inside a quoted scalar, and the
-    // body is the sentence as one plain paragraph.
-    expect(text).toContain(`title: ${JSON.stringify(`B-1 — ${sentence}`)}`);
+    // A sentence with no quote of its own is written bare — no JSON backslashes — because the
+    // source splits a field on its FIRST `: ` and reads a `#` on the line as text (1-A-4).
+    expect(text).toContain(`title: B-1 — ${sentence}`);
   });
 
   it('the tier rides when given, and not otherwise', () => {

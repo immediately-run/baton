@@ -60,7 +60,7 @@
 //   baton request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B] [--remote R]
 //                — start a course from one sentence, no hand-written ticket (B-98, R-BTN-131):
 //                files ONE request ticket (the sentence as title and description, course: C,
-//                status available, tags [request], the next free B-n) as one commit pushed
+//                status available, tags [request], the next free id under the repository's own prefix) as one commit pushed
 //                straight to the repository's default branch — --branch, else the checkout's
 //                origin/HEAD, else main — retrying on a moved head. It is a REPOSITORY command,
 //                not an API call: the push triggers the sync, the board places the ticket, and

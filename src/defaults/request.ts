@@ -48,6 +48,8 @@ export interface RequestPlan {
   course: string;
   /** The repository's `items` setting: where the ticket file goes, relative to `root`. */
   items: string;
+  /** The id prefix the landing tree's tickets use, from `ticketPrefix`. */
+  prefix: string;
   /** The course file's start and start leg, for the command's line. */
   start: string;
   startLeg: string;
@@ -55,6 +57,10 @@ export interface RequestPlan {
 
 /** A request as the command writes the file: the id it took at the head it is filed on. */
 export interface Filed {
+  /** The course, and its start station and leg, as the LANDING tree's course file names them. */
+  course: string;
+  start: string;
+  startLeg: string;
   id: string;
   /** The file's content, as the markdown source reads it (tickets-markdown.ts §2f). */
   text: string;
@@ -88,7 +94,7 @@ export const requestMessage = (id: string, course: string, sentence: string): st
  *  quotes become curly ones rather than a backslash a person would have to read. */
 const scalar = (v: string): string => {
   const one = v.replace(/\s+/g, ' ').trim();
-  if (!/["']/.test(one)) return /[:#]/.test(one) || one === '' ? JSON.stringify(one) : one;
+  if (!/["']/.test(one)) return /^[:#\s]/.test(one) || /^\[.*\]$/.test(one) || one === '' ? JSON.stringify(one) : one;
   if (!one.includes('"')) return '"' + one + '"';
   if (!one.includes("'")) return "'" + one + "'";
   return '"' + one.replace(/"/g, '\u201d') + '"';
@@ -121,25 +127,43 @@ export function requestFile(id: string, course: string, sentence: string, tier?:
   ].join('\n');
 }
 
-/** The next free `B-<n>` under a checkout's `<items>/` and `<items>/archive/` — scripts/ticket.mjs's
- *  scan, so a request and `npm run ticket -- new` never take the same id. */
-export function nextId(root: string, items: string): string {
+/** The id prefix a repository's own tickets use: the commonest among the files the markdown
+ *  source would read as tickets (frontmatter carrying an `id:` — a page like `README-2.mdx` is
+ *  not one), else `B` (B-98's review round 2). */
+export function ticketPrefix(root: string, items: string): string {
+  const counts = new Map<string, number>();
+  for (const sub of [items, join(items, 'archive')]) {
+    const dir = join(root, sub);
+    if (!existsSync(dir)) continue;
+    for (const f of readdirSync(dir)) {
+      const m = /^([A-Za-z][A-Za-z0-9]*-)\d+\.mdx$/.exec(f);
+      if (!m) continue;
+      let text: string;
+      try {
+        text = readFileSync(join(dir, f), 'utf8');
+      } catch {
+        continue;
+      }
+      if (!/^---\r?\n[\s\S]*?^id:\s*\S/m.test(text)) continue;
+      const key = m[1].replace(/-$/, '');
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0] ?? 'B';
+}
+
+/** The next free `<prefix>-<n>` across `<items>/` and `<items>/archive/` — the next free NUMBER
+ *  under that prefix only, as scripts/ticket.mjs numbers `B-`, so two id series in one repository
+ *  each keep their own count (round 2, 2-r0-2). */
+export function nextId(root: string, items: string, prefix = ticketPrefix(root, items)): string {
+  const re = new RegExp('^' + prefix + '-(\\d+)\\.mdx$');
   const taken = [items, join(items, 'archive')]
     .filter((sub) => existsSync(join(root, sub)))
     .flatMap((sub) => readdirSync(join(root, sub)))
-    .map((f) => /^[A-Za-z][A-Za-z0-9]*-(\d+)\.mdx$/.exec(f)?.[1])
-    .filter((n): n is string => n != null)
+    .map((f) => re.exec(f)?.[1])
+    .filter((n) => n != null)
     .map(Number);
-  // The prefix the repository's own tickets use (`S-`, `T-`, `B-`): the commonest one, else B.
-  const prefixes = [items, join(items, 'archive')]
-    .filter((sub) => existsSync(join(root, sub)))
-    .flatMap((sub) => readdirSync(join(root, sub)))
-    .map((f) => /^([A-Za-z][A-Za-z0-9]*)-\d+\.mdx$/.exec(f)?.[1])
-    .filter((p): p is string => p != null);
-  const counts = new Map<string, number>();
-  for (const p of prefixes) counts.set(p, (counts.get(p) ?? 0) + 1);
-  const prefix = [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0] ?? 'B';
-  return `${prefix}-${Math.max(0, ...taken) + 1}`;
+  return prefix + '-' + (Math.max(0, ...taken) + 1);
 }
 
 /** Read and judge the checkout before any git runs: the `.baton/baton.json` the request must be
@@ -176,7 +200,8 @@ export function readRequestPlan(root: string, course: string, sentence: string, 
   if (typeof graph.start !== 'string' || typeof graph.start_leg !== 'string') {
     throw new Error(`.baton/courses/${course}/course.json names no start and start_leg`);
   }
-  return { root: at, sentence, course, items: settings.items ?? 'tickets', start: graph.start, startLeg: graph.start_leg };
+  const items = settings.items ?? 'tickets';
+  return { root: at, sentence, course, items, prefix: ticketPrefix(at, items), start: graph.start, startLeg: graph.start_leg };
 }
 
 /** The branch a request lands on: `--branch`, else the checkout's `origin/HEAD`, else `main`. */
@@ -228,19 +253,19 @@ export function fileRequest(plan: RequestPlan, opts: RequestOptions = {}): Filed
       // the branch this ticket will be read from, never only on one the caller stands on. The
       // plan's root is swapped for the worktree for this try.
       const atHead = readRequestPlan(plan.root, plan.course, plan.sentence, dir);
-      const id = nextId(dir, atHead.items);
+      const id = nextId(dir, atHead.items, atHead.prefix);
       const text = requestFile(id, atHead.course, plan.sentence, opts.tier, opts.date);
       const message = requestMessage(id, plan.course, plan.sentence);
-      const file = join(dir, plan.items, `${id}.mdx`);
+      const file = join(dir, atHead.items, `${id}.mdx`);
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, text);
       // The ticket file alone: the worktree is a fresh checkout of the fetched head, so nothing
       // else in it is this request's to commit.
-      git(dir, 'add', '--', `${plan.items}/${id}.mdx`);
+      git(dir, 'add', '--', `${atHead.items}/${id}.mdx`);
       git(dir, 'commit', '-q', '-m', message);
       try {
         git(dir, 'push', '-q', remote, `HEAD:refs/heads/${branch()}`);
-        return { id, text, message };
+        return { id, text, message, course: atHead.course, start: atHead.start, startLeg: atHead.startLeg };
       } catch (e) {
         const said = (e as { status?: unknown; stderr?: string | Uint8Array }).stderr;
         const detail = typeof said === 'string' ? said : said ? new TextDecoder().decode(said) : (e as Error).message;
@@ -306,6 +331,18 @@ export function requestMain(
       if (v === undefined) throw new Error(`${a} needs a value`);
       return v;
     };
+    // A sentence may start with a dash: everything after `--` is words, never flags.
+    if (a === '--') {
+      sentence.push(...argv.slice(i + 1));
+      break;
+    }
+    if (a === '--help' || a === '-h') {
+      log('baton request "<one sentence>" --course <id> [--repo DIR] [--tier T] [--branch B] [--remote R]');
+      log('  files one request ticket on a course whose course.json says starts_from: request, commits');
+      log('  it to the default branch and pushes it: the push starts the sync, the board places the');
+      log('  ticket, the next claim starts the course. -- ends the flags: a sentence may start with -.');
+      return 0;
+    }
     if (a === '--course') course = value();
     else if (a === '--repo') root = value();
     else if (a === '--tier') tier = value();
@@ -319,8 +356,14 @@ export function requestMain(
   const said = sentence.join(' ').replace(/\s+/g, ' ').trim();
   if (!said) throw new Error('the request is one sentence, in quotes: baton request "<what to do>" --course <id>');
   if (!existsSync(root)) throw new Error(`--repo ${root}: no such directory`);
-  if (topOf(root) == null) throw new Error(`${resolve(root)} is not a git checkout — \`baton request\` commits the ticket and pushes it, so it needs the repository's checkout`);
-  const plan = readRequestPlan(root, course, said);
+  const top = topOf(root);
+  if (top == null) throw new Error(`${resolve(root)} is not a git checkout — \`baton request\` commits the ticket and pushes it, so it needs the repository's checkout`);
+  // A subdirectory of a checkout is that checkout (round 2, 2-r0-6).
+  // The caller's checkout answers only what the caller can know (it is a git checkout — above).
+  // The course, its `items` and the id prefix are the LANDING tree's word, read in the worktree
+  // (round 1, 1-A-2; round 2, 2-r0-1: judging them here both duplicated the check and refused
+  // requests the target would have accepted).
+  const plan = { root: top, sentence: said, course, items: 'tickets', prefix: 'B', start: '', startLeg: '' };
   let filed: Filed;
   try {
     filed = fileRequest(plan, { ...(branch ? { branch } : {}), ...(remote ? { remote } : {}), ...(tier ? { tier } : {}), ...(io.date ? { date: io.date } : {}), warn });
@@ -337,6 +380,6 @@ export function requestMain(
     const cause = lines.filter((l) => /^(fatal|error):/.test(l));
     throw new Error(`git in ${resolve(root)}: ${(cause.length ? cause : lines).join('; ') || 'failed'}`);
   }
-  log(`baton request: filed ${filed.id} (course ${plan.course}) — the next claim starts ${plan.startLeg} at ${plan.start}`);
+  log(`baton request: filed ${filed.id} (course ${filed.course}) — the next claim starts ${filed.startLeg} at ${filed.start}`);
   return 0;
 }

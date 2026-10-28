@@ -103,7 +103,7 @@ checkout, run the CLI as `node cli/baton.mjs`.
 - `node cli/baton.mjs request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B]` —
   start a course whose product is a spec or a ticket — `create-spec`, `build-app` — from one
   sentence (B-98). Files one request ticket (the sentence as title and description, `course: C`,
-  `tags: [request]`, the next free `B-n`) as one commit pushed straight to the repository's default
+  `tags: [request]`, the next free id under the repository's own prefix) as one commit pushed straight to the repository's default
   branch, retrying on a moved head; prints the ticket id and the course's first station. A
   repository command, not an API call: the push triggers the sync, the board places the ticket, and
   the next claim starts the course. The course's file must say `starts_from: request`.

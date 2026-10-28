@@ -41,7 +41,7 @@ npx baton request "Decide the export format, so two implementations agree" --cou
 ticket and pushes it:
 
 - `<items>/<ID>.mdx` — `items` from `.baton/baton.json` (default `tickets`), `ID` the next free
-  `B-n` across the folder and its `archive/` — with the sentence as `title` and `description`,
+  id under the repository's own prefix, across the folder and its `archive/` — with the sentence as `title` and `description`,
   `course: <course>`, `status: available` and `tags: [request]`.
 - One commit, `<ID>: request — <the sentence> — <course>`, pushed straight to the default branch —
   `--branch`, else the checkout's `origin/HEAD`, else `main`. It is made in a throwaway worktree at
