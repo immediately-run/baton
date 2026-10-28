@@ -19,6 +19,10 @@ prs: []
 depends_on: []
 ---
 
+> **The specification is BATON_SPEC §12.8 (R-BTN-180 to R-BTN-187, baton#134).** Where this
+> ticket and the spec differ, the spec wins: it was revised through three adversarial reviews
+> after this ticket was written.
+
 **Brief:** the owner, 2026-10-28, on keeping runners from writing Baton's state on every forge and
 on plain git, without a git proxy or per-worker forks: "explore with me the idea of having a
 protected main branch … a dedicated runner type, which runs only deterministic code, picks up
@@ -51,7 +55,7 @@ branch).
    script; it reads git objects and Baton's records only.
 2. **The default branch accepts the merge runner only**, per environment:
    - GitHub, public or private: a branch ruleset restricting updates to the merge runner's
-     identity (a GitHub App or a dedicated user), no bypass for anyone else but the human-only
+     identity (a dedicated GitHub App; GitHub cannot name a user as a bypass actor), no bypass for anyone else but the human-only
      identity (B-136);
    - GitLab: a protected branch, allowed to push and merge: the merge runner;
    - Gitea and Forgejo: a protected branch with the merge runner alone on its whitelist;
@@ -79,7 +83,7 @@ branch).
      ("Ticket creation is something that is almost certainly performed with assistance of a
      language model … there may be multiple stages from specification to ticket, potentially with
      reviews"): `draft-ticket`, and the spec-to-tickets course (B-99). The merge runner lands such a
-     PR only with **a human approval at its exact head**: a person leg (R-BTN-116, `asks: owner`)
+     PR only with **a human approval at its exact head**: a `std:approval@1` attestation (R-BTN-181)
      answered by the human-only identity (B-136), recorded by Baton like any other approval. Until
      that is available, the PR ends at `human-merge` and a human merges it.
    - **A leg's own progress** (the owner, 2026-10-28: "a runner branch working on a specific
@@ -91,7 +95,7 @@ branch).
 4. **Customisable per course and per home.** The merge leg's criteria are course data: required
    approvals and from which legs, required checks, the merge strategy (merge, squash, rebase),
    extra protected paths, and an optional deterministic override `legs/merge.run.mjs` that the
-   merge runner runs in place of the standard criteria. They are read from the default branch (or
+   merge runner runs to add refusals, never to approve (R-BTN-182). They are read from the default branch (or
    the course's source, B-139), so a change to them is itself a change under `.baton/**`, which
    only a human lands: a runner cannot loosen its own merge rules.
 5. **A floor no course removes.** The protected paths include, always, `.baton/**`, `tickets/**`,
@@ -99,10 +103,10 @@ branch).
    held as an owner setting in Baton (R-BTN-66) that courses may extend and never shrink.
 6. **Where it runs**, two supported places:
    - a GitHub Actions workflow on the default branch, triggered by schedule and dispatch, whose
-     credential sits in an environment limited to the default branch with human reviewers on any
-     change to it. Because only the merge runner changes the default branch, and it refuses
+     credential sits in an environment limited to the default branch, without reviewers so it runs
+     unattended (GitHub's reviewers gate every run, not changes). Because only the merge runner changes the default branch, and it refuses
      workflow changes without a human, "default branch only" holds;
-   - a process on a host above the VM level, or the owner's machine in a personal setup
+   - a process in a trust domain of its own; never the owner's machine under `protected`
      (`baton run --role merger`).
 7. **The secrets rule is a precondition** (FLDH-37): no repository-level secrets anywhere the
    runners push, since a workflow pushed to an agent branch runs with them. Every secret, the merge
@@ -110,7 +114,7 @@ branch).
 
 **Approvals are new Baton state** (the owner, 2026-10-28: "when you wrote approvals come from
 Baton's records, this indicates that Baton must track a new type of state, which is human
-approval"). Specified as R-BTN-186 (baton#134):
+approval"). Specified as R-BTN-181, attestations (baton#134):
 - review approvals, written by the `advance` that ends an approving review leg, bound to its
   `head_sha` and runner key;
 - human approvals, written only by `baton owner approve <ticket> --head <sha>` signed with a

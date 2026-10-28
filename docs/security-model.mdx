@@ -45,8 +45,10 @@ The owner, 2026-10-28: one simple model, implemented differently per forge, with
 guarantee everywhere. Engineers reason about protected branches and rejected pushes, so the model
 is that an unauthorised change never lands, not that it lands and is ignored.
 
-1. **Runners propose, the merge runner lands.** Runners write only their own branches. Only the
-   merge runner's identity updates the default branch.
+1. **Runners propose, trusted runners land.** Runners write only their own branches. Only trusted
+   runners (the merge runner first) and the human-only identity update the default branch and
+   tags. The specification is BATON_SPEC §12.8 (baton#134), which supersedes this page where they
+   differ.
 2. **No runner change to Baton's state lands without a human.**
    - **Courses and leg logic** (`.baton/**`, agent configuration, `.github/workflows/**`): for
      now, changed outside Baton. A human pushes to the default branch or merges the PR by hand,
@@ -55,7 +57,7 @@ is that an unauthorised change never lands, not that it lands and is ignored.
      support, a course may change courses with a human approval, as tickets do.
    - **Tickets** (`tickets/**`, goals): created through Baton courses like code (`draft-ticket`,
      spec-to-tickets), with their own stages and reviews. The merge runner lands one only with a
-     human approval at its exact head (R-BTN-186), or, until that exists, a human merging the PR.
+     human approval at its exact head (a `std:approval@1` attestation, R-BTN-181), or, until that exists, a human merging the PR.
      One exception: a claim's branch may append its leg's progress to its own ticket's
      `## Status` section, frontmatter and everything above untouched, which the merge runner
      checks from git. The brief and frontmatter stay human-approved, since a brief reads as the
