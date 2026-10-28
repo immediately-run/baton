@@ -13,10 +13,13 @@ change to Baton, not a change in Baton.</Lede>
 
 ## The ledger and the cache
 
-- **Git is the ledger; the board is a cache.** Every ticket, its evidence and its state
-  live in the repository; Baton's board is rebuilt from it by each sync and can be
-  rebuilt from it at any time. Nothing is true because Baton stored it; Baton stores it
-  because git says it.
+- **Git is the ledger for the work; Baton owns what no push may decide.** Every ticket, its
+  body and its evidence live in the repository, and Baton's board is a cache of them, rebuilt
+  by each sync. Baton owns the rest: claims and leases, each ticket's course history (B-120),
+  attestations (BATON_SPEC R-BTN-181), owner settings and grants. Some of it is duplicated in
+  git for people to read; some of it is in git nowhere, because a push must not be able to
+  write it. Losing it fails closed: work is reviewed and approved again, never restored from
+  git (the owner, 2026-10-28).
 - **One Baton serves a repository.** Two boards for one repository drift and contradict
   (the owner's decision, 2026-10-21); staging deploys the Worker but registers no
   repository production serves.
