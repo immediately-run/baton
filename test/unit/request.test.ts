@@ -199,7 +199,7 @@ describe('baton request: what it refuses (B-98)', () => {
     const dir = repo({ courses: { 'create-pr': GRAPH['create-pr'] }, listed: ['create-pr'] });
     const r = request(dir, ['--course', 'create-pr', SENTENCE]);
     expect(r.code).toBeNull();
-    expect(r.threw).toMatch(/^course create-pr does not start from a request — its course\.json carries no starts_from: request\./);
+    expect(r.threw).toMatch(/^origin\/main: course create-pr does not start from a request — its course\.json carries no starts_from: request\./);
     // Nothing was pushed: the origin's head is the fixture's.
     expect(git(originOf(dir), 'rev-parse', 'main')).toBe(git(dir, 'rev-parse', 'HEAD'));
     expect(atOrigin(dir, 'tickets/B-1.mdx')).toBeNull();
@@ -208,7 +208,7 @@ describe('baton request: what it refuses (B-98)', () => {
   it('a course .baton/baton.json does not list', () => {
     const dir = repo({ courses: { 'create-spec': CREATE_SPEC_COURSE }, listed: ['create-pr'] });
     const r = request(dir, ['--course', 'create-spec', SENTENCE]);
-    expect(r.threw).toBe('course create-spec is not one .baton/baton.json lists (create-pr) — add it to `courses` with `baton repo init --course create-spec`');
+    expect(r.threw).toBe('origin/main: course create-spec is not one .baton/baton.json lists (create-pr) — add it to `courses` with `baton repo init --course create-spec`');
   });
 
   it('an empty sentence, no --course, and no .baton/baton.json', () => {
@@ -348,7 +348,7 @@ describe('baton request: the id, the branch and the push (B-98)', () => {
     // And through the CLI's own path a refusal is the same one line and exit 2.
     const refused = spawnSync(process.execPath, [CLI, 'request', '--course', 'create-pr', SENTENCE], { cwd: repo({ courses: { 'create-pr': GRAPH['create-pr'] } }), encoding: 'utf8' });
     expect(refused.status).toBe(2);
-    expect(refused.stderr).toMatch(/^baton: course create-pr does not start from a request — its course\.json carries no starts_from: request\./);
+    expect(refused.stderr).toMatch(/^baton: origin\/main: course create-pr does not start from a request — its course\.json carries no starts_from: request\./);
     // And the CLI's happy path: the line, exit 0.
     const ok = spawnSync(process.execPath, [CLI, 'request', '--course', 'create-spec', SENTENCE], { cwd: repo(), encoding: 'utf8' });
     expect(ok.status).toBe(0);

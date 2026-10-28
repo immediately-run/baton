@@ -94,7 +94,10 @@ export const requestMessage = (id: string, course: string, sentence: string): st
  *  quotes become curly ones rather than a backslash a person would have to read. */
 const scalar = (v: string): string => {
   const one = v.replace(/\s+/g, ' ').trim();
-  if (!/["']/.test(one)) return /^[:#\s]/.test(one) || /^\[.*\]$/.test(one) || one === '' ? JSON.stringify(one) : one;
+  // One quote pair and nothing else: a JSON escape puts backslashes in, which the source keeps
+  // (round 3, 3-r1-3: a quoted Windows path came back doubled).
+  const quoted = (t: string) => (t.includes('"') ? "'" + t + "'" : '"' + t + '"');
+  if (!/["']/.test(one)) return /^[:#\s]/.test(one) || /^\[.*\]$/.test(one) || one === '' ? quoted(one) : one;
   if (!one.includes('"')) return '"' + one + '"';
   if (!one.includes("'")) return "'" + one + "'";
   return '"' + one.replace(/"/g, '\u201d') + '"';
@@ -168,12 +171,15 @@ export function nextId(root: string, items: string, prefix = ticketPrefix(root, 
 
 /** Read and judge the checkout before any git runs: the `.baton/baton.json` the request must be
  *  listed in, the course file that must opt in. Each refusal names what to do. */
-export function readRequestPlan(root: string, course: string, sentence: string, at = resolve(root)): RequestPlan {
+export function readRequestPlan(root: string, course: string, sentence: string, at = resolve(root), where?: string): RequestPlan {
+  // `where` names the tree in a refusal: a landing read's `at` is a throwaway worktree, useless
+  // to an operator — the branch is what they can act on (round 3, 3-r1-1).
+  const site = where ?? at;
   // `at` is the tree judged: the caller's checkout, or the fetched worktree a request is
   // committed in (B-98's review round 1: the course must be listed and opted in on the branch
   // the ticket LANDS on, never only on a branch the caller happens to be standing on).
   const settingsPath = join(at, '.baton', 'baton.json');
-  if (!existsSync(settingsPath)) throw new Error(`${at} has no .baton/baton.json — \`baton request\` files a ticket into a repository the sync reads; run \`baton repo init\` there first`);
+  if (!existsSync(settingsPath)) throw new Error(`${site} has no .baton/baton.json — \`baton request\` files a ticket into a repository the sync reads; run \`baton repo init\` there first`);
   let settings: BatonJson;
   try {
     settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as BatonJson;
@@ -182,10 +188,10 @@ export function readRequestPlan(root: string, course: string, sentence: string, 
   }
   const listed = (settings.courses ?? []).map((c) => c.id);
   if (!listed.includes(course)) {
-    throw new Error(`course ${course} is not one .baton/baton.json lists (${listed.length ? listed.join(', ') : 'none'}) — add it to \`courses\` with \`baton repo init --course ${course}\``);
+    throw new Error(`${site}: course ${course} is not one .baton/baton.json lists (${listed.length ? listed.join(', ') : 'none'}) — add it to \`courses\` with \`baton repo init --course ${course}\``);
   }
   const courseFile = join(at, '.baton', 'courses', course, 'course.json');
-  if (!existsSync(courseFile)) throw new Error(`.baton/courses/${course}/course.json is missing — run \`baton repo init --course ${course}\``);
+  if (!existsSync(courseFile)) throw new Error(`${site}: .baton/courses/${course}/course.json is missing — run \`baton repo init --course ${course}\``);
   let graph: { starts_from?: unknown; start?: unknown; start_leg?: unknown };
   try {
     graph = JSON.parse(readFileSync(courseFile, 'utf8')) as typeof graph;
@@ -195,7 +201,7 @@ export function readRequestPlan(root: string, course: string, sentence: string, 
   // R-BTN-131 (B-98): the course opts in. An ordinary course keeps its hand-filed tickets — its
   // start leg is written by whoever knows the work, not by one sentence.
   if (graph.starts_from !== REQUEST_ENTRY) {
-    throw new Error(`course ${course} does not start from a request — its course.json carries no starts_from: request. An ordinary course keeps its hand-filed tickets; a course that has gained one (create-spec, build-app) refreshes it with \`baton repo init --course ${course} --force\``);
+    throw new Error(`${site}: course ${course} does not start from a request — its course.json carries no starts_from: request. An ordinary course keeps its hand-filed tickets; a course that has gained one (create-spec, build-app) refreshes it with \`baton repo init --course ${course} --force\``);
   }
   if (typeof graph.start !== 'string' || typeof graph.start_leg !== 'string') {
     throw new Error(`.baton/courses/${course}/course.json names no start and start_leg`);
@@ -252,7 +258,7 @@ export function fileRequest(plan: RequestPlan, opts: RequestOptions = {}): Filed
       // The landing tree's own word (round 1, 1-A-2): the course must be listed and opted in on
       // the branch this ticket will be read from, never only on one the caller stands on. The
       // plan's root is swapped for the worktree for this try.
-      const atHead = readRequestPlan(plan.root, plan.course, plan.sentence, dir);
+      const atHead = readRequestPlan(plan.root, plan.course, plan.sentence, dir, `${remote}/${branch()}`);
       const id = nextId(dir, atHead.items, atHead.prefix);
       const text = requestFile(id, atHead.course, plan.sentence, opts.tier, opts.date);
       const message = requestMessage(id, plan.course, plan.sentence);
