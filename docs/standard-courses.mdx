@@ -23,12 +23,45 @@ are specified in BATON_SPEC R-BTN-131 and started from the docs repository's ski
 `create-pr` is the default. It replaced the `pr` course, which a repository scaffolded before
 keeps until it switches.
 
+## Starting a course from one sentence
+
+Some courses' product *is* a ticket: `create-spec` designs a specification, `build-app` builds an
+application, and neither has anything to work on until someone says, in a sentence, what it is.
+For those, the entry is a **request**: one ticket, `course:` naming the course, saying what to do —
+filed by a command instead of written by hand. A course opts in by carrying `starts_from: request`
+in its course file; `create-spec` and `build-app` do, and an ordinary course keeps its hand-filed
+tickets.
+
+```
+npx baton request "Decide the export format, so two implementations agree" --course create-spec
+# baton request: filed B-41 (course create-spec) — the next claim starts converse at requested
+```
+
+`baton request "<one sentence>" --course <course> [--repo DIR] [--tier T] [--branch B]` files ONE
+ticket and pushes it:
+
+- `<items>/<ID>.mdx` — `items` from `.baton/baton.json` (default `tickets`), `ID` the next free
+  id under the repository's own prefix, across the folder and its `archive/` — with the sentence as `title` and `description`,
+  `course: <course>`, `status: available` and `tags: [request]`.
+- One commit, `<ID>: request — <the sentence> — <course>`, pushed straight to the default branch —
+  `--branch`, else the checkout's `origin/HEAD`, else `main`. It is made in a throwaway worktree at
+  the freshly fetched head, so your branch, HEAD and working tree are never touched; and if another
+  push moves the branch first, it refetches, takes the next free id again and retries (six tries).
+
+It is a repository command, not an API call: the developer running it has the checkout, the push
+triggers the sync, the board places the ticket at the course's start station with its start leg
+ready, and the next claim starts the course — `converse` on `create-spec`, `define` on
+`build-app`. Nothing else is needed to begin. It refuses a course the checkout's `.baton/baton.json`
+does not list (the sync would refuse the ticket), and a course without `starts_from: request`. The
+board's own form, for the owner role, is this same command.
+
 ## Adopting one
 
 ```
 npx baton repo init                       # create-pr, the settings (agent_command among them) and the sync workflow
 npx baton repo init --course bug-report   # a second course beside the first
 npx baton tickets check                   # check the tickets as the sync reads them; exit 1 naming every finding (B-111)
+npx baton request "<one sentence>" --course create-spec   # start a course whose product is a spec or a ticket (B-98)
 ```
 
 Each `init --course` writes `.baton/courses/<course>/`: the course file, one stub per leg, and
@@ -221,7 +254,9 @@ npx baton repo init                       # create-pr
 npx baton repo init --course build-app
 ```
 
-A request is one ticket, `course: build-app`, saying what to build, often in a sentence. Each
+A request is one ticket, `course: build-app`, saying what to build, often in a sentence —
+`baton request "Build an online version of Blokus" --course build-app` files one, or you write it
+by hand. Each
 of the first four legs drafts one document in `product/<ticket id>/` and stops for the owner:
 
 | leg | writes | the owner approves with |
@@ -257,7 +292,8 @@ npx baton repo init --course create-spec
 ```
 
 A request is one ticket, `course: create-spec`. It starts at `requested` with `converse` queued:
-the owner opens an interactive agent session in a checkout, following that leg's instructions, and
+`baton request "<the specification>" --course create-spec` files it ([above](#starting-a-course-from-one-sentence)),
+or you write the ticket by hand. The owner opens an interactive agent session in a checkout, following that leg's instructions, and
 the two design one new specification file — under `spec/` by convention, wherever the repository
 keeps them — and open its PR on the course's branch pattern. The leg's own `close` appends its
 marker — `{"ticket": "<id>", "leg": "converse", "reached": "requested", "next": "review"}` — to

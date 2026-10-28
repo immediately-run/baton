@@ -79,6 +79,9 @@ export const CREATE_SPEC_COURSE = {
   start: 'requested',
   start_leg: 'converse',
   end: ['merged'],
+  // B-98: a specification is requested, not found — `baton request "<one sentence>" --course
+  // create-spec` files the ticket that starts it.
+  starts_from: 'request',
   short_waits: ['ci'],
   stations: {
     requested: { label: 'Requested, no PR yet' }, 'spec-open': { label: 'Spec PR open' }, reviewed: { label: 'Reviewed' },

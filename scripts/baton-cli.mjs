@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// baton-cli.mjs — the `baton repo sync`, `baton repo init` and `baton tickets check` bundle
-// (BATON_SPEC §2f R-BTN-74; B-111): bundles `src/defaults/cli.ts` and
-// `src/defaults/tickets-check.ts` with esbuild the way scripts/baton-run.mjs bundles the runner,
-// and re-exports their command entrypoints. The bundle lands in `.local/` (gitignored) and is
-// rebuilt on every start, so the commands a checkout runs are always its current source.
+// baton-cli.mjs — the `baton repo sync`, `baton repo init`, `baton tickets check` and
+// `baton request` bundle (BATON_SPEC §2f R-BTN-74; B-111; B-98 R-BTN-131): bundles
+// `src/defaults/cli.ts`, `src/defaults/tickets-check.ts` and `src/defaults/request.ts` with
+// esbuild the way scripts/baton-run.mjs bundles the runner, and re-exports their command
+// entrypoints. The bundle lands in `.local/` (gitignored) and is rebuilt on every start, so the
+// commands a checkout runs are always its current source.
 import { build } from 'esbuild';
 import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -27,20 +28,33 @@ await build({
 
 export const { initMain, parseSyncArgs, syncMain, prebuildDefaults, remoteSlug } = await import(pathToFileURL(OUT).href);
 
+/** One command module bundled the same way. Each bundle is this run's own — another process
+ *  builds its own — and it is deleted once loaded, before the child's imports run. */
+async function bundleCommand(entry, load) {
+  const file = join(ROOT, '.local', entry.replace(/\.ts$/, ''), String(process.pid), 'command.mjs');
+  try {
+    await build({
+      entryPoints: [join(ROOT, 'src', 'defaults', entry)],
+      outfile: file,
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      target: 'node22',
+      packages: 'external',
+      logLevel: 'warning',
+    });
+    // The entry, when a load fails: a bundle error reads as a bare SyntaxError otherwise.
+    return await load(file);
+  } catch (e) {
+    throw new Error(`${entry} did not load: ${e?.message ?? e}`);
+  } finally {
+    rmSync(dirname(file), { recursive: true, force: true });
+  }
+}
+
 // B-111: `baton tickets check`, built the same way and re-exported beside the repo commands.
-const CHECK = join(ROOT, '.local', 'baton-tickets-check', String(process.pid), 'check.mjs');
-await build({
-  entryPoints: [join(ROOT, 'src/defaults/tickets-check.ts')],
-  outfile: CHECK,
-  bundle: true,
-  platform: 'node',
-  format: 'esm',
-  target: 'node22',
-  packages: 'external',
-  logLevel: 'warning',
-});
-const checked = await import(pathToFileURL(CHECK).href);
+const checked = await bundleCommand('tickets-check.ts', (file) => import(pathToFileURL(file).href));
 export const checkTicketsMain = checked.checkTicketsMain;
-// The check's bundle is this process's alone — another process builds its own under its own pid —
-// and it is this run's cache only: it goes once loaded, before the child's imports run.
-rmSync(dirname(CHECK), { recursive: true, force: true });
+// B-98: `baton request` — a course started from one sentence, filed as a ticket and pushed.
+const requested = await bundleCommand('request.ts', (file) => import(pathToFileURL(file).href));
+export const requestMain = requested.requestMain;

@@ -111,8 +111,9 @@ export const DECISION_COURSE = {
   },
 };
 
-/** The `build-app` course (R-BTN-131, B-40): an application from a one-line request to a
- * verified build. Four drafting legs each write one document under `product/` and leave it to the
+/** The `build-app` course (R-BTN-131, B-40, B-98): an application from a one-line request to a
+ * verified build — `starts_from: request`, so `baton request` files it. Four drafting legs each
+ * write one document under `product/` and leave it to the
  * owner, who refines it in a conversation of their own and approves it; `file` turns the approved
  * plan into child tickets (R-BTN-86) on `create-pr`; `verify` waits on them, tests the build
  * against the product definition's acceptance criteria, and files fix tickets for what fails. It
@@ -122,6 +123,8 @@ export const BUILD_APP_COURSE = {
   start: 'requested',
   start_leg: 'define',
   end: ['shipped'],
+  // B-98: its request pattern, made a command's.
+  starts_from: 'request',
   stations: {
     requested: { label: 'Requested' }, defined: { label: 'Product definition drafted' }, designed: { label: 'Interface designed' },
     architected: { label: 'Architecture drafted' }, planned: { label: 'Plan drafted' }, building: { label: 'Tickets filed, being built' },

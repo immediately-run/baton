@@ -57,6 +57,16 @@
 //                post's validation, depends_on targets and cycles, and (with
 //                check.depends_line in .baton/baton.json) each **Depends on:** line; exit 1
 //                naming every finding (B-111)
+//   baton request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B] [--remote R]
+//                — start a course from one sentence, no hand-written ticket (B-98, R-BTN-131):
+//                files ONE request ticket (the sentence as title and description, course: C,
+//                status available, tags [request], the next free id under the repository's own prefix) as one commit pushed
+//                straight to the repository's default branch — --branch, else the checkout's
+//                origin/HEAD, else main — retrying on a moved head. It is a REPOSITORY command,
+//                not an API call: the push triggers the sync, the board places the ticket, and
+//                the next claim starts C. C's .baton/courses/C/course.json must say
+//                starts_from: request (create-spec, build-app), and .baton/baton.json must list
+//                it; an ordinary course keeps its hand-filed tickets.
 //
 //   baton test-course <repository root> <course> [--base REF] [--board FILE]
 //                — the course test kit (§2d, R-BTN-64/-65; R3-1248): the working tree's .baton/ is
@@ -506,6 +516,12 @@ export async function main(argv) {
     // B-111: sibling of `baton repo sync`, its ticket source and the board post's own validation.
     const { checkTicketsMain } = await import('../scripts/baton-cli.mjs');
     return checkTicketsMain(argv.slice(2));
+  }
+  if (argv[0] === 'request') {
+    // B-98: a course started from one sentence. A repository command — it commits the request
+    // ticket and pushes it — so it lives in the defaults beside `tickets check` (src/defaults/request.ts).
+    const { requestMain } = await import('../scripts/baton-cli.mjs');
+    return requestMain(argv.slice(1));
   }
   const [role, ...rest] = argv;
   const { flags } = parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
