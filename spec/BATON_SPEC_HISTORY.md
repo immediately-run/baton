@@ -377,7 +377,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   noted that "approvals come from Baton's records" means "baton must track a new type of state,
   which is human approval"; reading it, R-BTN-116's person leg, answered in git by "whoever can
   push", would have let a runner write its own human approval, so R-BTN-186 makes both kinds of
-  approval Baton records bound to one commit, the human's signed by a human-only key.
+  approval Baton records bound to one commit, the human's signed by a human-only key. Then: "a
+  runner branch working on a specific ticket should be able to update its own ticket … to
+  document the ticket's progression. And the ticket file is the right place to do this. It is
+  easy to check that a runner authored branch is only modifying its own ticket file at merge
+  time." R-BTN-182 allows append-only progress after the own ticket's `## Status` heading; the
+  brief and frontmatter stay human-approved, since a brief reads as the owner's instruction.
 
 ## Retired requirements
 

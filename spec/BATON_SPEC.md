@@ -5789,6 +5789,14 @@ Every value below is validated on write; a value over its cap is refused `invali
     and the ticket moves on when a human's merge appears in git.
   - **Tickets** (`tickets/**`, goals): the merge runner merges a change to them only with a human
     approval at that head (R-BTN-186). Without one, the leg ends at `human-merge`.
+  - **A leg's own progress is the exception.** A branch of a claim on ticket T may change T's own
+    ticket file, and no other ticket file, without a human approval, when the change is
+    append-only progress: the frontmatter is byte-identical, everything before the file's
+    `## Status` heading is byte-identical, and the change only appends after it. The merge runner
+    checks this from git (the file at the merge base against the file at the head), for the one
+    path the claim's ticket names. Anything else in a ticket file (the brief, the body, any
+    frontmatter field) is a ticket change under the rule above. What is appended is a runner's
+    words, read as data by later readers (status stays Baton's, R-BTN-180).
 - **R-BTN-183 (human-only credentials).** A human gate (a human approval under R-BTN-182, a
   production deploy, a ruleset bypass, a human's merge) is satisfied only by a credential no
   agent session holds: an owner key registered `human_only` (a hardware-backed SSH key that
@@ -6739,6 +6747,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose human-only credentials for every human gate, over gates that accept the owner's account: an owner's agent sessions hold that account (2026-10-27; R-BTN-183).
 - Chose authority by credential, not channel, over MCP's closed list, keeping credential management and the protected settings out of every delegated key (2026-10-27; R-BTN-184).
 - Chose to run a sourced course's code from its source, the home referring to Baton's legs rather than copying them (2026-10-28; R-BTN-134, B-139).
+- Chose to let a claim's branch append its leg's progress to its own ticket's `## Status` section without a human approval, over routing every ticket-file change through one: the ticket file is the right place for a leg's record, and append-only to one known path is checkable at merge (2026-10-28; R-BTN-182).
 - Chose approvals (runners' review verdicts and humans' approvals, each bound to one commit) as Baton's state, over reading them from git or the forge, where any pusher can write a verdict or a person leg's answer: a second exception to git being the ledger, after course history (2026-10-28; R-BTN-186).
 - Chose that ticket `tier` is not a protected input, on the precondition that no runner above the VM level serves a repository runners below it push; the decision reopens if that precondition fails (2026-10-27; B-127).
 
