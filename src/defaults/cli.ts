@@ -750,6 +750,11 @@ function stubSource(b: BuiltIn, course: string, leg: string): string {
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
   const closeFrom = b.reads === 'prs' ? ['prClose', 'pr-close.ts'] : ['markerClose', 'course-markers.ts'];
+  // `prClose`'s marker legs write their line through course-markers.ts's own git plumbing
+  // (`commitMarkerOnDefault`), so a PR course's close names that module too — one implementation,
+  // for a line the sync must find on the default branch. (B-96's review round 2: the import is
+  // for the stubs' own module tree; the close hands the checkout's default branch in itself.)
+  const closeHelpers = b.reads === 'prs' ? `\nimport { markersBranch } from ${JSON.stringify(source('course-markers.ts'))};` : '';
   const values = ask ? ask.values.join(' or ') : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, ${verify ? 'readFileSync, ' : ''}rmSync, writeFileSync } from 'node:fs';
@@ -767,7 +772,7 @@ const GIT_BOUND_MS = ${CLOSE_TIMEOUT_MS}, GIT_ENV = ${JSON.stringify(GIT_NONINTE
 // reads it from the error (\`e.stderr\`); nothing else of git's rides the log unasked.
 const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
-import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${verify ? `
+import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
 import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
 // The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
 // repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the
@@ -909,7 +914,11 @@ ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, b
   if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/${leg}`)} + ' ticket ' + ctx.ticket.id + ': the forge verified an open PR on a branch matching ' + patterns.join(' or ') + '\\n');
 ` : ''}  return ${position};`}
 }
-export const close = ${closeFrom[0]};
+// The close's ctx, one line (B-96's review round 2): everything the stub hands back, plus the
+// repository's default branch — the claim answer's \`default_branch\`, which the runner puts in
+// BATON_DEFAULT_BRANCH — where a marker leg's line goes, whatever branch this checkout is on.
+const closeCtx2 = (ctx) => ({ ...ctx, ...(ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === 'string' && process.env.BATON_DEFAULT_BRANCH !== '' ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {}) });
+export const close = (ctx, result) => ${closeFrom[0]}(closeCtx2(ctx), result);
 export async function handoff() { return null; }
 `;
 }

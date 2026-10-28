@@ -54,6 +54,7 @@
     "test/integration/S-BTN-105.course-sources.test.ts",
     "test/integration/S-BTN-106.cross-repo-prs.test.ts",
     "test/integration/S-BTN-107.build-app-course.test.ts",
+    "test/integration/S-BTN-174.create-spec.test.ts",
     "test/integration/S-BTN-156.sync-key.test.ts",
     "test/integration/S-BTN-157.busy-sync.test.ts",
     "test/integration/S-BTN-159.quiet-start.test.ts",

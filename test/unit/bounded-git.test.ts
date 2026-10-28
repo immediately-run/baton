@@ -44,7 +44,7 @@ describe('the defaults’ close is bounded and non-interactive (B-94)', () => {
     const started = Date.now();
     let killed = false;
     try {
-      exec(bin, [], dir, 150);
+      exec(bin, [], dir, { timeoutMs: 150 });
     } catch (e) {
       killed = (e as NodeJS.ErrnoException).code === 'ETIMEDOUT' || (e as { killed?: boolean }).killed === true || String(e).includes('SPAWN');
     } finally {
@@ -82,7 +82,7 @@ describe('the defaults’ close is bounded and non-interactive (B-94)', () => {
     execFileSync('git', ['-C', dir, 'init', '-q'], { stdio: 'ignore' });
     // The injected run ignores what the close asks for and runs a genuinely hanging git through
     // the real exec at a short bound: the kill and the throw are the production mechanism.
-    const hang: typeof exec = (_cmd, _args, cwd) => exec('git', HANGING_GIT_ARGS, cwd, 150);
+    const hang: typeof exec = (_cmd, _args, cwd) => exec('git', HANGING_GIT_ARGS, cwd, { timeoutMs: 150 });
     try {
       await expect(markerClose({ checkout: dir, ticket: { id: 'docs:B-2' }, leg: 'review' }, { reached: 'reviewed', next: 'merge' }, hang))
         .rejects.toThrow(/hang|killed|SPAWN|ETIMEDOUT/i);

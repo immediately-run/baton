@@ -5,7 +5,7 @@
 // sync reads the file as the checkout it posts has it. Pure over the parsed lines and the course
 // file, so a repository can eject it like the `create-pr` default. Course code in the CLI, never
 // core (§2b).
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, isAbsolute, join } from 'node:path';
 import type { PostedStation } from '../core/board';
@@ -130,8 +130,16 @@ export function stationsMarkers(ctx: MarkersCtx): StationsResult {
   return { stations, markers: [], course_data: {} };
 }
 
-/** What `close` runs: `git`, in the checkout, answering stdout. Tests inject it. */
-export type Exec = (cmd: 'git', args: string[], cwd: string) => string;
+/** How a command is called: `(cmd, args, cwd)`, plus what a command needs beyond its arguments
+ *  (B-96's review round 2: `commitMarkerOnDefault`'s temporary index, and the blob made from the
+ *  marker file's text). Optional, so a `run` that answers by arguments alone — the stubs pass
+ *  bound calls, the tests pass their own — keeps working: only `exec` reads them. */
+export type Exec = (
+  cmd: 'git' | 'gh',
+  args: string[],
+  cwd: string,
+  opts?: { env?: Record<string, string>; input?: string },
+) => string;
 
 /** B-94: the bound on every git (or `gh`) call a standard course's `close` makes. A command
  * that cannot answer in this long is killed and its failure thrown — a wedged push then fails
@@ -153,13 +161,21 @@ export const GIT_NONINTERACTIVE_ENV: Record<string, string> = {
 };
 
 /** The real command runner every standard course's `close` uses; tests inject their own. B-94: it
- * is bounded — a command still running at `timeoutMs` (default `CLOSE_TIMEOUT_MS`) is killed
- * with SIGKILL and its failure thrown (Node reports it as a timeout error) — and never
- * interactive. */
-export const exec = (cmd: string, args: string[], cwd: string, timeoutMs: number = CLOSE_TIMEOUT_MS): string =>
+ * is bounded — a command still running at its bound is killed with SIGKILL and its failure
+ * thrown (Node reports it as a timeout error) — and never interactive. B-96's review round 2:
+ * a command may also carry an environment (`opts.env`, over the non-interactive one) and its
+ * stdin (`opts.input`), which `commitMarkerOnDefault` needs for its temporary index and the
+ * marker file's text; a command with no input keeps stdin closed (`ignore`), as before. */
+export const exec = (
+  cmd: string,
+  args: string[],
+  cwd: string,
+  opts: { env?: Record<string, string>; input?: string; timeoutMs?: number } = {},
+): string =>
   execFileSync(cmd, args, {
-    cwd, encoding: 'utf8', timeout: timeoutMs, killSignal: 'SIGKILL',
-    env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
+    cwd, encoding: 'utf8', timeout: opts.timeoutMs ?? CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL',
+    ...(opts.input != null ? { input: opts.input } : { stdio: ['ignore', 'pipe', 'pipe'] }),
+    env: { ...process.env, ...GIT_NONINTERACTIVE_ENV, ...opts.env },
   }).trim();
 
 /** Appends one marker line to `.baton/markers.jsonl` and commits that file alone, as
@@ -209,26 +225,146 @@ export async function markerClose(
   const line: Marker = { ticket: id, leg: ctx.leg, reached: result.reached, next: result.next ?? null, claim: ctx.claim?.nonce ?? null };
   unionMerge(ctx.checkout, run);
   commitMarker(ctx.checkout, line, run);
+  return pushMarker(ctx.checkout, run);
+}
+
+/** Push the checkout's branch — the default branch, where a marker line is read from — with
+ *  `markerClose`'s one recovery: a push the remote refused because the branch moved is rebased
+ *  onto it and retried, up to `MARKER_PUSH_TRIES` (the checkout merges the markers file by
+ *  union, so two closes racing on it rebase cleanly); a rebase that still stops is aborted,
+ *  leaving the checkout as it was, and any other failure throws at once. Returns the pushed
+ *  commit's sha, the marker's evidence. Every call is bounded (`CLOSE_TIMEOUT_MS`), so a remote
+ *  that stops answering fails the leg in seconds. */
+export async function pushMarker(checkout: string, run: Exec = exec): Promise<string> {
   for (let tries = 1; ; tries++) {
     try {
-      run('git', ['push', 'origin', 'HEAD'], ctx.checkout);
+      run('git', ['push', 'origin', 'HEAD'], checkout);
       break;
     } catch (e) {
       if (!movedOnRemote(e) || tries >= MARKER_PUSH_TRIES) throw e;
     }
-    const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], ctx.checkout);
+    const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], checkout);
     try {
-      run('git', ['pull', '--rebase', 'origin', branch], ctx.checkout);
+      run('git', ['pull', '--rebase', 'origin', branch], checkout);
     } catch (e) {
       try {
-        run('git', ['rebase', '--abort'], ctx.checkout);
+        run('git', ['rebase', '--abort'], checkout);
       } catch {
         // No rebase in progress: the pull failed before starting one.
       }
       throw e;
     }
   }
-  return run('git', ['rev-parse', 'HEAD'], ctx.checkout);
+  return run('git', ['rev-parse', 'HEAD'], checkout);
+}
+
+/** The branch a marker line goes on when nothing names the repository's default: `main` (B-96's
+ *  review round 2). */
+export const DEFAULT_MARKERS_BRANCH = 'main';
+
+/** Which branch a marker line is written on, in order of what knows it best — every source is a
+ *  git command in the checkout, never the working tree:
+ *  - `named`, the caller's word (the claim answer names it and the runner sets it in the stub's
+ *    environment): the only source this repository's own settings carry, and the one a
+ *    repository not on `main` has;
+ *  - `remote`, what `origin/HEAD` says — set by a plain `git clone`, absent from a mirror or a
+ *    runner's fetch-only setup;
+ *  - `DEFAULT_MARKERS_BRANCH`, the course's own default and `fetchMain`'s (src/runner/main.ts
+ *    fetches `origin main` too, so a `main` runner finds what it already fetched).
+ *  A name that is empty, option-shaped or not a plain branch name is ignored, never run with. */
+export function markersBranch(checkout: string, named: string | null | undefined, run: Exec = exec): string {
+  const plain = (b: string | null | undefined): string | null =>
+    typeof b === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(b) && !b.includes('..') && !b.endsWith('/') ? b : null;
+  const given = plain(named);
+  if (given) return given;
+  try {
+    // `--short` prints the remote-tracking name (`origin/main`), and a marker is fetched and
+    // pushed by the BRANCH name (`main`): strip one `origin/` (round 2's test caught
+    // `git fetch origin origin/main`).
+    const head = run('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], checkout).trim().replace(/^origin\//, '');
+    return plain(head) ?? DEFAULT_MARKERS_BRANCH;
+  } catch {
+    return DEFAULT_MARKERS_BRANCH;
+  }
+}
+
+/** `commitMarkerOnDefault`'s temporary index: git's own path for it in this checkout, asked of
+ *  git and never assumed. A linked worktree or a submodule has a `.git` FILE, not a directory,
+ *  so `<checkout>/.git/…` is ENOTDIR there (B-96's review round 3 — and this repository's own
+ *  development checkouts are worktrees). The tree is built there and nowhere else, so the real
+ *  index, `HEAD` and the working tree are never touched. */
+const tmpIndexName = 'baton-marker-index';
+export function tmpIndex(checkout: string, run: Exec = exec): string {
+  const rel = run('git', ['rev-parse', '--git-path', tmpIndexName], checkout).trim();
+  return /^\//.test(rel) ? rel : join(checkout, rel);
+}
+
+/** B-96's review round 2: the line committed on the default branch itself — the checkout's
+ *  `HEAD` and working tree are never read or moved.
+ *
+ *  Where a close runs is not where a marker goes. The runner's home checkout sits on whatever
+ *  branch the last leg left it on (`create-pr`'s `implement` branches there; an interactive
+ *  session commits the PR's branch there) or is detached at a claim's snapshot, so a commit on
+ *  `HEAD` puts the line in a PR — never seen by the sync, and counted on a spec PR as a fake
+ *  `address` step. So every attempt here is git plumbing:
+ *
+ *  1. `git fetch origin <default>`;
+ *  2. read `origin/<default>:.baton/markers.jsonl` (absent = empty) and append the line — the
+ *     union merge by construction, since each attempt appends to what it just fetched;
+ *  3. `git hash-object -w --stdin` the text, and write a tree = the fetched commit's tree with
+ *     that file replaced, built on a temporary index (`GIT_INDEX_FILE`) that is removed after;
+ *  4. `git commit-tree` it with `origin/<default>` as parent, `baton:close <ticket> <leg>`;
+ *  5. `git push origin <commit>:refs/heads/<default>` — the local remote-tracking ref follows on
+ *     the next fetch, so nothing is advanced before the remote accepts.
+ *
+ *  A push the remote refused because the branch moved repeats the whole append, up to
+ *  `MARKER_PUSH_TRIES` (another close's line, never this one's duplicate); any other failure
+ *  throws at once. Returns the pushed commit's sha, the marker's evidence. Every call is bounded
+ *  by `run`'s own bound (`exec`: `CLOSE_TIMEOUT_MS`). */
+export async function commitMarkerOnDefault(checkout: string, line: Marker, run: Exec = exec, defaultBranch: string = markersBranch(checkout, null, run)): Promise<string> {
+  const git = (args: string[], opts: { env?: Record<string, string>; input?: string } = {}): string => run('git', args, checkout, opts);
+  const ref = `origin/${defaultBranch}`;
+  const index = tmpIndex(checkout, run);
+  const env = { GIT_INDEX_FILE: index };
+  try {
+    for (let tries = 1; ; tries++) {
+      // The explicit refspec, not the remote's own fetch setting: a checkout with no
+      // `remote.origin.fetch` (or a mirror home) would otherwise never move `origin/<branch>`,
+      // and the next close would build on a stale parent and be refused (round 4).
+      git(['fetch', 'origin', `+refs/heads/${defaultBranch}:refs/remotes/${ref}`]);
+      const parent = git(['rev-parse', '--verify', `${ref}^{commit}`]);
+      const text = markersTextAt(git, ref);
+      const blob = git(['hash-object', '-w', '--stdin'], { input: `${text}${JSON.stringify(line)}\n` });
+      rmSync(index, { force: true });
+      git(['read-tree', parent], { env });
+      git(['update-index', '--add', '--cacheinfo', `100644,${blob},${MARKERS_FILE}`], { env });
+      const tree = git(['write-tree'], { env });
+      const commit = git(['commit-tree', tree, '-p', parent, '-m', `baton:close ${line.ticket} ${line.leg}`]);
+      try {
+        git(['push', 'origin', `${commit}:refs/heads/${defaultBranch}`]);
+        return commit;
+      } catch (e) {
+        if (!movedOnRemote(e) || tries >= MARKER_PUSH_TRIES) throw e;
+      }
+    }
+  } finally {
+    // The index and git's lock for it: a close killed at its timeout leaves the lock, and every
+    // later close in this checkout would fail on it (B-96's review round 3).
+    rmSync(index, { force: true });
+    rmSync(`${index}.lock`, { force: true });
+  }
+}
+
+/** The markers file's text at `ref` — `''` when the ref has none (the first marker) — read
+ *  from the object store, and closed with a newline so the line appended after it is one line. */
+function markersTextAt(git: (args: string[]) => string, ref: string): string {
+  let text: string;
+  try {
+    text = git(['show', `${ref}:${MARKERS_FILE}`]);
+  } catch {
+    return '';
+  }
+  return text === '' || text.endsWith('\n') ? text : `${text}\n`;
 }
 
 /** The line that makes git merge the markers file by union (gitattributes(5), `merge=union`). */

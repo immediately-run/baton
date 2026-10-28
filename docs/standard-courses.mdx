@@ -1,13 +1,13 @@
 ---
 title: The standard courses
-description: The six courses Baton's CLI ships — create-pr, review-pr, bug-report, draft-ticket, decision and build-app — what each does, and how a repository adopts and changes one.
+description: The seven courses Baton's CLI ships — create-pr, review-pr, bug-report, draft-ticket, decision, build-app and create-spec — what each does, and how a repository adopts and changes one.
 tags: [concepts]
 order: 15
 ---
 
 A course is the route a ticket takes: its stations, and the legs an agent runs between them. A
 repository can write its own, as the docs repository did with `roadmap-pr`, but most need one of
-a handful of routes. Baton's CLI ships six, and a repository adopts each with one command. They
+a handful of routes. Baton's CLI ships seven, and a repository adopts each with one command. They
 are specified in BATON_SPEC R-BTN-131 and started from the docs repository's skills.
 
 | course | what it does | legs | where it ends |
@@ -18,6 +18,7 @@ are specified in BATON_SPEC R-BTN-131 and started from the docs repository's ski
 | `draft-ticket` | researches, drafts and files a ticket that prescribes its architecture, tests and requirements | research, draft, check | `filed` |
 | `decision` | turns a question only the owner can settle into a one-letter packet, then carries the answer out | prepare, carry-out | `decided` |
 | `build-app` | takes a one-line request to a verified application: a product definition, a design with mock-ups, an architecture and a plan, each approved by the owner, then the plan's tickets on `create-pr`, and a verification against the definition | define, design, architect, plan, file, verify | `shipped` |
+| `create-spec` | designs a specification in conversation with the owner, reviews it adversarially, addresses blocking findings in a second conversation, adjudicates what three rounds leave open, merges | converse, review, address, adjudicate, merge | `merged` |
 
 `create-pr` is the default. It replaced the `pr` course, which a repository scaffolded before
 keeps until it switches.
@@ -98,7 +99,7 @@ its harness, and with no command named, it is the command.
 
 ## How each course finds where a ticket is
 
-- **`create-pr` and `review-pr` read the forge.** A ticket's PRs are the ones its branch pattern
+- **`create-pr`, `review-pr` and `create-spec` read the forge.** A ticket's PRs are the ones its branch pattern
   or its `prs:` names. Each review's verdict is a review state or a comment whose first line is
   `<!-- baton:verdict approve -->` or `<!-- baton:verdict changes -->`. `create-pr`'s adjudication
   and `review-pr`'s conclusion are comment lines of the same kind. The leg's `close` writes each
@@ -123,8 +124,13 @@ its harness, and with no command named, it is the command.
   token at all.
 - **`decision` waits on the owner.** After `prepare` writes the packet into the ticket, the claim
   ends and `carry-out` waits until the owner sets the ticket's `answer:` to their letter. Nothing
-  answers for them. `review-pr` waits the same way on the author after asking for changes, and
-  `create-pr` on the owner after an `owner` adjudication.
+  answers for them. `review-pr` waits the same way on the author after asking for changes,
+  `create-pr` on the owner after an `owner` adjudication, and `create-spec`'s two interactive
+  legs — the design conversation and the one that answers a round's findings — from the moment
+  their claims end until the PR they work on moves. Those two are PR courses' legs that still need
+  a record, because nothing on the PR says a conversation is under way: each one's `close` pushes
+  its marker line to `.baton/markers.jsonl` itself (the marker courses' own commit and push), so a
+  checkout whose close ran always leaves the line on the default branch the sync reads.
 
 ## Where a course comes from
 
@@ -238,3 +244,38 @@ again, up to three rounds.
 Until interactive legs are built (B-34), the conversation is a session the owner starts
 themselves, and `answer:` is the approval.
 
+
+## `create-spec`, step by step
+
+`create-spec` takes a request for a specification — what a thing must be, decided — from the
+owner's design conversation to a merged PR. Its review and adjudication are `create-pr`'s; its
+two conversations are the course's own, and Baton neither runs them nor waits inside a claim for
+them.
+
+```
+npx baton repo init --course create-spec
+```
+
+A request is one ticket, `course: create-spec`. It starts at `requested` with `converse` queued:
+the owner opens an interactive agent session in a checkout, following that leg's instructions, and
+the two design one new specification file — under `spec/` by convention, wherever the repository
+keeps them — and open its PR on the course's branch pattern. The leg's own `close` appends its
+marker — `{"ticket": "<id>", "leg": "converse", "reached": "requested", "next": "review"}` — to
+`.baton/markers.jsonl`, commits it and pushes it, and the claim ends. The marker
+is the leg's own record that the conversation is under way: from it, every sync offers `converse`
+waiting on the owner rather than ready, so there is one session, not one per sync. When the PR
+appears the ticket moves to `spec-open` and
+`review` runs: adversarial, non-interactive, against the corpus the specification joins — live
+cross-references, security holes inherent in the design, decisions an implementer cannot be left
+to make, the product's values and vocabulary — with `create-pr`'s severity ladder and its verdict
+line. An `approve` queues `merge`. A `changes` verdict queues `address`: a second conversation, in
+which the owner and an agent decide how each blocking finding is answered — fixed, argued, or
+split into another ticket — and push the amendment. That round's claim ends with an `address`
+marker, so `address` waits on the owner too, until the push lands and the ticket goes back to
+`spec-open` for the next round. `review` runs four times and `address` three: the fourth review is
+the one that finds the rounds spent, and queues `adjudicate` on what is left, as in `create-pr`.
+`merge` lands the specification and closes the ticket.
+
+As with `build-app`, until Baton launches interactive sessions itself (B-34), the conversation is
+a session the owner starts; the runner then sends the link to the session instead. The course is
+otherwise unchanged.
