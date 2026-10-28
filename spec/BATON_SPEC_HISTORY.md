@@ -373,11 +373,18 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   create tickets in Baton the same way code can be created, but in this case a human approval is
   necessary." On surfaces: "I want the invoker's credentials (runner, repo owner, baton admin) to
   make the difference in which operations are available, not the channel." Rules introduced:
-  R-BTN-180–R-BTN-186. The §12 summary gained two bullets; §12.1 the merge runner. The owner
+  R-BTN-180–R-BTN-187. The §12 summary gained three bullets; §12.1 the trusted runner and the
+  owner's agent; §6.1 the attestation prerequisite; §13 the `attestations` table; §14 its route. The owner
   noted that "approvals come from Baton's records" means "baton must track a new type of state,
   which is human approval"; reading it, R-BTN-116's person leg, answered in git by "whoever can
   push", would have let a runner write its own human approval, so R-BTN-186 makes both kinds of
-  approval Baton records bound to one commit, the human's signed by a human-only key. Then: "a
+  approval Baton records bound to one commit, the human's signed by a human-only key. The owner then
+  generalised it: "I don't think merge is the only scenario where this trust issue comes up …
+  A binary go, no go on merges is not going to be enough … We could use this same type registry
+  to record custom trusted state … And these bits of state may be used as a gate for sensitive
+  course legs", with trusted services and Baton itself as writers, "attestation" as the name, and
+  "Attestation can be modeled as a type of prerequisite for a leg." R-BTN-181 (attestations) and
+  R-BTN-182 (trusted runners) replace the approvals rule. Then: "a
   runner branch working on a specific ticket should be able to update its own ticket … to
   document the ticket's progression. And the ticket file is the right place to do this. It is
   easy to check that a runner authored branch is only modifying its own ticket file at merge
@@ -2975,3 +2982,30 @@ should-fix, 1 simplify, 7 nits, none a design question. Resolved:)*
 | 10–16 nits | `route_choices_json`; `meters` placement; the instance view and §11.4's runners view; an empty `demote_when` refused, a leg absent from the course refused, needs outside the constant syntax refused; R-BTN-75 recounts derived rows when sets become current; the `derived` list never names `credential`, `runner` or `human-operator`; capacity-less resources billed for ranking |
 
 The owner accepted round 8's verdict without a further review (2026-10-22); B-104 and B-105 returned to `available`.
+
+*(2026-10-28 — §12.8 at `f378ec3` (with the security model and B-122–B-140) was reviewed
+adversarially by a fresh agent: the shape right, the headline ("one compromised runner cannot land
+a change alone") not yet delivered; 16 new findings, 3 critical; of the 21 findings of the
+security model's own review (2026-10-27), 3 closed, 17 partly closed, 1 open. Resolved in the
+rewrite around attestations and trusted runners:)*
+
+| Finding | Resolution |
+|---|---|
+| N1 a reviewer pushes to the branch and approves its own commit; "every key that wrote that head" is not computable | `std:wrote@1`: Baton attests each head a writing leg reports; a merged head and every commit since the merge base must be one; independence is computed over that chain, from a review claim that started at the head (R-BTN-181, R-BTN-183) |
+| N2 required checks are attacker-controlled | commit statuses never read; checks only as `std:checks@1` from the trusted executor running protected course data, or check runs from a workflow file on protected main with main's blob; checks named as no security gate (R-BTN-183) |
+| N3 merge-runner-landed code runs with main-only secrets; baton's `src/` unprotected | every path a deploying or releasing workflow executes is protected; for `baton` that is the whole repository, so every merge there needs a human (R-BTN-184, R-BTN-180) |
+| N4 the floor misses executed and authority paths; `tickets/**` is not every home's | the floor is computed per repository: `imports`, the ticket source's items path and the goal path, `.github/actions/**` and workflow-local `uses`, a per-harness list (`.mcp.json`, opencode), CODEOWNERS, authority paths (R-BTN-184) |
+| N5 renames, symlinks, gitlinks, case; source pins at any ancestor | `diff-tree --no-renames` from main's tip to the merge result plus `merge-base --all`; modes 120000 and 160000 and `.gitmodules` refused; `p` and `p/`, case-folded, NFC; pins at first-parent or release-tag commits only (R-BTN-183, R-BTN-134) |
+| N6 `legs/merge.run.mjs` runs repository code with the credential | may only add refusals, in a child without credential, network, clock or environment; the CLI's rules apply after (R-BTN-182) |
+| N7 the merge credential's power, placement and per-forge identity | stated as human-level for what it may do; never on the owner's machine under `protected`; GitHub bypass only a dedicated App without Administration, never Actions, a role, a team or Dependabot; GitLab Free by deploy key; plain git needs pusher identity and no file access (R-BTN-182, R-BTN-180) |
+| N8 the human gate: dashboard cookie, self-registered keys, the browser, protected settings | WebAuthn per act on the dashboard; a `human_only` key registered only by an existing one, bootstrapped out of band, hardware-attested where possible; no agent tool on the human's browser or desktop; every protected setting and the message of the day are human gates; the owner's agent is a principal; trusted runners pin `human_only` keys themselves (R-BTN-185, R-BTN-182) |
+| N8a own-progress exception: unapproved instructions, link definitions, the heading, the mirror | appended entries are one plain-text line each, no link, definition, heading, HTML, MDX, fence or backtick; the last `## Status` line, LF, outside fences, present at the base; none takes no progress; bytes at the end, no renames, exact path; the archive move by the merge runner; the mirror writes nothing to main under `protected` (R-BTN-184, R-BTN-180) |
+| N9 environment reviewers gate every run | reviewers only on deploy and release environments; trusted runners' and the sync's environments limited to the default branch, unattended (R-BTN-180) |
+| N10 tags and other refs | runners create and update only `branch_pattern` refs; rulesets on tags too; `repo protect` prints both (R-BTN-180) |
+| N11 R-BTN-184's protected list a subset of R-BTN-66's | R-BTN-186 lists every R-BTN-66 setting, the grant `sync` flag and `untrusted` mark, `landing`, `protected_paths` and writer policies |
+| N12 git-sourced verdicts and trailers still move tickets; squash forges trailers | under `protected`, stations a trusted leg acts on come from attestations; the merge runner writes its own commit message; a human's merge is a `sender.id` that is not a trusted runner's (R-BTN-187, R-BTN-183, R-BTN-184) |
+| N13 `cooperative` default; `landing` unchecked | `untrusted` grants are refused on `cooperative` repositories; the sync and trusted runners compare the forge's protection with `repo protect` every run and stop on a difference (`baton.unprotected`) (R-BTN-180) |
+| N14 inconsistencies | R-BTN-46, R-BTN-66 and R-BTN-116 amended; §14 route added; §12.1 rows corrected (no runner secret as a boundary); rule `trusted` keeps ordinary runners off trusted legs. Fieldhouse's Axiom 4 and R-FH-11 remain the owner's to amend in Fieldhouse |
+| N15 push deliveries capped or missing | compared with the forge's compare range; truncated or missing deliveries, and more than three tags at once, fail closed (R-BTN-187) |
+| N16 the signature over itself; unsigned review approvals; imports | signed over every other field; review attestations are `baton`-written and never a human gate; an import drops every attestation; the R-BTN-33 exception named (R-BTN-181) |
+
