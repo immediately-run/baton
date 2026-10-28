@@ -2789,7 +2789,8 @@ its own form (R-BTN-78); a raised **`hitl` condition** when a running leg asks (
   - `blocked?on=decision:*` lists every ticket waiting on a decision, with the tickets its answer
     would unblock; the answer fires `unblocked` (R-BTN-77).
 
-- **R-BTN-116 (a typed answer is a leg a person runs).** A leg may be `"kind": "person"` with
+- **R-BTN-116 (a typed answer is a leg a person runs).** *A person leg that stands for a human
+  approval is answered through Baton, never git (R-BTN-186, proposal).* A leg may be `"kind": "person"` with
   `"asks": <label>`. No runner is offered it or may claim or advance into it (rule `person`).
   While it is the queued leg, the ticket source posts an open decision on it (R-BTN-78), through
   which the person is listed and reached. That decision's `asks` is the leg's: Baton stores the
@@ -5767,7 +5768,8 @@ Every value below is validated on write; a value over its cap is refused `invali
     install, build, hook or script from any checkout.
   - **It merges a PR at an exact head** when, for that commit: Baton's claim records hold the
     approvals the course requires, from runner keys independent of the implementer's
-    (R-BTN-106), never PR comments or forge reviews; the required checks passed on that commit;
+    (R-BTN-106), never PR comments or forge reviews (R-BTN-186); the required checks passed on
+    that commit;
     and every changed path, computed from git (`merge-base` to head, and the merge result), is
     outside the protected paths or meets R-BTN-182. It merges only that commit (the forge's
     expected-head parameter, or a compare-and-swap push); a branch that moved is refused and the
@@ -5786,8 +5788,7 @@ Every value below is validated on write; a value over its cap is refused `invali
     a change to them. The leg ends at the station `human-merge` with a notice naming the paths,
     and the ticket moves on when a human's merge appears in git.
   - **Tickets** (`tickets/**`, goals): the merge runner merges a change to them only with a human
-    approval at that head: a person leg (R-BTN-116, `asks: owner`) answered with a human-only
-    credential (R-BTN-183). Without one, the leg ends at `human-merge`.
+    approval at that head (R-BTN-186). Without one, the leg ends at `human-merge`.
 - **R-BTN-183 (human-only credentials).** A human gate (a human approval under R-BTN-182, a
   production deploy, a ruleset bypass, a human's merge) is satisfied only by a credential no
   agent session holds: an owner key registered `human_only` (a hardware-backed SSH key that
@@ -5801,6 +5802,25 @@ Every value below is validated on write; a value over its cap is refused `invali
   credential management (minting, granting, revoking keys) or R-BTN-66's protected settings
   (owner and required bars, holds' release, `trusted_identities`, `code_repos`, `retry`,
   `machine_sync`, `landing`, `protected_paths`). This replaces R-BTN-130's closed list (B-124).
+- **R-BTN-186 (approvals are Baton's state, not git's).** The merge runner's inputs are records
+  Baton creates, never facts read from git or the forge, so no push can forge one. An exception to
+  R-BTN-35, like a ticket's course history (B-120).
+  - **A review approval** is written when a runner's `advance` ends a review leg the course marks
+    `approves: true` with the verdict `approve`, in the same transaction: `{repository, ticket,
+    leg, run, claim, runner key, head_sha, verdict}`. It counts only for that `head_sha`, and only
+    when the runner key is independent of every key that wrote that head (R-BTN-106).
+  - **A human approval** is written only by `POST /v1/owner/{repository}/tickets/{ticket}/approve`
+    (`baton owner approve <ticket> --head <sha>`, and the dashboard), signed by an owner key
+    registered `human_only` (R-BTN-183): `{repository, ticket, head_sha, scope, key, signature,
+    at}`, the signature over those fields, so the record is checkable without trusting Baton's
+    database. `scope` is `tickets` (R-BTN-182), and later `control` once a course may change
+    courses. A person leg (R-BTN-116) that stands for a human approval is answered only this way:
+    its answer in git, which any pusher can write, does not count.
+  - **Both bind to one commit.** Any new commit on the branch leaves them in the record but
+    counting for nothing.
+  - **Filter fields only** (R-BTN-33): ids, a sha, a verdict word, a key, a signature. Exported
+    with the owner state (R-BTN-88). A Baton that loses them fails closed: no approval, no merge,
+    the ticket returns to review or `human-merge`.
 - **R-BTN-185 (Baton computes what it must trust from a board post).**
   - `machine_sync` defaults to `false` in a repository with runners below the human level; a
     machine key that may post the board is an owner's deliberate choice.
@@ -5948,6 +5968,7 @@ and never accepted holds no role (§12.1).
 | `leg_run_inputs` | `(claim_id, seq, name)` | `ticket_id`, `from_leg`, `from_run`, `uri`, `digest`, `value_json`, `leg_version` | What each leg run was given; replay reads it (R-BTN-82, R-BTN-84) |
 | `transcripts` | `id`; unique `(runner_id, repo, path, claim_id)` | `runner_id`, `claim_id`, `repo`, `path`, `role` (`session`\|`subagent`), `activity_id`, `first_seen_at`, `last_pushed_at` | Archived transcript pointers (R-BTN-20) |
 | `activities` | `(runner_id, id)`; unique `(runner_id, call_id)` | `claim_id` (NULL only before a claim), `parent_id`, `call_id`, `kind`, `seq`, `label`, `source` (`skill`\|`hook` — a harness hook), `started_at` (runner clock), `ended_at`, `outcome` (`succeeded`\|`failed`\|`cancelled`\|`abandoned`; set exactly when ended), `received_at`, `detail_json` | The runner's timeline (§9) |
+| `approvals` | `id`; unique `(repository_id, ticket_id, head_sha, kind, key_fingerprint)` | `kind` (`review`\|`human`), `leg`, `run`, `claim_id`, `verdict`, `scope`, `signature`, `at` | What the merge runner merges on (R-BTN-186, proposal); counts only for its `head_sha` |
 | `ticket_history` | `id` | `repository_id`, `ticket_id`, `at`, `kind`, `claim_id`, `runner_id`, `leg`, `reached`, `next_leg`, `run`, `snapshot_sha`, `head_sha`, `course_version`, `leg_version`, `detail_json` (≤ 2 KB) | The ticket's running record, never replayed into state (R-BTN-81) |
 
 `ticket_history.kind`: `leg-started`, `leg-finished`, `leg-abandoned`, `position-confirmed`,
@@ -6718,6 +6739,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose human-only credentials for every human gate, over gates that accept the owner's account: an owner's agent sessions hold that account (2026-10-27; R-BTN-183).
 - Chose authority by credential, not channel, over MCP's closed list, keeping credential management and the protected settings out of every delegated key (2026-10-27; R-BTN-184).
 - Chose to run a sourced course's code from its source, the home referring to Baton's legs rather than copying them (2026-10-28; R-BTN-134, B-139).
+- Chose approvals (runners' review verdicts and humans' approvals, each bound to one commit) as Baton's state, over reading them from git or the forge, where any pusher can write a verdict or a person leg's answer: a second exception to git being the ledger, after course history (2026-10-28; R-BTN-186).
 - Chose that ticket `tier` is not a protected input, on the precondition that no runner above the VM level serves a repository runners below it push; the decision reopens if that precondition fails (2026-10-27; B-127).
 
 - Chose to run checks only on the repository's own branches over a sandbox for forks' code: a leg's logic cannot be both generally useful and safely sandboxed (2026-10-20; R-BTN-114).

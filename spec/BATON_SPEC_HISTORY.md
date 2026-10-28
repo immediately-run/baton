@@ -373,7 +373,11 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   create tickets in Baton the same way code can be created, but in this case a human approval is
   necessary." On surfaces: "I want the invoker's credentials (runner, repo owner, baton admin) to
   make the difference in which operations are available, not the channel." Rules introduced:
-  R-BTN-180–R-BTN-185. The §12 summary gained two bullets; §12.1 the merge runner.
+  R-BTN-180–R-BTN-186. The §12 summary gained two bullets; §12.1 the merge runner. The owner
+  noted that "approvals come from Baton's records" means "baton must track a new type of state,
+  which is human approval"; reading it, R-BTN-116's person leg, answered in git by "whoever can
+  push", would have let a runner write its own human approval, so R-BTN-186 makes both kinds of
+  approval Baton records bound to one commit, the human's signed by a human-only key.
 
 ## Retired requirements
 
