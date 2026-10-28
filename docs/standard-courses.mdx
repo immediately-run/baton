@@ -211,6 +211,13 @@ To change how a course places tickets, `npx baton repo init --course <course> --
 copies its station function into `.baton/courses/<course>/sync.mjs`, where you can edit it. The
 course is then yours, not the source's: remove its `source` from `.baton/baton.json` first.
 
+**Land course changes yourself, outside Baton.** A change to `.baton/` (instructions, overrides,
+`agent_command`, the wrapper, a course's merge criteria) changes what every runner executes and
+how its work lands. The practice (the owner, 2026-10-28): push it to the default branch directly,
+or open a PR and merge it by hand. Don't route it through a ticket that a runner implements and
+Baton merges; under the [security model](security-model.mdx)'s core guarantee the merge runner
+never merges a PR that touches `.baton/`, and stops it at `human-merge` for you to land.
+
 ## `build-app`, step by step
 
 `build-app` is for a whole application, or a large feature of one. Adopt it beside `create-pr`,

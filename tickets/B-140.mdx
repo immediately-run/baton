@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1163
 tier: critical
-description: "The owner, 2026-10-28: protect the default branch on every forge (GitHub rulesets public or private, GitLab and Gitea protected branches, a pre-receive hook on plain git) so only a merge runner can update it. The merge runner runs a pinned CLI and no repository code, merges an exact approved head when Baton's records hold independent approvals, required checks pass, and any protected path has a human approval. Merge criteria are course data, customisable per course and home, and themselves protected; a floor of protected paths no course removes. Waits on R3-1266. Requires: none."
+description: "The owner, 2026-10-28: protect the default branch on every forge (GitHub rulesets public or private, GitLab and Gitea protected branches, a pre-receive hook on plain git) so only a merge runner can update it. The merge runner runs a pinned CLI and no repository code, merges an exact approved head when Baton's records hold independent approvals, required checks pass, and no protected path changed; a PR touching one is landed by a human outside Baton. Merge criteria are course data, customisable per course and home, and themselves protected; a floor of protected paths no course removes. Waits on R3-1266. Requires: none."
 topics:
   - baton
 owns: {}
@@ -30,8 +30,8 @@ merge leg can be customized as necessary. On a per project or per course basis."
 **The model, three rules** (`docs/security-model.mdx`, *The core guarantee*):
 1. runners propose, the merge runner lands: only the merge runner's identity updates the default
    branch;
-2. no runner change to Baton's state lands without a human: a PR touching a protected path merges
-   only with a human approval;
+2. Baton's state is landed by humans, outside Baton: the merge runner never merges a PR touching a
+   protected path; a human pushes it or merges it by hand;
 3. tickets are proposals: runners add or edit tickets on their branches, and status, claims and
    course history live in Baton.
 
@@ -62,17 +62,24 @@ branch).
    - Baton's records hold the approvals the course requires, from runner keys independent of the
      implementer's (R-BTN-106). PR comments are not read;
    - the required checks passed on that commit (the executor's, B-128 item 6, or CI's);
-   - every changed path is outside the protected paths, or a human approval for that head is
-     recorded (a Baton owner action signed by the human-only identity, B-136). Changed paths come
-     from git (`merge-base` to head, and the merge result), never from a runner's report.
+   - every changed path is outside the protected paths. Changed paths come from git
+     (`merge-base` to head, and the merge result), never from a runner's report.
    It merges only that commit, with the forge's expected-head parameter or a compare-and-swap
    push; a branch that moved since approval is refused, and the ticket goes back to review.
+   **A PR touching a protected path is never merged by the merge runner, with or without
+   approvals** (the owner, 2026-10-28: "The best practice for working on baton courses or custom
+   leg logic is to either push to main directly or manually create a PR. And merge outside of
+   baton."). The leg ends at a station `human-merge`, with a notice naming the protected paths, and
+   the ticket moves on when git shows the human's merge. Baton holds no human-approval record for
+   protected paths: the human lands them, outside Baton, by pushing to the default branch or
+   merging the PR, as the human-only identity (B-136) that the default branch's protection lets
+   through.
 4. **Customisable per course and per home.** The merge leg's criteria are course data: required
    approvals and from which legs, required checks, the merge strategy (merge, squash, rebase),
    extra protected paths, and an optional deterministic override `legs/merge.run.mjs` that the
    merge runner runs in place of the standard criteria. They are read from the default branch (or
-   the course's source, B-139), so a change to them is itself a change under `.baton/**` and needs
-   a human approval to land: a runner cannot loosen its own merge rules.
+   the course's source, B-139), so a change to them is itself a change under `.baton/**`, which
+   only a human lands: a runner cannot loosen its own merge rules.
 5. **A floor no course removes.** The protected paths include, always, `.baton/**`, `tickets/**`,
    agent configuration (`.claude/**`, `**/CLAUDE.md`, `AGENTS.md`) and `.github/workflows/**`,
    held as an owner setting in Baton (R-BTN-66) that courses may extend and never shrink.
@@ -91,7 +98,8 @@ branch).
 
 - A scenario (the next free S-BTN number): an approved PR outside the protected paths merges at
   its approved head; the same PR after a later push is refused and returns to review; a PR touching
-  `.baton/` without a human approval is not merged, and with one is; a course's extra protected
+  `.baton/` is never merged by the merge runner and ends at `human-merge`, and the ticket moves on
+  when a human's merge appears in git; a course's extra protected
   path is honoured, and a course change removing a floor path is refused at the sync; an approval
   from the implementer's own key does not count.
 - A drill per environment, scripted: a runner identity's push to the default branch is refused by
