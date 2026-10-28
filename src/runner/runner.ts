@@ -1015,9 +1015,9 @@ export class Runner {
       // then drains below — the one place the actual local command completing the leg is
       // known (it is resolved at the claim's snapshot, not here).
       ...(this.verbose ? { BATON_VERBOSE: '1' } : {}),
-      // The claim's own `default_branch` (B-96's review round 2): the stub hands it to the
-      // close, so a marker line is committed on the branch the sync reads however the checkout's
-      // HEAD was left — the close runs in this process, after the leg child is gone.
+      // The claim's own `default_branch` (B-96): the environment form, for a stub whose close
+      // runs in the leg child. The close the RUNNER calls gets the same value through `ctx`
+      // (`runLeg`'s context), which is the primary path (round 4).
       ...(typeof ctx.default_branch === 'string' && ctx.default_branch !== '' ? { BATON_DEFAULT_BRANCH: ctx.default_branch } : {}),
     };
     if (this.verbose) this.log(`baton: ${leg} runs: node ${basename(LEG_PROCESS)} ${basename(script)} (ctx ${basename(ctxPath)})`);

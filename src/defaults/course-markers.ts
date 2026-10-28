@@ -314,8 +314,8 @@ export function tmpIndex(checkout: string, run: Exec = exec): string {
  *  3. `git hash-object -w --stdin` the text, and write a tree = the fetched commit's tree with
  *     that file replaced, built on a temporary index (`GIT_INDEX_FILE`) that is removed after;
  *  4. `git commit-tree` it with `origin/<default>` as parent, `baton:close <ticket> <leg>`;
- *  5. `git update-ref refs/remotes/origin/<default>` (so the next fetch is a fast-forward) and
- *     `git push origin <commit>:refs/heads/<default>`.
+ *  5. `git push origin <commit>:refs/heads/<default>` — the local remote-tracking ref follows on
+ *     the next fetch, so nothing is advanced before the remote accepts.
  *
  *  A push the remote refused because the branch moved repeats the whole append, up to
  *  `MARKER_PUSH_TRIES` (another close's line, never this one's duplicate); any other failure
@@ -328,7 +328,10 @@ export async function commitMarkerOnDefault(checkout: string, line: Marker, run:
   const env = { GIT_INDEX_FILE: index };
   try {
     for (let tries = 1; ; tries++) {
-      git(['fetch', 'origin', defaultBranch]);
+      // The explicit refspec, not the remote's own fetch setting: a checkout with no
+      // `remote.origin.fetch` (or a mirror home) would otherwise never move `origin/<branch>`,
+      // and the next close would build on a stale parent and be refused (round 4).
+      git(['fetch', 'origin', `+refs/heads/${defaultBranch}:refs/remotes/${ref}`]);
       const parent = git(['rev-parse', '--verify', `${ref}^{commit}`]);
       const text = markersTextAt(git, ref);
       const blob = git(['hash-object', '-w', '--stdin'], { input: `${text}${JSON.stringify(line)}\n` });

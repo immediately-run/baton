@@ -917,7 +917,7 @@ ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, b
 // The close's ctx, one line (B-96's review round 2): everything the stub hands back, plus the
 // repository's default branch — the claim answer's \`default_branch\`, which the runner puts in
 // BATON_DEFAULT_BRANCH — where a marker leg's line goes, whatever branch this checkout is on.
-const closeCtx2 = (ctx) => ({ ...ctx, ...(typeof process.env.BATON_DEFAULT_BRANCH === 'string' && process.env.BATON_DEFAULT_BRANCH !== '' ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {}) });
+const closeCtx2 = (ctx) => ({ ...ctx, ...(ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === 'string' && process.env.BATON_DEFAULT_BRANCH !== '' ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {}) });
 export const close = (ctx, result) => ${closeFrom[0]}(closeCtx2(ctx), result);
 export async function handoff() { return null; }
 `;
