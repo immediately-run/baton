@@ -107,7 +107,9 @@ branch).
 - A scenario (the next free S-BTN number): an approved PR outside the protected paths merges at
   its approved head; the same PR after a later push is refused and returns to review; a PR touching
   `.baton/` is never merged by the merge runner and ends at `human-merge`, and the ticket moves on
-  when a human's merge appears in git; a course's extra protected
+  when a human's merge appears in git; a ticket PR merges with a person-leg approval by the
+  human-only identity at its head, not with one given at an earlier head, and not with an approval
+  from any runner key; a course's extra protected
   path is honoured, and a course change removing a floor path is refused at the sync; an approval
   from the implementer's own key does not count.
 - A drill per environment, scripted: a runner identity's push to the default branch is refused by
