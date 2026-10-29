@@ -240,7 +240,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     }
     if (cmd === 'resource' && rest[0] === 'add') {
       // B-105 (R-BTN-176): --atoms-from names whether runners' readings may steer route choices.
-      const { flags, positional } = parseArgs(rest.slice(1), ['atoms-from'], ['scope', 'schema'], 1);
+      const { flags, positional } = parseArgs(rest.slice(1), [], ['scope', 'schema', 'atoms-from'], 1);
       if (flags['atoms-from'] != null && !['admin', 'any'].includes(flags['atoms-from'])) throw new Error('--atoms-from must be admin or any');
       return { method: 'POST', path: '/v1/admin/resources', body: { name: need(positional[0], 'the resource name'), scope: need(flags.scope, '--scope'), detail_schema: jsonArg(need(flags.schema, '--schema'), readJson), ...(flags['atoms-from'] != null ? { atoms_from: flags['atoms-from'] } : {}) } };
     }
