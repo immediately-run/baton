@@ -95,6 +95,29 @@ export const DRAFT_TICKET_COURSE = {
   },
 };
 
+/** The `spec-to-tickets` course (R-BTN-131, B-99): a merged specification decomposes into its
+ * child tickets. Entered by `baton request` (`starts_from: request`, B-98) — the sentence names
+ * the spec. `decompose` drafts one ticket per spec section or decision into the request,
+ * `check` holds the set against the spec's coverage, and `file` commits the children `parent:`-ed
+ * to the request and closes it done. The owner deciding against filing withdraws the request —
+ * a ticket status, not a course station. It opens no PR. */
+export const SPEC_TO_TICKETS_COURSE = {
+  start: 'reading',
+  start_leg: 'decompose',
+  end: ['filed'],
+  // B-98: entered by `baton request "<one sentence naming the spec>"`, like create-spec and build-app.
+  starts_from: 'request',
+  stations: {
+    reading: { label: 'Reading the spec' }, drafted: { label: 'Child tickets drafted' },
+    checked: { label: 'Set checked against the spec' }, filed: { label: 'Children filed' },
+  },
+  legs: {
+    decompose: { from: ['reading'], to: 'drafted', label: 'Draft one child ticket per spec section' },
+    check: { from: ['drafted'], to: 'checked', label: 'Check the set against the spec' },
+    file: { from: ['checked'], to: 'filed', label: 'File the children, close the request' },
+  },
+};
+
 /** The `decision` course (R-BTN-131), from the docs `prepare-decision-packet` and
  * `process-decision-packets` skills: a question only the owner can settle becomes a one-letter
  * packet in the ticket; the owner answers by setting the ticket's `answer:`; a worker carries the
@@ -291,6 +314,19 @@ export const BUILT_INS: BuiltIn[] = [
       merge: { position: "{ reached: 'merged', next: null }" },
     },
     skill: 'baton-create-spec',
+  },
+  {
+    id: 'spec-to-tickets',
+    summary: 'decompose a merged specification into child tickets, check the set against the spec, and file them',
+    course: SPEC_TO_TICKETS_COURSE,
+    reads: 'markers',
+    stations: markers(),
+    legs: {
+      decompose: { position: "{ reached: 'drafted', next: 'check' }" },
+      check: { position: "{ reached: 'checked', next: 'file' }" },
+      file: { position: "{ reached: 'filed', next: null }" },
+    },
+    skill: 'baton-spec-to-tickets',
   },
 ];
 

@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { validateCourse } from '../../src/core/course';
 import { graphOf, onGraph, type Step } from '../../src/core/graph';
 import { checkCourse, shortestRoute, type KitInput } from '../../src/local/testCourse';
-import { APPROVAL_STAGES, BUILT_INS, DEFAULT_COURSE, buildAppWaits, builtIn, scaffoldable } from '../../src/defaults/courses';
+import { APPROVAL_STAGES, BUILT_INS, DEFAULT_COURSE, SPEC_TO_TICKETS_COURSE, buildAppWaits, builtIn, scaffoldable } from '../../src/defaults/courses';
 import { CREATE_SPEC_COURSE, stationsSpec, type PrFact, type PrGraph } from '../../src/defaults/course-pr';
 import { ticketsMarkdown, type SourceTicket } from '../../src/defaults/tickets-markdown';
 
@@ -22,8 +22,8 @@ const instructionsDir = (id: string) => join(__dirname, '..', '..', 'src', 'defa
 const tosOf = (to: string | string[]): string[] => (Array.isArray(to) ? to : [to]);
 
 describe('the standard courses (R-BTN-131)', () => {
-  it('are create-pr, review-pr, bug-report, draft-ticket, decision, build-app and create-spec; create-pr is the default', () => {
-    expect(BUILT_INS.map((b) => b.id)).toEqual(['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision', 'build-app', 'create-spec']);
+  it('are create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec and spec-to-tickets; create-pr is the default', () => {
+    expect(BUILT_INS.map((b) => b.id)).toEqual(['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision', 'build-app', 'create-spec', 'spec-to-tickets']);
     expect(DEFAULT_COURSE).toBe('create-pr');
   });
 
@@ -102,12 +102,13 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(readdirSync(root).filter((d) => existsSync(join(root, d, '.'))).sort()).toEqual(BUILT_INS.map((b) => b.id).sort());
   });
 
-  it('create-spec and build-app carry starts_from: request, and no other course does (B-98)', () => {
-    expect(BUILT_INS.filter((b) => b.course.starts_from !== undefined).map((b) => [b.id, b.course.starts_from])).toEqual([['build-app', 'request'], ['create-spec', 'request']]);
-    for (const b of BUILT_INS) if (b.id !== 'build-app' && b.id !== 'create-spec') expect(b.course).not.toHaveProperty('starts_from');
+  it('create-spec, build-app and spec-to-tickets carry starts_from: request, and no other course does (B-98, B-99)', () => {
+    expect(BUILT_INS.filter((b) => b.course.starts_from !== undefined).map((b) => [b.id, b.course.starts_from])).toEqual([['build-app', 'request'], ['create-spec', 'request'], ['spec-to-tickets', 'request']]);
+    for (const b of BUILT_INS) if (b.id !== 'build-app' && b.id !== 'create-spec' && b.id !== 'spec-to-tickets') expect(b.course).not.toHaveProperty('starts_from');
     // The course file a repository scaffolds is the built-in's own JSON, so the key is in the file
     // `baton request` reads from the checkout.
     expect(JSON.parse(JSON.stringify(CREATE_SPEC_COURSE))).toMatchObject({ starts_from: 'request', start: 'requested', start_leg: 'converse' });
+    expect(JSON.parse(JSON.stringify(SPEC_TO_TICKETS_COURSE))).toMatchObject({ starts_from: 'request', start: 'reading', start_leg: 'decompose' });
   });
 
   it('the core accepts starts_from: request and refuses any other value (B-98, R-BTN-131)', () => {
@@ -122,7 +123,7 @@ describe('the standard courses (R-BTN-131)', () => {
   it('pr names create-pr for a repository scaffolded before, and is no longer scaffolded', () => {
     expect(builtIn('pr')?.id).toBe('create-pr');
     expect(() => scaffoldable('pr')).toThrow('--course pr: renamed create-pr');
-    expect(() => scaffoldable('epic')).toThrow('the CLI scaffolds create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec');
+    expect(() => scaffoldable('epic')).toThrow('the CLI scaffolds create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec, spec-to-tickets');
     expect(builtIn('epic')).toBeUndefined();
   });
 
@@ -225,6 +226,35 @@ describe('the standard courses (R-BTN-131)', () => {
       expect(placed(null, [])).toMatchObject({ path: [], next: [{ leg: 'converse', state: 'ready', waiting_on: null }] });
       // The conversation's PR landing moves it, the marker still standing.
       expect(placed(factOf([], []), [{ ticket: 'A-1', leg: 'converse', reached: 'requested' }])).toMatchObject({ station: 'spec-open', path: [{ leg: 'converse', reached: 'spec-open' }] });
+    });
+  });
+
+  describe('spec-to-tickets’ kit (B-99)', () => {
+    const KIT: KitInput = {
+      course: 'spec-to-tickets', proposed: SPEC_TO_TICKETS_COURSE, base: null,
+      proposedVersions: { version: 1, min_worker_version: 1 }, baseVersions: null,
+      legScripts: null, live: null,
+    };
+
+    it('its shortest route is decompose → check → file, and the route runs green through the core’s claim, advance and end', async () => {
+      expect(shortestRoute(graphOf(SPEC_TO_TICKETS_COURSE))!.map((s) => `${s.leg}→${s.reached}`)).toEqual(['decompose→drafted', 'check→checked', 'file→filed']);
+      // The kit's whole run: the file accepted by the core, the route claimed leg by leg from
+      // `reading`, ended done at `filed` and confirmed by the next post — no violation.
+      expect(await checkCourse(KIT)).toEqual([]);
+    }, 60_000);
+
+    it('check fails rather than covering a gap: its instructions refuse a section with no ticket draft, and no leg files a ticket before file', () => {
+      const check = readFileSync(join(instructionsDir('spec-to-tickets'), 'check.md'), 'utf8');
+      // A gap is returned to decompose, never patched by check — the two sentences together say
+      // so, and the unit test holds both so neither can quietly go (round 1, finding 3).
+      expect(check).toMatch(/A requirement no draft covers is \*\*not yours to add\*\*/);
+      expect(check).toMatch(/A requirement no draft covers — a section with no ticket draft at all, or one a draft misses —/);
+      expect(check).toMatch(/exit\s+non-zero naming the section and the/);
+      // `file` files the children — parent-ed to the request, the request closed done — and the
+      // earlier legs write no ticket file.
+      const file = readFileSync(join(instructionsDir('spec-to-tickets'), 'file.md'), 'utf8');
+      expect(file).toMatch(/\*\*parent\*\* this ticket's id/);
+      expect(readFileSync(join(instructionsDir('spec-to-tickets'), 'decompose.md'), 'utf8')).toMatch(/not as ticket files yet/);
     });
   });
 });

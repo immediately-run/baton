@@ -1,13 +1,13 @@
 ---
 title: The standard courses
-description: The seven courses Baton's CLI ships — create-pr, review-pr, bug-report, draft-ticket, decision, build-app and create-spec — what each does, and how a repository adopts and changes one.
+description: The eight courses Baton's CLI ships — create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec and spec-to-tickets — what each does, and how a repository adopts and changes one.
 tags: [concepts]
 order: 15
 ---
 
 A course is the route a ticket takes: its stations, and the legs an agent runs between them. A
 repository can write its own, as the docs repository did with `roadmap-pr`, but most need one of
-a handful of routes. Baton's CLI ships seven, and a repository adopts each with one command. They
+a handful of routes. Baton's CLI ships eight, and a repository adopts each with one command. They
 are specified in BATON_SPEC R-BTN-131 and started from the docs repository's skills.
 
 | course | what it does | legs | where it ends |
@@ -19,6 +19,7 @@ are specified in BATON_SPEC R-BTN-131 and started from the docs repository's ski
 | `decision` | turns a question only the owner can settle into a one-letter packet, then carries the answer out | prepare, carry-out | `decided` |
 | `build-app` | takes a one-line request to a verified application: a product definition, a design with mock-ups, an architecture and a plan, each approved by the owner, then the plan's tickets on `create-pr`, and a verification against the definition | define, design, architect, plan, file, verify | `shipped` |
 | `create-spec` | designs a specification in conversation with the owner, reviews it adversarially, addresses blocking findings in a second conversation, adjudicates what three rounds leave open, merges | converse, review, address, adjudicate, merge | `merged` |
+| `spec-to-tickets` | takes a merged specification a one-sentence request names, decomposes it into child tickets — one per section, each with tests and exit criteria from the spec's words — checks the set against the spec's coverage, and files the children under the request | decompose, check, file | `filed` |
 
 `create-pr` is the default. It replaced the `pr` course, which a repository scaffolded before
 keeps until it switches.
@@ -26,11 +27,11 @@ keeps until it switches.
 ## Starting a course from one sentence
 
 Some courses' product *is* a ticket: `create-spec` designs a specification, `build-app` builds an
-application, and neither has anything to work on until someone says, in a sentence, what it is.
-For those, the entry is a **request**: one ticket, `course:` naming the course, saying what to do —
-filed by a command instead of written by hand. A course opts in by carrying `starts_from: request`
-in its course file; `create-spec` and `build-app` do, and an ordinary course keeps its hand-filed
-tickets.
+application, `spec-to-tickets` decomposes one, and none has anything to work on until someone
+says, in a sentence, what it is. For those, the entry is a **request**: one ticket, `course:`
+naming the course, saying what to do — filed by a command instead of written by hand. A course
+opts in by carrying `starts_from: request` in its course file; `create-spec`, `build-app` and
+`spec-to-tickets` do, and an ordinary course keeps its hand-filed tickets.
 
 ```
 npx baton request "Decide the export format, so two implementations agree" --course create-spec
@@ -51,7 +52,7 @@ ticket and pushes it:
 It is a repository command, not an API call: the developer running it has the checkout, the push
 triggers the sync, the board places the ticket at the course's start station with its start leg
 ready, and the next claim starts the course — `converse` on `create-spec`, `define` on
-`build-app`. Nothing else is needed to begin. It refuses a course the checkout's `.baton/baton.json`
+`build-app`, `decompose` on `spec-to-tickets`. Nothing else is needed to begin. It refuses a course the checkout's `.baton/baton.json`
 does not list (the sync would refuse the ticket), and a course without `starts_from: request`. The
 board's own form, for the owner role, is this same command.
 
