@@ -377,6 +377,7 @@ describe('migrateMarkersMain (B-100)', () => {
       '{"ticket":"B-1","leg":"prevent","reached":"closed"}', // not an edge from `explained`: ignored
       '{"ticket":"B-2","leg":"trace","reached":"traced","next":"origin","claim":"old"}', // a closed ticket: dropped
       '{"ticket":"B-3","leg":"implement","reached":"pr-open"}', // a PR course's: dropped
+      '{"ticket":"S-1","leg":"converse","reached":"requested","next":"review","claim":"c1"}', // create-spec's interactive leg: replayed
       'not json', // skipped, reported
     ].join('\n') + '\n');
     execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' });
@@ -396,6 +397,13 @@ describe('migrateMarkersMain (B-100)', () => {
       expect(lines.some((l) => l.includes('B-1 → 3 close(s) replayed, station closed'))).toBe(true);
       expect(lines.some((l) => l.includes("B-2's lines dropped"))).toBe(true);
       expect(lines.some((l) => l.includes('B-3\'s lines dropped'))).toBe(true);
+      // The conversation's record replays as a close (round 2, finding 2; round 3, finding 1):
+      // the spec ticket's frontmatter carries it and its history feeds `specMarkersOf` — one
+      // conversation, held.
+      expect(readFileSync(join(dir, 'tickets', 's1.md'), 'utf8')).toContain('station: requested');
+      expect(readFileSync(join(dir, 'tickets', 's1.md'), 'utf8')).toContain('next_leg: review');
+      const specCloses = closesOfHistory((args) => git(dir, ...args), 'S-1', 'tickets/s1.md');
+      expect(specCloses.map((x) => [x.leg, x.reached, x.next])).toEqual([['converse', 'requested', 'review']]);
       expect(lines.some((l) => l.includes('skipped — not JSON'))).toBe(true);
       // One commit, pushed: origin carries the fold.
       expect(git(dir, 'log', '-1', '--format=%s')).toBe('baton: markers.jsonl folded into the tickets (B-100)');

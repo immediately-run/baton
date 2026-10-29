@@ -44,7 +44,7 @@ into the ticket's own frontmatter — `station: reviewed`, `next_leg: address`, 
 commits the ticket alone on the default branch, and pushes it. From that record on
 the sync holds `address` **waiting on the owner** — one conversation per round, not one per sync —
 until the amendment's push lands and the ticket moves back to `spec-open`. Do not write, amend or
-amend or delete that state. If the PR is closed without merging, the ticket keeps waiting on the owner:
+delete that state. If the PR is closed without merging, the ticket keeps waiting on the owner:
 closing a PR answers no finding, so the owner reopens it, or files a fresh request.
 
 ## The conversation
