@@ -2073,6 +2073,7 @@ mean (R-BTN-50).
   | `decision` | `prepare` (`raised` → `asked`); `carry-out` (`asked` → `decided`) | `decided` | markers |
   | `build-app` | `define`, `design`, `architect`, `plan` (`requested` → `defined` → `designed` → `architected` → `planned`); `file` (`planned` → `building`, a call leg); `verify` (`building` → `shipped` \| `building`, a call leg, `max_runs` 3) | `shipped` | markers |
   | `create-spec` | `converse` (`requested` → `spec-open`, an interactive leg that suspends); `review` (`spec-open` → `reviewed`, `max_runs` 4); `address` (`reviewed` → `spec-open`, an interactive leg that suspends, `max_runs` 3); `adjudicate` (`reviewed` → `adjudicated`); `merge` (`reviewed`, `adjudicated` → `merged`) | `merged` | PRs and the interactive legs' markers |
+  | `spec-to-tickets` | `decompose` (`reading` → `drafted`); `check` (`drafted` → `checked`); `file` (`checked` → `filed`) | `filed` | markers |
   | `epic` | R-BTN-124 | `integrated`, `abandoned` | children |
   | `branch` | R-BTN-96 | R-BTN-96 | branches |
   | `ask`, `deliver`, `announce` | condition handlers (R-BTN-169) | R-BTN-169 | — |
@@ -2105,6 +2106,15 @@ mean (R-BTN-50).
     path is the markers in order, skipping non-edges and legs past `max_runs`; the queued leg is
     the last marker's `next` if it leaves the station (`marker`), else the first leg listed
     (`course`); a malformed line is skipped and logged.
+  - **`spec-to-tickets`** (B-99) takes one merged specification — a `create-spec` conversation's
+    merged PR is the usual input — and files its child tickets. `decompose` drafts one ticket
+    per spec section or numbered decision into the request's `## Drafts`, each with its tests
+    and exit criteria drafted from the spec's own words; `check` holds the set against the spec
+    (every requirement covered exactly once, no ticket without a section, dependencies drawn as
+    the spec's order implies) and fails rather than covering a gap; `file` commits the children
+    `parent:`-ed to the request (R-BTN-86), the request's `status:` to `done`. The owner deciding
+    against filing withdraws the request — a ticket status, not a course station: the filed
+    children are ordinary tickets on their own courses.
   - **`build-app`**'s drafting legs each write one document under `product/<ticket id>/` —
     `PRODUCT.md` (numbered acceptance criteria), `DESIGN.md` with mock-ups, `ARCHITECTURE.md`,
     `PLAN.md` — with open questions and recommendations. `file` and `verify` are call legs
