@@ -1525,7 +1525,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
     root = mkdtempSync(join(tmpdir(), 'baton-courses-'));
     gitInit(root);
     baton(root, 'repo', 'init', '--pin', PIN);
-    for (const c of ['bug-report', 'decision', 'review-pr', 'draft-ticket']) baton(root, 'repo', 'init', '--course', c, '--pin', PIN);
+    for (const c of ['bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets']) baton(root, 'repo', 'init', '--course', c, '--pin', PIN);
     commitAll(root);
   }, 240_000);
   afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -1533,9 +1533,10 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
   it('a second course joins the first: its entry is added to baton.json, the default stays, its files are written', () => {
     const settings = JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8'));
     expect(settings.default_course).toBe('create-pr');
-    expect(settings.courses.map((c: { id: string }) => c.id)).toEqual(['create-pr', 'bug-report', 'decision', 'review-pr', 'draft-ticket']);
+    expect(settings.courses.map((c: { id: string }) => c.id)).toEqual(['create-pr', 'bug-report', 'decision', 'review-pr', 'draft-ticket', 'spec-to-tickets']);
     expect(settings.courses[1]).toEqual({ id: 'bug-report', version: 1, min_worker_version: 1, skill: 'baton-bug-report', step_kinds: ['trace', 'origin', 'dedupe', 'file', 'fold', 'prevent'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('bug-report') });
-    for (const [course, legs] of [['bug-report', 6], ['decision', 2], ['review-pr', 2], ['draft-ticket', 3]] as const) {
+    expect(settings.courses[5]).toEqual({ id: 'spec-to-tickets', version: 1, min_worker_version: 1, skill: 'baton-spec-to-tickets', step_kinds: ['decompose', 'check', 'file'], report_horizon_h: 6, branch_pattern: 'claude/{ticket}-*', protocol_files: [], source: sourceOf('spec-to-tickets') });
+    for (const [course, legs] of [['bug-report', 6], ['decision', 2], ['review-pr', 2], ['draft-ticket', 3], ['spec-to-tickets', 3]] as const) {
       expect(readdirSync(join(root, '.baton', 'courses', course, 'legs')).length, course).toBe(legs * 2);
     }
     expect(JSON.parse(readFileSync(join(root, '.baton', 'courses', 'bug-report', 'course.json'), 'utf8')).start).toBe('reported');
@@ -1605,14 +1606,14 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
   });
 
   it('the course test kit passes on each scaffolded course: its file, its stubs, one generic run to its end', () => {
-    for (const c of ['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision']) {
+    for (const c of ['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision', 'spec-to-tickets']) {
       expect(baton(root, 'test-course', root, c, '--base', 'none'), c).toContain('✓ no violations');
     }
   }, 240_000);
 
   it('--course pr is refused, naming create-pr; an unknown course names the choices', () => {
     expect(() => baton(root, 'repo', 'init', '--course', 'pr', '--pin', PIN)).toThrow(/renamed create-pr/);
-    expect(() => baton(root, 'repo', 'init', '--course', 'chore', '--pin', PIN)).toThrow(/scaffolds create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec/);
+    expect(() => baton(root, 'repo', 'init', '--course', 'chore', '--pin', PIN)).toThrow(/scaffolds create-pr, review-pr, bug-report, draft-ticket, decision, build-app, create-spec, spec-to-tickets/);
   });
 
   it('a repository still on pr: init with no --course moves the pin and keeps every file', () => {

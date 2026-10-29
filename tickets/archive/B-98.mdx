@@ -2,7 +2,7 @@
 title: "B-98 — baton request: start a course from one sentence, no hand-written ticket"
 id: B-98
 project: baton
-status: in-progress
+status: done
 updated: 2026-10-28
 tags:
   - roadmap-item
@@ -12,7 +12,8 @@ description: "Courses whose product is tickets or specs (create-spec, spec-to-ti
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/132
 depends_on: []
 ---
 
@@ -52,6 +53,15 @@ one sentence. `build-app` already works exactly this way; this ticket makes it a
    the request through the same commit flow); noted here so the API shape is anticipated,
    not built.
 
+## Dropped from the ticket, and why (2026-10-28, review round 1)
+
+The ticket's first draft had the command run with an owner or administrator key, and pick its
+target by `--repo`/`BATON_URL`. It does neither, by design: `baton request` is a REPOSITORY
+command — it files a ticket with git, in the checkout the developer already has, and the push
+is what starts the sync. There is no API call to sign, so there is no key to hold, and no
+`BATON_URL`: the remote the checkout names is the target. A web form (item 4) is where a key
+would come in, behind the owner role, calling the same commit flow.
+
 ### Tests
 
 - Unit: the written ticket's frontmatter (id, course, the sentence, status) against the
@@ -61,7 +71,7 @@ one sentence. `build-app` already works exactly this way; this ticket makes it a
 
 ### Exit criteria
 
-- [ ] `baton request "…" --course create-spec` starts the course from a terminal, one
+- [x] `baton request "…" --course create-spec` starts the course from a terminal, one
       sentence, no hand-written ticket
-- [ ] the request pattern documented as the general entry for courses whose product is
+- [x] the request pattern documented as the general entry for courses whose product is
       tickets or specs

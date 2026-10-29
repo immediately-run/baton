@@ -2076,9 +2076,12 @@ mean (R-BTN-50).
   | `decision` | `prepare` (`raised` → `asked`); `carry-out` (`asked` → `decided`) | `decided` | markers |
   | `build-app` | `define`, `design`, `architect`, `plan` (`requested` → `defined` → `designed` → `architected` → `planned`); `file` (`planned` → `building`, a call leg); `verify` (`building` → `shipped` \| `building`, a call leg, `max_runs` 3) | `shipped` | markers |
   | `create-spec` | `converse` (`requested` → `spec-open`, an interactive leg that suspends); `review` (`spec-open` → `reviewed`, `max_runs` 4); `address` (`reviewed` → `spec-open`, an interactive leg that suspends, `max_runs` 3); `adjudicate` (`reviewed` → `adjudicated`); `merge` (`reviewed`, `adjudicated` → `merged`) | `merged` | PRs and the interactive legs' markers |
+  | `spec-to-tickets` | `decompose` (`reading` → `drafted`); `check` (`drafted` → `checked`); `file` (`checked` → `filed`) | `filed` | markers |
   | `epic` | R-BTN-124 | `integrated`, `abandoned` | children |
   | `branch` | R-BTN-96 | R-BTN-96 | branches |
   | `ask`, `deliver`, `announce` | condition handlers (R-BTN-169) | R-BTN-169 | — |
+
+  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton request` — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder and `archive/`), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call: the push triggers the sync (§7.1), the board places the ticket at the course's `start` with its `start_leg` ready, and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
 
   - **A wait for a person's answer is a person's leg** (R-BTN-116), shown in git by the
     ticket's `answer:` (a sync-local field of the markdown source, read by the station
@@ -2106,6 +2109,16 @@ mean (R-BTN-50).
     path is the markers in order, skipping non-edges and legs past `max_runs`; the queued leg is
     the last marker's `next` if it leaves the station (`marker`), else the first leg listed
     (`course`); a malformed line is skipped and logged.
+  - **`spec-to-tickets`** (B-99) takes one merged specification — entered by `baton request`
+    (`starts_from: request`), the sentence naming the spec; a `create-spec` conversation's merged
+    PR is the usual input — and files its child tickets. `decompose` drafts one ticket per spec
+    section or numbered decision into the request's `## Drafts`, each with its tests and exit
+    criteria drafted from the spec's own words; `check` holds the set against the spec (every
+    requirement covered exactly once, no ticket without a section, dependencies drawn as the
+    spec's order implies) and fails rather than covering a gap; `file` commits the children
+    `parent:`-ed to the request (R-BTN-86), the request's `status:` to `done`. The owner deciding
+    against filing withdraws the request — a ticket status, not a course station: the filed
+    children are ordinary tickets on their own courses.
   - **`build-app`**'s drafting legs each write one document under `product/<ticket id>/` —
     `PRODUCT.md` (numbered acceptance criteria), `DESIGN.md` with mock-ups, `ARCHITECTURE.md`,
     `PLAN.md` — with open questions and recommendations. `file` and `verify` are call legs
@@ -6502,6 +6515,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-104 the standard courses | `bug-report` with markers (one no edge, one malformed), `decision` with `answer:`, `draft-ticket` with no forge facts; an audit leg answering with prose before and after its outcome, and with none (B-85) | markers move the ticket, bad ones nothing; `carry-out` ready once answered; the third syncs to `requested`; the prose-wrapped outcome is read, none fails naming the last line |
 | S-BTN-105 one leg overridden | `legs/review.run.mjs` on a sourced `create-pr` | the override runs at the snapshot; the standard `close` writes the verdict |
 | S-BTN-107 the build-app course | drafts approved one by one by `answer:`; `file`, a call, files two children on different courses; a verification files a fix; a third failing verification | each draft waits for its stage's approval; `file` settles at `building` only once both close, so `verify` never starts while a child is open; the fix call settles back to `building`; `released:blocked` on the posted decision; `shipped` |
+| S-BTN-175 the request | a fresh repository on `create-spec`; `baton request "<one sentence>" --course create-spec` run through the CLI's own entry, then a sync of what it pushed, then a runner's claim | one commit on the bare origin's main, on top of the scaffold, the ticket file alone — the sentence its title and description, `course: create-spec`, `available`, `tags: [request]` — with the caller's branch, HEAD and tree untouched; the board posts it `requested` with `converse` `ready`; the claim offers `converse` |
 | S-BTN-174 the create-spec course | a request with no PR and no marker; a run of `converse` that writes its marker and suspends, then a second sync; its PR on the branch pattern, checks running and then done; a verdict asking for changes and an address round begun and suspended; its push; a second round; a third round asking for changes; a round still asking for changes with all three address rounds spent; an adjudication reproducing a finding, then one that does not; a fresh approval; the merge | `converse` ready, then — its marker committed — waiting on `owner` and not offered again; `spec-open` with `review` waiting on `ci`, then ready; `reviewed` with `address` ready; back to `spec-open` after the push; `adjudicate` once the address rounds run out; `merge` waiting on `owner` for a reproduced finding, ready for none; `merge` ready on a fresh approval; `merged` |
 | S-BTN-110 courses from their sources | the built CLI outside a checkout: `--course create-pr`; a `--source` at a tag with overrides; a copied `course.json`; an off-branch commit; no `sync.mjs`; an outside import | full-commit source, no course file; source read at its commit with home overrides; each fault refused naming it, the commit unfetched |
 | S-BTN-117 bars and renames | bars on `implement` and `*` except `review`; files dropping, swapping, double-renaming, re-adding legs | first two held, raised; collision refused; `except` updated and the new leg barred |

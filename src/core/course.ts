@@ -10,7 +10,7 @@
 
 export type CourseRule =
   | 'shape' | 'unknown-key' | 'id' | 'unknown-station' | 'start-leg' | 'unreachable' | 'no-end' | 'terminal'
-  | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar' | 'no-chain-from' | 'entry' | 'schema' | 'role-in-roles';
+  | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar' | 'no-chain-from' | 'entry' | 'schema' | 'role-in-roles' | 'starts-from';
 
 export interface CourseViolation {
   rule: CourseRule;
@@ -47,7 +47,11 @@ const COURSE_LIST_MAX = 64;
  *  you entry (spec-silent, recorded on R3-1231). The list is kept to this while it fills, so a
  *  hostile file's thousand faults cost no more memory than a hundred. */
 const COURSE_VIOLATIONS_MAX = 100;
-const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs', 'capability_roles']);
+const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs', 'capability_roles', 'starts_from']);
+/** R-BTN-131 (B-98): the one way a course is entered that is not a hand-filed ticket —
+ *  `starts_from: request`, which `baton request` reads before it files the ticket that starts the
+ *  course. A closed set: anything else is a file Baton would record and never act on. */
+const STARTS_FROM = new Set(['request']);
 const STATION_KEYS = new Set(['label', 'renamed_from', 'entry']);
 const ENTRY_KEYS = new Set(['output', 'schema']);
 const LEG_KEYS = new Set(['from', 'to', 'label', 'max_runs', 'max_duration', 'max_queue', 'version', 'inputs', 'outputs', 'replay_safe', 'renamed_from',
@@ -253,6 +257,12 @@ export function validateCourse(json: unknown): CourseViolation[] {
   if (typeof json.start_leg !== 'string') add('shape', 'start_leg', 'start_leg must name a leg');
   else if (!isLeg.has(json.start_leg)) add('start-leg', 'start_leg', `"${json.start_leg}" is not a leg`);
   else if (start !== null && !(edges.get(json.start_leg)?.from ?? []).includes(start)) add('start-leg', 'start_leg', `"${json.start_leg}" does not leave the start station "${start}"`);
+  // R-BTN-131 (B-98): how the course is entered — `request`, filed by `baton request`, which
+  // reads this key from the checkout before it writes the ticket. Absent, the course is entered by
+  // a hand-filed ticket. Any other value is refused rather than kept unread.
+  if ('starts_from' in json && (typeof json.starts_from !== 'string' || !STARTS_FROM.has(json.starts_from))) {
+    add('starts-from', 'starts_from', `starts_from, when given, is one of ${[...STARTS_FROM].join(', ')}`);
+  }
   if ('short_waits' in json) {
     if (!Array.isArray(json.short_waits) || json.short_waits.length > COURSE_LIST_MAX || !json.short_waits.every((x) => typeof x === 'string')) add('shape', 'short_waits', `short_waits is a list of at most ${COURSE_LIST_MAX} waiting_on labels`);
     else for (const [i, w] of (json.short_waits as string[]).entries()) if (!WAIT_LABEL.test(w)) add('id', `short_waits.${i}`, `label "${w}" must match ${WAIT_LABEL.source}`);
