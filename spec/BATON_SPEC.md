@@ -2071,7 +2071,10 @@ mean (R-BTN-50).
   `src/defaults/courses/<id>/` (R-BTN-134), adapted from docs' skills with docs-specific content
   left out. A repository scaffolds one with `baton repo init --course <id>` and needs no course
   code of its own. "Standard" names where they live, not a privilege: the CLI reads them as any
-  source. Their shared code is copied into each directory by `npm run courses`, checked in, and
+  source. They assume no particular deployment and are written for `landing: cooperative`; a
+  course that relies on a deployment's own architecture and threat model (reviewers on clean,
+  separate trust domains, tests in a trusted executor, signed authorship) is that deployment's,
+  kept and sourced from its own repository: Fieldhouse's is FLDH-41. Their shared code is copied into each directory by `npm run courses`, checked in, and
   checked current by the baton repository's CI. Their legs require `runner:leg-trees`.
 
   | Course | Legs (`from` → `to`) | Ends | Reads |
@@ -5979,9 +5982,10 @@ merges that commit.
     must therefore (a) run review legs in an environment with no command execution and no
     configuration from the branch, and (b) reset a trust domain to a clean state after any leg that
     ran a branch's code, before it serves another ticket, since taint is tracked per ticket while a
-    domain persists. Fieldhouse does both (R-FH-3). The standard courses' harness invocation and
-    review instructions under `protected` follow (a): no `--auto` or permission bypass in the branch
-    checkout, and no "run the tests" in a review leg.
+    domain persists. Fieldhouse does both (R-FH-3). Baton's part is the runner's harness: a
+    `reads_only` leg starts its agent with no `--auto` or permission bypass and no configuration
+    from the branch (B-141). The courses that run their reviews that way are the deployment's
+    (R-BTN-131).
   - **Continuity.** A writing claim reports its start head at claim, which must be the last
     attested head (or the merge base for the first leg). The CLI refuses to build on any other tip
     and raises `baton.foreign-commit`. At `advance` the leg reports `start..head` from the objects it
@@ -7016,6 +7020,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 
 **Scope and truth**
 
+- Chose standard courses that assume no particular deployment and serve the simpler end of Baton's range, with a factory's security and quality-assurance courses kept by that factory, over standard courses that carry every factory's guarantees: Baton scales from a single user's naive setup to a factory whose threat model shapes its architecture, and only the mechanisms are common to both (2026-10-29; R-BTN-131).
 - Chose a protected default branch that only a deterministic merge runner and humans update, with merge criteria in Baton, over a git proxy, per-worker forks, or accepting unsigned pushes and verifying signatures: protected branches are what engineers already reason with and every forge has one, and the merge decision belongs in deterministic code (2026-10-28; R-BTN-180, R-BTN-182, R-BTN-183).
 - Chose to keep Baton cooperative on one trusted machine and leave enforcement to the deployment, over requiring a merge runner, proxy or sandbox everywhere: Baton must stay usable for a small project run locally (2026-10-28; R-BTN-180).
 - Chose that courses and leg logic change outside Baton for now, by a human's push or merge, and that tickets are created through courses and land only with a human approval, over letting the merge runner land either alone (2026-10-28; R-BTN-184).

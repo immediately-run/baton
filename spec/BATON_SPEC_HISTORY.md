@@ -355,6 +355,18 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   S-BTN-21 was rewritten and G-BTN-162 added. The 2026-10-14/16 rejection of reservations now
   names future capacity: a seat a running leg holds is a fact the runner states, not a forecast.
 
+- **2026-10-29 — the standard courses serve the simpler end (owner direction).** The owner:
+  "baton is a general tool designed to scale from single-user naive setups where security is an
+  afterthought and automation and lock management is the primary concern to something like our
+  software factory which has a specific threat model and real security guarantees which heavily
+  influence its architecture and the courses it uses. We should put all the immediately run
+  security and quality assurance work into fieldhouse and fieldhouse specific baton courses while
+  baton should ship courses that don't rely on fieldhouse's specific architecture, and thus are
+  simpler / aimed at less sophisticated users." R-BTN-131 gained the scope; §12.8's "the standard
+  courses … under `protected` follow (a)" became the runner's harness mode (B-141), with the
+  courses the deployment's (Fieldhouse FLDH-41); `docs/context/product.mdx` gained *From one
+  machine to a factory*. §12.8's mechanisms stay in core.
+
 - **2026-10-27 to 2026-10-28 — §12.8: the core guarantee (owner direction; B-124, B-127, B-130,
   B-136, B-137, B-139, B-140).** The owner kept push access to a home as the perimeter of a
   fleet, but asked for an explicit security model (`docs/security-model.mdx`) and an adversarial
