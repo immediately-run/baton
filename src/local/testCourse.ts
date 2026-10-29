@@ -311,10 +311,10 @@ export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
   const script = join(k.root, '.baton', 'courses', k.course, 'legs', `${startLeg}.mjs`);
   if (!existsSync(script)) return []; // a missing script is the legs-scripts rule's own failure
   const dir = mkdtempSync(join(tmpdir(), 'baton-kit-ticket-'));
+  // A local bare origin the close can really fetch (round 1, finding 5): the rule must reach
+  // the close's own checks, not pass on a fetch that cannot connect.
+  const origin = mkdtempSync(join(tmpdir(), 'baton-kit-ticket-origin-'));
   try {
-    // A local bare origin the close can really fetch (round 1, finding 5): the rule must reach
-    // the close's own checks, not pass on a fetch that cannot connect.
-    const origin = mkdtempSync(join(tmpdir(), 'baton-kit-ticket-origin-'));
     execFileSync('git', ['-C', origin, 'init', '-q', '--bare', '-b', 'main'], { stdio: 'ignore' });
     const git = (out: boolean, ...args: string[]) =>
       String(execFileSync('git', ['-C', dir, '-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'], ...(out ? { encoding: 'utf8' } : {}) }));
@@ -340,6 +340,7 @@ export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(origin, { recursive: true, force: true });
   }
 }
 

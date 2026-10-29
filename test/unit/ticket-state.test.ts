@@ -105,6 +105,10 @@ describe('the machine state in frontmatter', () => {
     const one = setMachineKeys(text, { station: 'traced', next_leg: 'origin', claim: 'n9' });
     expect(one).toBe(`---\nid: B-1\ntitle: T\nstation: traced\nnext_leg: origin\nclaim: n9\n---\n\n## trace\n\nThe work.\n`);
     expect(machineOf(parseFrontmatter(one))).toEqual({ station: 'traced', next_leg: 'origin', claim: 'n9' });
+    // A malformed block-list machine value goes whole: its `- item` continuations are removed
+    // with the key, never left dangling under the key above (round 1, finding 6; round 2, 3).
+    const listed = setMachineKeys('---\nid: B-1\ntitle: T\nstation:\n  - closed\n---\n\n## trace\n', { station: 'traced', next_leg: null, claim: null });
+    expect(listed).toBe('---\nid: B-1\ntitle: T\nstation: traced\n---\n\n## trace\n');
     // CRLF is preserved: the block keeps its own line endings (round 1, finding 6).
     const crlf = setMachineKeys('---\r\nid: B-1\r\ntitle: T\r\n---\r\n\r\n## trace\r\n', { station: 'traced', next_leg: 'origin', claim: 'n9' });
     expect(crlf).toBe('---\r\nid: B-1\r\ntitle: T\r\nstation: traced\r\nnext_leg: origin\r\nclaim: n9\r\n---\r\n\r\n## trace\r\n');
@@ -226,6 +230,20 @@ describe('closeTicket', () => {
       await expect(closeTicket({ checkout: brokenSchema.clones[0], ticket: { id: 'B-1', path: 'tickets/B-1.md' }, leg: 'trace' }, { reached: 'traced' })).rejects.toThrow('the ticket has no title');
     } finally {
       rmSync(brokenSchema.root, { recursive: true, force: true });
+    }
+    const badSchema = remote(1);
+    try {
+      // A schema that is present but unreadable fails the check closed (round 2, finding 1):
+      // never silently skipped.
+      const path = join(badSchema.seed, 'tickets', 'item.schema.json');
+      writeFileSync(path, '{ not json');
+      execFileSync('git', ['-C', badSchema.seed, 'add', '-A'], { stdio: 'ignore' });
+      execFileSync('git', ['-C', badSchema.seed, 'commit', '-qm', 'break the schema'], { stdio: 'ignore' });
+      execFileSync('git', ['-C', badSchema.seed, 'push', '-q', 'origin', 'main'], { stdio: 'ignore' });
+      execFileSync('git', ['-C', badSchema.clones[0], 'pull', '-q', 'origin', 'main'], { stdio: 'ignore' });
+      await expect(closeTicket({ checkout: badSchema.clones[0], ticket: { id: 'B-1', path: 'tickets/B-1.md' }, leg: 'trace' }, { reached: 'traced' })).rejects.toThrow('is not a schema the close can check');
+    } finally {
+      rmSync(badSchema.root, { recursive: true, force: true });
     }
     const noFrontmatter = remote(1, { 'tickets/B-1.md': `just prose, no fence\n` });
     try {
@@ -351,6 +369,8 @@ describe('migrateMarkersMain (B-100)', () => {
     writeFileSync(join(dir, 'tickets', 'b1.md'), '---\nid: B-1\ntitle: The save button\ncourse: bug-report\n---\n\n## trace\n\nThe work.\n');
     writeFileSync(join(dir, 'tickets', 'b2.md'), '---\nid: B-2\ntitle: Folded already\nstatus: done\ncourse: bug-report\n---\n\n## trace\n\nThe work.\n');
     writeFileSync(join(dir, 'tickets', 'b3.md'), '---\nid: B-3\ntitle: A PR ticket\ncourse: create-pr\n---\n');
+    mkdirSync(join(dir, '.baton', 'courses', 'create-spec'), { recursive: true });
+    writeFileSync(join(dir, 'tickets', 's1.md'), '---\nid: S-1\ntitle: Specify the export format\ncourse: create-spec\n---\n\nWrite down what an export file must contain.\n');
     writeFileSync(join(dir, '.baton', 'markers.jsonl'), [
       '{"ticket":"B-1","leg":"trace","reached":"traced","next":"origin","claim":"n1"}',
       '{"ticket":"B-1","leg":"origin","reached":"explained","next":"dedupe","claim":"n2"}',

@@ -109,7 +109,7 @@ carries, in an order the corpus already uses:
   the record, the ticket waits at `requested`, and nothing is lost: the next conversation continues
   from the branch.
 
-Your work lands under the ticket's own `## converse` heading — write it if it is not there; the close checks it is.
+Record the conversation under the ticket's own `## converse` heading when you write in the ticket; this leg's close checks no heading — its record is the frontmatter state, and its work is the PR.
 
 ## Do not
 

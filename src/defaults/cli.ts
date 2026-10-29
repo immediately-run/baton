@@ -437,6 +437,12 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
     }
     lines.push(m as typeof lines[number]);
   });
+  const gitRun = (args: string[]): string => exec('git', args, root);
+  const branch = gitRun(['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (branch === 'HEAD') {
+    log('baton: this checkout is detached — nothing was written. Check out the branch the board syncs, then run the migration there.');
+    return 1;
+  }
   const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
   const result = existsSync(join(root, '.baton', 'tickets.mjs'))
     ? await ((await import(`${pathToFileURL(join(root, '.baton', 'tickets.mjs')).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default: { tickets: (ctx: unknown) => Promise<TicketsResult> } }).default.tickets({ root, settings })
@@ -444,7 +450,6 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
   const closedIds = new Set(result.closed.map((c) => c.id));
   const byTicket = new Map<string, typeof lines>();
   for (const l of lines) byTicket.set(l.ticket, [...(byTicket.get(l.ticket) ?? []), l]);
-  const gitRun = (args: string[]): string => exec('git', args, root);
   const changed: string[] = [];
   const dropped: string[] = [];
   for (const t of result.tickets) {
@@ -479,11 +484,6 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
   // Only what the migration touched (round 1, finding 10) — never `-A`.
   gitRun(['add', '--', MARKERS_FILE_RETIRED, ...changed.map((id) => result.tickets.find((t) => t.id === id)!.path)]);
   gitRun(['commit', '--no-gpg-sign', '-qm', 'baton: markers.jsonl folded into the tickets (B-100)', '--', MARKERS_FILE_RETIRED, ...changed.map((id) => result.tickets.find((t) => t.id === id)!.path)]);
-  const branch = gitRun(['rev-parse', '--abbrev-ref', 'HEAD']);
-  if (branch === 'HEAD') {
-    log('baton: this checkout is detached — the migration commits are local; check out a branch, then push.');
-    return 1;
-  }
   try {
     gitRun(['push', 'origin', `HEAD:${branch}`]);
   } catch {

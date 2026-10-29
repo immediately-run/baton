@@ -39,12 +39,12 @@ Once Baton launches interactive legs itself, the runner sends the link to the se
 
 ## How the ticket waits
 
-**Baton records the round, not you**: when you return, this leg's `close` appends
-`{"ticket": "<the ticket's bare id>","leg":"address","reached":"reviewed"}` to
-the ticket file, commits it alone on the default branch, and pushes it. From that record on
+**Baton records the round, not you**: when you return, this leg's `close` writes the round
+into the ticket's own frontmatter — `station: reviewed`, `next_leg: address`, the claim's nonce —
+commits the ticket alone on the default branch, and pushes it. From that record on
 the sync holds `address` **waiting on the owner** — one conversation per round, not one per sync —
 until the amendment's push lands and the ticket moves back to `spec-open`. Do not write, amend or
-delete that line. If the PR is closed without merging, the ticket keeps waiting on the owner:
+amend or delete that state. If the PR is closed without merging, the ticket keeps waiting on the owner:
 closing a PR answers no finding, so the owner reopens it, or files a fresh request.
 
 ## The conversation
@@ -72,7 +72,7 @@ closing a PR answers no finding, so the owner reopens it, or files a fresh reque
   explicit paths, never `git add -A`; add commits, never rewrite the branch's history), push once
   with every answer in it, reply on the threads you fixed naming the commit, and end the session.
 
-Your work lands under the ticket's own `## address` heading — write it if it is not there; the close checks it is.
+Record the round under the ticket's own `## address` heading when you write in the ticket; this leg's close checks no heading — its record is the frontmatter state, and its work is the PR.
 
 ## Do not
 

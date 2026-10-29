@@ -182,11 +182,18 @@ export function setMachineKeys(text: string, state: MachineState): string {
   const block = fm[0];
   const eol = block.includes('\r\n') ? '\r\n' : '\n';
   // A machine key goes as one line; a malformed block-list value's `- item` continuations are
-  // removed with it, never left dangling under the key above (round 1, finding 6).
+  // removed with it, never left dangling under the key above (round 1, finding 6; round 2's
+  // finding 3 — the guard now walks a flag, not the line before, which the drop had already
+  // removed).
   const kept: string[] = [];
+  let dropping = false;
   for (const line of block.split(/\r?\n/)) {
-    if (/^(station|next_leg|claim):/.test(line)) continue;
-    if (/^\s+-\s+/.test(line) && kept.length && /^(station|next_leg|claim):/.test(kept[kept.length - 1] ?? `x:`)) continue;
+    if (/^(station|next_leg|claim):/.test(line)) {
+      dropping = true;
+      continue;
+    }
+    if (dropping && /^\s+-\s+/.test(line)) continue;
+    dropping = false;
     kept.push(line);
   }
   const entries: string[] = [`station: ${state.station}`];
