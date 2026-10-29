@@ -387,7 +387,14 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   R-BTN-182 (trusted runners) replace the approvals rule. A third fresh review found the headline
   still did not hold (R1–R20, below); the owner then agreed to commits signed by runners' Baton
   keys, independence by trust domain, two forge identities, and stating plainly that a change
-  persuading both reviewers' models lands, with two reviewers from different model families. Then: "a
+  persuading both reviewers' models lands, with two reviewers from different model families. A
+  fourth review found the guarantee still failed (F1–F17): a writer's code ran in its reviewers'
+  domains. The owner: signed authorship "might be a very strong addition for Fieldhouse, but I
+  don't think this should be universally required for all users of the baton", so it became the
+  opt-in `authorship: signed`, and §12.8 states each mode's guarantee separately; and, of "a domain
+  that runs a branch's code is a writer, with reviewers never executing branch code and Baton keys
+  moved to a host-side signer": "Yes, this makes sense to me." Values 12 and the architecture page
+  gained the opt-in exception; R-BTN-35, -161, -165, -171 and -173 their notes. Then: "a
   runner branch working on a specific ticket should be able to update its own ticket … to
   document the ticket's progression. And the ticket file is the right place to do this. It is
   easy to check that a runner authored branch is only modifying its own ticket file at merge
@@ -3014,8 +3021,10 @@ rewrite around attestations and trusted runners:)*
 
 *(2026-10-28 — §12.8 at `2e3bfa7` was reviewed adversarially by a third fresh agent: the headline
 did not yet hold, one compromised runner could still land a change alone; N1–N16: 4 resolved, 12
-partly, 1 not (Fieldhouse's Axiom 4, since amended in fieldhouse#7); 20 new findings. Resolved in
-the revision that follows, with the owner's four decisions:)*
+partly, 1 not (Fieldhouse's Axiom 4, since amended in fieldhouse#7); 20 new findings. Addressed in
+the revision that follows, with the owner's four decisions. The fourth review judged these
+resolutions 1 resolved (R15), 7 mostly and 12 partly; the table below says what was done, and the
+fourth round's table what remained:)*
 
 | Finding | Resolution |
 |---|---|
@@ -3038,5 +3047,29 @@ the revision that follows, with the owner's four decisions:)*
 | R17 the checks executor runs PR code beside its key | the executor's sandbox holds no credential; the key signs outside from the exit status; one `service` key per type (R-BTN-181) |
 | R18 Baton-written facts trusted wholesale; imports strand work | `baton` attestations are signed with Baton's attestation key, which trusted runners pin; after an import, work re-attests by re-running its writing and review legs (R-BTN-181, R-BTN-182) |
 | R19 per-forge feasibility | the check and the human-merge signal are specified for GitHub, GitLab, Gitea and plain git (the pusher log) (R-BTN-180, R-BTN-184) |
-| R20 stale references | the history's references corrected; `where` defined; §13 tables and columns, §14's revoke route and §15's scenarios S-BTN-180–187 added. B-128, B-140 and the security model are updated with this revision (baton#133) |
+| R20 stale references | the history's references corrected; `where` defined; §13 tables and columns, §14's revoke route and §15's scenarios S-BTN-180–187 added. B-128, B-140 and the security model are updated in baton#133, the spec in baton#134 |
+
+*(2026-10-29 — §12.8 at `cda30b2` was reviewed adversarially by a fourth fresh agent: the guarantee
+did not hold, not ready to merge as a proposal, but close; of R1–R20, 1 resolved, 7 mostly, 12
+partly (among them R3, whose read of GitHub's bypass actors needs write access to the ruleset, and
+whose audit log exists only on Enterprise Cloud); 17 new findings. Addressed in the revision that
+follows, with the owner's decisions on F1 and on signed authorship:)*
+
+| Finding | Resolution |
+|---|---|
+| F1 a writer's code runs in its reviewers' and fixers' domains, ending their legs or reading their keys | a domain that runs a branch's code is one of its writers (`std:ran@1`); reviews are `reads_only` legs that load agent configuration from the default branch and run nothing; tests run only in the trusted executor; Baton keys sit outside domains that run branch code, behind a host-side signer in Fieldhouse's profile (R-BTN-181, R-BTN-183; the owner's decision) |
+| F2 the exclusion understates the risk | stated exactly: a compromised runner that is one reviewer needs to persuade the other (§12.8) |
+| F3 the `trusted` mark makes `cooperative` unusable | the trust level (`trusted`, `untrusted`) is separate from the trusted-runner role; under `cooperative` grants are `trusted` by default (R-BTN-180) |
+| F4 the outbox and handler tickets still write ticket files to main | the outbox never writes a ticket file under `protected`; handler tickets, call children, promoted questions and supersession replacements are held in Baton until approved, in batches (R-BTN-180; notes on R-BTN-161, -165, -171, -173) |
+| F5 signed commits do not fit API keys, session isolation, WIP pushes, merges from main, rebases, B-101 | signing is the opt-in `authorship: signed`; under it, SSH keys only and session legs sign through their runner; a leg's own intermediate pushes are its range; commits reachable from main are outside every range; a rebase replaces the range; B-101's review files are written by the trusted runner (R-BTN-183) |
+| F6 the human-merge path is not gated | `human-merge` shows the computed view of the head (chain, reviews, checks, diff); a merge of anything but the presented head is a discrepancy; `**` applies only where a workflow uses a deploy or release secret (R-BTN-184) |
+| F7 a tree binding voids approvals whenever main moves | approvals bind paths and blobs, checked against the merge result's blobs; main moving voids one only if it changes an approved path (R-BTN-181, R-BTN-183) |
+| F8 supersession forbids two reviews; revoked keys keep counting | supersession is per writer; an attestation counts only while its writer's key is unrevoked (R-BTN-181) |
+| F9 approval queues bypassed in practice | batch approval for held tickets; the queue stays the cost the owner accepted under Fieldhouse Axiom 4 |
+| F10 contradictions with values 6 and 12, the architecture page, R-BTN-35, Fieldhouse Axiom 6 | protections read from git and the forge, never deliveries (values 6); values 12 and the architecture page state the opt-in exception and one grant per sandbox; R-BTN-35's note; Fieldhouse's profile rule (fieldhouse) carries the host-side signer under Axiom 6 |
+| F11 runners can edit GitHub releases | a release is the signed tag and the package's provenance, never the forge's release object (R-BTN-180) |
+| F12 the CLI's dependencies come from the registry | the release ships `npm-shrinkwrap.json`, so every dependency is pinned (R-BTN-182) |
+| F13 foreign-push detection cannot see signatures; clearing costs a ceremony | the trusted runner finds foreign commits from git, resets the branch, and raises `baton.foreign-commit`, an `owner` resolution (R-BTN-183) |
+| F14 the model family is self-declared | set on the grant with its trust level, a human gate; a review leg runs only that family (R-BTN-183) |
+| F15–F17 the validator's "alone"; `refs/baton/*`; `baton request`; the unpinned base; the key's machine; instance-wide administrators; the sandbox's needs | the validator refuses any `owner`-writable type on a trusted leg; `refs/baton/*` only for trusted runners and humans; `baton request` opens a PR under an untrusted credential; the base pinned by compare-and-swap; the human-only key only on a machine no agent drives; `human_only` administrators only on instances with a `protected` repository; `bubblewrap` with PID namespace and `/proc`, refused where unavailable (R-BTN-180–R-BTN-185) |
 

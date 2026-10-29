@@ -48,4 +48,6 @@ by a review.</Lede>
     included, each is a runner's own statement. Its permissions cover only its own state, and
     its gates protect the lock. Its advice is never older than the last write it accepted for
     the runner reading it; fleet-wide views catch up within one alarm cycle. A design that needs
-    Baton to stop a runner doing something is outside Baton.
+    Baton to stop a runner doing something is outside Baton, with one exception a repository opts
+    into: under `landing: protected`, Baton's trusted runners decide what lands, from attestations,
+    and the forge enforces that only they and a human may (BATON_SPEC §12.8).

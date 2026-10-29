@@ -31,6 +31,8 @@ change to Baton, not a change in Baton.</Lede>
   permissions cover only its own state — who takes a repository's leases, who changes its
   settings (values 12). A threat that needs a runner stopped belongs to the sandbox, the forge
   or the credential proxy, not here.
+  Under `landing: protected` a repository opts into one exception: Baton's trusted runners decide
+  what lands, and the forge lets only them and the human-only identity land it (BATON_SPEC §12.8).
 - **Advice is fresh for the reader, bounded for the fleet.** A write Baton accepts — a board,
   a reading, a heartbeat, an ontology — marks what it affects stale, and anything a runner reads
   afterwards is brought up to date for that runner first; fleet-wide views (counts, blocks,
@@ -67,6 +69,9 @@ change to Baton, not a change in Baton.</Lede>
   its recovery routine (the `reaped:silent` path). A single process multiplexing legs
   across threads or subprocesses is a possible later evolution, decided when the sandbox
   fleet's evidence is in — not the plan.
+  Under `landing: protected` a sandbox is one trust domain with one grant per repository
+  (BATON_SPEC R-BTN-180), so several runners in one sandbox count as one for independent
+  review; Fieldhouse runs one runner per VM (FLDH-13).
 
 ## Where code lives
 
