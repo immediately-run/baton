@@ -1,5 +1,5 @@
 ---
-title: "B-141 — Standard courses under protected: review legs run no branch code; tests only in the trusted executor"
+title: "B-141 — The runner's harness: a reads_only leg runs no branch code and loads no branch configuration"
 id: B-141
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1164
 tier: critical
-description: "Fifth review of §12.8 (2026-10-29): the harness starts agents with --auto or a permission bypass in the branch checkout, opencode loads the branch's configuration, review.md runs tests, and B-110's run-tests runs on ordinary runners. Under landing: protected, review legs are reads_only (diff as data, configuration from main, no command execution) and tests run as std:checks@1 in the trusted executor. Requires: none."
+description: "Fifth review of §12.8 (2026-10-29): the harness starts agents with --auto or a permission bypass in the branch checkout, and opencode loads the branch's configuration. A reads_only leg gets the diff as data from an extracted tree, configuration from the default branch, and no command execution. The courses that use it are the deployment's (the owner, 2026-10-29; Fieldhouse FLDH-41). Requires: none."
 topics:
   - baton
 owns: {}
@@ -20,36 +20,35 @@ depends_on: []
 
 **Brief:** the owner, 2026-10-29, on BATON_SPEC §12.8's F1: "a domain that runs a branch's code is
 a writer, with reviewers never executing branch code" — "Yes, this makes sense to me." The fifth
-adversarial review found the standard courses contradict it: `src/runner/harness.ts` starts every
-leg's agent with `opencode run --auto` or `claude --permission-mode bypassPermissions` in the
-ticket's checkout, where opencode loads the branch's own configuration and plugins; the standard
-`create-pr/review.md` tells the reviewer to run the tests; and B-110's `run-tests` leg runs the
-branch's tests on an ordinary runner.
+adversarial review found the runner contradicts it: `src/runner/harness.ts` starts every leg's
+agent with `opencode run --auto` or `claude --permission-mode bypassPermissions` in the ticket's
+checkout, where opencode loads the branch's own configuration and plugins.
 
-**Spec:** R-BTN-183 (a domain that runs a branch's code is a writer), R-BTN-181 (`std:ran@1`,
-`std:checks@1`), R-BTN-131 (the standard courses); B-110, B-128 item 6.
+**Narrowed 2026-10-29.** The owner: "baton should ship courses that don't rely on fieldhouse's
+specific architecture, and thus are simpler / aimed at less sophisticated users." The courses that
+review without running branch code and run tests in a trusted executor are Fieldhouse's (FLDH-41).
+This ticket keeps Baton's mechanism only; the standard courses and B-110 do not change.
+
+**Spec:** R-BTN-183 (a domain that runs a branch's code is a writer; "Baton records this; the
+deployment makes it true"), R-BTN-131 (the standard courses' scope).
 **Depends on:** none.
 
 ### What to build
 
-1. **Review legs are `reads_only: true`** in the standard courses (`create-pr`, `review-pr`,
-   `branch`) under `landing: protected`: the stub gives the agent the diff and the changed files
-   as data, from a tree it extracts (no working checkout of the branch, no `.git` hooks), and starts
-   the agent with its configuration from the default branch's snapshot, in a directory holding no
-   branch file the harness reads as configuration (`.claude/`, `.opencode/`, `opencode.json`,
-   `AGENTS.md`, `CLAUDE.md`, `.mcp.json`).
-2. **No command execution in a review leg's harness**: no `--auto`, no permission bypass; the
-   harness's tool policy allows reading files only. The standard `review.md` drops "run the
-   tests" and reads `std:checks@1` instead.
-3. **Tests run in the trusted executor**: B-110's `run-tests` leg, under `protected`, becomes the
-   executor's `std:checks@1` (B-128 item 6); on an ordinary runner it stays a fixer's feedback and
-   counts as running the branch's code (`std:ran@1`).
+1. **A `reads_only` leg's workspace**: the stub gives the agent the diff and the changed files as
+   data, from a tree it extracts (no working checkout of the branch, no `.git` hooks), in a
+   directory holding no branch file a harness reads as configuration (`.claude/`, `.opencode/`,
+   `opencode.json`, `AGENTS.md`, `CLAUDE.md`, `.mcp.json`); the agent's configuration comes from
+   the default branch's snapshot.
+2. **No command execution for a `reads_only` leg**: the harness starts the agent with no `--auto`
+   and no permission bypass, and with a tool policy that allows reading files only.
+3. Legs that are not `reads_only` run as today.
 
 ### Tests
 
-- A scenario (the next free S-BTN number): under `protected`, a review leg's agent command carries
-  no `--auto` or permission bypass and its working directory holds no branch configuration file; a
-  branch whose `.opencode/plugins/` writes a marker leaves no marker after a review leg.
+- A scenario (the next free S-BTN number): a `reads_only` leg's agent command carries no `--auto`
+  or permission bypass and its working directory holds no branch configuration file; a branch whose
+  `.opencode/plugins/` writes a marker leaves no marker after a `reads_only` leg.
 
 ### Exit criteria
 

@@ -49,6 +49,16 @@ A team of agents that coordinates through git alone pays three costs that grow w
 - **A live view.** Workers, claims, timelines, what is ready, what is blocked and what needs a
   person — on one dashboard, with the course's own record of how long things take.
 
+## From one machine to a factory
+
+Baton scales from one person running a few agents on their own machine, where automation and
+the lock are what matter and security is an afterthought, to a software factory with a threat
+model of its own and guarantees that shape its architecture. Core carries the mechanisms both
+ends need: leases and courses for the first, landing modes, attestations and trusted runners for
+the second. The courses Baton ships assume no particular architecture and serve the simpler end.
+A factory whose guarantees rest on its own architecture writes the courses that rely on it and
+keeps them with that factory: immediately.run's are Fieldhouse's (the owner, 2026-10-29).
+
 ## Who it is for
 
 Teams that run many coding agents — or agents and people — against the same repositories, and

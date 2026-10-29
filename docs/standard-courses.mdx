@@ -8,7 +8,9 @@ order: 15
 A course is the route a ticket takes: its stations, and the legs an agent runs between them. A
 repository can write its own, as the docs repository did with `roadmap-pr`, but most need one of
 a handful of routes. Baton's CLI ships eight, and a repository adopts each with one command. They
-are specified in BATON_SPEC R-BTN-131 and started from the docs repository's skills.
+are specified in BATON_SPEC R-BTN-131 and started from the docs repository's skills. They assume
+no particular deployment: a factory whose guarantees rest on its own architecture, such as
+Fieldhouse, writes and keeps the courses that rely on it.
 
 | course | what it does | legs | where it ends |
 |---|---|---|---|
