@@ -361,12 +361,15 @@ export function checkActivity(a: unknown, field: string): ActivityReport {
 
 export const RELEASE_REASONS = ['requested', 'owner-cancel', 'provider-suspended'] as const;
 
-export function checkMessage(body: unknown): { to_worker_id: number; kind: 'release' | 'status_request'; payload: Record<string, unknown> | null } {
+export function checkMessage(body: unknown): { to_worker_id: number; kind: 'release' | 'status_request' | 'wind-down'; payload: Record<string, unknown> | null } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
   if (!isInt(b.to_worker_id) || (b.to_worker_id as number) <= 0) bad('to_worker_id', 'must be a worker id');
   if (b.kind === 'status_request') return { to_worker_id: b.to_worker_id as number, kind: 'status_request', payload: null };
-  if (b.kind !== 'release') bad('kind', "must be 'release' or 'status_request'");
+  // B-109: an owner's wind-down — the graceful face of the reap, delivered by the heartbeat
+  // and acknowledged like any message; the runner drains, completing its leg first.
+  if (b.kind === 'wind-down') return { to_worker_id: b.to_worker_id as number, kind: 'wind-down', payload: null };
+  if (b.kind !== 'release') bad('kind', "must be 'release', 'status_request' or 'wind-down'");
   const p = b.payload;
   if (!isObj(p)) bad('payload', 'a release names {ticket_id, reason}');
   const x = p as Record<string, unknown>;

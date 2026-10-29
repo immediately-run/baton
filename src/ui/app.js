@@ -216,6 +216,11 @@ function renderWorkers() {
     const actions = el('td');
     if (w.reaped_at == null) {
       actions.append(button('Status', () => act('/v1/ui/messages', { to_worker_id: w.id, kind: 'status_request' })));
+      actions.append(button('Wind down', () => {
+        if (confirm(`Ask worker #${w.id} to wind down? Its current leg completes, then the runner exits.`)) {
+          act('/v1/ui/messages', { to_worker_id: w.id, kind: 'wind-down' });
+        }
+      }));
       if (w.claim) {
         actions.append(button('Release', () => {
           if (confirm(`Ask worker #${w.id} to release ${w.claim.ticket_id}?`)) {

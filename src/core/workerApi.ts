@@ -542,13 +542,14 @@ export class WorkerApi {
   private deliver(workerId: number, now: number) {
     const out = this.rows<{ id: number; kind: string; payload_json: string | null; sent_at: number }>(
       `SELECT id, kind, payload_json, sent_at FROM messages WHERE to_worker_id = ? AND status IN ('pending','delivered')
-       AND kind IN ('release','status_request','unblocked') ORDER BY id`, workerId);
+       AND kind IN ('release','status_request','wind-down','unblocked') ORDER BY id`, workerId);
     this.exec(`UPDATE messages SET status = 'delivered', delivered_at = ? WHERE to_worker_id = ? AND status = 'pending'`, now, workerId);
     return out.map((m) => ({ id: m.id, kind: m.kind, payload: m.payload_json ? JSON.parse(m.payload_json) : null, sent_at: m.sent_at }));
   }
 
-  /** `POST /v1/ui/messages`: a release (`requested`, `owner-cancel`, `provider-suspended`) or a
-   *  status request, from the owner to one worker. */
+  /** `POST /v1/ui/messages`: a release (`requested`, `owner-cancel`, `provider-suspended`), a
+   *  status request, or a wind-down (B-109: the runner drains — its current leg completes, then
+   *  it exits without claiming again), from the owner to one worker. */
   sendMessage(owner: string, body: unknown) {
     const m = checkMessage(body);
     if (!this.rows('SELECT 1 FROM workers WHERE id = ?', m.to_worker_id).length) throw new BatonError('not-found', 'no such worker');

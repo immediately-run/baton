@@ -3037,7 +3037,10 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
 - **Kinds.** `release` `{ticket_id, reason}`; `status_request`; `status_report`, a reply
   (`in_reply_to`) `{activity, text}` with the current activity (§9); `unblocked` `{tickets:
-  [{ticket_id, cleared}]}` (R-BTN-77); `handled` (R-BTN-162).
+  [{ticket_id, cleared}]}` (R-BTN-77); `handled` (R-BTN-162); `wind-down` (B-109) — an owner's
+  ask that a worker drain: the runner sets the same flag `SIGTERM` does (its current leg
+  completes, its claim ends at the boundary with its hand-off, it exits without claiming again),
+  acknowledges the message, and a second wind-down changes nothing.
 - **Delivery is a poll.** A heartbeat response returns pending messages and marks them
   `delivered` in the same transaction, and returns again every delivered message not yet
   acknowledged, so a lost response loses none; the runner acts on a message `id` once, then
@@ -4197,7 +4200,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     `forbidden`, `session-taken`, `runner-reaped`) replace the upgrade. One socket per runner; a
     new one closes the old.
   - Baton sends `{ring: [<kind>]}` after the transaction that queued something commits; kinds
-    are `release`, `status_request`, `unblocked` and `handled` (R-BTN-162). The runner heartbeats at
+    are `release`, `status_request`, `wind-down` (B-109), `unblocked` and `handled` (R-BTN-162). The runner heartbeats at
     once. At most one ring per runner per second; kinds suppressed within the second go in one **trailing ring** at its end, set by the alarm.
   - Delivery, acknowledgement, the lease and the fence stay on the heartbeat; its 2-minute
     cadence is unchanged, and a ring adds at most one heartbeat.
@@ -4375,10 +4378,15 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     stalled remote therefore
     fails the leg within the bound — `close` throws on the killed push, the runner's two retries
     are each bounded too, and then the leg ends `released:cannot-finish:transient` — rather than
-    blocking the runner for hours. Nothing on the heartbeat path runs a git without a bound. **A runner's death always leaves a line:** on SIGTERM, SIGINT,
+    blocking the runner for hours. Nothing on the heartbeat path runs a git without a bound. **A runner's death always leaves a line:** on SIGTERM, SIGINT, SIGHUP (B-109: a closed
+    terminal's hangup, found live 2026-10-24),
     an uncaught exception or an unhandled rejection it logs its claim id, the leg in flight and
     the time of its last answered beat before the process goes, so "died tracelessly" cannot
-    happen.
+    happen. **The immediate stop is a safe point (B-109):** SIGINT, SIGHUP and a second SIGTERM
+    release the leg in flight at its next safe point — its hand-off written, its claim ended
+    `released:requested` — and exit with the signal's code once the loop ends; a leg child that
+    will not take the release has its whole group killed after ten seconds (the lease-loss
+    mechanism), so no orphaned leg keeps pushing against a claim the reaper took.
   - **Built-in legs** — `baton.cancel` (R-BTN-168) and `baton.write`, which writes the entries
     of Baton's outbox the claim response lists under `outbox` and reports them as `written` on
     its end (R-BTN-171) — are the runner's own code with no script; they require the capability
@@ -6269,7 +6277,7 @@ Under §12.8 (proposal), `repositories` gains `landing`, `authorship` and `prote
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
 | `events` | `seq` (the mirror's cursor) | `at`, `repository_id` (NULL for a tenant event), `kind`, `ticket_id`, `claim_id`, `actor`, `detail_json` | The append-only log the mirror and dashboard read |
-| `messages` | `id` | `kind` (`release`\|`status_request`\|`status_report`\|`unblocked`\|`handled`), `payload_json`, `from_runner_id`, `from_principal`, `to_runner_id`, `in_reply_to`, `sent_at`, `delivered_at`, `acknowledged_at`, `status` (`pending`\|`delivered`\|`acknowledged`\|`expired`) | Messages to runners (§6, R-BTN-162) |
+| `messages` | `id` | `kind` (`release`\|`status_request`\|`status_report`\|`unblocked`\|`handled`\|`wind-down`), `payload_json`, `from_runner_id`, `from_principal`, `to_runner_id`, `in_reply_to`, `sent_at`, `delivered_at`, `acknowledged_at`, `status` (`pending`\|`delivered`\|`acknowledged`\|`expired`) | Messages to runners (§6, R-BTN-162, B-109) |
 | `notices` | `id` (random; the courier's dedupe key) | `credential_id` (the forge courier), `repository_id`, `ticket_id` (the check ticket; no cascade), `sha`, `name`, `seq`, `state` (`queued`\|`claimed`\|`sent`), `attempts`, `not_before` (backoff, lease end, or deletion), `sent_at`, `check_id`, `payload_json` (the signed notice), `created_at`, `updated_at` | `forge-check` notices, the only kind (R-BTN-114, R-BTN-115) |
 | `outbox` | `(repository_id, id)`; `id` increasing per repository | `ticket_id` (the handler ticket, or the ticket to withdraw), `kind` (`handler`\|`withdraw`\|`answer`), `condition_id` (a handler's or an answer's), `fields` JSON (identifiers only; the runner renders the file from them), `state` (`queued`\|`claimed`\|`written`\|`skipped`\|`landed`\|`dropped`), `claim_id` (while `claimed`), `queued_at`, `written_commit`, `landed_at`, `snapshots_since_written` | Baton's intended git writes, drained by an ordinary claim of the built-in leg `baton.write` on the entry's ticket (R-BTN-171, R-BTN-173) |
 
@@ -6457,7 +6465,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `POST /v1/login` | none; the pending cookie | `{role: "administrator" \| "owner"}`, then `{poll: true}` | `{code}` and the pending cookie; `{pending: true}` until bound; then the session cookie | R-BTN-155 |
 | `POST /v1/ui/logout` | session | — | `{ok: true}` | R-BTN-155 |
 | `GET /v1/ui/state` | session | — | everything the dashboard draws; for an owner's session, its repositories' only | §11 |
-| `POST /v1/ui/messages` | session | `{to_runner_id, kind: "release" \| "status_request", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}}` | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold, or for an owner's session, a runner holding no claim of its repositories; any other kind `invalid-params` | §6, R-BTN-119 |
+| `POST /v1/ui/messages` | session | `{to_runner_id, kind: "release" \| "status_request" \| "wind-down", payload}`; Stop is `{kind: "release", payload: {ticket_id, reason: "requested"}}`; Wind down is `{kind: "wind-down"}` (B-109) | `{id}`; `forbidden` for a `release` whose ticket `to_runner_id` does not hold, or for an owner's session, a runner holding no claim of its repositories; any other kind `invalid-params` | §6, R-BTN-119 |
 | `POST /v1/ui/conditions/{condition}/resolve` | session | `{restart}` | `{ok: true}`, in one step; `invalid-params` for a restart the condition does not offer | R-BTN-163 |
 | `POST /v1/ui/overrides/{ticket}` | session | `{expedite}`, `{hold}` or `{cancel: true, confirm: true}` | `{ok: true}`; `hold: false` and `expedite` answer `202 {confirm_code}` | §6, R-BTN-155 |
 | `POST /v1/ui/claims/{id}/reap` | admin session | `{confirm: true}` | `202 {confirm_code}` | §9, R-BTN-155 |
@@ -6666,7 +6674,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-136 the outbox | bound `baton.output-invalid`; no `runner:baton-legs` runner, then one; a write landed by a lost claim; a forge-refused push; a condition closing while queued, and while claimed; an entry undrained 24 h; a `tickets.mjs` that never posts the written file; a foreign file at the handler's path | provisional handler ticket queued `baton.write`; filed with `baton_write: <id>`, `written` then `landed`, the ticket's own `start_leg` then offered; the re-claim writes nothing; `released:cannot-finish:capability`, the ticket held and `baton.retries` naming the runner; `dropped`, and once claimed and reported written a `withdraw` follows; `baton.outbox-late`; no `baton.write` re-offered, held `outbox-unlanded` after 3 snapshots; held `outbox-collision` |
 | S-BTN-138 a light question | `hitl` raised `light` with `ask`/`deliver` bound and two answering channels: a reply within the wait; replies on both channels, different; a delivery leg killed after reading, re-claimed; a report repeated; the parent killed while waiting, then reaped; the parent killed after the answer settled; a reply after the wait; a reply after the person answered in the file; a fire-and-forget channel; a promotion; the ticket re-routed with a settled, unrecorded answer | the question pushed to `refs/baton/questions/…` before the report, Baton storing only the pointer; `open` files its Baton-held `deliver` child, never `spawned-unposted`; the leg goes on in the same session, no git write until its end records the answer; the first reply settles, the second `answer-ignored`; the reply re-read and settled once; `ok`, no second effect; reaped, promoted through the outbox, blocked, never asked again; the next claim resumes with the answer; written to the ask file through an `answer` entry, then resumed; the entry `skipped` and the reply `ignored`; `answers: false` only notifies; the ask file posted at `waiting` from `baton_position` with the question as its body, `open` not re-run; the closed ask written with its answer |
 | **§8** | | |
-| S-BTN-41 the runner | a `ci` wait, `{suspend: true}`, `max_runs`, a closed PR, returned `bars`, a lost lease, a course change, a non-edge `next`, a release, a leg session claiming, a granted runner with no `--capabilities`, a `--capabilities` a leg's need refuses, a grant of nothing (B-86); a `git` that never returns (B-94) | holds through `ci`; follows only named edges with their `bars`; suspends at `from` with a hand-off; kills the group on loss; new scripts unrestarted; `released:requested`; session refused (`BATON_PARENT`); declares the grant and claims, declares the narrower set and says why no leg can be taken, and says a grant of nothing; the close and the runner's own git killed at their bound, the leg failing, the heartbeat still beating; a stop on a signal or an `exit` leaves a line naming the claim, the leg and the last beat |
+| S-BTN-41 the runner | a `ci` wait, `{suspend: true}`, `max_runs`, a closed PR, returned `bars`, a lost lease, a course change, a non-edge `next`, a release, a wind-down message and the immediate stop (B-109), a leg session claiming, a granted runner with no `--capabilities`, a `--capabilities` a leg's need refuses, a grant of nothing (B-86); a `git` that never returns (B-94) | holds through `ci`; follows only named edges with their `bars`; suspends at `from` with a hand-off; kills the group on loss; new scripts unrestarted; `released:requested`; a wind-down drains through the signal's own flag (the leg completing, the claim ended at its boundary, the message acknowledged, twice a no-op) and the immediate stop releases the leg at its next safe point with its hand-off (B-109); session refused (`BATON_PARENT`); declares the grant and claims, declares the narrower set and says why no leg can be taken, and says a grant of nothing; the close and the runner's own git killed at their bound, the leg failing, the heartbeat still beating; a stop on a signal or an `exit` leaves a line naming the claim, the leg and the last beat |
 | S-BTN-159 a quiet start | a runner's first attempt, whose heartbeat registers the worker, then its recommendation; a repository with no `origin` at `remoteSlug` | not one `no recommendation (no worker holds this secret)` line — the refusal is not logged, a registered worker's still is; `null` and no line of git's own |
 | S-BTN-53 the doorbell | rings for a cancel and a follow-up; a deploy; a reap; liveness loss; bad upgrades; eviction | one ring then a trailing ring; reconnect with backoff, heartbeat delivery meanwhile; sockets closed; `unauthenticated`, `forbidden`; state recovered |
 | S-BTN-62 a session reports to its runner | a non-outcome `reached`, a move missing entry output, a valid move | first two answered on the channel only; the third advanced; no secret in the session's view |
