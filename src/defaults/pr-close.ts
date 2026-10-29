@@ -97,7 +97,9 @@ export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: 
   // the one `verify: 'pr'` checked, a change no course asked for.
   // The ticket's own frontmatter is the record (B-100): the close writes the leg's machine
   // state into the ticket file — on the default branch itself, never on the checkout's `HEAD`,
-  // which may sit on a PR's branch or be detached — with the boundary check and the leg's own
-  // heading, and its sha is the evidence.
-  return closeTicket(ctx, result, run);
+  // which may sit on a PR's branch or be detached — with the boundary check, and its sha is the
+  // evidence. No heading check here (round 1, finding 3): these legs' work is the conversation
+  // and its PR, which may never land on the default branch (an owner who stops before the PR is
+  // open still leaves the record); the marker courses' legs, whose work IS the ticket, keep it.
+  return closeTicket({ ...ctx, heading: false }, result, run);
 }

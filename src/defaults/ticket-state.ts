@@ -28,6 +28,10 @@ export interface TicketClose {
   claim?: string | null;
 }
 
+/** The frontmatter keys the close owns, alone: a repository's item schema may not know them
+ * (it lags the CLI), so the boundary check carries them for it (round 1, finding 2). */
+export const MACHINE_KEYS = ['station', 'next_leg', 'claim'] as const;
+
 /** The machine fields a close writes into the ticket's frontmatter — the owner's decision:
  * everything markers.jsonl held, reconstructed from frontmatter. */
 export interface MachineState {
@@ -176,12 +180,20 @@ export function setMachineKeys(text: string, state: MachineState): string {
   const fm = text.match(/^---\r?\n[\s\S]*?\r?\n---/);
   if (!fm) throw new Error('the ticket file has no frontmatter block');
   const block = fm[0];
-  const kept = block.split(/\r?\n/).filter((l) => !/^(station|next_leg|claim):/.test(l));
+  const eol = block.includes('\r\n') ? '\r\n' : '\n';
+  // A machine key goes as one line; a malformed block-list value's `- item` continuations are
+  // removed with it, never left dangling under the key above (round 1, finding 6).
+  const kept: string[] = [];
+  for (const line of block.split(/\r?\n/)) {
+    if (/^(station|next_leg|claim):/.test(line)) continue;
+    if (/^\s+-\s+/.test(line) && kept.length && /^(station|next_leg|claim):/.test(kept[kept.length - 1] ?? `x:`)) continue;
+    kept.push(line);
+  }
   const entries: string[] = [`station: ${state.station}`];
   if (state.next_leg != null) entries.push(`next_leg: ${state.next_leg}`);
   if (state.claim != null) entries.push(`claim: ${state.claim}`);
   const closing = kept.pop()!; // the `---`
-  const next = [...kept, ...entries, closing].join('\n');
+  const next = [...kept, ...entries, closing].join(eol);
   return next + text.slice(block.length);
 }
 
@@ -198,9 +210,10 @@ export function legHeadingPresent(text: string, leg: string): boolean {
  * `#/definitions/<name>` refs. A schema using anything else in a checked position fails the
  * check naming the keyword — never silently accepted unread (the boundary rule: check
  * everything the machine reads, or say you cannot). */
-export function checkFrontmatter(schema: unknown, fm: Record<string, unknown>): string[] {
+export function checkFrontmatter(schema: unknown, fm: Record<string, unknown>, ignore: readonly string[] = []): string[] {
   const out: string[] = [];
   const fail = (why: string) => out.push(why);
+  const skipped = new Set(ignore);
   if (schema == null || typeof schema !== 'object' || Array.isArray(schema)) return ['item.schema.json is not a schema object'];
   const s = schema as Record<string, unknown>;
   const defs = typeof s.definitions === 'object' && s.definitions != null && !Array.isArray(s.definitions) ? s.definitions as Record<string, unknown> : {};
@@ -222,13 +235,13 @@ export function checkFrontmatter(schema: unknown, fm: Record<string, unknown>): 
   const checked = new Set([`$schema`, `$id`, `title`, `description`, `type`, `required`, `properties`, `propertyNames`, `definitions`, 'additionalProperties']);
   for (const k of Object.keys(s)) if (!checked.has(k)) fail(`the schema uses "${k}", which the boundary check does not implement`);
   if (Array.isArray(s.required)) {
-    for (const key of s.required) if (typeof key === 'string' && !(key in fm)) fail(`the ticket has no ${key}`);
+    for (const key of s.required) if (typeof key === 'string' && !(key in fm) && !skipped.has(key)) fail(`the ticket has no ${key}`);
   } else if (s.required !== undefined) fail('required is not a list');
   if (s.properties != null) {
     if (typeof s.properties !== 'object' || Array.isArray(s.properties)) fail('properties is not an object');
     else {
       for (const [key, p] of Object.entries(s.properties as Record<string, unknown>)) {
-        if (!(key in fm)) continue;
+        if (!(key in fm) || skipped.has(key)) continue;
         const prop = shapeOf(key, p);
         if (prop == null) continue;
         for (const k of Object.keys(prop)) if (!['type', 'enum', 'pattern', 'description', 'title'].includes(k)) fail(`${key}: the property uses "${k}", which the boundary check does not implement`);
@@ -242,7 +255,7 @@ export function checkFrontmatter(schema: unknown, fm: Record<string, unknown>): 
   if (s.propertyNames != null) {
     const names = s.propertyNames as Record<string, unknown>;
     if (typeof names !== 'object' || !Array.isArray(names.enum)) fail('propertyNames.enum is not a list');
-    else for (const key of Object.keys(fm)) if (!(names.enum as unknown[]).includes(key)) fail(`the ticket has an unknown key ${key}`);
+    else for (const key of Object.keys(fm)) if (!(names.enum as unknown[]).includes(key) && !skipped.has(key)) fail(`the ticket has an unknown key ${key}`);
   }
   return out;
 }
@@ -277,7 +290,7 @@ export function checkMachine(state: MachineState): string[] {
  * Returns the pushed commit's sha, the close's evidence. Every call is bounded
  * (`CLOSE_TIMEOUT_MS`), so a remote that stops answering fails the leg in seconds. */
 export async function closeTicket(
-  ctx: { checkout: string; ticket: { id: string; path?: string | null; home?: string | null }; leg: string; claim?: { nonce?: string }; default_branch?: string | null },
+  ctx: { checkout: string; ticket: { id: string; path?: string | null; home?: string | null }; leg: string; claim?: { nonce?: string }; default_branch?: string | null; heading?: boolean },
   result: { reached?: string; next?: string | null },
   run: Exec = exec,
 ): Promise<string> {
@@ -308,14 +321,21 @@ export async function closeTicket(
       const fm = parseFrontmatter(text);
       if (fm == null) throw new Error(`the ticket file ${ctx.ticket.path} has no frontmatter block`);
       let schema: unknown = null;
+      let schemaPresent = false;
       try {
         schema = JSON.parse(git(['show', `${ref}:${itemSchemaPath(ctx.ticket.path)}`]));
-      } catch {
-        schema = null; // no schema beside the tickets: the machine check and the heading still run
+        schemaPresent = true;
+      } catch (e) {
+        // A schema that is present but unreadable fails the check closed — never silently
+        // skipped (round 1, finding 7); a repository with none keeps the machine check.
+        const missing = /does not exist|exists on disk|ambiguous argument/i.test(`${String((e as { stderr?: unknown }).stderr ?? '')}`);
+        if (!missing) throw new Error(`the repository's ${itemSchemaPath(ctx.ticket.path)} is not a schema the close can check: ${(e as Error).message}`);
       }
-      const violations = [...checkMachine(state), ...(schema != null ? checkFrontmatter(schema, fm) : [])];
+      // The machine keys are the close's own (round 1, finding 2): a schema that does not know
+      // them yet must not fail the ticket for carrying them.
+      const violations = [...checkMachine(state), ...(schemaPresent && schema != null ? checkFrontmatter(schema, fm, MACHINE_KEYS) : [])];
       for (const v of violations) throw new Error(`the ticket does not validate: ${v}`);
-      if (!legHeadingPresent(text, ctx.leg)) throw new Error(`the ticket has no '## ${ctx.leg}' heading — the leg's work belongs under its own heading`);
+      if (ctx.heading !== false && !legHeadingPresent(text, ctx.leg)) throw new Error(`the ticket has no '## ${ctx.leg}' heading — the leg's work belongs under its own heading`);
       // A markdown file ends with a newline; `run`'s trimmed read would drop the file's own.
       const next = text.endsWith('\n') ? setMachineKeys(text, state) : `${setMachineKeys(text, state)}\n`;
       const blob = git(['hash-object', '-w', '--stdin'], { input: next });
@@ -445,14 +465,15 @@ export function stationsTickets(ctx: TicketsCtx): StationsResult {
     const path: Step[] = [];
     const runs = new Map<string, number>();
     const closes = closesOf(t);
+    const fm = machineOf((t.course ?? {}) as Record<string, unknown>);
     if (closes.length === 0) {
-      // The migration's record, or a hand-set state with no history: the frontmatter's own
-      // station and queued leg, taken as-is (the close that wrote them was the one writer) —
-      // but only while it names a station of this course; a station the course file does not
-      // have is nothing git vouches for, and the ticket stands at its start.
-      const fm = machineOf((t.course ?? {}) as Record<string, unknown>);
+      // A state with no close history at all — the one-time migration replays its lines as
+      // closes (below, `migrateMarkersMain`), so this is a hand-set state: honoured only when
+      // it names a station of this course AND carries its closing `claim` — the one writer's
+      // signature (round 1, finding 9). An agent's bare `station:` pushes no claim; the ticket
+      // stands where its history says.
       const stations = new Set([ctx.graph.start, ...ctx.graph.end, ...Object.values(ctx.graph.legs).flatMap((l) => [...l.from, ...tosOf(l.to)])]);
-      if (typeof fm.station === 'string' && stations.has(fm.station)) station = fm.station;
+      if (typeof fm.station === 'string' && fm.claim != null && stations.has(fm.station)) station = fm.station;
       queued = fm.next_leg ?? null;
     }
     for (const m of closes) {

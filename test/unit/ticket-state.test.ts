@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import type { PostedTicket } from '../../src/core/board';
 import { migrateMarkersMain } from '../../src/defaults/cli';
 import {
-  CLOSES_MAX, PUSH_TRIES, bareTicketId, checkFrontmatter, checkMachine, closesOfHistory, closeTicket,
+  CLOSES_MAX, MACHINE_KEYS, PUSH_TRIES, bareTicketId, checkFrontmatter, checkMachine, closesOfHistory, closeTicket,
   legHeadingPresent, machineOf, setMachineKeys, stationsTickets, ticketsBranch, type TicketClose,
 } from '../../src/defaults/ticket-state';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
@@ -39,9 +39,11 @@ describe('stationsTickets (R-BTN-131, B-100)', () => {
   it('a migration\'s frontmatter state stands where no close history does', () => {
     const migrated = ticket('B-1', { course: { station: 'explained', next_leg: 'dedupe', claim: 'm1' } });
     expect(place([], [migrated])['B-1']).toMatchObject({ station: 'explained', path: [], next_leg: 'dedupe', next_source: 'marker', next: [{ leg: 'dedupe', state: 'ready', waiting_on: null }] });
-    // A hand-set station that names no station the course has is the course's to ignore: the
-    // ticket stands at its start (nothing in git says otherwise).
-    expect(place([], [ticket('B-1', { course: { station: 'elsewhere' } })])['B-1']).toMatchObject({ station: 'reported', next_leg: 'trace' });
+    // A hand-set station that names no station the course has, or carries no closing `claim`
+    // (the one writer's signature — round 1, finding 9), is the course's to ignore: the ticket
+    // stands at its start (nothing in git says otherwise).
+    expect(place([], [ticket('B-1', { course: { station: 'elsewhere', claim: 'x' } })])['B-1']).toMatchObject({ station: 'reported', next_leg: 'trace' });
+    expect(place([], [ticket('B-1', { course: { station: 'explained' } })])['B-1']).toMatchObject({ station: 'reported', next_leg: 'trace' });
   });
 
   it('follows the closes in order; the queued leg is the last close\'s next (marker), an outcome picks the branch', () => {
@@ -103,6 +105,9 @@ describe('the machine state in frontmatter', () => {
     const one = setMachineKeys(text, { station: 'traced', next_leg: 'origin', claim: 'n9' });
     expect(one).toBe(`---\nid: B-1\ntitle: T\nstation: traced\nnext_leg: origin\nclaim: n9\n---\n\n## trace\n\nThe work.\n`);
     expect(machineOf(parseFrontmatter(one))).toEqual({ station: 'traced', next_leg: 'origin', claim: 'n9' });
+    // CRLF is preserved: the block keeps its own line endings (round 1, finding 6).
+    const crlf = setMachineKeys('---\r\nid: B-1\r\ntitle: T\r\n---\r\n\r\n## trace\r\n', { station: 'traced', next_leg: 'origin', claim: 'n9' });
+    expect(crlf).toBe('---\r\nid: B-1\r\ntitle: T\r\nstation: traced\r\nnext_leg: origin\r\nclaim: n9\r\n---\r\n\r\n## trace\r\n');
     const again = setMachineKeys(one, { station: 'closed', next_leg: null, claim: null });
     expect(again).toBe(`---\nid: B-1\ntitle: T\nstation: closed\n---\n\n## trace\n\nThe work.\n`);
     // Absent keys read as absent; `null` arrives only from a key written as a literal null.
@@ -121,6 +126,16 @@ describe('the machine state in frontmatter', () => {
     expect(checkMachine({ station: 'Traced!', next_leg: null, claim: null })).toEqual(['station "Traced!" is not a station id']);
     expect(checkMachine({ station: 'a', next_leg: 'not a leg', claim: null })).toEqual(['next_leg "not a leg" is not a leg id']);
     expect(checkMachine({ station: 'a', next_leg: null, claim: 'a b' })).toEqual(['claim is not a nonce']);
+  });
+
+  it('checkFrontmatter ignores the machine keys the close owns, so a schema that does not know them still passes (round 1, finding 2)', () => {
+    const schema = {
+      required: ['title', 'id'],
+      propertyNames: { enum: ['title', 'id', 'status'] },
+    };
+    const fm = { title: 'T', id: 'B-1', status: 'available', station: 'traced', next_leg: 'origin', claim: 'n1' };
+    expect(checkFrontmatter(schema, fm)).toEqual(['the ticket has an unknown key station', 'the ticket has an unknown key next_leg', 'the ticket has an unknown key claim']);
+    expect(checkFrontmatter(schema, fm, MACHINE_KEYS)).toEqual([]);
   });
 
   it('checkFrontmatter applies the item schema\'s keywords and names each violation; an unimplemented keyword fails closed', () => {
@@ -278,7 +293,7 @@ describe('closeTicket', () => {
         if (args[0] === 'push') onPush();
         if (args[0] === 'rev-parse' && args[1] === '--git-path') return '.git/baton-ticket-index';
         if (args[0] === 'rev-parse') return 'abc123';
-        if (args[0] === 'show') return args[1]?.includes('item.schema') ? '' : `---\nid: B-1\ntitle: T\n---\n\n## trace\n\nThe work.\n`;
+        if (args[0] === 'show') return args[1]?.includes('item.schema') ? '{}' : `---\nid: B-1\ntitle: T\n---\n\n## trace\n\nThe work.\n`;
         return '';
       };
       return { calls, run };
@@ -355,20 +370,25 @@ describe('migrateMarkersMain (B-100)', () => {
     try {
       const lines: string[] = [];
       expect(await migrateMarkersMain([], { root: dir, log: (l) => lines.push(l) })).toBe(0);
-      expect(readFileSync(join(dir, 'tickets', 'b1.md'), 'utf8')).toBe('---\nid: B-1\ntitle: The save button\ncourse: bug-report\nstation: explained\nnext_leg: dedupe\nclaim: n2\n---\n\n## trace\n\nThe work.\n');
+      expect(readFileSync(join(dir, 'tickets', 'b1.md'), 'utf8')).toBe('---\nid: B-1\ntitle: The save button\ncourse: bug-report\nstation: closed\n---\n\n## trace\n\nThe work.\n');
       expect(readFileSync(join(dir, 'tickets', 'b2.md'), 'utf8')).not.toContain('station:');
       expect(existsSync(join(dir, '.baton', 'markers.jsonl'))).toBe(false);
-      expect(lines.some((l) => l.includes('B-1 → station explained, next dedupe'))).toBe(true);
+      expect(lines.some((l) => l.includes('B-1 → 3 close(s) replayed, station closed'))).toBe(true);
       expect(lines.some((l) => l.includes("B-2's lines dropped"))).toBe(true);
       expect(lines.some((l) => l.includes('B-3\'s lines dropped'))).toBe(true);
       expect(lines.some((l) => l.includes('skipped — not JSON'))).toBe(true);
       // One commit, pushed: origin carries the fold.
       expect(git(dir, 'log', '-1', '--format=%s')).toBe('baton: markers.jsonl folded into the tickets (B-100)');
       expect(git(bare, 'log', '-1', '--format=%s')).toBe('baton: markers.jsonl folded into the tickets (B-100)');
-      // And the placement the migration wrote is what the station function reads.
+      // And the replayed history is what the station function folds — a migrated ticket's next
+      // close folds from where the migration left it, never from `start` (round 1, finding 1).
+      // The raw last line (the off-graph `prevent`) wrote its state too; the fold ignores it,
+      // exactly as it ignores a native close that is no edge.
       const fm = parseFrontmatter(readFileSync(join(dir, 'tickets', 'b1.md'), 'utf8'));
-      expect(machineOf(fm)).toEqual({ station: 'explained', next_leg: 'dedupe', claim: 'n2' });
-      expect(place([], [ticket('B-1', { course: machineOf(fm) })])['B-1']).toMatchObject({ station: 'explained', next_leg: 'dedupe' });
+      expect(machineOf(fm)).toEqual({ station: 'closed' });
+      const replayed = closesOfHistory((args) => git(dir, ...args), 'B-1', 'tickets/b1.md');
+      expect(replayed.map((x) => [x.leg, x.reached])).toEqual([['trace', 'traced'], ['origin', 'explained'], ['prevent', 'closed']]);
+      expect(place(replayed)['B-1']).toMatchObject({ station: 'explained', next_leg: 'dedupe' });
       // A second run has nothing to migrate.
       expect(await migrateMarkersMain([], { root: dir, log: () => {} })).toBe(0);
     } finally {

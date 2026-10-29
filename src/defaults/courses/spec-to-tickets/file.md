@@ -1,7 +1,7 @@
 # spec-to-tickets · file — commit the checked tickets as children
 
 You are running the `file` leg of the `spec-to-tickets` course. The ticket's file is
-`$BATON_TICKET_FILE`; it carries the checked `## Drafts`. When you finish, every draft is a
+`$BATON_TICKET_FILE`; it carries the checked drafts. When you finish, every draft is a
 ticket file on the board, a child of the request, and the request is closed. Baton's closing
 marker is written for you after you return; do not write it.
 
@@ -36,7 +36,7 @@ For each draft, write a ticket file in the tickets directory (the `items` settin
   checkout's `.baton/baton.json` lists; never this course.
 - **The body** the draft's, verbatim.
 
-Then add a `## Filed` section to the request naming each child, set the request's `status:` to `done`,
+Then add a `## file` section to the request naming each child, set the request's `status:` to `done`,
 and commit the children and the request together, with explicit paths, to the default branch.
 
 Your work lands under the ticket's own `## file` heading — write it if it is not there; the close checks it is.

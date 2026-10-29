@@ -39,7 +39,7 @@
     "course": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{0,39}$",
-      "description": "The course the ticket runs on (§2f, R-BTN-48): the markdown source's `course:` field, read by every ticket and always written. A `baton request` ticket (B-98, R-BTN-131) names the course it starts."
+      "description": "The course the ticket runs on (\u00a72f, R-BTN-48): the markdown source's `course:` field, read by every ticket and always written. A `baton request` ticket (B-98, R-BTN-131) names the course it starts."
     },
     "station": {
       "type": "string",
@@ -84,7 +84,10 @@
       "course",
       "station",
       "next_leg",
-      "claim"
+      "claim",
+      "answer",
+      "parent",
+      "not_before"
     ]
   }
 }

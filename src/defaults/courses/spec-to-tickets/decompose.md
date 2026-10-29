@@ -28,7 +28,7 @@ written for you after you return; do not write it.
 
 ## Draft one ticket per section
 
-Write the drafts under `## Drafts` in the request, not as ticket files yet: a draft is not on
+Write the drafts under the request's `## decompose` heading, not as ticket files yet: a draft is not on
 the board until `file` files it. For each section or numbered decision of the spec, one draft:
 
 - **title** what the section builds, in one line.
@@ -41,7 +41,7 @@ the board until `file` files it. For each section or numbered decision of the sp
   whole: `check` counts coverage against them. A live check or a person-only step is its own
   draft, marked a person's ticket so `file` can tag it.
 
-Commit the request alone, with its `## Drafts`, to the default branch.
+Commit the request alone, with its drafts under `## decompose`, to the default branch.
 
 Your work lands under the ticket's own `## decompose` heading — write it if it is not there; the close checks it is.
 

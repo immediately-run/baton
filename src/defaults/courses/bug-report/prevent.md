@@ -38,7 +38,7 @@ fix.**
 
 ## Record and hand on
 
-- Add `## Prevention` to the bug ticket: the class, the options with costs, the recommendation.
+- Add `## prevent` to the bug ticket: the class, the options with costs, the recommendation.
   Keep it to one screen.
 - If the recommendation is anything but "nothing", the choice is the owner's: file a `decision`
   ticket whose question is "which prevention for <class>?", with your options, and name it here.

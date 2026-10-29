@@ -28,7 +28,7 @@ ticket is closed.
 
 ## Record
 
-Add `## Outcome` to the ticket: the letter, what was done, links to what changed or what was
+Add `## carry-out` to the ticket: the letter, what was done, links to what changed or what was
 filed. Set the ticket's `status:` to `done`. Commit to the default branch.
 
 Your work lands under the ticket's own `## carry-out` heading — write it if it is not there; the close checks it is.
@@ -36,5 +36,5 @@ Your work lands under the ticket's own `## carry-out` heading — write it if it
 ## Do not
 
 - Reinterpret the answer. If it cannot be carried out as written (an option no longer applies),
-  write that under `## Outcome`, set `answer:` back to `open` with a one-line note on why, and
+  write that under `## carry-out`, set `answer:` back to `open` with a one-line note on why, and
   stop with an error, so the owner is asked again.

@@ -22,7 +22,7 @@ the bug ticket points at it.
 - Open the ticket the dedupe named. If this report shows a symptom that ticket does not list, add
   the symptom to its Why and an exit criterion that checks it. If it adds nothing, leave the
   ticket as it is.
-- Add `## Folded` to the bug ticket: the ticket it was folded into, and what you added, or
+- Add `## fold` to the bug ticket: the ticket it was folded into, and what you added, or
   "nothing new".
 - Commit both files together to the default branch.
 
@@ -31,5 +31,5 @@ Your work lands under the ticket's own `## fold` heading — write it if it is n
 ## Do not
 
 - Change the existing ticket's architecture or scope beyond the new symptom. If the new symptom
-  needs more than a line and an exit criterion, it is not a duplicate: say so in `## Folded` and
+  needs more than a line and an exit criterion, it is not a duplicate: say so in `## fold` and
   stop with an error, so a person moves the ticket back.

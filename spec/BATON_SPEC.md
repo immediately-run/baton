@@ -2119,14 +2119,16 @@ mean (R-BTN-50).
     leaves the station (`marker`), else the first leg listed (`course`). A checkout git cannot
     answer for has no close history, and the frontmatter state a one-time migration wrote stands.
     `.baton/markers.jsonl` — the shared file every runner once appended to, with its union-merge
-    attribute — is retired; `baton repo migrate-markers` folds a board still holding its lines
-    into the tickets' frontmatter once, and B-87 (the retried close's duplicate lines) closed
-    superseded: per-ticket state written once per claim cannot re-append.
+    attribute — is retired; `baton repo migrate-markers` replays a board's in-flight lines as
+    closes (one `baton:close` commit per line, the line's state in the ticket's frontmatter —
+    a `create-spec` conversation's lines included, their state being nowhere in the forge) and
+    deletes the file, once; B-87 (the retried close's duplicate lines) closed superseded:
+    per-ticket state written once per claim cannot re-append.
   - **`spec-to-tickets`** (B-99) takes one merged specification — entered by `baton request`
     (`starts_from: request`), the sentence naming the spec; a `create-spec` conversation's merged
     PR is the usual input — and files its child tickets. `decompose` drafts one ticket per spec
-    section or numbered decision into the request's `## Drafts`, each with its tests and exit
-    criteria drafted from the spec's own words; `check` holds the set against the spec (every
+    section or numbered decision into the request under its own heading, each with its tests and
+    exit criteria drafted from the spec's own words; `check` holds the set against the spec (every
     requirement covered exactly once, no ticket without a section, dependencies drawn as the
     spec's order implies) and fails rather than covering a gap; `file` commits the children
     `parent:`-ed to the request (R-BTN-86), the request's `status:` to `done`. The owner deciding

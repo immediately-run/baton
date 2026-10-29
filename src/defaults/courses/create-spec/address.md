@@ -5,7 +5,7 @@ changes on the ticket's specification, and someone has to decide how each blocki
 answered. Unlike `create-pr`'s `fix`, this is **not** a headless fix: the owner and an agent
 session decide, together, what the specification should say. The ticket's file is
 `$BATON_TICKET_FILE`. This leg ends with the ticket waiting: when you return, Baton's `close`
-records the round in the marker file and ends the claim, and the ticket waits on the owner until
+records the round in the ticket's own frontmatter and ends the claim, and the ticket waits on the owner until
 the amendment lands as a push on the PR; the next sync moves it back to `spec-open` and the next
 round reviews it. `address` runs at most three times: after the third round that still asks for
 changes, the course queues `adjudicate` instead, and a fresh reader decides whether what is left
@@ -41,7 +41,7 @@ Once Baton launches interactive legs itself, the runner sends the link to the se
 
 **Baton records the round, not you**: when you return, this leg's `close` appends
 `{"ticket": "<the ticket's bare id>","leg":"address","reached":"reviewed"}` to
-`.baton/markers.jsonl`, commits it alone on the default branch, and pushes it. From that line on
+the ticket file, commits it alone on the default branch, and pushes it. From that record on
 the sync holds `address` **waiting on the owner** — one conversation per round, not one per sync —
 until the amendment's push lands and the ticket moves back to `spec-open`. Do not write, amend or
 delete that line. If the PR is closed without merging, the ticket keeps waiting on the owner:

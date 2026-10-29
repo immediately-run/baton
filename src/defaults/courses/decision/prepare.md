@@ -23,7 +23,7 @@ waits for the owner's answer.
 A packet is for what the evidence cannot settle, not for what nobody checked. Read everything the
 question points at: the PRs, the threads, the tickets. Reproduce any claim that can be reproduced:
 run the probe, the test, the grep. If the answer turns out to be settled already (the PR merged,
-the finding fixed), there is no packet: record the fact under `## Outcome`, set `answer:` to
+the finding fixed), there is no packet: record the fact under `## carry-out`, set `answer:` to
 `settled`, and return.
 
 If you have a stake in the answer (you wrote the work in question), write the packet from a fresh
@@ -31,10 +31,10 @@ context: a sub-agent given only this file and the evidence.
 
 ## The packet
 
-A `## Decision needed` section in the ticket file:
+A `## prepare` section in the ticket file, opening with the packet:
 
 ```
-## Decision needed
+### Decision needed
 
 - **Question:** <one sentence the owner can answer with a letter>
 - **Options:** (a) <option> · (b) <option> [· (c) … · (d) …]

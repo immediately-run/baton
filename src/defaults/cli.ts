@@ -23,7 +23,7 @@ import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticket
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
-import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, closeTicket, closesByTicket, closesOfCommits, machineOf, setMachineKeys, stationsTickets, ticketsBranch } from './ticket-state';
+import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch } from './ticket-state';
 
 /** The retired markers file's path (B-100): the sync no longer reads it — `baton repo
  *  migrate-markers` does, once, and deletes it. */
@@ -395,16 +395,17 @@ async function asResult(call: () => Promise<Record<string, any>>): Promise<Recor
 }
 
 /** `baton repo migrate-markers [--root DIR]` (B-100): the one-time migration that folds a
- * retired `.baton/markers.jsonl` into its tickets' own frontmatter — the marker courses' state
- * moved into the ticket, and a board still holding in-flight lines is translated once, before
- * the release that stops reading the file. For each live ticket on a marker course the lines are
- * folded exactly as the station function folds closes (only pairs that are edges from where the
- * ticket stood), and the station it reached, the leg it queues and the last close's claim nonce
- * are written into the ticket's frontmatter; lines of closed tickets, PR-course tickets or no
- * course at all are dropped, named. One commit — `baton: markers.jsonl folded into the tickets
- * (B-100)` — carries every folded ticket and the file's removal, pushed to the checkout's
- * upstream; a push refused because the branch moved leaves the commit local, named, for a pull
- * and re-push. */
+ * retired `.baton/markers.jsonl` into its tickets — the marker courses' state moved into the
+ * ticket, and a board still holding in-flight lines is translated once, before the release that
+ * stops reading the file. Each live ticket's lines are **replayed as closes**: one
+ * `baton:close <ticket> <leg>` commit per line, writing the line's station, queued leg and
+ * claim into the ticket's frontmatter, in order — so the ticket's history afterwards is what a
+ * native close would have left (the fold, `create-spec`'s interactive-leg records, the rounds
+ * counts all read it unchanged), and the final frontmatter is the last line's state. A
+ * repository's own `create-spec` lines replay the same way (their tickets' state is not in the
+ * forge); lines of closed tickets or PR-course tickets are dropped, named. The last commit
+ * deletes the file. A push refused because the branch moved leaves the commits local, named,
+ * for a pull and re-push. */
 export async function migrateMarkersMain(argv: string[], io: { root?: string; log?: (l: string) => void } = {}): Promise<number> {
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   const root = io.root ?? (argv.includes('--root') ? argv[argv.indexOf('--root') + 1] : process.cwd());
@@ -441,50 +442,57 @@ export async function migrateMarkersMain(argv: string[], io: { root?: string; lo
     ? await ((await import(`${pathToFileURL(join(root, '.baton', 'tickets.mjs')).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default: { tickets: (ctx: unknown) => Promise<TicketsResult> } }).default.tickets({ root, settings })
     : ticketsMarkdown(readItems(root, settings.items), settings);
   const closedIds = new Set(result.closed.map((c) => c.id));
-  const courses = batonJson.courses ?? [{ id: batonJson.default_course ?? DEFAULT_COURSE, version: 1 }];
   const byTicket = new Map<string, typeof lines>();
   for (const l of lines) byTicket.set(l.ticket, [...(byTicket.get(l.ticket) ?? []), l]);
+  const gitRun = (args: string[]): string => exec('git', args, root);
   const changed: string[] = [];
   const dropped: string[] = [];
   for (const t of result.tickets) {
     const mine = byTicket.get(t.id);
     if (mine == null) continue;
     byTicket.delete(t.id);
-    const courseFile = join(root, '.baton', 'courses', t.course_id, 'course.json');
     const standard = builtIn(t.course_id);
-    if (closedIds.has(t.id) || (!existsSync(courseFile) && standard == null)) {
+    const interactive = t.course_id === 'create-spec'; // its marker legs' state is not in the forge (round 1, finding 4)
+    if (closedIds.has(t.id) || (standard == null && !interactive) || (standard != null && standard.reads === 'prs' && !interactive)) {
       dropped.push(t.id);
       continue;
     }
-    if (standard?.reads === 'prs') {
-      dropped.push(t.id); // a PR course's state is the forge's, never a marker line's
+    const path = join(root, t.path);
+    if (!existsSync(path)) {
+      dropped.push(t.id);
+      log(`baton: ${t.id}'s lines dropped — its file ${t.path} is not in this checkout`);
       continue;
     }
-    const graph = existsSync(courseFile) ? JSON.parse(readFileSync(courseFile, 'utf8')) as never : standard!.course as never;
-    const placed = stationsTickets({ tickets: [{ ...t, course: { ...(t.course ?? {}), closes: mine } }], closed: new Set(), graph }).stations[t.id];
-    // The claim of the last close the fold accepted — the state written is that close's.
-    const lastStep = placed.path.at(-1);
-    const last = [...mine].reverse().find((x) => lastStep == null ? false : x.leg === lastStep.leg && x.reached === lastStep.reached) ?? mine.at(-1)!;
-    writeFileSync(join(root, t.path), setMachineKeys(readFileSync(join(root, t.path), 'utf8'), { station: placed.station, next_leg: placed.next_leg, claim: last.claim ?? null }));
+    let text = readFileSync(path, 'utf8');
+    for (const line of mine) {
+      text = setMachineKeys(text, { station: line.reached, next_leg: line.next ?? null, claim: line.claim ?? null });
+      writeFileSync(path, text);
+      gitRun(['add', '--', t.path]);
+      gitRun(['commit', '--no-gpg-sign', '-qm', `baton:close ${t.id} ${line.leg}`, '--', t.path]);
+    }
     changed.push(t.id);
-    log(`baton: ${t.id} → station ${placed.station}${placed.next_leg != null ? `, next ${placed.next_leg}` : ''}`);
+    log(`baton: ${t.id} → ${mine.length} close(s) replayed, station ${mine.at(-1)!.reached}`);
   }
   for (const id of byTicket.keys()) dropped.push(id);
-  for (const id of dropped) log(`baton: ${id}'s lines dropped — ${closedIds.has(id) ? 'the ticket is closed' : 'not a live ticket on a marker course'}`);
+  for (const id of dropped) log(`baton: ${id}'s lines dropped — ${closedIds.has(id) ? 'the ticket is closed' : 'not a live ticket on a course this fold covers'}`);
   rmSync(file);
-  execFileSync('git', ['-C', root, 'add', '-A'], { stdio: 'ignore' });
-  execFileSync('git', ['-C', root, 'commit', '-qm', 'baton: markers.jsonl folded into the tickets (B-100)'], { stdio: 'ignore' });
-  const branch = git(root, 'rev-parse', '--abbrev-ref', 'HEAD');
+  // Only what the migration touched (round 1, finding 10) — never `-A`.
+  gitRun(['add', '--', MARKERS_FILE_RETIRED, ...changed.map((id) => result.tickets.find((t) => t.id === id)!.path)]);
+  gitRun(['commit', '--no-gpg-sign', '-qm', 'baton: markers.jsonl folded into the tickets (B-100)', '--', MARKERS_FILE_RETIRED, ...changed.map((id) => result.tickets.find((t) => t.id === id)!.path)]);
+  const branch = gitRun(['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (branch === 'HEAD') {
+    log('baton: this checkout is detached — the migration commits are local; check out a branch, then push.');
+    return 1;
+  }
   try {
-    execFileSync('git', ['-C', root, 'push', 'origin', `HEAD:${branch}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+    gitRun(['push', 'origin', `HEAD:${branch}`]);
   } catch {
-    log(`baton: the push was refused — the branch moved. The migration commit is local on ${branch}: pull --rebase, push, and the board's next sync reads the tickets.`);
+    log(`baton: the push was refused — the branch moved. The migration commits are local on ${branch}: pull --rebase, push, and the board's next sync reads the tickets.`);
     return 1;
   }
   log(`baton: ${changed.length} ticket(s) folded, ${dropped.length} dropped — .baton/markers.jsonl is gone`);
   return 0;
 }
-
 
 /** One sync (§7.1), its decisions the vendored `syncOnce` (R-BTN-37: the code S-BTN-12 and
  * S-BTN-13 drive): the observation number first, then — with `--latest` — the current default

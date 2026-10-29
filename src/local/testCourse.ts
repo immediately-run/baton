@@ -312,14 +312,19 @@ export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
   if (!existsSync(script)) return []; // a missing script is the legs-scripts rule's own failure
   const dir = mkdtempSync(join(tmpdir(), 'baton-kit-ticket-'));
   try {
+    // A local bare origin the close can really fetch (round 1, finding 5): the rule must reach
+    // the close's own checks, not pass on a fetch that cannot connect.
+    const origin = mkdtempSync(join(tmpdir(), 'baton-kit-ticket-origin-'));
+    execFileSync('git', ['-C', origin, 'init', '-q', '--bare', '-b', 'main'], { stdio: 'ignore' });
     const git = (out: boolean, ...args: string[]) =>
       String(execFileSync('git', ['-C', dir, '-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'], ...(out ? { encoding: 'utf8' } : {}) }));
     git(false, 'init', '-q', '-b', 'main');
-    git(false, 'remote', 'add', 'origin', 'https://127.0.0.1:1/kit/no-forge.git');
+    git(false, 'remote', 'add', 'origin', origin);
     mkdirSync(join(dir, 'tickets'), { recursive: true });
     writeFileSync(join(dir, 'tickets', 'kit-1.md'), `---\nid: KIT-1\ntitle: A ticket\n---\n\nA body with no ${startLeg} heading.\n`);
     git(false, 'add', '-A');
     git(false, 'commit', '-qm', 'kit');
+    git(false, 'push', '-q', 'origin', 'main');
     const sha = git(true, 'rev-parse', 'HEAD').trim();
     const mod = (await import(`${pathToFileURL(script).href}?t=${Math.random()}`)) as Record<string, unknown>;
     const close = mod.close ?? (mod.default != null && typeof mod.default === 'object' ? (mod.default as Record<string, unknown>).close : undefined);
