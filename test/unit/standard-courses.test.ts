@@ -97,6 +97,14 @@ describe('the standard courses (R-BTN-131)', () => {
     }
   });
 
+  it("create-pr's implement and fix instructions carry the shared-file rule, and this repository's own .baton copies with them (B-102)", () => {
+    const rule = "never edits a file another ticket's leg may edit";
+    for (const leg of ['implement', 'fix']) {
+      expect(readFileSync(join(instructionsDir('create-pr'), `${leg}.md`), 'utf8'), `${leg}.md`).toContain(rule);
+      expect(readFileSync(join(__dirname, '..', '..', '.baton', 'courses', 'create-pr', 'legs', `${leg}.md`), 'utf8'), `.baton ${leg}.md`).toContain(rule);
+    }
+  });
+
   it('the instruction directories hold exactly the registered courses', () => {
     const root = join(__dirname, '..', '..', 'src', 'defaults', 'courses');
     expect(readdirSync(root).filter((d) => existsSync(join(root, d, '.'))).sort()).toEqual(BUILT_INS.map((b) => b.id).sort());

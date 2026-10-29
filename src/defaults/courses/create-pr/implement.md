@@ -91,5 +91,7 @@ of every repository the ticket names, and reads them together, as one change.
 
 ## Do not
 
+- A leg never edits a file another ticket's leg may edit — no CHANGELOG, no index, no
+  aggregate; a release note belongs in the PR body.
 - Merge, approve or review your own PR; later legs do that.
 - Leave the PR without a pushed head: the review reads what is pushed.
