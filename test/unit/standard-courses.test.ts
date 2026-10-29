@@ -248,8 +248,8 @@ describe('the standard courses (R-BTN-131)', () => {
       // A gap is returned to decompose, never patched by check — the two sentences together say
       // so, and the unit test holds both so neither can quietly go (round 1, finding 3).
       expect(check).toMatch(/A requirement no draft covers is \*\*not yours to add\*\*/);
-      expect(check).toMatch(/A section with no ticket draft is a failure of the set/);
-      expect(check).toMatch(/exit\s+non-zero naming the section/);
+      expect(check).toMatch(/A requirement no draft covers — a section with no ticket draft at all, or one a draft misses —/);
+      expect(check).toMatch(/exit\s+non-zero naming the section and the/);
       // `file` files the children — parent-ed to the request, the request closed done — and the
       // earlier legs write no ticket file.
       const file = readFileSync(join(instructionsDir('spec-to-tickets'), 'file.md'), 'utf8');

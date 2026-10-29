@@ -33,8 +33,9 @@ repository, a draft no section asks for — fix the drafts, never the spec:
 - **Each draft buildable as one PR per repository.** A draft that exceeds that splits, its parts
   chained by `depends_on`, each part still tied to its section's requirements.
 
-A section with no ticket draft is a failure of the set, not something to wave through: exit
-non-zero naming the section, and the leg fails — nothing is written, and a person looks.
+A requirement no draft covers — a section with no ticket draft at all, or one a draft misses —
+is a failure of the set, not something to wave through: exit non-zero naming the section and the
+requirement, and the leg fails — nothing is written, and a person looks.
 
 Commit the request alone, its `## Drafts` corrected, to the default branch.
 
