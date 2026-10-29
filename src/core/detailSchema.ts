@@ -147,8 +147,9 @@ export function sameSchema(a: Schema, b: Schema): boolean {
 /**
  * R-BTN-176: the `x-baton-base` chain a schema names — the base it refines, then that base's own
  * base, outermost first, stopping at a schema that names none (or that `resolve` does not know,
- * which registration refuses first). `sameSchema` compares schemas without the keyword's chain:
- * re-registering with the same schema is idempotent, and the chain lives beside it.
+ * which registration refuses first). `sameSchema` deep-compares the schema WHOLE, `x-baton-base`
+ * included — re-registering with the same schema is idempotent, and a changed base is refused as
+ * another schema (the chain is immutable with it, which is what keeps `base_chain_json` true).
  */
 export function baseChainOf(schema: Schema, resolve: (id: string) => Schema | null): string[] {
   const out: string[] = [];

@@ -386,6 +386,9 @@ describe('S-BTN-151: refinement', () => {
     const nonStd = await keyCall(admin, '/v1/admin/resources', { name: 'cap-other', scope: 'account', detail_schema: { ...CAPACITY_BASE, 'x-baton-base': 'roadmap-pr:schema@1' } });
     expect(nonStd.status).toBe(400);
     expect((nonStd.json as { message?: string }).message).toMatch(/std:/);
+    // The base is open (R-BTN-110's row): a provider schema ADDS a field and registers.
+    expect((await keyCall(admin, '/v1/admin/resources', { name: 'cap-provider', scope: 'account', detail_schema: { ...CAPACITY_BASE, properties: { ...CAPACITY_BASE.properties, region: { type: 'string', enum: ['eu', 'us'] } } } })).status).toBe(200);
+    expect((await rows<{ name: string; base_chain_json: string }>('SELECT name, base_chain_json FROM external_resources WHERE name = ?', 'cap-provider'))[0].base_chain_json).toBe('["std:api-capacity@1"]');
     // Both ac:main (the base itself) and cap-tight's instance serve the same rule: the worker
     // uses both, ct:one at 150‰ and ac:main at 900‰, and the rule over refines fires on the
     // tightening one alone (S-BTN-151's "the rule serves both refining resources").
@@ -502,6 +505,30 @@ describe('S-BTN-153: delivery and overrides', () => {
     const reviewAdvice = (finish.json.advice as { route_choices: { choice: string; alternative: string | null }[] }).route_choices[0];
     expect(reviewAdvice.alternative).toBe('opus');
     await w.call(`/v1/runner/claims/${claimId}/end`, { end_reason: 'done', reached: 'reviewed' });
+  });
+
+
+  it('a taken naming an EXCLUDED alternative is accepted and recorded advice-overridden (R-BTN-177: an exclusion filters advice, never a report)', async () => {
+    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'ac:main', available: true, valid_for: 86400, detail: { window_s: 300, remaining_permille: 150 } }] })).status).toBe(200);
+    // near_limit at 150‰ EXCLUDES opus outright (not demotes): glm advised, ranked holds glm alone.
+    const excluded = structuredClone(program) as typeof program;
+    (excluded.route_choices as { id: string; alternatives: { id: string; exclude_when?: unknown[][] }[] }[])[1].alternatives[0].exclude_when = [[['near_limit', '$i']]];
+    const h = nextHead();
+    const res = await syncCall('/v1/sync/board', payload(h.sha, h.parent, board.states.A, {
+      ontology: { builtin: 'baton@1', program: excluded },
+      registry: [course(3, 3, { route_choices: { implement: ['reviewer-2'] } })],
+      state: { items: [item('R3-9631')] },
+      ready: ['R3-9631'],
+    }));
+    expect(res.status).toBe(200);
+    const w = await grantedWorker(owner, 'docs', 'w9', ALL_KEYS, ['ac:main']);
+    const out = await runTicket(w, 'R3-9631', [{ choice: 'reviewer-2', alternative: 'opus' }]);
+    expect(out.advice!.route_choices[0].alternative).toBe('glm');
+    expect(out.advice!.route_choices[0].ranked.map((r) => r.alternative)).toEqual(['glm']); // opus excluded from advice
+    // …but its taken is a member of the CHOICE and is stored with the override recorded.
+    expect(JSON.parse(out.legRow[0].taken_json!)).toEqual([{ choice: 'reviewer-2', alternative: 'opus' }]);
+    const override = (await rows<{ detail_json: string }>("SELECT detail_json FROM events WHERE kind = 'advice-overridden' ORDER BY seq")).at(-1);
+    expect(JSON.parse(override!.detail_json)).toEqual({ choice: 'reviewer-2', advised: 'glm', taken: 'opus' });
   });
 
   it('no report leaves taken_json null; the advised one records nothing; an unknown alternative is dropped and logged; an oversized file is dropped whole', async () => {
