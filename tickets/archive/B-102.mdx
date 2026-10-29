@@ -18,13 +18,13 @@ depends_on: []
 ---
 
 **Brief:** found by the parallel-collaboration review of 2026-10-22
-([`docs/review/parallel-collaboration-2026-10-22.mdx`](../docs/review/parallel-collaboration-2026-10-22.mdx)):
+([`docs/review/parallel-collaboration-2026-10-22.mdx`](../../docs/review/parallel-collaboration-2026-10-22.mdx)):
 `CHANGELOG.md` is this repository's convention — every ticket's PR adds a row to one table
 at its top, and every implement agent imitates it (PRs #88 and #93 both did). Several dozen
 parallel workers on separate tickets each touching the same table's head is a conflict per
 merge: exactly what the architecture forbids.
 **Spec:** the resident context's rule
-([`docs/context/architecture.mdx`](../docs/context/architecture.mdx)): *separate tickets
+([`docs/context/architecture.mdx`](../../docs/context/architecture.mdx)): *separate tickets
 never share a write target — a file a leg writes is per-ticket, in its path or on its
 branch, or it does not exist.* No spec section names CHANGELOG; this ticket writes the
 rule where the agents read it.
