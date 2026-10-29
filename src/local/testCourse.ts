@@ -18,7 +18,7 @@ import { parseSource } from '../defaults/course-source';
 import { LocalHost } from './host';
 import { openStore } from './store';
 
-export type KitRule = 'course' | 'accepted' | 'legs-scripts' | 'min-worker-version' | 'moves-back' | 'generic-run' | 'no-op';
+export type KitRule = 'course' | 'accepted' | 'legs-scripts' | 'min-worker-version' | 'moves-back' | 'generic-run' | 'no-op' | 'instructions';
 export interface KitViolation {
   rule: KitRule;
   message: string;
@@ -47,6 +47,10 @@ export interface KitInput {
   /** The leg scripts in `legs/` — each name without `.mjs`, and which of §6.13's `run`, `handoff`
    *  and `close` it exports — or null when the course has no `legs/`. */
   legScripts: { name: string; exports: string[]; error?: string }[] | null;
+  /** The leg instructions in `legs/` — each name without `.md` and its text; an empty list when
+   *  the course has none. B-102's rule reads them: the implement and fix instructions carry the
+   *  shared-file line, the one place the agents read it. */
+  instructions?: { name: string; text: string }[] | null;
   /** The repository's leg overrides, `legs/<leg>.run.mjs` (R-BTN-131, B-33): each leg name and
    *  whether its module exports `run`, and whether `legs/<leg>.mjs` loads it (`loaded`; a leg
    *  script from before overrides does not). Absent or empty when there are none. */
@@ -61,6 +65,11 @@ const names = (v: unknown): string[] => (typeof v === 'string' ? [v] : Array.isA
 
 /** §6.13's three exports of a leg script, each a function (default-exported or named, as `baton run` reads them). */
 export const LEG_EXPORTS = ['run', 'handoff', 'close'] as const;
+
+/** B-102's shared-file rule, the words every implement and fix instruction carries: a leg
+ * never edits a file another ticket's leg may edit — the CHANGELOG rule the
+ * parallel-collaboration review found. */
+export const SHARED_FILE_RULE = "never edits a file another ticket's leg may edit";
 
 /** Which of `LEG_EXPORTS` a loaded leg module provides. */
 export function legExports(mod: Record<string, unknown>): string[] {
@@ -97,6 +106,15 @@ export function staticViolations(k: KitInput): KitViolation[] {
       if (x.error) { out.push({ rule: 'legs-scripts', message: `legs/${x.name}.mjs does not load: ${x.error}` }); continue; }
       const missing = LEG_EXPORTS.filter((e) => !x.exports.includes(e));
       if (missing.length) out.push({ rule: 'legs-scripts', message: `legs/${x.name}.mjs exports no ${missing.join(', ')} (§6.13: run, handoff and close)` });
+    }
+  }
+  // B-102: the shared-file rule — a leg never edits a file another ticket's leg may edit (no
+  // CHANGELOG, no index, no aggregate; a release note belongs in the PR body). The instruction,
+  // not a scanner, is the instrument; the kit asserts the line is where the agents read it:
+  // every implement and fix instruction the course ships carries it.
+  for (const x of k.instructions ?? []) {
+    if ((x.name === 'implement' || x.name === 'fix') && !x.text.includes(SHARED_FILE_RULE)) {
+      out.push({ rule: 'instructions', message: `legs/${x.name}.md carries no shared-file rule — a leg never edits a file another ticket's leg may edit (no CHANGELOG, no index, no aggregate; a release note belongs in the PR body). Add the Do-not line (B-102)` });
     }
   }
   // An override replaces one leg's run, never its close: it must name a leg and export run.
@@ -395,9 +413,14 @@ export async function readInputs(root: string, course: string, opts: { base?: st
   }
   const legsDir = join(dir, 'legs');
   let legScripts: KitInput['legScripts'] = null;
+  const instructions: { name: string; text: string }[] = [];
   const overrides: NonNullable<KitInput['overrides']> = [];
   if (existsSync(legsDir)) {
     legScripts = [];
+    for (const f of readdirSync(legsDir).filter((x) => x.endsWith('.md')).sort()) {
+      const name = f.slice(0, -'.md'.length);
+      instructions.push({ name, text: readFileSync(join(legsDir, f), 'utf8') });
+    }
     for (const f of readdirSync(legsDir).filter((x) => x.endsWith('.mjs')).sort()) {
       const override = f.endsWith('.run.mjs');
       const name = f.slice(0, override ? -'.run.mjs'.length : -'.mjs'.length);
@@ -419,5 +442,5 @@ export async function readInputs(root: string, course: string, opts: { base?: st
     live = Object.entries(asRecord(b.stations)).filter(([id]) => (courseOf.get(id) ?? course) === course)
       .map(([id, st]) => ({ id, path: (asRecord(st).path as Step[] | undefined) ?? [] }));
   }
-  return { course, proposed, base, proposedVersions, baseVersions, root, source: courseSource, legScripts, overrides, live };
+  return { course, proposed, base, proposedVersions, baseVersions, root, source: courseSource, legScripts, overrides, instructions, live };
 }

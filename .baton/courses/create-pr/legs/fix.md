@@ -36,6 +36,8 @@ thread.
 
 ## Do not
 
+- A leg never edits a file another ticket's leg may edit — no CHANGELOG, no index, no
+  aggregate; a release note belongs in the PR body.
 - Skip, disable or weaken a test to get green.
 - Rewrite the branch's history; add commits.
 - Merge.

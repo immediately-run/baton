@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkCourse, legExports, readInputs, removed, shortestRoute, type KitInput } from '../../src/local/testCourse';
+import { checkCourse, legExports, readInputs, removed, shortestRoute, staticViolations, type KitInput } from '../../src/local/testCourse';
 import { graphOf } from '../../src/core/graph';
 import { BUG_REPORT_COURSE } from '../../src/defaults/courses';
 
@@ -102,6 +102,48 @@ describe('baton test-course', () => {
     const v = await checkCourse(input({ proposed: WITHOUT_ADJUDICATE, proposedVersions: { version: 4, min_worker_version: 4 }, live }));
     expect(v).toEqual([expect.objectContaining({ rule: 'moves-back', message: expect.stringContaining('T-7') })]);
   }, 60_000);
+
+  it('the kit fails an implement or fix instruction without the shared-file rule (B-102)', () => {
+    const kit = (texts: Record<string, string> | null) => input({
+      proposed: roadmapPr,
+      legScripts: Object.keys(roadmapPr.legs).map((name) => ({ name, exports: ['run', 'handoff', 'close'] })),
+      ...(texts == null ? {} : { instructions: Object.entries(texts).map(([name, text]) => ({ name, text })) }),
+    });
+    // A kit run with no instruction files collected is not the rule's to check (the
+    // repository owns its instructions; the collected ones are).
+    expect(staticViolations(kit(null))).toEqual([]);
+    // An implement instruction without the line is the violation, named.
+    expect(staticViolations(kit({ implement: '## Do not\n\n- Nothing shared here.\n', fix: "Do not: a leg never edits a file another ticket's leg may edit — no CHANGELOG.\n" }))).toEqual([
+      expect.objectContaining({ rule: 'instructions', message: expect.stringContaining("legs/implement.md carries no shared-file rule") }),
+    ]);
+    expect(staticViolations(kit({ implement: "Do not: a leg never edits a file another ticket's leg may edit — no CHANGELOG.\n", fix: "Do not: a leg never edits a file another ticket's leg may edit.\n" }))).toEqual([]);
+  });
+
+  it('readInputs collects the legs/*.md instructions the rule reads, and the rule fires off them (B-102, round 2)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-kit-instr-'));
+    dirs.push(dir);
+    const legs = join(dir, '.baton/courses/roadmap-pr/legs');
+    mkdirSync(legs, { recursive: true });
+    writeFileSync(join(dir, '.baton/courses/roadmap-pr/course.json'), JSON.stringify(roadmapPr));
+    writeFileSync(join(dir, '.baton/baton.json'), JSON.stringify({ courses: [{ id: 'roadmap-pr', version: 1, min_worker_version: 1 }] }));
+    const RULE = "a leg never edits a file another ticket's leg may edit";
+    const write = (implement: string) => {
+      for (const leg of Object.keys(roadmapPr.legs)) {
+        if (leg === 'implement') writeFileSync(join(legs, 'implement.md'), implement);
+        else writeFileSync(join(legs, `${leg}.md`), `# roadmap-pr · ${leg}\n\nRule: ${RULE}.\n`);
+        writeFileSync(join(legs, `${leg}.mjs`), 'export async function run() {}\nexport async function handoff() {}\nexport async function close() {}\n');
+      }
+    };
+    write(`Do not: ${RULE}.\n`);
+    const good = await readInputs(dir, 'roadmap-pr');
+    expect(good.instructions?.map((x) => x.name).sort()).toEqual(Object.keys(roadmapPr.legs).sort());
+    expect(staticViolations(good)).toEqual([]);
+    write('Do not: nothing shared here.\n');
+    const bad = await readInputs(dir, 'roadmap-pr');
+    expect(staticViolations(bad)).toEqual([
+      expect.objectContaining({ rule: 'instructions', message: expect.stringContaining('legs/implement.md carries no shared-file rule') }),
+    ]);
+  });
 
   it('a no-op agent_command fails a PR course\'s start leg wherever it is filed; a marker course\'s close that accepts a mangled ticket fails the kit (B-81, B-100)', async () => {
     // docs' own course id, sourced from create-pr (B-33): still a PR course, wherever it is filed.

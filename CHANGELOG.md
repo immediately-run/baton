@@ -1,5 +1,10 @@
 # Baton changelog
 
+Release-curated: a row is written here **at release time**, from the merged PRs' bodies, by a
+person or a release command — never by a leg (B-102). A leg never edits a file another ticket's
+leg may edit, and this table's head is the file every parallel ticket would otherwise touch; a
+release note belongs in the PR body, and this file gathers them when a release is cut.
+
 One row per change to Baton — the spec (`BATON_SPEC`, its `roadmap-pr` course spec), this
 repository, and Baton's roadmap items — newest first. A row is not a commit: one change may
 span several commits or both repositories, and a commit may carry several changes. Commit
