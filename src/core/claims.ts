@@ -1403,7 +1403,8 @@ export class Claims {
     // …or the ticket at an end station in such a reading, when the ticket is still posted: the
     // holder pushed the merge, the sync read it, and only then the end arrived (G-BTN-44; found
     // by R3-1244's model-based tests — the judge already credits the same reading posted later)
-    const st = closed ? null : this.rows<{ station: string }>('SELECT station FROM ticket_stations WHERE ticket_id = ? AND observation > ?', c.ticket_id, c.claim_observation)[0];
+    const placed = closed ? undefined : this.stations.placed(c.ticket_id);
+    const st = placed && placed.observation > c.claim_observation ? placed : null;
     const g = st && c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
     const atEnd = !!st && !!g && g.ends.has(st.station) && this.rows('SELECT 1 FROM tickets WHERE id = ?', c.ticket_id).length > 0;
     if (!closed && !atEnd) return false;
@@ -1502,7 +1503,7 @@ export class Claims {
 
   /** R-BTN-10's test of one completed end against the head snapshot. */
   private endShown(c: { id: number; ticket_id: string; end_reason: string; start_path: string; ended_regressed: number; course_id: string | null; end_observation: number | null }, observation: number): boolean {
-    const st = this.rows<{ station: string; path: string; observation: number }>('SELECT station, path, observation FROM ticket_stations WHERE ticket_id = ?', c.ticket_id)[0];
+    const st = this.stations.placed(c.ticket_id);
     const live = this.rows('SELECT 1 FROM tickets WHERE id = ?', c.ticket_id).length > 0;
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
     if (c.end_reason === 'done') {

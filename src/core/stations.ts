@@ -10,6 +10,7 @@ import type { PostedStation } from './board';
 import type { Store } from './ports';
 import { meetsRequiredBar, requiredBarCovers, type RequiredBar } from './admin';
 import { qualify } from './validate';
+import { repositoryOf } from './registry';
 import type { History } from './history';
 import { BATON_WAITS } from './blocks';
 
@@ -82,6 +83,10 @@ export class Stations {
    */
   apply(repo: string, sha: string, observation: number, stations: Map<string, PostedStation>, closed: { id: string; as: 'done' | 'withdrawn' }[], at: number): Map<string, Seen> {
     const seen = new Map<string, Seen>();
+    // The reading that placed every station row before this one (R-BTN-62): a row this post
+    // leaves unchanged keeps its own, older `observation`, so the repository's stands for it.
+    const placedBefore = this.rows<{ n: number | null }>('SELECT stations_observation AS n FROM board_head WHERE repository_id = ?', repo)[0]?.n ?? 0;
+    this.exec('UPDATE board_head SET stations_observation = ? WHERE repository_id = ?', observation, repo);
     for (const [local, st] of stations) {
       const id = qualify(repo, local);
       const t = this.rows<{ course_id: string }>('SELECT course_id FROM tickets WHERE id = ?', id)[0];
@@ -106,7 +111,7 @@ export class Stations {
       if (!fine) this.offGraph(repo, id, { observation, why: prev ? 'the path does not extend the previous one by edges' : 'the path does not follow the course file from its start', path: st.path, previous: prev });
       this.write(id, g!, st, sha, observation, at, this.c.requiredBars?.(repo) ?? [], t.course_id);
       // R-BTN-81: git moved the ticket and no claim said so — someone else's work.
-      if (prevRow && (prevRow.station !== st.station || prevRow.path !== JSON.stringify(st.path)) && !this.claimMoved(id, st.station, prevRow.observation)) {
+      if (prevRow && (prevRow.station !== st.station || prevRow.path !== JSON.stringify(st.path)) && !this.claimMoved(id, st.station, Math.max(prevRow.observation, placedBefore))) {
         this.c.history?.record(id, { kind: 'git-moved', reached: st.station, next_leg: st.next_leg, detail: { from: prevRow.station, to: st.station, path: st.path, observation, next_source: st.next_source } });
       }
       seen.set(id, { station: st.station, path: st.path, prev, bars: st.bars });
@@ -122,6 +127,14 @@ export class Stations {
   /** A live ticket is not closed: a closure row of a ticket that returned is deleted. */
   reopened(repo: string, liveLocals: string[]) {
     this.exec(`DELETE FROM closed_tickets WHERE ticket_id IN (SELECT ? || ':' || value FROM json_each(?))`, repo, JSON.stringify(liveLocals));
+  }
+
+  /** Where the ticket's station row has it, with the observation of the latest snapshot to place
+   *  it there (R-BTN-62): the row's own, or its repository's when a later post left it unchanged. */
+  placed(id: string): { station: string; path: string; observation: number } | undefined {
+    return this.rows<{ station: string; path: string; observation: number }>(
+      `SELECT s.station, s.path, MAX(s.observation, COALESCE(h.stations_observation, 0)) AS observation
+       FROM ticket_stations s LEFT JOIN board_head h ON h.repository_id = ? WHERE s.ticket_id = ?`, repositoryOf(id), id)[0];
   }
 
   /** A ticket that left the board leaves the cache. */
@@ -194,19 +207,28 @@ export class Stations {
                                       THEN ticket_next_legs.waiting_since ELSE excluded.waiting_since END`, id, leg, since);
   }
 
+  /** Store where a snapshot places the ticket, writing only what changed (R-BTN-70): the sync
+   *  re-posts every live ticket on every push and every refresh, and rows rewritten unchanged
+   *  are what spend a plan's rows written (R-BTN-2; S-BTN-188). */
   private write(id: string, g: Graph, given: PostedStation, sha: string, observation: number, at: number, required: RequiredBar[], course: string) {
     // R-BTN-64: legs the snapshot names by an old name are stored under the current one.
     const name = (leg: string) => resolveLeg(g, leg) ?? leg;
     const st = { ...given, next_leg: given.next_leg == null ? null : name(given.next_leg), next: given.next.map((n) => ({ ...n, leg: name(n.leg) })) };
-    const before = new Map(this.rows<{ leg: string; state: string; waiting_on: string | null; ready_since: number | null; waiting_since: number | null }>(
+    type NextRow = { leg: string; state: string; waiting_on: string | null; ready_since: number | null; waiting_since: number | null };
+    const before = new Map(this.rows<NextRow>(
       'SELECT leg, state, waiting_on, ready_since, waiting_since FROM ticket_next_legs WHERE ticket_id = ?', id).map((r) => [r.leg, r]));
-    this.exec(`INSERT INTO ticket_stations (ticket_id, station, path, path_len, to_end, next_leg, next_source, handoff_url, snapshot_sha, observation)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT (ticket_id) DO UPDATE SET station = excluded.station, path = excluded.path, path_len = excluded.path_len,
-                 to_end = excluded.to_end, next_leg = excluded.next_leg, next_source = excluded.next_source, handoff_url = excluded.handoff_url,
-                 snapshot_sha = excluded.snapshot_sha, observation = excluded.observation`,
-      id, st.station, JSON.stringify(st.path), st.path.length, g.toEnd.get(st.station) ?? 0, st.next_leg, st.next_source, st.handoff_url, sha, observation);
-    this.exec('DELETE FROM ticket_next_legs WHERE ticket_id = ?', id);
+    const row = [st.station, JSON.stringify(st.path), st.path.length, g.toEnd.get(st.station) ?? 0, st.next_leg, st.next_source, st.handoff_url ?? null];
+    const stored = this.rows<Record<string, unknown>>(
+      'SELECT station, path, path_len, to_end, next_leg, next_source, handoff_url FROM ticket_stations WHERE ticket_id = ?', id)[0];
+    if (!stored || Object.values(stored).some((v, i) => v !== row[i])) {
+      this.exec(`INSERT INTO ticket_stations (ticket_id, station, path, path_len, to_end, next_leg, next_source, handoff_url, snapshot_sha, observation)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (ticket_id) DO UPDATE SET station = excluded.station, path = excluded.path, path_len = excluded.path_len,
+                   to_end = excluded.to_end, next_leg = excluded.next_leg, next_source = excluded.next_source, handoff_url = excluded.handoff_url,
+                   snapshot_sha = excluded.snapshot_sha, observation = excluded.observation`,
+        id, ...row, sha, observation);
+    }
+    const next = new Map<string, NextRow>();
     for (const posted of st.next) {
       // R-BTN-67: a leg a required bar covers whose posted bars hold no tag with its prefix is
       // stored waiting on `policy` — the board still moves — and listed under Needs you.
@@ -220,8 +242,7 @@ export class Stations {
       const readySince = n.state === 'ready' ? (b?.state === 'ready' ? b.ready_since : at) : null;
       const unbroken = b?.state === 'waiting' && batonWait(b.waiting_on) === batonWait(n.waiting_on ?? null);
       const waitingSince = n.state === 'waiting' ? (unbroken ? b.waiting_since : at) : null;
-      this.exec('INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, ready_since, waiting_since) VALUES (?, ?, ?, ?, ?, ?)',
-        id, n.leg, n.state, n.waiting_on, readySince, waitingSince);
+      next.set(n.leg, { leg: n.leg, state: n.state, waiting_on: n.waiting_on ?? null, ready_since: readySince, waiting_since: waitingSince });
     }
     // R-BTN-83: a queued leg — or any next leg posted with it — that does not leave the station in
     // the course file in force waits on `course-changed` whatever the snapshot posted for it; the
@@ -230,10 +251,28 @@ export class Stations {
       if (leaves(g, leg, st.station)) continue;
       // The wait runs from when Baton first stored it, whatever this snapshot posted (Needs you's age).
       const b = before.get(leg);
-      this.courseChanged(id, leg, b?.state === 'waiting' && b.waiting_on === 'course-changed' && b.waiting_since != null ? b.waiting_since : at);
+      const posted = next.get(leg);
+      const since = posted?.state === 'waiting' && posted.waiting_on === 'course-changed' ? posted.waiting_since
+        : b?.state === 'waiting' && b.waiting_on === 'course-changed' && b.waiting_since != null ? b.waiting_since : at;
+      next.set(leg, { leg, state: 'waiting', waiting_on: 'course-changed', ready_since: null, waiting_since: since });
     }
-    this.exec('DELETE FROM ticket_bars WHERE ticket_id = ?', id);
-    for (const [leg, tags] of Object.entries(st.bars)) for (const tag of tags) this.exec('INSERT OR IGNORE INTO ticket_bars (ticket_id, leg, tag) VALUES (?, ?, ?)', id, leg, tag);
+    for (const leg of before.keys()) if (!next.has(leg)) this.exec('DELETE FROM ticket_next_legs WHERE ticket_id = ? AND leg = ?', id, leg);
+    for (const n of next.values()) {
+      const b = before.get(n.leg);
+      if (b && b.state === n.state && b.waiting_on === n.waiting_on && b.ready_since === n.ready_since && b.waiting_since === n.waiting_since) continue;
+      this.exec(`INSERT INTO ticket_next_legs (ticket_id, leg, state, waiting_on, ready_since, waiting_since) VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (ticket_id, leg) DO UPDATE SET state = excluded.state, waiting_on = excluded.waiting_on,
+                   ready_since = excluded.ready_since, waiting_since = excluded.waiting_since`,
+        id, n.leg, n.state, n.waiting_on, n.ready_since, n.waiting_since);
+    }
+    const bars = new Set(Object.entries(st.bars).flatMap(([leg, tags]) => tags.map((tag) => JSON.stringify([leg, tag]))));
+    for (const b of this.rows<{ leg: string; tag: string }>('SELECT leg, tag FROM ticket_bars WHERE ticket_id = ?', id)) {
+      if (!bars.delete(JSON.stringify([b.leg, b.tag]))) this.exec('DELETE FROM ticket_bars WHERE ticket_id = ? AND leg = ? AND tag = ?', id, b.leg, b.tag);
+    }
+    for (const b of bars) {
+      const [leg, tag] = JSON.parse(b) as [string, string];
+      this.exec('INSERT INTO ticket_bars (ticket_id, leg, tag) VALUES (?, ?, ?)', id, leg, tag);
+    }
   }
 
   private offGraph(repo: string, id: string, detail: { observation: number; why: string; path?: Step[]; previous?: Step[] | null }) {

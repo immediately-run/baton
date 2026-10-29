@@ -1110,7 +1110,8 @@ Baton, and it is exportable (R-BTN-88).
 
   A post over R-BTN-149's caps is refused `too-large`. Baton materializes each accepted
   snapshot into `tickets`, upserting rows whose `row_hash` changed and deleting rows of tickets
-  that left the board. The protocol is the CLI's (`baton repo sync`); the repository supplies only
+  that left the board; its stations likewise write only the rows that changed (R-BTN-70), so a
+  post costs rows written in proportion to what moved, not to the board's size (R-BTN-2). The protocol is the CLI's (`baton repo sync`); the repository supplies only
   its ticket source and station functions.
 
 - **R-BTN-62 / R-BTN-150 (observations are ordered by Baton).**
@@ -1649,7 +1650,9 @@ mean (R-BTN-50).
   them); its **queued leg** with its `next_source` (R-BTN-83); for each leg leaving the station
   the ticket may still run, `ready` or `waiting` (with a `waiting_on` label); and the barred tags
   of each leg it knows them for (`ticket_bars`, per leg name). A ticket at an end station is
-  done. Core stores this as a cache each accepted snapshot overwrites (R-BTN-39), recommends a
+  done. Core stores this as a cache each accepted snapshot overwrites (R-BTN-39), writing only
+  the station, next-leg and bar rows that changed: a row the snapshot leaves as it is stays
+  unwritten, and counts as shown by that snapshot's observation (S-BTN-188). It recommends a
   `ready` leg, and never computes a station. The claim response, every heartbeat and every
   `advance` response show the holder the latest snapshot's station, path and next legs.
 - **R-BTN-83 (a leg ends in a position: the station it reached and the leg it queues).**
@@ -6211,13 +6214,13 @@ and never accepted holds no role (§12.1).
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
 | `board_snapshots` | `(repository_id, sha)` | `parent_sha`, `received_at`, `ticket_count`, `posted_by` | Accepted posts (R-BTN-11, R-BTN-102) |
-| `board_head` | `repository_id` | `sha`, `observation`, `last_handed_out`, `observation_holder`, `observation_issued_at`, `observation_renewed_at`, `behind_since` (R-BTN-147), `fleet_version` | The head and the observation counter (R-BTN-62, R-BTN-150, R-BTN-99) |
+| `board_head` | `repository_id` | `sha`, `observation`, `last_handed_out`, `observation_holder`, `observation_issued_at`, `observation_renewed_at`, `behind_since` (R-BTN-147), `fleet_version`, `stations_observation` (the latest accepted snapshot to post stations) | The head and the observation counter (R-BTN-62, R-BTN-150, R-BTN-99); a station row's reading (R-BTN-70) |
 | `held_snapshots` | `(repository_id, sha)` | `parent_sha`, `head_sha`, `ticket_count`, `observation`, `posted_by` (≤ 4 held per credential), `received_at`, `auto_accept_at` (+24 h), `accepted_at` (set by acceptance; the next force post of the sha is adopted, R-BTN-11) | Rewritten history held for the owner (R-BTN-147) |
 | `markers_seen` | `(repository_id, ref)` | `ticket_id`, `observation` | Marker refs already judged (R-BTN-46) |
 | `tickets` | `id` | `repository_id` (home), `local_id` (`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`), `course_id`, `course_json` (opaque), `path`, `title`, `display_json`, `tier`, `expedite`, `parent`, `repos` JSON, `rank`, `check_sha`, `check_head_repo_id`, `check_head_ref`, `snapshot_sha`, `row_hash`, `blocked_since`, `answer_lost` JSON, `outbox_id` (set on a provisional handler-ticket row until a snapshot posts the ticket), `baton_held` (a light question's handler until its promotion lands, and that handler's children until they close; no snapshot posts or drops them) | Filter fields of each live ticket; an accepted snapshot rewrites only rows whose `row_hash` changed (R-BTN-33, R-BTN-77, R-BTN-86, R-BTN-153, R-BTN-171, R-BTN-173) |
 | `ticket_requires` | `(ticket_id, name)` | — | The ticket's `requires` clause, expanded to capabilities (R-BTN-120) |
 | `ticket_depends` | `(ticket_id, leg, ref)`; `leg` `''` for every leg | `on_ticket`, `ref` (`<ticket>@at:<station>,…`, `@reached:…`, `@done` or `@withdrawn`) | Posted `depends_at` entries; index `ticket_dependents` on `on_ticket` (R-BTN-120, R-BTN-132) |
-| `ticket_stations` | `ticket_id` | `station`, `path` JSON `[{leg, reached}]`, `path_len`, `to_end`, `next_leg`, `next_source` (`course`\|`marker`\|`inferred`\|`holder`\|`call`\|`choice`\|`timer`\|`retry`\|`cancel`\|`outbox`), `handoff_url`, `snapshot_sha`, `observation` | Where the ticket is, replayed from git, or settled by Baton until git confirms (R-BTN-39, R-BTN-83, R-BTN-165, R-BTN-171) |
+| `ticket_stations` | `ticket_id` | `station`, `path` JSON `[{leg, reached}]`, `path_len`, `to_end`, `next_leg`, `next_source` (`course`\|`marker`\|`inferred`\|`holder`\|`call`\|`choice`\|`timer`\|`retry`\|`cancel`\|`outbox`), `handoff_url`, `snapshot_sha` and `observation` (the snapshot that last changed the row; the latest to show it there is the greater of `observation` and the repository's `stations_observation`) | Where the ticket is, replayed from git, or settled by Baton until git confirms (R-BTN-39, R-BTN-70, R-BTN-83, R-BTN-165, R-BTN-171) |
 | `ticket_next_legs` | `(ticket_id, leg)` | `state` (`ready`\|`waiting`), `waiting_on` (a label), `course_json` (opaque), `ready_since`, `waiting_since`, `not_before` | Legs leaving the station (R-BTN-83, R-BTN-89, R-BTN-166) |
 | `ticket_bars` | `(ticket_id, leg, tag)` | — | Tags barred from a leg (R-BTN-60) |
 | `ticket_decisions` | `(ticket_id, decision_id)` | `leg` (`''` for the ticket), `asks` (a person's leg's own, R-BTN-116), `url` | Posted decisions; each open one raises `hitl.decision` (R-BTN-78, R-BTN-163) |
@@ -6729,6 +6732,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-184 protected paths | a PR changing `.baton/`, one changing tickets, one appending own progress | the first ends at `human-merge`; the second merges only with a matching `std:approval@1`; the third merges when every entry matches the grammar and the claim, and is a ticket change otherwise |
 | S-BTN-185 human gates | an owner's agent key; a `human_only` key | the agent key's approval, writer-policy change or hold lift is refused; the `human_only` key's succeed; a `human_only` key registered without an existing one's signature is refused |
 | S-BTN-186 any surface | one owner, one action, the CLI, the API and an MCP key | each succeeds where `callers` allow it; an MCP key may add a hold and never lift one |
+| S-BTN-188 a sync writes only what changed | twelve tickets placed with next legs and bars; a refresh and a new head that change nothing; a new head moving one ticket, then a refresh flipping its leg and dropping a bar; a suspension at the station a snapshot already showed, then a refresh posting it unchanged | no station, next-leg or bar row rewritten; that ticket's rows alone rewritten, its unchanged station row kept; the refresh confirms the end without rewriting the row (R-BTN-70, R-BTN-62) |
 | S-BTN-187 board posts | a `protected` repository | a machine key's post is refused; a truncated delivery fails closed; a station a trusted leg acts on is not reached from a git verdict |
 | **§16** | | |
 | S-BTN-14 mirror preconditions | a reap after `in-review`; a replay; a stale clone's git claim | no overwrite; no-op; reverted, holder kept |
