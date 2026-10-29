@@ -17,7 +17,7 @@
 //   baton admin -i KEY repo retire ID
 //   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T]
 //   baton admin -i KEY probe add --key PUB --label L
-//   baton admin -i KEY resource add NAME --scope runner|account|service --schema FILE|JSON [--atoms-from admin|any]    (R-BTN-76, R-BTN-176)
+//   baton admin -i KEY resource add NAME --scope worker|account|service --schema FILE|JSON [--atoms-from admin|any]    (R-BTN-76, R-BTN-176)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]

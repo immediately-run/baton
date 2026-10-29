@@ -45,7 +45,7 @@ const program = {
   ],
 };
 
-const CAPACITY_BASE = { type: 'object', additionalProperties: false, properties: { remaining_permille: { type: 'integer', minimum: 0, maximum: 1000 } }, required: ['remaining_permille'], 'x-baton-base': 'std:api-capacity@1' };
+const CAPACITY_BASE = { type: 'object', properties: { window_s: { type: 'integer', minimum: 1 }, remaining_permille: { type: 'integer', minimum: 0, maximum: 1000 }, resets_at_min: { type: 'integer', minimum: 0 } }, required: ['window_s', 'remaining_permille'], 'x-baton-base': 'std:api-capacity@1' };
 
 let admin: TestKey;
 let owner: TestKey;
@@ -101,7 +101,11 @@ describe('S-BTN-153 (the runner half): BATON_ADVICE reaches the leg, BATON_TAKEN
 export async function run(ctx) {
   const advice = readFileSync(process.env.BATON_ADVICE, 'utf8');
   writeFileSync([ctx.checkout, '.baton', 'advice.json'].join('/'), advice);
-  writeFileSync(process.env.BATON_TAKEN, JSON.stringify([{ choice: 'codegen', alternative: 'opencode-go', dead: ['key:zai'] }]));
+  // The ticket's id names the taken this leg writes: the normal report, an over-4 KB file of
+  // valid entries, or an unparseable one — the runner drops the last two whole (R-BTN-177).
+  if (ctx.ticket.id.endsWith('9912')) writeFileSync(process.env.BATON_TAKEN, JSON.stringify([{ choice: 'codegen', alternative: 'opencode-go', dead: Array.from({ length: 70 }, (_, i) => 'key:' + 'k'.repeat(60) + i) }]));
+  else if (ctx.ticket.id.endsWith('9913')) writeFileSync(process.env.BATON_TAKEN, 'not json at all');
+  else writeFileSync(process.env.BATON_TAKEN, JSON.stringify([{ choice: 'codegen', alternative: 'opencode-go', dead: ['key:zai'] }]));
   return { reached: 'pr-open', next: 'review' };
 }
 export async function close() { return 'https://example.test/close'; }
@@ -109,13 +113,14 @@ export async function close() { return 'https://example.test/close'; }
     write('.baton/courses/roadmap-pr/legs/review.mjs', `export async function run() { return { end: 'done', reached: 'reviewed' }; }
 export async function close() { return 'https://example.test/close'; }
 `);
+
     g('add', '-A');
     g('-c', 'user.email=b105@test', '-c', 'user.name=b105 test', 'commit', '--no-gpg-sign', '-qm', 'courses');
     return { dir, sha: () => g('rev-parse', 'HEAD') };
   }
 
   it('the starting advance\'s advice is in BATON_ADVICE, the leg\'s taken rides the finishing advance, and the dead key leaves the declaration', async () => {
-    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'ac:main', available: true, valid_for: 86400, detail: { remaining_permille: 900 } }] })).status).toBe(200);
+    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'ac:main', available: true, valid_for: 86400, detail: { window_s: 300, remaining_permille: 900 } }] })).status).toBe(200);
     const home = adviceHome();
     try {
       // The board is posted AT the home's head, so the claim's snapshot loads the legs (R-BTN-34).
@@ -181,4 +186,50 @@ export async function close() { return 'https://example.test/close'; }
       rmSync(home.dir, { recursive: true, force: true });
     }
   });
+
+  it('an over-4 KB taken file and an unparseable one are dropped whole: no taken rides the advance, nothing is stored', async () => {
+    const home = adviceHome();
+    try {
+      // One board at the home's head carrying both tickets (a second post at the same head
+      // would be refused — the head must move, §7.1).
+      const git = execFileSync('git', ['-C', home.dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      const parent = head;
+      head = git;
+      const final = await syncCall('/v1/sync/board', payload(git, parent, board.states.A, {
+        ontology: { builtin: 'baton@1', program },
+        registry: [course(3, 3, { route_choices: { implement: ['codegen'] } })],
+        state: { items: [item('R3-9912'), item('R3-9913')] },
+        ready: ['R3-9912', 'R3-9913'],
+      }));
+      expect(final.status).toBe(200);
+      for (const [id, tail] of [['R3-9912', 'fat'], ['R3-9913', 'garbage']] as const) {
+        const api = new BatonApi({
+          url: 'https://baton.test',
+          transport: (req) => hostCall(req),
+          auth: (_m, _u, _b, secret) => ({ Authorization: `Bearer ${TOKENS['vm-a']}`, ...(secret ? { 'X-Worker-Secret': secret } : {}) }),
+        });
+        const advances: Record<string, unknown>[] = [];
+        const adv = api.advance.bind(api);
+        (api as unknown as { advance: (id: number, body: Record<string, unknown>) => Promise<Record<string, unknown>> }).advance = async (id: number, body: Record<string, unknown>) => {
+          advances.push(body);
+          return await adv(id, body);
+        };
+        const runner = new Runner({
+          api, home: home.dir, repository: 'docs', hostname: 'vm-a', harness: 'opencode',
+          capabilities: ['key:opencode-go', 'key:deepinfra', 'key:claude-subscription', 'key:zai'],
+          session: `b105-${tail}`, courses: [{ course: 'roadmap-pr', version: 3 }],
+          stateFile: join(tmpdir(), `baton-147-${tail}-${process.pid}.json`), beatEvery: 60_000, log: () => {},
+        });
+        const outcome = await runner.runOnce();
+        expect(outcome).not.toBeNull();
+        expect(advances.find((b) => Array.isArray(b.taken))).toBeUndefined(); // dropped whole by the runner
+        expect(await rows('SELECT 1 FROM claim_legs WHERE taken_json IS NOT NULL')).toEqual([]);
+        runner.stop();
+        rmSync(join(tmpdir(), `baton-147-${tail}-${process.pid}.json`), { force: true });
+      }
+    } finally {
+      rmSync(home.dir, { recursive: true, force: true });
+    }
+  });
 }, 120_000);
+

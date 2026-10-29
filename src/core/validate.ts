@@ -523,10 +523,11 @@ export interface End {
   prerequisite: { kind: 'capability'; ref: string } | null;
   /** R-BTN-108: what the finished leg produced. */
   outputs: Output[];
-  /** R-BTN-177 (B-105): what the leg wrote to BATON_TAKEN, as the runner read it — raw here,
-   *  judged against the leg's route choices by the claims (a file that is unparseable or over
-   *  4 KB was dropped by the runner and never arrives). */
-  taken: TakenEntry[] | null;
+  /** R-BTN-177 (B-105): what the leg wrote to BATON_TAKEN, as the runner read it — the kept
+   *  entries and how many were dropped here for their shape, judged against the leg's route
+   *  choices by the claims (a file that is unparseable or over 4 KB was dropped by the runner
+   *  and never arrives). */
+  taken: { kept: TakenEntry[]; dropped: number } | null;
 }
 
 /** One entry of a leg's `taken` (R-BTN-177): the alternative it ran for a route choice, and the
@@ -538,25 +539,40 @@ export interface TakenEntry {
   dead: string[];
 }
 
-/** The `taken` a finishing advance or end reports (R-BTN-177): at most 16 entries — the runner
- *  keeps one per route choice the leg listed — each carrying at most 8 dead holdings. An
- *  over-bound or malformed list is dropped whole, never refusing the advance or end that carries
- *  it. */
-export function checkTaken(v: unknown): TakenEntry[] | null {
+/** A route choice's or an alternative's id, as the ontology admits it (R-BTN-175: up to 63
+ *  characters — the course-id pattern this file's other checks use is shorter, and would drop a
+ *  legal id's whole report). */
+const CHOICE_ID = /^[a-z][a-z0-9-]{0,63}$/;
+
+/**
+ * The `taken` a finishing advance or end reports (R-BTN-177): a list of at most 16 entries —
+ * the runner keeps one per route choice the leg listed — each naming its dead holdings. A file
+ * that is unparseable or over 4 KB is dropped whole (the runner drops it first; the same bound
+ * holds here); a malformed ENTRY is dropped alone, never the report — dropping the rest is the
+ * claims' judgement with `taken-invalid`, and never refuses the advance or end.
+ */
+export function checkTaken(v: unknown): { kept: TakenEntry[]; dropped: number } | null {
   if (v === undefined || v === null) return null;
   const raw = JSON.stringify(v);
   if (raw.length > 4096) return null; // the file the leg wrote is over 4 KB: dropped (R-BTN-177)
-  if (!Array.isArray(v) || v.length > 16) return null;
-  const out: TakenEntry[] = [];
-  for (const e of v as unknown[]) {
+  if (!Array.isArray(v) || v.length < 1) return null;
+  const kept: TakenEntry[] = [];
+  let dropped = 0;
+  const entryProblem = (e: unknown): TakenEntry | null => {
     if (!isObj(e) || typeof e.choice !== 'string' || typeof e.alternative !== 'string') return null;
     for (const k of Object.keys(e)) if (!['choice', 'alternative', 'dead'].includes(k)) return null;
-    if (!COURSE_ID.test(e.choice) || !COURSE_ID.test(e.alternative)) return null;
+    if (!CHOICE_ID.test(e.choice) || !CHOICE_ID.test(e.alternative)) return null;
     const dead = e.dead === undefined ? [] : e.dead;
-    if (!Array.isArray(dead) || dead.length > 8 || !dead.every((d) => typeof d === 'string' && CAPABILITY_NAME.test(d))) return null;
-    out.push({ choice: e.choice, alternative: e.alternative, dead: [...new Set(dead as string[])] });
+    if (!Array.isArray(dead) || !dead.every((d) => typeof d === 'string' && CAPABILITY_NAME.test(d))) return null;
+    return { choice: e.choice, alternative: e.alternative, dead: [...new Set(dead as string[])] };
+  };
+  for (const e of (v as unknown[]).slice(0, 16)) {
+    const entry = entryProblem(e);
+    if (entry) kept.push(entry);
+    else dropped++;
   }
-  return out;
+  dropped += Math.max(0, (v as unknown[]).length - 16);
+  return { kept, dropped };
 }
 
 /** §6.5's ends: `done`, `suspended:<station>` and `released:<reason>`, each with an optional
@@ -619,7 +635,7 @@ export interface Advance {
   outputs: Output[];
   /** R-BTN-177 (B-105): what the finished leg wrote to BATON_TAKEN, reported on the advance or
    *  end that finishes it. */
-  taken: TakenEntry[] | null;
+  taken: { kept: TakenEntry[]; dropped: number } | null;
 }
 
 /** `POST /v1/runner/claims/{id}/advance` (R-BTN-63, §11): the leg to start; `reached`, the

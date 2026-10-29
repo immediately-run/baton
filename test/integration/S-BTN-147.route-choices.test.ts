@@ -54,8 +54,10 @@ const program = {
   ],
 };
 
-/** The schema anthropic-capacity and its kin register: a refinement of std:api-capacity@1. */
-const CAPACITY_BASE = { type: 'object', additionalProperties: false, properties: { remaining_permille: { type: 'integer', minimum: 0, maximum: 1000 } }, required: ['remaining_permille'], 'x-baton-base': 'std:api-capacity@1' };
+/** The schema anthropic-capacity and its kin register: a refinement of std:api-capacity@1 —
+ *  the base's own fields restated (it is open: a provider's schema refines it by adding fields),
+ *  its remaining_permille bounded as the base bounds it. */
+const CAPACITY_BASE = { type: 'object', properties: { window_s: { type: 'integer', minimum: 1 }, remaining_permille: { type: 'integer', minimum: 0, maximum: 1000 }, resets_at_min: { type: 'integer', minimum: 0 } }, required: ['window_s', 'remaining_permille'], 'x-baton-base': 'std:api-capacity@1' };
 const ALL_KEYS = ['key:opencode-go', 'key:deepinfra', 'key:claude-subscription', 'key:zai'];
 
 let admin: TestKey;
@@ -143,19 +145,23 @@ describe('S-BTN-147: a codegen route choice', () => {
     expect(alternativeOf(offPeak.advice, 'codegen')).toBe('opencode-go');
     await w1.call(`/v1/runner/claims/${offPeak.claimId}/end`, { end_reason: 'released:requested' });
 
-    // In peak with DeepInfra unavailable: the demoted OpenCode Go is still advised (a guard is soft).
-    await setClock(T0 + 6 * 60 * MIN); // 12:00Z — still off-peak; flip instead by window: back in peak next day is far, so demote and block.
+    // In peak with DeepInfra unavailable: the demoted OpenCode Go is still advised — a guard is
+    // soft, a blocked need is not, and this is the row's fallback clause (S-BTN-147).
+    await setClock(T0 + 21 * 60 * MIN); // next day 03:00Z — minute 180, inside [120, 600)
     await w1.beat();
     expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'di:main', available: false, valid_for: 86400 }] })).status).toBe(200);
     await postBoard({}, ['R3-9103']);
     await refresh();
-    const diDownOffPeak = await startLeg(w1, 'R3-9103');
-    expect(alternativeOf(diDownOffPeak.advice, 'codegen')).toBe('opencode-go'); // DeepInfra blocked_alt, not merely demoted
-    await w1.call(`/v1/runner/claims/${diDownOffPeak.claimId}/end`, { end_reason: 'released:requested' });
+    const diDownInPeak = await startLeg(w1, 'R3-9103');
+    expect(alternativeOf(diDownInPeak.advice, 'codegen')).toBe('opencode-go'); // blocked_alt removes deepinfra; the demoted first survives
+    expect(diDownInPeak.advice!.route_choices[0].ranked.map((r) => r.alternative)).toEqual(['opencode-go']);
+    expect(diDownInPeak.advice!.route_choices[0].ranked[0].demoted).toBe(true);
+    await w1.call(`/v1/runner/claims/${diDownInPeak.claimId}/end`, { end_reason: 'released:requested' });
 
-    // In peak with OpenCode Go unavailable: DeepInfra.
-    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'ocg:go-plus', available: false, valid_for: 86400 }] })).status).toBe(200);
-    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'di:main', available: true, valid_for: 86400 }] })).status).toBe(200);
+    // Off-peak with OpenCode Go unavailable: DeepInfra.
+    await setClock(T0 + 28 * 60 * MIN); // 10:00Z — minute 600, off-peak (the window ends at 600)
+    await w1.beat();
+    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'ocg:go-plus', available: false, valid_for: 86400 }, { instance: 'di:main', available: true, valid_for: 86400 }] })).status).toBe(200);
     await postBoard({}, ['R3-9104']);
     await refresh();
     const ocgDown = await startLeg(w1, 'R3-9104');
@@ -163,7 +169,6 @@ describe('S-BTN-147: a codegen route choice', () => {
     await w1.call(`/v1/runner/claims/${ocgDown.claimId}/end`, { end_reason: 'released:requested' });
 
     // A runner holding only DeepInfra's key: deepinfra, whatever the clock.
-    await setClock(T0 + 7 * 60 * MIN);
     const w2 = await grantedWorker(owner, 'docs', 'w2', ['key:deepinfra'], ['di:main']);
     expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'di:main', available: true, valid_for: 86400 }] })).status).toBe(200);
     await postBoard({}, ['R3-9105']);
@@ -204,29 +209,38 @@ describe('S-BTN-148: a reviewer route choice with hysteresis', () => {
       expect(res.json.refused).toEqual([]);
     };
     let t = T0;
+    let stepNo = 0;
     const step = async (body: Record<string, unknown>, by = 2 * MIN) => { t += by; await reading(t, body); };
-
-    await step({ available: true, detail: { remaining_permille: 500 } });
-    expect(await resolve(w1, 'R3-9201')).toBe('opus');
-    // W2 resolves between each step and never moves W1's rows (R-BTN-177: keyed by runner).
     const w1Rows = async () => (await rows<{ choice: string; alternative: string; demoted: number }>('SELECT choice, alternative, demoted FROM route_last WHERE worker_id = ? ORDER BY choice, alternative', w1.id));
-    let before = await w1Rows();
-    await postBoard({ implement: ['reviewer-2'] }, ['R3-9301']);
-    const w2out = await startLeg(w2, 'R3-9301');
-    expect(alternativeOf(w2out.advice, 'reviewer-2')).toBe('opus'); // no usable instance: fails open
-    await w2.call(`/v1/runner/claims/${w2out.claimId}/end`, { end_reason: 'released:requested' });
-    expect(await w1Rows()).toEqual(before);
+    /** W2 resolves between each step (S-BTN-148) and never moves W1's rows — keyed by runner,
+     *  the demotion's hysteresis is W1's alone. */
+    const betweenSteps = async () => {
+      const before = await w1Rows();
+      const id = `R3-93${String(++stepNo).padStart(2, '0')}`;
+      await postBoard({ implement: ['reviewer-2'] }, [id]);
+      const w2out = await startLeg(w2, id);
+      expect(alternativeOf(w2out.advice, 'reviewer-2')).toBe('opus'); // no usable instance: fails open
+      await w2.call(`/v1/runner/claims/${w2out.claimId}/end`, { end_reason: 'released:requested' });
+      expect(await w1Rows()).toEqual(before);
+    };
 
-    await step({ available: true, detail: { remaining_permille: 150 } });
+    await step({ available: true, detail: { window_s: 300, remaining_permille: 500 } });
+    expect(await resolve(w1, 'R3-9201')).toBe('opus');
+    await betweenSteps();
+
+    await step({ available: true, detail: { window_s: 300, remaining_permille: 150 } });
     expect(await resolve(w1, 'R3-9202')).toBe('glm');
-    before = await w1Rows();
-    await step({ available: true, detail: { remaining_permille: 250 } });
+    await betweenSteps(); // W1 demoted: the moment keying by runner matters
+    await step({ available: true, detail: { window_s: 300, remaining_permille: 250 } });
     expect(await resolve(w1, 'R3-9203')).toBe('glm'); // held below 300 by was_demoted
+    await betweenSteps();
     // A state reading with no detail: the field reading stays at 250.
     await step({ available: true });
     expect(await resolve(w1, 'R3-9204')).toBe('glm');
-    await step({ available: true, detail: { remaining_permille: 320 } });
+    await betweenSteps();
+    await step({ available: true, detail: { window_s: 300, remaining_permille: 320 } });
     expect(await resolve(w1, 'R3-9205')).toBe('opus');
+    await betweenSteps();
     // Every reading lapsed: unknown, no fields — fails open, and the demotion is history.
     await setClock(t + 2 * 60 * MIN);
     await w1.beat();
@@ -260,7 +274,7 @@ describe('S-BTN-148: a reviewer route choice with hysteresis', () => {
 describe('S-BTN-149: who steers', () => {
   it("under atoms_from admin a runner's readings form no atoms and move neither the route-choice state nor blocked; under any they do; an administrator's over an instrument's", async () => {
     // A second capacity resource, registered admin-only.
-    expect((await keyCall(admin, '/v1/admin/resources', { name: 'zai-capacity', scope: 'account', detail_schema: { ...CAPACITY_BASE, properties: { remaining_permille: { type: 'integer', minimum: 0, maximum: 1000 } } } })).status).toBe(200);
+    expect((await keyCall(admin, '/v1/admin/resources', { name: 'zai-capacity', scope: 'account', detail_schema: CAPACITY_BASE })).status).toBe(200);
     expect((await keyCall(admin, '/v1/admin/instances', { name: 'zc:main', serves: ['zai-capacity'], repositories: ['docs'] })).status).toBe(200);
     const prog = structuredClone(program);
     (prog.entries as unknown[]).push(
@@ -281,7 +295,7 @@ describe('S-BTN-149: who steers', () => {
     const w = await grantedWorker(owner, 'docs', 'w', ALL_KEYS, ['zc:main']);
     // The runner posts a measure and an unavailable state on zc:main — atoms_from is admin.
     expect((await w.call('/v1/runner/readings', { readings: [
-      { instance: 'zc:main', kind: 'measure', valid_for: 3600, detail: { remaining_permille: 100 } },
+      { instance: 'zc:main', kind: 'measure', valid_for: 3600, detail: { window_s: 300, remaining_permille: 100 } },
       { instance: 'zc:main', available: false, valid_for: 3600 },
     ] })).status).toBe(200);
     let out = await startLeg(w, 'R3-9401');
@@ -291,12 +305,31 @@ describe('S-BTN-149: who steers', () => {
     await w.call(`/v1/runner/claims/${out.claimId}/end`, { end_reason: 'released:requested' });
     // Re-registered any: the same readings now steer — the field atom forms (100‰ demotes) and
     // the runner's own unavailable state blocks the alternative it meters (S-BTN-149).
-    expect((await keyCall(admin, '/v1/admin/resources', { name: 'zai-capacity', scope: 'account', detail_schema: { ...CAPACITY_BASE, properties: { remaining_permille: { type: 'integer', minimum: 0, maximum: 1000 } } }, atoms_from: 'any' })).status).toBe(200);
+    expect((await keyCall(admin, '/v1/admin/resources', { name: 'zai-capacity', scope: 'account', detail_schema: CAPACITY_BASE, atoms_from: 'any' })).status).toBe(200);
     await refresh();
     out = await startLeg(w, 'R3-9402');
     expect(alternativeOf(out.advice, 'reviewer-1')).toBeNull(); // blocked_alt: its own reading, now heard
+    // A worker-scope resource's own instance steers its owner unconditionally (R-BTN-176: a
+    // runner's reading for its own runner-scope instance is always permitted — the permission
+    // atoms_from cannot close), where an account instance needed atoms_from any above: zai-local
+    // stays atoms_from admin, the worker's own unavailable reading on it still blocks glm.
+    expect((await keyCall(admin, '/v1/admin/resources', { name: 'zai-local', scope: 'worker', detail_schema: { type: 'object' } })).status).toBe(200);
+    const progLocal = structuredClone(prog);
+    (progLocal.entries as unknown[]).push({ id: 'meters-zai-local', fact: ['meters', 'key:zai', 'zai-local'] });
+    const wl = await grantedWorker(owner, 'docs', 'wl', ALL_KEYS, ['zc:main']);
+    expect((await wl.call('/v1/runner/readings', { readings: [{ instance: `zai-local@worker:${wl.id}`, available: false, valid_for: 3600 }] })).status).toBe(200);
+    const h1 = nextHead();
+    await syncCall('/v1/sync/board', payload(h1.sha, h1.parent, board.states.A, {
+      ontology: { builtin: 'baton@1', program: progLocal },
+      registry: [course(3, 3, { route_choices: { implement: ['reviewer-1'] } })],
+      state: { items: [item('R3-9404')] },
+      ready: ['R3-9404'],
+    }));
+    const ownOut = await startLeg(wl, 'R3-9404');
+    expect(alternativeOf(ownOut.advice, 'reviewer-1')).toBeNull(); // the own instance's unavailable reading blocks glm under atoms_from admin
+    await wl.call(`/v1/runner/claims/${ownOut.claimId}/end`, { end_reason: 'released:requested' });
     // An administrator's reading over the runner's: the administrator speaks — available, 900‰.
-    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'zc:main', available: true, valid_for: 86400, detail: { remaining_permille: 900 } }] })).status).toBe(200);
+    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'zc:main', available: true, valid_for: 86400, detail: { window_s: 300, remaining_permille: 900 } }] })).status).toBe(200);
     await postBoard({ implement: ['reviewer-1'] }, ['R3-9403']);
     await refresh();
     out = await startLeg(w, 'R3-9403');
@@ -345,21 +378,36 @@ describe('S-BTN-150: atom shapes', () => {
 
 describe('S-BTN-151: refinement', () => {
   it('a tightening schema registers with its chain, a widening and a non-std: base are refused, and a rule over refines serves both refining resources', async () => {
-    const tight = await keyCall(admin, '/v1/admin/resources', { name: 'cap-tight', scope: 'account', detail_schema: { ...CAPACITY_BASE, properties: { remaining_permille: { type: 'integer', minimum: 0, maximum: 900 } } } });
+    const tight = await keyCall(admin, '/v1/admin/resources', { name: 'cap-tight', scope: 'account', detail_schema: { ...CAPACITY_BASE, properties: { window_s: { type: 'integer', minimum: 1 }, remaining_permille: { type: 'integer', minimum: 0, maximum: 900 }, resets_at_min: { type: 'integer', minimum: 0 } } } });
     expect(tight.status).toBe(200);
-    const wide = await keyCall(admin, '/v1/admin/resources', { name: 'cap-wide', scope: 'account', detail_schema: { ...CAPACITY_BASE, properties: { remaining_permille: { type: 'integer', minimum: 0, maximum: 1200 } } } });
+    const wide = await keyCall(admin, '/v1/admin/resources', { name: 'cap-wide', scope: 'account', detail_schema: { ...CAPACITY_BASE, properties: { window_s: { type: 'integer', minimum: 1 }, remaining_permille: { type: 'integer', minimum: 0, maximum: 1200 }, resets_at_min: { type: 'integer', minimum: 0 } } } });
     expect(wide.status).toBe(400);
     expect((wide.json as { message?: string }).message).toMatch(/refine/);
     const nonStd = await keyCall(admin, '/v1/admin/resources', { name: 'cap-other', scope: 'account', detail_schema: { ...CAPACITY_BASE, 'x-baton-base': 'roadmap-pr:schema@1' } });
     expect(nonStd.status).toBe(400);
     expect((nonStd.json as { message?: string }).message).toMatch(/std:/);
-    // Both ac:main (the base itself) and cap-tight's instance serve the same rule.
+    // Both ac:main (the base itself) and cap-tight's instance serve the same rule: the worker
+    // uses both, ct:one at 150‰ and ac:main at 900‰, and the rule over refines fires on the
+    // tightening one alone (S-BTN-151's "the rule serves both refining resources").
     expect((await keyCall(admin, '/v1/admin/instances', { name: 'ct:one', serves: ['cap-tight'], repositories: ['docs'] })).status).toBe(200);
-    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'ct:one', available: true, valid_for: 86400, detail: { remaining_permille: 150 } }] })).status).toBe(200);
+    expect((await keyCall(admin, '/v1/admin/readings', { readings: [
+      { instance: 'ct:one', available: true, valid_for: 86400, detail: { window_s: 300, remaining_permille: 150 } },
+      { instance: 'ac:main', available: true, valid_for: 86400, detail: { window_s: 300, remaining_permille: 900 } },
+    ] })).status).toBe(200);
+    await postBoard({ implement: ['reviewer-2'] }, ['R3-9151']);
     const w = await grantedWorker(owner, 'docs', 'w', ALL_KEYS, ['ac:main', 'ct:one']);
-    // near_limit fires on ct:one's 150‰ (a refining resource's field read through the chain).
-    const out = await startLeg(w, 'R3-9101');
-    expect(alternativeOf(out.advice, 'codegen')).toBeDefined();
+    const served = await startLeg(w, 'R3-9151');
+    expect(alternativeOf(served.advice, 'reviewer-2')).toBe('glm'); // near_limit fired on ct:one's 150‰ through the chain
+    expect(served.advice!.route_choices[0].ranked.map((r) => r.alternative)).toEqual(['glm', 'opus']);
+    expect(served.advice!.route_choices[0].ranked[1].demoted).toBe(true);
+    await w.call(`/v1/runner/claims/${served.claimId}/end`, { end_reason: 'released:requested' });
+    // And with ct:one back at 900‰: nothing fires, opus again — the same rule, both resources.
+    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'ct:one', available: true, valid_for: 86400, detail: { window_s: 300, remaining_permille: 900 } }] })).status).toBe(200);
+    await postBoard({ implement: ['reviewer-2'] }, ['R3-9152']);
+    const recovered = await startLeg(w, 'R3-9152');
+    expect(alternativeOf(recovered.advice, 'reviewer-2')).toBe('opus');
+    await w.call(`/v1/runner/claims/${recovered.claimId}/end`, { end_reason: 'released:requested' });
+    void served;
     const stored = await rows<{ name: string; base_chain_json: string; atoms_from: string }>('SELECT name, base_chain_json, atoms_from FROM external_resources WHERE name IN (?, ?) ORDER BY name', 'anthropic-capacity', 'cap-tight');
     expect(stored).toEqual([
       { name: 'anthropic-capacity', base_chain_json: '["std:api-capacity@1"]', atoms_from: 'any' },
@@ -426,7 +474,7 @@ describe('S-BTN-153: delivery and overrides', () => {
 
   it('the advice is delivered as identifiers and stored with the leg run; a dead key removes the holding and advises the next leg without it', async () => {
     // near_limit at 150‰: glm advised, opus demoted behind it.
-    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'ac:main', available: true, valid_for: 86400, detail: { remaining_permille: 150 } }] })).status).toBe(200);
+    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'ac:main', available: true, valid_for: 86400, detail: { window_s: 300, remaining_permille: 150 } }] })).status).toBe(200);
     await postBoard({ implement: ['reviewer-2'], review: ['reviewer-2'] }, ['R3-9601']);
     const w = await grantedWorker(owner, 'docs', 'w1', ALL_KEYS, ['ac:main']);
     const claim = await w.call('/v1/runner/claim', { request_id: requestId(), ticket_id: 'docs:R3-9601' });
@@ -457,7 +505,7 @@ describe('S-BTN-153: delivery and overrides', () => {
   });
 
   it('no report leaves taken_json null; the advised one records nothing; an unknown alternative is dropped and logged; an oversized file is dropped whole', async () => {
-    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'ac:main', available: true, valid_for: 86400, detail: { remaining_permille: 900 } }] })).status).toBe(200);
+    expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'ac:main', available: true, valid_for: 86400, detail: { window_s: 300, remaining_permille: 900 } }] })).status).toBe(200);
     await postBoard({ implement: ['reviewer-2'] }, ['R3-9611', 'R3-9612', 'R3-9613', 'R3-9614']);
     const w = await grantedWorker(owner, 'docs', 'w2', ALL_KEYS, ['ac:main']);
     const none = await runTicket(w, 'R3-9611');
@@ -469,7 +517,11 @@ describe('S-BTN-153: delivery and overrides', () => {
     const unknown = await runTicket(w, 'R3-9613', [{ choice: 'reviewer-2', alternative: 'no-such' }]);
     expect(unknown.legRow[0].taken_json).toBeNull();
     expect((await takenInvalid()).length).toBe(1);
-    const oversized = await runTicket(w, 'R3-9614', [{ choice: 'reviewer-2', alternative: 'opus', dead: [`key:${'x'.repeat(200)}`, `key:${'y'.repeat(200)}`, `key:${'z'.repeat(200)}`, `key:${'w'.repeat(200)}`, `key:${'v'.repeat(200)}`, `key:${'u'.repeat(200)}`, `key:${'t'.repeat(200)}`, `key:${'s'.repeat(200)}`] }]);
+    // Over 4 KB of VALID entries — every dead holding a well-shaped capability — dropped whole
+    // by the size bound alone (the runner drops the file first; the same bound holds here).
+    const fat = Array.from({ length: 70 }, (_, i) => `key:${'k'.repeat(60)}${i}`);
+    const oversized = await runTicket(w, 'R3-9614', [{ choice: 'reviewer-2', alternative: 'opus', dead: fat }]);
+    expect(JSON.stringify([{ choice: 'reviewer-2', alternative: 'opus', dead: fat }]).length).toBeGreaterThan(4096);
     expect(oversized.legRow[0].taken_json).toBeNull(); // over 4 KB: dropped whole, the advance accepted
   });
 

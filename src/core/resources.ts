@@ -326,13 +326,13 @@ export class Resources {
   // ── route choices (R-BTN-176, B-105): what steers advice, never the fleet's blocks ────────
 
   /** The runner's usable instances per resource for a repository (R-BTN-76): the `service`
-   *  instance, its own `runner` instance, and the account instances in its `uses` that serve the
-   *  resource and list the repository. (`host` instances are R-BTN-178's, B-106.) */
+   *  instance, its own `worker`-scope instance, and the account instances in its `uses` that
+   *  serve the resource and list the repository. (`host` instances are R-BTN-178's, B-106.) */
   usableFor(workerId: number, repo: string): [string, string][] {
     const out: [string, string][] = [];
     for (const r of this.rows<{ name: string; scope: string }>('SELECT name, scope FROM external_resources ORDER BY name')) {
       if (r.scope === 'service') out.push([r.name, r.name]);
-      else if (r.scope === 'runner') out.push([r.name, `${r.name}@runner:${workerId}`]);
+      else if (r.scope === 'worker') out.push([r.name, `${r.name}@worker:${workerId}`]);
     }
     for (const u of this.rows<{ instance: string }>('SELECT instance FROM worker_instances WHERE worker_id = ? ORDER BY instance', workerId)) {
       for (const s of this.rows<{ resource: string }>(

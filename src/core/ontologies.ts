@@ -565,10 +565,14 @@ export class Ontologies {
     return { route_choices: run.choices, resolved_at: at };
   }
 
-  /** `baton.ontology-limit` for a route-choice evaluation that crossed its bound (R-BTN-175),
-   *  once per repository and program digest — the same refusal a gate crossing raises. */
-  recordRouteLimit(repo: string, digest: string): void {
-    this.recordLimitRefusal(repo, digest, this.c.now());
+  /** The alternatives a route choice of the program in force defines, for a taken's membership
+   *  (R-BTN-177: "an alternative that route choice lacks") — null when the repository has no
+   *  program or the choice is no longer defined, so every entry naming it drops. */
+  alternativesOf(repo: string, choice: string): string[] | null {
+    const p = this.programOf(repo);
+    if (!p) return null;
+    const rc = p.placed.program.routeChoices.find((x) => x.id === choice);
+    return rc ? rc.alternatives.map((a) => a.id) : null;
   }
 
   /** A reported `dead` holding leaves the declared set (R-BTN-177), as R-BTN-126's capability

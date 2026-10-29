@@ -1,4 +1,4 @@
-// ../../../../tmp/baton-bundle-tmiZcE/entry.ts
+// ../../../../tmp/baton-bundle-XH6Hp8/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync as rmSync2, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -316,35 +316,33 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../../../tmp/baton-bundle-tmiZcE/entry.ts
+// ../../../../tmp/baton-bundle-XH6Hp8/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
-function advisedCommand(command, settings, adviceFile) {
-  if (!adviceFile) return command;
+function advisedCommand(words, settings, adviceFile) {
+  if (!adviceFile) return words;
   let advice;
   try {
     advice = JSON.parse(readFileSync(adviceFile, "utf8"));
   } catch {
-    return command;
+    return words;
   }
   const choices = advice && Array.isArray(advice.route_choices) ? advice.route_choices : [];
-  const models = /* @__PURE__ */ new Set();
+  const map = settings && settings.agent_models && typeof settings.agent_models === "object" ? settings.agent_models : {};
+  const model = (rc) => Array.isArray(rc && rc.needs) ? rc.needs.find((n) => typeof n === "string" && n.startsWith("model:")) : void 0;
   for (const rc of choices) {
-    const alt = rc && typeof rc === "object" ? rc.alternative ?? (Array.isArray(rc.ranked) && rc.ranked[0] ? rc.ranked[0].alternative : null) : null;
-    const ranked = rc && typeof rc === "object" && Array.isArray(rc.ranked) ? rc.ranked.find((r) => r && r.alternative === alt) : null;
-    for (const need of ranked && Array.isArray(ranked.needs) ? ranked.needs : []) if (typeof need === "string" && need.startsWith("model:")) models.add(need);
+    if (!rc || typeof rc !== "object") continue;
+    const alt = rc.alternative ?? (Array.isArray(rc.ranked) && rc.ranked[0] ? rc.ranked[0].alternative : null);
+    if (alt == null) continue;
+    const ranked = Array.isArray(rc.ranked) ? rc.ranked.find((r) => r && r.alternative === alt) : null;
+    const mapped = map[rc.choice + "/" + alt] ?? map[model(ranked)];
+    if (typeof mapped !== "string" || mapped === "") continue;
+    const at = words.findIndex((w) => w === "--model");
+    if (at >= 0 && at + 1 < words.length && words[at + 1] !== mapped) words[at + 1] = mapped;
+    return words;
   }
-  if (models.size !== 1) return command;
-  const model = [...models][0];
-  const mapped = settings && settings.agent_models && typeof settings.agent_models === "object" ? settings.agent_models[model] : void 0;
-  if (typeof mapped !== "string" || mapped === "") return command;
-  const words = splitWords(command);
-  const at = words.findIndex((w) => w === "--model");
-  if (at < 0 || at + 1 >= words.length) return command;
-  if (words[at + 1] === mapped) return command;
-  words[at + 1] = mapped;
-  return words.join(" ");
+  return words;
 }
 async function run(ctx) {
   const sha = ctx.snapshot?.sha;
@@ -369,14 +367,15 @@ async function standard(ctx) {
   const settings = JSON.parse(show(".baton/baton.json"));
   const settingsCommand = typeof settings.agent_command === "string" && settings.agent_command !== "" ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? "";
   if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
-  const agentCommand = advisedCommand(settingsCommand, settings, process.env.BATON_ADVICE);
+  const agentWords = advisedCommand(splitWords(settingsCommand), settings, process.env.BATON_ADVICE);
+  const agentCommand = agentWords.join(" ");
   const rel = ".baton/courses/create-pr/legs/merge.md";
   const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel]).trim() !== "";
   const text = present ? show(rel) : null;
   const dir = text == null ? null : mkdtempSync(join2(tmpdir(), "baton-leg-"));
   const instructions = dir == null ? "" : join2(dir, "merge.md");
   if (dir != null) writeFileSync(instructions, text);
-  const [command, ...words] = splitWords(agentCommand);
+  const [command, ...words] = agentWords;
   if (command === void 0) throw new Error(".baton/baton.json names no agent_command to run");
   const envWrapper = process.env.BATON_AGENT_WRAPPER;
   const wrapper = typeof envWrapper === "string" && envWrapper.trim() !== "" ? envWrapper : settings.agent_wrapper;

@@ -907,34 +907,38 @@ export class Claims {
 
   /**
    * R-BTN-177 (B-105): what a finishing leg reported in `BATON_TAKEN`. Kept: one entry per route
-   * choice the leg's snapshot resolved, naming an alternative that snapshot ranked — or any
-   * alternative, for a choice that resolved null, which is stored and is not an override. Dropped
-   * and logged `taken-invalid`: the rest, never refusing the advance or end that carries it. Each
-   * kept entry's `dead` holdings leave the declared set in this transaction (R-BTN-126's shape),
-   * and an alternative other than the advised one records `advice-overridden`.
+   * choice the leg's snapshot resolved, naming an alternative THAT CHOICE has — whether or not
+   * the resolution offered it (an excluded or unavailable alternative is still accepted: an
+   * exclusion filters advice, never a report, and such a taken is recorded advice-overridden).
+   * Dropped and logged `taken-invalid`: the rest, never refusing the advance or end that carries
+   * it. Each kept entry's `dead` holdings leave the declared set in this transaction
+   * (R-BTN-126's shape), and an alternative other than the advised one records
+   * `advice-overridden`; a choice that resolved `null` stores whatever it is given, no override.
    */
-  private reportTaken(workerId: number, claimId: number, ticketId: string, seq: number, taken: { choice: string; alternative: string; dead: string[] }[] | null): void {
-    if (!taken || !taken.length) return;
+  private reportTaken(workerId: number, claimId: number, ticketId: string, seq: number, taken: { kept: { choice: string; alternative: string; dead: string[] }[]; dropped: number } | null): void {
+    if (!taken || !taken.kept.length) { if (taken?.dropped) this.event('taken-invalid', `worker:${workerId}`, { dropped: taken.dropped, claim: claimId }, ticketId, claimId); return; }
     const row = this.rows<{ route_choices_json: string }>('SELECT route_choices_json FROM claim_legs WHERE claim_id = ? AND seq = ?', claimId, seq)[0];
-    const snapshot = row?.route_choices_json ? (JSON.parse(row.route_choices_json) as { choice: string; alternative: string | null; ranked: { alternative: string }[] }[]) : [];
+    const snapshot = row?.route_choices_json ? (JSON.parse(row.route_choices_json) as { choice: string; alternative: string | null }[]) : [];
+    const repo = repositoryOf(ticketId);
     const kept: { choice: string; alternative: string; dead: string[] }[] = [];
     const seen = new Set<string>();
     let invalid = 0;
-    for (const entry of taken) {
+    for (const entry of taken.kept) {
       if (seen.has(entry.choice)) continue; // at most one entry per route choice; the rest drop
       const resolved = snapshot.find((r) => r.choice === entry.choice);
-      // A leg without route choices, a choice its snapshot lacks, or an alternative the choice's
-      // resolution did not offer (and a null resolution did not name): dropped, logged, never
-      // refusing the advance or end (R-BTN-177).
-      const member = resolved != null && (resolved.alternative === null || resolved.ranked.some((r) => r.alternative === entry.alternative));
-      if (!member) {
+      // A leg without route choices, a choice its snapshot lacks, or an alternative the choice
+      // itself lacks (R-BTN-177: "an alternative that route choice lacks") — dropped, logged,
+      // never refusing the advance or end. Membership is the choice's own alternatives, read
+      // from the program in force, so an excluded or unavailable one is accepted.
+      const alternatives = this.c.ontologies?.alternativesOf(repo, entry.choice) ?? null;
+      if (resolved == null || alternatives == null || !alternatives.includes(entry.alternative)) {
         invalid++;
         continue;
       }
       seen.add(entry.choice);
       kept.push(entry);
     }
-    if (invalid) this.event('taken-invalid', `worker:${workerId}`, { dropped: invalid, claim: claimId }, ticketId, claimId);
+    if (invalid + taken.dropped) this.event('taken-invalid', `worker:${workerId}`, { dropped: invalid + taken.dropped, claim: claimId }, ticketId, claimId);
     if (!kept.length) return;
     this.exec('UPDATE claim_legs SET taken_json = ? WHERE claim_id = ? AND seq = ?',
       JSON.stringify(kept.map(({ choice, alternative, dead }) => ({ choice, alternative, ...(dead.length ? { dead } : {}) }))), claimId, seq);

@@ -21,12 +21,12 @@ them and print the verdict after. An output that ends on anything else loses the
 
 ## The round
 
-- **Read `$BATON_ADVICE` first.** When the repository attaches route choices to this leg, the
-  file named by `BATON_ADVICE` (B-105, R-BTN-177) carries the advised `model:` capability for
-  each — for this repository, `reviewer-1` and `reviewer-2` — with a ranked fallback list. Map
-  `model:glm-5.3` to `zai-coding-plan/glm-5.3` and `model:claude-opus-5-5` to
-  `anthropic/claude-opus-5.5`; an advised alternative's model is the one that reviewer runs.
-  No file, no advice, or an advised `null`: fall back to the models below.
+- **Read `$BATON_ADVICE` first** (B-105, R-BTN-177). When the repository attaches route choices
+  to this leg, the file it names carries the advice: each choice's advised `model:` capability
+  and a ranked fallback list. Map the advised capability to the provider model your repository's
+  `agent_models` names; that model is the one the reviewer runs, taking the next ranked
+  alternative when it is unusable. No file, no advice, or an advised `null`: fall back to the
+  models your repository's own instructions name below.
 - **Round one gets two blind reviewers.** If you can start independent sub-agents, start two,
   from fresh contexts, ideally on two different models. Give each this file, the ticket and the
   PR, and tell neither about the other. Two blind passes find defects one pass misses. Without
