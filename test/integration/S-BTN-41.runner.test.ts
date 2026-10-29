@@ -464,6 +464,52 @@ describe('S-BTN-41 the runner', () => {
     await until(() => rows(`SELECT 1 FROM messages WHERE status = 'acknowledged'`));
   }, 30_000);
 
+  it('a wind-down message drains the runner through the same flag as the signal: the leg completes, the claim ends at its boundary, the message acknowledged — twice a no-op (B-109)', async () => {
+    home.leg('check', `await new Promise((r) => setTimeout(r, 700));
+    ev(ctx, 'check done');
+    return { reached: 'checked', next: 'merge' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'ready']]) });
+    const runner = makeRunner();
+    runner.start();
+    const done = runner.runOnce();
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    const worker = (await rows<{ id: number }>('SELECT id FROM workers ORDER BY id DESC LIMIT 1'))[0].id;
+    // Two wind-downs, the owner's ask: the first sets the drain flag, the second changes nothing.
+    for (let i = 0; i < 2; i++) {
+      const send = await ownerCall('/v1/ui/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ kind: 'wind-down', to_worker_id: worker }) });
+      expect(send.status).toBe(200);
+    }
+    // The leg ran to its end — a drain abandons nothing — and the claim ends at the boundary
+    // with its close and its hand-off, exactly as a SIGTERM drain does.
+    expect(await done).toMatchObject({ end_reason: 'released:requested', reached: 'checked' });
+    expect(home.evidence().some((l) => l === 'check done')).toBe(true);
+    const lines = home.evidence();
+    expect(lines.indexOf('close check')).toBeLessThan(lines.indexOf('handoff check'));
+    expect(home.closes().at(-1)).toMatchObject({ leg: 'check', reached: 'checked' });
+    await until(() => rows(`SELECT COUNT(*) = 2 AS ok FROM messages WHERE status = 'acknowledged'`));
+    expect(runner.isDraining()).toBe(true);
+  }, 30_000);
+
+  it("the immediate stop (stopNow, the signal handler's call) releases the leg at its next safe point with its hand-off — a safe point, not an abandonment (B-109)", async () => {
+    home.leg('check', `${ABORTABLE}
+    ev(ctx, 'check aborted:' + ctx.signal.reason);
+    return { reached: 'checked', next: 'merge' };`);
+    home.commit();
+    await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'ready']]) });
+    const runner = makeRunner();
+    runner.start();
+    const done = runner.runOnce();
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    runner.stopNow();
+    expect(await done).toMatchObject({ end_reason: 'released:requested', reached: 'checked' });
+    const lines = home.evidence();
+    expect(lines.indexOf('close check')).toBeLessThan(lines.indexOf('handoff check'));
+    expect(await rows('SELECT end_reason FROM claims')).toEqual([{ end_reason: 'released:requested' }]);
+    // The loop does not claim again.
+    expect(await runner.runOnce()).toBeNull();
+  }, 30_000);
+
   it('a lost lease kills the leg’s whole process group with no hand-off', async () => {
     home.leg('check', `const { spawn } = await import('node:child_process');
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });

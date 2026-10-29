@@ -372,7 +372,7 @@ describe('the courses a runner serves (R-BTN-131, B-103)', () => {
   // answers the calls itself (no Baton), so what it sees is the body the heartbeat path composed.
   // `runMain`'s loop runs until stopped, so the probe drains it the way SIGTERM does: one signal,
   // the first path, which ends `work()` without exiting.
-  const probe = async (dir: string, argv: string[] = []) => {
+  const probe = async (dir: string, argv: string[] = [], signal: NodeJS.Signals = 'SIGTERM') => {
     const seen = { heartbeats: [] as Record<string, unknown>[] };
     const lines: string[] = [];
     const saved = ['BATON_PARENT', 'BATON_TOKEN', 'BATON_KEY', 'BATON_KEY_FILE'].map((n) => [n, process.env[n]] as const);
@@ -397,8 +397,9 @@ describe('the courses a runner serves (R-BTN-131, B-103)', () => {
       // directly (an emitted signal also reaches vitest's warning wrapper, which unregisters the
       // handler between the two deliveries).
       for (let i = 0; i < 400 && !seen.heartbeats.length; i++) await new Promise((r) => setTimeout(r, 10));
-      (process.listeners('SIGTERM').at(-1) as (s: NodeJS.Signals) => void)('SIGTERM');
-      expect(await running).toBe(0);
+      (signal === 'SIGTERM' ? process.listeners('SIGTERM') : process.listeners(signal)).forEach(() => {});
+      (process.listeners(signal).at(-1) as (s: NodeJS.Signals) => void)(signal);
+      expect(await running).toBe(signal === 'SIGTERM' ? 0 : signal === 'SIGINT' ? 130 : 129);
       return { lines, seen };
     } finally {
       for (const [n, v] of saved) {
@@ -426,7 +427,19 @@ describe('the courses a runner serves (R-BTN-131, B-103)', () => {
     // One course reads as one, in the banner's singular field as before.
     expect(lines.join('\n')).toContain('course create-spec@2, host');
   }, 30_000);
+  it("the immediate stop ends the loop through the safe point with the signal's code — SIGINT 130, SIGHUP 129 — and the line it leaves names the stop (B-109)", async () => {
+    for (const [signal, code] of [['SIGINT', 130], ['SIGHUP', 129]] as const) {
+      const dir = declaring({ skills_version: 3, courses: [{ id: 'create-pr', version: 1 }], agent_command: 'true' });
+      const { lines } = await probe(dir, ['--verbose'], signal);
+      // The safe point's own line (the runner's log): the immediate stop releases, it does not
+      // abandon. The signal handler's line goes to the synchronous log, which the probe's
+      // injected log does not see; the exit code (asserted in the probe) is the signal's.
+      expect(lines.join('\n'), signal).toContain('stopping at once (the immediate stop)');
+      void code;
+    }
+  }, 30_000);
 });
+
 
 describe('declareCourses (rule 9)', () => {
   it('reads the spec’s baton.json courses[]', () => {

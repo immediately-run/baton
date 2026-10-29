@@ -298,25 +298,49 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   const release = holdHome(a.home);
   let runner: Runner | null = null;
   let draining = false;
+  let exitCode = 0;
+  let stopping = false;
+  const codeOf = (signal: NodeJS.Signals): number => (signal === 'SIGINT' ? 130 : signal === 'SIGHUP' ? 129 : 143);
   const onSignal = (signal: NodeJS.Signals) => {
     // 2026-10-24: SIGTERM drains — the current leg completes, the claim ends at its boundary,
-    // and the loop returns to a clean exit 0. A second SIGTERM, or SIGINT any time, is the
-    // immediate path (the leg child's group is the lease's to reap; see B-109's note).
+    // and the loop returns to a clean exit 0. A second SIGTERM, SIGINT, or SIGHUP any time, is
+    // the immediate path.
     if (signal === 'SIGTERM' && runner != null && !draining) {
       draining = true;
       syncLogStamped(a.verbose, 'baton: SIGTERM — draining: the current leg completes, then this runner exits (a second SIGTERM stops at once)');
       runner.drain('SIGTERM');
       return;
     }
-    // B-94: a runner never goes traceless — the signal, the claim it held, the leg in flight
-    // and the last beat are logged before the process leaves, synchronously (review round 1:
-    // `process.exit` flushes no pending pipe write).
+    // B-109: the immediate path is a safe point, not an abandonment — the leg in flight is
+    // released at its next safe point (its hand-off written, the claim ended released), the
+    // loop ends without claiming again, and this process exits with the signal's code once it
+    // does. SIGHUP joins the handled signals (found live, 2026-10-24: a closed terminal's
+    // SIGHUP killed the starved runner with no line at all, a hole in B-94's every-death-
+    // leaves-a-line promise).
+    if (runner != null && !stopping) {
+      stopping = true;
+      exitCode = codeOf(signal);
+      syncLogStamped(a.verbose, `baton: ${stopLine(runner, signal)} — stopping at once: the leg in flight is released with its hand-off, then this process exits`);
+      runner.stopNow();
+      // A leg child that will not take the release: after ten seconds its whole group is
+      // killed (the lease-loss mechanism) and this process leaves — the claim ends by the
+      // reaper, the resume record covers the leg (R-BTN-24).
+      const hardStop = setTimeout(() => {
+        syncLogStamped(a.verbose, `baton: ${signal} — the leg did not stop; killing its group and exiting`);
+        release();
+        process.exit(exitCode);
+      }, 10_000);
+      hardStop.unref?.();
+      return;
+    }
+    // A second immediate signal: leave now.
     syncLogStamped(a.verbose, `baton: ${stopLine(runner, signal)}`);
     release();
-    process.exit(signal === 'SIGINT' ? 130 : 143);
+    process.exit(codeOf(signal));
   };
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
+  process.on('SIGHUP', onSignal);
   // B-103: the transport the runner's API calls go through. Production builds each call's
   // `fetch` (the Worker, or the local host); a test hands one in and sees the bodies the
   // heartbeat path composed without a Baton behind it.
@@ -341,14 +365,16 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   } finally {
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
+    process.off('SIGHUP', onSignal);
     // B-94: every way out of the loop leaves a line — a normal end, a thrown error on its way
     // out (the CLI prints it), and an `exit` from anywhere once a claim could have been held.
     // The lines and the hook write synchronously: nothing pending is lost to `process.exit`.
-    syncLogStamped(a.verbose, `baton: the runner's loop ended (${runner.lastLine(draining ? 'drained' : 'idle')})`);
+    syncLogStamped(a.verbose, `baton: the runner's loop ended (${runner.lastLine(stopping ? 'stopped' : draining ? 'drained' : 'idle')})`);
     if (exitHookFn != null) process.removeListener('exit', exitHookFn);
     exitHookFn = exitHook(runner, (l) => syncLogStamped(a.verbose, l));
     process.on('exit', exitHookFn);
     release();
   }
-  return 0;
+  // B-109: an immediate stop ends the loop through the safe point; the signal's code returns.
+  return exitCode;
 }

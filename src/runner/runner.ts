@@ -413,6 +413,12 @@ export class Runner {
         // so it is not delivered again with every beat.
         this.unblocked = true;
         this.toAck.push(m.id);
+      } else if (m.kind === 'wind-down') {
+        // B-109: the owner's wind-down sets the same drain flag SIGTERM does — the current leg
+        // completes, the claim ends at its boundary with its hand-off, the runner exits without
+        // claiming again. drain() is idempotent: a second wind-down changes nothing.
+        this.drain(`the owner's wind-down message`);
+        this.toAck.push(m.id);
       }
     }
     if (!this.inflight) for (const id of this.toAck.splice(0)) await this.o.api.ack(id).catch(() => {});
@@ -583,6 +589,25 @@ export class Runner {
     if (this.draining) return;
     this.draining = true;
     this.log(`baton: draining (${why}) — the current leg completes, the claim ends at its boundary, then this runner exits without claiming again`);
+  }
+
+  /** Whether a drain has been asked (a signal's or a wind-down message's) — B-109's test seam. */
+  isDraining(): boolean {
+    return this.draining;
+  }
+
+  /** B-109: the immediate stop — a safe point, not an abandonment. The leg in flight is
+   *  released at its next safe point (its hand-off written, the claim ended
+   *  `released:requested`), and the loop ends without claiming again. `stopped` stays false
+   *  by design: it is the lease-loss race's word, and setting it would kill the leg's whole
+   *  group with no hand-off — the very abandonment this path exists to prevent (SIGINT, SIGHUP,
+   *  a second SIGTERM). */
+  stopNow(): void {
+    if (!this.draining) {
+      this.draining = true;
+      this.log('baton: stopping at once (the immediate stop) — the leg in flight is released at its next safe point with its hand-off, the claim ends released, and this runner exits without claiming again');
+    }
+    this.signalLeg('release', 'released:requested');
   }
 
   async work(): Promise<void> {
