@@ -73,6 +73,7 @@ interface FleetWorker {
   repos: Map<string, Set<string> | null>;
   caps: Set<string>;
   uses: Set<string>;
+  derived: Map<string, Set<string>>;
 }
 
 /** A registered resource as the counts need it: its scope and who serves it, with each account
@@ -578,6 +579,13 @@ export class Blocks {
           id: w.id,
           repos,
           caps: new Set(this.rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ?', w.id).map((r) => r.capability)),
+          // R-BTN-174 (B-104): what the repository's ontology derives from the worker's granted
+          // holdings — D(H), read from a current set, beside the declared capabilities.
+          derived: new Map(this.rows<{ repository_id: string; capability: string }>('SELECT repository_id, capability FROM worker_derived WHERE worker_id = ?', w.id)
+            .reduce((acc, r) => {
+              (acc.get(r.repository_id) ?? acc.set(r.repository_id, new Set<string>()).get(r.repository_id)!).add(r.capability);
+              return acc;
+            }, new Map<string, Set<string>>())),
           uses: new Set(this.rows<{ instance: string }>('SELECT instance FROM worker_instances WHERE worker_id = ?', w.id).map((r) => r.instance)),
         };
       });
@@ -625,7 +633,11 @@ export class Blocks {
     const capsOf = (w: FleetWorker, repo: string) => {
       if (!w.repos.has(repo)) return null;
       const g = w.repos.get(repo);
-      return g ? new Set([...w.caps].filter((c) => g.has(c))) : w.caps;
+      // H ∪ D(H) (R-BTN-174): the grant bounds holdings, and the ontology's derivations count
+      // beside them — a deriving worker holds the capability for the fleet exactly as a
+      // declaring one does.
+      const h = g ? new Set([...w.caps].filter((c) => g.has(c))) : w.caps;
+      return new Set([...h, ...(w.derived.get(repo) ?? [])]);
     };
     // Capabilities.
     const needCaps = this.rows<{ repository_id: string; name: string }>(

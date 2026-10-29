@@ -62,12 +62,14 @@ describe('S-BTN-32 owners and grants', () => {
     expect((await workerAs(k, '/v1/runner/claim', { request_id: 'req-k-ops-1', ticket_id: 'ops:R3-9001' }, secret)).json).toMatchObject({ code: 'not-eligible', rule: 7, rule_code: 'not-granted' });
     expect((await workerAs(k, '/v1/runner/claim', { request_id: 'req-k-docs-1' }, secret)).json).toMatchObject({ ticket_id: 'docs:R3-9001' });
 
-    // ops' owner cannot touch docs' grant, nor take K's hostname, nor grant human-operator.
+    // ops' owner cannot touch docs' grant, nor take K's hostname. B-104 (R-BTN-121 as
+    // amended, rule 6 retired): human-operator is granted like any capability — by an owner
+    // and by an administrator alike.
     expect((await keyCall(opsOwner, `/v1/owner/docs/grants/${encodeURIComponent(k.fingerprint)}/revoke`, {})).json.code).toBe('forbidden');
     expect((await keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: k.publicKey, hostname: 'other-host', capabilities: [] })).json.code).toBe('conflict');
     const other = await makeKey('ssh-ed25519', 'other');
-    expect((await keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: other.publicKey, hostname: 'op-host', capabilities: ['human-operator'] })).json.code).toBe('forbidden');
-    // An administrator may grant it.
+    expect((await keyCall(opsOwner, '/v1/owner/ops/grants', { public_key: other.publicKey, hostname: 'op-host', capabilities: ['human-operator'] })).status).toBe(200);
+    // An administrator may grant it too.
     expect((await keyCall(admin, '/v1/admin/grants', { repository: 'ops', public_key: other.publicKey, hostname: 'op-host', capabilities: ['human-operator'] })).status).toBe(200);
     // Removing docs' last owner is refused.
     expect((await keyCall(docsOwner, '/v1/owner/docs/owners', { fingerprint: docsOwner.fingerprint, remove: true })).json.code).toBe('conflict');

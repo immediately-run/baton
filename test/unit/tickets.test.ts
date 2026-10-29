@@ -36,8 +36,8 @@ describe('the tickets cache', () => {
     expect(await requiresOf('R3-9002')).toEqual(caps); // agent-venue → its four capabilities
     expect(await requiresOf('R3-9001')).toEqual([]); // Requires: none
     expect(await requiresOf('R3-9011')).toEqual(['mcp-chrome']); // a legacy name stays itself
-    expect(await requiresOf('R3-9003')).toEqual([...caps, 'github-admin'].sort()); // no human-operator row
-    expect(await requiresOf('R3-9010')).toEqual(caps);
+    expect(await requiresOf('R3-9003')).toEqual(['github-admin', 'human-operator'].sort()); // B-104: the literal stays, never an expansion
+    expect(await requiresOf('R3-9010')).toEqual(['human-operator']); // B-104: the literal, never an expansion
     const flags = await rows<{ id: string; requires_clause: string; operator_only: number }>('SELECT local_id AS id, requires_clause, operator_only FROM tickets ORDER BY id');
     expect(flags).toEqual([
       { id: 'R3-9001', requires_clause: 'none', operator_only: 0 },
@@ -47,7 +47,9 @@ describe('the tickets cache', () => {
       { id: 'R3-9010', requires_clause: 'listed', operator_only: 1 }, // the clause alone
       { id: 'R3-9011', requires_clause: 'listed', operator_only: 0 },
     ]);
-    expect(await rows(`SELECT 1 FROM ticket_requires WHERE name = 'human-operator'`)).toHaveLength(0);
+    // B-104: the literal stores as itself — a clause carrying it holds a human-operator row
+    // (the two OP fixtures), where the expansion used to spread it into the four.
+    expect(await rows(`SELECT 1 FROM ticket_requires WHERE name = 'human-operator'`)).toHaveLength(2);
   });
 
   it('deletes the row of an item no longer live (R-BTN-35)', async () => {

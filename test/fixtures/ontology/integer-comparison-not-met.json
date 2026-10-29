@@ -1,0 +1,57 @@
+{
+  "name": "integer-comparison-not-met",
+  "program": {
+    "version": 1,
+    "derived": [
+      "capability"
+    ],
+    "entries": [
+      {
+        "id": "quota-a",
+        "fact": [
+          "quota",
+          "key:a",
+          100
+        ]
+      },
+      {
+        "id": "quota-b",
+        "fact": [
+          "quota",
+          "key:b",
+          3
+        ]
+      },
+      {
+        "id": "cheap-enough",
+        "head": [
+          "derived",
+          "capability:cheap"
+        ],
+        "body": [
+          [
+            "quota",
+            "$k",
+            "$n"
+          ],
+          {
+            "cmp": [
+              "$n",
+              "<",
+              10
+            ]
+          },
+          [
+            "holds",
+            "$k"
+          ]
+        ]
+      }
+    ],
+    "route_choices": []
+  },
+  "holdings": [
+    "key:a"
+  ],
+  "derived": []
+}

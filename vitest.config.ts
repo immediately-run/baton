@@ -16,7 +16,10 @@ import { makeKey } from './test/lib/sshKeys.ts';
  *  TOKEN_HASHES and CREDENTIALS Worker secrets take in production (R3-1208). The `test`
  *  credential exists only here, and only it may send test_harness (R-BTN-32). */
 export const TEST_TOKENS = { 'vm-a': 'tok-vm-a', mac: 'tok-mac', test: 'tok-test', 'vm-b': 'tok-vm-b' };
-const VENUE = ['agent-venue', 'authentication', 'llm-call', 'create-pr', 'drivable-browser', 'mcp-chrome', 'none'];
+// B-104: the holdings the ontology tests declare too — a seed credential's allow-list is its
+// grant, so rule 4's H = declared ∩ allow-list needs them listed here.
+const VENUE = ['agent-venue', 'authentication', 'llm-call', 'create-pr', 'drivable-browser', 'mcp-chrome', 'none',
+  'key:anthropic', 'key:zai', 'key:opencode-go', 'key:deepinfra', 'dependency:claude-code', 'dependency:opencode-v2', 'capability:code-generation-llm', 'capability:review-llm'];
 const CREDENTIALS = {
   'vm-a': { hostname: 'vm-a', allowed_capabilities: VENUE },
   'vm-b': { hostname: 'vm-b', allowed_capabilities: VENUE },
@@ -75,7 +78,7 @@ const textModules: Plugin = {
 /** The tests only the local project runs: they need Node (the request queue, the file scan,
  *  the runner's leg child processes, the model replay). It also runs every integration scenario
  *  and the mirror's unit tests (S-BTN-14's server half). */
-const NODE_ONLY = ['test/unit/local-queue.test.ts', 'test/unit/boundary-host.test.ts', 'test/unit/cli.test.ts', 'test/model/replay.test.ts', 'test/unit/check-traces.test.ts', 'test/unit/runner-main.test.ts', 'test/unit/runner-bundle.test.ts', 'test/integration/S-BTN-41.runner.test.ts', 'test/integration/S-BTN-26.runner.test.ts', 'test/unit/test-course.test.ts', 'test/unit/stats-size.test.ts', 'test/integration/S-BTN-43.defaults.test.ts', 'test/unit/defaults-cli.test.ts', 'test/unit/standard-courses.test.ts', 'test/unit/ticket-state.test.ts', 'test/unit/bounded-git.test.ts', 'test/integration/S-BTN-104.standard-courses.test.ts', 'test/integration/S-BTN-105.course-sources.test.ts', 'test/integration/S-BTN-106.cross-repo-prs.test.ts', 'test/integration/S-BTN-107.build-app-course.test.ts', 'test/integration/S-BTN-174.create-spec.test.ts', 'test/integration/S-BTN-157.busy-sync.test.ts', 'test/unit/sign.test.ts', 'test/integration/S-BTN-156.sync-key.test.ts', 'test/unit/seed-owners-fresh.test.ts', 'test/unit/tickets-check.test.ts', 'test/unit/request.test.ts', 'test/unit/request-round2.test.ts', 'test/unit/request-round4.test.ts', 'test/integration/S-BTN-172.ticket-check.test.ts', 'test/unit/check-wiki-vocabulary.test.ts'];
+const NODE_ONLY = ['test/unit/ontology-conformance.test.ts', 'test/unit/local-queue.test.ts', 'test/unit/boundary-host.test.ts', 'test/unit/cli.test.ts', 'test/model/replay.test.ts', 'test/unit/check-traces.test.ts', 'test/unit/runner-main.test.ts', 'test/unit/runner-bundle.test.ts', 'test/integration/S-BTN-41.runner.test.ts', 'test/integration/S-BTN-26.runner.test.ts', 'test/unit/test-course.test.ts', 'test/unit/stats-size.test.ts', 'test/integration/S-BTN-43.defaults.test.ts', 'test/unit/defaults-cli.test.ts', 'test/unit/standard-courses.test.ts', 'test/unit/ticket-state.test.ts', 'test/unit/bounded-git.test.ts', 'test/integration/S-BTN-104.standard-courses.test.ts', 'test/integration/S-BTN-105.course-sources.test.ts', 'test/integration/S-BTN-106.cross-repo-prs.test.ts', 'test/integration/S-BTN-107.build-app-course.test.ts', 'test/integration/S-BTN-174.create-spec.test.ts', 'test/integration/S-BTN-157.busy-sync.test.ts', 'test/unit/sign.test.ts', 'test/integration/S-BTN-156.sync-key.test.ts', 'test/unit/seed-owners-fresh.test.ts', 'test/unit/tickets-check.test.ts', 'test/unit/request.test.ts', 'test/unit/request-round2.test.ts', 'test/unit/request-round4.test.ts', 'test/integration/S-BTN-172.ticket-check.test.ts', 'test/unit/check-wiki-vocabulary.test.ts'];
 /** `BATON_SKIP_QUINT=1` (`npm run test:no-quint`, what hosted CI runs) leaves out the one test
  *  that runs quint, the model-drawn replay (R3-1244); `npm test` and `npm run model:full` run it. */
 const QUINT_TESTS = process.env.BATON_SKIP_QUINT === '1' ? ['test/model/replay.test.ts'] : [];

@@ -29,6 +29,7 @@ import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, closeTicket, closesByTicket, 
  *  migrate-markers` does, once, and deletes it. */
 const MARKERS_FILE_RETIRED = join('.baton', 'markers.jsonl');
 import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
+import { mergeOntology } from './ontologyMerge';
 import { readItems } from './read-items';
 import { parseFrontmatter, ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
@@ -238,7 +239,9 @@ function stationsResult(value: unknown, from: string): StationsResult {
 
 /** What one reading of the repository posts (§7.1): every field but the protocol's own. */
 interface Board {
-  payload: { registry: Record<string, unknown>[]; tickets: TicketsResult['tickets']; closed: TicketsResult['closed']; stations: StationsResult['stations']; markers: StationsResult['markers']; course_data: Record<string, unknown> };
+  payload: { registry: Record<string, unknown>[]; tickets: TicketsResult['tickets']; closed: TicketsResult['closed']; stations: StationsResult['stations']; markers: StationsResult['markers']; course_data: Record<string, unknown>;
+    /** §5.9 (B-104): the merged ontology, or the merge's error; absent, the repository has none. */
+    ontology?: { builtin?: string | null; program: Record<string, unknown> } | { error: string } };
   /** A ticket's status at this reading for §6.7's confirmations: its file's, `live`, or null once closed. */
   statusOf: (id: string) => string | null;
 }
@@ -248,6 +251,21 @@ interface Board {
 async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log: (l: string) => void): Promise<Board> {
   const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
   const ctx = { root, settings };
+
+  // §5.9 (R-BTN-174, B-104): the default branch's head holds `.baton/ontology.json` or the
+  // repository has no ontology — the file may name a built-in by version and retract, replace
+  // or extend it. A merge that cannot be made posts `ontology: {error}` and the rest of the
+  // board as usual; a malformed file is the same kind of answer, never a failed sync.
+  let ontologyField: { ontology?: { builtin?: string | null; program: Record<string, unknown> } | { error: string } } = {};
+  const ontologyPath = join(root, '.baton', 'ontology.json');
+  if (existsSync(ontologyPath)) {
+    try {
+      const merged = mergeOntology(JSON.parse(readFileSync(ontologyPath, 'utf8')) as Record<string, unknown>);
+      ontologyField = 'error' in merged ? { ontology: { error: merged.error } } : { ontology: { builtin: merged.builtin, program: merged.program } };
+    } catch (e) {
+      ontologyField = { ontology: { error: `.baton/ontology.json is not JSON: ${e instanceof Error ? e.message : String(e)}` } };
+    }
+  }
 
   // The ticket source: the repository's own, else the markdown default.
   let result: TicketsResult;
@@ -353,7 +371,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
   }
   const status = new Map(result.tickets.map((t) => [t.id, t.display?.status ?? 'live']));
   return {
-    payload: { registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData },
+    payload: { registry, tickets: result.tickets, closed: result.closed, stations, markers, course_data: courseData, ...ontologyField },
     statusOf: (id) => (closedIds.has(id) ? null : status.get(id) ?? null),
   };
 }
@@ -1358,6 +1376,9 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   }
   writeWorkflow();
   await put('tickets/README.md', (abs) => writeFileSync(abs, '# Tickets\n\nOne `*.md` file per ticket; `baton repo init` wrote this directory.\n'));
+  // §5.9 (R-BTN-174, B-104): the ontology scaffold names the first built-in; a repository
+  // retracts, replaces or extends it from here, or deletes the file to have no ontology.
+  await put('.baton/ontology.json', (abs) => writeFileSync(abs, `${JSON.stringify({ version: 1, builtin: 'baton@1', entries: [], route_choices: [] }, null, 2)}\n`));
   // B-95: the worked example of a leg wrapper, there to be copied and named; a repository already
   // has one once it is.
   await put(`.baton/${WRAPPER_EXAMPLE}`, (abs) => writeFileSync(abs, wrapperExample()));

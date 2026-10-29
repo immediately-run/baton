@@ -18,10 +18,12 @@ export const CAPABILITIES = [
 ];
 
 /** The ROLE vocabulary: what an agent may HOLD. A role's expansion is the
- * capability set it fulfills; the claim rule is item.requires ⊆ capabilities(roles). */
+ * capability set it fulfills; the claim rule is item.requires ⊆ capabilities(roles).
+ * `human-operator` is NOT a role here (B-104, R-BTN-121 as amended): it is the one built-in
+ * literal, compared as itself by rule 4 like any capability - declared by that name and
+ * granted by that name - never an expansion of the four. */
 export const ROLES = {
   'agent-venue': ['authentication', 'llm-call', 'create-pr', 'drivable-browser'],
-  'human-operator': ['authentication', 'llm-call', 'create-pr', 'drivable-browser'],
 };
 
 /** The LEGACY resource vocabulary — valid in clauses through the R3-673

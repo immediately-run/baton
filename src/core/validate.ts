@@ -47,6 +47,9 @@ const ACCOUNT = /^[a-z0-9_]{1,64}$/;
 const PREFIX = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MODEL = /^[A-Za-z0-9._/:-]{1,200}$/;
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** A typed holding (R-BTN-174, B-104): `<type>:<value>` — the type a course type such as `key`,
+ * the value R-BTN-175's constant alphabet, the whole at most the constant's 128. */
+const HOLDING = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9:._/@-]{1,128}$/;
 const ACTIVITY_ID = /^[A-Za-z0-9._:-]{1,64}$/;
 /** §6.8: a transcript path — no `..` segment is checked separately. */
 const TRANSCRIPT_PATH = /^[A-Za-z0-9._/-]{1,256}$/;
@@ -142,7 +145,10 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     matches(PREFIX, `billing prefix ${prefix}`)(prefix);
     billing[prefix] = matches(ACCOUNT, `billing.${prefix}`)(account);
   }
-  if (!Array.isArray(b.capabilities) || !b.capabilities.every((c) => typeof c === 'string' && NAME.test(c))) bad('capabilities', 'must be a list of capability or role names');
+  // B-104 (R-BTN-174): a declaration may hold a typed holding — `<type>:<value>`, R-BTN-121's
+  // labels — beside the legacy names. Shape only: a holding is the runner's own statement,
+  // checked by nothing (§11.1's refusal deleted), bounded at matching by the grant.
+  if (!Array.isArray(b.capabilities) || !b.capabilities.every((c) => typeof c === 'string' && (NAME.test(c) || HOLDING.test(c)))) bad('capabilities', 'must be a list of capability, role or holding names');
   const capabilities = [...new Set(b.capabilities as string[])];
   const rawTags = b.tags ?? [];
   if (!Array.isArray(rawTags) || rawTags.length > TAGS_MAX || !rawTags.every((t) => typeof t === 'string' && TAG.test(t))) bad('tags', `must be a list of at most ${TAGS_MAX} tags`);
@@ -419,7 +425,7 @@ export function checkShadowReport(body: unknown) {
 const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/;
 export const GIT_SHA = /^[0-9a-f]{40}$/;
 /** §6.5: the `released:` reasons, exactly. */
-export const RELEASE_END_REASONS = ['stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output',
+export const RELEASE_END_REASONS = ['blocked', 'stale-board', 'cannot-finish:transient', 'cannot-finish:capability', 'cannot-finish:spec', 'cannot-finish:contract-output',
   'lease-lost', 'requested', 'owner-cancel', 'provider-suspended', 'provider-exhausted', 'course-changed'] as const;
 
 export function checkClaim(body: unknown): { request_id: string; ticket_id: string | null } {
@@ -506,6 +512,9 @@ export interface End {
   ended_at_sha: string | null;
   /** `released:<reason>` naming no §6.5 reason: an owner bar's (R-BTN-67), checked by the claims. */
   owner_bar: boolean;
+  /** R-BTN-126 (B-104's branch): a `released:blocked` end's failed prerequisite — `capability`,
+   *  a holding the runner declares and says it lost. */
+  prerequisite: { kind: 'capability'; ref: string } | null;
   /** R-BTN-108: what the finished leg produced. */
   outputs: Output[];
 }
@@ -514,6 +523,8 @@ export interface End {
  *  course-defined `detail` (§10.4 free text core stores and shows but never reads); `reached`, the
  *  station the claim rests at (R-BTN-71); `next`, the queued leg (R-BTN-83); and an optional
  *  pointer to the evidence, pushed first (R-BTN-8). */
+/** A capability name as a declaration carries it (R-BTN-121). */
+const CAPABILITY_NAME = /^[a-z0-9:-]{1,128}$/;
 export function checkEnd(body: unknown): End {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
@@ -544,7 +555,18 @@ export function checkEnd(body: unknown): End {
   if (ptr !== undefined && ptr !== null && !isPointer(ptr)) bad('ended_at_sha', 'must be a commit sha or an https URL of at most 1000 characters');
   const sha = (ptr as string | undefined | null) ?? null;
   if (status! === 'released' && sha) bad('ended_at_sha', 'only a completed end points at its evidence');
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, outputs: checkOutputs(b.outputs) };
+  // R-BTN-126 (B-104's branch): a blocked end names the prerequisite that failed — `capability`
+  // with a holding the runner declares and says it lost. The other kinds are the blocked-end
+  // work's; a blocked end without one is malformed.
+  let prerequisite: { kind: 'capability'; ref: string } | null = null;
+  if (reason === 'released:blocked') {
+    const p = b.prerequisite;
+    if (!isObj(p) || p.kind !== 'capability' || typeof p.ref !== 'string' || !CAPABILITY_NAME.test(p.ref)) {
+      bad('prerequisite', "a released:blocked end carries {kind: 'capability', ref: <the holding the runner lost>} (R-BTN-126)");
+    }
+    prerequisite = { kind: 'capability', ref: (p as { ref: string }).ref };
+  }
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs) };
 }
 
 export interface Advance {

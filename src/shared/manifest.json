@@ -1,9 +1,9 @@
 {
   "$comment": "Written by scripts/vendor.mjs (R-BTN-37): the docs commit these copies were taken from and their SHA-256. Never edit the copies here; change them in docs and re-vendor.",
-  "docs_commit": "4feb98cc8b9163cafdfc6d712b3b08c24be181b0",
+  "docs_commit": "9f288592d87a3b49b02c275b0e09b2ab543e5c13",
   "files": {
-    "baton.mjs": "8dec794c9158a6e08eeca89918eca1b7d143e82527ca19ab376ed882efc0e776",
-    "vocabulary.mjs": "f54678b6e73433e3448fc4be678b5690026a59bfe4fd36bb861e68a3a96c6a91",
+    "baton.mjs": "0fea689a6d3f4451c14792816ae817abff4fd2b8f0b2d2dae071c9451d68114e",
+    "vocabulary.mjs": "5f1bd410a26b4450927e8da8d5452951b736e1f34496a24e986983a0f0e9ae1f",
     "sessionUsage.mjs": "8e89c71f5a4d1fa45d1b28f24c7d29668644edeb75494075784ed64c105f727a",
     "batonSync.mjs": "520158cfbe8f1e706454a63d226ae405290e5e788f3cffd2a776b617e3d53c07"
   },

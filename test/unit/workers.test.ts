@@ -35,13 +35,16 @@ describe('G-BTN-5: identity — the secret, the hostname and the capability allo
     expect(JSON.stringify(first)).not.toContain(secret);
   });
 
-  it('refuses another hostname, a capability outside the allow-list, an unknown token and a revoked credential', async () => {
+  it('refuses another hostname, an unknown token and a revoked credential; a declaration outside the allow-list is recorded (B-104)', async () => {
     const other = await workerCall('/v1/runner/heartbeat', { cred: 'vm-a', body: hbBody('vm-a', { hostname: 'vm-b', secret_hash: await sha256('x') }) });
     expect([other.status, await code(other)]).toEqual([403, 'forbidden']);
+    // B-104 (R-BTN-174, §11.1's refusal deleted): a heartbeat's declaration is recorded as
+    // declared — every holding rests on the runner's own statement — and what it is granted
+    // bounds the holdings rule 4 reads (H = declared ∩ grant), never the declaration itself.
     const op = await workerCall('/v1/runner/heartbeat', { cred: 'vm-a', body: hbBody('vm-a', { capabilities: ['human-operator'], secret_hash: await sha256('x') }) });
-    expect([op.status, await code(op)]).toEqual([403, 'forbidden']);
-    // The owner's Mac credential may declare human-operator.
-    expect((await workerCall('/v1/runner/heartbeat', { cred: 'mac', body: hbBody('mac', { capabilities: ['human-operator'], secret_hash: await sha256('y') }) })).status).toBe(200);
+    expect(op.status).toBe(200);
+    expect(await rows(`SELECT capability FROM worker_capabilities wc JOIN workers w ON w.id = wc.worker_id
+                        WHERE w.credential_id = 'vm-a' ORDER BY capability`)).toContainEqual({ capability: 'human-operator' });
     const unknown = await call401('tok-nobody');
     expect(unknown).toBe(401);
   });
@@ -52,7 +55,7 @@ describe('G-BTN-5: identity — the secret, the hostname and the capability allo
     // within (R-BTN-58), `none` left out.
     const { first } = await register('vm-a');
     const held = (first as { grant: { capabilities: string[] } }).grant.capabilities;
-    expect(held).toEqual(['agent-venue', 'authentication', 'create-pr', 'drivable-browser', 'llm-call', 'mcp-chrome']);
+    expect(held).toEqual(['agent-venue', 'authentication', 'capability:code-generation-llm', 'capability:review-llm', 'create-pr', 'dependency:claude-code', 'dependency:opencode-v2', 'drivable-browser', 'key:anthropic', 'key:deepinfra', 'key:opencode-go', 'key:zai', 'llm-call', 'mcp-chrome']);
     expect(held).not.toContain('none');
   });
 
@@ -74,9 +77,10 @@ describe('G-BTN-5: identity — the secret, the hostname and the capability allo
     expect(answer.status).toBe(200);
     // The role's four capabilities and mcp-chrome; `none` never.
     expect(answer.json.grant.capabilities).toEqual(['authentication', 'create-pr', 'drivable-browser', 'llm-call', 'mcp-chrome']);
-    // And what it may declare: the role among them, as the machine names one role.
+    // And what it may declare (B-104: §11.1's refusal deleted): anything — the role among
+    // them, and a holding the grant leaves out, recorded as declared and bounded by rule 4.
     expect((await signed({ capabilities: ['agent-venue'] })).status).toBe(200);
-    expect((await signed({ capabilities: ['human-operator'] })).status).toBe(403);
+    expect((await signed({ capabilities: ['human-operator'] })).status).toBe(200);
   });
 
   it('R-BTN-32: test_harness is refused from every credential but the test one', async () => {
@@ -374,11 +378,12 @@ describe('round-one review fixes (baton#4)', () => {
     expect(await rows('SELECT provider_id, resets_at FROM rate_limit_events WHERE worker_id = ?', id)).toEqual([{ provider_id: 'zai', resets_at: T0 + 60_000 }]);
   });
 
-  it('§7.2 rule 6: a declared human-operator gets its own capability row', async () => {
+  it('a declared human-operator is the one literal row it declares (B-104: rule 6 retired, R-BTN-121 as amended)', async () => {
     const { id } = await register('mac', { capabilities: ['human-operator'] });
-    // The role expands to its capabilities (ROLES), and rule 6's own row names the role itself.
+    // No expansion: the literal is declared as itself and rule 4 compares it as a string —
+    // granted like any capability, met by declaring it, never a role that fulfils the four.
     expect(await rows(`SELECT capability FROM worker_capabilities WHERE worker_id = ? AND declared = 'human-operator' ORDER BY capability`, id))
-      .toEqual(['authentication', 'create-pr', 'drivable-browser', 'human-operator', 'llm-call'].map((capability) => ({ capability })));
+      .toEqual([{ capability: 'human-operator' }]);
   });
 
   it('§6.8: the owners’ transcript_repos replaces the default allow-list; a board post’s is ignored (R-BTN-66, R3-1240)', async () => {

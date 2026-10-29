@@ -93,9 +93,12 @@ describe('R-BTN-57: administrators', () => {
 });
 
 describe('R-BTN-58: owners', () => {
-  it('a grant refuses human-operator from an owner, an unknown key without a hostname, a taken hostname, another hostname, a bad max_tier', async () => {
-    expect(await code(own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: ['human-operator'] }))).toBe('forbidden');
-    expect(await code(own('/grants', { public_key: worker.publicKey, capabilities: [] }))).toBe('invalid-params');
+  it('a grant takes human-operator from an owner like any capability (B-104), and refuses an unknown key without a hostname, a taken hostname, another hostname, a bad max_tier', async () => {
+    expect(await code(own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: ['human-operator'] }))).toBe(200);
+    // An unknown key without a hostname is still malformed (R-BTN-58) — a fresh key for it,
+    // since the grant above made `worker` known.
+    const unknown = await makeKey('ssh-ed25519', 'b104-unknown');
+    expect(await code(own('/grants', { public_key: unknown.publicKey, capabilities: [] }))).toBe('invalid-params');
     expect(await code(own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: [], max_tier: 'epic' }))).toBe('invalid-params');
     expect(await code(own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: ['Bad Name'] }))).toBe('invalid-params');
     expect(await code(own('/grants', { public_key: worker.publicKey, hostname: 'w-host', capabilities: ['agent-venue'] }))).toBe(200);
@@ -104,8 +107,11 @@ describe('R-BTN-58: owners', () => {
     expect(await code(own('/grants', { public_key: twin.publicKey, hostname: 'w-host', capabilities: [] }))).toBe('conflict');
     // An administrator may rename it.
     expect(await code(adm('/grants', { repository: 'docs', public_key: worker.publicKey, hostname: 'w-other', capabilities: ['human-operator'] }))).toBe(200);
-    // An owner's re-grant keeps the administrator's human-operator.
+    // B-104: human-operator is granted like any capability, so an owner's re-grant replaces
+    // the set as any re-grant does — and grants it back the same way.
     expect(await code(own('/grants', { public_key: worker.publicKey, capabilities: ['llm-call'] }))).toBe(200);
+    expect(JSON.parse((await rows<{ capabilities: string }>('SELECT capabilities FROM worker_grants'))[0].capabilities)).toEqual(['llm-call']);
+    expect(await code(own('/grants', { public_key: worker.publicKey, capabilities: ['llm-call', 'human-operator'] }))).toBe(200);
     expect(JSON.parse((await rows<{ capabilities: string }>('SELECT capabilities FROM worker_grants'))[0].capabilities)).toContain('human-operator');
     // Stored expanded: a role as its capabilities.
     expect(await rows('SELECT hostname FROM credentials WHERE id = ?', worker.fingerprint)).toEqual([{ hostname: 'w-other' }]);

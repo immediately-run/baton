@@ -1,0 +1,103 @@
+{
+  "name": "positive-recursion",
+  "program": {
+    "version": 1,
+    "derived": [
+      "capability"
+    ],
+    "entries": [
+      {
+        "id": "seed",
+        "head": [
+          "reach",
+          "$x"
+        ],
+        "body": [
+          [
+            "holds",
+            "$x"
+          ],
+          [
+            "node",
+            "$x"
+          ]
+        ]
+      },
+      {
+        "id": "node-a",
+        "fact": [
+          "node",
+          "key:a"
+        ]
+      },
+      {
+        "id": "node-b",
+        "fact": [
+          "node",
+          "key:b"
+        ]
+      },
+      {
+        "id": "node-c",
+        "fact": [
+          "node",
+          "key:c"
+        ]
+      },
+      {
+        "id": "edge-ab",
+        "fact": [
+          "edge",
+          "key:a",
+          "key:b"
+        ]
+      },
+      {
+        "id": "edge-bc",
+        "fact": [
+          "edge",
+          "key:b",
+          "key:c"
+        ]
+      },
+      {
+        "id": "walk",
+        "head": [
+          "reach",
+          "$y"
+        ],
+        "body": [
+          [
+            "reach",
+            "$x"
+          ],
+          [
+            "edge",
+            "$x",
+            "$y"
+          ]
+        ]
+      },
+      {
+        "id": "cap",
+        "head": [
+          "derived",
+          "capability:reached"
+        ],
+        "body": [
+          [
+            "reach",
+            "key:c"
+          ]
+        ]
+      }
+    ],
+    "route_choices": []
+  },
+  "holdings": [
+    "key:a"
+  ],
+  "derived": [
+    "capability:reached"
+  ]
+}

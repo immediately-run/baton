@@ -24,6 +24,7 @@ import legQueues from './0021_leg_queues.sql';
 import legCapabilities from './0022_leg_capabilities.sql';
 import webhookSyncs from './0023_webhook_syncs.sql';
 import windDown from './0024_wind_down.sql';
+import ontology from './0025_ontology.sql';
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },
@@ -50,4 +51,5 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 22, sql: legCapabilities },
   { id: 23, sql: webhookSyncs },
   { id: 24, sql: windDown },
+  { id: 25, sql: ontology },
 ];

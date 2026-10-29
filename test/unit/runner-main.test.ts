@@ -273,15 +273,11 @@ describe('the grant\'s declaration (B-86)', () => {
     const reserved = legNeeds(dir, '', 'relay');
     expect(reserved).toContain('human-operator');
     expect(capabilitiesOf(['agent-venue']).has('human-operator')).toBe(false);
-    expect(capabilitiesOf(['human-operator']).has('human-operator')).toBe(false); // the expansion drops the literal
-    // Review round 7, finding 1: the never-eligible line's held set (runner.ts `reportEligibility`)
-    // adds the literal exactly when the declaration carries it — so the answer to "does this
-    // declaration lack human-operator" is the one rule 4's gate gives. Driven end to end by
-    // S-BTN-41's "the never-eligible line holds the literal human-operator" row.
-    const heldBy = (declared: string[]) => new Set([...capabilitiesOf(declared), ...(declared.includes('human-operator') ? ['human-operator'] : [])]);
-    expect(heldBy(['human-operator']).has('human-operator')).toBe(true);
-    expect(heldBy(['agent-venue']).has('human-operator')).toBe(false);
-    expect(heldBy(['human-operator', 'agent-venue']).has('create-pr')).toBe(true); // the role still expands
+    // B-104: the literal is compared as itself — capabilitiesOf no longer expands it away.
+    expect(capabilitiesOf(['human-operator']).has('human-operator')).toBe(true);
+    // The role still expands; the literal still joins any set that declares it.
+    expect(capabilitiesOf(['human-operator', 'agent-venue']).has('create-pr')).toBe(true);
+    expect(capabilitiesOf(['human-operator', 'agent-venue']).has('human-operator')).toBe(true);
     try {
       expect(readHead(dir)).toBe('');
     } finally {
