@@ -4,16 +4,17 @@
 // answer into a position, and the Markdown instructions shipped for each leg. One table, so a
 // course is added in one place. Course code in the CLI, never core (§2b).
 import { CREATE_PR_COURSE, CREATE_SPEC_COURSE, REVIEW_PR_COURSE, stationsPr, stationsReviewPr, stationsSpec, type PrFact, type PrGraph, type StationsResult } from './course-pr';
-import { stationsMarkers, type CourseGraph, type Marker } from './course-markers';
+import { stationsTickets, type CourseGraph } from './ticket-state';
 import type { SourceTicket } from './tickets-markdown';
 
-/** What a station function is handed (R-BTN-74's ctx), with the facts its course reads. */
+/** What a station function is handed (R-BTN-74's ctx), with the facts its course reads. The
+ * marker courses read no second input (B-100): each ticket carries its own record — the closes
+ * its git history holds and its frontmatter's machine state — on its opaque `course` blob. */
 export interface StationCtx {
   tickets: SourceTicket[];
   closed: Set<string>;
   done: Set<string>;
   facts: PrFact[];
-  markers: Marker[];
   branchPatterns: string[];
   repository: string | null;
   /** The course file as the checkout has it: the bounds the function reads. */
@@ -187,8 +188,8 @@ export const answered = (t: SourceTicket): boolean => {
   return typeof a === 'string' && a.trim() !== '' && a.trim().toLowerCase() !== 'open';
 };
 
-const markers = (waits?: (t: SourceTicket, leg: string) => string | null) => (ctx: StationCtx): StationsResult =>
-  stationsMarkers({ tickets: ctx.tickets, closed: ctx.closed, done: ctx.done, graph: ctx.graph as unknown as CourseGraph, markers: ctx.markers, waits });
+const ticketStations = (waits?: (t: SourceTicket, leg: string) => string | null) => (ctx: StationCtx): StationsResult =>
+  stationsTickets({ tickets: ctx.tickets, closed: ctx.closed, done: ctx.done, graph: ctx.graph as unknown as CourseGraph, waits });
 
 /** The verdict a review stub asks for, written by `close` as the verdict line. */
 const VERDICT: Ask = { name: 'verdict', values: ['approve', 'changes'] };
@@ -235,7 +236,7 @@ export const BUILT_INS: BuiltIn[] = [
     summary: 'trace a reported bug to its cause and origin, dedupe it by cause, file the fix ticket, weigh prevention',
     course: BUG_REPORT_COURSE,
     reads: 'markers',
-    stations: markers(),
+    stations: ticketStations(),
     legs: {
       trace: { position: "{ reached: 'traced', next: 'origin' }" },
       origin: { position: "{ reached: 'explained', next: 'dedupe' }" },
@@ -251,7 +252,7 @@ export const BUILT_INS: BuiltIn[] = [
     summary: 'research, draft and file a ticket that prescribes its architecture, tests and requirements',
     course: DRAFT_TICKET_COURSE,
     reads: 'markers',
-    stations: markers(),
+    stations: ticketStations(),
     legs: {
       research: { position: "{ reached: 'researched', next: 'draft' }" },
       draft: { position: "{ reached: 'drafted', next: 'check' }" },
@@ -265,7 +266,7 @@ export const BUILT_INS: BuiltIn[] = [
     course: DECISION_COURSE,
     reads: 'markers',
     // `carry-out` waits on the owner until the ticket's `answer:` is set.
-    stations: markers((t, leg) => (leg === 'carry-out' && !answered(t) ? 'owner' : null)),
+    stations: ticketStations((t, leg) => (leg === 'carry-out' && !answered(t) ? 'owner' : null)),
     legs: {
       // The packet is written; carry-out waits on the owner's answer, so the claim suspends.
       prepare: { position: "{ suspend: true, reached: 'asked', next: 'carry-out' }" },
@@ -278,7 +279,7 @@ export const BUILT_INS: BuiltIn[] = [
     summary: 'define a product, design it, decide its architecture and plan it with the owner, file the tickets, verify the build',
     course: BUILD_APP_COURSE,
     reads: 'markers',
-    stations: markers(buildAppWaits),
+    stations: ticketStations(buildAppWaits),
     legs: {
       // Each drafted document waits on the owner's approval, so the claim suspends.
       define: { position: "{ suspend: true, reached: 'defined', next: 'design' }" },
@@ -297,7 +298,7 @@ export const BUILT_INS: BuiltIn[] = [
     summary: 'design a specification in conversation with the owner, review it adversarially, address blocking findings in conversation, merge',
     course: CREATE_SPEC_COURSE,
     reads: 'prs',
-    stations: (ctx) => stationsSpec({ tickets: ctx.tickets, facts: ctx.facts, branchPatterns: ctx.branchPatterns, closed: ctx.closed, done: ctx.done, repository: ctx.repository, graph: ctx.graph as PrGraph, markers: ctx.markers }),
+    stations: (ctx) => stationsSpec({ tickets: ctx.tickets, facts: ctx.facts, branchPatterns: ctx.branchPatterns, closed: ctx.closed, done: ctx.done, repository: ctx.repository, graph: ctx.graph as PrGraph }),
     legs: {
       // The design conversation is the owner's session, which Baton neither runs nor waits for:
       // the leg writes its marker at `requested`, ends the claim, and the ticket waits there —
@@ -320,7 +321,7 @@ export const BUILT_INS: BuiltIn[] = [
     summary: 'decompose a merged specification into child tickets, check the set against the spec, and file them',
     course: SPEC_TO_TICKETS_COURSE,
     reads: 'markers',
-    stations: markers(),
+    stations: ticketStations(),
     legs: {
       decompose: { position: "{ reached: 'drafted', next: 'check' }" },
       check: { position: "{ reached: 'checked', next: 'file' }" },

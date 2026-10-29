@@ -39,6 +39,8 @@ setting in `.baton/baton.json`, `tickets/` by default):
 - **The body**: the plan's sections for that ticket, verbatim, with a first line linking
   `product/<ticket id>/PLAN.md` and the documents it builds on.
 
-Follow the format the repository's existing tickets use for anything else. Then add a `## Filed`
+Follow the format the repository's existing tickets use for anything else. Then add a `## file`
 section to this ticket listing each child, and commit the children and this ticket together,
 with explicit paths, to the default branch.
+
+Your work lands under the ticket's own `## file` heading — write it if it is not there; the close checks it is.

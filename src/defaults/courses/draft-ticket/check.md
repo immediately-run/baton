@@ -37,5 +37,7 @@ fix what fails:
   `.baton/baton.json`, `tickets/` by default), with the next id the repository uses (its id tool,
   if it has one), `depends_on` for the chain, and its course (the repository's default unless the
   ticket says otherwise).
-- Add `## Filed` to the request, naming each ticket, and set the request's `status:` to `done`.
+- Add `## check` to the request, naming each ticket you filed, and set the request's `status:` to `done`.
 - Commit the new files and the request together to the default branch.
+
+Your work lands under the ticket's own `## check` heading — write it if it is not there; the close checks it is.

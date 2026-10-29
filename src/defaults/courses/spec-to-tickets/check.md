@@ -1,7 +1,7 @@
 # spec-to-tickets · check — the set against the spec
 
 You are running the `check` leg of the `spec-to-tickets` course. The ticket's file is
-`$BATON_TICKET_FILE`; it carries the `## Drafts` the `decompose` leg wrote. When you finish, the
+`$BATON_TICKET_FILE`; it carries the drafts the `decompose` leg wrote under its own heading. When you finish, the
 drafts are a set that covers the spec exactly. Baton's closing marker is written for you after
 you return; do not write it.
 
@@ -37,7 +37,9 @@ A requirement no draft covers — a section with no ticket draft at all, or one 
 is a failure of the set, not something to wave through: exit non-zero naming the section and the
 requirement, and the leg fails — nothing is written, and a person looks.
 
-Commit the request alone, its `## Drafts` corrected, to the default branch.
+Commit the request alone, its drafts corrected under `## check`, to the default branch.
+
+Your work lands under the ticket's own `## check` heading — write it if it is not there; the close checks it is.
 
 ## Do not
 

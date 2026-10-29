@@ -1018,7 +1018,9 @@ Baton, and it is exportable (R-BTN-88).
   - **Each course's station function**, `sync.mjs` in its course directory (own or the
     source's, R-BTN-134), default-exporting `stations(ctx)` → `stations`, `markers` and that
     course's opaque `course_data`, from git and the fact adapter's PR facts (R-BTN-96). The sync
-    posts `course_data` keyed by course id.
+    posts `course_data` keyed by course id. The marker courses' tickets carry their own record on
+    their opaque `course` fields — the closes their git history holds and the frontmatter's
+    machine state (B-100) — read from the ticket, never a second input.
   - `course.json` is always the commit's own (or its source's): the sync posts and `baton
     runner start` loads the same file.
   - **CLI default ticket sources** (`src/defaults/`), used when the repository has no
@@ -2043,6 +2045,10 @@ mean (R-BTN-50).
     `requires.tickets` and completion tables exist in the selected or called courses
     (R-BTN-120, R-BTN-165);
   - checks overrides (R-BTN-131) and leg scripts and their imports (R-BTN-133);
+  - fails a stub whose close accepts what it should not: a PR course's start leg must fail an
+    agent that exits 0 with no PR (B-81), and a marker course's close must fail a ticket its leg
+    mangled — no heading for the leg, a broken item schema, a machine field of the wrong shape —
+    naming the rule (B-100);
   - refuses a retry policy naming an undeclared type and warns where the owners' bounds cut a
     course's policy (R-BTN-122); refuses a timer outside R-BTN-167's shape, naming the leg and
     the field; refuses a `suspend` binding to a course that does not produce `std:restart@1`
@@ -2103,18 +2109,30 @@ mean (R-BTN-50).
     rounds run out `conclude` is queued, and a trusted `<!-- baton:concluded -->` is that leg.
     A commenting leg's answer line may name its PR (`<answer> <PR URL>`; `conclude`'s the URL
     alone); `close` comments there, else on the checkout branch's PR.
-  - **The marker courses** open no PR. Each leg commits to the default branch; `close` appends
-    `{ticket, leg, reached, next, claim}` (bare local id) to `.baton/markers.jsonl` and pushes,
-    rebasing and retrying only a push refused because the branch moved, at most three times
-    (the checkout's `info/attributes` merges the file by union; a stuck rebase is aborted). The
-    path is the markers in order, skipping non-edges and legs past `max_runs`; the queued leg is
-    the last marker's `next` if it leaves the station (`marker`), else the first leg listed
-    (`course`); a malformed line is skipped and logged.
+  - **The marker courses** open no PR. **The ticket is the record (B-100)**: each leg commits
+    its work to the default branch under its own `## <leg>` heading in the ticket's body, and
+    `close` writes the machine state — `station`, `next_leg`, the closing claim's `claim` nonce —
+    into the ticket's own frontmatter and pushes the ticket alone on the default branch, retried
+    whole when the remote moved, at most three times. Before committing, the close validates the
+    ticket: its frontmatter against the repository's item schema (`item.schema.json` beside the
+    tickets), the machine fields' types, and the leg's own heading — trust nothing the agent
+    touched, check everything the machine reads; a violation fails the leg naming the rule, and
+    a forged `station:` is simply overwritten (the close is the one writer per ticket). The path
+    is the ticket's own git history — every `baton:close <id> <leg>` commit, oldest first —
+    skipping non-edges and legs past `max_runs`; the queued leg is the last close's `next` if it
+    leaves the station (`marker`), else the first leg listed (`course`). A checkout git cannot
+    answer for has no close history, and the frontmatter state a one-time migration wrote stands.
+    `.baton/markers.jsonl` — the shared file every runner once appended to, with its union-merge
+    attribute — is retired; `baton repo migrate-markers` replays a board's in-flight lines as
+    closes (one `baton:close` commit per line, the line's state in the ticket's frontmatter —
+    a `create-spec` conversation's lines included, their state being nowhere in the forge) and
+    deletes the file, once; B-87 (the retried close's duplicate lines) closed superseded:
+    per-ticket state written once per claim cannot re-append.
   - **`spec-to-tickets`** (B-99) takes one merged specification — entered by `baton request`
     (`starts_from: request`), the sentence naming the spec; a `create-spec` conversation's merged
     PR is the usual input — and files its child tickets. `decompose` drafts one ticket per spec
-    section or numbered decision into the request's `## Drafts`, each with its tests and exit
-    criteria drafted from the spec's own words; `check` holds the set against the spec (every
+    section or numbered decision into the request under its own heading, each with its tests and
+    exit criteria drafted from the spec's own words; `check` holds the set against the spec (every
     requirement covered exactly once, no ticket without a section, dependencies drawn as the
     spec's order implies) and fails rather than covering a gap; `file` commits the children
     `parent:`-ed to the request (R-BTN-86), the request's `status:` to `done`. The owner deciding
@@ -2140,23 +2158,25 @@ mean (R-BTN-50).
     posts a decision for the owner and ends `released:blocked` on it (R-BTN-126).
   - **A wait outside the claim suspends:** a leg whose next leg waits on someone the claim
     cannot wait for returns `suspend: true` with its pair, ending the claim there (R-BTN-72).
-  - **A leg that suspends into the owner's hands leaves a marker.** An interactive leg
-    (`create-spec`'s `converse` and `address`) is the owner's own session, which Baton neither runs
-    nor waits for inside a claim; the PR facts alone cannot tell it from one whose work has not
-    landed, so the leg's `close` — never the agent — appends a line to `.baton/markers.jsonl` and
-    pushes it to the default branch. `prClose` writes it through git plumbing, never through the
-    checkout's own branch: fetch the default branch, append the line over the file it fetched (the
-    union merge by construction), build the tree on a temporary index at git's own path for it,
-    `commit-tree` it onto the fetched head and push `<commit>:refs/heads/<default>` — retried whole
-    when the remote moved. So a checkout left on a PR's branch, detached at a claim's snapshot, or
-    itself a linked worktree still reaches the branch a sync reads, and `HEAD`, the index and the
+  - **A leg that suspends into the owner's hands leaves its record in the ticket.** An
+    interactive leg (`create-spec`'s `converse` and `address`) is the owner's own session, which
+    Baton neither runs nor waits for inside a claim; the PR facts alone cannot tell it from one
+    whose work has not landed, so the leg's `close` — never the agent — writes the leg's machine
+    state into the ticket's own frontmatter and pushes the ticket to the default branch
+    (B-100). `prClose` writes it through git plumbing, never through the checkout's own branch:
+    fetch the default branch, read the ticket at it, validate and write the frontmatter over the
+    text it fetched, build the tree on a temporary index at git's own path for it, `commit-tree`
+    it onto the fetched head and push `<commit>:refs/heads/<default>` — retried whole when the
+    remote moved. So a checkout left on a PR's branch, detached at a claim's snapshot, or itself
+    a linked worktree still reaches the branch a sync reads, and `HEAD`, the index and the
     working tree are never touched. The id is the ticket's bare local id, never the claim's
-    qualified one; the branch is the claim answer's `default_branch`. The station function reads the lines beside the PR facts, and each is a
+    qualified one; the branch is the claim answer's `default_branch`. The station function reads
+    the ticket's closes — its own history — beside the PR facts, and each is a
     signal, never a step: no posted path carries it, so the board sees no path off the graph (§2e).
-    `converse` writes `{ticket, leg: "converse", reached: "requested", next: "review"}` as the
-    claim ends before the owner's session starts, so one such line for the ticket means the design
+    `converse` closes at `reached: "requested"`, `next: "review"` as the
+    claim ends before the owner's session starts, so one such close for the ticket means the design
     conversation is under way: `converse` then waits on the `owner` and is not offered again while
-    the line stands, the path staying empty until the PR lands and the next reading places it at
+    the close stands, the path staying empty until the PR lands and the next reading places it at
     `spec-open`; a ticket with no such line is ready for `converse`, its dependency and child waits
     as any start leg's. `address` writes `{ticket, leg: "address", reached: "reviewed"}` as an
     address round's claim ends, and the station function compares the ticket's `address` lines with

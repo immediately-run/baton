@@ -21,7 +21,7 @@
 //   an unpushed one carried by the next push, would move the head past the one the leg verified —
 //   a change no course asked for.
 // `baton repo init` bundles this into each leg stub, so a stub imports nothing at run time.
-import { bareTicketId, commitMarkerOnDefault, exec, markersBranch } from './course-markers';
+import { closeTicket, exec } from './ticket-state';
 
 /** What `close` runs: `git` or `gh`, in the checkout, answering stdout. Tests inject it. */
 export type Exec = (cmd: 'git' | 'gh', args: string[], cwd: string) => string;
@@ -34,7 +34,7 @@ export interface CloseCtx {
   /** The repository's default branch (B-96's review round 2), where a marker leg's line goes:
    *  the claim answer's `default_branch`, which the runner hands the stub in
    *  `BATON_DEFAULT_BRANCH`. Absent — an older runner, a leg run by hand — the close reads
-   *  `origin/HEAD`, else `main` (`markersBranch`). */
+   *  `origin/HEAD`, else `main` (`ticketsBranch`). */
   default_branch?: string | null;
 }
 
@@ -73,9 +73,9 @@ const MARKER_LEGS = new Set(['converse', 'address']);
 
 /** Write the closing marker, push it, and return its evidence: the comment's URL, the pushed
  *  commit's sha, or the head it ran on when the leg writes nothing. A comment needs no push — the
- *  forge is the record the sync reads. A marker line does: the sync reads `.baton/markers.jsonl`
- *  from the default branch, and a line left in an un-pushed checkout is one no reading sees
- *  (B-96's review round 1) — so it is committed on that branch itself (round 2). */
+ *  forge is the record the sync reads. A ticket write does: the sync reads the ticket's own
+ *  git history from the default branch, and a write left in an un-pushed checkout is one no
+ *  reading sees (B-96's review round 1) — so it is committed on that branch itself (round 2). */
 export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: string | null; verdict?: unknown; adjudication?: unknown; pr?: unknown }, run: Exec = exec): Promise<string> {
   const comment = commentLine(ctx.leg, result);
   if (comment != null) {
@@ -91,11 +91,15 @@ export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: 
   // a pushed `baton:` commit on each PR branch would move the head past the one `verify: 'pr'`
   // checked, a change no course asked for.
   if (!MARKER_LEGS.has(ctx.leg)) return run('git', ['rev-parse', 'HEAD'], ctx.checkout);
-  // The ticket as its file names it (bare), never the claim's qualified id: the marker courses'
-  // own line, read back by id. The line is committed on the default branch itself — never on the
-  // checkout's `HEAD`, which may sit on a PR's branch or be detached (B-96's review round 2) —
-  // and appended to what that branch holds at the moment of the push, so two closes racing both
-  // land (the union merge by construction: no rebase, no conflicts, no duplicate line).
-  const line = { ticket: bareTicketId(ctx.ticket), leg: ctx.leg, reached: result.reached, next: result.next ?? null, claim: ctx.claim?.nonce ?? null };
-  return commitMarkerOnDefault(ctx.checkout, line, run, markersBranch(ctx.checkout, ctx.default_branch, run));
+  // Only the legs whose station function READS the ticket's own record (B-96, B-100):
+  // create-spec's interactive converse and address. Every other PR-course leg (implement, fix,
+  // merge) writes no state — a pushed `baton:` commit on each PR branch would move the head past
+  // the one `verify: 'pr'` checked, a change no course asked for.
+  // The ticket's own frontmatter is the record (B-100): the close writes the leg's machine
+  // state into the ticket file — on the default branch itself, never on the checkout's `HEAD`,
+  // which may sit on a PR's branch or be detached — with the boundary check, and its sha is the
+  // evidence. No heading check here (round 1, finding 3): these legs' work is the conversation
+  // and its PR, which may never land on the default branch (an owner who stops before the PR is
+  // open still leaves the record); the marker courses' legs, whose work IS the ticket, keep it.
+  return closeTicket({ ...ctx, heading: false }, result, run);
 }

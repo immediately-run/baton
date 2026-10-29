@@ -19,7 +19,7 @@ export const GIT_TIMEOUT_MS = 30_000;
 
 // B-94: git's non-interactive environment is defined once, beside the close's bound — the
 // runner's git and the generated stubs import it from there.
-import { GIT_NONINTERACTIVE_ENV } from '../defaults/course-markers';
+import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 
 /** One git command in the home checkout; throws with stderr when it fails, and is killed at
  * `timeoutMs` (default `GIT_TIMEOUT_MS`, under a beat) when it cannot answer (B-94). */

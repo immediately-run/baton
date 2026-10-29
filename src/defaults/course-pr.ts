@@ -213,24 +213,39 @@ const at = (station: string, path: Step[], next: PostedStation['next']): PostedS
  *  so `markers` is empty and `course_data` an empty object. */
 const noMarkers = (stations: Record<string, PostedStation>): StationsResult => ({ stations, markers: [], course_data: {} });
 
-/** `create-spec`'s record that a leg has run and is now waiting outside the claim: the closing
- *  marker its `close` commits (R-BTN-83) — `converse`'s at `requested`, `address`'s at `reviewed` —
- *  read from `.baton/markers.jsonl` beside the PR facts. Each is a signal, never a step: the path
+/** `create-spec`'s record that a leg has run and is now waiting outside the claim: the close
+ *  its `close` commits into the ticket's own frontmatter (R-BTN-83, B-100) — `converse`'s at
+ *  `requested`, `address`'s at `reviewed` — read from the ticket's git history as the sync
+ *  attached it to its opaque `course` blob (`closes`). Each is a signal, never a step: the path
  *  stays where the PR facts put it. */
 interface SpecMarkers {
-  /** The tickets whose design conversation has begun (a `converse` marker at `requested`). */
+  /** The tickets whose design conversation has begun (a `converse` close at `requested`). */
   conversed: Set<string>;
   /** How many times each ticket's `address` leg has ended in the owner's hands (an `address`
-   *  marker at `reviewed`): one more than the timeline's `address` steps while none of its work
-   *  has landed as a push. */
+   *  close at `reviewed`): one more than the timeline's `address` steps while none of its work
+   * has landed as a push. */
   addressed: Map<string, number>;
 }
 
-const specMarkersOf = (markers: { ticket: string; leg: string; reached: string }[]): SpecMarkers => {
+/** The closes a ticket's own history holds, as the sync attached them to its `course` blob —
+ * read structurally (never an import: this module is type-checked in both hosts). */
+const closesOfTicket = (t: { id: string; course?: Record<string, unknown> }): { leg: string; reached: string }[] => {
+  const c = t.course?.closes;
+  if (!Array.isArray(c)) return [];
+  const out: { leg: string; reached: string }[] = [];
+  for (const x of c as { leg?: unknown; reached?: unknown }[]) {
+    if (x != null && typeof x.leg === 'string' && typeof x.reached === 'string') out.push({ leg: x.leg, reached: x.reached });
+  }
+  return out;
+};
+
+const specMarkersOf = (tickets: { id: string; course?: Record<string, unknown> }[]): SpecMarkers => {
   const out: SpecMarkers = { conversed: new Set(), addressed: new Map() };
-  for (const m of markers) {
-    if (m.leg === 'converse' && m.reached === 'requested') out.conversed.add(m.ticket);
-    if (m.leg === 'address' && m.reached === 'reviewed') out.addressed.set(m.ticket, (out.addressed.get(m.ticket) ?? 0) + 1);
+  for (const t of tickets) {
+    for (const m of closesOfTicket(t)) {
+      if (m.leg === 'converse' && m.reached === 'requested') out.conversed.add(t.id);
+      if (m.leg === 'address' && m.reached === 'reviewed') out.addressed.set(t.id, (out.addressed.get(t.id) ?? 0) + 1);
+    }
   }
   return out;
 };
@@ -439,10 +454,6 @@ export function stationsSpec(ctx: {
   done?: Set<string>;
   repository?: string | null;
   graph?: PrGraph;
-  /** `.baton/markers.jsonl` as the checkout has it: the interactive legs' own records. */
-  // The marker lines the sync parsed (B-96): a structural type, never an import —
-  // course-markers.ts is Node code, and this module is type-checked in both hosts.
-  markers?: { ticket: string; leg: string; reached: string }[];
 }): StationsResult {
   const graph = ctx.graph ?? {};
   const stations: Record<string, PostedStation> = {};
@@ -452,8 +463,8 @@ export function stationsSpec(ctx: {
     legs: SPEC_BOUNDS.legs, back: SPEC_BOUNDS.back,
     rounds: graph.legs?.address?.max_runs ?? SPEC_BOUNDS.rounds, adjudicates: graph.legs?.adjudicate != null,
   };
-  // A malformed line is `parseMarkers`' to skip, never this function's.
-  const marks = specMarkersOf(ctx.markers ?? []);
+  // A malformed close is the history fold's to skip, never this function's.
+  const marks = specMarkersOf(ctx.tickets);
   for (const t of ctx.tickets) {
     if (ctx.closed.has(t.id)) continue;
     // A closed unmerged PR counts as none — the same reading as `stationsPr`, and the rule that

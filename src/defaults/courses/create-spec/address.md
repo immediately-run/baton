@@ -5,7 +5,7 @@ changes on the ticket's specification, and someone has to decide how each blocki
 answered. Unlike `create-pr`'s `fix`, this is **not** a headless fix: the owner and an agent
 session decide, together, what the specification should say. The ticket's file is
 `$BATON_TICKET_FILE`. This leg ends with the ticket waiting: when you return, Baton's `close`
-records the round in the marker file and ends the claim, and the ticket waits on the owner until
+records the round in the ticket's own frontmatter and ends the claim, and the ticket waits on the owner until
 the amendment lands as a push on the PR; the next sync moves it back to `spec-open` and the next
 round reviews it. `address` runs at most three times: after the third round that still asks for
 changes, the course queues `adjudicate` instead, and a fresh reader decides whether what is left
@@ -39,12 +39,12 @@ Once Baton launches interactive legs itself, the runner sends the link to the se
 
 ## How the ticket waits
 
-**Baton records the round, not you**: when you return, this leg's `close` appends
-`{"ticket": "<the ticket's bare id>","leg":"address","reached":"reviewed"}` to
-`.baton/markers.jsonl`, commits it alone on the default branch, and pushes it. From that line on
+**Baton records the round, not you**: when you return, this leg's `close` writes the round
+into the ticket's own frontmatter — `station: reviewed`, `next_leg: address`, the claim's nonce —
+commits the ticket alone on the default branch, and pushes it. From that record on
 the sync holds `address` **waiting on the owner** — one conversation per round, not one per sync —
 until the amendment's push lands and the ticket moves back to `spec-open`. Do not write, amend or
-delete that line. If the PR is closed without merging, the ticket keeps waiting on the owner:
+delete that state. If the PR is closed without merging, the ticket keeps waiting on the owner:
 closing a PR answers no finding, so the owner reopens it, or files a fresh request.
 
 ## The conversation
@@ -71,6 +71,8 @@ closing a PR answers no finding, so the owner reopens it, or files a fresh reque
   what changed — and ask whether to push. **Only on their yes**: commit on the PR's branch (with
   explicit paths, never `git add -A`; add commits, never rewrite the branch's history), push once
   with every answer in it, reply on the threads you fixed naming the commit, and end the session.
+
+Record the round under the ticket's own `## address` heading when you write in the ticket; this leg's close checks no heading — its record is the frontmatter state, and its work is the PR.
 
 ## Do not
 

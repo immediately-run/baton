@@ -38,13 +38,15 @@ fix.**
 
 ## Record and hand on
 
-- Add `## Prevention` to the bug ticket: the class, the options with costs, the recommendation.
+- Add `## prevent` to the bug ticket: the class, the options with costs, the recommendation.
   Keep it to one screen.
 - If the recommendation is anything but "nothing", the choice is the owner's: file a `decision`
   ticket whose question is "which prevention for <class>?", with your options, and name it here.
   If it is "nothing", record that too. A class that keeps recurring while each instance is judged
   "nothing" is exactly what someone needs to see.
 - Set the bug ticket's `status:` to `done`. Commit the files together to the default branch.
+
+Your work lands under the ticket's own `## prevent` heading — write it if it is not there; the close checks it is.
 
 ## Do not
 

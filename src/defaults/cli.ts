@@ -23,10 +23,14 @@ import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticket
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
 import { parseSource, printSource } from './course-source';
-import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, MARKERS_FILE, parseMarkers, type Marker } from './course-markers';
+import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, closeTicket, closesByTicket, closesOfCommits, exec, machineOf, setMachineKeys, stationsTickets, ticketsBranch } from './ticket-state';
+
+/** The retired markers file's path (B-100): the sync no longer reads it — `baton repo
+ *  migrate-markers` does, once, and deletes it. */
+const MARKERS_FILE_RETIRED = join('.baton', 'markers.jsonl');
 import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from './courses';
 import { readItems } from './read-items';
-import { ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
+import { parseFrontmatter, ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
 // LC_ALL=C on every git call (B-93, round 4): git translates its messages, and the two shapes
 // remoteSlug quiets are matched by their words — under a German catalog 'not a git repository'
@@ -294,11 +298,22 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     }
   }
   const facts: PrFact[] = args.factsFile ? (JSON.parse(readFileSync(args.factsFile, 'utf8')) as PrFact[]) : readsPrs ? await githubFacts(root, log, owns, [...siblings.values()]) : [];
-  // The closing markers the marker courses' legs committed (R-BTN-83), as the checkout has them.
-  const markersFile = join(root, MARKERS_FILE);
-  const markerLines: Marker[] = existsSync(markersFile)
-    ? parseMarkers(readFileSync(markersFile, 'utf8'), (line, why) => log(`baton: ${MARKERS_FILE}:${line} skipped — ${why}`))
-    : [];
+
+  // B-100: the ticket is the record. One traversal of the repository's history groups every
+  // `baton:close <id> <leg>` commit by ticket; each live ticket's closes — oldest first — are
+  // attached to its opaque `course` blob, which the station functions read, with its
+  // frontmatter's machine state beside them (a migration's record, or a hand-edited file: git's
+  // history is the authority, never the working tree). No second input, no shared file: a
+  // checkout git cannot answer for has no close history, and its frontmatter state stands.
+  const closeCommits = closesByTicket((args) => git(root, ...args));
+  for (const t of result.tickets) {
+    if (closedIds.has(t.id)) continue;
+    const commits = closeCommits.get(t.id) ?? [];
+    const fm = existsSync(join(root, t.path)) ? parseFrontmatter(readFileSync(join(root, t.path), 'utf8')) : null;
+    if (!commits.length && fm?.station === undefined) continue;
+    const closes = closesOfCommits((args) => git(root, ...args), t.path, t.id, commits);
+    t.course = { ...(t.course ?? {}), closes, ...machineOf(fm) };
+  }
 
   // Each course's stations, markers and course data: its own sync.mjs, else its standard
   // course's default (courses.ts). The function sees its own course's tickets alone.
@@ -311,7 +326,7 @@ async function readBoard(root: string, batonJson: BatonJson, args: SyncArgs, log
     if (!existsSync(courseFile)) throw new Error(`.baton/courses/${c.id}/course.json is missing — run \`baton repo init --course ${c.id}\``);
     const course = JSON.parse(readFileSync(courseFile, 'utf8')) as { legs?: Record<string, unknown> };
     const branchPatterns = [c.branch_pattern ?? DEFAULT_BRANCH_PATTERN, ...(c.previous_branch_pattern ? [c.previous_branch_pattern] : [])];
-    const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, markers: markerLines, branchPatterns, graph: course };
+    const fnCtx = { ...ctx, course: c.id, repository, tickets: result.tickets.filter((t) => t.course_id === c.id), closed: closedIds, done: doneIds, facts, branchPatterns, graph: course };
     const syncMjs = syncMjsOf(c.id);
     if (c.source) checkSource(c, readFileSync(courseFile, 'utf8'), existsSync(syncMjs));
     const standard = builtIn(c.id);
@@ -377,6 +392,106 @@ async function asResult(call: () => Promise<Record<string, any>>): Promise<Recor
     if (e instanceof BatonRefusal) return { ok: false, code: e.code };
     throw e;
   }
+}
+
+/** `baton repo migrate-markers [--root DIR]` (B-100): the one-time migration that folds a
+ * retired `.baton/markers.jsonl` into its tickets — the marker courses' state moved into the
+ * ticket, and a board still holding in-flight lines is translated once, before the release that
+ * stops reading the file. Each live ticket's lines are **replayed as closes**: one
+ * `baton:close <ticket> <leg>` commit per line, writing the line's station, queued leg and
+ * claim into the ticket's frontmatter, in order — so the ticket's history afterwards is what a
+ * native close would have left (the fold, `create-spec`'s interactive-leg records, the rounds
+ * counts all read it unchanged), and the final frontmatter is the last line's state. A
+ * repository's own `create-spec` lines replay the same way (their tickets' state is not in the
+ * forge); lines of closed tickets or PR-course tickets are dropped, named. The last commit
+ * deletes the file. A push refused because the branch moved leaves the commits local, named,
+ * for a pull and re-push. */
+export async function migrateMarkersMain(argv: string[], io: { root?: string; log?: (l: string) => void } = {}): Promise<number> {
+  const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
+  const root = io.root ?? (argv.includes('--root') ? argv[argv.indexOf('--root') + 1] : process.cwd());
+  const batonJsonPath = join(root, '.baton', 'baton.json');
+  if (!existsSync(batonJsonPath)) throw new Error(`${root} has no .baton/baton.json — run \`baton repo init\` first`);
+  const batonJson = JSON.parse(readFileSync(batonJsonPath, 'utf8')) as BatonJson;
+  const file = join(root, MARKERS_FILE_RETIRED);
+  if (!existsSync(file)) {
+    log('baton: no .baton/markers.jsonl — nothing to migrate');
+    return 0;
+  }
+  // The retired file's reader, kept here alone: the sync no longer parses it, and this command
+  // exists to read it once more and delete it.
+  const lines: { ticket: string; leg: string; reached: string; next?: string | null; claim?: string | null }[] = [];
+  readFileSync(file, 'utf8').split('\n').forEach((raw, i) => {
+    const text = raw.trim();
+    if (text === '') return;
+    let m: unknown;
+    try {
+      m = JSON.parse(text);
+    } catch {
+      log(`baton: .baton/markers.jsonl:${i + 1} skipped — not JSON`);
+      return;
+    }
+    const v = m as { ticket?: unknown; leg?: unknown; reached?: unknown };
+    if (typeof v.ticket !== 'string' || typeof v.leg !== 'string' || typeof v.reached !== 'string') {
+      log(`baton: .baton/markers.jsonl:${i + 1} skipped — no ticket, leg and reached`);
+      return;
+    }
+    lines.push(m as typeof lines[number]);
+  });
+  const gitRun = (args: string[]): string => exec('git', args, root);
+  const branch = gitRun(['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (branch === 'HEAD') {
+    log('baton: this checkout is detached — nothing was written. Check out the branch the board syncs, then run the migration there.');
+    return 1;
+  }
+  const settings: MarkdownSettings = { items: batonJson.items, default_course: batonJson.default_course, repos: batonJson.repos };
+  const result = existsSync(join(root, '.baton', 'tickets.mjs'))
+    ? await ((await import(`${pathToFileURL(join(root, '.baton', 'tickets.mjs')).href}?at=${git(root, 'rev-parse', 'HEAD')}`)) as { default: { tickets: (ctx: unknown) => Promise<TicketsResult> } }).default.tickets({ root, settings })
+    : ticketsMarkdown(readItems(root, settings.items), settings);
+  const closedIds = new Set(result.closed.map((c) => c.id));
+  const byTicket = new Map<string, typeof lines>();
+  for (const l of lines) byTicket.set(l.ticket, [...(byTicket.get(l.ticket) ?? []), l]);
+  const changed: string[] = [];
+  const dropped: string[] = [];
+  for (const t of result.tickets) {
+    const mine = byTicket.get(t.id);
+    if (mine == null) continue;
+    byTicket.delete(t.id);
+    const standard = builtIn(t.course_id);
+    const interactive = t.course_id === 'create-spec'; // its marker legs' state is not in the forge (round 1, finding 4)
+    if (closedIds.has(t.id) || (standard == null && !interactive) || (standard != null && standard.reads === 'prs' && !interactive)) {
+      dropped.push(t.id);
+      continue;
+    }
+    const path = join(root, t.path);
+    if (!existsSync(path)) {
+      dropped.push(t.id);
+      log(`baton: ${t.id}'s lines dropped — its file ${t.path} is not in this checkout`);
+      continue;
+    }
+    let text = readFileSync(path, 'utf8');
+    for (const line of mine) {
+      text = setMachineKeys(text, { station: line.reached, next_leg: line.next ?? null, claim: line.claim ?? null });
+      writeFileSync(path, text);
+      gitRun(['add', '--', t.path]);
+      gitRun(['commit', '--no-gpg-sign', '-qm', `baton:close ${t.id} ${line.leg}`, '--', t.path]);
+    }
+    changed.push(t.id);
+    log(`baton: ${t.id} → ${mine.length} close(s) replayed, station ${mine.at(-1)!.reached}`);
+  }
+  for (const id of byTicket.keys()) dropped.push(id);
+  for (const id of dropped) log(`baton: ${id}'s lines dropped — ${closedIds.has(id) ? 'the ticket is closed' : 'not a live ticket on a course this fold covers'}`);
+  rmSync(file);
+  // Only what the migration touched (round 1, finding 10) — never `-A`.
+  gitRun(['add', '--', MARKERS_FILE_RETIRED, ...changed.map((id) => result.tickets.find((t) => t.id === id)!.path)]);
+  gitRun(['commit', '--no-gpg-sign', '-qm', 'baton: markers.jsonl folded into the tickets (B-100)', '--', MARKERS_FILE_RETIRED, ...changed.map((id) => result.tickets.find((t) => t.id === id)!.path)]);
+  try {
+    gitRun(['push', 'origin', `HEAD:${branch}`]);
+  } catch {
+    log(`baton: the push was refused — the branch moved. The migration commits are local on ${branch}: pull --rebase, push, and the board's next sync reads the tickets.`);
+    return 1;
+  }
+  log(`baton: ${changed.length} ticket(s) folded, ${dropped.length} dropped — .baton/markers.jsonl is gone`);
+  return 0;
 }
 
 /** One sync (§7.1), its decisions the vendored `syncOnce` (R-BTN-37: the code S-BTN-12 and
@@ -749,12 +864,13 @@ function stubSource(b: BuiltIn, course: string, leg: string): string {
   // A leg whose close writes a line on a PR may name that PR after its answer (B-29): a ticket's
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
-  const closeFrom = b.reads === 'prs' ? ['prClose', 'pr-close.ts'] : ['markerClose', 'course-markers.ts'];
-  // `prClose`'s marker legs write their line through course-markers.ts's own git plumbing
-  // (`commitMarkerOnDefault`), so a PR course's close names that module too — one implementation,
-  // for a line the sync must find on the default branch. (B-96's review round 2: the import is
-  // for the stubs' own module tree; the close hands the checkout's default branch in itself.)
-  const closeHelpers = b.reads === 'prs' ? `\nimport { markersBranch } from ${JSON.stringify(source('course-markers.ts'))};` : '';
+  const closeFrom = b.reads === 'prs' ? ['prClose', 'pr-close.ts'] : ['closeTicket', 'ticket-state.ts'];
+  // `prClose`'s marker legs (create-spec's interactive converse and address) write the ticket's
+  // own frontmatter through ticket-state.ts's git plumbing (`closeTicket`), so a PR course's
+  // close names that module too — one implementation, for a state the sync must find on the
+  // default branch. (B-96's review round 2: the import is for the stubs' own module tree; the
+  // close hands the checkout's default branch in itself.)
+  const closeHelpers = b.reads === 'prs' ? `\nimport { ticketsBranch } from ${JSON.stringify(source('ticket-state.ts'))};` : '';
   const values = ask ? ask.values.join(' or ') : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, ${verify ? 'readFileSync, ' : ''}rmSync, writeFileSync } from 'node:fs';

@@ -43,7 +43,7 @@ line each with its evidence.
 
 ## 3. Then
 
-- **Everything passes:** add `## Outcome` to this ticket — what was verified, and where it runs
+- **Everything passes:** add `## verify` to this ticket — what was verified, and where it runs
   — set its `status:` to `done`, and commit `VERIFY.md` and the ticket together to the default
   branch. Your last line is `shipped`.
 - **Something fails:** file one fix ticket per cause, not per symptom, as `file` filed the
@@ -52,7 +52,9 @@ line each with its evidence.
   criteria. Commit them with `VERIFY.md`. Your last line is `building`: this leg runs again when
   the fixes close.
 - **This is the third verification and something still fails:** do not file more fixes. Write
-  the failures up under `## Decision needed` in this ticket for the owner — ship as is, or plan
+  the failures up under a `### Decision needed` packet inside your `## verify` section for the owner — ship as is, or plan
   a next round — and your last line is `building`.
 
 Do not change product code in this leg; a fix is a ticket.
+
+Your work lands under the ticket's own `## verify` heading — write it if it is not there; the close checks it is.

@@ -20,19 +20,19 @@ ticket at `spec-open` and a fresh claim takes the `review` leg.
 > `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
 > your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95).
 
-## The marker Baton writes for you
+## The record Baton writes for you
 
 `converse` is the leg that opens the specification's PR, and it runs as the owner's own session —
 a process Baton neither launches nor watches. Its one durable record that the conversation has
-begun is a line in the repository's marker file, `.baton/markers.jsonl`, which every sync reads.
-**Baton writes that line, not you**: when you return, this leg's `close` appends
-`{"ticket": "<the ticket's bare id>","leg":"converse","reached":"requested","next":"review"}` to
-the file, commits it alone on the default branch, and pushes it. Do not write, amend or delete it
-(see `## Do not`).
+begun is the machine state in the ticket's own frontmatter (`station: requested`,
+`next_leg: converse`), which every sync reads from the ticket's history. **Baton writes that
+record, not you**: when you return, this leg's `close` writes it into the ticket file, commits
+the ticket alone on the default branch as `baton:close <the ticket's bare id> converse`, and
+pushes it. Do not write, amend or delete it (see `## Do not`).
 
-From that line on, the sync offers `converse` **waiting on the owner** rather than ready, sync
+From that record on, the sync offers `converse` **waiting on the owner** rather than ready, sync
 after sync, until the specification's PR exists: this leg runs once, not once per sync. If the
-owner's session ends before the PR is open, the line stands and the ticket waits; the next
+owner's session ends before the PR is open, the record stands and the ticket waits; the next
 conversation continues from the branch it pushed, and the reviewer sees one PR either way. If the
 session's PR is closed without merging, the ticket stays waiting on the owner — closing the PR is
 no answer the board can read, and a second `converse` would be a second conversation — so the owner
@@ -47,7 +47,8 @@ prompt:
 > Follow the `## The conversation` section of `.baton/courses/create-spec/legs/converse.md` in this
 > checkout for ticket `<ticket id>`; its file is named by `BATON_TICKET_FILE`, or under the
 > repository's ticket directory. You and I will design one specification together, then you open
-> its PR. Do not write the `.baton/markers.jsonl` line for this ticket: Baton's close writes it.
+> its PR. Do not write the ticket's `station:`/`next_leg:`/`claim:` frontmatter: Baton's close
+> writes it.
 
 Once Baton launches interactive legs itself, the runner sends the link to the session instead —
 "the runner sends the link once B-34 lands" — and the conversation's rules and where the work
@@ -105,14 +106,16 @@ carries, in an order the corpus already uses:
 - **Release the claim**: the leg's stub has to see its agent return. When the PR is open and
   pushed, exit the agent session (the prompt's harness exits on its own: it has nothing left to
   read). If the owner stops before the PR is open, say so and exit anyway — Baton's close commits
-  the marker, the ticket waits at `requested`, and nothing is lost: the next conversation continues
+  the record, the ticket waits at `requested`, and nothing is lost: the next conversation continues
   from the branch.
+
+Record the conversation under the ticket's own `## converse` heading when you write in the ticket; this leg's close checks no heading — its record is the frontmatter state, and its work is the PR.
 
 ## Do not
 
-- Write, amend or delete the `.baton/markers.jsonl` line for this ticket: Baton's `close` writes
-  it, and it is what tells the sync the conversation is under way. A line you add would be a
-  second one, or a second conversation.
+- Write, amend or delete the ticket's machine frontmatter (`station:`, `next_leg:`, `claim:`):
+  Baton's `close` writes it, and it is what tells the sync the conversation is under way. A state
+  you push would be a forged one, or a second conversation.
 - Open a second PR for the ticket, or rewrite a branch an earlier attempt pushed: continue it.
 - Write code in this session. This course produces a specification; building it is another
   ticket's course.

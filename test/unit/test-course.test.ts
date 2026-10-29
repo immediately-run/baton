@@ -103,7 +103,7 @@ describe('baton test-course', () => {
     expect(v).toEqual([expect.objectContaining({ rule: 'moves-back', message: expect.stringContaining('T-7') })]);
   }, 60_000);
 
-  it('a no-op agent_command fails a PR course\'s start leg wherever the course is filed; the marker courses are exempt (B-81)', async () => {
+  it('a no-op agent_command fails a PR course\'s start leg wherever it is filed; a marker course\'s close that accepts a mangled ticket fails the kit (B-81, B-100)', async () => {
     // docs' own course id, sourced from create-pr (B-33): still a PR course, wherever it is filed.
     const dir = mkdtempSync(join(tmpdir(), 'baton-kit-noop-'));
     dirs.push(dir);
@@ -129,9 +129,16 @@ describe('baton test-course', () => {
     expect(await checkCourse(await readInputs(dir, 'docs-pr', { base: null }))).toEqual([]);
     rmSync(join(dir, '.baton', 'courses', 'docs-pr'), { recursive: true, force: true });
     // A marker course reports its agent's reached by design, and the core checks that against
-    // the course graph: the no-op run is not its rule.
+    // the course graph: the no-op run is not its rule. Its close is the boundary (B-100): one
+    // that accepts a ticket with no heading for its leg fails the kit; one that refuses passes.
     const markers = of('bug-report', BUG_REPORT_COURSE, null);
     scripts(markers, BUG_REPORT_COURSE.legs, 'export async function run() { return { reached: "traced", next: "origin" }; }');
+    expect(await checkCourse(await readInputs(dir, 'bug-report', { base: null }))).toEqual([
+      expect.objectContaining({ rule: 'no-op', message: expect.stringContaining("legs/trace.mjs's close accepted a ticket with no '## trace' heading") }),
+    ]);
+    for (const leg of Object.keys(BUG_REPORT_COURSE.legs)) {
+      writeFileSync(join(markers, `${leg}.mjs`), 'export async function run() { return { reached: "traced", next: "origin" };\n}\nexport async function handoff() { return null; }\nexport async function close() { throw new Error("the ticket has no \'## trace\' heading"); }\n');
+    }
     expect(await checkCourse(await readInputs(dir, 'bug-report', { base: null }))).toEqual([]);
   }, 60_000);
 

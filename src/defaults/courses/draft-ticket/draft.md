@@ -41,3 +41,5 @@ its own ticket too.
 
 Write the draft(s) under `## Draft` in the request, not as ticket files yet: a draft is not on
 the board until the check files it. Commit the ticket file alone to the default branch.
+
+Your work lands under the ticket's own `## draft` heading — write it if it is not there; the close checks it is.

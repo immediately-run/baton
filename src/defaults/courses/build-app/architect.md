@@ -90,3 +90,5 @@ helping the owner settle `product/<ticket id>/ARCHITECTURE.md`.
   `plan` leg.
 - Write no product code in this session; a scratch prototype is deleted when the question is
   answered.
+
+Your work lands under the ticket's own `## architect` heading — write it if it is not there; the close checks it is.

@@ -1,7 +1,7 @@
 // S-BTN-104 the standard courses (BATON_SPEC §15 S-BTN-104, R-BTN-131; B-28): a fresh repository
 // runs `baton repo init`, then `--course bug-report` and `--course decision`, with three tickets —
 // one on each — and syncs with no course code of its own. The bug report's legs commit their
-// closing markers to `.baton/markers.jsonl`; the decision's owner answers in the ticket's
+// closing state into their own tickets (B-100); the decision's owner answers in the ticket's
 // `answer:`. Must hold: each ticket starts at its course's start with its start leg queued; the
 // bug report follows its markers to `closed` (a marker that is not an edge, and a malformed line,
 // change nothing; the first marker written by the real close from a claim-shaped ticket id), its
@@ -10,12 +10,12 @@
 // facts at all. Node only: it writes a real repository and runs git.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
-import { markerClose } from '../../src/defaults/course-markers';
+import { closeTicket, setMachineKeys } from '../../src/defaults/ticket-state';
 import { ORIGIN, rows, setClock, syncToken } from '../helpers';
 
 const T0 = Date.parse('2026-10-18T12:00:00Z');
@@ -34,13 +34,32 @@ class Repo {
   write(path: string, text: string): void {
     writeFileSync(join(this.dir, path), text);
   }
-  /** One closing marker, as a marker course's `close` commits it (R-BTN-83). */
-  marker(ticket: string, leg: string, reached: string, next: string | null): void {
-    appendFileSync(join(this.dir, '.baton', 'markers.jsonl'), `${JSON.stringify({ ticket, leg, reached, next, claim: 'n' })}\n`);
+  /** One close, as a marker course's `close` commits it (R-BTN-83, B-100): the leg's machine
+   *  state written into the ticket's own frontmatter, committed alone under `baton:close`. */
+  close(file: string, ticket: string, leg: string, reached: string, next: string | null): void {
+    const path = join(this.dir, 'tickets', file);
+    const was = existsSync(path) ? readFileSync(path, 'utf8') : `---\nid: ${ticket}\ntitle: ${ticket}\n---\n\n`;
+    writeFileSync(path, setMachineKeys(was, { station: reached, next_leg: next, claim: 'n' }));
+    execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', this.dir, 'commit', '-qm', `baton:close ${ticket} ${leg}`], { stdio: 'ignore' });
+  }
+  /** A commit whose subject says `baton:close` but whose ticket carries no station: the history
+   *  fold's to skip, silently, as a malformed marker line once was. */
+  emptyClose(file: string, ticket: string, leg: string): void {
+    const path = join(this.dir, 'tickets', file);
+    const was = existsSync(path) ? readFileSync(path, 'utf8') : `---\nid: ${ticket}\ntitle: ${ticket}\n---\n\n`;
+    writeFileSync(path, `${was}\n(prose only, no machine state.)\n`);
+    execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', this.dir, 'commit', '-qm', `baton:close ${ticket} ${leg}`], { stdio: 'ignore' });
   }
   commit(): void {
     execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
     execFileSync('git', ['-C', this.dir, 'commit', '--allow-empty', '-qm', 'step'], { stdio: 'ignore' });
+  }
+  /** The checkout as a sync sees it: main, including what a real close pushed there. */
+  pull(): void {
+    execFileSync('git', ['-C', this.dir, 'fetch', '-q', 'origin'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', this.dir, 'reset', '-q', '--hard', 'origin/main'], { stdio: 'ignore' });
   }
   /** One sync through the local host; `facts` false passes no recorded facts (and no forge token). */
   async sync(facts = true): Promise<void> {
@@ -80,8 +99,8 @@ describe('S-BTN-104 the standard courses', () => {
     expect(await init(repo.dir, '--course', 'bug-report')).toBe(0);
     expect(await init(repo.dir, '--course', 'decision')).toBe(0);
     repo.write('tickets/t1.md', '---\nid: T-1\ntitle: Build it\n---\n');
-    repo.write('tickets/b1.md', '---\nid: B-1\ntitle: The save button does nothing\ncourse: bug-report\n---\n');
-    repo.write('tickets/d1.md', '---\nid: D-1\ntitle: Which prevention?\ncourse: decision\n---\n');
+    repo.write('tickets/b1.md', '---\nid: B-1\ntitle: The save button does nothing\ncourse: bug-report\n---\n\n## trace\n\nWhat the trace found.\n\n## origin\n\nWhere it began.\n\n## dedupe\n\nThe dedupe verdict.\n\n## fold\n\nThe fold.\n\n## prevent\n\nThe prevention weighed.\n');
+    repo.write('tickets/d1.md', '---\nid: D-1\ntitle: Which prevention?\ncourse: decision\n---\n\n## prepare\n\nThe packet.\n');
     repo.commit();
     await repo.sync();
     expect(await rows('SELECT id, course_id FROM tickets ORDER BY id')).toEqual([
@@ -92,13 +111,15 @@ describe('S-BTN-104 the standard courses', () => {
     expect(await stationOf('D-1')).toMatchObject({ station: 'raised', next_leg: 'prepare' });
 
     // The bug report's first two legs close — the first through the real close, with the claim's
-    // repository-qualified id — then a marker that is no edge and a malformed line.
+    // repository-qualified id — then a close that is no edge, and one whose ticket carries no
+    // machine state at all (the history fold's to skip, as a malformed line once was).
     execFileSync('git', ['-C', repo.dir, 'push', '-q', 'origin', 'main'], { stdio: 'ignore' });
-    await markerClose({ checkout: repo.dir, ticket: { id: 'docs:B-1', home: 'docs' }, leg: 'trace', claim: { nonce: 'n1' } }, { reached: 'traced', next: 'origin' });
-    repo.marker('B-1', 'origin', 'explained', 'dedupe');
-    repo.marker('B-1', 'prevent', 'closed', null); // prevent does not leave `explained`
-    appendFileSync(join(repo.dir, '.baton', 'markers.jsonl'), 'not a marker\n');
-    repo.marker('D-1', 'prepare', 'asked', 'carry-out');
+    await closeTicket({ checkout: repo.dir, ticket: { id: 'docs:B-1', home: 'docs', path: 'tickets/b1.md' }, leg: 'trace', claim: { nonce: 'n1' } }, { reached: 'traced', next: 'origin' });
+    repo.pull();
+    repo.close('b1.md', 'B-1', 'origin', 'explained', 'dedupe');
+    repo.close('b1.md', 'B-1', 'prevent', 'closed', null); // prevent does not leave `explained`
+    repo.emptyClose('b1.md', 'B-1', 'prevent');
+    repo.close('d1.md', 'D-1', 'prepare', 'asked', 'carry-out');
     repo.commit();
     await later();
     await repo.sync();
@@ -107,15 +128,15 @@ describe('S-BTN-104 the standard courses', () => {
     expect(await nextOf('D-1')).toEqual([{ leg: 'carry-out', state: 'waiting', waiting_on: 'owner' }]);
 
     // The owner answers; the bug report is a duplicate, folded, and its prevention weighed.
-    repo.write('tickets/d1.md', '---\nid: D-1\ntitle: Which prevention?\ncourse: decision\nanswer: b\n---\n');
-    repo.marker('B-1', 'dedupe', 'duplicate', 'fold');
+    repo.write('tickets/d1.md', '---\nid: D-1\ntitle: Which prevention?\ncourse: decision\nanswer: b\n---\n\n## prepare\n\nThe packet.\n');
+    repo.close('b1.md', 'B-1', 'dedupe', 'duplicate', 'fold');
     repo.commit();
     await later();
     await repo.sync();
     expect(await nextOf('D-1')).toEqual([{ leg: 'carry-out', state: 'ready', waiting_on: null }]);
     expect(await stationOf('B-1')).toMatchObject({ station: 'duplicate', next_leg: 'fold' });
-    repo.marker('B-1', 'fold', 'folded', 'prevent');
-    repo.marker('B-1', 'prevent', 'closed', null);
+    repo.close('b1.md', 'B-1', 'fold', 'folded', 'prevent');
+    repo.close('b1.md', 'B-1', 'prevent', 'closed', null);
     repo.commit();
     await later();
     await repo.sync();
