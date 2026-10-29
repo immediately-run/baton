@@ -6,7 +6,7 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
-import { ASKS, COURSE_ID as LEG_ID, DECISION_ID, DECISIONS_MAX, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG } from './validate';
+import { ASKS, COURSE_ID as LEG_ID, DECISION_ID, DECISIONS_MAX, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE } from './validate';
 import type { Step } from './graph';
 
 /** One factory-state item, as the sync posts it (`docs/scripts/factory-state.mjs`). Only the
@@ -211,7 +211,7 @@ function checkInterim(p: BoardPayload) {
     if (it.order != null && !Number.isFinite(it.order)) throw new BatonError('invalid-params', `${it.id}: order must be a number`);
     list(it.tags, /^[A-Za-z0-9-]{1,64}$/, `${it.id}: tags`);
     // B-104 (R-BTN-121/174): a clause may name a typed capability — `<type>:<value>`.
-    list(it.requires, new RegExp(`^(?:${NAME.source}|[a-z][a-z0-9-]{0,31}:[A-Za-z0-9:._/@-]{1,128})$`), `${it.id}: requires`);
+    list(it.requires, new RegExp(`^(?:${NAME.source}|${HOLDING_TYPE}:${HOLDING_VALUE})$`), `${it.id}: requires`);
     list(it.dependsOn, ID, `${it.id}: dependsOn`);
     list(it.blockedBy, ID, `${it.id}: blockedBy`);
     list(it.repos, REPO, `${it.id}: repos`);

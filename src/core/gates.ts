@@ -150,9 +150,11 @@ export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, p
   // it and granted like any capability (R-BTN-121 as amended).
   const held = capabilitiesOf(worker.declared);
   const granted = grant ? new Set(grant.capabilities) : null;
+  // R-BTN-58: a grant entry `<type>:*` admits every holding of that type.
+  const admits = (capability: string) => granted ? granted.has(capability) || granted.has(`${capability.split(':')[0]}:*`) : true;
   const derived = new Set(worker.derived?.[ticket.repository] ?? []);
   for (const need of new Set([...capabilitiesOf(ticket.requires), ...(leg.requires ?? [])])) {
-    const isHolding = need.startsWith('runner:') || (granted ? granted.has(need) : true);
+    const isHolding = need.startsWith('runner:') || admits(need);
     if ((!held.has(need) || !isHolding) && !derived.has(need)) return refuse(4);
   }
 

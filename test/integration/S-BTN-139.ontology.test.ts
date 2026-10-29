@@ -219,7 +219,9 @@ describe('S-BTN-144: why-not walks the canonical proof', () => {
     const fleet = fleetRes.json as unknown as { blocks?: { kind: string; ref: string; why?: { why: string; needs: string[]; missing: string[]; chain: string[] } }[] };
     const fleetRow = (fleet.blocks ?? []).find((b) => b.kind === 'capability' && b.ref === 'capability:code-generation-llm');
     expect(fleetRow).toBeDefined();
-    expect(fleetRow!.why).toMatchObject({ why: 'not-derived', needs: ['dependency:claude-code', 'key:anthropic'], missing: [], chain: expect.arrayContaining(['codegen']) });
+    expect(fleetRow!.why).toMatchObject({ why: 'not-derived', needs: ['dependency:claude-code', 'key:anthropic'], chain: expect.arrayContaining(['codegen']) });
+    expect(fleetRow!.why).not.toHaveProperty('missing'); // omitted for the fleet (R-BTN-174)
+    expect(fleetRow!.why).not.toHaveProperty('ungranted');
     // The worker's own answer names what IT lacks: the key. A granted key's session reads it
     // (rule 7: the token fixture is not granted), so grant one and read as its worker.
     const k = await makeKey('ssh-ed25519', 'b104-why');
@@ -264,6 +266,131 @@ describe('S-BTN-144: why-not walks the canonical proof', () => {
     const row = (out.blocks ?? []).find((b) => b.kind === 'capability');
     expect(row?.why?.why).toBe('not-derived');
     expect(row?.why?.needs).toEqual(expect.arrayContaining(['key:zai']));
+  });
+});
+
+describe('round one\u2019s fixes, pinned', () => {
+  beforeEach(async () => {
+    await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.A, {
+      ontology: { builtin: 'baton@1', program },
+      state: { items: [item('R3-9002', ['capability:code-generation-llm'])] },
+      ready: ['R3-9002'],
+    }));
+  });
+
+  it('A1: an interim credential is bounded by its allow-list — a declared outsider is refused rule 4', async () => {
+    // vm-a's allow-list (the fixture's VENUE) leaves out human-operator; declaring it is
+    // recorded (§11.1's refusal is gone) and rule 4 still refuses what the allow-list excludes.
+    // The ready ticket's clause names the literal, so the refusal is rule 4's and no other's.
+    await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.A, {
+      state: { items: [item('R3-9002', ['human-operator'])] },
+      ready: ['R3-9002'],
+    }));
+    const w = await register('vm-a', { capabilities: ['human-operator'] });
+    const res = await claimItem('vm-a', w.secret, { ticket_id: 'docs:R3-9002' });
+    expect([res.json.rule, res.json.rule_code]).toEqual([4, 'missing-capability']);
+    // And a name an allow-list carries still passes rule 4 — the mac credential's list
+    // includes human-operator, so its declaration is within the boundary.
+    const ok = await register('mac', { capabilities: ['human-operator'] });
+    const pass = await claimItem('mac', ok.secret, { request_id: 'r1-a1-ok', ticket_id: 'docs:R3-9002' });
+    expect(pass.json).toMatchObject({ ticket_id: 'docs:R3-9002' });
+  });
+
+  it('B1: a grant naming key:* admits every key holding (R-BTN-58), and it derives', async () => {
+    const admin = await makeKey('ssh-ed25519', 'b104-r1-admin');
+    await setAdminKeys(admin);
+    const k = await makeKey('ssh-ed25519', 'b104-r1-key');
+    const grant = await keyCall(admin, '/v1/admin/grants', { repository: 'docs', public_key: k.publicKey, hostname: 'b104-r1-host', capabilities: ['key:*', 'dependency:*'] });
+    expect(grant.status, JSON.stringify(grant.json)).toBe(200);
+    const secret = 'b104-r1-secret';
+    const created = Math.floor((await withCore((c) => c.now())) / 1000);
+    const body = JSON.stringify({ hostname: 'b104-r1-host', session_name: 'b104-r1', harness: 'opencode', kind: 'vm', secret_hash: await sha256Hex(secret), billing: { 'zai-coding-plan': 'zai' }, capabilities: ['key:anthropic', 'dependency:claude-code'], tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }] });
+    const hb = await hostCall(await signedRequest(k, `${ORIGIN}/v1/runner/heartbeat`, { created, body }));
+    const hbBody = (await hb.json()) as { worker_id: number };
+    expect(hb.status, JSON.stringify(hbBody)).toBe(200);
+    const workerId = hbBody.worker_id;
+    const req = JSON.stringify({ request_id: 'req-r1-b1-keywildcard', ticket_id: 'docs:R3-9002' });
+    const claim = await hostCall(await signedRequest(k, `${ORIGIN}/v1/runner/claim`, { created: Math.floor((await withCore((c) => c.now())) / 1000), body: req, headers: { 'X-Worker-Secret': secret } }));
+    expect(claim.status).toBe(200);
+    expect(await derivedOf(workerId)).toContain('capability:code-generation-llm');
+  });
+
+  it('A2: a limited set is retried once its digest changes — a new program re-derives', async () => {
+    await rows(`INSERT INTO baton_settings (key, value) VALUES ('ontology_test_bounds', ?)
+                ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify({ matches: 1 }));
+    const w = await register('vm-a', { capabilities: ['key:anthropic', 'dependency:claude-code'] });
+    expect((await claimItem('vm-a', w.secret, { ticket_id: 'docs:R3-9002' })).json).toMatchObject({ rule: 4 });
+    expect((await rows<{ limited: number }>('SELECT limited FROM worker_derived_inputs WHERE worker_id = ?', w.id))[0].limited).toBe(1);
+    // The bound restored: the digest did not change, so the limited set still stands.
+    await rows(`DELETE FROM baton_settings WHERE key = 'ontology_test_bounds'`);
+    expect((await claimItem('vm-a', w.secret, { request_id: 'r1-a2-same', ticket_id: 'docs:R3-9002' })).json).toMatchObject({ rule: 4 });
+    // A new program changes the digest: the evaluation runs again and derives.
+    const extended = structuredClone(program);
+    extended.entries.push({ id: 'extra-fact', fact: ['model_class', 'review'] });
+    await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.A, {
+      ontology: { builtin: 'baton@1', program: extended },
+      state: { items: [item('R3-9002', ['capability:code-generation-llm'])] },
+      ready: ['R3-9002'],
+    }));
+    await refresh();
+    expect((await claimItem('vm-a', w.secret, { request_id: 'r1-a2-new', ticket_id: 'docs:R3-9002' })).json).toMatchObject({ ticket_id: 'docs:R3-9002' });
+    expect(await derivedOf(w.id)).toContain('capability:code-generation-llm');
+  });
+
+  it('A3: a capability end removes the holding and re-derives in the same transaction (S-BTN-146\u2019s row)', async () => {
+    const w = await register('vm-a', { capabilities: ['key:anthropic', 'dependency:claude-code'] });
+    const claim = await claimItem('vm-a', w.secret, { ticket_id: 'docs:R3-9002' });
+    expect(claim.json).toMatchObject({ ticket_id: 'docs:R3-9002' });
+    expect(await derivedOf(w.id)).toContain('capability:code-generation-llm');
+    // The leg reports the key dead: the holding goes, the sets re-evaluate at once.
+    const ended = await endClaim('vm-a', w.secret, claim.json.claim_id, { end_reason: 'released:blocked', prerequisite: { kind: 'capability', ref: 'key:anthropic' } });
+    expect(ended.status).toBe(200);
+    expect(await rows('SELECT 1 FROM worker_capabilities WHERE worker_id = ? AND capability = ?', w.id, 'key:anthropic')).toEqual([]);
+    // The sets re-evaluated in the end's transaction (R-BTN-126): the key gone, nothing derives,
+    // and the fresh inputs row stands over the new digest — never a stale one over empty rows.
+    expect(await derivedOf(w.id)).toEqual([]);
+    const inputs = await rows<{ input_digest: string; limited: number }>('SELECT input_digest, limited FROM worker_derived_inputs WHERE worker_id = ?', w.id);
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0].limited).toBe(0);
+    // The next claim finds nothing derived (rule 4) — the end's re-evaluation is what rule 4 reads.
+    await refresh();
+    const claim2 = await claimItem('vm-a', w.secret, { request_id: 'r1-a3-two', ticket_id: 'docs:R3-9002' });
+    expect(claim2.json).toMatchObject({ rule: 4 });
+  });
+
+  it('B9: a blocked end naming a capability the worker does not declare is invalid-prerequisite', async () => {
+    const w = await register('vm-a', { capabilities: ['key:anthropic', 'dependency:claude-code'] });
+    const claim = await claimItem('vm-a', w.secret, { ticket_id: 'docs:R3-9002' });
+    expect(claim.json).toMatchObject({ ticket_id: 'docs:R3-9002' });
+    const res = await endClaim('vm-a', w.secret, claim.json.claim_id, { end_reason: 'released:blocked', prerequisite: { kind: 'capability', ref: 'not-declared:anywhere' } });
+    expect(res.json.code).toBe('invalid-prerequisite');
+    // The claim ended a failed attempt, and the ticket is claimable again after a sync.
+    expect((await rows<{ end_reason: string }>('SELECT end_reason FROM claims WHERE id = ?', claim.json.claim_id))[0].end_reason).toBe('released:cannot-finish:transient');
+  });
+
+  it('A6/B3: a post with no ontology field while entries attach route choices refuses the unit', async () => {
+    const registry = structuredClone(board.states.A.registry) as Record<string, unknown>[];
+    registry[0].route_choices = { implement: ['no-such-choice'] };
+    await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.A, { registry }));
+    expect((await rows<{ reason: string }>('SELECT reason FROM ontology_refusals'))[0].reason).toBe('route-attachment');
+  });
+
+  it('A7: a refused unit keeps the accepted non-empty attachments a post after their acceptance', async () => {
+    const admin = await makeKey('ssh-ed25519', 'b104-r7-admin');
+    await setAdminKeys(admin);
+    // A program with a route choice, attached and accepted.
+    const withChoice = structuredClone(program);
+    (withChoice as Record<string, unknown>).route_choices = [{ id: 'pick-model', alternatives: [{ id: 'opus', needs: ['model:claude-opus-5-5'] }] }];
+    const registryOk = structuredClone(board.states.A.registry) as Record<string, unknown>[];
+    registryOk[0].route_choices = { implement: ['pick-model'] };
+    const accepted = await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.A, { ontology: { builtin: 'baton@1', program: withChoice }, registry: registryOk }));
+    expect(accepted.status, JSON.stringify(await accepted.json())).toBe(200);
+    expect((await rows<{ route_choices_json: string }>('SELECT route_choices_json FROM courses'))[0].route_choices_json, JSON.stringify(await rows('SELECT reason, detail FROM ontology_refusals'))).toContain('pick-model');
+    // A refused unit (a program the validator refuses) must not erase it.
+    const bad = { ...structuredClone(withChoice), entries: [...structuredClone(withChoice.entries), { id: 'late-holds', head: ['derived', 'capability:late'], body: [['holds', '$k']] }] };
+    await syncCall('/v1/sync/board', payload(sha.D, sha.C, board.states.A, { ontology: { builtin: 'baton@1', program: bad }, registry: registryOk }));
+    expect((await rows<{ reason: string }>('SELECT reason FROM ontology_refusals'))[0].reason).toBe('program');
+    expect((await rows<{ route_choices_json: string }>('SELECT route_choices_json FROM courses'))[0].route_choices_json).toContain('pick-model');
   });
 });
 

@@ -48,8 +48,14 @@ const PREFIX = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MODEL = /^[A-Za-z0-9._/:-]{1,200}$/;
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** A typed holding (R-BTN-174, B-104): `<type>:<value>` — the type a course type such as `key`,
- * the value R-BTN-175's constant alphabet, the whole at most the constant's 128. */
-const HOLDING = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9:._/@-]{1,128}$/;
+ * the value R-BTN-175's constant alphabet, the whole at most the constant's 128. The ONE home
+ * of the pattern (round 1, B11): every reader of a holding's shape imports it, and the grant
+ * site composes its `<type>:*` wildcard from the same pieces.
+ */
+export const HOLDING_TYPE = '[a-z][a-z0-9-]{0,31}';
+export const HOLDING_VALUE = '[A-Za-z0-9:._/@-]{1,128}';
+const HOLDING = new RegExp(`^${HOLDING_TYPE}:${HOLDING_VALUE}$`);
+export { HOLDING };
 const ACTIVITY_ID = /^[A-Za-z0-9._:-]{1,64}$/;
 /** §6.8: a transcript path — no `..` segment is checked separately. */
 const TRANSCRIPT_PATH = /^[A-Za-z0-9._/-]{1,256}$/;
@@ -523,8 +529,9 @@ export interface End {
  *  course-defined `detail` (§10.4 free text core stores and shows but never reads); `reached`, the
  *  station the claim rests at (R-BTN-71); `next`, the queued leg (R-BTN-83); and an optional
  *  pointer to the evidence, pushed first (R-BTN-8). */
-/** A capability name as a declaration carries it (R-BTN-121). */
-const CAPABILITY_NAME = /^[a-z0-9:-]{1,128}$/;
+/** A capability or holding name as a declaration carries it (R-BTN-121; R-BTN-174's branch:
+ * a lost holding may be any typed label, `model:glm-5.3` included). */
+const CAPABILITY_NAME = new RegExp(`^(?:${NAME.source}|${HOLDING.source.slice(1, -1)})$`);
 export function checkEnd(body: unknown): End {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;

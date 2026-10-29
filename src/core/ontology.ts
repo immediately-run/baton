@@ -237,7 +237,12 @@ export function parseOntology(v: unknown, bytes: number): Program {
   const violations: OntologyViolation[] = [];
   const entries: Entry[] = [];
   const ids = new Set<string>();
-  const total = (v.entries as unknown[]).length + (Array.isArray(v.route_choices) ? (v.route_choices as unknown[]).length : 0);
+  // At most 512 entries and alternatives counted together (R-BTN-175) — a route choice
+  // counts each of its alternatives.
+  const alternatives = Array.isArray(v.route_choices)
+    ? (v.route_choices as { alternatives?: unknown[] }[]).reduce((n, rc) => n + (Array.isArray(rc.alternatives) ? rc.alternatives.length : 0), 0)
+    : 0;
+  const total = (v.entries as unknown[]).length + alternatives;
   if (total > BOUNDS.entriesMax) bad(`at most ${BOUNDS.entriesMax} entries and alternatives together (R-BTN-175)`);
   for (const [i, raw] of (v.entries as unknown[]).entries()) {
     const at = `entries[${i}]`;
@@ -877,14 +882,28 @@ export function evaluate(
   const over = () => counter.matches > bounds.matches || (bounds.atoms != null && counter.atoms > bounds.atoms);
 
   // Seed: the fixed strata's stored facts (a maximal evaluation runs them itself), then
-  // holds, sorted — the only core-formed input a gate evaluation reads.
-  for (const [p, tuples] of fixed ?? []) relations.set(p, [...tuples]);
+  // holds, sorted — the only core-formed input a gate evaluation reads. Both are facts the
+  // evaluator never re-derives, so their keys enter `seen` and their atoms the counter — a
+  // later evaluation reads them exactly once (R-BTN-175: "later evaluations read them as
+  // facts"), never twice.
+  for (const [p, tuples] of fixed ?? []) {
+    relations.set(p, [...tuples]);
+    for (const tuple of tuples) {
+      const k = keyOf(p, tuple);
+      if (!seen.has(k)) {
+        seen.add(k);
+        counter.atoms++;
+      }
+    }
+  }
   relations.set('holds', [...holds].sort().map((v) => [v] as Tuple));
   for (const t of relations.get('holds')!) {
     const k = keyOf('holds', t);
-    seen.add(k);
-    proofs.set(k, { entry: 'holds', body: [] });
-    counter.atoms++;
+    if (!seen.has(k)) {
+      seen.add(k);
+      proofs.set(k, { entry: 'holds', body: [] });
+      counter.atoms++;
+    }
   }
   if (over()) return { ok: false, crossed: bounds.atoms != null && counter.atoms > bounds.atoms ? 'atoms' : 'matches' };
 
@@ -902,10 +921,12 @@ export function evaluate(
 
   for (const stratum of placed.strata) {
     // A runner's gate evaluation runs only the gate strata; the fixed strata's tuples arrive
-    // from `fixed` as facts (R-BTN-175), and the route-choice strata are B-105's, over other
-    // inputs. A maximal evaluation (fixed null) runs everything.
+    // from `fixed` as facts (R-BTN-175: "later evaluations read them as facts"), and the
+    // route-choice strata are B-105's, over other inputs. A maximal evaluation (fixed null)
+    // runs everything. A stratum is fixed exactly when every predicate it writes is fixed —
+    // SCCs partition cleanly, so there is no mixed stratum to half-run.
     const preds = new Set<string>([...stratum.facts.map((e) => e.head.pred), ...stratum.rules.map((e) => e.head.pred)]);
-    if (fixed && ![...preds].some((p) => placed.gatePredicates.has(p))) continue;
+    if (fixed && [...preds].every((p) => placed.fixedPredicates.has(p))) continue;
     const own = preds;
     for (const e of [...stratum.facts, ...stratum.rules]) if (!relations.has(e.head.pred)) relations.set(e.head.pred, []);
     // The stratum's facts are inserted in merged entry order before its round 0.
@@ -961,13 +982,26 @@ export function evaluate(
         counter.atoms++;
         return true;
       };
+      // R-BTN-175's semi-naive letter: in a later round the literal at i reads the last
+      // round's new tuples, literals BEFORE it the tuples from before that round (the
+      // relations the last round's join left — the carried delta is not in them), and later
+      // literals every tuple.
+      const carriedPreds = new Map<string, Set<string>>();
+      for (const d of carried) {
+        if (!carriedPreds.has(d.pred)) carriedPreds.set(d.pred, new Set());
+        carriedPreds.get(d.pred)!.add(keyOf(d.pred, d.tuple));
+      }
+      const beforeRound = (pred: string): Tuple[] => {
+        const skip = carriedPreds.get(pred);
+        return skip ? (relations.get(pred) ?? []).filter((tuple) => !skip.has(keyOf(pred, tuple))) : relations.get(pred) ?? [];
+      };
       for (const { entry, order } of rules) {
         const positives = order.filter((o) => o.lit.t === 'atom');
         for (let i = 0; i < positives.length; i++) {
           const lit = positives[i].lit;
           if (lit.t !== 'atom' || !own.has(lit.atom.pred)) continue; // only the stratum's own predicates carry the delta
           const read = (pred: string, pos: number): Tuple[] =>
-            pos === i ? carried.filter((d) => d.pred === pred).map((d) => d.tuple) : relations.get(pred) ?? [];
+            pos === i ? carried.filter((d) => d.pred === pred).map((d) => d.tuple) : pos >= 0 && pos < i ? beforeRound(pred) : relations.get(pred) ?? [];
           for (const head of derive(entry, order, read, relations, counter)) {
             if (addRound(entry.head.pred, head.tuple, { entry: entry.id, body: head.body })) round.push({ pred: entry.head.pred, tuple: head.tuple });
           }

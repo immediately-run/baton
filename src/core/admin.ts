@@ -9,7 +9,7 @@ import { BatonError, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId, HOLDING_TYPE } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkRegistration, seedEntries, tierPosition, type Registration, type Registry } from './registry';
@@ -464,7 +464,7 @@ export class Admin {
     const label = b.label === undefined ? null : typeof b.label === 'string' && LABEL.test(b.label) ? b.label : bad('label', 'must be a short label');
     // B-104 (R-BTN-121/174): a grant names capabilities and may name a typed holding —
     // `<type>:<value>`, as `capability:*` and `key:*` always could by their type.
-    const raw = Array.isArray(b.capabilities) && b.capabilities.length <= CAPABILITIES_MAX && b.capabilities.every((x) => typeof x === 'string' && (CAPABILITY.test(x) || /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9:.*_/@-]{1,128}$/.test(x)))
+    const raw = Array.isArray(b.capabilities) && b.capabilities.length <= CAPABILITIES_MAX && b.capabilities.every((x) => typeof x === 'string' && (CAPABILITY.test(x) || new RegExp(`^${HOLDING_TYPE}:[A-Za-z0-9:.*_/@-]{1,128}$`).test(x)))
       ? (b.capabilities as string[]) : bad('capabilities', `must be at most ${CAPABILITIES_MAX} capability names`);
     // Stored expanded (§4): a role as its capabilities; human-operator as itself — B-104 (rule 6
     // retired, R-BTN-121 as amended): a capability like any other, granted by owners and

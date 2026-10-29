@@ -77,10 +77,19 @@ class Cursor {
     return { pred };
   }
   nafLiteral(): void {
+    // Default negation, with a boundary: 'notable(' is an atom, never 'not able(' (round 1,
+    // B12) — the separator is whitespace, so 'not' followed by a letter is an identifier's
+    // prefix and the literal is that atom itself.
+    const save = this.i;
     if (this.eat('not')) {
-      this.ws();
-      this.atom();
-      return;
+      const raw = this.s[this.i];
+      if (raw !== undefined && /[A-Za-z0-9_]/.test(raw)) {
+        this.i = save;
+      } else {
+        this.ws();
+        this.atom();
+        return;
+      }
     }
     // A comparison (term op term) starts where a term can: a quoted string, a V_ variable or
     // an integer. An identifier starts an atom.

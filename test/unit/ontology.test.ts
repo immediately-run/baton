@@ -5,7 +5,7 @@
 // decides — the entry order, the tie break, the counted bounds.
 import { describe, expect, it } from 'vitest';
 import {
-  BOUNDS, bodyOrder, canonicalJson, evaluate, maximalEvaluation, parseOntology,
+  BOUNDS, bodyOrder, canonicalJson, evaluate, maximalEvaluation, parseOntology, sha256Hex,
   validateOntology, whyNot, type Program,
 } from '../../src/core/ontology';
 
@@ -324,6 +324,67 @@ describe('whyNot', () => {
     if (!maximal.ok) throw new Error('maximal evaluation crossed its bound');
     const answer = whyNot(placed, maximal, new Set(), null, 'capability:not-in-program');
     expect(answer?.why).toBe('not-derivable');
+  });
+});
+
+describe("S-BTN-140's bounds class, each member probed (round 1, B10)", () => {
+  const probe = (v: unknown, what: string) => {
+    let refused = false;
+    try {
+      const p = parseOntology(json(v), JSON.stringify(v).length);
+      const r = validateOntology(p);
+      if (!r.ok) refused = true;
+      else {
+        const m = maximalEvaluation(r.placed);
+        if (!m.ok || m.check.violations.length) refused = true;
+      }
+    } catch {
+      refused = true;
+    }
+    expect(refused, what).toBe(true);
+  };
+  const cap = (id: string) => ({ id, head: ['derived', 'capability:x'], body: [['holds', '$k'], ['o', '$k']] });
+
+  it('refuses over 512 entries, 9 body literals, 5 variables, and a 64 KB program', () => {
+    probe({ version: 1, derived: ['capability'], entries: Array.from({ length: 513 }, (_, i) => ({ id: `f${i}`, fact: ['p', `x${i}`] })) }, 'over 512 entries');
+    probe({
+      version: 1, derived: ['capability'],
+      entries: [
+        { id: 'p', fact: ['p', 'x'] },
+        { id: 'r', head: ['derived', 'capability:x'], body: [['p', '$a'], ['p', '$b'], ['p', '$c'], ['p', '$d'], ['p', '$e'], ['p', '$f'], ['p', '$g'], ['p', '$h'], ['p', '$i']] },
+      ],
+    }, '9 body literals');
+    probe({
+      version: 1, derived: ['capability'],
+      entries: [
+        { id: 'p', fact: ['p', 'x', 'y', 'z', 'w'] },
+        { id: 'r', head: ['derived', 'capability:x'], body: [['p', '$a', '$b', '$c', '$d', '$e']] },
+      ],
+    }, '5 variables');
+    const huge = 'x'.repeat(65 * 1024);
+    probe({ version: 1, derived: ['capability'], entries: [{ id: 'p', fact: ['p', huge] }] }, 'a 64 KB program');
+  });
+
+  it('refuses 257 derived capabilities and a bad need; an empty demote_when; an encoding name in a body', () => {
+    probe({
+      version: 1, derived: ['capability'],
+      entries: Array.from({ length: 257 }, (_, i) => ({ id: `c${i}`, fact: ['derived', `capability:x${i}`] })),
+    }, '257 derived capabilities');
+    probe({ version: 1, derived: ['capability'], entries: [], route_choices: [{ id: 'rc', alternatives: [{ id: 'a', needs: ['credential:TOKEN'] }] }] }, 'a credential need');
+    probe({ version: 1, derived: ['capability'], entries: [], route_choices: [{ id: 'rc', alternatives: [{ id: 'a', needs: [], demote_when: [] }] }] }, 'an empty demote_when');
+    probe({
+      version: 1, derived: ['capability'],
+      entries: [{ id: 'r', head: ['derived', 'capability:x'], body: [['holds', '$k'], ['o', '$k'], ['route', '$k']] }],
+    }, 'an encoding name in a body');
+  });
+
+  it('sha256Hex matches known digests (the protocol-level hash, pinned)', () => {
+    expect(sha256Hex('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+    expect(sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    expect(sha256Hex('The quick brown fox jumps over the lazy dog')).toBe('d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592');
+    const long = 'a'.repeat(1000);
+    expect(sha256Hex(long)).toHaveLength(64);
+    expect(sha256Hex(long)).toBe(sha256Hex(long));
   });
 });
 

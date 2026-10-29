@@ -250,6 +250,12 @@ export class Courses {
         refused.push(e.id);
         continue;
       }
+      // A7 (round 1): a refused unit keeps every entry's previous attachments — read the
+      // stored value before the statement, never inside its arguments (a nested exec during
+      // argument binding trips the host's binder).
+      const routesJson = acceptedRoutes === undefined
+        ? this.c.store.exec<{ route_choices_json: string }>('SELECT route_choices_json FROM courses WHERE repository_id = ? AND id = ?', repo, e.id).toArray()[0]?.route_choices_json ?? '{}'
+        : JSON.stringify(acceptedRoutes.get(e.id) ?? {});
       this.c.store.exec(
         `INSERT INTO courses (repository_id, id, version, skill, course_json, leg_capabilities_json, step_kinds, min_worker_version, report_horizon_h, branch_pattern, previous_branch_pattern, route_choices_json)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -265,8 +271,12 @@ export class Courses {
         // the stored file. What rule 4 needs instead is derived beside it, from the one expansion
         // `graphOf` reads (`legNeedsOf`), for the candidate query's SQL — a view, kept in step with
         // the file by being written in the same statement.
+        // B-104 (round 1, A7): `acceptedRoutes === undefined` names a refused ontology unit —
+        // every entry keeps its previous attachments, so the value written is the one already
+        // stored (a no-op); an accepted unit's map names this post's attachments whole, and an
+        // entry absent from it carries none.
         repo, e.id, e.version, e.skill, JSON.stringify(e.course), JSON.stringify(legNeedsOf(e.course)), JSON.stringify(e.step_kinds), e.min_worker_version, e.report_horizon_h,
-        e.branch_pattern, e.previous_branch_pattern, JSON.stringify(acceptedRoutes?.get(e.id) ?? {}));
+        e.branch_pattern, e.previous_branch_pattern, routesJson);
       this.c.store.exec('DELETE FROM course_refusals WHERE repository_id = ? AND course_id = ?', repo, e.id);
       // Immutable: a schema already held has the same digest (schemaViolations), so it is kept.
       for (const x of e.schemas) {

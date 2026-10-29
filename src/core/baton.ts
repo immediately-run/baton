@@ -318,12 +318,12 @@ export class BatonCore {
     // transactions, yielding to requests between turns; the fleet's views are recounted when
     // the cycle ends. Turn outside the transaction above: an evaluation commits alone, whether
     // or not a later part of the tick fails.
+    // R-BTN-174: the fleet's views are recounted when the cycle ends (B6, round 1: the closing
+    // turn wrote rows too) and armed for the next turn while one is still pending.
+    const before = this.ontologies.pendingCount();
     const ontologyDue = this.ontologies.alarmTurn();
-    if (ontologyDue != null) {
-      const changed = this.store.transaction(() => this.blocks.recount());
-      void changed;
-      await this.armBy(ontologyDue);
-    }
+    if (ontologyDue != null || before > 0) this.store.transaction(() => this.blocks.recount());
+    if (ontologyDue != null) await this.armBy(ontologyDue);
   }
 
   /** R-BTN-77: each repository's unblocked dispatch due now, queued to send after the commit. */
@@ -582,8 +582,11 @@ export class BatonCore {
       const advance = /^\/v1\/runner\/claims\/(\d+)\/advance$/.exec(p);
       if (m === 'POST' && advance) {
         const body = await readJson(req);
-        // R-BTN-174: an advance re-checks rule 4 against the current set, prepared the same way.
-        const prepared = this.claims.prepareSetsFor(workerId, null);
+        // R-BTN-174: an advance re-checks rule 4 against the CURRENT set — the claim's own
+        // repository targeted (A5/B4, round 1: a budget-2 untargeted pass leaves it unprepared
+        // beside a fresher repository and refuses a deriving holder on its own running claim).
+        const claimRepo = this.sql<{ ticket_id: string }>('SELECT ticket_id FROM claims WHERE id = ? AND worker_id = ?', Number(advance[1]), workerId)[0]?.ticket_id;
+        const prepared = this.claims.prepareSetsFor(workerId, claimRepo != null && claimRepo.includes(':') ? repositoryOf(claimRepo) : null);
         return json(tx(() => this.claims.advance(workerId, Number(advance[1]), body, prepared)));
       }
       if (m === 'POST' && p === '/v1/runner/adopt') {
@@ -593,6 +596,17 @@ export class BatonCore {
       const end = /^\/v1\/runner\/claims\/(\d+)\/end$/.exec(p);
       if (m === 'POST' && end) {
         const body = await readJson(req);
+        // R-BTN-126 (round 1, B9): a blocked end's ref must be a capability the worker
+        // declares — judged before the request's transaction, so the invalid end's recording
+        // (a failed attempt, ended transient) commits whether or not the answer is the error.
+        const prereq = (body as { prerequisite?: { kind?: string; ref?: string } }).prerequisite;
+        if ((body as { end_reason?: string }).end_reason === 'released:blocked' && prereq?.kind === 'capability') {
+          const declared = this.sql('SELECT 1 FROM worker_capabilities wc JOIN claims c ON c.worker_id = wc.worker_id WHERE c.id = ? AND c.worker_id = ? AND wc.capability = ?', Number(end[1]), workerId, prereq.ref);
+          if (!declared.length) {
+            this.store.transaction(() => this.claims.invalidPrerequisiteEnd(workerId, Number(end[1]), prereq.ref!));
+            throw new BatonError('invalid-prerequisite', `prerequisite: ${prereq.ref} is not a capability this worker declares (R-BTN-126)`);
+          }
+        }
         return json(tx(() => this.claims.end(workerId, Number(end[1]), body)));
       }
       if (m === 'POST' && p === '/v1/runner/readings') {
@@ -1023,9 +1037,12 @@ export class BatonCore {
       // applies — a refused unit keeps the previous program and the previous route_choices of
       // every entry where it changed, and the refusal is listed under Needs you.
       const unitRefusal = this.ontologies.acceptUnit(r, p.ontology, (p.registry ?? []).map((e) => ({ id: e.id, course: e.course, routeChoices: e.route_choices ?? null })), p.sha, at);
-      const acceptedRoutes = new Map((p.registry ?? [])
-        .filter((e) => e.route_choices != null && unitRefusal === null)
-        .map((e) => [e.id, e.route_choices!]));
+      // A7 (round 1): on a refused unit the map is undefined, not empty — an empty map wrote
+      // '{}' over every entry's previous attachments a post after the acceptance that stored
+      // them. Undefined means "not this post's to change": each entry keeps what it had.
+      const acceptedRoutes = unitRefusal === null
+        ? new Map((p.registry ?? []).filter((e) => e.route_choices != null).map((e) => [e.id, e.route_choices!]))
+        : undefined;
       // The course registry first (R-BTN-48, R-BTN-69): every ticket must name a course in
       // force, and a refused file with none to keep refuses the whole post.
       const refused = this.applyRegistry(r, p, rows.map(({ row }) => row.course_id), at, acceptedRoutes);

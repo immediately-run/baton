@@ -748,13 +748,19 @@ export class Blocks {
    *  comparison against what it declares and is granted, and its own usable instances. */
   forWorker(workerId: number, ticketId: string): WorkerAnswer {
     const w = this.fleet(workerId)[0] ?? {
-      id: workerId, repos: new Map<string, Set<string> | null>(), caps: new Set<string>(),
+      id: workerId, repos: new Map<string, Set<string> | null>(), caps: new Set<string>(), derived: new Map<string, Set<string>>(),
       uses: new Set(this.rows<{ instance: string }>('SELECT instance FROM worker_instances WHERE worker_id = ?', workerId).map((r) => r.instance)),
     };
     const repo = repositoryOf(ticketId);
     const now = this.c.now();
     const g = w.repos.get(repo);
-    const caps = g ? new Set([...w.caps].filter((c) => g.has(c))) : w.caps;
+    // B-104 (round 1, B8): the asking runner's own answer is rule 4's — H ∪ D(H), the grant's
+    // wildcards admitted, `runner:` beside — exactly what a claim of this ticket would read.
+    const grantAdmits = (c: string) => (g ? g.has(c) || g.has(`${c.split(':')[0]}:*`) : true);
+    const caps = new Set([
+      ...[...w.caps].filter((c) => c.startsWith('runner:') || grantAdmits(c)),
+      ...(w.derived.get(repo) ?? []),
+    ]);
     const blocks: Block[] = this.rows<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ? ORDER BY name', ticketId)
       .filter((r) => !caps.has(r.name)).map((r) => ({ kind: 'capability' as const, ref: r.name, since: now }));
     const info = this.resources();

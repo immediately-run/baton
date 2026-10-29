@@ -226,8 +226,12 @@ export class Claims {
    *  an ungranted capability, so the intersection moved into rule 4, where the grant bounds H);
    * the seed retires with R3-1240's grants. A bearer token keeps null's interim reach. */
   private grantsOf(credential: string, createdBy: string | null): WorkerFacts['grants'] {
-    if (!isGrantedKey(createdBy)) return null;
-    if (createdBy === 'seed') {
+    // B-104 (round 1, A1): an interim credential — a bearer token's policy or a BATON_KEYS seed
+    // (any key no owner or administrator granted) — is bound by its allow-list exactly as a
+    // granted key is by its grant, since §11.1's refusal of a heartbeat declaring an ungranted
+    // capability was deleted: rule 4's H = declared ∩ allow-list, on every repository it may
+    // reach. Never null — null meant unbounded, and nothing is unbounded any more.
+    if (!isGrantedKey(createdBy)) {
       const allowed = this.rows<{ allowed_capabilities: string }>('SELECT allowed_capabilities FROM credentials WHERE id = ?', credential)[0];
       const capabilities = allowed ? (JSON.parse(allowed.allowed_capabilities) as string[]) : [];
       return Object.fromEntries(this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL')
@@ -269,6 +273,21 @@ export class Claims {
     let spent = 0;
     for (const repo of ontologied) {
       if (spent >= budget && only === undefined) continue; // left out, not offered from a stale set
+      // A5 (round 1): only an evaluation that RAN spends budget — a set already current under
+      // this program and these holdings costs nothing, so a worker current everywhere is still
+      // prepared everywhere within the two-evaluation bound.
+      const program = this.c.ontologies?.programOf(repo);
+      if (program) {
+        const { holdings } = this.c.ontologies!.holdingsOf(w.id, repo);
+        const digest = this.c.ontologies!.inputDigest(program.digest, program.placed, holdings);
+        const stored = this.rows<{ input_digest: string }>('SELECT input_digest FROM worker_derived_inputs WHERE worker_id = ? AND repository_id = ?', w.id, repo)[0];
+        const current = stored?.input_digest === digest;
+        if (current && this.c.ontologies) {
+          w.derived[repo] = [...this.c.ontologies.derivedFor(w.id, repo) ?? []];
+          fresh.add(repo);
+          continue;
+        }
+      }
       const set = this.c.ontologies?.derivedFor(w.id, repo);
       if (set == null) continue;
       w.derived[repo] = [...set];
@@ -420,8 +439,9 @@ export class Claims {
                            AND (o.hold = 1 OR o.retry_after > :now))                                          -- rules 3, 10
            AND NOT EXISTS (SELECT 1 FROM ticket_blocks k WHERE k.ticket_id = w.id
                            AND (k.kind = 'ticket' OR (k.kind = 'decision' AND k.leg IN ('', a.leg))))         -- rule 1's blocks
-           AND (:granted = 0 OR EXISTS (SELECT 1 FROM worker_grants g WHERE g.credential_id = :credential
-                                        AND g.repository_id = w.repository_id AND g.revoked_at IS NULL))      -- rule 7
+           AND (EXISTS (SELECT 1 FROM worker_grants g WHERE g.credential_id = :credential
+                        AND g.repository_id = w.repository_id AND g.revoked_at IS NULL)                       -- rule 7
+                OR NOT EXISTS (SELECT 1 FROM worker_grants g2 WHERE g2.credential_id = :credential))          -- an interim credential reaches every repository (B-104, A1)
            AND NOT EXISTS (SELECT 1 FROM ticket_requires r WHERE r.ticket_id = w.id
                            AND r.name NOT IN (SELECT h.capability FROM (
                                 SELECT c.capability FROM worker_capabilities c                                 -- rule 4 (R-BTN-174, B-104): H union D(H) — holdings
@@ -430,7 +450,13 @@ export class Claims {
                                         OR c.capability IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j   -- holdings only, never a derivation; a grant that
                                                             WHERE g.credential_id = :credential AND g.repository_id = w.repository_id   -- names a derived capability admits a runner
                                                               AND g.revoked_at IS NULL)                                          -- that declares it directly.
-                                        OR (:granted = 0 AND c.capability IN (SELECT j.value FROM json_each((SELECT allowed_capabilities FROM credentials WHERE id = :credential)) j)))
+                                        OR EXISTS (SELECT 1 FROM worker_grants g2, json_each(g2.capabilities) j2                -- and <type>:* admits the type's holdings (R-BTN-58)
+                                                    WHERE g2.credential_id = :credential AND g2.repository_id = w.repository_id
+                                                      AND g2.revoked_at IS NULL AND j2.value LIKE '%:*'
+                                                      AND c.capability LIKE substr(j2.value, 1, length(j2.value) - 1) || '%')
+                                        OR (NOT EXISTS (SELECT 1 FROM worker_grants g3 WHERE g3.credential_id = :credential)    -- an interim credential: the allow-list is its
+                                            AND c.capability IN (SELECT j4.value FROM json_each((SELECT allowed_capabilities      -- grant (B-104, A1: nothing is unbounded)
+                                                                     FROM credentials WHERE id = :credential)) j4)))
                                 UNION
                                 SELECT d.capability FROM worker_derived d
                                  WHERE d.worker_id = :worker AND d.repository_id = w.repository_id) h))        -- D(H), read only from a current set (prepareSets)
@@ -444,7 +470,13 @@ export class Claims {
                                                       OR c.capability IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j
                                                                           WHERE g.credential_id = :credential AND g.repository_id = w.repository_id
                                                                             AND g.revoked_at IS NULL)
-                                                      OR (:granted = 0 AND c.capability IN (SELECT j.value FROM json_each((SELECT allowed_capabilities FROM credentials WHERE id = :credential)) j)))
+                                                              OR EXISTS (SELECT 1 FROM worker_grants g2, json_each(g2.capabilities) j2
+                                                                          WHERE g2.credential_id = :credential AND g2.repository_id = w.repository_id
+                                                                            AND g2.revoked_at IS NULL AND j2.value LIKE '%:*'
+                                                                            AND c.capability LIKE substr(j2.value, 1, length(j2.value) - 1) || '%')
+                                                      OR (NOT EXISTS (SELECT 1 FROM worker_grants g3 WHERE g3.credential_id = :credential)
+                                                          AND c.capability IN (SELECT j4.value FROM json_each((SELECT allowed_capabilities
+                                                                                                   FROM credentials WHERE id = :credential)) j4)))
                                               UNION
                                               SELECT d.capability FROM worker_derived d
                                                WHERE d.worker_id = :worker AND d.repository_id = w.repository_id) h)))
@@ -887,6 +919,17 @@ export class Claims {
     }
     this.finish(c.id, c.ticket_id, e.status, e.end_reason, `worker:${workerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next });
     return { ok: true };
+  }
+
+  /** R-BTN-126 (round 1, B9): the invalid blocked end, recorded in its own committed
+   * transaction by the route — the claim ends a failed attempt `released:cannot-finish:transient`,
+   * named for what the runner claimed to lose and does not hold. */
+  invalidPrerequisiteEnd(workerId: number, claimId: number, ref: string): void {
+    const c = this.rows<{ id: number; ticket_id: string }>('SELECT id, ticket_id FROM claims WHERE id = ? AND worker_id = ?', claimId, workerId)[0];
+    if (!c) return;
+    const item = this.item(c.ticket_id);
+    this.finish(claimId, c.ticket_id, 'released', 'released:cannot-finish:transient', `worker:${workerId}`,
+      { detail: `invalid-prerequisite: ${ref} is not declared`, reached: item?.station?.station ?? null, finished: false, evidence: null, next: null });
   }
 
   /**

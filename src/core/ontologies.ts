@@ -15,6 +15,15 @@ import type { BatonCore } from './baton';
 /** A board post's `ontology` field (§4.4): the merged program, or why the merge failed. */
 export type PostedOntology = { builtin?: string | null; program: unknown } | { error: string } | undefined;
 
+/** The legs a posted course file names (R-BTN-177's attachment check reads the posted file,
+ * not the stored one a post behind). */
+const legsOf = (course: unknown): string[] | undefined => {
+  if (!course || typeof course !== 'object' || Array.isArray(course)) return undefined;
+  const legs = (course as { legs?: unknown }).legs;
+  if (!legs || typeof legs !== 'object' || Array.isArray(legs)) return undefined;
+  return Object.keys(legs);
+};
+
 /** The alarm cycle's state, kept in `baton_settings.ontology_cycle` between ticks. */
 interface CycleState {
   started_at: number;
@@ -94,11 +103,23 @@ export class Ontologies {
    * accept as usual. Answers the refusal reason, or null when the unit is accepted (a unit
    * equal to the one in force changes nothing).
    */
-  acceptUnit(repo: string, posted: PostedOntology, entries: { id: string; course: unknown; routeChoices: Record<string, string[]> | null }[], snapshotSha: string, at: number): string | null {
+  acceptUnit(repo: string, posted: PostedOntology, entries: { id: string; course: unknown; routeChoices: Record<string, string[]> | null; postedLegs?: string[] }[], snapshotSha: string, at: number): string | null {
     if (posted === undefined) {
       // With no `ontology` field the repository has none (§5.9: only when the default branch's
-      // head holds `.baton/ontology.json`). A stored program stays until a post says otherwise
-      // — the file's removal travels as a merge's empty program, which the sync posts.
+      // head holds `.baton/ontology.json` — its deletion is a deliberate act, and the post says
+      // so by omitting the field), so a stored program goes. But the unit's course-entry side is
+      // still judged (S-BTN-155): a post with no field while entries attach route choices
+      // refuses the unit, the program and the entries' previous attachments kept.
+      const attaching = entries.some((e) => e.routeChoices != null && Object.keys(e.routeChoices).length > 0);
+      if (attaching) {
+        const reason = 'route-attachment: a post with no ontology field cannot attach route choices (R-BTN-174, S-BTN-155)';
+        this.recordRefusal(repo, 'route-attachment', reason, at);
+        return reason;
+      }
+      if (this.sql('SELECT 1 FROM ontologies WHERE repository_id = ?', repo).length) {
+        this.store.exec('DELETE FROM ontologies WHERE repository_id = ?', repo);
+        this.store.exec('DELETE FROM ontology_refusals WHERE repository_id = ?', repo);
+      }
       return null;
     }
     if ('error' in (posted as { error?: string })) {
@@ -110,7 +131,7 @@ export class Ontologies {
     const canonical = canonicalProgram(rawProgram);
     const digest = sha256Hex(canonical);
     const current = this.sql<{ digest: string }>('SELECT digest FROM ontologies WHERE repository_id = ?', repo)[0];
-    const attachments = entries.map((e) => ({ id: e.id, routeChoices: e.routeChoices })).filter((e) => e.routeChoices != null);
+    const attachments = entries.map((e) => ({ id: e.id, routeChoices: e.routeChoices, postedLegs: legsOf(e.course) })).filter((e) => e.routeChoices != null);
     const priorAttachments = new Map(this.sql<{ id: string; route_choices_json: string }>('SELECT id, route_choices_json FROM courses WHERE repository_id = ?', repo)
       .map((r) => [r.id, JSON.parse(r.route_choices_json) as Record<string, string[]>]));
     const unitChanged = !current || current.digest !== digest
@@ -161,7 +182,9 @@ export class Ontologies {
     // on a leg its course file has (R-BTN-174, R-BTN-177).
     const defined = new Set(placed.program.routeChoices.map((rc) => rc.id));
     for (const a of attachments) {
-      const legs = this.courseLegs(repo, a.id);
+      // The POSTED course file decides (S-BTN-155: a post may add a course or a leg together
+      // with its attachment); the stored file is the previous one, a post behind.
+      const legs = a.postedLegs ?? this.courseLegs(repo, a.id);
       for (const [leg, ids] of Object.entries(a.routeChoices!)) {
         if (!legs.includes(leg)) {
           const reason = `route-attachment: course ${a.id} attaches a route choice to ${leg}, which its course file lacks (R-BTN-177)`;
@@ -228,8 +251,16 @@ export class Ontologies {
       'SELECT w.credential_id, c.created_by FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE w.id = ?', workerId)[0];
     const declared = new Set(this.sql<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ?', workerId).map((r) => r.capability));
     if (!w) return { holdings: declared, grant: null };
-    const rows_ = this.sql<{ capabilities: string }>('SELECT capabilities FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', w.credential_id, repo);
-    if (!rows_.length) {
+    const grantRows = this.sql<{ capabilities: string }>('SELECT capabilities FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', w.credential_id, repo);
+    if (grantRows.length) {
+      // R-BTN-58: a grant entry `<type>:*` admits every holding of that type (round 1, B1) —
+      // exact match alone left a `key:*` grant holding nothing at all.
+      const grant = new Set<string>(JSON.parse(grantRows[0].capabilities) as string[]);
+      const admits = (c: string) => grant.has(c) || grant.has(`${c.split(':')[0]}:*`);
+      const runner = [...declared].filter((c) => c.startsWith('runner:'));
+      return { holdings: new Set([...[...declared].filter((c) => admits(c) || c.startsWith('runner:')), ...runner]), grant };
+    }
+    {
       // An interim credential — a bearer token's policy or a BATON_KEYS seed (R3-1240's
       // transition) — is bound by no grant; its allow-list is its grant, and B-104 moved that
       // check from the heartbeat's refusal into rule 4's H.
@@ -237,10 +268,6 @@ export class Ontologies {
       const allowed = new Set<string>(cred ? (JSON.parse(cred.allowed_capabilities) as string[]) : []);
       return { holdings: new Set([...declared].filter((c) => allowed.has(c))), grant: allowed };
     }
-    const grant = new Set<string>(JSON.parse(rows_[0].capabilities) as string[]);
-    // `runner:` capabilities count once declared (R-BTN-133), beside the grant.
-    const runner = [...declared].filter((c) => c.startsWith('runner:'));
-    return { holdings: new Set([...[...declared].filter((c) => grant.has(c) || c.startsWith('runner:')), ...runner]), grant };
   }
 
   /** The input digest (R-BTN-174): the SHA-256 of the program's digest and the sorted H
@@ -266,7 +293,8 @@ export class Ontologies {
     if (stored && stored.input_digest === digest) {
       return new Set(this.sql<{ capability: string }>('SELECT capability FROM worker_derived WHERE worker_id = ? AND repository_id = ?', workerId, repo).map((r) => r.capability));
     }
-    if (stored?.limited) return new Set(); // a limited set is not retried until the digest changes
+    // A limited evaluation is not retried while its digest stands (R-BTN-175) — the digest
+    // above did not match, so this is a new program or new holdings: evaluate again.
     const at = this.c.now();
     const fixed = new Map<string, (string | number)[][]>(this.fixedOf(p.digest, p.placed));
     const run = () => {
@@ -322,9 +350,10 @@ export class Ontologies {
    * counter the fleet views' ETags read. The column is R-BTN-99's proposal-era addition; until
    * it lands this writes the same event row the heartbeat's recount path leaves, and nothing
    * reads a stale view the recount does not already refresh. */
-  private bumpFleetVersion(repo: string): void {
-    this.store.exec(`INSERT INTO baton_settings (key, value) VALUES ('ontology_fleet_changed', ?)
-                     ON CONFLICT (key) DO UPDATE SET value = excluded.value`, `${repo}:${this.c.now()}`);
+  private bumpFleetVersion(_repo: string): void {
+    // Intentionally nothing: `board_head` carries no `fleet_version` yet (R-BTN-99's proposal-era
+    // column), and the capability recount after the cycle is the refresh — every fleet view is
+    // rebuilt from the tables, so no stale view survives it.
   }
 
   /** The fleet's why-not (R-BTN-174): no asking worker, so `missing` and `ungranted` are
@@ -333,7 +362,10 @@ export class Ontologies {
     const m = this.maximalOf(repo);
     if (!m) return null;
     const answer = whyNot(m.placed, m.maximal, new Set(), null, capability);
-    return answer ? { ...answer, missing: [], ungranted: [] } : null;
+    if (!answer) return null;
+    // The fleet answer omits `missing` and `ungranted` entirely (R-BTN-174).
+    const { missing: _m, ungranted: _u, ...rest } = answer;
+    return rest as WhyNot;
   }
 
   /** Why a capability is missing for a worker (R-BTN-174): advice, computed on read from the
@@ -341,11 +373,15 @@ export class Ontologies {
   whyNotFor(workerId: number, repo: string, capability: string, fleet: boolean): WhyNot | null {
     const m = this.maximalOf(repo);
     if (!m) return null;
-    const { holdings, grant } = this.holdingsOf(workerId, repo);
-    const answer = whyNot(m.placed, m.maximal, holdings, fleet ? null : grant, capability);
+    // Why-not wants the DECLARED set and the grant separately (A9, round 1): H collapses them,
+    // and `ungranted` — declared but not admitted — could never hold.
+    const declared = new Set(this.sql<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ?', workerId).map((r) => r.capability));
+    const { grant } = this.holdingsOf(workerId, repo);
+    const answer = whyNot(m.placed, m.maximal, declared, fleet ? null : grant, capability);
     if (answer && fleet) {
-      // The fleet answer omits `missing` (whose holdings the asker lacks).
-      return { ...answer, missing: [], ungranted: [] };
+      // The fleet answer OMITS `missing` and `ungranted` (R-BTN-174) — no asking runner.
+      const { missing: _m, ungranted: _u, ...rest } = answer;
+      return rest as WhyNot;
     }
     return answer;
   }
@@ -362,23 +398,29 @@ export class Ontologies {
       return null;
     }
     const state = this.cycleState();
-    const fresh = { ...state, remaining: pending.map((w) => w.id) };
-    let spent = state.matches_spent;
-    let done = 0;
+    // Each TURN spends at most 1,000,000 matches (R-BTN-174: "an alarm cycle is that run of
+    // back-to-back alarm turns: each spends at most 1,000,000 matches") — the budget is the
+    // turn's, so a cycle never stalls on a spent number carried across turns.
+    let spent = 0;
+    const remaining = [...state.remaining];
     for (const worker of pending) {
       if (CYCLE_MATCHES - spent < BOUNDS.gateMatches) break; // never start what the budget cannot finish
       this.derivedFor(worker.id, worker.repository_id);
       spent += BOUNDS.gateMatches; // the worst case a turn may spend on one evaluation
-      done++;
+      const at = remaining.indexOf(worker.id);
+      if (at >= 0) remaining.splice(at, 1);
     }
-    fresh.matches_spent = spent;
-    fresh.remaining = fresh.remaining.slice(done);
-    this.saveCycle(fresh);
+    this.saveCycle({ started_at: state.started_at, matches_spent: spent, remaining });
     if (!this.pendingWorkers().length) {
       this.closeCycle();
       return null;
     }
     return this.c.now() + 1_000;
+  }
+
+  /** How many workers' sets were not current at the last look (the alarm's recount decision). */
+  pendingCount(): number {
+    return this.pendingWorkers().length;
   }
 
   /** Live granted workers whose set is not current, smallest holdings first: the digest is
@@ -399,7 +441,7 @@ export class Ontologies {
       const digest = this.inputDigest(p.digest, p.placed, holdings);
       const stored = this.sql<{ input_digest: string; limited: number }>(
         'SELECT input_digest, limited FROM worker_derived_inputs WHERE worker_id = ? AND repository_id = ?', w.id, w.repository_id)[0];
-      if (stored && (stored.input_digest === digest || stored.limited)) continue;
+      if (stored && stored.input_digest === digest) continue; // current, or limited under this digest: not retried
       out.push({ id: w.id, repository_id: w.repository_id, size: holdings.size });
     }
     return out.sort((a, b) => a.size - b.size || a.id - b.id);
@@ -446,7 +488,14 @@ export class Ontologies {
   /** Drop a worker's stored sets — a grant change or a holding an end removed leaves them
    * not current by digest, and this clears the stale rows at once. */
   forget(workerId: number, repo: string | null): void {
-    if (repo) this.store.exec('DELETE FROM worker_derived WHERE worker_id = ? AND repository_id = ?', workerId, repo);
-    else this.store.exec('DELETE FROM worker_derived WHERE worker_id = ?', workerId);
+    // The inputs row goes with the rows: a digest standing over no rows would read the empty
+    // set as current (A3, round 1).
+    if (repo) {
+      this.store.exec('DELETE FROM worker_derived WHERE worker_id = ? AND repository_id = ?', workerId, repo);
+      this.store.exec('DELETE FROM worker_derived_inputs WHERE worker_id = ? AND repository_id = ?', workerId, repo);
+      return;
+    }
+    this.store.exec('DELETE FROM worker_derived WHERE worker_id = ?', workerId);
+    this.store.exec('DELETE FROM worker_derived_inputs WHERE worker_id = ?', workerId);
   }
 }

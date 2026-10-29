@@ -13,8 +13,7 @@ export { DEFAULT_TRANSCRIPT_REPOS };
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import {
   checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, checkSuspension, bad, HOSTNAME, isGrantedKey,
-  type ActivityReport, type Heartbeat,
-} from './validate';
+  type ActivityReport, type Heartbeat, HOLDING } from './validate';
 
 import type { Config, Row, SqlValue, Store } from './ports';
 const CLOSE_GRACE_MS = 10 * 60_000; // §6.9: closing updates are accepted 10 minutes after a claim ends
@@ -157,7 +156,7 @@ export class WorkerApi {
       if (typeof name !== 'string' || !HOSTNAME.test(name)) throw new Error(`${at}.name must be a hostname`);
       // B-104 (R-BTN-121/174): the allow-list names capabilities and may name a typed holding —
       // `<type>:<value>`, the seed's grant for the interim reach it stands in for.
-      if (!Array.isArray(allowed_capabilities) || allowed_capabilities.some((c) => typeof c !== 'string' || !(/^[a-z0-9-]{1,64}$/.test(c) || /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9:._/@-]{1,128}$/.test(c)))) {
+      if (!Array.isArray(allowed_capabilities) || allowed_capabilities.some((c) => typeof c !== 'string' || !(/^[a-z0-9-]{1,64}$/.test(c) || HOLDING.test(c)))) {
         throw new Error(`${at}.allowed_capabilities must be capability or holding names`);
       }
       if (keys.some((k) => k.id === parsed.fingerprint)) throw new Error(`${at}: the key is listed twice`);
