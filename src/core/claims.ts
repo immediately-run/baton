@@ -47,6 +47,8 @@ export interface Ctx {
   intake?: (repo: string, course: string) => 'open' | 'closed';
   /** R-BTN-108: a schema by id for a repository — the `std:` library's or the repository's. */
   schema?: (repo: string, id: string) => Schema | null;
+  /** §5.9 (B-104): the ontology store, for the reads that bring derived sets current. */
+  ontologies?: import('./ontologies').Ontologies;
 }
 
 interface WorkerFacts {
@@ -69,6 +71,13 @@ interface WorkerFacts {
   isolation: 'attached' | 'process' | 'session';
   /** R-BTN-58: its key's grants by repository, or null for a key no owner granted (gates.ts). */
   grants: Record<string, { capabilities: string[]; max_tier: number | null }> | null;
+  /** R-BTN-174 (B-104): the repository's ontology's derived capabilities for this worker, by
+   *  repository, read only from a current set — `prepareSets` brings them up to date first. */
+  derived: Record<string, string[]>;
+  /** The repositories whose derived set is current (R-BTN-174): every one with no ontology is
+   *  current by definition; null when nothing was evaluated and none has an ontology, so the
+   *  candidate query filters nothing. */
+  fresh: Set<string> | null;
 }
 
 interface ItemFacts {
@@ -208,17 +217,94 @@ export class Claims {
       'SELECT repository_id AS repository, course_id AS course, version FROM worker_courses WHERE worker_id = ? ORDER BY repository_id, course_id', id);
     const tags = this.rows<{ tag: string }>('SELECT tag FROM worker_tags WHERE worker_id = ? ORDER BY tag', id).map((r) => r.tag);
     const { created_by, ...facts } = w;
-    return { ...facts, tier_ceilings: JSON.parse(w.tier_ceilings) as Record<string, string>, declared, courses, tags, grants: this.grantsOf(w.credential_id, created_by) };
+    return { ...facts, tier_ceilings: JSON.parse(w.tier_ceilings) as Record<string, string>, declared, courses, tags, grants: this.grantsOf(w.credential_id, created_by), derived: {}, fresh: null };
   }
 
   /** R-BTN-58: a granted key's grants in force by repository. A key an owner or administrator
-   *  registered works only where it is granted; a bearer token or a BATON_KEYS seed key is not
-   *  granted at all and keeps its interim reach until the seed retires (null). */
+   *  registered works only where it is granted. A BATON_KEYS seed key's allow-list is its grant
+   *  for every repository it may reach (B-104 deletes §11.1's refusal of a heartbeat declaring
+   *  an ungranted capability, so the intersection moved into rule 4, where the grant bounds H);
+   * the seed retires with R3-1240's grants. A bearer token keeps null's interim reach. */
   private grantsOf(credential: string, createdBy: string | null): WorkerFacts['grants'] {
-    if (!isGrantedKey(createdBy)) return null;
+    // B-104 (round 1, A1): an interim credential — a bearer token's policy or a BATON_KEYS seed
+    // (any key no owner or administrator granted) — is bound by its allow-list exactly as a
+    // granted key is by its grant, since §11.1's refusal of a heartbeat declaring an ungranted
+    // capability was deleted: rule 4's H = declared ∩ allow-list, on every repository it may
+    // reach. Never null — null meant unbounded, and nothing is unbounded any more.
+    if (!isGrantedKey(createdBy)) {
+      // 3-r3-1: ONE expansion, here at the source — an allow-list entry naming `<type>:*`
+      // admits the worker's declared holdings of that type, so every reader of the grant
+      // (gatesFor, holdingsOf, the candidate query, the fleet) sees the same set instead of
+      // gatesFor alone widening it.
+      const allowed = this.rows<{ allowed_capabilities: string }>('SELECT allowed_capabilities FROM credentials WHERE id = ?', credential)[0];
+      const listed = allowed ? (JSON.parse(allowed.allowed_capabilities) as string[]) : [];
+      const set = new Set(listed);
+      if (listed.some((c) => c.endsWith(':*'))) {
+        const declared = this.rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE credential_id IS NOT NULL AND worker_id IN (SELECT id FROM workers WHERE credential_id = ?)', credential).map((r) => r.capability);
+        for (const c of declared) if (listed.includes(`${c.split(':')[0]}:*`)) set.add(c);
+      }
+      const capabilities = [...set];
+      return Object.fromEntries(this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL')
+        .map((r) => [r.id, { capabilities, max_tier: null }]));
+    }
     return Object.fromEntries(this.rows<{ repository_id: string; capabilities: string; max_tier: number | null }>(
       'SELECT repository_id, capabilities, max_tier FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', credential)
       .map((g) => [g.repository_id, { capabilities: JSON.parse(g.capabilities) as string[], max_tier: g.max_tier }]));
+  }
+
+  /**
+   * R-BTN-174 (B-104): bring this worker's derived sets up to date for the reads that need
+   * them, in transactions of their own that commit whether or not the request succeeds — the
+   * route calls this BEFORE the request's transaction, and hands the enriched facts in. A
+   * claim, an advance or a why-not evaluates the one repository it concerns; a recommendation
+   * evaluates at most two repositories' sets that are not current and leaves out the legs of
+   * any repository whose set is still not current, rather than offer them from a stale set.
+   */
+  prepareSetsFor(workerId: number, wanted: string | null): WorkerFacts {
+    const w = this.worker(workerId);
+    this.prepareSets(w, wanted ? 1 : 2, wanted ? repositoryOf(wanted) : undefined);
+    return w;
+  }
+
+  private prepareSets(w: WorkerFacts, budget: number, only?: string): void {
+    if (!this.c.ontologies) {
+      w.fresh = null;
+      return;
+    }
+    const ontologied = this.rows<{ repository_id: string }>('SELECT DISTINCT repository_id FROM ontologies')
+      .map((r) => r.repository_id)
+      .filter((repo) => only === undefined || repo === only);
+    if (!ontologied.length) {
+      w.fresh = null;
+      return;
+    }
+    const fresh = new Set<string>(this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL').map((r) => r.id)
+      .filter((repo) => !ontologied.includes(repo)));
+    let spent = 0;
+    for (const repo of ontologied) {
+      if (spent >= budget && only === undefined) continue; // left out, not offered from a stale set
+      // A5 (round 1): only an evaluation that RAN spends budget — a set already current under
+      // this program and these holdings costs nothing, so a worker current everywhere is still
+      // prepared everywhere within the two-evaluation bound.
+      const program = this.c.ontologies?.programOf(repo);
+      if (program) {
+        const { holdings } = this.c.ontologies!.holdingsOf(w.id, repo);
+        const digest = this.c.ontologies!.inputDigest(program.digest, program.placed, holdings);
+        const stored = this.rows<{ input_digest: string }>('SELECT input_digest FROM worker_derived_inputs WHERE worker_id = ? AND repository_id = ?', w.id, repo)[0];
+        const current = stored?.input_digest === digest;
+        if (current && this.c.ontologies) {
+          w.derived[repo] = [...this.c.ontologies.derivedFor(w.id, repo) ?? []];
+          fresh.add(repo);
+          continue;
+        }
+      }
+      const set = this.c.ontologies?.derivedFor(w.id, repo);
+      if (set == null) continue;
+      w.derived[repo] = [...set];
+      fresh.add(repo);
+      spent++;
+    }
+    w.fresh = fresh;
   }
 
   /** A ticket's filter fields and where the head snapshot places it (R-BTN-33, R-BTN-70). */
@@ -320,7 +406,7 @@ export class Claims {
         `SELECT b.kind, b.leg FROM ticket_blocks b WHERE b.ticket_id = ? AND b.kind IN ('ticket', 'decision')
            AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))`, item.id),
     };
-    return gatesFor({ declared: w.declared, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase), phase, facts);
+    return gatesFor({ declared: w.declared, derived: w.derived, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase), phase, facts);
   }
 
   /** Rule 2's count (advice): active Baton claims on expedited tickets, not git in-progress. */
@@ -363,42 +449,62 @@ export class Claims {
                            AND (o.hold = 1 OR o.retry_after > :now))                                          -- rules 3, 10
            AND NOT EXISTS (SELECT 1 FROM ticket_blocks k WHERE k.ticket_id = w.id
                            AND (k.kind = 'ticket' OR (k.kind = 'decision' AND k.leg IN ('', a.leg))))         -- rule 1's blocks
-           AND (:granted = 0 OR EXISTS (SELECT 1 FROM worker_grants g WHERE g.credential_id = :credential
-                                        AND g.repository_id = w.repository_id AND g.revoked_at IS NULL))      -- rule 7
+           AND (EXISTS (SELECT 1 FROM worker_grants g WHERE g.credential_id = :credential
+                        AND g.repository_id = w.repository_id AND g.revoked_at IS NULL)                       -- rule 7
+                OR NOT EXISTS (SELECT 1 FROM worker_grants g2 WHERE g2.credential_id = :credential))          -- an interim credential reaches every repository (B-104, A1)
            AND NOT EXISTS (SELECT 1 FROM ticket_requires r WHERE r.ticket_id = w.id
-                           AND (r.name NOT IN (SELECT capability FROM worker_capabilities WHERE worker_id = :worker)
-                                OR (:granted = 1 AND r.name NOT IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j
-                                                                    WHERE g.credential_id = :credential AND g.repository_id = w.repository_id
-                                                                      AND g.revoked_at IS NULL))))             -- rule 4, within the grant
-           AND NOT EXISTS (SELECT 1 FROM courses k, json_each(k.leg_capabilities_json) l                           -- rule 4's leg input (R-BTN-120, B-86), the view the registry
-                           WHERE k.repository_id = w.repository_id AND k.id = w.course_id AND l.key = a.leg      -- derives from the one expansion: capabilities only
-                             AND EXISTS (SELECT 1 FROM json_each(l.value) q                                      -- A leg that asks for human-operator (R-BTN-121)
-                                         WHERE (q.value <> 'human-operator'                                                  -- asks for it literally, as rule 6 asks a ticket's —
-                                             AND (q.value NOT IN (SELECT capability FROM worker_capabilities WHERE worker_id = :worker)          -- declared, and granted when the key is
-                                               OR (:granted = 1 AND q.value NOT IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j  -- granted. Every other name is a capability,
-                                                                                     WHERE g.credential_id = :credential AND g.repository_id = w.repository_id   -- within the grant
-                                                                                       AND g.revoked_at IS NULL)))
-                                           OR (q.value = 'human-operator'                                                     -- asks for it literally, as rule 6 meets it:
-                                               AND NOT :human_operator                                                         -- declared by that name, and granted by that
-                                               OR (:granted = 1 AND NOT EXISTS (SELECT 1 FROM worker_grants g, json_each(g.capabilities) j  -- name when the key is granted (round 7, finding 0:
-                                                 WHERE g.credential_id = :credential AND g.repository_id = w.repository_id           -- the declaration alone let a key granted it
-                                                   AND g.revoked_at IS NULL AND j.value = 'human-operator'))))))                       -- on another repository pass)
+                           AND r.name NOT IN (SELECT h.capability FROM (
+                                SELECT c.capability FROM worker_capabilities c                                 -- rule 4 (R-BTN-174, B-104): H union D(H) — holdings
+                                 WHERE c.worker_id = :worker                                                    -- (declared within grant, runner: beside them) and what
+                                   AND (c.capability LIKE 'runner:%'                                        -- the repository's ontology derives. The grant bounds
+                                        OR c.capability IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j   -- holdings only, never a derivation; a grant that
+                                                            WHERE g.credential_id = :credential AND g.repository_id = w.repository_id   -- names a derived capability admits a runner
+                                                              AND g.revoked_at IS NULL)                                          -- that declares it directly.
+                                        OR EXISTS (SELECT 1 FROM worker_grants g2, json_each(g2.capabilities) j2                -- and <type>:* admits the type's holdings (R-BTN-58)
+                                                    WHERE g2.credential_id = :credential AND g2.repository_id = w.repository_id
+                                                      AND g2.revoked_at IS NULL AND j2.value LIKE '%:*'
+                                                      AND c.capability LIKE substr(j2.value, 1, length(j2.value) - 1) || '%')
+                                        OR (NOT EXISTS (SELECT 1 FROM worker_grants g3 WHERE g3.credential_id = :credential)    -- an interim credential: the allow-list is its
+                                            AND c.capability IN (SELECT j4.value FROM json_each((SELECT allowed_capabilities      -- grant (B-104, A1: nothing is unbounded)
+                                                                     FROM credentials WHERE id = :credential)) j4)))
+                                UNION
+                                SELECT d.capability FROM worker_derived d
+                                 WHERE d.worker_id = :worker AND d.repository_id = w.repository_id) h))        -- D(H), read only from a current set (prepareSets)
+           AND NOT EXISTS (SELECT 1 FROM courses k, json_each(k.leg_capabilities_json) l                           -- rule 4's leg input (R-BTN-120, B-86), read the same
+                           WHERE k.repository_id = w.repository_id AND k.id = w.course_id AND l.key = a.leg      -- way as the ticket's clause: H ∪ D(H), the one literal
+                             AND EXISTS (SELECT 1 FROM json_each(l.value) q                                     -- human-operator included — rule 6 is retired (R-BTN-121
+                                         WHERE q.value NOT IN (SELECT h.capability FROM (                        -- as amended): declared by that name, granted by that name.
+                                              SELECT c.capability FROM worker_capabilities c
+                                               WHERE c.worker_id = :worker
+                                                 AND (c.capability LIKE 'runner:%'
+                                                      OR c.capability IN (SELECT j.value FROM worker_grants g, json_each(g.capabilities) j
+                                                                          WHERE g.credential_id = :credential AND g.repository_id = w.repository_id
+                                                                            AND g.revoked_at IS NULL)
+                                                              OR EXISTS (SELECT 1 FROM worker_grants g2, json_each(g2.capabilities) j2
+                                                                          WHERE g2.credential_id = :credential AND g2.repository_id = w.repository_id
+                                                                            AND g2.revoked_at IS NULL AND j2.value LIKE '%:*'
+                                                                            AND c.capability LIKE substr(j2.value, 1, length(j2.value) - 1) || '%')
+                                                      OR (NOT EXISTS (SELECT 1 FROM worker_grants g3 WHERE g3.credential_id = :credential)
+                                                          AND c.capability IN (SELECT j4.value FROM json_each((SELECT allowed_capabilities
+                                                                                                   FROM credentials WHERE id = :credential)) j4)))
+                                              UNION
+                                              SELECT d.capability FROM worker_derived d
+                                               WHERE d.worker_id = :worker AND d.repository_id = w.repository_id) h)))
            AND COALESCE(w.tier_position, json_array_length(p.tiers) - 1)
                <= json_extract(:ceiling, '$."' || w.repository_id || '"')                                      -- rule 5, per repository
-           AND (w.operator_only = 0 OR (:human_operator AND (:granted = 0 OR EXISTS (
-                  SELECT 1 FROM worker_grants g, json_each(g.capabilities) j WHERE g.credential_id = :credential
-                    AND g.repository_id = w.repository_id AND g.revoked_at IS NULL AND j.value = 'human-operator'))))  -- rule 6
+           AND (:fresh IS NULL OR w.repository_id IN (SELECT value FROM json_each(:fresh)))                     -- R-BTN-174: a repository whose derived set is still
+                                                                                                                -- not current is left out, never offered from a stale set
            AND (:rule9 = 0 OR EXISTS (SELECT 1 FROM worker_courses f JOIN courses k ON k.repository_id = f.repository_id AND k.id = f.course_id
                                       WHERE f.worker_id = :worker AND f.repository_id = w.repository_id AND f.course_id = w.course_id
                                         AND f.version >= k.min_worker_version)))                              -- rule 9
        WHERE n > :page * 50 AND n <= (:page + 1) * 50
        ORDER BY repository_id, course_id, n`,
-      { worker: w.id, now: this.c.now(), ceiling: JSON.stringify(this.ceilingPositions(w)), human_operator: w.declared.includes('human-operator') ? 1 : 0, rule9: rule9 ? 1 : 0, page,
+      { worker: w.id, now: this.c.now(), ceiling: JSON.stringify(this.ceilingPositions(w)), fresh: w.fresh ? JSON.stringify([...w.fresh]) : null, rule9: rule9 ? 1 : 0, page,
         // A leg's `requires` is compared as `graphOf` expanded it: the registry writes that view to
         // `leg_capabilities_json` from `legNeedsOf` when it accepts a file (§12.5), so the query reads
-        // capabilities only, and `human-operator` stays the literal rule 6 compares (review round
-        // 6, finding 0) — declared by that name, and granted by that name on this ticket's
-        // repository (review round 7, finding 0). A grant stores capabilities only, so no role is bound.
+        // capabilities only. B-104: rule 4 reads H ∪ D(H) — the grant against holdings alone, the
+        // ontology's derivations beside them; rule 6 is retired, so `human-operator` is the one
+        // literal both sides compare. A grant stores capabilities only, so no role is bound.
         granted: w.grants ? 1 : 0, credential: w.credential_id });
   }
 
@@ -488,6 +594,11 @@ export class Claims {
   /** The ticket a claim by `w` gets now (§6.2): the named one if it passes the gates, recommended
    *  or not, with the advice it went against; else the first recommendation. Throws the §11 refusal. */
   private decide(w: WorkerFacts, wanted: string | null): { item: ItemFacts; advice: Record<string, unknown> | null } {
+    // R-BTN-174: the reads that offer legs bring the reader's derived sets up to date first —
+    // a claim evaluates the one repository it concerns, a recommendation at most two. A route
+    // that already prepared the worker's facts (its transaction would roll the writes back)
+    // passes them in with fresh already set.
+    if (w.fresh == null) this.prepareSets(w, wanted ? 1 : 2, wanted ? repositoryOf(wanted) : undefined);
     if (wanted) {
       if (!this.cutOver(wanted)) throw new BatonError('not-cut-over', `${repositoryOf(wanted)}'s claims go through git until its cutover (R-BTN-28)`);
       const item = this.item(wanted);
@@ -543,7 +654,11 @@ export class Claims {
   /** `GET /v1/runner/recommendations` (R-BTN-45): the sorted legs this worker may take, without
    *  claiming; `?limit=` applies after the merge (R-BTN-61). */
   recommendations(workerId: number, limit = 10) {
-    return { recommendations: this.recommend(this.worker(workerId), limit) };
+    const w = this.worker(workerId);
+    // R-BTN-174: a recommendation evaluates at most two repositories' sets that are not
+    // current, and leaves out the legs of any repository whose set still is not.
+    this.prepareSets(w, 2);
+    return { recommendations: this.recommend(w, limit) };
   }
 
   /** `GET /v1/runner/next`: the first recommendation, or `no-eligible-ticket`. */
@@ -556,7 +671,7 @@ export class Claims {
   /** `POST /v1/runner/claim` (§6.2): idempotent by `request_id`; the lock is the index. The claim
    *  is at the ticket's posted station, running nothing, its path recorded (R-BTN-63). */
   // @model claim sha256:ae05eab25b84
-  claim(workerId: number, body: unknown) {
+  claim(workerId: number, body: unknown, prepared?: WorkerFacts) {
     const b = checkClaim(body);
     if (!this.anyCutOver()) throw new BatonError('not-cut-over', 'claims go through git until cutover (R-BTN-28)');
     const prior = this.rows<{ id: number; worker_id: number }>('SELECT id, worker_id FROM claims WHERE request_id = ?', b.request_id)[0];
@@ -566,7 +681,7 @@ export class Claims {
       return this.claimResponse(prior.id);
     }
     const now = this.c.now();
-    const w = this.worker(workerId);
+    const w = prepared ?? this.worker(workerId);
     const mine = this.rows<{ ticket_id: string }>(`SELECT ticket_id FROM claims WHERE worker_id = ? AND status = 'active'`, workerId)[0];
     if (mine) throw new BatonError('not-eligible', `this worker holds ${mine.ticket_id}; end it before claiming another (R-BTN-4)`, { rule: 'one-claim-per-worker' });
     const { item, advice } = this.decide(w, b.ticket_id);
@@ -692,7 +807,7 @@ export class Claims {
    * until the course's hook, R3-1236).
    */
   // @model advance sha256:86d70456f6d8
-  advance(workerId: number, claimId: number, body: unknown) {
+  advance(workerId: number, claimId: number, body: unknown, prepared?: WorkerFacts) {
     const b = checkAdvance(body);
     const c = this.held(workerId, claimId);
     if (c.status !== 'active') throw new BatonError('claim-ended', `the claim already ended (${c.status}: ${c.end_reason})`);
@@ -735,7 +850,11 @@ export class Claims {
     const posted = this.rows<{ tag: string }>('SELECT tag FROM ticket_bars WHERE ticket_id = ? AND leg = ?', c.ticket_id, leg).map((r) => r.tag);
     const unmet = this.c.admin.requiredBars(repo).find((r) => requiredBarCovers(r, item.course, leg, g) && !meetsRequiredBar(r, [...posted, ...b.bars]));
     if (unmet) throw new BatonError('not-eligible', `policy: ${leg} must bar a ${unmet.tag_prefix} tag (an owner's required bar)`, { rule: 8, rule_code: 'policy' });
-    const v = this.gate(this.worker(workerId), item, leg, 'advance', { except: claimId, holderBars: b.bars });
+    // R-BTN-174: an advance re-checks rule 4 against the current set, so a program change can
+    // refuse a holder's next advance, as a lost declaration can — brought current first.
+    const advancing = prepared ?? this.worker(workerId);
+    if (advancing.fresh == null) this.prepareSets(advancing, 1, repo);
+    const v = this.gate(advancing, item, leg, 'advance', { except: claimId, holderBars: b.bars });
     if (!v.ok) throw this.refusal(c.ticket_id, v, 'advance');
     // R-BTN-109: the finished leg arrives at `at` with what its entry asks; inline values in full.
     if (run) this.checkEntry(repo, g, at, b.outputs);
@@ -796,8 +915,34 @@ export class Claims {
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
     if (e.status === 'completed' && finished && g) this.checkEntry(repositoryOf(c.ticket_id), g, reached, e.outputs);
     else if (e.status === 'completed') this.checkOutputValues(repositoryOf(c.ticket_id), e.outputs);
+    // R-BTN-126's capability branch (B-104): the holding the runner says it lost leaves its
+    // declared set, its derived sets re-evaluate in this transaction, and the fleet's counts
+    // follow — rule 4 refuses this runner at once. A valid blocked end is not a failed attempt,
+    // not a run for max_runs, and starts no backoff (the blocked-end work's rules).
+    if (e.prerequisite?.kind === 'capability') {
+      this.exec('DELETE FROM worker_capabilities WHERE worker_id = ? AND capability = ?', workerId, e.prerequisite.ref);
+      this.c.ontologies?.forget(workerId, null);
+      for (const repo of this.rows<{ repository_id: string }>('SELECT DISTINCT repository_id FROM ontologies')) {
+        this.c.ontologies?.derivedFor(workerId, repo.repository_id);
+      }
+      // (No extra write: the transaction is the end's own; the rows above are its shape.)
+    }
     this.finish(c.id, c.ticket_id, e.status, e.end_reason, `worker:${workerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next });
     return { ok: true };
+  }
+
+  /** R-BTN-126 (round 1, B9): the invalid blocked end, recorded in its own committed
+   * transaction by the route — the claim ends a failed attempt `released:cannot-finish:transient`,
+   * named for what the runner claimed to lose and does not hold. */
+  invalidPrerequisiteEnd(workerId: number, claimId: number, ref: string): void {
+    // 2-r2-0: only the worker's ACTIVE claim is ended — a completed or already-ended one
+    // answers claim-ended as end() does, never re-finished, so rule 3's unconfirmed hold
+    // stands (R-BTN-168).
+    const c = this.rows<{ id: number; ticket_id: string }>(`SELECT id, ticket_id FROM claims WHERE id = ? AND worker_id = ? AND status = 'active'`, claimId, workerId)[0];
+    if (!c) throw new BatonError('claim-ended', 'the claim already ended');
+    const item = this.item(c.ticket_id);
+    this.finish(claimId, c.ticket_id, 'released', 'released:cannot-finish:transient', `worker:${workerId}`,
+      { detail: `invalid-prerequisite: ${ref.slice(0, 100)} is not declared`, reached: item?.station?.station ?? null, finished: false, evidence: null, next: null });
   }
 
   /**

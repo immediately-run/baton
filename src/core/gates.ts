@@ -9,6 +9,10 @@ import { capabilitiesOf, fitsTier } from '../shared/vocabulary.mjs';
 export interface GateWorker {
   /** Capability and role names as declared. */
   declared: string[];
+  /** B-104 (R-BTN-174): the capabilities the repository's ontology derives from the worker's
+   * granted holdings, by repository — D(H), read only from a current set (the caller brings
+   * it up to date first). Absent, nothing is derived. */
+  derived?: Record<string, string[]>;
   /** Its ceiling in the ticket's repository's ladder, resolved by the caller (R-BTN-66). */
   tier_ceiling: string;
   tags: string[];
@@ -28,6 +32,8 @@ export interface GateTicket {
   tier: string | null;
   /** The clause's names, null with none (rule 4). */
   requires: string[] | null;
+  /** Shown, never read: rule 6 is retired (R-BTN-121 as amended, B-104), so an operator-only
+   *  ticket is held by rule 4's `human-operator` literal like any capability. */
   operator_only: boolean;
   /** Its repository's tier ladder, lowest first (R-BTN-66). */
   tiers: string[];
@@ -83,14 +89,14 @@ export type GateRule = keyof typeof GATE_CODES | 'chain' | 'isolation';
 
 export type GateVerdict = { ok: true } | { ok: false; rule: GateRule; code: string };
 
-/** The refusal code of each rule (§7.2, §11). */
+/** The refusal code of each rule (§7.2, §11). Rule 6 is retired (R-BTN-121 as amended, B-104)
+ * and never refuses; its number stays unused, like 12's. */
 export const GATE_CODES = {
   1: 'not-ready',
   3: 'claimed',
   7: 'not-granted',
   4: 'missing-capability',
   5: 'above-tier-ceiling',
-  6: 'operator-only',
   8: 'barred-tag',
   9: 'stale-skills',
   10: 'backing-off',
@@ -133,33 +139,30 @@ export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, p
   const grant = worker.grants ? worker.grants[ticket.repository] ?? null : undefined;
   if (grant === null) return refuse(7);
 
-  // Rule 4: what it declared, within what this repository granted it. The leg's own
-  // `requires.capabilities` is an input beside the ticket's clause (R-BTN-120, B-86), and both are
-  // read the same way: the clause's names are expanded here (`capabilitiesOf`: it names a role or
-  // a capability, and a role is satisfied by its capabilities), while the leg's arrive expanded
-  // — `graphOf` runs the course's `capability_roles` and the vocabulary through `legCapabilities`,
-  // so only capabilities are left (§12.5). Every name needs a capability the declaration carries,
-  // and one the grant holds when the key is granted (review round 5, finding 0: `.some()` let one
-  // capability of a role named in a leg stand for the whole role).
-  // `human-operator` is the exception on both sides (review round 6, finding 0): R-BTN-121 compares
-  // it as a string, and `capabilitiesOf` drops the literal, so it is met exactly as rule 6 meets it
-  // — declared by that name, and granted by that name when the key is granted.
+  // Rule 4 (R-BTN-174, B-104): what a runner has for this repository is H ∪ D(H) — its
+  // holdings (declared ∩ grant, its `runner:` capabilities beside them, R-BTN-133) and what
+  // the repository's ontology derives from them. The grant is checked against holdings only:
+  // authority bounds H, never a derivation — a grant that names a derived capability admits a
+  // runner that declares it directly, and a derivation satisfies a need the grant never names.
+  // The leg's own `requires.capabilities` is rule 4's input beside the ticket's clause
+  // (R-BTN-120, B-86); both arrive expanded, capabilities only (§12.5), `human-operator`
+  // included as the literal R-BTN-121 compares — rule 6 is retired, so it is met by declaring
+  // it and granted like any capability (R-BTN-121 as amended).
   const held = capabilitiesOf(worker.declared);
   const granted = grant ? new Set(grant.capabilities) : null;
-  const operator = worker.declared.includes('human-operator') && !(granted && !granted.has('human-operator'));
+  // R-BTN-58: a grant entry `<type>:*` admits every holding of that type.
+  const admits = (capability: string) => granted ? granted.has(capability) || granted.has(`${capability.split(':')[0]}:*`) : true;
+  const derived = new Set(worker.derived?.[ticket.repository] ?? []);
   for (const need of new Set([...capabilitiesOf(ticket.requires), ...(leg.requires ?? [])])) {
-    if (need === 'human-operator') {
-      if (!operator) return refuse(4);
-      continue;
-    }
-    if (!held.has(need) || (granted && !granted.has(need))) return refuse(4);
+    const isHolding = need.startsWith('runner:') || admits(need);
+    if ((!held.has(need) || !isHolding) && !derived.has(need)) return refuse(4);
   }
 
   // Rule 5: the caller passes the lower of the declared ceiling and the grant's max_tier.
   if (!fitsTier(ticket.tier, worker.tier_ceiling, ticket.tiers)) return refuse(5);
 
-  // Rule 6: declared, and — for a granted key — granted by an administrator.
-  if (ticket.operator_only && (!worker.declared.includes('human-operator') || (granted && !granted.has('human-operator')))) return refuse(6);
+  // Rule 6 is retired (R-BTN-121 as amended): `human-operator` is a runner's own statement,
+  // checked by rule 4 like any capability — declared by that name and granted by that name.
 
   const barred = new Set([...leg.bars, ...(phase === 'advance' ? facts.holderBars ?? [] : [])]);
   if (worker.tags.some((t) => barred.has(t))) return refuse(8);

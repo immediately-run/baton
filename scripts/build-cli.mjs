@@ -52,6 +52,10 @@ await build({
 });
 // The runner spawns its leg process by path (src/runner/runner.ts LEG_PROCESS), beside the bundle.
 copyFileSync(join(ROOT, 'src/runner/legProcess.mjs'), join(OUT, 'legProcess.mjs'));
+// B-104: the built-in ontologies (src/defaults/ontology/baton@<n>.json) ship in the package;
+// `builtInOntology` reads them beside the bundled code.
+mkdirSync(join(OUT, 'defaults', 'ontology'), { recursive: true });
+for (const name of ['baton@1']) copyFileSync(join(ROOT, 'src', 'defaults', 'ontology', `${name}.json`), join(OUT, 'defaults', 'ontology', `${name}.json`));
 
 // What `baton repo init` writes, prebuilt (a package has no src/ and no esbuild), and the commit
 // it was built from, which the package names as its courses' source and its workflow's pin

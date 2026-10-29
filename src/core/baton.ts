@@ -16,9 +16,10 @@ import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { WorkerApi } from './workerApi';
 import { parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
+import { Ontologies } from './ontologies';
 import { Cutover } from './cutover';
 import { Mirror } from './mirror';
-import { checkConfirmations, checkRepositoryId, GIT_BRANCH, GIT_REPO } from './validate';
+import { CAPABILITY_NAME, checkConfirmations, checkRepositoryId, GIT_BRANCH, GIT_REPO } from './validate';
 import { Courses } from './courses';
 import { Observations } from './observations';
 import { Webhooks, type Delivery } from './webhook';
@@ -52,6 +53,8 @@ export class BatonCore {
   readonly admin: Admin;
   readonly stats: Stats;
   readonly blocks: Blocks;
+  /** §5.9 (B-104): the ontologies in force and the derived sets they compute. */
+  readonly ontologies: Ontologies;
   readonly resources: Resources;
   readonly notices: Notices;
   readonly queues: Queues;
@@ -94,11 +97,13 @@ export class BatonCore {
     this.queues = new Queues({ store, now: () => this.now(), held: (ticket) => this.blocks.isHeld(ticket),
       graph: (repo, course) => this.stations.graph(repo, course), notices: this.notices });
     this.resources = new Resources({ store, now: () => this.now(), blocks: this.blocks });
+    // §5.9 (B-104): the ontology store — acceptance, memoised programs, derived sets, the alarm cycle.
+    this.ontologies = new Ontologies(this, store);
     this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(), origin: ports.config.BATON_ORIGIN,
       dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices });
     this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo), history: this.history });
     this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
-      schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
+      schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course), ontologies: this.ontologies,
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
@@ -297,6 +302,9 @@ export class BatonCore {
         this.notices.alarm();
         // R-BTN-81: the history of tickets closed 90 days ago goes.
         this.history.purge();
+        // R-BTN-174: a non-live worker's derived rows go 30 days after it was last live, and a
+        // revoked grant's rows go with the grant.
+        this.ontologies.upkeep();
       });
     } catch (e) {
       this.pendingDispatch.clear(); // rolled back: nothing to tell the mirror
@@ -305,6 +313,17 @@ export class BatonCore {
     this.flushDispatch();
     await this.armBy(lapse);
     await this.armBy(this.blocks.nextDue());
+    // R-BTN-174 (B-104): the alarm cycle brings every live granted worker's derived sets up to
+    // date — back-to-back turns within the cycle's match budget, each turn in its own
+    // transactions, yielding to requests between turns; the fleet's views are recounted when
+    // the cycle ends. Turn outside the transaction above: an evaluation commits alone, whether
+    // or not a later part of the tick fails.
+    // R-BTN-174: the fleet's views are recounted when the cycle ends (B6, round 1: the closing
+    // turn wrote rows too) and armed for the next turn while one is still pending.
+    const before = this.ontologies.pendingCount();
+    const ontologyDue = this.ontologies.alarmTurn();
+    if (ontologyDue != null || before > 0) this.store.transaction(() => this.blocks.recount());
+    if (ontologyDue != null) await this.armBy(ontologyDue);
   }
 
   /** R-BTN-77: each repository's unblocked dispatch due now, queued to send after the commit. */
@@ -545,7 +564,12 @@ export class BatonCore {
       const workerId = await this.workers.authWorker(cred, secret);
       if (m === 'POST' && p === '/v1/runner/claim') {
         const body = await readJson(req);
-        return json(tx(() => this.claims.claim(workerId, body)));
+        // R-BTN-174 (B-104): the reader's derived sets are brought up to date first, in
+        // transactions of their own that commit whether or not the claim succeeds — a refusal
+        // must not roll the evaluation back with it.
+        const wanted = typeof (body as { ticket_id?: unknown }).ticket_id === 'string' ? (body as { ticket_id: string }).ticket_id : null;
+        const prepared = this.claims.prepareSetsFor(workerId, wanted != null && wanted.includes(':') ? wanted : null);
+        return json(tx(() => this.claims.claim(workerId, body, prepared)));
       }
       if (m === 'GET' && p === '/v1/runner/next') return json(this.claims.next(workerId));
       if (m === 'GET' && p === '/v1/runner/recommendations') {
@@ -558,7 +582,12 @@ export class BatonCore {
       const advance = /^\/v1\/runner\/claims\/(\d+)\/advance$/.exec(p);
       if (m === 'POST' && advance) {
         const body = await readJson(req);
-        return json(tx(() => this.claims.advance(workerId, Number(advance[1]), body)));
+        // R-BTN-174: an advance re-checks rule 4 against the CURRENT set — the claim's own
+        // repository targeted (A5/B4, round 1: a budget-2 untargeted pass leaves it unprepared
+        // beside a fresher repository and refuses a deriving holder on its own running claim).
+        const claimTicket = this.sql<{ ticket_id: string }>('SELECT ticket_id FROM claims WHERE id = ? AND worker_id = ?', Number(advance[1]), workerId)[0]?.ticket_id ?? null;
+        const prepared = this.claims.prepareSetsFor(workerId, claimTicket);
+        return json(tx(() => this.claims.advance(workerId, Number(advance[1]), body, prepared)));
       }
       if (m === 'POST' && p === '/v1/runner/adopt') {
         const body = await readJson(req);
@@ -567,6 +596,19 @@ export class BatonCore {
       const end = /^\/v1\/runner\/claims\/(\d+)\/end$/.exec(p);
       if (m === 'POST' && end) {
         const body = await readJson(req);
+        // R-BTN-126 (round 1 B9, round 2 r2-5): a blocked end's ref must be a well-formed
+        // capability the worker declares — judged before the request's transaction, so the
+        // invalid end's recording (a failed attempt, ended transient) commits whether or not
+        // the answer is the error.
+        const prereq = (body as { prerequisite?: { kind?: string; ref?: unknown } }).prerequisite;
+        if ((body as { end_reason?: string }).end_reason === 'released:blocked' && prereq?.kind === 'capability') {
+          if (typeof prereq.ref !== 'string' || !CAPABILITY_NAME.test(prereq.ref)) throw new BatonError('invalid-params', 'prerequisite: must be a capability name (R-BTN-126)');
+          const declared = this.sql('SELECT 1 FROM worker_capabilities wc JOIN claims c ON c.worker_id = wc.worker_id WHERE c.id = ? AND c.worker_id = ? AND wc.capability = ?', Number(end[1]), workerId, prereq.ref);
+          if (!declared.length) {
+            this.store.transaction(() => this.claims.invalidPrerequisiteEnd(workerId, Number(end[1]), prereq.ref as string));
+            throw new BatonError('invalid-prerequisite', `prerequisite: ${prereq.ref} is not a capability this worker declares (R-BTN-126)`);
+          }
+        }
         return json(tx(() => this.claims.end(workerId, Number(end[1]), body)));
       }
       if (m === 'POST' && p === '/v1/runner/readings') {
@@ -842,8 +884,22 @@ export class BatonCore {
       if (who != null) {
         if (who !== 'me' || role !== 'worker') throw new BatonError('invalid-params', 'worker: only `me`, from a worker session');
         worker = await this.workers.authWorker(cred, req.headers.get('X-Worker-Secret'));
+        // R-BTN-174 (round 2, r2-4): a read brings the reader's sets up to date first — the
+        // worker's own answer is rule 4's, never a stale set's.
+        this.claims.prepareSetsFor(worker, id);
       }
-      return json(this.blocks.blocksOf(id, worker));
+      const out = this.blocks.blocksOf(id, worker);
+      // §6.2 (R-BTN-174, B-104): a worker's own view of a `capability` block carries why-not —
+      // not-derived with the canonical proof's needs, missing, ungranted and chain; not-derivable
+      // when the program's maximal evaluation has no proof at all. Advice, computed on read.
+      for (const b of 'blocks' in out ? out.blocks as { kind: string; ref: string; why?: unknown }[] : []) {
+        if (b.kind === 'capability') b.why = worker != null ? this.ontologies.whyNotFor(worker, repo, b.ref, false) : this.ontologies.whyNotFleet(repo, b.ref);
+      }
+      for (const b of 'other' in out ? out.other as { kind: string; detail: unknown }[] : []) {
+        const d = b.detail as { kind?: string; ref?: string; why?: unknown };
+        if (b.kind === 'capability' && d?.ref) d.why = worker != null ? this.ontologies.whyNotFor(worker, repo, d.ref, false) : this.ontologies.whyNotFleet(repo, d.ref);
+      }
+      return json(out);
     }
     const on = url.searchParams.get('on');
     if (on == null) {
@@ -981,9 +1037,20 @@ export class BatonCore {
       // meanwhile: this reading must still be the newest, over the head it was judged against.
       if (!this.observations.newest(r, n)) throw new BatonError('stale-observation', `a newer reading than ${n} was accepted while this post was judged; take a new number and retry (R-BTN-62)`);
       if (this.headOf(r) !== head) throw new BatonError('head-moved', `the head moved to ${this.headOf(r) ?? 'unset'} while this post was judged; re-read it and retry`);
+      // The ontology unit first (R-BTN-174, B-104): its program together with the course
+      // entries' route_choices attachments is accepted or refused whole, before the registry
+      // applies — a refused unit keeps the previous program and the previous route_choices of
+      // every entry where it changed, and the refusal is listed under Needs you.
+      const unitRefusal = this.ontologies.acceptUnit(r, p.ontology, (p.registry ?? []).map((e) => ({ id: e.id, course: e.course, routeChoices: e.route_choices ?? null })), p.sha, at);
+      // A7 (round 1): on a refused unit the map is undefined, not empty — an empty map wrote
+      // '{}' over every entry's previous attachments a post after the acceptance that stored
+      // them. Undefined means "not this post's to change": each entry keeps what it had.
+      const acceptedRoutes = unitRefusal === null
+        ? new Map((p.registry ?? []).filter((e) => e.route_choices != null).map((e) => [e.id, e.route_choices!]))
+        : undefined;
       // The course registry first (R-BTN-48, R-BTN-69): every ticket must name a course in
       // force, and a refused file with none to keep refuses the whole post.
-      const refused = this.applyRegistry(r, p, rows.map(({ row }) => row.course_id), at);
+      const refused = this.applyRegistry(r, p, rows.map(({ row }) => row.course_id), at, acceptedRoutes);
       if (refused.length) changed.courses_refused = refused;
       const legsBefore = this.queuedLegs(r);
       const upserted: string[] = [];
@@ -1108,8 +1175,8 @@ export class BatonCore {
   /** The registry of a post (R-BTN-48, R-BTN-69), inside its transaction: applied whole, then
    *  every course the post's tickets name must be in force — a refused file with none to keep,
    *  or a course the registry dropped while a ticket still names it, refuses the post. */
-  private applyRegistry(r: string, p: BoardPayload, ticketCourses: string[], at: number): string[] {
-    const refused = p.registry ? this.courses.apply(r, p.registry, p.sha, at) : [];
+  private applyRegistry(r: string, p: BoardPayload, ticketCourses: string[], at: number, acceptedRoutes?: Map<string, Record<string, string[]>>): string[] {
+    const refused = p.registry ? this.courses.apply(r, p.registry, p.sha, at, acceptedRoutes) : [];
     this.stations.reset();
     for (const c of new Set(ticketCourses)) {
       if (!this.courses.get(r, c)) throw new BatonError('invalid-params', `a ticket's course ${c} is not in ${r}'s registry`);
@@ -1174,6 +1241,23 @@ export class BatonCore {
     if (p.matrix) exec(`INSERT INTO baton_settings (key, value) VALUES ('reviewer_matrix', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(p.matrix));
     if (p.reviewers) exec(`INSERT INTO baton_settings (key, value) VALUES ('reviewer_catalog', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(p.reviewers));
     return false;
+  }
+
+  /**
+   * A test's lowered evaluator bounds (R-BTN-175, S-BTN-146): a `baton_settings` row named
+   * `ontology_test_bounds` (JSON `{matches?, atoms?}`) is honoured only while the test
+   * bindings are on — no deploy or local start reads it, exactly as it reads no test key.
+   */
+  testOntologyBounds(): { matches?: number; atoms?: number | null } | undefined {
+    if (this.ports.config.BATON_TEST_BINDINGS !== 'true') return undefined;
+    const row = this.sql<{ value: string }>("SELECT value FROM baton_settings WHERE key = 'ontology_test_bounds'")[0];
+    if (!row) return undefined;
+    try {
+      const parsed = JSON.parse(row.value) as { matches?: number; atoms?: number | null };
+      return parsed.matches != null || parsed.atoms != null ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private event(repo: string, kind: string, detail: unknown, at: number) {
@@ -1326,7 +1410,7 @@ export class BatonCore {
       // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
       limits: this.admin.view(now),
       // R-BTN-69: a refused course file, the previous one staying in force.
-      needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), keys: this.keysNotice() },
+      needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), ontologies_refused: this.ontologies.refusals(), keys: this.keysNotice() },
       // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.
       blocked: this.blocks.view(),
       // R-BTN-85: the disagreements with git of the last 7 days, by kind.

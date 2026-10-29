@@ -1,0 +1,48 @@
+{
+  "$comment": "baton@1 — the first built-in capability ontology (BATON_SPEC §5.9, R-BTN-174, B-104). A repository names it from .baton/ontology.json and retracts, replaces or extends it; a published version never changes. What it says: a runner declares what it holds — a provider key, an installed tool — and the ontology derives what those amount to: which models it can reach, and the ability to generate code or review it. The bindings narrow a class to one model (the default-with-exception idiom, R-BTN-175); no binding leaves the class open. Core interprets this file; it never runs it (R-BTN-98), and no provider word enters src/ — the names are this file's data.",
+  "version": 1,
+  "derived": ["capability", "model"],
+  "entries": [
+    { "id": "class-coding", "fact": ["model_class", "coding"] },
+    { "id": "class-review", "fact": ["model_class", "review"] },
+
+    { "id": "model-opus", "fact": ["model", "model:claude-opus-5-5"] },
+    { "id": "model-sonnet", "fact": ["model", "model:claude-sonnet-5-5"] },
+    { "id": "model-haiku", "fact": ["model", "model:claude-haiku-5-5"] },
+    { "id": "model-glm", "fact": ["model", "model:glm-5.3"] },
+    { "id": "model-glm-flash", "fact": ["model", "model:glm-5.3-flash"] },
+    { "id": "model-deepseek-v4", "fact": ["model", "model:deepseek-v4-pro"] },
+    { "id": "model-deepseek-flash", "fact": ["model", "model:deepseek-v4.1-flash"] },
+    { "id": "model-qwen", "fact": ["model", "model:qwen3.8-max"] },
+
+    { "id": "offers-anthropic-opus", "fact": ["offers", "key:anthropic", "model:claude-opus-5-5"] },
+    { "id": "offers-anthropic-sonnet", "fact": ["offers", "key:anthropic", "model:claude-sonnet-5-5"] },
+    { "id": "offers-anthropic-haiku", "fact": ["offers", "key:anthropic", "model:claude-haiku-5-5"] },
+    { "id": "offers-claude-code-opus", "fact": ["offers", "dependency:claude-code", "model:claude-opus-5-5"] },
+    { "id": "offers-claude-code-sonnet", "fact": ["offers", "dependency:claude-code", "model:claude-sonnet-5-5"] },
+    { "id": "offers-zai-glm", "fact": ["offers", "key:zai", "model:glm-5.3"] },
+    { "id": "offers-zai-glm-flash", "fact": ["offers", "key:zai", "model:glm-5.3-flash"] },
+    { "id": "offers-opencode-go-deepseek", "fact": ["offers", "key:opencode-go", "model:deepseek-v4-pro"] },
+    { "id": "offers-opencode-go-deepseek-flash", "fact": ["offers", "key:opencode-go", "model:deepseek-v4.1-flash"] },
+    { "id": "offers-opencode-go-qwen", "fact": ["offers", "key:opencode-go", "model:qwen3.8-max"] },
+    { "id": "offers-deepinfra-deepseek", "fact": ["offers", "key:deepinfra", "model:deepseek-v4-pro"] },
+    { "id": "offers-deepinfra-deepseek-flash", "fact": ["offers", "key:deepinfra", "model:deepseek-v4.1-flash"] },
+
+    { "id": "usable-claude-code-opus", "fact": ["usable_with", "dependency:claude-code", "model:claude-opus-5-5"] },
+    { "id": "usable-claude-code-sonnet", "fact": ["usable_with", "dependency:claude-code", "model:claude-sonnet-5-5"] },
+    { "id": "usable-opencode-cli-glm", "fact": ["usable_with", "dependency:opencode-v2", "model:glm-5.3"] },
+    { "id": "usable-opencode-cli-glm-flash", "fact": ["usable_with", "dependency:opencode-v2", "model:glm-5.3-flash"] },
+    { "id": "usable-opencode-cli-deepseek", "fact": ["usable_with", "dependency:opencode-v2", "model:deepseek-v4-pro"] },
+    { "id": "usable-opencode-cli-deepseek-flash", "fact": ["usable_with", "dependency:opencode-v2", "model:deepseek-v4.1-flash"] },
+
+    { "id": "binding-opens", "head": ["model_for", "$c", "$m"], "body": [["binding", "$c", "$m"]] },
+    { "id": "class-bound", "head": ["bound", "$c"], "body": [["binding", "$c", "$m"]] },
+    { "id": "class-open", "head": ["model_for", "$c", "$m"], "body": [["model_class", "$c"], ["model", "$m"], { "not": ["bound", "$c"] }] },
+    { "id": "one-binding-per-class", "constraint": [["binding", "$c", "$m1"], ["binding", "$c", "$m2"], { "cmp": ["$m1", "!=", "$m2"] }] },
+
+    { "id": "derived-model-from-key", "head": ["derived", "$m"], "body": [["offers", "$k", "$m"], ["holds", "$k"]] },
+    { "id": "derived-code-generation", "head": ["derived", "capability:code-generation-llm"], "body": [["model_for", "coding", "$m"], ["offers", "$k", "$m"], ["holds", "$k"], ["usable_with", "$d", "$m"], ["holds", "$d"]] },
+    { "id": "derived-review", "head": ["derived", "capability:review-llm"], "body": [["model_for", "review", "$m"], ["offers", "$k", "$m"], ["holds", "$k"], ["usable_with", "$d", "$m"], ["holds", "$d"]] }
+  ],
+  "route_choices": []
+}

@@ -169,12 +169,13 @@ export function qualifyingPair(authorFamilies, workerBilling, suspensions, date,
 
 /** The refusal codes, by rule number. Rule 1 (being in the claim order) is the ranked list's
  *  job — `rankReady`/`claimOrder` in `lib/factoryState.mjs` — not this function's. */
+/** Rule 6 is retired (B-104, R-BTN-121 as amended) and never refuses; its number stays
+ *  unused. */
 export const RULE_CODES = {
   2: 'expedite-lane-full',
   3: 'claimed',
   4: 'missing-capability',
   5: 'above-tier-ceiling',
-  6: 'operator-only',
   7: 'provider-suspended',
   8: 'awaiting-review-capacity',
   9: 'stale-skills',
@@ -196,9 +197,11 @@ export function claimBlocks(claim) {
  * `{ok: false, rule, code}` naming the first rule that refuses. The reference for every
  * rule: the server's candidate query is tested against it (G-BTN-40).
  *
- * - `worker`: `{tier_ceiling, declared, model_id, model_provider_id, billing, courses}`
+ * - `worker`: `{tier_ceiling, declared, model_id, model_provider_id, billing, courses, derived?}`
  *   — `declared` the capability/role names as the heartbeat sent them, `billing`
- *   `{prefix: accountId}`, `courses` the `{repository, course, version}` its checkouts run.
+ *   `{prefix: accountId}`, `courses` the `{repository, course, version}` its checkouts run,
+ *   `derived` (B-104, R-BTN-174) what the item's repository's ontology derives from the
+ *   worker's granted holdings — D(H), from a current set.
  * - `item`: `{id, repository, course, tier, tags, requires, expedite}` — `requires` the
  *   clause's names, `null` when it has none; `expedite` true for the expedite lane or an
  *   expedite override.
@@ -217,16 +220,22 @@ export function isEligible(worker, item, ctx) {
 
   if ((ctx.claims ?? []).some(claimBlocks) || override?.hold) return refuse(3);
 
+  // Rule 4 (R-BTN-174, B-104): H ∪ D(H) — the holdings (declared ∩ grant, a granted key's) and
+  // what the repository's ontology derives from them; `worker.derived` is D(H) for the item's
+  // repository, handed in by the caller that read a current set. A derivation satisfies a need
+  // the grant never names; a grant bounds holdings only.
   const held = capabilitiesOf(worker.declared);
-  for (const need of capabilitiesOf(item.requires)) if (!held.has(need)) return refuse(4);
+  const derived = new Set(worker.derived ?? []);
+  for (const need of capabilitiesOf(item.requires)) if (!held.has(need) && !derived.has(need)) return refuse(4);
 
   // Rule 5 in the item's repository's ladder (R-BTN-66); the caller resolves the worker's
   // ceiling for that repository. No ladder given: docs' three tiers.
   const ladder = ctx.tiers ?? TIERS;
   if (!fitsTier(item.tier ?? null, worker.tier_ceiling ?? ladder.at(-1), ladder)) return refuse(5);
 
-  const operatorOnly = (item.tags ?? []).includes('OP') || (item.requires ?? []).includes('human-operator');
-  if (operatorOnly && !(worker.declared ?? []).includes('human-operator')) return refuse(6);
+  // Rule 6 is retired (B-104, R-BTN-121 as amended): `human-operator` is a runner's own
+  // statement, checked by rule 4 like any capability — declared by that name and granted by
+  // that name.
 
   if (suspended(ctx.suspensions, worker.model_provider_id, worker.model_id, now)) return refuse(7);
 

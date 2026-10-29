@@ -73,6 +73,7 @@ interface FleetWorker {
   repos: Map<string, Set<string> | null>;
   caps: Set<string>;
   uses: Set<string>;
+  derived: Map<string, Set<string>>;
 }
 
 /** A registered resource as the counts need it: its scope and who serves it, with each account
@@ -565,19 +566,36 @@ export class Blocks {
     const now = this.c.now();
     const all = this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL').map((r) => r.id);
     return this.named<{ id: number; credential_id: string; created_by: string | null }>(
-      `SELECT w.id, w.credential_id, c.created_by FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} AND (:only IS NULL OR w.id = :only) ORDER BY w.id`, { now, only })
+      `SELECT w.id, w.credential_id, c.created_by, c.allowed_capabilities FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} AND (:only IS NULL OR w.id = :only) ORDER BY w.id`, { now, only })
       .map((w) => {
         // R-BTN-58: a key an owner or administrator granted works where it is granted; another
-        // (a bearer token, a BATON_KEYS seed key) keeps its interim reach on every repository.
+        // (a bearer token, a BATON_KEYS seed key) is bounded by its allow-list on every
+        // repository — B-104 (round 2, r2-3): nothing is unbounded, here as in rule 4.
         const granted = isGrantedKey(w.created_by);
+        const allowList = () => {
+          const cred = this.rows<{ allowed_capabilities: string }>('SELECT allowed_capabilities FROM credentials WHERE id = ?', w.credential_id)[0];
+          return new Set<string>(cred ? (JSON.parse(cred.allowed_capabilities) as string[]) : []);
+        };
+        const wildcards = (set: Set<string>, c: string) => set.has(c) || set.has(`${c.split(':')[0]}:*`);
         const repos = new Map<string, Set<string> | null>(granted
           ? this.rows<{ repository_id: string; capabilities: string }>('SELECT repository_id, capabilities FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', w.credential_id)
-            .map((g) => [g.repository_id, new Set(JSON.parse(g.capabilities) as string[])])
-          : all.map((r) => [r, null]));
+            .map((g) => {
+              const caps = new Set(JSON.parse(g.capabilities) as string[]);
+              // The wildcard admits the type's holdings — serve the expanded view.
+              return [g.repository_id, new Set([...caps, ...[...this.rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ?', w.id).map((r) => r.capability)].filter((c) => c.includes(':') && wildcards(caps, c))])] as [string, Set<string>];
+            })
+          : all.map((r) => [r, allowList()] as [string, Set<string>]));
         return {
           id: w.id,
           repos,
           caps: new Set(this.rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE worker_id = ?', w.id).map((r) => r.capability)),
+          // R-BTN-174 (B-104): what the repository's ontology derives from the worker's granted
+          // holdings — D(H), read from a current set, beside the declared capabilities.
+          derived: new Map(this.rows<{ repository_id: string; capability: string }>('SELECT repository_id, capability FROM worker_derived WHERE worker_id = ?', w.id)
+            .reduce((acc, r) => {
+              (acc.get(r.repository_id) ?? acc.set(r.repository_id, new Set<string>()).get(r.repository_id)!).add(r.capability);
+              return acc;
+            }, new Map<string, Set<string>>())),
           uses: new Set(this.rows<{ instance: string }>('SELECT instance FROM worker_instances WHERE worker_id = ?', w.id).map((r) => r.instance)),
         };
       });
@@ -623,9 +641,13 @@ export class Blocks {
     const fleet = this.fleet();
     this.exec(`INSERT INTO baton_settings (key, value) VALUES ('fleet_live', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, JSON.stringify(fleet.map((w) => w.id)));
     const capsOf = (w: FleetWorker, repo: string) => {
-      if (!w.repos.has(repo)) return null;
       const g = w.repos.get(repo);
-      return g ? new Set([...w.caps].filter((c) => g.has(c))) : w.caps;
+      if (g === undefined) return null;
+      // H ∪ D(H) (R-BTN-174): the grant bounds holdings — wildcards served expanded by
+      // fleet(), an interim credential bounded by its allow-list — and the ontology's
+      // derivations count beside them.
+      const h = g ? new Set([...w.caps].filter((c) => c.startsWith('runner:') || g.has(c))) : w.caps;
+      return new Set([...h, ...(w.derived.get(repo) ?? [])]);
     };
     // Capabilities.
     const needCaps = this.rows<{ repository_id: string; name: string }>(
@@ -736,13 +758,20 @@ export class Blocks {
    *  comparison against what it declares and is granted, and its own usable instances. */
   forWorker(workerId: number, ticketId: string): WorkerAnswer {
     const w = this.fleet(workerId)[0] ?? {
-      id: workerId, repos: new Map<string, Set<string> | null>(), caps: new Set<string>(),
+      id: workerId, repos: new Map<string, Set<string> | null>(), caps: new Set<string>(), derived: new Map<string, Set<string>>(),
       uses: new Set(this.rows<{ instance: string }>('SELECT instance FROM worker_instances WHERE worker_id = ?', workerId).map((r) => r.instance)),
     };
     const repo = repositoryOf(ticketId);
     const now = this.c.now();
     const g = w.repos.get(repo);
-    const caps = g ? new Set([...w.caps].filter((c) => g.has(c))) : w.caps;
+    // B-104 (round 1 B8, round 2 r2-3): the asking runner's own answer is rule 4's — H ∪ D(H)
+    // with the grant's wildcards (fleet() serves them expanded) and `runner:` beside; an
+    // interim credential's map entry is its allow-list, never null.
+    const grantAdmits = (c: string) => (g ? g.has(c) : true);
+    const caps = new Set([
+      ...[...w.caps].filter((c) => c.startsWith('runner:') || grantAdmits(c)),
+      ...(w.derived.get(repo) ?? []),
+    ]);
     const blocks: Block[] = this.rows<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ? ORDER BY name', ticketId)
       .filter((r) => !caps.has(r.name)).map((r) => ({ kind: 'capability' as const, ref: r.name, since: now }));
     const info = this.resources();

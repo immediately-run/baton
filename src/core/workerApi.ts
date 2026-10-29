@@ -13,8 +13,7 @@ export { DEFAULT_TRANSCRIPT_REPOS };
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import {
   checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, checkSuspension, bad, HOSTNAME, isGrantedKey,
-  type ActivityReport, type Heartbeat,
-} from './validate';
+  type ActivityReport, type Heartbeat, HOLDING } from './validate';
 
 import type { Config, Row, SqlValue, Store } from './ports';
 const CLOSE_GRACE_MS = 10 * 60_000; // §6.9: closing updates are accepted 10 minutes after a claim ends
@@ -155,8 +154,10 @@ export class WorkerApi {
       if (typeof key !== 'string') throw new Error(`${at}.key must be an OpenSSH public key`);
       const parsed = await parseSshKey(key);
       if (typeof name !== 'string' || !HOSTNAME.test(name)) throw new Error(`${at}.name must be a hostname`);
-      if (!Array.isArray(allowed_capabilities) || allowed_capabilities.some((c) => typeof c !== 'string' || !/^[a-z0-9-]{1,64}$/.test(c))) {
-        throw new Error(`${at}.allowed_capabilities must be capability names`);
+      // B-104 (R-BTN-121/174): the allow-list names capabilities and may name a typed holding —
+      // `<type>:<value>`, the seed's grant for the interim reach it stands in for.
+      if (!Array.isArray(allowed_capabilities) || allowed_capabilities.some((c) => typeof c !== 'string' || !(/^[a-z0-9-]{1,64}$/.test(c) || HOLDING.test(c)))) {
+        throw new Error(`${at}.allowed_capabilities must be capability or holding names`);
       }
       if (keys.some((k) => k.id === parsed.fingerprint)) throw new Error(`${at}: the key is listed twice`);
       // R-BTN-57: a key holds one role — a sync key (R-BTN-93) is never a worker's.
@@ -285,12 +286,10 @@ export class WorkerApi {
   private heartbeatTx(credentialId: string, presented: string | null, settingsHash: string, hb: Heartbeat) {
     const cred = this.credential(credentialId);
     if (hb.hostname !== cred.hostname) throw new BatonError('forbidden', `this credential may register only ${cred.hostname}`);
-    // A granted key's allow-list is expanded capabilities: a declared role passes when all of its
-    // capabilities are granted.
-    const outside = hb.capabilities.filter((c) => cred.granted
-      ? !(c === 'human-operator' ? cred.allowed.includes(c) : [...capabilitiesOf([c])].every((x) => cred.allowed.includes(x)))
-      : !cred.allowed.includes(c));
-    if (outside.length) throw new BatonError('forbidden', `this credential may not declare ${outside.join(', ')}`);
+    // B-104 (R-BTN-174, §11.1's refusal deleted): a heartbeat's declaration is recorded as
+    // declared — every holding rests on the runner's own statement, and what it is granted
+    // bounds the holdings rule 4 reads (H = declared ∩ grant), never the declaration itself.
+    // The shape of a capability name is checked where the heartbeat was parsed (§12.3).
     // §10.1: a granted key declares only courses of repositories its grants cover (round 2, 2-A-6).
     if (cred.granted) {
       const granted = new Set(this.rows<{ repository_id: string }>('SELECT repository_id FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', cred.id).map((r) => r.repository_id));

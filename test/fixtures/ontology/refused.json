@@ -1,0 +1,198 @@
+[
+  {
+    "name": "cycle-through-negation",
+    "program": {
+      "version": 1,
+      "derived": [
+        "capability"
+      ],
+      "entries": [
+        {
+          "id": "a",
+          "head": [
+            "derived",
+            "capability:x"
+          ],
+          "body": [
+            [
+              "p"
+            ],
+            {
+              "not": [
+                "q"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "p-rule",
+          "head": [
+            "p"
+          ],
+          "body": [
+            {
+              "not": [
+                "derived",
+                "capability:x"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "q-fact",
+          "fact": [
+            "q",
+            "x"
+          ]
+        }
+      ],
+      "route_choices": []
+    }
+  },
+  {
+    "name": "unsafe-rule",
+    "program": {
+      "version": 1,
+      "derived": [
+        "capability"
+      ],
+      "entries": [
+        {
+          "id": "u",
+          "head": [
+            "derived",
+            "capability:x"
+          ],
+          "body": [
+            {
+              "cmp": [
+                "$n",
+                ">",
+                3
+              ]
+            }
+          ]
+        }
+      ],
+      "route_choices": []
+    }
+  },
+  {
+    "name": "string-compared-as-integer",
+    "program": {
+      "version": 1,
+      "derived": [
+        "capability"
+      ],
+      "entries": [
+        {
+          "id": "f",
+          "fact": [
+            "p",
+            "a"
+          ]
+        },
+        {
+          "id": "r",
+          "head": [
+            "derived",
+            "capability:x"
+          ],
+          "body": [
+            [
+              "p",
+              "$x"
+            ],
+            {
+              "cmp": [
+                "$x",
+                "<",
+                3
+              ]
+            }
+          ]
+        }
+      ],
+      "route_choices": []
+    }
+  },
+  {
+    "name": "derived-type-not-listed",
+    "program": {
+      "version": 1,
+      "derived": [
+        "capability"
+      ],
+      "entries": [
+        {
+          "id": "b",
+          "fact": [
+            "binding",
+            "coding",
+            "model:opus"
+          ]
+        },
+        {
+          "id": "r",
+          "head": [
+            "derived",
+            "model:opus"
+          ],
+          "body": [
+            [
+              "binding",
+              "$c",
+              "$m"
+            ]
+          ]
+        }
+      ],
+      "route_choices": []
+    }
+  },
+  {
+    "name": "reserved-head",
+    "program": {
+      "version": 1,
+      "derived": [
+        "capability"
+      ],
+      "entries": [
+        {
+          "id": "r",
+          "head": [
+            "holds",
+            "x"
+          ],
+          "body": []
+        }
+      ],
+      "route_choices": []
+    }
+  },
+  {
+    "name": "holds-bound-by-holds-alone",
+    "program": {
+      "version": 1,
+      "derived": [
+        "capability"
+      ],
+      "entries": [
+        {
+          "id": "r",
+          "head": [
+            "derived",
+            "capability:x"
+          ],
+          "body": [
+            [
+              "holds",
+              "$k"
+            ]
+          ]
+        }
+      ],
+      "route_choices": []
+    }
+  }
+]

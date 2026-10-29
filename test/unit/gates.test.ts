@@ -36,7 +36,6 @@ describe('gatesFor: every gate of the table', () => {
     ['rule 4: a missing capability', () => [worker({ declared: [] }), ticket(), leg(), 'claim', facts()], { rule: 4, code: 'missing-capability' }, { rule: 4, code: 'missing-capability' }],
     ['rule 4: the leg’s own requires names a capability the worker lacks (R-BTN-120)', () => [worker({ declared: ['llm-call'] }), ticket({ requires: [] }), leg({ requires: ['create-pr'] }), 'claim', facts()], { rule: 4, code: 'missing-capability' }, { rule: 4, code: 'missing-capability' }],
     ['rule 5: above the tier ceiling', () => [worker({ tier_ceiling: 'routine' }), ticket(), leg(), 'claim', facts()], { rule: 5, code: 'above-tier-ceiling' }, { rule: 5, code: 'above-tier-ceiling' }],
-    ['rule 6: operator-only', () => [worker(), ticket({ operator_only: true }), leg(), 'claim', facts()], { rule: 6, code: 'operator-only' }, { rule: 6, code: 'operator-only' }],
     ['rule 8: a posted barred tag', () => [worker(), ticket(), leg({ bars: ['family:glm'] }), 'claim', facts()], { rule: 8, code: 'barred-tag' }, { rule: 8, code: 'barred-tag' }],
     ['rule 9: an older course version', () => [worker({ courses: [{ repository: 'docs', course: 'roadmap-pr', version: 2 }] }), ticket(), leg(), 'claim', facts()], { rule: 9, code: 'stale-skills' }, null],
     ['rule 9: a course not declared', () => [worker({ courses: [] }), ticket(), leg(), 'claim', facts()], { rule: 9, code: 'stale-skills' }, null],
@@ -49,6 +48,17 @@ describe('gatesFor: every gate of the table', () => {
     const [w, t, l, , f] = args();
     expect(gatesFor(w, t, l, 'claim', f)).toEqual({ ok: false, ...atClaim });
     expect(gatesFor(w, t, l, 'advance', f)).toEqual(atAdvance ? { ok: false, ...atAdvance } : { ok: true });
+  });
+
+  it('rule 6 is retired: an operator-only ticket is never refused for the tag alone (B-104, R-BTN-121 as amended)', () => {
+    // The posted operator_only field is shown, never read: the literal in the ticket's or the
+    // leg's requires is rule 4's, met by declaring human-operator and granted like any capability.
+    expect(gatesFor(worker(), ticket({ operator_only: true }), leg(), 'claim', facts())).toEqual({ ok: true });
+    expect(gatesFor(worker(), ticket({ operator_only: true }), leg(), 'advance', facts())).toEqual({ ok: true });
+    // A ticket whose clause carries the literal is refused without the declaration…
+    expect(gatesFor(worker(), ticket({ requires: ['human-operator'] }), leg(), 'claim', facts())).toEqual({ ok: false, rule: 4, code: 'missing-capability' });
+    // …and passes with it, granted or not (the grant bounds holdings, and there is none here).
+    expect(gatesFor(worker({ declared: ['human-operator'] }), ticket({ requires: ['human-operator'] }), leg(), 'claim', facts())).toEqual({ ok: true });
   });
 
   it('chain and isolation pass a key that ran none of the named legs, and a session worker', () => {

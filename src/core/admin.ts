@@ -9,7 +9,7 @@ import { BatonError, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId, HOLDING_TYPE } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkRegistration, seedEntries, tierPosition, type Registration, type Registry } from './registry';
@@ -451,7 +451,8 @@ export class Admin {
   /** `POST /v1/owner/{repository}/grants` and `POST /v1/admin/grants`: grant a worker key access to
    *  one repository, with the capabilities it may use there and its `max_tier`. The first grant of
    *  an unknown key names its hostname, unique among keys in force; a later one naming another is
-   *  `conflict` — only an administrator changes it. `human-operator` only from an administrator. */
+   *  `conflict` — only an administrator changes it. `human-operator` is granted like any capability
+   *  (B-104: rule 6 retired, R-BTN-121 as amended). */
   async grant(actor: string, repository: string, body: unknown, by: 'owner' | 'admin') {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
@@ -461,11 +462,14 @@ export class Admin {
     const key = await this.parsePersonOrWorkerKey(b.public_key, 'public_key');
     const hostname = b.hostname === undefined ? null : typeof b.hostname === 'string' && HOSTNAME.test(b.hostname) ? b.hostname : bad('hostname', 'must be a hostname');
     const label = b.label === undefined ? null : typeof b.label === 'string' && LABEL.test(b.label) ? b.label : bad('label', 'must be a short label');
-    const raw = Array.isArray(b.capabilities) && b.capabilities.length <= CAPABILITIES_MAX && b.capabilities.every((x) => typeof x === 'string' && CAPABILITY.test(x))
+    // B-104 (R-BTN-121/174): a grant names capabilities and may name a typed holding —
+    // `<type>:<value>`, as `capability:*` and `key:*` always could by their type.
+    const raw = Array.isArray(b.capabilities) && b.capabilities.length <= CAPABILITIES_MAX && b.capabilities.every((x) => typeof x === 'string' && (CAPABILITY.test(x) || new RegExp(`^${HOLDING_TYPE}:[A-Za-z0-9:.*_/@-]{1,128}$`).test(x)))
       ? (b.capabilities as string[]) : bad('capabilities', `must be at most ${CAPABILITIES_MAX} capability names`);
-    // Stored expanded (§4): a role as its capabilities; human-operator as itself, rule 6's own.
+    // Stored expanded (§4): a role as its capabilities; human-operator as itself — B-104 (rule 6
+    // retired, R-BTN-121 as amended): a capability like any other, granted by owners and
+    // administrators alike, checked by rule 4 as the literal it is.
     const expanded = [...new Set([...capabilitiesOf(raw), ...(raw.includes('human-operator') ? ['human-operator'] : [])])].sort();
-    if (expanded.includes('human-operator') && by !== 'admin') throw new BatonError('forbidden', 'only an administrator grants human-operator (R-BTN-58)');
     const maxTier = b.max_tier == null ? null : typeof b.max_tier === 'string' && repo.tiers.includes(b.max_tier) ? repo.tiers.indexOf(b.max_tier) : bad('max_tier', `must be one of ${repo.tiers.join(', ')}`);
     const admins = await this.adminFingerprints();
     return this.c.store.transaction(() => {
@@ -493,10 +497,8 @@ export class Admin {
         if (this.rows(`SELECT 1 FROM credentials WHERE hostname = ? AND revoked_at IS NULL AND id != ?`, hostname, key.fingerprint).length) throw new BatonError('conflict', `${hostname} already has a key in force`);
         this.exec('UPDATE credentials SET hostname = ? WHERE id = ?', hostname, key.fingerprint);
       }
-      // An owner's re-grant keeps an administrator's human-operator: only an administrator takes it away.
       const prior = this.rows<{ capabilities: string; revoked_at: number | null }>('SELECT capabilities, revoked_at FROM worker_grants WHERE credential_id = ? AND repository_id = ?', key.fingerprint, repository)[0];
-      const keepOp = by === 'owner' && prior && prior.revoked_at == null && (JSON.parse(prior.capabilities) as string[]).includes('human-operator');
-      const caps = keepOp ? [...new Set([...expanded, 'human-operator'])].sort() : expanded;
+      const caps = expanded;
       this.exec(`INSERT INTO worker_grants (credential_id, repository_id, capabilities, max_tier, granted_by, granted_at) VALUES (?, ?, ?, ?, ?, ?)
                  ON CONFLICT (credential_id, repository_id) DO UPDATE SET capabilities = excluded.capabilities, max_tier = excluded.max_tier,
                    granted_by = excluded.granted_by, granted_at = excluded.granted_at, revoked_at = NULL`,

@@ -1,0 +1,184 @@
+{
+  "name": "narrowing-open-glm-only",
+  "program": {
+    "version": 1,
+    "builtin": "baton@1",
+    "derived": [
+      "capability",
+      "model"
+    ],
+    "entries": [
+      {
+        "id": "class-coding",
+        "fact": [
+          "model_class",
+          "coding"
+        ]
+      },
+      {
+        "id": "model-opus",
+        "fact": [
+          "model",
+          "model:claude-opus-5-5"
+        ]
+      },
+      {
+        "id": "model-glm",
+        "fact": [
+          "model",
+          "model:glm-5.3"
+        ]
+      },
+      {
+        "id": "binding-opens",
+        "head": [
+          "model_for",
+          "$c",
+          "$m"
+        ],
+        "body": [
+          [
+            "binding",
+            "$c",
+            "$m"
+          ]
+        ]
+      },
+      {
+        "id": "class-bound",
+        "head": [
+          "bound",
+          "$c"
+        ],
+        "body": [
+          [
+            "binding",
+            "$c",
+            "$m"
+          ]
+        ]
+      },
+      {
+        "id": "class-open",
+        "head": [
+          "model_for",
+          "$c",
+          "$m"
+        ],
+        "body": [
+          [
+            "model_class",
+            "$c"
+          ],
+          [
+            "model",
+            "$m"
+          ],
+          {
+            "not": [
+              "bound",
+              "$c"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "one-binding",
+        "constraint": [
+          [
+            "binding",
+            "$c",
+            "$m1"
+          ],
+          [
+            "binding",
+            "$c",
+            "$m2"
+          ],
+          {
+            "cmp": [
+              "$m1",
+              "!=",
+              "$m2"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "direct-model",
+        "head": [
+          "derived",
+          "$m"
+        ],
+        "body": [
+          [
+            "offers",
+            "$k",
+            "$m"
+          ],
+          [
+            "holds",
+            "$k"
+          ]
+        ]
+      },
+      {
+        "id": "codegen",
+        "head": [
+          "derived",
+          "capability:code-generation-llm"
+        ],
+        "body": [
+          [
+            "model_for",
+            "coding",
+            "$m"
+          ],
+          [
+            "offers",
+            "$k",
+            "$m"
+          ],
+          [
+            "holds",
+            "$k"
+          ],
+          [
+            "usable_with",
+            "$d",
+            "$m"
+          ],
+          [
+            "holds",
+            "$d"
+          ]
+        ]
+      },
+      {
+        "id": "offers-key-glm",
+        "fact": [
+          "offers",
+          "key:zai",
+          "model:glm-5.3"
+        ]
+      },
+      {
+        "id": "usable-dep-glm",
+        "fact": [
+          "usable_with",
+          "dependency:opencode-v2",
+          "model:glm-5.3"
+        ]
+      }
+    ],
+    "route_choices": []
+  },
+  "holdings": [
+    "key:zai",
+    "dependency:opencode-v2"
+  ],
+  "derived": [
+    "model:glm-5.3",
+    "capability:code-generation-llm"
+  ]
+}

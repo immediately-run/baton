@@ -6,7 +6,7 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
-import { ASKS, COURSE_ID as LEG_ID, DECISION_ID, DECISIONS_MAX, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG } from './validate';
+import { ASKS, COURSE_ID as LEG_ID, DECISION_ID, DECISIONS_MAX, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE } from './validate';
 import type { Step } from './graph';
 
 /** One factory-state item, as the sync posts it (`docs/scripts/factory-state.mjs`). Only the
@@ -103,6 +103,8 @@ export interface BoardPayload {
   matrix?: { families: Record<string, string[]>; agents: Record<string, { reviews_on: string; bills: string[]; models?: Record<string, string> }> };
   /** The course registry (R-BTN-48, §7.1); absent, the courses in force stay. */
   registry?: RegistryEntry[];
+  /** §5.9 (R-BTN-174, B-104): the merged ontology, or why the merge failed; absent, none. */
+  ontology?: { builtin?: string | null; program: unknown } | { error: string };
   /** §6.8: the transcript repositories from `baton.json`; absent, the defaults stand. */
   transcript_repos?: string[];
 }
@@ -175,6 +177,15 @@ export function checkPayload(body: unknown): BoardPayload {
   // `min_skills_version` is gone (R-BTN-22: each course's version is the skills version); a
   // sync that still sends it is not refused for it, and Baton reads it nowhere.
   checkReference(p);
+  if (p.ontology !== undefined) {
+    const o = p.ontology as { builtin?: unknown; program?: unknown; error?: unknown };
+    if (!o || typeof o !== 'object' || Array.isArray(o)) throw new BatonError('invalid-params', 'ontology must be {builtin?, program} or {error}');
+    if ('error' in o) {
+      if (typeof o.error !== 'string' || !o.error.length || o.error.length > 500) throw new BatonError('invalid-params', "ontology.error must be the merge's reason, short plain text");
+    } else if (o.program === undefined || typeof o.program !== 'object' || (o.builtin !== undefined && o.builtin !== null && typeof o.builtin !== 'string')) {
+      throw new BatonError('invalid-params', 'ontology must be {builtin?, program} or {error}');
+    }
+  }
   return p.registry === undefined ? p : { ...p, registry: checkRegistry(p.registry) };
 }
 
@@ -199,7 +210,8 @@ function checkInterim(p: BoardPayload) {
     if (it.project != null && !NAME.test(it.project)) throw new BatonError('invalid-params', `${it.id}: project is malformed`);
     if (it.order != null && !Number.isFinite(it.order)) throw new BatonError('invalid-params', `${it.id}: order must be a number`);
     list(it.tags, /^[A-Za-z0-9-]{1,64}$/, `${it.id}: tags`);
-    list(it.requires, NAME, `${it.id}: requires`);
+    // B-104 (R-BTN-121/174): a clause may name a typed capability — `<type>:<value>`.
+    list(it.requires, new RegExp(`^(?:${NAME.source}|${HOLDING_TYPE}:${HOLDING_VALUE})$`), `${it.id}: requires`);
     list(it.dependsOn, ID, `${it.id}: dependsOn`);
     list(it.blockedBy, ID, `${it.id}: blockedBy`);
     list(it.repos, REPO, `${it.id}: repos`);
