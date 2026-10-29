@@ -51,6 +51,12 @@ R-FH-11 (what a VM holds) and Axiom 6; `docs/security-model.mdx` (OWASP mapping,
 - **Two Apps, one per role** (finding 7, with B-128): the implementer's and the reviewer's tokens
   come from separate GitHub Apps with separate keys, so they stay two identities to GitHub.
 
+**After the merge-runner design** (the owner, 2026-10-28; B-140):
+
+- **One App is enough** (B-140 drops the second GitHub identity). The broker stays worthwhile
+  for what it was first for: no long-lived forge credential in a VM, and per-claim scope. It is
+  no longer needed to keep two roles apart.
+
 ### Tests
 
 - A scenario (the next free S-BTN number): a runner with a claim on a `fieldhouse` ticket gets a

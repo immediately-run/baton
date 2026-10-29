@@ -93,6 +93,16 @@ default branch, so a change that has not reached it is not claimable and not in 
 - **"Owner's approval" means the human-only identity** (B-136), not the account the owner's agent
   sessions use.
 
+**After the merge-runner design** (the owner, 2026-10-28; B-140):
+
+- **This ticket is now B-140's three rules**: runners propose, the merge runner lands; no runner
+  change to Baton's state lands without a human; tickets are proposals. The default branch accepts
+  only the merge runner's identity (a GitHub branch ruleset, public or private; GitLab and Gitea
+  protected branches; a `pre-receive` hook on plain git). Protected paths are enforced by the
+  merge runner's own path check, the same on every forge, so push rulesets and CODEOWNERS become
+  optional extra layers. What stays here: agent-filed tickets as PRs, no course committing to the
+  default branch, the tag ruleset, the owner-gated authority paths, and the Axiom 4 amendment.
+
 ### Tests
 
 - A drill on a scratch repository, scripted: the worker's push to main is refused; its push to an

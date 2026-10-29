@@ -18,6 +18,10 @@ prs: []
 depends_on: []
 ---
 
+> **The specification is BATON_SPEC §12.8 (R-BTN-180 to R-BTN-187, baton#134).** Where this
+> ticket and the spec differ, the spec wins: it was revised through three adversarial reviews
+> after this ticket was written.
+
 **Brief:** the owner, 2026-10-27: "Baton as currently designed is completely unprotected against
 scenarios where a runner is compromised (and this will happen sooner or later)", then, on the
 security model's hardening option 8: "file it now".
@@ -81,6 +85,15 @@ makes a single compromised runner unable to land code alone.
   reviewer identity (and the humans) belong to, so the implementer's approval of a reviewer's push
   does not satisfy "someone other than the pusher".
 
+**After the merge-runner design** (the owner, 2026-10-28; B-140):
+
+- **The second GitHub identity is dropped.** Under B-140 the merge runner reads approvals from
+  Baton's claim records, signed by distinct runner keys and checked for independence (R-BTN-106),
+  and never from PR comments or forge reviews. All runners may share one GitHub identity; what
+  this ticket keeps is independence by Baton key, the routing of review legs, and item 6 (the
+  reviewer never executes code under review). Items 1, 3 and the reviewer-only team are
+  superseded by B-140's protected default branch.
+
 ### Tests
 
 - A scenario (the next free S-BTN number): a runner with only `forge-implementer` is never
@@ -94,4 +107,4 @@ makes a single compromised runner unable to land code alone.
 
 - [ ] the spec amended (credential sets, routing, the verdict rule) citing this ticket
 - [ ] the scenario passes on both hosts; the drill script passes
-- [ ] irfldhv1 runs with two identities on `fieldhouse` and one output repository
+- [ ] ~~irfldhv1 runs with two identities~~ superseded: independence by trust domain and signed commits (R-BTN-183)

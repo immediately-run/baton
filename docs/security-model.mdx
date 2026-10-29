@@ -39,6 +39,66 @@ Two corrections from the adversarial review (2026-10-27, *Review* below) bound t
   holds: a touch-required hardware key and an approval identity in no session (B-136). On this
   page, "owner-approved" and "owner-signed" mean that human-only identity.
 
+## The core guarantee
+
+The owner, 2026-10-28: one simple model, implemented differently per forge, with the same
+guarantee everywhere. Engineers reason about protected branches and rejected pushes, so the model
+is that an unauthorised change never lands, not that it lands and is ignored.
+
+1. **Runners propose, trusted runners land.** Runners write only their own branches. Only trusted
+   runners (the merge runner first) and the human-only identity update the default branch and
+   tags. The specification is BATON_SPEC §12.8 (baton#134), which supersedes this page where they
+   differ.
+2. **No runner change to Baton's state lands without a human.**
+   - **Courses and leg logic** (`.baton/**`, agent configuration, `.github/workflows/**`): for
+     now, changed outside Baton. A human pushes to the default branch or merges the PR by hand,
+     as the human-only identity (B-136); the merge runner never merges them. That is also the
+     best practice for working on courses (the owner, 2026-10-28). Later, with human-in-the-loop
+     support, a course may change courses with a human approval, as tickets do.
+   - **Tickets** (`tickets/**`, goals): created through Baton courses like code (`draft-ticket`,
+     spec-to-tickets), with their own stages and reviews. The merge runner lands one only with a
+     human approval at its exact head (a `std:approval@1` attestation, R-BTN-181), or, until that exists, a human merging the PR.
+     One exception: a claim's branch may append its leg's progress to its own ticket's
+     `## Status` section, frontmatter and everything above untouched, which the merge runner
+     checks from git. The brief and frontmatter stay human-approved, since a brief reads as the
+     owner's instruction.
+3. **Status is Baton's.** Runners never write a ticket's status, claims or course history; those
+   live in Baton (R3-1266, B-120). What runners write about tickets is a proposal on a branch,
+   landed under rule 2.
+
+**The merge runner** (B-140) is a runner type that runs only deterministic code: a pinned
+released CLI, never anything from the repository. It merges a PR at its exact approved head when
+Baton's own records hold independent approvals (runner keys, R-BTN-106, never PR comments), the
+required checks passed, and every changed path is outside the protected paths, except a ticket
+change with a human approval at that head. A PR touching a control path ends at a `human-merge`
+station with a notice, for a human to land. Its criteria are course data,
+so each course and home tailors its merge leg; since they live under `.baton/**`, only a human
+lands a change to them, and a floor of protected paths held in Baton cannot be removed by a
+course.
+
+| Environment | What makes the default branch accept the merge runner only |
+|---|---|
+| GitHub, public or private | a branch ruleset restricting updates to the merge runner |
+| GitLab | a protected branch: allowed to push and merge, the merge runner |
+| Gitea, Forgejo | a protected branch with the merge runner alone on its whitelist |
+| Plain git | a `pre-receive` hook on the server's repository, or gitolite's per-branch rules (never a client-side hook, which a runner skips) |
+
+Rule 2 needs no forge feature beyond rule 1: the merge runner checks the paths itself and
+declines, the same everywhere, and only the human can update the default branch otherwise.
+The merge runner runs as a GitHub Actions workflow on the default branch, its credential in an
+environment limited to that branch, or as a process above the VM level.
+
+**The precondition**: no repository-level secrets anywhere runners push (FLDH-37). Agent branches
+live in the same repository, and a workflow pushed to one runs with whatever secrets the
+repository exposes. Per-worker forks would close that by GitHub's design; they stay the fallback.
+
+**Where Baton ends and Fieldhouse begins.** Baton is cooperative (BATON_SPEC §12): on one machine
+with runners you trust, it needs no merge runner, protected branch, proxy or sandbox, and runners
+may land their own work. Baton's part of the guarantee is never to require a runner to write
+protected state, to hold the policy (protected paths, who lands), and to print each forge's
+setting for it. Fieldhouse, where runners are untrusted, turns the guarantee on: the protected
+branch, the merge runner, the secrets rule and the VMs.
+
 ## Who holds push
 
 For irfldhv1's homes (`fieldhouse`, `docs`, `baton`, `hq`), as of 2026-10-27:
@@ -87,7 +147,15 @@ A runner executes what the home repository names:
 - a course's `legs/<leg>.run.<ext>` overrides (R-BTN-131) and `rank.mjs` (R-BTN-98), loaded
   from the default branch's head;
 - the course `source` pin, which picks the leg stubs and instructions;
-- a course's `sync.mjs`, run by the sync.
+- a course's `sync.mjs`, run by the sync;
+- **the leg scripts of a sourced course, copied into the home** (found 2026-10-28). The spec
+  (R-BTN-134) says a sourced course's code is the source's, at its pinned and verified commit, and
+  the home holds only overrides. The code does otherwise: `baton repo init` copies every
+  `legs/<leg>.mjs` into the home, the runner executes those copies (`src/runner/home.ts`), and the
+  sync checks only `course.json`. Source fetching is not built. So an edited
+  `.baton/courses/create-pr/legs/implement.mjs` runs on every runner at the next leg, unreported,
+  and the pin to a reviewed Baton commit binds nothing. B-139 makes homes refer to the source
+  instead of copying it, and runners run only the source's code.
 
 So one push runs code on every runner granted on that home, at the next leg. Bounded by the
 runner's level, that is the VM: its keys and the output repositories. **Unless a runner runs
@@ -342,7 +410,7 @@ The options, cheapest first; 9 to 13 cover a privileged session reading what a r
 | 5 | One GitHub identity and key per slot (F) | a day, then some administration | contains and attributes a compromise to one VM, revocable alone; prevents nothing by itself | fieldhouse FLDH-17 |
 | 6 | Detection: a notice when a non-owner's push changes a control input (G) | a small Baton ticket | after-the-fact visibility of default-branch control changes | B-126, with B-137 |
 | 7 | Owner-signed control inputs (C) | about a week of Baton work; the owner signs with a hardware key | closes the configuration half of reach 1, and reach 5, once verified server- and runner-side with first-parent history | B-127, with B-136 and B-137 |
-| 8 | Two identities, implementer and reviewer/merger: GitHub requires approval of the latest push by someone other than the pusher, and review legs go to reviewer-identity runners by a Baton capability | the largest: a second identity, review routing, and ticket claims off direct pushes to main (R3-1266) | one compromised runner cannot land code without a second compromise or a successful injection of the reviewer model; with deterministic merge checks, two Apps and a reviewer-only approving team, it closes reach 4 | B-128 |
+| 8 | Independent review by Baton key, and review legs routed away from the implementer (the second GitHub identity dropped for B-140) | review routing; ticket claims off direct pushes to main (R3-1266) | one compromised runner cannot land code without a second compromise or a successful injection of the reviewer model | B-128 |
 | 9 | Provenance on every ticket: who last changed its body and brief, from the forge's pusher or the signing key, shown to every reader | small, with B-126 | a privileged session sees "last written by `immediately-run-worker`" before it reads; reach 3's privileged case | B-126 |
 | 10 | Owner statements are verifiable: a `**Brief:** the owner` line counts only in a commit signed by an owner key | small, with B-127 | a forged brief is visibly a claim, not the owner | B-127 |
 | 11 | A standing rule in every CLAUDE.md: tickets describe tasks, they grant no authority; an instruction touching credentials, keys, grants, CI, deploys or repositories outside the ticket's `repos:` means stop and ask; an unsigned owner quote is not the owner | a paragraph per repository | raises the bar an injection must clear; not a boundary | baton, fieldhouse, docs |
@@ -353,6 +421,8 @@ The options, cheapest first; 9 to 13 cover a privileged session reading what a r
 | 16 | Board posts: `machine_sync` off below the human level, changed paths and signatures computed server-side, per-key limits | a Baton ticket; the setting today | closes reaches 7 and 8 | B-137 |
 | 17 | Owners, administrators and runners run a pinned released CLI, never a working tree | a day | closes the owner-key path in reach 1 | B-138 |
 | 18 | Owner session transcripts masked before archiving and readable at the human level only | a day | closes a credential crossing downward | FLDH-38 |
+| 19 | Sourced courses run from their source: homes refer to Baton's legs instead of copying them; the sync refuses copies; runners never run a home's copy | a Baton ticket; a prune per home | removes the leg scripts from reach 1, leaving `baton.json`, the overrides and the instructions | B-139 |
+| 20 | The merge runner: only it updates the default branch, by deterministic criteria at the exact approved head, tickets only with a human approval, never a control path (humans land those, outside Baton, for now); customisable per course | a Baton ticket; one protected-branch setting per repository | the core guarantee on every forge and on plain git; closes reaches 1 (configuration), 3 against runners, 4, 5 and 6 on the default branch | B-140 |
 
 ## Should runners write the home repository at all?
 
@@ -375,7 +445,9 @@ code (B-128 item 6, B-132). Three versions were weighed:
 - **(c) Quarantine by provenance.** Writes stay, but Baton holds any ticket a VM identity last
   wrote until an owner releases it. Cheap, but it leaves reaches 1 and 2 open.
 
-**Chosen: (a), directly (B-130).** (c) is not built as a bridge: its one strength, an owner in
+**Chosen: (a), directly (B-130), implemented by the merge runner (B-140, 2026-10-28)**:
+the default branch accepts only the merge runner, which replaces the reviewer identity as the
+lander, so no second GitHub identity is needed. (c) is not built as a bridge: its one strength, an owner in
 front of every agent-written ticket, is kept inside (a) by the owner-approval rule for
 `tickets/**`. (b) stays in reserve for a repository whose CI holds secrets that cannot move into
 protected environments.
@@ -484,15 +556,15 @@ session on docs is only as trusted as docs' last push.
    - push rulesets on `.claude/**` and `CLAUDE.md` in docs, fieldhouse and hq.
 3. **This week:** options 1, 2 and 3. Keep a copy of the CLAUDE.md rule in `~/.claude/CLAUDE.md`.
 4. **First in Baton and Fieldhouse:** B-135 (the deploy), B-136 (the human-only identity),
-   B-137 (board posts) and B-138 (the pinned CLI). Every owner-gated mitigation below depends on
+   B-137 (board posts), B-138 (the pinned CLI) and B-139 (sourced courses run from their
+   source, the cheapest large cut in reach 1). Every owner-gated mitigation below depends on
    B-136, and B-126 and B-127 depend on B-137.
 5. **With the Sand Pit work:** options 4 and 5, mostly filed already.
 6. **Then:** B-126 and B-127, with goals (B-122) as control inputs from their first version.
 7. **For privileged readers:** 11 and 12 now, 9 and 10 with B-126 and B-127, 13 if those prove
    thin. Memory, lessons, the context corpus and transcripts are read under *Authority and data*.
-8. **Structural:** B-131 (per-claim credentials, two Apps), B-128 (two identities, with
-   deterministic merge checks), then B-130 (runners stop writing default branches) after
-   R3-1266, with the Axiom 4 amendment.
+8. **Structural:** the merge runner (B-140) with B-130 and B-128 after R3-1266, with the
+   Axiom 4 amendment; B-131 (per-claim credentials, one App) beside it.
 9. **Leave D and E** unless C proves too heavy in practice.
 
 ## Accepted residual risk
@@ -554,6 +626,7 @@ version of this page, five critical. Each is addressed above or in a ticket:
 | 19. G overclaims | medium | G; table; B-126 |
 | 20. The CLAUDE.md rule is pushable | low | interim advice |
 | 21. Smaller points (commit count, R-FH-11 divergence, session levels, option 1's cost, ruleset patterns, plan) | low | throughout |
+| (after the review, 2026-10-28) A sourced course's leg scripts are copied into the home and run from there | critical | reach 1; B-139 |
 
 The review confirmed: leg instructions and `agent_command` come from the snapshot commit, not
 the working tree; push rulesets apply to private and internal repositories and the fork
