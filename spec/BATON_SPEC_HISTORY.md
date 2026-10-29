@@ -355,6 +355,55 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   S-BTN-21 was rewritten and G-BTN-162 added. The 2026-10-14/16 rejection of reservations now
   names future capacity: a seat a running leg holds is a fact the runner states, not a forecast.
 
+- **2026-10-27 to 2026-10-28 — §12.8: the core guarantee (owner direction; B-124, B-127, B-130,
+  B-136, B-137, B-139, B-140).** The owner kept push access to a home as the perimeter of a
+  fleet, but asked for an explicit security model (`docs/security-model.mdx`) and an adversarial
+  review of it, which found 21 problems, five critical: a push to `baton` deploys the server;
+  docs held a repository secret with Administration write; every owner gate was passable by the
+  owner's agent sessions; any runner key could post the board, so client-side checks were the
+  attacker's; the CLI ran from a pushed checkout. Then it was found that `baton repo init` copies a
+  sourced course's leg scripts into the home and runners run those copies, so the source pin bound
+  nothing (B-139). The owner rejected verifying signatures on pushes that had already landed
+  ("counterintuitive to how most software engineers reason about code") and a git proxy (an
+  operational burden for getting started with Fieldhouse), and asked for "a protected main
+  branch … a dedicated runner type, which runs only deterministic code … taking the merge approval
+  logic out of GitHub and placing it into Baton", customisable per course. On courses: "As an
+  initial step and before human in the loop support is built out, I think it makes sense to
+  require these changes to be done outside of Baton." On tickets: "I would like to be able to
+  create tickets in Baton the same way code can be created, but in this case a human approval is
+  necessary." On surfaces: "I want the invoker's credentials (runner, repo owner, baton admin) to
+  make the difference in which operations are available, not the channel." Rules introduced:
+  R-BTN-180–R-BTN-187. The §12 summary gained three bullets; §12.1 the trusted runner and the
+  owner's agent; §6.1 the attestation prerequisite; §13 the `attestations` table; §14 its route. The owner
+  noted that "approvals come from Baton's records" means "baton must track a new type of state,
+  which is human approval"; reading it, R-BTN-116's person leg, answered in git by "whoever can
+  push", would have let a runner write its own human approval, so approvals became Baton records (now R-BTN-181's attestations): both kinds of
+  approval Baton records bound to one commit, the human's signed by a human-only key. The owner then
+  generalised it: "I don't think merge is the only scenario where this trust issue comes up …
+  A binary go, no go on merges is not going to be enough … We could use this same type registry
+  to record custom trusted state … And these bits of state may be used as a gate for sensitive
+  course legs", with trusted services and Baton itself as writers, "attestation" as the name, and
+  "Attestation can be modeled as a type of prerequisite for a leg." R-BTN-181 (attestations) and
+  R-BTN-182 (trusted runners) replace the approvals rule. A third fresh review found the headline
+  still did not hold (R1–R20, below); the owner then agreed to commits signed by runners' Baton
+  keys, independence by trust domain, two forge identities, and stating plainly that a change
+  persuading both reviewers' models lands, with two reviewers from different model families. A
+  fourth review found the guarantee still failed (F1–F17): a writer's code ran in its reviewers'
+  domains. The owner: signed authorship "might be a very strong addition for Fieldhouse, but I
+  don't think this should be universally required for all users of the baton", so it became the
+  opt-in `authorship: signed`, and §12.8 states each mode's guarantee separately; and, of "a domain
+  that runs a branch's code is a writer, with reviewers never executing branch code and Baton keys
+  moved to a host-side signer": "Yes, this makes sense to me." Values 12 and the architecture page
+  gained the opt-in exception; R-BTN-35, -161, -165, -171 and -173 their notes. Then, on R-BTN-185: "I'm not
+  sure the baton spec should require hardware keys, this sounds more like a fieldhouse
+  hardening"; hardware backing became the deployment policy `human_key: hardware`, which
+  Fieldhouse's R-FH-3 requires. Then: "a
+  runner branch working on a specific ticket should be able to update its own ticket … to
+  document the ticket's progression. And the ticket file is the right place to do this. It is
+  easy to check that a runner authored branch is only modifying its own ticket file at merge
+  time." R-BTN-184 allows append-only progress after the own ticket's `## Status` heading; the
+  brief and frontmatter stay human-approved, since a brief reads as the owner's instruction.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -2946,3 +2995,97 @@ should-fix, 1 simplify, 7 nits, none a design question. Resolved:)*
 | 10–16 nits | `route_choices_json`; `meters` placement; the instance view and §11.4's runners view; an empty `demote_when` refused, a leg absent from the course refused, needs outside the constant syntax refused; R-BTN-75 recounts derived rows when sets become current; the `derived` list never names `credential`, `runner` or `human-operator`; capacity-less resources billed for ranking |
 
 The owner accepted round 8's verdict without a further review (2026-10-22); B-104 and B-105 returned to `available`.
+
+*(2026-10-28 — §12.8 at `f378ec3` (with the security model and B-122–B-140) was reviewed
+adversarially by a fresh agent: the shape right, the headline ("one compromised runner cannot land
+a change alone") not yet delivered; 17 new findings (N1–N16 and N8a), 3 critical; of the 21 findings of the
+security model's own review (2026-10-27), 3 closed, 17 partly closed, 1 open. Resolved in the
+rewrite around attestations and trusted runners:)*
+
+| Finding | Resolution | The next review's verdict |
+|---|---|---|
+| N1 a reviewer pushes to the branch and approves its own commit; "every key that wrote that head" is not computable | `std:wrote@1`: Baton attests each head a writing leg reports; a merged head and every commit since the merge base must be one; independence is computed over that chain, from a review claim that started at the head (R-BTN-181, R-BTN-183) | partly |
+| N2 required checks are attacker-controlled | commit statuses never read; checks only as `std:checks@1` from the trusted executor running protected course data, or check runs from a workflow file on protected main with main's blob; checks named as no security gate (R-BTN-183) | partly |
+| N3 merge-runner-landed code runs with main-only secrets; baton's `src/` unprotected | every path a deploying or releasing workflow executes is protected; for `baton` that is the whole repository, so every merge there needs a human (R-BTN-184, R-BTN-180) | partly |
+| N4 the floor misses executed and authority paths; `tickets/**` is not every home's | the floor is computed per repository: `imports`, the ticket source's items path and the goal path, `.github/actions/**` and workflow-local `uses`, a per-harness list (`.mcp.json`, opencode), CODEOWNERS, authority paths (R-BTN-184) | partly |
+| N5 renames, symlinks, gitlinks, case; source pins at any ancestor | `diff-tree --no-renames` from main's tip to the merge result plus `merge-base --all`; modes 120000 and 160000 and `.gitmodules` refused; `p` and `p/`, case-folded, NFC; pins at first-parent or release-tag commits only (R-BTN-183, R-BTN-134) | resolved |
+| N6 `legs/merge.run.mjs` runs repository code with the credential | may only add refusals, in a child without credential, network, clock or environment; the CLI's rules apply after (R-BTN-182) | partly |
+| N7 the merge credential's power, placement and per-forge identity | stated as human-level for what it may do; never on the owner's machine under `protected`; GitHub bypass only a dedicated App without Administration, never Actions, a role, a team or Dependabot; GitLab Free by deploy key; plain git needs pusher identity and no file access (R-BTN-182, R-BTN-180) | partly |
+| N8 the human gate: dashboard cookie, self-registered keys, the browser, protected settings | WebAuthn per act on the dashboard; a `human_only` key registered only by an existing one, bootstrapped out of band, hardware-attested where possible; no agent tool on the human's browser or desktop; every protected setting and the message of the day are human gates; the owner's agent is a principal; trusted runners pin `human_only` keys themselves (R-BTN-185, R-BTN-182) | partly |
+| N8a own-progress exception: unapproved instructions, link definitions, the heading, the mirror | appended entries are one plain-text line each, no link, definition, heading, HTML, MDX, fence or backtick; the last `## Status` line, LF, outside fences, present at the base; none takes no progress; bytes at the end, no renames, exact path; the archive move by the merge runner; the mirror writes nothing to main under `protected` (R-BTN-184, R-BTN-180) | partly |
+| N9 environment reviewers gate every run | reviewers only on deploy and release environments; trusted runners' and the sync's environments limited to the default branch, unattended (R-BTN-180) | resolved in the spec |
+| N10 tags and other refs | runners create and update only `branch_pattern` refs; rulesets on tags too; `repo protect` prints both (R-BTN-180) | resolved |
+| N11 R-BTN-184's protected list a subset of R-BTN-66's | R-BTN-186 lists every R-BTN-66 setting, the grant `sync` flag and `untrusted` mark, `landing`, `protected_paths` and writer policies | partly |
+| N12 git-sourced verdicts and trailers still move tickets; squash forges trailers | under `protected`, stations a trusted leg acts on come from attestations; the merge runner writes its own commit message; a human's merge is a `sender.id` that is not a trusted runner's (R-BTN-187, R-BTN-183, R-BTN-184) | partly |
+| N13 `cooperative` default; `landing` unchecked | `untrusted` grants are refused on `cooperative` repositories; the sync and trusted runners compare the forge's protection with `repo protect` every run and stop on a difference (`baton.unprotected`) (R-BTN-180) | partly |
+| N14 inconsistencies | R-BTN-46, R-BTN-66 and R-BTN-116 amended; §14 route added; §12.1 rows corrected (no runner secret as a boundary); rule `trusted` keeps ordinary runners off trusted legs. Fieldhouse's Axiom 4 and R-FH-11 remain the owner's to amend in Fieldhouse | partly |
+| N15 push deliveries capped or missing | compared with the forge's compare range; truncated or missing deliveries, and more than three tags at once, fail closed (R-BTN-187) | resolved |
+| N16 the signature over itself; unsigned review approvals; imports | signed over every other field; review attestations are `baton`-written and never a human gate; an import drops every attestation; the R-BTN-33 exception named (R-BTN-181) | partly |
+
+*(2026-10-28 — §12.8 at `2e3bfa7` was reviewed adversarially by a third fresh agent: the headline
+did not yet hold, one compromised runner could still land a change alone; N1–N16: 4 resolved, 12
+partly, 1 not (Fieldhouse's Axiom 4, since amended in fieldhouse#7); 20 new findings. Addressed in
+the revision that follows, with the owner's four decisions. The fourth review judged these
+resolutions 1 resolved (R15), 7 mostly and 12 partly; the table below says what was done, and the
+fourth round's table what remained:)*
+
+| Finding | Resolution | The next review's verdict |
+|---|---|---|
+| R1 the `std:wrote@1` chain has no continuity: a planted commit is laundered through an honest fixer | runners sign every commit with their Baton key; a writing claim reports its start head, which must be the last attested head, and the CLI refuses any other tip (`baton.foreign-commit`); the merge needs an unbroken chain of attested ranges, each commit signed by its leg's key (R-BTN-183; the owner's decision) | partly |
+| R2 independence by key, several keys per host | trust domains: one grant per domain per repository, set by a human gate; independence over domains (R-BTN-180, R-BTN-183; the owner's decision) | partly |
+| R3 the everyday account keeps admin rights; the check cannot see bypass actors | two forge identities, the everyday one with no administrative role; GitHub needs an organisation and a human-only team; the check uses a read-only App with Administration read; changes between runs fail closed; a human's merge is the human-only identity's sender only (R-BTN-180, R-BTN-184, R-BTN-185; the owner's decision) | partly |
+| R4 bootstrap, credential management and writer policies rooted in agent credentials | administrators are `human_only`; credential management, trust domains, the `trusted` mark, owner-key removal and writer policies are human gates; trusted runners pin writer classes and `service` keys (R-BTN-182, R-BTN-185) | mostly |
+| R5 a touch or a WebAuthn assertion on a machine agents drive | PIN and touch, FIDO attestation against an allowlist; the CLI shows the fields and requires a derived code typed on an undriven terminal; the dashboard only prepares approvals unless its authenticator is attested and pinned (R-BTN-185) | partly |
+| R6 the headline overclaims | the guarantee and what it does not cover are stated; two reviewers of different model families; `protected_paths: ["**"]` for deployed main (§12.8 preamble, R-BTN-183; the owner's decision) | partly |
+| R7 the override exfiltrates through `reasons`; isolation unspecified | Linux namespace without network or credential, the diff as only input, a fixed time; `reasons` from a closed list (R-BTN-182) | mostly |
+| R8 `.npmrc` and the Actions cache | trusted runners install by tarball integrity outside any checkout without package configuration; privileged jobs restore no cache and run with a read-only `GITHUB_TOKEN`; `.npmrc`, `.yarnrc*`, `.envrc` protected (R-BTN-180, R-BTN-182, R-BTN-184) | partly |
+| R9 the outbox and call legs still write main | under `protected` only a trusted runner drains the outbox, from templates; call-leg children and promoted questions are held in Baton until approved (R-BTN-180; notes on R-BTN-165, R-BTN-171, R-BTN-173) | partly |
+| R10 no revocation; uniqueness blocks re-attestation; signature over mutable fields | `DELETE` revokes (a human gate for `human` types); a new attestation supersedes; the signature covers canonical JSON of fixed fields with a nonce, namespace `baton-attestation@1`; consumption by compare-and-swap, restored only on a provable forge refusal (R-BTN-181, R-BTN-182) | partly |
+| R11 own-progress entries forgeable and injectable | leg and nonce must equal the claim's, time within its span; a character whitelist without URLs, 300 bytes, 20 entries; the base ends in LF; readers show entries as the leg's data (R-BTN-184) | mostly |
+| R12 `untrusted` optional; R-BTN-187 contradicts R-BTN-180 | every grant is untrusted unless marked `trusted`; one sync rule, in R-BTN-180 (R-BTN-180, R-BTN-187) | partly |
+| R13 any runner can force-push any ticket's branch | foreign pushes raise `baton.foreign-push` and hold the ticket rather than re-running legs; per-claim forge credentials remain B-131 (R-BTN-183) | partly; worse in cost |
+| R14 the floor partly not computable | what Baton can compute is listed; the rest is declared by the owner; a repository with any workflow using an environment or secret is `**` until narrowed; ticket sources declare their globs (R-BTN-184) | mostly |
+| R15 holds and bars human-gated and taken from MCP | only loosening is gated; any owner credential, MCP included, may add holds and bars (R-BTN-186) | resolved |
+| R16 `owner`-class attestations and runner-supplied subjects | the validator refuses a trusted leg on an `owner`-only type; trusted legs' subjects come from Baton-held values and always include the ticket (R-BTN-181) | partly |
+| R17 the checks executor runs PR code beside its key | the executor's sandbox holds no credential; the key signs outside from the exit status; one `service` key per type (R-BTN-181) | mostly |
+| R18 Baton-written facts trusted wholesale; imports strand work | `baton` attestations are signed with Baton's attestation key, which trusted runners pin; after an import, work re-attests by re-running its writing and review legs (R-BTN-181, R-BTN-182) | partly |
+| R19 per-forge feasibility | the check and the human-merge signal are specified for GitHub, GitLab, Gitea and plain git (the pusher log) (R-BTN-180, R-BTN-184) | partly |
+| R20 stale references | the history's references corrected; `where` defined; §13 tables and columns, §14's revoke route and §15's scenarios S-BTN-180–187 added. B-128, B-140 and the security model are updated in baton#133, the spec in baton#134 | partly |
+
+*(2026-10-29 — §12.8 at `cda30b2` was reviewed adversarially by a fourth fresh agent: the guarantee
+did not hold, not ready to merge as a proposal, but close; of R1–R20, 1 resolved, 7 mostly, 12
+partly (among them R3, whose read of GitHub's bypass actors needs write access to the ruleset, and
+whose audit log exists only on Enterprise Cloud); 17 new findings. Addressed in the revision that
+follows, with the owner's decisions on F1 and on signed authorship:)*
+
+| Finding | Resolution | The next review's verdict |
+|---|---|---|
+| F1 a writer's code runs in its reviewers' and fixers' domains, ending their legs or reading their keys | a domain that runs a branch's code is one of its writers (`std:ran@1`); reviews are `reads_only` legs that load agent configuration from the default branch and run nothing; tests run only in the trusted executor; Baton keys sit outside domains that run branch code, behind a host-side signer in Fieldhouse's profile (R-BTN-181, R-BTN-183; the owner's decision) | not resolved |
+| F2 the exclusion understates the risk | stated exactly: a compromised runner that is one reviewer needs to persuade the other (§12.8) | partly |
+| F3 the `trusted` mark makes `cooperative` unusable | the trust level (`trusted`, `untrusted`) is separate from the trusted-runner role; under `cooperative` grants are `trusted` by default (R-BTN-180) | mostly |
+| F4 the outbox and handler tickets still write ticket files to main | the outbox never writes a ticket file under `protected`; handler tickets, call children, promoted questions and supersession replacements are held in Baton until approved, in batches (R-BTN-180; notes on R-BTN-161, -165, -171, -173) | partly |
+| F5 signed commits do not fit API keys, session isolation, WIP pushes, merges from main, rebases, B-101 | signing is the opt-in `authorship: signed`; under it, SSH keys only and session legs sign through their runner; a leg's own intermediate pushes are its range; commits reachable from main are outside every range; a rebase replaces the range; B-101's review files are written by the trusted runner (R-BTN-183) | partly |
+| F6 the human-merge path is not gated | `human-merge` shows the computed view of the head (chain, reviews, checks, diff); a merge of anything but the presented head is a discrepancy; `**` applies only where a workflow uses a deploy or release secret (R-BTN-184) | partly |
+| F7 a tree binding voids approvals whenever main moves | approvals bind paths and blobs, checked against the merge result's blobs; main moving voids one only if it changes an approved path (R-BTN-181, R-BTN-183) | mostly |
+| F8 supersession forbids two reviews; revoked keys keep counting | supersession is per writer; an attestation counts only while its writer's key is unrevoked (R-BTN-181) | not resolved |
+| F9 approval queues bypassed in practice | batch approval for held tickets; the queue stays the cost the owner accepted under Fieldhouse Axiom 4 | partly / not |
+| F10 contradictions with values 6 and 12, the architecture page, R-BTN-35, Fieldhouse Axiom 6 | protections read from git and the forge, never deliveries (values 6); values 12 and the architecture page state the opt-in exception and one grant per sandbox; R-BTN-35's note; Fieldhouse's profile rule (fieldhouse) carries the host-side signer under Axiom 6 | partly |
+| F11 runners can edit GitHub releases | a release is the signed tag and the package's provenance, never the forge's release object (R-BTN-180) | partly |
+| F12 the CLI's dependencies come from the registry | the release ships `npm-shrinkwrap.json`, so every dependency is pinned (R-BTN-182) | mostly |
+| F13 foreign-push detection cannot see signatures; clearing costs a ceremony | the trusted runner finds foreign commits from git, resets the branch, and raises `baton.foreign-commit`, an `owner` resolution (R-BTN-183) | partly |
+| F14 the model family is self-declared | set on the grant with its trust level, a human gate; a review leg runs only that family (R-BTN-183) | partly |
+| F15–F17 the validator's "alone"; `refs/baton/*`; `baton request`; the unpinned base; the key's machine; instance-wide administrators; the sandbox's needs | the validator refuses any `owner`-writable type on a trusted leg; `refs/baton/*` only for trusted runners and humans; `baton request` opens a PR under an untrusted credential; the base pinned by compare-and-swap; the human-only key only on a machine no agent drives; `human_only` administrators only on instances with a `protected` repository; `bubblewrap` with PID namespace and `/proc`, refused where unavailable (R-BTN-180–R-BTN-185) | mostly / mostly under `hardware`, not under `any` / mostly |
+
+*(2026-10-29 — the fifth adversarial review, of §12.8 at `da402e7` with fieldhouse `4ba731a`, found
+the strongest guarantee still failed and the amendment not ready, but narrower: F1 and F8 not
+resolved, 9 partly, 6 mostly (the column above), and new findings N1–N11 of its own. With the
+owner's agreement the amendment was finished as a proposal, not reviewed a sixth time in full:
+supersession keyed by the attested key (F8, N4); proposed tickets on branches, unclaimable and
+unread until approved, holding only filter fields (N3); the `protected` row split into what the
+forge enforces against any runner and what holds against mistakes only; the `human_key` qualifier
+and exclusion (N6); mode switches resetting ungated settings (N5); `std:wrote@1` no longer
+asserting signatures Baton cannot see (N10); F1 and N1 stated as the deployment's to enforce, which
+Fieldhouse does (R-FH-3; review legs without command execution, VM resets); the host repository
+writable by the human-only identity only (N2, fieldhouse#7); the rest recorded under Open
+questions.)*
+
