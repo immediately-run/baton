@@ -210,6 +210,10 @@ function namedAgentCommand(home: string): string {
 /** B-94: the line a runner leaves when it stops — the signal and the runner's last state. A
  * runner that has not been built yet (the signal came before its first claim) still leaves a
  * line. Exported so the shutdown hook is tested without a process signal. */
+/** B-109: how long the immediate stop waits for a leg child to take its release before its
+ * whole group is killed — enough for a stub's graceful wind-down, short of a lease window. */
+export const HARD_STOP_MS = 10_000;
+
 export function stopLine(runner: Pick<Runner, 'lastLine'> | null, signal: string): string {
   return runner ? runner.lastLine(`stopping on ${signal}`) : `the runner stopped on ${signal} before its first claim`;
 }
@@ -300,6 +304,7 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
   let draining = false;
   let exitCode = 0;
   let stopping = false;
+  let hardStop: NodeJS.Timeout | null = null;
   const codeOf = (signal: NodeJS.Signals): number => (signal === 'SIGINT' ? 130 : signal === 'SIGHUP' ? 129 : 143);
   const onSignal = (signal: NodeJS.Signals) => {
     // 2026-10-24: SIGTERM drains — the current leg completes, the claim ends at its boundary,
@@ -323,18 +328,20 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
       syncLogStamped(a.verbose, `baton: ${stopLine(runner, signal)} — stopping at once: the leg in flight is released with its hand-off, then this process exits`);
       runner.stopNow();
       // A leg child that will not take the release: after ten seconds its whole group is
-      // killed (the lease-loss mechanism) and this process leaves — the claim ends by the
-      // reaper, the resume record covers the leg (R-BTN-24).
-      const hardStop = setTimeout(() => {
-        syncLogStamped(a.verbose, `baton: ${signal} — the leg did not stop; killing its group and exiting`);
+      // killed (the lease-loss mechanism, `killInflight`) and this process leaves — the claim
+      // ends by the reaper, the resume record covers the leg (R-BTN-24).
+      hardStop = setTimeout(() => {
+        runner!.killInflight();
+        syncLogStamped(a.verbose, `baton: ${signal} — the leg did not stop; its group is killed and this process exits`);
         release();
         process.exit(exitCode);
-      }, 10_000);
+      }, HARD_STOP_MS);
       hardStop.unref?.();
       return;
     }
-    // A second immediate signal: leave now.
+    // A second immediate signal: leave now, the leg's group with us.
     syncLogStamped(a.verbose, `baton: ${stopLine(runner, signal)}`);
+    runner?.killInflight();
     release();
     process.exit(codeOf(signal));
   };
@@ -366,6 +373,8 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
     process.off('SIGHUP', onSignal);
+    // The loop ended through its safe point: the hard stop's ten seconds never fire.
+    if (hardStop != null) clearTimeout(hardStop);
     // B-94: every way out of the loop leaves a line — a normal end, a thrown error on its way
     // out (the CLI prints it), and an `exit` from anywhere once a claim could have been held.
     // The lines and the hook write synchronously: nothing pending is lost to `process.exit`.

@@ -397,7 +397,6 @@ describe('the courses a runner serves (R-BTN-131, B-103)', () => {
       // directly (an emitted signal also reaches vitest's warning wrapper, which unregisters the
       // handler between the two deliveries).
       for (let i = 0; i < 400 && !seen.heartbeats.length; i++) await new Promise((r) => setTimeout(r, 10));
-      (signal === 'SIGTERM' ? process.listeners('SIGTERM') : process.listeners(signal)).forEach(() => {});
       (process.listeners(signal).at(-1) as (s: NodeJS.Signals) => void)(signal);
       expect(await running).toBe(signal === 'SIGTERM' ? 0 : signal === 'SIGINT' ? 130 : 129);
       return { lines, seen };
@@ -428,14 +427,13 @@ describe('the courses a runner serves (R-BTN-131, B-103)', () => {
     expect(lines.join('\n')).toContain('course create-spec@2, host');
   }, 30_000);
   it("the immediate stop ends the loop through the safe point with the signal's code — SIGINT 130, SIGHUP 129 — and the line it leaves names the stop (B-109)", async () => {
-    for (const [signal, code] of [['SIGINT', 130], ['SIGHUP', 129]] as const) {
+    for (const signal of ['SIGINT', 'SIGHUP'] as const) {
       const dir = declaring({ skills_version: 3, courses: [{ id: 'create-pr', version: 1 }], agent_command: 'true' });
       const { lines } = await probe(dir, ['--verbose'], signal);
       // The safe point's own line (the runner's log): the immediate stop releases, it does not
       // abandon. The signal handler's line goes to the synchronous log, which the probe's
       // injected log does not see; the exit code (asserted in the probe) is the signal's.
       expect(lines.join('\n'), signal).toContain('stopping at once (the immediate stop)');
-      void code;
     }
   }, 30_000);
 });

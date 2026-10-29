@@ -510,6 +510,33 @@ describe('S-BTN-41 the runner', () => {
     expect(await runner.runOnce()).toBeNull();
   }, 30_000);
 
+  it('the immediate stop kills a leg that will not take its release: its whole group dies with the runner (B-109)', async () => {
+    home.leg('check', `const { spawn } = await import('node:child_process');
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    ev(ctx, 'grandchild ' + child.pid);
+    // It never reads ctx.signal: the release goes nowhere, and only the kill reaches it.
+    await new Promise(() => {});`);
+    home.commit();
+    await home.post({ 'T-1': placed('built', [['build', 'built']], [['check', 'ready']]) });
+    const runner = makeRunner();
+    runner.start();
+    const done = runner.runOnce();
+    await until(() => rows(`SELECT 1 FROM claim_legs WHERE leg = 'check'`));
+    let pid = 0;
+    for (let i = 0; i < 400 && !(pid > 0); i++) {
+      pid = Number((home.evidence().find((l) => l.startsWith('grandchild ')) ?? '').split(' ')[1]);
+      if (!(pid > 0)) await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(pid).toBeGreaterThan(0);
+    // The immediate stop's last resort: the release is ignored, so the group is killed.
+    runner.stopNow();
+    runner.killInflight();
+    expect(await untilDead(pid)).toBe(true);
+    // The child died with its group; the release the stop signalled is honoured in its place —
+    // the claim ends released with its hand-off, never an orphan against a reaped claim.
+    expect(await done).toMatchObject({ end_reason: 'released:requested', handoff: 'https://example.test/handoff/check' });
+  }, 30_000);
+
   it('a lost lease kills the leg’s whole process group with no hand-off', async () => {
     home.leg('check', `const { spawn } = await import('node:child_process');
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });

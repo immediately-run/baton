@@ -596,6 +596,14 @@ export class Runner {
     return this.draining;
   }
 
+  /** B-109: kill the leg in flight's whole process group — the lease-loss mechanism
+   *  (`killGroup`, no hand-off; the resume record covers the leg, R-BTN-24), for the immediate
+   *  stop's last resort: a leg child that will not take its release must not outlive the
+   *  runner as an orphan pushing against a claim the reaper takes. No leg in flight: nothing. */
+  killInflight(): void {
+    if (this.inflight?.child) this.killGroup(this.inflight.child);
+  }
+
   /** B-109: the immediate stop — a safe point, not an abandonment. The leg in flight is
    *  released at its next safe point (its hand-off written, the claim ended
    *  `released:requested`), and the loop ends without claiming again. `stopped` stays false
