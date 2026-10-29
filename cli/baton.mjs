@@ -17,7 +17,7 @@
 //   baton admin -i KEY repo retire ID
 //   baton admin -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--max-tier T]
 //   baton admin -i KEY probe add --key PUB --label L
-//   baton admin -i KEY resource add NAME --scope worker|account|service --schema FILE|JSON    (R-BTN-76)
+//   baton admin -i KEY resource add NAME --scope runner|account|service --schema FILE|JSON [--atoms-from admin|any]    (R-BTN-76, R-BTN-176)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
@@ -239,8 +239,10 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'GET', path: '/v1/admin/state' };
     }
     if (cmd === 'resource' && rest[0] === 'add') {
-      const { flags, positional } = parseArgs(rest.slice(1), [], ['scope', 'schema'], 1);
-      return { method: 'POST', path: '/v1/admin/resources', body: { name: need(positional[0], 'the resource name'), scope: need(flags.scope, '--scope'), detail_schema: jsonArg(need(flags.schema, '--schema'), readJson) } };
+      // B-105 (R-BTN-176): --atoms-from names whether runners' readings may steer route choices.
+      const { flags, positional } = parseArgs(rest.slice(1), ['atoms-from'], ['scope', 'schema'], 1);
+      if (flags['atoms-from'] != null && !['admin', 'any'].includes(flags['atoms-from'])) throw new Error('--atoms-from must be admin or any');
+      return { method: 'POST', path: '/v1/admin/resources', body: { name: need(positional[0], 'the resource name'), scope: need(flags.scope, '--scope'), detail_schema: jsonArg(need(flags.schema, '--schema'), readJson), ...(flags['atoms-from'] != null ? { atoms_from: flags['atoms-from'] } : {}) } };
     }
     if (cmd === 'resource' && rest[0] === 'set') {
       // R-BTN-76: an administrator's reading by hand, in force at most 7 days.

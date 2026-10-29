@@ -1,0 +1,39 @@
+{
+  "$comment": "baton's own ontology (BATON_SPEC §5.9/§6.10, B-105): baton@1 derives what a runner's holdings amount to, and the route choices below advise how this repository's create-pr legs run — which model and key the implement leg codes on, and which models review. The meters facts name the resource each key spends, so a blocked provider demotes its alternatives; anthropic-capacity (registered refining std:api-capacity@1, atoms_from: any) carries the subscription's remaining_permille, and the peak rule demotes OpenCode Go in its window. Alternatives' needs are labels the runner declares; nothing here changes a leg's environment (R-BTN-144).",
+  "version": 1,
+  "builtin": "baton@1",
+  "derived": ["capability", "model"],
+  "entries": [
+    { "id": "meters-opencode-go", "fact": ["meters", "key:opencode-go", "opencode-go"] },
+    { "id": "meters-deepinfra", "fact": ["meters", "key:deepinfra", "deepinfra"] },
+    { "id": "meters-anthropic", "fact": ["meters", "key:claude-subscription", "anthropic-capacity"] },
+
+    { "id": "opencode-go-peak", "head": ["ocg_peak"], "body": [["now", "utc_minute_of_day", "$t"], { "cmp": ["$t", ">=", 360] }, { "cmp": ["$t", "<", 600] }] },
+    { "id": "anthropic-near-limit", "head": ["near_limit", "$i"], "body": [["refines", "$r", "std:api-capacity@1"], ["usable", "$r", "$i"], ["int", "$i", "remaining_permille", "$v"], { "cmp": ["$v", "<", 200] }] },
+    { "id": "anthropic-hold-limit", "head": ["near_limit", "$i"], "body": [["refines", "$r", "std:api-capacity@1"], ["usable", "$r", "$i"], ["int", "$i", "remaining_permille", "$v"], { "cmp": ["$v", "<", 300] }, ["was_demoted", "reviewer-2", "opus"]] }
+  ],
+  "route_choices": [
+    {
+      "id": "codegen",
+      "alternatives": [
+        { "id": "opencode-go", "needs": ["model:deepseek-v4.1-flash", "key:opencode-go"],
+          "demote_when": [[["ocg_peak"]]] },
+        { "id": "deepinfra", "needs": ["model:deepseek-v4.1-flash", "key:deepinfra"] }
+      ]
+    },
+    {
+      "id": "reviewer-1",
+      "alternatives": [
+        { "id": "glm", "needs": ["model:glm-5.3", "key:zai"] }
+      ]
+    },
+    {
+      "id": "reviewer-2",
+      "alternatives": [
+        { "id": "opus", "needs": ["model:claude-opus-5-5", "key:claude-subscription"],
+          "demote_when": [[["near_limit", "$i"]]] },
+        { "id": "glm", "needs": ["model:glm-5.3", "key:zai"] }
+      ]
+    }
+  ]
+}

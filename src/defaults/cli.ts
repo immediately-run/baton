@@ -891,7 +891,7 @@ function stubSource(b: BuiltIn, course: string, leg: string): string {
   const closeHelpers = b.reads === 'prs' ? `\nimport { ticketsBranch } from ${JSON.stringify(source('ticket-state.ts'))};` : '';
   const values = ask ? ask.values.join(' or ') : '';
   return `import { execFile, execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, ${verify ? 'readFileSync, ' : ''}rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -904,7 +904,35 @@ const GIT_BOUND_MS = ${CLOSE_TIMEOUT_MS}, GIT_ENV = ${JSON.stringify(GIT_NONINTE
 // B-93: stderr is captured, never inherited — the stub runs in the runner's own log, where a
 // quiet 'no origin' or a failed forge probe printed as a failure. A caller that reports one
 // reads it from the error (\`e.stderr\`); nothing else of git's rides the log unasked.
-const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });${ask ? `
+const gitRun = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', timeout: GIT_BOUND_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+// R-BTN-177 (B-105): the advice first, the command's own words as the fallback. BATON_ADVICE
+// names a file holding the starting advance's advice — identifiers only. When one of its route
+// choices resolved an alternative whose needs name exactly one model: capability, and the
+// snapshot's settings carry an \`agent_models\` map from that capability to the value the
+// agent command's --model word takes, the command's --model value is replaced by it. No advice,
+// no map, no --model word or no match: the command runs exactly as written, today's model.
+function advisedCommand(command, settings, adviceFile) {
+  if (!adviceFile) return command;
+  let advice;
+  try { advice = JSON.parse(readFileSync(adviceFile, 'utf8')); } catch { return command; }
+  const choices = advice && Array.isArray(advice.route_choices) ? advice.route_choices : [];
+  const models = new Set();
+  for (const rc of choices) {
+    const alt = rc && typeof rc === 'object' ? (rc.alternative ?? (Array.isArray(rc.ranked) && rc.ranked[0] ? rc.ranked[0].alternative : null)) : null;
+    const ranked = rc && typeof rc === 'object' && Array.isArray(rc.ranked) ? rc.ranked.find((r) => r && r.alternative === alt) : null;
+    for (const need of (ranked && Array.isArray(ranked.needs) ? ranked.needs : [])) if (typeof need === 'string' && need.startsWith('model:')) models.add(need);
+  }
+  if (models.size !== 1) return command;
+  const model = [...models][0];
+  const mapped = settings && settings.agent_models && typeof settings.agent_models === 'object' ? settings.agent_models[model] : undefined;
+  if (typeof mapped !== 'string' || mapped === '') return command;
+  const words = splitWords(command);
+  const at = words.findIndex((w) => w === '--model');
+  if (at < 0 || at + 1 >= words.length) return command;
+  if (words[at + 1] === mapped) return command;
+  words[at + 1] = mapped;
+  return words.join(' ');
+}${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
 import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
 import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
@@ -952,8 +980,13 @@ async function standard(ctx) {
   const settings = JSON.parse(show('.baton/baton.json'));
   // B-83: the snapshot's settings stay authoritative; BATON_AGENT_COMMAND — the harness command
   // \`baton run --harness\` chose — fills their absence, never overrides their choice.
-  const agentCommand = typeof settings.agent_command === 'string' && settings.agent_command !== '' ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? '';
-  if (agentCommand === '') throw new Error('.baton/baton.json names no agent_command — run \`baton repo init --agent opencode\` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none');${verify ? `
+  const settingsCommand = typeof settings.agent_command === 'string' && settings.agent_command !== '' ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? '';
+  if (settingsCommand === '') throw new Error('.baton/baton.json names no agent_command — run \`baton repo init --agent opencode\` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none');
+  // R-BTN-177 (B-105): the advice first, the command's own model as the fallback. BATON_ADVICE
+  // holds the starting advance's advice; an advised alternative's needs may name one model:
+  // capability, and \`agent_models\` in the snapshot's settings maps it to the --model value the
+  // agent command carries. No advice, no map, no match — the command runs exactly as written.
+  const agentCommand = advisedCommand(settingsCommand, settings, process.env.BATON_ADVICE);${verify ? `
   // What this leg's verification looks for (B-81): the course's branch patterns, as the
   // snapshot's settings carry them, and the repositories the ticket's repos: names — the
   // ticket file is the checkout's own copy, the one the agent may have just added its PR to.

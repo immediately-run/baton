@@ -523,6 +523,40 @@ export interface End {
   prerequisite: { kind: 'capability'; ref: string } | null;
   /** R-BTN-108: what the finished leg produced. */
   outputs: Output[];
+  /** R-BTN-177 (B-105): what the leg wrote to BATON_TAKEN, as the runner read it — raw here,
+   *  judged against the leg's route choices by the claims (a file that is unparseable or over
+   *  4 KB was dropped by the runner and never arrives). */
+  taken: TakenEntry[] | null;
+}
+
+/** One entry of a leg's `taken` (R-BTN-177): the alternative it ran for a route choice, and the
+ *  holdings it found dead. Shape-checked only; attachment and membership are the claims' to
+ *  judge, dropping what fails with `taken-invalid`. */
+export interface TakenEntry {
+  choice: string;
+  alternative: string;
+  dead: string[];
+}
+
+/** The `taken` a finishing advance or end reports (R-BTN-177): at most 16 entries — the runner
+ *  keeps one per route choice the leg listed — each carrying at most 8 dead holdings. An
+ *  over-bound or malformed list is dropped whole, never refusing the advance or end that carries
+ *  it. */
+export function checkTaken(v: unknown): TakenEntry[] | null {
+  if (v === undefined || v === null) return null;
+  const raw = JSON.stringify(v);
+  if (raw.length > 4096) return null; // the file the leg wrote is over 4 KB: dropped (R-BTN-177)
+  if (!Array.isArray(v) || v.length > 16) return null;
+  const out: TakenEntry[] = [];
+  for (const e of v as unknown[]) {
+    if (!isObj(e) || typeof e.choice !== 'string' || typeof e.alternative !== 'string') return null;
+    for (const k of Object.keys(e)) if (!['choice', 'alternative', 'dead'].includes(k)) return null;
+    if (!COURSE_ID.test(e.choice) || !COURSE_ID.test(e.alternative)) return null;
+    const dead = e.dead === undefined ? [] : e.dead;
+    if (!Array.isArray(dead) || dead.length > 8 || !dead.every((d) => typeof d === 'string' && CAPABILITY_NAME.test(d))) return null;
+    out.push({ choice: e.choice, alternative: e.alternative, dead: [...new Set(dead as string[])] });
+  }
+  return out;
 }
 
 /** §6.5's ends: `done`, `suspended:<station>` and `released:<reason>`, each with an optional
@@ -573,7 +607,7 @@ export function checkEnd(body: unknown): End {
     }
     prerequisite = { kind: 'capability', ref: (p as { ref: string }).ref };
   }
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), taken: checkTaken(b.taken) };
 }
 
 export interface Advance {
@@ -583,6 +617,9 @@ export interface Advance {
   bars: string[];
   /** R-BTN-108: what the finished leg produced, checked against `reached`'s entry (R-BTN-109). */
   outputs: Output[];
+  /** R-BTN-177 (B-105): what the finished leg wrote to BATON_TAKEN, reported on the advance or
+   *  end that finishes it. */
+  taken: TakenEntry[] | null;
 }
 
 /** `POST /v1/runner/claims/{id}/advance` (R-BTN-63, §11): the leg to start; `reached`, the
@@ -597,7 +634,7 @@ export function checkAdvance(body: unknown): Advance {
   const raw = b.bars ?? [];
   if (!Array.isArray(raw) || raw.length > TAGS_MAX || !raw.every((t) => typeof t === 'string' && TAG.test(t))) bad('bars', `must be a list of at most ${TAGS_MAX} tags`);
   if (b.course !== undefined && JSON.stringify(b.course).length > 4096) bad('course', 'must be at most 4 KB');
-  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs) };
+  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), taken: checkTaken(b.taken) };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */
@@ -738,15 +775,17 @@ export function checkReadings(body: unknown, maxStateS: number = VALID_FOR.state
   return ((body as { readings: unknown[] }).readings).map((r, i) => checkReading(r, `readings[${i}]`, maxStateS));
 }
 
-/** `POST /v1/admin/resources` (R-BTN-76): the schema itself is detailSchema.ts's to judge. */
-export function checkResource(body: unknown): { name: string; scope: (typeof RESOURCE_SCOPES)[number]; detail_schema: unknown } {
+/** `POST /v1/admin/resources` (R-BTN-76): the schema itself is detailSchema.ts's to judge.
+ *  B-105 (R-BTN-176): `atoms_from` names whether runners' readings may steer route choices. */
+export function checkResource(body: unknown): { name: string; scope: (typeof RESOURCE_SCOPES)[number]; detail_schema: unknown; atoms_from: 'admin' | 'any' } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
-  for (const k of Object.keys(b)) if (!['name', 'scope', 'detail_schema'].includes(k)) bad(`body.${k}`, 'is not a field of a resource');
+  for (const k of Object.keys(b)) if (!['name', 'scope', 'detail_schema', 'atoms_from'].includes(k)) bad(`body.${k}`, 'is not a field of a resource');
   if (typeof b.name !== 'string' || !RESOURCE_NAME.test(b.name)) bad('name', `must match ${RESOURCE_NAME}`);
   if (!RESOURCE_SCOPES.includes(b.scope as never)) bad('scope', `must be one of ${RESOURCE_SCOPES.join(', ')}`);
+  if (b.atoms_from !== undefined && b.atoms_from !== 'admin' && b.atoms_from !== 'any') bad('atoms_from', "must be 'admin' or 'any' (R-BTN-176)");
   if (b.detail_schema === undefined) bad('detail_schema', 'is required');
-  return { name: b.name as string, scope: b.scope as (typeof RESOURCE_SCOPES)[number], detail_schema: b.detail_schema };
+  return { name: b.name as string, scope: b.scope as (typeof RESOURCE_SCOPES)[number], detail_schema: b.detail_schema, atoms_from: (b.atoms_from as 'admin' | 'any') ?? 'admin' };
 }
 
 /** `POST /v1/admin/instances` (R-BTN-76): an account instance, what it serves and who may use it. */

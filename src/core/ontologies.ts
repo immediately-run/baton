@@ -8,6 +8,7 @@ import {
   BOUNDS, canonicalProgram, evaluate, maximalEvaluation, parseOntology, sha256Hex, validateOntology,
   whyNot, boundsFor, type Evaluation, type ValidatedProgram, type WhyNot,
 } from './ontology';
+import { resolveRoutes, type ResolvedChoice, type RouteInputs } from './routes';
 import { BatonError } from './http';
 import type { Store } from './ports';
 import type { BatonCore } from './baton';
@@ -206,7 +207,11 @@ export class Ontologies {
       }
     }
 
-    // Accepted: store the program, drop the refusal, and let the reads bring sets current.
+    // Accepted: store the program, drop the refusal, and let the reads bring sets current. The
+    // prior program's route choices are read BEFORE the upsert replaces them: an accepted
+    // program without a route choice drops its route_last rows (R-BTN-174) — a choice the new
+    // program no longer defines has no hysteresis to keep.
+    const dropped = new Set(this.priorChoicesOf(repo));
     this.store.exec(`INSERT INTO ontologies (repository_id, digest, builtin, fixed_json, program_json, snapshot_sha, accepted_at)
                      VALUES (?, ?, ?, ?, ?, ?, ?)
                      ON CONFLICT (repository_id) DO UPDATE SET digest = excluded.digest, builtin = excluded.builtin,
@@ -215,9 +220,21 @@ export class Ontologies {
       repo, digest, builtin ?? null, fixedJson, canonical, snapshotSha, at);
     this.store.exec('DELETE FROM ontology_refusals WHERE repository_id = ?', repo);
     this.memo.delete(current?.digest ?? '');
-    // An accepted program without a route choice drops its route_last rows (R-BTN-174) — the
-    // table is B-105's; nothing to do until it exists.
+    const kept = new Set(placed.program.routeChoices.map((rc) => rc.id));
+    const ids = [...dropped].filter((id) => !kept.has(id));
+    if (ids.length) this.store.exec(`DELETE FROM route_last WHERE repository_id = ? AND choice IN (${ids.map(() => '?').join(',')})`, repo, ...ids);
     return null;
+  }
+
+  /** The route-choice ids the stored program defines — the choices route_last rows may name. */
+  private priorChoicesOf(repo: string): string[] {
+    const row = this.sql<{ program_json: string }>('SELECT program_json FROM ontologies WHERE repository_id = ?', repo)[0];
+    if (!row) return [];
+    try {
+      return (JSON.parse(row.program_json) as { route_choices?: { id: string }[] }).route_choices?.map((rc) => rc.id) ?? [];
+    } catch {
+      return [];
+    }
   }
 
   /** The legs a course file names, for the unit's attachment check. */
@@ -477,7 +494,97 @@ export class Ontologies {
 
   /** The upkeep the alarm runs beside the cycle: rows of the no-longer-live go after 30 days,
    * and a revoked grant's rows go with the grant (R-BTN-174). */
+  // ── route choices (R-BTN-176/R-BTN-177, B-105): resolution, hysteresis, the limit ─────────
+
+  /** H ∪ D(H) for a worker and a repository (R-BTN-176): what `has` reads — the derived set
+   *  brought current first, as every read does. */
+  capabilitiesFor(workerId: number, repo: string): Set<string> {
+    const { holdings } = this.holdingsOf(workerId, repo);
+    const derived = this.derivedFor(workerId, repo) ?? new Set<string>();
+    return new Set([...holdings, ...derived]);
+  }
+
+  /**
+   * Resolve the route choices attached to a leg an advance starts (R-BTN-177): form the atoms
+   * (R-BTN-176) for this worker and the claim's repository, evaluate the route-choice stratum
+   * under its bound, write one `route_last` row per alternative — demoted or not, available or
+   * not — and answer the advice, identifiers only. A crossed bound answers `limit` per choice,
+   * writes no rows, and raises `baton.ontology-limit` once per repository and program digest.
+   * Called inside the advance's transaction, after any `taken` the same advance reported has
+   * removed its dead holdings, so the leg it starts is advised without them.
+   */
+  resolveFor(workerId: number, repo: string, wanted: string[], at: number): { route_choices: ResolvedChoice[]; resolved_at: number } | null {
+    const p = this.programOf(repo);
+    if (!p || !wanted.length) return null;
+    const wantedChoices = wanted.filter((id) => p.placed.program.routeChoices.some((rc) => rc.id === id));
+    if (!wantedChoices.length) return null;
+    const now = this.c.now();
+    // The atoms (R-BTN-176): has from the current set; usable, state and the field reading for
+    // the worker's usable instances alone; refines from the stored chains; now from the clock;
+    // was_demoted from this worker's rows within 24 hours.
+    const has = this.capabilitiesFor(workerId, repo);
+    const usable = this.c.resources.usableFor(workerId, repo);
+    const states: [string, 'available' | 'unavailable' | 'unknown'][] = [];
+    const details: [string, unknown][] = [];
+    for (const [, instance] of usable) {
+      const reading = this.c.resources.routeReadingFor(workerId, instance, now);
+      states.push([instance, reading.state]);
+      if (reading.detail != null) details.push([instance, reading.detail]);
+    }
+    const inputs: RouteInputs = {
+      has: [...has],
+      wanted: wantedChoices,
+      usable,
+      states,
+      refines: this.c.resources.refinesFacts(),
+      details,
+      now,
+      wasDemoted: this.sql<{ choice: string; alternative: string }>(
+        'SELECT choice, alternative FROM route_last WHERE worker_id = ? AND repository_id = ? AND demoted = 1 AND resolved_at > ?',
+        workerId, repo, now - 24 * 3_600_000).map((r) => [r.choice, r.alternative] as [string, string]),
+    };
+    const fixed = new Map(this.fixedOf(p.digest, p.placed));
+    // The test bindings may lower the route bound alone (`{route: {matches: n}}`, S-BTN-154), so
+    // a gate evaluation still passes while a route-choice one crosses.
+    const loweredAll = this.c.testOntologyBounds();
+    const lowered = loweredAll?.route?.matches != null ? { matches: loweredAll.route.matches } : loweredAll;
+    const run = resolveRoutes(p.placed, inputs, fixed, lowered);
+    if (!run.ok) {
+      this.recordLimitRefusal(repo, p.digest, now);
+      return { route_choices: wantedChoices.map((choice) => ({ choice, alternative: null, ranked: [], reason: 'limit' as const })), resolved_at: at };
+    }
+    // Hysteresis: one row per alternative, written whether or not it was available (R-BTN-177).
+    for (const id of wantedChoices) {
+      const rc = p.placed.program.routeChoices.find((x) => x.id === id)!;
+      for (const a of rc.alternatives) {
+        this.store.exec(`INSERT INTO route_last (worker_id, repository_id, choice, alternative, demoted, resolved_at) VALUES (?, ?, ?, ?, ?, ?)
+                         ON CONFLICT (worker_id, repository_id, choice, alternative) DO UPDATE SET demoted = excluded.demoted, resolved_at = excluded.resolved_at`,
+          workerId, repo, id, a.id, run.demoted.has(`${id}\u0000${a.id}`) ? 1 : 0, at);
+      }
+    }
+    return { route_choices: run.choices, resolved_at: at };
+  }
+
+  /** `baton.ontology-limit` for a route-choice evaluation that crossed its bound (R-BTN-175),
+   *  once per repository and program digest — the same refusal a gate crossing raises. */
+  recordRouteLimit(repo: string, digest: string): void {
+    this.recordLimitRefusal(repo, digest, this.c.now());
+  }
+
+  /** A reported `dead` holding leaves the declared set (R-BTN-177), as R-BTN-126's capability
+   *  end does: removed here in the reporting advance's or end's transaction, its derived sets
+   *  re-evaluated, so the leg that advance starts is advised without it. */
+  dropHolding(workerId: number, capability: string): void {
+    this.store.exec('DELETE FROM worker_capabilities WHERE worker_id = ? AND capability = ?', workerId, capability);
+    this.forget(workerId, null);
+    for (const repo of this.sql<{ repository_id: string }>('SELECT DISTINCT repository_id FROM ontologies')) {
+      this.derivedFor(workerId, repo.repository_id);
+    }
+  }
+
   upkeep(): void {
+    // R-BTN-177: the alarm deletes route_last rows older than 24 hours.
+    this.store.exec('DELETE FROM route_last WHERE resolved_at <= ?', this.c.now() - 24 * 3_600_000);
     this.store.exec(`DELETE FROM worker_derived WHERE worker_id IN (
                        SELECT id FROM workers WHERE last_seen_at < ? AND last_seen_at < ? - lease_timeout_ms)`,
       this.c.now() - DERIVED_TTL_MS, this.c.now());

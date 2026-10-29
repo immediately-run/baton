@@ -25,7 +25,11 @@ import legCapabilities from './0022_leg_capabilities.sql';
 import webhookSyncs from './0023_webhook_syncs.sql';
 import windDown from './0024_wind_down.sql';
 import ontology from './0025_ontology.sql';
+<<<<<<< HEAD
 import stationWrites from './0026_station_writes.sql';
+import routeChoices from './0027_route_choices.sql';
+=======
+>>>>>>> 97a10de (B-105 — Route choices: advice on how a leg runs, from the ontology and the instruments' readings (§6.10, R-BTN-176/R-BTN-177))
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },
@@ -53,5 +57,10 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 23, sql: webhookSyncs },
   { id: 24, sql: windDown },
   { id: 25, sql: ontology },
+<<<<<<< HEAD
   { id: 26, sql: stationWrites },
+  { id: 27, sql: routeChoices },
+=======
+  { id: 26, sql: routeChoices },
+>>>>>>> 97a10de (B-105 — Route choices: advice on how a leg runs, from the ontology and the instruments' readings (§6.10, R-BTN-176/R-BTN-177))
 ];

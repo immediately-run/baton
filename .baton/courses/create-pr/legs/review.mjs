@@ -1,6 +1,6 @@
-// ../../baton-bundle-OGsuZZ/entry.ts
+// ../../../../tmp/baton-bundle-05Nc8P/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync as rmSync2, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -97,35 +97,231 @@ function requireAnswer(out, ask, leg, opts = {}) {
   throw new Error(`the ${leg} agent printed no ${ask.name} (${values}) as its last line${last === "" ? " \u2014 its output was empty" : ` \u2014 its last line was ${JSON.stringify(last)}`}`);
 }
 
-// src/defaults/course-markers.ts
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+// src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
-import { dirname, isAbsolute, join } from "node:path";
-var MARKERS_FILE = join(".baton", "markers.jsonl");
+import { rmSync } from "node:fs";
+import { join } from "node:path";
+
+// src/defaults/tickets-markdown.ts
+function parseFrontmatter(text) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!m) return null;
+  const out = {};
+  const lines = m[1].split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const kv = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (!kv) continue;
+    const [, key, rest] = kv;
+    if (rest.trim() === "") {
+      const items = [];
+      while (i + 1 < lines.length && /^\s+-\s+/.test(lines[i + 1])) {
+        i++;
+        items.push(unquote(lines[i].replace(/^\s+-\s+/, "")));
+      }
+      out[key] = items;
+    } else if (/^\[.*\]$/.test(rest.trim())) {
+      out[key] = rest.trim().slice(1, -1).split(",").map(unquote).filter(Boolean);
+    } else {
+      out[key] = unquote(rest);
+    }
+  }
+  return out;
+}
+var unquote = (v) => {
+  const t = v.trim();
+  return /^(["']).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1) : t;
+};
+
+// src/defaults/ticket-state.ts
+var MACHINE_KEYS = ["station", "next_leg", "claim"];
 var CLOSE_TIMEOUT_MS = 12e4;
 var GIT_NONINTERACTIVE_ENV = {
   GIT_TERMINAL_PROMPT: "0",
   GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o ConnectTimeout=20"
 };
-var exec = (cmd, args, cwd, timeoutMs = CLOSE_TIMEOUT_MS) => execFileSync(cmd, args, {
+var exec = (cmd, args, cwd, opts = {}) => execFileSync(cmd, args, {
   cwd,
   encoding: "utf8",
-  timeout: timeoutMs,
+  timeout: opts.timeoutMs ?? CLOSE_TIMEOUT_MS,
   killSignal: "SIGKILL",
-  env: { ...process.env, ...GIT_NONINTERACTIVE_ENV }
+  ...opts.input != null ? { input: opts.input } : { stdio: ["ignore", "pipe", "pipe"] },
+  env: { ...process.env, ...GIT_NONINTERACTIVE_ENV, ...opts.env }
 }).trim();
-function commitMarker(checkout, line, run2 = exec) {
-  appendFileSync(join(checkout, MARKERS_FILE), `${JSON.stringify(line)}
-`);
-  run2("git", ["add", MARKERS_FILE], checkout);
-  run2("git", ["commit", "--no-gpg-sign", "-m", `baton:close ${line.ticket} ${line.leg}`], checkout);
-}
 function bareTicketId(ticket) {
   if (ticket.home && ticket.id.startsWith(`${ticket.home}:`)) return ticket.id.slice(ticket.home.length + 1);
   const colon = ticket.id.indexOf(":");
   return colon < 0 ? ticket.id : ticket.id.slice(colon + 1);
 }
-var MARKERS_ATTRIBUTE = `/${MARKERS_FILE} merge=union`;
+var PUSH_TRIES = 3;
+var movedOnRemote = (e) => {
+  const err = e;
+  return /! \[rejected\]|non-fast-forward|\(fetch first\)/.test(`${String(err?.stderr ?? "")}
+${String(err?.message ?? "")}`);
+};
+var DEFAULT_TICKETS_BRANCH = "main";
+function ticketsBranch(checkout, named, run2 = exec) {
+  const plain = (b) => typeof b === "string" && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(b) && !b.includes("..") && !b.endsWith("/") ? b : null;
+  const given = plain(named);
+  if (given) return given;
+  try {
+    const head = run2("git", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], checkout).trim().replace(/^origin\//, "");
+    return plain(head) ?? DEFAULT_TICKETS_BRANCH;
+  } catch {
+    return DEFAULT_TICKETS_BRANCH;
+  }
+}
+var tmpIndexName = "baton-ticket-index";
+function tmpIndex(checkout, run2 = exec) {
+  const rel = run2("git", ["rev-parse", "--git-path", tmpIndexName], checkout).trim();
+  return /^\//.test(rel) ? rel : join(checkout, rel);
+}
+function itemSchemaPath(ticketPath) {
+  const dir = ticketPath.split("/").slice(0, -1).join("/");
+  return dir === "" ? "item.schema.json" : `${dir}/item.schema.json`;
+}
+var COURSE_NAME = /^[a-z][a-z0-9-]{0,39}$/;
+function setMachineKeys(text, state) {
+  const fm = text.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  if (!fm) throw new Error("the ticket file has no frontmatter block");
+  const block = fm[0];
+  const eol = block.includes("\r\n") ? "\r\n" : "\n";
+  const kept = [];
+  let dropping = false;
+  for (const line of block.split(/\r?\n/)) {
+    if (/^(station|next_leg|claim):/.test(line)) {
+      dropping = true;
+      continue;
+    }
+    if (dropping && /^\s+-\s+/.test(line)) continue;
+    dropping = false;
+    kept.push(line);
+  }
+  const entries = [`station: ${state.station}`];
+  if (state.next_leg != null) entries.push(`next_leg: ${state.next_leg}`);
+  if (state.claim != null) entries.push(`claim: ${state.claim}`);
+  const closing = kept.pop();
+  const next = [...kept, ...entries, closing].join(eol);
+  return next + text.slice(block.length);
+}
+function legHeadingPresent(text, leg) {
+  const body = text.replace(/^---\r?\n[\s\S]*?\r?\n---/, "");
+  return new RegExp(`^##[ \\t]+${leg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[ \\t]*$`, "im").test(body);
+}
+function checkFrontmatter(schema, fm, ignore = []) {
+  const out = [];
+  const fail = (why) => out.push(why);
+  const skipped = new Set(ignore);
+  if (schema == null || typeof schema !== "object" || Array.isArray(schema)) return ["item.schema.json is not a schema object"];
+  const s = schema;
+  const defs = typeof s.definitions === "object" && s.definitions != null && !Array.isArray(s.definitions) ? s.definitions : {};
+  const shapeOf = (key, p) => {
+    if (p == null || typeof p !== "object" || Array.isArray(p)) return null;
+    const prop = { ...p };
+    if (typeof prop.$ref === "string") {
+      const m = /^#\/definitions\/([A-Za-z0-9_-]+)$/.exec(prop.$ref);
+      if (!m) {
+        fail(`${key}: a $ref other than #/definitions/<name> (${prop.$ref})`);
+        return null;
+      }
+      const target = defs[m[1]];
+      if (target == null || typeof target !== "object" || Array.isArray(target)) {
+        fail(`${key}: $ref ${prop.$ref} names no definition`);
+        return null;
+      }
+      delete prop.$ref;
+      return { ...target, ...prop };
+    }
+    return prop;
+  };
+  const checked = /* @__PURE__ */ new Set([`$schema`, `$id`, `title`, `description`, `type`, `required`, `properties`, `propertyNames`, `definitions`, "additionalProperties"]);
+  for (const k of Object.keys(s)) if (!checked.has(k)) fail(`the schema uses "${k}", which the boundary check does not implement`);
+  if (Array.isArray(s.required)) {
+    for (const key of s.required) if (typeof key === "string" && !(key in fm) && !skipped.has(key)) fail(`the ticket has no ${key}`);
+  } else if (s.required !== void 0) fail("required is not a list");
+  if (s.properties != null) {
+    if (typeof s.properties !== "object" || Array.isArray(s.properties)) fail("properties is not an object");
+    else {
+      for (const [key, p] of Object.entries(s.properties)) {
+        if (!(key in fm) || skipped.has(key)) continue;
+        const prop = shapeOf(key, p);
+        if (prop == null) continue;
+        for (const k of Object.keys(prop)) if (!["type", "enum", "pattern", "description", "title"].includes(k)) fail(`${key}: the property uses "${k}", which the boundary check does not implement`);
+        const v = fm[key];
+        if (prop.type === "string" && typeof v !== "string") fail(`${key} is not a string`);
+        if (Array.isArray(prop.enum) && !prop.enum.some((e) => e === v)) fail(`${key} ${JSON.stringify(v)} is not one of ${prop.enum.map((e) => String(e)).join(", ")}`);
+        if (typeof prop.pattern === "string" && (typeof v !== "string" || !new RegExp(prop.pattern).test(v))) fail(`${key} ${JSON.stringify(v)} does not match ${prop.pattern}`);
+      }
+    }
+  }
+  if (s.propertyNames != null) {
+    const names = s.propertyNames;
+    if (typeof names !== "object" || !Array.isArray(names.enum)) fail("propertyNames.enum is not a list");
+    else for (const key of Object.keys(fm)) if (!names.enum.includes(key) && !skipped.has(key)) fail(`the ticket has an unknown key ${key}`);
+  }
+  return out;
+}
+function checkMachine(state) {
+  const out = [];
+  if (!COURSE_NAME.test(state.station)) out.push(`station ${JSON.stringify(state.station)} is not a station id`);
+  if (state.next_leg != null && !COURSE_NAME.test(state.next_leg)) out.push(`next_leg ${JSON.stringify(state.next_leg)} is not a leg id`);
+  if (state.claim != null && (state.claim === "" || state.claim.length > 64 || !/^[A-Za-z0-9._-]+$/.test(state.claim))) out.push("claim is not a nonce");
+  return out;
+}
+async function closeTicket(ctx, result, run2 = exec) {
+  if (typeof result?.reached !== "string" || result.reached === "") throw new Error(`the ${ctx.leg} leg returned no station reached`);
+  if (ctx.ticket.path == null || ctx.ticket.path === "") throw new Error(`the ${ctx.leg} leg's ticket has no file path to write`);
+  const id = bareTicketId(ctx.ticket);
+  const state = { station: result.reached, next_leg: result.next ?? null, claim: ctx.claim?.nonce ?? null };
+  const branch = ticketsBranch(ctx.checkout, ctx.default_branch ?? null, run2);
+  const git = (args, opts = {}) => run2("git", args, ctx.checkout, opts);
+  const ref = `origin/${branch}`;
+  const index = tmpIndex(ctx.checkout, run2);
+  const env = { GIT_INDEX_FILE: index };
+  try {
+    for (let tries = 1; ; tries++) {
+      git(["fetch", "origin", `+refs/heads/${branch}:refs/remotes/${ref}`]);
+      const parent = git(["rev-parse", "--verify", `${ref}^{commit}`]);
+      let text;
+      try {
+        text = git(["show", `${ref}:${ctx.ticket.path}`]);
+      } catch {
+        throw new Error(`the ticket file ${ctx.ticket.path} is not on ${branch} \u2014 the leg cannot write it`);
+      }
+      const fm = parseFrontmatter(text);
+      if (fm == null) throw new Error(`the ticket file ${ctx.ticket.path} has no frontmatter block`);
+      let schema = null;
+      let schemaPresent = false;
+      try {
+        schema = JSON.parse(git(["show", `${ref}:${itemSchemaPath(ctx.ticket.path)}`]));
+        schemaPresent = true;
+      } catch (e) {
+        const missing = /does not exist|exists on disk|ambiguous argument/i.test(`${String(e.stderr ?? "")}`);
+        if (!missing) throw new Error(`the repository's ${itemSchemaPath(ctx.ticket.path)} is not a schema the close can check: ${e.message}`);
+      }
+      const violations = [...checkMachine(state), ...schemaPresent && schema != null ? checkFrontmatter(schema, fm, MACHINE_KEYS) : []];
+      for (const v of violations) throw new Error(`the ticket does not validate: ${v}`);
+      if (ctx.heading !== false && !legHeadingPresent(text, ctx.leg)) throw new Error(`the ticket has no '## ${ctx.leg}' heading \u2014 the leg's work belongs under its own heading`);
+      const next = text.endsWith("\n") ? setMachineKeys(text, state) : `${setMachineKeys(text, state)}
+`;
+      const blob = git(["hash-object", "-w", "--stdin"], { input: next });
+      rmSync(index, { force: true });
+      git(["read-tree", parent], { env });
+      git(["update-index", "--add", "--cacheinfo", `100644,${blob},${ctx.ticket.path}`], { env });
+      const tree = git(["write-tree"], { env });
+      const commit = git(["commit-tree", tree, "-p", parent, "-m", `baton:close ${id} ${ctx.leg}`]);
+      try {
+        git(["push", "origin", `${commit}:refs/heads/${branch}`]);
+        return commit;
+      } catch (e) {
+        if (!movedOnRemote(e) || tries >= PUSH_TRIES) throw e;
+      }
+    }
+  } finally {
+    rmSync(index, { force: true });
+    rmSync(`${index}.lock`, { force: true });
+  }
+}
 
 // src/defaults/pr-close.ts
 var PR_URL2 = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
@@ -146,23 +342,50 @@ function commentLine(leg, result) {
   if (leg === "conclude") return "<!-- baton:concluded -->";
   return null;
 }
+var MARKER_LEGS = /* @__PURE__ */ new Set(["converse", "address"]);
 async function prClose(ctx, result, run2 = exec) {
-  const line = commentLine(ctx.leg, result);
-  if (line != null) {
-    const body = `${line}
+  const comment = commentLine(ctx.leg, result);
+  if (comment != null) {
+    const body = `${comment}
 baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
     if (result?.pr != null && !(typeof result.pr === "string" && PR_URL2.test(result.pr))) throw new Error(`the ${ctx.leg} leg named no PR URL to write on, got ${JSON.stringify(result.pr)}`);
     return run2("gh", ["pr", "comment", ...typeof result?.pr === "string" ? [result.pr] : [], "--body", body], ctx.checkout);
   }
   if (typeof result?.reached !== "string" || result.reached === "") throw new Error(`the ${ctx.leg} leg returned no station reached`);
-  commitMarker(ctx.checkout, { ticket: bareTicketId(ctx.ticket), leg: ctx.leg, reached: result.reached, next: result.next ?? null, claim: ctx.claim?.nonce ?? null }, run2);
-  return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
+  if (!MARKER_LEGS.has(ctx.leg)) return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
+  return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../baton-bundle-OGsuZZ/entry.ts
+// ../../../../tmp/baton-bundle-05Nc8P/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
-var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, ...opts });
+var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
+function advisedCommand(command, settings, adviceFile) {
+  if (!adviceFile) return command;
+  let advice;
+  try {
+    advice = JSON.parse(readFileSync(adviceFile, "utf8"));
+  } catch {
+    return command;
+  }
+  const choices = advice && Array.isArray(advice.route_choices) ? advice.route_choices : [];
+  const models = /* @__PURE__ */ new Set();
+  for (const rc of choices) {
+    const alt = rc && typeof rc === "object" ? rc.alternative ?? (Array.isArray(rc.ranked) && rc.ranked[0] ? rc.ranked[0].alternative : null) : null;
+    const ranked = rc && typeof rc === "object" && Array.isArray(rc.ranked) ? rc.ranked.find((r) => r && r.alternative === alt) : null;
+    for (const need of ranked && Array.isArray(ranked.needs) ? ranked.needs : []) if (typeof need === "string" && need.startsWith("model:")) models.add(need);
+  }
+  if (models.size !== 1) return command;
+  const model = [...models][0];
+  const mapped = settings && settings.agent_models && typeof settings.agent_models === "object" ? settings.agent_models[model] : void 0;
+  if (typeof mapped !== "string" || mapped === "") return command;
+  const words = splitWords(command);
+  const at = words.findIndex((w) => w === "--model");
+  if (at < 0 || at + 1 >= words.length) return command;
+  if (words[at + 1] === mapped) return command;
+  words[at + 1] = mapped;
+  return words.join(" ");
+}
 async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read its override at");
@@ -176,7 +399,7 @@ async function run(ctx) {
     if (typeof mod.run !== "function") throw new Error(rel + " exports no run(ctx, standard)");
     return await mod.run(ctx, standard);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync2(dir, { recursive: true, force: true });
   }
 }
 async function standard(ctx) {
@@ -184,8 +407,9 @@ async function standard(ctx) {
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read .baton/baton.json at");
   const show = (rel2) => gitRun("git", ["-C", ctx.checkout, "show", sha + ":" + rel2], { maxBuffer: 67108864 });
   const settings = JSON.parse(show(".baton/baton.json"));
-  const agentCommand = typeof settings.agent_command === "string" && settings.agent_command !== "" ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? "";
-  if (agentCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
+  const settingsCommand = typeof settings.agent_command === "string" && settings.agent_command !== "" ? settings.agent_command : process.env.BATON_AGENT_COMMAND ?? "";
+  if (settingsCommand === "") throw new Error(".baton/baton.json names no agent_command \u2014 run `baton repo init --agent opencode` (or --agent claude-code, or --agent-command <cmd>); baton run --harness <harness> runs its command when the settings name none");
+  const agentCommand = advisedCommand(settingsCommand, settings, process.env.BATON_ADVICE);
   const rel = ".baton/courses/create-pr/legs/review.md";
   const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel]).trim() !== "";
   const text = present ? show(rel) : null;
@@ -240,13 +464,14 @@ async function standard(ctx) {
     });
     child.stdin?.end();
   }).finally(() => {
-    if (dir != null) rmSync(dir, { recursive: true, force: true });
+    if (dir != null) rmSync2(dir, { recursive: true, force: true });
   });
   const { answer, pr } = requireAnswer(out, { "name": "verdict", "values": ["approve", "changes"] }, "review");
   const on = pr;
   return { ...{ reached: "reviewed", next: answer === "approve" ? "merge" : "fix", verdict: answer }, ...on ? { pr: on } : {} };
 }
-var close = prClose;
+var closeCtx2 = (ctx) => ({ ...ctx, ...ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === "string" && process.env.BATON_DEFAULT_BRANCH !== "" ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {} });
+var close = (ctx, result) => prClose(closeCtx2(ctx), result);
 async function handoff() {
   return null;
 }

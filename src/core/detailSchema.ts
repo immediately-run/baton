@@ -2,8 +2,9 @@
 // (BATON_SPEC §2g R-BTN-76; R3-1251). Interpreted here, never compiled: a Worker may not `eval`,
 // so no code generation. Exactly the keywords `type`, `properties`, `required`,
 // `additionalProperties` (a boolean), `items`, `enum`, `const`, `minimum`, `maximum`, `minLength`,
-// `maxLength`, `minItems` and `maxItems`; a schema of at most 4 KB and 5 levels. Anything else —
-// `$ref`, `pattern`, `format`, a keyword this list lacks — is refused at registration. Pure.
+// `maxLength`, `minItems`, `maxItems` and `x-baton-base` (the root alone, naming a `std:` schema:
+// R-BTN-176); a schema of at most 4 KB and 5 levels. Anything else — `$ref`, `pattern`, `format`,
+// a keyword this list lacks — is refused at registration. Pure.
 
 /** R-BTN-76's bounds on a schema and on a `detail`. */
 export const SCHEMA_MAX_BYTES = 4096;
@@ -11,8 +12,12 @@ export const SCHEMA_MAX_DEPTH = 5;
 export const DETAIL_MAX_BYTES = 4096;
 
 const KEYWORDS = new Set(['type', 'properties', 'required', 'additionalProperties', 'items', 'enum', 'const',
-  'minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems']);
+  'minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'x-baton-base']);
 const TYPES = new Set(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null']);
+
+/** A schema id as `x-baton-base` names one (R-BTN-175's shape, checked here without importing the
+ *  output-schema machinery: `<name>@<version>`). */
+const SCHEMA_ID = /^[a-z][a-z0-9:._-]*@[0-9]+$/;
 
 export type Schema = Record<string, unknown>;
 
@@ -30,6 +35,10 @@ function problemAt(s: unknown, at: string, depth: number): string | null {
   if (depth > SCHEMA_MAX_DEPTH) return `${at}: is more than ${SCHEMA_MAX_DEPTH} levels deep`;
   if (!isObj(s)) return `${at}: must be an object`;
   for (const k of Object.keys(s)) if (!KEYWORDS.has(k)) return `${at}: ${k} is not in the subset`;
+  if (s['x-baton-base'] !== undefined) {
+    if (at !== '#') return `${at}.x-baton-base: is the root schema's only`;
+    if (typeof s['x-baton-base'] !== 'string' || !SCHEMA_ID.test(s['x-baton-base'])) return `${at}.x-baton-base: names a std: schema as <id>@<version>`;
+  }
   if (s.type !== undefined) {
     const types = Array.isArray(s.type) ? s.type : [s.type];
     if (!types.length || !types.every((t) => typeof t === 'string' && TYPES.has(t))) return `${at}.type: must name JSON types`;
@@ -133,4 +142,21 @@ export function detailProblem(schemas: Schema[], detail: unknown): string | null
 /** Two registered schemas are the same schema (R-BTN-76: an instance's resources share one). */
 export function sameSchema(a: Schema, b: Schema): boolean {
   return same(a, b);
+}
+
+/**
+ * R-BTN-176: the `x-baton-base` chain a schema names — the base it refines, then that base's own
+ * base, outermost first, stopping at a schema that names none (or that `resolve` does not know,
+ * which registration refuses first). `sameSchema` compares schemas without the keyword's chain:
+ * re-registering with the same schema is idempotent, and the chain lives beside it.
+ */
+export function baseChainOf(schema: Schema, resolve: (id: string) => Schema | null): string[] {
+  const out: string[] = [];
+  let base = typeof schema['x-baton-base'] === 'string' ? schema['x-baton-base'] as string : null;
+  while (base && !out.includes(base) && out.length < 64) {
+    out.push(base);
+    const next = resolve(base);
+    base = next && typeof next['x-baton-base'] === 'string' ? next['x-baton-base'] as string : null;
+  }
+  return out;
 }

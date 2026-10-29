@@ -241,8 +241,8 @@ describe('the refinement check (R-BTN-108; S-BTN-65)', () => {
 });
 
 describe('the std: library (R-BTN-110)', () => {
-  it('ships the nine schemas, each inside the subset, closed and bounded', () => {
-    expect(Object.keys(STD).sort()).toEqual(['std:decision@1', 'std:effect@1', 'std:forge.change@1', 'std:forge.check@1', 'std:forge.comment@1', 'std:git.commit@1', 'std:git.file@1', 'std:object@1', 'std:url@1']);
+  it('ships the ten schemas, each inside the subset, closed and bounded', () => {
+    expect(Object.keys(STD).sort()).toEqual(['std:api-capacity@1', 'std:decision@1', 'std:effect@1', 'std:forge.change@1', 'std:forge.check@1', 'std:forge.comment@1', 'std:git.commit@1', 'std:git.file@1', 'std:object@1', 'std:url@1']);
     for (const [id, s] of Object.entries(STD)) {
       expect([id, checkSchema(s)]).toEqual([id, []]);
       expect(Object.isFrozen(STD)).toBe(true);
