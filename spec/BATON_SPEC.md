@@ -2078,7 +2078,7 @@ mean (R-BTN-50).
   | `branch` | R-BTN-96 | R-BTN-96 | branches |
   | `ask`, `deliver`, `announce` | condition handlers (R-BTN-169) | R-BTN-169 | — |
 
-  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton request` — `create-spec` and `build-app` do; an ordinary course keeps its hand-filed tickets. `baton request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder and `archive/`), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call: the push triggers the sync (§7.1), the board places the ticket at the course's `start` with its `start_leg` ready, and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
+  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton request` — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder and `archive/`), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call: the push triggers the sync (§7.1), the board places the ticket at the course's `start` with its `start_leg` ready, and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
 
   - **A wait for a person's answer is a person's leg** (R-BTN-116), shown in git by the
     ticket's `answer:` (a sync-local field of the markdown source, read by the station
@@ -2106,12 +2106,13 @@ mean (R-BTN-50).
     path is the markers in order, skipping non-edges and legs past `max_runs`; the queued leg is
     the last marker's `next` if it leaves the station (`marker`), else the first leg listed
     (`course`); a malformed line is skipped and logged.
-  - **`spec-to-tickets`** (B-99) takes one merged specification — a `create-spec` conversation's
-    merged PR is the usual input — and files its child tickets. `decompose` drafts one ticket
-    per spec section or numbered decision into the request's `## Drafts`, each with its tests
-    and exit criteria drafted from the spec's own words; `check` holds the set against the spec
-    (every requirement covered exactly once, no ticket without a section, dependencies drawn as
-    the spec's order implies) and fails rather than covering a gap; `file` commits the children
+  - **`spec-to-tickets`** (B-99) takes one merged specification — entered by `baton request`
+    (`starts_from: request`), the sentence naming the spec; a `create-spec` conversation's merged
+    PR is the usual input — and files its child tickets. `decompose` drafts one ticket per spec
+    section or numbered decision into the request's `## Drafts`, each with its tests and exit
+    criteria drafted from the spec's own words; `check` holds the set against the spec (every
+    requirement covered exactly once, no ticket without a section, dependencies drawn as the
+    spec's order implies) and fails rather than covering a gap; `file` commits the children
     `parent:`-ed to the request (R-BTN-86), the request's `status:` to `done`. The owner deciding
     against filing withdraws the request — a ticket status, not a course station: the filed
     children are ordinary tickets on their own courses.

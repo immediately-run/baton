@@ -96,7 +96,8 @@ export const DRAFT_TICKET_COURSE = {
 };
 
 /** The `spec-to-tickets` course (R-BTN-131, B-99): a merged specification decomposes into its
- * child tickets. `decompose` drafts one ticket per spec section or decision into the request,
+ * child tickets. Entered by `baton request` (`starts_from: request`, B-98) — the sentence names
+ * the spec. `decompose` drafts one ticket per spec section or decision into the request,
  * `check` holds the set against the spec's coverage, and `file` commits the children `parent:`-ed
  * to the request and closes it done. The owner deciding against filing withdraws the request —
  * a ticket status, not a course station. It opens no PR. */
@@ -104,6 +105,8 @@ export const SPEC_TO_TICKETS_COURSE = {
   start: 'reading',
   start_leg: 'decompose',
   end: ['filed'],
+  // B-98: entered by `baton request "<one sentence naming the spec>"`, like create-spec and build-app.
+  starts_from: 'request',
   stations: {
     reading: { label: 'Reading the spec' }, drafted: { label: 'Child tickets drafted' },
     checked: { label: 'Set checked against the spec' }, filed: { label: 'Children filed' },

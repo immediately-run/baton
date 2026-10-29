@@ -102,12 +102,13 @@ describe('the standard courses (R-BTN-131)', () => {
     expect(readdirSync(root).filter((d) => existsSync(join(root, d, '.'))).sort()).toEqual(BUILT_INS.map((b) => b.id).sort());
   });
 
-  it('create-spec and build-app carry starts_from: request, and no other course does (B-98)', () => {
-    expect(BUILT_INS.filter((b) => b.course.starts_from !== undefined).map((b) => [b.id, b.course.starts_from])).toEqual([['build-app', 'request'], ['create-spec', 'request']]);
-    for (const b of BUILT_INS) if (b.id !== 'build-app' && b.id !== 'create-spec') expect(b.course).not.toHaveProperty('starts_from');
+  it('create-spec, build-app and spec-to-tickets carry starts_from: request, and no other course does (B-98, B-99)', () => {
+    expect(BUILT_INS.filter((b) => b.course.starts_from !== undefined).map((b) => [b.id, b.course.starts_from])).toEqual([['build-app', 'request'], ['create-spec', 'request'], ['spec-to-tickets', 'request']]);
+    for (const b of BUILT_INS) if (b.id !== 'build-app' && b.id !== 'create-spec' && b.id !== 'spec-to-tickets') expect(b.course).not.toHaveProperty('starts_from');
     // The course file a repository scaffolds is the built-in's own JSON, so the key is in the file
     // `baton request` reads from the checkout.
     expect(JSON.parse(JSON.stringify(CREATE_SPEC_COURSE))).toMatchObject({ starts_from: 'request', start: 'requested', start_leg: 'converse' });
+    expect(JSON.parse(JSON.stringify(SPEC_TO_TICKETS_COURSE))).toMatchObject({ starts_from: 'request', start: 'reading', start_leg: 'decompose' });
   });
 
   it('the core accepts starts_from: request and refuses any other value (B-98, R-BTN-131)', () => {
@@ -244,8 +245,11 @@ describe('the standard courses (R-BTN-131)', () => {
 
     it('check fails rather than covering a gap: its instructions refuse a section with no ticket draft, and no leg files a ticket before file', () => {
       const check = readFileSync(join(instructionsDir('spec-to-tickets'), 'check.md'), 'utf8');
-      expect(check).toMatch(/A section with no ticket draft fails here/);
-      expect(check).toMatch(/exit non-zero naming the section/);
+      // A gap is returned to decompose, never patched by check — the two sentences together say
+      // so, and the unit test holds both so neither can quietly go (round 1, finding 3).
+      expect(check).toMatch(/A requirement no draft covers is \*\*not yours to add\*\*/);
+      expect(check).toMatch(/A section with no ticket draft is a failure of the set/);
+      expect(check).toMatch(/exit\s+non-zero naming the section/);
       // `file` files the children — parent-ed to the request, the request closed done — and the
       // earlier legs write no ticket file.
       const file = readFileSync(join(instructionsDir('spec-to-tickets'), 'file.md'), 'utf8');

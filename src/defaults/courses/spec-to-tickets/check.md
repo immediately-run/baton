@@ -19,10 +19,13 @@ you return; do not write it.
 
 ## Check the set, from a fresh read
 
-Read the spec again beside the drafts, and fix the drafts — never the spec — until each holds:
+Read the spec again beside the drafts. Where correcting is yours — a requirement sitting in two
+drafts, a dependency the spec's order does not imply, a draft too large for one PR per
+repository, a draft no section asks for — fix the drafts, never the spec:
 
 - **Every requirement exactly once.** Each requirement of each section is in exactly one draft:
-  none missing, none twice, none split across two. A section with no ticket draft fails here.
+  none twice, none split across two. A requirement no draft covers is **not yours to add** —
+  `decompose` owns drafting, and a set that missed one is returned, not patched.
 - **No ticket without a section.** A draft no section of the spec asks for is gone — however
   useful it looks, it is not this spec's work.
 - **Dependencies as the spec's order implies.** A draft depends on another only where the spec
@@ -30,9 +33,8 @@ Read the spec again beside the drafts, and fix the drafts — never the spec —
 - **Each draft buildable as one PR per repository.** A draft that exceeds that splits, its parts
   chained by `depends_on`, each part still tied to its section's requirements.
 
-A section with no ticket draft after that is a failure of the set, not something to wave
-through: exit non-zero naming the section, and the leg fails — nothing is written, and a person
-looks.
+A section with no ticket draft is a failure of the set, not something to wave through: exit
+non-zero naming the section, and the leg fails — nothing is written, and a person looks.
 
 Commit the request alone, its `## Drafts` corrected, to the default branch.
 
