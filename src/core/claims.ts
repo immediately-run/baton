@@ -925,11 +925,14 @@ export class Claims {
    * transaction by the route — the claim ends a failed attempt `released:cannot-finish:transient`,
    * named for what the runner claimed to lose and does not hold. */
   invalidPrerequisiteEnd(workerId: number, claimId: number, ref: string): void {
-    const c = this.rows<{ id: number; ticket_id: string }>('SELECT id, ticket_id FROM claims WHERE id = ? AND worker_id = ?', claimId, workerId)[0];
-    if (!c) return;
+    // 2-r2-0: only the worker's ACTIVE claim is ended — a completed or already-ended one
+    // answers claim-ended as end() does, never re-finished, so rule 3's unconfirmed hold
+    // stands (R-BTN-168).
+    const c = this.rows<{ id: number; ticket_id: string }>(`SELECT id, ticket_id FROM claims WHERE id = ? AND worker_id = ? AND status = 'active'`, claimId, workerId)[0];
+    if (!c) throw new BatonError('claim-ended', 'the claim already ended');
     const item = this.item(c.ticket_id);
     this.finish(claimId, c.ticket_id, 'released', 'released:cannot-finish:transient', `worker:${workerId}`,
-      { detail: `invalid-prerequisite: ${ref} is not declared`, reached: item?.station?.station ?? null, finished: false, evidence: null, next: null });
+      { detail: `invalid-prerequisite: ${ref.slice(0, 100)} is not declared`, reached: item?.station?.station ?? null, finished: false, evidence: null, next: null });
   }
 
   /**

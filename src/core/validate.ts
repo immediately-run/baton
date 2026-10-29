@@ -531,7 +531,7 @@ export interface End {
  *  pointer to the evidence, pushed first (R-BTN-8). */
 /** A capability or holding name as a declaration carries it (R-BTN-121; R-BTN-174's branch:
  * a lost holding may be any typed label, `model:glm-5.3` included). */
-const CAPABILITY_NAME = new RegExp(`^(?:${NAME.source}|${HOLDING.source.slice(1, -1)})$`);
+export const CAPABILITY_NAME = new RegExp(`^(?:${NAME.source}|${HOLDING.source.slice(1, -1)})$`);
 export function checkEnd(body: unknown): End {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;

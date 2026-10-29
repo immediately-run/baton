@@ -119,6 +119,11 @@ export class Ontologies {
       if (this.sql('SELECT 1 FROM ontologies WHERE repository_id = ?', repo).length) {
         this.store.exec('DELETE FROM ontologies WHERE repository_id = ?', repo);
         this.store.exec('DELETE FROM ontology_refusals WHERE repository_id = ?', repo);
+        // 2-r2-2: the program is gone, so no worker's stored set can be current — the rows go
+        // with it, or rule 4's SQL and the fleet recount would keep reading a dead program's
+        // derivations.
+        this.store.exec('DELETE FROM worker_derived WHERE repository_id = ?', repo);
+        this.store.exec('DELETE FROM worker_derived_inputs WHERE repository_id = ?', repo);
       }
       return null;
     }

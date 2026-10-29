@@ -19,7 +19,7 @@ import { Claims } from './claims';
 import { Ontologies } from './ontologies';
 import { Cutover } from './cutover';
 import { Mirror } from './mirror';
-import { checkConfirmations, checkRepositoryId, GIT_BRANCH, GIT_REPO } from './validate';
+import { CAPABILITY_NAME, checkConfirmations, checkRepositoryId, GIT_BRANCH, GIT_REPO } from './validate';
 import { Courses } from './courses';
 import { Observations } from './observations';
 import { Webhooks, type Delivery } from './webhook';
@@ -585,8 +585,8 @@ export class BatonCore {
         // R-BTN-174: an advance re-checks rule 4 against the CURRENT set — the claim's own
         // repository targeted (A5/B4, round 1: a budget-2 untargeted pass leaves it unprepared
         // beside a fresher repository and refuses a deriving holder on its own running claim).
-        const claimRepo = this.sql<{ ticket_id: string }>('SELECT ticket_id FROM claims WHERE id = ? AND worker_id = ?', Number(advance[1]), workerId)[0]?.ticket_id;
-        const prepared = this.claims.prepareSetsFor(workerId, claimRepo != null && claimRepo.includes(':') ? repositoryOf(claimRepo) : null);
+        const claimTicket = this.sql<{ ticket_id: string }>('SELECT ticket_id FROM claims WHERE id = ? AND worker_id = ?', Number(advance[1]), workerId)[0]?.ticket_id ?? null;
+        const prepared = this.claims.prepareSetsFor(workerId, claimTicket);
         return json(tx(() => this.claims.advance(workerId, Number(advance[1]), body, prepared)));
       }
       if (m === 'POST' && p === '/v1/runner/adopt') {
@@ -596,14 +596,16 @@ export class BatonCore {
       const end = /^\/v1\/runner\/claims\/(\d+)\/end$/.exec(p);
       if (m === 'POST' && end) {
         const body = await readJson(req);
-        // R-BTN-126 (round 1, B9): a blocked end's ref must be a capability the worker
-        // declares — judged before the request's transaction, so the invalid end's recording
-        // (a failed attempt, ended transient) commits whether or not the answer is the error.
-        const prereq = (body as { prerequisite?: { kind?: string; ref?: string } }).prerequisite;
+        // R-BTN-126 (round 1 B9, round 2 r2-5): a blocked end's ref must be a well-formed
+        // capability the worker declares — judged before the request's transaction, so the
+        // invalid end's recording (a failed attempt, ended transient) commits whether or not
+        // the answer is the error.
+        const prereq = (body as { prerequisite?: { kind?: string; ref?: unknown } }).prerequisite;
         if ((body as { end_reason?: string }).end_reason === 'released:blocked' && prereq?.kind === 'capability') {
+          if (typeof prereq.ref !== 'string' || !CAPABILITY_NAME.test(prereq.ref)) throw new BatonError('invalid-params', 'prerequisite: must be a capability name (R-BTN-126)');
           const declared = this.sql('SELECT 1 FROM worker_capabilities wc JOIN claims c ON c.worker_id = wc.worker_id WHERE c.id = ? AND c.worker_id = ? AND wc.capability = ?', Number(end[1]), workerId, prereq.ref);
           if (!declared.length) {
-            this.store.transaction(() => this.claims.invalidPrerequisiteEnd(workerId, Number(end[1]), prereq.ref!));
+            this.store.transaction(() => this.claims.invalidPrerequisiteEnd(workerId, Number(end[1]), prereq.ref as string));
             throw new BatonError('invalid-prerequisite', `prerequisite: ${prereq.ref} is not a capability this worker declares (R-BTN-126)`);
           }
         }
@@ -882,6 +884,9 @@ export class BatonCore {
       if (who != null) {
         if (who !== 'me' || role !== 'worker') throw new BatonError('invalid-params', 'worker: only `me`, from a worker session');
         worker = await this.workers.authWorker(cred, req.headers.get('X-Worker-Secret'));
+        // R-BTN-174 (round 2, r2-4): a read brings the reader's sets up to date first — the
+        // worker's own answer is rule 4's, never a stale set's.
+        this.claims.prepareSetsFor(worker, id);
       }
       const out = this.blocks.blocksOf(id, worker);
       // §6.2 (R-BTN-174, B-104): a worker's own view of a `capability` block carries why-not —

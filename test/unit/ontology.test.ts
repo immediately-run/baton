@@ -5,7 +5,7 @@
 // decides — the entry order, the tie break, the counted bounds.
 import { describe, expect, it } from 'vitest';
 import {
-  BOUNDS, bodyOrder, canonicalJson, evaluate, maximalEvaluation, parseOntology, sha256Hex,
+  BOUNDS, bodyOrder, boundsFor, canonicalJson, evaluate, maximalEvaluation, parseOntology, sha256Hex,
   validateOntology, whyNot, type Program,
 } from '../../src/core/ontology';
 
@@ -385,6 +385,29 @@ describe("S-BTN-140's bounds class, each member probed (round 1, B10)", () => {
     const long = 'a'.repeat(1000);
     expect(sha256Hex(long)).toHaveLength(64);
     expect(sha256Hex(long)).toBe(sha256Hex(long));
+  });
+});
+
+describe('the gate evaluation reads the fixed strata as facts (round 1, B2 — pinned by matches)', () => {
+  it('derives from a maximal run\u2019s fixed map without re-deriving it, and the count says so', () => {
+    const { placed } = batonAt1([]);
+    const maximal = evaluate(placed, [...placed.constants], null, { matches: BOUNDS.maximalMatches, atoms: BOUNDS.maximalAtoms });
+    expect(maximal.ok).toBe(true);
+    if (!maximal.ok) return;
+    const fixed = new Map<string, (string | number)[][]>([...placed.fixedPredicates].map((p) => [p, (maximal.relations.get(p) ?? []) as (string | number)[][]]));
+    // A gate evaluation over the fixed map: the offers/model_for tuples are facts — every match
+    // is spent on the gate stratum itself, not on re-deriving what acceptance already answered.
+    const gate = evaluate(placed, ['key:anthropic', 'dependency:claude-code'], fixed, boundsFor('gate'));
+    expect(gate.ok).toBe(true);
+    if (!gate.ok) return;
+    expect(gate.derived).toContain('capability:code-generation-llm');
+    // The same evaluation with no fixed map (a maximal run's cost) re-derives the fixed strata:
+    // strictly more matches. The pin: the fixed-map run is the cheaper one and stays so.
+    const scratch = evaluate(placed, ['key:anthropic', 'dependency:claude-code'], null, boundsFor('gate'));
+    expect(scratch.ok).toBe(true);
+    if (!scratch.ok) return;
+    expect(gate.matches).toBeLessThan(scratch.matches);
+    expect(gate.matches).toBeLessThan(60); // baton@1's gate stratum is a handful of joins
   });
 });
 
