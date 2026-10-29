@@ -566,7 +566,7 @@ export class Blocks {
     const now = this.c.now();
     const all = this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL').map((r) => r.id);
     return this.named<{ id: number; credential_id: string; created_by: string | null }>(
-      `SELECT w.id, w.credential_id, c.created_by FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} AND (:only IS NULL OR w.id = :only) ORDER BY w.id`, { now, only })
+      `SELECT w.id, w.credential_id, c.created_by, c.allowed_capabilities FROM workers w JOIN credentials c ON c.id = w.credential_id WHERE ${LIVE} AND (:only IS NULL OR w.id = :only) ORDER BY w.id`, { now, only })
       .map((w) => {
         // R-BTN-58: a key an owner or administrator granted works where it is granted; another
         // (a bearer token, a BATON_KEYS seed key) is bounded by its allow-list on every

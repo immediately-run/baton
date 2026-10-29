@@ -394,6 +394,67 @@ describe('round one\u2019s fixes, pinned', () => {
   });
 });
 
+describe('round two\u2019s fixes, pinned', () => {
+  beforeEach(async () => {
+    await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.A, {
+      ontology: { builtin: 'baton@1', program },
+      state: { items: [item('R3-9002', ['capability:code-generation-llm'])] },
+      ready: ['R3-9002'],
+    }));
+  });
+
+  it('2-r2-0: an invalid blocked end on a completed-unconfirmed claim answers claim-ended and re-finishes nothing', async () => {
+    const w = await register('vm-a', { capabilities: ['key:anthropic', 'dependency:claude-code'] });
+    const claim = await claimItem('vm-a', w.secret, { ticket_id: 'docs:R3-9002' });
+    // A completed end that no snapshot has confirmed yet: the claim still holds (rule 3) —
+    // seeded directly, the state the guard must respect (its end machinery is not under test).
+    await rows(`UPDATE claims SET status = 'completed', end_reason = 'done', ended_at = ?, ended_at_sha = ? WHERE id = ?`, T0, 'e'.repeat(40), claim.json.claim_id);
+    const row = await rows<{ status: string; end_reason: string; ended_at: number }>('SELECT status, end_reason, ended_at FROM claims WHERE id = ?', claim.json.claim_id);
+    expect(row[0].status).toBe('completed');
+    expect(row[0].ended_at).not.toBeNull();
+    // The invalid blocked end answers claim-ended and changes nothing.
+    const res = await endClaim('vm-a', w.secret, claim.json.claim_id, { end_reason: 'released:blocked', prerequisite: { kind: 'capability', ref: 'not-declared:anywhere' } });
+    expect(res.json.code).toBe('claim-ended');
+    const after = await rows<{ status: string; end_reason: string; ended_at: number }>('SELECT status, end_reason, ended_at FROM claims WHERE id = ?', claim.json.claim_id);
+    expect(after[0]).toEqual(row[0]);
+  });
+
+  it('2-r2-2: a post deleting the program takes the derived rows with it', async () => {
+    const w = await register('vm-a', { capabilities: ['key:anthropic', 'dependency:claude-code'] });
+    expect((await claimItem('vm-a', w.secret, { ticket_id: 'docs:R3-9002' })).json).toMatchObject({ ticket_id: 'docs:R3-9002' });
+    expect((await derivedOf(w.id)).length).toBeGreaterThan(0);
+    // The file is gone: the post carries no ontology field (and no attachments), the program
+    // and every derived row go.
+    await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.A));
+    expect(await rows('SELECT * FROM ontologies')).toEqual([]);
+    expect(await rows('SELECT * FROM worker_derived')).toEqual([]);
+    expect(await rows('SELECT * FROM worker_derived_inputs')).toEqual([]);
+  });
+
+  it('2-r2-1: the advance\u2019s targeted evaluation commits before the request\u2019s transaction — a refused advance leaves the set current', async () => {
+    const w = await register('vm-a', { capabilities: ['key:anthropic', 'dependency:claude-code'] });
+    const claim = await claimItem('vm-a', w.secret, { ticket_id: 'docs:R3-9002' });
+    expect(claim.json).toMatchObject({ ticket_id: 'docs:R3-9002' });
+    expect((await derivedOf(w.id)).length).toBeGreaterThan(0);
+    // Narrow the program so the worker derives nothing; the next advance is refused rule 4 —
+    // and its pre-transaction evaluation still commits (the rows are the narrowed set's).
+    const narrowed = structuredClone(program);
+    narrowed.entries.push({ id: 'bind-coding', fact: ['binding', 'coding', 'model:glm-5.3'] });
+    await syncCall('/v1/sync/board', payload(sha.C, sha.B, board.states.A, {
+      ontology: { builtin: 'baton@1', program: narrowed },
+      state: { items: [item('R3-9002', ['capability:code-generation-llm'])] },
+      ready: ['R3-9002'],
+    }));
+    await refresh();
+    const body = { leg: 'review', bars: [] };
+    const res = await workerCall(`/v1/runner/claims/${claim.json.claim_id}/advance`, { cred: 'vm-a', secret: w.secret, body });
+    expect(res.status).toBe(409);
+    // The evaluation ran BEFORE the refused request's transaction: the stored set is the
+    // narrowed program's (the capability gone), not the old one the rollback would keep.
+    expect(await derivedOf(w.id)).not.toContain('capability:code-generation-llm');
+  });
+});
+
 describe('S-BTN-145: the environment is R-BTN-144\u2019s — no credential data in any answer', () => {
   it('an advance answer and a claim answer carry no credential material', async () => {
     await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.A, {

@@ -232,8 +232,18 @@ export class Claims {
     // capability was deleted: rule 4's H = declared ∩ allow-list, on every repository it may
     // reach. Never null — null meant unbounded, and nothing is unbounded any more.
     if (!isGrantedKey(createdBy)) {
+      // 3-r3-1: ONE expansion, here at the source — an allow-list entry naming `<type>:*`
+      // admits the worker's declared holdings of that type, so every reader of the grant
+      // (gatesFor, holdingsOf, the candidate query, the fleet) sees the same set instead of
+      // gatesFor alone widening it.
       const allowed = this.rows<{ allowed_capabilities: string }>('SELECT allowed_capabilities FROM credentials WHERE id = ?', credential)[0];
-      const capabilities = allowed ? (JSON.parse(allowed.allowed_capabilities) as string[]) : [];
+      const listed = allowed ? (JSON.parse(allowed.allowed_capabilities) as string[]) : [];
+      const set = new Set(listed);
+      if (listed.some((c) => c.endsWith(':*'))) {
+        const declared = this.rows<{ capability: string }>('SELECT capability FROM worker_capabilities WHERE credential_id IS NOT NULL AND worker_id IN (SELECT id FROM workers WHERE credential_id = ?)', credential).map((r) => r.capability);
+        for (const c of declared) if (listed.includes(`${c.split(':')[0]}:*`)) set.add(c);
+      }
+      const capabilities = [...set];
       return Object.fromEntries(this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL')
         .map((r) => [r.id, { capabilities, max_tier: null }]));
     }
