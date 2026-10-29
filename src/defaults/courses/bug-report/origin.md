@@ -52,6 +52,8 @@ ticket" where there is none), `Spec as read:`, `Origin:`, `Missed by:` with evid
 out of reads, write `Origin: unknown` with what you checked; the section is never omitted.
 Commit the ticket file alone to the default branch.
 
+Your work lands under the ticket's own `## origin` heading — write it if it is not there; the close checks it is.
+
 ## Do not
 
 - Edit the introducing ticket, the PR or the spec. A wrong spec becomes a line in the fix

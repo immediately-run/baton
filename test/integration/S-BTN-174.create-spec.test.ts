@@ -2,7 +2,7 @@
 // a fresh repository runs `baton repo init --course create-spec`, with one request. Must hold: the
 // ticket starts at `requested` with `converse` queued and ready (a claim runs it: the owner's
 // session); the claim suspends (`{ suspend: true, reached: 'requested', next: 'converse' }`) and
-// the leg's `close` commits and pushes the marker line to `.baton/markers.jsonl`, so the next sync
+// the leg's `close` commits and pushes its machine state into the ticket's own frontmatter, so the next sync
 // places the ticket at `requested` with `converse` waiting on the `owner` and never offers it again
 // — the owner's session is one, not one per sync — and the path stays empty (a marker is no step of
 // the graph: no `off-graph` is logged); the conversation's PR, on the course's branch pattern,
@@ -24,7 +24,7 @@ import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
 import type { PrFact } from '../../src/defaults/course-pr';
 import { BUILT_INS } from '../../src/defaults/courses';
-import { MARKERS_FILE, parseMarkers } from '../../src/defaults/course-markers';
+import { closesOfHistory } from '../../src/defaults/ticket-state';
 import { prClose } from '../../src/defaults/pr-close';
 import { ORIGIN, rows, setClock, syncToken } from '../helpers';
 
@@ -61,17 +61,19 @@ class Repo {
   git(...args: string[]): string {
     return execFileSync('git', ['-C', this.dir, ...args], { encoding: 'utf8' }).trim();
   }
-  /** A leg's `close` as the stub calls it (B-96's review round 1): `prClose` writes the marker
-   *  line from the leg's result, the ticket bare, commits that file alone and pushes it — the
-   *  default branch, which is what the sync reads. The origin is this repository's own bare
-   *  clone, so the push is a real one and its commit is what the next sync parses. */
+  /** A leg's `close` as the stub calls it (B-96's review round 1, B-100): `prClose` writes the
+   *  leg's machine state from its result into the ticket's own frontmatter, commits that file
+   *  alone and pushes it — the default branch, which is what the sync reads. The origin is this
+   *  repository's own bare clone, so the push is a real one and its commit is what the next sync
+   *  reads back out of the file's history. */
   async close(leg: string, result: { reached: string; next: string | null }): Promise<void> {
-    await prClose({ checkout: this.dir, ticket: { id: 'docs:SPEC-1', home: 'docs' }, leg, claim: { nonce: 'n1' }, default_branch: 'main' }, result);
+    await prClose({ checkout: this.dir, ticket: { id: 'docs:SPEC-1', home: 'docs', path: 'tickets/spec-1.md' }, leg, claim: { nonce: 'n1' }, default_branch: 'main' }, result);
     this.pull();
   }
-  /** The markers the checkout's default branch carries, as the sync parses them. */
-  markers(): { ticket: string; leg: string; reached: string; next?: string | null; claim?: string | null }[] {
-    return parseMarkers(readFileSync(join(this.dir, MARKERS_FILE), 'utf8'));
+  /** The closes the checkout's default branch carries, as the sync reads them out of the
+   *  ticket's own git history (B-100: the file's history is the record). */
+  closes(): { ticket: string; leg: string; reached: string; next?: string | null; claim?: string | null }[] {
+    return closesOfHistory((args) => this.git(...args), 'SPEC-1', 'tickets/spec-1.md');
   }
   /** One sync: recorded facts, the harness's sync credential and the local host's transport. */
   async sync(): Promise<void> {
@@ -104,7 +106,7 @@ const nextOf = (id: string) => rows<{ leg: string; state: string; waiting_on: st
 const offGraph = (id: string) => rows<{ why: string }>(`SELECT json_extract(detail_json, '$.why') AS why FROM events WHERE ticket_id = ? AND kind = 'off-graph'`, `docs:${id}`);
 
 /** The ticket's one spec request. */
-const request = '---\nid: SPEC-1\ntitle: Specify the export format\ncourse: create-spec\n---\n\nWrite down what an export file must contain, so two implementations agree.\n';
+const request = '---\nid: SPEC-1\ntitle: Specify the export format\ncourse: create-spec\n---\n\nWrite down what an export file must contain, so two implementations agree.\n\n## converse\n\nThe design conversation, recorded as it happened.\n\n## address\n\nThe findings answered in the owner\'s second conversation.\n';
 
 /** One fact in the shape R-BTN-96's adapter records, on the course's branch pattern. */
 function fact(state: PrFact['state'], checks: (string | null)[], reviews: PrFact['reviews'], pushes?: number[]): PrFact {
@@ -143,7 +145,7 @@ describe('S-BTN-174 the create-spec course', () => {
       await repo.close('converse', { reached: 'requested', next: 'review' });
       // The line the close wrote is the one `parseMarkers` reads back — the ticket bare, at the
       // station it opened, `review` queued — and the checkout's branch is level with the origin.
-      expect(repo.markers()).toEqual([{ ticket: 'SPEC-1', leg: 'converse', reached: 'requested', next: 'review', claim: 'n1' }]);
+      expect(repo.closes()).toEqual([{ ticket: 'SPEC-1', leg: 'converse', reached: 'requested', next: 'review', claim: 'n1' }]);
       expect(repo.git('rev-parse', 'HEAD')).toBe(execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim());
 
       // The marker is committed and pushed, the PR still is not: still `requested` with `converse`
@@ -187,7 +189,7 @@ describe('S-BTN-174 the create-spec course', () => {
       // not one per sync (B-96's review round 1). Nothing is pushed between rounds but the rounds'
       // own work, so the timeline still holds one `address` step while the markers hold one.
       await repo.close('address', { reached: 'reviewed', next: 'address' });
-      expect(repo.markers().map((m) => [m.leg, m.reached])).toEqual([['converse', 'requested'], ['address', 'reviewed']]);
+      expect(repo.closes().map((m) => [m.leg, m.reached])).toEqual([['converse', 'requested'], ['address', 'reviewed']]);
       await later();
       await repo.sync();
       expect(await stationOf('SPEC-1')).toMatchObject({ station: 'reviewed', next_leg: 'address', path_len: 2 });

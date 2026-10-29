@@ -15,7 +15,7 @@ import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { BatonApi, envAuth } from './api';
 import { HARNESS_AGENTS, type Harness } from './harness';
 import { holdHome, legNeeds, readHead } from './home';
-import { GIT_NONINTERACTIVE_ENV } from '../defaults/course-markers';
+import { GIT_NONINTERACTIVE_ENV } from '../defaults/ticket-state';
 import { Runner, stampLine, withTimestamps } from './runner';
 
 export interface RunArgs {

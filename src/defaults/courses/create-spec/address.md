@@ -72,6 +72,8 @@ closing a PR answers no finding, so the owner reopens it, or files a fresh reque
   explicit paths, never `git add -A`; add commits, never rewrite the branch's history), push once
   with every answer in it, reply on the threads you fixed naming the commit, and end the session.
 
+Your work lands under the ticket's own `## address` heading — write it if it is not there; the close checks it is.
+
 ## Do not
 
 - Mark the ticket `done`: this leg decides nothing about the ticket, and the board reads the PR —

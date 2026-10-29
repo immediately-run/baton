@@ -41,6 +41,8 @@ Add `## Research` to the request: the files found by name, the sources by sectio
 already delivered, the planned split, the resources, the open decisions. Commit the ticket file
 alone to the default branch.
 
+Your work lands under the ticket's own `## research` heading — write it if it is not there; the close checks it is.
+
 ## Do not
 
 - Write the ticket yet, or edit code.

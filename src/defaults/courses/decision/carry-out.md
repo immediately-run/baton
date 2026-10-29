@@ -31,6 +31,8 @@ ticket is closed.
 Add `## Outcome` to the ticket: the letter, what was done, links to what changed or what was
 filed. Set the ticket's `status:` to `done`. Commit to the default branch.
 
+Your work lands under the ticket's own `## carry-out` heading — write it if it is not there; the close checks it is.
+
 ## Do not
 
 - Reinterpret the answer. If it cannot be carried out as written (an option no longer applies),

@@ -46,6 +46,8 @@ fix.**
   "nothing" is exactly what someone needs to see.
 - Set the bug ticket's `status:` to `done`. Commit the files together to the default branch.
 
+Your work lands under the ticket's own `## prevent` heading — write it if it is not there; the close checks it is.
+
 ## Do not
 
 - Apply a prevention yourself. You recommend; the owner decides.

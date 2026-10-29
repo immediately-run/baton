@@ -23,7 +23,7 @@ import chore from '../fixtures/courses/chore/course.json';
 
 const T0 = Date.parse('2026-10-20T12:00:00Z');
 
-/** One leg script: the body given; `close` commits a closing marker and returns the commit (the
+/** One leg script: the body given; `close` commits its closing record and returns the commit (the
  *  position is in git before it is reported, R-BTN-83). Each line it writes lands in the home's
  *  `.baton/evidence.jsonl` — which course's script ran, and for which claim. */
 const legFile = (run: string): string => `import { appendFileSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
@@ -35,8 +35,8 @@ export async function run(ctx) {
 ${run}
 }
 export async function close(ctx, result) {
-  appendFileSync([ctx.checkout, '.baton', 'markers.jsonl'].join('/'), JSON.stringify({ leg: ctx.leg, ...(result && result.reached ? { reached: result.reached } : {}), claim: ctx.claim.nonce }) + '\\n');
-  git(ctx, 'add', '.baton/markers.jsonl');
+  appendFileSync([ctx.checkout, '.baton', 'closes.jsonl'].join('/'), JSON.stringify({ leg: ctx.leg, ...(result && result.reached ? { reached: result.reached } : {}), claim: ctx.claim.nonce }) + '\\n');
+  git(ctx, 'add', '.baton/closes.jsonl');
   git(ctx, 'commit', '--allow-empty', '--no-gpg-sign', '-m', 'baton:close ' + ctx.leg);
   return git(ctx, 'rev-parse', 'HEAD');
 }

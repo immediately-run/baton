@@ -292,11 +292,57 @@ export async function noopViolations(k: KitInput): Promise<KitViolation[]> {
   }
 }
 
+/** B-100: a marker course's close writes the ticket — and the boundary check is the leg's
+ *  outcome, not the agent's exit. The kit runs the course's start leg's `close` in a scratch
+ *  checkout whose ticket file is valid frontmatter but carries no `## <start leg>` heading (a
+ *  no-op agent wrote nothing): the close must fail the leg naming the heading. One that pushes
+ *  a state change anyway is the violation — the ticket is the record, and nothing the agent
+ *  touched is trusted unchecked. */
+export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
+  if (!k.root) return [];
+  let standard: ReturnType<typeof builtIn> = undefined;
+  try {
+    standard = builtIn(k.source != null ? parseSource(k.source).course : k.course);
+  } catch {
+    standard = undefined; // a source that is not a name: the sync's to refuse, not the kit's
+  }
+  if (standard?.reads !== 'markers') return [];
+  const startLeg = graphOf(k.proposed).startLeg;
+  const script = join(k.root, '.baton', 'courses', k.course, 'legs', `${startLeg}.mjs`);
+  if (!existsSync(script)) return []; // a missing script is the legs-scripts rule's own failure
+  const dir = mkdtempSync(join(tmpdir(), 'baton-kit-ticket-'));
+  try {
+    const git = (out: boolean, ...args: string[]) =>
+      String(execFileSync('git', ['-C', dir, '-c', 'user.name=kit', '-c', 'user.email=kit@baton.test', ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'], ...(out ? { encoding: 'utf8' } : {}) }));
+    git(false, 'init', '-q', '-b', 'main');
+    git(false, 'remote', 'add', 'origin', 'https://127.0.0.1:1/kit/no-forge.git');
+    mkdirSync(join(dir, 'tickets'), { recursive: true });
+    writeFileSync(join(dir, 'tickets', 'kit-1.md'), `---\nid: KIT-1\ntitle: A ticket\n---\n\nA body with no ${startLeg} heading.\n`);
+    git(false, 'add', '-A');
+    git(false, 'commit', '-qm', 'kit');
+    const sha = git(true, 'rev-parse', 'HEAD').trim();
+    const mod = (await import(`${pathToFileURL(script).href}?t=${Math.random()}`)) as Record<string, unknown>;
+    const close = mod.close ?? (mod.default != null && typeof mod.default === 'object' ? (mod.default as Record<string, unknown>).close : undefined);
+    if (typeof close !== 'function') return []; // a script that exports no close is the legs-scripts rule's
+    try {
+      await (close as (ctx: unknown, result: unknown) => Promise<unknown>)(
+        { ticket: { id: `${REPO}:KIT-1`, path: 'tickets/kit-1.md', home: REPO }, leg: startLeg, checkout: dir, snapshot: { sha }, claim: { nonce: 'kit' }, default_branch: 'main' },
+        { reached: graphOf(k.proposed).legs.get(startLeg)!.to[0], next: null },
+      );
+      return [{ rule: 'no-op', message: `legs/${startLeg}.mjs's close accepted a ticket with no '## ${startLeg}' heading — the marker courses' state is the ticket itself, so the close must validate it (the item schema, the machine fields, its own heading) and fail the leg naming what broke (B-100)` }];
+    } catch {
+      return []; // the close refused the mangled ticket: what B-100 asks
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** The whole kit over in-memory inputs. */
 export async function checkCourse(k: KitInput): Promise<KitViolation[]> {
   const s = staticViolations(k);
   if (s.some((v) => v.rule === 'course')) return s;
-  return [...s, ...replayViolations(k.proposed, k.live), ...(await coreViolations(k)), ...(await noopViolations(k))];
+  return [...s, ...replayViolations(k.proposed, k.live), ...(await coreViolations(k)), ...(await noopViolations(k)), ...(await ticketViolations(k))];
 }
 
 /** The kit's inputs from a repository checkout: the proposed `.baton/` in the working tree, the

@@ -39,6 +39,8 @@ requirement, and the leg fails — nothing is written, and a person looks.
 
 Commit the request alone, its `## Drafts` corrected, to the default branch.
 
+Your work lands under the ticket's own `## check` heading — write it if it is not there; the close checks it is.
+
 ## Do not
 
 - File a ticket file, edit the spec, or weaken a requirement to make a draft fit.

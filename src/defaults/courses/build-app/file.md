@@ -42,3 +42,5 @@ setting in `.baton/baton.json`, `tickets/` by default):
 Follow the format the repository's existing tickets use for anything else. Then add a `## Filed`
 section to this ticket listing each child, and commit the children and this ticket together,
 with explicit paths, to the default branch.
+
+Your work lands under the ticket's own `## file` heading — write it if it is not there; the close checks it is.

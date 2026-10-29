@@ -50,6 +50,7 @@
 //
 //   baton repo sync [--root DIR] [--url URL] [--latest BRANCH] [--facts FILE] [--sync-key FILE] [--busy-retry S]
 //   baton repo init [--course C] [--agent opencode|claude-code] [--agent-command CMD] [--override LEG]…
+//   baton repo migrate-markers [--root DIR]   — the one-time fold of the retired .baton/markers.jsonl into the tickets (B-100)
 //                   [--eject tickets|stations] [--pin owner/name@commit] [--force]
 //                — a repository's own sync and scaffold (§2f R-BTN-74, R-BTN-131)
 //   baton tickets check [--repo DIR] [--quiet]
@@ -507,10 +508,12 @@ export async function main(argv) {
     const { runMain } = await import('../scripts/baton-run.mjs');
     return runMain(argv.slice(1));
   }
-  if (argv[0] === 'repo' && (argv[1] === 'sync' || argv[1] === 'init')) {
+  if (argv[0] === 'repo' && (argv[1] === 'sync' || argv[1] === 'init' || argv[1] === 'migrate-markers')) {
     // §2f, R-BTN-127's names: the defaults are TypeScript under src/defaults, bundled the same way.
-    const { parseSyncArgs, syncMain, initMain } = await import('../scripts/baton-cli.mjs');
-    return argv[1] === 'sync' ? syncMain(parseSyncArgs(argv.slice(2))) : initMain(argv.slice(2));
+    const { parseSyncArgs, syncMain, initMain, migrateMarkersMain } = await import('../scripts/baton-cli.mjs');
+    if (argv[1] === 'sync') return syncMain(parseSyncArgs(argv.slice(2)));
+    if (argv[1] === 'migrate-markers') return migrateMarkersMain(argv.slice(2));
+    return initMain(argv.slice(2));
   }
   if (argv[0] === 'tickets' && argv[1] === 'check') {
     // B-111: sibling of `baton repo sync`, its ticket source and the board post's own validation.

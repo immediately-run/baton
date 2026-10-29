@@ -43,6 +43,8 @@ the board until `file` files it. For each section or numbered decision of the sp
 
 Commit the request alone, with its `## Drafts`, to the default branch.
 
+Your work lands under the ticket's own `## decompose` heading — write it if it is not there; the close checks it is.
+
 ## Do not
 
 - File a ticket file, edit the spec, or draft from a spec that is not merged.

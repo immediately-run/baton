@@ -104,3 +104,5 @@ helping the owner turn the draft `product/<ticket id>/PRODUCT.md` into the defin
   `## Your turn` section, set the ticket's `answer:` to `define`, commit the document and the
   ticket together to the default branch, and push. That approval starts the `design` leg.
 - Do not start the design, the architecture or any code in this session.
+
+Your work lands under the ticket's own `## define` heading — write it if it is not there; the close checks it is.

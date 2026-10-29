@@ -108,6 +108,8 @@ carries, in an order the corpus already uses:
   the marker, the ticket waits at `requested`, and nothing is lost: the next conversation continues
   from the branch.
 
+Your work lands under the ticket's own `## converse` heading — write it if it is not there; the close checks it is.
+
 ## Do not
 
 - Write, amend or delete the `.baton/markers.jsonl` line for this ticket: Baton's `close` writes

@@ -45,7 +45,7 @@
     "test/integration/S-BTN-43.defaults.test.ts",
     "test/unit/defaults-cli.test.ts",
     "test/unit/standard-courses.test.ts",
-    "test/unit/course-markers.test.ts",
+    "test/unit/ticket-state.test.ts",
     "test/unit/bounded-git.test.ts",
     "test/unit/tickets-check.test.ts",
     "test/unit/request.test.ts",

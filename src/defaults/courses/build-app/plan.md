@@ -84,3 +84,5 @@ helping the owner settle `product/<ticket id>/PLAN.md`.
   together to the default branch, and push. That approval starts the `file` leg, which files the
   tickets as written.
 - File no tickets and write no code in this session.
+
+Your work lands under the ticket's own `## plan` heading — write it if it is not there; the close checks it is.

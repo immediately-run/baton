@@ -34,6 +34,8 @@ Add a `## Trace` section to the ticket file: the symptom in one line, the cause 
 and how you got there (the searches, the files). Commit the ticket file alone to the default
 branch, naming the ticket's id. Baton's closing marker follows your commit; do not write it.
 
+Your work lands under the ticket's own `## trace` heading — write it if it is not there; the close checks it is.
+
 ## Do not
 
 - Edit the code. **Tracing reads code; it never edits it.** This course delivers a ticket for the

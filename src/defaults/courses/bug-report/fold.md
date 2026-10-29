@@ -26,6 +26,8 @@ the bug ticket points at it.
   "nothing new".
 - Commit both files together to the default branch.
 
+Your work lands under the ticket's own `## fold` heading — write it if it is not there; the close checks it is.
+
 ## Do not
 
 - Change the existing ticket's architecture or scope beyond the new symptom. If the new symptom

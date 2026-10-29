@@ -165,12 +165,13 @@ describe('the standard courses (R-BTN-131)', () => {
       proposedVersions: { version: 1, min_worker_version: 1 }, baseVersions: null,
       legScripts: null, live: null,
     };
-    /** Where the course's own station function puts a ticket, from the facts and markers it reads
-     *  (the same call the sync and an ejected `sync.mjs` make). */
-    const placed = (fact: PrFact | null, markers: { ticket: string; leg: string; reached: string }[], id = 'A-1') =>
+    /** Where the course's own station function puts a ticket, from the facts and the closes its
+     *  own history holds (the same call the sync and an ejected `sync.mjs` make — B-100: the
+     *  closes ride the ticket's opaque `course` blob, no second input). */
+    const placed = (fact: PrFact | null, closes: { leg: string; reached: string }[], id = 'A-1') =>
       stationsSpec({
-        tickets: [ticketOf(id)], facts: fact ? [fact] : [], closed: new Set(), done: new Set(), branchPatterns: ['claude/{ticket}-*'],
-        repository: null, graph: CREATE_SPEC_COURSE as unknown as PrGraph, markers,
+        tickets: [{ ...ticketOf(id), course: { closes } }], facts: fact ? [fact] : [], closed: new Set(), done: new Set(), branchPatterns: ['claude/{ticket}-*'],
+        repository: null, graph: CREATE_SPEC_COURSE as unknown as PrGraph,
       }).stations[id];
 
     it('its shortest route is converse → review → merge, and the route runs green through the core’s claim, advance and end', async () => {
@@ -197,8 +198,8 @@ describe('the standard courses (R-BTN-131)', () => {
       // first three, three address markers), places the ticket where the fourth verdict leaves it:
       // `adjudicate` ready, never a fourth `address`.
       const reviews = [verdict('changes', 100), verdict('changes', 200), verdict('changes', 300), verdict('changes', 400)];
-      const markers = ['address', 'address', 'address'].map(() => ({ ticket: 'A-1', leg: 'address', reached: 'reviewed' }));
-      expect(placed(factOf(reviews, [150, 250, 350]), markers)).toMatchObject({
+      const addressCloses = ['address', 'address', 'address'].map(() => ({ leg: 'address', reached: 'reviewed' }));
+      expect(placed(factOf(reviews, [150, 250, 350]), addressCloses)).toMatchObject({
         station: 'reviewed', path: steps.slice(0, 8), next_leg: 'adjudicate', next: [{ leg: 'adjudicate', state: 'ready', waiting_on: null }],
       });
     });
@@ -207,7 +208,7 @@ describe('the standard courses (R-BTN-131)', () => {
       // One changes verdict, one address round claimed and suspended: the leg's close wrote its
       // marker and no push has landed, so `address` waits on the owner rather than being ready.
       const changes = factOf([verdict('changes', 100)], []);
-      const marker = [{ ticket: 'A-1', leg: 'address', reached: 'reviewed' }];
+      const marker = [{ leg: 'address', reached: 'reviewed' }];
       expect(placed(changes, marker)).toMatchObject({ station: 'reviewed', next: [{ leg: 'address', state: 'waiting', waiting_on: 'owner' }] });
       // A round whose push landed but whose next verdict has not been posted yet: the ticket is
       // at `spec-open`, `review` ready — the round is not offered again, and no marker is needed,
@@ -219,13 +220,13 @@ describe('the standard courses (R-BTN-131)', () => {
       // `converse`'s only outcome is `spec-open`; a marker at `requested` is a signal, so the path
       // posted with it must be one the graph accepts (`[]`), or every sync logs `off-graph` (B-96
       // review round 1, 1-A-3).
-      const placedAtRequest = placed(null, [{ ticket: 'A-1', leg: 'converse', reached: 'requested' }]);
+      const placedAtRequest = placed(null, [{ leg: 'converse', reached: 'requested' }]);
       expect(placedAtRequest).toMatchObject({ station: 'requested', path: [], next_leg: 'converse', next: [{ leg: 'converse', state: 'waiting', waiting_on: 'owner' }] });
       expect(onGraph(graphOf(CREATE_SPEC_COURSE), placedAtRequest.path)).toBe(true);
       // No marker: ready for the first claim.
       expect(placed(null, [])).toMatchObject({ path: [], next: [{ leg: 'converse', state: 'ready', waiting_on: null }] });
       // The conversation's PR landing moves it, the marker still standing.
-      expect(placed(factOf([], []), [{ ticket: 'A-1', leg: 'converse', reached: 'requested' }])).toMatchObject({ station: 'spec-open', path: [{ leg: 'converse', reached: 'spec-open' }] });
+      expect(placed(factOf([], []), [{ leg: 'converse', reached: 'requested' }])).toMatchObject({ station: 'spec-open', path: [{ leg: 'converse', reached: 'spec-open' }] });
     });
   });
 

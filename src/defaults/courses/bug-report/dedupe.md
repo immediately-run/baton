@@ -38,3 +38,5 @@ symptom. Read the candidates' Why and Architecture, not just their titles. Then:
 
 Add a `## Dedupe` section: the candidates you read, the outcome, and the ticket it names when
 there is one. Commit the ticket file alone to the default branch.
+
+Your work lands under the ticket's own `## dedupe` heading — write it if it is not there; the close checks it is.

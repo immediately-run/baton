@@ -39,3 +39,5 @@ fix what fails:
   ticket says otherwise).
 - Add `## Filed` to the request, naming each ticket, and set the request's `status:` to `done`.
 - Commit the new files and the request together to the default branch.
+
+Your work lands under the ticket's own `## check` heading — write it if it is not there; the close checks it is.

@@ -56,3 +56,5 @@ line each with its evidence.
   a next round — and your last line is `building`.
 
 Do not change product code in this leg; a fix is a ticket.
+
+Your work lands under the ticket's own `## verify` heading — write it if it is not there; the close checks it is.

@@ -37,6 +37,8 @@ ticket for the fix exists and the bug ticket names it.
 Add `## Filed` to the bug ticket, naming the new ticket(s). Commit the new ticket file(s) and the
 bug ticket together to the default branch.
 
+Your work lands under the ticket's own `## file` heading — write it if it is not there; the close checks it is.
+
 ## Do not
 
 - Fix the bug here. The fix is the new ticket's work.

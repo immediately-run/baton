@@ -1049,6 +1049,8 @@ describe('prClose', () => {
     g('config', 'user.email', 't@t');
     g('config', 'user.name', 't');
     mkdirSync(join(seed, '.baton'), { recursive: true });
+    mkdirSync(join(seed, 'tickets'), { recursive: true });
+    writeFileSync(join(seed, 'tickets', 'a-1.md'), '---\nid: A-1\ntitle: Specify the export format\ncourse: create-spec\n---\n\nWrite down what an export file must contain.\n\n## converse\n\nThe design conversation.\n\n## address\n\nThe findings answered.\n');
     g('add', '-A');
     g('commit', '--allow-empty', '-qm', 'base');
     g('push', '-q', 'origin', 'main');
@@ -1068,15 +1070,16 @@ describe('prClose', () => {
       execFileSync('git', ['-C', dir, 'checkout', '-q', '-b', 'claude/spec-A-1'], { stdio: 'ignore' });
       const headBefore = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
       const defaultBefore = execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
-      // The claim's id is repository-qualified; the marker names the ticket as its file does.
-      const sha = await prClose({ checkout: dir, ticket: { id: 'docs:A-1', home: 'docs' }, leg: 'converse', claim: { nonce: 'n1' } }, { reached: 'requested', next: 'converse' });
-      // The marker commit is on the default branch — what a sync reads — and HEAD never moved.
+      // The claim's id is repository-qualified; the close's commit names the ticket as its file does.
+      const sha = await prClose({ checkout: dir, ticket: { id: 'docs:A-1', home: 'docs', path: 'tickets/a-1.md' }, leg: 'converse', claim: { nonce: 'n1' } }, { reached: 'requested', next: 'converse' });
+      // The close's commit is on the default branch — what a sync reads — and HEAD never moved.
       expect(execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(sha);
       expect(sha).not.toBe(defaultBefore);
-      expect(execFileSync('git', ['-C', bare, 'show', 'main:.baton/markers.jsonl'], { encoding: 'utf8' })).toBe('{"ticket":"A-1","leg":"converse","reached":"requested","next":"converse","claim":"n1"}\n');
+      expect(execFileSync('git', ['-C', bare, 'show', 'main:tickets/a-1.md'], { encoding: 'utf8' })).toBe('---\nid: A-1\ntitle: Specify the export format\ncourse: create-spec\nstation: requested\nnext_leg: converse\nclaim: n1\n---\n\nWrite down what an export file must contain.\n\n## converse\n\nThe design conversation.\n\n## address\n\nThe findings answered.\n');
+      expect(execFileSync('git', ['-C', bare, 'log', '-1', '--format=%s'], { encoding: 'utf8' })).toBe('baton:close A-1 converse\n');
       expect(execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(headBefore);
-      // The checkout's own working tree is not a marker file it did not have.
-      expect(() => readFileSync(join(dir, '.baton', 'markers.jsonl'), 'utf8')).toThrow();
+      // The checkout's own working tree still carries no machine state: it read the default branch.
+      expect(readFileSync(join(dir, 'tickets', 'a-1.md'), 'utf8')).not.toContain('station:');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1089,9 +1092,9 @@ describe('prClose', () => {
       // A linked worktree of the same repository: `dir` is a real clone; `wt` shares its git dir
       // through a .git FILE, so `<checkout>/.git/…` is ENOTDIR there.
       execFileSync('git', ['-C', dir, 'worktree', 'add', '-q', '-b', 'claude/wt-spec', wt], { stdio: 'ignore' });
-      const sha = await prClose({ checkout: wt, ticket: { id: 'A-1' }, leg: 'converse', claim: { nonce: 'wt' } }, { reached: 'requested', next: 'converse' });
+      const sha = await prClose({ checkout: wt, ticket: { id: 'A-1', path: 'tickets/a-1.md' }, leg: 'converse', claim: { nonce: 'wt' } }, { reached: 'requested', next: 'converse' });
       expect(execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(sha);
-      expect(execFileSync('git', ['-C', bare, 'show', 'main:.baton/markers.jsonl'], { encoding: 'utf8' })).toContain('"claim":"wt"');
+      expect(execFileSync('git', ['-C', bare, 'show', 'main:tickets/a-1.md'], { encoding: 'utf8' })).toContain('claim: wt');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1114,9 +1117,8 @@ describe('prClose', () => {
         if (args[0] === 'push' && refused === 0) {
           refused++;
           execFileSync('git', ['-C', second, 'pull', '-q', '--rebase'], { stdio: 'ignore' });
-          mkdirSync(join(second, '.baton'), { recursive: true });
-          writeFileSync(join(second, '.baton', 'markers.jsonl'), '{"ticket":"Z-9","leg":"converse","reached":"requested","next":"converse","claim":"other"}\n');
-          execFileSync('git', ['-C', second, 'add', '.baton/markers.jsonl'], { stdio: 'ignore' });
+          writeFileSync(join(second, 'tickets', 'z-9.md'), '---\nid: Z-9\ntitle: The other ticket\ncourse: create-spec\nstation: requested\nnext_leg: converse\nclaim: other\n---\n\n## converse\n\nIts conversation.\n');
+          execFileSync('git', ['-C', second, 'add', 'tickets/z-9.md'], { stdio: 'ignore' });
           execFileSync('git', ['-C', second, 'commit', '-q', '--no-gpg-sign', '-m', 'baton:close Z-9 converse'], { stdio: 'ignore' });
           execFileSync('git', ['-C', second, 'push', '-q', 'origin', 'main'], { stdio: 'ignore' });
         }
@@ -1126,12 +1128,10 @@ describe('prClose', () => {
           ...(opts?.env ? { env: { ...process.env, ...opts.env } } : {}),
         }).trim();
       };
-      await prClose({ checkout: dir, ticket: { id: 'A-1' }, leg: 'converse', claim: { nonce: 'mine' } }, { reached: 'requested', next: 'converse' }, racing);
-      const raw = execFileSync('git', ['-C', root + '/origin.git', 'show', 'main:.baton/markers.jsonl'], { encoding: 'utf8' });
-      const lines = raw.trim().split('\n').map((l) => JSON.parse(l) as { ticket: string; claim: string });
-      // Both lines, each once: the union by construction, and no duplicate from the retry.
-      expect(lines.map((l) => l.ticket).sort()).toEqual(['A-1', 'Z-9']);
-      expect(new Set(lines.map((l) => l.claim)).size).toBe(2);
+      await prClose({ checkout: dir, ticket: { id: 'A-1', path: 'tickets/a-1.md' }, leg: 'converse', claim: { nonce: 'mine' } }, { reached: 'requested', next: 'converse' }, racing);
+      // Both tickets, each with its own state once: per-ticket files, and no duplicate from the retry.
+      expect(execFileSync('git', ['-C', root + '/origin.git', 'show', 'main:tickets/a-1.md'], { encoding: 'utf8' })).toContain('claim: mine');
+      expect(execFileSync('git', ['-C', root + '/origin.git', 'show', 'main:tickets/z-9.md'], { encoding: 'utf8' })).toContain('claim: other');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1141,7 +1141,7 @@ describe('prClose', () => {
     const { root, dir } = withOrigin();
     try {
       execFileSync('git', ['-C', dir, 'remote', 'set-url', 'origin', join(root, 'nowhere.git')], { stdio: 'ignore' });
-      await expect(prClose({ checkout: dir, ticket: { id: 'A-1' }, leg: 'converse' }, { reached: 'requested', next: 'converse' })).rejects.toThrow(/git (push|fetch)/);
+      await expect(prClose({ checkout: dir, ticket: { id: 'A-1', path: 'tickets/a-1.md' }, leg: 'converse' }, { reached: 'requested', next: 'converse' })).rejects.toThrow(/git (push|fetch)/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1595,7 +1595,7 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
       expect(await conclude.run({ ticket: { id: 'R-1' }, checkout: root, snapshot })).toEqual({ reached: 'concluded', next: null });
       // A marker course's stub closes through markerClose; a PR course's through prClose (the
       // stub wraps either to hand the default branch in, so the source is what names it).
-      expect(stubSourceOf(root, 'bug-report', 'trace')).toContain('markerClose(closeCtx2(');
+      expect(stubSourceOf(root, 'bug-report', 'trace')).toContain('closeTicket(closeCtx2(');
       expect(stubSourceOf(root, 'review-pr', 'conclude')).toContain('prClose(closeCtx2(');
     } finally {
       delete process.env.OUTCOME;

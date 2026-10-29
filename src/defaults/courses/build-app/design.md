@@ -80,3 +80,5 @@ helping the owner settle the design in `product/<ticket id>/DESIGN.md` and its m
   `design`, commit the documents and the ticket together to the default branch, and push. That
   approval starts the `architect` leg.
 - Do not start the architecture or any code in this session.
+
+Your work lands under the ticket's own `## design` heading — write it if it is not there; the close checks it is.

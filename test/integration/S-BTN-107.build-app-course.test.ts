@@ -7,11 +7,12 @@
 // `shipped`. Node only: it writes a real repository and runs git.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { call as hostCall } from '#host';
 import { initMain, parseSyncArgs, syncMain } from '../../src/defaults/cli';
+import { setMachineKeys } from '../../src/defaults/ticket-state';
 import { ORIGIN, rows, setClock, syncToken } from '../helpers';
 
 const T0 = Date.parse('2026-10-18T12:00:00Z');
@@ -20,7 +21,7 @@ const init = (root: string, ...argv: string[]) => initMain(argv, { root, log: ()
 
 class Repo {
   readonly dir = mkdtempSync(join(tmpdir(), 'baton-s107-'));
-  /** The remote a leg's close pushes its marker to. */
+  /** The remote a leg's close pushes its ticket write to. */
   readonly remote = mkdtempSync(join(tmpdir(), 'baton-s107-remote-'));
   constructor() {
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main', this.remote], { stdio: 'ignore' });
@@ -30,9 +31,14 @@ class Repo {
   write(path: string, text: string): void {
     writeFileSync(join(this.dir, path), text);
   }
-  /** One closing marker, as a marker course's `close` commits it (R-BTN-83). */
+  /** One close, as a marker course's `close` commits it (R-BTN-83, B-100): the leg's machine
+   *  state written into the ticket's own frontmatter, committed alone under `baton:close`. */
   marker(ticket: string, leg: string, reached: string, next: string | null): void {
-    appendFileSync(join(this.dir, '.baton', 'markers.jsonl'), `${JSON.stringify({ ticket, leg, reached, next, claim: 'n' })}\n`);
+    const path = join(this.dir, 'tickets', `${ticket.toLowerCase()}.md`);
+    const was = existsSync(path) ? readFileSync(path, 'utf8') : `---\nid: ${ticket}\ntitle: ${ticket}\n---\n\n`;
+    writeFileSync(path, setMachineKeys(was, { station: reached, next_leg: next, claim: 'n' }));
+    execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', this.dir, 'commit', '-qm', `baton:close ${ticket} ${leg}`], { stdio: 'ignore' });
   }
   commit(): void {
     execFileSync('git', ['-C', this.dir, 'add', '-A'], { stdio: 'ignore' });

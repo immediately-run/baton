@@ -54,3 +54,5 @@ Then set the ticket's frontmatter `answer: open`. The owner answers by changing 
 letter, and may add a line after it. Until then the next leg waits on the owner.
 
 Commit the ticket file alone to the default branch.
+
+Your work lands under the ticket's own `## prepare` heading — write it if it is not there; the close checks it is.

@@ -39,6 +39,8 @@ For each draft, write a ticket file in the tickets directory (the `items` settin
 Then add a `## Filed` section to the request naming each child, set the request's `status:` to `done`,
 and commit the children and the request together, with explicit paths, to the default branch.
 
+Your work lands under the ticket's own `## file` heading — write it if it is not there; the close checks it is.
+
 ## Do not
 
 - Re-plan the set, edit the spec, or leave a draft unfiled.

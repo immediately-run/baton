@@ -27,7 +27,7 @@ import relay from '../fixtures/courses/relay/course.json';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
 
-/** One leg script: `run` is the body given; `close` commits a closing marker and returns the
+/** One leg script: `run` is the body given; `close` commits its closing record and returns the
  * commit (the position is in git before it is reported, R-BTN-83); `handoff` records its call.
  * Every line the test asserts on lands in `<home>/.baton/evidence.jsonl`. */
 function legFile(run: string, defaultExport = false): string {
@@ -41,8 +41,8 @@ ${defaultExport ? 'export default' : 'export'} async function run(ctx) {
 ${run}
 }
 export async function close(ctx, result) {
-  appendFileSync(at(ctx, 'markers.jsonl'), JSON.stringify({ leg: ctx.leg, ...(result && result.reached ? { reached: result.reached } : {}), claim: ctx.claim.nonce }) + '\\n');
-  git(ctx, 'add', '.baton/markers.jsonl');
+  appendFileSync(at(ctx, 'closes.jsonl'), JSON.stringify({ leg: ctx.leg, ...(result && result.reached ? { reached: result.reached } : {}), claim: ctx.claim.nonce }) + '\\n');
+  git(ctx, 'add', '.baton/closes.jsonl');
   git(ctx, 'commit', '--allow-empty', '--no-gpg-sign', '-m', 'baton:close ' + ctx.leg);
   ev(ctx, 'close ' + ctx.leg);
   return git(ctx, 'rev-parse', 'HEAD');
@@ -97,8 +97,8 @@ class Home {
     const f = join(this.dir, '.baton', 'evidence.jsonl');
     return existsSync(f) ? readFileSync(f, 'utf8').split('\n').filter(Boolean) : [];
   }
-  markers(): { leg: string; reached?: string; claim: string }[] {
-    const f = join(this.dir, '.baton', 'markers.jsonl');
+  closes(): { leg: string; reached?: string; claim: string }[] {
+    const f = join(this.dir, '.baton', 'closes.jsonl');
     return existsSync(f) ? readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as { leg: string; reached?: string; claim: string }) : [];
   }
 }
@@ -200,7 +200,7 @@ describe('S-BTN-41 the runner', () => {
     // close ran for every leg (git before the report, R-BTN-83); a done end writes no hand-off.
     expect(lines.filter((l) => l.startsWith('close '))).toEqual(['close build', 'close check', 'close merge']);
     expect(lines.some((l) => l.startsWith('handoff'))).toBe(false);
-    expect(home.markers()).toHaveLength(3);
+    expect(home.closes()).toHaveLength(3);
   }, 30_000);
 
   // R-BTN-109 (B-3, baton#69 round 2): a result's outputs travel on the advance and the done end;
@@ -386,7 +386,7 @@ describe('S-BTN-41 the runner', () => {
     expect(await rows('SELECT end_reason, status FROM claims')).toEqual([{ end_reason: 'suspended:checked', status: 'completed' }]);
     const lines = home.evidence();
     expect(lines.indexOf('close check')).toBeLessThan(lines.indexOf('handoff check')); // §6.13's order
-    expect(home.markers().at(-1)).toMatchObject({ leg: 'check', reached: 'checked' });
+    expect(home.closes().at(-1)).toMatchObject({ leg: 'check', reached: 'checked' });
   }, 30_000);
 
   it('a max-runs refusal suspends at the station reached, never releasing', async () => {
@@ -413,7 +413,7 @@ describe('S-BTN-41 the runner', () => {
     const out = await makeRunner().runOnce();
     expect(out).toMatchObject({ end_reason: 'suspended:built', reached: 'built' });
     // No closing marker for the buggy leg (a bad pair never reaches git, R-BTN-83)…
-    expect(home.markers().some((m) => m.leg === 'check')).toBe(false);
+    expect(home.closes().some((m) => m.leg === 'check')).toBe(false);
     // …and the hand-off names the fault for the next claimant.
     expect(home.evidence().at(-1)).toMatch(/^handoff check bug=/);
     expect(await rows('SELECT end_reason FROM claims')).toEqual([{ end_reason: 'suspended:built' }]);
@@ -457,7 +457,7 @@ describe('S-BTN-41 the runner', () => {
     expect(home.evidence().some((l) => l.includes('aborted:release'))).toBe(true);
     const lines = home.evidence();
     expect(lines.indexOf('close check')).toBeLessThan(lines.indexOf('handoff check'));
-    expect(home.markers().at(-1)).toMatchObject({ leg: 'check', reached: 'checked' });
+    expect(home.closes().at(-1)).toMatchObject({ leg: 'check', reached: 'checked' });
     expect(await rows('SELECT end_reason, status FROM claims')).toEqual([{ end_reason: 'released:requested', status: 'released' }]);
     expect((await rows<{ resume_json: string }>('SELECT resume_json FROM claims'))[0].resume_json).toMatch(/"next":"merge"/); // the script's own word (R-BTN-83)
     // The message is acknowledged once acted on (§9).

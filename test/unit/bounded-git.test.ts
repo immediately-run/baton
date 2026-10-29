@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { exec, markerClose, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from '../../src/defaults/course-markers';
+import { exec, closeTicket, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from '../../src/defaults/ticket-state';
 import { git, GIT_TIMEOUT_MS } from '../../src/runner/home';
 import { BEAT_MS, Runner } from '../../src/runner/runner';
 import type { BatonApi } from '../../src/runner/api';
@@ -77,14 +77,14 @@ describe('the defaults’ close is bounded and non-interactive (B-94)', () => {
     }
   });
 
-  it('a wedged close fails the leg: markerClose with a hanging git at its bound throws (round 2: the timeout becomes the leg’s failure)', async () => {
+  it('a wedged close fails the leg: closeTicket with a hanging git at its bound throws (round 2: the timeout becomes the leg’s failure)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'baton-hang-'));
     execFileSync('git', ['-C', dir, 'init', '-q'], { stdio: 'ignore' });
     // The injected run ignores what the close asks for and runs a genuinely hanging git through
     // the real exec at a short bound: the kill and the throw are the production mechanism.
     const hang: typeof exec = (_cmd, _args, cwd) => exec('git', HANGING_GIT_ARGS, cwd, { timeoutMs: 150 });
     try {
-      await expect(markerClose({ checkout: dir, ticket: { id: 'docs:B-2' }, leg: 'review' }, { reached: 'reviewed', next: 'merge' }, hang))
+      await expect(closeTicket({ checkout: dir, ticket: { id: 'docs:B-2', path: 'tickets/B-2.md' }, leg: 'review' }, { reached: 'reviewed', next: 'merge' }, hang))
         .rejects.toThrow(/hang|killed|SPAWN|ETIMEDOUT/i);
     } finally {
       rmSync(dir, { recursive: true, force: true });
