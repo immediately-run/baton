@@ -365,7 +365,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   simpler / aimed at less sophisticated users." R-BTN-131 gained the scope; §12.8's "the standard
   courses … under `protected` follow (a)" became the runner's harness mode (B-141), with the
   courses the deployment's (Fieldhouse FLDH-41); `docs/context/product.mdx` gained *From one
-  machine to a factory*. §12.8's mechanisms stay in core.
+  machine to a factory*. §12.8's mechanisms stay in core; only the courses that use them move. The
+  owner, on that reading: "this is perfect, your interpretation is correct."
 
 - **2026-10-27 to 2026-10-28 — §12.8: the core guarantee (owner direction; B-124, B-127, B-130,
   B-136, B-137, B-139, B-140).** The owner kept push access to a home as the perimeter of a
