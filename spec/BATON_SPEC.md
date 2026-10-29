@@ -5998,16 +5998,19 @@ merges that commit.
   trust domains, model families and the trusted-runner role, owner-key removal, every R-BTN-66 setting
   that loosens a limit, attestation writer policies, revoking a `human` attestation, the message of the
   day) is satisfied only by a credential no agent session holds and no agent can drive.
-  - **The human-only key** is a hardware-backed SSH key used for nothing else, requiring PIN and touch
-    (`verify-required`), with its FIDO attestation verified against an allowlist of authenticators,
-    and plugged only into a machine where no agent session runs. The first is registered by the
-    administrator out of band; each later one needs a signature by an existing one. On an instance
-    with any `protected` repository, administrators are `human_only` keys.
-  - **What is signed is shown first.** The CLI prints the canonical fields and the computed view, and
-    requires a short code derived from them typed on that machine. The dashboard may only prepare an
-    approval that the CLI signs; a WebAuthn assertion is a human gate only with an attested
-    authenticator from the allowlist, registered by a `human_only` signature and pinned by trusted
-    runners.
+  - **The human-only key** is an SSH key registered `human_only`, used for nothing else, and kept
+    where no agent session can use it: not in an agent session's environment or `ssh-agent`, not on a
+    machine an agent drives. The first is registered by the administrator out of band; each later one
+    needs a signature by an existing one. On an instance with any `protected` repository,
+    administrators are `human_only` keys. How strongly a deployment enforces "no agent can use it" is
+    its own policy, `human_key: any | hardware` (an instance setting, default `any`): `hardware`
+    accepts only a hardware-backed key requiring PIN and touch (`verify-required`) whose FIDO
+    attestation matches an allowlist of authenticators. Fieldhouse requires `hardware` (R-FH-3).
+  - **What is signed is shown first.** The CLI prints the canonical fields and the computed view
+    before signing. Under `human_key: hardware`, it also requires a short code derived from them,
+    typed on the machine the key is plugged into. The dashboard may only prepare an approval that the
+    CLI signs; a WebAuthn assertion is a human gate only with an authenticator registered by a
+    `human_only` signature and pinned by trusted runners, attested and allowlisted under `hardware`.
   - **Two forge identities.** The human-only identity administers protected repositories and is their
     only human bypass and reviewer; its token is in no agent session, and no agent tool drives the
     browser profile or desktop where it is signed in. The everyday identity the owner's agent
@@ -6960,6 +6963,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose to keep Baton cooperative on one trusted machine and leave enforcement to the deployment, over requiring a merge runner, proxy or sandbox everywhere: Baton must stay usable for a small project run locally (2026-10-28; R-BTN-180).
 - Chose that courses and leg logic change outside Baton for now, by a human's push or merge, and that tickets are created through courses and land only with a human approval, over letting the merge runner land either alone (2026-10-28; R-BTN-184).
 - Chose human-only credentials for every human gate, over gates that accept the owner's account: an owner's agent sessions hold that account (2026-10-27; R-BTN-185).
+- Chose to require of a human-only key only that it is used for nothing else and kept where no agent session can use it, leaving hardware backing, PIN and touch, attestation and the derived code to a deployment's `human_key: hardware` policy, over requiring hardware keys of every Baton user (2026-10-29; R-BTN-185).
 - Chose authority by credential, not channel, over MCP's closed list, keeping credential management and the protected settings out of every delegated key (2026-10-27; R-BTN-186).
 - Chose to run a sourced course's code from its source, the home referring to Baton's legs rather than copying them (2026-10-28; R-BTN-134, B-139).
 - Chose to let a claim's branch append its leg's progress to its own ticket's `## Status` section without a human approval, over routing every ticket-file change through one: the ticket file is the right place for a leg's record, and append-only to one known path is checkable at merge, as one-line plain-text entries (2026-10-28; R-BTN-184).

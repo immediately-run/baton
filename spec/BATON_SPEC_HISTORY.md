@@ -394,7 +394,10 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   opt-in `authorship: signed`, and §12.8 states each mode's guarantee separately; and, of "a domain
   that runs a branch's code is a writer, with reviewers never executing branch code and Baton keys
   moved to a host-side signer": "Yes, this makes sense to me." Values 12 and the architecture page
-  gained the opt-in exception; R-BTN-35, -161, -165, -171 and -173 their notes. Then: "a
+  gained the opt-in exception; R-BTN-35, -161, -165, -171 and -173 their notes. Then, on R-BTN-185: "I'm not
+  sure the baton spec should require hardware keys, this sounds more like a fieldhouse
+  hardening"; hardware backing became the deployment policy `human_key: hardware`, which
+  Fieldhouse's R-FH-3 requires. Then: "a
   runner branch working on a specific ticket should be able to update its own ticket … to
   document the ticket's progression. And the ticket file is the right place to do this. It is
   easy to check that a runner authored branch is only modifying its own ticket file at merge
