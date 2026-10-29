@@ -47,8 +47,8 @@ export interface KitInput {
   /** The leg scripts in `legs/` — each name without `.mjs`, and which of §6.13's `run`, `handoff`
    *  and `close` it exports — or null when the course has no `legs/`. */
   legScripts: { name: string; exports: string[]; error?: string }[] | null;
-  /** The leg instructions in `legs/` — each name without `.md` and its text — or null when the
-   *  course has none. B-102's rule reads them: the implement and fix instructions carry the
+  /** The leg instructions in `legs/` — each name without `.md` and its text; an empty list when
+   *  the course has none. B-102's rule reads them: the implement and fix instructions carry the
    *  shared-file line, the one place the agents read it. */
   instructions?: { name: string; text: string }[] | null;
   /** The repository's leg overrides, `legs/<leg>.run.mjs` (R-BTN-131, B-33): each leg name and

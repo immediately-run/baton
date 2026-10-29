@@ -119,6 +119,32 @@ describe('baton test-course', () => {
     expect(staticViolations(kit({ implement: "Do not: a leg never edits a file another ticket's leg may edit — no CHANGELOG.\n", fix: "Do not: a leg never edits a file another ticket's leg may edit.\n" }))).toEqual([]);
   });
 
+  it('readInputs collects the legs/*.md instructions the rule reads, and the rule fires off them (B-102, round 2)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-kit-instr-'));
+    dirs.push(dir);
+    const legs = join(dir, '.baton/courses/roadmap-pr/legs');
+    mkdirSync(legs, { recursive: true });
+    writeFileSync(join(dir, '.baton/courses/roadmap-pr/course.json'), JSON.stringify(roadmapPr));
+    writeFileSync(join(dir, '.baton/baton.json'), JSON.stringify({ courses: [{ id: 'roadmap-pr', version: 1, min_worker_version: 1 }] }));
+    const RULE = "a leg never edits a file another ticket's leg may edit";
+    const write = (implement: string) => {
+      for (const leg of Object.keys(roadmapPr.legs)) {
+        if (leg === 'implement') writeFileSync(join(legs, 'implement.md'), implement);
+        else writeFileSync(join(legs, `${leg}.md`), `# roadmap-pr · ${leg}\n\nRule: ${RULE}.\n`);
+        writeFileSync(join(legs, `${leg}.mjs`), 'export async function run() {}\nexport async function handoff() {}\nexport async function close() {}\n');
+      }
+    };
+    write(`Do not: ${RULE}.\n`);
+    const good = await readInputs(dir, 'roadmap-pr');
+    expect(good.instructions?.map((x) => x.name).sort()).toEqual(Object.keys(roadmapPr.legs).sort());
+    expect(staticViolations(good)).toEqual([]);
+    write('Do not: nothing shared here.\n');
+    const bad = await readInputs(dir, 'roadmap-pr');
+    expect(staticViolations(bad)).toEqual([
+      expect.objectContaining({ rule: 'instructions', message: expect.stringContaining('legs/implement.md carries no shared-file rule') }),
+    ]);
+  });
+
   it('a no-op agent_command fails a PR course\'s start leg wherever it is filed; a marker course\'s close that accepts a mangled ticket fails the kit (B-81, B-100)', async () => {
     // docs' own course id, sourced from create-pr (B-33): still a PR course, wherever it is filed.
     const dir = mkdtempSync(join(tmpdir(), 'baton-kit-noop-'));
