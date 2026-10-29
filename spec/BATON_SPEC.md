@@ -3378,7 +3378,7 @@ Limits that hold throughout:
 
 ### 7.2 Handlers
 
-- **R-BTN-161 (bindings choose a handler course; the handler is a ticket file).** *Under `landing: protected`, the handler ticket is held in Baton until approved (R-BTN-180, proposal).*
+- **R-BTN-161 (bindings choose a handler course; the handler is a ticket file).** *Under `landing: protected`, the handler ticket is proposed, not filed, and not claimable until it lands with a `std:approval@1` (R-BTN-180, proposal).*
   - **Binding.** A binding maps a type prefix to a course id, for example `"conditions":
     {"hitl": "ask", "warning": "announce", "baton": "announce"}`; for an `error` type the value
     may be `{"course": <id>, "replaces": "retry"}` (R-BTN-122). It is written in one of two
@@ -3491,7 +3491,7 @@ Limits that hold throughout:
   - **One at a time.** A leg awaits one `suspend` condition at a time. The `notify` conditions it
     raises in the meantime are not waits.
 
-- **R-BTN-173 (light questions: answered in the claim, or promoted to git).** *Under `landing: protected`, runners push no `refs/baton/*` ref; a promoted question is held in Baton until approved (R-BTN-180, proposal).* A light question is
+- **R-BTN-173 (light questions: answered in the claim, or promoted to git).** *Under `landing: protected`, runners push no `refs/baton/*` ref; a promoted question is proposed, not filed, until it lands with a `std:approval@1` (R-BTN-180, proposal).* A light question is
   a bound `suspend` condition whose handler lives in Baton's database until the parent stops
   waiting. Answered while the parent waits, it never touches git until the consuming leg ends;
   otherwise it is promoted to an ask file, and from then on its answer is git's.
@@ -3853,7 +3853,7 @@ Limits that hold throughout:
 
 ### 7.6 Calls and choices
 
-- **R-BTN-165 (a call leg runs a course and waits for it).** *Under `landing: protected`, a call leg's children are held in Baton until approved (R-BTN-180, proposal).*
+- **R-BTN-165 (a call leg runs a course and waits for it).** *Under `landing: protected`, a call leg's children are proposed, not filed, and not claimable until they land with a `std:approval@1` (R-BTN-180, proposal).*
   - **The leg.** A call leg is `"kind": "call"` with a `spawns` declaration (R-BTN-111), whose
     `course` names the course or courses it calls. The leg's `"to"` is a **completion table**
     `{<station>: <completion>, …}`, checked in order. A question to a person is not a call: a
@@ -5778,7 +5778,7 @@ trusted runners on one machine needs none.
 | A repository with | Guarantees |
 |---|---|
 | `landing: cooperative` (the default) | R-BTN-14's model: Baton keeps cooperating runners from colliding, and nothing more |
-| `landing: protected` | **against any runner, compromised or not** (enforced by the forge): no runner lands on the default branch or a tag; a control path lands only by the human-only identity; a ticket or goal change lands only with a human approval of that commit. **Against mistakes only**: a merge needs reviews from trust domains that did not write or run the change; a compromised runner can push a commit onto another ticket's branch that an honest fixer's report carries |
+| `landing: protected` | **against any runner, compromised or not**: no runner lands on the default branch or a tag, and a control path lands only by the human-only identity (both enforced by the forge); a ticket or goal change lands only with a human approval of that commit (enforced by the trusted merge runner). **Against mistakes only**: a merge needs reviews from trust domains that did not write or run the change. **Not held**: a compromised runner can push a commit onto another ticket's branch that an honest fixer's report carries |
 | `landing: protected` and `authorship: signed` | also no single compromised runner or trust domain can land a change, change a protected path, or change a fact a sensitive leg acts on, **provided the deployment enforces** that review legs run no branch code and that a domain which ran a branch's code is reset before it serves another ticket (R-BTN-183) |
 
 **Human gates and `human_key`.** Every clause above that rests on a human approval holds against an
@@ -5788,12 +5788,12 @@ path lands only by the human-only identity" survives, since it rests on the sepa
 
 **Outside every guarantee, stated exactly:**
 - a compromised runner that is itself one of the two reviewers, and whose change or findings persuade
-  the other reviewer's model, lands it;
-- a human-only key an agent session can use (always possible under `human_key: any`);
-- a compromised host of trusted runners or of the host-side signer (the deployment's to protect:
-  Fieldhouse keeps its host repository writable by the human-only identity only); two reviewers from different model families narrow this, and a
+  the other reviewer's model, lands it; two reviewers from different model families narrow this, and a
   repository whose default branch is itself deployed sets `protected_paths: ["**"]` so a human
   approves every merge;
+- a human-only key an agent session can use (always possible under `human_key: any`);
+- a compromised host of trusted runners or of the host-side signer (the deployment's to protect:
+  Fieldhouse keeps its host repository writable by the human-only identity only);
 - a human who approves a change they misread;
 - a compromised Baton server or Cloudflare account (reach 0 of `docs/security-model.mdx`), recovered
   by B-125's runbook;
@@ -6022,7 +6022,7 @@ merges that commit.
     to the archive, setting `status: done`, is a templated change the merge runner makes.
 - **R-BTN-185 (human-only credentials).** Under `protected`, a human gate (`std:approval@1`, a
   production deploy or release, a ruleset bypass, a human's merge, credential management, trust levels,
-  trust domains, model families and the trusted-runner role, owner-key removal, every R-BTN-66 setting
+  trust domains, model families and the trusted-runner role, lowering `human_key`, owner-key removal, every R-BTN-66 setting
   that loosens a limit, attestation writer policies, revoking a `human` attestation, the message of the
   day) is satisfied only by a credential no agent session holds and no agent can drive.
   - **The human-only key** is an SSH key registered `human_only`, used for nothing else, and kept
@@ -6032,7 +6032,9 @@ merges that commit.
     administrators are `human_only` keys. How strongly a deployment enforces "no agent can use it" is
     its own policy, `human_key: any | hardware` (an instance setting, default `any`): `hardware`
     accepts only a hardware-backed key requiring PIN and touch (`verify-required`) whose FIDO
-    attestation matches an allowlist of authenticators. Fieldhouse requires `hardware` (R-FH-3).
+    attestation matches an allowlist of authenticators. Switching to `hardware` suspends every
+    `human_only` key registered before the switch that does not meet it. Fieldhouse requires
+    `hardware` (R-FH-3).
   - **What is signed is shown first.** The CLI prints the canonical fields and the computed view
     before signing. Under `human_key: hardware`, it also requires a short code derived from them,
     typed on the machine the key is plugged into. The dashboard may only prepare an approval that the
@@ -7151,6 +7153,9 @@ One line per decision in force; the reasoning and the rejected alternatives in f
     the ruleset suffices on GitHub, to be verified when B-140 is built.
   - **Approval cost** (Fieldhouse Axiom 4): a human gate per VM grant (trust level, domain, family)
     and per proposed ticket; whether some may be batched or delegated to a policy.
+  - **Smaller items**: where a promoted question's text lives under `protected` (R-BTN-173);
+    whether `human_only` keys registered under `cooperative` must be re-registered on the switch to
+    `protected`; whether `human_key` should be per repository rather than per instance.
   - **Companion text** that still describes earlier designs: B-110 and the standard `review.md`
     (which runs tests in a review leg), and `baton-deploy.yml`, whose production job restores the npm
     cache.
