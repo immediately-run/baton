@@ -5778,12 +5778,20 @@ trusted runners on one machine needs none.
 | A repository with | Guarantees |
 |---|---|
 | `landing: cooperative` (the default) | R-BTN-14's model: Baton keeps cooperating runners from colliding, and nothing more |
-| `landing: protected` | no runner lands on the default branch or a tag; a control path lands only by the human-only identity; a ticket or goal change lands only with the human's approval of that commit; a merge needs reviews from trust domains that did not write or run the change. Against a *compromised* runner it does not hold: a commit pushed onto another ticket's branch is carried by an honest fixer's report |
-| `landing: protected` and `authorship: signed` | no single compromised runner or trust domain can land a change, change a protected path, or change a fact a sensitive leg acts on |
+| `landing: protected` | **against any runner, compromised or not** (enforced by the forge): no runner lands on the default branch or a tag; a control path lands only by the human-only identity; a ticket or goal change lands only with a human approval of that commit. **Against mistakes only**: a merge needs reviews from trust domains that did not write or run the change; a compromised runner can push a commit onto another ticket's branch that an honest fixer's report carries |
+| `landing: protected` and `authorship: signed` | also no single compromised runner or trust domain can land a change, change a protected path, or change a fact a sensitive leg acts on, **provided the deployment enforces** that review legs run no branch code and that a domain which ran a branch's code is reset before it serves another ticket (R-BTN-183) |
+
+**Human gates and `human_key`.** Every clause above that rests on a human approval holds against an
+injected owner's agent session only under `human_key: hardware` (R-BTN-185). Under `human_key: any`,
+the default, a human-only key an agent session can reach is outside every guarantee; only "a control
+path lands only by the human-only identity" survives, since it rests on the separate forge identity.
 
 **Outside every guarantee, stated exactly:**
-- a compromised runner that is itself one of the two reviewers, and whose change persuades the other
-  reviewer's model, lands it; two reviewers from different model families narrow this, and a
+- a compromised runner that is itself one of the two reviewers, and whose change or findings persuade
+  the other reviewer's model, lands it;
+- a human-only key an agent session can use (always possible under `human_key: any`);
+- a compromised host of trusted runners or of the host-side signer (the deployment's to protect:
+  Fieldhouse keeps its host repository writable by the human-only identity only); two reviewers from different model families narrow this, and a
   repository whose default branch is itself deployed sets `protected_paths: ["**"]` so a human
   approves every merge;
 - a human who approves a change they misread;
@@ -5803,6 +5811,10 @@ merges that commit.
     (a human gate under `protected`, R-BTN-185). Under `cooperative` a grant is `trusted` unless
     marked otherwise, and Baton refuses an `untrusted` grant there. Under `protected` a grant is
     `untrusted` unless marked otherwise, and a repository has one active grant per trust domain.
+  - **Switching to `protected` resets them.** Trust levels, trust domains, model families, roles and
+    attestation writer policies set under `cooperative`, where they are not human gates, are cleared
+    when a repository becomes `protected`, and set again through human gates. Lowering `human_key` or
+    switching back to `cooperative` is itself a human gate.
   - **A trusted runner** (R-BTN-182) is a role a grant may hold only at trust level `trusted`. It
     is separate from the trust level: a `trusted` grant without the role runs ordinary legs.
   - **Under `protected`**, machine syncs (R-BTN-102) and every grant's `sync` flag are off, and
@@ -5836,9 +5848,11 @@ merges that commit.
     - Baton's own git writes (the outbox, R-BTN-171) are drained only by a trusted runner, through
       templates fixed in the CLI with no runner text, and never create or change a ticket file;
     - a ticket a runner's action would create (a condition's handler ticket, R-BTN-161; a call
-      leg's child, R-BTN-165; a promoted question, R-BTN-173; a supersession's replacement) is held
-      in Baton, where it can be claimed, and enters git only as a ticket change with a
-      `std:approval@1`; one approval may cover a batch;
+      leg's child, R-BTN-165; a promoted question, R-BTN-173; a supersession's replacement) is
+      **proposed, not filed**: a trusted runner writes its file on a branch `baton/proposed/<ticket>`
+      from the creating leg's typed output, and Baton holds only its filter fields (R-BTN-33). It is
+      not claimable, and no leg reads its body, until its file lands with a `std:approval@1`, as a
+      ticket change; one approval may cover several proposed tickets, each named in its `paths`;
     - `baton request` (R-BTN-131) run with an untrusted credential opens a PR, not a push;
     - the mirror (§16) writes nothing to the default branch; its notes are Baton's.
   - **Secrets and privileged jobs.** No repository-level secrets where untrusted runners push. A
@@ -5861,7 +5875,8 @@ merges that commit.
     `until` `lapses_at`.
   - **Signed, always.** The signature covers the RFC 8785 canonical JSON of `{type, subject, value,
     writer, nonce, uses, lapses_at}` in SSHSIG namespace `baton-attestation@1`; fields Baton sets
-    are outside it. An attestation counts only while its writer's key is unrevoked.
+    are outside it. An attestation counts only while its writer's key, and for a `baton` attestation
+    the attested runner key, is unrevoked.
   - **Writers.** Each type names the writer classes that may make it, as an owner setting (a human
     gate under `protected`), never from git:
     - `human`: a `human_only` key (R-BTN-185);
@@ -5872,16 +5887,20 @@ merges that commit.
   - **Any surface.** `POST /v1/repositories/{repository}/attestations` (`baton attest`, the
     dashboard, MCP) takes a signed attestation; whether it is accepted depends on the credential
     alone (R-BTN-186). A delegated key is never `human`. `DELETE …/attestations/{id}` revokes one,
-    a human gate for `human` types. A new attestation by the same writer for the same subject and
-    type supersedes that writer's earlier one; attestations by different writers coexist.
+    a human gate for `human` types. A new attestation supersedes an earlier one only when type, subject,
+    writer and **attested key** are the same; the attested key is the writer's key for `human`,
+    `owner` and `service` attestations, and the runner key the attestation is about for `baton` ones.
+    So two runners' reviews at one head coexist, and a later `std:ran@1` by one domain never erases
+    another's.
   - **A prerequisite kind** (R-BTN-120): a leg's `requires.attestations: [{type, subject, where?,
     count?, distinct?}]`. `where` is a list of tests `{path, op, value | leg_input}` over the value,
     `op` one of `eq`, `in`, `glob`, `superset-of`; `count` (default 1) attestations must hold, with
     `distinct` naming a field they must differ on. Unmet, it is an `attestation` block, `why` one of
     `missing`, `other-subject`, `writer-not-allowed`, `consumed`, `lapsed`, `revoked`.
   - **Standard types:**
-    - `std:wrote@1` (writer `baton`): a writing leg's commit range `start..head`, its trust domain,
-      and, under `authorship: signed`, that every commit in it is signed by the leg's key;
+    - `std:wrote@1` (writer `baton`): a writing leg's reported commit range `start..head`, its
+      trust domain and its runner key. Baton does not see the commits; the trusted runner verifies
+      their signatures at merge (R-BTN-183);
     - `std:ran@1` (writer `baton`): a leg ran the branch's code at `head` in its trust domain (every
       writing leg, and any leg its course does not mark `reads_only: true`);
     - `std:review@1` (writer `baton`): a review leg the course marks `approves: true` and
@@ -5927,6 +5946,14 @@ merges that commit.
     `reads_only: true`, reads the diff and the files as data, loads its agent configuration from the
     default branch and never from the branch, and runs no hook, install, build or test; tests run
     only in the trusted executor.
+  - **Baton records this; the deployment makes it true.** Baton cannot observe what a leg ran:
+    `std:ran@1` follows from the course's declarations. Under `authorship: signed` the deployment
+    must therefore (a) run review legs in an environment with no command execution and no
+    configuration from the branch, and (b) reset a trust domain to a clean state after any leg that
+    ran a branch's code, before it serves another ticket, since taint is tracked per ticket while a
+    domain persists. Fieldhouse does both (R-FH-3). The standard courses' harness invocation and
+    review instructions under `protected` follow (a): no `--auto` or permission bypass in the branch
+    checkout, and no "run the tests" in a review leg.
   - **Continuity.** A writing claim reports its start head at claim, which must be the last
     attested head (or the merge base for the first leg). The CLI refuses to build on any other tip
     and raises `baton.foreign-commit`. At `advance` the leg reports `start..head` from the objects it
@@ -7104,6 +7131,29 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose `clingo-wasm` in `npm test` as the conformance oracle over a pip-installed clingo or another Datalog dialect: none is a standard with preferences or has better TypeScript tooling (2026-10-22; R-BTN-175).
 
 ## Open questions
+
+- **§12.8's remaining items (the fifth adversarial review, 2026-10-29).** The amendment merged as a
+  proposal with these open; each is to be settled before the rule it names is built:
+  - **Foreign-commit resets race honest work** (R-BTN-183): a reset can discard an honest leg's
+    unreported pushes, and any runner can trigger one through the shared forge identity until B-131
+    gives each claim its own push credential.
+  - **The host-side signer's policy** (R-FH-3): "signs only for the claim its runner holds" must be
+    defined per kind (requests, commits, attestations); the signer is not built.
+  - **A human's wrong-head merge is caught after it lands** (R-BTN-184): the forge cannot refuse a
+    human's merge of another head; whether trusted runners should revert it, or the human's merge
+    should itself go through a pinned expected head, is open.
+  - **Multi-repository tickets** (R-BTN-140) under `protected`: one chain and one approval per
+    repository, or one per ticket.
+  - **Deleted paths in `std:approval@1`**, which have no blob; **sync imports** reached transitively
+    outside `imports`; **release assets**, which a forge `write` role can still replace, unless
+    releases are made immutable; **the shrinkwrap**, which the CLI package does not ship yet.
+  - **`bypass_actors` read access** (R-BTN-180): whether a narrower permission than write access to
+    the ruleset suffices on GitHub, to be verified when B-140 is built.
+  - **Approval cost** (Fieldhouse Axiom 4): a human gate per VM grant (trust level, domain, family)
+    and per proposed ticket; whether some may be batched or delegated to a policy.
+  - **Companion text** that still describes earlier designs: B-110 and the standard `review.md`
+    (which runs tests in a review leg), and `baton-deploy.yml`, whose production job restores the npm
+    cache.
 
 - **Confirmation by keys a same-user process can reach (R-BTN-155, R-BTN-159).** Any
   administrator or owner key, SSH or API, binds a sign-in code and confirms its session's
