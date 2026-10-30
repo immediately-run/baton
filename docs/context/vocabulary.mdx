@@ -76,8 +76,14 @@ grant worker keys access to it.
 trusts the workers on one machine; `protected` lets only trusted runners and humans land, with
 the forge enforcing it (§12.8).
 
-**Attestation.** A typed, signed fact Baton records about a ticket or commit — a review, a check
-run, a human's approval — which a leg can require as a prerequisite; git never supplies one.
+**Attestation, reading.** A typed statement Baton records — a review, a check run, a human's
+approval, a provider's remaining funds — about a ticket or commit, or about a resource instance (a
+**reading**); git never supplies one. A leg's course says which attestations it requires, from
+which writers, and whether a missing one blocks the leg or only steers advice.
+
+**Outbox, courier.** Every effect Baton intends outside itself — a git write, a check run — is an
+outbox entry; a courier, a key whose host holds the credential the effect needs, delivers it, and
+Baton confirms it by reading it back.
 
 **Trusted runner.** A runner that claims only legs marked `trusted`, runs no repository code, and
 acts on attestations alone; the merge runner is the first.

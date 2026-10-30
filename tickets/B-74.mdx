@@ -37,7 +37,7 @@ R-BTN-162 (the wait, `handled`, the blocked end, `resume`); R-BTN-169 (§7.9, `a
 /v1/runner/claims/{id}/answers`); §15 S-BTN-138, G-BTN-158.
 **Depends on:**
 - B-59 (the wait in the claim, `handled`, the blocked end and `resume`);
-- B-64 (the outbox and `baton.write`);
+- B-64 (the outbox and its couriers);
 - B-66 (the standard `ask` and `deliver` courses and `retract`).
 
 ### Requires
@@ -89,8 +89,8 @@ costs no git write when the person answers while it waits, and loses no answer w
    instants; clear `baton_held` when the entry lands.
    - A ticket that changes station or closes with a settled, unrecorded light answer of a leg it
      leaves queues a `handler` entry writing the closed ask with its answer.
-5. **The outbox's `answer` kind** (`src/runner/` `baton.write`): write `answer` and `answered_by`
-   with `baton_write: <id>`; read the file at the fetched head first, and report the entry
+5. **The outbox's `answer` kind** (the `git` courier, B-64): write `answer` and `answered_by`
+   with `baton_write: <id>`; read the file at the fetched head first, and mark the entry
    `skipped` when it already carries an answer; Baton then records that reply `ignored`.
 6. **Channels** (`src/defaults/courses/deliver/`): `answers: true` on `push` with a webhook
    channel that keeps replies until acknowledged; the leg acknowledges a reply only after Baton

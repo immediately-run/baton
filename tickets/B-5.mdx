@@ -45,7 +45,8 @@ R-BTN-114, R-BTN-115 and R-BTN-153 are specified; this ticket builds them.
    every other kind.
 3. **The forge courier.** Its own credential kind (`courier`), never a machine key;
    `?delivers=forge-check`; `check_id` on `sent`; a notice not sent within 15 minutes raises
-   `baton.forge-check-late` (through today's listing if B-57 has not landed).
+   `baton.outbox-late` with `kind: forge-check` (through today's listing if B-57 has not
+   landed).
 4. **Read-back.** The sync reads the check runs; a run Baton did not issue is the discrepancy
    `check-mismatch` (R-BTN-85) and raises `baton.check-mismatch`.
 5. **Tenancy** *(added 2026-10-18, §2.2 R-BTN-136)*: the notice also carries and signs `origin`
@@ -130,3 +131,5 @@ _(2026-10-20: references moved to the current-state spec, PR #71; check legs now
 second.)_
 
 _(2026-10-20: extended for the adversarial review's fixes — `check_runners` as the grant, the command from the branch tip, `superseded_at` on a new head, `seq` skipping and the re-queue, and fileless check tickets re-verified against Baton's record (item 7).)_
+
+_(2026-10-30: the spec folds `forge-check` notices into the outbox (R-BTN-171, R-BTN-115): an entry of kind `forge-check`, claimed through `/v1/courier/entries`, marked `delivered`, and late as `baton.outbox-late`. Build on today's `notices` if B-64 has not landed — B-64 migrates them — or on the outbox if it has.)_

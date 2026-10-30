@@ -417,6 +417,44 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   time." R-BTN-184 allows append-only progress after the own ticket's `## Status` heading; the
   brief and frontmatter stay human-approved, since a brief reads as the owner's instruction.
 
+- **2026-10-30 — §7.8, R-BTN-115, R-BTN-181: one outbox, and attestations that cover readings
+  (owner direction).** The owner, to make Baton easier to onboard: "I think the outbox and the
+  courier messages are essentially the same thing. And in the opposite direction, human
+  attestation and instrument readings can also be generalized into a single thing, which differs
+  only by the participant signing the attestation."
+  - **One outbox.** The outbox (R-BTN-171) and `forge-check` notices (R-BTN-115) were the same
+    mechanism twice: an effect Baton holds no credential for, claimed under a lease, applied once
+    by its id, confirmed by reading it back, and late after a window. R-BTN-171 now holds every
+    such effect as an outbox entry with a `kind` (`handler`, `withdraw`, `answer`,
+    `forge-check`), whose order, confirmation and late window are columns of the kind; every
+    entry is signed as notices were. Couriers, keys of their own registered with `--delivers git`
+    or `forge-check`, deliver it through `/v1/courier/entries`. Retired with it: the built-in leg
+    `baton.write`, `runner start --outbox`, the claim response's `outbox` list and the end's
+    `written`, the `notices` table, `/v1/courier/notices/*` and `baton.forge-check-late` (now
+    `baton.outbox-late` with `kind: forge-check`). States are `queued`, `claimed`, `delivered`,
+    `skipped`, `confirmed` and `dropped` for every kind (`written` and `landed` before, `sent` for
+    notices). A forge-refused push now holds the ticket `outbox-refused` instead of ending a
+    runner's claim. `baton.cancel` no longer drains the `withdraw` entry: Baton queues it when
+    the cancel ends. `runner:baton-legs` is declared by every runner that implements
+    `baton.cancel`.
+  - **Readings are attestations.** Asked whether a gate on a reading should be the course's to
+    decide, the owner: "Why not leave this up to the course to decide what the gate should be for
+    the leg? It could actually depend on a reading if we want (eg: account funds)." An attestation
+    (R-BTN-181) is now about work or about a resource instance; a reading is the second (R-BTN-76).
+    A requirement chooses `binds: gate | advice` and `missing: block | allow`, so a `resource`
+    block gates where its requirement says so (R-BTN-75); `where` gained `gte` and `lte` and the
+    block `failed-where`. Rule 1 refuses a `resource` or `attestation` row that binds as a gate,
+    `ticket_blocks` gained `binds`, and `attestation` joined R-BTN-75's list of block kinds, from
+    which it had been missing. Readings may be unsigned, and an unsigned one never counts toward a
+    trusted leg.
+  - **Writers in the course.** Told that writer classes had to stay out of git because a pushed
+    course could accept a runner's own statement, the owner: "no because of branch protection, the
+    changes would live on a branch that is never merged into main". Under `protected` a course
+    file is a control path that lands only by a human (R-BTN-184); under `cooperative` gates bind
+    cooperating runners only (R-BTN-46). So a requirement's `writers` is in the course file, and
+    the `attestation_policies` owner setting is retired; the trusted runner still pins the keys
+    it acts on (R-BTN-182).
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
