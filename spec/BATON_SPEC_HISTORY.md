@@ -454,6 +454,17 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     cooperating runners only (R-BTN-46). So a requirement's `writers` is in the course file, and
     the `attestation_policies` owner setting is retired; the trusted runner still pins the keys
     it acts on (R-BTN-182).
+  - **Who delivers is a policy.** The first draft fixed that runner keys never deliver and that
+    a `git` courier runs as a trusted runner under `protected`. The owner: "I agree with the
+    security content, but I want these decisions to be an explicit policy, stored by baton per
+    repo which the repo owner can modify. The protected / cooperative dichotomy is too
+    simplistic." R-BTN-171 gained the owner setting `outbox_policy`, with one entry per delivery
+    class (`git`, `forge-check`). Each entry names its `deliverers` (`courier`, `runner`,
+    `trusted-runner`), its `trust` (`any` or `trusted`) and a `min_release`. The default admits
+    dedicated couriers only. Loosening the policy is a loosening change (R-BTN-186). R-BTN-180's
+    guarantee for Baton's git writes now holds only while the `git` policy is at least
+    `courier`/`trusted-runner`, `trust: trusted` and a templating `min_release`; anything looser
+    is the repository's stated exception.
 
 ## Retired requirements
 

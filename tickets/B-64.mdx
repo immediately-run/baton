@@ -102,6 +102,13 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
    minutes, then hourly; `refused` and `collision` hold the ticket and raise `baton.outbox-late`
    naming the courier. `POST /v1/owner/{repository}/couriers` takes `delivers: "git" |
    "forge-check"` and refuses a key that holds another role (`conflict`).
+   - **The outbox policy.** The owner setting `outbox_policy` (a `repositories` column; §13.1),
+     validated in `src/core/validate.ts` and written through `PUT …/settings`: per class,
+     `deliverers` (`courier`, `runner`, `trusted-runner`), `trust` (`any` | `trusted`) and
+     `min_release`. The claim route admits a caller only as the policy of each repository allows
+     (`forbidden` naming the unmet field); a loosening is refused to an MCP key and logged
+     `admin` with before and after (R-BTN-186). A policy admitting runners adds the shared
+     `forge-check` copy.
 4. **The courier (`src/courier/`, `baton courier run`).** A loop with its own SSH key, outside
    any runner: claim, verify each entry's signature against the pinned `GET /v1/keys/signing`
    keys, deliver, mark. For `git`: fetch the default-branch head, skip an entry whose file
@@ -139,7 +146,8 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
 
 - Give Baton or the Worker any git or forge credential, or write git from core: every effect is
   a courier's delivery of a signed entry.
-- Let a runner key deliver: a courier key holds no other role (§12.1).
+- Let a key deliver that the repository's `outbox_policy` does not admit, or hard-code a rule
+  the policy owns (who delivers, trust, release) to `landing`.
 - Store a subject, body or any free text in `fields` beyond a `forge-check`'s rendered `summary`.
 - Put choice settlements, timer legs, `exhausted` legs or call settlements in the outbox: they
   are overrides written by the leg they queue (R-BTN-171's "Not in the outbox").
@@ -153,7 +161,8 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
   condition closing while queued (`dropped`) and while claimed (a `withdraw` follows); an entry
   undelivered 24 h (`baton.outbox-late`); a foreign file at the handler's path (held
   `outbox-collision`); a runner key registered as a courier (`conflict`); a bad signature
-  (refused by the courier).
+  (refused by the courier); the outbox policy's cases (a runner key `forbidden`, then admitted;
+  `trust: trusted` against a shared trust domain; `min_release`; an MCP key's loosening refused).
 - **S-BTN-81** and S-BTN-68 unchanged in outcome on the new routes.
 - Unit: entry ordering per ticket; the `fields` validator; the signature; `withdraw` on the
   markdown source; the `baton_write` idempotence check; the three-retry rejected push; the
