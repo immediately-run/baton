@@ -5869,7 +5869,7 @@ merges that commit.
     (a human gate under `protected`, R-BTN-185). Under `cooperative` a grant is `trusted` unless
     marked otherwise, and Baton refuses an `untrusted` grant there. Under `protected` a grant is
     `untrusted` unless marked otherwise, and a repository has one active grant per trust domain.
-  - **Switching to `protected` resets them.** Trust levels, trust domains, model families, roles and
+  - **Switching to `protected` resets them.** Trust levels, trust domains, model families and roles
     set under `cooperative`, where they are not human gates, are cleared
     when a repository becomes `protected`, and set again through human gates. Lowering `human_key` or
     switching back to `cooperative` is itself a human gate.
