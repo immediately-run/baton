@@ -529,6 +529,35 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       `tickets.created: proposed` now covers every outbox git kind.
     - **Stale references** in §13.6, S-BTN-123, the security-model page, the vocabulary, B-67,
       B-140 and B-142 are fixed.
+  - **The second adversarial review** found that most round-one fixes held, the definition of
+    "looser" and the lock-out check among them, but four holes remained. Fixed in the same PR:
+    - **Control paths.** `no-runner-lands` did not constrain `paths.control`, so a runner's
+      workflow change landed under the trusted runner's credentials. It now requires control
+      paths a runner cannot land, proposed tickets, and `board-from-trusted` includes it.
+    - **Repository code in delivery.** The trusted runner delivered through the repository's
+      `.baton/tickets.mjs`. It now writes only from the CLI's templates and refuses an ejected
+      source.
+    - **Proposals that could never land.** Proposed tickets had no way to merge. A proposal now
+      lands by a proposal merge, with one `std:approval@1` and no reviews.
+    - **The protection credential.** The credential that reads GitHub's `bypass_actors` can
+      rewrite the rulesets. It now belongs to a separate protection checker, never a workflow
+      and never the merge runner.
+    - **Smaller fixes:**
+      - `refs/baton/*`, which GitHub rulesets cannot restrict, is outside every guarantee.
+      - Runners pin the tenant signing key and check the tenant, and the read carries
+        `floors_hash`.
+      - Floors are judged on policy conditions alone, so a lapsed report never deadlocks a
+        change, and the checker keeps checking while others stop.
+      - A delegated key changes no policy, and an owner may restore the version its own
+        tightening replaced within 24 hours.
+      - Absent `attestations` and `readings` entries admit nothing, `readings` gains a `*`
+        entry, and instruments leave `approvers.members`.
+      - The first human-only key comes from `BATON_HUMAN_KEYS`, later ones from
+        `/v1/human-keys`, and the last key a `human` approver needs cannot be revoked.
+      - `trust_set_by`; unmarked grants are `untrusted` while `approvers.trust` is `human`;
+        tightening onto a violation is refused.
+      - Baton refuses a policy whose writes could never land.
+    - S-BTN-191 and G-BTN-165 test the new rules.
 
 ## Retired requirements
 

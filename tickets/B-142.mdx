@@ -84,6 +84,12 @@ it relies on (R-FH-3 names a mode).
    reading routes and `instance_readings` gain `writer`, `nonce` and `signature`.
 10. **Couriers' trust.** `couriers` gains `trust_level` and `trust_domain`, set by the
    `approvers.trust` approver.
+11. **After the second review** (R-BTN-180, R-BTN-185, R-BTN-188): the protection checker role
+   (no merge credential, never a workflow) as the only source of `protection` reports; the
+   proposal merge; delegated keys refused on every policy route, and the owner's 24-hour restore;
+   `trust_set_by`; floors judged on policy conditions alone; `floors_hash`; the `*` readings
+   entry; `BATON_HUMAN_KEYS` and `POST /v1/human-keys` with the last-key refusal; S-BTN-191,
+   G-BTN-165.
 
 ### Do not
 
@@ -102,7 +108,7 @@ it relies on (R-FH-3 names a mode).
 
 ### Exit criteria
 
-- [ ] S-BTN-189 and S-BTN-190 pass on both hosts; G-BTN-163 and G-BTN-164 hold
+- [ ] S-BTN-189, S-BTN-190 and S-BTN-191 pass on both hosts; G-BTN-163 to G-BTN-165 hold
 - [ ] no reference to `landing`, `authorship`, `protected_paths`, `machine_sync` or
   `outbox_policy` remains as a setting in `src/`
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
