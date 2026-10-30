@@ -197,3 +197,20 @@ These are its lessons, newest understanding first.
   (`list` in src/defaults/cli.ts) — not yet seen. `docs` is still never read: `.baton/tickets.mjs`
   drops it from every ticket's `repos:` (b2a70cd) until the token can read it. *Status: fixed for
   `fieldhouse` — run 40572091880 on `dd7a2f0` read it and posted the board.*
+
+## 2026-10-27 — a busy day's syncs spent Workers Free's rows written
+
+- **Every post rewrote every live ticket's station, next legs and bars, changed or not.**
+  Cloudflare emailed the owner that the account had passed Workers Free's 100,000 Durable Object
+  rows written for 2026-10-27, with writes failing until 00:00 UTC. That day docs ran
+  `baton-sync.yml` 69 times, 64 of them on pushes (its path filter passed all of them: the
+  factory pushes each ticket move to `main`), and this repository pushed 49 times to `main`, 43
+  of them under `tickets/` or `.baton/`. On the local host a 270-ticket board's refresh that
+  changed nothing wrote about 1,620 rows — `tickets` already skipped unchanged rows by
+  `row_hash`, the station cache did not — so docs alone came to about 110,000 rows, before the
+  index writes Cloudflare also counts. The alarm wrote nothing and a heartbeat one row; the
+  schedule is not the driver (GitHub fires the `*/15` cron four or five times a day). **A write
+  path the sync drives runs once per push for every ticket on the board: it must cost what
+  changed, not what exists** — and a cut-over repository on Workers Free (against R-BTN-2) turns
+  that cost into a claiming outage. *Status: fixed by S-BTN-188 — a post writes only the station
+  rows that changed; the move to Workers Paid is the owner's.*
