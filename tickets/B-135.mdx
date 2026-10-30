@@ -40,7 +40,11 @@ deploy); `docs/security-model.mdx` (reach 0).
    token for staging.
 3. **Build before secrets.** The job that holds `CLOUDFLARE_API_TOKEN` runs no `npm ci` of the
    pushed lockfile: it deploys an artifact built and checked by an earlier job without the secret,
-   so a poisoned dependency cannot read the token.
+   so a poisoned dependency cannot read the token. It also restores no cache: no `cache: npm` on
+   its `setup-node`, no `actions/cache`. Today the deploy job restores the `~/.npm` that the test
+   job, which runs repository code, saved. The artifact is the only thing it takes from an earlier
+   job, checked by digest. (The owner, 2026-10-29, on the fifth §12.8 review's cache finding: add
+   it here.)
 4. **Model a compromised server** in the security model: what runners and owners trust from
    Baton's answers (claims, snapshot shas, the message of the day, recommendations), what the
    GitHub App key reaches, and how to recover (rotate the App key, the webhook secrets, the
@@ -52,6 +56,8 @@ deploy); `docs/security-model.mdx` (reach 0).
 
 ### Tests
 
+- A check over the workflow file: the job that holds `CLOUDFLARE_API_TOKEN` has no `cache:` key
+  and no `actions/cache` step, and runs no `npm ci`.
 - A drill on a fork or staging: a push to `main` deploys staging and not production; a production
   deploy without the signed tag or the human approval is refused.
 

@@ -7193,9 +7193,11 @@ One line per decision in force; the reasoning and the rejected alternatives in f
   - **Smaller items**: where a promoted question's text lives under `protected` (R-BTN-173);
     whether `human_only` keys registered under `cooperative` must be re-registered on the switch to
     `protected`; whether `human_key` should be per repository rather than per instance.
-  - **Companion text** that still describes earlier designs: B-110 and the standard `review.md`
-    (which runs tests in a review leg), and `baton-deploy.yml`, whose production job restores the npm
-    cache.
+  - **`baton-deploy.yml`**, whose production job restores the npm cache the test job saved: tracked
+    in B-135 item 3 (the owner, 2026-10-29), so the deploy job restores no cache. (B-110 and the standard
+    `review.md` running tests in a review leg are no longer open: the standard courses are written
+    for `cooperative` (R-BTN-131, 2026-10-29), and the courses that must not run branch code in a
+    review are the deployment's.)
 
 - **Confirmation by keys a same-user process can reach (R-BTN-155, R-BTN-159).** Any
   administrator or owner key, SSH or API, binds a sign-in code and confirms its session's
