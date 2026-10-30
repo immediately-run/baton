@@ -116,3 +116,5 @@ lands the code carries R-BTN-80 and R-BTN-103 citations check-spec warns about (
 ## Status
 
 _(filed 2026-10-20 with the current-state spec, PR #71)_
+
+_(2026-10-30: the spec folds `forge-check` notices into the outbox (R-BTN-171): B-64 migrates `notices` into `outbox` and retires `/v1/courier/notices/*`, and `POST …/couriers` takes `delivers: "git" | "forge-check"`. Phase 4 applies to whichever of `notices` or `outbox` exists when it is built, and its Do-not line about `forge-check` notices reads as `forge-check` outbox entries.)_

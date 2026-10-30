@@ -495,6 +495,40 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     `machine_sync` and the draft's `outbox_policy`. Whose attestations count moved from the course
     file back into Baton (the policy's `attestations` and `readings`), since `paths.control` can
     now leave course files agent-writable. B-142 builds it.
+  - **The first adversarial review of the policy** (two fresh reviewers, a security attack and a
+    consistency pass) found that the draft's `protected` preset guaranteed less than the old mode.
+    Fixed in the same PR:
+    - **Looser.** A change that swaps one member for another was neither looser nor tighter, so
+      it slipped through. Looser is now "admits anything the old value did not"; removing a
+      protected pattern, and any incomparable value, are loosenings.
+    - **Guarantees include what they rest on.** `tickets-approved`, `control-paths-human`,
+      `independent-review` and `signed-authorship` now include `no-runner-lands`.
+      `tickets-approved` and `independent-review` pin their types' writers. `no-runner-lands`
+      covers `refs.other` and `merge.trusted`. Every guarantee is stated to hold against an
+      injected owner's agent only together with `human-gates`.
+    - **Deliverers.** `no-runner-lands` contradicted courier delivery to the default branch, so
+      under it only trusted runners deliver git kinds. Couriers gained a trust level and trust
+      domain. `min_release` is declared honesty, not a control.
+    - **Tightening `approvers.trust`** now leaves cleared grants `untrusted`, not at the default.
+      Only an owner key may do it, and null trust domains never count as distinct.
+    - **Lock-outs.** A `human` approver, `human_key: hardware` or a `remove_by: human` floor now
+      needs an owner's `human_only` key. Administrators meet a repository's `human` approvers
+      with a `human_only` key, replacing the instance-wide rule.
+    - **Signed reads** carry the repository, the tenant and a 10-minute `valid_until`, under the
+      `baton-policy@1` signing namespace. Runners refetch on `guarantees_hash` too, so forge
+      drift is seen.
+    - **Protection reports.** Only trusted runners' reports feed `no-runner-lands`.
+    - **Pins.** Trusted runners pin the whole policy and its floors.
+    - **Readings** count per repository, through its `readings` entry. A gate under
+      `signed: true` counts only signed readings, which the reading routes now carry.
+    - **Re-checks.** Writer rules are checked again at every course snapshot, and a trusted leg
+      may not take `missing: allow`.
+    - **Export.** Policy versions and floors are exported, and an import never falls back to a
+      preset.
+    - **Declarations.** `released:policy` is declared, the presets got full value columns, and
+      `tickets.created: proposed` now covers every outbox git kind.
+    - **Stale references** in §13.6, S-BTN-123, the security-model page, the vocabulary, B-67,
+      B-140 and B-142 are fixed.
 
 ## Retired requirements
 

@@ -53,15 +53,20 @@ it relies on (R-FH-3 names a mode).
    until no code reads them (append-only migrations).
 2. **Core module `src/core/policy.ts`.** The knob table as data: each knob's JSON schema, its
    order, and a `looser(a, b)` per knob; `diff(old, new)` listing loosened knobs; the presets as
-   documents; `guarantees(policy, protectCheck)` computing R-BTN-189's table. A validator in
-   `src/core/validate.ts` refuses an unknown knob, a value outside its schema, and an
-   `attestations` entry naming an `owner` or `runner` writer for a type a trusted leg acts on.
+   documents; `guarantees(policy, protectCheck)` computing R-BTN-189's table. `looser` implements R-BTN-188's
+   definition exactly: anything admitted that was not, any protected pattern removed, any
+   incomparable value. A validator in `src/core/validate.ts` refuses an unknown knob, a value
+   outside its schema, an `outbox.git` class `refs.default_branch` excludes under `filed`, and,
+   for a type `merge` or a trusted leg acts on, an `attestations` writer other than `human`,
+   `baton` and `service:` keys holding no owner, runner or courier role (checked again at every
+   course snapshot).
 3. **Changes.** `PUT /v1/owner/{repository}/policy` in one `store.transaction`: compare-and-set
    on `base_version`; the approver check (`approvers.loosen` for any loosening, never a delegated
-   key; R-BTN-186); every floor re-checked against the new version (`floor-violated`); on
-   `approvers.trust` becoming `human`, clearing owner-set trust levels, domains, families and
-   roles; an `admin` event with both versions and `loosened`. `GET …/policy/log`, and the floors
-   route.
+   key; R-BTN-186); every floor re-checked against the new version (`floor-violated`); refusing
+   a `human` approver, `human_key: hardware` or `remove_by: human` with no owner's `human_only`
+   key to meet it; on `approvers.trust` becoming `human` (owner key only), every owner-set trust
+   level cleared to `untrusted`, roles dropped, domains and families null; an `admin` event with
+   both versions and `loosened`. `GET …/policy/log`, and the floors route.
 4. **Readers.** Every rule that read `landing`, `authorship`, `protected_paths`, `machine_sync`
    or `outbox_policy` reads its knob through `policy.ts`. No code compares a preset name.
 5. **The signed read and the claim response.** `GET /v1/repositories/{repository}/policy`, signed
@@ -69,8 +74,16 @@ it relies on (R-FH-3 names a mode).
 6. **The CLI.** `baton owner policy show | diff | log | set <file> | apply <preset> | floor add |
    floor remove`; `baton runner start --require <guarantee>…`, refusing to claim where one is
    broken (`released:policy`); trusted runners' section pins, raising `baton.policy-unpinned`.
-7. **`baton repo protect`** derives `--print` from `refs.*` and `paths.control`, and `--check`
-   feeds `no-runner-lands`.
+7. **`baton repo protect`** derives `--print` from `refs.*` and `paths.control`. Trusted runners
+   report `--check` in their heartbeat's `protection`, which alone feeds `no-runner-lands`; their
+   `policy_pins` drive `baton.policy-unpinned`; `released:policy` joins the end reasons.
+8. **Export.** R-BTN-88's sections gain `repository_policies` and `policy_floors`; an import
+   verifies the `previous_hash` chain and never falls back to a preset.
+9. **Readings per repository.** A requirement reads state computed from the readings its
+   repository's `readings` entry admits, signed ones only for a gate under `signed: true`; the
+   reading routes and `instance_readings` gain `writer`, `nonce` and `signature`.
+10. **Couriers' trust.** `couriers` gains `trust_level` and `trust_domain`, set by the
+   `approvers.trust` approver.
 
 ### Do not
 

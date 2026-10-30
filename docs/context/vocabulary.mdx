@@ -80,8 +80,9 @@ floor is a set of guarantees Baton refuses to let any change break (§12.8).
 
 **Attestation, reading.** A typed statement Baton records — a review, a check run, a human's
 approval, a provider's remaining funds — about a ticket or commit, or about a resource instance (a
-**reading**); git never supplies one. A leg's course says which attestations it requires, from
-which writers, and whether a missing one blocks the leg or only steers advice.
+**reading**); git never supplies one. A leg's course says which attestations it requires and
+whether a missing one blocks the leg or only steers advice; the repository's policy says whose
+count.
 
 **Outbox, courier.** Every effect Baton intends outside itself — a git write, a check run — is an
 outbox entry; a courier, a key whose host holds the credential the effect needs, delivers it, and

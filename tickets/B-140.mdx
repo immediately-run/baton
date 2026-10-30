@@ -143,3 +143,5 @@ implementing PR amends `docs/context/architecture.mdx` and `values.mdx` with it.
 
 - [ ] the scenario passes on both hosts; the drills pass
 - [ ] `fieldhouse` and `baton` run with the default branch restricted to the merge runner
+
+_(2026-10-30: §12.8 now reads every rule from the repository policy (R-BTN-188, B-142). Protected paths are `paths.protected`, not an owner setting; whether `.baton/**` lands only by a human is `paths.control`; the merge criteria are `merge.trusted`, `merge.reviews` and `merge.checks`, signed authorship is `authorship`; where trusted runners run is `grants.trusted_domain` plus the deployment's duty (§12.8). The merge runner reports its protection check in its heartbeat (R-BTN-180) and pins the policy's hash (R-BTN-189).)_
