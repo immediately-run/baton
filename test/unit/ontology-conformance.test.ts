@@ -6,11 +6,13 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, it, expect } from 'vitest';
 import { maximalEvaluation, parseOntology, validateOntology, evaluate, boundsFor } from '../../src/core/ontology';
-import { SHOW_GATE, toAsp } from '../../src/defaults/ontology-asp';
+import { resolveRoutes } from '../../src/core/routes';
+import { SHOW_GATE, SHOW_ROUTES, toAsp } from '../../src/defaults/ontology-asp';
 import { mergeOntology } from '../../src/defaults/ontologyMerge';
 
 const DIR = join(import.meta.dirname, '..', 'fixtures', 'ontology');
-const fixtures = readdirSync(DIR).filter((f) => f.endsWith('.json') && f !== 'refused.json');
+const routeFiles = readdirSync(DIR).filter((f) => f.startsWith('route-choice-') && f.endsWith('.json'));
+const fixtures = readdirSync(DIR).filter((f) => f.endsWith('.json') && f !== 'refused.json' && !f.startsWith('route-choice-'));
 const refused = JSON.parse(readFileSync(join(DIR, 'refused.json'), 'utf8')) as { name: string; program: Record<string, unknown> }[];
 
 /** clingo-wasm's `run`, initialised once (it compiles the module). */
@@ -31,6 +33,86 @@ beforeAll(async () => {
 });
 
 const parse = (program: Record<string, unknown>) => parseOntology(JSON.parse(JSON.stringify(program)), JSON.stringify(program).length);
+
+/** One input fact as ASP writes it: a string constant quoted, an integer bare. */
+const aspTuple = (pred: string, tuple: unknown[]) => `${pred}(${tuple.map((x) => (typeof x === 'number' ? String(x) : JSON.stringify(String(x)))).join(',')}).`;
+
+/** R-BTN-177's route-choice conformance (B-105): the fixture's input facts as ASP text, beside
+ * the program's encoding, for a run under `--opt-mode=optN`. */
+const routeText = (program: Record<string, unknown>, facts: Record<string, unknown[][]>): string => {
+  const parts = [toAsp(parse(program), [])];
+  for (const [pred, tuples] of Object.entries(facts)) for (const t of tuples) parts.push(aspTuple(pred, t));
+  return parts.join('\n');
+};
+
+it.each(routeFiles.map((f) => [f]))('route conformance: %s — the evaluator equals clingo\'s optimum', async (file) => {
+  const fixture = JSON.parse(readFileSync(join(DIR, file as string), 'utf8')) as {
+    program: Record<string, unknown>;
+    wanted: string[];
+    facts: Record<string, unknown[][]>;
+    expected: Record<string, { alternative: string | null; ranked: string[] }>;
+  };
+  expect(() => parse(fixture.program)).not.toThrow();
+  const parsed = parse(fixture.program);
+  const validated = validateOntology(parsed);
+  expect(validated.ok).toBe(true);
+  if (!validated.ok) return;
+  const maximal = maximalEvaluation(validated.placed);
+  expect(maximal.ok).toBe(true);
+  if (!maximal.ok) return;
+  expect(maximal.check.violations).toEqual([]);
+  const fixed = new Map([...maximal.check.fixed.entries()]);
+  // The evaluator's side: the fixture's facts become the atoms' inputs (R-BTN-176), the epoch
+  // standing in for the fixture's utc_minute_of_day alone — no fixture names a weekday.
+  const minuteOfDay = Number((fixture.facts.now ?? []).find((t) => t[0] === 'utc_minute_of_day')?.[1] ?? 0);
+  const epoch = Date.UTC(2026, 9, 29, 0, minuteOfDay);
+  const mine = resolveRoutes(validated.placed, {
+    has: (fixture.facts.has ?? []).map((t) => String(t[0])),
+    wanted: fixture.wanted,
+    usable: (fixture.facts.usable ?? []).map((t) => [String(t[0]), String(t[1])] as [string, string]),
+    states: (fixture.facts.state ?? []).map((t) => [String(t[0]), t[1] as 'available' | 'unavailable' | 'unknown'] as [string, 'available' | 'unavailable' | 'unknown']),
+    refines: (fixture.facts.refines ?? []).map((t) => [String(t[0]), String(t[1])] as [string, string]),
+    details: [],
+    now: epoch,
+    wasDemoted: (fixture.facts.was_demoted ?? []).map((t) => [String(t[0]), String(t[1])] as [string, string]),
+  }, fixed, undefined);
+  expect(mine.ok).toBe(true);
+  if (!mine.ok) return;
+  // The fixture's own expectation first: the evaluator's first-match and ranked order.
+  for (const [choice, want] of Object.entries(fixture.expected)) {
+    const got = mine.choices.find((c) => c.choice === choice);
+    expect(got, choice).toBeDefined();
+    expect(got?.alternative).toBe(want.alternative);
+    expect(got?.ranked.map((r) => r.alternative)).toEqual(want.ranked);
+  }
+  // …equals clingo's optimum: under optN the witnesses before the optimum come first, so the
+  // LAST witness is it (R-BTN-177's conformance).
+  const text = `${routeText(fixture.program, { wanted: fixture.wanted.map((id) => [id]), ...fixture.facts })}\n#show ${SHOW_ROUTES}`;
+  const out = await clingo!(text, 0, ['--opt-mode=optN']);
+  const witnesses = out.Call?.[0]?.Witnesses ?? [];
+  const atomsOf = (w: { Value: string[] }) => (pred: string) => w.Value.filter((v) => v.startsWith(`${pred}(`)).map((v) => v.replace(/^[a-z_]+\(/, '').replace(/\)$/, '')).sort();
+  const available = new Set(mine.choices.flatMap((c) => c.ranked.map((r) => `${c.choice},${r.alternative}`)));
+  if (available.size) {
+    expect(out.Result).toBe('OPTIMUM FOUND');
+    expect(out.Models?.More).toBe('no');
+    expect(out.Models?.Optimal).toBe(1);
+    const last = witnesses.at(-1)!;
+    const route = atomsOf(last)('route');
+    const wanted = mine.choices.filter((c) => c.alternative != null).map((c) => `"${c.choice}","${c.alternative}"`).sort();
+    expect(route).toEqual(wanted);
+    expect(atomsOf(last)('available')).toEqual([...available].map((a) => `"${a.split(',')[0]}","${a.split(',')[1]}"`).sort());
+    expect(atomsOf(last)('demoted')).toEqual([...mine.demoted].map((a) => `"${a.split('\u0000')[0]}","${a.split('\u0000')[1]}"`).sort());
+  } else {
+    expect(out.Result).toBe('SATISFIABLE');
+    expect(out.Models?.More).toBe('no');
+    expect(witnesses).toHaveLength(1);
+    expect(atomsOf(witnesses[0])('route')).toEqual([]);
+  }
+  // The warnings are filtered as R-BTN-175 says (the two info notices, each wrapping a line).
+  const joined = (out.Warnings ?? []).join('\n').replace(/\n+/g, '\n');
+  const notices = /-:?\d+:\d+-\d+: info: (atom does not occur in any rule head|no atoms over signature occur in program):\n[^\n]*/g;
+  expect(joined.replace(notices, '').trim()).toEqual('');
+});
 
 it.each(fixtures.map((f) => [f]))('conformance: %s agrees with clingo and the evaluator', async (file) => {
   const fixture = JSON.parse(readFileSync(join(DIR, file as string), 'utf8')) as {

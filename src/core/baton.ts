@@ -1248,13 +1248,13 @@ export class BatonCore {
    * `ontology_test_bounds` (JSON `{matches?, atoms?}`) is honoured only while the test
    * bindings are on — no deploy or local start reads it, exactly as it reads no test key.
    */
-  testOntologyBounds(): { matches?: number; atoms?: number | null } | undefined {
+  testOntologyBounds(): { matches?: number; atoms?: number | null; route?: { matches?: number } } | undefined {
     if (this.ports.config.BATON_TEST_BINDINGS !== 'true') return undefined;
     const row = this.sql<{ value: string }>("SELECT value FROM baton_settings WHERE key = 'ontology_test_bounds'")[0];
     if (!row) return undefined;
     try {
-      const parsed = JSON.parse(row.value) as { matches?: number; atoms?: number | null };
-      return parsed.matches != null || parsed.atoms != null ? parsed : undefined;
+      const parsed = JSON.parse(row.value) as { matches?: number; atoms?: number | null; route?: { matches?: number } };
+      return parsed.matches != null || parsed.atoms != null || parsed.route?.matches != null ? parsed : undefined;
     } catch {
       return undefined;
     }

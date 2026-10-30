@@ -1,0 +1,32 @@
+{
+  "$comment": "A route-choice fixture with nothing available (R-BTN-177, B-105): the runner holds no key any alternative needs, so no route atom is derived — clingo answers SATISFIABLE with one model and no route/2, and the evaluator answers null with reason none-available.",
+  "program": {
+    "version": 1,
+    "derived": [],
+    "entries": [
+      { "id": "meters-a", "fact": ["meters", "key:a", "ra"] }
+    ],
+    "route_choices": [
+      {
+        "id": "pick",
+        "alternatives": [
+          { "id": "first", "needs": ["model:x", "key:a"] },
+          { "id": "second", "needs": ["model:y", "key:b"] }
+        ]
+      }
+    ]
+  },
+  "wanted": ["pick"],
+  "facts": {
+    "has": [["model:x"]],
+    "usable": [["ra", "ra@one"]],
+    "state": [["ra@one", "available"]],
+    "blocked": [],
+    "now": [["utc_minute_of_day", 0]],
+    "refines": [],
+    "was_demoted": []
+  },
+  "expected": {
+    "pick": { "alternative": null, "ranked": [] }
+  }
+}

@@ -26,6 +26,7 @@ import webhookSyncs from './0023_webhook_syncs.sql';
 import windDown from './0024_wind_down.sql';
 import ontology from './0025_ontology.sql';
 import stationWrites from './0026_station_writes.sql';
+import routeChoices from './0027_route_choices.sql';
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },
@@ -54,4 +55,5 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 24, sql: windDown },
   { id: 25, sql: ontology },
   { id: 26, sql: stationWrites },
+  { id: 27, sql: routeChoices },
 ];

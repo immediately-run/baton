@@ -30,6 +30,21 @@ export const STD = Object.freeze({
   'std:url@1': closed({ url: str({ format: 'uri' }) }, ['url']),
   'std:effect@1': closed({ kind: str(), ref: str(), at: str({ format: 'date-time' }) }, ['kind', 'at']),
   'std:decision@1': closed({ id: str(), option: str(), answered_by: str(), commit: sha }, ['id', 'option', 'commit']),
+  // B-105 (R-BTN-176): the base an API-capacity resource's schema refines. Not an output schema:
+  // a DETAIL schema in R-BTN-76's subset, which an external resource's readings carry — so it
+  // uses only that subset's keywords (no `pattern`, no `format`) and a fraction in fixed point
+  // (`remaining_permille`), as R-BTN-176 asks. The library's one OPEN schema: a provider's
+  // resource schema refines it by adding fields, so `additionalProperties` is not false and a
+  // refinement must restate the base's own bounds (R-BTN-108).
+  'std:api-capacity@1': {
+    type: 'object',
+    properties: {
+      window_s: { type: 'integer', minimum: 1 },
+      remaining_permille: { type: 'integer', minimum: 0, maximum: 1000 },
+      resets_at_min: { type: 'integer', minimum: 0 },
+    },
+    required: ['window_s', 'remaining_permille'],
+  },
 });
 
 /** A `std:` schema, or null. */

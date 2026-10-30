@@ -26,9 +26,17 @@ change: review them together, and post your review once, on that PR.
 
 ## The round
 
+- **Read `$BATON_ADVICE` first.** When the repository attaches route choices to this leg, the
+  file named by `BATON_ADVICE` (B-105, R-BTN-177) carries the advice — for this repository,
+  `reviewer-1` and `reviewer-2` — each choice's advised alternative and a ranked fallback list.
+  The advised alternative's `model:` capability maps to a provider model through this
+  repository's `agent_models` (`.baton/baton.json`): `zai-coding-plan/glm-5.3` for GLM,
+  `anthropic/claude-opus-5-5` for Opus — the same ids below, and the ones the stub's
+  `--model` rewrite uses. No file, no advice, or an advised `null`: fall back to the two fixed
+  models below.
 - **Round one gets two blind reviewers.** If you can start independent sub-agents, start two,
   from fresh contexts, **on exactly these two models, one reviewer each: `zai-coding-plan/glm-5.3`
-  and `anthropic/claude-opus-5.5`** — name the model when you start each sub-agent; if the model
+  and `anthropic/claude-opus-5-5`** — name the model when you start each sub-agent; if the model
   you are already running on is one of them, the other sub-agent takes the other model. Try no
   other provider: the alternatives configured here are broken or redundant, and a failed launch
   wastes the round's clock. Give each this file, the ticket and the
