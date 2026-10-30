@@ -32,6 +32,8 @@ import { BUILT_INS, DEFAULT_COURSE, builtIn, scaffoldable, type BuiltIn } from '
 import { mergeOntology } from './ontologyMerge';
 import { readItems } from './read-items';
 import { parseFrontmatter, ticketsMarkdown, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
+import { readTicketSettings } from './tickets-config';
+import { PAGE_NAME, ticketsPage } from './tickets-page';
 
 // LC_ALL=C on every git call (B-93, round 4): git translates its messages, and the two shapes
 // remoteSlug quiets are matched by their words — under a German catalog 'not a git repository'
@@ -137,6 +139,15 @@ interface BatonJson {
   /** The ticket check's settings (B-111); every one is off. Read by `baton tickets check` alone,
    * never by a sync. */
   check?: { depends_line?: boolean };
+  /** The ticket commands' settings (B-112, tickets-config.ts): the prefix `baton tickets new`
+   * allocates under, the ids it still accepts, the `project:` a filing takes when `--project`
+   * names none, and the tags it writes when `--tags` names none. Read by the commands alone. */
+  ticket_prefix?: string;
+  legacy_ids?: string[];
+  prefixes?: Record<string, string>;
+  project?: string;
+  tags?: string[];
+  projects?: string;
 }
 
 /** The skill a course entry names when its file names none: the course's own (`baton-create-pr`). */
@@ -1376,6 +1387,14 @@ export async function initMain(argv: string[], io: { root?: string; log?: (l: st
   }
   writeWorkflow();
   await put('tickets/README.md', (abs) => writeFileSync(abs, '# Tickets\n\nOne `*.md` file per ticket; `baton repo init` wrote this directory.\n'));
+  // B-112: the conventions page, the same text in every repository — written again whenever it
+  // has drifted, like the course files, since it is Baton's (its settings are read where it lands).
+  const pagePath = join(root, (settings.items ?? 'tickets').replace(/\/$/, ''), PAGE_NAME);
+  const page = ticketsPage(readTicketSettings(root, root));
+  if (!existsSync(pagePath) || readFileSync(pagePath, 'utf8') !== page) {
+    await put(relative(root, pagePath), (abs) => writeFileSync(abs, page), true);
+    log(`baton: ${relative(root, pagePath)} — how tickets work in this repository, generated`);
+  }
   // §5.9 (R-BTN-174, B-104): the ontology scaffold names the first built-in; a repository
   // retracts, replaces or extends it from here, or deletes the file to have no ontology.
   await put('.baton/ontology.json', (abs) => writeFileSync(abs, `${JSON.stringify({ version: 1, builtin: 'baton@1', entries: [], route_choices: [] }, null, 2)}\n`));

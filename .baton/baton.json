@@ -1,6 +1,11 @@
 {
   "baton_url": "https://baton.immediately.run",
   "items": "tickets",
+  "ticket_prefix": "B",
+  "legacy_ids": [
+    "R3-\\d+"
+  ],
+  "project": "baton",
   "default_course": "create-pr",
   "repos": {
     "baton": "immediately-run/baton",
@@ -26,7 +31,7 @@
       "report_horizon_h": 6,
       "branch_pattern": "claude/{ticket}-*",
       "protocol_files": [],
-      "source": "github/immediately-run/baton/22692625d6e7a183f22e1aaf3c25734e652511c5/create-pr"
+      "source": "github/immediately-run/baton/dd0de8c87c58c11b063c0b547aa61504e27576c2/create-pr"
     }
   ]
 }

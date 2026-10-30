@@ -53,11 +53,19 @@
 //   baton repo migrate-markers [--root DIR]   — the one-time fold of the retired .baton/markers.jsonl into the tickets (B-100)
 //                   [--eject tickets|stations] [--pin owner/name@commit] [--force]
 //                — a repository's own sync and scaffold (§2f R-BTN-74, R-BTN-131)
+//   baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]
+//                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]
+//                — file one ticket, the next free id under .baton/baton.json's ticket_prefix,
+//                with the conventional body, as one commit pushed to the default branch (B-112)
+//   baton tickets claim <id> | set <id> <status> [--pr URL] | done <id> [--pr URL]
+//                — claim, move or finish one, each one commit pushed to the default branch (B-112)
 //   baton tickets check [--repo DIR] [--quiet]
 //                — check this repository's ticket source without posting it: ids, the board
-//                post's validation, depends_on targets and cycles, and (with
-//                check.depends_line in .baton/baton.json) each **Depends on:** line; exit 1
-//                naming every finding (B-111)
+//                post's validation, depends_on targets and cycles, (with check.depends_line in
+//                .baton/baton.json) each **Depends on:** line, and the generated "How tickets
+//                work" page; exit 1 naming every finding (B-111, B-112)
+//   baton tickets --help
+//                — the commands, the tags Baton reads and their meanings, the Requires: clause (B-112)
 //   baton request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B] [--remote R]
 //                — start a course from one sentence, no hand-written ticket (B-98, R-BTN-131):
 //                files ONE request ticket (the sentence as title and description, course: C,
@@ -515,10 +523,11 @@ export async function main(argv) {
     if (argv[1] === 'migrate-markers') return migrateMarkersMain(argv.slice(2));
     return initMain(argv.slice(2));
   }
-  if (argv[0] === 'tickets' && argv[1] === 'check') {
-    // B-111: sibling of `baton repo sync`, its ticket source and the board post's own validation.
-    const { checkTicketsMain } = await import('../scripts/baton-cli.mjs');
-    return checkTicketsMain(argv.slice(2));
+  if (argv[0] === 'tickets') {
+    // B-111's check, and B-112's ticket commands: repository commands in the defaults beside
+    // `repo sync` (src/defaults/tickets.ts), each writing one commit pushed to the default branch.
+    const { ticketsMain } = await import('../scripts/baton-cli.mjs');
+    return ticketsMain(argv.slice(1));
   }
   if (argv[0] === 'request') {
     // B-98: a course started from one sentence. A repository command — it commits the request
