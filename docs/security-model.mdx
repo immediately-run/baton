@@ -96,8 +96,9 @@ repository exposes. Per-worker forks would close that by GitHub's design; they s
 with runners you trust, it needs no merge runner, protected branch, proxy or sandbox, and runners
 may land their own work. Baton's part of the guarantee is never to require a runner to write
 protected state, to hold the policy (protected paths, who lands), and to print each forge's
-setting for it. Fieldhouse, where runners are untrusted, turns the guarantee on: the protected
-branch, the merge runner, the secrets rule and the VMs.
+setting for it. Fieldhouse, where runners are untrusted, sets that policy, registers the
+guarantees it relies on as a floor (BATON_SPEC R-BTN-188, R-BTN-189), and supplies what Baton
+cannot observe: the VMs, their resets and where keys live.
 
 ## Who holds push
 

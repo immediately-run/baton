@@ -465,6 +465,36 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     guarantee for Baton's git writes now holds only while the `git` policy is at least
     `courier`/`trusted-runner`, `trust: trusted` and a templating `min_release`; anything looser
     is the repository's stated exception.
+  - **Policy, not modes (R-BTN-188, R-BTN-189).** The owner, on that setting: "Outbox-policy is
+    the wrong level of abstraction. We need a repo-level policy not just for the outbox, but also
+    for all the other protected vs cooperative mode differences. These modes shouldn't be
+    hardcoded into baton … Baton cannot assume all customization fits into predefined modes", and:
+    "Fieldhouse and baton's most important interface is the baton policy enforcing fieldhouse's
+    security guarantees." Then, deciding the open points:
+    - deployment duties Baton cannot observe ("reviewers run no branch code", "reset a VM after
+      it ran branch code") "don't have a place in baton per repo policy, therefore must live
+      somewhere else";
+    - `owner` and `human` are the only approver levels;
+    - one versioned document with an append-only change log, trusted runners pinning the hash of
+      the sections they enforce;
+    - folded into this PR, with an adversarial review once drafted;
+    - guarantee names beyond core Baton are defined in the Fieldhouse repository;
+    - Baton enforces consumer floors.
+
+    The result: R-BTN-188 holds every rule about authority and trust as a knob of one versioned
+    policy document per repository, each knob with an order from strict to loose. The knobs cover
+    approvers, the minimum `human_key`, grant defaults, the writers admitted to each ref class,
+    protected and control paths, ticket approval, merge criteria, authorship, created tickets,
+    outbox delivery, board posts, answers, and whose attestations and readings count.
+    `cooperative`, `protected` and `protected-signed` are presets; no rule reads one. R-BTN-189
+    defines nine core guarantees as conditions over the policy, floors that refuse any change
+    breaking a guarantee they name, and a signed read, `--require` on runners and section pins on
+    trusted runners. R-BTN-180 keeps trust levels and forge protection, read from the policy.
+    R-BTN-183's merge criteria become `merge.*`. R-BTN-185's human gate becomes any action whose
+    approver is `human`. Retired settings: `landing`, `authorship`, `protected_paths`,
+    `machine_sync` and the draft's `outbox_policy`. Whose attestations count moved from the course
+    file back into Baton (the policy's `attestations` and `readings`), since `paths.control` can
+    now leave course files agent-writable. B-142 builds it.
 
 ## Retired requirements
 
