@@ -198,59 +198,76 @@ describe('S-BTN-148: a reviewer route choice with hysteresis', () => {
     return alternativeOf(out.advice, 'reviewer-2');
   }
 
-  it('500 opus, 150 glm, 250 glm (held), a detail-less state keeps the fields, 320 opus, lapsed opus, an administrator unavailable glm; another runner never moves them', async () => {
-    const w1 = await grantedWorker(owner, 'docs', 'w1', ALL_KEYS, ['ac:main']);
-    const w2 = await grantedWorker(owner, 'docs', 'w2', ALL_KEYS, []); // no usable instance of anthropic-capacity
-    const reading = async (at: number, body: Record<string, unknown>) => {
-      await setClock(at);
+  /** The reading-and-resolve loop, split so each trace stays quint-sized (the one long test
+   *  made the model's replay run for hours — a trace is a trace, not a marathon). */
+  async function steps(from: string, bodies: Record<string, unknown>[], w1: FleetWorker, w2: FleetWorker, ids: string[], t0: number) {
+    void from;
+    let t = t0;
+    let n = 0;
+    const resolved: (string | null | undefined)[] = [];
+    for (const body of bodies) {
+      t += 2 * MIN;
+      await setClock(t);
       await w1.beat();
       const res = await w1.call('/v1/runner/readings', { readings: [{ instance: 'ac:main', valid_for: 3600, ...body }] });
       expect(res.status, JSON.stringify(res.json)).toBe(200);
       expect(res.json.refused).toEqual([]);
-    };
-    let t = T0;
-    let stepNo = 0;
-    const step = async (body: Record<string, unknown>, by = 2 * MIN) => { t += by; await reading(t, body); };
-    const w1Rows = async () => (await rows<{ choice: string; alternative: string; demoted: number }>('SELECT choice, alternative, demoted FROM route_last WHERE worker_id = ? ORDER BY choice, alternative', w1.id));
-    /** W2 resolves between each step (S-BTN-148) and never moves W1's rows — keyed by runner,
-     *  the demotion's hysteresis is W1's alone. */
-    const betweenSteps = async () => {
+      const w1Rows = async () => (await rows<{ choice: string; alternative: string; demoted: number }>('SELECT choice, alternative, demoted FROM route_last WHERE worker_id = ? ORDER BY choice, alternative', w1.id));
+      // W2 resolves between each step (S-BTN-148) and never moves W1's rows — keyed by runner,
+      // the demotion's hysteresis is W1's alone.
       const before = await w1Rows();
-      const id = `R3-93${String(++stepNo).padStart(2, '0')}`;
+      const id = ids[n++];
       await postBoard({ implement: ['reviewer-2'] }, [id]);
       const w2out = await startLeg(w2, id);
       expect(alternativeOf(w2out.advice, 'reviewer-2')).toBe('opus'); // no usable instance: fails open
       await w2.call(`/v1/runner/claims/${w2out.claimId}/end`, { end_reason: 'released:requested' });
       expect(await w1Rows()).toEqual(before);
-    };
+      await postBoard({ implement: ['reviewer-2'] }, [`w1-${id}`]);
+      const out = await startLeg(w1, `w1-${id}`);
+      resolved.push(alternativeOf(out.advice, 'reviewer-2'));
+      await w1.call(`/v1/runner/claims/${out.claimId}/end`, { end_reason: 'released:requested' });
+    }
+    return { t, resolved };
+  }
 
-    await step({ available: true, detail: { window_s: 300, remaining_permille: 500 } });
-    expect(await resolve(w1, 'R3-9201')).toBe('opus');
-    await betweenSteps();
+  it('500 opus, then 150 glm — the demotion entered, W2 between each', async () => {
+    const w1 = await grantedWorker(owner, 'docs', 'w148a', ALL_KEYS, ['ac:main']);
+    const w2 = await grantedWorker(owner, 'docs', 'w148b', ALL_KEYS, []);
+    const { resolved } = await steps('R3-9201', [
+      { available: true, detail: { window_s: 300, remaining_permille: 500 } },
+      { available: true, detail: { window_s: 300, remaining_permille: 150 } },
+    ], w1, w2, ['R3-9301', 'R3-9302'], T0);
+    expect(resolved).toEqual(['opus', 'glm']); // the demotion entered below 200
+    const rowsOf = await rows<{ alternative: string; demoted: number }>('SELECT alternative, demoted FROM route_last WHERE worker_id = ? ORDER BY alternative', w1.id);
+    expect(rowsOf).toEqual([{ alternative: 'glm', demoted: 0 }, { alternative: 'opus', demoted: 1 }]);
+  });
 
-    await step({ available: true, detail: { window_s: 300, remaining_permille: 150 } });
-    expect(await resolve(w1, 'R3-9202')).toBe('glm');
-    await betweenSteps(); // W1 demoted: the moment keying by runner matters
-    await step({ available: true, detail: { window_s: 300, remaining_permille: 250 } });
-    expect(await resolve(w1, 'R3-9203')).toBe('glm'); // held below 300 by was_demoted
-    await betweenSteps();
-    // A state reading with no detail: the field reading stays at 250.
-    await step({ available: true });
-    expect(await resolve(w1, 'R3-9204')).toBe('glm');
-    await betweenSteps();
-    await step({ available: true, detail: { window_s: 300, remaining_permille: 320 } });
-    expect(await resolve(w1, 'R3-9205')).toBe('opus');
-    await betweenSteps();
+  it('a detail-less state keeps the fields at 250; 320 recovers opus; lapsed fails open with the demotion history gone', async () => {
+    const w1 = await grantedWorker(owner, 'docs', 'w148c', ALL_KEYS, ['ac:main']);
+    const w2 = await grantedWorker(owner, 'docs', 'w148d', ALL_KEYS, []);
+    const { t, resolved } = await steps('R3-9204', [
+      { available: true, detail: { window_s: 300, remaining_permille: 150 } }, // this worker's own demotion
+      { available: true, detail: { window_s: 300, remaining_permille: 250 } },
+      { available: true }, // no detail: the field reading stays at 250
+      { available: true, detail: { window_s: 300, remaining_permille: 320 } },
+    ], w1, w2, ['R3-9304', 'R3-9305', 'R3-9306', 'R3-9307'], T0 + 10 * MIN);
+    expect(resolved).toEqual(['glm', 'glm', 'glm', 'opus']); // entered, held at 250, held again with no detail, recovered at 320
     // Every reading lapsed: unknown, no fields — fails open, and the demotion is history.
     await setClock(t + 2 * 60 * MIN);
     await w1.beat();
     await tick();
-    expect(await resolve(w1, 'R3-9206')).toBe('opus');
-    const afterLapse = await w1Rows();
+    await postBoard({ implement: ['reviewer-2'] }, ['R3-9206']);
+    const out = await startLeg(w1, 'R3-9206');
+    expect(alternativeOf(out.advice, 'reviewer-2')).toBe('opus');
+    await w1.call(`/v1/runner/claims/${out.claimId}/end`, { end_reason: 'released:requested' });
+    const afterLapse = await rows<{ alternative: string; demoted: number }>('SELECT alternative, demoted FROM route_last WHERE worker_id = ? ORDER BY alternative', w1.id);
     expect(afterLapse.find((r) => r.alternative === 'opus')!.demoted).toBe(0);
     // An administrator's unavailable: blocked, glm.
     expect((await keyCall(admin, '/v1/admin/readings', { readings: [{ instance: 'ac:main', available: false, valid_for: 86400 }] })).status).toBe(200);
-    expect(await resolve(w1, 'R3-9207')).toBe('glm');
+    await postBoard({ implement: ['reviewer-2'] }, ['R3-9207']);
+    const blocked = await startLeg(w1, 'R3-9207');
+    expect(alternativeOf(blocked.advice, 'reviewer-2')).toBe('glm');
+    await w1.call(`/v1/runner/claims/${blocked.claimId}/end`, { end_reason: 'released:requested' });
   });
 
   it('a fail-closed rule over state(I, "unknown") demotes when nothing is known', async () => {
