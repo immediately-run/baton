@@ -11,6 +11,22 @@
     "at": 7,
     "reason": "claim 1 confirmed by the interim post's confirmations (docs' interim shape, not modelled)"
   },
+  "S-BTN-139.ontology › round one’s fixes, pinned > A6/B3: a post with no ontology field while entries attach route choices refuses the unit": {
+    "at": 5,
+    "reason": "docs:R3-9001 returned after it was withdrawn (a closure undone; the model's withdrawal is final)"
+  },
+  "S-BTN-139.ontology › round one’s fixes, pinned > A7: a refused unit keeps the accepted non-empty attachments a post after their acceptance": {
+    "at": 5,
+    "reason": "docs:R3-9001 returned after it was withdrawn (a closure undone; the model's withdrawal is final)"
+  },
+  "S-BTN-139.ontology › round two’s fixes, pinned > 2-r2-0: an invalid blocked end on a completed-unconfirmed claim answers claim-ended and re-finishes nothing": {
+    "at": 6,
+    "reason": "the harness wrote a claim (a state Baton did not reach)"
+  },
+  "S-BTN-139.ontology › round two’s fixes, pinned > 2-r2-2: a post deleting the program takes the derived rows with it": {
+    "at": 7,
+    "reason": "docs:R3-9001 returned after it was withdrawn (a closure undone; the model's withdrawal is final)"
+  },
   "S-BTN-16.cutover › S-BTN-16 cutover (server) > G-BTN-19: the session the note names asks to adopt; the claim moves only when the owner confirms": {
     "at": 6,
     "reason": "claim 1 imported at cutover (a legacy claim; §16.1, not modelled)"
