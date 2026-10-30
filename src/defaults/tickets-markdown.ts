@@ -128,8 +128,9 @@ export function ticketsMarkdown(files: MarkdownFile[], settings: MarkdownSetting
       repos: resolved as string[],
       rank: order != null ? Math.max(0, Math.round(order)) : null,
       // Opaque to Baton, read by the course's own code (§2b): the PR list the PR courses read,
-      // and the owner's `answer:` the decision course waits on (R-BTN-131).
-      course: { ...(strList(fm.prs).length ? { prs: strList(fm.prs) } : {}), ...(str(fm.answer) != null ? { answer: str(fm.answer)! } : {}) },
+      // the ticket's project (B-112: `baton tickets new --project` writes it, and the generated
+      // page groups by it), and the owner's `answer:` the decision course waits on (R-BTN-131).
+      course: { ...(strList(fm.prs).length ? { prs: strList(fm.prs) } : {}), ...(str(fm.project) != null ? { project: str(fm.project)! } : {}), ...(str(fm.answer) != null ? { answer: str(fm.answer)! } : {}) },
       ...(parent != null ? { parent } : {}),
       ...(fm.not_before != null ? { not_before: fm.not_before } : {}),
       ...(str(fm.status) != null ? { display: { status: str(fm.status)! } } : {}),
