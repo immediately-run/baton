@@ -4,7 +4,7 @@ import { describe, it, expect, inject } from 'vitest';
 import prices from '../fixtures/data/model-prices.json';
 import providers from '../fixtures/data/model-providers.json';
 import matrix from '../fixtures/data/reviewer-matrix.json';
-import { ownerCall, payload, q, rows, setClock, syncCall } from '../helpers';
+import { ownerCall, payload, q, rows, syncCall } from '../helpers';
 
 const board = inject('board');
 // The reference data: the fixture repository's own scripts/data files (one source with S-BTN-13).
@@ -75,45 +75,29 @@ describe('the tickets cache', () => {
 });
 
 describe('reference data and the dashboard state', () => {
-  it('materializes providers, schedules, prices and the reviewer catalog', async () => {
+  it('materializes the reviewer catalog; the advisory blocks post through the window and store nothing (B-107)', async () => {
     await post(A, null, stateA, reference);
-    expect(await rows('SELECT id, billing FROM model_providers ORDER BY id')).toEqual([
-      { id: 'opencode_go_plus', billing: 'subscription' }, { id: 'zai', billing: 'subscription' }]);
-    expect(await rows(`SELECT model_id, input_per_m, monthly_limit_usd, peak_schedule_id FROM provider_models ORDER BY model_id`)).toEqual([
-      { model_id: 'opencode-go/deepseek-v4-pro', input_per_m: 1.32, monthly_limit_usd: 60, peak_schedule_id: 'deepseek' },
-      { model_id: 'zai-coding-plan/glm-5.3', input_per_m: 1.4, monthly_limit_usd: null, peak_schedule_id: 'zai' }]);
     expect(await rows('SELECT name, family, bills, models FROM reviewer_agents ORDER BY name')).toEqual([
       { name: 'review-pr-claude', family: 'claude', bills: '["zai-coding-plan","anthropic"]', models: '{"zai-coding-plan":"zai-coding-plan/glm-5.3-flash","anthropic":"claude-opus-5-5"}' },
       { name: 'review-pr-glm', family: 'glm', bills: '["zai-coding-plan"]', models: null }]);
     // min_skills_version is gone (R-BTN-22): the registry carries each course's version.
     expect(await rows(`SELECT id, version, min_worker_version FROM courses`)).toEqual([{ id: 'roadmap-pr', version: 3, min_worker_version: 3 }]);
+    // The `providers` and `prices` the reference still carries (the sync keeps posting them
+    // through the window) reach no table: the advisory's are gone by migration.
+    expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('model_providers', 'provider_models', 'peak_schedules', 'provider_suspensions')`)).toEqual([]);
   });
 
-  it('an account the providers file no longer lists is deleted', async () => {
-    await post(A, null, stateA, reference);
-    const providers = { ...reference.providers, accounts: reference.providers.accounts.filter((a) => a.id !== 'zai'), models: reference.providers.models.filter((m) => m.provider !== 'zai') };
-    await post(B, A, stateA, { ...reference, providers });
-    expect(await rows('SELECT id FROM model_providers')).toEqual([{ id: 'opencode_go_plus' }]);
-    const s = (await (await ownerCall('/v1/ui/state')).json()) as { providers: { id: string }[] };
-    expect(s.providers.map((p) => p.id)).toEqual(['opencode_go_plus']);
-  });
-
-  it('the Ready view orders each tier ceiling by rank; Providers shows peak now and the next change', async () => {
-    // Monday 2026-10-12 07:30 UTC: inside both the DeepSeek and the Z.AI peak (06–10).
-    await setClock(Date.parse('2026-10-12T07:30:00Z'));
+  it('the Ready view orders each tier ceiling by rank', async () => {
     await post(A, null, stateA, reference);
     const s = (await (await ownerCall('/v1/ui/state')).json()) as {
       repositories: { id: string; head: { sha: string; ticket_count: number } }[];
       ready: { id: string; title: string; url: string; rank_reason: string; requires: string[]; operator_only: boolean }[];
       ready_by_tier: Record<string, string[]>;
-      providers: { id: string; peaks: { schedule: string; in_peak: boolean; next_change: number }[] }[];
     };
     expect(s.repositories.find((r) => r.id === 'docs')!.head).toMatchObject({ sha: A, ticket_count: 4 });
     expect(s.ready.map((r) => r.id)).toEqual(stateA.ready.map(q));
     expect(s.ready_by_tier).toEqual({ routine: [q('R3-9001')], judgement: [q('R3-9001'), q('R3-9002')], critical: [q('R3-9001'), q('R3-9002'), q('R3-9003')] });
     expect(s.ready[0]).toMatchObject({ repository_id: 'docs', local_id: 'R3-9001', url: 'https://github.com/immediately-run/docs/blob/main/content/roadmap/R3-9001.mdx', rank_reason: 'autonomous queue · order 10' });
     expect(s.ready.find((r) => r.id === q('R3-9003'))).toMatchObject({ operator_only: true });
-    const zai = s.providers.find((p) => p.id === 'zai')!;
-    expect(zai.peaks).toMatchObject([{ schedule: 'zai', in_peak: true, next_change: Date.parse('2026-10-12T10:00:00Z') }]);
   });
 });

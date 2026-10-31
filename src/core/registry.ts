@@ -340,10 +340,11 @@ export class Registry {
     return r ? parse(r) : null;
   }
 
-  /** The repository whose sync still posts the instance's fleet data — providers, prices, the
-   *  reviewer matrix and catalog — until the course data of §7.1's board post replaces them (§2a drops the reference repository; R3-1231). An interim, so it is
-   *  the one a deployment registered first (docs, the board these tables came from), and no
-   *  other repository's sync can rewrite what every repository's claims read. */
+  /** The repository whose sync still posts the instance's fleet data — the reviewer matrix and
+   *  catalog — until the course data of §7.1's board post replaces them (§2a drops the reference repository; R3-1231). The provider advisory's blocks are not fleet data
+   *  since B-107: a sync still posting `providers` or `prices` is ignored for them. An interim,
+   *  so it is the one a deployment registered first (docs, the board these tables came from),
+   *  and no other repository's sync can rewrite what every repository's claims read. */
   fleetRepository(): string | null {
     return this.rows<{ id: string }>('SELECT id FROM repositories WHERE retired_at IS NULL ORDER BY rowid LIMIT 1')[0]?.id ?? null;
   }
