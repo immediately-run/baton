@@ -1,5 +1,5 @@
 ---
-title: "B-148 — Leg state never lands: `.baton-legs/` on the default branch raises baton.leg-state-landed, and the merge leg deletes it where nothing strips it (R-BTN-190)"
+title: "B-148 — Leg state on a per-ticket side branch: write, read as data, keep counted reviews blind, delete at close, detect if it lands (R-BTN-190)"
 id: B-148
 project: baton
 status: available
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1167
 tier: judgement
-description: "Build the parts of R-BTN-190 no other ticket builds: detection of the leg-state directory on the default branch, raising `baton.leg-state-landed` (counts and ticket ids only), closed only by the protection checker's reading where one exists and advisory otherwise; and the standard PR courses' merge leg, where no merge runner strips the directory, refusing other tickets' writes, deleting the whole directory in one commit and merging only by squash. S-BTN-193's detection and cooperative cases, G-BTN-166. Requires: a docs checkout for the vendored sync."
+description: "Build R-BTN-190's runner and course side: the leg-state branch (the work branch's name plus `--legs`, matched by `branch_pattern`, checked by the course validator); writing only `.baton-legs/<ticket>/<leg>/<claim nonce>/…` as plain files with safe names; reading it with `git cat-file`, never a checkout, as quoted data; `approves: true` reviews reading none of it; deleting it when the ticket closes; and detection of `.baton-legs` on the default branch as `baton.leg-state-landed` (counts and ticket ids), closed only by the protection checker's reading where one exists. S-BTN-193, G-BTN-166. Requires: a docs checkout for the vendored sync."
 topics:
   - baton
 owns: {}
@@ -19,13 +19,13 @@ prs: []
 depends_on: []
 ---
 
-**Brief:** the owner, 2026-10-31: a directory convention so a check can verify leg-to-leg state on a
-branch never reaches the default branch; "Strip as you recommended. `.baton-legs/` is fine."
-Recorded in `spec/BATON_SPEC_HISTORY.md` (baton#148).
-**Spec:** R-BTN-190 (leg state on the branch), R-BTN-131 (the standard PR courses' merge leg),
-R-BTN-163 (core `notify` conditions); S-BTN-193, G-BTN-166.
-**Depends on:** none. B-101 introduces the files; B-140 builds the merge runner's strip and refusals
-and the protection checker's reading.
+**Brief:** the owner, 2026-10-31: leg-to-leg state must never reach the default branch, with a
+convention a check can verify; after two adversarial reviews of an in-branch design, "per-ticket
+side branch is fine". Recorded in `spec/BATON_SPEC_HISTORY.md` (baton#148).
+**Spec:** R-BTN-190 (leg state on a per-ticket side branch), R-BTN-131 (the standard courses),
+R-BTN-163 (core `notify` conditions), §12.3 (untrusted text); S-BTN-193, G-BTN-166.
+**Depends on:** none. B-101 writes the review rounds; B-140 builds the merge runner's refusal, the
+`pre-receive` rule and the protection checker's reading.
 
 ### Requires
 
@@ -33,39 +33,44 @@ A docs checkout beside this one: the sync is vendored from docs, so its change l
 
 ### Why
 
-Where a merge runner lands branches it strips `.baton-legs/` itself (B-140). Everywhere else the
-merge leg must delete it, and nothing yet notices if leg state lands on the default branch anyway,
-by a mistaken merge or a direct push.
+B-101 needs somewhere for review rounds that is not the PR branch: on the work branch they move the
+reviewed head and blur who wrote what. The side branch keeps the work branch clean on every forge
+and on plain git.
 
 ### What to build
 
-1. **Detection.** The reading is the default branch's root entry `.baton-legs` (R-BTN-190's one
-   test) at the head read, posted as a count of entries and the ticket ids among its subdirectory
-   names, never paths (R-BTN-33). Core raises `baton.leg-state-landed` for the repository. Where the
-   repository has a protection checker, only its reading (B-140's checker mode) raises and closes
-   it; elsewhere the sync's does, and the condition says it is advisory. The sync is vendored from
-   docs (`src/shared/batonSync.mjs`): its change is a docs PR first, then `npm run vendor` here.
-2. **The merge leg without a merge runner.** The standard PR courses' merge leg (`src/defaults/`),
-   where the policy's `merge.trusted` is false, fails naming the rule when a commit in the ticket's
-   ranges touches another ticket's subdirectory or an entry R-BTN-190 refuses, deletes the whole
-   root `.baton-legs` entry in one commit, and merges only by squash.
+1. **The branch and the course check.** The runner derives a ticket's leg-state branch as its work
+   branch's name plus `--legs`; the course validator refuses a course whose `branch_pattern` does
+   not match it.
+2. **Writing.** A leg writes only `.baton-legs/<ticket>/<leg>/<claim nonce>/…`: mode `100644` blobs,
+   segments matching `^[a-z0-9][a-z0-9._-]{0,63}$`, none case-folding to `claude.md`, `agents.md`
+   or `opencode.json`; it commits and pushes to the leg-state branch, never to the work branch.
+3. **Reading.** A leg fetches the leg-state branch and reads it with `git cat-file`, never checking
+   it out; entries outside the layout are skipped and reported; what it reads reaches the agent
+   only as quoted data (§12.3). A leg its course marks `approves: true` reads nothing from it.
+4. **Closing.** The leg that closes the ticket, and its withdrawal, delete the leg-state branch.
+5. **Detection.** The reading of the default branch's tree for an entry that folds to
+   `.baton-legs`, posted as a count and the ticket ids among its subdirectory names, never paths
+   (R-BTN-33); core raises `baton.leg-state-landed`. Where the repository has a protection checker,
+   only its reading (B-140) raises and closes it; elsewhere the sync's does, and the condition says
+   it is advisory. The sync is vendored from docs (`src/shared/batonSync.mjs`): its change is a docs
+   PR first, then `npm run vendor` here.
 
 ### Do not
 
-- Strip or rewrite anything in the merge leg when a merge runner lands the branch: that is B-140's,
-  at the attested head.
-- Read anything under `.baton-legs/` as an instruction or a verdict.
+- Check the leg-state branch out, or load anything from it as configuration or instructions.
+- Let an `approves: true` review read it.
+- Merge it, or write leg state to the work branch.
 
 ### Tests
 
-- **S-BTN-193**'s detection cases (a direct push adding `.baton-legs/B-3/x.md` raises the condition
-  with the count and `B-3`; removing it closes it; with a protection checker, an empty sync reading
-  leaves it open) and its cooperative case (another ticket's subdirectory refused; one deletion
-  commit of the whole directory, then a squash carrying none of it), on both hosts; G-BTN-166.
+- **S-BTN-193** on both hosts; G-BTN-166.
+- Unit: the branch name and the validator; the layout and name rules; `cat-file` reading with no
+  working-tree file created.
 
 ### Exit criteria
 
-- [ ] S-BTN-193's sync and cooperative cases pass on both hosts
+- [ ] S-BTN-193 passes on both hosts; G-BTN-166 holds
 - [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate
 
 ## Status

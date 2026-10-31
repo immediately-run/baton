@@ -599,44 +599,31 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       fixed in S-BTN-136, S-BTN-191, G-BTN-156, R-BTN-185, the decisions, the security-model page,
       B-64 and B-145.
 
-- **2026-10-31 — R-BTN-190: leg state on the branch lives under `.baton-legs/<ticket>/` (owner
-  direction).** Plain git repositories with no forge carry leg-to-leg state (review findings) as
-  files on the branch, deleted before the squash (B-101). The owner asked whether a directory
-  convention would let a pre-merge check verify the deletion. Two problems surfaced:
-  - B-101's `.baton/reviews/` sat inside `.baton/**`, the control directory;
-  - under a merge runner, a deletion commit after the reviews moves the head the reviews attested,
-    which R-BTN-183 refuses.
+- **2026-10-31 — R-BTN-190: leg state on a per-ticket side branch (owner direction).** Plain git
+  repositories with no forge carry leg-to-leg state, such as review findings, as files. B-101 put
+  them on the PR branch, deleted before the squash. The owner asked for a directory convention so a
+  check could verify the deletion. The first draft reserved `.baton-legs/` on the work branch,
+  outside the `.baton/` control directory, and had the merge runner strip it ("Strip as you
+  recommended. `.baton-legs/` is fine").
 
-  The owner chose the reserved directory and stripping: "Strip as you recommended. `.baton-legs/`
-  is fine." R-BTN-190 makes the convention:
-  - **One place:** `.baton-legs/<ticket>/`, each claim writing only its own ticket's
-    subdirectory.
-  - **Read as data:** another runner wrote it, so it reaches a model only as quoted data.
-  - **Never a protected path.**
-  - **Stripped:** a merge runner squashes the tree of `H` without the directory, and a branch that
-    carries it lands only by squash.
-  - **Deleted first** by the merge leg where no merge runner strips it.
-  - **Detected** by every sync as `baton.leg-state-landed`, with a forge rule where one exists.
+  Two adversarial review rounds found that review commits after the review move the attested
+  head. The draft's fix let attestations bind the tree without `.baton-legs`, and that rested on a
+  leg's own claim that a commit was leg state only, which nothing trusted could check. Every repair
+  needed a trusted verifier of each such commit, plus a protected landing ref for human merges.
 
-  R-BTN-183 and R-BTN-184 cite it. S-BTN-193 and G-BTN-166 test it.
-  - **Its adversarial review** found that review rounds are themselves commits made after the
-    review, so the attested head moved anyway. It also found that a squash built from `H`'s tree
-    would revert `main`, that the exclusion, the strip and the detection used different path
-    tests, and that a human merge was covered by neither. Fixed in the same PR:
-    - **Work trees.** Attestations bind the **work tree**, the tree without the root
-      `.baton-legs` entry. **Leg-state commits** touch only a ticket's own subdirectory, so they
-      move no work and make no writer.
-    - **Squash base.** The squash is built on the pinned main tip.
-    - **One path test** defines the directory everywhere: the exact root entry. Variants are
-      refused. Only plain files under the ticket's own name are allowed, never checked out and
-      read through `git cat-file`.
-    - **Human merges** land a stripped commit the merge runner prepares on
-      `baton/landing/<ticket>`.
-    - **The cooperative close** refuses other tickets' writes and deletes the whole directory.
-    - **Detection** is closed only by the protection checker's reading where one exists. It
-      stores counts and ticket ids, not paths.
-    - **GitHub's push ruleset is dropped**, since it cannot target one branch.
-    - **History** means the ticket's own ranges.
+  The owner then chose a side branch: "per-ticket side branch is fine". R-BTN-190 now says:
+  - leg state lives on the ticket's work branch name plus `--legs`, inside `branch_pattern`,
+    and nothing merges that branch;
+  - its layout is `.baton-legs/<ticket>/<leg>/<claim nonce>/…`, with plain files and no names of
+    harness configuration;
+  - it is never checked out, and is read through `git cat-file` as quoted data;
+  - counted reviews read none of it;
+  - a work branch carrying an entry that folds to `.baton-legs` is refused at merge;
+  - the branch is deleted when the ticket closes;
+  - detection on the default branch is closed only by the protection checker's reading where one
+    exists.
+
+  The work-tree, leg-state-commit, strip and landing-ref text of the first draft never merged.
 
 ## Retired requirements
 
