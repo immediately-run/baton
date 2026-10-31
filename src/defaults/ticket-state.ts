@@ -106,8 +106,9 @@ export const PUSH_TRIES = 3;
 
 /** A push the remote refused because the branch moved — the one failure a re-read can fix. Not
  * git's summary line (`failed to push some refs`), which every refusal prints: a hook or a
- * protected branch says `[remote rejected]`, and no re-read fixes that. */
-const movedOnRemote = (e: unknown): boolean => {
+ * protected branch says `[remote rejected]`, and no re-read fixes that. Exported for the
+ * review-rounds protocol's branch writes (B-101), which retry exactly the same way. */
+export const movedOnRemote = (e: unknown): boolean => {
   const err = e as { stderr?: unknown; message?: unknown };
   return /! \[rejected\]|non-fast-forward|\(fetch first\)/.test(`${String(err?.stderr ?? '')}\n${String(err?.message ?? '')}`);
 };

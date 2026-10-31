@@ -53,7 +53,12 @@ closing a PR answers no finding, so the owner reopens it, or files a fresh reque
 
 - **Read first**: the ticket, the specification, the latest review round and the rounds before it,
   and the corpus the findings cite. Every finding is a claim: open the cited sections yourself
-  before deciding anything about it.
+  before deciding anything about it. The rounds live on the PR branch as files (B-101): after
+  `git fetch origin`, `git show origin/<branch>:.baton/reviews/<n>.md` is the round — the
+  verdict line first, then every finding with its severity and citation — and
+  `.baton/reviews/<n>-addressed.md` the replies before it. Read them there, not from the
+  conversation: that file is the channel, and on a repository with no forge it is the only
+  copy there is.
 - **Take the blocking findings one at a time, most severe first**, and put the decision to the
   owner with a recommendation: "(a) fix it — the specification should say …, because …; (b) argue
   it — the finding misreads …, and the reply quotes …; (c) split it — it needs more than this
@@ -71,6 +76,13 @@ closing a PR answers no finding, so the owner reopens it, or files a fresh reque
   what changed — and ask whether to push. **Only on their yes**: commit on the PR's branch (with
   explicit paths, never `git add -A`; add commits, never rewrite the branch's history), push once
   with every answer in it, reply on the threads you fixed naming the commit, and end the session.
+
+**Leave the round's replies at `.baton/reviews/addressed.md` in the checkout, uncommitted**
+(B-101) — one line per finding: the decision taken (a, b or c) and where it landed (the commit,
+the reply's reasoning, the child ticket). The leg's close commits them beside the round as
+`.baton/reviews/<n>-addressed.md`, and the next round's reviewer reads the rounds and the
+replies from the branch. When the ticket's PRs are in other repositories too, commit the same
+replies file to each of their PR branches yourself; the close covers this repository's.
 
 Record the round under the ticket's own `## address` heading when you write in the ticket; this leg's close checks no heading — its record is the frontmatter state, and its work is the PR.
 

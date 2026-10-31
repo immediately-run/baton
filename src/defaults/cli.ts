@@ -883,6 +883,13 @@ function stubSource(b: BuiltIn, course: string, leg: string): string {
   // PRs may sit in other repositories, and its home may have none.
   const names = b.reads === 'prs' && COMMENTING_LEGS.has(leg);
   const closeFrom = b.reads === 'prs' ? ['prClose', 'pr-close.ts'] : ['closeTicket', 'ticket-state.ts'];
+  // B-101: the review-rounds file protocol's legs — the rounds, the replies and the merge that
+  // clears them. Their stubs remove a stale draft before the agent runs (so the draft the close
+  // reads is this run's alone), and the merge leg clears the branch before its agent merges;
+  // their close carries `review_files` and the snapshot's branch patterns to `prClose`.
+  const protocol = b.review_files === true;
+  const protocolLeg = protocol && ['review', 'fix', 'address', 'merge'].includes(leg);
+  const protocolImports = !protocolLeg ? '' : `, ROUND_DRAFT, ADDRESSED_DRAFT${leg === 'merge' ? ', clearReviewFiles' : ''}`;
   // `prClose`'s marker legs (create-spec's interactive converse and address) write the ticket's
   // own frontmatter through ticket-state.ts's git plumbing (`closeTicket`), so a PR course's
   // close names that module too — one implementation, for a state the sync must find on the
@@ -932,9 +939,22 @@ function advisedCommand(words, settings, adviceFile) {
     return words;
   }
   return words;
-}${ask ? `
+}${protocol ? `
+// B-101: this course's branch patterns at the claim's snapshot — what names the checkout's
+// branch this ticket's PR, for the review-rounds protocol's writes and its clearing. Read at
+// the snapshot like everything the stub trusts; unreadable or absent, none are named and the
+// protocol's own default pattern applies.
+const snapshotPatterns = (ctx) => {
+  try {
+    const sha = ctx.snapshot?.sha;
+    if (typeof sha !== 'string' || sha === '') return [];
+    const settings = JSON.parse(gitRun('git', ['-C', ctx.checkout, 'show', sha + ':.baton/baton.json'], { maxBuffer: ${AGENT_OUTPUT_MAX} }));
+    const entry = (settings.courses ?? []).find((c) => c && c.id === ${JSON.stringify(b.id)}) ?? {};
+    return [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === 'string' && p !== '');
+  } catch { return []; }
+};` : ''}${ask ? `
 import { requireAnswer } from ${JSON.stringify(source('answer.ts'))};` : ''}
-import { ${closeFrom[0]} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
+import { ${closeFrom[0]}${protocolImports} } from ${JSON.stringify(source(closeFrom[1]))};${closeHelpers}${verify ? `
 import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-verify.ts'))};` : ''}
 // The \`${leg}\` leg of the \`${b.id}\` course, written by \`baton repo init\`: it runs this
 // repository's agent — \`agent_command\` in .baton/baton.json — with the ticket, the leg and the
@@ -954,10 +974,23 @@ import { verifyPrOpen, ticketRepositories } from ${JSON.stringify(source('pr-ver
 // open PR on a branch this course's branch patterns map to the ticket, its head pushed; where
 // it cannot verify, the leg fails naming what it looked for.` : ''}
 // The repository may replace this leg's run, never its close: \`${leg}.run.mjs\` beside this file
-// (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131).
+// (\`baton repo init --override ${leg}\`), read at the same snapshot (R-BTN-131).${protocol ? `
+// B-101, the review-rounds file protocol: this leg is one of its legs. The stale-draft cleanup
+// and (on merge) the branch clearing below run before the override too — the protocol is the
+// course's own machinery, not the agent's work to repeat or skip.` : ''}
 export async function run(ctx) {
   const sha = ctx.snapshot?.sha;
-  if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');
+  if (typeof sha !== 'string' || sha === '') throw new Error('the leg has no snapshot to read its override at');${protocolLeg ? `
+  // B-101: a stale protocol draft from an earlier run of this leg never rides into this one —
+  // the agent writes its drafts fresh, and the close reads them only because these went first.
+  for (const stale of [ROUND_DRAFT, ADDRESSED_DRAFT]) rmSync(join(ctx.checkout, stale), { force: true });` : ''}${protocol && leg === 'merge' ? `
+  // B-101 — this leg's first act, before the override and the agent: every \`.baton/reviews/\`
+  // file leaves the ticket's PR branch in one commit, so the squash this leg then lands carries
+  // none of the review protocol — main never sees the conversation. A checkout on some other
+  // branch (a ticket whose PRs are all in other repositories) clears nothing here; the close
+  // still holds the default branch clean after the merge.
+  await clearReviewFiles({ checkout: ctx.checkout, ticket: ctx.ticket, branch_patterns: snapshotPatterns(ctx) });
+  if (process.env.BATON_VERBOSE) process.stderr.write('baton: ' + ${JSON.stringify(`${b.id}/merge`)} + ' ticket ' + ctx.ticket.id + ': the review protocol left the PR branch before the merge\\n');` : ''}
   const rel = ${JSON.stringify(`.baton/courses/${course}/legs/${leg}${OVERRIDE_SUFFIX}`)};
   // As with the instructions below: only an empty listing means there is no override.
   if (gitRun('git', ['-C', ctx.checkout, 'ls-tree', '--name-only', sha, '--', rel]).trim() === '') return standard(ctx);
@@ -1086,8 +1119,16 @@ ${verify ? `  await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, b
 }
 // The close's ctx, one line (B-96's review round 2): everything the stub hands back, plus the
 // repository's default branch — the claim answer's \`default_branch\`, which the runner puts in
-// BATON_DEFAULT_BRANCH — where a marker leg's line goes, whatever branch this checkout is on.
-const closeCtx2 = (ctx) => ({ ...ctx, ...(ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === 'string' && process.env.BATON_DEFAULT_BRANCH !== '' ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {}) });
+// BATON_DEFAULT_BRANCH — where a marker leg's line goes, whatever branch this checkout is on.${protocol ? `
+// B-101: plus the review-rounds file protocol's own two — \`review_files\`, so the close writes
+// the round and the replies on the PR branch and holds the default branch clean of them, and
+// the snapshot's branch patterns, which name that branch this ticket's.` : ''}
+const closeCtx2 = (ctx) => ${protocol ? `{
+  const out = { ...ctx, review_files: true, ...(ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === 'string' && process.env.BATON_DEFAULT_BRANCH !== '' ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {}) };
+  const patterns = snapshotPatterns(ctx);
+  if (patterns.length > 0) out.branch_patterns = patterns;
+  return out;
+}` : `({ ...ctx, ...(ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === 'string' && process.env.BATON_DEFAULT_BRANCH !== '' ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {}) })`};
 export const close = (ctx, result) => ${closeFrom[0]}(closeCtx2(ctx), result);
 export async function handoff() { return null; }
 `;

@@ -163,12 +163,18 @@ describe('baton test-course', () => {
     // A stub that trusts the agent's exit 0 — B-81's failure: it returns pr-open for nothing.
     const legs = of('docs-pr', roadmapPr, source);
     scripts(legs, roadmapPr.legs, 'export async function run() { return { reached: "pr-open", next: "review" }; }');
+    // The hand-written merge stub predates B-101 (it clears no review protocol), so the kit's
+    // round trip names it beside the no-op: both are findings of the scripts it read.
     expect(await checkCourse(await readInputs(dir, 'docs-pr', { base: null }))).toEqual([
       expect.objectContaining({ rule: 'no-op', message: expect.stringContaining('legs/implement.mjs returned {"reached":"pr-open","next":"review"} for an agent_command that exits 0 with no PR') }),
+      expect.objectContaining({ rule: 'round-trip', message: expect.stringContaining('the merge leg left .baton/reviews/ on the PR branch') }),
     ]);
-    // The standard behaviour: the leg fails on what it cannot verify, and the kit passes.
+    // The standard behaviour: the leg fails on what it cannot verify, and the kit passes — the
+    // merge stub's throw is the round trip's to catch too, so it still names the one leg.
     scripts(legs, roadmapPr.legs, 'export async function run() { throw new Error("cannot verify KIT-1’s PR: gh pr list failed"); }');
-    expect(await checkCourse(await readInputs(dir, 'docs-pr', { base: null }))).toEqual([]);
+    expect(await checkCourse(await readInputs(dir, 'docs-pr', { base: null }))).toEqual([
+      expect.objectContaining({ rule: 'round-trip', message: expect.stringContaining('cannot verify KIT-1’s PR') }),
+    ]);
     rmSync(join(dir, '.baton', 'courses', 'docs-pr'), { recursive: true, force: true });
     // A marker course reports its agent's reached by design, and the core checks that against
     // the course graph: the no-op run is not its rule. Its close is the boundary (B-100): one
