@@ -7,10 +7,9 @@
 // request's key, signature, clock and nonce, which only the core can check (verifySigned).
 import { MIGRATIONS } from '../migrations';
 import { BatonError, errorResponse, json } from './http';
-import { checkPayload, DEFAULT_COURSE, inPeak, nextPeakChange, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation } from './board';
+import { checkPayload, DEFAULT_COURSE, rowFor, rowForTicket, rowHash, stationOf, type BoardPayload, type PostedStation } from './board';
 import { Stations, type Seen } from './stations';
 import { Admin, SESSION_COOKIE, SESSION_MS } from './admin';
-import { priceFor } from '../shared/sessionUsage.mjs';
 import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { WorkerApi } from './workerApi';
@@ -639,12 +638,6 @@ export class BatonCore {
         const body = await readJson(req);
         return json(tx(() => this.workers.sendMessage(owner, body)));
       }
-      if (p === '/v1/ui/suspensions') {
-        const body = await readJson(req);
-        return json(tx(() => this.workers.setSuspension(owner, body)));
-      }
-      const lift = /^\/v1\/ui\/suspensions\/(\d+)\/lift$/.exec(p);
-      if (lift) return json(tx(() => this.workers.liftSuspension(owner, Number(lift[1]))));
       const reap = /^\/v1\/ui\/claims\/(\d+)\/reap$/.exec(p);
       if (reap) {
         const body = await readJson(req);
@@ -1198,37 +1191,19 @@ export class BatonCore {
     return refused;
   }
 
-  /** The reference data the sync posts with every snapshot (§7.3, §7.4): providers, peak
-   *  schedules, per-model prices and limits, the reviewer catalog. Each
-   *  table is a copy of a docs file, never edited here, so it is rewritten whole: an account
-   *  the file no longer lists is deleted. (Nothing references `model_providers` yet; when
-   *  workers and suspensions do, R3-1211 decides what retiring a referenced account means.)
+  /** The reference data the sync posts with every snapshot (§7.3, §7.4): the reviewer catalog
+   *  and matrix. Each table is a copy of a docs file, never edited here, so it is rewritten
+   *  whole. The provider advisory's blocks — `providers`, `prices` — are gone (B-107): the
+   *  ontology's readings and route choices carry what they carried (§5.9, §6.10), and a sync
+   *  that still posts them is accepted with the fields ignored.
    *  Returns whether the payload carried fleet data this repository may not write. */
   private reference(repo: string, p: BoardPayload): boolean {
     const exec = (q: string, ...a: unknown[]) => this.store.exec(q, ...a);
     // §6.8, R-BTN-66: a repository's transcript repositories are its owners' setting, never read
     // from a board post (R3-1240); a sync that still sends them is not refused for it.
     // The rest is the instance's: only the fleet repository writes it (interim, R3-1231 2b).
-    const carries = p.providers != null || p.matrix != null || p.reviewers != null;
+    const carries = p.matrix != null || p.reviewers != null;
     if (this.registry.fleetRepository() !== repo) return carries;
-    if (p.providers) {
-      exec('DELETE FROM provider_models');
-      const ids = p.providers.accounts.map((a) => a.id);
-      exec(`DELETE FROM model_providers WHERE id NOT IN (${ids.map(() => '?').join(', ') || "''"})`, ...ids);
-      for (const a of p.providers.accounts) {
-        exec(`INSERT INTO model_providers (id, name, billing, window_limits_json) VALUES (?, ?, ?, ?)
-              ON CONFLICT (id) DO UPDATE SET name = excluded.name, billing = excluded.billing, window_limits_json = excluded.window_limits_json`,
-          a.id, a.name, a.billing, a.window_limits ? JSON.stringify(a.window_limits) : null);
-      }
-      exec('DELETE FROM peak_schedules');
-      for (const s of p.providers.peak_schedules) exec('INSERT INTO peak_schedules (id, rules_json, factor) VALUES (?, ?, ?)', s.id, JSON.stringify(s.rules), s.factor);
-      for (const m of p.providers.models) {
-        const price = priceFor(m.model, p.prices);
-        exec(`INSERT INTO provider_models (provider_id, model_id, input_per_m, output_per_m, cache_read_per_m, cache_write_per_m, monthly_limit_usd, peak_schedule_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          m.provider, m.model, price?.input ?? null, price?.output ?? null, price?.cacheRead ?? null, price?.cacheWrite5m ?? null, m.monthly_limit_usd, m.peak_schedule ?? null);
-      }
-    }
     const catalog = p.reviewers ?? p.matrix?.agents;
     if (catalog && p.matrix) {
       exec('DELETE FROM reviewer_agents');
@@ -1386,26 +1361,13 @@ export class BatonCore {
     const ready = this.readyRows(repositories);
     const byTier = this.readyByTier(ready);
 
-    const schedules = new Map(this.sql<{ id: string; rules_json: string; factor: number }>('SELECT id, rules_json, factor FROM peak_schedules').map((s) => [s.id, s]));
-    const providers = this.sql<{ id: string; name: string; billing: string; window_limits_json: string | null }>('SELECT id, name, billing, window_limits_json FROM model_providers ORDER BY id').map((a) => {
-      const models = this.sql<{ model_id: string; monthly_limit_usd: number | null; peak_schedule_id: string | null }>(
-        'SELECT model_id, monthly_limit_usd, peak_schedule_id FROM provider_models WHERE provider_id = ? ORDER BY model_id', a.id);
-      const peaks = [...new Set(models.map((m) => m.peak_schedule_id).filter((x): x is string => !!x))].map((id) => {
-        const s = schedules.get(id);
-        if (!s) return { schedule: id, in_peak: null, next_change: null, factor: null };
-        const rules = JSON.parse(s.rules_json);
-        return { schedule: id, in_peak: inPeak(rules, now), next_change: nextPeakChange(rules, now), factor: s.factor, models: models.filter((m) => m.peak_schedule_id === id).map((m) => m.model_id) };
-      });
-      return { id: a.id, name: a.name, billing: a.billing, window_limits: a.window_limits_json ? JSON.parse(a.window_limits_json) : null, models, peaks };
-    });
-
     const held = this.sql(
       `SELECT repository_id, sha, parent_sha, head_sha, ticket_count, received_at, auto_accept_at FROM held_snapshots
        WHERE accepted_at IS NULL ORDER BY received_at`);
-    const suspensions = this.sql(`SELECT id, provider_id, model_id, mode, starts_at, ends_at, reason, set_by, lifted_at FROM provider_suspensions
-                                  WHERE lifted_at IS NULL AND (ends_at IS NULL OR ends_at > ?) ORDER BY starts_at`, now);
+    // B-107: `providers` and `suspensions` served here no more — a peak-cost preference is a
+    // route choice's guard over a capacity reading, an unavailable provider a reading (§6.10).
     return {
-      server_time: now, repositories, ready, ready_by_tier: byTier, providers, held, workers: this.workers.workersView(now), suspensions,
+      server_time: now, repositories, ready, ready_by_tier: byTier, held, workers: this.workers.workersView(now),
       running: this.claims.running(now), timeline: this.claims.timeline(now),
       // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
       limits: this.admin.view(now),

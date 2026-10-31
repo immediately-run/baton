@@ -97,8 +97,9 @@ export interface BoardPayload {
   closed?: { id: string; as: 'done' | 'withdrawn' }[];
   stations?: Record<string, PostedStation>;
   confirmations?: unknown[];
-  prices?: { models: { match: string; input?: number; output?: number; cacheRead?: number; cacheWrite5m?: number }[] };
-  providers?: ProvidersData;
+  /** B-107: `prices` and `providers` are gone with the provider advisory (§5.9, §6.10
+   *  replaced them). A sync that still posts either is not refused for it — accepted with the
+   *  field ignored, as `min_skills_version` above — until no registered repository posts it. */
   reviewers?: Record<string, { reviews_on: string; bills: string[]; models?: Record<string, string> }>;
   matrix?: { families: Record<string, string[]>; agents: Record<string, { reviews_on: string; bills: string[]; models?: Record<string, string> }> };
   /** The course registry (R-BTN-48, §7.1); absent, the courses in force stay. */
@@ -107,12 +108,6 @@ export interface BoardPayload {
   ontology?: { builtin?: string | null; program: unknown } | { error: string };
   /** §6.8: the transcript repositories from `baton.json`; absent, the defaults stand. */
   transcript_repos?: string[];
-}
-
-export interface ProvidersData {
-  accounts: { id: string; name: string; billing: 'subscription' | 'api'; window_limits: Record<string, number> | null }[];
-  peak_schedules: { id: string; rules: { days: number[]; hoursUtc: [number, number][] }; factor: number }[];
-  models: { provider: string; model: string; monthly_limit_usd: number | null; peak_schedule?: string }[];
 }
 
 /** A `tickets` row (§4) plus its expanded requirements (`ticket_requires`). */
@@ -424,9 +419,7 @@ export function stationOf(st: PostedStation): PostedStation {
   };
 }
 
-const ACCOUNT = /^[a-z0-9_]{1,64}$/;
 const MODEL = /^[A-Za-z0-9._/:-]{1,200}$/;
-const isNum = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const bad = (field: string, why: string): never => {
   throw new BatonError('invalid-params', `${field}: ${why}`);
@@ -453,47 +446,9 @@ function catalog(field: string, agents: unknown) {
 }
 
 /** The reference blocks (§7.3, §7.4) are docs data files: a malformed one is refused, named,
- *  before anything is written, never left to fail a constraint mid-transaction. */
+ *  before anything is written, never left to fail a constraint mid-transaction. The provider
+ *  advisory's blocks (B-107) validate nowhere: `providers` and `prices` are accepted unread. */
 function checkReference(p: BoardPayload) {
-  if (p.prices !== undefined) {
-    if (!isObj(p.prices) || !Array.isArray(p.prices.models)) bad('prices.models', 'must be a list');
-    p.prices.models.forEach((m, i) => {
-      if (!isObj(m)) bad(`prices.models[${i}]`, 'must be an object');
-      regex(`prices.models[${i}].match`, m.match);
-      for (const k of ['input', 'output', 'cacheRead', 'cacheWrite5m'] as const) if (m[k] !== undefined && !isNum(m[k])) bad(`prices.models[${i}].${k}`, 'must be a number');
-    });
-  }
-  if (p.providers !== undefined) {
-    const pr = p.providers;
-    if (!isObj(pr) || !Array.isArray(pr.accounts) || !Array.isArray(pr.peak_schedules) || !Array.isArray(pr.models)) bad('providers', 'needs accounts, peak_schedules and models lists');
-    const accounts = new Set<string>();
-    pr.accounts.forEach((a, i) => {
-      if (!isObj(a) || typeof a.id !== 'string' || !ACCOUNT.test(a.id)) bad(`providers.accounts[${i}].id`, 'is malformed');
-      if (accounts.has(a.id)) bad(`providers.accounts[${i}].id`, `repeats ${a.id}`);
-      if (typeof a.name !== 'string' || !TEXT.test(a.name)) bad(`providers.accounts[${i}].name`, 'must be short text');
-      if (a.billing !== 'subscription' && a.billing !== 'api') bad(`providers.accounts[${i}].billing`, "must be 'subscription' or 'api'");
-      if (a.window_limits !== null && !(isObj(a.window_limits) && Object.values(a.window_limits).every(isNum))) bad(`providers.accounts[${i}].window_limits`, 'must be null or numbers by window');
-      accounts.add(a.id);
-    });
-    const schedules = new Set<string>();
-    pr.peak_schedules.forEach((sc, i) => {
-      const ok = isObj(sc) && typeof sc.id === 'string' && NAME.test(sc.id) && isNum(sc.factor) && isObj(sc.rules) &&
-        Array.isArray(sc.rules.days) && sc.rules.days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6) &&
-        Array.isArray(sc.rules.hoursUtc) && sc.rules.hoursUtc.every((h) => Array.isArray(h) && h.length === 2 && Number.isInteger(h[0]) && Number.isInteger(h[1]) && 0 <= h[0] && h[0] < h[1] && h[1] <= 24);
-      if (!ok) bad(`providers.peak_schedules[${i}]`, 'needs an id, days 0–6, [start, end) hour pairs and a numeric factor');
-      if (schedules.has(sc.id)) bad(`providers.peak_schedules[${i}].id`, `repeats ${sc.id}`);
-      schedules.add(sc.id);
-    });
-    const pairs = new Set<string>();
-    pr.models.forEach((m, i) => {
-      if (!isObj(m) || !accounts.has(m.provider)) bad(`providers.models[${i}].provider`, 'must name an account in providers.accounts');
-      if (typeof m.model !== 'string' || !MODEL.test(m.model)) bad(`providers.models[${i}].model`, 'must be a model id');
-      if (m.monthly_limit_usd !== null && !isNum(m.monthly_limit_usd)) bad(`providers.models[${i}].monthly_limit_usd`, 'must be a number or null');
-      if (m.peak_schedule !== undefined && !schedules.has(m.peak_schedule)) bad(`providers.models[${i}].peak_schedule`, 'must name a schedule in providers.peak_schedules');
-      if (pairs.has(`${m.provider} ${m.model}`)) bad(`providers.models[${i}]`, `repeats ${m.provider} ${m.model}`);
-      pairs.add(`${m.provider} ${m.model}`);
-    });
-  }
   if (p.matrix !== undefined) {
     if (!isObj(p.matrix) || !isObj(p.matrix.families)) bad('matrix.families', 'must be an object');
     for (const [fam, pats] of Object.entries(p.matrix.families)) {
@@ -586,23 +541,4 @@ export async function rowHash(row: TicketRow): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(row));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-// ── peaks (§7.3, the Providers view) ────────────────────────────────────────────────────
-
-const HOUR = 3_600_000;
-
-/** Whether `ms` falls in a schedule's peak (UTC weekday in `days`, hour in a [start, end) pair). */
-export function inPeak(rules: { days: number[]; hoursUtc: [number, number][] }, ms: number): boolean {
-  const d = new Date(ms);
-  const h = d.getUTCHours();
-  return rules.days.includes(d.getUTCDay()) && rules.hoursUtc.some(([a, b]) => a <= h && h < b);
-}
-
-/** The next hour boundary at which `inPeak` flips, within 8 days, or null. */
-export function nextPeakChange(rules: { days: number[]; hoursUtc: [number, number][] }, ms: number): number | null {
-  const now = inPeak(rules, ms);
-  let t = Math.floor(ms / HOUR) * HOUR + HOUR;
-  for (let i = 0; i < 24 * 8; i++, t += HOUR) if (inPeak(rules, t) !== now) return t;
-  return null;
 }

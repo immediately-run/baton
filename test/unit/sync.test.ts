@@ -75,20 +75,24 @@ describe('POST /v1/sync/board', () => {
     ['a report horizon past 168 hours', { ...payload(A, null, board.states.A), registry: [course(3, 3, { report_horizon_h: 169 })] }],
     ['a version past the ceiling', { ...payload(A, null, board.states.A), registry: [course(1_000_000_001, 0)] }],
     ['an item naming a malformed course', { sha: A, parent_sha: null, state: { items: [{ id: 'R3-1', title: 't', status: 'available', queue: 'autonomous', node: 'blocked', course: 'Roadmap PR' }] }, ready: [] }],
-    ['an account list that is not a list', { ...payload(A, null, board.states.A), providers: { accounts: 'x', peak_schedules: [], models: [] } }],
-    ['an unknown billing kind', { ...payload(A, null, board.states.A), providers: { accounts: [{ id: 'zai', name: 'Z', billing: 'credits', window_limits: null }], peak_schedules: [], models: [] } }],
-    ['a model on an unknown schedule', { ...payload(A, null, board.states.A), providers: { accounts: [{ id: 'zai', name: 'Z', billing: 'api', window_limits: null }], peak_schedules: [], models: [{ provider: 'zai', model: 'm', monthly_limit_usd: null, peak_schedule: 'nope' }] } }],
-    ['a model on an unknown account', { ...payload(A, null, board.states.A), providers: { accounts: [], peak_schedules: [], models: [{ provider: 'zai', model: 'm', monthly_limit_usd: null }] } }],
-    ['a price pattern that does not compile', { ...payload(A, null, board.states.A), prices: { models: [{ match: '(', input: 1 }] } }],
-    ['a repeated peak schedule id', { ...payload(A, null, board.states.A), providers: { accounts: [], peak_schedules: [{ id: 'x', rules: { days: [1], hoursUtc: [[1, 2]] }, factor: 0.5 }, { id: 'x', rules: { days: [1], hoursUtc: [[1, 2]] }, factor: 0.5 }], models: [] } }],
-    ['a repeated (provider, model) pair', { ...payload(A, null, board.states.A), providers: { accounts: [{ id: 'zai', name: 'Z', billing: 'api', window_limits: null }], peak_schedules: [], models: [{ provider: 'zai', model: 'm', monthly_limit_usd: null }, { provider: 'zai', model: 'm', monthly_limit_usd: 1 }] } }],
-    ['a repeated account id', { ...payload(A, null, board.states.A), providers: { accounts: [{ id: 'zai', name: 'Z', billing: 'api', window_limits: null }, { id: 'zai', name: 'Z2', billing: 'api', window_limits: null }], peak_schedules: [], models: [] } }],
     ['a reviewer with no bills', { ...payload(A, null, board.states.A), matrix: { families: {}, agents: { 'review-pr-x': { reviews_on: 'm' } } } }],
   ])('refuses %s with invalid-params, writing nothing', async (_what, bad) => {
     const res = await syncCall('/v1/sync/board', bad);
     expect(res.status).toBe(400);
     expect((await body(res)).code).toBe('invalid-params');
     expect(await head()).toBeNull();
+  });
+
+  it('B-107: a post still carrying a providers block or prices is accepted and stores nothing', async () => {
+    // The fixture states are the real sync's buildPayload output, `providers` and `prices`
+    // included (§5.9, §6.10 replaced them): the window accepts the post and ignores both. Even
+    // a malformed advisory block no longer refuses — it is residue, read nowhere.
+    const res = await post(A, null, 'A');
+    expect(res.status).toBe(200);
+    const residue = { providers: { accounts: 'not even a list' }, prices: { models: [{ match: '(', input: 'x' }] } };
+    expect((await post(B, A, 'B', residue)).status).toBe(200);
+    expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('model_providers', 'provider_models', 'peak_schedules')`)).toEqual([]);
+    expect(await head()).toBe(B);
   });
 
   it.skipIf(!inject('liveBoard'))("accepts what the docs sync builds for today's board, reference data included", async () => {
@@ -98,7 +102,9 @@ describe('POST /v1/sync/board', () => {
     const res = await syncCall('/v1/sync/board', payload('f'.repeat(40), null, live));
     expect(res.status).toBe(200);
     expect(await rows('SELECT count(*) AS n FROM tickets')).toEqual([{ n: live.state.items.length }]);
-    expect(await rows('SELECT count(*) AS n FROM model_providers')).toEqual([{ n: live.providers.accounts.length }]);
+    // B-107: the providers block the sync still posts is accepted and ignored — no table exists.
+    expect(live.providers.accounts.length).toBeGreaterThan(0);
+    expect(await rows(`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'model_providers'`)).toEqual([{ n: 0 }]);
     expect(await rows('SELECT count(*) AS n FROM reviewer_agents')).toEqual([{ n: Object.keys(live.reviewers).length }]);
   });
 });
