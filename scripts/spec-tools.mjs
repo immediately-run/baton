@@ -53,7 +53,8 @@ export function units(spec, prefix = CONFIG.prefix) {
     const ids = headingIds(line, prefix);
     if (ids) {
       close();
-      const title = /\(([^)]*)\)/.exec(line)?.[1] ?? '';
+      // A title may wrap onto the next line: take what the heading line holds.
+      const title = /\(([^)]*)(?:\)|$)/.exec(line)?.[1]?.trim() ?? '';
       rule = { kind: 'rule', label: `${ids.join(' / ')} (${title})`, ids, line: n, text: line };
       return;
     }
