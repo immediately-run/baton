@@ -599,6 +599,27 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       fixed in S-BTN-136, S-BTN-191, G-BTN-156, R-BTN-185, the decisions, the security-model page,
       B-64 and B-145.
 
+- **2026-10-31 — R-BTN-190: leg state on the branch lives under `.baton-legs/<ticket>/` (owner
+  direction).** Plain git repositories with no forge carry leg-to-leg state (review findings) as
+  files on the branch, deleted before the squash (B-101). The owner asked whether a directory
+  convention would let a pre-merge check verify the deletion. Two problems surfaced:
+  - B-101's `.baton/reviews/` sat inside `.baton/**`, the control directory;
+  - under a merge runner, a deletion commit after the reviews moves the head the reviews attested,
+    which R-BTN-183 refuses.
+
+  The owner chose the reserved directory and stripping: "Strip as you recommended. `.baton-legs/`
+  is fine." R-BTN-190 makes the convention:
+  - **One place:** `.baton-legs/<ticket>/`, each claim writing only its own ticket's
+    subdirectory.
+  - **Read as data:** another runner wrote it, so it reaches a model only as quoted data.
+  - **Never a protected path.**
+  - **Stripped:** a merge runner squashes the tree of `H` without the directory, and a branch that
+    carries it lands only by squash.
+  - **Deleted first** by the merge leg where no merge runner strips it.
+  - **Detected** by every sync as `baton.leg-state-landed`, with a forge rule where one exists.
+
+  R-BTN-183 and R-BTN-184 cite it. S-BTN-193 and G-BTN-166 test it.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

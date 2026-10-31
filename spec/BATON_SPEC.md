@@ -2242,6 +2242,31 @@ mean (R-BTN-50).
     claim's `create-pr` `implement` — run their own course's graph and scripts with no restart
     and no second clone. Its only parallelism limit is one leg at a time, at least for now (rule
     3, one claim per worker).
+- **R-BTN-190 (leg state on the branch: `.baton-legs/<ticket>/`, never on the default branch).**
+  State one leg hands the next on a branch, which must never reach the default branch — review
+  rounds and their answers (B-101), a fixer's notes, anything a plain git repository with no forge
+  has nowhere else to put — lives only under `.baton-legs/<ticket id>/`, the ticket being the one
+  the claim holds.
+  - **Own subdirectory only.** A claim's branch writes under `.baton-legs/` only in its own
+    ticket's subdirectory; a commit touching another ticket's is refused at merge, checked from git
+    as R-BTN-184's own-progress rule is. Separate tickets never share a write target.
+  - **Read as data.** What a leg reads there another runner wrote: it reaches a model only as
+    quoted data (§12.3), and nothing a trusted leg acts on comes from it (R-BTN-187); verdicts and
+    approvals are attestations (R-BTN-181).
+  - **Never a protected path**, since it never lands: it is outside R-BTN-184's floor and the
+    owner's `paths.protected`, and outside the changed paths R-BTN-183 computes.
+  - **Stripped, not deleted, where a merge runner lands the branch** (R-BTN-183): the squash tree is
+    the tree of `H` with `.baton-legs/` removed, so the head the reviews attested never moves. A
+    branch that carries `.baton-legs/` anywhere in its history lands only by squash; a course
+    whose merge strategy is merge or rebase writes nothing there.
+  - **Deleted before the squash where nothing strips it.** Without a merge runner (`merge.trusted`
+    false), the merge leg's `close` deletes `.baton-legs/<ticket>/` in one commit and the forge or
+    the plain-git merge squashes.
+  - **Detected if it lands anyway.** Every sync checks the default branch's tree; a path under
+    `.baton-legs/` there raises `baton.leg-state-landed` (a `notify` condition naming the paths,
+    closed when they are gone). `baton repo protect --print` adds, where the forge can enforce it,
+    a rule refusing default-branch updates that add `.baton-legs/` (plain git's `pre-receive` hook;
+    a GitHub push ruleset restricting the path where the plan offers one).
 - **R-BTN-124 (the planning course, `epic`).** `epic` turns a request into child tickets and
   integrates them, with no coordinator in core. Start `filed`; ends `integrated`, `abandoned`.
   - `plan` (`filed`) and `replan` (`planned`, `max_runs` 2) are call legs (R-BTN-165) over
@@ -6252,7 +6277,7 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     key (SSHSIG, namespace `git`); a commit by any other key, or unsigned, never merges. A runner
     under `authorship: signed` signs with an SSH key, never an API key, and a leg in `session`
     isolation signs through its runner (R-BTN-14). Review records a course commits to the branch
-    (B-101) are written by the trusted runner, not the reviewer, so a reviewer never becomes a
+    under `.baton-legs/<ticket>/` (R-BTN-190, B-101) are written by the trusted runner, not the reviewer, so a reviewer never becomes a
     writer.
   - **Independent review.** `merge.reviews.count` `std:review@1` at `H`, each from a trust domain
     other than every writer domain of `H` and from a review claim that started at `H`, differing
@@ -6263,7 +6288,8 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     file is on the protected default branch with the same blob as at merge time. Commit statuses are never read. Checks show that the
     change's own tests pass; they are not a security gate.
   - **Paths.** The changed paths are `git diff-tree -r -z --no-renames --name-only` from the default
-    branch's tip to the merge result, plus each `merge-base --all` diff. A symlink or submodule entry
+    branch's tip to the merge result, plus each `merge-base --all` diff, `.baton-legs/` excluded
+    (R-BTN-190). A symlink or submodule entry
     (modes 120000, 160000) or a `.gitmodules` change anywhere is refused. Paths are matched as `p`
     and `p/`, case-folded and NFC-normalised, against the protected paths.
   - **Protected paths.** Under `paths.control: human`, a control path never merges here; under
@@ -6272,8 +6298,11 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     `H` whose `paths` and `blobs` cover every protected path changed,
     and whose blobs equal those paths' blobs in the merge result; the own-progress exception aside.
     Main moving does not void an approval unless it changes an approved path.
-  - **How.** Squash or merge at exactly `H`, with the base pinned too (a compare-and-swap push of
-    the merge result onto the main tip it was computed from), and a commit message the merge runner
+  - **Leg state.** A commit touching `.baton-legs/` outside the claim's own ticket's subdirectory is
+    refused; a branch whose history carries `.baton-legs/` merges only by squash (R-BTN-190).
+  - **How.** Squash or merge at exactly `H`, the squash tree being `H`'s with `.baton-legs/` removed
+    (R-BTN-190), with the base pinned too (a compare-and-swap push of the merge result onto the main
+    tip it was computed from), and a commit message the merge runner
     writes itself, carrying no trailer from the branch. A branch that moved since an attestation was
     made is refused, and the ticket returns to the leg the course names.
   - **Foreign commits.** A commit on a ticket's branch that no claim of that ticket reported is found
@@ -6284,7 +6313,7 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     a release tag.
 - **R-BTN-184 (protected paths).** The policy's `paths.protected` (R-BTN-188), with a floor no
   course or owner removes. Baton computes what it can and fails closed on the rest:
-  - computed: `.baton/**`; every path `.baton/baton.json` lists in `imports`; the items glob and goal
+  - computed (`.baton-legs/` never among them: it never lands, R-BTN-190): `.baton/**`; every path `.baton/baton.json` lists in `imports`; the items glob and goal
     glob the ticket source declares in `baton.json`; `.github/workflows/**`, `.github/actions/**`
     and every local path a workflow `uses`; `.github/CODEOWNERS`; agent configuration for each
     supported harness (Claude Code: `.claude/**`, `**/CLAUDE.md`, `.mcp.json`; opencode:
@@ -6996,6 +7025,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-188 a sync writes only what changed | twelve tickets placed with next legs and bars; a refresh and a new head that change nothing; a new head moving one ticket, then a refresh flipping its leg and dropping a bar; a suspension at the station a snapshot already showed, then a refresh posting it unchanged | no station, next-leg or bar row rewritten; that ticket's rows alone rewritten, its unchanged station row kept; the refresh confirms the end without rewriting the row (R-BTN-70, R-BTN-62) |
 | S-BTN-189 the repository policy | a new repository; the `protected` preset applied by an owner key holding no `human_only` key, then by one with a `human_only` key; then `merge.reviews.count` raised and lowered by an owner key, by an MCP key, and by a `human_only` key under `approvers.policy: [human]`; two owners setting it from one `base_version`; from `cooperative`, an MCP key and then an owner key setting `approvers.trust: [human]`; an export and an import | the `cooperative` values; the first apply refused, the second stored without the preset's name, every guarantee but `signed-authorship` and `human-gates-hardware` held except `no-runner-lands` and every guarantee including it, which hold once the protection checker reports a match; the owner key's changes `forbidden` both ways, the MCP key's refused (a delegated key changes no policy), the human key's accepted and logged with `changed`; the second `conflict`; the MCP key refused, the owner key's accepted with every owner-set trust level cleared to `untrusted`, roles dropped and domains and families null; the import keeps every version and floor, and refuses a broken chain |
 | S-BTN-192 approver lists | `approvers.policy: [key:<A>]` with A a `human_only` key; an owner key B, an MCP key, and A; a change by A setting `approvers.policy: [key:<B>]`; then B setting it to `[owner]`; a list naming a revoked key; revoking A while `[key:<A>]` is the only list it satisfies | B and the MCP key `forbidden`, A accepted; A's change accepted, after which A is `forbidden` and B, matching the list in force, accepted; the list naming a revoked key refused; the revocation refused; `human-gates` held while every list is human-only and broken once `approvers.policy` is `[key:<B>]` |
+| S-BTN-193 leg state on the branch | a review leg committing round 1 to `.baton-legs/B-1/reviews/1.md` and an address leg answering beside it; a commit touching `.baton-legs/B-2/`; under `merge.trusted`, two reviews attested at `H` with `.baton-legs/B-1/` present; the same course with merge strategy `merge`; under `cooperative`, the merge leg's close; a default branch that gains `.baton-legs/B-3/x.md` by a direct push | the next reviewer reads both rounds as quoted data; the branch refused at merge; the squash at `H` lands without `.baton-legs/`, the attestations still valid, and `.baton-legs/` absent from the changed paths; the merge refused (squash only); one deletion commit, then a squash with none of it; `baton.leg-state-landed` naming the path, closed when it is removed |
 | S-BTN-190 guarantees and floors | a floor `{fieldhouse: [no-runner-lands, independent-review, signed-authorship, human-gates-hardware]}`; a change admitting `runner` to `refs.default_branch` or `refs.other`; a floor naming a broken guarantee, and a second floor named `fieldhouse`; removal by an owner key and by a `human_only` key; a trusted runner's protection report that no longer matches; an untrusted runner holding a claim on the repository; a signed read replayed for another repository, and one past `valid_until`; a trusted runner whose pin differs | the change refused `floor-violated`; both floors refused; removal refused, then accepted; `baton.unprotected` raised, `no-runner-lands` broken, trusted runners stopped, the runner's claim released `policy` and ended `released:floor`, and every claim refused `floor-broken` until a matching report; both reads rejected by a trusted runner; the trusted runner acts on nothing and `baton.policy-unpinned` stays open until its pins match |
 | S-BTN-191 the protected path in practice | the `protected` preset on GitHub; `paths.control` set to `any`; a handler raised; its proposal; an approval naming two proposals; the merge runner's workflow given the checker's credential; an MCP key raising `merge.reviews.count` to 99; the protection checker's report lapsing past 24 hours | `--check` matches with `refs.baton` admitting all five; the change to `paths.control: any` refused `floor-violated`, `no-runner-lands` still held; the handler written on `baton/proposed/<ticket>` from the CLI template and merged by a proposal merge with one `std:approval@1`, no reviews; the two-proposal approval covers neither; the checker's naming refused; the MCP key refused; `no-runner-lands` broken, no policy change refused, trusted runners stopped but the checker still checking |
 | S-BTN-187 board posts | `inputs.board` without `machine`, `inputs.answers: attestation` | a machine key's post is refused; a truncated delivery fails closed; a station a trusted leg acts on is not reached from a git verdict |
@@ -7090,6 +7120,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-163 | Every rule about authority and trust is a knob of one versioned policy document per repository; every change to it, in any direction and the approver lists included, needs an approver on `approvers.policy` as it stands before the change, never a delegated key; no rule reads a preset; no list is left that no live credential can satisfy; versions are append-only and survive export | S-BTN-189, -192 |
 | G-BTN-164 | A guarantee is a condition over the policy that includes the guarantees it rests on, computed for each version; a floor refuses every change that would break a guarantee it names, and is removed only by a credential satisfying both its `remove_by` and `approvers.policy`; only the protection checker's report feeds `no-runner-lands`; the policy read is signed, bound to its repository and tenant and short-lived; while a floored guarantee is broken Baton itself refuses every claim and advance on every ticket reaching the repository and releases running claims, relying on no runner's check; a trusted runner acts on nothing while a pin differs | S-BTN-190 |
 | G-BTN-165 | `no-runner-lands` requires control paths a runner cannot land, proposed tickets, trusted-runner delivery through the CLI's templates, and a matching report from a protection checker that holds no merge credential; a proposal lands only by a proposal merge with one approval; a delegated key changes no policy | S-BTN-191 |
+| G-BTN-166 | Leg state that must not land lives only under `.baton-legs/<ticket>/`, written by that ticket's claims alone; a merge runner strips it from the squash tree without moving `H`, and a branch carrying it lands only by squash; without one the merge leg deletes it first; any path under it on the default branch raises `baton.leg-state-landed` | S-BTN-193 |
 | G-BTN-161 | A route choice's advice never refuses, carries identifiers only, and a reported `taken` alternative other than the advised one records `advice-overridden` | S-BTN-153 |
 | **§7** | | |
 | G-BTN-31 | Only listed ends are failed attempts; the owners' default backs off 1 h, then 4 h; the third failure or a non-retryable condition holds with `baton.retries` | S-BTN-5, -6, -7 |
@@ -7399,6 +7430,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose whose attestations count, and the merge criteria, as policy over course files: once `paths.control` is a knob, a course file is only as protected as the policy makes it. Other trusted legs' requirements stay in course files, re-validated against the policy at every course change (2026-10-30; R-BTN-181, R-BTN-188).
 - Chose a separate protection checker, a trusted runner that merges nothing and runs as no workflow, over the merge runner holding the credential that reads GitHub's `bypass_actors`, which can also rewrite rulesets (2026-10-30; R-BTN-180).
 - Chose to leave `refs/baton/*` outside every guarantee on GitHub, whose rulesets cover only branches and tags, and to read nothing from it that a trusted leg acts on (2026-10-30; R-BTN-180).
+- Chose one reserved directory, `.baton-legs/<ticket>/`, for leg state that must not land, stripped from the squash by the merge runner, over files anywhere on the branch deleted before the squash: a deletion commit after the reviews moves the attested head, and a reserved path is one the merge runner can drop deterministically and a check can find; outside `.baton/`, which is the control directory (2026-10-31, the owner; R-BTN-190).
 - Chose approver lists in the policy itself (`owner`, `human`, `key:<fingerprint>`), authorised by the list in force before a change, over a fixed choice of approver class, so a repository can name exactly who may change it (2026-10-31, the owner; R-BTN-188).
 - Chose one approver list for every policy change, `approvers.policy`, over classifying each change as a tightening or a loosening: who may change the policy is simpler to state and to audit than an order on every knob, and floors still refuse any change that breaks a guarantee they name (2026-10-31, the owner; R-BTN-188).
 - Chose that Baton stops a repository whose floored guarantee breaks, refusing claims and releasing running ones, over runners that refuse to claim when told a guarantee is broken: an untrusted runner shares its sandbox with the code it builds and cannot be trusted to keep a guarantee it promises (2026-10-31, the owner; R-BTN-189).

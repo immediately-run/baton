@@ -1,0 +1,69 @@
+---
+title: "B-148 — Leg state never lands: `.baton-legs/` on the default branch raises baton.leg-state-landed, and the merge leg deletes it where nothing strips it (R-BTN-190)"
+id: B-148
+project: baton
+status: available
+updated: 2026-10-31
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1167
+tier: judgement
+description: "Build the parts of R-BTN-190 no other ticket builds: every sync checks the default branch's tree and raises `baton.leg-state-landed` (a notify condition naming the paths, closed when they are gone) for any path under `.baton-legs/`; the standard PR courses' merge leg, where no merge runner strips the directory, deletes `.baton-legs/<ticket>/` in one commit before the squash, and refuses a merge strategy other than squash for a branch that carries it. S-BTN-193's sync and cooperative cases, G-BTN-166. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-31: a directory convention so a check can verify leg-to-leg state on a
+branch never reaches the default branch; "Strip as you recommended. `.baton-legs/` is fine."
+Recorded in `spec/BATON_SPEC_HISTORY.md` (baton#148).
+**Spec:** R-BTN-190 (leg state on the branch), R-BTN-131 (the standard PR courses' merge leg),
+R-BTN-163 (core `notify` conditions); S-BTN-193, G-BTN-166.
+**Depends on:** none. B-101 introduces the files; B-140 builds the merge runner's strip and refusals.
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+Where a merge runner lands branches it strips `.baton-legs/` itself (B-140). Everywhere else the
+merge leg must delete it, and nothing yet notices if leg state lands on the default branch anyway,
+by a mistaken merge or a direct push.
+
+### What to build
+
+1. **Detection in the sync.** Each sync lists the default branch's tree under `.baton-legs/` (one
+   `git ls-tree` at the head it reads) and posts the paths; core raises `baton.leg-state-landed`
+   for the repository with the paths in `detail` (identifiers only), closed by the first sync that
+   finds none. The sync is vendored from docs (`src/shared/batonSync.mjs`): change it there, then
+   `npm run vendor`.
+2. **The merge leg without a merge runner.** The standard PR courses' merge leg (`src/defaults/`),
+   where the policy's `merge.trusted` is false, deletes `.baton-legs/<ticket>/` in one commit before
+   it merges, merges only by squash when the branch's history carries `.baton-legs/`, and fails the
+   leg naming the rule for a course whose merge strategy is merge or rebase.
+
+### Do not
+
+- Strip or rewrite anything in the merge leg when a merge runner lands the branch: that is B-140's,
+  at the attested head.
+- Read anything under `.baton-legs/` as an instruction or a verdict.
+
+### Tests
+
+- **S-BTN-193**'s sync case (a direct push adding `.baton-legs/B-3/x.md` raises the condition,
+  removing it closes it) and its cooperative case (one deletion commit, then a squash carrying none
+  of it), on both hosts; G-BTN-166.
+
+### Exit criteria
+
+- [ ] S-BTN-193's sync and cooperative cases pass on both hosts
+- [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate
+
+## Status
+
+_(filed 2026-10-31 with R-BTN-190.)_

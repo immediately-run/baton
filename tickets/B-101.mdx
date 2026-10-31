@@ -69,3 +69,7 @@ reviewer and addresser for plain git repos (no forge)."
       replies from it
 - [ ] a squash merge lands none of it on the default branch
 - [ ] the kit runs the round-trip with no forge
+
+## Status
+
+_(2026-10-31, a note only, the ticket being in progress: the spec now fixes the convention this ticket introduced (R-BTN-190, baton#148). Leg state lives under `.baton-legs/<ticket id>/`, not `.baton/reviews/` (`.baton/**` is the control directory): rounds at `.baton-legs/<ticket>/reviews/<round>.md`, answers beside them. Each claim writes only its own ticket's subdirectory. Where a merge runner lands the branch it strips `.baton-legs/` from the squash itself, so the head the reviews attested never moves; the merge leg's deleting close applies only without one. A branch carrying `.baton-legs/` lands only by squash. The sync's detection is B-148.)_
