@@ -88,7 +88,9 @@ it relies on (R-FH-3 names a mode).
 11. **After the second review** (R-BTN-180, R-BTN-185, R-BTN-188): the protection checker role
    (no merge credential, never a workflow) as the only source of `protection` reports; the
    proposal merge; delegated keys refused on every policy route, and the owner's 24-hour restore;
-   `trust_set_by`; floors judged on policy conditions alone; `floors_hash`; the `*` readings
+   `trust_set_by`; floors judged on policy conditions alone; approver lists (`owner`, `human`,
+   `key:<fingerprint>`) authorised by `approvers.policy` as it stands, with the satisfiable-list
+   and last-key refusals (S-BTN-192); `floors_hash`; the `*` readings
    entry; `BATON_HUMAN_KEYS` and `POST /v1/human-keys` with the last-key refusal; S-BTN-191,
    G-BTN-165.
 
@@ -108,7 +110,7 @@ it relies on (R-FH-3 names a mode).
 
 ### Exit criteria
 
-- [ ] S-BTN-189, S-BTN-190 and S-BTN-191 pass on both hosts; G-BTN-163 to G-BTN-165 hold
+- [ ] S-BTN-189 to S-BTN-192 pass on both hosts; G-BTN-163 to G-BTN-165 hold
 - [ ] no reference to `landing`, `authorship`, `protected_paths`, `machine_sync` or
   `outbox_policy` remains as a setting in `src/`
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green

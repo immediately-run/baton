@@ -571,6 +571,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       `approvers.loosen` (now `approvers.policy`, governing every change to the policy and its
       floors) and the owner's 24-hour restore. A delegated key is never an approver. Floors still
       refuse any change that breaks a guarantee they name.
+    - **Approver lists.** The owner: "How about the list of approvers who may update policy is
+      itself a policy configuration item?" Each `approvers.*` knob is now a list of `owner`,
+      `human` and `key:<fingerprint>` entries. A change to a list is authorised by
+      `approvers.policy` as it stands before the change. Baton refuses a list no live credential
+      can satisfy, and refuses a revocation that would leave one. `human-gates` holds when every
+      list is human-only. S-BTN-192 tests it.
 
 ## Retired requirements
 

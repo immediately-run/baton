@@ -5892,17 +5892,18 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     `baton owner policy show | diff | log` read it. Each change is logged `admin` with the
     versions and the knobs it changed. Every change is checked against the floors (R-BTN-189)
     and the current courses (R-BTN-181) in its transaction.
-  - **Who may change it.** Every change to the policy, in any direction, needs the
-    `approvers.policy` approver; Baton never asks whether a change tightens or loosens. An
-    `attestations` or `readings` entry that is absent admits no writer.
+  - **Who may change it.** Every change to the policy, in any direction, needs an approver on the
+    `approvers.policy` list, as the list stands before the change; Baton never asks whether a
+    change tightens or loosens. An `attestations` or `readings` entry that is absent admits no
+    writer.
   - **The knobs and the presets.** The `cooperative` column is a new repository's policy.
     `protected-signed` equals `protected` except where its column says otherwise.
 
     | Knob | `cooperative` | `protected` | `protected-signed` | Enforced by | Rule |
     |---|---|---|---|---|---|
-    | `approvers.members` — adding or removing owners; granting or revoking runner keys; registering couriers, check-runners, sync and mirror keys (instrument keys are the administrator's, tenant-wide, R-BTN-101); minting registration tokens and MCP keys | `owner` | `human` | | Baton | R-BTN-58, R-BTN-93, R-BTN-114, R-BTN-117, R-BTN-130, R-BTN-171 |
-    | `approvers.trust` — the trust level, trust domain, model family and role of a grant or courier | `owner` | `human` | | Baton | R-BTN-180 |
-    | `approvers.policy` — every change to this policy or its floors, and every loosening of an R-BTN-66 setting (R-BTN-186) | `owner` | `human` | | Baton | R-BTN-186, R-BTN-189 |
+    | `approvers.members` — adding or removing owners; granting or revoking runner keys; registering couriers, check-runners, sync and mirror keys (instrument keys are the administrator's, tenant-wide, R-BTN-101); minting registration tokens and MCP keys | `[owner]` | `[human]` | | Baton | R-BTN-58, R-BTN-93, R-BTN-114, R-BTN-117, R-BTN-130, R-BTN-171 |
+    | `approvers.trust` — the trust level, trust domain, model family and role of a grant or courier | `[owner]` | `[human]` | | Baton | R-BTN-180 |
+    | `approvers.policy` — every change to this policy or its floors, this list included, and every loosening of an R-BTN-66 setting (R-BTN-186) | `[owner]` | `[human]` | | Baton | R-BTN-186, R-BTN-189 |
     | `human_key` — the minimum for a human-only key acting on this repository; the instance's is a floor under it | `any` | `any` | `hardware` | Baton | R-BTN-185 |
     | `grants.default_trust` — the trust level of a grant or courier nobody marked | `trusted` | `untrusted` | | Baton | R-BTN-180 |
     | `grants.one_per_domain` — at most one active grant per trust domain | `false` | `true` | | Baton | R-BTN-180 |
@@ -5925,20 +5926,30 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     Owner settings that tune operation rather than trust (`retry`, bars, `checks`,
     `transcript_repos`, `leg_log_root`, `artifact_buckets`) stay R-BTN-66 settings, whose loosening
     `approvers.policy` governs.
-  - **Approvers.** `owner` is any owner key or owner session. `human` is a `human_only` key
-    meeting `human_key` (R-BTN-185). A delegated key (R-BTN-130) is never an approver: it never
-    changes the policy or its floors, nor any action a row above governs. An action whose approver
-    is `human` is a **human gate**, for administrators too: an administrator performs an action a
-    repository's policy gives to `human` only with a `human_only` key.
-  - **No gate without a key to open it.** Baton refuses to set an approver, `human_key: hardware`,
-    or a floor's `remove_by` to `human` unless an owner of the repository holds a `human_only` key
-    meeting the resulting `human_key`. While any approver is `human`, Baton refuses revoking or
-    suspending the last such key (R-BTN-185).
-  - **Setting `approvers.trust` to `human`** clears every trust level, trust domain, model
-    family and trusted-runner role an `owner` approver set (`trust_set_by`, §13): each such grant
-    and courier becomes `untrusted` until a human sets it again. While `approvers.trust` is
-    `human`, a grant or courier no human marked is `untrusted`, whatever `grants.default_trust`
-    says. A cleared trust domain or model family is null: two nulls never count as distinct for
+  - **Approvers.** Each `approvers.*` knob is a non-empty list; a credential is an approver for
+    it when it matches an entry:
+    - `owner`: any owner key or owner session of the repository;
+    - `human`: any `human_only` key meeting `human_key` (R-BTN-185);
+    - `key:<fingerprint>`: that one owner key or `human_only` key, which must meet `human_key`
+      when it is a `human_only` key.
+
+    A delegated key (R-BTN-130) matches no entry: it never changes the policy or its floors, nor
+    performs any action an `approvers.*` row governs. A list is **human-only** when every entry is
+    `human` or names a `human_only` key; an action whose list is human-only is a **human gate**,
+    for administrators too: an administrator performs it only with a `human_only` key the list
+    admits.
+  - **The list in force decides.** A change to any `approvers.*` list is authorised by
+    `approvers.policy` as it stands before the change, never by the list being written.
+  - **No gate without a key to open it.** Baton refuses a list no live credential can satisfy: a
+    `key:` entry for a revoked, suspended or unknown key does not count, and a human-only list
+    needs a `human_only` key meeting the resulting `human_key` among the repository's owners.
+    The same holds for a floor's `remove_by: human`. Baton refuses revoking or suspending a key
+    when a list would be left with no live credential to satisfy it (R-BTN-185).
+  - **Making `approvers.trust` human-only** clears every trust level, trust domain, model family
+    and trusted-runner role set by a credential the new list does not admit (`trust_set_by`,
+    §13): each such grant and courier becomes `untrusted` until an approver on the list sets it
+    again. While `approvers.trust` is human-only, a grant or courier no human marked is
+    `untrusted`, whatever `grants.default_trust` says. A cleared trust domain or model family is null: two nulls never count as distinct for
     `merge.reviews`, and under `grants.one_per_domain` a grant with a null trust domain is not
     offered work.
   - **A policy that live grants already break is refused.** Setting `grants.one_per_domain` or
@@ -5960,7 +5971,7 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     | `independent-review` | `no-runner-lands`; `merge.reviews` has `count` ≥ 2 and `distinct` both `trust_domain` and `model_family`; `grants.one_per_domain`; and `attestations` admits only `baton` for `std:review@1`, `std:wrote@1` and `std:ran@1` |
     | `signed-authorship` | `no-runner-lands`, and `authorship` is `signed` |
     | `trusted-domain-separate` | `grants.trusted_domain` is `separate`, and `grants.default_trust` is `untrusted` |
-    | `human-gates` | `approvers.members`, `approvers.trust` and `approvers.policy` are `human` |
+    | `human-gates` | `approvers.members`, `approvers.trust` and `approvers.policy` are human-only lists |
     | `human-gates-hardware` | `human-gates`, and the repository's `human_key` is `hardware` |
     | `board-from-trusted` | `no-runner-lands`; `inputs.board` excludes `machine`; and `inputs.answers` is `attestation` |
 
@@ -6086,7 +6097,7 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     published package's provenance, never the forge's release object, which any `write` role can
     edit.
   - **The everyday forge identity** the owner's agent sessions use holds no admin, maintain or
-    organisation-owner role and no bypass on a repository with any `human` approver (R-BTN-185).
+    organisation-owner role and no bypass on a repository with any human-only approver list (R-BTN-185).
 - **R-BTN-181 (attestations: typed statements about work or about a resource).** A typed
   statement Baton stores, which a leg may require: a review, a check run, a human's approval, a
   provider's remaining quota. Attestations differ only in their subject and their writer; whether
@@ -6298,7 +6309,7 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     configuration, as administrators are (R-BTN-57), never registered over the API; each later
     one is registered with a signature by an existing one (`POST /v1/human-keys`), and any is
     revoked only with a `human_only` key. Baton refuses a revocation, and an instance switch to
-    `hardware`, that would leave a repository with a `human` approver and no key to meet it
+    `hardware`, that would leave a repository with an approver list no live key can satisfy
     (R-BTN-188). How strongly a deployment enforces "no agent can use it" is
     its own policy, `human_key: any | hardware` (an instance setting, default `any`, which a
     repository's policy may raise for itself, R-BTN-188): `hardware`
@@ -6481,7 +6492,7 @@ and never accepted holds no role (§12.1).
 | `attestations` | `id` | `repository_id`, `ticket_id`, `type`, `subject_json`, `value_json` (≤ 4 KB), `writer_class`, `writer_key`, `nonce`, `uses`, `lapses_at`, `signature`, `at`, `revoked_at`, `used_by_claim`, `superseded_by` | Signed typed facts legs require (R-BTN-181, proposal); never imported |
 | `webauthn_credentials` | `(owner_key, credential_id)` | `cose_key`, `aaguid`, `attestation`, `registered_by_signature` | Attested authenticators a `human_only` key registered (R-BTN-185, proposal) |
 
-Under §12.8 (proposal), `repository_policies` `(repository_id, version)` holds each policy version (`policy_json`, `hash`, `previous_hash`, `changed_by`, `approver`, `preset`, `at`; append-only) and `policy_floors` `(repository_id, name)` each floor (`guarantees` JSON, `remove_by`, `added_by`, `added_at`) (R-BTN-188, R-BTN-189); grants gain `trust_level`, `trust_domain`, `model_family`, `role` (`runner`, `trusted-runner` or `trusted-runner` named as the repository's protection checker) and `trust_set_by` (`owner`\|`human`, R-BTN-188); owner keys gain `human_only` and `fido_attestation`; the instance holds an attestation signing key, exported only as its public half.
+Under §12.8 (proposal), `repository_policies` `(repository_id, version)` holds each policy version (`policy_json`, `hash`, `previous_hash`, `changed_by`, `approver`, `preset`, `at`; append-only) and `policy_floors` `(repository_id, name)` each floor (`guarantees` JSON, `remove_by`, `added_by`, `added_at`) (R-BTN-188, R-BTN-189); grants gain `trust_level`, `trust_domain`, `model_family`, `role` (`runner`, `trusted-runner` or `trusted-runner` named as the repository's protection checker) and `trust_set_by` (the setting credential's fingerprint and class, R-BTN-188); owner keys gain `human_only` and `fido_attestation`; the instance holds an attestation signing key, exported only as its public half.
 | `ticket_history` | `id` | `repository_id`, `ticket_id`, `at`, `kind`, `claim_id`, `runner_id`, `leg`, `reached`, `next_leg`, `run`, `snapshot_sha`, `head_sha`, `course_version`, `leg_version`, `detail_json` (≤ 2 KB) | The ticket's running record, never replayed into state (R-BTN-81) |
 
 `ticket_history.kind`: `leg-started`, `leg-finished`, `leg-abandoned`, `position-confirmed`,
@@ -6662,7 +6673,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `POST /v1/owner/{repository}/bars/{id}/lift` | owner | — | `{ok: true}` | R-BTN-67 |
 | `POST /v1/owner/{repository}/bars/follow` | owner | `{course}` | `{ok: true}` | R-BTN-142 |
 | `PUT /v1/owner/{repository}/settings` | owner | any owner setting (§13.1); `code_repos` as `[{path}]` | `{ok: true}` | R-BTN-66, R-BTN-140 |
-| `PUT /v1/owner/{repository}/policy` | the `approvers.policy` approver; never a delegated key | `{base_version, policy}` or `{base_version, preset}` | `{version, hash, changed[], guarantees}`; `conflict` when stale, `forbidden`, `floor-violated` | R-BTN-188, R-BTN-189 (proposal) |
+| `PUT /v1/owner/{repository}/policy` | an approver on `approvers.policy` as it stands; never a delegated key | `{base_version, policy}` or `{base_version, preset}` | `{version, hash, changed[], guarantees}`; `conflict` when stale, `forbidden`, `floor-violated` | R-BTN-188, R-BTN-189 (proposal) |
 | `GET /v1/owner/{repository}/policy/log` | owner | `?after=<version>` | `{versions: [{version, hash, previous_hash, changed_by, approver, preset?, at, changed[]}]}` | R-BTN-188 (proposal) |
 | `POST /v1/owner/{repository}/policy/floors` | the `approvers.policy` approver to add; the stricter of the floor's `remove_by` and `approvers.policy` to remove | `{name, guarantees[], remove_by?}` or `{name, remove: true, confirm: true}` | `{ok: true}`; `floor-violated` for a guarantee not held now | R-BTN-189 (proposal) |
 | `POST /v1/human-keys` | a `human_only` key | `{public_key, owner_of?: [repository], signature}`; `{fingerprint, revoke: true, confirm: true}` | `{ok: true}`; `conflict` for a key holding another role; `floor-violated`-style refusal naming a repository left without a key | R-BTN-185, R-BTN-188 (proposal) |
@@ -6965,10 +6976,11 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-182 trusted legs | a `merge` leg marked `trusted: true` | an ordinary runner is never offered it and cannot claim, advance or end it; a `merge.run.mjs` can refuse but not approve, and its `reasons` outside the closed list are dropped |
 | S-BTN-183 what merges | under `merge.reviews {count: 2, distinct: [trust_domain, model_family]}` and `merge.trusted`, a ticket written by one domain, reviewed by two others of different model families that ran none of its code | it merges at the attested head; a review from a domain that ran the branch's code does not count; a foreign commit resets the branch and raises `baton.foreign-commit`; under `authorship: signed` an unsigned or foreign-signed commit blocks it; a merge of main into the branch does not; a push after review returns it to review; a rename, symlink or submodule into a protected path is refused |
 | S-BTN-184 protected paths | under `paths.control: human` and `paths.tickets: approval`, a PR changing `.baton/`, one changing tickets, one appending own progress | the first ends at `human-merge`; the second merges only with a matching `std:approval@1`; the third merges when every entry matches the grammar and the claim, and is a ticket change otherwise |
-| S-BTN-185 human gates | `approvers.policy: human`; an owner's agent key; a `human_only` key | the agent key's approval, policy change or hold lift is refused; the `human_only` key's succeed; a `human_only` key registered without an existing one's signature is refused; the same policy change under `approvers.policy: owner` succeeds for the agent key and is refused for an MCP key |
+| S-BTN-185 human gates | `approvers.policy: [human]`; an owner's agent key; a `human_only` key | the agent key's approval, policy change or hold lift is refused; the `human_only` key's succeed; a `human_only` key registered without an existing one's signature is refused; the same policy change under `approvers.policy: [owner]` succeeds for the agent key and is refused for an MCP key |
 | S-BTN-186 any surface | one owner, one action, the CLI, the API and an MCP key | each succeeds where `callers` allow it; an MCP key may add a hold and never lift one |
 | S-BTN-188 a sync writes only what changed | twelve tickets placed with next legs and bars; a refresh and a new head that change nothing; a new head moving one ticket, then a refresh flipping its leg and dropping a bar; a suspension at the station a snapshot already showed, then a refresh posting it unchanged | no station, next-leg or bar row rewritten; that ticket's rows alone rewritten, its unchanged station row kept; the refresh confirms the end without rewriting the row (R-BTN-70, R-BTN-62) |
-| S-BTN-189 the repository policy | a new repository; the `protected` preset applied by an owner key holding no `human_only` key, then by one with a `human_only` key; then `merge.reviews.count` raised and lowered by an owner key, by an MCP key, and by a `human_only` key under `approvers.policy: human`; two owners setting it from one `base_version`; from `cooperative`, an owner key and an MCP key raising `approvers.trust` to `human`; an export and an import | the `cooperative` values; the first apply refused, the second stored without the preset's name, every guarantee but `signed-authorship` and `human-gates-hardware` held except `no-runner-lands` and every guarantee including it, which hold once the protection checker reports a match; the owner key's changes `forbidden` both ways, the MCP key's refused (a delegated key changes no policy), the human key's accepted and logged with `changed`; the second `conflict`; the MCP key refused, the owner key's accepted with every owner-set trust level cleared to `untrusted`, roles dropped and domains and families null; the import keeps every version and floor, and refuses a broken chain |
+| S-BTN-189 the repository policy | a new repository; the `protected` preset applied by an owner key holding no `human_only` key, then by one with a `human_only` key; then `merge.reviews.count` raised and lowered by an owner key, by an MCP key, and by a `human_only` key under `approvers.policy: [human]`; two owners setting it from one `base_version`; from `cooperative`, an MCP key and then an owner key setting `approvers.trust: [human]`; an export and an import | the `cooperative` values; the first apply refused, the second stored without the preset's name, every guarantee but `signed-authorship` and `human-gates-hardware` held except `no-runner-lands` and every guarantee including it, which hold once the protection checker reports a match; the owner key's changes `forbidden` both ways, the MCP key's refused (a delegated key changes no policy), the human key's accepted and logged with `changed`; the second `conflict`; the MCP key refused, the owner key's accepted with every owner-set trust level cleared to `untrusted`, roles dropped and domains and families null; the import keeps every version and floor, and refuses a broken chain |
+| S-BTN-192 approver lists | `approvers.policy: [key:<A>]` with A a `human_only` key; an owner key B, an MCP key, and A; a change by A setting `approvers.policy: [key:<B>]`; then B setting it to `[owner]`; a list naming a revoked key; revoking A while `[key:<A>]` is the only list it satisfies | B and the MCP key `forbidden`, A accepted; A's change accepted, after which A is `forbidden` and B, matching the list in force, accepted; the list naming a revoked key refused; the revocation refused; `human-gates` held while every list is human-only and broken once `approvers.policy` is `[key:<B>]` |
 | S-BTN-190 guarantees and floors | a floor `{fieldhouse: [no-runner-lands, independent-review, signed-authorship, human-gates-hardware]}`; a change admitting `runner` to `refs.default_branch` or `refs.other`; a floor naming a broken guarantee, and a second floor named `fieldhouse`; removal by an owner key and by a `human_only` key; a trusted runner's protection report that no longer matches; an untrusted runner holding a claim on the repository; a signed read replayed for another repository, and one past `valid_until`; a trusted runner whose pin differs | the change refused `floor-violated`; both floors refused; removal refused, then accepted; `baton.unprotected` raised, `no-runner-lands` broken, trusted runners stopped, the runner's claim released `policy` and ended `released:policy`, and every claim refused `policy-broken` until a matching report; both reads rejected by a trusted runner; the trusted runner acts on nothing and `baton.policy-unpinned` stays open until its pins match |
 | S-BTN-191 the protected path in practice | the `protected` preset on GitHub; `paths.control` set to `any`; a handler raised; its proposal; an approval naming two proposals; the merge runner's workflow given the checker's credential; an MCP key raising `merge.reviews.count` to 99; the protection checker's report lapsing past 24 hours | `--check` matches with `refs.baton` admitting all five; `no-runner-lands` broken and the floor refusing it; the handler written on `baton/proposed/<ticket>` from the CLI template and merged by a proposal merge with one `std:approval@1`, no reviews; the two-proposal approval covers neither; the checker's naming refused; the MCP key refused; `no-runner-lands` broken, no policy change refused, trusted runners stopped but the checker still checking |
 | S-BTN-187 board posts | `inputs.board` without `machine`, `inputs.answers: attestation` | a machine key's post is refused; a truncated delivery fails closed; a station a trusted leg acts on is not reached from a git verdict |
@@ -7060,7 +7072,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-116 | Every view draws legs as edges with state in colour and text, and no station the file lacks | S-BTN-96 |
 | G-BTN-127 | Ticket prerequisites reach core only as `requires.tickets` (`parent`, `posted`) or `depends_at`, and a parent waits on its children only through a call; `human-operator` by rule 4; `waiting_on` is never `dependencies`, `children`, `owner` or `policy` | S-BTN-108 |
 | G-BTN-162 | A bill past an instance's capacity is never admitted, a claim's own seats never counting against it; a capacity lowered below the seats held takes none back; seats are released at every leg end and claim end, at a silent reap, and after the fence for a fence-pending reap; a seat refusal is never a failed attempt | S-BTN-21 |
-| G-BTN-163 | Every rule about authority and trust is a knob of one versioned policy document per repository; every change to it, in any direction, needs the `approvers.policy` approver and never a delegated key; no rule reads a preset; no approver becomes `human` without a `human_only` key to meet it; versions are append-only and survive export | S-BTN-189 |
+| G-BTN-163 | Every rule about authority and trust is a knob of one versioned policy document per repository; every change to it, in any direction and the approver lists included, needs an approver on `approvers.policy` as it stands before the change, never a delegated key; no rule reads a preset; no list is left that no live credential can satisfy; versions are append-only and survive export | S-BTN-189, -192 |
 | G-BTN-164 | A guarantee is a condition over the policy that includes the guarantees it rests on, computed for each version; a floor refuses every change that would break a guarantee it names, and is removed only by the stricter of its `remove_by` and `approvers.policy`; only the protection checker's report feeds `no-runner-lands`; the policy read is signed, bound to its repository and tenant and short-lived; while a floored guarantee is broken Baton itself refuses every claim and advance on the repository and releases running claims, relying on no runner's check; a trusted runner acts on nothing while a pin differs | S-BTN-190 |
 | G-BTN-165 | `no-runner-lands` requires control paths a runner cannot land, proposed tickets, trusted-runner delivery through the CLI's templates, and a matching report from a protection checker that holds no merge credential; a proposal lands only by a proposal merge with one approval; a delegated key changes no policy | S-BTN-191 |
 | G-BTN-161 | A route choice's advice never refuses, carries identifiers only, and a reported `taken` alternative other than the advised one records `advice-overridden` | S-BTN-153 |
@@ -7372,7 +7384,8 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose whose attestations count, and the merge criteria, as policy over course files: once `paths.control` is a knob, a course file is only as protected as the policy makes it. Other trusted legs' requirements stay in course files, re-validated against the policy at every course change (2026-10-30; R-BTN-181, R-BTN-188).
 - Chose a separate protection checker, a trusted runner that merges nothing and runs as no workflow, over the merge runner holding the credential that reads GitHub's `bypass_actors`, which can also rewrite rulesets (2026-10-30; R-BTN-180).
 - Chose to leave `refs/baton/*` outside every guarantee on GitHub, whose rulesets cover only branches and tags, and to read nothing from it that a trusted leg acts on (2026-10-30; R-BTN-180).
-- Chose one approver for every policy change, `approvers.policy`, over classifying each change as a tightening or a loosening: who may change the policy is simpler to state and to audit than an order on every knob, and floors still refuse any change that breaks a guarantee they name (2026-10-31, the owner; R-BTN-188).
+- Chose approver lists in the policy itself (`owner`, `human`, `key:<fingerprint>`), authorised by the list in force before a change, over a fixed choice of approver class, so a repository can name exactly who may change it (2026-10-31, the owner; R-BTN-188).
+- Chose one approver list for every policy change, `approvers.policy`, over classifying each change as a tightening or a loosening: who may change the policy is simpler to state and to audit than an order on every knob, and floors still refuse any change that breaks a guarantee they name (2026-10-31, the owner; R-BTN-188).
 - Chose that Baton stops a repository whose floored guarantee breaks, refusing claims and releasing running ones, over runners that refuse to claim when told a guarantee is broken: an untrusted runner shares its sandbox with the code it builds and cannot be trusted to keep a guarantee it promises (2026-10-31, the owner; R-BTN-189).
 - Chose guarantees that include the guarantees they rest on (`tickets-approved` includes `no-runner-lands`), over guarantees computed from their own knobs, after the first adversarial review of the policy (2026-10-30; R-BTN-189).
 - Chose `owner` and `human` as the only approver classes (2026-10-30; R-BTN-188).
