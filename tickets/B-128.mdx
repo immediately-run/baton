@@ -2,8 +2,8 @@
 title: "B-128 — Two forge identities, implementer and reviewer: one compromised runner cannot land code alone"
 id: B-128
 project: baton
-status: available
-updated: 2026-10-27
+status: superseded
+updated: 2026-10-31
 repos:
   - baton
 tags:
@@ -108,3 +108,7 @@ makes a single compromised runner unable to land code alone.
 - [ ] the spec amended (credential sets, routing, the verdict rule) citing this ticket
 - [ ] the scenario passes on both hosts; the drill script passes
 - [ ] ~~irfldhv1 runs with two identities~~ superseded: independence by trust domain and signed commits (R-BTN-183)
+
+## Status
+
+_(2026-10-31: superseded by the repository policy (baton#145). Independence is `merge.reviews` by trust domain and model family (R-BTN-183, B-140), each set by an approver on `approvers.trust` (B-147); the second forge identity was already dropped; item 6, review legs running no branch code, lives in B-141 and FLDH-41. Nothing here remains to build.)_

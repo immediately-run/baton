@@ -3,7 +3,7 @@ title: "B-67 — Notices for people removed: the conditions window's phases 3 an
 id: B-67
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-31
 repos:
   - baton
   - docs
@@ -60,14 +60,14 @@ lands the code carries R-BTN-80 and R-BTN-103 citations check-spec warns about (
    same PR. Being conditions, they show in **Needs you** and `GET …/conditions`, which is how
    phase 4's precondition is read.
 2. **Phase 4 (its own PR, after phase 3 shows none, and after docs' PR).**
-   - **Notices.** A new numbered migration deletes the `decision` and `queue-over` rows, drops
-     `notices.kind`, `ref`, `channel` and the `closed` state (states `queued`, `claimed`,
-     `sent`), the reminder use of `not_before`, `repositories.remind_after_s` and the
-     `notices_by_ref` index. `src/core/notices.ts` loses decision and queue-over queuing and
-     reminders; `src/core/queues.ts` stops queuing the queue-over notice (B-57's
-     `baton.queue-over` stays); `channel` leaves `POST /v1/courier/notices/{id}`.
+   - **Notices.** `src/core/notices.ts` loses decision and queue-over queuing and reminders,
+     `src/core/queues.ts` stops queuing the queue-over notice (B-57's `baton.queue-over` stays),
+     and a new numbered migration deletes the `decision` and `queue-over` rows and drops
+     `repositories.remind_after_s`. The `notices` table itself is B-64's: it folds the remaining
+     `forge-check` rows into the outbox and drops the table (R-BTN-171). If B-64 has landed first,
+     this phase has no `notices` columns or routes left to change.
    - **Personal channels.** `POST /v1/owner/{repository}/couriers` accepts only `delivers:
-     ["forge-check"]` (B-5's form) and refuses `asks` (`src/core/admin.ts`); the `couriers`
+     "git" | "forge-check"` (R-BTN-171) and refuses `asks` (`src/core/admin.ts`); the `couriers`
      table loses `asks` and takes §13.2's shape. Courier keys registered with `asks` are revoked;
      a key with no other registration is deleted.
    - **Worker couriers.** The heartbeat's `couriers` is refused (`src/core/validate.ts`); the
@@ -90,8 +90,8 @@ lands the code carries R-BTN-80 and R-BTN-103 citations check-spec warns about (
 
 ### Do not
 
-- Remove `forge-check` notices, the forge courier credential kind `courier` or
-  `owner.courier.revoke`: they are R-BTN-115's.
+- Remove `forge-check` delivery, the courier credential kind `courier` or
+  `owner.courier.revoke`: they are R-BTN-115's and R-BTN-171's (B-64).
 - Edit `0017_notices.sql` or any old migration: the change is a new numbered file.
 - Merge phase 4 while phase 3 still raises for any registered repository.
 - Keep a compatibility read of the heartbeat's `couriers` after phase 4: it is refused.
@@ -116,3 +116,7 @@ lands the code carries R-BTN-80 and R-BTN-103 citations check-spec warns about (
 ## Status
 
 _(filed 2026-10-20 with the current-state spec, PR #71)_
+
+_(2026-10-30: the spec folds `forge-check` notices into the outbox (R-BTN-171): B-64 migrates `notices` into `outbox` and retires `/v1/courier/notices/*`, and `POST …/couriers` takes `delivers: "git" | "forge-check"`. Phase 4 applies to whichever of `notices` or `outbox` exists when it is built, and its Do-not line about `forge-check` notices reads as `forge-check` outbox entries.)_
+
+_(2026-10-31: phase 4 rescoped against B-64, which drops the `notices` table and its routes (R-BTN-171); `delivers` is now `"git" | "forge-check"`.)_

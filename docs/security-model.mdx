@@ -96,8 +96,9 @@ repository exposes. Per-worker forks would close that by GitHub's design; they s
 with runners you trust, it needs no merge runner, protected branch, proxy or sandbox, and runners
 may land their own work. Baton's part of the guarantee is never to require a runner to write
 protected state, to hold the policy (protected paths, who lands), and to print each forge's
-setting for it. Fieldhouse, where runners are untrusted, turns the guarantee on: the protected
-branch, the merge runner, the secrets rule and the VMs.
+setting for it. Fieldhouse, where runners are untrusted, sets that policy, registers the
+guarantees it relies on as a floor (BATON_SPEC R-BTN-188, R-BTN-189), and supplies what Baton
+cannot observe: the VMs, their resets and where keys live.
 
 ## Who holds push
 
@@ -110,7 +111,7 @@ For irfldhv1's homes (`fieldhouse`, `docs`, `baton`, `hq`), as of 2026-10-27:
 | Claude Code sessions | host (`local`) or below (`cloud`) | the owner's account, or the Claude GitHub App. That puts human-level credentials in sessions below the human level: a credential crossing downward under Axiom 6, and the root of reach 3 (B-136) |
 | GitHub Actions workflows | the workflow's | `GITHUB_TOKEN` and the repository's secrets |
 | Any other org member or installed App with `write` | theirs | their grant |
-| Any runner's Baton machine key | VM | not push, but a board post (R-BTN-102, `machine_sync` default on): reach 7 |
+| Any runner's Baton machine key | VM | not push, but a board post (R-BTN-102, the `cooperative` policy's `inputs.board` admits `machine`): reach 7 |
 
 Every VM shares one GitHub identity, so a push cannot be traced to a slot from git alone,
 and revoking that identity stops every VM at once.
@@ -258,13 +259,13 @@ git holds: markers, ticket records, changelogs.
 
 ### 7. Board posts
 
-Any runner's machine key can post its repository's board (R-BTN-102, `machine_sync` default
-`true`), and any leg can read its runner's key file (R-BTN-14, R-BTN-144). Baton never reads
+Any runner's machine key can post its repository's board (R-BTN-102, while the policy's
+`inputs.board` admits `machine`, as the `cooperative` preset does), and any leg can read its runner's key file (R-BTN-14, R-BTN-144). Baton never reads
 repository content itself, so what a board post says is what Baton believes. A compromised leg
 can post a board that marks its own verdicts and approvals trusted (R-BTN-139's marking runs in
 the CLI), reports no control change (so G and B-126 stay silent), and names an older commit as
 the one runners load (a rollback). B-127's signature check, as first specified, ran in that
-same sync. None of this needs a push. B-137 turns `machine_sync` off below the human level and
+same sync. None of this needs a push. B-137 and the policy's `inputs.board` (BATON_SPEC R-BTN-188) take `machine` out below the human level and
 moves what Baton must trust (changed paths, signatures) to the server and the runners.
 
 ### 8. Denial of service by a key
@@ -418,7 +419,7 @@ The options, cheapest first; 9 to 13 cover a privileged session reading what a r
 | 13 | A quarantined reader for bulk sweeps: a low-privilege agent reads tickets and returns structured fields; the privileged session acts only on those | the largest of these; slower sweeps | closes reach 3's privileged case for the sweeping skills | not filed |
 | 14 | Baton's production deploy is a human act: a signed tag or a human-only approval, a scoped Cloudflare token, no secret in the build job | a day | closes reach 0 | B-135 |
 | 15 | A human-only identity: a touch-required hardware signing key, an approval account no session holds, sessions on an identity of their own | a hardware key and an account | makes every owner gate on this page a human gate; without it, reach 3 passes them all | B-136 |
-| 16 | Board posts: `machine_sync` off below the human level, changed paths and signatures computed server-side, per-key limits | a Baton ticket; the setting today | closes reaches 7 and 8 | B-137 |
+| 16 | Board posts: `machine` out of the policy's `inputs.board` below the human level, changed paths and signatures computed server-side, per-key limits | a Baton ticket; the setting today | closes reaches 7 and 8 | B-137 |
 | 17 | Owners, administrators and runners run a pinned released CLI, never a working tree | a day | closes the owner-key path in reach 1 | B-138 |
 | 18 | Owner session transcripts masked before archiving and readable at the human level only | a day | closes a credential crossing downward | FLDH-38 |
 | 19 | Sourced courses run from their source: homes refer to Baton's legs instead of copying them; the sync refuses copies; runners never run a home's copy | a Baton ticket; a prune per home | removes the leg scripts from reach 1, leaving `baton.json`, the overrides and the instructions | B-139 |
@@ -550,7 +551,7 @@ session on docs is only as trusted as docs' last push.
      session uses;
    - move docs' deploy App key and `baton`'s sync read token into environments with such
      reviewers, and rotate them (FLDH-37);
-   - set `machine_sync: false` on every home a VM runner serves;
+   - take `machine` out of the policy's `inputs.board` (BATON_SPEC R-BTN-188) on every home a VM runner serves (`machine_sync: false` until B-145 lands);
    - run owner and administrator commands from the published CLI at a pinned version, never from
      a checkout;
    - push rulesets on `.claude/**` and `CLAUDE.md` in docs, fieldhouse and hq.

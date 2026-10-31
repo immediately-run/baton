@@ -417,6 +417,188 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   time." R-BTN-184 allows append-only progress after the own ticket's `## Status` heading; the
   brief and frontmatter stay human-approved, since a brief reads as the owner's instruction.
 
+- **2026-10-30 — §7.8, R-BTN-115, R-BTN-181: one outbox, and attestations that cover readings
+  (owner direction).** The owner, to make Baton easier to onboard: "I think the outbox and the
+  courier messages are essentially the same thing. And in the opposite direction, human
+  attestation and instrument readings can also be generalized into a single thing, which differs
+  only by the participant signing the attestation."
+  - **One outbox.** The outbox (R-BTN-171) and `forge-check` notices (R-BTN-115) were the same
+    mechanism twice: an effect Baton holds no credential for, claimed under a lease, applied once
+    by its id, confirmed by reading it back, and late after a window. R-BTN-171 now holds every
+    such effect as an outbox entry with a `kind` (`handler`, `withdraw`, `answer`,
+    `forge-check`), whose order, confirmation and late window are columns of the kind; every
+    entry is signed as notices were. Couriers, keys of their own registered with `--delivers git`
+    or `forge-check`, deliver it through `/v1/courier/entries`. Retired with it: the built-in leg
+    `baton.write`, `runner start --outbox`, the claim response's `outbox` list and the end's
+    `written`, the `notices` table, `/v1/courier/notices/*` and `baton.forge-check-late` (now
+    `baton.outbox-late` with `kind: forge-check`). States are `queued`, `claimed`, `delivered`,
+    `skipped`, `confirmed` and `dropped` for every kind (`written` and `landed` before, `sent` for
+    notices). A forge-refused push now holds the ticket `outbox-refused` instead of ending a
+    runner's claim. `baton.cancel` no longer drains the `withdraw` entry: Baton queues it when
+    the cancel ends. `runner:baton-legs` is declared by every runner that implements
+    `baton.cancel`.
+  - **Readings are attestations.** Asked whether a gate on a reading should be the course's to
+    decide, the owner: "Why not leave this up to the course to decide what the gate should be for
+    the leg? It could actually depend on a reading if we want (eg: account funds)." An attestation
+    (R-BTN-181) is now about work or about a resource instance; a reading is the second (R-BTN-76).
+    A requirement chooses `binds: gate | advice` and `missing: block | allow`, so a `resource`
+    block gates where its requirement says so (R-BTN-75); `where` gained `gte` and `lte` and the
+    block `failed-where`. Rule 1 refuses a `resource` or `attestation` row that binds as a gate,
+    `ticket_blocks` gained `binds`, and `attestation` joined R-BTN-75's list of block kinds, from
+    which it had been missing. Readings may be unsigned, and an unsigned one never counts toward a
+    trusted leg.
+  - **Writers in the course.** Told that writer classes had to stay out of git because a pushed
+    course could accept a runner's own statement, the owner: "no because of branch protection, the
+    changes would live on a branch that is never merged into main". Under `protected` a course
+    file is a control path that lands only by a human (R-BTN-184); under `cooperative` gates bind
+    cooperating runners only (R-BTN-46). So a requirement's `writers` is in the course file, and
+    the `attestation_policies` owner setting is retired; the trusted runner still pins the keys
+    it acts on (R-BTN-182).
+  - **Who delivers is a policy.** The first draft fixed that runner keys never deliver and that
+    a `git` courier runs as a trusted runner under `protected`. The owner: "I agree with the
+    security content, but I want these decisions to be an explicit policy, stored by baton per
+    repo which the repo owner can modify. The protected / cooperative dichotomy is too
+    simplistic." R-BTN-171 gained the owner setting `outbox_policy`, with one entry per delivery
+    class (`git`, `forge-check`). Each entry names its `deliverers` (`courier`, `runner`,
+    `trusted-runner`), its `trust` (`any` or `trusted`) and a `min_release`. The default admits
+    dedicated couriers only. Loosening the policy is a loosening change (R-BTN-186). R-BTN-180's
+    guarantee for Baton's git writes now holds only while the `git` policy is at least
+    `courier`/`trusted-runner`, `trust: trusted` and a templating `min_release`; anything looser
+    is the repository's stated exception.
+  - **Policy, not modes (R-BTN-188, R-BTN-189).** The owner, on that setting: "Outbox-policy is
+    the wrong level of abstraction. We need a repo-level policy not just for the outbox, but also
+    for all the other protected vs cooperative mode differences. These modes shouldn't be
+    hardcoded into baton … Baton cannot assume all customization fits into predefined modes", and:
+    "Fieldhouse and baton's most important interface is the baton policy enforcing fieldhouse's
+    security guarantees." Then, deciding the open points:
+    - deployment duties Baton cannot observe ("reviewers run no branch code", "reset a VM after
+      it ran branch code") "don't have a place in baton per repo policy, therefore must live
+      somewhere else";
+    - `owner` and `human` are the only approver levels;
+    - one versioned document with an append-only change log, trusted runners pinning the hash of
+      the sections they enforce;
+    - folded into this PR, with an adversarial review once drafted;
+    - guarantee names beyond core Baton are defined in the Fieldhouse repository;
+    - Baton enforces consumer floors.
+
+    The result: R-BTN-188 holds every rule about authority and trust as a knob of one versioned
+    policy document per repository, each knob with an order from strict to loose. The knobs cover
+    approvers, the minimum `human_key`, grant defaults, the writers admitted to each ref class,
+    protected and control paths, ticket approval, merge criteria, authorship, created tickets,
+    outbox delivery, board posts, answers, and whose attestations and readings count.
+    `cooperative`, `protected` and `protected-signed` are presets; no rule reads one. R-BTN-189
+    defines nine core guarantees as conditions over the policy, floors that refuse any change
+    breaking a guarantee they name, and a signed read, `--require` on runners and section pins on
+    trusted runners. R-BTN-180 keeps trust levels and forge protection, read from the policy.
+    R-BTN-183's merge criteria become `merge.*`. R-BTN-185's human gate becomes any action whose
+    approver is `human`. Retired settings: `landing`, `authorship`, `protected_paths`,
+    `machine_sync` and the draft's `outbox_policy`. Whose attestations count moved from the course
+    file back into Baton (the policy's `attestations` and `readings`), since `paths.control` can
+    now leave course files agent-writable. B-145 builds it.
+  - **The first adversarial review of the policy** (two fresh reviewers, a security attack and a
+    consistency pass) found that the draft's `protected` preset guaranteed less than the old mode.
+    Fixed in the same PR:
+    - **Looser.** A change that swaps one member for another was neither looser nor tighter, so
+      it slipped through. Looser is now "admits anything the old value did not"; removing a
+      protected pattern, and any incomparable value, are loosenings.
+    - **Guarantees include what they rest on.** `tickets-approved`, `control-paths-human`,
+      `independent-review` and `signed-authorship` now include `no-runner-lands`.
+      `tickets-approved` and `independent-review` pin their types' writers. `no-runner-lands`
+      covers `refs.other` and `merge.trusted`. Every guarantee is stated to hold against an
+      injected owner's agent only together with `human-gates`.
+    - **Deliverers.** `no-runner-lands` contradicted courier delivery to the default branch, so
+      under it only trusted runners deliver git kinds. Couriers gained a trust level and trust
+      domain. `min_release` is declared honesty, not a control.
+    - **Tightening `approvers.trust`** now leaves cleared grants `untrusted`, not at the default.
+      Only an owner key may do it, and null trust domains never count as distinct.
+    - **Lock-outs.** A `human` approver, `human_key: hardware` or a `remove_by: human` floor now
+      needs an owner's `human_only` key. Administrators meet a repository's `human` approvers
+      with a `human_only` key, replacing the instance-wide rule.
+    - **Signed reads** carry the repository, the tenant and a 10-minute `valid_until`, under the
+      `baton-policy@1` signing namespace. Runners refetch on `guarantees_hash` too, so forge
+      drift is seen.
+    - **Protection reports.** Only trusted runners' reports feed `no-runner-lands`.
+    - **Pins.** Trusted runners pin the whole policy and its floors.
+    - **Readings** count per repository, through its `readings` entry. A gate under
+      `signed: true` counts only signed readings, which the reading routes now carry.
+    - **Re-checks.** Writer rules are checked again at every course snapshot, and a trusted leg
+      may not take `missing: allow`.
+    - **Export.** Policy versions and floors are exported, and an import never falls back to a
+      preset.
+    - **Declarations.** `released:policy` is declared, the presets got full value columns, and
+      `tickets.created: proposed` now covers every outbox git kind.
+    - **Stale references** in §13.6, S-BTN-123, the security-model page, the vocabulary, B-67,
+      B-140 and B-145 are fixed.
+  - **The second adversarial review** found that most round-one fixes held, the definition of
+    "looser" and the lock-out check among them, but four holes remained. Fixed in the same PR:
+    - **Control paths.** `no-runner-lands` did not constrain `paths.control`, so a runner's
+      workflow change landed under the trusted runner's credentials. It now requires control
+      paths a runner cannot land, proposed tickets, and `board-from-trusted` includes it.
+    - **Repository code in delivery.** The trusted runner delivered through the repository's
+      `.baton/tickets.mjs`. It now writes only from the CLI's templates and refuses an ejected
+      source.
+    - **Proposals that could never land.** Proposed tickets had no way to merge. A proposal now
+      lands by a proposal merge, with one `std:approval@1` and no reviews.
+    - **The protection credential.** The credential that reads GitHub's `bypass_actors` can
+      rewrite the rulesets. It now belongs to a separate protection checker, never a workflow
+      and never the merge runner.
+    - **Smaller fixes:**
+      - `refs/baton/*`, which GitHub rulesets cannot restrict, is outside every guarantee.
+      - Runners pin the tenant signing key and check the tenant, and the read carries
+        `floors_hash`.
+      - Floors are judged on policy conditions alone, so a lapsed report never deadlocks a
+        change, and the checker keeps checking while others stop.
+      - A delegated key changes no policy, and an owner may restore the version its own
+        tightening replaced within 24 hours.
+      - Absent `attestations` and `readings` entries admit nothing, `readings` gains a `*`
+        entry, and instruments leave `approvers.members`.
+      - The first human-only key comes from `BATON_HUMAN_KEYS`, later ones from
+        `/v1/human-keys`, and the last key a `human` approver needs cannot be revoked.
+      - `trust_set_by`; unmarked grants are `untrusted` while `approvers.trust` is `human`;
+        tightening onto a violation is refused.
+      - Baton refuses a policy whose writes could never land.
+    - S-BTN-191 and G-BTN-165 test the new rules.
+  - **Two owner corrections, 2026-10-31.**
+    - **No runner-side enforcement.** The owner: "untrusted runners execute within the sandpit
+      virtual machine along with generated code, and as a result cannot be trusted to maintain
+      the guarantees they promise to." `--require` is gone. While a floored guarantee is broken,
+      Baton itself refuses every claim and advance on the repository (rule `policy`,
+      `policy-broken`) and releases running claims (`released:policy`). The signed read serves
+      trusted runners and audits only.
+    - **One approver for every change.** The owner: "it seems simpler just to specify who may
+      change the policy without making any distinction between whether the new values tighten or
+      loosen the given setting." Gone: the strict-to-loose order, the definition of "looser",
+      `approvers.loosen` (now `approvers.policy`, governing every change to the policy and its
+      floors) and the owner's 24-hour restore. A delegated key is never an approver. Floors still
+      refuse any change that breaks a guarantee they name.
+    - **Approver lists.** The owner: "How about the list of approvers who may update policy is
+      itself a policy configuration item?" Each `approvers.*` knob is now a list of `owner`,
+      `human` and `key:<fingerprint>` entries. A change to a list is authorised by
+      `approvers.policy` as it stands before the change. Baton refuses a list no live credential
+      can satisfy, and refuses a revocation that would leave one. `human-gates` holds when every
+      list is human-only. S-BTN-192 tests it.
+  - **The third adversarial review** found that rounds one and two held. What remained were small,
+    local defects. Fixed in the same PR:
+    - **Approvers scoped to the repository.** `human` and `key:` match only owners of the
+      repository, so a human-only key minted elsewhere carries no authority there.
+      `/v1/human-keys` no longer makes owners. Owner removal and administrator revocation are
+      refused when they would leave a list unsatisfiable (`unsatisfiable-approvers`).
+      `BATON_HUMAN_KEYS` is the stated break-glass.
+    - **The floor stop reaches every repository.** It covers every repository a ticket reaches,
+      not only its home, and code-repository consents became an `approvers.members` action.
+    - **Floor removal** needs a credential satisfying both `remove_by` and `approvers.policy`.
+    - **Declarations completed.** The §14 rows carry every field the signed read binds. Each
+      guarantee states its promise.
+    - **Readings.** The `readings` row is repaired, and the `protected` preset no longer drops
+      runner readings everywhere.
+    - **Renames.** The new rule and release reason are now `floor` (`floor-broken`,
+      `released:floor`), apart from rule 8's `policy`.
+    - **Single approver for trust.** Trust attributes leave R-BTN-186's list for
+      `approvers.trust`.
+    - **Wording.** An outbox `failed` mark is declared as a mark, not a state. Stale wording is
+      fixed in S-BTN-136, S-BTN-191, G-BTN-156, R-BTN-185, the decisions, the security-model page,
+      B-64 and B-145.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

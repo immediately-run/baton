@@ -3,7 +3,7 @@ title: "B-46 — hardening within a tenant: only pushers' forge writes count, ru
 id: B-46
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-31
 repos:
   - immediately-run/baton
 tags:
@@ -214,3 +214,5 @@ adapter's trust and fork mapping from real payload shapes. Item 7's cases, on bo
 _(2026-10-20: rescoped to the current-state spec, PR #71 — the courier `asks` scope, the delivery flag and the `courier` grant flag are dropped (personal couriers retired, R-BTN-164); everything else is unchanged.)_
 
 _(2026-10-20: extended for the adversarial review's fixes — settlement gates, `code_repo_consents`, the longest id winning a branch, `base_sha`, grant acceptance and roleless pending keys, the declaration budget, verified-only revocation over `http`, and no Access JWT read (item 7).)_
+
+_(2026-10-31: a code-repository consent is an `approvers.members` action of the consenting repository (R-BTN-188's first row; B-145 item 12 builds the hook).)_

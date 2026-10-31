@@ -3,7 +3,7 @@ title: "B-124 — Authority by credential, not channel: an action is available o
 id: B-124
 project: baton
 status: available
-updated: 2026-10-27
+updated: 2026-10-31
 repos:
   - baton
 tags:
@@ -65,7 +65,8 @@ owner cannot do through an MCP client. That is the distinction the owner rejects
 
 - **R-BTN-66's protected settings stay out of every delegated key** (finding 11), as item 3 does
   for credential management: owner bars and required bars, holds' release, `trusted_identities`,
-  `code_repos`, `retry` and `machine_sync` are never in an MCP key's allowlist. A rule about
+  `code_repos`, `retry`, any action an `approvers.*` list governs and any change to the repository
+  policy or its floors (R-BTN-186, R-BTN-188) are never in an MCP key's allowlist. A rule about
   delegated credentials, not channels.
 
 ### Tests
@@ -83,3 +84,7 @@ owner cannot do through an MCP client. That is the distinction the owner rejects
       closed list
 - [ ] the scenario passes on both hosts; `npm test`, `npm run typecheck` and `check:actions`
       green
+
+## Status
+
+_(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may post the board is the repository policy's `inputs.board` (`machine`), R-BTN-188, built by B-145. Read it through `src/core/policy.ts` once B-145 lands.)_

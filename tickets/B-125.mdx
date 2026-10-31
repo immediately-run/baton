@@ -3,7 +3,7 @@ title: "B-125 — A compromised-runner runbook: bar, revoke, find what changed, 
 id: B-125
 project: baton
 status: available
-updated: 2026-10-27
+updated: 2026-10-31
 repos:
   - baton
 tags:
@@ -49,7 +49,7 @@ cheapest measures: today revocation is improvised.
 **After the adversarial review** (2026-10-27, `docs/security-model.mdx` *Review*):
 
 - **The runbook starts with the key, not the identity** (finding 18): revoke the compromised
-  runner key, set `machine_sync: false` (B-137), then bar and revoke as written. It covers a
+  runner key, drop `machine` from the policy's `inputs.board` (an approver on `approvers.policy`; R-BTN-188, B-137), then bar and revoke as written. It covers a
   compromised server or Cloudflare account too (B-135): rotate the GitHub App key, the webhook
   secrets and the administrator keys, and redeploy from a known commit.
 
@@ -62,3 +62,7 @@ cheapest measures: today revocation is improvised.
 
 - [ ] the runbook merged and linked from `docs/security-model.mdx`
 - [ ] the drill script passes
+
+## Status
+
+_(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may post the board is the repository policy's `inputs.board` (`machine`), R-BTN-188, built by B-145. Read it through `src/core/policy.ts` once B-145 lands.)_

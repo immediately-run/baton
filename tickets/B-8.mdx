@@ -3,7 +3,7 @@ title: "B-8 — Baton registration tokens and API keys beside SSH keys"
 id: B-8
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-31
 repos:
   - baton
 tags:
@@ -81,3 +81,5 @@ Registration tokens let the owner scope what such a session may become; R-BTN-15
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — tokens register runners only, with no
 courier role or `--asks`; the migration raises each grant for its owners.)_
+
+_(2026-10-31: minting registration tokens is an `approvers.members` action (R-BTN-188's first row; B-145 item 12 builds the hook): only an approver on that list, never a delegated key, mints one.)_

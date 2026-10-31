@@ -3,26 +3,29 @@ title: "B-5 — Baton check courses: check-runner keys, owner-held conclusions a
 id: B-5
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-31
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1108
 tier: critical
-description: "Check tickets per change head, owner-registered check-runner keys, the owners' `checks` conclusions map, `forge-check` notices signed with a named key (`GET /v1/keys/signing`), the forge courier credential kind, and `check-mismatch` from the sync's read-back raising `baton.check-mismatch` (BATON_SPEC R-BTN-114, R-BTN-115, R-BTN-153). Extended after the adversarial review: the `check_runners` row standing in for a grant (rules 4, 5, 7) with the hostname bound at `add --name`; `check_command` read from the fetched default-branch tip; a changed `check.sha` marking an unconfirmed completed claim `superseded_at`; the courier skipping a lower `seq` and read-back re-queuing the highest notice on a stale newest run; fileless check tickets re-verified against Baton's record. S-BTN-68, -81, -123; G-BTN-93, -103, -143. Requires: B-3."
+description: "Check tickets per change head, owner-registered check-runner keys, the owners' `checks` conclusions map, `forge-check` outbox entries signed with a named key (`GET /v1/keys/signing`), the forge courier credential kind, and `check-mismatch` from the sync's read-back raising `baton.check-mismatch` (BATON_SPEC R-BTN-114, R-BTN-115, R-BTN-153). Extended after the adversarial review: the `check_runners` row standing in for a grant (rules 4, 5, 7) with the hostname bound at `add --name`; `check_command` read from the fetched default-branch tip; a changed `check.sha` marking an unconfirmed completed claim `superseded_at`; the courier skipping a lower `seq` and read-back re-queuing the highest notice on a stale newest run; fileless check tickets re-verified against Baton's record. S-BTN-68, -81, -123; G-BTN-93, -103, -143. Requires: B-3."
 topics:
   - baton
 owns: {}
 prs: []
 depends_on:
   - B-3
+  - B-64
 ---
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
 **Spec:** `spec/BATON_SPEC.md` §10 (R-BTN-114, R-BTN-115, R-BTN-153), §8.3 R-BTN-107 (check legs
 require `runner:session`), §1 R-BTN-66 (the owners' `checks` setting), §2.2 R-BTN-136, §13.2's
-`check_runners` and `couriers`, §13.8's `notices`, §14's courier, notice and check-runner rows.
+`check_runners` and `couriers`, §13.8's `outbox`, §14's courier-entry and check-runner rows;
+R-BTN-171 (the outbox the `forge-check` kind belongs to, since 2026-10-30) and R-BTN-188
+(`approvers.members` registers couriers and check-runners; the policy's `outbox.forge-check`).
 After the adversarial review (`spec/BATON_SPEC_HISTORY.md`, "Adversarial review (2026-10-20)"):
 R-BTN-114 and §12.1 (adv-3 F5, F6), R-BTN-153 (F4), R-BTN-115 (F7), R-BTN-10 and R-BTN-168's
 `superseded_at` (F6), R-BTN-5/R-BTN-34 (adv-2 M3); §13's `claims.superseded_at`.
@@ -39,18 +42,23 @@ R-BTN-114, R-BTN-115 and R-BTN-153 are specified; this ticket builds them.
    check-runner key. Check legs require `runner:session` (R-BTN-107): no `process` or
    `attached` runner takes one (rule 4). Whichever of B-5 and B-70 lands second wires that
    requirement into the check courses.
-2. **The notice.** Queued only after a sync confirms the end and its entry; conclusion from the
-   owners' `checks` setting; signed (Ed25519, `BATON_SIGNING_KEY`, `kid`); retired keys still
-   listed. `forge-check` is a kind in today's `notices` (`src/core/notices.ts`); B-67 later drops
-   every other kind.
-3. **The forge courier.** Its own credential kind (`courier`), never a machine key;
-   `?delivers=forge-check`; `check_id` on `sent`; a notice not sent within 15 minutes raises
-   `baton.forge-check-late` (through today's listing if B-57 has not landed).
+2. **The `forge-check` outbox entry** (R-BTN-115, R-BTN-171, on B-64's outbox). Queued only after
+   a sync confirms the end; `fields` `{origin, forge_repo_id, sha, name, conclusion, summary, seq,
+   issued_at}`, the conclusion from the owners' `checks` setting and `summary` rendered `plain`;
+   signed as every entry is (Ed25519, `BATON_SIGNING_KEY`, `kid`), retired keys still listed. One
+   copy per forge courier registered for `forge-check`, plus a shared copy when the policy's
+   `outbox.forge-check` admits runners; a delivered entry is deleted after 7 days.
+3. **The forge courier.** A courier registered `--delivers forge-check` (credential kind `courier`,
+   one role, never a machine key), registered by an approver on `approvers.members` and given its
+   trust level by one on `approvers.trust` (B-147); it claims through `POST
+   /v1/courier/entries/claim` only if the policy's `outbox.forge-check` admits it, and marks
+   `delivered` with the run's `check_id`. An entry not delivered within 15 minutes raises
+   `baton.outbox-late` with `kind: forge-check`; the change stays pending.
 4. **Read-back.** The sync reads the check runs; a run Baton did not issue is the discrepancy
    `check-mismatch` (R-BTN-85) and raises `baton.check-mismatch`.
-5. **Tenancy** *(added 2026-10-18, §2.2 R-BTN-136)*: the notice also carries and signs `origin`
+5. **Tenancy** *(added 2026-10-18, §2.2 R-BTN-136)*: the entry also carries and signs `origin`
    and `forge_repo_id` (null while the repository has no ids); `GET /v1/keys/signing` returns
-   `{keys: [{kid, alg, public_key, retired_at?}]}`; the forge courier refuses a notice whose
+   `{keys: [{kid, alg, public_key, retired_at?}]}`; the forge courier refuses an entry whose
    `origin` is not its configured origin or whose `forge_repo_id` is not the target repository's
    id.
 
@@ -58,7 +66,7 @@ R-BTN-114, R-BTN-115 and R-BTN-153 are specified; this ticket builds them.
    `check: {sha, head_repo_id, head_ref}`, and the claim response carries `check_sha` and
    `check_head_ref`, a fork's dropped and every check dropped while the repository has no ids; a
    claim binds `check_sha` and refuses an `advance` without it (`head-moved`); a concluding
-   notice only for a confirmed `done` of an ordinary check-runner claim, mapped from the end's
+   entry only for a confirmed `done` of an ordinary check-runner claim, mapped from the end's
    own `reached`, anything else raising `baton.check-unattested`; the verdict leg runs
    `check_command` first through the session provider's `exec` in a fresh sandbox at
    `check_sha`, after checking `check_sha` is `check.head_ref`'s head (else
@@ -86,17 +94,17 @@ R-BTN-114, R-BTN-115 and R-BTN-153 are specified; this ticket builds them.
      no attempt, no longer holding rule 3). Whichever of B-5 and B-65 lands second wires this
      trigger to it, as item 1's `superseded` release already is.
    - **No older `seq` over a newer one** (R-BTN-115, adv-3 F7). Before posting, the forge
-     courier reads the sha's check runs of that name and skips its notice when one carries a
-     higher `seq`; each run's output holds its notice's `seq` beside the signature. In the
-     sync's read-back, a newest run of a name that is not the highest-`seq` notice already marked
-     `sent` for that head is `check-mismatch`, and Baton also re-queues that highest notice
-     (`src/core/notices.ts`). A mark arriving after the lease lapsed stays accepted.
+     courier reads the sha's check runs of that name and skips its entry when one carries a
+     higher `seq`; each run's output holds its entry's `seq` beside the signature, and
+     `external_id` is `<repository>:<id>`. In the sync's read-back, a matching run confirms the
+     entry; a newest run of a name that is not the highest-`seq` entry already marked
+     `delivered` for that head is `check-mismatch`, and Baton also re-queues that highest entry
+     (B-64's `src/core/outbox.ts`). A mark arriving after the lease lapsed stays accepted.
    - **Fileless check tickets re-verified against Baton's record** (R-BTN-5/R-BTN-34, adv-2
      M3). A `changes` check ticket has no file, so the runner (`src/runner/runner.ts`'s
      re-verification before the leg runs) checks it against the claim response's station and
      queued leg, never against git, and never releases it `stale-board` for a missing file.
-     B-64 and B-65 add the built-in legs to the same path; whichever of the three lands first
-     writes it.
+     B-65 adds `baton.cancel` to the same path; whichever lands first writes it.
 
 ### Do not
 
@@ -110,7 +118,7 @@ R-BTN-114, R-BTN-115 and R-BTN-153 are specified; this ticket builds them.
   hosts:
   - S-BTN-68: a push right after a `done`, before the sync, marks that `done` `superseded_at`
     and leaves the new head claimable; a courier that stalls past its lease and posts an older
-    `seq` is skipped, or read-back raises `check-mismatch` and re-queues the newest notice;
+    `seq` is skipped, or read-back raises `check-mismatch` and re-queues the newest entry;
   - S-BTN-123: the command read from the branch tip, not from an older `snapshot_sha`;
   - G-BTN-103: a check-runner's claim judged by its `check_runners` row's capabilities and
     `max_tier`, and refused to a key without one.
@@ -130,3 +138,7 @@ _(2026-10-20: references moved to the current-state spec, PR #71; check legs now
 second.)_
 
 _(2026-10-20: extended for the adversarial review's fixes — `check_runners` as the grant, the command from the branch tip, `superseded_at` on a new head, `seq` skipping and the re-queue, and fileless check tickets re-verified against Baton's record (item 7).)_
+
+_(2026-10-30: the spec folds `forge-check` notices into the outbox (R-BTN-171, R-BTN-115): an entry of kind `forge-check`, claimed through `/v1/courier/entries`, marked `delivered`, and late as `baton.outbox-late`. Build on today's `notices` if B-64 has not landed — B-64 migrates them — or on the outbox if it has.)_
+
+_(2026-10-31: rewritten onto B-64's outbox: `forge-check` is an outbox entry, not a notice; B-5 now depends on B-64 so it builds on the outbox rather than code B-64 would migrate.)_
