@@ -1,8 +1,8 @@
-// ../../../../tmp/baton-bundle-dtOQ10/entry.ts
+// ../../../../tmp/baton-bundle-TXdE20/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync as rmSync2, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync as readFileSync2, rmSync as rmSync3, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/defaults/agent-words.ts
@@ -56,6 +56,10 @@ function splitWords(command) {
   if (started) take();
   return words;
 }
+
+// src/defaults/pr-close.ts
+import { readFileSync, rmSync as rmSync2 } from "node:fs";
+import { join as join2 } from "node:path";
 
 // src/defaults/ticket-state.ts
 import { execFileSync } from "node:child_process";
@@ -283,39 +287,6 @@ async function closeTicket(ctx, result, run2 = exec) {
   }
 }
 
-// src/defaults/pr-close.ts
-var PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
-var verdictLine = (verdict) => `<!-- baton:verdict ${verdict} -->`;
-function commentLine(leg, result) {
-  if (leg === "review") {
-    if (result?.verdict !== "approve" && result?.verdict !== "changes") {
-      throw new Error(`the review returned no verdict (approve or changes), got ${JSON.stringify(result?.verdict)}`);
-    }
-    return verdictLine(result.verdict);
-  }
-  if (leg === "adjudicate") {
-    if (result?.adjudication !== "merge" && result?.adjudication !== "owner") {
-      throw new Error(`the adjudication returned neither merge nor owner, got ${JSON.stringify(result?.adjudication)}`);
-    }
-    return `<!-- baton:adjudicated ${result.adjudication} -->`;
-  }
-  if (leg === "conclude") return "<!-- baton:concluded -->";
-  return null;
-}
-var MARKER_LEGS = /* @__PURE__ */ new Set(["converse", "address"]);
-async function prClose(ctx, result, run2 = exec) {
-  const comment = commentLine(ctx.leg, result);
-  if (comment != null) {
-    const body = `${comment}
-baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
-    if (result?.pr != null && !(typeof result.pr === "string" && PR_URL.test(result.pr))) throw new Error(`the ${ctx.leg} leg named no PR URL to write on, got ${JSON.stringify(result.pr)}`);
-    return run2("gh", ["pr", "comment", ...typeof result?.pr === "string" ? [result.pr] : [], "--body", body], ctx.checkout);
-  }
-  if (typeof result?.reached !== "string" || result.reached === "") throw new Error(`the ${ctx.leg} leg returned no station reached`);
-  if (!MARKER_LEGS.has(ctx.leg)) return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
-  return closeTicket({ ...ctx, heading: false }, result, run2);
-}
-
 // src/defaults/course-pr.ts
 var DEFAULT_BRANCH_PATTERN = "claude/{ticket}-*";
 var CREATE_SPEC_COURSE = {
@@ -374,6 +345,183 @@ function branchMatches(pattern, branch) {
   return j === p.length;
 }
 var matchPatterns = (branchPatterns) => (branchPatterns?.length ? branchPatterns : [DEFAULT_BRANCH_PATTERN]).map((p) => p.replace(/\{repository\}/g, "*"));
+
+// src/defaults/pr-close.ts
+var REVIEWS_DIR = ".baton/reviews";
+var ROUND_DRAFT = `${REVIEWS_DIR}/round.md`;
+var ADDRESSED_DRAFT = `${REVIEWS_DIR}/addressed.md`;
+var reviewFilesAt = (run2, checkout, ref) => run2("git", ["ls-tree", "-r", "--name-only", ref, "--", REVIEWS_DIR], checkout).split("\n").map((l) => l.trim()).filter((l) => l !== "");
+var baseName = (path) => path.startsWith(`${REVIEWS_DIR}/`) ? path.slice(REVIEWS_DIR.length + 1) : path;
+var roundOf = (path) => {
+  const m = /^(\d+)(?:-addressed)?\.md$/.exec(baseName(path));
+  return m ? Number(m[1]) : null;
+};
+var nextRound = (files) => 1 + Math.max(0, ...files.map(roundOf).filter((n) => n != null));
+var latestRound = (files) => {
+  let out = null;
+  for (const f of files) {
+    const m = /^(\d+)\.md$/.exec(baseName(f));
+    if (m) out = Math.max(out ?? 0, Number(m[1]));
+  }
+  return out;
+};
+var ticketPatterns = (t, branchPatterns) => matchPatterns(branchPatterns).map((p) => p.replace(/\{ticket\}/g, bareTicketId(t)));
+function reviewsBranch(ctx, run2 = exec) {
+  const branch = run2("git", ["branch", "--show-current"], ctx.checkout).trim();
+  if (branch === "") throw new Error("the checkout is on no branch (detached HEAD) \u2014 the review-rounds protocol is written on the PR's branch");
+  const patterns = ticketPatterns(ctx.ticket, ctx.branch_patterns);
+  if (!patterns.some((p) => branchMatches(p, branch))) {
+    throw new Error(`the checkout's branch ${branch} matches none of ${patterns.join(" or ")} \u2014 the review-rounds protocol is written on the ticket's PR branch, so leave the checkout on it`);
+  }
+  return branch;
+}
+function protocolBranch(ctx, run2 = exec) {
+  try {
+    return reviewsBranch(ctx, run2);
+  } catch {
+    const patterns = ticketPatterns(ctx.ticket, ctx.branch_patterns);
+    const elsewhere = run2("git", ["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"], ctx.checkout).split("\n").map((l) => l.trim().replace(/^origin\//, "")).filter((b) => b !== "" && patterns.some((p) => branchMatches(p, b)));
+    if (elsewhere.length > 0) {
+      throw new Error(`the checkout is on no branch of ${patterns.join(" or ")} (its origin holds ${elsewhere.join(", ")}) \u2014 the review-rounds protocol is written on the ticket's PR branch, so leave the checkout on it`);
+    }
+    return null;
+  }
+}
+async function commitOnBranch(ctx, change, message, run2 = exec) {
+  const branch = reviewsBranch(ctx, run2);
+  const ref = `origin/${branch}`;
+  const index = tmpIndex(ctx.checkout, run2);
+  const git = (args, opts = {}) => run2("git", args, ctx.checkout, opts);
+  try {
+    for (let tries = 1; ; tries++) {
+      git(["fetch", "origin", `+refs/heads/${branch}:refs/remotes/${ref}`]);
+      let parent;
+      try {
+        parent = git(["rev-parse", "--verify", `${ref}^{commit}`]);
+      } catch {
+        throw new Error(`origin holds no branch ${branch} \u2014 push the PR's branch before the review-rounds protocol is written on it`);
+      }
+      rmSync2(index, { force: true });
+      git(["read-tree", parent], { env: { GIT_INDEX_FILE: index } });
+      if (change.write != null) {
+        const blob = git(["hash-object", "-w", "--stdin"], { input: change.write.text });
+        git(["update-index", "--add", "--cacheinfo", `100644,${blob},${change.write.path}`], { env: { GIT_INDEX_FILE: index } });
+      }
+      for (const path of change.remove ?? []) git(["update-index", "--force-remove", path], { env: { GIT_INDEX_FILE: index } });
+      const tree = git(["write-tree"], { env: { GIT_INDEX_FILE: index } });
+      if (tree === git(["rev-parse", `${parent}^{tree}`])) return null;
+      const commit = git(["commit-tree", tree, "-p", parent, "-m", message]);
+      try {
+        git(["push", "origin", `${commit}:refs/heads/${branch}`]);
+        try {
+          git(["update-ref", `refs/heads/${branch}`, commit, parent]);
+        } catch {
+        }
+        return { branch, commit };
+      } catch (e) {
+        if (!movedOnRemote(e) || tries >= PUSH_TRIES) throw e;
+      }
+    }
+  } finally {
+    rmSync2(index, { force: true });
+    rmSync2(`${index}.lock`, { force: true });
+  }
+}
+var PR_URL = /^https?:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+\/pull\/\d+$/;
+var verdictLine = (verdict) => `<!-- baton:verdict ${verdict} -->`;
+function commentLine(leg, result) {
+  if (leg === "review") {
+    if (result?.verdict !== "approve" && result?.verdict !== "changes") {
+      throw new Error(`the review returned no verdict (approve or changes), got ${JSON.stringify(result?.verdict)}`);
+    }
+    return verdictLine(result.verdict);
+  }
+  if (leg === "adjudicate") {
+    if (result?.adjudication !== "merge" && result?.adjudication !== "owner") {
+      throw new Error(`the adjudication returned neither merge nor owner, got ${JSON.stringify(result?.adjudication)}`);
+    }
+    return `<!-- baton:adjudicated ${result.adjudication} -->`;
+  }
+  if (leg === "conclude") return "<!-- baton:concluded -->";
+  return null;
+}
+var MARKER_LEGS = /* @__PURE__ */ new Set(["converse", "address"]);
+function draftOf(path, checkout, leg) {
+  let draft = "";
+  try {
+    draft = readFileSync(join2(checkout, path), "utf8");
+  } catch {
+    throw new Error(`the ${leg} leg left no ${path} in the checkout \u2014 the review-rounds protocol is written from that draft (B-101); the leg's instructions name the path`);
+  }
+  if (draft.trim() === "") throw new Error(`${path} is empty \u2014 the review-rounds protocol is written from that draft (B-101)`);
+  return draft;
+}
+async function prClose(ctx, result, run2 = exec) {
+  const comment = commentLine(ctx.leg, result);
+  if (ctx.review_files === true && ctx.leg === "review") {
+    const verdict = result.verdict;
+    const branch = protocolBranch(ctx, run2);
+    if (branch != null) {
+      run2("git", ["fetch", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], ctx.checkout);
+      const round = nextRound(reviewFilesAt(run2, ctx.checkout, `origin/${branch}`));
+      const draft = draftOf(ROUND_DRAFT, ctx.checkout, ctx.leg);
+      await commitOnBranch(
+        { checkout: ctx.checkout, ticket: ctx.ticket, branch_patterns: ctx.branch_patterns },
+        { write: { path: `${REVIEWS_DIR}/${round}.md`, text: `${comment}
+
+# Round ${round} \u2014 ${verdict}
+
+${draft.trim()}
+` } },
+        `baton:review ${bareTicketId(ctx.ticket)} round ${round}`,
+        run2
+      );
+      rmSync2(join2(ctx.checkout, ROUND_DRAFT), { force: true });
+    }
+  }
+  if (comment != null) {
+    const body = `${comment}
+baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
+    if (result?.pr != null && !(typeof result.pr === "string" && PR_URL.test(result.pr))) throw new Error(`the ${ctx.leg} leg named no PR URL to write on, got ${JSON.stringify(result.pr)}`);
+    return run2("gh", ["pr", "comment", ...typeof result?.pr === "string" ? [result.pr] : [], "--body", body], ctx.checkout);
+  }
+  if (typeof result?.reached !== "string" || result.reached === "") throw new Error(`the ${ctx.leg} leg returned no station reached`);
+  if (ctx.review_files === true && (ctx.leg === "fix" || ctx.leg === "address")) {
+    const branch = protocolBranch(ctx, run2);
+    if (branch != null) {
+      run2("git", ["fetch", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], ctx.checkout);
+      const round = latestRound(reviewFilesAt(run2, ctx.checkout, `origin/${branch}`));
+      if (round == null) throw new Error(`no review round is on ${REVIEWS_DIR}/ of branch ${branch} to answer \u2014 the review close writes the round before its verdict is posted (B-101)`);
+      const draft = draftOf(ADDRESSED_DRAFT, ctx.checkout, ctx.leg);
+      const wrote = await commitOnBranch(
+        { checkout: ctx.checkout, ticket: ctx.ticket, branch_patterns: ctx.branch_patterns },
+        { write: { path: `${REVIEWS_DIR}/${round}-addressed.md`, text: `# Round ${round} \u2014 addressed
+
+${draft.trim()}
+` } },
+        `baton:address ${bareTicketId(ctx.ticket)} round ${round}`,
+        run2
+      );
+      rmSync2(join2(ctx.checkout, ADDRESSED_DRAFT), { force: true });
+      if (ctx.leg === "fix" && wrote != null) return wrote.commit;
+    }
+  }
+  if (!MARKER_LEGS.has(ctx.leg)) {
+    if (ctx.review_files === true && ctx.leg === "merge") {
+      const branch = ticketsBranch(ctx.checkout, ctx.default_branch ?? null, run2);
+      run2("git", ["fetch", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], ctx.checkout);
+      let carries = true;
+      try {
+        run2("git", ["cat-file", "-e", `origin/${branch}:${REVIEWS_DIR}`], ctx.checkout);
+      } catch {
+        carries = false;
+      }
+      if (carries) throw new Error(`the default branch still carries ${REVIEWS_DIR}/ after the merge \u2014 the squash landed the review protocol on it (B-101); remove the directory in a commit on the default branch and note it on the ticket`);
+    }
+    return run2("git", ["rev-parse", "HEAD"], ctx.checkout);
+  }
+  return closeTicket({ ...ctx, heading: false }, result, run2);
+}
 
 // src/defaults/pr-verify.ts
 var bareId = (t) => {
@@ -472,7 +620,7 @@ function verifyPrOpen(ask, run2) {
   throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
 }
 
-// ../../../../tmp/baton-bundle-dtOQ10/entry.ts
+// ../../../../tmp/baton-bundle-TXdE20/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
@@ -480,7 +628,7 @@ function advisedCommand(words, settings, adviceFile) {
   if (!adviceFile) return words;
   let advice;
   try {
-    advice = JSON.parse(readFileSync(adviceFile, "utf8"));
+    advice = JSON.parse(readFileSync2(adviceFile, "utf8"));
   } catch {
     return words;
   }
@@ -500,20 +648,31 @@ function advisedCommand(words, settings, adviceFile) {
   }
   return words;
 }
+var snapshotPatterns = (ctx) => {
+  try {
+    const sha = ctx.snapshot?.sha;
+    if (typeof sha !== "string" || sha === "") return [];
+    const settings = JSON.parse(gitRun("git", ["-C", ctx.checkout, "show", sha + ":.baton/baton.json"], { maxBuffer: 67108864 }));
+    const entry = (settings.courses ?? []).find((c) => c && c.id === "create-pr") ?? {};
+    return [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === "string" && p !== "");
+  } catch {
+    return [];
+  }
+};
 async function run(ctx) {
   const sha = ctx.snapshot?.sha;
   if (typeof sha !== "string" || sha === "") throw new Error("the leg has no snapshot to read its override at");
   const rel = ".baton/courses/create-pr/legs/implement.run.mjs";
   if (gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel]).trim() === "") return standard(ctx);
-  const dir = mkdtempSync(join2(tmpdir(), "baton-override-"));
+  const dir = mkdtempSync(join3(tmpdir(), "baton-override-"));
   try {
-    const file = join2(dir, "implement.run.mjs");
+    const file = join3(dir, "implement.run.mjs");
     writeFileSync(file, gitRun("git", ["-C", ctx.checkout, "show", sha + ":" + rel], { maxBuffer: 67108864 }));
     const mod = await import(pathToFileURL(file).href);
     if (typeof mod.run !== "function") throw new Error(rel + " exports no run(ctx, standard)");
     return await mod.run(ctx, standard);
   } finally {
-    rmSync2(dir, { recursive: true, force: true });
+    rmSync3(dir, { recursive: true, force: true });
   }
 }
 async function standard(ctx) {
@@ -529,7 +688,7 @@ async function standard(ctx) {
   const patterns = [entry.branch_pattern, entry.previous_branch_pattern].filter((p) => typeof p === "string" && p !== "");
   const ticketText = (() => {
     try {
-      return ctx.ticket?.path ? readFileSync(join2(ctx.checkout, ctx.ticket.path), "utf8") : null;
+      return ctx.ticket?.path ? readFileSync2(join3(ctx.checkout, ctx.ticket.path), "utf8") : null;
     } catch {
       return null;
     }
@@ -545,8 +704,8 @@ async function standard(ctx) {
   const rel = ".baton/courses/create-pr/legs/implement.md";
   const present = gitRun("git", ["-C", ctx.checkout, "ls-tree", "--name-only", sha, "--", rel]).trim() !== "";
   const text = present ? show(rel) : null;
-  const dir = text == null ? null : mkdtempSync(join2(tmpdir(), "baton-leg-"));
-  const instructions = dir == null ? "" : join2(dir, "implement.md");
+  const dir = text == null ? null : mkdtempSync(join3(tmpdir(), "baton-leg-"));
+  const instructions = dir == null ? "" : join3(dir, "implement.md");
   if (dir != null) writeFileSync(instructions, text);
   const [command, ...words] = agentWords;
   if (command === void 0) throw new Error(".baton/baton.json names no agent_command to run");
@@ -594,14 +753,19 @@ async function standard(ctx) {
     });
     child.stdin?.end();
   }).finally(() => {
-    if (dir != null) rmSync2(dir, { recursive: true, force: true });
+    if (dir != null) rmSync3(dir, { recursive: true, force: true });
   });
   void out;
   await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
   if (process.env.BATON_VERBOSE) process.stderr.write("baton: create-pr/implement ticket " + ctx.ticket.id + ": the forge verified an open PR on a branch matching " + patterns.join(" or ") + "\n");
   return { reached: "pr-open", next: "review" };
 }
-var closeCtx2 = (ctx) => ({ ...ctx, ...ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === "string" && process.env.BATON_DEFAULT_BRANCH !== "" ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {} });
+var closeCtx2 = (ctx) => {
+  const out = { ...ctx, review_files: true, ...ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === "string" && process.env.BATON_DEFAULT_BRANCH !== "" ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {} };
+  const patterns = snapshotPatterns(ctx);
+  if (patterns.length > 0) out.branch_patterns = patterns;
+  return out;
+};
 var close = (ctx, result) => prClose(closeCtx2(ctx), result);
 async function handoff() {
   return null;
