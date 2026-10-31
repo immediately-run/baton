@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1164
 tier: critical
-description: "Build R-BTN-188 and R-BTN-189: the repository policy as one versioned document in Baton (append-only `repository_policies`, compare-and-set by `base_version`), its knobs and their strict-to-loose order, the `owner`/`human` approvers, the `cooperative`, `protected` and `protected-signed` presets, the core guarantees computed per version, floors that refuse any change breaking a guarantee they name, and the signed `GET …/policy` with `--require` on runners and section pins on trusted runners. Replaces the `landing`, `authorship`, `protected_paths`, `machine_sync` and `outbox_policy` settings. S-BTN-189, S-BTN-190, G-BTN-163, G-BTN-164. Requires: none."
+description: "Build R-BTN-188 and R-BTN-189: the repository policy as one versioned document in Baton (append-only `repository_policies`, compare-and-set by `base_version`), its knobs, the `owner`/`human` approvers and `approvers.policy` for every change, the `cooperative`, `protected` and `protected-signed` presets, the core guarantees computed per version, floors that refuse any change breaking a guarantee they name, Baton refusing claims on a repository whose floored guarantee is broken, and the signed `GET …/policy` with pins on trusted runners. Replaces the `landing`, `authorship`, `protected_paths`, `machine_sync` and `outbox_policy` settings. S-BTN-189, S-BTN-190, G-BTN-163, G-BTN-164. Requires: none."
 topics:
   - baton
 owns: {}
@@ -24,7 +24,7 @@ per-repository policy, presets are conveniences, and the policy is the interface
 Baton enforces Fieldhouse's guarantees.
 **Spec:** `spec/BATON_SPEC.md` §12.8 R-BTN-188 (the repository policy), R-BTN-189 (guarantees,
 floors and signed reads), R-BTN-180 (trust levels and protection, now read from the policy),
-R-BTN-185 (human gates as `human` approvers), R-BTN-186 (loosening), R-BTN-66 (what lives in
+R-BTN-185 (human gates as `human` approvers), R-BTN-186 (delegated keys), R-BTN-66 (what lives in
 Baton); §13 `repository_policies`, `policy_floors`; §14 the four policy routes; §15 S-BTN-189,
 S-BTN-190, G-BTN-163, G-BTN-164.
 **Depends on:** nothing to start. The knobs each bind the ticket that builds their mechanism:
@@ -51,29 +51,30 @@ it relies on (R-FH-3 names a mode).
    `added_by`, `added_at`). Every existing repository gets version 1, the `cooperative` preset,
    with its current `machine_sync` folded into `inputs.board`. The retired columns stay readable
    until no code reads them (append-only migrations).
-2. **Core module `src/core/policy.ts`.** The knob table as data: each knob's JSON schema, its
-   order, and a `looser(a, b)` per knob; `diff(old, new)` listing loosened knobs; the presets as
-   documents; `guarantees(policy, protectCheck)` computing R-BTN-189's table. `looser` implements R-BTN-188's
-   definition exactly: anything admitted that was not, any protected pattern removed, any
-   incomparable value. A validator in `src/core/validate.ts` refuses an unknown knob, a value
+2. **Core module `src/core/policy.ts`.** The knob table as data: each knob's JSON schema;
+   `diff(old, new)` listing the knobs a change touches; the presets as documents;
+   `guarantees(policy)` computing R-BTN-189's table over the policy, with the protection report
+   applied separately. No knob has an order: every change needs `approvers.policy`. A validator in `src/core/validate.ts` refuses an unknown knob, a value
    outside its schema, an `outbox.git` class `refs.default_branch` excludes under `filed`, and,
    for a type `merge` or a trusted leg acts on, an `attestations` writer other than `human`,
    `baton` and `service:` keys holding no owner, runner or courier role (checked again at every
    course snapshot).
 3. **Changes.** `PUT /v1/owner/{repository}/policy` in one `store.transaction`: compare-and-set
-   on `base_version`; the approver check (`approvers.loosen` for any loosening, never a delegated
-   key; R-BTN-186); every floor re-checked against the new version (`floor-violated`); refusing
+   on `base_version`; the approver check (`approvers.policy` for every change, never a delegated
+   key; R-BTN-186, R-BTN-188); every floor re-checked against the new version (`floor-violated`); refusing
    a `human` approver, `human_key: hardware` or `remove_by: human` with no owner's `human_only`
    key to meet it; on `approvers.trust` becoming `human` (owner key only), every owner-set trust
    level cleared to `untrusted`, roles dropped, domains and families null; an `admin` event with
-   both versions and `loosened`. `GET …/policy/log`, and the floors route.
+   both versions and `changed`. `GET …/policy/log`, and the floors route.
 4. **Readers.** Every rule that read `landing`, `authorship`, `protected_paths`, `machine_sync`
    or `outbox_policy` reads its knob through `policy.ts`. No code compares a preset name.
 5. **The signed read and the claim response.** `GET /v1/repositories/{repository}/policy`, signed
    with the tenant's `SigningKey`; `policy_version` and `policy_hash` on every claim response.
 6. **The CLI.** `baton owner policy show | diff | log | set <file> | apply <preset> | floor add |
-   floor remove`; `baton runner start --require <guarantee>…`, refusing to claim where one is
-   broken (`released:policy`); trusted runners' section pins, raising `baton.policy-unpinned`.
+   floor remove`; trusted runners' pins of the policy and floors hashes, raising
+   `baton.policy-unpinned`. No runner-side `--require`: Baton itself refuses claims and advances on
+   a repository whose floored guarantee is broken (rule `policy`, `policy-broken`) and releases
+   running claims with reason `policy` (`released:policy`), the protection checker exempt.
 7. **`baton repo protect`** derives `--print` from `refs.*` and `paths.control`. Trusted runners
    report `--check` in their heartbeat's `protection`, which alone feeds `no-runner-lands`; their
    `policy_pins` drive `baton.policy-unpinned`; `released:policy` joins the end reasons.
@@ -101,10 +102,9 @@ it relies on (R-FH-3 names a mode).
 
 ### Tests
 
-- **S-BTN-189** and **S-BTN-190** on both hosts.
-- Unit: every knob's order (`looser` is a strict partial order; each preset is comparable with
-  `cooperative`); `diff` on mixed tighten-and-loosen changes; each guarantee's condition against
-  the presets; the signature over the canonical JSON; the migration of `machine_sync`.
+- **S-BTN-189**, **S-BTN-190** and **S-BTN-191** on both hosts.
+- Unit: every knob's schema; `diff`; each guarantee's condition against the presets; rule `policy`
+  and the release on a broken floor; the signature over the canonical JSON; the migration of `machine_sync`.
 
 ### Exit criteria
 

@@ -558,6 +558,19 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
         tightening onto a violation is refused.
       - Baton refuses a policy whose writes could never land.
     - S-BTN-191 and G-BTN-165 test the new rules.
+  - **Two owner corrections, 2026-10-31.**
+    - **No runner-side enforcement.** The owner: "untrusted runners execute within the sandpit
+      virtual machine along with generated code, and as a result cannot be trusted to maintain
+      the guarantees they promise to." `--require` is gone. While a floored guarantee is broken,
+      Baton itself refuses every claim and advance on the repository (rule `policy`,
+      `policy-broken`) and releases running claims (`released:policy`). The signed read serves
+      trusted runners and audits only.
+    - **One approver for every change.** The owner: "it seems simpler just to specify who may
+      change the policy without making any distinction between whether the new values tighten or
+      loosen the given setting." Gone: the strict-to-loose order, the definition of "looser",
+      `approvers.loosen` (now `approvers.policy`, governing every change to the policy and its
+      floors) and the owner's 24-hour restore. A delegated key is never an approver. Floors still
+      refuse any change that breaks a guarantee they name.
 
 ## Retired requirements
 
