@@ -712,6 +712,28 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   state. `baton repo migrate-markers` stays as the one-time transition it was. Built by B-120,
   rewritten as its build ticket. Review: pending.
 
+- **2026-10-31 — §12.8 R-BTN-191 (new), R-BTN-181, R-BTN-187, R-BTN-188, §4.4, R-BTN-10,
+  R-BTN-39, R-BTN-46, R-BTN-70, R-BTN-82, R-BTN-116, R-BTN-171, R-BTN-190, §15 S-BTN-187,
+  S-BTN-193, S-BTN-195 (owner direction): one inbound path.** The 2026-10-30 unification had
+  made readings attestations, but answers stayed git's by a separate knob and a courier's report
+  was only a state change. Asked whether the sync could be an instrument's reading of the
+  repository's state, then shown the answer (its facts yes, its ticket and course registries
+  no), the owner: "yes, please!" Every statement Baton receives about the work is now an
+  attestation, the writers `sync` and `courier` joining R-BTN-181's. The sync's readiness,
+  arrivals, implied stations, outputs, markers and evidence are `std:git.*` attestations in the
+  board post, accepted with it so no judgement mixes two runs; a person's answer is always a
+  `std:decision@1`; a courier's delivery a `std:effect@1`. The board post keeps the ticket and
+  course registries, with bars, decisions and `not_before` on each ticket. `inputs.answers` is
+  retired: whether the sync's attestations count is an `attestations` entry. Built by B-151.
+  Review: pending.
+- **2026-10-31 — §12.8 R-BTN-188, R-BTN-189, §15 S-BTN-183 (owner direction):
+  `independent-review` without a model-family requirement.** The owner, moving the reference
+  factory to one model for writing and reviewing: "I feel like having a stronger model generate
+  and review code is the better trade-off in most cases", a hostile or compromised model being
+  out of Fieldhouse's scope. `independent-review` now requires two reviews from trust domains
+  other than the writers' and each other's; `merge.reviews.distinct` may still add
+  `model_family`, and `protected`'s value is `{count: 2, distinct: [trust_domain]}`.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

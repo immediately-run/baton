@@ -139,3 +139,9 @@ it relies on (R-FH-3 names a mode).
 ## Status
 
 _(filed 2026-10-30 with the spec amendment that replaces landing modes with the repository policy.)_
+
+- 2026-10-31: immediately-run/baton#150 retires the `inputs.answers` knob into the `attestations`
+  entries (R-BTN-191: whether the sync's `std:decision@1` and `std:git.*` attestations count is
+  an `attestations` entry), and changes `merge.reviews`' `protected` value to
+  `{count: 2, distinct: [trust_domain]}`, `independent-review` requiring distinct trust domains
+  only (a policy may add `model_family`). Build the knob table as amended.

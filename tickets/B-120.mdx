@@ -38,7 +38,7 @@ choices below were the owner's answers the same day.
 R-BTN-1's table, R-BTN-35, R-BTN-39 (position, fact arrivals, adopt), R-BTN-69 (`arrives`),
 R-BTN-70, R-BTN-74 (`ctx.positions`), R-BTN-81, R-BTN-83, R-BTN-85 (`position-disagrees`),
 R-BTN-63, R-BTN-71 and *Disagreement, not movement*, R-BTN-10, §4.3 (the observation's
-`positions`), §4.4 (the board post's `at`, `arrivals`, `implied`), R-BTN-131 (the marker courses
+`positions`), §4.4 (the board post's `attestations`; the readiness, arrival and implied-station types are R-BTN-191's, built by B-151), R-BTN-131 (the marker courses
 and `create-spec`'s interactive legs write no machine state), §9, §13, §14's adopt route,
 §15 S-BTN-18, S-BTN-34, S-BTN-47, G-BTN-59, G-BTN-73, and §16's Decisions.
 `docs/context/vocabulary.mdx` (*Path*, *Confirmation*, *Adopt*) is amended with it; values
@@ -71,7 +71,7 @@ write is a way around them (reset a path to escape `max_runs` or a retry hold).
    snapshot updates readiness and bars only, discarding readiness whose `at` is not Baton's
    station. `position-disagrees` replaces the retired discrepancy subs, raised under Needs you.
    Retire the regression machinery listed above, in core, the runner and the heartbeat.
-2. **The observation's `positions`** and the board post's `at`, `arrivals` and `implied`;
+2. **The observation's `positions`**, read by the station functions (B-151 carries their readiness, arrivals and implied station as the sync's attestations);
    `StationCtx.positions` in `src/defaults/courses.ts`.
 3. **The standard courses' station functions** compute readiness at the given station from
    their facts. `create-spec`'s `converse` and `address`, and the marker courses' closes, write
