@@ -625,6 +625,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
   The work-tree, leg-state-commit, strip and landing-ref text of the first draft never merged.
 
+  The owner then narrowed it: "this is very unidiomatic for forges so we should only do this for
+  plain git (make it a policy setting)". The new knob `leg_state` takes `forge` (the PR
+  conversation, R-BTN-131) or `branch` (the side branch). Unset, it means `forge` on GitHub,
+  GitLab and Gitea and `branch` where `forge` is `git`. `forge` is refused on a `git` repository.
+  The work-branch refusal and the detection hold under either value.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

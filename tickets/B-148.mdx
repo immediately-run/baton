@@ -1,5 +1,5 @@
 ---
-title: "B-148 — Leg state on a per-ticket side branch: write, read as data, keep counted reviews blind, delete at close, detect if it lands (R-BTN-190)"
+title: "B-148 — Leg state on a per-ticket side branch where there is no forge: the `leg_state` knob, write, read as data, keep counted reviews blind, delete at close, detect if it lands (R-BTN-190)"
 id: B-148
 project: baton
 status: available
@@ -11,7 +11,7 @@ tags:
   - roadmap-item
 order: 1167
 tier: judgement
-description: "Build R-BTN-190's runner and course side: the leg-state branch (the work branch's name plus `--legs`, matched by `branch_pattern`, checked by the course validator); writing only `.baton-legs/<ticket>/<leg>/<claim nonce>/…` as plain files with safe names; reading it with `git cat-file`, never a checkout, as quoted data; `approves: true` reviews reading none of it; deleting it when the ticket closes; and detection of `.baton-legs` on the default branch as `baton.leg-state-landed` (counts and ticket ids), closed only by the protection checker's reading where one exists. S-BTN-193, G-BTN-166. Requires: a docs checkout for the vendored sync."
+description: "Build R-BTN-190's runner and course side: the policy's `leg_state` read from the claim response (`forge` by default with a forge, `branch` where `forge` is `git`); under `branch`, the leg-state branch (the work branch's name plus `--legs`, matched by `branch_pattern`, checked by the course validator); writing only `.baton-legs/<ticket>/<leg>/<claim nonce>/…` as plain files with safe names; reading it with `git cat-file`, never a checkout, as quoted data; `approves: true` reviews reading none of it; deleting it when the ticket closes; and detection of `.baton-legs` on the default branch as `baton.leg-state-landed` (counts and ticket ids), closed only by the protection checker's reading where one exists. S-BTN-193, G-BTN-166. Requires: a docs checkout for the vendored sync."
 topics:
   - baton
 owns: {}
@@ -39,6 +39,10 @@ and on plain git.
 
 ### What to build
 
+0. **The channel.** The claim response carries the policy's `leg_state` (B-145 adds the knob:
+   unset means `forge` with a forge and `branch` where `forge` is `git`, and `forge` is refused on a
+   `git` repository). Under `forge` the PR courses read and write the PR conversation as today
+   (R-BTN-131), and items 1 to 4 do not apply; item 5 applies under either value.
 1. **The branch and the course check.** The runner derives a ticket's leg-state branch as its work
    branch's name plus `--legs`; the course validator refuses a course whose `branch_pattern` does
    not match it.
