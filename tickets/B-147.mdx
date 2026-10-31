@@ -1,0 +1,82 @@
+---
+title: "B-147 — Grants and couriers carry a trust level, a trust domain, a model family and the trusted-runner role (R-BTN-180, R-BTN-182)"
+id: B-147
+project: baton
+status: available
+updated: 2026-10-31
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1166
+tier: critical
+description: "Build the trust attributes of R-BTN-180 and R-BTN-182: `trust_level`, `trust_domain`, `model_family`, `role` (runner, trusted-runner, protection checker) and `trust_set_by` on grants and couriers, set only by an approver on the policy's `approvers.trust`; `grants.default_trust`, `grants.one_per_domain` and `grants.trusted_domain` enforced; rule `trusted`, the `trusted: true` course flag, and the trusted runner's refusal-only sandbox. S-BTN-180, S-BTN-182. Requires: Linux with bubblewrap for the sandbox test."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-145
+---
+
+**Brief:** BATON_SPEC §12.8 as amended 2026-10-30 (baton#145): trust is a property of each grant
+and courier, set by the repository policy's `approvers.trust`, and the trusted-runner role is the
+only one offered trusted legs.
+**Spec:** R-BTN-180 (trust levels and domains, one grant per domain), R-BTN-182 (trusted runners:
+the role, rule `trusted`, the refusal-only override), R-BTN-188 (`approvers.trust`,
+`grants.default_trust`, `grants.one_per_domain`, `grants.trusted_domain`, setting `approvers.trust`
+human-only, a policy live grants already break), R-BTN-171 (courier trust), R-BTN-183 (model family
+for `merge.reviews`); §13 grants and `couriers`; S-BTN-180, S-BTN-182.
+**Depends on:** B-145 (the policy and its approver lists).
+
+### Requires
+
+Linux with `bubblewrap` for the sandbox test; otherwise a checkout and a terminal.
+
+### Why
+
+B-140's merge runner, the protection checker, `merge.reviews`' independence and `outbox` trust all
+read these attributes, and no ticket built them.
+
+### What to build
+
+1. **Schema.** A new numbered migration adds `trust_level`, `trust_domain`, `model_family`, `role`
+   (`runner`, `trusted-runner`, `protection-checker`) and `trust_set_by` (fingerprint and class) to
+   `runner_grants`, and `trust_level`, `trust_domain`, `trust_set_by` to `couriers`.
+2. **Setting them.** `POST /v1/owner/{repository}/grants/{fingerprint}/trust` and the same for
+   couriers (`baton owner grant trust …`), accepted only from an approver on `approvers.trust`; a
+   delegated key never. An unset attribute takes `grants.default_trust`; while `approvers.trust` is
+   human-only, one no human set is `untrusted`. The trusted-runner role only at `trusted`; a
+   repository's protection checker is a trusted runner the same approver names.
+3. **Constraints.** Under `grants.one_per_domain`, at most one active grant per trust domain, and a
+   grant with a null domain is not offered work; under `grants.trusted_domain: separate`, a trusted
+   runner's domain is shared with no other grant or courier. B-145's policy write refuses turning
+   either on while a live grant breaks it.
+4. **Rule `trusted`** (R-BTN-182): a leg its course marks `trusted: true` is offered to, and may be
+   claimed, advanced and ended by, a trusted-runner grant only; no other leg is offered to one.
+5. **The refusal-only override**: `legs/<leg>.run.mjs` for a trusted leg runs under bubblewrap (or
+   an equivalent; refused where none is available) with no network, no credential, a private PID
+   namespace and `/proc`, the computed diff as its only input, a fixed time, and no checkout, `.git`
+   or home; it returns `{refuse, reasons}` from a closed list.
+
+### Do not
+
+- Let anything but an approver on `approvers.trust` set a trust attribute, or a delegated key set
+  any.
+- Treat two null trust domains or model families as distinct.
+
+### Tests
+
+- **S-BTN-182** and the trust half of **S-BTN-180** on both hosts; S-BTN-189's clearing of
+  owner-set trust when `approvers.trust` becomes human-only.
+- Unit: rule `trusted` both ways; `one_per_domain` with a null domain; the sandbox refusing network
+  and file access.
+
+### Exit criteria
+
+- [ ] S-BTN-182 and S-BTN-180's trust cases pass on both hosts
+- [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate
+
+## Status
+
+_(filed 2026-10-31 after baton#145's ticket audit: no ticket built the trust attributes.)_

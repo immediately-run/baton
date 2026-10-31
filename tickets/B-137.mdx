@@ -1,16 +1,16 @@
 ---
-title: "B-137 — Board posts are an attack surface: machine_sync off below the human level, control changes and signatures computed server-side, and rate limits per key"
+title: "B-137 — Board posts are an attack surface: machine keys out of the policy's inputs.board below the human level, control changes and signatures computed server-side, and rate limits per key (R-BTN-187)"
 id: B-137
 project: baton
 status: available
-updated: 2026-10-27
+updated: 2026-10-31
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1160
 tier: critical
-description: "Adversarial review findings 4 and 18 (2026-10-27): any runner key can post the board and any leg can read that key, so B-126's detection and B-127's signature check, computed client-side, are computed by the attacker. machine_sync defaults off for homes with runners below the human level; Baton reads control-path changes from push deliveries and verifies signatures over raw commits, and runners verify again; observation and post rate limits per key. Requires: none."
+description: "Adversarial review findings 4 and 18 (2026-10-27): any runner key can post the board and any leg can read that key, so B-126's detection and B-127's signature check, computed client-side, are computed by the attacker. the policy's `inputs.board` excludes machine keys on homes with runners below the human level; Baton reads control-path changes from push deliveries and verifies signatures over raw commits, and runners verify again; observation and post rate limits per key. Requires: none."
 topics:
   - baton
 owns: {}
@@ -32,8 +32,10 @@ R-BTN-97; B-126, B-127; `docs/security-model.mdx` (reach 7, reach 8).
 
 ### What to build
 
-1. **`machine_sync` defaults to `false`** for every repository with a runner below the human
-   level; the owner turns it on knowingly. Existing homes are switched by their owners now.
+1. **No machine-key posts below the human level**: on every repository with a runner below the
+   human level, the policy's `inputs.board` excludes `machine` (the `protected` preset does; R-BTN-93,
+   R-BTN-188), changed only by an approver on `approvers.policy`. Existing homes are switched by
+   their owners now (`machine_sync: false` until B-145 lands).
 2. **What Baton must trust, Baton computes.** Control-path changes (B-126) come from the push
    deliveries' `commits[].added/modified/removed` and `sender.id`, server-side; a missing delivery
    is `pusher-unknown`, fail closed. Signatures (B-127) are verified by Baton over the raw commit
@@ -45,13 +47,15 @@ R-BTN-97; B-126, B-127; `docs/security-model.mdx` (reach 7, reach 8).
 ### Tests
 
 - A scenario (the next free S-BTN number): a machine key posting a board that drops a control
-  change is contradicted by the server's own reading of the delivery and raises the notice; a key
-  posting faster than its limit is refused; with `machine_sync: false` a machine key's post is
-  `forbidden`.
+  change is contradicted by the server's own reading of the delivery and raises a condition; a
+  key posting faster than its limit is refused; with `machine` out of `inputs.board` a machine
+  key's post is `forbidden`; and **S-BTN-187** (R-BTN-187: a station a trusted leg acts on is not
+  reached from a git verdict under `inputs.answers: attestation`).
 
 ### Exit criteria
 
-- [ ] `machine_sync` off on every VM-runner home; the scenario passes on both hosts
+- [ ] `machine` out of `inputs.board` on every VM-runner home; S-BTN-187 and the scenario pass on
+  both hosts
 
 ## Status
 

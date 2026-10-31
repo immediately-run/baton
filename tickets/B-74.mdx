@@ -3,7 +3,7 @@ title: "B-74 — Light questions: answered from a channel in the claim, or promo
 id: B-74
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-31
 repos:
   - baton
 tags:
@@ -135,3 +135,5 @@ costs no git write when the person answers while it waits, and loses no answer w
 ## Status
 
 _(filed 2026-10-20 from the light-question model and R-BTN-173)_
+
+_(2026-10-31: under the repository policy (R-BTN-173, R-BTN-180, R-BTN-188): where `refs.baton` excludes `runner`, a light question's text is not pushed to `refs/baton/questions/…`; under `tickets.created: proposed`, a promoted question's ask file and its answers are outbox entries written on `baton/proposed/<ticket>` and landed by the proposal merge (B-64, B-140), never filed directly. `refs/baton/*` is outside every guarantee on GitHub, so nothing a trusted leg acts on is read from it.)_

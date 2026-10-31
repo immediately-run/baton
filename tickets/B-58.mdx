@@ -3,7 +3,7 @@ title: "B-58 — Bindings choose a handler course; the handler is a ticket file 
 id: B-58
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-31
 repos:
   - baton
 tags:
@@ -157,3 +157,5 @@ delivery.
 _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
 
 _(2026-10-20: extended for the adversarial review's fixes — `c<condition_id>` and reserved handler ids, no foreign overwrite, and the `{course, replaces: "retry"}` binding form (item 9).)_
+
+_(2026-10-31: under the repository policy's `tickets.created: proposed` (R-BTN-161, R-BTN-180, R-BTN-188), a runner-raised handler ticket is proposed, not filed: Baton queues an outbox entry, a trusted-runner deliverer writes it on `baton/proposed/<ticket>`, and it is not claimable until the proposal merge lands it with a `std:approval@1` (B-64, B-140). A policy whose `refs.default_branch` excludes `runner` while `tickets.created` is `filed` is refused, so this ticket's direct filing applies only where runners may write the default branch. Read the knob through `src/core/policy.ts` (B-145).)_

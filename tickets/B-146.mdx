@@ -1,0 +1,104 @@
+---
+title: "B-146 — Attestations and readings: one record, and each requirement chooses gate or advice (R-BTN-181, R-BTN-76, R-BTN-75)"
+id: B-146
+project: baton
+status: available
+updated: 2026-10-31
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1165
+tier: critical
+description: "Build R-BTN-181 as amended 2026-10-30: the attestation store and routes, writers recorded from the credential, SSHSIG signatures, supersession by attested key, `once` consumption by compare-and-swap, Baton's own `std:wrote@1`/`std:ran@1`/`std:review@1`; readings as attestations about a resource instance; `requires.attestations` and `requires.resources` with `binds: gate|advice`, `missing: block|allow` and `where` (`eq`, `in`, `glob`, `superset-of`, `gte`, `lte`); the `attestation` block kind and `ticket_blocks.binds`; rule 1 refusing gate-binding rows. S-BTN-181, S-BTN-24, G-BTN-70. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-145
+---
+
+**Brief:** the owner, 2026-10-30: "human attestation and instrument readings can also be
+generalized into a single thing", and "Why not leave this up to the course to decide what the gate
+should be for the leg? It could actually depend on a reading if we want (eg: account funds)."
+Recorded in `spec/BATON_SPEC_HISTORY.md` (baton#145).
+**Spec:** R-BTN-181 (attestations: shape, writers, signatures, supersession, the prerequisite,
+standard types, records not git), R-BTN-76 (readings as attestations about an instance, read per
+repository), R-BTN-75 (block kinds, `binds`), R-BTN-120 (prerequisites), §6.6 rule 1, R-BTN-88
+(export), R-BTN-188's `attestations` and `readings` knobs; §13 `attestations`, `ticket_blocks`,
+`instance_readings`; §14 the attestation and reading routes; S-BTN-181, S-BTN-24, G-BTN-70.
+**Depends on:** B-145 (the policy's `attestations` and `readings` entries say whose count).
+
+### Requires
+
+None: a checkout and a terminal.
+
+### Why
+
+Today a leg can require a review or an approval only through course-specific state, and a reading
+only advises. The amended spec makes both one record a requirement reads, gate or advice by the
+requirement's choice; B-140's merge runner, B-141's harness and every trusted leg act on it.
+
+### What to build
+
+1. **Schema.** A new numbered migration adds `attestations` (§13: `repository_id`, `ticket_id`,
+   `type`, `subject_json`, `value_json` ≤ 4 KB, `writer_class`, `writer_key`, `nonce`, `uses`,
+   `lapses_at`, `signature`, `at`, `revoked_at`, `used_by_claim`, `superseded_by`), `binds` on
+   `ticket_blocks` and `attestation` in its kind CHECK, and `writer`, `signature`, `nonce` on
+   `instance_readings`.
+2. **Core module `src/core/attestations.ts`.**
+   - `POST /v1/repositories/{repository}/attestations` and `DELETE …/{id}` (`baton attest`): the
+     writer class recorded from the credential (`human`, `owner`, `baton`, `instrument`, `runner`,
+     `admin`, and `service:<fingerprint>` for its own key); work attested only by `human`, `owner`,
+     `service` and `baton`; the SSHSIG signature over the RFC 8785 canonical JSON in namespace
+     `baton-attestation@1`; revoking a `human` attestation a human gate.
+   - Supersession only when type, subject, writer and attested key match; a `once` attestation
+     consumed by compare-and-swap.
+   - Baton writes `std:wrote@1`, `std:ran@1` and `std:review@1` at the `advance` or end that earns
+     them, signed with its attestation key; the subject from values Baton holds, never a runner's
+     output.
+3. **Readings as attestations.** A reading's `type` is its resource's schema id and its value
+   `{available?, until?, detail}`. The reading routes accept `nonce` and `signature`; an API-key
+   reading is unsigned. What a repository's requirement reads is the state and fields computed from
+   only the readings its policy's `readings` entry admits, and only signed ones for a gate under
+   `signed: true` (R-BTN-76).
+4. **Requirements.** `requires.attestations: [{type, subject, writers?, where?, count?, distinct?,
+   binds?, missing?}]` and `requires.resources` with `binds`, `missing` and `writers`, evaluated in
+   `src/core/blocks.ts`: `writers` only narrows the policy's entry; `where` ops `eq`, `in`, `glob`,
+   `superset-of`, `gte`, `lte` over the value (`available` or `detail.<path>` for a reading);
+   `binds: gate` (default for attestations) or `advice` (default for resources); `missing: block`
+   or `allow`. Unmet, an `attestation` block with `why` `missing`, `other-subject`,
+   `writer-not-allowed`, `consumed`, `lapsed`, `revoked` or `failed-where`; `ticket_blocks.binds`
+   from the requirement.
+5. **Rule 1** refuses a claim or advance on a `resource` or `attestation` row binding as a gate
+   (`src/core/gates.ts`), and `isEligible` in the vendored decision library matches (docs first,
+   then `npm run vendor`).
+6. **The course validator** refuses a `trusted: true` leg whose requirement binds as `advice` or
+   takes `missing: allow`.
+7. **Export.** Attestations about work are exported with the owner state and dropped on import;
+   in-flight work re-attests (R-BTN-88).
+
+### Do not
+
+- Read an attestation from git or the forge.
+- Let a course's `writers` widen what the policy admits.
+- Count an unsigned reading toward a trusted leg or a `signed: true` gate.
+
+### Tests
+
+- **S-BTN-181** on both hosts, including the funds leg (`instance: account-funds`, `where
+  detail.balance_usd gte 50`) and a reading posted for another repository's runners never moving it.
+- **S-BTN-24**'s gate case: a `requires.resources` entry binding `gate` refused `blocked` under a
+  fleet block that only advises otherwise. G-BTN-70.
+- Unit: supersession by attested key; `once` compare-and-swap; each `where` op; the signature.
+
+### Exit criteria
+
+- [ ] S-BTN-181 and S-BTN-24 pass on both hosts; G-BTN-70 holds
+- [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate
+
+## Status
+
+_(filed 2026-10-31 after baton#145's ticket audit: no ticket built R-BTN-181's store or the
+gate-or-advice requirement.)_

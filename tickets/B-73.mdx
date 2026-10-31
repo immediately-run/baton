@@ -3,7 +3,7 @@ title: "B-73 — OAuth 2.1 for MCP clients: Baton issues owner-approved MCP keys
 id: B-73
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-31
 repos:
   - baton
 tags:
@@ -167,3 +167,5 @@ device-code phishing kit, so consent is now the standard OAuth shape: spec Decis
 
 _(filed 2026-10-20 with `spec/BATON_MCP_OAUTH_SPEC.md`; revised the same day after the spec's
 adversarial review moved consent onto the dashboard, adding B-76)_
+
+_(2026-10-31: minting MCP keys is an `approvers.members` action (R-BTN-188's first row; B-145 item 12 builds the hook): an `owner-session` mints one only where the list admits `owner`; under a human-only list it takes a `human_only` key. An MCP key is never itself an approver.)_

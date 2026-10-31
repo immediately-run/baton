@@ -3,7 +3,7 @@ title: "B-136 — A human-only identity for owner gates: a hardware signing key,
 id: B-136
 project: baton
 status: available
-updated: 2026-10-27
+updated: 2026-10-31
 repos:
   - baton
   - fieldhouse
@@ -16,7 +16,8 @@ topics:
   - baton
 owns: {}
 prs: []
-depends_on: []
+depends_on:
+  - B-145
 ---
 
 **Brief:** the adversarial review of the security model (2026-10-27, finding 3): every "owner"
@@ -27,22 +28,36 @@ prompt-injected session (reach 3) passes all of them, and B-127 would mark an in
 signed. Owner gates are not human gates until the human holds something their agents do not.
 
 **Spec:** Fieldhouse Axiom 6 (trust levels) and its Decisions (local sessions hold the owner's
-credentials); BATON_SPEC §11.1 (keys) and R-BTN-58; `docs/security-model.mdx` (*The decision*).
-**Depends on:** none.
+credentials); BATON_SPEC R-BTN-185 (human-only credentials), R-BTN-188 (approver lists,
+`human_key`), §11.1 (keys) and R-BTN-58; `docs/security-model.mdx` (*The decision*).
+**Depends on:** B-145 (approver lists, `/v1/human-keys`, the refusals).
 
 ### What to build
 
 1. **A human-only signing key**: a hardware-backed SSH key (`sk-ssh-ed25519`, verify-required,
-   touch on every use) registered as the owner's signing key in Baton. No agent session can sign
-   with it, since every signature needs a touch. B-127 and the deploy gate accept only it.
-2. **A human-only approval identity**: approvals that gate merges (B-130's code-owner review),
+   touch on every use) registered `human_only` with the tenant, the first from the host's
+   `BATON_HUMAN_KEYS` and each later one through `POST /v1/human-keys` signed by an existing one
+   (B-145 builds the registration, the last-key and `unsatisfiable-approvers` refusals and the
+   break-glass). It is an owner of nothing until a repository's `approvers.members` makes it one;
+   then it satisfies that repository's human-only approver lists (R-BTN-185, R-BTN-188). No agent
+   session can sign with it, since every signature needs a touch. B-127, the deploy gate and every
+   human-only list accept only such keys.
+2. **`human_key: hardware`** (R-BTN-185), the part of the human-only key this ticket builds: the
+   instance setting and each repository policy's minimum, the stricter applying; accepting only a
+   hardware-backed key requiring PIN and touch (`verify-required`) whose FIDO attestation matches an
+   allowlist; suspending, on the switch, every `human_only` key that does not meet it, refused where
+   it would leave an approver list unsatisfiable; the CLI printing the canonical fields and the
+   computed view before signing, and under `hardware` requiring the short code derived from them,
+   typed on the machine the key is in; a WebAuthn assertion counting only from an authenticator a
+   `human_only` signature registered, attested and allowlisted under `hardware`.
+3. **A human-only approval identity**: approvals that gate merges (B-130's code-owner review),
    environment deployments and ruleset bypass come from a GitHub account whose token is in no
    agent session (a separate account, or the owner's account with every session using a
    different, lesser identity). The account sessions use holds no bypass and is not a code owner.
-3. **Sessions get their own identity.** Interactive agent sessions act as an "owner's agent"
+4. **Sessions get their own identity.** Interactive agent sessions act as an "owner's agent"
    GitHub identity and Baton key, below the human: they can propose, not approve. Under Axiom 6
    this fixes the credential crossing downward that reach 3 exploits.
-4. **B-126 reports the difference**: "owner" means the human-only identity; the session identity
+5. **B-126 reports the difference**: "owner" means the human-only identity; the session identity
    is shown as "owner's agent".
 
 ### Tests
@@ -55,3 +70,7 @@ credentials); BATON_SPEC §11.1 (keys) and R-BTN-58; `docs/security-model.mdx` (
 
 - [ ] the hardware key registered; the approval identity in place; sessions on their own identity
 - [ ] the check passes; the security model's *The decision* states the separation
+
+## Status
+
+_(2026-10-31: aligned with the repository policy (baton#145): the key is registered with the tenant and becomes an owner only through `approvers.members`; it satisfies human-only approver lists rather than a fixed set of gates; the `hardware` path (item 2) is this ticket's, the registration routes and refusals are B-145's.)_

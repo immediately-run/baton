@@ -116,6 +116,23 @@ Filed 2026-10-13, in rollout order. Every item names its `S-BTN-n` scenarios (R-
   B-60, B-61, B-59 and B-63 beside it. B-68 goes right after B-49 merges, before the §7 wave
   adds new `worker` code.
 
+- **The 2026-10-30 policy amendment** (baton#145, with immediately-run/fieldhouse#8): one outbox
+  delivered by couriers (R-BTN-171, R-BTN-115), readings as attestations with gate-or-advice
+  requirements (R-BTN-181, R-BTN-76), and a per-repository policy with guarantees and floors in
+  place of landing modes (§12.8, R-BTN-188, R-BTN-189). B-128 and B-130 are superseded; B-5, B-64
+  and B-140 were rewritten for it, and every §12.8 ticket now reads the policy. New tickets:
+  B-145 — The repository policy; B-146 — Attestations and readings, gate or advice per
+  requirement; B-147 — Trust levels, domains, model families and the trusted-runner role.
+
+  ```
+  B-145 policy ─┬─ B-146 attestations + readings (also B-10, B-21)
+                ├─ B-147 trust on grants and couriers
+                ├─ B-136 human keys: hardware
+                └─ B-140 merge runner, proposal merge, protect --print/--check (also B-146, B-147)
+  B-64 outbox + couriers ── B-5 checks on the outbox ── B-67 phase 4 (nothing left in notices)
+  B-137 board posts read inputs.board; R3-1270 machine-key sync reads it too
+  ```
+
 Step 4 (consumer migration) is filed after cutover.
 
 ## Done when

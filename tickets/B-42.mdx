@@ -3,7 +3,7 @@ title: "B-42 — Legs run in a checkout of their commit: TypeScript or JavaScrip
 id: B-42
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-31
 repos:
   - baton
 tags:
@@ -85,7 +85,7 @@ written in TypeScript, or one that needs a library, cannot be expressed.
 8. **The `runner:` capability:**
    - Built-in type `runner`, treated as granted in core's rule 4: the `isEligible` list, the
      claim SQL, `fleet_capabilities` and the prerequisites answer. This ticket adds the value
-     `leg-trees`; B-70 adds `session` (R-BTN-107) and B-64 `baton-legs` (R-BTN-171), on the same
+     `leg-trees`; B-70 adds `session` (R-BTN-107) and B-65 `baton-legs` (R-BTN-168, required by `baton.cancel`), on the same
      code.
    - The runner declares it from its own code, and so does an interactive sidecar. The kit and
      the sync refuse unknown values, and courses may not define the type.

@@ -3,7 +3,7 @@ title: "B-145 — The repository policy: one versioned document of every trust r
 id: B-145
 project: baton
 status: available
-updated: 2026-10-30
+updated: 2026-10-31
 repos:
   - baton
 tags:
@@ -77,9 +77,12 @@ it relies on (R-FH-3 names a mode).
    `baton.policy-unpinned`. No runner-side `--require`: Baton itself refuses claims and advances on
    a repository whose floored guarantee is broken (rule `floor`, `floor-broken`) and releases
    running claims with reason `floor` (`released:floor`), the protection checker exempt.
-7. **`baton repo protect`** derives `--print` from `refs.*` and `paths.control`. Trusted runners
-   report `--check` in their heartbeat's `protection`, which alone feeds `no-runner-lands`; their
-   `policy_pins` drive `baton.policy-unpinned`; `released:floor` joins the end reasons.
+7. **Protection reports and pins** (the server side; B-140 builds `baton repo protect` and the
+   checker mode): only the repository's protection checker's heartbeat `protection` reports feed
+   `no-runner-lands`, a report not matching or differing from the previous `reading_hash` raising
+   `baton.unprotected`; other trusted runners' and the sync's readings only log a `discrepancy`.
+   Trusted runners' `policy_pins` drive `baton.policy-unpinned`; `released:floor` joins the end
+   reasons.
 8. **Export.** R-BTN-88's sections gain `repository_policies` and `policy_floors`; an import
    verifies the `previous_hash` chain and never falls back to a preset.
 9. **Readings per repository.** A requirement reads state computed from the readings its
@@ -97,6 +100,11 @@ it relies on (R-FH-3 names a mode).
    reaches; code-repository consents under `approvers.members`; `floors_hash`; the `*` readings
    entry; `BATON_HUMAN_KEYS` and `POST /v1/human-keys` with the last-key refusal; S-BTN-191,
    G-BTN-165.
+12. **Membership through `approvers.members`.** One authorisation hook for every action the
+   policy's first row governs: adding and removing owners, granting and revoking runner keys,
+   registering couriers, check-runners, sync and mirror keys, minting registration tokens and MCP
+   keys, and code-repository consents; none of them a plain owner action any more, and a delegated
+   key never an approver (B-5, B-6, B-8, B-46 and B-73 call it).
 
 ### Do not
 

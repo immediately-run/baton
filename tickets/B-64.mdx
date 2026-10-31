@@ -3,7 +3,7 @@ title: "B-64 — The outbox and its couriers: every effect Baton intends outside
 id: B-64
 project: baton
 status: available
-updated: 2026-10-30
+updated: 2026-10-31
 repos:
   - baton
 tags:
@@ -64,7 +64,7 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
    `not_before`, `queued_at`, `delivered_ref`, `confirmed_at`, `snapshots_since_delivered`), the
    `outbox_due`, `outbox_alarm` and `outbox_pending` indexes, `couriers.delivers`, and `outbox`
    to `ticket_overrides.override_kind`'s CHECK and `outbox-unlanded`, `outbox-refused`,
-   `outbox-collision` to `hold_reason`'s. It copies every live `notices` row into `outbox` as a
+   `outbox-collision` to `hold_reason`'s. It copies every live `forge-check` `notices` row into `outbox` as a
    `forge-check` entry and drops `notices` (migrations are append-only: a new file, never an edit
    of `0017_notices.sql`).
 2. **Core module `src/core/outbox.ts`**, replacing `src/core/notices.ts`. `queue(kind, ticket,
@@ -91,7 +91,10 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
    - **Confirming.** In the snapshot transaction (`src/core/board.ts`), a git entry whose
      `delivered_ref` the accepted snapshot contains, and which the snapshot shows, turns
      `confirmed`; the posted ticket then rules and the override ends. After 3 accepted snapshots
-     without it, the ticket is held `outbox-unlanded`. A `forge-check` entry is confirmed by the
+     without it, the ticket is held `outbox-unlanded`, except a proposed entry (under
+     `tickets.created: proposed`), which is confirmed only when the proposal merge lands it
+     (B-140), is late only if undelivered after 24 hours, and is never held `outbox-unlanded`
+     (R-BTN-180). A `forge-check` entry is confirmed by the
      sync's read-back (R-BTN-115).
 3. **The courier routes** (`src/core/workerApi.ts` or a new `src/core/courierApi.ts`, with
    `src/core/auth.ts` for the `courier` principal): `POST /v1/courier/entries/claim` leases up to
@@ -111,11 +114,16 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
      `forge-check` copy.
 4. **The courier (`src/courier/`, `baton courier run`).** A loop with its own SSH key, outside
    any runner: claim, verify each entry's signature against the pinned `GET /v1/keys/signing`
-   keys, deliver, mark. For `git`: fetch the default-branch head, skip an entry whose file
-   already carries `baton_write: <id>` (or, for `withdraw`, already says withdrawn or is absent)
-   and mark it `delivered` with the head's commit; else render it through the source's
-   `file(ticket)` (`handler`, body generated from `fields`), `withdraw(ticket, reason)` or
-   `answer`, commit, push; on a rejected push fetch, check and write again at most 3 times, then
+   keys, deliver, mark. The claim carries `{limit?, release}`, refused below the policy's
+   `min_release` (a declaration, not a control). For `git`: fetch the head it writes to (the
+   default branch, or under `tickets.created: proposed` the branch `baton/proposed/<ticket>`),
+   skip an entry whose file already carries `baton_write: <id>` (or, for `withdraw`, already says
+   withdrawn or is absent) and mark it `delivered` with the head's commit; else render it, commit,
+   push. A dedicated courier renders through the source's `file(ticket)` (`handler`, body generated
+   from `fields`), `withdraw(ticket, reason)` or `answer`; **a trusted-runner deliverer** never
+   loads the source's exports and writes only from the CLI's own markdown-source templates, marking
+   every git entry `failed refused` on a repository whose ticket source is ejected
+   (`.baton/tickets.mjs`; R-BTN-171, R-BTN-182); on a rejected push fetch, check and write again at most 3 times, then
    mark `failed transient`; a push the forge refuses marks `failed refused`; a foreign file at a
    `handler`'s path marks `failed collision`. For `forge-check`: the existing courier's delivery
    (R-BTN-115), moved onto the new routes, with `<repository>:<id>` as `external_id`.
@@ -173,7 +181,8 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
 
 ### Exit criteria
 
-- [ ] S-BTN-136 and S-BTN-81 pass on both hosts, with item 7's cases; G-BTN-156 holds
+- [ ] S-BTN-136 and S-BTN-81 pass on both hosts, with item 7's cases and S-BTN-191's proposal
+  delivery; G-BTN-156 and G-BTN-165 hold
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
 - [ ] merged under the review gate
 

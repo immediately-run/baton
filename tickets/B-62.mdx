@@ -3,7 +3,7 @@ title: "B-62 — Call legs: a leg that files children and waits for a completion
 id: B-62
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-31
 repos:
   - baton
 tags:
@@ -142,3 +142,5 @@ leg scopes the wait to one leg and one run's children.
 _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
 
 _(2026-10-20: extended for the adversarial review's fixes — a completion table must end with the closing `{"of": "all", "closed": true}` entry.)_
+
+_(2026-10-31: under `tickets.created: proposed` (R-BTN-165, R-BTN-180, R-BTN-188), a call leg's children are proposed, not filed, and not claimable until the proposal merge lands them with a `std:approval@1` (B-64, B-140); the call waits meanwhile. Read the knob through `src/core/policy.ts` (B-145).)_
