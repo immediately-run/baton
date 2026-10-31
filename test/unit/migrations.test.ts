@@ -353,3 +353,46 @@ describe('migration 0021: leg queues (R3-1255)', () => {
     });
   });
 });
+
+describe('migration 0028: the repository policy tables (B-145)', () => {
+  it('creates the append-only policy log with its floors, and the columns the trust and human marks land in', async () => {
+    const id = env.BATON.idFromName('migrations-0028');
+    await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
+      const sql = state.storage.sql;
+      sql.exec('PRAGMA foreign_keys = OFF');
+      const objects = sql.exec("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table','index')").toArray() as { type: string; name: string }[];
+      for (const o of objects.filter((x) => x.type === 'table')) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
+      for (const m of MIGRATIONS.filter((x) => x.id <= 27)) sql.exec(m.sql);
+      sql.exec(MIGRATIONS.find((x) => x.id === 28)!.sql);
+      sql.exec('PRAGMA foreign_keys = ON');
+
+      // A policy version row, a floor, a human key, a checker's report and a pin.
+      sql.exec(`INSERT INTO repositories (id, github, forge, remote, default_branch, sync_workflow, weight, transcript_repos, tiers, cutover_at)
+                VALUES ('ops', 'o/ops', 'github', 'ssh://git@h/o/ops', 'main', '', 100, '[]', '["routine"]', 1)`);
+      sql.exec(`INSERT INTO repository_policies (repository_id, version, policy_json, hash, previous_hash, changed_by, approver, preset, at)
+                VALUES ('ops', 1, '{}', '${'a'.repeat(64)}', NULL, 'server', NULL, 'cooperative', 1)`);
+      sql.exec(`INSERT INTO policy_floors (repository_id, name, guarantees, remove_by, added_by, added_at)
+                VALUES ('ops', 'fieldhouse', '["no-runner-lands"]', 'human', 'owner:x', 1)`);
+      // Append-only: no UPDATE, no DELETE (R-BTN-188).
+      expect(() => sql.exec(`UPDATE repository_policies SET policy_json = '{}' WHERE repository_id = 'ops'`)).toThrow(/append-only/);
+      expect(() => sql.exec(`DELETE FROM repository_policies WHERE repository_id = 'ops'`)).toThrow(/append-only/);
+      // A second version chains on the first; a second floor with the name is refused by the key.
+      sql.exec(`INSERT INTO repository_policies (repository_id, version, policy_json, hash, previous_hash, changed_by, approver, preset, at)
+                VALUES ('ops', 2, '{}', '${'b'.repeat(64)}', '${'a'.repeat(64)}', 'owner:x', 'owner', NULL, 2)`);
+      expect(() => sql.exec(`INSERT INTO policy_floors (repository_id, name, guarantees, remove_by, added_by, added_at)
+                VALUES ('ops', 'fieldhouse', '[]', 'human', 'owner:x', 3)`)).toThrow(/UNIQUE/);
+      expect(() => sql.exec(`INSERT INTO repository_policies (repository_id, version, policy_json, hash, previous_hash, changed_by, approver, preset, at)
+                VALUES ('ops', 2, '{}', '${'b'.repeat(64)}', '${'a'.repeat(64)}', 'owner:x', 'owner', NULL, 2)`)).toThrow(/UNIQUE/);
+      // The columns the rest of §12.8 lands in: owners' human marks, grants' and couriers' trust
+      // attributes, a reading's writer, nonce and signature.
+      const cols = (table: string) => sql.exec(`SELECT name FROM pragma_table_info('${table}')`).toArray().map((r) => (r as { name: string }).name);
+      expect(cols('repository_owners')).toEqual(expect.arrayContaining(['human_only', 'fido_attestation']));
+      expect(cols('worker_grants')).toEqual(expect.arrayContaining(['trust_level', 'trust_domain', 'model_family', 'role', 'trust_set_by']));
+      expect(cols('couriers')).toEqual(expect.arrayContaining(['trust_level', 'trust_domain', 'trust_set_by']));
+      expect(cols('instance_readings')).toEqual(expect.arrayContaining(['writer', 'nonce', 'signature']));
+      for (const table of ['policy_conditions', 'protection_reports', 'policy_pins', 'human_keys']) {
+        expect(sql.exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${table}'`).toArray()).toHaveLength(1);
+      }
+    });
+  });
+});

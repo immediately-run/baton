@@ -14,6 +14,7 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import {
   checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, checkSuspension, bad, HOSTNAME, isGrantedKey,
   type ActivityReport, type Heartbeat, HOLDING } from './validate';
+import type { Policies } from './policy';
 
 import type { Config, Row, SqlValue, Store } from './ports';
 const CLOSE_GRACE_MS = 10 * 60_000; // §6.9: closing updates are accepted 10 minutes after a claim ends
@@ -50,6 +51,9 @@ export interface Ctx {
   /** R-BTN-103: store the repositories and `asks` a heartbeat delivers notices for (`granted`: the
    *  repositories a machine key works on, null for any other key), returning what was refused. */
   couriers?: (workerId: number, granted: string[] | null, entries: { repository: string; asks: string[] }[]) => { repository: string; code: string }[];
+  /** §12.8 (B-145): the policy store — the protection reports and pins a heartbeat carries
+   *  (R-BTN-180, R-BTN-189) and the hashes the answer carries for its repositories. */
+  policies?: Policies;
   /** R-BTN-75, R-BTN-76: a worker became live or changed what it declares or uses. */
   fleetChanged?: () => void;
   /** R-BTN-75: a shadow report's claim holds its ticket, or no longer does. */
@@ -372,6 +376,22 @@ export class WorkerApi {
     // is granted on; a refused entry never refuses the heartbeat either.
     const refusedCouriers = [...hb.couriers.refused, ...(this.c.couriers?.(w.id, cred.kind === 'worker' ? granted : null, hb.couriers.entries) ?? [])];
     const refusedUses = [...hb.uses.refused, ...uses.refused];
+    // §12.8 (B-145, R-BTN-180): only the protection checker's reports feed `no-runner-lands` —
+    // a report from anyone else is refused per entry; the sync's and other trusted runners'
+    // readings only log a discrepancy, so a granted key's report is logged as one.
+    const protectionRefused: { repository: string; code: string }[] = [];
+    for (const report of hb.protection) {
+      if (this.c.policies?.recordProtection(report.repository, report, cred.id)) continue;
+      if (this.rows('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', cred.id, report.repository).length) {
+        this.event('discrepancy', `worker:${w.id}`, { kind: 'protection-report', repository: report.repository, matched: report.matched, by: cred.id }, null, null);
+        protectionRefused.push({ repository: report.repository, code: 'not-checker' });
+      } else {
+        protectionRefused.push({ repository: report.repository, code: 'not-granted' });
+      }
+    }
+    // §12.8 (B-145, R-BTN-189): the policy pins a trusted runner reports — stored per
+    // repository, a differing one holding `baton.policy-unpinned` open.
+    if (this.c.policies && hb.policy_pins.length) this.c.policies.recordPins(w.id, hb.policy_pins, new Set(granted ?? []));
     if (!was?.live || rewrote || uses.changed) this.c.fleetChanged?.();
     const refused = hb.transcript_refusals;
     const unlinked = this.recordTranscripts(w.id, hb, now);
@@ -399,11 +419,26 @@ export class WorkerApi {
       mode: Object.fromEntries(this.rows<{ id: string; cutover_at: number | null }>('SELECT id, cutover_at FROM repositories WHERE retired_at IS NULL ORDER BY id')
         .map((r) => [r.id, r.cutover_at == null ? 'shadow' : 'cut-over'])),
       server_time: now,
+      // §12.8 (B-145, R-BTN-189): the policy facts of every repository the worker serves — a
+      // map, for a worker's grants and courses reach several.
+      ...(this.c.policies ? { policies: this.policyFacts(granted, hb) } : {}),
+      ...(protectionRefused.length ? { protection_refused: protectionRefused } : {}),
       ...(refused.length ? { transcripts_refused: refused } : {}),
       ...(refusedUses.length ? { refused_uses: refusedUses } : {}),
       ...(refusedCouriers.length ? { refused_couriers: refusedCouriers } : {}),
       ...(unlinked.length ? { transcripts_unlinked: unlinked } : {}),
     };
+  }
+
+  /** §12.8 (B-145, R-BTN-189): the policy facts of the repositories this heartbeat's worker
+   *  serves — its grants', and a bearer's or seed key's the courses it declares. */
+  private policyFacts(granted: string[] | null, hb: Heartbeat): Record<string, { version: number; policy_hash: string; guarantees_hash: string; floors_hash: string }> {
+    const policies = this.c.policies!;
+    const repos = granted ?? [...new Set(hb.courses.map((c) => c.repository))];
+    return Object.fromEntries(repos
+      .map((repository) => [repository, policies.hashesFor(repository)] as const)
+      .filter(([, v]) => v != null)
+      .map(([repository, v]) => [repository, v!]));
   }
 
   /**

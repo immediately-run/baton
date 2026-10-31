@@ -341,6 +341,14 @@ export function setAdminKeys(...keys: (TestKey | string)[]) {
   });
 }
 
+/** BATON_HUMAN_KEYS for this test (R-BTN-185, B-145): the host's break-glass keys, replaced the
+ *  same way the administrators' are. */
+export function setHumanKeys(...keys: (TestKey | string)[]) {
+  return withCore((c) => {
+    (c as unknown as { ports: { humanKeys?: { list: () => string[] } } }).ports.humanKeys = { list: () => keys.map((k) => (typeof k === 'string' ? k : k.publicKey)) };
+  });
+}
+
 /** R-BTN-159: an API key and its public line, as `baton key create` makes them. */
 export async function makeApiKey(comment = '') {
   const hex = (n: number) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, '0')).join('');

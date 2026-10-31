@@ -41,6 +41,11 @@ export interface AdminKeys {
   list(): string[];
 }
 
+/** R-BTN-185 (B-145): the host's human-only keys — `BATON_HUMAN_KEYS`, the same shape as the
+ *  administrators'. The deployment's root of trust, set outside Baton; a test replaces it as it
+ *  replaces the administrators'. */
+export type HumanKeys = AdminKeys;
+
 /** A hook call (R-BTN-52, R-BTN-59): a Dynamic Worker on Cloudflare, a local `workerd`
  *  process locally — the same module format, input, output and limits. R3-1236 builds both. */
 export interface HookRunner {
@@ -104,6 +109,10 @@ export interface Config {
   BATON_FORGE_SECRETS?: string;
   /** R-BTN-73: the GitHub App's webhook secret. Absent, every delivery is refused. */
   BATON_GITHUB_WEBHOOK_SECRET?: string;
+  /** R-BTN-185 (B-145): the host's human-only keys, one OpenSSH public key per line — the
+   *  deployment's root of trust, set outside Baton. A key in it satisfies every `human` entry
+   *  of every repository on the instance, and it is the only recovery from a lost key. */
+  BATON_HUMAN_KEYS?: string;
   /** Test bindings only (vitest.config.ts, §13a): never set by a deploy or a local start. */
   BATON_TEST_BINDINGS?: string;
   TEST_OIDC_JWKS?: string;
@@ -129,6 +138,8 @@ export interface Ports {
   config: Config;
   dispatch: Dispatch;
   adminKeys: AdminKeys;
+  /** R-BTN-185 (B-145): the host's human-only keys; absent, `BATON_HUMAN_KEYS` in the config. */
+  humanKeys?: HumanKeys;
   /** Absent until R3-1236; a test injects a fake. */
   hooks?: HookRunner;
   /** Absent on Cloudflare, where the input gate needs nothing. */

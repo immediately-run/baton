@@ -28,6 +28,13 @@
 //   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T]
 //   baton owner -i KEY revoke REPO FINGERPRINT
 //   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
+//   baton owner -i KEY policy show REPO                     — the signed read (R-BTN-189), as JSON
+//   baton owner -i KEY policy diff REPO FILE                — the knobs FILE's document would change
+//   baton owner -i KEY policy log REPO [--after N]          — the append-only change log
+//   baton owner -i KEY policy set REPO FILE                 — a compare-and-set on the current version
+//   baton owner -i KEY policy apply REPO PRESET             — cooperative | protected | protected-signed | plain-git
+//   baton owner -i KEY policy floor add REPO NAME --guarantees a,b [--remove-by human|owner]
+//   baton owner -i KEY policy floor remove REPO NAME        (R-BTN-189: needs the floor's remove_by and approvers.policy)
 //   baton owner -i KEY bar REPO --course C|'*' --tag T [--legs a,b] --applies claim|claim+advance
 //                [--starts-at ISO] [--ends-at ISO] [--release-holders] --reason R
 //   baton owner -i KEY bar lift REPO ID
@@ -485,6 +492,106 @@ async function decisionList(argv) {
   return 0;
 }
 
+// ── `baton owner policy …` (§12.8 R-BTN-188/R-BTN-189, B-145) ────────────────────────────
+
+/** The policy's knobs, dotted, in the spec table's order — the CLI's own copy of
+ *  src/core/policy.ts's KNOBS, which the bundled core cannot share with this file. */
+const POLICY_KNOBS = [
+  'approvers.members', 'approvers.trust', 'approvers.policy', 'human_key',
+  'grants.default_trust', 'grants.one_per_domain', 'grants.trusted_domain',
+  'refs.default_branch', 'refs.tags', 'refs.other', 'refs.baton', 'refs.legs',
+  'paths.protected', 'paths.control', 'paths.tickets',
+  'merge.trusted', 'merge.reviews', 'merge.checks', 'authorship', 'tickets.created', 'leg_state',
+  'outbox.git', 'outbox.forge-check', 'inputs.board', 'inputs.answers', 'attestations', 'readings',
+];
+
+/** One knob's value, read out of a document by its dotted path. */
+const knobOf = (doc, knob) => knob.split('.').reduce((v, seg) => (v && typeof v === 'object' ? v[seg] : undefined), doc);
+
+/** A value as the canonical JSON the core hashes and diffs over: objects with sorted keys, so a
+ *  stored document and a rebuilt one differ in key order alone, which is no change. */
+const canonical = (v) => Array.isArray(v) ? `[${v.map(canonical).join(',')}]`
+  : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}` : (JSON.stringify(v) ?? 'null');
+
+/** The knobs a change from `oldDoc` to `newDoc` touches — `baton owner policy diff` (pure, so
+ *  the tests check it alone). */
+export function policyDiff(oldDoc, newDoc) {
+  return POLICY_KNOBS.filter((k) => canonical(knobOf(oldDoc, k)) !== canonical(knobOf(newDoc, k)));
+}
+
+/** `baton owner policy …`: show and diff read the signed policy read (R-BTN-189 — a deployment
+ *  verifies its signature against the tenant key it pinned; the CLI shows the fields and the
+ *  signature beside them), set and apply compare-and-set on the version the read names, and
+ *  the floor commands register and remove a deployment's floors. */
+async function policyMain(argv) {
+  const [sub, ...rest] = argv;
+  const urlFlags = parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
+  const args = rest.filter((_, i, a) => !(a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
+  const url = urlFlags.flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+  const keyFile = need(urlFlags.flags.identity, '-i KEY (an owner key file)');
+  const request = (method, path, body) => send(url, { method, path, body }, keyFile);
+  const write = (text) => process.stdout.write(`${text}\n`);
+  if (sub === 'show') {
+    const { flags, positional } = parseArgs(args, [], ['identity', 'url'], 1);
+    const repo = need(positional[0], 'the repository id');
+    const out = await request('GET', `/v1/repositories/${encodeURIComponent(repo)}/policy`);
+    if (out.status !== 200) return write(arrived(out.text)), 1;
+    write(JSON.stringify(out.json));
+    process.stderr.write(`baton: verify ${out.json.repository}@${out.json.version} against your pinned tenant key (${out.json.kid}); the read lives until ${new Date(out.json.valid_until).toISOString()}\n`);
+    return 0;
+  }
+  if (sub === 'diff') {
+    const { positional } = parseArgs(args, [], ['identity', 'url'], 2);
+    const [repo, file] = positional;
+    const out = await request('GET', `/v1/repositories/${encodeURIComponent(need(repo, 'the repository id'))}/policy`);
+    if (out.status !== 200) return write(arrived(out.text)), 1;
+    let next;
+    try {
+      next = JSON.parse(readFileSync(need(file, 'the policy file'), 'utf8'));
+    } catch (e) {
+      throw new Error(`${file}: not JSON (${e.message})`);
+    }
+    const changed = policyDiff(out.json.policy, next);
+    write(changed.length ? changed.join('\n') : '(no knob changes)');
+    return 0;
+  }
+  if (sub === 'log') {
+    const { flags, positional } = parseArgs(args, [], ['after', 'identity', 'url'], 1);
+    const q = new URLSearchParams(flags.after ? { after: flags.after } : {});
+    const out = await request('GET', `/v1/owner/${encodeURIComponent(need(positional[0], 'the repository id'))}/policy/log${q.size ? `?${q}` : ''}`);
+    if (out.status !== 200) return write(arrived(out.text)), 1;
+    write(JSON.stringify(out.json));
+    return 0;
+  }
+  if (sub === 'set' || sub === 'apply') {
+    const { positional } = parseArgs(args, [], ['identity', 'url'], 2);
+    const [repo, what] = positional.map((x) => need(x, sub === 'set' ? 'the repository id and the policy file' : 'the repository id and the preset name'));
+    const read = await request('GET', `/v1/repositories/${encodeURIComponent(repo)}/policy`);
+    if (read.status !== 200) return write(arrived(read.text)), 1;
+    const base = read.json.version;
+    const body = sub === 'apply' ? { base_version: base, preset: what } : { base_version: base, policy: JSON.parse(readFileSync(what, 'utf8')) };
+    const out = await request('PUT', `/v1/owner/${encodeURIComponent(repo)}/policy`, body);
+    write(JSON.stringify(out.json));
+    return out.status >= 200 && out.status < 300 ? 0 : 1;
+  }
+  if (sub === 'floor' && rest[0] === 'add') {
+    const { flags, positional } = parseArgs(rest.slice(1), [], ['guarantees', 'remove-by', 'identity', 'url'], 2);
+    const out = await request('POST', `/v1/owner/${encodeURIComponent(need(positional[0], 'the repository id'))}/policy/floors`,
+      { name: need(positional[1], 'the floor name'), guarantees: need(list(flags.guarantees), '--guarantees'), ...(flags['remove-by'] ? { remove_by: flags['remove-by'] } : {}) });
+    write(JSON.stringify(out.json));
+    return out.status >= 200 && out.status < 300 ? 0 : 1;
+  }
+  if (sub === 'floor' && rest[0] === 'remove') {
+    const { positional } = parseArgs(rest.slice(1), [], ['identity', 'url'], 2);
+    const out = await request('POST', `/v1/owner/${encodeURIComponent(need(positional[0], 'the repository id'))}/policy/floors`,
+      { name: need(positional[1], 'the floor name'), remove: true, confirm: true });
+    write(JSON.stringify(out.json));
+    return out.status >= 200 && out.status < 300 ? 0 : 1;
+  }
+  throw new Error('baton owner policy show|diff|log|set|apply|floor add|floor remove');
+}
+
+
 /** What arrived instead of Baton's JSON: its first 300 characters, an empty body named (B-80). */
 const arrived = (text) => (text.length > 300 ? `${text.slice(0, 300)}…` : text) || '(an empty body)';
 
@@ -504,6 +611,7 @@ export async function main(argv) {
     if (argv[1] !== 'list') throw new Error('baton decision list -i KEY [--watch | --all]');
     return decisionList(argv.slice(2));
   }
+  if (argv[0] === 'owner' && argv[1] === 'policy') return policyMain(argv.slice(2));
   if (argv[0] === 'run') {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.

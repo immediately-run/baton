@@ -12,7 +12,8 @@ export type ErrorCode =
   | 'unauthenticated' | 'forbidden' | 'invalid-params' | 'not-found'
   | 'head-moved' | 'snapshot-rejected' | 'stale-observation' | 'sync-busy' | 'unavailable' | 'internal'
   | 'session-taken' | 'worker-reaped' | 'claim-ended' | 'not-holder'
-  | 'not-eligible' | 'no-eligible-ticket' | 'provider-suspended' | 'stale-skills' | 'backing-off' | 'not-cut-over' | 'conflict' | 'barred-tag' | 'blocked' | 'closed' | 'invalid-prerequisite';
+  | 'not-eligible' | 'no-eligible-ticket' | 'provider-suspended' | 'stale-skills' | 'backing-off' | 'not-cut-over' | 'conflict' | 'barred-tag' | 'blocked' | 'closed' | 'invalid-prerequisite'
+  | 'floor-violated' | 'unsatisfiable-approvers' | 'confirm-required'; // §12.8 (B-145): the policy's refusals
 
 const STATUS: Record<ErrorCode, number> = {
   unauthenticated: 401, forbidden: 403, 'invalid-params': 400, 'not-found': 404,
@@ -22,6 +23,8 @@ const STATUS: Record<ErrorCode, number> = {
   'not-cut-over': 409, conflict: 409, 'invalid-prerequisite': 409, // §11: a key in another role (R-BTN-57, R-BTN-93); R-BTN-126's invalid end
   blocked: 409, // an open dependency or decision (R-BTN-75, R-BTN-78)
   closed: 409, // a notice whose decision was answered (R-BTN-80)
+  'floor-violated': 409, 'unsatisfiable-approvers': 409, // R-BTN-189's floor, R-BTN-188's unsatisfiable list
+  'confirm-required': 428, // a destructive action without confirm: true (§14)
 };
 
 /** Thrown anywhere below the router; the router turns it into the §11 error body. */
