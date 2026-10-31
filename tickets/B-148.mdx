@@ -6,11 +6,12 @@ status: available
 updated: 2026-10-31
 repos:
   - baton
+  - docs
 tags:
   - roadmap-item
 order: 1167
 tier: judgement
-description: "Build the parts of R-BTN-190 no other ticket builds: every sync checks the default branch's tree and raises `baton.leg-state-landed` (a notify condition naming the paths, closed when they are gone) for any path under `.baton-legs/`; the standard PR courses' merge leg, where no merge runner strips the directory, deletes `.baton-legs/<ticket>/` in one commit before the squash, and refuses a merge strategy other than squash for a branch that carries it. S-BTN-193's sync and cooperative cases, G-BTN-166. Requires: none."
+description: "Build the parts of R-BTN-190 no other ticket builds: detection of the leg-state directory on the default branch, raising `baton.leg-state-landed` (counts and ticket ids only), closed only by the protection checker's reading where one exists and advisory otherwise; and the standard PR courses' merge leg, where no merge runner strips the directory, refusing other tickets' writes, deleting the whole directory in one commit and merging only by squash. S-BTN-193's detection and cooperative cases, G-BTN-166. Requires: a docs checkout for the vendored sync."
 topics:
   - baton
 owns: {}
@@ -23,11 +24,12 @@ branch never reaches the default branch; "Strip as you recommended. `.baton-legs
 Recorded in `spec/BATON_SPEC_HISTORY.md` (baton#148).
 **Spec:** R-BTN-190 (leg state on the branch), R-BTN-131 (the standard PR courses' merge leg),
 R-BTN-163 (core `notify` conditions); S-BTN-193, G-BTN-166.
-**Depends on:** none. B-101 introduces the files; B-140 builds the merge runner's strip and refusals.
+**Depends on:** none. B-101 introduces the files; B-140 builds the merge runner's strip and refusals
+and the protection checker's reading.
 
 ### Requires
 
-None: a checkout and a terminal.
+A docs checkout beside this one: the sync is vendored from docs, so its change lands there first.
 
 ### Why
 
@@ -37,15 +39,16 @@ by a mistaken merge or a direct push.
 
 ### What to build
 
-1. **Detection in the sync.** Each sync lists the default branch's tree under `.baton-legs/` (one
-   `git ls-tree` at the head it reads) and posts the paths; core raises `baton.leg-state-landed`
-   for the repository with the paths in `detail` (identifiers only), closed by the first sync that
-   finds none. The sync is vendored from docs (`src/shared/batonSync.mjs`): change it there, then
-   `npm run vendor`.
+1. **Detection.** The reading is the default branch's root entry `.baton-legs` (R-BTN-190's one
+   test) at the head read, posted as a count of entries and the ticket ids among its subdirectory
+   names, never paths (R-BTN-33). Core raises `baton.leg-state-landed` for the repository. Where the
+   repository has a protection checker, only its reading (B-140's checker mode) raises and closes
+   it; elsewhere the sync's does, and the condition says it is advisory. The sync is vendored from
+   docs (`src/shared/batonSync.mjs`): its change is a docs PR first, then `npm run vendor` here.
 2. **The merge leg without a merge runner.** The standard PR courses' merge leg (`src/defaults/`),
-   where the policy's `merge.trusted` is false, deletes `.baton-legs/<ticket>/` in one commit before
-   it merges, merges only by squash when the branch's history carries `.baton-legs/`, and fails the
-   leg naming the rule for a course whose merge strategy is merge or rebase.
+   where the policy's `merge.trusted` is false, fails naming the rule when a commit in the ticket's
+   ranges touches another ticket's subdirectory or an entry R-BTN-190 refuses, deletes the whole
+   root `.baton-legs` entry in one commit, and merges only by squash.
 
 ### Do not
 
@@ -55,9 +58,10 @@ by a mistaken merge or a direct push.
 
 ### Tests
 
-- **S-BTN-193**'s sync case (a direct push adding `.baton-legs/B-3/x.md` raises the condition,
-  removing it closes it) and its cooperative case (one deletion commit, then a squash carrying none
-  of it), on both hosts; G-BTN-166.
+- **S-BTN-193**'s detection cases (a direct push adding `.baton-legs/B-3/x.md` raises the condition
+  with the count and `B-3`; removing it closes it; with a protection checker, an empty sync reading
+  leaves it open) and its cooperative case (another ticket's subdirectory refused; one deletion
+  commit of the whole directory, then a squash carrying none of it), on both hosts; G-BTN-166.
 
 ### Exit criteria
 

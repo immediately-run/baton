@@ -75,12 +75,17 @@ branch).
    - tickets and goals, under `paths.tickets: approval`, only with a `std:approval@1` at `H` whose
      `paths` and `blobs` cover every protected path changed; a leg's own progress after `## Status`,
      by R-BTN-184's grammar, needs none;
-   - leg state (R-BTN-190): a commit touching `.baton-legs/` outside the claim's own ticket's
-     subdirectory is refused; `.baton-legs/` is outside the changed paths; a branch whose history
-     carries it merges only by squash;
-   - how: squash or merge at exactly `H` with the base pinned (a compare-and-swap push), the squash
-     tree being `H`'s with `.baton-legs/` removed, so the attested head never moves, and a commit
-     message it writes itself; a branch that moved since an attestation was made is refused.
+   - leg state (R-BTN-190): the leg-state directory is the exact root entry `.baton-legs`
+     (mode `040000`), one test for exclusion, strip and refusal; variants that fold or normalise to
+     it at any depth, entries other than the ticket's own plain files, and commits in the ticket's
+     ranges touching another ticket's subdirectory are refused; a branch whose ranges touch it
+     merges only by squash;
+   - how: merge the branch's latest head, whose **work tree** (its tree without `.baton-legs`) must
+     equal the one attested at `H`, onto the pinned main tip (a compare-and-swap push), removing
+     `.baton-legs` from the result, with a commit message it writes itself; leg-state commits after
+     `H` move no work; a branch whose work tree changed since an attestation was made is refused;
+   - under `paths.control: human`, it builds that stripped squash commit on
+     `baton/landing/<ticket>` and presents it as the commit the human lands.
    Every attestation is fetched, verified against the pins, its subject compared with the exact
    object, and a `once` attestation consumed by compare-and-swap (R-BTN-182).
 3. **The proposal merge** (R-BTN-180): it merges `baton/proposed/<ticket>` when every commit on it
@@ -105,9 +110,11 @@ branch).
    - GitLab protected branches and tags (a deploy key on GitLab Free); Gitea and Forgejo protected
      branches with a whitelist; plain git a `pre-receive` hook on a server that knows the pusher
      (`baton repo hook pre-receive`), keeping a pusher log;
-   - every forge that can: a rule refusing default-branch updates that add `.baton-legs/` (the
-     `pre-receive` hook; a GitHub push ruleset restricting the path where the plan offers one;
-     R-BTN-190).
+   - plain git: the `pre-receive` hook also refuses default-branch updates that add the leg-state
+     directory (R-BTN-190); GitHub relies on the strip and the detection, its push rulesets being
+     unable to target one branch;
+   - the protection checker mode also reads the default branch's tree for the leg-state directory
+     and reports it, the reading that alone raises and closes `baton.leg-state-landed` (B-148).
 
    `--check <forge>` reads it back and returns `{matched, reading_hash}`; it does not match while a
    class the forge cannot restrict excludes any writer. On GitHub it needs the credential that reads

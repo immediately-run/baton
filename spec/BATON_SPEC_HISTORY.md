@@ -619,6 +619,24 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - **Detected** by every sync as `baton.leg-state-landed`, with a forge rule where one exists.
 
   R-BTN-183 and R-BTN-184 cite it. S-BTN-193 and G-BTN-166 test it.
+  - **Its adversarial review** found that review rounds are themselves commits made after the
+    review, so the attested head moved anyway. It also found that a squash built from `H`'s tree
+    would revert `main`, that the exclusion, the strip and the detection used different path
+    tests, and that a human merge was covered by neither. Fixed in the same PR:
+    - **Work trees.** Attestations bind the **work tree**, the tree without the root
+      `.baton-legs` entry. **Leg-state commits** touch only a ticket's own subdirectory, so they
+      move no work and make no writer.
+    - **Squash base.** The squash is built on the pinned main tip.
+    - **One path test** defines the directory everywhere: the exact root entry. Variants are
+      refused. Only plain files under the ticket's own name are allowed, never checked out and
+      read through `git cat-file`.
+    - **Human merges** land a stripped commit the merge runner prepares on
+      `baton/landing/<ticket>`.
+    - **The cooperative close** refuses other tickets' writes and deletes the whole directory.
+    - **Detection** is closed only by the protection checker's reading where one exists. It
+      stores counts and ticket ids, not paths.
+    - **GitHub's push ruleset is dropped**, since it cannot target one branch.
+    - **History** means the ticket's own ranges.
 
 ## Retired requirements
 
