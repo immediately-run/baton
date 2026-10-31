@@ -637,6 +637,24 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   deliverers. It is a new `git` repository's default. `protected` and `protected-signed` applied to
   a `git` repository write the same three values, and Baton refuses the forge-only values there.
 
+  **The final review round** found the side branch named inside `branch_pattern`. Every reader of
+  that pattern would treat it as a work branch, the foreign-commit rule would reset it, and its
+  name could collide with another ticket's branch. It also found that the layout regex rejected
+  its own required path. Fixed in the same PR:
+  - **A reserved namespace.** The branch moved to `baton-legs/<ticket id>`, an orphan history no
+    `branch_pattern` may match, governed by a new `refs.legs` class.
+  - **Not a write.** A push to it reports no range, triggers no foreign-commit reset, and makes no
+    writer.
+  - **The grammar** applies below `.baton-legs/<ticket id>/` only.
+  - **Readers.** Adjudication joins the counted reviews in reading none of it.
+  - **The runner's and the deployment's parts** are stated separately.
+  - **Verdicts.** The `branch` course writes no verdict commits under `inputs.answers:
+    attestation`.
+  - **Folding** covers any segment at any depth.
+  - **Detection's detail** lists only existing ticket ids.
+  - **Declared fields:** `leg_state` on the claim response, `legs` in the checker's report, and
+    `legs_landed` on the board post.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

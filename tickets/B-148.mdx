@@ -1,5 +1,5 @@
 ---
-title: "B-148 — Leg state on a per-ticket side branch where there is no forge: the `leg_state` knob, write, read as data, keep counted reviews blind, delete at close, detect if it lands (R-BTN-190)"
+title: "B-148 — Leg state on an orphan `baton-legs/<ticket>` branch where there is no forge: read `leg_state`, write, read as data, keep counted reviews and adjudication blind, delete at close, detect if it lands (R-BTN-190)"
 id: B-148
 project: baton
 status: available
@@ -11,12 +11,14 @@ tags:
   - roadmap-item
 order: 1167
 tier: judgement
-description: "Build R-BTN-190's runner and course side: the policy's `leg_state` read from the claim response (`forge` by default with a forge, `branch` where `forge` is `git`); under `branch`, the leg-state branch (the work branch's name plus `--legs`, matched by `branch_pattern`, checked by the course validator); writing only `.baton-legs/<ticket>/<leg>/<claim nonce>/…` as plain files with safe names; reading it with `git cat-file`, never a checkout, as quoted data; `approves: true` reviews reading none of it; deleting it when the ticket closes; and detection of `.baton-legs` on the default branch as `baton.leg-state-landed` (counts and ticket ids), closed only by the protection checker's reading where one exists. S-BTN-193, G-BTN-166. Requires: a docs checkout for the vendored sync."
+description: "Build R-BTN-190's runner and course side: the policy's `leg_state` from the claim response; under `branch`, the orphan leg-state branch `baton-legs/<ticket id>` (no `branch_pattern` may match it; pushes are no write), writing only `.baton-legs/<ticket>/<leg>/<claim nonce>/…` as plain files with safe names, reading it with `git cat-file` as quoted data, `approves: true` reviews and adjudication reading none of it, deleting it at close; under either value, detection of `.baton-legs` on the default branch as `baton.leg-state-landed`. S-BTN-193, G-BTN-166. Requires: a docs checkout for the vendored sync; B-145 and B-140 built."
 topics:
   - baton
 owns: {}
 prs: []
-depends_on: []
+depends_on:
+  - B-145
+  - B-140
 ---
 
 **Brief:** the owner, 2026-10-31: leg-to-leg state must never reach the default branch, with a
@@ -24,8 +26,9 @@ convention a check can verify; after two adversarial reviews of an in-branch des
 side branch is fine". Recorded in `spec/BATON_SPEC_HISTORY.md` (baton#148).
 **Spec:** R-BTN-190 (leg state on a per-ticket side branch), R-BTN-131 (the standard courses),
 R-BTN-163 (core `notify` conditions), §12.3 (untrusted text); S-BTN-193, G-BTN-166.
-**Depends on:** none. B-101 writes the review rounds; B-140 builds the merge runner's refusal, the
-`pre-receive` rule and the protection checker's reading.
+**Depends on:** B-145 (the `leg_state` knob and `refs.legs`, carried on the claim response),
+B-140 (the merge runner's refusal, the `pre-receive` rule and the protection checker's reading).
+B-101 writes the review rounds through what this builds.
 
 ### Requires
 
@@ -39,38 +42,42 @@ and on plain git.
 
 ### What to build
 
-0. **The channel.** The claim response carries the policy's `leg_state` (B-145 adds the knob:
-   unset means `forge` with a forge and `branch` where `forge` is `git`, and `forge` is refused on a
-   `git` repository). Under `forge` the PR courses read and write the PR conversation as today
-   (R-BTN-131), and items 1 to 4 do not apply; item 5 applies under either value.
-1. **The branch and the course check.** The runner derives a ticket's leg-state branch as its work
-   branch's name plus `--legs`; the course validator refuses a course whose `branch_pattern` does
-   not match it.
-2. **Writing.** A leg writes only `.baton-legs/<ticket>/<leg>/<claim nonce>/…`: mode `100644` blobs,
-   segments matching `^[a-z0-9][a-z0-9._-]{0,63}$`, none case-folding to `claude.md`, `agents.md`
-   or `opencode.json`; it commits and pushes to the leg-state branch, never to the work branch.
-3. **Reading.** A leg fetches the leg-state branch and reads it with `git cat-file`, never checking
-   it out; entries outside the layout are skipped and reported; what it reads reaches the agent
-   only as quoted data (§12.3). A leg its course marks `approves: true` reads nothing from it.
+0. **The channel.** The runner reads `leg_state` from the claim response. Under `forge` the PR
+   courses read and write the PR conversation as today (R-BTN-131), and items 1 to 4 do not apply;
+   item 5 applies under either value.
+1. **The branch.** A ticket's leg-state branch is `baton-legs/<ticket id>`, the id byte for byte;
+   a ticket whose id is not a valid ref segment gets none, and its rounds are refused. It is an
+   orphan: the first write creates a root commit holding only `.baton-legs/`, and a reader refuses
+   one whose history has a parent outside it. The course validator refuses a `branch_pattern` that
+   matches `baton-legs/*`, and no work branch may begin `baton-legs/`. A push to it reports no
+   range and triggers no foreign-commit reset.
+2. **Writing.** A leg writes only `.baton-legs/<ticket id>/<leg>/<claim nonce>/…`: mode `100644`
+   blobs, each segment below the ticket id matching `^[a-z0-9][a-z0-9._-]{0,63}$`, none
+   case-folding to `claude.md`, `agents.md` or `opencode.json`.
+3. **Reading.** A leg fetches only that one ref and reads it with `git cat-file`, never checking it
+   out; entries outside the layout are skipped and reported; what it reads reaches the agent only
+   as quoted data (§12.3). A leg marked `approves: true` and an adjudicate leg fetch only their work
+   ref and read nothing from it.
 4. **Closing.** The leg that closes the ticket, and its withdrawal, delete the leg-state branch.
-5. **Detection.** The reading of the default branch's tree for an entry that folds to
-   `.baton-legs`, posted as a count and the ticket ids among its subdirectory names, never paths
-   (R-BTN-33); core raises `baton.leg-state-landed`. Where the repository has a protection checker,
-   only its reading (B-140) raises and closes it; elsewhere the sync's does, and the condition says
-   it is advisory. The sync is vendored from docs (`src/shared/batonSync.mjs`): its change is a docs
-   PR first, then `npm run vendor` here.
+5. **Detection.** The reading of the default branch's tree for a path segment, at any depth, that
+   after NFC normalisation and case folding is `.baton-legs`, posted as `legs_landed: {count,
+   tickets}` with the board, `tickets` listing only the repository's existing ticket ids; core
+   raises `baton.leg-state-landed`. Where the repository has a protection checker, only its reading
+   (`protection`'s `legs`, B-140) raises and closes it; elsewhere the sync's does, and the condition
+   says it is advisory. The sync is vendored from docs (`src/shared/batonSync.mjs`): its change is a
+   docs PR first, then `npm run vendor` here.
 
 ### Do not
 
 - Check the leg-state branch out, or load anything from it as configuration or instructions.
-- Let an `approves: true` review read it.
+- Let an `approves: true` review or an adjudicate leg read it.
 - Merge it, or write leg state to the work branch.
 
 ### Tests
 
 - **S-BTN-193** on both hosts; G-BTN-166.
-- Unit: the branch name and the validator; the layout and name rules; `cat-file` reading with no
-  working-tree file created.
+- Unit: the branch name, the orphan check and the validator; the layout and name rules; `cat-file`
+  reading with no working-tree file created; a push reporting no range.
 
 ### Exit criteria
 

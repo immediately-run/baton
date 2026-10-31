@@ -2251,38 +2251,61 @@ mean (R-BTN-50).
     branch do not apply.
   - **`branch`**, the default and the only choice where `forge` is `git` (R-BTN-92), and open to a
     forge repository whose owners choose it: the rounds live on the ticket's **leg-state branch**,
-    never on the branch that carries its work, as follows.
-  - **The branch.** A ticket's leg-state branch is its work branch's name with `--legs` appended.
-    The course's `branch_pattern` must match it, so runners write it wherever they may write work
-    (the policy's `refs.*`, R-BTN-188); the validator refuses a course whose pattern does not. It is
-    no PR's head, and nothing merges it.
-  - **Its layout.** Its tree holds only `.baton-legs/<ticket id>/<leg>/<claim nonce>/…`: mode
-    `100644` blobs, each path segment matching `^[a-z0-9][a-z0-9._-]{0,63}$`, none case-folding to a
-    harness configuration file R-BTN-184's floor names (`claude.md`, `agents.md`, `opencode.json`).
-    A claim writes only its own `<leg>/<claim nonce>/` subpath. A reader skips, and reports, any
-    entry outside this layout. Whoever can push the ticket's branches can write here, so its
-    content is unauthenticated data and its attribution advisory; nothing that gates reads it.
-  - **Read as data, never checked out.** A leg reads the leg-state branch with `git fetch` and `git
-    cat-file`; it is never checked out into a working tree, so no harness loads a file from it as
-    configuration. What a leg reads there reaches a model only as quoted data (§12.3), and nothing a
-    trusted leg acts on comes from it (R-BTN-187).
-  - **Counted reviews read none of it.** A review leg whose verdict can count toward `merge.reviews`
-    (`approves: true`) reads nothing from the leg-state branch, so content planted in one round
-    never reaches another counted reviewer. Address, fix and adjudicate legs may read it.
-  - **The work branch never carries it**, under either value. The merge runner (R-BTN-183) refuses a work branch whose
-    merge result, or any commit in the ticket's ranges, holds an entry that case-folds or
-    NFC-normalises to `.baton-legs`; review rounds therefore never make a reviewer a writer and
-    never move an attested head.
+    as follows. On plain git the courses using it are the `branch` course (R-BTN-131) and any
+    course whose legs pass rounds to one another.
+
+  Under `leg_state: branch`:
+  - **A reserved namespace, an orphan history.** A ticket's leg-state branch is
+    `baton-legs/<ticket id>`, the ticket's own id byte for byte (a ticket whose id is not a valid
+    ref segment, such as one containing `..`, has none, and its rounds are refused). It is an
+    **orphan** branch: its first commit has no parent and every commit's tree holds only
+    `.baton-legs/`, so it shares no history with the work, no forge opens a PR from it, it holds no
+    workflow to run, and merging it by hand needs `--allow-unrelated-histories`. No
+    `branch_pattern` may match `baton-legs/*` (the course validator refuses one that does), so
+    no reader of `branch_pattern` — a station function, R-BTN-25's continuation, the PR courses'
+    mapping, the branch-holder query — ever sees it, and no work branch's name collides with it.
+    Who may push it is the policy's `refs.legs` (R-BTN-188).
+  - **Not a work branch.** A push to it is no write in R-BTN-183's sense: it reports no range, is
+    exempt from continuity and foreign-commit resets, and does not make a leg a writing leg
+    (`std:wrote@1`, `std:ran@1`), so a review leg that writes its round stays independent.
+  - **Its layout.** Its tree holds only `.baton-legs/<ticket id>/<leg>/<claim nonce>/…`, the
+    ticket id byte-equal to the branch's. Each segment below `.baton-legs/<ticket id>/` matches
+    `^[a-z0-9][a-z0-9._-]{0,63}$` and none case-folds to a harness configuration file R-BTN-184's
+    floor names (`claude.md`, `agents.md`, `opencode.json`); entries are mode `100644` blobs. A
+    claim writes only its own `<leg>/<claim nonce>/` subpath. A reader skips, and reports, any entry
+    outside this layout. Whoever can push the ticket's branches can write here, so the content is
+    unauthenticated data and its attribution advisory; nothing that gates reads it.
+  - **Read as data, never checked out.** What a leg reads there reaches a model only as quoted data
+    (§12.3), and nothing a trusted leg acts on comes from it (R-BTN-187). **The runner's part:**
+    it reads the branch with `git fetch` of that one ref and `git cat-file`, and never checks it
+    out. **The deployment's part** (§12.8): that an agent with a shell does not fetch or check it
+    out itself.
+  - **Who reads it.** Address and fix legs may. A review leg whose verdict can count toward
+    `merge.reviews` (`approves: true`) and an adjudicate leg, which decides a merge, read nothing
+    from it, so content planted in one round never reaches another counted reviewer or the merge
+    decision. **The runner's part:** such a leg's claim fetches only its work ref. **The
+    deployment's part:** that the leg holds no forge or network access to fetch it otherwise.
+  - **Verdicts are not leg state.** The `branch` course's verdict commits (R-BTN-131) carry no files
+    and stay on the work branch where `inputs.answers` is `git`. Where it is `attestation`
+    (R-BTN-187), verdicts are attestations and the course writes no verdict commit, so none moves
+    an attested head.
   - **Deleted when the ticket closes.** The leg that closes the ticket, or its withdrawal, deletes the
     leg-state branch. One left behind is harmless, since nothing merges it.
-  - **Detected if it lands anyway**, under either value. An entry on the default branch's tree that case-folds or
-    NFC-normalises to `.baton-legs` raises `baton.leg-state-landed`, a `notify` condition whose
-    `detail` holds the count of entries and those of their subdirectory names that match the
-    ticket-id grammar, never paths. Where the repository has a protection checker (R-BTN-180), only
-    its reading of the default branch's tree raises and closes the condition; elsewhere the sync's
-    does, and the condition is advisory, since any holder of the sync key can post. The check reads
-    the tree, not history. On plain git, `baton repo protect --print` adds a `pre-receive` rule
-    refusing default-branch updates that add the entry.
+
+  Under either value:
+  - **The work branch never carries it.** The merge runner (R-BTN-183) refuses a work branch whose
+    merge result, or any commit in the ticket's ranges, holds a path segment, at any depth, that
+    after NFC normalisation and case folding is `.baton-legs`. No work branch's name may begin
+    `baton-legs/`.
+  - **Detected if it lands anyway.** Such a segment anywhere in the default branch's tree raises
+    `baton.leg-state-landed`, a `notify` condition whose `detail` holds the count of entries and the
+    ids of the repository's existing tickets among their subdirectory names, never paths or other
+    text. Where the repository has a protection checker (R-BTN-180), only its reading, reported in
+    its heartbeat's `protection` as `legs: {count, tickets}`, raises and closes the condition;
+    elsewhere the sync's reading, posted with the board as `legs_landed: {count, tickets}`, does,
+    and the condition is advisory, since any holder of the sync key can post. The check reads the
+    tree, not history. On plain git, `baton repo protect --print` adds a `pre-receive` rule refusing
+    default-branch updates that add such a segment.
 - **R-BTN-124 (the planning course, `epic`).** `epic` turns a request into child tickets and
   integrates them, with no coordinator in core. Start `filed`; ends `integrated`, `abandoned`.
   - `plan` (`filed`) and `replan` (`planned`, `max_runs` 2) are call legs (R-BTN-165) over
@@ -5954,7 +5977,7 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     | `grants.default_trust` — the trust level of a grant or courier nobody marked | `trusted` | `untrusted` | | Baton | R-BTN-180 |
     | `grants.one_per_domain` — at most one active grant per trust domain | `false` | `true` | | Baton | R-BTN-180 |
     | `grants.trusted_domain` — a trusted runner's trust domain is shared with no other grant or courier | `shared` | `separate` | | Baton | R-BTN-182 |
-    | `refs.default_branch`, `refs.tags`, `refs.other` (branches outside `branch_pattern`, `baton/proposed/*` among them), `refs.baton` (`refs/baton/*`) — who may update them, from `runner`, `trusted-runner`, `courier`, `mirror`, `human` | all five, for each | `[trusted-runner, human]` for the first three; all five for `refs.baton`, which GitHub cannot restrict | | the forge; Baton prints it, the protection checker checks it | R-BTN-180 |
+    | `refs.default_branch`, `refs.tags`, `refs.other` (branches outside `branch_pattern`, `baton/proposed/*` among them, `baton-legs/*` not), `refs.baton` (`refs/baton/*`), `refs.legs` (`baton-legs/*`, R-BTN-190) — who may update them, from `runner`, `trusted-runner`, `courier`, `mirror`, `human` | all five, for each | `[trusted-runner, human]` for the first three; all five for `refs.baton`, which GitHub cannot restrict; `[runner, trusted-runner, human]` for `refs.legs`, which nothing merges | | the forge; Baton prints it, the protection checker checks it | R-BTN-180, R-BTN-190 |
     | `paths.protected` — the owner's protected paths, beside the computed floor | `[]` | `[]` | | trusted runners, the forge | R-BTN-184 |
     | `paths.control` — who lands a control path | `any` | `human` | | trusted runners, the forge | R-BTN-184 |
     | `paths.tickets` — a ticket or goal change merges only with a `std:approval@1` | `any` | `approval` | | trusted runners | R-BTN-183, R-BTN-184 |
@@ -6303,8 +6326,9 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
   - **Signed authorship**, where the policy's `authorship` is `signed`: every commit in a range is signed by the leg's
     key (SSHSIG, namespace `git`); a commit by any other key, or unsigned, never merges. A runner
     under `authorship: signed` signs with an SSH key, never an API key, and a leg in `session`
-    isolation signs through its runner (R-BTN-14). Review rounds go to the ticket's leg-state branch, never
-    to the work branch (R-BTN-190, B-101), so a reviewer never becomes a writer.
+    isolation signs through its runner (R-BTN-14). Review rounds go to the PR conversation or, under
+    `leg_state: branch`, to the ticket's leg-state branch, never to the work branch (R-BTN-190,
+    B-101), so a reviewer never becomes a writer.
   - **Independent review.** `merge.reviews.count` `std:review@1` at `H`, each from a trust domain
     other than every writer domain of `H` and from a review claim that started at `H`, differing
     from each other in each field `merge.reviews.distinct` names (`trust_domain`, `model_family`). A
@@ -6692,8 +6716,8 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
 | **Runner** | | | | |
-| `POST /v1/runner/heartbeat` | machine | `{hostname, session_name, secret_hash?, rekey?, harness, kind, isolation, capabilities[], tags[], profile, tier_ceilings?, lease_timeout_s?, courses: [{repository, course, version}], uses?: [<instance>], session_url?, last_activity_at?, leg_finished?: <seq>, fenced?: {claim_id, terminated: true}, transcripts?[], reports?: [{claim_id?, key?, payload}], test_harness?, policy_pins?: [{repository, hash}], protection?: [{repository, matched, reading_hash}]}` (the last two from trusted runners, R-BTN-180, R-BTN-189) | `{runner_id, incarnation, lease_timeout_s, grant: {capabilities[]}, claim: {id, ticket_id, station, leg?, nonce, claimed_at, deadline_at?, cancel_at?, git: {station, path, path_len, regressed, next[]} \| {closed} \| "unknown"} \| null, messages[], handled?: [{condition_id, handler, outcome, output?}], bars[], stale_courses[], refused_uses?, pending_grants[], mode, server_time}` | R-BTN-3, R-BTN-9, R-BTN-14, R-BTN-60, R-BTN-90, R-BTN-146, R-BTN-162 |
-| `POST /v1/runner/claim` | machine | `{request_id}` and at most one of `ticket_id` or `prefer: [{ticket_id, leg?, bills?}]` (≤ 50); `bills?: [{instance, n?}]`, `rationale?` (≤ 4 KB); for an unknown ticket `course`, `leg`, `sha`, `declared` | `{claim_id, ticket_id, course_id, course_version, policy_hash, guarantees_hash, floors_hash, station, legs, next[], path, nonce, snapshot_sha, base_sha, default_branch, handoff_url?, previous_attempts[] (newest 10), previous_attempts_total, resume?, rewrite_held?, check_sha?, check_head_ref?, tainted_branches[], leg_log?: {dir}, outbox?: [{id, kind, fields}], refused?}`; `course_id` the ticket's course and `course_version` the version the registry holds for it, both `null` for a claim with no course (B-103); refusals as the codes above | R-BTN-4, R-BTN-45, R-BTN-100, R-BTN-104, R-BTN-143, R-BTN-148, R-BTN-153, R-BTN-162, R-BTN-171, R-BTN-173 |
+| `POST /v1/runner/heartbeat` | machine | `{hostname, session_name, secret_hash?, rekey?, harness, kind, isolation, capabilities[], tags[], profile, tier_ceilings?, lease_timeout_s?, courses: [{repository, course, version}], uses?: [<instance>], session_url?, last_activity_at?, leg_finished?: <seq>, fenced?: {claim_id, terminated: true}, transcripts?[], reports?: [{claim_id?, key?, payload}], test_harness?, policy_pins?: [{repository, hash}], protection?: [{repository, matched, reading_hash, legs?: {count, tickets}}]}` (the last two from trusted runners, `protection` from the protection checker only; R-BTN-180, R-BTN-189, R-BTN-190) | `{runner_id, incarnation, lease_timeout_s, grant: {capabilities[]}, claim: {id, ticket_id, station, leg?, nonce, claimed_at, deadline_at?, cancel_at?, git: {station, path, path_len, regressed, next[]} \| {closed} \| "unknown"} \| null, messages[], handled?: [{condition_id, handler, outcome, output?}], bars[], stale_courses[], refused_uses?, pending_grants[], mode, server_time}` | R-BTN-3, R-BTN-9, R-BTN-14, R-BTN-60, R-BTN-90, R-BTN-146, R-BTN-162 |
+| `POST /v1/runner/claim` | machine | `{request_id}` and at most one of `ticket_id` or `prefer: [{ticket_id, leg?, bills?}]` (≤ 50); `bills?: [{instance, n?}]`, `rationale?` (≤ 4 KB); for an unknown ticket `course`, `leg`, `sha`, `declared` | `{claim_id, ticket_id, course_id, course_version, policy_hash, guarantees_hash, floors_hash, leg_state, station, legs, next[], path, nonce, snapshot_sha, base_sha, default_branch, handoff_url?, previous_attempts[] (newest 10), previous_attempts_total, resume?, rewrite_held?, check_sha?, check_head_ref?, tainted_branches[], leg_log?: {dir}, outbox?: [{id, kind, fields}], refused?}`; `course_id` the ticket's course and `course_version` the version the registry holds for it, both `null` for a claim with no course (B-103); refusals as the codes above | R-BTN-4, R-BTN-45, R-BTN-100, R-BTN-104, R-BTN-143, R-BTN-148, R-BTN-153, R-BTN-162, R-BTN-171, R-BTN-173 |
 | `POST /v1/runner/claims/{id}/advance` | holder | `{reached?, leg, head_sha?, evidence?, outputs?: [{name, schema, uri?, digest?, value?}], bars?, bills?, taken?, exit_status?, session_url?}` | `{ok, station, next[], flags[], inputs: [{name, uri?, digest?, value?, from_leg, from_run, leg_version}], advice?, leg_log?: {dir}}` | R-BTN-63, R-BTN-64, R-BTN-82, R-BTN-108, R-BTN-153, R-BTN-177 |
 | `POST /v1/runner/claims/{id}/end` | holder | `{end_reason, reached, next?, not_before?, spawned?, outputs?, detail?, ended_at_sha?, error?: {type, message?}, prerequisite?: {kind, ref}, reading?, commit?, answers?: [<condition_id>], taken?, exit_status?, session_url?}` | `{ok: true}` | §9, R-BTN-83, R-BTN-86, R-BTN-126, R-BTN-173, R-BTN-177 |
 | `POST /v1/runner/claims/{id}/conditions` | holder | `{type, disposition, handler?, restarts, default?, severity?, url?, light?, question?}` | `{condition_id, handler_id?}`; `quota` past 20 open on the claim or 200 a day on the ticket; `invalid-params` for `baton`, `baton.*` or `hitl.decision` | R-BTN-160, R-BTN-173 |
@@ -6758,7 +6782,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `POST /v1/owner/{repository}/check-runners`, `…/check-runners/{fingerprint}/revoke` | owner | `{public_key, name, capabilities?, max_tier?}`; revoke `{confirm: true}` | `{ok: true}` | R-BTN-114 |
 | **Sync and forges** | | | | |
 | `POST /v1/sync/observation` | sync | `{renew?}`, or `{release, behind?}` | `{sha, observation, bars, provisional, held, behind_confirmed, trusted_identities, code_repos, tainted_branches}`; a release `{ok: true}` | R-BTN-11, R-BTN-62, R-BTN-104, R-BTN-147, R-BTN-139, R-BTN-140, R-BTN-148, R-BTN-150 |
-| `POST /v1/sync/board` | sync | the board post (§4) | `{ok: true}` | R-BTN-11, R-BTN-147, R-BTN-149 |
+| `POST /v1/sync/board` | sync | the board post (§4), with `legs_landed?: {count, tickets}` (R-BTN-190) | `{ok: true}` | R-BTN-11, R-BTN-147, R-BTN-149, R-BTN-190 |
 | `POST /v1/sync/want` | sync | — | `{ok: true}` | R-BTN-94 |
 | `GET /v1/sync/wanted` | sync, mirror | — | `{wanted, since?, head_sha}` for the credential's role; changes nothing but its nonce | R-BTN-94, R-BTN-105 |
 | `GET /v1/sync/events` | mirror | `?after=<seq>`, which acknowledges up to the lesser of `after` and the last `seq` a read returned to the mirror | `{events[], next}` | §16 |
@@ -7049,7 +7073,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-188 a sync writes only what changed | twelve tickets placed with next legs and bars; a refresh and a new head that change nothing; a new head moving one ticket, then a refresh flipping its leg and dropping a bar; a suspension at the station a snapshot already showed, then a refresh posting it unchanged | no station, next-leg or bar row rewritten; that ticket's rows alone rewritten, its unchanged station row kept; the refresh confirms the end without rewriting the row (R-BTN-70, R-BTN-62) |
 | S-BTN-189 the repository policy | a new repository; a new `git` repository, and `protected` applied to one; the `protected` preset applied by an owner key holding no `human_only` key, then by one with a `human_only` key; then `merge.reviews.count` raised and lowered by an owner key, by an MCP key, and by a `human_only` key under `approvers.policy: [human]`; two owners setting it from one `base_version`; from `cooperative`, an MCP key and then an owner key setting `approvers.trust: [human]`; an export and an import | the `cooperative` values; the `plain-git` values, and `protected`'s with `leg_state: branch`, `inputs.board` `[sync-key]` and no `forge-check` deliverer; the first apply refused, the second stored without the preset's name, every guarantee but `signed-authorship` and `human-gates-hardware` held except `no-runner-lands` and every guarantee including it, which hold once the protection checker reports a match; the owner key's changes `forbidden` both ways, the MCP key's refused (a delegated key changes no policy), the human key's accepted and logged with `changed`; the second `conflict`; the MCP key refused, the owner key's accepted with every owner-set trust level cleared to `untrusted`, roles dropped and domains and families null; the import keeps every version and floor, and refuses a broken chain |
 | S-BTN-192 approver lists | `approvers.policy: [key:<A>]` with A a `human_only` key; an owner key B, an MCP key, and A; a change by A setting `approvers.policy: [key:<B>]`; then B setting it to `[owner]`; a list naming a revoked key; revoking A while `[key:<A>]` is the only list it satisfies | B and the MCP key `forbidden`, A accepted; A's change accepted, after which A is `forbidden` and B, matching the list in force, accepted; the list naming a revoked key refused; the revocation refused; `human-gates` held while every list is human-only and broken once `approvers.policy` is `[key:<B>]` |
-| S-BTN-193 leg state on a side branch | a GitHub repository with `leg_state` unset, and a `git` repository whose policy sets `leg_state: forge`; on a `git` repository, ticket B-1 on `claude/B-1-x`: a review leg writing round 1 to `claude/B-1-x--legs` at `.baton-legs/B-1/review/<nonce>/round.md`; an address leg, then a second `approves: true` review; entries `CLAUDE.md`, a symlink and `../x` on the leg-state branch; a course whose `branch_pattern` does not match `--legs`; a work-branch commit adding `.Baton-Legs/notes.md`; the ticket closing; the leg-state branch merged into the default branch by hand, with and without a protection checker, and a sync posting an empty reading | on GitHub the rounds are PR comments and no leg-state branch exists; the `forge` value refused on the `git` repository; the reviewer stays independent and the reviewed head unmoved; the address leg reads round 1 through `git cat-file` as quoted data, the branch never checked out; the second reviewer reads nothing from it; the three entries skipped and reported; the course refused; the work branch refused at merge; the leg-state branch deleted; `baton.leg-state-landed` with the count and `B-1`, closed only by the checker's reading where one exists, the empty sync reading leaving it open there |
+| S-BTN-193 leg state | a GitHub repository with `leg_state` unset, and a `git` repository whose policy sets `leg_state: forge`; on a `git` repository, ticket B-1 on `claude/B-1-x` and ticket B-1-x on `claude/B-1-x-y`: a review leg writing round 1 to `baton-legs/B-1` at `.baton-legs/B-1/review/<nonce>/round.md`; an address leg, an `approves: true` review and an adjudicate leg; entries `CLAUDE.md`, a symlink and `../x` on the leg-state branch; a leg-state branch whose first commit has a parent; a course whose `branch_pattern` matches `baton-legs/*`; a work-branch commit adding `docs/.Baton-Legs/notes.md`; under `inputs.answers: attestation`, the `branch` course's review; the ticket closing; the leg-state branch merged into the default branch by hand, with and without a protection checker, and a sync posting an empty reading | on GitHub the rounds are PR comments and no leg-state branch exists; `forge` refused on the `git` repository; the round push reports no range, raises no foreign commit and leaves the reviewer independent and `H` unmoved; B-1-x's station function and the PR mapping never see `baton-legs/B-1`; the address leg reads round 1 through `git cat-file` as quoted data, the branch never checked out; the review and the adjudication read nothing from it; the three entries skipped and reported; the non-orphan push refused by the reading leg; the course refused; the work branch refused at merge; no verdict commit on the work branch; the leg-state branch deleted; `baton.leg-state-landed` with the count and `B-1`, closed only by the checker's reading where one exists, the empty sync reading leaving it open there |
 | S-BTN-190 guarantees and floors | a floor `{fieldhouse: [no-runner-lands, independent-review, signed-authorship, human-gates-hardware]}`; a change admitting `runner` to `refs.default_branch` or `refs.other`; a floor naming a broken guarantee, and a second floor named `fieldhouse`; removal by an owner key and by a `human_only` key; a trusted runner's protection report that no longer matches; an untrusted runner holding a claim on the repository; a signed read replayed for another repository, and one past `valid_until`; a trusted runner whose pin differs | the change refused `floor-violated`; both floors refused; removal refused, then accepted; `baton.unprotected` raised, `no-runner-lands` broken, trusted runners stopped, the runner's claim released `policy` and ended `released:floor`, and every claim refused `floor-broken` until a matching report; both reads rejected by a trusted runner; the trusted runner acts on nothing and `baton.policy-unpinned` stays open until its pins match |
 | S-BTN-191 the protected path in practice | the `protected` preset on GitHub; `paths.control` set to `any`; a handler raised; its proposal; an approval naming two proposals; the merge runner's workflow given the checker's credential; an MCP key raising `merge.reviews.count` to 99; the protection checker's report lapsing past 24 hours | `--check` matches with `refs.baton` admitting all five; the change to `paths.control: any` refused `floor-violated`, `no-runner-lands` still held; the handler written on `baton/proposed/<ticket>` from the CLI template and merged by a proposal merge with one `std:approval@1`, no reviews; the two-proposal approval covers neither; the checker's naming refused; the MCP key refused; `no-runner-lands` broken, no policy change refused, trusted runners stopped but the checker still checking |
 | S-BTN-187 board posts | `inputs.board` without `machine`, `inputs.answers: attestation` | a machine key's post is refused; a truncated delivery fails closed; a station a trusted leg acts on is not reached from a git verdict |
@@ -7144,7 +7168,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-163 | Every rule about authority and trust is a knob of one versioned policy document per repository; every change to it, in any direction and the approver lists included, needs an approver on `approvers.policy` as it stands before the change, never a delegated key; no rule reads a preset; no list is left that no live credential can satisfy; versions are append-only and survive export | S-BTN-189, -192 |
 | G-BTN-164 | A guarantee is a condition over the policy that includes the guarantees it rests on, computed for each version; a floor refuses every change that would break a guarantee it names, and is removed only by a credential satisfying both its `remove_by` and `approvers.policy`; only the protection checker's report feeds `no-runner-lands`; the policy read is signed, bound to its repository and tenant and short-lived; while a floored guarantee is broken Baton itself refuses every claim and advance on every ticket reaching the repository and releases running claims, relying on no runner's check; a trusted runner acts on nothing while a pin differs | S-BTN-190 |
 | G-BTN-165 | `no-runner-lands` requires control paths a runner cannot land, proposed tickets, trusted-runner delivery through the CLI's templates, and a matching report from a protection checker that holds no merge credential; a proposal lands only by a proposal merge with one approval; a delegated key changes no policy | S-BTN-191 |
-| G-BTN-166 | Leg state lives only on the ticket's leg-state branch, inside `branch_pattern`, which nothing merges; it is never checked out, read only as data, and never read by a counted review; a work branch carrying an entry that folds to `.baton-legs` is refused at merge; detection on the default branch is closed only by a trusted reading where one exists | S-BTN-193 |
+| G-BTN-166 | Leg state is the PR conversation under `leg_state: forge` and, under `branch`, an orphan `baton-legs/<ticket>` branch no `branch_pattern` matches, never a work branch, never merged, never checked out by the runner, read only as data, and never read by a counted review or an adjudication; under either value a work branch carrying a segment that folds to `.baton-legs` is refused at merge, and detection on the default branch is closed only by a trusted reading where one exists | S-BTN-193 |
 | G-BTN-161 | A route choice's advice never refuses, carries identifiers only, and a reported `taken` alternative other than the advised one records `advice-overridden` | S-BTN-153 |
 | **§7** | | |
 | G-BTN-31 | Only listed ends are failed attempts; the owners' default backs off 1 h, then 4 h; the third failure or a non-retryable condition holds with `baton.retries` | S-BTN-5, -6, -7 |
