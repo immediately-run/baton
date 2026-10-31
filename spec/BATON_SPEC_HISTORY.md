@@ -655,6 +655,30 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - **Declared fields:** `leg_state` on the claim response, `legs` in the checker's report, and
     `legs_landed` on the board post.
 
+- **2026-10-31 — §5 R-BTN-69, R-BTN-131, §6 R-BTN-171, §9 end reasons, §12.8 R-BTN-180,
+  R-BTN-190, §15 S-BTN-194 (owner direction): the standard courses under a protected default
+  branch.** A design session on Fieldhouse's courses found that the marker courses (`bug-report`,
+  `draft-ticket`, `decision`, `build-app`, `spec-to-tickets`) and `create-spec`'s interactive
+  legs push the default branch at every close, which `no-runner-lands` forbids. R-BTN-180's
+  proposal route covered only what a runner's action creates, and B-130's item 4 ("No course
+  writes main directly") had been superseded without it. The owner: "This seems like a pretty
+  serious issue. Please address this now."
+  - **The route.** Under a protected default branch, machine state is Baton's course history, each
+    leg's record goes on the leg-state branch, and each output a person must accept is one
+    proposal: a `std:proposal@1` output, a new `propose` outbox kind that copies its blobs unparsed,
+    and the proposal merge. `spec-to-tickets`' children are one proposal, and a `build-app` stage's
+    approval is its proposal's.
+  - **The policy chooses.** Where `refs.default_branch` admits `runner`, nothing changes and no
+    approval is added.
+  - **Early refusal.** A course declares `records` (`default-branch` or `policy`) and its
+    proposal paths (`proposes`). Baton refuses a policy or registry that pairs a protected default
+    branch with a `default-branch` course (`unlandable-course`). A protection refusal at a close
+    ends `released:cannot-finish:policy` and raises `baton.unlandable`, and is never retried.
+  - **Leg state** gains a second kind, the protected route's records and proposed files, held on
+    the leg-state branch whatever `leg_state` says.
+
+  Built by B-149. Review: pending.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
