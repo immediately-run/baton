@@ -102,11 +102,11 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
    minutes, then hourly; `refused` and `collision` hold the ticket and raise `baton.outbox-late`
    naming the courier. `POST /v1/owner/{repository}/couriers` takes `delivers: "git" |
    "forge-check"` and refuses a key that holds another role (`conflict`).
-   - **Who may deliver.** The repository policy's `outbox` section (R-BTN-188; B-142 builds the
+   - **Who may deliver.** The repository policy's `outbox` section (R-BTN-188; B-145 builds the
      store and who may change it): per class, `deliverers` (`courier`, `runner`,
      `trusted-runner`), `trust` (`any` | `trusted`) and `min_release`, read through
      `src/core/policy.ts`, or the `cooperative` preset's `{deliverers: [courier], trust: any}`
-     until B-142 lands. The claim route admits a caller only as the policy of each repository
+     until B-145 lands. The claim route admits a caller only as the policy of each repository
      allows (`forbidden` naming the unmet knob). A policy admitting runners adds the shared
      `forge-check` copy.
 4. **The courier (`src/courier/`, `baton courier run`).** A loop with its own SSH key, outside

@@ -5844,7 +5844,7 @@ Every value below is validated on write; a value over its cap is refused `invali
 - **The check App is another App** (R-BTN-115): its key lives only with the forge courier, and
   branch protection names it, never the dispatch App.
 
-### 12.8 The repository policy and its guarantees *(proposal — B-127, B-130, B-131, B-133, B-136, B-137, B-139, B-140, B-142)*
+### 12.8 The repository policy and its guarantees *(proposal — B-127, B-130, B-131, B-133, B-136, B-137, B-139, B-140, B-145)*
 
 Baton specifies mechanisms, each with what it guarantees; a repository's **policy** chooses which
 of them hold. The policy is Baton state, one document per repository, set by its owners and never

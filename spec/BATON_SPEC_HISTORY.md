@@ -494,7 +494,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     approver is `human`. Retired settings: `landing`, `authorship`, `protected_paths`,
     `machine_sync` and the draft's `outbox_policy`. Whose attestations count moved from the course
     file back into Baton (the policy's `attestations` and `readings`), since `paths.control` can
-    now leave course files agent-writable. B-142 builds it.
+    now leave course files agent-writable. B-145 builds it.
   - **The first adversarial review of the policy** (two fresh reviewers, a security attack and a
     consistency pass) found that the draft's `protected` preset guaranteed less than the old mode.
     Fixed in the same PR:
@@ -528,7 +528,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     - **Declarations.** `released:policy` is declared, the presets got full value columns, and
       `tickets.created: proposed` now covers every outbox git kind.
     - **Stale references** in §13.6, S-BTN-123, the security-model page, the vocabulary, B-67,
-      B-140 and B-142 are fixed.
+      B-140 and B-145 are fixed.
   - **The second adversarial review** found that most round-one fixes held, the definition of
     "looser" and the lock-out check among them, but four holes remained. Fixed in the same PR:
     - **Control paths.** `no-runner-lands` did not constrain `paths.control`, so a runner's
@@ -597,7 +597,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       `approvers.trust`.
     - **Wording.** An outbox `failed` mark is declared as a mark, not a state. Stale wording is
       fixed in S-BTN-136, S-BTN-191, G-BTN-156, R-BTN-185, the decisions, the security-model page,
-      B-64 and B-142.
+      B-64 and B-145.
 
 ## Retired requirements
 

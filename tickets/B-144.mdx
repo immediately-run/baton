@@ -1,0 +1,52 @@
+---
+title: "B-144 — Retire the pre-route-choice model tables: model_providers, peak_schedules, provider_suspensions"
+id: B-144
+project: baton
+status: superseded
+updated: 2026-10-30
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1165
+tier: judgement
+description: "B-105 item 7: route choices (§6.10, R-BTN-176) form their atoms from the ontology, external_resources and readings — never core's model_providers, peak_schedules or provider_suspensions tables. Decide each table's fate and retire what goes: the tables (a drop migration), the board providers sync that writes two of them, the worker API's suspension endpoints, and the dashboard rows they feed. Requires: B-105."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-105
+---
+
+**Brief:** B-105's ticket, item 7: "Out of scope: core's existing `model_providers`, `peak_schedules`
+and `provider_suspensions` tables are not read by route choices. File a ticket to retire them once
+this lands." §6.10 (R-BTN-176) forms its atoms from the ontology, `external_resources` and
+readings; nothing in the route-choice stratum reads these tables.
+
+**What still touches them today** (surveyed at B-105's merge):
+
+- `model_providers`, `peak_schedules` — written by the board `providers` sync and validated by
+  `board.ts`; read back only for the board view. Nothing else.
+- `provider_suspensions` — the worker API's set/lift/list endpoints and the alarm's start/end
+  logging (`workerApi.ts`); the live ones read for the board view.
+
+### What to build
+
+1. **Decide, per surface**, whether §6.10 replaces it — a suspension becoming an `"unavailable"`
+   route-choice state reading, a peak schedule becoming a guard over `now` — or it still earns its
+   keep. What the spec does not settle, the owner does.
+2. **Retire what goes**: the tables (migrations are append-only — a new numbered migration drops
+   them), the sync fields, the endpoints, the dashboard rows, and their tests.
+3. **Spec**: amend or retire the rows that name a retired surface, and their §15 scenarios.
+
+### Tests
+
+- The next free S-BTN numbers: a board sync without `providers` accepted; each retired endpoint
+  answering 404; the drop migration leaving no row the core reads.
+
+### Exit criteria
+
+- [ ] no code path reads or writes a table this ticket retires; `npm test` and
+      `npm run typecheck` green
+- [ ] the spec names no retired surface

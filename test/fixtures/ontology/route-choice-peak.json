@@ -1,0 +1,43 @@
+{
+  "$comment": "A route-choice fixture (R-BTN-175/R-BTN-177, B-105): the program's encoding, the input facts the atoms stand for, and the choices this evaluation is over. The suite runs it through clingo-wasm under --opt-mode=optN with #show route/2. available/2. demoted/2., and asserts the last witness's route/2 equals the evaluator's first-match. Here: in peak (minute 480), with both keys held, the first alternative demoted behind the undemoted second — and the second also excluding nothing; a third alternative excluded by an exclude_when over a blocked resource.",
+  "program": {
+    "version": 1,
+    "derived": ["capability"],
+    "entries": [
+      { "id": "meters-a", "fact": ["meters", "key:a", "ra"] },
+      { "id": "meters-c", "fact": ["meters", "key:c", "rb"] },
+      { "id": "peak", "head": ["peak"], "body": [["now", "utc_minute_of_day", "$t"], { "cmp": ["$t", ">=", 120] }, { "cmp": ["$t", "<", 600] }] },
+      { "id": "rb-down", "head": ["rb_down"], "body": [["blocked", "rb"]] }
+    ],
+    "route_choices": [
+      {
+        "id": "pick",
+        "alternatives": [
+          { "id": "first", "needs": ["model:x", "key:a"], "demote_when": [[["peak"]]] },
+          { "id": "second", "needs": ["model:x", "key:b"] },
+          { "id": "third", "needs": ["model:x", "key:c"], "exclude_when": [[["rb_down"]]] }
+        ]
+      },
+      {
+        "id": "lone",
+        "alternatives": [
+          { "id": "only", "needs": ["key:b"], "demote_when": [[["peak"]]] }
+        ]
+      }
+    ]
+  },
+  "wanted": ["pick", "lone"],
+  "facts": {
+    "has": [["model:x"], ["key:a"], ["key:b"], ["key:c"]],
+    "usable": [["ra", "ra@one"], ["rb", "rb@one"]],
+    "state": [["ra@one", "available"], ["rb@one", "unavailable"]],
+    "blocked": [["rb"]],
+    "now": [["utc_minute_of_day", 480]],
+    "refines": [],
+    "was_demoted": []
+  },
+  "expected": {
+    "pick": { "alternative": "second", "ranked": ["second", "first"] },
+    "lone": { "alternative": "only", "ranked": ["only"] }
+  }
+}
