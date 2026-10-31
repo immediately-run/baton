@@ -631,6 +631,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   GitLab and Gitea and `branch` where `forge` is `git`. `forge` is refused on a `git` repository.
   The work-branch refusal and the detection hold under either value.
 
+  The owner then asked for a template: "There should be a plain git policy template." The
+  `plain-git` preset is the `cooperative` column without what a repository with no forge cannot
+  use: `leg_state: branch`, `inputs.board` without `ci-identity`, and no `forge-check`
+  deliverers. It is a new `git` repository's default. `protected` and `protected-signed` applied to
+  a `git` repository write the same three values, and Baton refuses the forge-only values there.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
