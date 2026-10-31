@@ -75,6 +75,10 @@ branch).
    - tickets and goals, under `paths.tickets: approval`, only with a `std:approval@1` at `H` whose
      `paths` and `blobs` cover every protected path changed; a leg's own progress after `## Status`,
      by R-BTN-184's grammar, needs none;
+   - leg state (R-BTN-190): a work branch whose merge result, or any commit in the ticket's ranges,
+     holds a path segment at any depth that after NFC normalisation and case folding is
+     `.baton-legs` is refused; it never merges a `baton-legs/*` branch, and a push there is no
+     write (no range, no foreign-commit reset);
    - how: squash or merge at exactly `H` with the base pinned (a compare-and-swap push), a commit
      message it writes itself; a branch that moved since an attestation was made is refused.
    Every attestation is fetched, verified against the pins, its subject compared with the exact
@@ -100,7 +104,12 @@ branch).
      restricted;
    - GitLab protected branches and tags (a deploy key on GitLab Free); Gitea and Forgejo protected
      branches with a whitelist; plain git a `pre-receive` hook on a server that knows the pusher
-     (`baton repo hook pre-receive`), keeping a pusher log.
+     (`baton repo hook pre-receive`), keeping a pusher log, and refusing default-branch updates
+     that add such a segment, and admitting `baton-legs/*` as the policy's `refs.legs` says
+     (R-BTN-190);
+   - the protection checker mode also reads the default branch's tree for such a segment and reports
+     it as `legs: {count, tickets}` in its heartbeat's `protection`, the reading that alone raises and closes `baton.leg-state-landed` where a checker exists
+     (B-148).
 
    `--check <forge>` reads it back and returns `{matched, reading_hash}`; it does not match while a
    class the forge cannot restrict excludes any writer. On GitHub it needs the credential that reads

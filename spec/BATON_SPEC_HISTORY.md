@@ -599,6 +599,62 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       fixed in S-BTN-136, S-BTN-191, G-BTN-156, R-BTN-185, the decisions, the security-model page,
       B-64 and B-145.
 
+- **2026-10-31 — R-BTN-190: leg state on a per-ticket side branch (owner direction).** Plain git
+  repositories with no forge carry leg-to-leg state, such as review findings, as files. B-101 put
+  them on the PR branch, deleted before the squash. The owner asked for a directory convention so a
+  check could verify the deletion. The first draft reserved `.baton-legs/` on the work branch,
+  outside the `.baton/` control directory, and had the merge runner strip it ("Strip as you
+  recommended. `.baton-legs/` is fine").
+
+  Two adversarial review rounds found that review commits after the review move the attested
+  head. The draft's fix let attestations bind the tree without `.baton-legs`, and that rested on a
+  leg's own claim that a commit was leg state only, which nothing trusted could check. Every repair
+  needed a trusted verifier of each such commit, plus a protected landing ref for human merges.
+
+  The owner then chose a side branch: "per-ticket side branch is fine". R-BTN-190 now says:
+  - leg state lives on the ticket's work branch name plus `--legs`, inside `branch_pattern`,
+    and nothing merges that branch;
+  - its layout is `.baton-legs/<ticket>/<leg>/<claim nonce>/…`, with plain files and no names of
+    harness configuration;
+  - it is never checked out, and is read through `git cat-file` as quoted data;
+  - counted reviews read none of it;
+  - a work branch carrying an entry that folds to `.baton-legs` is refused at merge;
+  - the branch is deleted when the ticket closes;
+  - detection on the default branch is closed only by the protection checker's reading where one
+    exists.
+
+  The work-tree, leg-state-commit, strip and landing-ref text of the first draft never merged.
+
+  The owner then narrowed it: "this is very unidiomatic for forges so we should only do this for
+  plain git (make it a policy setting)". The new knob `leg_state` takes `forge` (the PR
+  conversation, R-BTN-131) or `branch` (the side branch). Unset, it means `forge` on GitHub,
+  GitLab and Gitea and `branch` where `forge` is `git`. `forge` is refused on a `git` repository.
+  The work-branch refusal and the detection hold under either value.
+
+  The owner then asked for a template: "There should be a plain git policy template." The
+  `plain-git` preset is the `cooperative` column without what a repository with no forge cannot
+  use: `leg_state: branch`, `inputs.board` without `ci-identity`, and no `forge-check`
+  deliverers. It is a new `git` repository's default. `protected` and `protected-signed` applied to
+  a `git` repository write the same three values, and Baton refuses the forge-only values there.
+
+  **The final review round** found the side branch named inside `branch_pattern`. Every reader of
+  that pattern would treat it as a work branch, the foreign-commit rule would reset it, and its
+  name could collide with another ticket's branch. It also found that the layout regex rejected
+  its own required path. Fixed in the same PR:
+  - **A reserved namespace.** The branch moved to `baton-legs/<ticket id>`, an orphan history no
+    `branch_pattern` may match, governed by a new `refs.legs` class.
+  - **Not a write.** A push to it reports no range, triggers no foreign-commit reset, and makes no
+    writer.
+  - **The grammar** applies below `.baton-legs/<ticket id>/` only.
+  - **Readers.** Adjudication joins the counted reviews in reading none of it.
+  - **The runner's and the deployment's parts** are stated separately.
+  - **Verdicts.** The `branch` course writes no verdict commits under `inputs.answers:
+    attestation`.
+  - **Folding** covers any segment at any depth.
+  - **Detection's detail** lists only existing ticket ids.
+  - **Declared fields:** `leg_state` on the claim response, `legs` in the checker's report, and
+    `legs_landed` on the board post.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

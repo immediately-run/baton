@@ -1,14 +1,14 @@
 ---
-title: "B-101 — Review rounds as a file on the PR branch: the conversation mirrored, the squash kept clean, the plain-git channel"
+title: "B-101 — Review rounds between legs: the PR conversation on a forge, the leg-state branch on plain git, the work branch kept clean (R-BTN-190)"
 id: B-101
 project: baton
 status: in-progress
-updated: 2026-10-28
+updated: 2026-10-31
 tags:
   - roadmap-item
 order: 503
 tier: judgement
-description: "The review close commits the round's findings to .baton/reviews/<round>.md on the PR branch (the same markdown the forge conversation gets); the address leg answers beside it as <round>-addressed.md; the merge close deletes every reviews file before the squash. On a plain git repository the file is the only reviewer-to-addresser channel — the foundation create-pr needs to run without a forge. Requires: none."
+description: "R-BTN-190 as specified 2026-10-31: where the policy's `leg_state` is `forge` (the default with a forge), the review close posts the round to the PR conversation and the address leg reads it there; where it is `branch` (the only choice on plain git), the review close writes the round to the ticket's orphan leg-state branch `baton-legs/<ticket>` at `.baton-legs/<ticket>/review/<claim nonce>/round.md`, the address leg answers beside it under its own subpath, and both read through `git cat-file`. The work branch never carries a round, so nothing is deleted before the squash. B-148 builds the branch mechanics this uses. Requires: none."
 topics:
   - baton
 owns: {}
@@ -26,46 +26,53 @@ reviewer and addresser for plain git repos (no forge)."
 "later rounds get one fresh reviewer, who reads the earlier reviews and their replies"),
 §2k R-BTN-92 (`forge: git`: no `web_base`, no links — no conversation API exists).
 
+**Since the brief** (the owner, 2026-10-31, in `spec/BATON_SPEC_HISTORY.md`): the rounds left the
+PR branch. On it, review commits move the attested head and every repair needed a trusted verifier
+("per-ticket side branch is fine"), and a side branch is "very unidiomatic for forges so we should
+only do this for plain git (make it a policy setting)". R-BTN-190 is the result.
+
 ### The protocol
 
-- **The review leg's close writes the round to the branch.** The same markdown it posts
-  as the PR review (the findings, each with its severity and `file:line`, merged from the
-  blind reviewers) is committed to the PR's head branch as `.baton/reviews/<round>.md`,
-  the round number and verdict line included. On a forge, the GitHub conversation and the
-  file carry the same content — the conversation for humans, the file for the legs.
-- **The address leg reads the round from the branch** (`git show` at the branch head),
-  not from the conversation API: on a forge both exist and agree; on a plain git
-  repository the file is the channel. Its replies are committed beside the round as
-  `.baton/reviews/<round>-addressed.md` — the next round's reviewer reads the rounds and
-  the replies from the branch, which is exactly §7.2's "reads the earlier reviews and
-  their replies".
-- **The merge leg's close deletes the protocol before the squash.** Every
-  `.baton/reviews/` file leaves the branch in one commit, and the squash merge carries
-  none of it: main never sees the conversation, the branch holds it for the course's
-  life. The deletion is the merge close's first act, before the merge itself.
+- **The claim response carries the policy's `leg_state`** (B-145).
+- **Under `forge`** (the default on GitHub, GitLab and Gitea): the review close posts the round to
+  the PR conversation, the verdict line and the inline findings, as today; the address leg reads it
+  from the conversation and answers there. No file is written anywhere.
+- **Under `branch`** (the only choice where `forge` is `git`, R-BTN-92):
+  - the review close writes the round, the same markdown, to the ticket's leg-state branch
+    `baton-legs/<ticket id>` (an orphan branch, B-148) at
+    `.baton-legs/<ticket id>/review/<claim nonce>/round.md`, the round number and verdict line
+    included;
+  - the address leg reads it with `git cat-file`, never a checkout, as quoted data, and answers at
+    `.baton-legs/<ticket id>/address/<claim nonce>/reply.md`;
+  - a review leg marked `approves: true` and an adjudicate leg read nothing from the branch.
+- **The work branch never carries a round** under either value, so nothing is deleted before the
+  squash and the merge runner refuses a work branch carrying `.baton-legs` (B-140).
 
 ### What this enables, and what it does not change
 
-- On the forges, nothing observable changes for humans: the GitHub conversation remains
-  exactly what the close posts today (the verdict line, the inline findings).
-- On a plain git repository, this file protocol is the *only* reviewer↔addresser
-  channel — the foundation `create-pr` needs to run there at all (the placement's
-  plain-git reading — verdicts from the file instead of review states — is that
-  follow-on ticket, not this one; this ticket builds the channel it will read).
+- On the forges, nothing observable changes for humans: the conversation remains what the close
+  posts today, and no file mirrors it.
+- On a plain git repository, the leg-state branch is the reviewer-to-addresser channel `create-pr`
+  needs to run there at all (the placement's plain-git reading, verdicts from the branch instead of
+  review states, is the follow-on ticket).
 
 ### Tests
 
-- Unit (the closes' suite): a review close posts the conversation (forge) *and* commits
-  the round file with the same content and the verdict line; an address close commits
-  its replies beside it; a merge close removes every reviews file from the branch in its
-  own commit before merging, and the squashed tree contains no `.baton/reviews/`.
-- The kit: a round-trip — review (file on branch), address (reply file), merge (clean
-  squash) — runs on the local host with no forge token.
+- Unit (the closes' suite): under `forge`, a review close posts the conversation and writes no
+  file; under `branch`, it writes the round to `baton-legs/<ticket>` at its own subpath and posts
+  nothing; an address close answers beside it; an `approves: true` review reads nothing from the
+  branch; the work branch is untouched throughout.
+- The kit: a round-trip under `branch` (review, address, merge) runs on the local host with no
+  forge token, and the squashed tree contains no `.baton-legs`.
 
 ### Exit criteria
 
-- [ ] a round's findings live on the PR branch as a file, mirroring the conversation
-- [ ] the addresser answers through the branch, and the next reviewer reads rounds and
-      replies from it
-- [ ] a squash merge lands none of it on the default branch
+- [ ] under `forge` the rounds are the PR conversation, with no file anywhere
+- [ ] under `branch` the rounds live on `baton-legs/<ticket>`, the addresser answers there, and no
+      counted review or adjudication reads it
+- [ ] no round ever reaches the work branch or the default branch
 - [ ] the kit runs the round-trip with no forge
+
+## Status
+
+_(2026-10-31: the plan above rewritten for R-BTN-190 (baton#148), since the earlier plan, rounds as `.baton/reviews/` files on the PR branch deleted before the squash, no longer matches the spec. The brief is kept as written; the ticket stays with the session holding it.)_
