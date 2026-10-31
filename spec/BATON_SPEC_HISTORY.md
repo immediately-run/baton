@@ -677,7 +677,40 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - **Leg state** gains a second kind, the protected route's records and proposed files, held on
     the leg-state branch whatever `leg_state` says.
 
-  Built by B-149. Review: pending.
+  Built by B-149.
+  **Review, round one** (two fresh reviewers, the diff and the corpus only), found the route
+  incomplete: station functions could not read course history (R-BTN-39 said "from git alone"),
+  a proposal merge skipped R-BTN-183's path checks, so an approved proposal could land a control
+  path, a course's last leg reached its end before its proposal landed, while closing the ticket
+  deleted the blobs its copy needed, and several legs' writes, ticket-id allocation, rejection and
+  `build-app`'s refine-then-approve had no rule. The first finding was a symptom of the next
+  entry's unpropagated reversal, which is made first; the protected route is then reworked on it.
+
+- **2026-10-31 — §2e R-BTN-35, R-BTN-39, §4 R-BTN-1, R-BTN-70, R-BTN-74, R-BTN-81, R-BTN-85,
+  §4.3, §4.4, §5 R-BTN-63, R-BTN-69, R-BTN-71, R-BTN-83, R-BTN-131, §9 R-BTN-10, §13, §14,
+  §15 S-BTN-18, S-BTN-34, S-BTN-47, G-BTN-59, G-BTN-73, §16 (owner direction): Baton is the
+  one authority on a ticket's course history.** The owner's ruling of 2026-10-26 (B-120: "Git is
+  authorative in everything *except* the ticket's course history") had reached values,
+  architecture and Fieldhouse's decisions on 2026-10-28, but not the spec, which still replayed
+  positions from git. The owner, 2026-10-31: Baton is the sole authority on ticket history;
+  tickets in git may get per-leg amendments, but git need not hold the full history. On the
+  owner's command to set a position, `adopt`: "this is a useful fallback if baton is down". The
+  owner chose, the same day:
+  - **git facts move a ticket only on declared legs** (person legs, `arrives: facts`), by an
+    edge from Baton's station, over no fact ever moving one;
+  - **the sync reads Baton's positions** in its observation, over station functions computing
+    readiness for every station;
+  - **regression detection retired** (`regressed_since`, `git.regressed`, `baton.regressed`,
+    path-extension checks, the subs `position-replaced`, `route-overridden`, `regressed`,
+    `off-graph` for paths and `path-rewritten`, and the `marker` and `inferred` next sources),
+    a disagreement being `position-disagrees`, which the owner settles with adopt or a route,
+    over keeping it as advice;
+  - **confirmation by evidence**: an end's position stands at once, and the end is confirmed by
+    the first snapshot after it that shows its named evidence, over dropping confirmation.
+
+  The marker courses' closes (B-100) and `create-spec`'s interactive closes write no machine
+  state. `baton repo migrate-markers` stays as the one-time transition it was. Built by B-120,
+  rewritten as its build ticket. Review: pending.
 
 ## Retired requirements
 

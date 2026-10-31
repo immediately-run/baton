@@ -29,7 +29,8 @@ station** finishes the ticket.
 **Leg.** One edge of the course (`implement`, `review`, `merge`). A leg is **ready** or
 **waiting** on something named.
 
-**Path.** The legs a ticket has run and the stations they reached, read from git.
+**Path.** The legs a ticket has run and the stations they reached, as Baton recorded them: its
+**course history**, which git never writes.
 
 **Worker.** An agent session on a machine, identified by its key. It declares capabilities,
 a tier ceiling, tags and the courses it can run.
@@ -60,7 +61,10 @@ change: tags barred across courses, and bars every leg must carry.
 **Sync, snapshot, observation.** The repository's sync reads git and posts a **snapshot**.
 Each carries an **observation** number, so a stale reading never overrules a newer one.
 
-**Confirmation.** A completion counts once a later snapshot shows it in git.
+**Confirmation.** A completion counts once a later snapshot shows its evidence; its position
+stands from the moment Baton records it.
+
+**Adopt.** An owner's signed command that sets a ticket's position, for legs done outside Baton.
 
 **Hand-off.** The document a suspended or released claim leaves for the next claimant.
 
