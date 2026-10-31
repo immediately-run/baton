@@ -36,6 +36,8 @@
     "test/hosts/local.ts",
     "test/unit/local-queue.test.ts",
     "test/unit/ontology-conformance.test.ts",
+    "test/unit/routes.test.ts",
+    "test/integration/S-BTN-147.runner-half.test.ts",
     "test/unit/boundary-host.test.ts",
     "test/unit/cli.test.ts",
     "test/unit/sign.test.ts",

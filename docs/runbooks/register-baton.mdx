@@ -254,12 +254,16 @@ Then, as the repository's owner, grant that key (copy its `.pub` over first):
 
 ```sh
 node cli/baton.mjs owner -i ~/.ssh/baton_repo_owner grant baton --key worker.pub \
-  --hostname <the worker's hostname> --capabilities create-pr,llm-call,agent-venue --max-tier judgement
+  --hostname <the worker's hostname> --capabilities create-pr,llm-call,agent-venue,key:opencode-go,key:deepinfra,key:claude-subscription,key:zai --max-tier judgement
 ```
 
 The hostname must be what the machine reports (`hostname`, or `BATON_HOSTNAME`), or its heartbeats
 are refused. Capabilities are from `src/shared/vocabulary.mjs` (`authentication`, `llm-call`,
 `create-pr`, `drivable-browser`, `agent-venue`); only an administrator grants `human-operator`.
+The `key:` labels in the grant above are this repository's route-choice holdings (B-105,
+R-BTN-176): a runner declares the provider keys it holds, the ontology derives what models they
+amount to, and the `codegen` and `reviewer` route choices advise on them — grant the ones the
+machine actually holds and let `--capabilities` narrow the rest away.
 
 The grant *is* the machine's capability declaration (B-86): `baton run` with no `--capabilities`
 declares what the grant allows on the repositories it serves, so the runner and the grant cannot

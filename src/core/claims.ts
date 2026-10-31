@@ -869,17 +869,86 @@ export class Claims {
       this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', at, now, b.evidence, claimId, run.seq);
       const f = this.legFacts(claimId, run.leg);
       this.c.history?.record(f.ticket, { kind: 'leg-finished', ...f.row, reached: at, next_leg: leg, ...(b.evidence ? { detail: { evidence: b.evidence } } : {}) });
+      // R-BTN-177 (B-105): the finished leg's reported taken, judged against the snapshot it ran
+      // under — BEFORE the resolution below, so a dead holding it named is gone from `has` and
+      // the leg this advance starts is advised without it.
+      this.reportTaken(workerId, claimId, c.ticket_id, run.seq, b.taken);
     }
+    // R-BTN-177: the route choices the course attaches to the leg being started resolve here, in
+    // the advance's transaction — a snapshot stored with the leg run and carried as advice,
+    // identifiers only. A claim runs nothing (R-BTN-63); nothing resolves at the claim.
+    const attached = this.legRouteChoices(repo, c.course_id, leg);
+    const resolved = attached.length ? this.c.ontologies?.resolveFor(workerId, repo, attached, now) ?? null : null;
     const seq = (this.rows<{ s: number | null }>('SELECT MAX(seq) AS s FROM claim_legs WHERE claim_id = ?', claimId)[0].s ?? 0) + 1;
-    this.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, bars, started_at, started_observation) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      claimId, seq, leg, at, JSON.stringify(b.bars), now, n);
+    this.exec(`INSERT INTO claim_legs (claim_id, seq, leg, from_station, bars, started_at, started_observation, route_choices_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      claimId, seq, leg, at, JSON.stringify(b.bars), now, n, resolved ? JSON.stringify(resolved.route_choices) : null);
     const started = this.legFacts(claimId, leg);
-    this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}) } });
+    this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}), ...(resolved ? { route_choices: resolved.route_choices.map((r) => r.choice) } : {}) } });
     // R-BTN-62: only a reading numbered above the counter now can judge the claim stale.
     this.exec('UPDATE claims SET station = ?, leg = ?, claim_observation = ? WHERE id = ?', at, leg, n, claimId);
     this.event('advanced', `worker:${workerId}`, { from: station, reached: at, leg, ...(b.bars.length ? { bars: b.bars } : {}), ...(b.evidence ? { evidence: b.evidence } : {}) }, c.ticket_id, claimId);
     this.c.dispatch?.('sync', c.ticket_id); // R-BTN-73: after every advance
-    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), advice: null };
+    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), advice: resolved ?? null };
+  }
+
+  /** The route choices a course entry attaches to a leg (R-BTN-177): the `route_choices` map the
+   *  unit accepted, in force for the claim's course. */
+  private legRouteChoices(repo: string, courseId: string | null, leg: string): string[] {
+    if (!courseId) return [];
+    const row = this.rows<{ route_choices_json: string }>('SELECT route_choices_json FROM courses WHERE repository_id = ? AND id = ?', repo, courseId)[0];
+    if (!row) return [];
+    try {
+      const ids = (JSON.parse(row.route_choices_json) as Record<string, string[]>)[leg];
+      return Array.isArray(ids) ? ids : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * R-BTN-177 (B-105): what a finishing leg reported in `BATON_TAKEN`. Kept: one entry per route
+   * choice the leg's snapshot resolved, naming an alternative THAT CHOICE has — whether or not
+   * the resolution offered it (an excluded or unavailable alternative is still accepted: an
+   * exclusion filters advice, never a report, and such a taken is recorded advice-overridden).
+   * Dropped and logged `taken-invalid`: the rest, never refusing the advance or end that carries
+   * it. Each kept entry's `dead` holdings leave the declared set in this transaction
+   * (R-BTN-126's shape), and an alternative other than the advised one records
+   * `advice-overridden`; a choice that resolved `null` stores whatever it is given, no override.
+   */
+  private reportTaken(workerId: number, claimId: number, ticketId: string, seq: number, taken: { kept: { choice: string; alternative: string; dead: string[] }[]; dropped: number } | null): void {
+    if (!taken || !taken.kept.length) { if (taken?.dropped) this.event('taken-invalid', `worker:${workerId}`, { dropped: taken.dropped, claim: claimId }, ticketId, claimId); return; }
+    const row = this.rows<{ route_choices_json: string }>('SELECT route_choices_json FROM claim_legs WHERE claim_id = ? AND seq = ?', claimId, seq)[0];
+    const snapshot = row?.route_choices_json ? (JSON.parse(row.route_choices_json) as { choice: string; alternative: string | null }[]) : [];
+    const repo = repositoryOf(ticketId);
+    const kept: { choice: string; alternative: string; dead: string[] }[] = [];
+    const seen = new Set<string>();
+    let invalid = 0;
+    for (const entry of taken.kept) {
+      if (seen.has(entry.choice)) continue; // at most one entry per route choice; the rest drop
+      const resolved = snapshot.find((r) => r.choice === entry.choice);
+      // A leg without route choices, a choice its snapshot lacks, or an alternative the choice
+      // itself lacks (R-BTN-177: "an alternative that route choice lacks") — dropped, logged,
+      // never refusing the advance or end. Membership is the choice's own alternatives, read
+      // from the program in force, so an excluded or unavailable one is accepted.
+      const alternatives = this.c.ontologies?.alternativesOf(repo, entry.choice) ?? null;
+      if (resolved == null || alternatives == null || !alternatives.includes(entry.alternative)) {
+        invalid++;
+        continue;
+      }
+      seen.add(entry.choice);
+      kept.push(entry);
+    }
+    if (invalid + taken.dropped) this.event('taken-invalid', `worker:${workerId}`, { dropped: invalid + taken.dropped, claim: claimId }, ticketId, claimId);
+    if (!kept.length) return;
+    this.exec('UPDATE claim_legs SET taken_json = ? WHERE claim_id = ? AND seq = ?',
+      JSON.stringify(kept.map(({ choice, alternative, dead }) => ({ choice, alternative, ...(dead.length ? { dead } : {}) }))), claimId, seq);
+    for (const entry of kept) {
+      const resolved = snapshot.find((r) => r.choice === entry.choice)!;
+      if (resolved.alternative != null && resolved.alternative !== entry.alternative) {
+        this.event('advice-overridden', `worker:${workerId}`, { choice: entry.choice, advised: resolved.alternative, taken: entry.alternative }, ticketId, claimId);
+      }
+      for (const capability of entry.dead) this.c.ontologies?.dropHolding(workerId, capability);
+    }
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
@@ -915,6 +984,11 @@ export class Claims {
     const g = c.course_id ? this.stations.graph(repositoryOf(c.ticket_id), c.course_id) : null;
     if (e.status === 'completed' && finished && g) this.checkEntry(repositoryOf(c.ticket_id), g, reached, e.outputs);
     else if (e.status === 'completed') this.checkOutputValues(repositoryOf(c.ticket_id), e.outputs);
+    // R-BTN-177 (B-105): the ending claim's running leg reports its taken here when no advance
+    // finished it — judged against its own snapshot, its dead holdings leaving the declared set
+    // in this transaction.
+    const ending = this.runningLeg(c.id);
+    if (ending) this.reportTaken(workerId, c.id, c.ticket_id, ending.seq, e.taken);
     // R-BTN-126's capability branch (B-104): the holding the runner says it lost leaves its
     // declared set, its derived sets re-evaluate in this transaction, and the fleet's counts
     // follow — rule 4 refuses this runner at once. A valid blocked end is not a failed attempt,

@@ -218,7 +218,10 @@ describe('round 3: the budget before the work; a $ref two hops deep (3-r3-0, 3-r
 
 describe('the inline bound (R-BTN-108)', () => {
   it('stores a value only when its whole chain closes every object and caps every string at 256', () => {
-    for (const id of Object.keys(STD)) expect([id, unboundedAt(id, stdSchema)]).toEqual([id, null]);
+    // R-BTN-176's std:api-capacity@1 is a DETAIL-schema base, not an output schema: it is open
+    // by design (a provider's resource schema refines it by adding fields) and never bounds an
+    // inline value, so the inline bound does not read it.
+    for (const id of Object.keys(STD).filter((id) => id !== 'std:api-capacity@1')) expect([id, unboundedAt(id, stdSchema)]).toEqual([id, null]);
     expect(unboundedAt('c:a@1', resolveWith({ 'c:a@1': { type: 'object', properties: { a: { type: 'string', maxLength: 10 } } } }))).toMatch(/additionalProperties/);
     expect(unboundedAt('c:a@1', resolveWith({ 'c:a@1': { type: 'object', additionalProperties: false, properties: { a: { type: 'string' } } } }))).toMatch(/maxLength/);
     expect(unboundedAt('c:a@1', resolveWith({ 'c:a@1': { type: 'array' } }))).toMatch(/any items/);
@@ -241,8 +244,8 @@ describe('the refinement check (R-BTN-108; S-BTN-65)', () => {
 });
 
 describe('the std: library (R-BTN-110)', () => {
-  it('ships the nine schemas, each inside the subset, closed and bounded', () => {
-    expect(Object.keys(STD).sort()).toEqual(['std:decision@1', 'std:effect@1', 'std:forge.change@1', 'std:forge.check@1', 'std:forge.comment@1', 'std:git.commit@1', 'std:git.file@1', 'std:object@1', 'std:url@1']);
+  it('ships the ten schemas, each inside the subset — nine closed and bounded, std:api-capacity@1 the one open detail base', () => {
+    expect(Object.keys(STD).sort()).toEqual(['std:api-capacity@1', 'std:decision@1', 'std:effect@1', 'std:forge.change@1', 'std:forge.check@1', 'std:forge.comment@1', 'std:git.commit@1', 'std:git.file@1', 'std:object@1', 'std:url@1']);
     for (const [id, s] of Object.entries(STD)) {
       expect([id, checkSchema(s)]).toEqual([id, []]);
       expect(Object.isFrozen(STD)).toBe(true);

@@ -31,8 +31,13 @@ change to Baton, not a change in Baton.</Lede>
   permissions cover only its own state — who takes a repository's leases, who changes its
   settings (values 12). A threat that needs a runner stopped belongs to the sandbox, the forge
   or the credential proxy, not here.
-  Under `landing: protected` a repository opts into one exception: Baton's trusted runners decide
-  what lands, and the forge lets only them and the human-only identity land it (BATON_SPEC §12.8).
+  A repository's policy may opt into one exception: Baton's trusted runners decide what lands,
+  and the forge lets only them and the human-only identity land it (BATON_SPEC §12.8).
+- **Policy, not modes.** Every rule about authority and trust is a knob of one versioned policy
+  document per repository, held in Baton (BATON_SPEC R-BTN-188). Presets such as `cooperative`
+  and `protected` fill it; no rule reads a preset. A deployment requires named guarantees, which
+  are conditions over the policy, and Baton enforces the floor it registers (R-BTN-189); what Baton
+  cannot observe stays the deployment's.
 - **Advice is fresh for the reader, bounded for the fleet.** A write Baton accepts — a board,
   a reading, a heartbeat, an ontology — marks what it affects stale, and anything a runner reads
   afterwards is brought up to date for that runner first; fleet-wide views (counts, blocks,
@@ -69,8 +74,8 @@ change to Baton, not a change in Baton.</Lede>
   its recovery routine (the `reaped:silent` path). A single process multiplexing legs
   across threads or subprocesses is a possible later evolution, decided when the sandbox
   fleet's evidence is in — not the plan.
-  Under `landing: protected` a sandbox is one trust domain with one grant per repository
-  (BATON_SPEC R-BTN-180), so several runners in one sandbox count as one for independent
+  Under the policy's `grants.one_per_domain` a sandbox is one trust domain with one grant per
+  repository (BATON_SPEC R-BTN-180), so several runners in one sandbox count as one for independent
   review; Fieldhouse runs one runner per VM (FLDH-13).
 
 ## Where code lives
@@ -87,7 +92,8 @@ change to Baton, not a change in Baton.</Lede>
   ontology (spec §5.9) is a total, bounded logic program with no I/O, evaluated by core the
   way a course file's state machine is, which is why it may decide a gate without breaking
   "Baton runs no repository code". Its language grows only by ASP-Core-2 constructs, and
-  readings reach advice, never a gate.
+  readings reach its advice, never its gate; a leg that must gate on a reading says so in its
+  own requirement (BATON_SPEC R-BTN-181).
 - **The formal model names the code.** `model/baton.qnt` and the implementation check
   each other (`model:links`, traces); a change to what the model checks carries a report.
 
@@ -99,9 +105,9 @@ change to Baton, not a change in Baton.</Lede>
   choice (`baton.json`), the wrapper hook the repository's freedom (B-95).
 - **The state seam** (marker courses, B-100): the ticket is the record — frontmatter for
   the machine, one heading per leg for the work, schema-checked at the boundary.
-- **The conversation seam** (PR courses, B-101): review rounds live on the PR branch as
-  files, mirrored to the forge for humans, deleted before the squash — the channel plain
-  `git` repositories have.
+- **The conversation seam** (PR courses, B-101): review rounds live in the forge's PR
+  conversation; on plain `git`, which has none, as files on an orphan per-ticket branch,
+  `baton-legs/<ticket>`, which nothing merges. The repository policy's `leg_state` chooses (BATON_SPEC R-BTN-190).
 - **The entry seam** (B-98): a course whose product is tickets or specs starts from a
   request — one sentence, filed by a command — never ticket-less.
 

@@ -479,6 +479,13 @@ export function validateOntology(program: Program): { ok: true; placed: Validate
     if (!arity.has(p)) continue;
     t.types.forEach((type, i) => typeAsserts.push([posOf(p, i), type]));
   }
+  // R-BTN-177's prelude reads meters/2 with string arguments, so a repository meters of any
+  // other shape clashes here (S-BTN-152): one arity per predicate, one type per position.
+  if (arity.has('meters')) {
+    if (arity.get('meters') !== 2) add(null, 'terms', `meters appears with arity ${arity.get('meters')} — the prelude reads meters(K, R) with two strings (R-BTN-177)`);
+    typeAsserts.push([posOf('meters', 0), 'str']);
+    typeAsserts.push([posOf('meters', 1), 'str']);
+  }
   const linkAtom = (atom: Atom, varScope: string | null) => {
     if (atom.args.length > 0) atom.args.forEach((_, i) => node(posOf(atom.pred, i)));
     for (const [i, t] of atom.args.entries()) {
@@ -790,7 +797,7 @@ function tarjan(nodes: string[], edges: (p: string) => string[]): string[][] {  
 // ── the evaluator (R-BTN-175) ────────────────────────────────────────────────────────────
 
 /** One ground tuple of a relation. */
-type Tuple = (string | number)[];
+export type Tuple = (string | number)[];
 
 /** A rule's first derivation of an atom: the entry id and the body atoms it joined, each a
  * relation key — the canonical proof's nodes (R-BTN-174). */

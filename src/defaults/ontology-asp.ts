@@ -8,8 +8,9 @@ import type { Entry, Literal, Program, RouteChoice, Term } from '../core/ontolog
 /** A term as ASP-Core-2 writes it: constants as quoted strings, `$m` as `V_m` (R-BTN-175). */
 const term = (t: Term): string => (t.k === 'var' ? `V_${t.v}` : typeof t.v === 'number' ? String(t.v) : JSON.stringify(t.v));
 
-/** An atom: `pred(args…)`. */
-const atom = (pred: string, args: Term[]): string => `${pred}(${args.map(term).join(',')})`;
+/** An atom: `pred(args…)`, or the bare `pred` when it has none (ASP-Core-2 writes a 0-ary
+ * atom without parentheses — `peak()`, as a naive join would emit, does not parse). */
+const atom = (pred: string, args: Term[]): string => (args.length ? `${pred}(${args.map(term).join(',')})` : pred);
 
 const literal = (l: Literal): string => {
   if (l.t === 'atom') return atom(l.atom.pred, l.atom.args);
@@ -60,6 +61,7 @@ export function toAsp(program: Program, holdings: string[]): string {
 }
 
 /** R-BTN-175's harness-only shows, one per kind of check: the gate fixtures show `derived/1`,
- * the route-choice fixtures `route/2`, `available/2` and `demoted/2` (R-BTN-177). */
+ * the route-choice fixtures `route/2`, `available/2` and `demoted/2` (R-BTN-177) — each its own
+ * `#show` statement, as ASP-Core-2 asks. */
 export const SHOW_GATE = 'derived/1.';
-export const SHOW_ROUTES = 'route/2. available/2. demoted/2.';
+export const SHOW_ROUTES = 'route/2. #show available/2. #show demoted/2.';

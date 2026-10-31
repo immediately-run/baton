@@ -214,3 +214,27 @@ These are its lessons, newest understanding first.
   changed, not what exists** — and a cut-over repository on Workers Free (against R-BTN-2) turns
   that cost into a claiming outage. *Status: fixed by S-BTN-188 — a post writes only the station
   rows that changed; the move to Workers Paid is the owner's.*
+
+## 2026-10-31 — B-105's merge leg ran twice; the second pass merged the PR red
+
+- **A merge leg quietly running its long work looks exactly like a stalled one, and a re-claim
+  of the same leg can kill it and merge without the one check still pending.** B-105's review
+  verdict (approve) landed 18:37:17Z and the merge leg was claimed. That agent resolved main's
+  `dd0de8c` conflict into the PR branch (`138eef6`, pushed 18:50; CI `test` green 18:55), then
+  began `npm run model:pr` for the new head — the report R-BTN-68 still wanted, the one thing
+  the PR could not carry before. Around 18:56 a second claim on the same VM took the leg over:
+  the model run died on an external SIGTERM, its worktree was removed and pruned mid-run, and
+  PR #144 was merged at 18:57:34 with the `report` check failing — no model report was ever
+  pasted — and the ticket archived at 18:59. **A leg's completion signal is its process exit,
+  not its silence**: nothing distinguished "producing a 2-hour model report" from "hung", so
+  the lease changed hands mid-flight and the merge landed red. The displaced leg went on to
+  produce the evidence after the merge (PR comment, 2026-10-31): quick, the 200-trace replay
+  and the integration suite each passed in one invocation, and all 261 scenario traces were
+  accepted with none rejected — though no single `npm run traces` invocation could finish,
+  because the VM's serve layer restarted roughly every two hours all night and each restart
+  SIGTERMs every tree under it (four attempts died at 82–97% through; the tail dirs were
+  checked through `check-traces.mjs`'s argument surface to complete the union). Long leg work
+  on a shared VM needs either a heartbeat that says "alive and model-checking" or a lease
+  fence that outlives a quiet hour; both are the owner's to decide. *Status: the merge stands
+  (delivered, `c43f550`); the model evidence for the landed head is on the PR; B-142 filed
+  (item 7); the re-claim race is unfiled and the owner's.*

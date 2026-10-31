@@ -1,16 +1,16 @@
 ---
-title: "B-64 — The outbox and the built-in leg baton.write: Baton's git writes, drained by runners (R-BTN-171)"
+title: "B-64 — The outbox and its couriers: every effect Baton intends outside itself, delivered by a key that holds the credential (R-BTN-171)"
 id: B-64
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-10-31
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1120
 tier: critical
-description: "Build R-BTN-171: every git write Baton intends is an `outbox` row (`handler` for a bound core condition, `withdraw` for a superseded ticket) holding identifiers only; the built-in leg `baton.write`, requiring `runner:baton-legs` (declared under `--outbox`), writes a ticket's entries in id order with `baton_write: <id>` idempotence and reports `written[]`; entries land at a snapshot, drop when their condition closes first, and raise `baton.outbox-late` after 24 h; the source gains a `withdraw(ticket, reason)` export. Extended after the adversarial review: core's handlers resolved from the board post's top-level `bindings` and the tickets' `conditions`, stored in `condition_bindings`, a runner's or the tenant's condition never bound; a foreign file at a handler's path never overwritten, the ticket held `outbox-collision`; `baton.write` re-verified against Baton's record. S-BTN-136, S-BTN-131's binding cases, G-BTN-156. Requires: none."
+description: "Build R-BTN-171 as amended 2026-10-30: every effect Baton intends outside itself is a signed `outbox` row of a `kind` (`handler`, `withdraw`, `answer`, `forge-check`); couriers, keys of their own registered `--delivers git` or `forge-check`, claim entries under a 10-minute lease through `/v1/courier/entries`, deliver them once by id, and mark them; git entries are confirmed by a snapshot, `forge-check` by read-back; late, refused and colliding entries hold the ticket and raise `baton.outbox-late`. The existing `notices` table and `/v1/courier/notices/*` fold into it; there is no `baton.write` leg. Also: core's handlers resolved from the board post's `bindings`, a runner's or the tenant's condition never bound, the source's `withdraw(ticket, reason)` export. S-BTN-136, S-BTN-81, S-BTN-131's binding cases, G-BTN-156. Requires: none."
 topics:
   - baton
 owns: {}
@@ -22,24 +22,26 @@ depends_on:
   - B-42
 ---
 
-**Brief:** the ticket plan for the current-state spec (PR #71, 2026-10-20), §2's B-64. Baton holds
-no git credential, so the handler tickets of its own conditions (R-BTN-163) and the withdrawals
-of superseded tickets (R-BTN-168) reach git only through a runner.
-**Spec:** `spec/BATON_SPEC.md` §7.8 R-BTN-171 (the outbox); §7.3 R-BTN-163 ("Binding core's
-conditions": the handler id `<local>.c<n>` or `baton.<sub>.<condition_id>`, `baton.outbox-late`
-never bound); §5.2 R-BTN-69 (built-in legs: held, `ready` while held, `runner:baton-legs`, rule 9
-not binding `baton.write`); §4.2 R-BTN-74 (`file(ticket)` and `withdraw(ticket, reason)`); §8.4
-R-BTN-133 (the `runner` capability type's `baton-legs` value); §5.3 R-BTN-83 (held positions);
-§6.6 (recommendation order: built-in legs first); §13.6 `ticket_overrides.override_kind`; §13.8
-the `outbox` table, `outbox_pending`, the alarm's `outbox.queued_at` + 24 h; §15 S-BTN-136,
+**Brief:** the ticket plan for the current-state spec (PR #71, 2026-10-20), §2's B-64, rescoped by
+the 2026-10-30 amendment (one outbox, couriers; `spec/BATON_SPEC_HISTORY.md`). Baton holds no git
+or forge credential, so the handler tickets of its own conditions (R-BTN-163), the withdrawals of
+superseded tickets (R-BTN-168), promoted light questions' files (R-BTN-173) and check runs
+(R-BTN-115) reach the outside only through a courier.
+**Spec:** `spec/BATON_SPEC.md` §7.8 R-BTN-171 (the outbox and couriers); §10 R-BTN-115 (the
+`forge-check` kind); §7.3 R-BTN-163 ("Binding core's conditions": the handler id `<local>.c<n>` or
+`baton.<sub>.<condition_id>`, `baton.outbox-late` never bound); §4.2 R-BTN-74 (`file(ticket)` and
+`withdraw(ticket, reason)`); §5.3 R-BTN-83 (the `outbox` held position, which queues no leg);
+§12.1 (the courier principal, one role per key); §13.1 `couriers.delivers`; §13.6
+`ticket_overrides` (`override_kind` `outbox`, `hold_reason` `outbox-unlanded`, `outbox-refused`,
+`outbox-collision`); §13.8 the `outbox` table, `outbox_due`, `outbox_alarm`, `outbox_pending`;
+§14 `/v1/owner/{repository}/couriers` and `/v1/courier/entries/*`; §15 S-BTN-136, S-BTN-81,
 G-BTN-156. After the adversarial review (`spec/BATON_SPEC_HISTORY.md`, "Adversarial review
 (2026-10-20)"): §4.4's top-level `bindings`, R-BTN-163's "Binding core's conditions" and §13's
-`condition_bindings` (adv-2 M12); R-BTN-171's `outbox-collision` and §13.6's `hold_reason`
-(adv-2 m2); R-BTN-5/R-BTN-34's built-in legs (adv-2 M3); S-BTN-131.
+`condition_bindings` (adv-2 M12); R-BTN-171's `outbox-collision` (adv-2 m2); S-BTN-131.
 **Depends on:** B-58 (bindings, handler ticket frontmatter, the source's `file` export,
 `std:condition@1`), B-56 (`baton.<sub>` and `hitl.decision` conditions, which are what a
 `handler` entry files), B-38 (route overrides stored with their `next_source` kind; this ticket
-adds `outbox`), B-42 (the `runner` capability type; this ticket adds its `baton-legs` value).
+adds `outbox`), B-42 (unchanged by the amendment; kept for the override store it shares).
 
 ### Requires
 
@@ -48,61 +50,93 @@ fake forge.
 
 ### Why
 
-Bound core conditions need a handler ticket in git, and supersession (B-65) needs withdrawals
-in git, but Baton must never write git itself. Until this lands, every core condition reaches
-only the debugger, and nothing Baton decides can be written back.
+Bound core conditions need a handler ticket in git, supersession (B-65) needs withdrawals in git,
+and checks need runs on the forge, but Baton must never hold the credential for any of them. Until
+this lands, every core condition reaches only the debugger, nothing Baton decides is written back,
+and check runs travel through a second queue (`notices`, R3-1256) that does the same job.
 
 ### What to build
 
 1. **Schema.** A new numbered migration in `src/migrations/` adds the `outbox` table as §13.8
    gives it (`(repository_id, id)`, `id` increasing per repository; `ticket_id`, `kind`
-   `handler|withdraw`, `condition_id`, `fields` JSON, `state`
-   `queued|written|landed|dropped`, `queued_at`, `written_commit`, `landed_at`), the
-   `outbox_pending` index, and `outbox` to `ticket_overrides.override_kind`'s CHECK.
-2. **Core module `src/core/outbox.ts`.** `queue(kind, ticket, fields, condition?)` in the
-   caller's transaction; `fields` passes a new identifiers-only validator in
-   `src/core/validate.ts` (no free text, §12.3). Each queue, write and land logs an
-   `outbox {id, kind, state}` event in the ticket's history (`src/core/history.ts`).
+   `handler|withdraw|answer|forge-check`, `condition_id`, `fields` JSON, `kid`, `signature`,
+   `state` `queued|claimed|delivered|skipped|confirmed|dropped`, `credential_id`, `attempts`,
+   `not_before`, `queued_at`, `delivered_ref`, `confirmed_at`, `snapshots_since_delivered`), the
+   `outbox_due`, `outbox_alarm` and `outbox_pending` indexes, `couriers.delivers`, and `outbox`
+   to `ticket_overrides.override_kind`'s CHECK and `outbox-unlanded`, `outbox-refused`,
+   `outbox-collision` to `hold_reason`'s. It copies every live `forge-check` `notices` row into `outbox` as a
+   `forge-check` entry and drops `notices` (migrations are append-only: a new file, never an edit
+   of `0017_notices.sql`).
+2. **Core module `src/core/outbox.ts`**, replacing `src/core/notices.ts`. `queue(kind, ticket,
+   fields, condition?)` in the caller's transaction, signing the entry with the tenant's
+   `SigningKey` (R-BTN-55); `fields` passes a new identifiers-only validator in
+   `src/core/validate.ts` (no free text, §12.3; a `forge-check`'s `summary` is rendered `plain`,
+   R-BTN-112). Each queue, delivery and confirmation logs an `outbox {id, kind, state}` event in
+   the ticket's history (`src/core/history.ts`).
    - **`handler` entries.** When B-56/B-58 raise a bound `baton.*` or `hitl.decision`
      condition, queue a `handler` entry and, in the same transaction, a provisional ticket row
-     at the handler course's start station with queued leg `baton.write` held as an override
-     (`next_source: outbox`, B-38's store). The id is `<local>.c<n>`, or
+     at the handler course's start station waiting on `outbox` (`next_source: outbox`, held as
+     an override in B-38's store; no leg is queued). The id is `<local>.c<n>`, or
      `baton.<sub>.<condition_id>` for a repository-level condition; a runner's or the tenant's
-     condition is never bound (item 8). The condition
-     counts as handled from this moment. A binding of `baton.outbox-late` is ignored.
+     condition is never bound (item 7). The condition counts as handled from this moment. A
+     binding of `baton.outbox-late` is ignored.
    - **`withdraw` entries** are queued by B-65; this ticket gives them their kind, ordering and
-     drain, and tests them with a fixture supersession.
-   - **Dropping.** A `handler` entry still `queued` when its condition closes is `dropped`, its
-     provisional row deleted, and no withdrawal follows; a `written` one is followed by a
-     `withdraw` entry.
-   - **Landing.** In the snapshot transaction (`src/core/board.ts`), an entry whose
-     `written_commit` the accepted snapshot contains turns `landed`; the posted ticket then rules
-     and the override ends.
-3. **The built-in leg in core.** `baton.write` is queued only as a held position, `ready` while
-   held, requires `runner:baton-legs` for rule 4 and R-BTN-126, is exempt from rule 9, reports
-   no position, and is recommended ahead of the repository's other legs (`src/core/claims.ts`'s
-   recommendation order; `src/core/gates.ts` for rule 4). Its claim response carries
-   `outbox: [{id, kind, fields}]`, every pending entry of the ticket in `id` order; a `completed`
-   end carrying `written: [{id, commit}]` (validated in `src/core/validate.ts`) sets them
-   `written`.
-4. **The runner (`src/runner/`).** `--outbox` on the runner's start flags (`src/runner/main.ts`;
-   `baton runner start --outbox` once B-23's tree lands) declares `runner:baton-legs`; a config
-   naming the capability refuses to start (R-BTN-133). The built-in leg runs runner code, no
-   script: fetch the default-branch head, skip an entry whose file already carries
-   `baton_write: <id>` (or, for `withdraw`, already says withdrawn), else render it through the
-   source's `file(ticket)` (`handler`, body generated from `fields`) or `withdraw(ticket,
-   reason)`, commit, push; on a rejected push fetch, check and write again at most 3 times, then
-   end `released:cannot-finish:transient`. A push the forge refuses ends
-   `released:cannot-finish:capability`: the ticket is held and `baton.retries` names the runner.
+     delivery, and tests them with a fixture supersession.
+   - **`forge-check` entries** are queued where `notices` were (B-5's check tickets), one copy
+     per forge courier of the repository.
+   - **Dropping.** A `handler` entry still `queued` when its condition closes, and never claimed,
+     is `dropped`, its provisional row deleted, and no withdrawal follows; a claimed or delivered
+     one is dropped and followed by a `withdraw` entry, the claimed one's row kept until its mark
+     or its lease lapse.
+   - **Confirming.** In the snapshot transaction (`src/core/board.ts`), a git entry whose
+     `delivered_ref` the accepted snapshot contains, and which the snapshot shows, turns
+     `confirmed`; the posted ticket then rules and the override ends. After 3 accepted snapshots
+     without it, the ticket is held `outbox-unlanded`, except a proposed entry (under
+     `tickets.created: proposed`), which is confirmed only when the proposal merge lands it
+     (B-140), is late only if undelivered after 24 hours, and is never held `outbox-unlanded`
+     (R-BTN-180). A `forge-check` entry is confirmed by the
+     sync's read-back (R-BTN-115).
+3. **The courier routes** (`src/core/workerApi.ts` or a new `src/core/courierApi.ts`, with
+   `src/core/auth.ts` for the `courier` principal): `POST /v1/courier/entries/claim` leases up to
+   50 entries of the kinds the courier delivers on its repositories for 10 minutes, a ticket's git
+   entries together in `id` order and none while an earlier one is `claimed` or `delivered`;
+   `POST /v1/courier/entries/{repository}/{id}` takes `delivered {ref}`, `skipped`, or `failed
+   {transient | refused | collision}` from the claimer only. `transient` backs off 1, 5, 30
+   minutes, then hourly; `refused` and `collision` hold the ticket and raise `baton.outbox-late`
+   naming the courier. `POST /v1/owner/{repository}/couriers` takes `delivers: "git" |
+   "forge-check"` and refuses a key that holds another role (`conflict`).
+   - **Who may deliver.** The repository policy's `outbox` section (R-BTN-188; B-145 builds the
+     store and who may change it): per class, `deliverers` (`courier`, `runner`,
+     `trusted-runner`), `trust` (`any` | `trusted`) and `min_release`, read through
+     `src/core/policy.ts`, or the `cooperative` preset's `{deliverers: [courier], trust: any}`
+     until B-145 lands. The claim route admits a caller only as the policy of each repository
+     allows (`forbidden` naming the unmet knob). A policy admitting runners adds the shared
+     `forge-check` copy.
+4. **The courier (`src/courier/`, `baton courier run`).** A loop with its own SSH key, outside
+   any runner: claim, verify each entry's signature against the pinned `GET /v1/keys/signing`
+   keys, deliver, mark. The claim carries `{limit?, release}`, refused below the policy's
+   `min_release` (a declaration, not a control). For `git`: fetch the head it writes to (the
+   default branch, or under `tickets.created: proposed` the branch `baton/proposed/<ticket>`),
+   skip an entry whose file already carries `baton_write: <id>` (or, for `withdraw`, already says
+   withdrawn or is absent) and mark it `delivered` with the head's commit; else render it, commit,
+   push. A dedicated courier renders through the source's `file(ticket)` (`handler`, body generated
+   from `fields`), `withdraw(ticket, reason)` or `answer`; **a trusted-runner deliverer** never
+   loads the source's exports and writes only from the CLI's own markdown-source templates, marking
+   every git entry `failed refused` on a repository whose ticket source is ejected
+   (`.baton/tickets.mjs`; R-BTN-171, R-BTN-182); on a rejected push fetch, check and write again at most 3 times, then
+   mark `failed transient`; a push the forge refuses marks `failed refused`; a foreign file at a
+   `handler`'s path marks `failed collision`. For `forge-check`: the existing courier's delivery
+   (R-BTN-115), moved onto the new routes, with `<repository>:<id>` as `external_id`.
 5. **The `withdraw` export.** `src/defaults/tickets-markdown.ts` (and the generated
    `.baton/tickets.mjs` wrapper in `src/defaults/cli.ts`) gains `withdraw(ticket, reason)`,
    setting `status: withdrawn`, `withdrawn_reason` and `baton_write: <id>`.
-6. **Alarm and export.** The alarm (`src/core/baton.ts`) raises `baton.outbox-late` for an entry
-   not `landed` 24 h after `queued_at`, closed when it lands or drops. R3-1258's export
-   (R-BTN-88) carries the `outbox` rows.
-7. **Model.** The `outbox` override kind as a held position, with a `model:pr` report
-   (R-BTN-68).
-8. **The adversarial review's fixes** (2026-10-20):
+6. **Alarm, export and model.** The alarm (`src/core/baton.ts`) raises `baton.outbox-late` for a
+   git entry not `confirmed` 24 h after `queued_at` and a `forge-check` entry not `delivered` 15
+   minutes after, closed when it is confirmed or dropped. R3-1258's export (R-BTN-88) carries the
+   git-kind rows. `model/lightQuestion.qnt` renames its writer from a `baton.write` claim to a
+   courier lease and `written`/`landed` to `delivered`/`confirmed` (no change to what it checks);
+   the `outbox` held position goes into `model/baton.qnt` with a `model:pr` report (R-BTN-68).
+7. **The adversarial review's fixes** (2026-10-20):
    - **Bindings for core's handlers** (§4.4, R-BTN-163, adv-2 M12). The sync posts
      `.baton/baton.json`'s `conditions` as the board post's top-level `bindings` (`<type
      prefix>: <course> | {course, replaces}`); the sync is `src/shared/batonSync.mjs`, vendored,
@@ -115,53 +149,47 @@ only the debugger, and nothing Baton decides can be written back.
    - **Never bound** (R-BTN-163, adv-2 M12). A condition on a runner or on the tenant has no
      repository whose bindings and outbox apply: it queues no entry, and Needs you lists it as
      unhandled.
-   - **`outbox-collision`** (R-BTN-171, adv-2 m2). When `baton.write` finds a foreign file at a
-     `handler` entry's path (one without that entry's `baton_write`), it writes nothing for the
-     entry and reports it. Baton leaves the entry unwritten and holds the ticket with
-     `hold_reason` `outbox-collision` (added to the CHECK in item 1's migration).
-   - **Re-verified against Baton's record** (R-BTN-5/R-BTN-34, adv-2 M3). `baton.write` acts only
-     on its claim's `outbox` list, so the runner (`src/runner/runner.ts`'s re-verification)
-     checks it against the claim response's station and queued leg, never against the ticket
-     file in git. B-65 (`baton.cancel`) and B-5 (fileless check tickets) use the same path;
-     whichever of the three lands first writes it.
 
 ### Do not
 
-- Give Baton or the Worker any git credential, or write git from core: every write is a
-  runner's `baton.write` or `baton.cancel`.
-- Store a subject, body or any free text in `fields`.
+- Give Baton or the Worker any git or forge credential, or write git from core: every effect is
+  a courier's delivery of a signed entry.
+- Let a key deliver that the policy's `outbox` does not admit, or hard-code a rule the policy
+  owns (who delivers, trust, release).
+- Store a subject, body or any free text in `fields` beyond a `forge-check`'s rendered `summary`.
 - Put choice settlements, timer legs, `exhausted` legs or call settlements in the outbox: they
   are overrides written by the leg they queue (R-BTN-171's "Not in the outbox").
-- End a forge-refused push `released:blocked` on `runner:baton-legs`: the runner would
-  re-declare at once and loop (history, Integration, "Who drains the outbox").
+- Keep `notices` beside `outbox`, or a `baton.write` leg beside the courier.
 
 ### Tests
 
 - **S-BTN-136** on both hosts, its trace replayed through the model: a bound
-  `baton.output-invalid`; no `runner:baton-legs` runner, then one; a write landed by a lost
-  claim (the re-claim writes nothing); a forge-refused push; a condition closing while queued
-  (`dropped`); an entry undrained 24 h (`baton.outbox-late`).
-- Unit: entry ordering per ticket; the `fields` validator; `withdraw` on the markdown source;
-  the `baton_write` idempotence check; the three-retry rejected push.
-- Item 8, on both hosts: S-BTN-136's foreign file at the handler's path (held
-  `outbox-collision`); S-BTN-131's `baton.output-invalid` filed with its binding taken from the
+  `baton.output-invalid`; no `git` courier, then one; a write pushed by a courier whose lease
+  lapsed (the next courier writes nothing); a forge-refused push (held `outbox-refused`); a
+  condition closing while queued (`dropped`) and while claimed (a `withdraw` follows); an entry
+  undelivered 24 h (`baton.outbox-late`); a foreign file at the handler's path (held
+  `outbox-collision`); a runner key registered as a courier (`conflict`); a bad signature
+  (refused by the courier); the outbox policy's cases (a runner key `forbidden`, then admitted;
+  `trust: trusted` against a shared trust domain; `min_release`; an MCP key's policy change refused).
+- **S-BTN-81** and S-BTN-68 unchanged in outcome on the new routes.
+- Unit: entry ordering per ticket; the `fields` validator; the signature; `withdraw` on the
+  markdown source; the `baton_write` idempotence check; the three-retry rejected push; the
+  `notices` migration.
+- Item 7, on both hosts: S-BTN-131's `baton.output-invalid` filed with its binding taken from the
   post's `bindings`, and a runner's condition never bound. Unit: `condition_bindings` rewritten
-  per snapshot and resolved innermost first; `baton.write` re-verified with no git read.
+  per snapshot and resolved innermost first.
 
 ### Exit criteria
 
-- [ ] S-BTN-136 passes on both hosts, with item 8's cases; G-BTN-156 holds
+- [ ] S-BTN-136 and S-BTN-81 pass on both hosts, with item 7's cases and S-BTN-191's proposal
+  delivery; G-BTN-156 and G-BTN-165 hold
 - [ ] `npm test`, `npm run typecheck`, `npm run check:spec` and `npm run check:wiki` green
 - [ ] merged under the review gate
 
 ## Status
 
-_(filed 2026-10-20 with the current-state spec, PR #71)_ S-BTN-136's row says a forge-refused
-push ends `released:blocked` on `runner:baton-legs` with another runner taking it; R-BTN-171 and
-the history's later Integration entry say `released:cannot-finish:capability`, the ticket held
-and `baton.retries` naming the runner. This ticket follows R-BTN-171; the §15 row needs a spec
-fix before the scenario is written.
+_(filed 2026-10-20 with the current-state spec, PR #71.)_
 
-_(2026-10-20: adversarial review of the spec — R-BTN-171 gains the entry state `claimed`, a `written` entry is never handed out again, an entry not landed after 3 snapshots holds the ticket `outbox-unlanded`, dropping a claimed handler keeps its row until the claim ends and withdraws it if written, later `answer` entries drop with their handler, R-BTN-83 names the built-in legs' clearing events, and a core `notify` condition re-raised within an hour or past 20 handler entries an hour files no handler. Build these here.)_
+_(2026-10-20: adversarial review of the spec — the entry state `claimed`, never handing out a delivered entry again, `outbox-unlanded` after 3 snapshots, a dropped claimed handler withdrawn, later `answer` entries dropped with their handler, and a core `notify` condition re-raised within an hour or past 20 handler entries an hour filing no handler. Build these here.)_
 
-_(2026-10-20: extended for the adversarial review's fixes — the board post's `bindings` stored in `condition_bindings` for core's handlers, runner- and tenant-level conditions never bound, `outbox-collision`, and `baton.write` re-verified against Baton's record (item 8).)_
+_(2026-10-30: rescoped by the spec amendment that folds `forge-check` notices into the outbox and replaces the built-in leg `baton.write` with couriers. The earlier plan's `--outbox` flag, `outbox` claim list, `written[]` end and `baton.write` re-verification are gone; the `notices` table migrates here.)_

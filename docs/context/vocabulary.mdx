@@ -72,12 +72,21 @@ outside resource — and the questions only a person can answer.
 **Administrator, owner, grant.** Administrators run the instance; each repository's owners
 grant worker keys access to it.
 
-**Landing mode.** How a repository's default branch accepts changes: `cooperative`, the default,
-trusts the workers on one machine; `protected` lets only trusted runners and humans land, with
-the forge enforcing it (§12.8).
+**Policy, preset, guarantee, floor.** A repository's policy is the one versioned document of
+every rule about authority and trust — who lands on which refs, who approves what, whose
+attestations count — held in Baton, never in git. A preset (`cooperative`, `protected`) is a set
+of values an owner applies and then tunes. A guarantee is a named condition over the policy; a
+floor is a set of guarantees Baton refuses to let any change break (§12.8).
 
-**Attestation.** A typed, signed fact Baton records about a ticket or commit — a review, a check
-run, a human's approval — which a leg can require as a prerequisite; git never supplies one.
+**Attestation, reading.** A typed statement Baton records — a review, a check run, a human's
+approval, a provider's remaining funds — about a ticket or commit, or about a resource instance (a
+**reading**); git never supplies one. A leg's course says which attestations it requires and
+whether a missing one blocks the leg or only steers advice; the repository's policy says whose
+count.
+
+**Outbox, courier.** Every effect Baton intends outside itself — a git write, a check run — is an
+outbox entry; a courier, a key whose host holds the credential the effect needs, delivers it, and
+Baton confirms it by reading it back.
 
 **Trusted runner.** A runner that claims only legs marked `trusted`, runs no repository code, and
 acts on attestations alone; the merge runner is the first.

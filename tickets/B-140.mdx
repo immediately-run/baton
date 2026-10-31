@@ -3,7 +3,7 @@ title: "B-140 — The merge runner: a deterministic runner type holds the only c
 id: B-140
 project: baton
 status: available
-updated: 2026-10-28
+updated: 2026-10-31
 repos:
   - baton
   - fieldhouse
@@ -11,17 +11,20 @@ tags:
   - roadmap-item
 order: 1163
 tier: critical
-description: "The owner, 2026-10-28: protect the default branch on every forge (GitHub rulesets public or private, GitLab and Gitea protected branches, a pre-receive hook on plain git) so only a merge runner can update it. The merge runner runs a pinned CLI and no repository code, merges an exact approved head when Baton's records hold independent approvals, required checks pass, and no protected path changed; a PR touching one is landed by a human outside Baton. Merge criteria are course data, customisable per course and home, and themselves protected; a floor of protected paths no course removes. Waits on R3-1266. Requires: none."
+description: "The owner, 2026-10-28, as specified in BATON_SPEC §12.8 since 2026-10-31: a merge runner, a grant with the trusted-runner role, claims only `trusted: true` legs, runs a pinned CLI and no repository code, and merges an exact head when the repository policy's `merge`, `paths` and `authorship` say so, checked from git and from attestations (R-BTN-182, R-BTN-183, R-BTN-184); it also performs the proposal merge (R-BTN-180), pins what it trusts (R-BTN-182, R-BTN-189), and `baton repo protect` prints and checks the forge protection from the policy's `refs.*` for the separate protection checker to report (R-BTN-180). S-BTN-180, S-BTN-182, S-BTN-183, S-BTN-184, S-BTN-191. Requires: a GitHub organisation with a dedicated App, a Gitea instance and a plain git server for the drills."
 topics:
   - baton
 owns: {}
 prs: []
-depends_on: []
+depends_on:
+  - B-145
+  - B-146
+  - B-147
 ---
 
-> **The specification is BATON_SPEC §12.8 (R-BTN-180 to R-BTN-187, baton#134).** Where this
-> ticket and the spec differ, the spec wins: it was revised through three adversarial reviews
-> after this ticket was written.
+> **The specification is BATON_SPEC §12.8 (R-BTN-180 to R-BTN-189, baton#134, baton#145).** Where
+> this ticket and the spec differ, the spec wins. The plan below was rewritten on 2026-10-31 for
+> the repository policy; the brief and the owner's statements are kept as written.
 
 **Brief:** the owner, 2026-10-28, on keeping runners from writing Baton's state on every forge and
 on plain git, without a git proxy or per-worker forks: "explore with me the idea of having a
@@ -31,115 +34,130 @@ approval logic out of GitHub and placing it into Baton at the cost of having a d
 trusted runner executing somewhere." Then: "What I like about this design is that the PR branch
 merge leg can be customized as necessary. On a per project or per course basis."
 
-**The model, three rules** (`docs/security-model.mdx`, *The core guarantee*):
-1. runners propose, the merge runner lands: only the merge runner's identity updates the default
-   branch;
-2. Baton's state is landed by humans, outside Baton: the merge runner never merges a PR touching a
-   protected path; a human pushes it or merges it by hand;
-3. tickets are proposals: runners add or edit tickets on their branches, and status, claims and
-   course history live in Baton.
+**The model** (`docs/security-model.mdx`, *The core guarantee*), now stated as the repository
+policy's knobs (R-BTN-188) rather than a mode: runners propose and the merge runner lands
+(`refs.default_branch`, `merge.trusted`); what Baton's state depends on lands as `paths.control`
+and `paths.tickets` say; status, claims and course history live in Baton.
 
-**Spec:** R-BTN-114 (check-runners: a restricted principal), R-BTN-106 (independence by key),
-R-BTN-131 (the standard courses' `merge` leg), R-BTN-134 (sources), R-BTN-66 (owner settings);
-B-128, B-130, B-136, B-138, B-139; FLDH-37.
-**Depends on:** none.
+**Spec:** R-BTN-180 (refs, `baton repo protect`, the protection checker, proposals and the
+proposal merge), R-BTN-182 (trusted runners: the role, no repository code, pins, the refusal-only
+override), R-BTN-183 (what the merge runner merges), R-BTN-184 (protected paths), R-BTN-187 (what a
+trusted leg reads), R-BTN-188 (`merge.*`, `paths.*`, `authorship`, `refs.*`, `grants.trusted_domain`),
+R-BTN-189 (pins); R-BTN-131 (the standard courses' `merge` leg), R-BTN-134 (sources); B-136, B-138,
+B-139, B-141; FLDH-37, FLDH-43.
+**Depends on:** B-145 (the policy the merge runner reads), B-146 (attestations it acts on), B-147
+(the trusted-runner role and trust domains).
 **Waits on:** R3-1266 (Baton holds claims and status, so no runner needs to push the default
 branch).
 
 ### What to build
 
-1. **A merge runner**: a runner type, like R-BTN-114's check-runner a restricted principal, that
-   claims only legs a course marks `merger: true` (the standard courses' `merge`), and holds the
-   only credential that may update the default branch. It runs a pinned released CLI (B-138) and
-   never executes anything from the repository: no install, no build, no hooks, no repository
-   script; it reads git objects and Baton's records only.
-2. **The default branch accepts the merge runner only**, per environment:
-   - GitHub, public or private: a branch ruleset restricting updates to the merge runner's
-     identity (a dedicated GitHub App; GitHub cannot name a user as a bypass actor), no bypass for anyone else but the human-only
-     identity (B-136);
-   - GitLab: a protected branch, allowed to push and merge: the merge runner;
-   - Gitea and Forgejo: a protected branch with the merge runner alone on its whitelist;
-   - plain git: a `pre-receive` hook on the server's repository (`baton repo hook pre-receive`
-     prints it), or gitolite's per-branch rules. Never a client-side hook, which a runner skips.
-   `baton repo protect --print <forge>` prints the setting for each, from the repository's policy.
-3. **The criteria, deterministic.** The merge runner merges a PR when, at the **exact head commit**:
-   - Baton's records hold the approvals the course requires, from runner keys independent of the
-     implementer's (R-BTN-106). PR comments are not read;
-   - the required checks passed on that commit (the executor's, B-128 item 6, or CI's);
-   - every changed path is outside the protected paths. Changed paths come from git
-     (`merge-base` to head, and the merge result), never from a runner's report.
-   It merges only that commit, with the forge's expected-head parameter or a compare-and-swap
-   push; a branch that moved since approval is refused, and the ticket goes back to review.
-   **Protected paths come in two classes** (the owner, 2026-10-28):
-   - **Control paths** (`.baton/**`, agent configuration, `.github/workflows/**`): **for now, never
-     merged by the merge runner.** "The best practice for working on baton courses or custom leg
-     logic is to either push to main directly or manually create a PR. And merge outside of
-     baton." The leg ends at a station `human-merge`, with a notice naming the paths, and the
-     ticket moves on when git shows the human's merge, made as the human-only identity (B-136)
-     that the default branch's protection lets through. **Later**, once human-in-the-loop support
-     is built, a course may change courses and leg logic with a human approval, under the rule
-     for tickets below; that is a separate decision, not part of this ticket.
-   - **Tickets** (`tickets/**`, goal files): created and edited through Baton courses like code
-     ("Ticket creation is something that is almost certainly performed with assistance of a
-     language model … there may be multiple stages from specification to ticket, potentially with
-     reviews"): `draft-ticket`, and the spec-to-tickets course (B-99). The merge runner lands such a
-     PR only with **a human approval at its exact head**: a `std:approval@1` attestation (R-BTN-181)
-     answered by the human-only identity (B-136), recorded by Baton like any other approval. Until
-     that is available, the PR ends at `human-merge` and a human merges it.
-   - **A leg's own progress** (the owner, 2026-10-28: "a runner branch working on a specific
-     ticket should be able to update its own ticket … to document the ticket's progression"): a
-     claim's branch may change its own ticket file, and no other, without a human approval, when
-     the change only appends after the file's `## Status` heading, with the frontmatter and
-     everything before that heading byte-identical. The merge runner checks it from git, for the
-     one path the claim's ticket names (R-BTN-182, baton#134).
-4. **Customisable per course and per home.** The merge leg's criteria are course data: required
-   approvals and from which legs, required checks, the merge strategy (merge, squash, rebase),
-   extra protected paths, and an optional deterministic override `legs/merge.run.mjs` that the
-   merge runner runs to add refusals, never to approve (R-BTN-182). They are read from the default branch (or
-   the course's source, B-139), so a change to them is itself a change under `.baton/**`, which
-   only a human lands: a runner cannot loosen its own merge rules.
-5. **A floor no course removes.** The protected paths include, always, `.baton/**`, `tickets/**`,
-   agent configuration (`.claude/**`, `**/CLAUDE.md`, `AGENTS.md`) and `.github/workflows/**`,
-   held as an owner setting in Baton (R-BTN-66) that courses may extend and never shrink.
-6. **Where it runs**, two supported places:
-   - a GitHub Actions workflow on the default branch, triggered by schedule and dispatch, whose
-     credential sits in an environment limited to the default branch, without reviewers so it runs
-     unattended (GitHub's reviewers gate every run, not changes). Because only the merge runner changes the default branch, and it refuses
-     workflow changes without a human, "default branch only" holds;
-   - a process in a trust domain of its own; never the owner's machine under `protected`
-     (`baton run --role merger`).
-7. **The secrets rule is a precondition** (FLDH-37): no repository-level secrets anywhere the
-   runners push, since a workflow pushed to an agent branch runs with them. Every secret, the merge
-   runner's included, sits in an environment limited to the default branch.
+1. **The merge runner** is a grant with the trusted-runner role (B-147). It claims only legs its
+   course marks `trusted: true` (the standard courses' `merge`; rule `trusted`), runs a CLI release
+   installed by tarball integrity (B-138), and executes nothing from the repository: no install,
+   build, hook or repository script; it reads git objects and Baton's records only (R-BTN-182).
+2. **What it merges** (R-BTN-183), at the PR's exact head `H`, every rule read from the policy:
+   - `merge.reviews`: `count` `std:review@1` at `H`, each from a trust domain other than every
+     writer domain of `H` (`std:wrote@1`, `std:ran@1`), from a review claim that started at `H`,
+     differing in each field `distinct` names; null domains and families never count as distinct;
+   - `merge.checks: required`: a `std:checks@1` at `H`, or check runs whose workflow file is on the
+     protected default branch with the same blob as at merge time;
+   - `authorship: signed`: every commit in every attested range signed by its leg's key;
+   - continuity: a writing claim's start head is the last attested head; a commit no claim
+     reported resets the branch and raises `baton.foreign-commit`;
+   - paths: `git diff-tree -r -z --no-renames --name-only` from the default branch's tip to the
+     merge result plus each `merge-base --all` diff; a symlink, submodule or `.gitmodules` change
+     refused; matched case-folded and NFC-normalised against `paths.protected` plus the computed
+     floor (R-BTN-184);
+   - control paths as `paths.control` says: `human` ends the leg at `human-merge` and recognises
+     the human's merge from the forge; `trusted-runner` merges with a `std:approval@1`; `any` merges
+     as any path does;
+   - tickets and goals, under `paths.tickets: approval`, only with a `std:approval@1` at `H` whose
+     `paths` and `blobs` cover every protected path changed; a leg's own progress after `## Status`,
+     by R-BTN-184's grammar, needs none;
+   - leg state (R-BTN-190): a work branch whose merge result, or any commit in the ticket's ranges,
+     holds a path segment at any depth that after NFC normalisation and case folding is
+     `.baton-legs` is refused; it never merges a `baton-legs/*` branch, and a push there is no
+     write (no range, no foreign-commit reset);
+   - how: squash or merge at exactly `H` with the base pinned (a compare-and-swap push), a commit
+     message it writes itself; a branch that moved since an attestation was made is refused.
+   Every attestation is fetched, verified against the pins, its subject compared with the exact
+   object, and a `once` attestation consumed by compare-and-swap (R-BTN-182).
+3. **The proposal merge** (R-BTN-180): it merges `baton/proposed/<ticket>` when every commit on it
+   since the merge base is a deliverer's template write for that ticket's outbox entries (B-64),
+   touching only the paths they name, and one `std:approval@1` whose subject is that ticket at that
+   commit covers exactly those paths and blobs; `merge.reviews`, `merge.checks`, `authorship` and
+   continuity do not apply.
+4. **The course override** `legs/merge.run.mjs` only adds refusals: it runs in a sandbox with no
+   network, no credential, a private PID namespace, the computed diff as its only input and a fixed
+   time, and returns `{refuse, reasons}` from a closed list; where no sandbox is available it is
+   refused, not run (R-BTN-182).
+5. **Pins** (R-BTN-182, R-BTN-189): its own configuration pins the `human_only` public keys, Baton's
+   attestation key, the tenant signing keys, and the hashes of the policy and its floors. It reports
+   its pins in each heartbeat and acts on nothing in the repository while one differs from Baton's
+   (`baton.policy-unpinned`); it verifies signed policy reads against its pinned keys, checking
+   `repository` and `tenant`.
+6. **`baton repo protect`** (R-BTN-180): `--print <forge>` derives the forge setting from the
+   policy's `refs.*` and `paths.control`:
+   - GitHub (an organisation): branch and tag rulesets whose only bypass actors are the trusted
+     runners' dedicated App and a team holding only the human-only identity; `refs/baton/*` cannot be
+     restricted;
+   - GitLab protected branches and tags (a deploy key on GitLab Free); Gitea and Forgejo protected
+     branches with a whitelist; plain git a `pre-receive` hook on a server that knows the pusher
+     (`baton repo hook pre-receive`), keeping a pusher log, and refusing default-branch updates
+     that add such a segment, and admitting `baton-legs/*` as the policy's `refs.legs` says
+     (R-BTN-190);
+   - the protection checker mode also reads the default branch's tree for such a segment and reports
+     it as `legs: {count, tickets}` in its heartbeat's `protection`, the reading that alone raises and closes `baton.leg-state-landed` where a checker exists
+     (B-148).
 
-**Approvals are new Baton state** (the owner, 2026-10-28: "when you wrote approvals come from
-Baton's records, this indicates that Baton must track a new type of state, which is human
-approval"). Specified as R-BTN-181, attestations (baton#134):
-- review approvals, written by the `advance` that ends an approving review leg, bound to its
-  `head_sha` and runner key;
-- human approvals, written only by `baton owner approve <ticket> --head <sha>` signed with a
-  `human_only` key (B-136), the record carrying the signature;
-- an `approvals` table (a migration), exported with the owner state, failing closed when lost;
-- R-BTN-116's person leg, answered in git by any pusher, never counts as a human approval: without
-  this, a runner could commit its own approval.
+   `--check <forge>` reads it back and returns `{matched, reading_hash}`; it does not match while a
+   class the forge cannot restrict excludes any writer. On GitHub it needs the credential that reads
+   `bypass_actors`, which can also write rulesets: it runs only in the **protection checker** mode
+   (`baton run --role protection-checker`, a trusted runner named by `approvers.trust`, claiming no
+   leg and holding no merge credential), never as a workflow and never beside the merge runner; that
+   mode reports in its heartbeat's `protection` at least hourly. Verify whether a narrower GitHub App
+   permission suffices.
+7. **Where it runs**: a GitHub Actions workflow on the default branch (its credential in an
+   environment limited to the default branch, without reviewers), or a process in a trust domain of
+   its own (`baton run --role merger`); under `grants.trusted_domain: separate` that domain is shared
+   with no other grant (B-147). Where no agent session runs is the deployment's duty (FLDH-43).
+8. **The secrets rule is a precondition** (FLDH-37): where any `refs.*` admits `runner`, no
+   repository-level secrets; every secret, the merge runner's included, in an environment limited to
+   the default branch (R-BTN-180).
 
-This is a second exception to git being the ledger, after course history (B-120); the
-implementing PR amends `docs/context/architecture.mdx` and `values.mdx` with it.
+### Do not
+
+- Read a merge criterion from a course file, a PR comment, a trailer or a board post: they are the
+  policy's and git's (R-BTN-183, R-BTN-187).
+- Hold the protection checker's credential in the merge runner, or run the checker as a workflow.
+- Load `.baton/tickets.mjs` or any repository code, delivering proposals included.
+- Merge a commit other than the exact head, or a proposal carrying anything but template writes.
 
 ### Tests
 
-- A scenario (the next free S-BTN number): an approved PR outside the protected paths merges at
-  its approved head; the same PR after a later push is refused and returns to review; a PR touching
-  `.baton/` is never merged by the merge runner and ends at `human-merge`, and the ticket moves on
-  when a human's merge appears in git; a ticket PR merges with a person-leg approval by the
-  human-only identity at its head, not with one given at an earlier head, and not with an approval
-  from any runner key; a course's extra protected
-  path is honoured, and a course change removing a floor path is refused at the sync; an approval
-  from the implementer's own key does not count.
+- **S-BTN-183** (what merges), **S-BTN-184** (protected paths under `paths.control: human` and
+  `paths.tickets: approval`), **S-BTN-182** (trusted runners), **S-BTN-180** (refs from the policy,
+  `--check` and `baton.unprotected`), and S-BTN-191's proposal-merge and checker cases, on both hosts.
 - A drill per environment, scripted: a runner identity's push to the default branch is refused by
-  the GitHub ruleset, by a Gitea protected branch, and by the `pre-receive` hook.
+  the GitHub ruleset, by a Gitea protected branch, and by the `pre-receive` hook; `--check` matches
+  each, and stops matching after a hand edit.
 
 ### Exit criteria
 
-- [ ] the scenario passes on both hosts; the drills pass
-- [ ] `fieldhouse` and `baton` run with the default branch restricted to the merge runner
+- [ ] the scenarios pass on both hosts; the drills pass
+- [ ] `fieldhouse` and `baton` run with the default branch restricted to the merge runner and the
+  human-only identity, and a protection checker reporting
+- [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green; merged under the review gate
+
+## Status
+
+_(2026-10-28: filed.)_
+
+_(2026-10-31: the plan rewritten for the repository policy (baton#145). Retired from the earlier
+text: `merger: true` legs (now `trusted: true` and the trusted-runner role), merge criteria as
+course data with independence by key (now `merge.*` in the policy, by trust domain and model
+family), control paths "for now, never merged" (now `paths.control`), the protected-path floor "as
+an owner setting" (now `paths.protected` plus the computed floor), an `approvals` table (now
+R-BTN-181 attestations, B-146), and the merge runner reporting protection checks (now the separate
+protection checker).)_
