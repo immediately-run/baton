@@ -27,7 +27,7 @@ import windDown from './0024_wind_down.sql';
 import ontology from './0025_ontology.sql';
 import stationWrites from './0026_station_writes.sql';
 import routeChoices from './0027_route_choices.sql';
-import repositoryPolicies from './0028_repository_policies.sql';
+import repositoryPolicies from './0029_repository_policies.sql';
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },

@@ -354,9 +354,9 @@ describe('migration 0021: leg queues (R3-1255)', () => {
   });
 });
 
-describe('migration 0028: the repository policy tables (B-145)', () => {
+describe('migration 0029: the repository policy tables (B-145)', () => {
   it('creates the append-only policy log with its floors, and the columns the trust and human marks land in', async () => {
-    const id = env.BATON.idFromName('migrations-0028');
+    const id = env.BATON.idFromName('migrations-0029');
     await runInDurableObject(env.BATON.get(id), (_o: unknown, state: DurableObjectState) => {
       const sql = state.storage.sql;
       sql.exec('PRAGMA foreign_keys = OFF');
