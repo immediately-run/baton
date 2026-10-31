@@ -375,7 +375,7 @@ describe('migration 0028: the provider advisory retires (B-107)', () => {
       sql.exec(`INSERT INTO peak_schedules (id, rules_json, factor) VALUES ('zai', '{"days":[1],"hoursUtc":[[1,4]]}', 0.5)`);
       sql.exec(`INSERT INTO provider_models (provider_id, model_id, monthly_limit_usd, peak_schedule_id) VALUES ('zai', 'glm-5.3', 10, 'zai')`);
       sql.exec(`INSERT INTO worker_providers (worker_id, prefix, provider_id) VALUES (1, 'zai-coding-plan', 'zai')`);
-      sql.exec(`INSERT INTO provider_suspensions (provider_id, starts_at, set_by) VALUES ('zai', 1, 'owner:x')`);
+      sql.exec(`INSERT INTO provider_suspensions (provider_id, mode, starts_at, set_by) VALUES ('zai', 'no-new-work', 1, 'owner:x')`);
       sql.exec(`INSERT INTO usage_reports (worker_id, provider_id, model_id, hour, usd_list) VALUES (1, 'zai', 'glm-5.3', 0, 1.5)`);
       sql.exec(`INSERT INTO rate_limit_events (provider_id, worker_id, at) VALUES ('zai', 1, 1)`);
 

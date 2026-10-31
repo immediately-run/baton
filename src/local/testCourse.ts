@@ -238,7 +238,7 @@ export async function coreViolations(k: KitInput): Promise<KitViolation[]> {
     const secret = 'test-course-secret';
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)))].map((b) => b.toString(16).padStart(2, '0')).join('');
     const hb = await core.workers.heartbeat(CRED, null, { hostname: 'test-course', session_name: 'test-course', harness: 'claude-code', kind: 'vm', capabilities: ['agent-venue'],
-      model_id: 'anthropic/kit', model_provider_id: 'anthropic', billing: { anthropic: 'kit' },
+      model_id: 'anthropic/kit',
       tier_ceiling: 'critical', lease_timeout_s: 3600, secret_hash: hash, courses: [{ repository: REPO, course: k.course, version: version.version }] }) as { worker_id: number };
     const tx = <T>(f: () => T) => core.store.transaction(f);
     const claim = tx(() => core.claims.claim(hb.worker_id, { request_id: 'test-course-1', ticket_id: `${REPO}:KIT-1` })) as { claim_id?: number; code?: string; message?: string };
