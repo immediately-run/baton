@@ -4,6 +4,8 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error a plain .mjs script, no types
 import { check, definedIds, retiredIds, retiredScenarioIds, scenarioIds } from '../../scripts/check-spec.mjs';
+// @ts-expect-error a plain .mjs script, no types
+import { impact, patchNotes, render, units } from '../../scripts/spec-tools.mjs';
 
 const SPEC = [
   '- **R-BTN-1 (the lock).** One holder.',
@@ -66,4 +68,58 @@ describe('check-spec', () => {
       ['S-BTN-46.decision-reaches-owner.test.ts', 'S-BTN-60.worker-couriers.test.ts']);
     expect([...problems]).toEqual([]);
   });
+
+  it('fails a rule that opens with an italic patch note, unless allowlisted, and a stale allowlist entry', () => {
+    const spec = `${SPEC}\n- **R-BTN-5 (gates).** *Except under the policy, it does not.* Body.\n- **R-BTN-6 (plain).** Body.`;
+    expect(patchNotes(spec, 'R-BTN')).toEqual(['R-BTN-5']);
+    expect([...check(spec, [], new Set(['R3-1205']))]).toEqual([
+      'R-BTN-5 opens with an italic patch note: rewrite the rule so its body says it',
+    ]);
+    expect([...check(spec, [], new Set(['R3-1205']), '', [], ['R-BTN-5'])]).toEqual([]);
+    expect([...check(SPEC, [], new Set(['R3-1205']), '', [], ['R-BTN-5'])]).toEqual([
+      'R-BTN-5 no longer has a patch note: remove it from PATCH_NOTES_ALLOWED',
+    ]);
+  });
 });
+
+/** A unit spec-tools.mjs returns (a plain .mjs script, so typed here). */
+type Unit = { kind: string; label: string; ids?: string[]; why?: string[] };
+
+describe('spec-tools impact', () => {
+  const spec = [
+    '## 2. Rules',
+    '- **R-BTN-39 (where a ticket is).** Positions.',
+    '  - a sub-bullet of R-BTN-39.',
+    '- **R-BTN-70 (readiness).** Computed at the station R-BTN-39 names.',
+    '- **R-BTN-83 (a leg ends in a position).** The course history is Baton\'s.',
+    '- **R-BTN-90 (timers).** Unrelated.',
+    '### Scenarios',
+    '| S-BTN-18 Baton owns the position | a push | R-BTN-39 holds |',
+    '## Decisions',
+    '- Chose Baton as the authority on course history (R-BTN-39).',
+    '- **Chose a wrapped entry** whose citation is on its',
+    '  second line (R-BTN-39).',
+  ].join('\n');
+
+  it('cuts the spec into rules, rows and decisions', () => {
+    expect(units(spec, 'R-BTN').map((u: Unit) => `${u.kind}:${u.label.split(' ')[0]}`)).toEqual([
+      'rule:R-BTN-39', 'rule:R-BTN-70', 'rule:R-BTN-83', 'rule:R-BTN-90', 'scenario:S-BTN-18', 'decision:Chose',
+      'decision:**Chose',
+    ]);
+  });
+
+  it('lists every unit and file that cites the id or uses a term, and not the rest', () => {
+    const r = impact(spec, ['R-BTN-39'], ['course history'], [['tickets/B-1.mdx', 'see R-BTN-39'], ['tickets/B-2.mdx', 'no']], 'R-BTN');
+    expect(r.changed.map((u: Unit) => u.ids)).toEqual([['R-BTN-39']]);
+    expect(r.spec.map((u: Unit) => [u.label.split(' ')[0], u.why])).toEqual([
+      ['R-BTN-70', ['cites R-BTN-39']],
+      ['R-BTN-83', ['uses "course history"']],
+      ['S-BTN-18', ['cites R-BTN-39']],
+      ['Chose', ['cites R-BTN-39', 'uses "course history"']],
+      ['**Chose', ['cites R-BTN-39']],
+    ]);
+    expect(r.files).toEqual([{ path: 'tickets/B-1.mdx', why: ['cites R-BTN-39'] }]);
+    expect(render(r)).toContain('- [ ] rule R-BTN-70 (readiness) — l. 4 — cites R-BTN-39');
+  });
+});
+

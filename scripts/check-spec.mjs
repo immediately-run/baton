@@ -13,10 +13,15 @@
 // - none of the scrub's terms (SCRUBBED) is in the spec: the repository is public;
 // - every test/integration/ file named for a scenario (`S-BTN-n.*.test.ts`) names one §15's
 //   scenario table defines and not one the history retired (B-71) — the RETIRED_TESTS_ALLOWED
-//   list holds the two retired files that still test their rows until B-67 deletes them.
+//   list holds the two retired files that still test their rows until B-67 deletes them;
+// - no rule opens with an italic patch note (`- **R-BTN-35 (…).** *Except …*`): an amendment
+//   rewrites the rule instead of stating an exception on top of a body that still says the
+//   opposite (spec-tools.mjs's `patchNotes`). PATCH_NOTES_ALLOWED holds the ones written before
+//   this check; it only shrinks (B-150).
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { patchNotes } from './spec-tools.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -73,6 +78,11 @@ export function fileScenario(name) {
   return /^(S-BTN-\d+)\./.exec(name)?.[1] ?? null;
 }
 
+/** Rules that carried an italic patch note when the check was added (B-150 folds each into its
+ *  rule's body). Only shrinks: a new patch note fails, and so does a listed rule that no longer
+ *  has one, so the list stays exact. */
+export const PATCH_NOTES_ALLOWED = ['R-BTN-35', 'R-BTN-116', 'R-BTN-161', 'R-BTN-165', 'R-BTN-171', 'R-BTN-173'];
+
 /** Every `R-BTN-n` in a text. */
 export function citedIds(text) {
   return new Set([...text.matchAll(/\bR-BTN-(\d+)\b/g)].map((m) => `R-BTN-${m[1]}`));
@@ -80,7 +90,7 @@ export function citedIds(text) {
 
 /** The problems with a spec, given the code's texts by path, the ticket ids that exist, the
  *  history file and the names of test/integration/'s files. */
-export function check(spec, code, tickets, history = '', testNames = []) {
+export function check(spec, code, tickets, history = '', testNames = [], allowed = []) {
   const problems = [];
   const warnings = [];
   const defined = new Set([...definedIds(spec), ...COURSE_IDS]);
@@ -102,6 +112,13 @@ export function check(spec, code, tickets, history = '', testNames = []) {
   }
   for (const id of new Set([...spec.matchAll(/(?<![\w-])(R3-\d+|B-\d+)\b/g)].map((m) => m[1]))) {
     if (!tickets.has(id) && !EXAMPLE_TICKETS.includes(id)) problems.push(`the spec cites ${id}, which is not a ticket here`);
+  }
+  const notes = patchNotes(spec, 'R-BTN');
+  for (const id of notes) {
+    if (!allowed.includes(id)) problems.push(`${id} opens with an italic patch note: rewrite the rule so its body says it`);
+  }
+  for (const id of allowed) {
+    if (!notes.includes(id)) problems.push(`${id} no longer has a patch note: remove it from PATCH_NOTES_ALLOWED`);
   }
   for (const term of SCRUBBED) {
     if (spec.toLowerCase().includes(term)) problems.push(`the spec contains the scrubbed term "${term}"`);
@@ -129,7 +146,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const history = existsSync(historyPath) ? readFileSync(historyPath, 'utf8') : '';
   const integration = join(REPO, 'test', 'integration');
   const testNames = existsSync(integration) ? readdirSync(integration) : [];
-  const problems = check(spec, code, tickets, history, testNames);
+  const problems = check(spec, code, tickets, history, testNames, PATCH_NOTES_ALLOWED);
   for (const w of problems.warnings) console.warn(`! ${w}`);
   if (problems.length) {
     for (const p of problems) console.error(`✗ ${p}`);
