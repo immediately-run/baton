@@ -26,6 +26,7 @@ import { addPr, idOf, locate, nextNumber, scalar, setKey } from './tickets-file'
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
 import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
+import { defaultBranch } from './request';
 
 /** The most tries one command makes when the default branch moves under it: the stopgap's. */
 export const TICKET_TRIES = 6;
@@ -43,17 +44,6 @@ const detailOf = (e: unknown): string => {
   const err = e as { status?: unknown; stderr?: string | Uint8Array; message?: string };
   return typeof err?.stderr === 'string' ? err.stderr : err?.stderr ? new TextDecoder().decode(err.stderr) : (err?.message ?? String(e));
 };
-
-/** The branch commands land on: the checkout's `origin/HEAD`, else `main` (request.ts's own). */
-export function ticketsBranchOf(root: string): string {
-  try {
-    const ref = git(root, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD');
-    if (ref.startsWith('origin/') && ref.length > 'origin/'.length) return ref.slice('origin/'.length);
-  } catch {
-    // no origin/HEAD: main
-  }
-  return 'main';
-}
 
 export interface TicketsIo {
   root?: string;
@@ -87,7 +77,7 @@ function transact(root: string, io: TicketsIo, describe: string, change: (dir: s
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   const warn = io.warn ?? ((l: string) => process.stderr.write(`${l}\n`));
   const remote = io.remote ?? 'origin';
-  const branch = io.branch ?? ticketsBranchOf(root);
+  const branch = io.branch ?? defaultBranch(root);
   for (let attempt = 1; attempt <= TICKET_TRIES; attempt++) {
     git(root, 'fetch', '-q', remote, branch);
     const dir = mkdtempSync(join(tmpdir(), 'baton-tickets-'));
@@ -181,7 +171,7 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
   if (pr != null && !GITHUB_PR.test(pr)) throw new Error(`--pr ${pr} is not a GitHub pull request URL`);
   const date = io.date ?? today();
   const remote = io.remote ?? 'origin';
-  const branch = io.branch ?? ticketsBranchOf(root);
+  const branch = io.branch ?? defaultBranch(root);
   transact(root, io, `${id} → ${status}`, (dir) => {
     const settings = settingsAt(dir, remote, branch);
     if (!accepts(settings, id)) throw new Error(`${id} is not a ticket id of this repository — its ids are ${acceptedList(settings)}`);
@@ -192,10 +182,10 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
     let text = readFileSync(join(dir, found.path), 'utf8');
     const read = sourceAt(dir, settings);
     const current = read.tickets.find((t) => t.id === id)?.display?.status ?? 'closed';
-    // A claim is available → in-progress alone, the stopgap's rule that keeps two sessions off one
-    // ticket; `set` moves a status wherever the caller's own session left it.
-    if (status === 'in-progress' && claim && current !== 'available') throw new Error(`${id} is ${current}, not available — someone may hold it`);
-    if (status === 'in-progress' && claim) {
+    // In-progress is the claim status, so it is written only on an available ticket — the
+    // stopgap's rule, for `claim` and `set` alike: anything else may be held by another session.
+    if (status === 'in-progress' && current !== 'available') throw new Error(`${id} is ${current}, not available — someone may hold it`);
+    if (status === 'in-progress') {
       const open = (read.tickets.find((t) => t.id === id)?.depends_on ?? []).filter((dep) => !isDone(dir, settings, dep));
       if (open.length) throw new Error(`${id} depends on ${open.join(', ')}, not done yet`);
     }
@@ -213,14 +203,16 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
   });
 }
 
-/** Whether `id` is done, for a claim's dependency: archived, or a live file carrying any of the
- *  markdown source's closed statuses (`done`, `superseded`, `deferred`, `withdrawn`). */
+/** Whether `id` is done, for a claim's dependency: archived, or a live file whose `status:` is
+ * `done` or `superseded` — the ticket's rule. `deferred` and `withdrawn` are closed but not
+ * done: a deferred dependency keeps the claim waiting. */
 function isDone(dir: string, settings: TicketSettings, id: string): boolean {
   const items = (settings.items ?? 'tickets').replace(/\/$/, '');
   const found = locate(items, id, fileAt(dir));
   if (!found) return false;
   if (found.archived) return true;
-  return !sourceAt(dir, settings).tickets.some((t) => t.id === id);
+  const status = /^status:[ \t]*["']?([A-Za-z-]+)["']?[ \t]*$/m.exec(readFileSync(join(dir, found.path), 'utf8'))?.[1];
+  return status === 'done' || status === 'superseded';
 }
 
 /* ------------------------------------------------------------------------------------------
@@ -297,7 +289,7 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
   const deps = t.dependsOn ?? [];
   const date = io.date ?? today();
   const remote = io.remote ?? 'origin';
-  const branch = io.branch ?? ticketsBranchOf(root);
+  const branch = io.branch ?? defaultBranch(root);
   let filed: string | null = null;
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   transact(root, { ...io, quiet: true }, 'new ticket', (dir) => {
@@ -351,7 +343,7 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
 function ticketText(o: { id: string; title: string; project: string; settings: TicketSettings; deps: string[]; t: NewTicket; date: string }): string {
   const { id, title, project, settings, deps, t, date } = o;
   const description = (t.description ?? t.title).replace(/\s+/g, ' ').trim();
-  const tags = t.tags ?? settings.tags;
+  const tags = t.tags?.length ? t.tags : settings.tags;
   const body = t.body?.trim() ? t.body.trim() : skeletonBody({ description, deps, ...(t.course ? { course: t.course } : {}), date });
   return [
     '---',
@@ -363,7 +355,7 @@ function ticketText(o: { id: string; title: string; project: string; settings: T
     ...(t.repos?.length ? ['repos:', ...t.repos.map((r) => `  - ${scalar(r)}`)] : []),
     'tags:',
     ...tags.map((x) => `  - ${scalar(x)}`),
-    `order: ${t.order ?? ORDER_AFTER_LAST}`,
+    ...(t.order != null ? [`order: ${t.order}`] : []),
     ...(t.tier ? [`tier: ${scalar(t.tier)}`] : []),
     ...(t.course ? [`course: ${scalar(t.course)}`] : []),
     `description: ${scalar(description)}`,
@@ -403,21 +395,29 @@ function reverseMentions(files: readonly MarkdownFile[], id: string, deps: reado
   return out;
 }
 
-/** A ticket's text with `id` named on its `**Used by:**` line — added to the names there, or the
- *  line written after the header block when it has none. The skeleton's `nothing yet` gives way
- *  to the first name. */
+/** A ticket's text with `id` named on its `**Used by:**` line — appended to what the line
+ * already says (its prose and names are kept: the line may name a repository or a plan, not
+ * only ids), or the line written after the header block when it has none. The skeleton's
+ * `nothing yet` gives way to the first name. */
 export function reverseMention(text: string, id: string): string {
   const lines = text.split('\n');
   const at = headerLine(lines, '**Used by:**');
+  const namesId = new RegExp(`(?<![A-Za-z0-9_-])${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_-])`);
   if (at >= 0) {
-    const named = (lines[at].match(/(?<![A-Za-z0-9._-])[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-\d+[a-z]?\d*/g) ?? [])
-      .filter((n) => n !== id && !/^nothing$/i.test(n) && !/^yet$/i.test(n));
-    lines[at] = `**Used by:** ${[...named, id].join(', ')}.`;
+    const existing = lines[at].replace(/^\*\*Used by:\*\*[ \t]*/i, '').trim();
+    if (existing === '' || /^nothing yet\.?$/i.test(existing)) {
+      lines[at] = `**Used by:** ${id}.`;
+    } else if (!namesId.test(lines[at])) {
+      lines[at] = `${lines[at].replace(/\s*\.?$/, '')}, ${id}.`;
+    }
     return lines.join('\n');
   }
-  // No line: after the other header lines of the opening block — before its first heading or
-  // the description that follows it, which is where a reader looks for a header.
-  const block = lines.indexOf('');
+  // No line: after the frontmatter's closing fence, before the body's first blank line and the
+  // heading or description that follows it — where a reader looks for a header. Searching past
+  // the closing `---` keeps a blank line inside the frontmatter from taking the insert.
+  const fmEnd = lines[0]?.trim() === '---' ? lines.indexOf('---', 1) : -1;
+  const body = fmEnd >= 0 ? fmEnd + 1 : 0;
+  const block = lines.indexOf('', body);
   const end = block < 0 ? lines.length : block;
   return [...lines.slice(0, end), `**Used by:** ${id}.`, ...lines.slice(end)].join('\n');
 }

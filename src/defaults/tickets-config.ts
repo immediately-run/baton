@@ -49,29 +49,18 @@ export const TAGS: { tag: string; means: string }[] = [
 export const REQUIRES_MARKER = 'Requires:';
 
 /** The statuses a ticket file's `status:` takes, as the markdown source reads them (§4.2,
- *  tickets-markdown.ts's `CLOSED`): the live ones `baton tickets set` writes, then `done`, which
- *  `baton tickets done` writes and moves the file to `archive/`. `deferred` and `superseded` are
- *  closed — a claim passes them as it passes a done one — and a file keeps the word it chose. */
+ *  tickets-markdown.ts's `CLOSED`). */
 export const STATUSES = ['available', 'in-progress', 'in-review', 'deferred', 'deprioritized', 'superseded', 'done'] as const;
 export type Status = (typeof STATUSES)[number];
 
-/** The live statuses: every one but `done`. */
-export const LIVE_STATUSES: readonly Status[] = ['available', 'in-progress', 'in-review', 'deprioritized'];
+/** The live statuses `baton tickets set` writes: every one but `done` (which `done` writes,
+ *  moving the file to `archive/`) — the stopgap's own LIVE list, `deferred` and `superseded`
+ *  included, so withdrawing a ticket without archiving keeps a writer. */
+export const LIVE_STATUSES: readonly Status[] = ['available', 'in-progress', 'in-review', 'deferred', 'deprioritized', 'superseded'];
 
 /** Whether `id` may be named — the ticket, `claim`'s dependency, `new`'s: under the allocating
  *  prefix, or under a legacy pattern the repository still accepts but never allocates. */
 export const accepting = (settings: TicketSettings, id: string): boolean => accepts(settings, id);
-
-/** `.baton/baton.json`'s `check` settings, as `baton tickets check` reads them (B-111): whether
- *  each markdown ticket's `**Depends on:**` line is held to its `depends_on`. `new` reads it too,
- *  so a filing is judged by the same rule the check would judge it by. */
-export const checkSettings = (root: string): { depends_line?: boolean } => {
-  try {
-    return ((JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8')) as { check?: { depends_line?: boolean } }).check ?? {});
-  } catch {
-    return {};
-  }
-};
 
 export const GITHUB_PR = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
 
