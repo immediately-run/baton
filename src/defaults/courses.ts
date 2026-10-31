@@ -51,6 +51,13 @@ export interface BuiltIn {
   course: Record<string, any>;
   /** The facts the station function reads: the forge's PRs, or the closing markers in git. */
   reads: 'prs' | 'markers';
+  /** B-101: this course carries the review-rounds file protocol — the review close commits each
+   *  round to the PR branch as `.baton/reviews/<round>.md`, the fix/address close its replies
+   *  beside it, and the merge leg clears the directory before its agent merges, so the squash
+   *  lands none of it. The courses whose rounds run through Baton's own legs (`create-pr`,
+   *  `create-spec`); not `review-pr`, whose PR is someone else's and whose rounds stay in the
+   *  conversation. */
+  review_files?: true;
   stations: (ctx: StationCtx) => StationsResult;
   legs: Record<string, LegStub>;
   /** The skill a `courses` entry names (R-BTN-51). */
@@ -199,6 +206,7 @@ const CREATE_PR: BuiltIn = {
   summary: 'implement a ticket in a PR, review it in up to three blind rounds, fix, adjudicate what stays open, merge',
   course: CREATE_PR_COURSE,
   reads: 'prs',
+  review_files: true,
   stations: (ctx) => stationsPr({ tickets: ctx.tickets, facts: ctx.facts, closed: ctx.closed, done: ctx.done, branchPatterns: ctx.branchPatterns, repository: ctx.repository, graph: ctx.graph as PrGraph }),
   legs: {
     // B-81: the stub verifies its PR on the forge (open, on a branch the patterns map to this
@@ -298,6 +306,7 @@ export const BUILT_INS: BuiltIn[] = [
     summary: 'design a specification in conversation with the owner, review it adversarially, address blocking findings in conversation, merge',
     course: CREATE_SPEC_COURSE,
     reads: 'prs',
+    review_files: true,
     stations: (ctx) => stationsSpec({ tickets: ctx.tickets, facts: ctx.facts, branchPatterns: ctx.branchPatterns, closed: ctx.closed, done: ctx.done, repository: ctx.repository, graph: ctx.graph as PrGraph }),
     legs: {
       // The design conversation is the owner's session, which Baton neither runs nor waits for:

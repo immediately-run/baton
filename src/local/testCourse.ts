@@ -15,10 +15,12 @@ import { graphOf, onGraph, resolvePath, type Graph, type Step } from '../core/gr
 import { checkPayload, DEFAULT_COURSE } from '../core/board';
 import { builtIn } from '../defaults/courses';
 import { parseSource } from '../defaults/course-source';
+import { ADDRESSED_DRAFT, prClose, REVIEWS_DIR, ROUND_DRAFT, type Exec } from '../defaults/pr-close';
+import { exec } from '../defaults/ticket-state';
 import { LocalHost } from './host';
 import { openStore } from './store';
 
-export type KitRule = 'course' | 'accepted' | 'legs-scripts' | 'min-worker-version' | 'moves-back' | 'generic-run' | 'no-op' | 'instructions';
+export type KitRule = 'course' | 'accepted' | 'legs-scripts' | 'min-worker-version' | 'moves-back' | 'generic-run' | 'no-op' | 'instructions' | 'round-trip';
 export interface KitViolation {
   rule: KitRule;
   message: string;
@@ -366,7 +368,103 @@ export async function ticketViolations(k: KitInput): Promise<KitViolation[]> {
 export async function checkCourse(k: KitInput): Promise<KitViolation[]> {
   const s = staticViolations(k);
   if (s.some((v) => v.rule === 'course')) return s;
-  return [...s, ...replayViolations(k.proposed, k.live), ...(await coreViolations(k)), ...(await noopViolations(k)), ...(await ticketViolations(k))];
+  return [...s, ...replayViolations(k.proposed, k.live), ...(await coreViolations(k)), ...(await noopViolations(k)), ...(await ticketViolations(k)), ...(await roundTripViolations(k))];
+}
+
+/** B-101: the review-rounds file protocol round-trips on a plain git repository, with no forge
+ *  anywhere — the channel `create-pr` needs to run without one (R-BTN-92 `forge: git`). The kit
+ *  drives the review and fix closes over a scratch checkout whose origin is a local bare
+ *  repository and whose `gh` is answered in process (no forge, no token), then the course's own
+ *  merge leg script, whose first act is the protocol's clearing, and squashes the branch the
+ *  way a squash merge would:
+ *  - the round's file lands on the PR branch, the verdict line its first line, the findings in
+ *    its body — the same markdown the conversation gets;
+ *  - the fix's replies land beside it as `<round>-addressed.md`;
+ *  - the merge leg's first act deletes every reviews file from the branch in one commit, before
+ *    its agent runs;
+ *  - and the squashed tree contains no `.baton/reviews/` at all. */
+export async function roundTripViolations(k: KitInput): Promise<KitViolation[]> {
+  if (!k.root) return [];
+  let standard: ReturnType<typeof builtIn> = undefined;
+  try {
+    standard = builtIn(k.source != null ? parseSource(k.source).course : k.course);
+  } catch {
+    standard = undefined; // a source that is not a name: the sync's to refuse, not the kit's
+  }
+  if (standard?.review_files !== true) return [];
+  const script = join(k.root, '.baton', 'courses', k.course, 'legs', 'merge.mjs');
+  if (!existsSync(script)) return []; // a missing script is the legs-scripts rule's own failure
+  const fail = (message: string): KitViolation[] => [{ rule: 'round-trip', message }];
+  const root = mkdtempSync(join(tmpdir(), 'baton-kit-round-'));
+  try {
+    const origin = join(root, 'origin.git');
+    mkdirSync(origin, { recursive: true });
+    execFileSync('git', ['-C', origin, 'init', '-q', '--bare', '-b', 'main'], { stdio: 'ignore' });
+    const dir = join(root, 'clone');
+    mkdirSync(dir, { recursive: true });
+    const git = (out: boolean, ...args: string[]) =>
+      String(execFileSync('git', ['-C', dir, ...args], { stdio: ['ignore', out ? 'pipe' : 'ignore', 'ignore'], ...(out ? { encoding: 'utf8' } : {}) }));
+    git(false, 'init', '-q', '-b', 'main');
+    git(false, 'remote', 'add', 'origin', origin);
+    git(false, 'config', 'user.email', 'kit@baton.test');
+    git(false, 'config', 'user.name', 'kit');
+    // The checkout's own settings name a no-op agent — the merge leg's clearing is the kit's
+    // subject, not the agent — and the course entry whose branch pattern the protocol reads.
+    mkdirSync(join(dir, '.baton'), { recursive: true });
+    writeFileSync(join(dir, '.baton', 'baton.json'), JSON.stringify({ agent_command: 'true', courses: [{ id: k.course, version: 1, min_worker_version: 1, branch_pattern: 'claude/{ticket}-*' }] }));
+    git(false, 'add', '-A');
+    git(false, 'commit', '-qm', 'kit');
+    git(false, 'push', '-q', 'origin', 'main');
+    const branch = 'claude/KIT-1-rounds';
+    git(false, 'checkout', '-q', '-b', branch);
+    writeFileSync(join(dir, 'a.txt'), 'the change under review\n');
+    git(false, 'add', '-A');
+    git(false, 'commit', '-qm', 'the PR');
+    git(false, 'push', '-q', '-u', 'origin', branch);
+    const sha = git(true, 'rev-parse', 'HEAD').trim();
+    const onOrigin = (ref: string, path: string): string | null => {
+      try {
+        return execFileSync('git', ['-C', origin, 'show', `${ref}:${path}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      } catch {
+        return null;
+      }
+    };
+    const ticket = { id: `${REPO}:KIT-1`, home: REPO };
+    const ctx = { checkout: dir, ticket, review_files: true as const, branch_patterns: ['claude/{ticket}-*'] };
+    // No forge and no token: `gh` is answered in process, and every git call is the real one.
+    const run: Exec = (cmd, args, cwd, opts) => (cmd === 'gh' ? 'https://github.com/local/kit/pull/1#issuecomment-1' : exec(cmd, args, cwd!, opts));
+    // Review: the round on the branch, the verdict line its first line, the findings its body.
+    mkdirSync(join(dir, REVIEWS_DIR), { recursive: true });
+    writeFileSync(join(dir, ROUND_DRAFT), '**blocking** src/a.txt:1 — the mechanism.\n');
+    await prClose({ ...ctx, leg: 'review' }, { reached: 'reviewed', next: 'fix', verdict: 'changes' }, run);
+    const round = onOrigin(branch, `${REVIEWS_DIR}/1.md`);
+    if (round == null) return fail(`the review close left no ${REVIEWS_DIR}/1.md on the PR branch — the round's findings belong there beside the conversation (B-101)`);
+    if (!round.startsWith('<!-- baton:verdict changes -->')) return fail(`the round file's first line is not the verdict line the course reads (B-101):\n${round.slice(0, 200)}`);
+    if (!round.includes('src/a.txt:1')) return fail('the round file does not carry the round\'s findings — the same markdown the conversation gets (B-101)');
+    // Fix: the replies beside the round.
+    writeFileSync(join(dir, ADDRESSED_DRAFT), 'Fixed in the follow-up commit.\n');
+    await prClose({ ...ctx, leg: 'fix' }, { reached: 'fixed', next: 'review' }, run);
+    if (onOrigin(branch, `${REVIEWS_DIR}/1-addressed.md`) == null) return fail(`the fix close left no ${REVIEWS_DIR}/1-addressed.md beside the round (B-101)`);
+    // Merge: the course's own leg script, whose first act clears the protocol before its agent.
+    const mod = (await import(`${pathToFileURL(script).href}?t=${Math.random()}`)) as Record<string, unknown>;
+    const mergeRun = mod.run ?? (mod.default != null && typeof mod.default === 'object' ? (mod.default as Record<string, unknown>).run : undefined) ?? (typeof mod.default === 'function' ? mod.default : undefined);
+    if (typeof mergeRun !== 'function') return []; // a script that exports no run is the legs-scripts rule's
+    await (mergeRun as (ctx: unknown) => Promise<unknown>)({ ticket, checkout: dir, leg: 'merge', snapshot: { sha } });
+    if (onOrigin(branch, REVIEWS_DIR) != null || onOrigin(branch, `${REVIEWS_DIR}/1.md`) != null) {
+      return fail(`the merge leg left ${REVIEWS_DIR}/ on the PR branch — its first act deletes every reviews file in one commit, before the agent that merges (B-101); \`baton repo init --course ${k.course} --force\` rewrites the leg script`);
+    }
+    // The squash a forge would make of the branch: its tree is what lands on the default branch.
+    git(false, 'checkout', '-q', 'main');
+    git(false, 'merge', '-q', '--squash', branch);
+    git(false, 'commit', '-qm', 'squash');
+    git(false, 'push', '-q', 'origin', 'main');
+    if (onOrigin('main', REVIEWS_DIR) != null) return fail(`the squashed merge landed ${REVIEWS_DIR}/ on the default branch — main never sees the conversation (B-101)`);
+    return [];
+  } catch (e) {
+    return fail(`the round trip failed: ${(e as Error).message}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 /** The kit's inputs from a repository checkout: the proposed `.baton/` in the working tree, the

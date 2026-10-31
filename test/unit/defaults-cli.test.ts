@@ -20,7 +20,8 @@ import { githubFake } from '../githubFake';
 import { graphOf } from '../../src/core/graph';
 import { decide } from '../../src/runner/protocol';
 import { CREATE_PR_COURSE, stationsPr, stationsReviewPr, type PrFact } from '../../src/defaults/course-pr';
-import { prClose, verdictLine, type Exec } from '../../src/defaults/pr-close';
+import { prClose, verdictLine, ADDRESSED_DRAFT, clearReviewFiles, REVIEWS_DIR, ROUND_DRAFT, type Exec } from '../../src/defaults/pr-close';
+import { exec } from '../../src/defaults/ticket-state';
 import { splitWords } from '../../src/defaults/agent-words';
 import { ticketsMarkdown } from '../../src/defaults/tickets-markdown';
 
@@ -1184,6 +1185,159 @@ describe('prClose', () => {
     await expect(prClose(ctx, { verdict: 'approve', pr: 'o/site#7' }, run)).rejects.toThrow('named no PR URL to write on');
   });
 
+  /** B-101: a scratch repository with a PR branch the pattern maps to the ticket, and a fake
+   *  `gh` that answers the conversation while every git call is the real one — the protocol
+   *  round-trips on plain git alone, the forge only carries the comment. */
+  const withPrBranch = (): { root: string; bare: string; dir: string; branch: string } => {
+    const { root, bare, dir } = withOrigin();
+    const branch = 'claude/A-1-rounds';
+    const g = (...a: string[]) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', stdio: 'ignore' });
+    g('checkout', '-q', '-b', branch);
+    writeFileSync(join(dir, 'src.ts'), 'the change under review\n');
+    g('add', '-A');
+    g('commit', '-qm', 'the PR');
+    g('push', '-q', '-u', 'origin', branch);
+    return { root, bare, dir, branch };
+  };
+  /** The real git and a fake gh (B-101's tests: the file protocol needs no forge; the comment
+   *  still goes there), remembering every call in order. */
+  const gitAndFakeGh = (dir: string): { run: Exec; calls: { cmd: string; args: string[] }[] } => {
+    const calls: { cmd: string; args: string[] }[] = [];
+    const run: Exec = (cmd, args, cwd, opts) => {
+      calls.push({ cmd, args });
+      return cmd === 'gh' ? 'https://github.com/o/r/pull/7#issuecomment-1' : exec(cmd, args, cwd ?? dir, opts);
+    };
+    return { run, calls };
+  };
+  const protocolCtx = (dir: string, leg: string) =>
+    ({ checkout: dir, ticket: { id: 'docs:A-1', home: 'docs' }, leg, review_files: true as const, branch_patterns: ['claude/{ticket}-*'] });
+  const onOrigin = (bare: string, ref: string, path: string): string | null => {
+    try {
+      return execFileSync('git', ['-C', bare, 'show', `${ref}:${path}`], { encoding: 'utf8' });
+    } catch {
+      return null;
+    }
+  };
+
+  it('B-101: the review close commits the round to the PR branch before the conversation — the verdict line first, the findings beside it, the draft consumed', async () => {
+    const { root, bare, dir, branch } = withPrBranch();
+    try {
+      mkdirSync(join(dir, REVIEWS_DIR), { recursive: true });
+      writeFileSync(join(dir, ROUND_DRAFT), '**blocking** src/a.ts:12 — the mechanism.\n');
+      const { run, calls } = gitAndFakeGh(dir);
+      expect(await prClose(protocolCtx(dir, 'review'), { reached: 'reviewed', next: 'fix', verdict: 'changes' }, run)).toBe('https://github.com/o/r/pull/7#issuecomment-1');
+      // The round file is on the PR's branch on origin — the file the next legs read — with the
+      // machine-written verdict line as its first line, the round number, and the draft's
+      // findings as the body the conversation also carries.
+      const round = onOrigin(bare, branch, `${REVIEWS_DIR}/1.md`);
+      expect(round).not.toBeNull();
+      expect(round!.split('\n')[0]).toBe(verdictLine('changes'));
+      expect(round).toContain('# Round 1 — changes');
+      expect(round).toContain('**blocking** src/a.ts:12 — the mechanism.');
+      expect(execFileSync('git', ['-C', bare, 'log', '-1', '--format=%s', branch], { encoding: 'utf8' })).toBe('baton:review A-1 round 1\n');
+      // The round was pushed BEFORE the comment posted (a push after a verdict reads as a fix
+      // the course never ran), the draft is consumed, and the local branch joined the push.
+      const pushed = calls.findIndex((c) => c.cmd === 'git' && c.args[0] === 'push');
+      const commented = calls.findIndex((c) => c.cmd === 'gh');
+      expect(pushed).toBeGreaterThanOrEqual(0);
+      expect(pushed).toBeLessThan(commented);
+      expect(existsSync(join(dir, ROUND_DRAFT))).toBe(false);
+      expect(execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(execFileSync('git', ['-C', bare, 'rev-parse', branch], { encoding: 'utf8' }).trim());
+      // A second round after a fix numbers itself after the first (below writes the fix's file).
+      writeFileSync(join(dir, ADDRESSED_DRAFT), 'fixed\n');
+      await prClose(protocolCtx(dir, 'fix'), { reached: 'fixed', next: 'review' }, run);
+      writeFileSync(join(dir, ROUND_DRAFT), '**should-fix** src/b.ts:1 — the mechanism.\n');
+      await prClose(protocolCtx(dir, 'review'), { reached: 'reviewed', next: 'merge', verdict: 'approve' }, run);
+      const round2 = onOrigin(bare, branch, `${REVIEWS_DIR}/2.md`);
+      expect(round2!.split('\n')[0]).toBe(verdictLine('approve'));
+      expect(round2).toContain('# Round 2 — approve');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('B-101: a review with no draft, or from a checkout off the PR branch, fails the leg and pushes nothing; a ticket whose branch is not on this origin writes no file at all', async () => {
+    const { root, bare, dir, branch } = withPrBranch();
+    try {
+      const { run } = gitAndFakeGh(dir);
+      const before = execFileSync('git', ['-C', bare, 'rev-parse', branch], { encoding: 'utf8' }).trim();
+      await expect(prClose(protocolCtx(dir, 'review'), { reached: 'reviewed', verdict: 'changes' }, run)).rejects.toThrow(ROUND_DRAFT);
+      // Off the ticket's branch while its branch IS on this origin — the round belongs there:
+      // refused, nothing pushed, the draft unconsumed.
+      execFileSync('git', ['-C', dir, 'checkout', '-q', 'main'], { stdio: 'ignore' });
+      mkdirSync(join(dir, REVIEWS_DIR), { recursive: true });
+      writeFileSync(join(dir, ROUND_DRAFT), '**blocking** src/a.ts:12 — the mechanism.\n');
+      await expect(prClose(protocolCtx(dir, 'review'), { reached: 'reviewed', verdict: 'changes' }, run)).rejects.toThrow(/the checkout is on no branch of claude\/A-1-\* \(its origin holds claude\/A-1-rounds\)/);
+      expect(execFileSync('git', ['-C', bare, 'rev-parse', branch], { encoding: 'utf8' }).trim()).toBe(before);
+      expect(existsSync(join(dir, ROUND_DRAFT))).toBe(true); // unconsumed: the leg failed
+      // A ticket whose branch this origin never held (its PRs are in other repositories, or
+      // there is no origin to read): the conversation still carries the round, and the close
+      // writes no file here — the agent's instructions put it on the other repositories'
+      // branches itself.
+      const ctx9 = { ...protocolCtx(dir, 'review'), branch_patterns: ['claude/A-9-*'], ticket: { id: 'docs:A-9', home: 'docs' } };
+      expect(await prClose(ctx9, { reached: 'reviewed', verdict: 'approve' }, run)).toBe('https://github.com/o/r/pull/7#issuecomment-1');
+      expect(execFileSync('git', ['-C', bare, 'rev-parse', 'main'], { encoding: 'utf8' }).trim()).toBe(execFileSync('git', ['-C', dir, 'rev-parse', 'origin/main'], { encoding: 'utf8' }).trim());
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('B-101: the fix close commits its replies beside the latest round and returns the pushed commit; with no round on the branch it fails naming the channel', async () => {
+    const { root, bare, dir, branch } = withPrBranch();
+    try {
+      const { run } = gitAndFakeGh(dir);
+      mkdirSync(join(dir, REVIEWS_DIR), { recursive: true });
+      writeFileSync(join(dir, ROUND_DRAFT), '**blocking** src/a.ts:12 — the mechanism.\n');
+      await prClose(protocolCtx(dir, 'review'), { reached: 'reviewed', next: 'fix', verdict: 'changes' }, run);
+      writeFileSync(join(dir, ADDRESSED_DRAFT), 'Fixed in the follow-up commit; the second finding is out of scope because …\n');
+      const sha = await prClose(protocolCtx(dir, 'fix'), { reached: 'fixed', next: 'review' }, run);
+      expect(sha).toBe(execFileSync('git', ['-C', bare, 'rev-parse', branch], { encoding: 'utf8' }).trim());
+      expect(execFileSync('git', ['-C', bare, 'log', '-1', '--format=%s', branch], { encoding: 'utf8' })).toBe('baton:address A-1 round 1\n');
+      const addressed = onOrigin(bare, branch, `${REVIEWS_DIR}/1-addressed.md`);
+      expect(addressed).toContain('# Round 1 — addressed');
+      expect(addressed).toContain('Fixed in the follow-up commit');
+      expect(existsSync(join(dir, ADDRESSED_DRAFT))).toBe(false);
+      // A fix with no round on the branch has no channel to answer through.
+      execFileSync('git', ['-C', dir, 'checkout', '-q', '-b', 'claude/A-9-other', 'main'], { stdio: 'ignore' });
+      execFileSync('git', ['-C', dir, 'push', '-q', '-u', 'origin', 'claude/A-9-other'], { stdio: 'ignore' });
+      writeFileSync(join(dir, ADDRESSED_DRAFT), 'replies with no round\n');
+      await expect(prClose({ ...protocolCtx(dir, 'fix'), branch_patterns: ['claude/A-9-*'], ticket: { id: 'A-9' } }, { reached: 'fixed', next: 'review' }, run)).rejects.toThrow(/no review round is on \.baton\/reviews\//);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('B-101: the merge leg’s clearing leaves the PR branch in one commit carrying none of the protocol, and the merge close refuses a default branch that still does', async () => {
+    const { root, bare, dir, branch } = withPrBranch();
+    try {
+      const { run } = gitAndFakeGh(dir);
+      mkdirSync(join(dir, REVIEWS_DIR), { recursive: true });
+      writeFileSync(join(dir, ROUND_DRAFT), '**blocking** src/a.ts:12 — the mechanism.\n');
+      await prClose(protocolCtx(dir, 'review'), { reached: 'reviewed', next: 'merge', verdict: 'approve' }, run);
+      const before = execFileSync('git', ['-C', bare, 'rev-parse', branch], { encoding: 'utf8' }).trim();
+      // The merge stub's first act: every reviews file leaves in one commit.
+      const cleared = await clearReviewFiles({ checkout: dir, ticket: { id: 'docs:A-1', home: 'docs' }, branch_patterns: ['claude/{ticket}-*'] }, run);
+      expect(cleared).toMatchObject({ branch });
+      expect(execFileSync('git', ['-C', bare, 'log', '-1', '--format=%s', branch], { encoding: 'utf8' })).toBe('baton:reviews A-1 cleared\n');
+      expect(execFileSync('git', ['-C', bare, 'log', '--format=%s', `${before}..${branch}`], { encoding: 'utf8' })).toBe('baton:reviews A-1 cleared\n');
+      expect(execFileSync('git', ['-C', bare, 'ls-tree', '-r', '--name-only', branch, '--', REVIEWS_DIR], { encoding: 'utf8' })).toBe('');
+      // Nothing left to clear clears nothing (an idempotent merge retry).
+      expect(await clearReviewFiles({ checkout: dir, ticket: { id: 'docs:A-1', home: 'docs' }, branch_patterns: ['claude/{ticket}-*'] }, run)).toBeNull();
+      // A clean default branch: the merge close stands down and answers the head.
+      expect(await prClose(protocolCtx(dir, 'merge'), { reached: 'merged', next: null }, run)).toBe(execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());
+      // A dirty one — the protocol squashed onto main — fails the leg naming it.
+      execFileSync('git', ['-C', dir, 'checkout', '-q', 'main'], { stdio: 'ignore' });
+      mkdirSync(join(dir, REVIEWS_DIR), { recursive: true });
+      writeFileSync(join(dir, REVIEWS_DIR, '1.md'), '<!-- baton:verdict changes -->\n');
+      execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' });
+      execFileSync('git', ['-C', dir, 'commit', '-qm', 'a dirty squash'], { stdio: 'ignore' });
+      execFileSync('git', ['-C', dir, 'push', '-q', 'origin', 'main'], { stdio: 'ignore' });
+      await expect(prClose({ ...protocolCtx(dir, 'merge'), default_branch: 'main' }, { reached: 'merged', next: null }, run)).rejects.toThrow(new RegExp(`still carries ${REVIEWS_DIR}/ after the merge`));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   /** The comment body prClose posts for `leg`, as a review fact the station functions read. */
   const posted = async (leg: string, result: Record<string, unknown>, at: number) => {
     let body = '';
@@ -1608,6 +1762,29 @@ describe('baton repo init --course, the standard courses (R-BTN-131)', () => {
   it('the course test kit passes on each scaffolded course: its file, its stubs, one generic run to its end', () => {
     for (const c of ['create-pr', 'review-pr', 'bug-report', 'draft-ticket', 'decision', 'spec-to-tickets']) {
       expect(baton(root, 'test-course', root, c, '--base', 'none'), c).toContain('✓ no violations');
+    }
+  }, 240_000);
+
+  it('the kit round-trips the review-rounds protocol on a plain git repository — no forge, no token — and fails a merge leg that does not clear it (B-101)', () => {
+    // The scaffolded course's own merge leg carries the clearing as its first act, so the
+    // round trip passes inside the kit's run above; a stub from before B-101 does not, and the
+    // rule names it.
+    const stub = join(root, '.baton', 'courses', 'create-pr', 'legs', 'merge.mjs');
+    const current = readFileSync(stub, 'utf8');
+    const old = 'export async function run() { return { reached: "merged", next: null }; }\nexport async function handoff() { return null; }\nexport const close = () => "";\n';
+    try {
+      expect(current).toContain('clearReviewFiles');
+      writeFileSync(stub, old);
+      let said = '';
+      try {
+        baton(root, 'test-course', root, 'create-pr', '--base', 'none');
+      } catch (e) {
+        said = String((e as { stdout?: unknown }).stdout);
+      }
+      expect(said).toContain('the merge leg left .baton/reviews/ on the PR branch');
+    } finally {
+      writeFileSync(stub, current);
+      commitAll(root);
     }
   }, 240_000);
 

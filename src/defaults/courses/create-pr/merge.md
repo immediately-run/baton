@@ -20,6 +20,12 @@ the PR's change is on the default branch and the ticket is closed.
 
 - **Never merge red.** Every required check on the PR's current head has concluded and passed. A
   check still running is not a pass; wait for it, or stop and say so.
+- **The review protocol left the branch before you started (B-101).** This leg's first act
+  deleted every `.baton/reviews/` file from the ticket's PR branch in one commit and pushed it,
+  so the squash carries none of it — main never sees the conversation. That deletion moved the
+  PR's head: wait for the new head's checks like any other, and never merge a head that still
+  carries `.baton/reviews/`. For a ticket's PRs in other repositories, delete the directory
+  from each of their branches and push before merging that PR.
 - No blocking finding is open on the PR.
 - The PR is mergeable. A conflict is resolved by merging the default branch into the PR's branch,
   never by rewriting its history. Regenerate lock files and generated files with the repository's

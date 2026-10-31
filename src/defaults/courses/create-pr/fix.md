@@ -28,6 +28,21 @@ thread.
   build anything for it. When the path is far-fetched, or the fix costs more than it prevents,
   say so on the thread with the path you traced, rather than widening the PR.
 
+## The round on the branch
+
+The round you are answering lives on the PR branch as a file (B-101): after `git fetch origin`,
+`git show origin/<branch>:.baton/reviews/<n>.md` is the round — the verdict line first, then
+every finding with its severity and `file:line`, the same markdown the conversation carries.
+Read it there, not from the conversation: that file is the channel between you and the next
+round's reviewer, and on a repository with no forge it is the only copy there is.
+
+**Leave your replies at `.baton/reviews/addressed.md` in the checkout, uncommitted** — one
+reply per finding: the fix (naming its commit) or the answer why it is wrong or out of scope.
+The leg's close commits them beside the round as `.baton/reviews/<n>-addressed.md`, and the
+next round's reviewer reads the rounds and your replies from the branch. When the ticket's PRs
+are in other repositories too, commit the same replies file to each of their PR branches
+yourself; the close covers this repository's.
+
 ## Before you push
 
 - Run the repository's own checks, the same ones CI runs.

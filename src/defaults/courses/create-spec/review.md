@@ -30,10 +30,29 @@ The ticket's PRs are one change: review them together, and post your review once
   PR, and tell neither about the other. Two blind passes find what one misses. Without
   sub-agents, review once, slowly.
 - **Later rounds get one fresh reviewer**, who reads the earlier reviews and their replies and
-  re-checks only what is still open plus what the author pushed since. A finding a reply closed is
+  re-checks only what is still open plus the author's amendment. A finding a reply closed is
   not posted again, unless the reply is wrong; then say why, once.
 - Read the ticket's sections first: they are the contract the specification answers. Then read
   the specification whole, and the corpus it joins.
+
+## The round file
+
+The round is written to the PR branch as a file, beside the conversation (B-101):
+
+- **Leave the round's markdown at `.baton/reviews/round.md` in the checkout, uncommitted** —
+  the same findings you post to the conversation, each with its severity and its citation, the
+  blind reviewers' findings merged into one list. The leg's close commits it to the PR's head
+  branch as `.baton/reviews/<round>.md`, the round number and the verdict line included, and
+  deletes your draft; the conversation and the file then carry the same content — the
+  conversation for humans, the file for the legs.
+- **Read the earlier rounds and their replies from the branch, not the conversation**: after
+  `git fetch origin`, `git show origin/<branch>:.baton/reviews/<n>.md` and
+  `git show origin/<branch>:.baton/reviews/<n>-addressed.md`. That file is the channel the
+  address conversation reads; on a repository with no forge it is the only one there is.
+- **Leave the checkout on the PR branch of this repository** — the close commits the round file
+  there. When the ticket's PRs are in other repositories too, commit the same round file to
+  each of their PR branches yourself (`.baton/reviews/<round>.md`, the verdict line first); the
+  close covers this repository's.
 
 ## What a specification must survive
 

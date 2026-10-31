@@ -38,6 +38,25 @@ them and print the verdict after. An output that ends on anything else loses the
   this one), and read the ticket's sections first: they are the contract. Then read the whole
   change, every PR's diff against its default branch.
 
+## The round file
+
+The round is written to the PR branch as a file, beside the conversation (B-101):
+
+- **Leave the round's markdown at `.baton/reviews/round.md` in the checkout, uncommitted** —
+  the same findings you post to the conversation, each with its severity and `file:line`, the
+  blind reviewers' findings merged into one list. The leg's close commits it to the PR's head
+  branch as `.baton/reviews/<round>.md`, the round number and the verdict line included, and
+  deletes your draft; the conversation and the file then carry the same content — the
+  conversation for humans, the file for the legs.
+- **Read the earlier rounds and their replies from the branch, not the conversation**: after
+  `git fetch origin`, `git show origin/<branch>:.baton/reviews/<n>.md` and
+  `git show origin/<branch>:.baton/reviews/<n>-addressed.md`. That file is the channel between
+  you and the fixer; on a repository with no forge it is the only one there is.
+- **Leave the checkout on the PR branch of this repository** — the close commits the round file
+  there. When the ticket's PRs are in other repositories too, commit the same round file to
+  each of their PR branches yourself (`.baton/reviews/<round>.md`, the verdict line first); the
+  close covers this repository's.
+
 ## Finding defects
 
 1. **Read for candidates.** Walk the diff with the ticket in hand. List every candidate with a
