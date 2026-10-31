@@ -577,6 +577,27 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
       `approvers.policy` as it stands before the change. Baton refuses a list no live credential
       can satisfy, and refuses a revocation that would leave one. `human-gates` holds when every
       list is human-only. S-BTN-192 tests it.
+  - **The third adversarial review** found that rounds one and two held. What remained were small,
+    local defects. Fixed in the same PR:
+    - **Approvers scoped to the repository.** `human` and `key:` match only owners of the
+      repository, so a human-only key minted elsewhere carries no authority there.
+      `/v1/human-keys` no longer makes owners. Owner removal and administrator revocation are
+      refused when they would leave a list unsatisfiable (`unsatisfiable-approvers`).
+      `BATON_HUMAN_KEYS` is the stated break-glass.
+    - **The floor stop reaches every repository.** It covers every repository a ticket reaches,
+      not only its home, and code-repository consents became an `approvers.members` action.
+    - **Floor removal** needs a credential satisfying both `remove_by` and `approvers.policy`.
+    - **Declarations completed.** The §14 rows carry every field the signed read binds. Each
+      guarantee states its promise.
+    - **Readings.** The `readings` row is repaired, and the `protected` preset no longer drops
+      runner readings everywhere.
+    - **Renames.** The new rule and release reason are now `floor` (`floor-broken`,
+      `released:floor`), apart from rule 8's `policy`.
+    - **Single approver for trust.** Trust attributes leave R-BTN-186's list for
+      `approvers.trust`.
+    - **Wording.** An outbox `failed` mark is declared as a mark, not a state. Stale wording is
+      fixed in S-BTN-136, S-BTN-191, G-BTN-156, R-BTN-185, the decisions, the security-model page,
+      B-64 and B-142.
 
 ## Retired requirements
 

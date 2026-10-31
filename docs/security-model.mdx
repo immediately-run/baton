@@ -551,7 +551,7 @@ session on docs is only as trusted as docs' last push.
      session uses;
    - move docs' deploy App key and `baton`'s sync read token into environments with such
      reviewers, and rotate them (FLDH-37);
-   - set `machine_sync: false` on every home a VM runner serves;
+   - take `machine` out of the policy's `inputs.board` (BATON_SPEC R-BTN-188) on every home a VM runner serves (`machine_sync: false` until B-142 lands);
    - run owner and administrator commands from the published CLI at a pinned version, never from
      a checkout;
    - push rulesets on `.claude/**` and `CLAUDE.md` in docs, fieldhouse and hq.

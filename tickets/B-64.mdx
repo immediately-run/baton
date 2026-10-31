@@ -103,7 +103,7 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
    naming the courier. `POST /v1/owner/{repository}/couriers` takes `delivers: "git" |
    "forge-check"` and refuses a key that holds another role (`conflict`).
    - **Who may deliver.** The repository policy's `outbox` section (R-BTN-188; B-142 builds the
-     store, its changes and its loosening rule): per class, `deliverers` (`courier`, `runner`,
+     store and who may change it): per class, `deliverers` (`courier`, `runner`,
      `trusted-runner`), `trust` (`any` | `trusted`) and `min_release`, read through
      `src/core/policy.ts`, or the `cooperative` preset's `{deliverers: [courier], trust: any}`
      until B-142 lands. The claim route admits a caller only as the policy of each repository
@@ -162,7 +162,7 @@ and check runs travel through a second queue (`notices`, R3-1256) that does the 
   undelivered 24 h (`baton.outbox-late`); a foreign file at the handler's path (held
   `outbox-collision`); a runner key registered as a courier (`conflict`); a bad signature
   (refused by the courier); the outbox policy's cases (a runner key `forbidden`, then admitted;
-  `trust: trusted` against a shared trust domain; `min_release`; an MCP key's loosening refused).
+  `trust: trusted` against a shared trust domain; `min_release`; an MCP key's policy change refused).
 - **S-BTN-81** and S-BTN-68 unchanged in outcome on the new routes.
 - Unit: entry ordering per ticket; the `fields` validator; the signature; `withdraw` on the
   markdown source; the `baton_write` idempotence check; the three-retry rejected push; the
