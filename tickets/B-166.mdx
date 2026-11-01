@@ -1,0 +1,83 @@
+---
+title: "B-166 — Restructure the spec: rewrite it part by part from the owner's rulings of 2026-11-01, the §15 scenarios as the oracle"
+id: B-166
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1099
+tier: critical
+description: "Rewrite spec/BATON_SPEC.md in parts — the core model, security and policy, the surfaces — from the owner's rulings of 2026-11-01 on the whole-spec review (B-155 to B-165), keeping rule ids where the meaning survives and every §15 scenario kept, changed or retired with a reason. Not a blank-page rewrite. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, after the whole-spec review
+(`docs/review/spec-simplification-review-2026-11-01.mdx`): "Would it be a good idea to rewrite the
+baton spec from scratch now that the design is more mature or would it be a bad idea because it
+may introduce entirely new bugs which our iterations so far caught and removed?" The answer
+recommended was to settle the decisions first, then rewrite each part from them, with the
+scenarios as the test that nothing was lost. The owner then took the decisions in the same session
+("Can we go through the decisions together now?").
+
+**Spec:** `spec/BATON_SPEC.md` whole; `docs/context/` (product, architecture, values, vocabulary);
+`docs/security-model.mdx`.
+
+### The rulings (2026-11-01)
+
+Each quoted answer is the owner's choice among options put to them; the ticket named holds the
+detail.
+
+| Ticket | Ruling |
+|---|---|
+| B-160 | A compromised Baton server is out of scope: "Out of scope". Its defences go. |
+| B-159 | Couriers merge into runners. The dispatch courier is dropped ("Drop it"), and Baton holds the GitHub App key. The fact reader, protection checker, check-runners, instruments and mirror stay. |
+| B-164 | `protected` stops claiming `human-gates` ("Only protected-signed"). `signed-authorship` leaves the spec until a host-side signer is designed ("Remove until designed"). |
+| B-158 | Under `cooperative`, Baton's state is a coordination record; the adversary-only mechanisms are removed ("Remove it"). |
+| B-156 | MCP may tighten and undo its own tightenings ("Tighten, and undo own"). |
+| B-161 | One primitive to ask a person: a person leg answered by `std:decision@1` ("One primitive"). |
+| B-162 | The ontology moves entirely to the runner side ("Nothing; move it out"). |
+| B-155 | Forge checks from protected workflows suffice ("Forge checks suffice"). Baton's own notifications need no ticket file ("No ticket file"). |
+| B-165 | The review's default for each small candidate, listed per PR for the owner's veto ("Take review's default"). |
+| B-152 | Superseded by the B-159 and B-160 rulings. |
+
+### How
+
+- **Not a blank page.** Each part is rewritten from the current text, applying the rulings. Rule
+  ids are kept where the meaning survives. Retired ids go to the history file's tables, and
+  `npm run check:spec` catches every dangling citation in code.
+- **The oracle.** §15's scenarios and gates. Each part's PR lists, scenario by scenario, which are
+  kept, changed (with the new expected result) or retired (with the reason), and the test files
+  that cite them are updated in the same PR or noted as stale.
+- **One part per spec PR**, under the babysit skill's *Spec PRs*: two fresh reviewers in round
+  one, the impact list, at most three rounds, with anything left going to the owner.
+
+### The parts, in order
+
+1. **The core model:** tickets, courses, stations and legs, positions and course history,
+   claims, leases and fences, person legs (B-161), conditions. B-158's statement and removals go
+   here.
+2. **Security and policy:** §12.8, the policy, presets, guarantees and floors (B-164, B-165's
+   layers), actors (B-159, B-160), the outbox, attestations, the merge runner, checks (B-155).
+   B-163's single meaning of "trusted" goes here.
+3. **The surfaces:** the action registry, the CLI tree and its help (B-157), MCP (B-156), the
+   dashboard, and the API table.
+4. **The capability ontology moved out** (B-162), and the smaller candidates (B-165) not already
+   taken in parts 1 to 3.
+
+### Exit criteria
+
+- [ ] Each part's spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] Every §15 scenario and gate kept, changed or retired with a reason, listed in the PRs
+- [ ] `npm run check:spec`, `npm run check:wiki` and `npm test` green after each part
+- [ ] B-155 to B-165 each marked done or noted with what remains to build
+
+## Status
+
+- 2026-11-01: filed with the owner's rulings.
