@@ -972,6 +972,49 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   2026-10-31 and 2026-11-01, the second draft as the starting text, and every open finding as its
   amendment's acceptance list.
 
+- **2026-11-01 — §5 R-BTN-131, R-BTN-165, §12.8 R-BTN-180, §15 S-BTN-104, S-BTN-107,
+  S-BTN-194, §16 (owner direction): the marker courses work on a PR under every policy.** After
+  part 4 was withdrawn from PR #150, the owner: "The marker courses no longer need to commit to
+  the main branch now that ticket history and claims are owned exclusively by Baton. We can
+  always commit to a PR branch instead of the main branch."
+
+  The owner agreed to take that one step further, making the marker courses end at a merge as
+  `create-pr` does. Asked three questions, they chose:
+  - **"Every policy":** one route, so a policy change mid-course changes nothing. This reverses
+    the 2026-10-31 choice that the cooperative route needs no approval.
+  - **"Answer, then merge":** `decision` is answered in Baton and then merged, two acts. This
+    reverses the 2026-11-01 "One action" answer.
+  - **"Each approval is a merge":** `build-app` has a PR per stage. Its merges replace
+    `answer: <stage>`, and the plan's PR carries the plan's child tickets (the 2026-11-01 "One
+    PR per plan").
+
+  The amendment:
+  - **R-BTN-131's marker courses.** Each leg commits on the ticket's open PR, opening one on
+    `baton/<ticket id>-<leg>` when none is open.
+  - **Fact legs.** Each course gains `pr-merged` fact legs: `land`, `build-app`'s `accept-*`,
+    `ship` and `accept-fixes`. The owner's merge is the approval, and it moves the ticket.
+  - **The owner's edits.** The owner refines with their own commits, which no merge leg
+    governs, sends a drafting leg back with `route`, and rejects by closing the PR.
+  - **`decision`** gains the named person leg `answer`.
+  - **`build-app`.** Its `verify` writes `VERIFY.md` and its fix tickets on a PR, and a new call
+    leg, `fix`, waits for the fixes once they land.
+  - **R-BTN-165.** A call leg whose children a merged PR landed writes none. Baton derives the
+    set from the landed tickets' `called_by`, refuses a different `spawned` list, and evaluates
+    the completion at that end.
+
+  This answers the second draft's open findings by removing their cause:
+  - **(a), (b) and (e):** the end is the merge fact, as `create-pr`'s, and an answer moves only
+    its own person leg.
+  - **(c) and (d):** the owner merges by hand, so R-BTN-183's foreign-commit and signed-authorship
+    rules, which are the merge runner's, are not involved.
+  - **(f):** no leg runs after a merge it depends on without opening its own PR.
+  - **(g):** a single route.
+  - **(h):** no approval-only exception to `independent-review`.
+  - **(i):** the derived set.
+  - **(j):** the person and fact legs are named in the table.
+
+  Built by B-149.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
