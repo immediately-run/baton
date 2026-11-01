@@ -102,8 +102,8 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   and owner state (R-BTN-66). When Baton and git disagree about those, Baton wins and logs the
   disagreement (R-BTN-85). About anything else, git is authoritative: every other ticket fact
   Baton holds (its existence, filter fields, closure) is a cache of the head snapshot, which
-  Baton never edits. A runner acts on the ticket as `origin/<default branch>` has it (R-BTN-5,
-  R-BTN-34); the next accepted snapshot overwrites the cached rows; **Resync** forces one.
+  Baton never edits. A runner acts on the ticket as `origin/<default branch>` has it, or as its branch does for a
+  course that keeps its record there (R-BTN-5, R-BTN-34); the next accepted snapshot overwrites the cached rows; **Resync** forces one.
   - **Staleness.** A snapshot observed after a claim's latest claim or `advance` (R-BTN-62)
     that shows the held ticket `closed` as `withdrawn`, or re-tiered above the holder's
     ceiling, ends the claim `released:stale-board` with a `release` to the holder. A held
@@ -1412,8 +1412,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
     the file is absent, it fetches the default branch once, then releases `stale-board` if it is
     still missing.
   - The runner reads the ticket from `origin/<default branch>:<path>`, never the working tree,
-    and takes body, exit criteria and PRs from that file. No ticket content travels through
-    Baton.
+    and takes body, exit criteria and PRs from that file. A leg of a course that keeps its
+    record on the ticket's branch (R-BTN-131) reads the body and its inputs at that branch's
+    fetched head instead, once it has checked that the branch maps to the ticket; filter fields and
+    closure still come from the default branch. No ticket content travels through Baton.
   - It then checks the tier fits its ceiling and runs the course's `sync.mjs` (through the
     wrapper, from a verified tree at the claim's commit, R-BTN-133) on the ticket and its PRs at
     the fetched head, whose readiness must show the offered leg leaving the claim's station as
@@ -1910,7 +1912,8 @@ mean (R-BTN-50).
   - **Git first, confirmed by the sync.** The closing marker lists the outputs; the sync attests
     each as `std:git.output@1` with its marker's `ref` and `claim_nonce` (R-BTN-191). An output is recorded only if its nonce names
     a claim on the ticket (`leg_outputs.claim_id`); any other is the discrepancy `foreign-write`
-    and never resolved as an input. Markers by untrusted authors are never outputs (R-BTN-139).
+    and never resolved as an input. The one output no claim records is a person leg's `answer`,
+    the applied `std:decision@1` itself (R-BTN-116), recorded with no claim. Markers by untrusted authors are never outputs (R-BTN-139).
   - **Inputs are resolved by Baton.** At the `advance` that starts a leg, Baton returns each
     input: the latest recorded output of its producer for this ticket, with the producer's
     versions; the inputs given are recorded in the ticket's history (R-BTN-81). In every
@@ -2184,7 +2187,7 @@ mean (R-BTN-50).
     (R-BTN-120, R-BTN-165);
   - checks overrides (R-BTN-131) and leg scripts and their imports (R-BTN-133);
   - fails a stub whose close accepts what it should not: a PR course's start leg must fail an
-    agent that exits 0 with no PR (B-81), and a marker course's close must fail a ticket its leg
+    agent that exits 0 with no PR (B-81), and a record course's close (R-BTN-131) must fail a ticket its leg
     mangled — no heading for the leg, a broken item schema, a machine field of the wrong shape —
     naming the rule (B-100);
   - refuses a retry policy naming an undeclared type and warns where the owners' bounds cut a
@@ -2209,7 +2212,7 @@ mean (R-BTN-50).
   `src/defaults/courses/<id>/` (R-BTN-134), adapted from docs' skills with docs-specific content
   left out. A repository scaffolds one with `baton repo init --course <id>` and needs no course
   code of its own. "Standard" names where they live, not a privilege: the CLI reads them as any
-  source. They assume no particular deployment and are written for the `cooperative` preset; a
+  source. They assume no particular deployment and run under every preset; a
   course that relies on a deployment's own architecture and threat model (reviewers on clean,
   separate trust domains, tests in a trusted executor, signed authorship) is that deployment's,
   kept and sourced from its own repository: Fieldhouse's is FLDH-41. Their shared code is copied into each directory by `npm run courses`, checked in, and
@@ -2219,23 +2222,25 @@ mean (R-BTN-50).
   |---|---|---|---|
   | `create-pr` (the default) | `implement` (`filed` → `pr-open`); `review` (`pr-open`, `fixed` → `reviewed`, `max_runs` 3); `fix` (`reviewed` → `fixed`, `max_runs` 2); `adjudicate` (`reviewed` → `adjudicated`); `merge` (`reviewed`, `adjudicated` → `merged`); and the fact legs `reviewed-by-hand` (`pr-open`, `fixed` → `reviewed`, `pr-verdict`) and `merged-by-hand` (`pr-open`, `fixed`, `reviewed`, `adjudicated` → `merged`, `pr-merged`) | `merged` | PRs |
   | `review-pr` | `review` (`requested`, `changes-requested` → `approved` \| `changes-requested`, `max_runs` 3); `conclude` (`requested`, `changes-requested` → `concluded`) | `approved`, `concluded` | PRs |
-  | `bug-report` | `trace`, `origin`, `dedupe` (→ `new-cause` \| `duplicate`), `file` or `fold`, `prevent` (`reported` → … → `closed`) | `closed` | markers |
-  | `draft-ticket` | `research`, `draft`, `check` (`requested` → `researched` → `drafted` → `filed`) | `filed` | markers |
-  | `decision` | `prepare` (`raised` → `asked`); `carry-out` (`asked` → `decided`) | `decided` | markers |
-  | `build-app` | `define`, `design`, `architect`, `plan` (`requested` → `defined` → `designed` → `architected` → `planned`); `file` (`planned` → `building`, a call leg); `verify` (`building` → `shipped` \| `building`, a call leg, `max_runs` 3) | `shipped` | markers |
+  | `bug-report` | `trace` (`reported` → `traced`); `origin` (`traced` → `explained`); `dedupe` (`explained` → `new-cause` \| `duplicate`); `file` (`new-cause` → `ticketed`); `fold` (`duplicate` → `folded`); `prevent` (`ticketed`, `folded`, `prevented` → `prevented`, `max_runs` 3); the fact leg `merged-by-hand` (`prevented` → `merged`, `pr-merged`) | `merged` | PRs |
+  | `draft-ticket` | `research`, `draft`, `check` (`requested` → `researched` → `drafted` → `checked`; `check` also leaves `checked`, `max_runs` 3); `merged-by-hand` (`checked` → `merged`, `pr-merged`) | `merged` | PRs |
+  | `decision` | `prepare` (`raised` → `asked` \| `carried`, the latter when the question is already settled); the person leg `answer` (`asked` → `answered`, R-BTN-116); `carry-out` (`answered`, `carried` → `carried` \| `asked`, `max_runs` 3); `merged-by-hand` (`carried` → `merged`, `pr-merged`) | `merged` | PRs |
+  | `build-app` | `stages` (`requested` → `planned` \| `abandoned` \| `stopped`, a call leg over `draft-doc`); `file` (`planned` → `building`, a call leg); `verify` (`building` → `verified` \| `building`, a call leg, `max_runs` 3); `report` (`verified`, `reported` → `reported`, `max_runs` 3); `merged-by-hand` (`reported` → `shipped`, `pr-merged`) | `shipped`, `abandoned`, `stopped` | children, PRs |
+  | `draft-doc` | `write` (`requested`, `written` → `written`, `max_runs` 3); `merged-by-hand` (`written` → `merged`, `pr-merged`) | `merged` | PRs |
   | `create-spec` | `converse` (`requested` → `spec-open`, the owner's conversation, `arrives: {fact: pr-opened}`); `review` (`spec-open` → `reviewed`, `max_runs` 4); `address` (`reviewed` → `spec-open`, the owner's conversation, `arrives: {fact: pr-pushed}`, `max_runs` 3); `adjudicate` (`reviewed` → `adjudicated`); `merge` (`reviewed`, `adjudicated` → `merged`) | `merged` | PRs |
-  | `spec-to-tickets` | `decompose` (`reading` → `drafted`); `check` (`drafted` → `checked`); `file` (`checked` → `filed`) | `filed` | markers |
+  | `spec-to-tickets` | `decompose` (`reading` → `drafted`); `check` (`drafted` → `checked`); `file` (`checked`, `written` → `written`, `max_runs` 3); `merged-by-hand` (`written` → `merged`, `pr-merged`) | `merged` | PRs |
   | `epic` | R-BTN-124 | `integrated`, `abandoned` | children |
   | `branch` | R-BTN-96 | R-BTN-96 | branches |
   | `ask`, `deliver`, `announce` | condition handlers (R-BTN-169) | R-BTN-169 | — |
 
   A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton request` — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder and `archive/`), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call: the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
 
-  - **A wait for a person's answer is a person's leg** (R-BTN-116), shown in git by the
-    ticket's `answer:` (a sync-local field of the markdown source, read by the station
-    function and never posted, R-BTN-74; never applied unless the owner gave it): one before `decision`'s `carry-out`, one after `create-pr`'s `adjudicate`
-    answers `owner`, and one after each of `build-app`'s four drafting legs, approved by
-    setting `answer:` to the stage's name.
+  - **A wait for a person's answer is a person's leg** (R-BTN-116), answered by a
+    `std:decision@1`: `decision`'s `answer`, and the one after `create-pr`'s `adjudicate`
+    answers `owner`. Where the policy admits `sync` for `std:decision@1`, the ticket's `answer:`
+    on the default branch (a sync-local field of the markdown source, read by the station
+    function and never posted, R-BTN-74; never applied unless the owner gave it) is attested as
+    one. Approving a document is not an answer: it is merging the PR that holds it.
   - **The PR courses.** A ticket's PRs are those in `prs:` plus same-repository PRs, open or
     merged, whose head matches `branch_pattern` or `previous_branch_pattern` (R-BTN-51,
     R-BTN-141), in the home or a `repos:` repository (R-BTN-140), and no other. Several PRs are
@@ -2250,14 +2255,70 @@ mean (R-BTN-50).
     rounds run out `conclude` is queued, and a trusted `<!-- baton:concluded -->` is that leg.
     A commenting leg's answer line may name its PR (`<answer> <PR URL>`; `conclude`'s the URL
     alone); `close` comments there, else on the checkout branch's PR.
-  - **The marker courses** open no PR. Each leg commits its work to the default branch under its
-    own `## <leg>` heading in the ticket's body: a note for people, and the input the course's
-    next leg reads. Where the ticket is, is Baton's (R-BTN-39): `close` writes no machine state
-    into the ticket. Before committing, the close validates the ticket: its frontmatter against
-    the repository's item schema (`item.schema.json` beside the tickets) and the leg's own
-    heading; a violation fails the leg naming the rule. A `station:` or `next_leg:` field a
-    ticket still carries is not read. Their station functions post readiness from the ticket's
-    facts (its sections, `answer:`, its children) at Baton's station.
+  - **One ticket, one PR, one merge.** Every standard course that writes a ticket's work is a PR
+    course. Its legs commit their records and outputs on the ticket's branch (`branch_pattern`,
+    continued by R-BTN-25), the first push opens the ticket's PR, and the course ends at `merged`.
+    A runner's `merge` leg (`create-pr`, `create-spec`, under `merge.*`, R-BTN-182) or the fact leg
+    `merged-by-hand`, the owner merging it, takes it there. A course that needs several approvals
+    is several tickets (`build-app`, below). No leg of a record course (below) writes to the
+    default branch, under any policy. A call leg's children are not a record: they are filed as
+    R-BTN-165 and `tickets.created` say, directly under `filed` and proposed under `proposed`.
+    - **The record.** `bug-report`, `draft-ticket`, `decision`, `spec-to-tickets`, `draft-doc`
+      and `build-app`'s `report` (the record courses' legs) write each leg's record under its own `## <leg>` heading in the ticket's body,
+      on the branch: a note for people, and the input the next leg reads from the branch's
+      fetched head (R-BTN-5). Their outputs go on the same branch:
+      - a new ticket file, its id the next free one across the default branch, `archive/` and
+        the heads of the repository's open ticket branches: every branch matching a listed
+        course's `branch_pattern` with a commit not reachable from the default branch (R-BTN-96).
+        Every allocator does the same: `baton request`, `baton tickets new` and the source's
+        `file` export. A collision that still happens is caught by the sync's duplicate-id
+        refusal (R-BTN-74), and the owner renumbers;
+      - a document.
+
+      A leg never edits another ticket's file. `bug-report`'s `fold` records the duplicate as
+      `duplicate_of:` (the existing ticket's id) in its own ticket. `duplicate_of:` and
+      `document:` are fields the standard item schema carries; a home whose own schema omits them
+      adds them with the course. No record leg writes `answer:` on the branch.
+
+      Where the ticket is, is Baton's (R-BTN-39): `close` writes no machine state into the
+      ticket, and a `station:` or `next_leg:` field is not read. Before committing, the close
+      validates the ticket: its frontmatter against the repository's item schema
+      (`item.schema.json` beside the tickets, read from the default branch) and the leg's own
+      heading. A violation fails the leg, naming the rule. Their station functions post readiness
+      from the ticket's facts on the branch's head (its sections, its children), finding the file
+      by its `id` wherever the branch holds it (under `archive/` once archived). `prs:` and the
+      ticket's other filter fields are read from the default branch only.
+    - **The owner's merge is the approval.** `merged-by-hand` waits on the `owner` and arrives
+      when they merge the PR, exactly as `create-pr`'s does (R-BTN-192). Which merge counts, the
+      owner's own commits on the PR, and what a hand merge may change are that rule's, for every
+      course alike (B-154).
+    - **Sending back and rejecting.** The owner may send the last writing leg back with
+      `baton owner route` (R-BTN-83) to its own station, within its `max_runs`, or withdraw the
+      ticket in git on the default branch (R-BTN-168). Each record course declares one
+      compensation, `close-pr`, named by its first writing leg (R-BTN-168). It runs on an ordinary
+      runner, closes the ticket's own PR unmerged and deletes the ticket's own branch, and
+      succeeds when both are already gone. So a withdrawn, superseded or cancelled ticket leaves
+      no PR whose merge would land its work. Deleting a ticket's own branch is not R-BTN-182's
+      trusted branch deletion, which covers branches a runner does not hold.
+    - **Closing in git.** Until B-154 lands, the merge closing a ticket in git and the arrival it
+      carries are read in the same run; B-149 waits for it. The leg whose position queues
+      `merged-by-hand` sets the ticket's
+      `status:` to `done` and moves its file to `archive/` on the branch, so the owner's merge
+      closes it in git; a run reporting any other position leaves or restores the file live
+      where it was. How Baton sees the arrival of a ticket its own merge closed is
+      `merged-by-hand`'s rule (B-154).
+    - **`decision`.**
+      - `prepare` writes the packet on the branch and asks through Baton. A settled question
+        goes straight to `carried`, queuing `merged-by-hand`.
+      - The answer reaches `carry-out` as its input (R-BTN-116), `required: false`.
+      - `carry-out` records what was decided and files tickets for anything to be done (a
+        setting, a reply, another merge); it does none of it itself. Finding the chosen option
+        gone, it reports `asked`.
+      - Where the policy admits `sync` for `std:decision@1`, a re-ask is answered by a changed
+        `answer:`, since an unchanged one is the same `ref` and moves nothing.
+    - **Plain git** (`forge: git`). The ticket's branch stands for the PR, and the CLI picks the
+      facts adapter by the repository's `forge` (R-BTN-96): `branches` there, `prs` elsewhere.
+      What counts as `pr-merged` on plain git is B-154's.
   - **The PR courses' facts** below say what each course reads. Under R-BTN-39 they make legs
     `ready` or `waiting`, and settle a leg that declares `arrives` (R-BTN-192); they never place a
     ticket. A verdict a holder's leg writes is its evidence; the holder's `advance` or end moves
@@ -2275,28 +2336,52 @@ mean (R-BTN-50).
     section or numbered decision into the request under its own heading, each with its tests and
     exit criteria drafted from the spec's own words; `check` holds the set against the spec (every
     requirement covered exactly once, no ticket without a section, dependencies drawn as the
-    spec's order implies) and fails rather than covering a gap; `file` commits the children
-    `parent:`-ed to the request (R-BTN-86), the request's `status:` to `done`. The owner deciding
-    against filing withdraws the request — a ticket status, not a course station: the filed
+    spec's order implies) and fails rather than covering a gap; `file` writes the children
+    `parent:`-ed to the request (R-BTN-86) on the request's branch, and the owner's merge files
+    them all. The owner deciding against filing closes the PR and withdraws the request — a ticket status, not a course station: the filed
     children are ordinary tickets on their own courses.
-  - **`build-app`**'s drafting legs each write one document under `product/<ticket id>/` —
-    `PRODUCT.md` (numbered acceptance criteria), `DESIGN.md` with mock-ups, `ARCHITECTURE.md`,
-    `PLAN.md` — with open questions and recommendations. `file` and `verify` are call legs
-    (R-BTN-165) with `"spawns": {"course": "*"}`, each child on the course the plan names
-    (`create-pr` by default):
+  - **`build-app`** is a parent ticket, as `epic` is (R-BTN-124). Its only PR is `report`'s, at the end.
+    - **`stages`** is a call leg over `draft-doc` (R-BTN-165). Its script files four children,
+      each naming its document's path in `document:` (`product/<request id>/PRODUCT.md`, …),
+      one per document under the request's `product/<request id>/`: `PRODUCT.md` (numbered acceptance
+      criteria), `DESIGN.md` with mock-ups, `ARCHITECTURE.md`, and `PLAN.md` (every ticket and the
+      criteria it makes pass). Each child names its document, and each `depends_on` the one
+      before it, so it waits until that one is done. Each child is one `draft-doc` ticket: `write`
+      drafts the document, with its open questions and recommendations, on the child's PR; the
+      owner settles them in the stage's conversation, refining the PR; and their merge is the
+      stage's approval.
+    - **`file`** reads `PLAN.md` at its claim's `snapshot_sha` (as merged, the owner's
+      refinements included), declaring no `called` input, and files its tickets as children of
+      the request,
+      each on the course the plan names (`create-pr` by default). Under
+      `tickets.created: proposed` they are proposed (R-BTN-165, R-BTN-180).
+    - **`verify`** checks every criterion against the running build. It reports `verified`, or
+      files one fix child per failing criterion, the finding in its body, and settles at
+      `building` again once they close. A third verification that still fails files nothing,
+      posts a decision for the owner and ends `released:blocked` on it (R-BTN-126).
+    - **`report`** (`verified` → `reported`, `max_runs` 3) is the parent's one record leg: it
+      writes `VERIFY.md` beside the documents and closes the request (`status: done`, archived)
+      on the request's own branch, and `merged-by-hand` (`reported` → `shipped`) ends it. A
+      request that ends `abandoned` or `stopped` is listed under Needs you until the owner
+      withdraws it in git.
 
     ```json
+    "stages": { "from": ["requested"], "kind": "call", "spawns": {"course": "draft-doc"},
+                "to": { "planned":   {"of": "all", "done": true,      "next": "file"},
+                        "abandoned": {"of": "any", "withdrawn": true},
+                        "stopped":   {"of": "all", "closed": true} } },
     "file":   { "from": ["planned"],  "kind": "call", "spawns": {"course": "*"},
                 "to": { "building": {"of": "all", "closed": true, "next": "verify"} } },
     "verify": { "from": ["building"], "kind": "call", "spawns": {"course": "*"}, "max_runs": 3,
                 "to": { "building": {"of": "all", "closed": true, "next": "verify"},
-                        "shipped": null } }
+                        "verified": null } }
     ```
 
-    `file` files the plan's tickets and settles at `building` once all have closed. `verify`
-    checks every criterion and reports `shipped`, or files fix children and settles at
-    `building` again once they close. A third verification that still fails files nothing,
-    posts a decision for the owner and ends `released:blocked` on it (R-BTN-126).
+    A stage the owner withdraws ends the request `abandoned` at once, and the stages still open
+    are superseded (R-BTN-165). `stopped` is the table's closing catch-all, an end like
+    `abandoned`. To redo a stage after its merge, the owner files a new `draft-doc` ticket for the
+    document. Under `tickets.created: proposed`, each stage and each plan ticket is a proposal the
+    owner approves before it is claimable, as any call leg's child is (R-BTN-165, R-BTN-180).
   - **A wait outside the claim suspends:** a leg whose next leg waits on someone the claim
     cannot wait for returns `suspend: true` with its pair, ending the claim there (R-BTN-72).
   - **The owner's conversations are fact legs.** `create-spec`'s `converse` (`requested` →
@@ -3032,7 +3117,9 @@ its own form (R-BTN-78); a raised **`hitl` condition** when a running leg asks (
   (R-BTN-109): the person's own, or the sync's attestation of the answer the ticket shows. Its
   `option` chooses the outcome, `reached`, by the person leg's `to`, and it is the leg's arrival
   under R-BTN-39's rules (writer admitted, the leg leaving Baton's station, the ticket not held,
-  the ref new). Whoever can push can
+  the ref new). The applied answer is the person leg's output `answer` (R-BTN-82), which a later
+  leg may declare as an input, `required: false` where a route can skip the person leg. Whoever
+  can push can
   write an answer in git, so where the policy admits `human` alone for `std:decision@1`
   (`protected`), an answer in git does not count. At a
   choice station a person's leg may complete without being queued (R-BTN-166). A leg never waits
@@ -6114,7 +6201,7 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     | `refs.default_branch`, `refs.tags`, `refs.other` (branches outside `branch_pattern`, `baton/proposed/*` among them, `baton-legs/*` not), `refs.baton` (`refs/baton/*`), `refs.legs` (`baton-legs/*`, R-BTN-190) — who may update them, from `runner`, `trusted-runner`, `courier`, `mirror`, `human` | all five, for each | `[trusted-runner, human]` for the first three; all five for `refs.baton`, which GitHub cannot restrict; `[runner, trusted-runner, human]` for `refs.legs`, which nothing merges | | the forge; Baton prints it, the protection checker checks it | R-BTN-180, R-BTN-190 |
     | `paths.protected` — the owner's protected paths, beside the computed floor | `[]` | `[]` | | trusted runners, the forge | R-BTN-184 |
     | `paths.control` — who lands a control path | `any` | `human` | | trusted runners, the forge | R-BTN-184 |
-    | `paths.tickets` — a ticket or goal change merges only with a `std:approval@1` | `any` | `approval` | | trusted runners | R-BTN-183, R-BTN-184 |
+    | `paths.tickets` — a ticket or goal change the merge runner merges needs a `std:approval@1`; a human's own merge of a ticket's PR (`merged-by-hand`, R-BTN-131) is their approval of the ticket files it carries | `any` | `approval` | | trusted runners | R-BTN-183, R-BTN-184 |
     | `merge.trusted` — merge legs are trusted legs, and no course commits to the default branch | `false` | `true` | | Baton, the forge | R-BTN-182 |
     | `merge.reviews` — `{count, distinct}`: the `std:review@1` a merge needs at its head, each independent of every writer domain, differing in each field `distinct` names (`trust_domain`, `model_family`) | `{count: 0}` | `{count: 2, distinct: [trust_domain]}`; a policy may add `model_family` | | trusted runners | R-BTN-183 |
     | `merge.checks` — a `std:checks@1` or protected check runs at the head | `optional` | `required` | | trusted runners | R-BTN-183 |
@@ -6185,10 +6272,10 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
 
     | Guarantee | Promises | Holds when |
     |---|---|---|
-    | `no-runner-lands` | no runner updates the default branch, a tag or a branch outside its pattern; a runner's work lands only through the merge runner under `merge.*`, as reviewed as `merge.reviews` says | `refs.default_branch`, `refs.tags` and `refs.other` admit only `trusted-runner` and `human`; `paths.control` is not `any`; `merge.trusted`; `tickets.created` is `proposed`; `outbox.git` admits only `trusted-runner`, with `trust: trusted`; `outbox.dispatch` has `trust: trusted`; and the latest report from the protection checker, within 24 hours, matched (R-BTN-180) |
+    | `no-runner-lands` | no runner updates the default branch, a tag or a branch outside its pattern; a runner's work lands only through the merge runner under `merge.*`, as reviewed as `merge.reviews` says, or by the human identity's own merge of its PR (`merged-by-hand`) | `refs.default_branch`, `refs.tags` and `refs.other` admit only `trusted-runner` and `human`; `paths.control` is not `any`; `merge.trusted`; `tickets.created` is `proposed`; `outbox.git` admits only `trusted-runner`, with `trust: trusted`; `outbox.dispatch` has `trust: trusted`; and the latest report from the protection checker, within 24 hours, matched (R-BTN-180) |
     | `control-paths-human` | no control path (courses, workflows, agent configuration, the ticket source) changes without a human landing it | `no-runner-lands`, and `paths.control` is `human` |
-    | `tickets-approved` | no ticket or goal changes, and no ticket a runner creates is filed, without a human approval of that file | `no-runner-lands`; `paths.tickets` is `approval`; `tickets.created` is `proposed`; and `attestations` admits only `human` for `std:approval@1` |
-    | `independent-review` | a runner's change lands only with two reviews from trust domains other than its writers' and each other's | `no-runner-lands`; `merge.reviews` has `count` ≥ 2 and `distinct` includes `trust_domain`; `grants.one_per_domain`; and `attestations` admits only `baton` for `std:review@1`, `std:wrote@1` and `std:ran@1` |
+    | `tickets-approved` | no ticket or goal changes, and no ticket a runner creates is filed, without a human approval of that file: a `std:approval@1`, or the human's merge of the ticket's PR carrying it | `no-runner-lands`; `paths.tickets` is `approval`; `tickets.created` is `proposed`; and `attestations` admits only `human` for `std:approval@1` |
+    | `independent-review` | a runner's change the merge runner lands has two reviews from trust domains other than its writers' and each other's; what the human merges by hand, the human has reviewed | `no-runner-lands`; `merge.reviews` has `count` ≥ 2 and `distinct` includes `trust_domain`; `grants.one_per_domain`; and `attestations` admits only `baton` for `std:review@1`, `std:wrote@1` and `std:ran@1` |
     | `signed-authorship` | every commit that lands is signed by the leg that wrote it | `no-runner-lands`, and `authorship` is `signed` |
     | `trusted-domain-separate` | a trusted runner shares its trust domain with no other grant, and a grant is untrusted until someone marks it | `grants.trusted_domain` is `separate`, and `grants.default_trust` is `untrusted` |
     | `human-gates` | no owner's agent session, and no delegated key, changes membership, trust or the policy | `approvers.members`, `approvers.trust` and `approvers.policy` are human-only lists |
@@ -6289,10 +6376,13 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
   - **Nothing requires a runner the refs exclude to write the default branch.** Claims, status and
     course history are Baton's (R3-1266, B-120). Where `refs.default_branch` excludes `runner`:
     - under `merge.trusted`, no course commits to the default branch and `merge` legs are trusted
-      legs (R-BTN-182);
+      legs (R-BTN-182). The standard courses commit only on the ticket's branch under every policy
+      (R-BTN-131);
     - under `tickets.created: proposed`, nothing writes a ticket file on the default branch
       directly. A ticket a runner's action would create (a condition's handler ticket, R-BTN-161; a
-      call leg's child, R-BTN-165; a promoted question, R-BTN-173; a supersession's replacement),
+      call leg's child, R-BTN-165; a promoted question, R-BTN-173; a supersession's replacement;
+      not a ticket file a leg writes on its own ticket's branch, which the human's merge of that
+      PR files, R-BTN-131),
       and every outbox git kind (a handler ticket, a withdrawal, an answer, R-BTN-171), is
       **proposed, not filed**: Baton queues an outbox entry for it, and a trusted-runner deliverer
       writes it on a branch `baton/proposed/<ticket>` from the entry's fields or the creating leg's
@@ -6602,7 +6692,7 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     merge of any commit other than the presented `H` as a discrepancy. Under `trusted-runner`, the
     merge runner merges them with a `std:approval@1`; under `any`, they merge as any path does.
   - **Tickets and goals:** under `paths.tickets: approval`, merged by the merge runner with a
-    `std:approval@1` (R-BTN-183).
+    `std:approval@1` (R-BTN-183), or by the human's own merge of a ticket's PR (R-BTN-131).
   - **A leg's own progress** needs no approval: a claim's branch may append to its own ticket file,
     at the exact path Baton's claim names, when the change is bytes appended at the end of a file
     whose base ends in LF, compared as blobs without rename detection, with no mode change, after the
@@ -6611,7 +6701,8 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     and nonce equal to the claim's and the time within its span; the text at most 300 bytes of
     letters, digits, spaces and `.,;:-'()?!`, no URL; at most 20 entries per claim. Readers show these
     lines as the leg's data. Anything else in a ticket file is a ticket change. A done ticket's move
-    to the archive, setting `status: done`, is a templated change the merge runner makes.
+    to the archive, setting `status: done`, is a templated change the merge runner makes; a record
+    course's ticket makes it on its own branch (R-BTN-131).
 - **R-BTN-185 (human-only credentials).** A human gate — `std:approval@1`, revoking a `human`
   attestation, a human's merge, and every action whose approver list in the repository's policy
   is human-only (R-BTN-188) — is satisfied only by a credential no agent session holds and no agent can
@@ -7178,9 +7269,9 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-79 schemas refused | changed digest, `oneOf`, back-reference, `$ref` cycle, own `std:` id; another repository's same id | refused with the file kept, raised; `std:` refused; the other accepted, keyed to it |
 | S-BTN-80 signatures and spawns | a call leg's `spawns` (`provides: [brief]`) of a course whose start requires `brief` and whose ends `done` and `abandoned` produce `result` and nothing; a completion `{of: "all", closed: true}` into a station whose `entry` requires `result` | `course test` prints both signatures and names `abandoned` as not producing `result` |
 | S-BTN-89 an epic | `plan` files three children, one withdrawn; `replan` files a replacement; a second epic's `replan` files none | `plan` settles `planned` once all three closed; `replan` settles `built` when its child merges; `integrate` ends `integrated`; the second reaches `abandoned` |
-| S-BTN-104 the standard courses | `bug-report` with markers (one no edge, one malformed), `decision` with `answer:`, `draft-ticket` with no forge facts; an audit leg answering with prose before and after its outcome, and with none (B-85) | markers move the ticket, bad ones nothing; `carry-out` ready once answered; the third syncs to `requested`; the prose-wrapped outcome is read, none fails naming the last line |
+| S-BTN-104 the standard courses | `bug-report` with a holder's arrival off the graph and one malformed, `decision` answered by a `std:decision@1`, `draft-ticket` with no forge facts; an audit leg answering with prose before and after its outcome, and with none (B-85) | the bad arrivals refused, the good ones moving the ticket; `carry-out` ready once answered, with the answer as its input; the third syncs to `requested`; the prose-wrapped outcome is read, none fails naming the last line |
 | S-BTN-105 one leg overridden | `legs/review.run.mjs` on a sourced `create-pr` | the override runs at the snapshot; the standard `close` writes the verdict |
-| S-BTN-107 the build-app course | drafts approved one by one by `answer:`; `file`, a call, files two children on different courses; a verification files a fix; a third failing verification | each draft waits for its stage's approval; `file` settles at `building` only once both close, so `verify` never starts while a child is open; the fix call settles back to `building`; `released:blocked` on the posted decision; `shipped` |
+| S-BTN-107 the build-app course | a request; `stages` filing four `draft-doc` children, each naming its `document:`; each merged in turn, the second refined by the owner on its PR before the merge; `file` filing two children on different courses from `PLAN.md` as merged; a verification files a fix; a third failing verification; a second request whose design stage the owner withdraws; under `tickets.created: proposed`, a third request | each stage child waits on the one before it, unblocked by the previous one's merge closing it in git; `stages` settles at `planned` once all four are merged, and `file` reads `PLAN.md` at its snapshot, the owner's refinement included; `file` settles at `building` only once both children close, so `verify` never starts while a child is open; the fix call settles back to `building`; `released:blocked` on the posted decision; the second request `abandoned` at the withdrawal, the withdrawn stage's PR closed by `close-pr`, its later stages superseded with no PR, and the request listed until withdrawn in git; the first request's `report` landing `VERIFY.md` and closing it by the owner's merge, `shipped`; the third's stages and plan tickets each proposed and claimable only once approved |
 | S-BTN-175 the request | a fresh repository on `create-spec`; `baton request "<one sentence>" --course create-spec` run through the CLI's own entry, then a sync of what it pushed, then a runner's claim | one commit on the bare origin's main, on top of the scaffold, the ticket file alone — the sentence its title and description, `course: create-spec`, `available`, `tags: [request]` — with the caller's branch, HEAD and tree untouched; the board posts it `requested` with `converse` `ready`; the claim offers `converse` |
 | S-BTN-174 the create-spec course | a request with no PR and no marker; a run of `converse` that writes its marker and suspends, then a second sync; its PR on the branch pattern, checks running and then done; a verdict asking for changes and an address round begun and suspended; its push; a second round; a third round asking for changes; a round still asking for changes with all three address rounds spent; an adjudication reproducing a finding, then one that does not; a fresh approval; the merge | `converse` ready, then — its marker committed — waiting on `owner` and not offered again; `spec-open` with `review` waiting on `ci`, then ready; `reviewed` with `address` ready; back to `spec-open` after the push; `adjudicate` once the address rounds run out; `merge` waiting on `owner` for a reproduced finding, ready for none; `merge` ready on a fresh approval; `merged` |
 | S-BTN-110 courses from their sources | the built CLI outside a checkout: `--course create-pr`; a `--source` at a tag with overrides; a copied `course.json`; an off-branch commit; no `sync.mjs`; an outside import | full-commit source, no course file; source read at its commit with home overrides; each fault refused naming it, the commit unfetched |
@@ -7302,6 +7393,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-189 the repository policy | a new repository; a new `git` repository, and `protected` applied to one; the `protected` preset applied by an owner key holding no `human_only` key, then by one with a `human_only` key; then `merge.reviews.count` raised and lowered by an owner key, by an MCP key, and by a `human_only` key under `approvers.policy: [human]`; two owners setting it from one `base_version`; from `cooperative`, an MCP key and then an owner key setting `approvers.trust: [human]`; an export and an import | the `cooperative` values; the `plain-git` values, and `protected`'s with `leg_state: branch`, `inputs.board` `[sync-key]` and no `forge-check` deliverer; the first apply refused, the second stored without the preset's name, every guarantee but `signed-authorship` and `human-gates-hardware` held except `no-runner-lands` and every guarantee including it, which hold once the protection checker reports a match; the owner key's changes `forbidden` both ways, the MCP key's refused (a delegated key changes no policy), the human key's accepted and logged with `changed`; the second `conflict`; the MCP key refused, the owner key's accepted with every owner-set trust level cleared to `untrusted`, roles dropped and domains and families null; the import keeps every version and floor, and refuses a broken chain |
 | S-BTN-192 approver lists | `approvers.policy: [key:<A>]` with A a `human_only` key; an owner key B, an MCP key, and A; a change by A setting `approvers.policy: [key:<B>]`; then B setting it to `[owner]`; a list naming a revoked key; revoking A while `[key:<A>]` is the only list it satisfies | B and the MCP key `forbidden`, A accepted; A's change accepted, after which A is `forbidden` and B, matching the list in force, accepted; the list naming a revoked key refused; the revocation refused; `human-gates` held while every list is human-only and broken once `approvers.policy` is `[key:<B>]` |
 | S-BTN-193 leg state | a GitHub repository with `leg_state` unset, and a `git` repository whose policy sets `leg_state: forge`; on a `git` repository, ticket B-1 on `claude/B-1-x` and ticket B-1-x on `claude/B-1-x-y`: a review leg writing round 1 to `baton-legs/B-1` at `.baton-legs/B-1/review/<nonce>/round.md`; an address leg, an `approves: true` review and an adjudicate leg; entries `CLAUDE.md`, a symlink and `../x` on the leg-state branch; a leg-state branch whose first commit has a parent; a course whose `branch_pattern` matches `baton-legs/*`; a work-branch commit adding `docs/.Baton-Legs/notes.md`; under `attestations` entries admitting no `sync` writer for verdicts (R-BTN-191), the `branch` course's review; the ticket closing; the leg-state branch merged into the default branch by hand, with and without a protection checker, and a sync posting an empty reading | on GitHub the rounds are PR comments and no leg-state branch exists; `forge` refused on the `git` repository; the round push reports no range, raises no foreign commit and leaves the reviewer independent and `H` unmoved; B-1-x's station function and the PR mapping never see `baton-legs/B-1`; the address leg reads round 1 through `git cat-file` as quoted data, the branch never checked out; the review and the adjudication read nothing from it; the three entries skipped and reported; the non-orphan push refused by the reading leg; the course refused; the work branch refused at merge; no verdict commit on the work branch; the leg-state branch deleted; `baton.leg-state-landed` with the count and `B-1`, closed only by the checker's reading where one exists, the empty sync reading leaving it open there |
+| S-BTN-194 one ticket, one PR, one merge | under `cooperative` and under `protected` (plain git's reading being B-154's), each of `bug-report`, `draft-ticket`, `decision`, `spec-to-tickets` and `draft-doc` run from its start leg to its end; the last writing leg routed back after it archived the ticket, then reporting a station other than the one queuing `merged-by-hand`; a PR closed and its ticket withdrawn on the default branch; a record ticket superseded with its PR open; `prepare` finding the question settled; `carry-out` finding the chosen option gone; two tickets' branches taking the same new id; a `fold` | no leg of a record course writes to the default branch under any policy; each ticket's legs on one branch and one PR, the next leg reading the record at the branch's head, the archived file found by its `id`; `merged-by-hand` waiting on `owner` and arriving at the owner's merge as `create-pr`'s does; the ticket done at `merged` and closed in git by its own merge (`status: done`, archived); the routed run's ticket left live on the branch; the withdrawn and the superseded tickets' PRs closed by `close-pr`, nothing landed; `prepare` reaching `carried` with `merged-by-hand` queued; `carry-out` reaching `asked`; the second merge conflicting; the fold recording `duplicate_of:` in its own ticket alone |
 | S-BTN-195 one inbound path | a sync run attesting readiness, an arrival and an output for one ticket; a second run attesting only readiness; a run whose post is refused; under `cooperative`, an `answer:` in the ticket; a courier delivering a `handler` entry; an `advance` reaching `reviewed`, and the sync attesting the same arrival by a leg without `arrives: {fact: …}`; a want with a dispatch target and a dispatch courier holding the doorbell, then with none registered | the ticket's readiness, arrival and output are all the first run's until the second replaces readiness alone, never a mix within one judgement; the refused run's attestations are refused with it; the sync's `std:decision@1` settles the person leg; the courier's `std:effect@1` marks the entry `delivered`, and the next run's attestation of the file confirms it; the advance's `std:arrival@1` by the holder moves the ticket and the sync's for that leg is `position-disagrees`; the want queues one `dispatch` entry, the courier is rung `outbox` and delivers it, and only a board post observed after the delivery confirms it; with none registered no entry is queued, `baton.dispatch-courier-missing` is raised and the runners answer the want; the same merged PR attested by two runs moves the ticket once and the second is silent; readiness attested at `reviewed` before a `fix → review` round returned the ticket to `reviewed` is discarded; a courier asked to dispatch a workflow its configuration does not pin refuses the entry |
 | S-BTN-196 the fact reader | under `protected`, a `create-pr` ticket at `reviewed` with `merge` queued, then a human merging its PR; a `create-spec` ticket at `requested`, then the owner's PR appearing; the same merge read twice; the reader's key not yet named, then named; a forge notification for the repository | with no key named, `baton.fact-reader-missing` is raised and nothing moves; once named, `fact-legs` lists both tickets, the reader is rung `facts`, attests `pr-merged` and `pr-opened`, and the tickets reach `merged` and `spec-open`; the second read is silent; no repository code runs on the reader's host |
 | S-BTN-190 guarantees and floors | a floor `{fieldhouse: [no-runner-lands, independent-review, signed-authorship, human-gates-hardware]}`; a change admitting `runner` to `refs.default_branch` or `refs.other`; a floor naming a broken guarantee, and a second floor named `fieldhouse`; removal by an owner key and by a `human_only` key; a trusted runner's protection report that no longer matches; an untrusted runner holding a claim on the repository; a signed read replayed for another repository, and one past `valid_until`; a trusted runner whose pin differs | the change refused `floor-violated`; both floors refused; removal refused, then accepted; `baton.unprotected` raised, `no-runner-lands` broken, trusted runners stopped, the runner's claim released `policy` and ended `released:floor`, and every claim refused `floor-broken` until a matching report; both reads rejected by a trusted runner; the trusted runner acts on nothing and `baton.policy-unpinned` stays open until its pins match |
@@ -7760,6 +7852,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose to skip an owner key an administrator revoked when the seed names it, over stopping the start: a revocation after the seed was written (a rotation, a leaked key) must not take the whole instance down until `wrangler.toml` changes; the repository it leaves with no owner is named in `seed_owners`. A key that holds another role or is no key still stops the start, as a broken seed (the owner, 2026-10-27; R-BTN-47, B-91 round six).
 - Chose the CLI's reads to return the dashboard's own queries behind the signed principal, with no new core query and no browser session, over a second read model: one answer per fact (R-BTN-1, R-BTN-179) (2026-10-24; B-90).
 - Chose `clingo-wasm` in `npm test` as the conformance oracle over a pip-installed clingo or another Datalog dialect: none is a standard with preferences or has better TypeScript tooling (2026-10-22; R-BTN-175).
+- Chose one ticket, one PR, one merge for every standard course that writes work: its legs commit on the ticket's branch, the course ends at `merged` (a runner's `merge` or the owner's `merged-by-hand`), and a course needing several approvals is several tickets (`build-app` a parent of one `draft-doc` child per stage). Rejected, for the former marker courses: committing to the default branch (forbidden under a protected default branch); proposals copied from a leg-state branch; a ticket merge on a separate approval; and a numbered per-ticket branch with merges partway through a course. Each needed new machinery, and review found each incomplete. The owner, 2026-11-01: "Would it be possible to simplify the spec by eliminating this type of course entirely and tying every course to a ticket file in Git?" Accepted costs: a PR to merge per ticket under `cooperative` too; `decision` answered in Baton and then merged; `build-app` a family of tickets (R-BTN-131, B-149).
 - Chose Baton as the one authority on a ticket's position, git facts moving a ticket only on legs that declare it (`arrives: {fact: …}`, person legs) and only by an edge from Baton's station, over git replaying positions or no fact ever moving a ticket. The sync reads Baton's positions in its observation, over station functions computing readiness for every station; regression detection is retired, a disagreement being a discrepancy the owner settles with adopt; and confirmation checks an end's evidence, not its position (2026-10-31, the owner; R-BTN-35, R-BTN-39, R-BTN-10).
 - Chose every statement Baton receives about the work, whoever states it, to be an attestation whose writer the policy admits per type, over a board post that carried readiness, arrivals, outputs and markers as its own fields beside attestations, a person's answer read from git or Baton by a separate knob, and a courier's delivery as a state change only. The sync becomes the writer `sync`, a courier the writer `courier`; a run's attestations are accepted with its post, so no judgement mixes two runs; `inputs.answers` is retired into the `attestations` entries (2026-10-31, the owner; R-BTN-191).
 - Chose four nouns for everything that crosses Baton's boundary — attestations (statements about the world, weighed by writer), commands (requests to change Baton's own state, accepted or refused by its gates), outbox entries (effects, delivered by couriers) and replies — over one noun per direction: a command is not evidence, and a reply is not an effect. A runner's report of where its leg reached is the holder's `std:arrival@1`, the same type as the sync's fact arrival, carried by the command that moves the lease (2026-11-01, the owner; R-BTN-191).

@@ -1,0 +1,61 @@
+---
+title: "B-153 — One approval for a call's proposed children: under tickets.created: proposed, a call leg's children land as one proposal under one std:approval@1"
+id: B-153
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1098
+tier: normal
+description: "Under `tickets.created: proposed`, each child a call leg files is its own proposal needing its own `std:approval@1` (R-BTN-165, R-BTN-180), so `build-app`'s plan tickets and `epic`'s children cost one approval per child after the owner has approved the plan. Amend the spec so one approval covers all of one call run's proposed children, then build it. Requires: B-62, B-140."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-62
+  - B-140
+---
+
+**Brief:** the owner, 2026-11-01, on immediately-run/baton#154 (one ticket, one PR, one merge),
+asked whether `build-app`'s plan tickets should keep the existing call-leg route under
+`protected` (one approval per child) or ride the plan's PR: "Accept, batch later". This ticket is
+the batching.
+
+**Spec:** `spec/BATON_SPEC.md` R-BTN-165 (call legs), R-BTN-180 (*proposed, not filed*; the
+proposal merge, "one approval covers one proposal"), R-BTN-171 (outbox git kinds).
+
+### Why
+
+Under `tickets.created: proposed`, a call leg's children are proposed one by one, and the proposal
+merge accepts one approval per proposal. A `build-app` plan of twenty tickets, or an `epic`'s
+children, therefore asks the owner for twenty approvals after they approved the plan itself. The
+owner's attention is the factory's constraint.
+
+### What to build
+
+1. **The spec amendment first** (its own PR, two fresh reviewers, the impact list): all children
+   one call run proposes are written on one branch, `baton/proposed/<calling ticket>-<run>`, and
+   one `std:approval@1` whose subject is the calling ticket at that commit, covering every path
+   and blob, lands them by one proposal merge. Decide whether a partial approval exists.
+2. **The deliverer** writes one run's entries on one branch, and **the proposal merge** accepts
+   the run's single approval.
+3. **The call's settlement** counts the children once they land, as today.
+
+### Tests
+
+A scenario row in §15: a call run proposing three children, one approval landing all three; an
+approval naming two of the three, refused.
+
+### Exit criteria
+
+- [ ] The spec amendment merged
+- [ ] `npm test` green with the new scenario's cases
+- [ ] `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from immediately-run/baton#154.

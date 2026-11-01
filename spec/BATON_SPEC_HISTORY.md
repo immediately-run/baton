@@ -972,6 +972,283 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   2026-10-31 and 2026-11-01, the second draft as the starting text, and every open finding as its
   amendment's acceptance list.
 
+- **2026-11-01 — §5 R-BTN-131, R-BTN-165, §12.8 R-BTN-180, §15 S-BTN-104, S-BTN-107,
+  S-BTN-194, §16 (owner direction): the marker courses work on a PR under every policy.** After
+  part 4 was withdrawn from PR #150, the owner: "The marker courses no longer need to commit to
+  the main branch now that ticket history and claims are owned exclusively by Baton. We can
+  always commit to a PR branch instead of the main branch."
+
+  The owner agreed to take that one step further, making the marker courses end at a merge as
+  `create-pr` does. Asked three questions, they chose:
+  - **"Every policy":** one route, so a policy change mid-course changes nothing. This reverses
+    the 2026-10-31 choice that the cooperative route needs no approval.
+  - **"Answer, then merge":** `decision` is answered in Baton and then merged, two acts. This
+    reverses the 2026-11-01 "One action" answer.
+  - **"Each approval is a merge":** `build-app` has a PR per stage. Its merges replace
+    `answer: <stage>`, and the plan's PR carries the plan's child tickets (the 2026-11-01 "One
+    PR per plan").
+
+  The amendment:
+  - **R-BTN-131's marker courses.** Each leg commits on the ticket's open PR, opening one on
+    `baton/<ticket id>-<leg>` when none is open.
+  - **Fact legs.** Each course gains `pr-merged` fact legs: `land`, `build-app`'s `accept-*`,
+    `ship` and `accept-fixes`. The owner's merge is the approval, and it moves the ticket.
+  - **The owner's edits.** The owner refines with their own commits, which no merge leg
+    governs, sends a drafting leg back with `route`, and rejects by closing the PR.
+  - **`decision`** gains the named person leg `answer`.
+  - **`build-app`.** Its `verify` writes `VERIFY.md` and its fix tickets on a PR, and a new call
+    leg, `fix`, waits for the fixes once they land.
+  - **R-BTN-165.** A call leg whose children a merged PR landed writes none. Baton derives the
+    set from the landed tickets' `called_by`, refuses a different `spawned` list, and evaluates
+    the completion at that end.
+
+  This answers the second draft's open findings by removing their cause:
+  - **(a), (b) and (e):** the end is the merge fact, as `create-pr`'s, and an answer moves only
+    its own person leg.
+  - **(c) and (d):** the owner merges by hand, so R-BTN-183's foreign-commit and signed-authorship
+    rules, which are the merge runner's, are not involved.
+  - **(f):** no leg runs after a merge it depends on without opening its own PR.
+  - **(g):** a single route.
+  - **(h):** no approval-only exception to `independent-review`.
+  - **(i):** the derived set.
+  - **(j):** the person and fact legs are named in the table.
+
+  Built by B-149.
+
+- **2026-11-01 — review round one of PR #154** (two fresh reviewers, the diff and the impact
+  list). Blocking:
+  - **An early merge.** A merge of an earlier marker PR, never applied while no fact leg waited,
+    could later satisfy `land` while a newer PR stayed open.
+  - **`status: done` hiding the arrival.** The merge closed the ticket, which then dropped off
+    the fact reader's list before `pr-merged` arrived.
+  - **Untouched rules contradicted.** R-BTN-165's note, R-BTN-180's proposed tickets,
+    `paths.tickets` and three guarantees still promised approvals, reviews or signatures that a
+    human's merge of a marker PR does not give.
+
+  Majors:
+  - the merged head bound to nothing, and other runners' commits;
+  - no edge to send the last writing leg back;
+  - branch names reused across runs, and "the open PR" undefined;
+  - plain-git repositories without PRs;
+  - which merge counts;
+  - colliding ids with no one to refile;
+  - the runner reading inputs from the default branch (R-BTN-5);
+  - `decision`'s settled and re-ask paths;
+  - the third failing `verify`;
+  - gaps in the derived child set;
+  - migration against R-BTN-64.
+
+  The owner chose, when asked:
+  - **"Branch + human merge"** for `forge: git`: the marker branch stands for the PR, and a
+    first-parent merge commit is `pr-merged`.
+  - **"Any non-runner merge"**: under `protected` only the human identity can merge, and under
+    `cooperative` the spec promises no more than the refs do.
+
+  Fixed:
+  - **The marker branch.** A ticket has a current marker branch, `baton/m/<id>/<n>`, never
+    reused and recorded with the position. A fact leg counts only a merge of that branch
+    containing its reported head, made by no claim. R-BTN-25 continues only that branch.
+  - **Closing in git.** The last writing leg sets `status: done` on the branch, and the fact
+    reader keeps a ticket closed `done` on its list until the arrival applies, which a
+    `cooperative` post applies before the closure.
+  - **What a leg may change and read.** The close refuses paths outside the ticket folder and a
+    restored `outputs` field. Runners read at the marker head (R-BTN-5).
+  - **Unreported commits** are listed under `baton.marker-unreported`, never reset.
+  - **Sending back.** Every writing leg before a fact leg also leaves its own station; a
+    writing leg's `next` naming itself is refused.
+  - **`decision`.** `prepare` may reach `carried` when the question is settled, and `carry-out`
+    may return to `asked`. The answer reaches the next leg as its input `answer`, and only the
+    default branch's `answer:` is attested.
+  - **`build-app`.** A third failing `verify` reaches `stuck`, which the person leg
+    `ship-anyway` resolves, and `fix` has the null outcome `unfixed`.
+  - **R-BTN-165's italic note** is folded into its body, and it leaves `PATCH_NOTES_ALLOWED`.
+    The children are read from the merge alone; one landed closed is `child-closed`, and they
+    stay `waiting` on `parent` until bound.
+  - **Rules restated:** R-BTN-180's proposed tickets, `paths.tickets`, R-BTN-184, and the
+    guarantees `no-runner-lands`, `tickets-approved`, `independent-review` and
+    `signed-authorship` now state what a human's merge by hand is.
+
+- **2026-11-01 — review round two of PR #154** (one fresh reviewer, the diff and the impact
+  list). Blocking:
+  - **Continuity.** Commits no claim reported became the next leg's input, against R-BTN-183's
+    continuity, which also opened cross-ticket injection, since any runner may push a
+    per-ticket branch.
+
+  Majors:
+  - **The merge itself.** The merge's actor and paths were unchecked, and "only the human may
+    merge" was false under `protected`.
+  - **Merge methods.** Squash, rebase and fast-forward merges never counted.
+  - **Carriers.** Nothing carried the current branch, Baton cannot read git for a merge's
+    children, and core keyed on course names.
+  - **Ends.** S-BTN-107 expected the removed `released:blocked`, and `stuck` never closed the
+    ticket in git.
+  - **Migration.** It could not run in the order B-149 gave it.
+  - **`decision`.** Its settled route and `carry-out`'s side effects had no rule.
+  - **Untouched text.** R-BTN-165's empty-set sentences, R-BTN-85's table, and R-BTN-120's
+    `done`.
+  - **`cooperative` closure.** A closed ticket could drop its arrival.
+
+  Fixed:
+  - **Continuity holds.** A leg starts only at the reported head. Unreported commits raise
+    `baton.marker-unreported` and hold the next leg on the owner, who merges with them, accepts
+    them (`baton owner ticket accept-head`) or rejects.
+  - **The merge is checked.** Under `protected` the fact reader requires the human-only
+    identity as the merge's actor and the merged diff within the items glob and `writes`;
+    otherwise a `merge-refused` discrepancy, no arrival. A forge merge counts by the PR's head
+    at merge, and a git merge by the first first-parent commit containing the head.
+  - **Carriers and fields.** A course field `work_branch: per-ticket` (core keys on it) and
+    `writes` (renamed from `outputs`, which R-BTN-82 already uses). `branch` on `std:arrival@1`,
+    `positions` and `fact-legs`. `std:git.landed@1` for a merge's children.
+  - **New discrepancies:** `branch-extra`, `merge-refused` and `child-closed`.
+  - **Ends.** `verify` sets `done` at `stuck` too, and a git-closed ticket is done for dependants
+    only at its end. Closed tickets stay listed until their arrival.
+  - **`decision`.** A settled `prepare` queues `land`, and `carry-out` only records and files.
+  - **Text.** S-BTN-107, R-BTN-35 and R-BTN-165's empty-set sentences now match.
+
+- **2026-11-01 — §5 R-BTN-5, R-BTN-35, R-BTN-116, R-BTN-131, §12.8 R-BTN-180, §15 S-BTN-104,
+  S-BTN-107, S-BTN-194, §16 (owner direction): one ticket, one PR, one merge.** Review round
+  three of PR #154's per-ticket-branch draft found 2 blocking and 5 major problems:
+  - **`accept-head`** recorded a head the owner never saw.
+  - **A merge during a re-run** ended the course with the re-run's branch unmerged.
+  - **On plain git**, another branch's merge counted.
+  - **The fact reader** had no channel for unreported commits.
+  - **The migration** broke R-BTN-64.
+  - **`status: done`** was left on a re-run's branch.
+  - **The landed-children attestation** had no clear writer.
+
+  Every round had found new blocking problems, nearly all in machinery that existed only so one
+  ticket could hold several approvals or work after its own merge. The owner: "There has been
+  lots of work trying to accommodate these marker courses. Would it be possible to simplify the
+  spec by eliminating this type of course entirely and tying every course to a ticket file in
+  Git?" Asked whether to rewrite on "one ticket, one PR, one merge", the owner said "Yes".
+
+  The rewrite starts again from the specification on `main`. What it keeps:
+  - **Every standard course that writes work is a PR course.** Its legs commit on the ticket's
+    branch, and the course ends at `merged`: by a runner's `merge`, or by the owner's
+    `merged-by-hand` under `create-pr`'s existing rule.
+  - **`bug-report`, `draft-ticket`, `decision` and `spec-to-tickets`** gain `merged-by-hand`
+    and a send-back edge on their last writing leg. `decision` gains the person leg `answer`, a
+    settled route and a re-ask route.
+  - **`build-app`** becomes a parent ticket like `epic`. A call leg, `stages`, files one child
+    per document on the new course `draft-doc` (`write`, then `merged-by-hand`), chained by
+    `depends_on`. `file` and `verify` are as before.
+  - **Reading and answers.** A leg reads its record at the branch's head (R-BTN-5), and a person
+    leg's applied answer is its output `answer` (R-BTN-116).
+
+  What it drops: the numbered per-ticket branch, merges partway through a course, the
+  `work_branch` and `writes` fields, `accept-head`, `baton.marker-unreported`,
+  `std:git.landed@1`, the restated guarantees and R-BTN-165's landed-children variant.
+
+- **2026-11-01 — review round one of "one ticket, one PR, one merge"** (two fresh reviewers, the
+  diff and the impact list). Both found the same two blocking problems:
+  - **Closure.** Nothing closed a ticket in git after `merged-by-hand`, so `depends_on`, and with
+    it every `build-app` stage after the first, never unblocked.
+  - **A withdrawn stage deadlocked `build-app`.** Its later stages never closed.
+
+  Majors:
+  - **A false blanket rule.** "No leg … commits to the default branch" contradicted call legs'
+    children under `filed` and the runner `merge` legs.
+  - **`pr-merged` was unbound.** It was bound to no head, no time and no actor, and a forged
+    `prs:` on the branch could satisfy it. Several of these gaps were already open in
+    `create-pr`'s `merged-by-hand`.
+  - **The owner's refining commits** met R-BTN-183's foreign-commit reset and continuity.
+  - **Tickets written on a branch** under `proposed`, and the guarantees, were still worded as
+    before.
+  - **No plain-git reader** existed.
+  - **The person leg's `answer`** had no output source.
+  - **Ticket ids and folds** collided across branches.
+  - **The migration** was mis-cited and incomplete.
+
+  The owner chose, for `build-app`'s plan tickets under `proposed`, "Accept, batch later": keep
+  the call-leg route (one approval per child) and file the batching as B-153. This reverses the
+  2026-11-01 "One PR per plan" for now.
+
+  Fixed:
+  - **Closure.** The last writing leg sets `status: done` and archives the file on the branch, so
+    the merge closes the ticket. The fact reader keeps it listed until the arrival applies.
+  - **The withdrawn stage.** `stages` gains a fail-fast `abandoned` entry and a closing
+    `stopped`.
+  - **The blanket rule** is narrowed to records and outputs; call children follow
+    `tickets.created`.
+  - **`pr-merged`** requires the last attested head, a merge after waiting, and under a
+    protected default branch the human identity (R-BTN-192). `prs:` is read from the default
+    branch only.
+  - **The owner's commits** are not reset while `merged-by-hand` alone waits, and `route` records
+    them as the next leg's start (R-BTN-183).
+  - **Ticket files and guarantees.** Ticket files written on a ticket's own branch are filed by its
+    merge (R-BTN-180), and `paths.tickets`, `no-runner-lands`, `tickets-approved` and
+    `independent-review` name the human's merge.
+  - **Plain git.** A `--no-ff` merge commit whose second parent contains the head.
+  - **Outputs and ids.** The person leg's `answer` is an output with no claim (R-BTN-82). New ids
+    skip the open ticket branches, and `fold` writes only its own ticket (`duplicate_of:`).
+  - **Text.** `bug-report`'s stations are written out; R-BTN-64's kit text and the standard
+    courses' lead are corrected; S-BTN-107 and S-BTN-194 are extended.
+
+- **2026-11-01 — review round two of "one ticket, one PR, one merge"** (one fresh reviewer).
+  Blocking:
+  - **A route made another runner's commit a leg's input.**
+  - **A merge refused for timing stranded a ticket** closed in git at a non-end station.
+
+  Majors:
+  - **A closed ticket hid its own arrival.** The station function and the fact reader could not
+    see a ticket its own merge closed.
+  - **R-BTN-5 and R-BTN-131 named different read points.**
+  - **No path check on a hand merge.**
+  - **`file` read unrefined drafts** through `called`.
+  - **Withdrawn and superseded record tickets kept open PRs.**
+
+  Most of these were gaps in `merged-by-hand` itself, which `create-pr` already uses. The owner,
+  asked, chose "Split the hardening out": B-154 now specifies `merged-by-hand` for every course.
+  This PR's round-one additions to that rule are withdrawn, being incomplete:
+  - `pr-merged`'s head, time and actor binding;
+  - the exemption of the owner's commits from R-BTN-183;
+  - `route` recording the branch head;
+  - closed tickets kept listed;
+  - the plain-git reading.
+
+  The record courses now defer to `create-pr`'s rule.
+
+  Fixed here:
+  - **Reading.** The next leg reads at the branch's fetched head, finding the file by `id` once
+    archived.
+  - **Withdrawing.** It happens on the default branch, and every record writing leg declares the
+    compensation `close-pr`.
+  - **Closing.** Only the run that queues `merged-by-hand` sets `done` and archives; other
+    outcomes leave the file live.
+  - **`file`** reads `PLAN.md` at its snapshot.
+  - **The default-branch rule** is limited to record courses, call children being no record.
+  - **R-BTN-184** names the record courses' own archive move and the human's merge.
+  - **The adapter** follows the forge.
+  - **Scenarios.** S-BTN-107 and S-BTN-194 are trimmed to this PR's rules.
+
+- **2026-11-01 — review round three of "one ticket, one PR, one merge"** (one fresh reviewer, the
+  last round). Blocking:
+  - **Every record PR carries `status: done`,** so its merge closes the ticket in git before
+    Baton sees the arrival. This is B-154's gap, made routine here.
+
+  Majors:
+  - `build-app` had no way to close in git and no home for `VERIFY.md`.
+  - Ticket ids could collide across an archived ticket and an open branch, stopping the sync.
+  - B-149's migration could not hold changed legs in one file.
+  - The new `document:` and `duplicate_of:` fields failed the close's own schema check.
+
+  Fixed:
+  - **B-149 depends on B-154,** stated in R-BTN-131 and B-149, and S-BTN-194's plain-git column
+    defers to it.
+  - **`build-app`** gains a record leg `report` (`VERIFY.md` and the request's close on its own
+    branch) and `merged-by-hand` to `shipped`. `verify` reports `verified`. An `abandoned` or
+    `stopped` request is listed until the owner withdraws it in git.
+  - **Ticket ids.** Every allocator skips `archive/` and the open ticket branches' heads, and
+    the sync's duplicate-id refusal is the backstop.
+  - **The migration** adopts first and uses `renamed_from` legs.
+  - **The new fields** are shaped and added to the shipped schema.
+  - **`close-pr`** is one idempotent compensation per course on an ordinary runner.
+  - **`answer:`** is never written on the branch.
+  - **S-BTN-107** no longer expects PRs on stages that never ran.
+
+  This was the third and last round the babysit skill allows. Its findings are fixed without
+  another review, and what remains is for the owner.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
