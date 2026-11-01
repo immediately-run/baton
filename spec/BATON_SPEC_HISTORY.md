@@ -1275,7 +1275,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     resolve page. R-BTN-116 is the one
     primitive: the ticket source posts the queued person leg's **question** (`{id, url, severity,
     options}`) with the ticket; the answer is a `std:decision@1` from the person (CLI, dashboard,
-    MCP) or, where the policy admits `sync`, from the ticket's `answer:`; expiry is the leg's
+    or, where the policy admits `sync`, from the ticket's `answer:` (a delegated key's reach is part 3's); expiry is the leg's
     `expires: {after_s, reached}`. R-BTN-78 (posted decisions, the `decision` block kind,
     `hitl.decision`, `ticket_decisions`) and R-BTN-173 (light questions, `refs/baton/questions/*`,
     `baton_held`, the `answers` route, `condition_answers`, the `answer` outbox kind,
@@ -1364,11 +1364,49 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   queued and fires under R-BTN-39's rules; a person leg has no `stalled_s`. R-BTN-83 names the four
   held cases. The conditions route gains `questions` entries and R-BTN-163 says what each entry
   carries. The `ask` course names no `cancel` leg. A raise that names a handler records a sync want;
-  the closed world's minute is the forge's notification or a runner's poll, and G-BTN-167 states it.
+  the closed world's minute is the forge's notification or a runner's poll, and G-BTN-167 states the refusal.
   `baton.head-behind` names a default branch reset behind the head. The deadline lives in
   `claims.deadline_at` alone. The record courses end at `merged` or, by `close-pr`, `closed`.
   Every leftover word was removed, and this entry quotes the owner's answers apart from the tickets'
   readings of them.
+
+- **2026-11-01 — review round two of the restructure's part 1** (one fresh reviewer, the diff and
+  the impact list, round one's fixes re-checked line by line). Every round-one finding was
+  confirmed closed but R-BTN-169's MCP leftover and three sibling rules the `cancel` leg's fixes
+  had not reached. Two blocking: after a forced Resync the head was already `sha`, so the sync
+  posted a refresh or an advance against it, never the `parent_sha: null` first snapshot R-BTN-11
+  judged the post as, and S-BTN-13 and S-BTN-121 could not both follow; and R-BTN-63's run-count
+  restart was applied to "the leg it queues" while R-BTN-39 and adopt selected `next` only among
+  legs with runs left, so `build-app`'s spent `verify` was never queued and nothing in §13 held the
+  restart. Majors: R-BTN-72 and the heartbeat's `git` view told the runner of a `cancel` leg on a
+  git-withdrawn ticket it had already been released; §4.3's materialization, R-BTN-147's
+  `ticket-dropped` and R-BTN-85's `closed-under-claim` were not amended for the kept-live
+  `cancelling` ticket; R-BTN-169 still named MCP a `std:decision@1` writer; S-BTN-127 answered a
+  person leg that did not leave Baton's station; S-BTN-132 ran a `cancel` leg on a `review-pr`
+  child whose course has none; S-BTN-136 expected a hold `outbox-unlanded` no transaction set; and
+  `cancelling` as a `hold_reason` overwrote the owner's hold, survived in `kept_json` and came back
+  unliftable on a returning id (S-BTN-39). Minors: R-BTN-5's file-absence check, a route arming no
+  `expires`, the `questions` entry's fields, G-BTN-44's and `leg_queue_members`' cancel-leg clauses,
+  "armed" in R-BTN-64 and S-BTN-37, and three history statements.
+
+  Fixed: a forced Resync keeps the head `sha` and marks the board unmaterialized
+  (`board_head.reset_at`); the next accepted post is materialized as a first snapshot whatever its
+  `parent_sha`, every ticket written and the omitted live ones dropped, and `reset_at` clears
+  (R-BTN-11, §4.3, R-BTN-143; S-BTN-13, S-BTN-121). A person's answer, an owner's route or an adopt
+  selects `next` before the `max_runs` test and records the restart as `runs_from` on
+  `ticket_stations`, exported with the course history (R-BTN-39, R-BTN-63, §13). A `cancel` leg's
+  claim runs to its end under `closed: withdrawn` (R-BTN-72, the heartbeat's `git` view), its ticket
+  is neither deleted at materialization nor dropped nor logged `closed-under-claim` (§4.3,
+  R-BTN-147, R-BTN-85), and its file's absence releases nothing (R-BTN-5). MCP is gone from
+  R-BTN-169 and R-BTN-181 defers the delegated key to part 3. S-BTN-127 answers after `open`
+  reaches `waiting`, and R-BTN-162 says the in-claim path needs `open` run within `wait_s`;
+  S-BTN-132's cancel case is a `draft-doc` ticket's `close-pr`; `outbox-unlanded` is gone from
+  §6.8, §13.6 and S-BTN-136. `cancelling` is a flag (`ticket_overrides.cancelling_at`) beside any
+  hold, read by rule 3, never in `kept_json`, cleared at the close (R-BTN-168, §6.8, §13.6,
+  `leg_queue_members`, G-BTN-44). `expires` is set at a route that queues the person leg too
+  (R-BTN-116); the `questions` entry carries `queued_at`, `severity?`, `posted_at?` (§14); "armed
+  timers" are the stalled and expiry instants (R-BTN-64, S-BTN-37); and this entry's B-161 bullet,
+  the R-BTN-104 row and the round-one record say what the text does.
 
 ## Retired requirements
 
@@ -1384,7 +1422,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 | R-BTN-164 | Baton queues no notices for people | this rewrite (2026-10-20) | one line in §7's introduction; `baton decision list` in R-BTN-163 |
 | R-BTN-170 | the window | this rewrite (2026-10-20) | **Migrations the implementation still carries**, below |
 | R-BTN-78 | posted decisions block, and are not resources | B-166 part 1 (2026-11-01, B-161 "One primitive") | the queued person leg's question, posted by the ticket source (R-BTN-116); `hitl.decision`, the `decision` block kind and `ticket_decisions` go with it |
-| R-BTN-104 | open world: a claim may name a ticket Baton has not seen | B-166 part 1 (2026-11-01, B-165's review default) | a closed world: a ticket is claimable after the first post that names it, which the sync want makes a minute away (R-BTN-5, R-BTN-94) |
+| R-BTN-104 | open world: a claim may name a ticket Baton has not seen | B-166 part 1 (2026-11-01, B-165's review default) | a closed world: a ticket is claimable after the first post that names it, which the forge's notification or a runner's poll makes a minute away (R-BTN-5) |
 | R-BTN-148 | open-world settlement, misdeclared claims, tainted branches | B-166 part 1 (2026-11-01, B-165's review default) | nothing: no provisional claim, no author gate, no taint |
 | R-BTN-166 | a choice station: the first leg ready wins | B-166 part 1 (2026-11-01, B-165's review default) | a person leg's `expires: {after_s, reached}` (R-BTN-116); no general race between legs |
 | R-BTN-173 | light questions: answered in the claim, or promoted to git | B-166 part 1 (2026-11-01, B-161 "One primitive") | the plain path: a handler ticket written git first, asked through its person leg, the restart formed by Baton from the answer (R-BTN-161, R-BTN-162, R-BTN-169) |

@@ -158,8 +158,9 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
     claim is active on the ticket; and Baton holds the ticket for nothing else — no call or
     `suspend` condition it is blocked on (R-BTN-126, R-BTN-162, R-BTN-165), no cancellation under
     way (R-BTN-168). Its `next` is the attestation's, else the first leg the course file lists
-    leaving `reached` with runs left under `max_runs`. Baton logs a `fact-arrival` history row and
-    keeps the `ref`.
+    leaving `reached` with runs left under `max_runs` — for a person's answer, counting from the
+    restart the answer makes (R-BTN-63), so the first leg listed. Baton logs a `fact-arrival`
+    history row and keeps the `ref`.
     - **Idempotent.** An arrival whose `ref` Baton has applied for this ticket is accepted
       silently and moves nothing, so the sync attesting the same merged PR or `answer:` on every
       run changes nothing, and a ticket that loops back to the station is not moved again by an
@@ -183,8 +184,8 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
       it is one of the actions `approvers.policy` governs (R-BTN-186).
     - **Where.** The station given, or without `--at` the station the latest snapshot's facts
       imply, refused `nothing-implied` where the course implies none. Station and `next` must be
-      the course file's, `next` leaving the station and with runs left under `max_runs`; absent,
-      `next` is the station's first listed leg.
+      the course file's, `next` leaving the station; absent, `next` is the station's first listed
+      leg. The adopt restarts `next`'s run count (R-BTN-63), so runs already made do not refuse it.
     - **What it writes**, in one transaction: if a claim is active, its `release`
       (`released:requested`) and its fence (R-BTN-19), both before the position; the position
       (`next_source: owner`), its path extended by one entry `{leg: null, reached: <station>,
@@ -1238,7 +1239,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
 - **The sync run.** A run checks out with full history (ancestry needs it), then:
   1. `POST /v1/sync/observation` → `{sha, observation, bars, trusted_identities, code_repos,
      provisional, positions, unconfirmed}`: Baton's head (null before the first post; the named
-     commit after a forced Resync, R-BTN-11), a fresh observation number (R-BTN-62), the owner bars in force or
+     commit, with an unmaterialized board, after a forced Resync, R-BTN-11), a fresh observation number (R-BTN-62), the owner bars in force or
      scheduled (R-BTN-67), the trust inputs (R-BTN-139, R-BTN-140), the commits provisional block
      rows wait for (R-BTN-126), `positions` — every live ticket's `{station, path_len, path,
      next_leg, running?}` from Baton's course history (R-BTN-39); a ticket absent from it is at its
@@ -1257,7 +1258,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
   A post over R-BTN-149's caps is refused `too-large`. Baton materializes each accepted
   snapshot into `tickets`, upserting rows whose `row_hash` changed and deleting rows of tickets
-  that left the board; its stations likewise write only the rows that changed (R-BTN-70), so a
+  that left the board — a ticket marked `cancelling` excepted (R-BTN-168), and every row written
+  after a forced Resync (R-BTN-11); its stations likewise write only the rows that changed (R-BTN-70), so a
   post costs rows written in proportion to what moved, not to the board's size (R-BTN-2). The
   protocol is the CLI's (`baton repo sync`); the repository supplies only its ticket source and
   station functions.
@@ -1306,13 +1308,16 @@ live solely in Baton, and both are exportable (R-BTN-88).
     confirmation) or `baton admin resync <repository> --force [<sha>]`, which reads
     `origin/<default branch>` when none is given and shows it before signing. In one transaction
     Baton logs an `admin` event `head-reset` naming the old head and the new, replaces the head
-    with `sha` and no board (the observation counter runs on, so nothing older is accepted), and
-    records a sync want (R-BTN-94). The next accepted post is judged as a first snapshot's —
-    `parent_sha: null`, its `sha` the named commit or one descending from it, refused `head-moved`
-    otherwise — and every live ticket it omits is dropped as R-BTN-147 says; a `board_snapshots`
-    row the `sha` already has is replaced. Claims whose `snapshot_sha` the new history does not
-    reach end `released:off-branch` at their runner's next check (R-BTN-143). Ordering never
-    depends on a clock.
+    with `sha` and marks the board **unmaterialized** (`board_head.reset_at`; the observation
+    counter runs on, so nothing older is accepted), and records a sync want (R-BTN-94). The sync
+    then posts as it always does against the head it is handed — a refresh of `sha`, or an advance
+    whose `parent_sha` is `sha` — and the first post accepted after the reset is **materialized as a
+    first snapshot's** whatever its `parent_sha`: every ticket it lists is written, every live
+    ticket it omits is dropped as R-BTN-147 says, and `reset_at` clears. A post whose `parent_sha`
+    is not `sha` stays `head-moved`, so only the named history follows. A `board_snapshots` row the
+    `sha` already has is replaced. Claims whose `snapshot_sha` the new history does not reach end
+    `released:off-branch` at their runner's next check (R-BTN-143). Ordering never depends on a
+    clock.
 
 - **R-BTN-147 (a board names a head that exists; dropped and renumbered tickets are raised).**
   - **The sync proves its head is founded.** After its full fetch, `baton repo sync` checks
@@ -1333,7 +1338,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
     - `baton.ticket-dropped` — the post drops, without listing it in `closed`, a ticket Baton
       holds state for (a claim, hold, backoff, open condition, fence); an active claim on it
       ends `released:stale-board`, and its owner state is kept in a `closed_tickets` row
-      `closed_as: dropped`, as a closing's is (R-BTN-12);
+      `closed_as: dropped`, as a closing's is (R-BTN-12). A ticket marked `cancelling` is neither
+      dropped nor its `cancel` leg's claim staled while the leg runs (R-BTN-168);
     - `baton.renumbered` — the post adds a ticket at the `path` of a ticket it drops; the new id
       takes the old one's hold and backoff (`admin` event `renumbered`).
 
@@ -1396,7 +1402,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
     Before preparing any tree at the sha, the runner checks it is on the registered default
     branch (R-BTN-143, else `released:off-branch`). If `git cat-file -e <snapshot_sha>` fails or
     the file is absent, it fetches the default branch once, then releases `stale-board` if it is
-    still missing.
+    still missing — a claim of the `cancel` leg excepted (R-BTN-168), which needs no file and reads
+    the PR and branch it closes.
   - The runner reads the ticket from `origin/<default branch>:<path>`, never the working tree,
     and takes body, exit criteria and PRs from that file. A leg of a course that keeps its
     record on the ticket's branch (R-BTN-131) reads the body and its inputs at that branch's
@@ -1474,7 +1481,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
   | sub | when |
   |---|---|
   | `bars-mismatch` | posted bars lack a tag the holder declared (R-BTN-63) |
-  | `closed-under-claim` | a ticket closed while a claim is active on it |
+  | `closed-under-claim` | a ticket closed while a claim is active on it, a claim of its `cancel` leg excepted (R-BTN-168) |
   | `spawned-unposted` | a reported child the first snapshot after the end does not post (R-BTN-86) |
   | `output-invalid` | a posted output pointer failed its schema or digest (R-BTN-109): logged and raised, nothing adopted |
 
@@ -1760,8 +1767,8 @@ mean (R-BTN-50).
     and the owner-state export. The `start_leg`, a call's settlement and an applied arrival's
     `next` are recorded in the position alone.
   - **Route.** `baton owner route <ticket> <leg>` (`POST /v1/owner/{repository}/tickets/{ticket}/route`)
-    queues any leg leaving Baton's station for the ticket, `next_source: owner`, and `{clear:
-    true}` restores the course's choice; both are logged `re-routed`.
+    queues any leg leaving Baton's station for the ticket, `next_source: owner`, restarting its run
+    count (R-BTN-63); `{clear: true}` restores the course's choice. Both are logged `re-routed`.
   - **The queue is the queued leg.** A ticket waits in exactly one queue, its queued leg's
     (R-BTN-79), and matching rule 1 offers that leg alone, `ready` or `waiting` as posted. A
     queue, not a reservation: whoever claims passes every gate then. A person leg (R-BTN-116) and
@@ -1790,8 +1797,12 @@ mean (R-BTN-50).
     `max_runs`, attempts (R-BTN-122) and retries read these counts. Git never places a ticket
     (R-BTN-39), so an agent that rewrites a ticket's history in git changes neither its position
     nor its counts. `max_runs` bounds the runs made without a person: a person leg's answer
-    (R-BTN-116), an owner's route or an adopt (R-BTN-83, R-BTN-39) starts the count of the leg it
-    queues again, since a person's intervention is what the bound waits for.
+    (R-BTN-116), an owner's route or an adopt (R-BTN-83, R-BTN-39) **restarts the count** of the
+    leg it queues, since a person's intervention is what the bound waits for. Baton records the
+    restart as `runs_from` on the position (`ticket_stations`, the id of the last `claim_legs` row
+    at that moment; exported with the course history, R-BTN-88); the queued leg's runs toward
+    `max_runs` are those recorded after it, so the leg is queued whatever its earlier runs, and the
+    traversal record itself is never erased.
   - The holder pushes a leg's evidence before the `advance` that finishes it, and may pass
     `bars`, tags it bars from the new leg, which only add to the posted bars. A later snapshot
     posting that leg's bars without a tag the holder declared is the discrepancy
@@ -1815,7 +1826,7 @@ mean (R-BTN-50).
 
 - **R-BTN-79 (legs are queues; a course may bound them, as a warning).** Leg L's **queue**, per
   repository, is the tickets of L's course whose queued leg is L (ready or waiting, blocked or
-  not) and that are not held (R-BTN-75; a ticket held `cancelling` counts in its queued `cancel`
+  not) and that are not held (R-BTN-75; a ticket marked `cancelling` counts in its queued `cancel`
   leg's queue, R-BTN-168). Baton keeps its depth in `leg_queues`, changed in the
   transactions that accept a snapshot, start, end or advance a claim, confirm an end, clear a
   fence or re-route a ticket.
@@ -2096,7 +2107,7 @@ mean (R-BTN-50).
     per-leg record keyed by an old name to the new one: `leg_attempts`, `ticket_timers`,
     `ticket_blocks`, `leg_needs`, `ticket_next_legs`, `ticket_bars`, `ticket_questions` and a held position's
     `route_leg` and `route_station` (§13). Runs count toward `max_runs` under the resolved
-    name; attempts, backoffs, armed timers, blocks and held positions carry over unchanged.
+    name; attempts, backoffs, the stalled and expiry instants, blocks and held positions carry over unchanged.
     Bars do not follow renames (R-BTN-142).
   - **Removals.** A claim whose station or leg the new file lacks, even under a rename,
     keeps its lease; its heartbeat says `station: unknown`; the session finishes or abandons the
@@ -3066,8 +3077,9 @@ its course already has. Baton's own conditions are answered on their resolve pag
     as an input, `required: false` where a route can skip the person leg. Baton logs
     `question-answered` with the option and `answered_by`, and the question is closed.
   - **Expiry.** A person's leg may carry `"expires": {"after_s": <n>, "reached": <outcome>}`
-    (60 s–30 d). The instant is set when the ticket arrives at a station with the person leg
-    queued — that arrival, by Baton's clock, plus `after_s` — and held in `ticket_timers`
+    (60 s–30 d). The instant is set when the person leg becomes the queued leg — at the ticket's
+    arrival at the station, a new ticket's placement at `start` included, or at a route that queues
+    it (R-BTN-83) — that moment, by Baton's clock, plus `after_s`, and held in `ticket_timers`
     (R-BTN-167); a person leg that is not the queued leg has no instant. It restarts only when the
     ticket's station changes, so a Baton move keeps it (R-BTN-88). At the instant, if the leg is
     still queued and unanswered, Baton applies the arrival at `reached` itself (`next_source:
@@ -3137,7 +3149,7 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   |---|---|---|---|
   | 1 | Claim: the queued leg (R-BTN-83, or a route override) is `ready` as posted (R-BTN-70; a `cancel` leg Baton queued is `ready`, R-BTN-168), a snapshot was accepted after the ticket's last end (R-BTN-10), and no `ticket`, `condition` or `call` row, nor a `resource` or `attestation` row binding as a gate (R-BTN-181), is on that leg or the whole ticket. Advance: the new leg is an edge from the claim's station within its run limit (R-BTN-63), with no `ticket`, `condition` or `call` row on it, nor a `resource` or `attestation` row binding as a gate, and no whole-ticket `ticket` row | claim, advance | `blocked` with the blocks; else rule 1 (`not-ready`, or R-BTN-63's codes) |
   | 2 | *(advice)* expedite lane: while 2 active claims hold expedited tickets, other expedited tickets lose their expedite place and carry `expedite-bound` | — | — |
-  | 3 | No other active, completed-unconfirmed (not superseded, R-BTN-168) or fence-pending claim on the ticket; no hold (§6.8), the `cancelling` hold refusing every leg but the ticket's queued `cancel` leg (R-BTN-168) | claim; advance: hold only | `claimed`, `held` |
+  | 3 | No other active, completed-unconfirmed (not superseded, R-BTN-168) or fence-pending claim on the ticket; no hold (§6.8); not `cancelling`, which refuses every leg but the ticket's queued `cancel` leg (R-BTN-168) | claim; advance: hold and cancellation only | `claimed`, `held` |
   | 4 | `capabilitiesOf(ticket.requires ∪ leg.requires.capabilities) ⊆ H ∪ D(H)`, with `H = declared ∩ grant(repository)` and D the repository's ontology (R-BTN-174); `runner:` counts once declared (R-BTN-133); no clause is met by all | claim, advance | `missing-capability` |
   | 5 | Tier at or below the runner's ceiling: the position in the repository's `tiers` of the lower of its declared ceiling and grant `max_tier`; untiered fits only the top | claim, advance | `above-tier-ceiling` |
   | 6 | *(retired: `human-operator` is a runner's own statement, checked by rule 4 like any capability, R-BTN-121)* | — | — |
@@ -3249,8 +3261,9 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
   show, and the mirror writes the tag (§16).
   - A **hold** means "do not hand this ticket out" (rule 3), with `hold_reason` `owner`,
     `mcp:<name>`, `parked` (R-BTN-163), `attempts-exhausted`, `non-retryable:<class>`,
-    `blocked-exhausted` (R-BTN-122, R-BTN-126),
-    `cancelling` (R-BTN-168), or `outbox-unlanded` or `outbox-refused` (R-BTN-171). The dashboard's **Cancel**
+    `blocked-exhausted` (R-BTN-122, R-BTN-126), or `outbox-refused` (R-BTN-171). A cancellation
+    (R-BTN-168) is a second flag beside the hold, `cancelling`, which refuses every leg but the
+    ticket's queued `cancel` leg (rule 3) and which no owner lifts. The dashboard's **Cancel**
     sets a hold and sends the holder a `release` with reason `owner-cancel`. A hold is not
     mirrored as a status; the mirror writes a Status note (§16).
   - Owners set and clear both with `POST /v1/owner/{repository}/overrides/{ticket}` or `baton
@@ -3712,8 +3725,10 @@ Limits that hold throughout:
       transaction that accepts the post or decides the supersession, before any `cancel` leg runs;
     - an owner resolves the condition (R-BTN-163): the chosen restart, `reason: "resolved"`,
       `answered_by` the owner's credential.
-  - **Settling within the wait.** In that transaction Baton queues a `handled` message for the
-    raiser's holder and rings it (R-BTN-91). The heartbeat answers `handled: [{condition_id,
+  - **Settling within the wait.** The in-claim path needs a runner to run the handler's first leg
+    (`ask`'s `open`) within `wait_s`, so that its person leg is queued; a repository that wants it
+    runs a runner with the handler courses' capabilities. In the settling transaction Baton queues
+    a `handled` message for the raiser's holder and rings it (R-BTN-91). The heartbeat answers `handled: [{condition_id,
     handler, restart, reason, answered_by?}]`, inline; `ctx.raise` returns `{restart, reason,
     answered_by?}` and the leg goes on in the same session. In a session, `baton leg raise
     --wait` blocks for the wait and prints the restart or `suspend`. A harness that bounds a
@@ -4037,10 +4052,12 @@ Limits that hold throughout:
       confirmed, concludes nothing (no `baton.check-unattested`), counts no attempt, and no
       longer holds rule 3 or raises `baton.unconfirmed`;
     - logs `superseded {by}`;
-    - holds the ticket `cancelling` (`hold_reason: cancelling`, §6.8), replacing any earlier
-      `hold_reason`, which no owner lifts: the ticket shows `cancelling` until it closes. The hold
-      refuses every leg but the ticket's queued `cancel` leg (§6.6, rule 3); an unlanded
-      `withdraw` entry raises `baton.outbox-late` without changing it (R-BTN-171).
+    - marks the ticket **`cancelling`** (`ticket_overrides.cancelling_at`, §6.8), a flag beside any
+      hold it carries, which no owner lifts and which is cleared when the ticket closes, never kept
+      past it (so a returning id gets its hold back, not the cancellation, R-BTN-12): the ticket
+      shows `cancelling` until it closes, and the flag refuses every leg but the ticket's queued
+      `cancel` leg (§6.6, rule 3); an unlanded `withdraw` entry raises `baton.outbox-late` without
+      changing it (R-BTN-171).
   - **Then the cancel leg, then the close.** For a cancelled ticket whose course names a `cancel`
     leg leaving its station, Baton queues that leg, `ready` at once (R-BTN-69), and a runner
     holding its capabilities claims it like any leg. In the transaction that records the run's
@@ -4156,12 +4173,12 @@ Limits that hold throughout:
     - `forge-check`: the check run's `external_id` carries the id, and R-BTN-115's `seq` keeps an
       older entry from overwriting a newer one.
   - **What Baton holds until a git entry is confirmed.**
-    - **Withdraw entry.** The cancelled ticket stays held `cancelling` (R-BTN-168) until a snapshot
+    - **Withdraw entry.** The cancelled ticket stays `cancelling` (R-BTN-168) until a snapshot
       posts it withdrawn or closed, which closes it `withdrawn`.
     - **Delivered, not confirmed.** A `delivered` entry is never claimed again. An entry still not
       `confirmed` after 3 accepted snapshots at or after its commit raises `baton.outbox-late`; a
-      `withdraw` entry's ticket, already held `cancelling` (R-BTN-168), keeps that hold, and the
-      condition's `retry` queues the entry again.
+      `withdraw` entry's ticket, already `cancelling` (R-BTN-168), stays so, and the condition's
+      `retry` queues the entry again.
   - **Dropping.** A `withdraw` entry for a ticket whose course names a `cancel` leg is queued in
     the transaction that records that leg's end (R-BTN-168). A `withdraw` entry whose ticket a snapshot shows
     withdrawn or closed before any courier claimed it is `dropped`.
@@ -4199,7 +4216,7 @@ Limits that hold throughout:
       source posts its question from the handler file's `handles.restarts`, each option reaching
       `answered`.
     - A person answers with a `std:decision@1` naming a restart as its `option` — from the
-      dashboard's Needs-you entry, `baton attest`, or MCP — or, where the policy admits `sync`
+      dashboard's Needs-you entry or `baton attest` (R-BTN-116) — or, where the policy admits `sync`
       for `std:decision@1`, in the ask's own file (`answer: b`, the markdown source's `answer`
       field, R-BTN-74), which the sync attests. The raiser resumes with that restart, `reason:
       "chosen"` (R-BTN-162).
@@ -4271,7 +4288,8 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
   - The response carries the runner's active claim — id, ticket, station, leg, nonce,
     `deadline_at`, Baton's position (`station`, `path`, `next_leg`) and the latest
     snapshot's `git` view (`next` legs with state, `waiting_on` and `not_before`; or `closed:
-    done | withdrawn`; or `unknown`) — or none; pending messages (§6), marked `delivered` in the same
+    done | withdrawn`; or `unknown`; for a ticket marked `cancelling`, its queued `cancel` leg
+    `ready`, R-BTN-168) — or none; pending messages (§6), marked `delivered` in the same
     transaction, and delivered ones not yet acknowledged, re-sent until they are (§6.9); the current activity; owner bars in force (R-BTN-67); stale courses;
     `handled` conditions (R-BTN-162); `pending_grants` (R-BTN-146); `server_time`.
   - Every runner call updates `last_seen_at`. Lease upkeep has its own rate bucket and no
@@ -4441,7 +4459,9 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     the runner suspends — unless `waiting_on` is in the course file's `short_waits`: then it
     keeps the claim, re-reads the station each heartbeat for up to 30 minutes, then suspends
     (R-BTN-40). At an end station, or when the heartbeat's `git` says `closed: 'done'`, it ends
-    `done`; `closed: 'withdrawn'` is a `stale-board` release Baton already made.
+    `done`; `closed: 'withdrawn'` is a `stale-board` release Baton already made — except under a
+    claim of the ticket's `cancel` leg, whose `git` view shows that leg `ready` and which runs to
+    its end (R-BTN-168).
   - **Reactions**: a gate's refusal or a `max-runs` refusal suspends at the station reached; an
     `off-graph` refusal or heartbeat `station: unknown` (R-BTN-64) finishes or abandons the leg
     and ends `released:course-changed`; a prerequisite lost mid-leg ends
@@ -4583,7 +4603,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     `posted_by` and records a sync want (R-BTN-94).
   - **No roll-back.** The claim response also names `base_sha`, the head the post that set
     `snapshot_sha` was accepted against (`board_snapshots.parent_sha`; null for a repository's
-    first snapshot, a forced Resync's included, R-BTN-11). The runner checks that `base_sha`
+    first snapshot). The runner checks that `base_sha`
     is an ancestor of `snapshot_sha` as well, so a post naming an older default-branch commit
     cannot roll runners back to its scripts; a failure is handled as an off-branch sha.
   - The rule binds `baton runner start`, launchers and `baton leg replay`'s recorded sha, not
@@ -6140,7 +6160,7 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
       typed output, through the CLI's own templates (R-BTN-171), marks the entry `delivered` with
       that commit, and Baton holds only its filter fields (R-BTN-33). It is not claimable, no leg
       reads its body, and the entry is not `confirmed`, until its file lands. Such an entry is late
-      only when it is not delivered within 24 hours, and never held `outbox-unlanded`;
+      only when it is not delivered within 24 hours;
     - **a proposal lands by a proposal merge** (R-BTN-183): the merge runner merges
       `baton/proposed/<ticket>` when every commit on it since the merge base is a deliverer's
       template write for that ticket's entries, touching only the paths they name, and a
@@ -6191,7 +6211,8 @@ merges that commit. It needs the guarantees `tickets-approved`, `independent-rev
     counts only while its writer's key, and for a `baton` attestation the attested runner key, is
     unrevoked. An unsigned reading never counts toward a trusted leg's requirement (R-BTN-182).
   - **Any surface.** `POST /v1/repositories/{repository}/attestations` (`baton attest`, the
-    dashboard, MCP) takes an attestation about work, and R-BTN-76's routes take readings; whether
+    dashboard; a delegated key as part 3 decides, B-156) takes an attestation about work, and
+    R-BTN-76's routes take readings; whether
     one is accepted depends on the credential alone (R-BTN-186). A delegated key is never `human`.
     `DELETE …/attestations/{id}` revokes one, a human gate for `human` ones.
   - **Supersession.** A new attestation supersedes an earlier one only when type, subject, writer
@@ -6533,7 +6554,7 @@ reach it, and the object refuses to serve until every migration is applied (§2)
   `ticket_bars`, `ticket_questions`, `leg_queue_members`, `ticket_blocks`, `leg_needs`,
   `ticket_timers` and its `condition_bindings`. Its `ticket_overrides` row and `leg_attempts`
   move into `closed_tickets.kept_json` and come back if the same id returns (R-BTN-12); a
-  `retry` block is rebuilt from `leg_attempts.retry_after`. A ticket held `cancelling` keeps its
+  `retry` block is rebuilt from `leg_attempts.retry_after`. A ticket marked `cancelling` keeps its
   board rows until Baton closes it (R-BTN-168): the snapshot's `closed` entry is recorded and
   applied then. Every other row naming it is kept:
   claims and their leg runs (the traversal record, R-BTN-63), conditions, the outbox; its
@@ -6617,17 +6638,17 @@ and never accepted holds no role (§12.1).
 | Table | Key | Columns | Purpose |
 |---|---|---|---|
 | `board_snapshots` | `(repository_id, sha)` | `parent_sha`, `received_at`, `ticket_count`, `posted_by` | Accepted posts (R-BTN-11, R-BTN-102) |
-| `board_head` | `repository_id` | `sha`, `observation`, `last_handed_out`, `observation_holder`, `observation_issued_at`, `observation_renewed_at`, `behind_since` (R-BTN-147), `fleet_version`, `stations_observation` (the latest accepted snapshot to post stations) | The head and the observation counter (R-BTN-62, R-BTN-150, R-BTN-99); a station row's reading (R-BTN-70) |
+| `board_head` | `repository_id` | `sha`, `observation`, `last_handed_out`, `observation_holder`, `observation_issued_at`, `observation_renewed_at`, `behind_since` (R-BTN-147), `reset_at` (set by a forced Resync until the next accepted post, R-BTN-11), `fleet_version`, `stations_observation` (the latest accepted snapshot to post stations) | The head and the observation counter (R-BTN-62, R-BTN-150, R-BTN-99); a station row's reading (R-BTN-70) |
 | `tickets` | `id` | `repository_id` (home), `local_id` (`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`), `course_id`, `course_json` (opaque), `path`, `title`, `display_json`, `tier`, `expedite`, `parent`, `repos` JSON, `rank`, `check_sha`, `check_head_repo_id`, `check_head_ref`, `snapshot_sha`, `row_hash`, `blocked_since`, `answer_lost` JSON | Filter fields of each live ticket; an accepted snapshot rewrites only rows whose `row_hash` changed (R-BTN-33, R-BTN-77, R-BTN-86, R-BTN-153) |
 | `ticket_requires` | `(ticket_id, name)` | — | The ticket's `requires` clause, expanded to capabilities (R-BTN-120) |
 | `ticket_depends` | `(ticket_id, leg, ref)`; `leg` `''` for every leg | `on_ticket`, `ref` (`<ticket>@at:<station>,…`, `@reached:…`, `@done` or `@withdrawn`) | Posted `depends_at` entries; index `ticket_dependents` on `on_ticket` (R-BTN-120, R-BTN-132) |
-| `ticket_stations` | `ticket_id` | `station`, `path` JSON `[{leg, reached, adopted?}]` (`leg` null on an adopted entry), `path_len`, `to_end`, `next_leg`, `next_source` (`holder`\|`baton`\|`owner`, R-BTN-83), `handoff_url`, `snapshot_sha` and `observation` (the snapshot that last changed the row; the latest to show it there is the greater of `observation` and the repository's `stations_observation`) | Where the ticket is: Baton's course history, written by arrivals, settlements, routes and adoption; a snapshot only creates a new ticket's row at `start` (R-BTN-39, R-BTN-70, R-BTN-83, R-BTN-165) |
+| `ticket_stations` | `ticket_id` | `station`, `path` JSON `[{leg, reached, adopted?}]` (`leg` null on an adopted entry), `path_len`, `to_end`, `next_leg`, `next_source` (`holder`\|`baton`\|`owner`, R-BTN-83), `runs_from` (the `claim_legs` id a person's answer, a route or an adopt restarted the queued leg's run count from, R-BTN-63), `handoff_url`, `snapshot_sha` and `observation` (the snapshot that last changed the row; the latest to show it there is the greater of `observation` and the repository's `stations_observation`) | Where the ticket is: Baton's course history, written by arrivals, settlements, routes and adoption; a snapshot only creates a new ticket's row at `start` (R-BTN-39, R-BTN-70, R-BTN-83, R-BTN-165) |
 | `ticket_next_legs` | `(ticket_id, leg)` | `state` (`ready`\|`waiting`), `waiting_on` (a label), `course_json` (opaque), `ready_since`, `waiting_since`, `not_before` | Legs leaving the station (R-BTN-83, R-BTN-89) |
 | `ticket_bars` | `(ticket_id, leg, tag)` | — | Tags barred from a leg (R-BTN-60) |
 | `ticket_questions` | `ticket_id` | `question_id`, `leg` (the queued person leg), `url`, `severity`, `options` JSON `[{id, reached}]`, `posted_at`, `answered_at`, `answered_by`, `option` | The queued person leg's question and its answer or expiry (R-BTN-116, R-BTN-163) |
 | `closed_tickets` | `ticket_id` | `closed_as` (`done`\|`withdrawn`\|`dropped` — dropped with owner state to keep, neither done nor withdrawn), `final_station`, `final_path` JSON, `parent`, `observation`, `closed_at`, `purged_at`, `kept_json` (the ticket's `ticket_overrides` row and `leg_attempts`, kept past the purge) | What a snapshot reported closing or dropped; deleted if the ticket returns, after `kept_json` is restored (R-BTN-10, R-BTN-12, R-BTN-81, R-BTN-86) |
 | `leg_queues` | `(repository_id, course_id, leg)` | `depth`, `max_queue` (the bound last judged; NULL until judged) | R-BTN-79 |
-| `leg_queue_members` | `ticket_id` | `repository_id`, `course_id`, `leg` | The one queue each unheld ticket is counted in (R-BTN-79) |
+| `leg_queue_members` | `ticket_id` | `repository_id`, `course_id`, `leg` | The one queue each unheld ticket, and each `cancelling` ticket, is counted in (R-BTN-79) |
 | `unblocked_dispatch` | `repository_id` | `last_sent_at`, `pending_json` (≤ 100 entries and a `truncated` count), `due_at` | Retired with B-152: the unblocked trigger's window is its `dispatch` entry's `not_before` (R-BTN-171); a new migration drops it |
 | `pending_owner_state` | `(repository_id, ticket_id, kind, key)` | `kind` (`override`\|`condition`\|`timer`\|`outbox`\|`station`\|`history`\|`run`), `key` (`''`, the condition id, the timer's `(leg, timer)` or the outbox id), `row_json` | Imported ticket-scoped rows awaiting their ticket's first snapshot (R-BTN-88) |
 
@@ -6661,7 +6682,7 @@ Under §12.8 (proposal), `repository_policies` `(repository_id, version)` holds 
 | `ticket_blocks` | `(ticket_id, kind, ref, leg)`; `leg` `''` for the whole ticket | `repository_id`, `kind` (`ticket`\|`capability`\|`resource`\|`retry`\|`condition`\|`call`\|`attestation`), `ref`, `since`, `until`, `provisional` (the commit a runner-written row waits for), `found` (`before-start`\|`during-run`), `binds` (`gate`\|`advice`; set for `resource` and `attestation` rows from their requirement, R-BTN-181) | Each unmet prerequisite, maintained, never recomputed on read (R-BTN-75, R-BTN-120, R-BTN-126) |
 | `leg_needs` | `(ticket_id, leg, resource)` | `repository_id`, `source` (`posted`\|`end`), `added_at`, `found_at` | Resources a next leg needs; an `end` need is never removed by a post (R-BTN-76, R-BTN-126) |
 | `leg_attempts` | `(ticket_id, leg)` | `repository_id`, `attempts`, `retry_after`, `last_error_type` | Retry state per ticket and leg; reset when the leg reaches an outcome or a hold is lifted (R-BTN-122) |
-| `ticket_overrides` | `ticket_id` | `expedite`, `hold`, `hold_reason` (`owner`\|`attempts-exhausted`\|`non-retryable:<class>`\|`blocked-exhausted`\|`parked`\|`cancelling`\|`outbox-unlanded`\|`outbox-refused`\|`mcp:<name>`), `route_leg`, `route_station`, `override_kind` (`owner`\|`baton`), `set_by`, `set_at` | Expedite and hold (§6); the queued leg Baton or the owner chose, held until the station changes — an owner's route, retry's `exhausted` leg, a person leg's expiry, the `cancel` leg (R-BTN-12, R-BTN-83, R-BTN-116, R-BTN-122, R-BTN-168) |
+| `ticket_overrides` | `ticket_id` | `expedite`, `hold`, `hold_reason` (`owner`\|`attempts-exhausted`\|`non-retryable:<class>`\|`blocked-exhausted`\|`parked`\|`outbox-refused`\|`mcp:<name>`), `cancelling_at` (set by a cancellation, cleared at the close, never in `kept_json`, R-BTN-168), `route_leg`, `route_station`, `override_kind` (`owner`\|`baton`), `set_by`, `set_at` | Expedite, hold and cancellation (§6); the queued leg Baton or the owner chose, held until the station changes — an owner's route, retry's `exhausted` leg, a person leg's expiry, the `cancel` leg (R-BTN-12, R-BTN-83, R-BTN-116, R-BTN-122, R-BTN-168) |
 | `owner_bars` | `id` | `repository_id`, `course` (an id or `*`), `tag`, `legs` JSON, `applies` (`claim`\|`claim+advance`), `starts_at`, `ends_at`, `release_holders`, `reason` (`^[a-z][a-z0-9-]{0,39}$`), `set_by`, `lifted_at` | R-BTN-67 |
 | `conditions` | `id` | `repository_id`, `ticket_id` (NULL for a repository's), `ref` (what a core condition is about: a runner, an instance, `<course>:<leg>`, a question id), `claim_id`, `leg`, `run`, `type`, `disposition` (`interrupt`\|`suspend`\|`notify`), `handler` (the handler ticket), `restarts` JSON, `default`, `severity` (`critical`\|`high`\|`normal`), `url`, `detail` JSON (a core condition's identifiers and numbers), `raised_at`, `closed_at`, `outcome`, `restart`, `reason`, `answered_by` (the answer's, or an owner's credential), `consumed_at` (an end of the raiser's claim consumed the restart, R-BTN-162) | Raised conditions, filter fields only; indexed open by repository, and by `handler`; an open core condition is unique on `(repository_id, type, ticket_id, ref)` (R-BTN-160, R-BTN-162, R-BTN-163) |
 | `ticket_timers` | `(ticket_id, leg, kind)`; `kind` `stalled`\|`expires` | `repository_id`, `from_at`, `due_at`, `fired_at` | The instants Baton holds per leg; each fires once per `from_at`; renamed with their leg (R-BTN-64, R-BTN-116, R-BTN-167) |
@@ -6804,7 +6825,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `GET /v1/repositories/{repository}/tickets/{ticket}/children` | reader | — | `{children: [{ticket_id, station, blocked, closed?}]}` | R-BTN-86 |
 | `GET /v1/repositories/{repository}/tickets/{ticket}/legs/{leg}/runs` | owner, admin | — | `{runs: [{run, claim, runner, mode, started_at, ended_at?, end?, session_url?, log_dir?, transcripts: [{repo, path, pushed_at}]}]}` | R-BTN-128, R-BTN-144 |
 | `GET /v1/repositories/{repository}/blocked` | reader | `?on=<kind>:<ref or *>&transitive=1?`, or `?cursor=` | `{tickets: [{ticket_id, blocks}]}`; with no `on`, blocked tickets grouped by kind and `ref`, 100 a page, `next_cursor` | R-BTN-75, R-BTN-79 |
-| `GET /v1/repositories/{repository}/conditions` | reader | `?open=1`, `?person=1`, `?type=<prefix>`, `?ticket=`, `?cursor=` | `{conditions: [{condition_id, ticket?, leg?, type, disposition, handler?, restarts, default?, severity, url?, detail?, resolve_url, raised_at, closed_at?, outcome?}], questions?: [{ticket, leg, asks, options: [{id, reached}], question_id?, url?, severity, posted_at}], next_cursor?}`, 100 a page; `questions` only with `person=1`: the queued person legs (R-BTN-116) | R-BTN-163, R-BTN-116 |
+| `GET /v1/repositories/{repository}/conditions` | reader | `?open=1`, `?person=1`, `?type=<prefix>`, `?ticket=`, `?cursor=` | `{conditions: [{condition_id, ticket?, leg?, type, disposition, handler?, restarts, default?, severity, url?, detail?, resolve_url, raised_at, closed_at?, outcome?}], questions?: [{ticket, leg, asks, options: [{id, reached}], queued_at, question_id?, url?, severity?, posted_at?}], next_cursor?}`, 100 a page; `questions` only with `person=1`: the queued person legs (R-BTN-116) | R-BTN-163, R-BTN-116 |
 | `GET /v1/repositories/{repository}/board` | owner, runner granted there, admin | — | `{repository, ready[], ready_by_tier, granted_capabilities: string[] \| null, server_time}` (R-BTN-179) | R-BTN-179 |
 | `GET /v1/repositories/{repository}/courses` | reader | — | each course file as last accepted, with its capability types and roles | R-BTN-121, R-BTN-157 |
 | `GET /v1/repositories/{repository}/stats` | reader | `?since=` | per station and leg, wait and run times; ends by reason and detail; suspensions; advice overridden; `off-graph` — aggregates and ids only | §5 |
@@ -6987,7 +7008,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-116 cross-repository reach | `repos:` outside `code_repos`, pattern `*`, an input with a wrong digest; A's owner writes `code_repos` carrying a `repo_id` and `consented_at` for B; a re-written list | `*` refused; ticket raised `repo-not-listed`, no fence; listing needs that repository's owner; `contract-input` before the leg runs; only `path` kept, no reach until B consents; kept paths keep their ids and consents |
 | S-BTN-125 CI tokens, notifications, import, local host | untrusted-event CI tokens; a cross-repository delivery; GitLab with `release/*` protected; an edited export; a pre-seal replay; non-loopback bind; readable secrets; `http` bearers | tokens refused, schedule and dispatch pass; no want; init refused; import refused naming the row; replay refused; bind as asked; exit 2; bearers refused except through `--trusted-proxy` |
 | **§4** | | |
-| S-BTN-13 board ordering | two syncs finishing out of order; a force-push of the default branch, read by the CLI sync and posted by hand; an administrator's forced Resync naming the new head, then a post of an unrelated `sha` and one of the new head | head never moves back; the CLI sync posts nothing, releases `unfounded` and `baton.head-unfounded` is raised, and the hand-made post is `head-moved`; after the reset (`head-reset`), the unrelated post is `head-moved` and the new head's is accepted as a first snapshot |
+| S-BTN-13 board ordering | two syncs finishing out of order; a force-push of the default branch, read by the CLI sync and posted by hand; an administrator's forced Resync naming the new head, then a post of an unrelated `sha` and the CLI sync's refresh of the new head | head never moves back; the CLI sync posts nothing, releases `unfounded` and `baton.head-unfounded` is raised, and the hand-made post is `head-moved`; after the reset (`head-reset`), the unrelated post is `head-moved` and the refresh is accepted and materialized as a first snapshot |
 | S-BTN-36 suspension confirmed from a PR | a suspension evidenced only in a code repository; an older observation arriving late; a reap and re-claim | confirmed by the next later snapshot, never by ancestry; `stale-observation`; R-BTN-5's check passes |
 | S-BTN-40 slow and stale syncs | a whole ticket under slow, stale-checkout and held syncs, a lost delivery, an archive sync numbered before `/end` | every `advance` accepted; no stale end; the stale checkout posts nothing; the schedule covers the loss; `done` confirmed from the closure |
 | S-BTN-43 no course code | five ticket files (a dependency, a `done`, an unknown field, no `id`) on the default source; a PR through review, fix and merge; `--eject tickets`; comment verdicts | four tickets on `create-pr`; the dependent waits; `filed` → `pr-open` → `reviewed` → `fixed` → `reviewed` → `merged`; the ejected copy rules; `src/core/` unchanged |
@@ -6995,14 +7016,14 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-49 child tickets | a leg files C1, C2 with `parent: T` and ends `spawned`; ends with 51 ids, the parent itself, or `done`; looping and foreign parents; children `T-1`, `T-2` push branches and PRs while T is held | bad ends `invalid-params`; children and T held concurrently, T's non-calling leg offered; the children's branches and PRs map to them alone, their pushes allowed; `children` lists both, also closed; bad parents `parent-invalid` |
 | S-BTN-50 owner state exported | a Baton with claims, keys, grants, bars, a hold, a re-route, a forge courier, readings, open core conditions and a person leg's pending expiry; freeze, seal, export, import, re-heartbeat; a tampered and a second import | refusals before seal (`frozen`, `conflict` for a lagging mirror); identical exports with only owner state; source `sealed`; import restores state, continues seq, runners resume unkeyed, the expiry instant unchanged; `invalid-params`, `conflict` |
 | S-BTN-58 an unknown ticket | claims by id of a ticket Baton has not seen, before and after the first post naming it; `baton tickets new`, then the forge's notification, and on `plain` a runner's `ls-remote` poll | `not-eligible` (`unknown-ticket`), no claim; claimable at the first post; the sync within a minute of the push |
-| S-BTN-121 heads and resets | an unfounded head: a rewritten default branch, once and after a fetch lagging the head for 31 minutes; a post whose `parent_sha` is not the head; an administrator's forced Resync naming the new head, then a post naming it and omitting a ticket with a hold; a forced Resync while a claim whose `snapshot_sha` the new history lacks runs, and one whose `snapshot_sha` it keeps | the sync posts nothing, releases `unfounded` and exits 1, `baton.head-unfounded` raised, and `baton.head-behind` at 30 minutes behind; `head-moved`; `head-reset` logged, the next post accepted as a first snapshot, the omitted ticket dropped with `baton.ticket-dropped` and its hold kept; the first claim ends `released:off-branch` at its runner's next check, the second runs on |
+| S-BTN-121 heads and resets | an unfounded head: a rewritten default branch, once and after a fetch lagging the head for 31 minutes; a post whose `parent_sha` is not the head; an administrator's forced Resync naming the new head, then the sync's post against it omitting a ticket with a hold; a forced Resync while a claim whose `snapshot_sha` the new history lacks runs, and one whose `snapshot_sha` it keeps | the sync posts nothing, releases `unfounded` and exits 1, `baton.head-unfounded` raised, and `baton.head-behind` at 30 minutes behind; `head-moved`; `head-reset` logged, the next post materialized as a first snapshot, the omitted ticket dropped with `baton.ticket-dropped` and its hold kept; the first claim ends `released:off-branch` at its runner's next check, the second runs on |
 | **§5** | | |
 | S-BTN-8 owner bar, no new work | a bar `applies: claim` set mid-claim | holder finishes; others `barred-tag` |
 | S-BTN-9 owner bar, stop | the same with `stop` | holders end `released:provider-suspended`, not failed |
 | S-BTN-11 scheduled bar | a bar for +1 h to +3 h, no sync | refused from +1 h, accepted from +3 h on Baton's clock |
 | S-BTN-15 stale skills | a runner below `min_runner_version` | no new claim (`stale-skills`); its held claim finishes |
 | S-BTN-33 tags gate | `fix` with `barred_tags: ["family:glm"]`; GLM and Qwen runners | GLM never offered, claim and `advance` `barred-tag`; Qwen gets it |
-| S-BTN-37 a course changes under a claim | a rename of a leg with an attempt, a backoff, an armed timer and a held position; a removal raising `min_runner_version`, an unbounded loop, a leg leaving an end | claim, attempts, backoff, timer and held position carry over under the new name; removed station ends `course-changed`; `stale-skills` only after the rise; bad files refused and raised, previous kept |
+| S-BTN-37 a course changes under a claim | a rename of a leg with an attempt, a backoff, a stalled instant and a held position; a removal raising `min_runner_version`, an unbounded loop, a leg leaving an end | claim, attempts, backoff, timer and held position carry over under the new name; removed station ends `course-changed`; `stale-skills` only after the rise; bad files refused and raised, previous kept |
 | S-BTN-38 a course measures itself | a granted and an ungranted key read `/stats` | times, ends and overrides, no profile; `forbidden` |
 | S-BTN-48 contracts and replay | a typed input from `review`; bad output; bad input; an unwidened version rise; a digest-less `https` pointer; `baton leg replay`, `--against`, `replay_safe: false` | inputs recorded; `contract-output` failed; `contract-input` held, `baton.contract`; `input-version` wait; pointer refused; replay writes nothing; unsafe refused |
 | S-BTN-65 refinement | a refinement dropping a base's `required`; a value missing a base field | `course test` names it; the value fails both, `contract-output` |
@@ -7068,14 +7089,14 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-83 the backoff | `backoff_s` 600, `max_attempts` 5; four failures; then the owners' floor `backoff_s` 900 | 10 min ±10% after each failure; a `retry` block meanwhile; `unblocked` at `retry_after`; 15 min under the floor |
 | S-BTN-84 declared interrupt conditions | non-retryable and retryable types, a plain `Error`, a type naming a prerequisite | held with `baton.retries`; backoff as `transient`; `error.type` on each end; `released:blocked` |
 | S-BTN-86 owners bound the course | an owners' `max_attempts` ceiling below a course's and a `backoff_s` floor above it; a file with `coefficient`, `in_claim` or `exhausted_on` | the stricter applies, warned and shown; the retired fields refused with the file |
-| S-BTN-127 answered within the wait | `hitl` bound to `ask`; a raise with restarts, `wait_s` 600, answered from the dashboard before `open` ran and again after it; an answer naming no restart | ask file pushed before return, the raise recording a sync want; the `answer` leg's options are the restarts from the moment the handler is posted, its question once the source posts it; `handled` rung; `ctx.raise` returns `{restart: "b", reason: "chosen"}` in the claim; `deliver` superseded, its `retract` run; `invalid-params` |
+| S-BTN-127 answered within the wait | `hitl` bound to `ask`; a raise with restarts, `wait_s` 600; a runner runs `open` within the wait; an answer from the dashboard before the source posts the question and one after; an answer naming no restart | ask file pushed before return, the raise recording a sync want; once `open` reaches `waiting`, the `answer` leg is on Needs you with the restarts as its options, its question once the source posts it; the first answer settles the condition, `handled` rung, `ctx.raise` returns `{restart: "b", reason: "chosen"}` in the claim; the second is `arrival-unapplied`; `deliver` superseded, its `retract` run; `invalid-params` |
 | S-BTN-128 answered after the wait, withdrawn | no answer in 120 s, one 3 h later; a withdrawn ask; one answered 1 s after the wait; a waiting holder reaped, released `requested`, or reaped by `leg-timeout` | `released:blocked` on the `condition`, not failed; resumed by another runner with `resume`; default restart `withdrawn`; no block row, resumed at once; each writes the `condition` block, and no claim asks again |
 | S-BTN-129 expiry and asking again | an ask waits 2 days; push retries fail; a late answer; a retry | `answer` expires to `unanswered` (`question-expired`), the raiser resumes `restart: null`; the late answer `arrival-unapplied`; `email` queued; `error.no-answer` holds; the retry files a new ask |
 | S-BTN-130 dynamic binding | repository and epic-scope bindings; a narrowed leg; a restart-less handler course; an unmerged binding | innermost scope, longest prefix; raise refused on the channel; `course test` refuses; inert; `baton leg why` names each |
 | S-BTN-131 the debugger | no bindings: a `hitl` raise, spent retries, an invalid output; a delivery runner polling the list; `baton.retries` answered on its resolve page; `baton.queue-over` closing and reopening within an hour; a leg raising `baton.retries`; a runner's condition; a binding of `baton` | `hitl` listed by severity and age with its restarts, resumed by `baton owner resolve` (`resolved`); `baton.retries` offers `retry`, `route:<leg>`, `park`; `baton.output-invalid` listed, no ticket filed and no outbox entry queued; the runner sends each entry's resolve link once; resolved on the page by a signed-in owner, the hold cleared; one entry with `reraised` 1; `invalid-params`; never bound; the binding ignored |
-| S-BTN-132 calls and completion | a call over three `review-pr` children (2 of 3 approve; `lifetime: station`); an epic `plan` call with one child withdrawn; a `spawned` end naming none; a table without a closing `{"of": "all", "closed": true}` entry; a superseded ticket's `cancel` leg released mid-run and claimed again | settles on the second approval, third `superseded`, held `cancelling` while its `cancel` leg runs, then withdrawn through the outbox; `settleCall` agrees; the epic settles `planned` only once all closed; empty end refused; the table refused; the second run of the `cancel` leg succeeds on work already done and the ticket closes |
+| S-BTN-132 calls and completion | a call over three `review-pr` children (2 of 3 approve; `lifetime: station`); an epic `plan` call with one child withdrawn; a `spawned` end naming none; a table without a closing `{"of": "all", "closed": true}` entry; a superseded `draft-doc` ticket whose `close-pr` is released mid-run and claimed again | settles on the second approval, the third `superseded` and, `review-pr` naming no `cancel` leg, withdrawn through the outbox at once; `settleCall` agrees; the epic settles `planned` only once all closed; empty end refused; the table refused; the `draft-doc` ticket marked `cancelling` while `close-pr` runs, the second run succeeding on work already done, then withdrawn |
 | S-BTN-134 deadlines and the stalled notice | a leg's `stalled_s` at 1 day; a `deadline_s` of 30 s and of 8 days; a file with `max_duration`, `max_ready_s`, `max_attempts_s`, `error_types`, `timers`, `after_s`, `choice`, `compensate`, `isolation`, a leg's `call`, `checks` or `retry.non_retryable` | `baton.stalled` raised after 1 day, not 3, and closed when the leg is posted `ready`; each refused naming the leg and field, previous kept |
-| S-BTN-136 the outbox | a superseded ticket's `withdraw` entry; no `git` courier, then one; a write pushed by a courier whose lease lapsed; a forge-refused push; a ticket withdrawn in git before any courier claimed its entry; an entry undelivered 24 h; a `tickets.mjs` that never posts the withdrawal; a runner key registered as a courier; an entry whose signature does not verify; a runner key claiming under the default policy, then under `git: {deliverers: [runner]}`; `trust: trusted` with an `untrusted` courier; a trusted-runner deliverer on a repository with an ejected ticket source; a release below `min_release`; an owner's MCP key changing the policy | the ticket held `cancelling` until the withdrawal lands; written with `baton_write: <id>`, `delivered` then `confirmed`, the ticket closed `withdrawn`; the next courier writes nothing and reports the head; held `outbox-refused` and `baton.outbox-late` naming the courier; `dropped`; `baton.outbox-late`; held `outbox-unlanded` after 3 snapshots; `conflict`; refused by the courier; `forbidden`, then claimed; `forbidden`; entries marked `failed refused`; `forbidden`; refused, and an approver on `approvers.policy` accepted |
+| S-BTN-136 the outbox | a superseded ticket's `withdraw` entry; no `git` courier, then one; a write pushed by a courier whose lease lapsed; a forge-refused push; a ticket withdrawn in git before any courier claimed its entry; an entry undelivered 24 h; a `tickets.mjs` that never posts the withdrawal, then the condition's `retry`; a runner key registered as a courier; an entry whose signature does not verify; a runner key claiming under the default policy, then under `git: {deliverers: [runner]}`; `trust: trusted` with an `untrusted` courier; a trusted-runner deliverer on a repository with an ejected ticket source; a release below `min_release`; an owner's MCP key changing the policy | the ticket marked `cancelling` until the withdrawal lands; written with `baton_write: <id>`, `delivered` then `confirmed`, the ticket closed `withdrawn`; the next courier writes nothing and reports the head; held `outbox-refused` and `baton.outbox-late` naming the courier; `dropped`; `baton.outbox-late`; `baton.outbox-late` after 3 snapshots, the ticket still `cancelling`, the entry queued again by `retry`; `conflict`; refused by the courier; `forbidden`, then claimed; `forbidden`; entries marked `failed refused`; `forbidden`; refused, and an approver on `approvers.policy` accepted |
 | **§8** | | |
 | S-BTN-41 the runner | a `ci` wait, `{suspend: true}`, `max_runs`, a closed PR, returned `bars`, a lost lease, a course change, a non-edge `next`, a release, a wind-down message and the immediate stop (B-109), a leg session claiming, a granted runner with no `--capabilities`, a `--capabilities` a leg's need refuses, a grant of nothing (B-86); a `git` that never returns (B-94) | holds through `ci`; follows only named edges with their `bars`; suspends at `from` with a hand-off; kills the group on loss; new scripts unrestarted; `released:requested`; a wind-down drains through the signal's own flag (the leg completing, the claim ended at its boundary, the message acknowledged, twice a no-op) and the immediate stop releases the leg at its next safe point with its hand-off (B-109); session refused (`BATON_PARENT`); declares the grant and claims, declares the narrower set and says why no leg can be taken, and says a grant of nothing; the close and the runner's own git killed at their bound, the leg failing, the heartbeat still beating; a stop on a signal or an `exit` leaves a line naming the claim, the leg and the last beat |
 | S-BTN-159 a quiet start | a runner's first attempt, whose heartbeat registers the worker, then its recommendation; a repository with no `origin` at `remoteSlug` | not one `no recommendation (no worker holds this secret)` line — the refusal is not logged, a registered worker's still is; `null` and no line of git's own |
@@ -7241,7 +7262,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-149 | Open `hitl`, `baton.retries`, `baton.contract`, `baton.stalled` and queued person legs stay on Needs you until closed; Baton files no ticket and queues no entry for its own conditions; `resolve` invokes only offered restarts | S-BTN-131 |
 | G-BTN-150 | A call settles on the first holding entry, in table order, over its run's children, never over none; `settleCall` agrees | S-BTN-132 |
 | G-BTN-152 | Each instant Baton holds on a leg (deadline, stalled, expires) fires once per `from_at`; a deadline releases and fences; the retired course fields are refused | S-BTN-134, -67 |
-| G-BTN-153 | A superseded claim is released `superseded` in the settling transaction; a cancelled ticket is held `cancelling`, runs its course's `cancel` leg if one leaves its station, and only then is withdrawn | S-BTN-129, -132 |
+| G-BTN-153 | A superseded claim is released `superseded` in the settling transaction; a cancelled ticket is marked `cancelling`, runs its course's `cancel` leg if one leaves its station, and only then is withdrawn | S-BTN-129, -132 |
 | G-BTN-154 | Baton queues nothing for a person; the outbox's only kind outside git is `forge-check` | S-BTN-68, -131 |
 | G-BTN-156 | Baton holds no credential to write git or post a check, and does both only through signed outbox entries couriers deliver, each carrying its id and applied at most once, git kinds in id order per ticket; only a key the repository policy's `outbox` admits claims an entry, and only an approver on `approvers.policy` changes that (R-BTN-188); a `withdraw` entry is queued only after the ticket's `cancel` leg ends, and dropped when git withdrew the ticket first; an entry late by its kind raises `baton.outbox-late` | S-BTN-136, -81 |
 | **§8** | | |
@@ -7283,7 +7304,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-38 | No environment variable changes `batonNow()`; `clock-offset` only from a loopback `--test-harness` sidecar; `pre-push` asks Baton | tests |
 | G-BTN-43 | `advance` moves to the next leg whenever the gates pass, in one transaction; a refusal changes nothing | S-BTN-17, -19 |
 | G-BTN-167 | A ticket no accepted post names is refused `not-eligible` (`unknown-ticket`); the first accepted post naming it makes it claimable; nothing is ever claimed provisionally | S-BTN-58 |
-| G-BTN-44 | A suspension is confirmed by a later path extending it by edges; `done` by an end station or closure under a greater observation, or absence; claimable only after a later snapshot; suspensions and `course-changed` never fail; every end writes a resume record and every self-release a hand-off | S-BTN-18, -20, -23, -36, -40 |
+| G-BTN-44 | A suspension is confirmed by a later path extending it by edges; `done` by an end station or closure under a greater observation, or absence, a `cancel` leg's by acceptance alone; claimable only after a later snapshot; suspensions and `course-changed` never fail; every end writes a resume record and every self-release a hand-off | S-BTN-18, -20, -23, -36, -40 |
 | **§10** | | |
 | G-BTN-93 | A `success` check is queued only after a confirmed end, with the owners' conclusions, signed with a named key; unissued runs are logged; a courier is never a machine key | S-BTN-68 |
 | G-BTN-103 | Only check-runner keys claim check tickets, their `check_runners` row standing in for a grant (rules 4, 5, 7); an unsent `forge-check` is raised after 15 min | S-BTN-68, -81 |
