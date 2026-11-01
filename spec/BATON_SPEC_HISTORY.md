@@ -814,6 +814,26 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     R-BTN-109, R-BTN-122 and the `kind` field, `std:arrival@1`'s `ref`, `ticket_stations`' path and
     `next_source`, the want's causes, and B-120's and B-152's drift.
 
+- **2026-11-01 — review round three of PR #150's parts 1–3 and 5** (one fresh reviewer, the
+  rounds' fixes as a delta, the last round the babysit skill allows). Nothing blocking. Fixed:
+  - **A fact arrival on a held ticket:** an arrival now also waits while Baton holds the ticket
+    (a call or `suspend` condition it is blocked on, a `cancel` or `outbox` override), deferred
+    with its `ref` and applied when the hold ends, raising nothing; a call settles only at its own
+    station (R-BTN-39, R-BTN-165).
+  - **Import:** `pending_owner_state` holds course history (`station`, `history`, `run`), and a
+    ticket with pending history is placed from it, not at `start` (R-BTN-88, R-BTN-39).
+  - **R-BTN-5:** a claim is re-verified against Baton's position and git's readiness; where the
+    ticket is never comes from git.
+  - **Minor:** the `approvers.policy` row's cells; the `stale-board` parentheticals removed;
+    R-BTN-116 no longer requires the queued leg; `std:decision@1`'s `ref` optional for a signed
+    human answer; `claim_legs` readers (the `call` block's ref, `no_chain_from`, export); R-BTN-181's
+    supersession exception for the sync; dispatch's routes, alarm, signed tuple, history events
+    and courierless backstop; leftovers in R-BTN-171, the dashboard, G-BTN-75, S-BTN-67 and
+    `ticket_stations`.
+  - **Open, put to the owner:** under `protected` the merge runner cannot do the attesting round
+    two gave it — a trusted runner runs no repository code, so it has no station function to read
+    the fact legs with, no trigger beyond a queued `merge`, and a preset cannot name its key.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
