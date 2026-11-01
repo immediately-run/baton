@@ -307,6 +307,23 @@ describe('S-BTN-190 guarantees and floors', () => {
     expect(claim.json.ticket_id).toBe('ops:R3-9001');
     expect(claim.json.policy_hash).toBe(hash);
   });
+
+  it('a pin left by a demoted grant drives nothing — the trust that made it matter is gone (round 2, N1)', async () => {
+    await protectedSigned();
+    const { hash } = (await rows<{ hash: string }>('SELECT hash FROM repository_policies WHERE repository_id = ? ORDER BY version DESC LIMIT 1', 'ops'))[0];
+    // Trusted, pinning the wrong hash: stored, open, refusing.
+    await rows('UPDATE worker_grants SET trust_level = ?, trust_domain = ? WHERE credential_id = ? AND repository_id = ?', 'trusted', 'runner-host', runnerKey.fingerprint, 'ops');
+    await runnerBeat('runner-secret', { policy_pins: [{ repository: 'ops', hash: 'e'.repeat(64) }] });
+    expect((await rows(`SELECT count(*) AS n FROM policy_conditions WHERE repository_id = 'ops' AND type = 'baton.policy-unpinned' AND closed_at IS NULL`))[0].n).toBe(1);
+    expect((await claimAsRunner()).json.rule_code).toBe('policy-unpinned');
+    // The demotion — the cooperative → protected trust clearing, or B-147's later route: the
+    // stored row stays, but it no longer refuses the runner's claims, and nothing is left that
+    // only a re-trusted grant could close.
+    await rows('UPDATE worker_grants SET trust_level = ? WHERE credential_id = ? AND repository_id = ?', 'untrusted', runnerKey.fingerprint, 'ops');
+    await refreshOps();
+    const claim = await claimAsRunner();
+    expect(claim.json.ticket_id).toBe('ops:R3-9001');
+  });
 });
 
 /** The runner claims whatever ops offers. */

@@ -1001,12 +1001,16 @@ export class Policies {
 
   /** Whether the worker's pins on `repository` differ from the current version — while one
    *  does, the runner acts on nothing in the repository (R-BTN-189; a trusted runner's pins
-   *  alone are stored, so only a trusted grant can differ). */
+   *  alone are stored, so only a trusted grant can differ). A pin left behind by a demoted
+   *  grant drives nothing: the trust that made it matter is gone (round 2, finding N1). */
   pinDiffers(workerId: number, repository: string): boolean {
     const pin = this.rows<{ hash: string; floors_hash: string | null }>('SELECT hash, floors_hash FROM policy_pins WHERE worker_id = ? AND repository_id = ?', workerId, repository)[0];
     if (!pin) return false;
     const cur = this.current(repository);
     if (cur == null) return false;
+    const trusted = this.rows<{ trust_level: string | null }>(
+      'SELECT trust_level FROM worker_grants WHERE credential_id = (SELECT credential_id FROM workers WHERE id = ?) AND repository_id = ? AND revoked_at IS NULL', workerId, repository)[0];
+    if (!(trusted != null && (trusted.trust_level ?? cur.policy?.grants.default_trust ?? 'untrusted') === 'trusted')) return false;
     return cur.hash !== pin.hash || (pin.floors_hash != null && pin.floors_hash !== this.floorsHashOf(this.floors(repository)));
   }
 
