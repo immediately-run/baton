@@ -16,7 +16,8 @@ topics:
   - baton
   - harness
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/docs/pull/224
 depends_on: []
 ---
 
@@ -82,6 +83,13 @@ None: a measurement.
 ## Status
 
 _2026-10-16 — Baton runs no hooks any more (BATON_SPEC §1 R-BTN-98); this spike's questions are about the harnesses' own pre-tool and session hooks, which the sidecar and the reviewer-spawn denial still need, so it stands. Question 6 (switching models per leg) now feeds docs' `rank.mjs` (R3-1235), not a Baton hook._
+
+_2026-11-01 — implement leg done: the findings note is `content/plans/baton/hook-spike.mdx`
+(docs PR #224), questions 1–6 answered with commands and outputs from a fleet VM (Claude Code
+2.1.316, opencode v2.1.2-neumark.2). Two findings change spec cells and are filed as B-153: opencode
+cannot deny a tool call from a plugin in headless runs (wrapper + pre-push fallback), and Claude
+Code's simple commands share the harness's process group (kill pids, not blind groups). The Mac
+residuals are listed in the note's Unmeasured section for the human operator._
 
 
 _(filed 2026-10-13)_
