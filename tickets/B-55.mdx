@@ -3,7 +3,7 @@ title: "B-55 — Conditions: typed raises, checked by the runner, reported to Ba
 id: B-55
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -165,3 +165,5 @@ route. It adds no handler. Until B-58 lands, every condition is unbound.
 _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
 
 _(2026-10-20: extended for the adversarial review's fixes — `baton`, `baton.*` and `hitl.decision` reserved to core: refused in declarations, by the runner's raise check and by the raise route.)_
+
+_(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): `hitl.decision` no longer exists; only `baton` and `baton.*` are reserved to core (R-BTN-160). A raise carries no `light` or `question`.)_

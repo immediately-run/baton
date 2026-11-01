@@ -3,7 +3,7 @@ title: "B-7 — Baton person legs: legs a person runs, answered in git"
 id: B-7
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -76,3 +76,5 @@ out of the leg and check the answer when a sync shows it.
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — the source posts the decision and Baton
 stores the leg's `asks`; no notices, and an invalid answer raises `baton.output-invalid`.)_
+
+_(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): a person leg is the one way a course waits on a person (R-BTN-116): the ticket source posts the leg's **question** (`{id, url, severity, options}`) with the ticket, stored in `ticket_questions`; the answer is a `std:decision@1` whose `option` is one of the question's options, from the person (`baton attest`, the dashboard, MCP) or the sync (`answer:`) where the policy admits it; an invalid answer is `invalid-params` or `answer-invalid`, not `baton.output-invalid`; a leg may carry `expires: {after_s, reached}`, which Baton applies as its own arrival (`question-expired`). Posted decisions (R-BTN-78) are retired, so the source translates a `## Decision needed` packet into the queued person leg's question.)_

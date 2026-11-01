@@ -3,7 +3,7 @@ title: "B-77 — Heads, held posts and dropped tickets after the adversarial rev
 id: B-77
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -182,3 +182,5 @@ deletes a returning ticket's `closed_tickets` row with nothing kept.
 
 _(filed 2026-10-20 from the coverage audit of the tickets against the spec, for the adversarial
 review's fixes to §4.3, §5.3 and §6.8)_
+
+_(2026-11-01: **rescoped** by the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`) on the owner's rulings of 2026-11-01 (B-158 "Remove it", B-165 "Take review's default"): held snapshots, their tightening and acceptance, `behind_confirmed`, `head-replaced`, `baton.held-history`, `baton.station-jump` and `baton.machine-loosened` are retired (R-BTN-11, R-BTN-147). Item by item: 1 (migration) — `board_head.behind_since`, `closed_tickets.kept_json` and `dropped` stay; no `held_snapshots.posted_by`. 2 (the lagging fetch) — the founded check and the `behind` release stay; after 30 minutes behind Baton raises `baton.head-unfounded`, and nothing is posted `force`. 3 (numbers) — unchanged. 4 (held rows) — retired: a post whose `parent_sha` is not the head is `head-moved`, and an administrator's forced Resync (`POST /v1/ui/resync {repository, force: true}`, `baton admin resync --force`) resets the head (`head-reset`) so the next post is a first snapshot's (R-BTN-11). 5 (a held post only tightens) — retired. 6 (arrivals no claim ran) — retired; an arrival Baton does not apply is `arrival-unapplied` and raises nothing (R-BTN-39). 7 (drops and returns) — unchanged, the one part of this ticket left whole. 8 (machine-key loosening) — retired. 9 (the model) — held rows and station jumps leave the model; the reset joins it. Tests: S-BTN-13 and S-BTN-121 are changed to the refusal and the forced Resync; G-BTN-7 and G-BTN-141 are changed; S-BTN-39 stands.)_
