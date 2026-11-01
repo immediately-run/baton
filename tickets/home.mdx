@@ -26,7 +26,8 @@ tickets whose dependencies are all done.
 
 - A ticket is one `.mdx` file in this folder, named after its id. New tickets are `B-1`,
   `B-2`, and so on; tickets that moved here from the immediately.run docs roadmap keep their
-  `R3-NNNN` ids.
+  `R3-NNNN` ids. [How tickets work](HOW-TICKETS-WORK.md) is the generated conventions page —
+  `baton repo init` writes it, `baton tickets check` reports it when it drifts.
 - Its frontmatter is what Baton reads: `status`, `depends_on`, `order`, `tags`, `prs` and
   `repos`. `item.schema.json` is its shape, and `npm run check:wiki` checks every ticket
   against it. The body is for people and agents; Baton never stores it.
@@ -34,16 +35,18 @@ tickets whose dependencies are all done.
 
 ## Claiming a ticket
 
-Until Baton claims this repository's tickets itself (R3-1266), git is the lock. Each command
-below is one commit pushed straight to `main` from a fresh checkout of it; if someone else
-pushed first, it retries on the new head, and `claim` refuses a ticket that is not available
-or whose dependencies are not all done.
+Until Baton claims this repository's tickets itself (R3-1266), git is the lock, and the
+commands are the CLI's — the same ones docs and fieldhouse run (B-112). Each is one commit
+pushed straight to `main` from a fresh checkout of it; if someone else pushed first, it retries
+on the new head, and `claim` refuses a ticket that is not available or whose dependencies are
+not all done.
 
 ```sh
-npm run ticket -- claim R3-1249                  # available → in-progress
-npm run ticket -- set R3-1249 in-review --pr https://github.com/immediately-run/baton/pull/40
-npm run ticket -- done R3-1249                   # done, moved to archive/
-npm run ticket -- new --title "…" --depends-on R3-1249 --order 1100   # the next B-n
+node cli/baton.mjs tickets claim R3-1249                  # available → in-progress
+node cli/baton.mjs tickets set R3-1249 in-review --pr https://github.com/immediately-run/baton/pull/40
+node cli/baton.mjs tickets done R3-1249                   # done, moved to archive/
+node cli/baton.mjs tickets new --title "…" --depends-on R3-1249 --order 1100   # the next B-n
+node cli/baton.mjs tickets --help                         # every flag, the tags Baton reads
 ```
 
 [The project page](projects/baton.mdx) has Baton's rollout steps and how the tickets group.

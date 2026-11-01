@@ -1,6 +1,11 @@
 {
   "baton_url": "https://baton.immediately.run",
   "items": "tickets",
+  "ticket_prefix": "B",
+  "legacy_ids": [
+    "R3-\\d+[a-z]?\\d*"
+  ],
+  "project": "baton",
   "default_course": "create-pr",
   "repos": {
     "baton": "immediately-run/baton",
