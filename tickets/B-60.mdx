@@ -3,7 +3,7 @@ title: "B-60 — Leg deadlines: the interrupting start timer, the leg-timeout re
 id: B-60
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -140,3 +140,5 @@ _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71; carv
 R3-1259's items 4–6)_
 
 _(2026-10-20: text corrected to the current spec — a `leg-timeout` reap's fence clears at `fence_deadline`, not when the runner goes silent past its lease, adv-3 F1.)_
+
+_(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): R-BTN-90 is now the one deadline a leg's `deadline_s` sets: the `leg_finished` 40-minute re-arm, the `leg-timeout` release (always a failed attempt) and the fenced reap stand; `POST /v1/owner/{repository}/claims/{id}/deadline`, `extend_to`, `cancel_at` and `baton owner deadline` are retired, and a leg with no `deadline_s` has no deadline (R-BTN-167). Build the arming from `deadline_s`, not from a `timers` entry.)_
