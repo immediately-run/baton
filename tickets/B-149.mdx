@@ -1,5 +1,5 @@
 ---
-title: "B-149 — The marker courses under a protected default branch: no leg pushes it; records on the leg-state branch, outputs as proposals, and a refusal until then"
+title: "B-149 — The marker courses under a protected default branch: no leg pushes it; one work branch per ticket, landed by a ticket merge on the owner's approval, and a refusal until then"
 id: B-149
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1164
 tier: critical
-description: "Build the protected route the spec now gives the standard courses (R-BTN-69 `records` and `proposes`, R-BTN-131, R-BTN-171 `propose`, R-BTN-180, R-BTN-190, S-BTN-194). The marker courses (bug-report, draft-ticket, decision, build-app, spec-to-tickets) and create-spec's converse and address push the default branch at every close, which `no-runner-lands` forbids; B-130 item 4 named this and was superseded without it. Refuse an unlandable policy or registry, end a protection-refused close `released:cannot-finish:policy`, and move machine state to course history (B-120), leg records to the leg-state branch and outputs to proposals. Requires: none."
+description: "Build the protected route the spec now gives the standard courses (R-BTN-69 `records` and `outputs`, R-BTN-131, R-BTN-180, R-BTN-183's ticket merge, R-BTN-192's ticket-merge list, S-BTN-194). The marker courses (bug-report, draft-ticket, decision, build-app, spec-to-tickets) push the default branch at every close, which `no-runner-lands` forbids; B-130 item 4 named this and was superseded without it. Refuse an unlandable policy or registry, end a protection-refused close `released:cannot-finish:policy`, and move each marker ticket's records and outputs to its work branch, landed by a ticket merge on the owner's `std:approval@1`. Requires: none."
 topics:
   - baton
 owns: {}
@@ -27,13 +27,13 @@ default branch, and `close` pushes the ticket); §12.8 R-BTN-188 (`refs.default_
 `merge.trusted`, `tickets.created`, `leg_state`, `refs.legs`), R-BTN-180 (*Nothing requires a runner
 the refs exclude to write the default branch*; the proposal route; the refusal of a policy whose
 writes could never land), R-BTN-189 (`no-runner-lands`), R-BTN-190 (the leg-state branch),
-R-BTN-171 (the outbox), B-120's course history.
+R-BTN-183 (the ticket merge), R-BTN-192 (the fact reader), B-120's course history.
 
 **Depends on:** nothing to start. Items 1 and 3 need nothing; item 2 lands with B-145 (it extends
 that ticket's validator) and reads a fixed default where the policy store does not exist yet.
 Item 4 needs B-120 (course history
-in Baton), B-148 (the leg-state branch mechanics), B-64 (the outbox) and B-140 (the proposal merge),
-and builds on whichever has landed.
+in Baton), B-140 (the merge runner and the fact reader) and B-148 (the leg-state branch, for a
+record written after the merge under `leg_state: branch`), and builds on whichever has landed.
 
 ### Why
 
@@ -66,33 +66,40 @@ spec or the tickets says so.
 
 ### What to build
 
-The rules are in the spec, amended with this ticket (R-BTN-69's `records` and `proposes`,
-R-BTN-131's *Under a protected default branch*, R-BTN-171's `propose` kind, R-BTN-180's
-`unlandable-course` refusal and refused-write rule, R-BTN-190's second kind of leg state, the
-`released:cannot-finish:policy` end, S-BTN-194). Build them:
+The rules are in the spec, amended with this ticket (R-BTN-69's `records` and `outputs`,
+R-BTN-131's *Under a protected default branch*, R-BTN-180's `unlandable-course` refusal and
+refused-write rule, R-BTN-183's *A ticket merge*, R-BTN-192's *Ticket merges*, `std:approval@1`'s
+`answer`, the `released:cannot-finish:policy` end, S-BTN-194). Build them:
 
 1. **Course-file fields.** The course validator accepts `records` (`default-branch` | `policy`,
-   absent meaning `default-branch`) and `proposes` (path patterns with `{ticket}`, refusing a
-   control or protected path). The standard courses declare `default-branch` until item 4 lands,
-   then `policy`. `create-pr` and `review-pr` declare `policy` now.
+   absent meaning `default-branch`) and `outputs` (path patterns with `{ticket}`, refusing a
+   control path or one R-BTN-184's floor protects). The standard courses declare `default-branch`
+   until item 4 lands, then `policy`; `build-app` declares `outputs: ["product/{ticket}/**"]`.
+   `create-pr` and `review-pr` declare `policy` now.
 2. **Refuse it before it runs** (with B-145). The policy validator refuses `unlandable-course`,
    naming each course. The sync's registry post refuses each such course as an invalid course file:
    the previous file stays in force, and `baton.course-refused` names the policy version.
 3. **A refused close ends the claim with its own reason.** The close tells a protection refusal
    from a moved branch, and never retries the first. The end is `released:cannot-finish:policy`
-   naming the ref, the ticket is held `non-retryable:policy`, and `baton.unlandable` is raised once
+   naming the ref, the ticket held `non-retryable:policy`, and `baton.unlandable` is raised once
    per repository.
-4. **The protected route** (needs B-120, B-148, B-64, B-140), for the five marker courses and
-   `create-spec`'s `converse` and `address`:
-   - **Machine state** goes in the end's report to course history; no frontmatter is written, and
-     the station functions read history.
-   - **Records** go to `.baton-legs/<ticket>/<leg>/<claim nonce>/record.md`, read by later legs
-     through `git cat-file` as quoted data.
-   - **Outputs.** The leg writes its files under its own subpath and reports `std:proposal@1`.
-     Baton queues a `propose` entry, and the deliverer copies the blobs by id, unparsed, to
-     `baton/proposed/<ticket>`. The proposal merge accepts those copies. `spec-to-tickets` makes
-     one proposal per run; for `build-app`, the stage's proposal approval stands in for
-     `answer: <stage>`.
+4. **The protected route** (needs B-120, B-140, B-148), for the five marker courses:
+   - **One work branch per ticket.** The close pushes the ticket's work branch, not the default
+     branch, and the first pushing leg opens the PR; each leg's instructions stay the same, with
+     the branch in place of the default branch. `decision`'s `prepare` writes no `answer:`.
+   - **The approval gate.** Readiness waits on `owner` until a `std:approval@1` covers the head,
+     at each stage R-BTN-131 lists, and until `pr-merged` after the last. `decision`'s approval
+     carries `answer: {leg, option}`, applied as the person leg's answer. A `build-app` stage's
+     approval is its person leg's answer; `plan` writes the children beside `PLAN.md`, and
+     `file` returns the landed children as `spawned`.
+   - **Refining and rejecting.** The owner's commits on the branch are the person leg's range,
+     attested by the fact reader's `pr-pushed`; `changes` re-queues the writing leg; a cancel
+     closes the PR unmerged.
+   - **The ticket merge** in the merge runner (B-140): the owner's approval in place of
+     `merge.reviews` and `merge.checks`, every changed path in the ticket folder or `outputs`,
+     R-BTN-183's other rules, and `id-taken`. Baton lists waiting tickets in the fact-legs list;
+     the merge runner attests each merge as `pr-merged`, and Baton applies the deferred end.
+   - **After the merge**, a leg's record goes where `leg_state` says.
 5. **Migration.** A home whose policy tightens while marker tickets are in flight replays each
    one's frontmatter state into course history once (B-120's `baton owner ticket adopt`), then
    stops reading the frontmatter. A ticket mid-course resumes at its station with no leg re-run.
@@ -107,9 +114,12 @@ S-BTN-194, every case in its row.
 ### Do not
 
 - Push the default branch from any runner leg where `refs.default_branch` excludes `runner`,
-  including a "status-only" frontmatter write.
+  including a "status-only" frontmatter write (the owner, 2026-11-01: no agent-filed change
+  lands without their approval).
 - Let a gate, a merge or a trusted leg read the leg-state branch.
-- Let a proposal merge cover a path its entries do not name.
+- Let a ticket merge cover a path outside the ticket folder and `outputs`, or land a head no
+  approval covers.
+- Reach a course's end before its ticket merge lands.
 - Retry a protection refusal, or report it as a moved branch.
 - Copy the marker courses into Fieldhouse or any other home as hardened variants: Baton's standard
   courses must run under Baton's own strongest preset.
@@ -130,3 +140,8 @@ S-BTN-194, every case in its row.
   (B-120). The route itself is to be reworked on it, the owner having chosen that a marker
   course's PR touching only ticket and output paths merges on the owner's `std:approval@1` alone;
   the rest of the rework is under discussion with the owner.
+- 2026-11-01: reworked in the same PR on the owner's answers (one work branch per ticket and a
+  ticket merge on the owner's approval; `decision`'s approval carries the answer; a `build-app`
+  plan's children in the plan's change; no agent-filed change lands without approval). The
+  proposal route, `std:proposal@1`, the `propose` outbox kind and the second kind of leg state
+  are gone. Item 5 (migration) and item 6 (docs) stand as written.

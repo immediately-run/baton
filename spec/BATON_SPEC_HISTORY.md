@@ -844,6 +844,52 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   them as a `service:` key the owner names; `baton.fact-reader-missing` when none is named. Built
   by B-140; B-120 depends on it.
 
+- **2026-11-01 — §5 R-BTN-69, R-BTN-131, R-BTN-165, R-BTN-190, §6 R-BTN-171, §12.8 R-BTN-180,
+  R-BTN-181, R-BTN-183, R-BTN-188, R-BTN-189, R-BTN-192, §15 S-BTN-194, §16 (owner direction):
+  the protected route reworked as one change per ticket.** Review round one had found the first
+  draft (2026-10-31, above) incomplete. Its first finding, station functions unable to read
+  course history, was closed by Baton owning course history (same PR). The rest is closed by
+  replacing the route. The owner, 2026-10-31, chose that "a marker course's PR touching only
+  ticket and output paths merges on the owner's `std:approval@1` alone", replacing
+  `merge.reviews`. On 2026-11-01 the owner chose to rework part 4 in the same PR rather than strip
+  it, and answered its three open questions, each with the recommended option:
+  - `decision`'s packet approval carries the answer: "One action";
+  - a `build-app` plan's children land in one change: "One PR per plan";
+  - no agent-filed change, status-only included, merges without the owner: "No exemption".
+
+  The route now:
+  - **One work branch per ticket.** Each marker leg commits its record and outputs on the
+    ticket's work branch, under its usual instructions, and the first opens the PR.
+  - **The approval gate.** What follows an output waits on the owner's `std:approval@1` of the
+    head; the change merges once, at the course's last approval, by a **ticket merge**
+    (R-BTN-183). That merge takes the approval in place of `merge.reviews` and `merge.checks` and
+    is limited to the ticket folder and the course's new `outputs` field (replacing `proposes`).
+    It applies every other merge rule (paths, control paths, symlinks, leg state, continuity,
+    authorship, foreign commits) and refuses `id-taken`. `std:approval@1` gains an optional
+    `answer`. On this route `build-app`'s `plan` writes the children, and `file` returns them
+    as already landed (R-BTN-165).
+  - **The end waits for the merge.** The end arrival is deferred until the merge runner, which
+    lists waiting tickets through the fact reader (R-BTN-192), attests the merge as `pr-merged`.
+    After it, a leg's record is leg state where `leg_state` says.
+  - **Refining** is the owner's own commits, attested by `pr-pushed`. `changes` re-queues the
+    writer, and a cancel closes the PR unmerged.
+  - **Removed:** `std:proposal@1`, the `propose` outbox kind, the second kind of leg state and
+    the leg-state record path. The proposal merge (handler tickets and other template writes) now
+    takes R-BTN-183's path, control-path and leg-state refusals, which the first draft's merge
+    skipped.
+  - **Guarantees.** `no-runner-lands` and `independent-review` state the ticket merge as their
+    one approval-only route.
+
+  Round one's findings, closed:
+  - **(a) Path checks skipped:** the ticket merge and the proposal merge apply R-BTN-183's.
+  - **(b) End before landing:** the end is deferred until `pr-merged`.
+  - **(c) Close deleting the blobs a copy needed:** no copy remains; outputs are on the work
+    branch.
+  - **(d) Unruled writes, ids, rejection and refine-then-approve:** each leg's writes are on one
+    branch; `id-taken`; cancel; the owner's commits and `changes`.
+
+  Built by B-149 (rewritten); B-140 notes the proposal merge's path checks.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
