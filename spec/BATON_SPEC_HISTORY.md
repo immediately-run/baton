@@ -1105,6 +1105,40 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - **`decision`.** A settled `prepare` queues `land`, and `carry-out` only records and files.
   - **Text.** S-BTN-107, R-BTN-35 and R-BTN-165's empty-set sentences now match.
 
+- **2026-11-01 — §5 R-BTN-5, R-BTN-35, R-BTN-116, R-BTN-131, §12.8 R-BTN-180, §15 S-BTN-104,
+  S-BTN-107, S-BTN-194, §16 (owner direction): one ticket, one PR, one merge.** Review round
+  three of PR #154's per-ticket-branch draft found 2 blocking and 5 major problems:
+  - **`accept-head`** recorded a head the owner never saw.
+  - **A merge during a re-run** ended the course with the re-run's branch unmerged.
+  - **On plain git**, another branch's merge counted.
+  - **The fact reader** had no channel for unreported commits.
+  - **The migration** broke R-BTN-64.
+  - **`status: done`** was left on a re-run's branch.
+  - **The landed-children attestation** had no clear writer.
+
+  Every round had found new blocking problems, nearly all in machinery that existed only so one
+  ticket could hold several approvals or work after its own merge. The owner: "There has been
+  lots of work trying to accommodate these marker courses. Would it be possible to simplify the
+  spec by eliminating this type of course entirely and tying every course to a ticket file in
+  Git?" Asked whether to rewrite on "one ticket, one PR, one merge", the owner said "Yes".
+
+  The rewrite starts again from the specification on `main`. What it keeps:
+  - **Every standard course that writes work is a PR course.** Its legs commit on the ticket's
+    branch, and the course ends at `merged`: by a runner's `merge`, or by the owner's
+    `merged-by-hand` under `create-pr`'s existing rule.
+  - **`bug-report`, `draft-ticket`, `decision` and `spec-to-tickets`** gain `merged-by-hand`
+    and a send-back edge on their last writing leg. `decision` gains the person leg `answer`, a
+    settled route and a re-ask route.
+  - **`build-app`** becomes a parent ticket like `epic`. A call leg, `stages`, files one child
+    per document on the new course `draft-doc` (`write`, then `merged-by-hand`), chained by
+    `depends_on`. `file` and `verify` are as before.
+  - **Reading and answers.** A leg reads its record at the branch's head (R-BTN-5), and a person
+    leg's applied answer is its output `answer` (R-BTN-116).
+
+  What it drops: the numbered per-ticket branch, merges partway through a course, the
+  `work_branch` and `writes` fields, `accept-head`, `baton.marker-unreported`,
+  `std:git.landed@1`, the restated guarantees and R-BTN-165's landed-children variant.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

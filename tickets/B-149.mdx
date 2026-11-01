@@ -1,5 +1,5 @@
 ---
-title: "B-149 — The marker courses work on a PR under every policy: each leg commits on the ticket's PR, and the owner's merge is the approval"
+title: "B-149 — One ticket, one PR, one merge: the former marker courses become PR courses ending at merged, and build-app a parent of one draft-doc child per stage"
 id: B-149
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1164
 tier: critical
-description: "Every marker course (bug-report, draft-ticket, decision, build-app, spec-to-tickets) commits each leg's work to the default branch, which `no-runner-lands` forbids. Build R-BTN-131 as amended on 2026-11-01: each leg commits on the ticket's open PR under every policy, each approval is the owner's merge (a `pr-merged` fact leg), `build-app` has a PR per stage with the plan's children in the plan's PR, and call legs take children a merged PR landed (R-BTN-165). S-BTN-104, S-BTN-107, S-BTN-194. Requires: B-120, B-140, B-7, B-62."
+description: "The marker courses (bug-report, draft-ticket, decision, build-app, spec-to-tickets) commit each leg's work to the default branch, which `no-runner-lands` forbids. Build R-BTN-131 as amended on 2026-11-01: every standard course that writes work commits on the ticket's branch and ends at `merged` (the owner's `merged-by-hand`); `build-app` becomes a parent ticket filing one `draft-doc` child per stage. S-BTN-104, S-BTN-107, S-BTN-194. Requires: B-120, B-140, B-7, B-62."
 topics:
   - baton
 owns: {}
@@ -26,14 +26,18 @@ depends_on:
 the marker courses cannot run under the strong policy: "This seems like a pretty serious issue.
 Please address this now."
 
-**Spec:** `spec/BATON_SPEC.md` §5 R-BTN-131 (*The marker courses*, the course table, `spec-to-tickets`,
-`build-app`), R-BTN-165 (children a merged PR landed), R-BTN-180, R-BTN-192 (`pr-merged`);
-S-BTN-104, S-BTN-107, S-BTN-194.
+**Spec:** `spec/BATON_SPEC.md` §5 R-BTN-131 (*One ticket, one PR, one merge*, the course table,
+`spec-to-tickets`, `build-app`), R-BTN-5, R-BTN-116 (the answer as output), R-BTN-192
+(`merged-by-hand`'s `pr-merged`); S-BTN-104, S-BTN-107, S-BTN-194.
 
-**Depends on:** B-120 (course history in Baton, fact legs), B-140 (the fact reader, which
-attests `pr-merged` under `protected`), B-7 (person legs: `decision`'s `answer`, `build-app`'s
-`ship-anyway`) and B-62 (call legs: `file`, `fix`). Under `cooperative` the sync attests
-`pr-merged`, so items 1–5 can be built and tested before B-140.
+**Depends on:**
+- B-120: course history in Baton, and fact legs.
+- B-140: the fact reader, which attests `pr-merged` under `protected`.
+- B-7: person legs (`decision`'s `answer`).
+- B-62: call legs (`build-app`'s `stages`, `file`, `verify`).
+
+Under `cooperative` the sync attests `pr-merged`, so the PR courses can be built and tested before
+B-140.
 
 ### Why
 
@@ -57,105 +61,83 @@ The five marker courses cannot run on a home whose default branch is protected.
 
 ### What the owner has decided
 
-- **2026-10-31:** the marker courses must run under Baton's strongest preset; no hardened
+- **2026-10-31:** the standard courses must run under Baton's strongest preset; no hardened
   copies in other homes.
-- **2026-11-01:** "The marker courses no longer need to commit to the main branch now that ticket
-  history and claims are owned exclusively by Baton. We can always commit to a PR branch instead
-  of the main branch." The owner then chose:
-  - **every policy:** one route;
-  - **answer, then merge:** `decision` takes two acts;
-  - **each approval is a merge:** `build-app` has a PR per stage, and the plan's PR carries its
-    children.
+- **2026-11-01,** after four drafts and five review rounds on routes that kept a "marker"
+  course: "Would it be possible to simplify the spec by eliminating this type of course entirely
+  and tying every course to a ticket file in Git?" The owner then agreed to one ticket, one PR,
+  one merge, with `build-app` as a parent ticket. The earlier choices still hold:
+  - a PR under every policy;
+  - `decision` answered in Baton, then merged;
+  - each approval a merge.
 
-  The two earlier drafts (proposals, then a ticket merge) are withdrawn. Their history entries,
-  dated 2026-10-31 and 2026-11-01 in `spec/BATON_SPEC_HISTORY.md`, record why.
+  The history entries dated 2026-10-31 and 2026-11-01 in `spec/BATON_SPEC_HISTORY.md` record
+  each draft and why it was dropped.
 
 ### What to build
 
-1. **The current branch.** The courses declare `work_branch: per-ticket` and `writes`, and core
-   keys on the field. Each marker leg's `close` commits on the ticket's current marker branch
-   (`baton/m/<id>/<n>`): the one the last writing leg reported, or a new one cut from the default
-   branch, or from a closed PR's head after a route. The close then opens the PR and reports
-   `{branch, head}` with the position. It refuses paths outside the ticket folder and the course's
-   `writes`, and never pushes or merges the default branch (`src/defaults/ticket-state.ts`).
-   The courses' `branch_pattern` is `baton/m/{ticket}/*`, and R-BTN-25 continues only the current
-   branch.
-2. **The course files** (`src/defaults/courses.ts`), as R-BTN-131's table gives them: every fact
-   leg with `arrives: {fact: pr-merged}`; the self-edges with `max_runs`; `decision`'s `answer`,
-   `settled` and re-ask paths; `build-app`'s stage PRs, `verify`'s three outcomes, `ship-anyway`
-   and `fix`'s `unfixed`; and `writes` (`build-app`: `product/{ticket}/**`). A writing leg's
-   `next` naming itself is refused.
-3. **What a leg reads and when a merge counts.**
-   - The runner reads the ticket at the marker head (R-BTN-5), and the station functions read
-     there too.
-   - The fact reader and the sync count only a merge of the current marker branch containing
-     its reported head, made by no claim, or on `forge: git` a first-parent merge commit.
-   - `fact-legs` carries the branch and head, and keeps a ticket closed `done` until its arrival
-     applies.
-   - Continuity: a leg starts at the reported head, refusing `foreign-commit` otherwise.
-     `baton.marker-unreported` holds the next leg on the owner, and
-     `baton owner ticket accept-head` (an `approvers.policy` approver) records the head.
-   - Under `protected` the fact reader checks the merge's actor (the human-only identity) and its
-     paths, raising `merge-refused`. A squash or rebase merge counts by the PR's head at merge,
-     and on `forge: git` a fast-forward counts.
-   - `branch` rides `std:arrival@1`, the claim response, `positions` and `fact-legs`, and the
-     sync or fact reader attests `std:git.landed@1`.
-4. **Call legs over a merge's children** (R-BTN-165): the set is read from the applied merge,
-   `child-closed` is refused, the null outcome taken on an empty set, the completion evaluated at
-   the end, and the children `waiting` on `parent` until bound.
+1. **The close commits on the ticket's branch.** The close of each leg of `bug-report`,
+   `draft-ticket`, `decision`, `spec-to-tickets` and `draft-doc`:
+   - commits the ticket and its outputs on the ticket's branch, the first push opening the PR
+     (as `create-pr`'s `implement` does);
+   - never pushes the default branch, and writes no `status:` (`src/defaults/ticket-state.ts`);
+   - validates against `item.schema.json` read from the default branch.
+2. **The course files** (`src/defaults/courses.ts`), as R-BTN-131's table gives them:
+   - `merged-by-hand` on each PR course;
+   - the send-back edge with `max_runs` 3 on each last writing leg;
+   - `decision`'s `answer`, its `carried` (settled) route and its re-ask route;
+   - the new `draft-doc` course;
+   - `build-app` as `stages`, `file`, `verify`.
+3. **Reading at the branch head.** The runner reads the body and inputs at the ticket's branch
+   head (R-BTN-5), and so do the station functions. The applied answer is the person leg's output
+   `answer`.
+4. **`build-app`'s `stages` script.** It files the four `draft-doc` children, one per document,
+   each `depends_on` the one before. `file` reads the merged `PLAN.md`.
 5. **Leg instructions.**
-   - Every marker leg's `.md` commits to the marker branch, never the default branch, and only
-     the last writing leg sets `status: done`.
-   - `build-app`'s *The conversation* refines the PR and ends with the owner's merge, not
-     `answer:`. `plan` writes the children, and `verify` writes `VERIFY.md` and its fix tickets.
-   - `decision`'s `prepare` asks through Baton, not `answer: open`, and reports `carried` when
-     the question is settled. `carry-out` reads its claim's input `answer` and reports `asked`
-     to re-ask.
-   - New ids skip the open marker branches' heads.
-6. **Migration**, in this order, tested on a fixture per row:
+   - Every leg's `.md` commits to the ticket's branch, never the default branch, and sets no
+     `status:`.
+   - `draft-doc`'s `write` carries `build-app`'s four drafting instructions, chosen by the
+     document the child names, and its *The conversation* ends with the owner's merge, not
+     `answer:`.
+   - `decision`'s `prepare` asks through Baton and reports `carried` when the question is
+     settled.
+   - `carry-out` reads its input `answer`, only records and files, and reports `asked` to re-ask.
+6. **Migration**, tested on a fixture per row:
    1. Land the new course files. A live ticket whose queued leg the new file lacks waits on
-      `course-changed` (R-BTN-83), which R-BTN-64's course test accepts.
+      `course-changed` (R-BTN-83).
    2. Place each such ticket with `baton owner ticket adopt`:
-      - `decision` at `asked`, with `carry-out` queued: to `asked` with `answer` queued, so the
-        owner answers again in Baton. A git `answer:` is not carried over.
-      - `build-app` at `defined`, `designed` or `architected`: to the next `*-accepted` station
-        if the git `answer:` approved that stage, else to the drafting station with its
-        `accept-*` leg queued and the drafting leg routed to open the stage's PR.
-      - `build-app` at `planned`: to `architecture-accepted` with `plan` queued, so the plan's PR
-        carries the children; never to `plan-accepted`.
-      - Other stations: unchanged.
-   3. Any ticket a leg left with records on the default branch keeps them, and its next leg
-      opens its first branch.
+      - `decision` at `asked`: `answer` queued.
+      - `build-app` at `requested`, `defined`, `designed`, `architected` or `planned`: to
+        `requested` with `stages` queued. Its script skips any stage whose document the default
+        branch already holds and that the git `answer:` approved.
+   3. Records already on the default branch stay, and the ticket's next leg opens its branch.
+
+   If R-BTN-64's course test refuses the new file while such tickets are live, place them first
+   on a transitional file that keeps the old edges beside the new ones, then remove those edges.
 7. **The docs.** In `docs/standard-courses.mdx`, *How each course finds where a ticket is* and
-   *`build-app`, step by step*. In `docs/security-model.mdx`, the marker courses among what a
-   human's merge by hand lands.
+   *`build-app`, step by step*.
 
 ### Tests
 
-S-BTN-104, S-BTN-107 and S-BTN-194, every case in their rows, and each row of item 6's map.
+S-BTN-104, S-BTN-107 and S-BTN-194, every case in their rows, and each row of item 6.
 
 ### Do not
 
-- Push the default branch from any marker leg, under any policy.
-- Treat an answer, a comment or a verdict as a stage's approval: only a merge is.
-- Take a call leg's children from its script or from tickets outside the applied merge.
-- Copy the marker courses into Fieldhouse or any other home as hardened variants.
+- Push the default branch from any leg of a standard course, under any policy.
+- Give one ticket a second approval: a course that needs several is several tickets.
+- Copy the standard courses into Fieldhouse or any other home as hardened variants.
 
 ### Exit criteria
 
 - [ ] `npm test` green with S-BTN-104, S-BTN-107 and S-BTN-194's cases
 - [ ] `npm run typecheck` green
-- [ ] Under `protected` on a test repository, a `draft-ticket` ticket runs to `filed` with no
+- [ ] Under `protected` on a test repository, a `draft-ticket` ticket runs to `merged` with no
       runner commit on the default branch
 - [ ] FLDH-42's note that it waits on this ticket is removed when this ticket is done
 
 ## Status
 
 - 2026-10-31 to 2026-11-01: two drafts of a protected-only route in immediately-run/baton#150,
-  each found incomplete by review, withdrawn from it at the owner's choice.
-- 2026-11-01: the owner ruled that the marker courses work on a PR under every policy; the spec
-  is amended in its own PR, stacked on #150.
-- 2026-11-01: review round one of #154 (two reviewers) closed in the spec; this ticket's items
-  rewritten on it, with B-7 and B-62 added as dependencies.
-- 2026-11-01: review round two of #154 (one reviewer) closed in the spec; items 1, 3 and 6
-  rewritten on it.
+  withdrawn from it.
+- 2026-11-01: in #154, a per-ticket-branch route reviewed three times, each round finding new
+  blocking problems, then replaced, on the owner's direction, by one ticket, one PR, one merge.
