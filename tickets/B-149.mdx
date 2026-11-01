@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1164
 tier: critical
-description: "Every marker course (bug-report, draft-ticket, decision, build-app, spec-to-tickets) commits each leg's work to the default branch, which `no-runner-lands` forbids. Build R-BTN-131 as amended on 2026-11-01: each leg commits on the ticket's open PR under every policy, each approval is the owner's merge (a `pr-merged` fact leg), `build-app` has a PR per stage with the plan's children in the plan's PR, and call legs take children a merged PR landed (R-BTN-165). S-BTN-104, S-BTN-107, S-BTN-194. Requires: B-120, B-140."
+description: "Every marker course (bug-report, draft-ticket, decision, build-app, spec-to-tickets) commits each leg's work to the default branch, which `no-runner-lands` forbids. Build R-BTN-131 as amended on 2026-11-01: each leg commits on the ticket's open PR under every policy, each approval is the owner's merge (a `pr-merged` fact leg), `build-app` has a PR per stage with the plan's children in the plan's PR, and call legs take children a merged PR landed (R-BTN-165). S-BTN-104, S-BTN-107, S-BTN-194. Requires: B-120, B-140, B-7, B-62."
 topics:
   - baton
 owns: {}
@@ -18,6 +18,8 @@ prs: []
 depends_on:
   - B-120
   - B-140
+  - B-7
+  - B-62
 ---
 
 **Brief:** the owner, 2026-10-31, in a design session on Fieldhouse's courses, on being shown that
@@ -28,9 +30,10 @@ Please address this now."
 `build-app`), R-BTN-165 (children a merged PR landed), R-BTN-180, R-BTN-192 (`pr-merged`);
 S-BTN-104, S-BTN-107, S-BTN-194.
 
-**Depends on:** B-120 (course history in Baton, fact legs) and B-140 (the fact reader, which
-attests `pr-merged` under `protected`). Under `cooperative` the sync attests it, so items 1–5
-can be built and tested before B-140.
+**Depends on:** B-120 (course history in Baton, fact legs), B-140 (the fact reader, which
+attests `pr-merged` under `protected`), B-7 (person legs: `decision`'s `answer`, `build-app`'s
+`ship-anyway`) and B-62 (call legs: `file`, `fix`). Under `cooperative` the sync attests
+`pr-merged`, so items 1–5 can be built and tested before B-140.
 
 ### Why
 
@@ -69,42 +72,64 @@ The five marker courses cannot run on a home whose default branch is protected.
 
 ### What to build
 
-1. **The close commits on the ticket's PR.** Each marker leg's `close` commits the ticket and its
-   outputs on the ticket's open marker PR. Where none is open, it opens one on
-   `baton/<ticket id>-<leg>`, cut from the default branch. It never pushes the default branch
-   (`src/defaults/ticket-state.ts`). The courses' `branch_pattern` is `baton/{ticket}-*`.
-2. **The course files** (`src/defaults/courses.ts`), as R-BTN-131's table gives them:
-   - `land` on `bug-report`, `draft-ticket`, `decision` and `spec-to-tickets`;
-   - `decision`'s person leg `answer`;
-   - `build-app`'s `accept-*`, `ship`, `accept-fixes` and the call leg `fix`, and its drafting
-     legs' `from` including their own station with `max_runs` 3;
-   - `spec-to-tickets`' `file` ending at `written`.
-
-   Each fact leg declares `arrives: {fact: pr-merged}`.
-3. **Station functions** read the ticket at the open PR's head, else at the default branch. Each
-   fact leg is `waiting` on `owner`.
-4. **Call legs over landed children** (R-BTN-165): `called_by: {leg}` with no run, the set derived
-   from landed tickets, a different `spawned` refused, the completion evaluated at the end, and
-   the children unclaimable until bound.
-5. **Leg instructions.** Every marker leg's `.md` says to commit to the PR, never to the default
-   branch. `build-app`'s *The conversation* refines the PR and ends with the owner's merge, not
-   `answer:`. `plan` writes the children, and `verify` writes `VERIFY.md` and its fix tickets.
-   `decision`'s `prepare` asks through Baton, not `answer: open`, and `carry-out` reads the
-   answer from its claim's input.
-6. **Migration.** A marker ticket mid-course when this lands keeps its station (course history)
-   and opens its PR at its next leg. Its earlier records stay on the default branch.
+1. **The marker branch.** Each marker leg's `close` commits on the ticket's current marker branch
+   (`baton/m/<id>/<n>`): the one the last writing leg reported, or a new one cut from the default
+   branch, or from a closed PR's head after a route. The close then opens the PR and reports
+   `{branch, head}` with the position. It refuses paths outside the ticket folder and the course's
+   `outputs`, and never pushes or merges the default branch (`src/defaults/ticket-state.ts`).
+   The courses' `branch_pattern` is `baton/m/{ticket}/*`, and R-BTN-25 continues only the current
+   branch.
+2. **The course files** (`src/defaults/courses.ts`), as R-BTN-131's table gives them: every fact
+   leg with `arrives: {fact: pr-merged}`; the self-edges with `max_runs`; `decision`'s `answer`,
+   `settled` and re-ask paths; `build-app`'s stage PRs, `verify`'s three outcomes, `ship-anyway`
+   and `fix`'s `unfixed`; and `outputs` (`build-app`: `product/{ticket}/**`). A writing leg's
+   `next` naming itself is refused.
+3. **What a leg reads and when a merge counts.**
+   - The runner reads the ticket at the marker head (R-BTN-5), and the station functions read
+     there too.
+   - The fact reader and the sync count only a merge of the current marker branch containing
+     its reported head, made by no claim, or on `forge: git` a first-parent merge commit.
+   - `fact-legs` carries the branch and head, and keeps a ticket closed `done` until its arrival
+     applies.
+   - `baton.marker-unreported` is raised for unreported commits.
+4. **Call legs over a merge's children** (R-BTN-165): the set is read from the applied merge,
+   `child-closed` is refused, the null outcome taken on an empty set, the completion evaluated at
+   the end, and the children `waiting` on `parent` until bound.
+5. **Leg instructions.**
+   - Every marker leg's `.md` commits to the marker branch, never the default branch, and only
+     the last writing leg sets `status: done`.
+   - `build-app`'s *The conversation* refines the PR and ends with the owner's merge, not
+     `answer:`. `plan` writes the children, and `verify` writes `VERIFY.md` and its fix tickets.
+   - `decision`'s `prepare` asks through Baton, not `answer: open`, and reports `carried` when
+     the question is settled. `carry-out` reads its claim's input `answer` and reports `asked`
+     to re-ask.
+   - New ids skip the open marker branches' heads.
+6. **Migration.** Before the new course files land, place every live marker ticket whose
+   position the new file lacks with `baton owner ticket adopt`, so that R-BTN-64's course test
+   passes. The map, tested on a fixture per row:
+   - `decision`: at `asked` with `carry-out` queued, to `answered` if an `answer:` was given,
+     else to `asked` with `answer` queued.
+   - `build-app`: at `defined`, `designed`, `architected` or `planned`, with the next drafting
+     leg or `file` queued:
+     - to the next `*-accepted` station if the git `answer:` approved that stage;
+     - else to the drafting station with its `accept-*` leg queued, which waits for a PR the
+       next run of the drafting leg opens.
+   - `draft-ticket` at `drafted` with `check` queued: unchanged.
+   - Any ticket a leg left with records on the default branch keeps them, and its next leg
+     opens the first marker branch.
 7. **The docs.** In `docs/standard-courses.mdx`, *How each course finds where a ticket is* and
-   *`build-app`, step by step*.
+   *`build-app`, step by step*. In `docs/security-model.mdx`, the marker courses among what a
+   human's merge by hand lands.
 
 ### Tests
 
-S-BTN-104, S-BTN-107 and S-BTN-194, every case in their rows.
+S-BTN-104, S-BTN-107 and S-BTN-194, every case in their rows, and each row of item 6's map.
 
 ### Do not
 
 - Push the default branch from any marker leg, under any policy.
 - Treat an answer, a comment or a verdict as a stage's approval: only a merge is.
-- Let a call leg's script name the children a merged PR landed. Baton derives them.
+- Take a call leg's children from its script or from tickets outside the applied merge.
 - Copy the marker courses into Fieldhouse or any other home as hardened variants.
 
 ### Exit criteria
@@ -121,3 +146,5 @@ S-BTN-104, S-BTN-107 and S-BTN-194, every case in their rows.
   each found incomplete by review, withdrawn from it at the owner's choice.
 - 2026-11-01: the owner ruled that the marker courses work on a PR under every policy; the spec
   is amended in its own PR, stacked on #150.
+- 2026-11-01: review round one of #154 (two reviewers) closed in the spec; this ticket's items
+  rewritten on it, with B-7 and B-62 added as dependencies.

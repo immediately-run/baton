@@ -1015,6 +1015,59 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
   Built by B-149.
 
+- **2026-11-01 — review round one of PR #154** (two fresh reviewers, the diff and the impact
+  list). Blocking:
+  - **An early merge.** A merge of an earlier marker PR, never applied while no fact leg waited,
+    could later satisfy `land` while a newer PR stayed open.
+  - **`status: done` hiding the arrival.** The merge closed the ticket, which then dropped off
+    the fact reader's list before `pr-merged` arrived.
+  - **Untouched rules contradicted.** R-BTN-165's note, R-BTN-180's proposed tickets,
+    `paths.tickets` and three guarantees still promised approvals, reviews or signatures that a
+    human's merge of a marker PR does not give.
+
+  Majors:
+  - the merged head bound to nothing, and other runners' commits;
+  - no edge to send the last writing leg back;
+  - branch names reused across runs, and "the open PR" undefined;
+  - plain-git repositories without PRs;
+  - which merge counts;
+  - colliding ids with no one to refile;
+  - the runner reading inputs from the default branch (R-BTN-5);
+  - `decision`'s settled and re-ask paths;
+  - the third failing `verify`;
+  - gaps in the derived child set;
+  - migration against R-BTN-64.
+
+  The owner chose, when asked:
+  - **"Branch + human merge"** for `forge: git`: the marker branch stands for the PR, and a
+    first-parent merge commit is `pr-merged`.
+  - **"Any non-runner merge"**: under `protected` only the human identity can merge, and under
+    `cooperative` the spec promises no more than the refs do.
+
+  Fixed:
+  - **The marker branch.** A ticket has a current marker branch, `baton/m/<id>/<n>`, never
+    reused and recorded with the position. A fact leg counts only a merge of that branch
+    containing its reported head, made by no claim. R-BTN-25 continues only that branch.
+  - **Closing in git.** The last writing leg sets `status: done` on the branch, and the fact
+    reader keeps a ticket closed `done` on its list until the arrival applies, which a
+    `cooperative` post applies before the closure.
+  - **What a leg may change and read.** The close refuses paths outside the ticket folder and a
+    restored `outputs` field. Runners read at the marker head (R-BTN-5).
+  - **Unreported commits** are listed under `baton.marker-unreported`, never reset.
+  - **Sending back.** Every writing leg before a fact leg also leaves its own station; a
+    writing leg's `next` naming itself is refused.
+  - **`decision`.** `prepare` may reach `carried` when the question is settled, and `carry-out`
+    may return to `asked`. The answer reaches the next leg as its input `answer`, and only the
+    default branch's `answer:` is attested.
+  - **`build-app`.** A third failing `verify` reaches `stuck`, which the person leg
+    `ship-anyway` resolves, and `fix` has the null outcome `unfixed`.
+  - **R-BTN-165's italic note** is folded into its body, and it leaves `PATCH_NOTES_ALLOWED`.
+    The children are read from the merge alone; one landed closed is `child-closed`, and they
+    stay `waiting` on `parent` until bound.
+  - **Rules restated:** R-BTN-180's proposed tickets, `paths.tickets`, R-BTN-184, and the
+    guarantees `no-runner-lands`, `tickets-approved`, `independent-review` and
+    `signed-authorship` now state what a human's merge by hand is.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
