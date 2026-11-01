@@ -89,20 +89,18 @@ describe('G-BTN-5: identity — the secret, the hostname and the capability allo
     expect((await workerCall('/v1/runner/heartbeat', { cred: 'test', body: hbBody('test', { test_harness: true, secret_hash: await sha256('z') }) })).status).toBe(200);
   });
 
-  it('stores capabilities expanded with what was declared, clamps the lease, and fails closed on unknown accounts', async () => {
-    const { id } = await register('vm-a', { capabilities: ['agent-venue', 'mcp-chrome'], lease_timeout_s: 60, billing: { 'zai-coding-plan': 'zai', anthropic: 'anthropic' }, model_provider_id: 'nope' });
+  it('stores capabilities expanded with what was declared, and clamps the lease', async () => {
+    const { id } = await register('vm-a', { capabilities: ['agent-venue', 'mcp-chrome'], lease_timeout_s: 60 });
     expect(await rows('SELECT capability, declared FROM worker_capabilities WHERE worker_id = ? ORDER BY capability', id)).toEqual([
       { capability: 'authentication', declared: 'agent-venue' }, { capability: 'create-pr', declared: 'agent-venue' },
       { capability: 'drivable-browser', declared: 'agent-venue' }, { capability: 'llm-call', declared: 'agent-venue' },
       { capability: 'mcp-chrome', declared: 'mcp-chrome' }]);
-    // anthropic is not an account the reference data knows: left out, so it counts as suspended (§7.4).
-    expect(await rows('SELECT prefix, provider_id FROM worker_providers WHERE worker_id = ?', id)).toEqual([{ prefix: 'zai-coding-plan', provider_id: 'zai' }]);
-    expect(await rows('SELECT lease_timeout_ms, model_provider_id FROM workers WHERE id = ?', id)).toEqual([{ lease_timeout_ms: 900_000, model_provider_id: null }]);
+    expect(await rows('SELECT lease_timeout_ms FROM workers WHERE id = ?', id)).toEqual([{ lease_timeout_ms: 900_000 }]);
     const { first } = await register('vm-b', { lease_timeout_s: 999_999 });
     expect(first.lease_timeout_s).toBe(86400);
   });
 
-  it('§3 write budget: capability and provider rows are rewritten only when the settings change', async () => {
+  it('§3 write budget: capability rows are rewritten only when the settings change', async () => {
     const { id, secret } = await register('vm-a');
     const before = await rows('SELECT rowid, capability FROM worker_capabilities WHERE worker_id = ? ORDER BY rowid', id);
     await beat('vm-a', secret);
@@ -361,21 +359,28 @@ describe('round-one review fixes (baton#4)', () => {
     expect(await rows(`SELECT hostname, revoked_at IS NOT NULL AS revoked FROM credentials WHERE id = 'vm-a'`)).toEqual([{ hostname: 'vm-a', revoked: 1 }]);
   });
 
-  it('§7.4: a billed account the reference data learns later is written on the next heartbeat', async () => {
-    const { id, secret } = await register('vm-a', { billing: { 'zai-coding-plan': 'zai', newco: 'newco' } });
-    expect(await rows('SELECT prefix FROM worker_providers WHERE worker_id = ? ORDER BY prefix', id)).toEqual([{ prefix: 'zai-coding-plan' }]);
-    await rows(`INSERT INTO model_providers (id, name, billing) VALUES ('newco', 'NewCo', 'subscription')`);
-    await beat('vm-a', secret, { billing: { 'zai-coding-plan': 'zai', newco: 'newco' } });
-    expect(await rows('SELECT prefix FROM worker_providers WHERE worker_id = ? ORDER BY prefix', id)).toEqual([{ prefix: 'newco' }, { prefix: 'zai-coding-plan' }]);
-  });
-
-  it('§7.3: usage replaces the hour’s row, unknown accounts are skipped, rate limits are logged', async () => {
-    const { id, secret } = await register('vm-a');
+  it('B-107: the advisory is gone — a heartbeat still carrying its fields is accepted with them ignored, and the owner suspension routes answer not-found', async () => {
+    // Through the window (BATON_SPEC §5.9, §6.10): a sidecar that still posts `model_provider_id`,
+    // `billing`, `usage` and `rate_limits` keeps working; each field is read nowhere, and no
+    // table it once fed exists. A heartbeat without them (the helpers' default) is the same.
     const hour = T0 - (T0 % 3_600_000);
-    await beat('vm-a', secret, { usage: [{ provider_id: 'zai', model_id: 'glm-5.3', hour, usd_list: 1.5 }, { provider_id: 'nope', model_id: 'm', hour, usd_list: 9 }], rate_limits: [{ provider_id: 'zai', resets_at: T0 + 60_000 }] });
-    await beat('vm-a', secret, { usage: [{ provider_id: 'zai', model_id: 'glm-5.3', hour, usd_list: 2.25 }] });
-    expect(await rows('SELECT provider_id, usd_list FROM usage_reports WHERE worker_id = ?', id)).toEqual([{ provider_id: 'zai', usd_list: 2.25 }]);
-    expect(await rows('SELECT provider_id, resets_at FROM rate_limit_events WHERE worker_id = ?', id)).toEqual([{ provider_id: 'zai', resets_at: T0 + 60_000 }]);
+    const residue = {
+      model_provider_id: 'zai', billing: { 'zai-coding-plan': 'zai', anthropic: 'anthropic' },
+      usage: [{ provider_id: 'zai', model_id: 'glm-5.3', hour, usd_list: 1.5 }],
+      rate_limits: [{ provider_id: 'zai', resets_at: T0 + 60_000 }],
+    };
+    const { id, secret, first } = await register('vm-a', residue);
+    expect(first.worker_id).toBe(id);
+    const hb = await beat('vm-a', secret, residue);
+    expect(hb.status).toBe(200);
+    expect(hb.json.suspensions).toBeUndefined();
+    expect(await rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('model_providers', 'provider_models', 'peak_schedules', 'provider_suspensions', 'worker_providers', 'usage_reports', 'rate_limit_events')`)).toEqual([]);
+    expect(await rows(`SELECT name FROM pragma_table_info('workers') WHERE name = 'model_provider_id'`)).toEqual([]);
+    // The routes that once set and lifted a suspension are gone.
+    const set = await owner('/v1/ui/suspensions', { provider_id: 'zai', mode: 'no-new-work' });
+    expect([set.status, await code(set)]).toEqual([404, 'not-found']);
+    const lift = await owner('/v1/ui/suspensions/1/lift', {});
+    expect([lift.status, await code(lift)]).toEqual([404, 'not-found']);
   });
 
   it('a declared human-operator is the one literal row it declares (B-104: rule 6 retired, R-BTN-121 as amended)', async () => {
@@ -413,14 +418,12 @@ describe('round-one review fixes (baton#4)', () => {
     expect(await rows('SELECT status FROM messages WHERE id = ?', m1)).toEqual([{ status: 'acknowledged' }]);
   });
 
-  it('§7.4: a window already over is refused; a lifted timed suspension never logs an end', async () => {
-    const past = await owner('/v1/ui/suspensions', { provider_id: 'zai', mode: 'stop', starts_at: T0 - 3 * 3_600_000, ends_at: T0 - 3_600_000 });
-    expect([past.status, await code(past)]).toEqual([400, 'invalid-params']);
-    const { id } = (await (await owner('/v1/ui/suspensions', { provider_id: 'zai', mode: 'no-new-work', ends_at: T0 + 3_600_000 })).json()) as { id: number };
-    await owner(`/v1/ui/suspensions/${id}/lift`, {});
-    await setClock(T0 + 2 * 3_600_000);
-    await tick();
-    expect((await rows<{ a: string }>(`SELECT json_extract(detail_json, '$.action') AS a FROM events WHERE kind = 'suspension' ORDER BY seq`)).map((r) => r.a)).toEqual(['set', 'started', 'lifted']);
+  it('B-107: the dashboard state serves neither advisory view — no providers, no suspensions', async () => {
+    await register('vm-a');
+    const s = (await (await ownerCall('/v1/ui/state')).json()) as Record<string, unknown>;
+    expect(s.providers).toBeUndefined();
+    expect(s.suspensions).toBeUndefined();
+    expect(s.workers).toEqual([expect.not.objectContaining({ providers: expect.anything(), model_provider_id: expect.anything() })]);
   });
 });
 
