@@ -76,11 +76,13 @@ The five marker courses cannot run on a home whose default branch is protected.
 
 ### What to build
 
-1. **The close commits on the ticket's branch.** The close of each leg of `bug-report`,
+1. **The close commits on the ticket's branch.** The last writing leg sets `status: done` and
+   moves the file to `archive/` there. `fold` writes `duplicate_of:` in its own ticket only, and
+   new ids skip the open ticket branches' heads. The close of each leg of `bug-report`,
    `draft-ticket`, `decision`, `spec-to-tickets` and `draft-doc`:
    - commits the ticket and its outputs on the ticket's branch, the first push opening the PR
      (as `create-pr`'s `implement` does);
-   - never pushes the default branch, and writes no `status:` (`src/defaults/ticket-state.ts`);
+   - never pushes the default branch (`src/defaults/ticket-state.ts`);
    - validates against `item.schema.json` read from the default branch.
 2. **The course files** (`src/defaults/courses.ts`), as R-BTN-131's table gives them:
    - `merged-by-hand` on each PR course;
@@ -88,34 +90,50 @@ The five marker courses cannot run on a home whose default branch is protected.
    - `decision`'s `answer`, its `carried` (settled) route and its re-ask route;
    - the new `draft-doc` course;
    - `build-app` as `stages`, `file`, `verify`.
-3. **Reading at the branch head.** The runner reads the body and inputs at the ticket's branch
+3. **`pr-merged` and continuity** (with B-140): a merge counts only if it contains the last
+   attested head and was made after the leg began waiting, and under a protected default branch
+   only if the human identity made it. On `forge: git`, a `--no-ff` merge commit whose second
+   parent contains the head. `prs:` is read from the default branch only. While `merged-by-hand`
+   alone waits, the owner's commits are not reset, and `route` records the branch head. A
+   ticket closed `done` stays listed until its arrival applies.
+4. **Reading at the branch head.** The runner reads the body and inputs at the ticket's branch
    head (R-BTN-5), and so do the station functions. The applied answer is the person leg's output
    `answer`.
-4. **`build-app`'s `stages` script.** It files the four `draft-doc` children, one per document,
+5. **`build-app`'s `stages` script.** It files the four `draft-doc` children, one per document,
    each `depends_on` the one before. `file` reads the merged `PLAN.md`.
-5. **Leg instructions.**
-   - Every leg's `.md` commits to the ticket's branch, never the default branch, and sets no
-     `status:`.
+6. **Leg instructions.**
+   - Every leg's `.md` commits to the ticket's branch, never the default branch. Only the last
+     writing leg sets `status: done`.
    - `draft-doc`'s `write` carries `build-app`'s four drafting instructions, chosen by the
      document the child names, and its *The conversation* ends with the owner's merge, not
      `answer:`.
    - `decision`'s `prepare` asks through Baton and reports `carried` when the question is
      settled.
    - `carry-out` reads its input `answer`, only records and files, and reports `asked` to re-ask.
-6. **Migration**, tested on a fixture per row:
-   1. Land the new course files. A live ticket whose queued leg the new file lacks waits on
-      `course-changed` (R-BTN-83).
-   2. Place each such ticket with `baton owner ticket adopt`:
-      - `decision` at `asked`: `answer` queued.
-      - `build-app` at `requested`, `defined`, `designed`, `architected` or `planned`: to
-        `requested` with `stages` queued. Its script skips any stage whose document the default
-        branch already holds and that the git `answer:` approved.
-   3. Records already on the default branch stay, and the ticket's next leg opens its branch.
-
-   If R-BTN-64's course test refuses the new file while such tickets are live, place them first
-   on a transitional file that keeps the old edges beside the new ones, then remove those edges.
-7. **The docs.** In `docs/standard-courses.mdx`, *How each course finds where a ticket is* and
-   *`build-app`, step by step*.
+7. **Migration**, tested on a fixture per row. R-BTN-64's course test refuses a file while a
+   live ticket stands off its graph, so the order is:
+   1. **A transitional file.** Land course files that keep every old station and edge beside the
+      new ones. The old legs stay offerable, so live tickets stand on the graph.
+   2. **Place each live ticket** with `baton owner ticket adopt`, passing `--ran` for the legs
+      already run, so `max_runs` stays honest:
+      - `decision` at `asked`: `answer` queued. Under a policy admitting `sync` for
+        `std:decision@1`, an `answer:` already in git is attested as before. Under `protected` it
+        does not count, and the owner answers in Baton.
+      - `bug-report`, `draft-ticket` and `spec-to-tickets` at a station the new file keeps:
+        unchanged. At a removed end (`closed`, `filed`, `decided`): left closed.
+      - `build-app` with all four documents approved in git (`answer: plan`): at `planned` with
+        `file` queued.
+      - `build-app` with fewer approved: at `requested` with `stages` queued. Its script files
+        only the stages whose documents are not yet approved (at least one, since all approved
+        is the row above).
+   3. **Remove the old stations and edges**, raising `min_runner_version` (R-BTN-64).
+   4. **Records already on the default branch** stay, and each ticket's next leg opens its
+      branch.
+8. **Registration and metadata.** `baton repo init --course build-app` also scaffolds and lists
+   `draft-doc` in `.baton/baton.json`. The migration adds it where `build-app` is listed. The
+   courses' `reads` becomes `facts: ["prs"]`, and `["branches"]` on `forge: git`.
+9. **The docs.** In `docs/standard-courses.mdx`: the overview table, *How each course finds
+   where a ticket is*, `decision`'s answer paragraph and *`build-app`, step by step*.
 
 ### Tests
 
@@ -123,7 +141,7 @@ S-BTN-104, S-BTN-107 and S-BTN-194, every case in their rows, and each row of it
 
 ### Do not
 
-- Push the default branch from any leg of a standard course, under any policy.
+- Write a record or an output to the default branch from any leg, under any policy.
 - Give one ticket a second approval: a course that needs several is several tickets.
 - Copy the standard courses into Fieldhouse or any other home as hardened variants.
 
@@ -141,3 +159,5 @@ S-BTN-104, S-BTN-107 and S-BTN-194, every case in their rows, and each row of it
   withdrawn from it.
 - 2026-11-01: in #154, a per-ticket-branch route reviewed three times, each round finding new
   blocking problems, then replaced, on the owner's direction, by one ticket, one PR, one merge.
+- 2026-11-01: round one of the new design closed in the spec; items 1, 3, 7 and 8 rewritten on it.
+  Batching call children's approvals is B-153.

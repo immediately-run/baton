@@ -1139,6 +1139,51 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   `work_branch` and `writes` fields, `accept-head`, `baton.marker-unreported`,
   `std:git.landed@1`, the restated guarantees and R-BTN-165's landed-children variant.
 
+- **2026-11-01 — review round one of "one ticket, one PR, one merge"** (two fresh reviewers, the
+  diff and the impact list). Both found the same two blocking problems:
+  - **Closure.** Nothing closed a ticket in git after `merged-by-hand`, so `depends_on`, and with
+    it every `build-app` stage after the first, never unblocked.
+  - **A withdrawn stage deadlocked `build-app`.** Its later stages never closed.
+
+  Majors:
+  - **A false blanket rule.** "No leg … commits to the default branch" contradicted call legs'
+    children under `filed` and the runner `merge` legs.
+  - **`pr-merged` was unbound.** It was bound to no head, no time and no actor, and a forged
+    `prs:` on the branch could satisfy it. Several of these gaps were already open in
+    `create-pr`'s `merged-by-hand`.
+  - **The owner's refining commits** met R-BTN-183's foreign-commit reset and continuity.
+  - **Tickets written on a branch** under `proposed`, and the guarantees, were still worded as
+    before.
+  - **No plain-git reader** existed.
+  - **The person leg's `answer`** had no output source.
+  - **Ticket ids and folds** collided across branches.
+  - **The migration** was mis-cited and incomplete.
+
+  The owner chose, for `build-app`'s plan tickets under `proposed`, "Accept, batch later": keep
+  the call-leg route (one approval per child) and file the batching as B-153. This reverses the
+  2026-11-01 "One PR per plan" for now.
+
+  Fixed:
+  - **Closure.** The last writing leg sets `status: done` and archives the file on the branch, so
+    the merge closes the ticket. The fact reader keeps it listed until the arrival applies.
+  - **The withdrawn stage.** `stages` gains a fail-fast `abandoned` entry and a closing
+    `stopped`.
+  - **The blanket rule** is narrowed to records and outputs; call children follow
+    `tickets.created`.
+  - **`pr-merged`** requires the last attested head, a merge after waiting, and under a
+    protected default branch the human identity (R-BTN-192). `prs:` is read from the default
+    branch only.
+  - **The owner's commits** are not reset while `merged-by-hand` alone waits, and `route` records
+    them as the next leg's start (R-BTN-183).
+  - **Ticket files and guarantees.** Ticket files written on a ticket's own branch are filed by its
+    merge (R-BTN-180), and `paths.tickets`, `no-runner-lands`, `tickets-approved` and
+    `independent-review` name the human's merge.
+  - **Plain git.** A `--no-ff` merge commit whose second parent contains the head.
+  - **Outputs and ids.** The person leg's `answer` is an output with no claim (R-BTN-82). New ids
+    skip the open ticket branches, and `fold` writes only its own ticket (`duplicate_of:`).
+  - **Text.** `bug-report`'s stations are written out; R-BTN-64's kit text and the standard
+    courses' lead are corrected; S-BTN-107 and S-BTN-194 are extended.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
