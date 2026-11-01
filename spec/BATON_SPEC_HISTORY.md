@@ -939,6 +939,39 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     `spawned` end.
   - **Corrected text:** the worked example, the attestations cell and the git-kind counts.
 
+- **2026-11-01 — R-BTN-39, R-BTN-69, R-BTN-83, R-BTN-116, R-BTN-131, R-BTN-165, R-BTN-168,
+  R-BTN-171, R-BTN-180, R-BTN-181, R-BTN-183, R-BTN-188, R-BTN-189, R-BTN-190, §9 end reasons,
+  §15 S-BTN-194, §16 (owner direction): the protected route withdrawn from this PR, to B-149.**
+  Review round two of the second draft (one fresh reviewer) found two blocking problems:
+  - **A confirmation deadlock.** A gated end is never confirmed under R-BTN-10, and the merge
+    cannot be claimed while it is unconfirmed.
+  - **A plain answer skips the gate.** A plain `std:decision@1` answers a gated person leg, so a
+    course could end before its change lands.
+
+  It found eight majors besides: a post-approval push both voiding and resetting; unverified
+  `owner_commits`; a cancel racing a claimed merge; post-merge outputs with no landing path; policy
+  changes stranding branches; `independent-review` holding while code lands unreviewed;
+  `build-app`'s children trusted from the runner's list; and person legs the course table does not
+  name. Several trace to person and call legs that B-7, B-41 and B-62 have not yet built. The
+  owner, asked whether to make a third draft in this PR or split it out, chose "Split part 4
+  out": merge this PR with parts 1–3 and 5, and specify the route in its own PR. Everything the
+  two drafts added is removed from the specification:
+  - R-BTN-131's protected route;
+  - the course fields `records`, `proposes`, `outputs` and `lands`;
+  - `std:proposal@1`, and `std:approval@1`'s `answer` and `owner_commits`;
+  - the `propose` outbox kind;
+  - the `merge` hold and `baton.ticket-merge`;
+  - `merge.ticket_courses`;
+  - `unlandable-course`, `released:cannot-finish:policy` and `baton.unlandable`;
+  - the owner cancel;
+  - the leg-state branch's second kind;
+  - S-BTN-194 and its Decisions entry.
+
+  The specification states the marker courses as before this PR's part 4, except that their
+  machine state is course history (part 1). B-149 is rewritten to carry the owner's rulings of
+  2026-10-31 and 2026-11-01, the second draft as the starting text, and every open finding as its
+  amendment's acceptance list.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
