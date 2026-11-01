@@ -45,6 +45,7 @@
     "model:verify": "node model/verify.mjs",
     "check:wiki": "node scripts/check-wiki.mjs",
     "check:tickets": "node cli/baton.mjs tickets check --repo .",
+    "spec:impact": "node scripts/spec-tools.mjs impact",
     "check:spec": "node scripts/check-spec.mjs"
   },
   "dependencies": {
