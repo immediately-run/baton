@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1097
 tier: critical
-description: "Build R-BTN-94 and R-BTN-171 as amended 2026-11-01: a want with a dispatch target queues a `dispatch` outbox entry (coalesced per repository and workflow, the latest replacing one not yet claimed; confirmed by a later board post; late after 2 minutes); couriers registered --delivers dispatch hold the GitHub App's key and the GitLab and Gitea trigger tokens and are rung `outbox` on GET /v1/courier/push; BATON_GITHUB_APP_KEY and the dispatch entries of BATON_FORGE_SECRETS leave the Worker. S-BTN-195. Requires: an operator to move the App key to the courier's host."
+description: "Build R-BTN-94 and R-BTN-171 as amended 2026-11-01: a want with a dispatch target queues a `dispatch` outbox entry (coalesced per repository and workflow, a newer want joining the unclaimed entry with its tickets merged; confirmed only once delivered and a later board post is accepted; late 2 minutes after its not_before); couriers registered --delivers dispatch hold the GitHub App's key and the GitLab and Gitea trigger tokens and are rung `outbox` on GET /v1/courier/push; BATON_GITHUB_APP_KEY and the dispatch entries of BATON_FORGE_SECRETS leave the Worker. S-BTN-195. Requires: an operator to move the App key to the courier's host."
 topics:
   - baton
 owns: {}
@@ -39,10 +39,13 @@ is a claim until Baton marks briefs (B-127): before the build starts, the owner 
 
 1. **The kind.** `dispatch` entries queued in the transaction that records a want, an unblocked
    trigger or a mirror's lag, where the repository has a dispatch target; coalesced to one per
-   repository per 30 seconds plus a trailing one (the alarm), a newer entry replacing one not yet
-   claimed per `(repository, workflow)`; confirmed by a board post (a mirror's acknowledgement)
-   observed after it; `baton.outbox-late` 2 minutes after queueing.
-2. **The courier.** `baton owner courier add <key> --delivers dispatch`; `baton courier start`
+   repository and workflow per 30 seconds, a newer want joining the unclaimed entry with its
+   `tickets` merged (≤ 100) and a window's end as its `not_before`, so `unblocked_dispatch` is
+   retired (a new migration drops it); no entry where no dispatch courier is registered
+   (`baton.dispatch-courier-missing`); confirmed only once `delivered` and a board post whose
+   observation is above `delivered_observation` is accepted; `baton.outbox-late` 2 minutes after
+   `not_before`. A refused entry is dropped and raises `baton.dispatch-refused`.
+2. **The courier.** `baton owner courier add <key> --delivers dispatch`, or for the App's tenant-wide key `baton admin courier add <key> --delivers dispatch --repository <id>…` under each repository's `approvers.members`; its own pinned list of the workflows it may start; `baton courier start`
    with `--github-app-key` and the forge tokens, minting installation tokens on its own host and
    dispatching only a signed entry's workflow; a `std:effect@1` on delivery (R-BTN-191).
 3. **The ring.** `GET /v1/courier/push`, authenticated as the courier's key, rung `outbox` when an

@@ -792,6 +792,28 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     snapshot row, `claim_legs` and an unconfirmed end's pair; B-152 depends on B-120 and waits
     for the owner's confirmation of the credential move; B-116, B-119 and B-137 noted.
 
+- **2026-11-01 — review round two of PR #150's parts 1–3 and 5** (one fresh reviewer, the diff,
+  round one's record and fresh `spec:impact` lists). It confirmed round one's export,
+  confirmation inputs, `board-from-trusted`, readiness key, dispatch credential and ticket fold,
+  and found:
+  - **Blocking:** `create-pr`'s fact legs could never arrive, since round one let a fact arrival
+    move only the queued leg, and a runner leg is queued where they leave. A fact leg or person
+    leg now arrives whenever it leaves Baton's station and no claim is active, idempotent by
+    `ref`; its default `next` must have runs left.
+  - **Major:** no rule named who attests a fact arrival under `protected` — now the home's merge
+    runner, as its `service:` key, from the forge it already reads (R-BTN-181); `claim_legs` could
+    not hold adoption's runs or survive export — keyed by its own `id` with the ticket and a
+    nullable claim; the adopt route's callers disagreed with R-BTN-39 and B-120 still built an MCP
+    action — the route takes an `approvers.policy` approver and `ran?`, and `approvers.policy`
+    lists adopt; `std:decision@1` had no idempotence key and `std:restart@1` no longer refined it —
+    `ref` added, `std:restart@1` its own schema; §13 lacked `dispatch` — added to `outbox.kind`
+    and `couriers.delivers`, a dispatch entry has no ticket, is confirmed by observation number,
+    and a pin refusal raises `baton.dispatch-refused`; a tenant-wide dispatch courier is
+    registered per repository under `approvers.members`.
+  - **Minor:** the R-BTN-131 table (both courses' fact legs), leftovers in R-BTN-33, R-BTN-148,
+    R-BTN-109, R-BTN-122 and the `kind` field, `std:arrival@1`'s `ref`, `ticket_stations`' path and
+    `next_source`, the want's causes, and B-120's and B-152's drift.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

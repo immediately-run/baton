@@ -69,17 +69,20 @@ write is a way around them (reset a path to escape `max_runs` or a retry hold).
 1. **Core.** Positions written only by advances and ends, Baton's settlements and overrides,
    fact arrivals and adopt (R-BTN-39); a new ticket at `start` on its first snapshot. A
    snapshot updates readiness and bars only, discarding readiness whose `at` is not Baton's
-   station. `position-disagrees` replaces the retired discrepancy subs, raised under Needs you.
+   position `{station, path_len}`. `position-disagrees` replaces the retired discrepancy subs, raised under Needs you.
    Retire the regression machinery listed above, in core, the runner and the heartbeat.
 2. **The observation's `positions`**, read by the station functions (their readiness, arrivals and implied station are the sync's attestations, built below);
    `StationCtx.positions` in `src/defaults/courses.ts`.
 3. **The standard courses' station functions** compute readiness at the given station from
    their facts. `create-spec`'s `converse` and `address`, and the marker courses' closes, write
-   no machine state; `create-pr`'s and `review-pr`'s human-made outcomes that should still move
-   a ticket get `arrives: facts` legs where the course needs them (decide per course, in the PR).
-4. **Adopt:** the route, `baton owner ticket adopt` with `--at` and `--next`, the
-   `nothing-implied` refusal, releasing and fencing an active claim first, `history-adopted`,
-   the attempt-window reset; MCP's `ticket.adopt` with R-BTN-130.
+   no machine state; the fact legs R-BTN-131 names — `create-pr`'s `reviewed-by-hand` and
+   `merged-by-hand`, `create-spec`'s `converse` and `address` — declare `arrives: facts`, and
+   under `protected` the merge runner attests their arrivals from the forge (R-BTN-181).
+4. **Adopt:** the route (an `approvers.policy` approver, never a delegated key, so no MCP
+   action), `baton owner ticket adopt` with `--at`, `--next` and `--ran`, the `nothing-implied`
+   refusal, release and fence first, the `adopted` path entry, `claim_legs` runs with a null
+   claim (`claim_legs` keyed by its own `id` with `repository_id` and `ticket_id`, a new
+   migration), superseding an unconfirmed end, `history-adopted`, the attempt-window reset.
 5. **Confirmation** by evidence (R-BTN-10), and `baton.unconfirmed` for evidence never shown.
 6. **Migration.** At the release that ships this, each live ticket's course history starts from
    the newest of: its `ticket_stations` row, the last arrival in its `claim_legs`, and an
@@ -100,8 +103,7 @@ write is a way around them (reset a path to escape `max_runs` or a retry hold).
    decisions and `not_before` move into `tickets[]`.
 3. **The holder's arrival.** An `advance`, end or suspension records its pair as the holder's
    `std:arrival@1` (writer `runner`, signed by the request), the same type as the sync's fact
-   arrival; every preset admits `runner` for it on the claim's own leg, and nothing else of the
-   sync's types (R-BTN-83, R-BTN-191).
+   arrival; every preset admits `runner` for it on the claim's own leg (R-BTN-83, R-BTN-191).
 4. **Readers.** Readiness (R-BTN-70), fact arrivals and implied stations (R-BTN-39), outputs
    (R-BTN-82), markers (R-BTN-46) and evidence (R-BTN-10) read from the newest accepted run's
    attestations; a person leg settles from a `std:decision@1` by an admitted writer (R-BTN-116).
