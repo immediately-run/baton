@@ -10,12 +10,13 @@ tags:
   - roadmap-item
 order: 1095
 tier: judgement
-description: "Build Baton as the one authority on a ticket's course history and position, as the spec now states it (R-BTN-35, R-BTN-39, R-BTN-10, R-BTN-63, R-BTN-70, R-BTN-71, R-BTN-81, R-BTN-83, R-BTN-85; S-BTN-18, S-BTN-34, S-BTN-47, S-BTN-195; R-BTN-191 and the one inbound path, folded in from B-151): no snapshot places a ticket; fact arrivals only on person legs and legs declaring arrives: facts; the sync reads positions in its observation; regression detection retired; confirmation by evidence; and baton owner ticket adopt for legs done outside Baton. Requires: none."
+description: "Build Baton as the one authority on a ticket's course history and position, as the spec now states it (R-BTN-35, R-BTN-39, R-BTN-10, R-BTN-63, R-BTN-70, R-BTN-71, R-BTN-81, R-BTN-83, R-BTN-85; S-BTN-18, S-BTN-34, S-BTN-47, S-BTN-195; R-BTN-191 and the one inbound path, folded in from B-151): no snapshot places a ticket; fact arrivals only on person legs and legs declaring arrives (under protected, attested by the fact reader, R-BTN-192, B-140); the sync reads positions in its observation; regression detection retired; confirmation by evidence; and baton owner ticket adopt for legs done outside Baton. Requires: none."
 topics:
   - baton
 owns: {}
 prs: []
-depends_on: []
+depends_on:
+  - B-140
 ---
 
 **Brief:** the owner, 2026-10-26, verbatim: "blindly accepting git updates as tickets status in
@@ -44,10 +45,12 @@ and `create-spec`'s interactive legs write no machine state), §9, §13, §14's 
 `docs/context/vocabulary.mdx` (*Path*, *Confirmation*, *Adopt*) is amended with it; values
 and architecture already say it (2026-10-28).
 
+**Depends on:** B-140 (the fact reader, R-BTN-192), for protected homes' fact legs.
+
 ### The choices (the owner, 2026-10-31)
 
 1. **Git facts move a ticket only on declared legs:** person legs and legs declaring
-   `arrives: facts`, by an edge from Baton's station. Anything else is `position-disagrees`
+   `arrives: {fact: …}`, by an edge from Baton's station. Anything else is `position-disagrees`
    and moves nothing.
 2. **The sync reads Baton's positions** in its observation and hands them to `stations(ctx)`;
    station functions compute readiness at that station only.
@@ -76,8 +79,8 @@ write is a way around them (reset a path to escape `max_runs` or a retry hold).
 3. **The standard courses' station functions** compute readiness at the given station from
    their facts. `create-spec`'s `converse` and `address`, and the marker courses' closes, write
    no machine state; the fact legs R-BTN-131 names — `create-pr`'s `reviewed-by-hand` and
-   `merged-by-hand`, `create-spec`'s `converse` and `address` — declare `arrives: facts`, and
-   under `protected` the merge runner attests their arrivals from the forge (R-BTN-181).
+   `merged-by-hand`, `create-spec`'s `converse` and `address` — declare `arrives: {fact: …}`, and
+   under `protected` the fact reader attests their arrivals (R-BTN-192, built by B-140).
 4. **Adopt:** the route (an `approvers.policy` approver, never a delegated key, so no MCP
    action), `baton owner ticket adopt` with `--at`, `--next` and `--ran`, the `nothing-implied`
    refusal, release and fence first, the `adopted` path entry, `claim_legs` runs with a null

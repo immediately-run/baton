@@ -3,7 +3,7 @@ title: "B-140 — The merge runner: a deterministic runner type holds the only c
 id: B-140
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-01
 repos:
   - baton
   - fieldhouse
@@ -161,3 +161,11 @@ family), control paths "for now, never merged" (now `paths.control`), the protec
 an owner setting" (now `paths.protected` plus the computed floor), an `approvals` table (now
 R-BTN-181 attestations, B-146), and the merge runner reporting protection checks (now the separate
 protection checker).)_
+
+- 2026-11-01: immediately-run/baton#150 adds the **fact reader** to the merge runner (R-BTN-192):
+  under a policy admitting no `sync` arrival, it reads the closed set of forge facts the
+  standard courses' fact legs name (`pr-merged`, `pr-verdict`, `pr-opened`, `pr-pushed`)
+  through the CLI's fact adapters, for the tickets `GET /v1/repositories/{repository}/fact-legs`
+  lists, each minute and on a `facts` ring, and attests each as `std:arrival@1` under its
+  `service:` key, which the owner names in the policy. Build it with the merge runner; B-120
+  depends on it.

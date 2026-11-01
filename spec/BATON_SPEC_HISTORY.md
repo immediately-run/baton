@@ -834,6 +834,16 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     two gave it — a trusted runner runs no repository code, so it has no station function to read
     the fact legs with, no trigger beyond a queued `merge`, and a preset cannot name its key.
 
+- **2026-11-01 — R-BTN-192 (new), R-BTN-69, R-BTN-131, R-BTN-181, R-BTN-188, R-BTN-191,
+  R-BTN-91, §14, S-BTN-196 (owner direction): the fact reader.** Round three's open finding —
+  under `protected` nothing could attest a fact arrival — put to the owner, who chose the built-in
+  fact reader over confirming each human action or leaving fact legs inert. A fact leg names one
+  of a closed set of forge facts (`arrives: {fact: pr-merged | pr-verdict | pr-opened |
+  pr-pushed}`); the merge runner, in its fact-reader mode, reads them through the CLI's fact
+  adapters for the tickets `GET …/fact-legs` lists, each minute and on a `facts` ring, and attests
+  them as a `service:` key the owner names; `baton.fact-reader-missing` when none is named. Built
+  by B-140; B-120 depends on it.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
