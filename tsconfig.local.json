@@ -48,6 +48,7 @@
     "test/unit/standard-courses.test.ts",
     "test/unit/ticket-state.test.ts",
     "test/unit/bounded-git.test.ts",
+    "test/unit/pr-markers.test.ts",
     "test/unit/tickets-check.test.ts",
     "test/unit/tickets.test.ts",
     "test/integration/S-BTN-189.ticket-commands.test.ts",

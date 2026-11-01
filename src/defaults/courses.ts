@@ -33,7 +33,15 @@ export interface Ask {
  * expression over `answer` (the agent's last line, checked against `ask.values`). A position
  * whose next leg waits on someone outside the claim (the owner, the PR's author) carries
  * `suspend: true`: the runner closes the leg and ends the claim there, rather than starting a
- * next leg on a board that cannot yet show the wait (§6.13). */
+ * next leg on a board that cannot yet show the wait (§6.13).
+ *
+ * B-110's `tests: true` is a stub of another kind: it runs no agent at all. The stub runs the
+ * course's deterministic test script itself (`npm run <test_script>`, the course file's field,
+ * default `test`) in the checkout, bounded and non-interactive (B-94's bounds, a bound of its
+ * own), green advancing to `review` and red to the back leg — the gate's outcome never depends
+ * on a model (R-BTN-131, the owner, 2026-10-24). Its position is not a static expression over
+ * an answer: it is read from `ctx.claim.station` (the station the gate ran from) and the
+ * script's exit, and its close writes the gate's marker (`testsClose`). */
 export interface LegStub {
   ask?: Ask;
   position: string;
@@ -41,6 +49,9 @@ export interface LegStub {
    * PR on a branch the course's patterns map to the ticket, its head what the checkout pushed.
    * The agent's exit 0 is not the leg's outcome. */
   verify?: 'pr';
+  /** B-110: the deterministic test gate — no agent runs; the stub itself executes the course's
+   *  `test_script` and the close writes the branch's `Baton-Tests` marker. */
+  tests?: true;
 }
 
 export interface BuiltIn {
@@ -203,13 +214,24 @@ const CREATE_PR: BuiltIn = {
   legs: {
     // B-81: the stub verifies its PR on the forge (open, on a branch the patterns map to this
     // ticket, its head pushed) before returning pr-open — never the agent's exit code alone.
-    implement: { position: "{ reached: 'pr-open', next: 'review' }", verify: 'pr' },
+    // B-110: what follows implement is the gate, not the round — the claim's walk runs
+    // run-tests before any review, green advancing and red routing back to a fix.
+    implement: { position: "{ reached: 'pr-open', next: 'run-tests' }", verify: 'pr' },
+    // B-110: the deterministic gate — no agent. The stub runs `npm run <test_script>` itself,
+    // bounded, and returns the station it ran from (the claim's, pr-open or fixed): green
+    // advances to review, red routes to fix — never back to implement — wherever the push came
+    // from, naming the failing script's last lines in the close's red marker on the branch.
+    'run-tests': { position: "station", tests: true },
     // The verdict decides what the review queues: merge for approve, fix for changes (once the
     // fixes run out the sync queues adjudicate instead, and a refused fix suspends the claim).
     review: { ask: VERDICT, position: "{ reached: 'reviewed', next: answer === 'approve' ? 'merge' : 'fix', verdict: answer }" },
-    fix: { position: "{ reached: 'fixed', next: 'review' }" },
-    // `merge`: no open blocking finding reproduced; `owner`: one did, and the owner decides —
-    // the claim suspends until they do.
+    // B-110: a fix's push re-opens the gate, so what follows fix is run-tests again — the next
+    // round waits on a green head, never on the fix's own word for it.
+    fix: { position: "{ reached: 'fixed', next: 'run-tests' }" },
+    // B-110: the third round's blockers are the owner's — the leg waits on them (the sync posts
+    // the decision that carries their question) until they answer `Baton-Adjudicated:
+    // merge|owner|round` on the branch. No agent reproduces anything, so the leg runs no
+    // command: the position below is what a holder would report if one ever ran it by hand.
     adjudicate: { ask: { name: 'adjudication', values: ['merge', 'owner'] }, position: "{ ...(answer === 'owner' ? { suspend: true } : {}), reached: 'adjudicated', next: 'merge', adjudication: answer }" },
     merge: { position: "{ reached: 'merged', next: null }" },
   },

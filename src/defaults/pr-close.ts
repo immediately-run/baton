@@ -20,8 +20,13 @@
 //   (a merge is read from the forge's own PR state). A pushed `baton:` commit on a PR branch, or
 //   an unpushed one carried by the next push, would move the head past the one the leg verified —
 //   a change no course asked for.
+// - `create-pr`'s `run-tests` (B-110) is the exception the gate needs: its close commits an
+//   EMPTY marker on the branch (`testsClose`) — the gate's own record, `Baton-Tests` trailers
+//   and a red marker's failure tail — pushing the head itself, which no `verify` checked and
+//   which the sync reads back as the gate's state. No comment anywhere: the marker is git's,
+//   so a plain-git repository reads the same gate with no forge at all.
 // `baton repo init` bundles this into each leg stub, so a stub imports nothing at run time.
-import { closeTicket, exec } from './ticket-state';
+import { bareTicketId, closeTicket, exec } from './ticket-state';
 
 /** What `close` runs: `git` or `gh`, in the checkout, answering stdout. Tests inject it. */
 export type Exec = (cmd: 'git' | 'gh', args: string[], cwd: string) => string;
@@ -102,4 +107,33 @@ export async function prClose(ctx: CloseCtx, result: { reached?: string; next?: 
   // and its PR, which may never land on the default branch (an owner who stops before the PR is
   // open still leaves the record); the marker courses' legs, whose work IS the ticket, keep it.
   return closeTicket({ ...ctx, heading: false }, result, run);
+}
+
+/** B-110: the `run-tests` gate's close — the marker commit, the gate's record in git and never
+ *  on the forge. An empty commit on the branch the checkout sits on (the PR's, the one the leg
+ *  just ran the script in), its trailers `Baton-Tests: green|red` and, when the claim names
+ *  one, `Baton-Claim: <nonce>`, and a red marker's own paragraph naming the failing script's
+ *  last lines. Pushed, its sha is the evidence; the sync reads the marker back from the
+ *  branch's commits — a plain-git repository reads it identically, `gh` nowhere in sight — and
+ *  a content commit following it re-opens the gate whatever it said. */
+export function testsClose(
+  ctx: CloseCtx,
+  result: { reached?: string; next?: string | null; tests?: unknown; tail?: unknown },
+  run: Exec = exec,
+): string {
+  if (result?.tests !== 'green' && result?.tests !== 'red') {
+    throw new Error(`the run-tests gate returned neither green nor red, got ${JSON.stringify(result?.tests)}`);
+  }
+  if (typeof result?.reached !== 'string' || result.reached === '') throw new Error('the run-tests gate returned no station reached');
+  const branch = run('git', ['branch', '--show-current'], ctx.checkout).trim();
+  if (branch === '') throw new Error('the checkout is on no branch — the run-tests marker has nowhere to go');
+  const id = bareTicketId(ctx.ticket);
+  const tail = typeof result.tail === 'string' && result.tail.trim() !== '' ? result.tail.trim() : '(no output)';
+  const trailers = [`Baton-Tests: ${result.tests}`, ...(ctx.claim?.nonce ? [`Baton-Claim: ${ctx.claim.nonce}`] : [])].join('\n');
+  const args = result.tests === 'red'
+    ? ['-m', `baton: tests red for ${id}`, '-m', `npm run <the course's test_script> failed — its last lines:\n${tail}`, '-m', trailers]
+    : ['-m', `baton: tests green for ${id}`, '-m', trailers];
+  run('git', ['commit', '--allow-empty', ...args], ctx.checkout);
+  run('git', ['push', 'origin', `HEAD:refs/heads/${branch}`], ctx.checkout);
+  return run('git', ['rev-parse', 'HEAD'], ctx.checkout);
 }

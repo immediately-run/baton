@@ -355,6 +355,34 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   S-BTN-21 was rewritten and G-BTN-162 added. The 2026-10-14/16 rejection of reservations now
   names future capacity: a seat a running leg holds is a fact the runner states, not a forecast.
 
+- **2026-10-31 — §3.4, §5.2, §5.8, §6.1, §6.8: the run-tests gate and the owner round (owner
+  direction; B-110).** The owner, 2026-10-24: "I would like both the implement and fix legs to be
+  followed by a run – test leg, which execute an NPM script to run deterministic tests and
+  linting" and "I would like the course to explicitly specify that the third round of reviews
+  should trigger a human in the loop request if they continue to find blockers." `create-pr`
+  gained `run-tests` — a self-loop at `pr-open` and `fixed`, `max_runs` 30 (and `fix` 30 beside
+  it, the review rounds staying at 3) — whose stub runs **no agent**: it executes `npm run
+  <test_script>` (the course file's new field, default `test`) itself, bounded
+  (`RUN_TESTS_TIMEOUT_MS`) and non-interactive as B-94 bounds git; green advances to `review`,
+  red routes to `fix` — never back to `implement` — so no review round starts on red checks. The
+  gate's state is the marker its close commits on the branch (`Baton-Tests: green|red`, a red
+  marker naming the failing script's last lines; a marker commit changes no tree, so it is never
+  a push and a content commit re-opens the gate), read by the fact adapter from the commits it
+  already reads — git, so a plain-git repository (R3-1265) runs the gate identically with `gh`
+  nowhere in sight. The loop's runs are counted from Baton's traversal record alone (§4's rule
+  of the same day: "Baton's traversal record counts"), never from a forge. And the third round's
+  blockers became the owner's: `adjudicate` queues `waiting` on the owner — no agent reproduces
+  anything, the third pair of eyes is the person's — with the decision the sync posts carrying
+  *"3 failed reviews — manual review or start a 4th round?"* to Needs you, until the owner
+  answers `Baton-Adjudicated: merge|owner|round` as a trailer on a commit pushed to the branch
+  (`merge` → merge ready; `owner` → parked; `round` → exactly one more review round, its run
+  budget granted by §6.8's owner-granted runs, added for the purpose: `{runs: {leg, add}}` on
+  the override surface, read at the advance that starts the leg). The forge-comment spelling of
+  the adjudication (`<!-- baton:adjudicated merge|owner -->`) became one reader beside the
+  trailer, not the record. R-BTN-120's `why` table gained nothing: the gate's waits are
+  readiness, not blocks. S-BTN-43 gained the gate and the owner round; the model's course is
+  docs' own `roadmap-pr`, untouched by this change.
+
 - **2026-10-29 — the standard courses serve the simpler end (owner direction).** The owner:
   "baton is a general tool designed to scale from single-user naive setups where security is an
   afterthought and automation and lock management is the primary concern to something like our

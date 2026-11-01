@@ -7,10 +7,10 @@
 // Node only: it spawns processes and drives the production seams with a real hanging git.
 import { afterAll, afterEach, describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { exec, closeTicket, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from '../../src/defaults/ticket-state';
+import { exec, closeTicket, CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV, RUN_TESTS_TIMEOUT_MS } from '../../src/defaults/ticket-state';
 import { git, GIT_TIMEOUT_MS } from '../../src/runner/home';
 import { BEAT_MS, Runner } from '../../src/runner/runner';
 import type { BatonApi } from '../../src/runner/api';
@@ -59,6 +59,22 @@ describe('the defaults’ close is bounded and non-interactive (B-94)', () => {
     // runner's loop is blocked for 3 × CLOSE_TIMEOUT_MS with no beat possible; the lease goes
     // at lease_timeout − 4 min (§9.2), 900 s at today's floor.
     expect(3 * CLOSE_TIMEOUT_MS).toBeLessThan(900_000 - 240_000);
+  });
+
+  it('the run-tests gate’s one script run plus the close stays under the lease’s margin (B-110: its own bound, the same arithmetic)', () => {
+    // The gate runs its one `npm run <test_script>` synchronously before the close's three git
+    // attempts, all blocking the runner's loop with no beat possible (RUN_TESTS_TIMEOUT_MS's
+    // own comment names this arithmetic; a course raises it in its own copy of the leg script).
+    expect(RUN_TESTS_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(RUN_TESTS_TIMEOUT_MS + 3 * CLOSE_TIMEOUT_MS).toBeLessThan(900_000 - 240_000);
+    // The generated stub carries the same bound, pinned by name — the bundle prints the number
+    // in esbuild's own spelling (24e4), so the pin reads the constant's value, not its text.
+    const stub = readFileSync(join(__dirname, '..', '..', '.baton', 'courses', 'create-pr', 'legs', 'run-tests.mjs'), 'utf8');
+    const bound = /RUN_TESTS_TIMEOUT_MS = ([\d.e]+);/.exec(stub)?.[1];
+    expect(bound != null && Number(bound)).toBe(RUN_TESTS_TIMEOUT_MS);
+    expect(stub).toContain('"ignore", "pipe", "pipe"'); // stdin never an open pipe (B-84)
+    expect(stub).toContain('killSignal');
+    expect(stub).toContain('GIT_TERMINAL_PROMPT');
   });
 
   it('the environment is merged in at the real seams, not only named (round 2: a probe sees it)', () => {

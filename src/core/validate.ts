@@ -705,12 +705,19 @@ export function checkDecisionAnswer(body: unknown): { decision: 'baton:retries' 
 }
 
 /** §8, §11: `{expedite?, hold?}` — booleans, at least one. */
-export function checkOverride(body: unknown): { expedite?: boolean; hold?: boolean } {
+export function checkOverride(body: unknown): { expedite?: boolean; hold?: boolean; runs?: { leg: string; add: number } } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
   for (const k of ['expedite', 'hold']) if (b[k] !== undefined && typeof b[k] !== 'boolean') bad(k, 'must be a boolean');
-  if (b.expedite === undefined && b.hold === undefined) bad('body', 'names expedite or hold');
-  return { expedite: b.expedite as boolean | undefined, hold: b.hold as boolean | undefined };
+  if (b.runs !== undefined) {
+    // B-110: an owner-granted run of one leg (§6.8) — the override that carries a `round`
+    // adjudication answer, one more review round. The leg must be a name and the grant a small
+    // count, so one answer buys one round.
+    if (!isObj(b.runs) || typeof (b.runs as Record<string, unknown>).leg !== 'string' || !COURSE_ID.test((b.runs as Record<string, unknown>).leg as string)) bad('runs.leg', 'must be a leg id');
+    if (!isObj(b.runs) || !Number.isInteger((b.runs as Record<string, unknown>).add) || ((b.runs as Record<string, unknown>).add as number) < 1 || ((b.runs as Record<string, unknown>).add as number) > 10) bad('runs.add', 'must be an integer of 1 to 10 runs');
+  }
+  if (b.expedite === undefined && b.hold === undefined && b.runs === undefined) bad('body', 'names expedite, hold or runs');
+  return { expedite: b.expedite as boolean | undefined, hold: b.hold as boolean | undefined, ...(isObj(b.runs) ? { runs: b.runs as { leg: string; add: number } } : {}) };
 }
 
 // ── blocks, external resources and readings (§2g R-BTN-75–78, §2l R-BTN-101; R3-1251) ─────

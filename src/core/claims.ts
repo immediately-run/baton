@@ -843,7 +843,10 @@ export class Claims {
     const max = g.legs.get(leg)!.maxRuns;
     if (max != null) {
       const ran = [...(JSON.parse(c.start_path) as Step[]).map((s) => s.leg), ...this.rows<{ leg: string }>('SELECT leg FROM claim_legs WHERE claim_id = ?', claimId).map((r) => r.leg)];
-      if (runsOf(g, leg, ran) >= max) throw new BatonError('not-eligible', `max-runs: ${leg} has run ${max} times`, { rule: 1, rule_code: 'max-runs' });
+      // B-110 (§6.8): an owner's granted runs of this leg sit beside its `max_runs` for this
+      // ticket alone — the override that carried a `round` adjudication answer. The count itself
+      // is the traversal record's (R-BTN-63): a grant buys one round, never a reset.
+      if (runsOf(g, leg, ran) >= max + this.grantedRuns(c.ticket_id, leg)) throw new BatonError('not-eligible', `max-runs: ${leg} has run ${max} times`, { rule: 1, rule_code: 'max-runs' });
     }
     // R-BTN-67: a leg a required bar covers needs a tag with its prefix among its posted bars and
     // the holder's own; else the advance is refused `policy` and the claim is unchanged.
@@ -1242,7 +1245,29 @@ export class Claims {
     }
     if (o.hold === true) this.hold(item, 'owner', actor);
     if (o.hold === false) this.liftHold(item, actor);
+    if (o.runs !== undefined) {
+      // B-110 (§6.8): one more run of a named leg — the override that carries a `round`
+      // adjudication answer, the fourth review round the owner granted. Added to the leg's
+      // `max_runs` for this ticket alone, at the advance that starts it; the traversal record
+      // still counts the runs (R-BTN-63), so each grant buys exactly what it says.
+      const granted = this.grantedRuns(item, o.runs.leg) + o.runs.add;
+      this.upsertOverride(item, actor, {});
+      this.exec('UPDATE ticket_overrides SET runs_json = ? WHERE ticket_id = ?', JSON.stringify({ [o.runs.leg]: granted }), item);
+      this.event('override', actor, { runs: { [o.runs.leg]: granted } }, item);
+    }
     return { ok: true };
+  }
+
+  /** B-110: the runs an owner has granted a leg of this ticket beyond its `max_runs` (§6.8). */
+  private grantedRuns(item: string, leg: string): number {
+    const row = this.rows<{ runs_json: string | null }>('SELECT runs_json FROM ticket_overrides WHERE ticket_id = ?', item)[0];
+    if (row?.runs_json == null) return 0;
+    try {
+      const v = (JSON.parse(row.runs_json) as Record<string, unknown>)[leg];
+      return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : 0;
+    } catch {
+      return 0;
+    }
   }
 
   /** §8, §6.10: a hold lifted, its reason and backoff cleared and the attempt count reset; any

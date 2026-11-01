@@ -63,6 +63,13 @@ describe('S-BTN-105 a course from its source, one leg overridden', () => {
     expect(settings.courses[0].source).toMatch(new RegExp(`^github/[^/]+/[^/]+/${SHA}/create-pr$`));
     await sync();
     const at = async () => (await rows<{ station: string; next_leg: string | null }>('SELECT station, next_leg FROM ticket_stations WHERE ticket_id = ?', 'docs:T-1'))[0];
+    // The gate comes before every review round (B-110): with no marker on the head it is the
+    // gate that is ready, not the round.
+    expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'run-tests' });
+    // The gate stands green on the head — a Baton-Tests marker commit — and the round queues.
+    const gate = { at: T0 + 30_000, sha: 'a'.repeat(40), tests: 'green', claim: 'n0' };
+    writeFileSync(facts, JSON.stringify([{ number: 7, head: 'claude/T-1-x', state: 'open', pushedAt: T0, pushes: [T0], checks: ['success'], reviews: [], markers: [gate] }]));
+    await sync();
     expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'review' });
 
     // The repository's review: its own check, then the course's run with an agent that asks for changes.
@@ -94,7 +101,7 @@ export async function run(ctx, standard) {
       const body = readFileSync(join(bin, 'body'), 'utf8');
       expect(body.split('\n')[0]).toBe('<!-- baton:verdict changes -->');
       // The forge now carries that comment: the next sync reads it as the review's verdict.
-      writeFileSync(facts, JSON.stringify([{ number: 7, head: 'claude/T-1-x', state: 'open', pushedAt: T0, pushes: [T0], checks: ['success'], reviews: [{ author: 'baton', state: 'COMMENTED', submittedAt: T0 + 60_000, body }] }]));
+      writeFileSync(facts, JSON.stringify([{ number: 7, head: 'claude/T-1-x', state: 'open', pushedAt: T0, pushes: [T0], checks: ['success'], reviews: [{ author: 'baton', state: 'COMMENTED', submittedAt: T0 + 60_000, body }], markers: [gate] }]));
     } finally {
       process.env.PATH = path;
       rmSync(bin, { recursive: true, force: true });

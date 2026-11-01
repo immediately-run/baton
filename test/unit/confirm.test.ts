@@ -35,8 +35,8 @@ describe('confirmation by path extension (R-BTN-71)', () => {
     expect(extendsPath(g, expected, [...expected, ...p(['fix', 'fixed'], ['review', 'reviewed'], ['merge', 'merged'])], g.start)).toBe(true);
   });
 
-  it('a non-edge extension does not: fix cannot follow fixed, merge does not reach fixed', () => {
-    expect(extendsPath(g, expected, [...expected, ...p(['fix', 'fixed'], ['fix', 'fixed'])], g.start)).toBe(false);
+  it('a non-edge extension does not: adjudicate cannot follow fixed, merge does not reach fixed', () => {
+    expect(extendsPath(g, expected, [...expected, ...p(['fix', 'fixed'], ['adjudicate', 'adjudicated'])], g.start)).toBe(false);
     expect(extendsPath(g, expected, [...expected, ...p(['merge', 'fixed'])], g.start)).toBe(false);
   });
 

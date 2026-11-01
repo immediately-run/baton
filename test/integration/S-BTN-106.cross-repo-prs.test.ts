@@ -29,7 +29,12 @@ const asked: string[] = [];
 const pull = (number: number, merged = false) => ({ number, head: { ref: 'claude/A-1-x', sha: `s${number}` }, state: merged ? 'closed' : 'open', merged_at: merged ? '2026-10-18T13:00:00Z' : null });
 const detail = (repo: string, number: number, comments: unknown[] = []) => ({
   [`/repos/${repo}/commits/s${number}/check-runs`]: { check_runs: [{ conclusion: 'success' }] },
-  [`/repos/${repo}/pulls/${number}/commits`]: [{ commit: { committer: { date: '2026-10-18T11:00:00Z' } } }],
+  // The branch's commits: the work, then the run-tests gate's green marker (B-110) — a marker
+  // commit changes no tree, so it is never a push and the round may queue behind it.
+  [`/repos/${repo}/pulls/${number}/commits`]: [
+    { sha: `c${number}w`, commit: { message: 'the work', committer: { date: '2026-10-18T11:00:00Z' } } },
+    { sha: `c${number}g`, commit: { message: 'baton: tests green for A-1\n\nBaton-Tests: green\nBaton-Claim: n0', committer: { date: '2026-10-18T11:30:00Z' } } },
+  ],
   [`/repos/${repo}/pulls/${number}/reviews`]: [],
   [`/repos/${repo}/issues/${number}/comments`]: comments,
 });
@@ -68,7 +73,7 @@ describe('S-BTN-106 a ticket\'s PRs in other repositories', () => {
   it('reads the repositories the live ticket names, places it from their PRs, and reads them together as one change', async () => {
     github = { '/repos/o/docs/pulls?state=all': [], '/repos/o/site/pulls?state=all': [pull(3)], '/repos/o/sdk/pulls?state=all': [pull(3)], ...detail('o/site', 3), ...detail('o/sdk', 3) };
     await sync();
-    expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'review' });
+    expect(await at()).toMatchObject({ station: 'pr-open', next_leg: 'review' }); // the gate green, the round queued
     // The home and the two repositories A-1 names — never the closed ticket's o/old.
     const repoOf = (k: string) => (k.startsWith('graphql ') ? k.split(' ')[1] : k.split('/').slice(2, 4).join('/'));
     expect([...new Set(asked.map(repoOf))].sort()).toEqual(['o/docs', 'o/sdk', 'o/site']);

@@ -42,6 +42,19 @@ describe('the standard courses (R-BTN-131)', () => {
 
       it('every stub returns an edge for every answer: reached is one of the leg\'s outcomes, next leaves it, null only at an end', () => {
         for (const [leg, stub] of Object.entries(b.legs)) {
+          // B-110's test gate is not a static expression over an answer: the stub reads the
+          // claim's station and the script's exit at run time (no agent), so the kit checks its
+          // two outcomes at both stations it may run from — each an edge of the course.
+          if (stub.tests) {
+            for (const station of tosOf(b.course.legs[leg].from.flat())) {
+              for (const answer of ['green', 'red'] as const) {
+                const pos = { reached: station, next: answer === 'green' ? 'review' : 'fix', tests: answer };
+                expect(tosOf(b.course.legs[leg].to), `${leg} → ${pos.reached}`).toContain(pos.reached);
+                expect(b.course.legs[pos.next].from, `${leg} queues ${pos.next}`).toContain(pos.reached);
+              }
+            }
+            continue;
+          }
           const answers = stub.ask?.values ?? [undefined];
           for (const answer of answers) {
             const pos = new Function('answer', `return (${stub.position});`)(answer) as { reached: string; next: string | null; [k: string]: unknown };
@@ -59,6 +72,7 @@ describe('the standard courses (R-BTN-131)', () => {
 
       it('every leg that can reach an end tells its agent to close the ticket: the sync reads only status: done (R-BTN-74)', () => {
         for (const [leg, stub] of Object.entries(b.legs)) {
+          if (stub.tests) continue; // B-110: no agent runs the gate, and it reaches no end
           const ends = (stub.ask?.values ?? [undefined]).some((answer) => {
             const pos = new Function('answer', `return (${stub.position});`)(answer) as { reached: string };
             return b.course.end.includes(pos.reached);
@@ -88,6 +102,7 @@ describe('the standard courses (R-BTN-131)', () => {
     ]);
     for (const b of BUILT_INS) {
       for (const [leg, stub] of Object.entries(b.legs)) {
+        if (stub.tests) continue; // B-110: the gate suspends nothing — it advances green or red
         for (const answer of stub.ask?.values ?? [undefined]) {
           const pos = new Function('answer', `return (${stub.position});`)(answer) as { suspend?: boolean };
           const key = [b.id, leg, answer].filter(Boolean).join(' ');

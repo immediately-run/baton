@@ -1,17 +1,19 @@
 // S-BTN-43 a repository with no course code (BATON_SPEC §15 S-BTN-43, §4.2 R-BTN-74; R3-1249):
 // a fresh repository with a `tickets/` wiki of five items (one `depends_on` another, one
 // `done`, one with an unknown frontmatter field, one file without `id`) runs `baton repo init` and
-// its sync with no `.baton/tickets.mjs` or `sync.mjs`; a PR opens for one ticket, checks pass,
-// a review requests changes, a fix is pushed, a review approves, the PR merges and the item is
-// marked `done`; then `baton repo init --eject tickets` and an edit to the copy. Must hold: four
+// its sync with no `.baton/tickets.mjs` or `sync.mjs`; a PR opens for one ticket, the run-tests
+// gate stands green before each review round (B-110), checks pass, a review requests changes, a
+// fix is pushed, a review approves, the PR merges and the item is marked `done`; then
+// `baton repo init --eject tickets` and an edit to the copy. Must hold: four
 // tickets on the `create-pr` course (the file without `id` is none, the `done` one closed); the
 // dependent ticket is not ready until its dependency is done; the ticket moves
-// filed → pr-open (review waiting on ci, then ready) → reviewed (fix ready) → fixed → reviewed
-// (merge ready) → merged; after the eject the edited source's tickets are posted; Baton's
+// filed → pr-open (run-tests ready, then review waiting on ci, then ready) → reviewed (fix
+// ready) → fixed (run-tests ready, then review ready) → reviewed (merge ready) → merged; after
+// the eject the edited source's tickets are posted; Baton's
 // src/core/ gains no line (the boundary test asserts the defaults' exemption and core's
 // non-import); a second run where the PR is authored and reviewed by one identity, with
 // `<!-- baton:verdict … -->` comment-only reviews, moves the same way; a red check makes
-// `review` ready. Node only: it writes a real repository and runs git.
+// `review` ready once the gate stands green. Node only: it writes a real repository and runs git.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -78,11 +80,16 @@ const stationOf = (id: string): Promise<StationRow[]> => rows('SELECT station, n
 const nextOf = (id: string): Promise<NextRow[]> => rows('SELECT leg, state, waiting_on FROM ticket_next_legs WHERE ticket_id = ? ORDER BY leg', `docs:${id}`);
 
 /** One fact in the shape R-BTN-96's adapter records. */
-function fact(number: number, state: PrFact['state'], checks: (string | null)[], reviews: PrFact['reviews'], pushedAt?: number): PrFact {
-  return { number, head: `claude/T-1-${number}`, state, pushedAt: pushedAt ?? reviews.at(-1)?.submittedAt ?? T0, checks, reviews };
+function fact(number: number, state: PrFact['state'], checks: (string | null)[], reviews: PrFact['reviews'], pushedAt?: number, markers: PrFact['markers'] = []): PrFact {
+  return { number, head: `claude/T-1-${number}`, state, pushedAt: pushedAt ?? reviews.at(-1)?.submittedAt ?? T0, checks, reviews, ...(markers.length ? { markers } : {}) };
 }
 function rev(author: string, state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED', ago: number, body = ''): PrFact['reviews'][number] {
   return { author, state, submittedAt: T0 - ago, body };
+}
+/** The run-tests gate's marker commit, as the adapter records it (B-110): a content commit
+ *  never follows it in these fixtures unless the case says so. */
+function gate(at: number, tests: 'green' | 'red' = 'green'): NonNullable<PrFact['markers']>[number] {
+  return { at: T0 - at, sha: `${at.toString(16)}`.padStart(40, '0'), tests, claim: 'n1' };
 }
 
 describe('S-BTN-43 a repository with no course code', () => {
@@ -104,29 +111,41 @@ describe('S-BTN-43 a repository with no course code', () => {
     expect((await stationOf('T-2'))[0]).toMatchObject({ station: 'filed', next_leg: 'implement' });
     expect((await nextOf('T-2'))[0]).toMatchObject({ state: 'waiting', waiting_on: 'dependencies' });
 
-    // A PR opens for T-1; checks run; review waits on ci then is ready.
-    repo.facts = [fact(7, 'open', [null], [])];
+    // A PR opens for T-1: the run-tests gate comes before every review round (B-110), so with
+    // no marker on the head the gate is ready — not review, whatever the checks say.
+    repo.facts = [fact(7, 'open', [null], [], T0 - 200)];
+    await repo.sync();
+    expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'pr-open', next_leg: 'run-tests' });
+    expect((await nextOf('T-1'))[0]).toMatchObject({ leg: 'run-tests', state: 'ready', waiting_on: null });
+    // The gate stands green on the head: review queues, ci-waited while the head's checks run,
+    // then ready.
+    repo.facts = [fact(7, 'open', [null], [], T0 - 200, [gate(190)])];
     await repo.sync();
     expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'pr-open', next_leg: 'review' });
     expect((await nextOf('T-1'))[0]).toMatchObject({ state: 'waiting', waiting_on: 'ci' });
-    repo.facts = [fact(7, 'open', ['success'], [])];
+    repo.facts = [fact(7, 'open', ['success'], [], T0 - 200, [gate(190)])];
     await repo.sync();
     expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'pr-open', next_leg: 'review' });
     expect((await nextOf('T-1'))[0]).toMatchObject({ state: 'ready', waiting_on: null });
 
-    // A review requests changes; a fix is pushed; a review approves; the PR merges.
-    repo.facts = [fact(7, 'open', ['success'], [rev('r1', 'CHANGES_REQUESTED', 100)])];
+    // A review requests changes; a fix is pushed — the push re-opens the gate, and its green
+    // marker queues the second round; a review approves; the PR merges.
+    repo.facts = [fact(7, 'open', ['success'], [rev('r1', 'CHANGES_REQUESTED', 100)], T0 - 200, [gate(190)])];
     await repo.sync();
     expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'reviewed', next_leg: 'fix' });
     repo.facts = [fact(7, 'open', ['success'], [rev('r1', 'CHANGES_REQUESTED', 100)], T0 - 50)];
     await repo.sync();
+    expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'fixed', next_leg: 'run-tests' });
+    expect((await nextOf('T-1'))[0]).toMatchObject({ leg: 'run-tests', state: 'ready' });
+    repo.facts = [fact(7, 'open', ['success'], [rev('r1', 'CHANGES_REQUESTED', 100)], T0 - 50, [gate(190), gate(40)])];
+    await repo.sync();
     expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'fixed', next_leg: 'review' });
     expect((await nextOf('T-1'))[0]).toMatchObject({ leg: 'review', state: 'ready' });
-    repo.facts = [fact(7, 'open', ['success'], [rev('r1', 'CHANGES_REQUESTED', 100), rev('r1', 'APPROVED', 10)], T0 - 50)];
+    repo.facts = [fact(7, 'open', ['success'], [rev('r1', 'CHANGES_REQUESTED', 100), rev('r1', 'APPROVED', 10)], T0 - 50, [gate(190), gate(40)])];
     await repo.sync();
     expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'reviewed', next_leg: 'merge' });
     expect((await nextOf('T-1'))[0]).toMatchObject({ leg: 'merge', state: 'ready' });
-    repo.facts = [fact(7, 'merged', ['success'], [rev('r1', 'CHANGES_REQUESTED', 100), rev('r1', 'APPROVED', 10)], T0 - 50)];
+    repo.facts = [fact(7, 'merged', ['success'], [rev('r1', 'CHANGES_REQUESTED', 100), rev('r1', 'APPROVED', 10)], T0 - 50, [gate(190), gate(40)])];
     await repo.sync();
     expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'merged' });
 
@@ -154,19 +173,64 @@ describe('S-BTN-43 a repository with no course code', () => {
     expect(await rows('SELECT id, title FROM tickets WHERE id = ?', 'docs:T-2')).toEqual([{ id: 'docs:T-2', title: 'EDITED BY HAND' }]);
   }, 60_000);
 
-  it('one identity, comment-only verdict reviews, moves the same way; a red check makes review ready', async () => {
+  it('one identity, comment-only verdict reviews, moves the same way; a red check makes review ready once the gate stands green', async () => {
     await init(repo.dir);
     repo.commit();
     // The same identity authors and reviews; GitHub refuses self-approval, so the verdict is
-    // the marker line a comment-only review opens with.
-    repo.facts = [fact(7, 'open', ['failure'], [rev('me', 'COMMENTED', 100, '<!-- baton:verdict changes --> one thing')])];
+    // the marker line a comment-only review opens with. The gate's green marker precedes each
+    // round (B-110), and the red check — a content check, not the gate's — never holds it.
+    repo.facts = [fact(7, 'open', ['failure'], [rev('me', 'COMMENTED', 100, '<!-- baton:verdict changes --> one thing')], T0 - 200, [gate(190)])];
     await repo.sync();
     expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'reviewed', next_leg: 'fix' });
-    repo.facts = [fact(7, 'open', ['failure'], [rev('me', 'COMMENTED', 100, '<!-- baton:verdict changes --> one thing'), rev('me', 'COMMENTED', 10, '<!-- baton:verdict approve -->')], T0 - 50)];
+    repo.facts = [fact(7, 'open', ['failure'], [rev('me', 'COMMENTED', 100, '<!-- baton:verdict changes --> one thing'), rev('me', 'COMMENTED', 10, '<!-- baton:verdict approve -->')], T0 - 50, [gate(190), gate(40)])];
     await repo.sync();
     expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'reviewed', next_leg: 'merge' });
     // The red check made review ready all along — the review reads it and asks for a fix.
     expect((await nextOf('T-1'))[0]).toMatchObject({ leg: 'merge', state: 'ready' });
+  }, 60_000);
+
+  it('three failed reviews hand the blockers to the owner — a decision in Needs you — whose trailer answers (B-110)', async () => {
+    await init(repo.dir);
+    repo.commit();
+    // Three review rounds asking for changes, each round's fix pushed and its gate standing
+    // green before the next round; the third round's changes then stand unanswered. The fact
+    // carries the pushes and the branch's gate markers (B-110) as the adapter records them.
+    const rounds = (n: number): PrFact['reviews'] => Array.from({ length: n }, (_, i) => rev(`r${i + 1}`, 'CHANGES_REQUESTED', 200 - i * 60));
+    const pushes = [T0 - 250, T0 - 190, T0 - 130];
+    const gates = [gate(240), gate(180), gate(120)];
+    const answer = (a: 'merge' | 'owner' | 'round', ago: number): NonNullable<PrFact['markers']>[number] => ({ at: T0 - ago, sha: 'f'.repeat(40), adjudicated: a });
+    repo.facts = [fact(7, 'open', ['success'], rounds(3), T0 - 130, gates)];
+    repo.facts[0].pushes = pushes;
+    await repo.sync();
+    // The third round's blockers are the owner's: adjudicate waits on them, and the decision
+    // the sync posts carries the question to Needs you (§14). No agent reproduces anything.
+    expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'reviewed', next_leg: 'adjudicate' });
+    expect(await nextOf('T-1')).toEqual([{ leg: 'adjudicate', state: 'waiting', waiting_on: 'owner' }]);
+    expect(await rows('SELECT decision_id, leg, asks, source FROM ticket_decisions WHERE ticket_id = ?', 'docs:T-1'))
+      .toEqual([{ decision_id: 'review-rounds', leg: 'adjudicate', asks: 'owner', source: 'sync' }]);
+    // The owner answers `round` on the branch — a Baton-Adjudicated trailer, git's record — and
+    // the sync offers exactly one more review round; the decision no longer posts.
+    repo.facts = [fact(7, 'open', ['success'], rounds(3), T0 - 130, [...gates, answer('round', 40)])];
+    repo.facts[0].pushes = pushes;
+    await repo.sync();
+    expect(await nextOf('T-1')).toEqual([{ leg: 'review', state: 'ready', waiting_on: null }]);
+    expect(await rows('SELECT count(*) AS n FROM ticket_decisions WHERE ticket_id = ?', 'docs:T-1')).toEqual([{ n: 0 }]);
+    // The fourth round asks for changes again: back to the owner, who this time takes it over
+    // by hand — `owner` parks it, merge waiting on them; `merge` would land it instead.
+    const four = [...rounds(3), rev('r1', 'CHANGES_REQUESTED', 20)];
+    repo.facts = [fact(7, 'open', ['success'], four, T0 - 130, [...gates, answer('round', 40)])];
+    repo.facts[0].pushes = pushes;
+    await repo.sync();
+    expect(await nextOf('T-1')).toEqual([{ leg: 'adjudicate', state: 'waiting', waiting_on: 'owner' }]);
+    repo.facts = [fact(7, 'open', ['success'], four, T0 - 130, [...gates, answer('round', 40), answer('owner', 10)])];
+    repo.facts[0].pushes = pushes;
+    await repo.sync();
+    expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'adjudicated', next_leg: 'merge' });
+    expect(await nextOf('T-1')).toEqual([{ leg: 'merge', state: 'waiting', waiting_on: 'owner' }]);
+    repo.facts = [fact(7, 'merged', ['success'], four, T0 - 130, [...gates, answer('merge', 1)])];
+    repo.facts[0].pushes = pushes;
+    await repo.sync();
+    expect((await stationOf('T-1'))[0]).toMatchObject({ station: 'merged' });
   }, 60_000);
 });
 

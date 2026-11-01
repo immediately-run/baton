@@ -47,7 +47,7 @@ const COURSE_LIST_MAX = 64;
  *  you entry (spec-silent, recorded on R3-1231). The list is kept to this while it fills, so a
  *  hostile file's thousand faults cost no more memory than a hundred. */
 const COURSE_VIOLATIONS_MAX = 100;
-const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs', 'capability_roles', 'starts_from']);
+const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs', 'capability_roles', 'starts_from', 'test_script']);
 /** R-BTN-131 (B-98): the one way a course is entered that is not a hand-filed ticket —
  *  `starts_from: request`, which `baton request` reads before it files the ticket that starts the
  *  course. A closed set: anything else is a file Baton would record and never act on. */
@@ -262,6 +262,12 @@ export function validateCourse(json: unknown): CourseViolation[] {
   // a hand-filed ticket. Any other value is refused rather than kept unread.
   if ('starts_from' in json && (typeof json.starts_from !== 'string' || !STARTS_FROM.has(json.starts_from))) {
     add('starts-from', 'starts_from', `starts_from, when given, is one of ${[...STARTS_FROM].join(', ')}`);
+  }
+  // B-110: the deterministic test gate's script — `npm run <test_script>`, the run-tests leg's
+  // own, no agent. A course without the leg never reads it; a script name is an npm script
+  // name, nothing wider.
+  if ('test_script' in json && (typeof json.test_script !== 'string' || !/^[\w:.+-]{1,64}$/.test(json.test_script))) {
+    add('shape', 'test_script', 'test_script, when given, is an npm script name (a word of at most 64 characters)');
   }
   if ('short_waits' in json) {
     if (!Array.isArray(json.short_waits) || json.short_waits.length > COURSE_LIST_MAX || !json.short_waits.every((x) => typeof x === 'string')) add('shape', 'short_waits', `short_waits is a list of at most ${COURSE_LIST_MAX} waiting_on labels`);

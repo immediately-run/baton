@@ -282,12 +282,14 @@ describe('validateCourse (R-BTN-69)', () => {
     const full = copy();
     for (let i = 0; i < 94; i++) full.stations[`s${i}`] = {};
     const all = Object.keys(full.stations);
-    for (let i = 0; i < 195; i++) full.legs[`l${i}`] = { from: all, to: all, max_runs: 1 };
+    // The file's own legs plus these stay at COURSE_LEGS_MAX exactly (B-110 added run-tests to
+    // the fixture, so the loose legs are one fewer).
+    for (let i = 0; i < 200 - Object.keys(full.legs).length; i++) full.legs[`l${i}`] = { from: all, to: all, max_runs: 1 };
     t = Date.now();
     validateCourse(full);
     expect(Date.now() - t).toBeLessThan(2000);
     // The same file with no max_runs runs the cycle pass at the caps (review gate 2-A-0): one
-    // component holding all 195 loose legs, kept as station pairs, not per leg.
+    // component holding all the loose legs, kept as station pairs, not per leg.
     for (const l of Object.values(full.legs) as Record<string, unknown>[]) delete l.max_runs;
     full.legs.review.max_runs = 3;
     full.legs.fix.max_runs = 2;
