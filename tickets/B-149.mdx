@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1164
 tier: critical
-description: "The marker courses (bug-report, draft-ticket, decision, build-app, spec-to-tickets) commit each leg's work to the default branch, which `no-runner-lands` forbids. Build R-BTN-131 as amended on 2026-11-01: every standard course that writes work commits on the ticket's branch and ends at `merged` (the owner's `merged-by-hand`); `build-app` becomes a parent ticket filing one `draft-doc` child per stage. S-BTN-104, S-BTN-107, S-BTN-194. Requires: B-120, B-140, B-7, B-62."
+description: "The marker courses (bug-report, draft-ticket, decision, build-app, spec-to-tickets) commit each leg's work to the default branch, which `no-runner-lands` forbids. Build R-BTN-131 as amended on 2026-11-01: every standard course that writes work commits on the ticket's branch and ends at `merged` (the owner's `merged-by-hand`); `build-app` becomes a parent ticket filing one `draft-doc` child per stage. S-BTN-104, S-BTN-107, S-BTN-194. Requires: B-120, B-140, B-7, B-62, B-154."
 topics:
   - baton
 owns: {}
@@ -20,6 +20,7 @@ depends_on:
   - B-140
   - B-7
   - B-62
+  - B-154
 ---
 
 **Brief:** the owner, 2026-10-31, in a design session on Fieldhouse's courses, on being shown that
@@ -35,6 +36,8 @@ Please address this now."
 - B-140: the fact reader, which attests `pr-merged` under `protected`.
 - B-7: person legs (`decision`'s `answer`).
 - B-62: call legs (`build-app`'s `stages`, `file`, `verify`).
+- B-154: `merged-by-hand` hardened, above all a ticket its own merge closes still arriving, which
+  every record ticket now does.
 
 Under `cooperative` the sync attests `pr-merged`, so the PR courses can be built and tested before
 B-140.
@@ -100,35 +103,45 @@ The five marker courses cannot run on a home whose default branch is protected.
    (`document:`),
    each `depends_on` the one before. `file` reads `PLAN.md` at its claim's snapshot, declaring no `called` input.
 6. **Leg instructions.**
-   - Every leg's `.md` commits to the ticket's branch, never the default branch. Only the last
-     writing leg sets `status: done`.
+   - Every leg's `.md` commits to the ticket's branch, never the default branch. Only the run
+     that queues `merged-by-hand` sets `status: done`, and no leg writes `answer:` on the branch.
+   - `build-app`'s `verify` reports `verified`, and its new `report` writes `VERIFY.md` and
+     closes the request on its branch.
    - `draft-doc`'s `write` carries `build-app`'s four drafting instructions, chosen by the
      document the child names, and its *The conversation* ends with the owner's merge, not
      `answer:`.
    - `decision`'s `prepare` asks through Baton and reports `carried` when the question is
      settled.
    - `carry-out` reads its input `answer`, only records and files, and reports `asked` to re-ask.
-7. **Migration**, tested on a fixture per row. R-BTN-64's course test refuses a file while a
-   live ticket stands off its graph, so the order is:
-   1. **A transitional file.** Land course files that keep every old station and edge beside the
-      new ones. The old legs stay offerable, so live tickets stand on the graph.
-   2. **Place each live ticket** with `baton owner ticket adopt`, passing `--ran` for the legs
-      already run, so `max_runs` stays honest:
+7. **Migration**, tested on a fixture per row:
+   1. **Adopt every live ticket of the five courses** onto stations both files share, or onto a
+      leg the old file has, before swapping the file. Use `--ran` for the legs already run, so
+      `max_runs` stays honest. Where a leg keeps its id but changes its edges or kind (`check`,
+      `prevent`, `spec-to-tickets`' `file`, `carry-out`, `build-app`'s `file` and `verify`), the
+      new file names the old leg in `renamed_from` under a new id (e.g. `check-v1`), so R-BTN-64's
+      course test accepts every live position.
+   2. **Rows:**
       - `decision` at `asked`: `answer` queued. Under a policy admitting `sync` for
         `std:decision@1`, an `answer:` already in git is attested as before. Under `protected` it
         does not count, and the owner answers in Baton.
-      - `bug-report`, `draft-ticket` and `spec-to-tickets` at a station the new file keeps:
-        unchanged. At a removed end (`closed`, `filed`, `decided`): left closed.
-      - `build-app` with all four documents approved in git (`answer: plan`): at `planned` with
+      - `bug-report`, `draft-ticket` and `spec-to-tickets` mid-course: unchanged station, the
+        renamed leg queued.
+      - `build-app` at `building` (old `file` ran, children open): left at `building`, its
+        `verify` waiting on those children as the old `verify` did (`renamed_from`).
+      - `build-app` with all four documents approved and no children filed: at `planned` with
         `file` queued.
-      - `build-app` with fewer approved: at `requested` with `stages` queued. Its script files
-        only the stages whose documents are not yet approved (at least one, since all approved
-        is the row above).
-   3. **Remove the old stations and edges**, raising `min_runner_version` (R-BTN-64).
+      - `build-app` with fewer approved: withdrawn and refiled as a new request, the approved
+        documents kept on the default branch for its stages to start from.
+   3. **Remove the `renamed_from` legs** once no live ticket stands on them, raising
+      `min_runner_version` (R-BTN-64).
    4. **Records already on the default branch** stay, and each ticket's next leg opens its
       branch.
 8. **Registration and metadata.** `baton repo init --course build-app` also scaffolds and lists
    `draft-doc` in `.baton/baton.json`. The migration adds it where `build-app` is listed. The
+   shipped item schema (`tickets/item.schema.json` and the scaffold) gains `document:` (a path)
+   and `duplicate_of:` (a ticket id).
+   `close-pr`: one compensation per record course, idempotent, run on an ordinary runner; on
+   `forge: git` it deletes the branch. The
    courses read PR facts, and the CLI picks the `branches` adapter on `forge: git`.
 9. **The docs.** In `docs/standard-courses.mdx`: the overview table, *How each course finds
    where a ticket is*, `decision`'s answer paragraph and *`build-app`, step by step*.
@@ -160,3 +173,4 @@ S-BTN-104, S-BTN-107 and S-BTN-194, every case in their rows, and each row of it
 - 2026-11-01: round one of the new design closed in the spec; items 1, 3, 7 and 8 rewritten on it.
   Batching call children's approvals is B-153.
 - 2026-11-01: round two of #154 closed; `merged-by-hand`'s hardening split out to B-154.
+- 2026-11-01: round three of #154 (the last) closed in the spec; B-154 added as a dependency.

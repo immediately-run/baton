@@ -1221,6 +1221,34 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - **The adapter** follows the forge.
   - **Scenarios.** S-BTN-107 and S-BTN-194 are trimmed to this PR's rules.
 
+- **2026-11-01 — review round three of "one ticket, one PR, one merge"** (one fresh reviewer, the
+  last round). Blocking:
+  - **Every record PR carries `status: done`,** so its merge closes the ticket in git before
+    Baton sees the arrival. This is B-154's gap, made routine here.
+
+  Majors:
+  - `build-app` had no way to close in git and no home for `VERIFY.md`.
+  - Ticket ids could collide across an archived ticket and an open branch, stopping the sync.
+  - B-149's migration could not hold changed legs in one file.
+  - The new `document:` and `duplicate_of:` fields failed the close's own schema check.
+
+  Fixed:
+  - **B-149 depends on B-154,** stated in R-BTN-131 and B-149, and S-BTN-194's plain-git column
+    defers to it.
+  - **`build-app`** gains a record leg `report` (`VERIFY.md` and the request's close on its own
+    branch) and `merged-by-hand` to `shipped`. `verify` reports `verified`. An `abandoned` or
+    `stopped` request is listed until the owner withdraws it in git.
+  - **Ticket ids.** Every allocator skips `archive/` and the open ticket branches' heads, and
+    the sync's duplicate-id refusal is the backstop.
+  - **The migration** adopts first and uses `renamed_from` legs.
+  - **The new fields** are shaped and added to the shipped schema.
+  - **`close-pr`** is one idempotent compensation per course on an ordinary runner.
+  - **`answer:`** is never written on the branch.
+  - **S-BTN-107** no longer expects PRs on stages that never ran.
+
+  This was the third and last round the babysit skill allows. Its findings are fixed without
+  another review, and what remains is for the owner.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
