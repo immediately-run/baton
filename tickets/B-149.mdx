@@ -76,8 +76,9 @@ The five marker courses cannot run on a home whose default branch is protected.
 
 ### What to build
 
-1. **The close commits on the ticket's branch.** The last writing leg sets `status: done` and
-   moves the file to `archive/` there. `fold` writes `duplicate_of:` in its own ticket only, and
+1. **The close commits on the ticket's branch.** The run whose position queues `merged-by-hand`
+   sets `status: done` and moves the file to `archive/` there; any other run leaves it live.
+   Every record writing leg declares the compensation `close-pr`. `fold` writes `duplicate_of:` in its own ticket only, and
    new ids skip the open ticket branches' heads. The close of each leg of `bug-report`,
    `draft-ticket`, `decision`, `spec-to-tickets` and `draft-doc`:
    - commits the ticket and its outputs on the ticket's branch, the first push opening the PR
@@ -90,17 +91,14 @@ The five marker courses cannot run on a home whose default branch is protected.
    - `decision`'s `answer`, its `carried` (settled) route and its re-ask route;
    - the new `draft-doc` course;
    - `build-app` as `stages`, `file`, `verify`.
-3. **`pr-merged` and continuity** (with B-140): a merge counts only if it contains the last
-   attested head and was made after the leg began waiting, and under a protected default branch
-   only if the human identity made it. On `forge: git`, a `--no-ff` merge commit whose second
-   parent contains the head. `prs:` is read from the default branch only. While `merged-by-hand`
-   alone waits, the owner's commits are not reset, and `route` records the branch head. A
-   ticket closed `done` stays listed until its arrival applies.
+3. **`merged-by-hand`** is `create-pr`'s, unchanged here. Its hardening for every course (which
+   merge counts, the owner's commits, paths, closed tickets, plain git) is B-154.
 4. **Reading at the branch head.** The runner reads the body and inputs at the ticket's branch
    head (R-BTN-5), and so do the station functions. The applied answer is the person leg's output
    `answer`.
-5. **`build-app`'s `stages` script.** It files the four `draft-doc` children, one per document,
-   each `depends_on` the one before. `file` reads the merged `PLAN.md`.
+5. **`build-app`'s `stages` script.** It files the four `draft-doc` children, one per document
+   (`document:`),
+   each `depends_on` the one before. `file` reads `PLAN.md` at its claim's snapshot, declaring no `called` input.
 6. **Leg instructions.**
    - Every leg's `.md` commits to the ticket's branch, never the default branch. Only the last
      writing leg sets `status: done`.
@@ -131,7 +129,7 @@ The five marker courses cannot run on a home whose default branch is protected.
       branch.
 8. **Registration and metadata.** `baton repo init --course build-app` also scaffolds and lists
    `draft-doc` in `.baton/baton.json`. The migration adds it where `build-app` is listed. The
-   courses' `reads` becomes `facts: ["prs"]`, and `["branches"]` on `forge: git`.
+   courses read PR facts, and the CLI picks the `branches` adapter on `forge: git`.
 9. **The docs.** In `docs/standard-courses.mdx`: the overview table, *How each course finds
    where a ticket is*, `decision`'s answer paragraph and *`build-app`, step by step*.
 
@@ -161,3 +159,4 @@ S-BTN-104, S-BTN-107 and S-BTN-194, every case in their rows, and each row of it
   blocking problems, then replaced, on the owner's direction, by one ticket, one PR, one merge.
 - 2026-11-01: round one of the new design closed in the spec; items 1, 3, 7 and 8 rewritten on it.
   Batching call children's approvals is B-153.
+- 2026-11-01: round two of #154 closed; `merged-by-hand`'s hardening split out to B-154.

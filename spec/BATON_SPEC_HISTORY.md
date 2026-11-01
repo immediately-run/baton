@@ -1184,6 +1184,43 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - **Text.** `bug-report`'s stations are written out; R-BTN-64's kit text and the standard
     courses' lead are corrected; S-BTN-107 and S-BTN-194 are extended.
 
+- **2026-11-01 — review round two of "one ticket, one PR, one merge"** (one fresh reviewer).
+  Blocking:
+  - **A route made another runner's commit a leg's input.**
+  - **A merge refused for timing stranded a ticket** closed in git at a non-end station.
+
+  Majors:
+  - **A closed ticket hid its own arrival.** The station function and the fact reader could not
+    see a ticket its own merge closed.
+  - **R-BTN-5 and R-BTN-131 named different read points.**
+  - **No path check on a hand merge.**
+  - **`file` read unrefined drafts** through `called`.
+  - **Withdrawn and superseded record tickets kept open PRs.**
+
+  Most of these were gaps in `merged-by-hand` itself, which `create-pr` already uses. The owner,
+  asked, chose "Split the hardening out": B-154 now specifies `merged-by-hand` for every course.
+  This PR's round-one additions to that rule are withdrawn, being incomplete:
+  - `pr-merged`'s head, time and actor binding;
+  - the exemption of the owner's commits from R-BTN-183;
+  - `route` recording the branch head;
+  - closed tickets kept listed;
+  - the plain-git reading.
+
+  The record courses now defer to `create-pr`'s rule.
+
+  Fixed here:
+  - **Reading.** The next leg reads at the branch's fetched head, finding the file by `id` once
+    archived.
+  - **Withdrawing.** It happens on the default branch, and every record writing leg declares the
+    compensation `close-pr`.
+  - **Closing.** Only the run that queues `merged-by-hand` sets `done` and archives; other
+    outcomes leave the file live.
+  - **`file`** reads `PLAN.md` at its snapshot.
+  - **The default-branch rule** is limited to record courses, call children being no record.
+  - **R-BTN-184** names the record courses' own archive move and the human's merge.
+  - **The adapter** follows the forge.
+  - **Scenarios.** S-BTN-107 and S-BTN-194 are trimmed to this PR's rules.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
