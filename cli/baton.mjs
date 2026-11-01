@@ -31,8 +31,8 @@
 //   baton owner -i KEY policy show REPO                     — the signed read (R-BTN-189), as JSON
 //   baton owner -i KEY policy diff REPO FILE                — the knobs FILE's document would change
 //   baton owner -i KEY policy log REPO [--after N]          — the append-only change log
-//   baton owner -i KEY policy set REPO FILE                 — a compare-and-set on the current version
-//   baton owner -i KEY policy apply REPO PRESET             — cooperative | protected | protected-signed | plain-git
+//   baton owner -i KEY policy set REPO FILE --base N        — a compare-and-set on the version you read
+//   baton owner -i KEY policy apply REPO PRESET --base N    — cooperative | protected | protected-signed | plain-git
 //   baton owner -i KEY policy floor add REPO NAME --guarantees a,b [--remove-by human|owner]
 //   baton owner -i KEY policy floor remove REPO NAME        (R-BTN-189: needs the floor's remove_by and approvers.policy)
 //   baton owner -i KEY bar REPO --course C|'*' --tag T [--legs a,b] --applies claim|claim+advance
@@ -521,18 +521,23 @@ export function policyDiff(oldDoc, newDoc) {
 
 /** `baton owner policy …`: show and diff read the signed policy read (R-BTN-189 — a deployment
  *  verifies its signature against the tenant key it pinned; the CLI shows the fields and the
- *  signature beside them), set and apply compare-and-set on the version the read names, and
- *  the floor commands register and remove a deployment's floors. */
+ *  signature beside them), set and apply compare-and-set on the `--base` version the operator
+ *  READ (never a version the CLI fetches itself: a fresh fetch would overwrite a concurrent
+ *  change sight unseen, defeating the compare-and-set — round 1, finding 9; `show` names the
+ *  version), and the floor commands register and remove a deployment's floors. */
 async function policyMain(argv) {
-  const [sub, ...rest] = argv;
-  const urlFlags = parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
-  const args = rest.filter((_, i, a) => !(a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
-  const url = urlFlags.flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
-  const keyFile = need(urlFlags.flags.identity, '-i KEY (an owner key file)');
+  // `-i KEY` and `--url URL` may sit before the subcommand — `baton owner -i KEY policy show
+  // REPO` is the documented form — or after it, as every other command takes them.
+  const isFlagOrValue = (_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url';
+  const { flags: globalFlags } = parseArgs(argv.filter(isFlagOrValue));
+  const args = argv.filter((x, i, a) => !isFlagOrValue(x, i, a));
+  const url = globalFlags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+  const keyFile = need(globalFlags.identity, '-i KEY (an owner key file)');
   const request = (method, path, body) => send(url, { method, path, body }, keyFile);
   const write = (text) => process.stdout.write(`${text}\n`);
+  const [sub, ...rest] = args;
   if (sub === 'show') {
-    const { flags, positional } = parseArgs(args, [], ['identity', 'url'], 1);
+    const { positional } = parseArgs(rest, [], ['identity', 'url'], 1);
     const repo = need(positional[0], 'the repository id');
     const out = await request('GET', `/v1/repositories/${encodeURIComponent(repo)}/policy`);
     if (out.status !== 200) return write(arrived(out.text)), 1;
@@ -541,7 +546,7 @@ async function policyMain(argv) {
     return 0;
   }
   if (sub === 'diff') {
-    const { positional } = parseArgs(args, [], ['identity', 'url'], 2);
+    const { positional } = parseArgs(rest, [], ['identity', 'url'], 2);
     const [repo, file] = positional;
     const out = await request('GET', `/v1/repositories/${encodeURIComponent(need(repo, 'the repository id'))}/policy`);
     if (out.status !== 200) return write(arrived(out.text)), 1;
@@ -556,7 +561,7 @@ async function policyMain(argv) {
     return 0;
   }
   if (sub === 'log') {
-    const { flags, positional } = parseArgs(args, [], ['after', 'identity', 'url'], 1);
+    const { flags, positional } = parseArgs(rest, [], ['after', 'identity', 'url'], 1);
     const q = new URLSearchParams(flags.after ? { after: flags.after } : {});
     const out = await request('GET', `/v1/owner/${encodeURIComponent(need(positional[0], 'the repository id'))}/policy/log${q.size ? `?${q}` : ''}`);
     if (out.status !== 200) return write(arrived(out.text)), 1;
@@ -564,11 +569,11 @@ async function policyMain(argv) {
     return 0;
   }
   if (sub === 'set' || sub === 'apply') {
-    const { positional } = parseArgs(args, [], ['identity', 'url'], 2);
+    const { flags, positional } = parseArgs(rest, [], ['base', 'identity', 'url'], 2);
     const [repo, what] = positional.map((x) => need(x, sub === 'set' ? 'the repository id and the policy file' : 'the repository id and the preset name'));
-    const read = await request('GET', `/v1/repositories/${encodeURIComponent(repo)}/policy`);
-    if (read.status !== 200) return write(arrived(read.text)), 1;
-    const base = read.json.version;
+    // R-BTN-188: the change builds on the version the OPERATOR read — the one `show` printed —
+    // so a concurrent change is a `conflict` the operator sees, never one this overwrites.
+    const base = need(baseOf(flags.base), '--base N (the version your change builds on — `baton owner policy show` names it; a stale one answers conflict)');
     const body = sub === 'apply' ? { base_version: base, preset: what } : { base_version: base, policy: JSON.parse(readFileSync(what, 'utf8')) };
     const out = await request('PUT', `/v1/owner/${encodeURIComponent(repo)}/policy`, body);
     write(JSON.stringify(out.json));
@@ -591,6 +596,14 @@ async function policyMain(argv) {
   throw new Error('baton owner policy show|diff|log|set|apply|floor add|floor remove');
 }
 
+/** `--base` as the version number the PUT carries. */
+function baseOf(v) {
+  if (v == null || v === '') return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) throw new Error('--base must be the version number you read (as `baton owner policy show` printed it)');
+  return n;
+}
+
 
 /** What arrived instead of Baton's JSON: its first 300 characters, an empty body named (B-80). */
 const arrived = (text) => (text.length > 300 ? `${text.slice(0, 300)}…` : text) || '(an empty body)';
@@ -611,7 +624,19 @@ export async function main(argv) {
     if (argv[1] !== 'list') throw new Error('baton decision list -i KEY [--watch | --all]');
     return decisionList(argv.slice(2));
   }
-  if (argv[0] === 'owner' && argv[1] === 'policy') return policyMain(argv.slice(2));
+  if (argv[0] === 'owner') {
+    // `-i KEY` (and `--url URL`) may sit between `owner` and its subcommand: `baton owner -i KEY
+    // policy show REPO` is the documented form (round 1, finding 10). The flags stay in what
+    // policyMain receives; only the `policy` word is taken out.
+    const rest = argv.slice(1);
+    let cut = -1;
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i] === '-i' || rest[i] === '--url') { i += 1; continue; }
+      if (rest[i] === 'policy') cut = i;
+      break;
+    }
+    if (cut >= 0) return policyMain(rest.filter((_, i) => i !== cut));
+  }
   if (argv[0] === 'run') {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
     // its devDependencies), then run it in this process's stead.

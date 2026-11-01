@@ -13,7 +13,7 @@
 // export — nothing of either is in the code yet; the PR body says so. Runs on both hosts.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { call as hostCall } from '#host';
-import { cutover, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, syncCall, withCore } from '../helpers';
+import { cutover, course, keyCall, ORIGIN, payload, rows, setAdminKeys, setClock, setHumanKeys, setPolicySigningKey, syncCall, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
 import { COOPERATIVE, PLAIN_GIT, canonicalJson } from '../../src/core/policy';
 
@@ -24,6 +24,8 @@ let owner: TestKey;
 let human: TestKey;
 let breakGlass: TestKey;
 let checkerKey: TestKey;
+/** The tenant's Ed25519 key this test configured (BATON_SIGNING_KEY) — what a pinned reader holds. */
+let signingJwk: JsonWebKey;
 
 /** A signed call by an arbitrary key (the human one among them). */
 async function as(key: TestKey, path: string, body?: unknown, method?: string) {
@@ -51,6 +53,7 @@ beforeEach(async () => {
   breakGlass = await makeKey('ssh-ed25519', 'break-glass');
   checkerKey = await makeKey('ssh-ed25519', 'checker');
   await setAdminKeys(admin);
+  signingJwk = await setPolicySigningKey();
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', forge: 'github', remote: 'ssh://git@github.com/immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', sync_keys: [] , owner_keys: [owner.publicKey] })).status).toBe(200);
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'docs', owner_keys_add: [owner.publicKey] })).status).toBe(200);
   await syncCall('/v1/sync/board', payload(board.shas.A, null, board.states.A));
@@ -98,7 +101,15 @@ describe('S-BTN-189 the repository policy', () => {
     expect(refused.status).toBe(409);
     expect(refused.json.code).toBe('unsatisfiable-approvers');
     expect(refused.json.list).toBe('approvers.members');
+    // Round 1, finding 2: break-glass configured alone still refuses — R-BTN-188's no-gate rule
+    // needs a `human_only` key among the repository's OWNERS, and the host's root of trust acts,
+    // it does not count as one.
+    await setHumanKeys(breakGlass);
+    expect((await as(owner, '/v1/owner/ops/policy', { base_version: 1, preset: 'protected' }, 'PUT')).json.code).toBe('unsatisfiable-approvers');
     await addHumanOwner('ops');
+    // `protected-signed` (human_key: hardware) is refused while no owner's key meets hardware —
+    // no FIDO attestation exists before B-136 (finding 2's other half).
+    expect((await as(owner, '/v1/owner/ops/policy', { base_version: 1, preset: 'protected-signed' }, 'PUT')).json.code).toBe('unsatisfiable-approvers');
     // The protection checker's grant, made while the policy still admits owners (a grant is an
     // `approvers.members` action; under `protected` only a human key makes one).
     await makeChecker('ops');
@@ -139,6 +150,20 @@ describe('S-BTN-189 the repository policy', () => {
   it('policy changes under approvers.policy: [human]: the owner key forbidden both ways, the human key accepted and logged', async () => {
     await addHumanOwner('ops');
     expect((await as(owner, '/v1/owner/ops/policy', { base_version: 1, preset: 'protected' }, 'PUT')).status).toBe(200);
+    // Round 1, finding 4: an administrator's owner_keys_add and sync_keys_add are
+    // `approvers.members` actions too — a human-only list is a human gate for administrators
+    // (R-BTN-188, ticket item 12), and an administrator key opens no human gate.
+    const extra = await makeKey('ssh-ed25519', 'extra-owner');
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', owner_keys_add: [extra.publicKey] })).json.code).toBe('forbidden');
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', sync_keys_add: [{ public_key: extra.publicKey, role: 'sync' }] })).json.code).toBe('forbidden');
+    // Round 1, finding 13: loosening an R-BTN-66 setting needs approvers.policy (R-BTN-186
+    // names `retry` flatly); the human key's change is accepted.
+    expect((await as(owner, '/v1/owner/ops/settings', { retry: { backoff_ms: [3_600_000], max_failed: 3 } }, 'PUT')).json.code).toBe('forbidden');
+    expect((await as(human, '/v1/owner/ops/settings', { retry: { backoff_ms: [3_600_000], max_failed: 3 } }, 'PUT')).status).toBe(200);
+    // Round 1, finding 3: revoking the last human owner under `protected` would leave every
+    // human list with no live credential (R-BTN-188: naming the list) — the replacement is
+    // added first, then the old key revoked.
+    expect((await as(human, '/v1/human-keys', { fingerprint: human.fingerprint, revoke: true, confirm: true })).json.code).toBe('unsatisfiable-approvers');
     const base = (await policyRow('ops')).version;
     const current = JSON.parse((await policyRow('ops')).policy_json);
     const raised = { ...current, merge: { ...current.merge, reviews: { count: 3, distinct: current.merge.reviews.distinct } } };
@@ -170,7 +195,7 @@ describe('S-BTN-189 the repository policy', () => {
     const a = await as(human, '/v1/owner/ops/policy', { base_version: 1, preset: 'protected' }, 'PUT');
     expect(a.status).toBe(200);
     const current = JSON.parse((await policyRow('ops')).policy_json);
-    const first = await as(other, '/v1/owner/ops/policy', { base_version: 2, policy: { ...current, human_key: 'hardware' } }, 'PUT');
+    const first = await as(other, '/v1/owner/ops/policy', { base_version: 2, policy: { ...current, paths: { ...current.paths, protected: ['spec/**'] } } }, 'PUT');
     expect(first.status).toBe(200);
     const second = await as(human, '/v1/owner/ops/policy', { base_version: 2, policy: current }, 'PUT');
     expect(second.status).toBe(409);
@@ -219,6 +244,61 @@ describe('S-BTN-189 the repository policy', () => {
     expect(claimJson.guarantees_hash).toBe(hbJson.policies.docs.guarantees_hash);
     expect(claimJson.floors_hash).toBe(hbJson.policies.docs.floors_hash);
     expect(claimJson.leg_state).toBe('forge');
+  });
+
+  it('a policy live grants already break is refused — one grant per domain, a trusted domain shared with none', async () => {
+    // Two runner grants in one trust domain, one marked trusted and one not (B-147's trust
+    // routes are not built: the rows are written as their approver would write them).
+    const r1 = await makeKey('ssh-ed25519', 'runner-1');
+    const r2 = await makeKey('ssh-ed25519', 'runner-2');
+    for (const [k, host] of [[r1, 'runner-1-host'], [r2, 'runner-2-host']] as const) {
+      expect((await keyCall(owner, `/v1/owner/ops/grants`, { public_key: k.publicKey, hostname: host, capabilities: ['agent-venue'] })).status).toBe(200);
+    }
+    await rows(`UPDATE worker_grants SET trust_level = 'trusted', trust_domain = 'host-a' WHERE credential_id = ?`, r1.fingerprint);
+    await rows(`UPDATE worker_grants SET trust_level = 'untrusted', trust_domain = 'host-a' WHERE credential_id = ?`, r2.fingerprint);
+    const { version, doc } = await policyRow('ops').then((r) => ({ version: r.version, doc: JSON.parse(r.policy_json) }));
+    // grants.trusted_domain: separate — the trusted grant's domain is shared with another grant,
+    // untrusted included (round 1, finding 6: the untrusted one was skipped before).
+    const separate = await as(owner, '/v1/owner/ops/policy', { base_version: version, policy: { ...doc, grants: { ...doc.grants, trusted_domain: 'separate' } } }, 'PUT');
+    expect(separate.status).toBe(400);
+    expect(separate.json.message).toContain('grant:');
+    // grants.one_per_domain with separate — at most one ACTIVE grant per domain, whatever the
+    // trust of either.
+    const both = await as(owner, '/v1/owner/ops/policy', { base_version: version, policy: { ...doc, grants: { ...doc.grants, one_per_domain: true, trusted_domain: 'separate' } } }, 'PUT');
+    expect(both.json.message).toContain('grant:');
+    // The second grant gone, a courier in a domain of its own — registered once per ask, two
+    // rows — does not refuse the change against itself: a courier is not a grant, and one
+    // courier is one courier.
+    await rows(`UPDATE worker_grants SET revoked_at = ? WHERE credential_id = ?`, Date.now(), r2.fingerprint);
+    const courier = await makeKey('ssh-ed25519', 'courier');
+    expect((await as(owner, '/v1/owner/ops/couriers', { public_key: courier.publicKey, asks: ['owner', 'hi'], trust_level: 'untrusted', trust_domain: 'host-b' })).status).toBe(200);
+    const ok = await as(owner, '/v1/owner/ops/policy', { base_version: version, policy: { ...doc, grants: { ...doc.grants, one_per_domain: true, trusted_domain: 'separate' } } }, 'PUT');
+    expect(ok.status).toBe(200);
+  });
+
+  it('a service: writer that gained a role holds the course at its previous version — the check runs again at every snapshot', async () => {
+    // A neutral service key the policy names for std:checks@1 (the trusted executor's, B-136).
+    const service = await makeKey('ssh-ed25519', 'service');
+    const row = await policyRow('docs');
+    const doc = JSON.parse(row.policy_json);
+    const withService = { ...doc, attestations: { ...doc.attestations, 'std:checks@1': [`service:${service.fingerprint}`] } };
+    expect((await as(owner, '/v1/owner/docs/policy', { base_version: row.version, policy: withService }, 'PUT')).status).toBe(200);
+    // The key becomes a runner (a grant is an approvers.members action): the policy document did
+    // not change, but its service: writer is no longer neutral — and the next snapshot holds the
+    // course at its previous version, naming the drift (R-BTN-181, B-145 item 2).
+    expect((await keyCall(owner, '/v1/owner/docs/grants', { public_key: service.publicKey, hostname: 'service-host', capabilities: ['agent-venue'] })).status).toBe(200);
+    const posted = await syncCall('/v1/sync/board', payload('e'.repeat(40), board.shas.A, board.states.A, { registry: [course(4)] }));
+    const postedJson = (await (posted as Response).json()) as Record<string, any>;
+    expect(postedJson.courses_refused).toEqual(['roadmap-pr']);
+    expect((await rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', 'docs', 'roadmap-pr'))[0].version).toBe(3);
+  });
+
+  it('version 1 of the log changes nothing — a git repository’s plain-git seed is not a change from cooperative', async () => {
+    expect((await keyCall(admin, '/v1/admin/repositories', { id: 'plain2', github: 'server/plain2', forge: 'git', remote: 'ssh://git@git.example/plain2.git', default_branch: 'main', sync_keys: [{ public_key: checkerKey.publicKey, role: 'sync' }], owner_keys: [owner.publicKey] })).status).toBe(200);
+    const log = await as(owner, '/v1/owner/plain2/policy/log');
+    expect(log.status).toBe(200);
+    expect(log.json.versions).toHaveLength(1);
+    expect(log.json.versions[0].changed).toEqual([]);
   });
 });
 
@@ -271,14 +351,15 @@ async function checkerBeat(repository: string, matched: boolean, readingHash: st
 }
 
 /** Verify a signed policy read as a trusted runner does (R-BTN-189): Ed25519 by the tenant's
- *  signing key over `baton-policy@1\n` and the canonical JSON of the other fields. */
+ *  signing key over `baton-policy@1\n` and the canonical JSON of the other fields — the key the
+ *  test configured as BATON_SIGNING_KEY, a reader's pinned tenant key, never one the read
+ *  carries. */
 async function verifyRead(read: Record<string, any>): Promise<boolean> {
-  const jwk = JSON.parse((await rows<{ value: string }>(`SELECT value FROM baton_settings WHERE key = 'policy_signing_key'`))[0].value) as JsonWebKey;
-  const pub = await crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: jwk.x }, { name: 'Ed25519' }, false, ['verify']);
+  const pub = await crypto.subtle.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', x: signingJwk.x }, { name: 'Ed25519' }, false, ['verify']);
   const { repository, tenant, version, hash, policy, guarantees, guarantees_hash, floors, floors_hash, at, valid_until, kid, signature } = read;
   const fields = { repository, tenant, version, hash, policy, guarantees, guarantees_hash, floors, floors_hash, at, valid_until };
   // The canonical JSON of the fields is what was signed — key order independent.
   const sig = Uint8Array.from(atob(signature), (c) => c.charCodeAt(0));
   if (!(await crypto.subtle.verify({ name: 'Ed25519' }, pub, sig, new TextEncoder().encode(`baton-policy@1\n${canonicalJson(fields)}`)))) return false;
-  return kid === (await sha256Of(String(jwk.x)));
+  return kid === (await sha256Of(String(signingJwk.x)));
 }

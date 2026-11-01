@@ -409,7 +409,7 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
     expect(policyDiff(READ.policy, { human_key: 'any', approvers: { policy: ['owner'], members: ['owner'], trust: ['owner'] } })).toEqual([]);
   });
 
-  it('show, set, apply, log and the floor commands each make their one request (set on the read’s version)', async () => {
+  it('show, set, apply, log and the floor commands each make their one request (set on the version --base names)', async () => {
     const file = join(dir, 'owner.key');
     createApiKey(file);
     const policyFile = join(dir, 'policy.json');
@@ -431,10 +431,15 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       await expect(run(['show', 'ops'])).resolves.toBe(0);
       await expect(run(['diff', 'ops', policyFile])).resolves.toBe(0);
       await expect(run(['log', 'ops', '--after', '2'])).resolves.toBe(0);
-      await expect(run(['set', 'ops', policyFile])).resolves.toBe(0);
-      await expect(run(['apply', 'ops', 'protected'])).resolves.toBe(0);
+      await expect(run(['set', 'ops', policyFile, '--base', '4'])).resolves.toBe(0);
+      await expect(run(['apply', 'ops', 'protected', '--base', '5'])).resolves.toBe(0);
       await expect(run(['floor', 'add', 'ops', 'fieldhouse', '--guarantees', 'no-runner-lands,human-gates', '--remove-by', 'owner'])).resolves.toBe(0);
       await expect(run(['floor', 'remove', 'ops', 'fieldhouse'])).resolves.toBe(0);
+      // Round 1, findings 9 and 10: `set` without --base refuses rather than fetch-and-overwrite
+      // (the compare-and-set builds on the version the operator read), and `baton owner -i KEY
+      // policy show REPO` — the documented form — reaches the policy commands.
+      await expect(run(['set', 'ops', policyFile])).rejects.toThrow(/--base/);
+      await expect(main(['owner', '-i', file, 'policy', 'show', 'ops', '--url', ORIGIN])).resolves.toBe(0);
     } finally {
       globalThis.fetch = was;
       process.stdout.write = outWrite;
@@ -443,18 +448,17 @@ describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
       'GET /v1/repositories/ops/policy',
       'GET /v1/repositories/ops/policy',
       'GET /v1/owner/ops/policy/log?after=2',
-      'GET /v1/repositories/ops/policy',
       'PUT /v1/owner/ops/policy',
-      'GET /v1/repositories/ops/policy',
       'PUT /v1/owner/ops/policy',
       'POST /v1/owner/ops/policy/floors',
       'POST /v1/owner/ops/policy/floors',
+      'GET /v1/repositories/ops/policy',
     ]);
-    // The compare-and-set builds on the version the signed read named.
-    expect(requests[4].body).toEqual({ base_version: 4, policy: { ...READ.policy, human_key: 'hardware' } });
-    expect(requests[6].body).toEqual({ base_version: 4, preset: 'protected' });
-    expect(requests[7].body).toEqual({ name: 'fieldhouse', guarantees: ['no-runner-lands', 'human-gates'], remove_by: 'owner' });
-    expect(requests[8].body).toEqual({ name: 'fieldhouse', remove: true, confirm: true });
+    // The compare-and-set builds on the version the operator named, never one the CLI fetched.
+    expect(requests[3].body).toEqual({ base_version: 4, policy: { ...READ.policy, human_key: 'hardware' } });
+    expect(requests[4].body).toEqual({ base_version: 5, preset: 'protected' });
+    expect(requests[5].body).toEqual({ name: 'fieldhouse', guarantees: ['no-runner-lands', 'human-gates'], remove_by: 'owner' });
+    expect(requests[6].body).toEqual({ name: 'fieldhouse', remove: true, confirm: true });
     // diff printed the one knob; show printed the read it verified the fields of.
     expect(outs.join('')).toContain('human_key');
   });

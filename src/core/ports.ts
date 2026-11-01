@@ -113,6 +113,10 @@ export interface Config {
    *  deployment's root of trust, set outside Baton. A key in it satisfies every `human` entry
    *  of every repository on the instance, and it is the only recovery from a lost key. */
   BATON_HUMAN_KEYS?: string;
+  /** R-BTN-114's `SigningKey` (R-BTN-171, R-BTN-189): the tenant's Ed25519 signing key, as the
+   *  JWK of its private half — `{"kty":"OKP","crv":"Ed25519","d":…,"x":…}`. A secret on
+   *  Cloudflare, a key file locally; Baton never generates or stores one. */
+  BATON_SIGNING_KEY?: string;
   /** Test bindings only (vitest.config.ts, §13a): never set by a deploy or a local start. */
   BATON_TEST_BINDINGS?: string;
   TEST_OIDC_JWKS?: string;

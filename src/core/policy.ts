@@ -267,13 +267,14 @@ export function validatePolicyDocument(input: unknown, opts: { forge: Forge }): 
   }
 
   // R-BTN-180: Baton refuses a policy whose writes could never land — one whose `outbox.git`
-  // admits a class that `refs.default_branch` (under `tickets.created: filed`) or `refs.other`
-  // (under `proposed`) excludes, and one whose `refs.default_branch` excludes `runner` while
-  // `tickets.created` is `filed`, since a runner then files tickets nowhere (R-BTN-161).
+  // admits a class (courier or trusted-runner) that `refs.default_branch` (under
+  // `tickets.created: filed`) or `refs.other` (under `proposed`) excludes, and one whose
+  // `refs.default_branch` excludes `runner` while `tickets.created` is `filed`, since a runner
+  // then files tickets nowhere (R-BTN-161, R-BTN-165).
   const landingRef = tickets.created === 'filed' ? 'default_branch' : 'other';
   for (const d of outboxGit.deliverers) {
-    if (d === 'trusted-runner' && !refsOf[landingRef].includes('trusted-runner')) {
-      bad('policy.outbox.git', `admits trusted-runner, which refs.${landingRef} excludes under tickets.created: ${tickets.created} — its writes could never land (R-BTN-180)`);
+    if (!refsOf[landingRef].includes(d)) {
+      bad('policy.outbox.git', `admits ${d}, which refs.${landingRef} excludes under tickets.created: ${tickets.created} — its writes could never land (R-BTN-180)`);
     }
   }
   if (tickets.created === 'filed' && !refsOf.default_branch.includes('runner')) {
@@ -507,20 +508,25 @@ export interface FloorRow {
 }
 
 /** What a heartbeat's protection report says (R-BTN-180). */
-export interface ProtectionReport { repository: string; matched: boolean; reading_hash: string }
+export interface ProtectionReport { repository: string; matched: boolean; reading_hash: string; legs?: { count: number; tickets: number } }
 /** What a heartbeat's policy pins say (R-BTN-189). */
-export interface PolicyPin { repository: string; hash: string }
+export interface PolicyPin { repository: string; hash: string; floors_hash?: string }
 
 /** A repository's live owners, and the human-only keys among them — everything the approver
- *  checks read. `humans` is every fingerprint a `human` entry counts: the repository's
- *  `human_only` owners, the tenant's registered human keys, and the host's BATON_HUMAN_KEYS
- *  lines; `breakGlass` is those lines alone (R-BTN-185: the deployment's root of trust, which
- *  satisfies every `human` entry of every repository on the instance, whatever `human_key`
- *  asks, and is the only recovery from a lost key). */
+ *  checks read. `humans` is every fingerprint a `human` entry counts when ACTING: the
+ *  repository's `human_only` owners, the tenant's registered human keys, and the host's
+ *  BATON_HUMAN_KEYS lines; `breakGlass` is those lines alone (R-BTN-185: the deployment's root
+ *  of trust, which satisfies every `human` entry of every repository on the instance, whatever
+ *  `human_key` asks, and is the only recovery from a lost key). `humanOwners` is the
+ *  repository's owners alone that are human keys by their own mark or the tenant's register —
+ *  break-glass excluded: R-BTN-188's no-gate rule needs "a `human_only` key meeting the
+ *  resulting `human_key` among the repository's owners", so a list a break-glass key alone
+ *  could satisfy is a gate with no key to open it. */
 export interface ApproverFacts {
   owners: Map<string, { human_only: boolean; fido_attestation: string | null }>;
   humans: Set<string>;
   breakGlass: Set<string>;
+  humanOwners: Set<string>;
 }
 
 const FLOOR_NAME = /^[a-z][a-z0-9-]{0,39}$/;
@@ -572,8 +578,11 @@ export class Policies {
     return this.rows<{ version: number; hash: string; previous_hash: string | null; changed_by: string; approver: string | null; preset: string | null; at: number }>(
       'SELECT version, hash, previous_hash, changed_by, approver, preset, at FROM repository_policies WHERE repository_id = ? AND version > ? ORDER BY version', repository, from)
       .map((r) => {
-        const before = docs.get(r.version - 1) ?? structuredClone(COOPERATIVE);
-        return { ...r, changed: diffPolicies(before, docs.get(r.version) ?? before) };
+        // Version 1 is the seed: nothing came before it, so nothing changed (a git repository's
+        // `plain-git` seed is not a change from `cooperative` — the baseline a diff needs does
+        // not exist).
+        const before = r.version === 1 ? null : docs.get(r.version - 1) ?? null;
+        return { ...r, changed: before ? diffPolicies(before, docs.get(r.version) ?? before) : [] };
       });
   }
 
@@ -627,15 +636,18 @@ export class Policies {
     const owners = new Map(this.rows<{ fingerprint: string; human_only: number; fido_attestation: string | null }>(
       'SELECT fingerprint, human_only, fido_attestation FROM repository_owners WHERE repository_id = ? AND removed_at IS NULL', repository)
       .map((o) => [o.fingerprint, { human_only: !!o.human_only, fido_attestation: o.fido_attestation }]));
+    const registered = new Set(this.rows<{ fingerprint: string }>('SELECT fingerprint FROM human_keys WHERE revoked_at IS NULL').map((r) => r.fingerprint));
     const humans = new Set<string>(breakGlass);
+    const humanOwners = new Set<string>();
     for (const [fp, o] of owners) {
-      if (o.human_only) humans.add(fp);
+      // A `human_only` mark, or the tenant's register, makes an owner a human key — even if its
+      // row lost the mark.
+      if (o.human_only || registered.has(fp)) {
+        humans.add(fp);
+        humanOwners.add(fp);
+      }
     }
-    // A registered human key that owns the repository counts even if its row lost the mark.
-    for (const r of this.rows<{ fingerprint: string }>('SELECT fingerprint FROM human_keys WHERE revoked_at IS NULL')) {
-      if (owners.has(r.fingerprint)) humans.add(r.fingerprint);
-    }
-    return { owners, humans, breakGlass: new Set(breakGlass) };
+    return { owners, humans, breakGlass: new Set(breakGlass), humanOwners };
   }
 
   /** R-BTN-185: whether a human-only owner key meets `human_key` — `any` always; `hardware`
@@ -675,28 +687,18 @@ export class Policies {
   }
 
   /** R-BTN-188's no-gate-without-a-key: whether some live credential could satisfy `list` —
-   *  `owner` needs a live owner, `human` a human-only owner meeting `human_key` (or
-   *  break-glass), a `key:` entry a live owner of its own. */
+   *  `owner` needs a live owner, a `human` entry a human-only key among the repository's OWNERS
+   *  meeting `human_key` (break-glass never opens a gate: it is the acting root of trust, not
+   *  an owner; a repository whose human lists only break-glass could satisfy has no key to open
+   *  them), a `key:` entry a live owner of its own. */
   listSatisfiable(list: ApproverEntry[], facts: ApproverFacts, humanKey: 'any' | 'hardware'): boolean {
     return list.some((e) => {
       if (e === 'owner') return facts.owners.size > 0;
-      if (e === 'human') return [...facts.humans].some((fp) => this.humanEntryOk(fp, facts, humanKey));
+      if (e === 'human') {
+        return [...facts.humanOwners].some((fp) => this.meetsHumanKey({ human_only: true, fido_attestation: facts.owners.get(fp)?.fido_attestation ?? null }, humanKey));
+      }
       const o = facts.owners.get(e.slice(4));
       return o !== undefined && (!o.human_only || this.meetsHumanKey(o, humanKey));
-    });
-  }
-
-  /** Whether `list` stays openable — some entry a credential could yet satisfy, once the
-   *  owners and human keys that can still be registered are counted: an `owner` entry always
-   *  (the administrator's owner route adds one), a `human` entry while break-glass exists
-   *  (without it no first human key can be registered), a `key:` entry while its key is a live
-   *  owner. The revocation-time half of the no-gate rule: a list nothing can ever satisfy
-   *  again is refused, one merely empty now is the repairable kind B-91 already names. */
-  listRecoverable(list: ApproverEntry[], facts: ApproverFacts): boolean {
-    return list.some((e) => {
-      if (e === 'owner') return true;
-      if (e === 'human') return facts.breakGlass.size > 0;
-      return facts.owners.has(e.slice(4));
     });
   }
 
@@ -741,25 +743,30 @@ export class Policies {
         throw new BatonError('unsatisfiable-approvers', `${name}: no live credential can satisfy it (R-BTN-188)`, { list: name });
       }
     }
-    this.checkServiceWriters(doc);
+    for (const v of this.serviceWriterViolations(doc)) bad('policy', v);
 
     // R-BTN-188: a policy that live grants already break is refused — `one_per_domain` and
-    // `trusted_domain: separate`, naming them. Only a set trust domain collides; a grant with
-    // a null domain is not offered work instead (B-147 reads it so).
+    // `trusted_domain: separate`, naming them. `one_per_domain` counts GRANTS (at most one
+    // active grant per trust domain, couriers are not grants); `separate` needs a trusted
+    // entry's domain shared with no other grant or courier (an untrusted grant's domain it
+    // leaves alone). A courier registers one row per ask, so its rows are one courier; only a
+    // set trust domain collides — a grant with a null domain is not offered work instead
+    // (B-147 reads it so).
     if (doc.grants.one_per_domain || doc.grants.trusted_domain === 'separate') {
       const grants = this.rows<{ credential_id: string; trust_level: string | null; trust_domain: string | null }>(
         'SELECT credential_id, trust_level, trust_domain FROM worker_grants WHERE repository_id = ? AND revoked_at IS NULL AND trust_domain IS NOT NULL', repository);
-      const couriers = this.rows<{ credential_id: string; trust_level: string | null; trust_domain: string | null }>(
-        'SELECT credential_id, trust_level, trust_domain FROM couriers WHERE repository_id = ? AND trust_domain IS NOT NULL', repository);
-      const live = [...grants.map((g) => ({ kind: 'grant', ...g })), ...couriers.map((c) => ({ kind: 'courier', ...c }))];
-      const byDomain = new Map<string, string[]>();
-      for (const x of live) {
-        if (doc.grants.trusted_domain === 'separate' && x.trust_level !== 'trusted') continue;
-        byDomain.set(x.trust_domain!, [...(byDomain.get(x.trust_domain!) ?? []), `${x.kind}:${x.credential_id}`]);
+      const couriers = [...new Map(this.rows<{ credential_id: string; trust_level: string | null; trust_domain: string | null }>(
+        'SELECT credential_id, trust_level, trust_domain FROM couriers WHERE repository_id = ? AND trust_domain IS NOT NULL', repository).map((c) => [c.credential_id, c])).values()];
+      const byDomain = new Map<string, { who: string; grant: boolean; trusted: boolean }[]>();
+      for (const x of [...grants.map((g) => ({ ...g, grant: true })), ...couriers.map((c) => ({ ...c, grant: false }))]) {
+        byDomain.set(x.trust_domain!, [...(byDomain.get(x.trust_domain!) ?? []), { who: `${x.grant ? 'grant' : 'courier'}:${x.credential_id}`, grant: x.grant, trusted: x.trust_level === 'trusted' }]);
       }
-      for (const [domain, who] of byDomain) {
-        if (who.length > 1) {
-          bad(doc.grants.one_per_domain ? 'policy.grants.one_per_domain' : 'policy.grants.trusted_domain', `trust domain ${domain} is already shared by ${who.join(', ')} (R-BTN-188)`);
+      for (const [domain, es] of byDomain) {
+        if (doc.grants.one_per_domain && es.filter((e) => e.grant).length > 1) {
+          bad('policy.grants.one_per_domain', `trust domain ${domain} already holds the grants ${es.filter((e) => e.grant).map((e) => e.who).join(', ')} (R-BTN-188)`);
+        }
+        if (doc.grants.trusted_domain === 'separate' && es.length > 1 && es.some((e) => e.trusted)) {
+          bad('policy.grants.trusted_domain', `trust domain ${domain} is already shared by ${es.map((e) => e.who).join(', ')} (R-BTN-188)`);
         }
       }
     }
@@ -812,8 +819,12 @@ export class Policies {
   }
 
   /** R-BTN-181's store half: a `service:` writer the policy names must hold no owner, runner or
-   *  courier role — a key that holds one is not a neutral third service. */
-  private checkServiceWriters(doc: PolicyDocument): void {
+   *  courier role — a key that holds one is not a neutral third service. The violations a
+   *  document's named service keys draw, as messages: the policy change refuses them, and the
+   *  course snapshot re-checks the same thing against the roles as they stand NOW (a key that
+   *  gained a role since the policy named it — R-BTN-188 item 2's "checked again at every
+   *  course snapshot"). */
+  serviceWriterViolations(doc: PolicyDocument): string[] {
     const named = new Set<string>();
     for (const writers of Object.values(doc.attestations)) {
       for (const w of writers) if (w.startsWith('service:')) named.add(w.slice(8));
@@ -821,12 +832,22 @@ export class Policies {
     for (const entry of Object.values(doc.readings)) {
       for (const w of entry.writers) if (w.startsWith('service:')) named.add(w.slice(8));
     }
+    const out: string[] = [];
     for (const fp of named) {
       const role = this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND removed_at IS NULL', fp).length ? 'an owner key'
         : this.rows('SELECT 1 FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', fp).length ? 'a runner key'
           : this.rows('SELECT 1 FROM couriers WHERE credential_id = ?', fp).length ? 'a courier key' : null;
-      if (role) bad('policy', `service:${fp.slice(0, 16)}… is ${role}, and a service: writer holds no owner, runner or courier role (R-BTN-181)`);
+      if (role) out.push(`service:${fp.slice(0, 16)}… is ${role}, and a service: writer holds no owner, runner or courier role (R-BTN-181)`);
     }
+    return out;
+  }
+
+  /** The service-writer drift of `repository`'s current policy — the same check a policy
+   *  change runs, read against the roles as they stand now, for the course snapshot to refuse
+   *  a post over (the previous course version stays in force). */
+  serviceWriterDrift(repository: string): string[] {
+    const cur = this.current(repository);
+    return cur ? this.serviceWriterViolations(cur.policy) : [];
   }
 
   /** `POST /v1/owner/{repository}/policy/floors` (R-BTN-189): the `approvers.policy` approver
@@ -893,27 +914,53 @@ export class Policies {
   /** Every repository with floors: a broken one stops the repository — Baton offers and
    *  accepts no claim or advance on any ticket that reaches it, and releases the running claims
    *  `released:floor` (R-BTN-189). Called from the report and the alarm paths, so a floor that
-   *  breaks by any way back is enforced. */
+   *  breaks by any way back is enforced — a report lapsing past its 24 hours included, which
+   *  raises `baton.unprotected` first (R-BTN-189: a lapsed or failed report raises it all the
+   *  same as a mismatched one). */
   enforceFloors(): void {
+    this.raiseLapsedReports();
     for (const r of this.rows<{ id: string }>('SELECT DISTINCT repository_id AS id FROM policy_floors')) {
       if (this.brokenUnderFloors(r.id).length) this.releaseForFloor?.(r.id);
+    }
+  }
+
+  /** R-BTN-189: a report lapsed past 24 hours raises `baton.unprotected` — the guarantee it
+   *  fed is broken by the lapse, exactly as by a mismatch, wherever the policy's own conditions
+   *  hold (a cooperative repository never expected a report; its `no-runner-lands` is broken by
+   *  its knobs, not by the checker's silence). Idempotent: an open condition stays open, a
+   *  matching report within the window closes it (recordProtection). */
+  private raiseLapsedReports(): void {
+    for (const r of this.rows<{ repository_id: string; at: number; by: string }>(
+      'SELECT repository_id, at, by FROM protection_reports WHERE at < ?', this.c.now() - PROTECTION_WINDOW_MS)) {
+      const cur = this.current(r.repository_id);
+      if (!cur) continue;
+      const g = guaranteesOf(cur.policy);
+      if (!g['no-runner-lands']) continue; // the policy's own conditions already break it
+      if (this.rows('SELECT 1 FROM policy_conditions WHERE repository_id = ? AND type = ? AND ref = ? AND closed_at IS NULL', r.repository_id, 'baton.unprotected', '').length) continue;
+      this.openCondition(r.repository_id, 'baton.unprotected', '', { lapsed: true, last_at: r.at, by: r.by });
+      logEvent(this.c.store, this.c.now(), 'discrepancy', 'server', { kind: 'condition', type: 'baton.unprotected', repository: r.repository_id, lapsed: true }, null, null, r.repository_id);
     }
   }
 
   // ── protection reports and pins (R-BTN-180, R-BTN-189) ────────────────────────────────
 
   /** The protection checker's report with its heartbeat: stored as the latest, `baton.unprotected`
-   *  raised on a report that does not match or differs from the previous reading, closed by one
-   *  that matches and repeats it. Returns false when the caller is not the repository's
-   *  protection checker (the grant's role names it, R-BTN-180). */
-  recordProtection(repository: string, report: { matched: boolean; reading_hash: string }, credential: string): boolean {
+   *  raised on a report that does not match or differs from the previous reading, closed by a
+   *  matching report (R-BTN-180). The reading a report differs FROM is the last one that
+   *  MATCHED — the stable baseline — so a report that restores the forge after a mismatch (its
+   *  reading returns to the baseline) closes the condition at once, while a reading that
+   *  changes while matching (the forge's protection settings moved) raises it, to be closed by
+   *  the next report that repeats the new reading. Returns false when the caller is not the
+   *  repository's protection checker (the grant's role names it, R-BTN-180). */
+  recordProtection(repository: string, report: { matched: boolean; reading_hash: string; legs?: { count: number; tickets: number } }, credential: string): boolean {
     if (!this.rows('SELECT 1 FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL AND role = ?', credential, repository, 'protection-checker').length) return false;
-    const prev = this.rows<{ matched: number; reading_hash: string }>('SELECT matched, reading_hash FROM protection_reports WHERE repository_id = ?', repository)[0];
-    this.exec('INSERT INTO protection_reports (repository_id, matched, reading_hash, by, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (repository_id) DO UPDATE SET matched = excluded.matched, reading_hash = excluded.reading_hash, by = excluded.by, at = excluded.at',
-      repository, report.matched ? 1 : 0, report.reading_hash, credential, this.c.now());
-    const breaks = !report.matched || (prev != null && prev.reading_hash !== report.reading_hash);
+    const prev = this.rows<{ matched: number; reading_hash: string; matched_hash: string | null }>('SELECT matched, reading_hash, matched_hash FROM protection_reports WHERE repository_id = ?', repository)[0];
+    this.exec('INSERT INTO protection_reports (repository_id, matched, reading_hash, matched_hash, by, at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (repository_id) DO UPDATE SET matched = excluded.matched, reading_hash = excluded.reading_hash, matched_hash = excluded.matched_hash, by = excluded.by, at = excluded.at',
+      repository, report.matched ? 1 : 0, report.reading_hash, report.matched ? report.reading_hash : prev?.matched_hash ?? null, credential, this.c.now());
+    const baseline = prev?.matched_hash ?? null;
+    const breaks = !report.matched || (baseline != null && baseline !== report.reading_hash);
     if (breaks) {
-      this.openCondition(repository, 'baton.unprotected', '', { matched: report.matched, reading_hash: report.reading_hash, changed_reading: prev != null && prev.reading_hash !== report.reading_hash });
+      this.openCondition(repository, 'baton.unprotected', '', { matched: report.matched, reading_hash: report.reading_hash, changed_reading: baseline != null && baseline !== report.reading_hash, ...(report.legs ? { legs: report.legs } : {}) });
       logEvent(this.c.store, this.c.now(), 'discrepancy', 'server', { kind: 'condition', type: 'baton.unprotected', repository, matched: report.matched }, null, null, repository);
       this.enforceFloors();
     } else {
@@ -923,18 +970,28 @@ export class Policies {
   }
 
   /** A trusted runner's policy pins, as its heartbeat reports them (R-BTN-189): stored, and a
-   *  pin that differs from the current version holds `baton.policy-unpinned` open for that
-   *  runner; one that matches closes it. Returns the repositories whose pin differed. */
-  recordPins(workerId: number, pins: PolicyPin[], granted: ReadonlySet<string>): string[] {
+   *  pin that differs from the current version — the policy document's hash, and the floors'
+   *  when the runner pins it — holds `baton.policy-unpinned` open for that runner; one that
+   *  matches closes it. R-BTN-189 names trusted runners: a pin from a grant not trusted on the
+   *  repository is recorded nowhere and drives nothing (an untrusted runner shares its sandbox
+   *  with the code it builds, so its pin proves nothing). Returns the repositories whose pin
+   *  differed. */
+  recordPins(workerId: number, credential: string, pins: PolicyPin[], granted: ReadonlySet<string>): string[] {
     const differed: string[] = [];
     for (const pin of pins) {
       if (!REPOSITORY_ID.test(pin.repository) || !granted.has(pin.repository)) continue;
       const cur = this.current(pin.repository);
-      this.exec('INSERT INTO policy_pins (worker_id, repository_id, hash, at) VALUES (?, ?, ?, ?) ON CONFLICT (worker_id, repository_id) DO UPDATE SET hash = excluded.hash, at = excluded.at',
-        workerId, pin.repository, pin.hash, this.c.now());
-      if (cur && cur.hash !== pin.hash) {
+      const trusted = this.rows<{ trust_level: string | null }>(
+        'SELECT trust_level FROM worker_grants WHERE credential_id = ? AND repository_id = ? AND revoked_at IS NULL', credential, pin.repository)[0];
+      const policy = cur?.policy;
+      const isTrusted = trusted != null && (trusted.trust_level ?? policy?.grants.default_trust ?? 'untrusted') === 'trusted';
+      if (!isTrusted) continue;
+      this.exec('INSERT INTO policy_pins (worker_id, repository_id, hash, floors_hash, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (worker_id, repository_id) DO UPDATE SET hash = excluded.hash, floors_hash = excluded.floors_hash, at = excluded.at',
+        workerId, pin.repository, pin.hash, pin.floors_hash ?? null, this.c.now());
+      const floorsHash = cur ? this.floorsHashOf(this.floors(pin.repository)) : null;
+      if (cur && (cur.hash !== pin.hash || (pin.floors_hash != null && pin.floors_hash !== floorsHash))) {
         differed.push(pin.repository);
-        this.openCondition(pin.repository, 'baton.policy-unpinned', `worker:${workerId}`, { pinned: pin.hash, current: cur.hash });
+        this.openCondition(pin.repository, 'baton.policy-unpinned', `worker:${workerId}`, { pinned: pin.hash, current: cur.hash, ...(pin.floors_hash != null && pin.floors_hash !== floorsHash ? { pinned_floors: pin.floors_hash, current_floors: floorsHash } : {}) });
       } else {
         this.closeCondition(pin.repository, 'baton.policy-unpinned', `worker:${workerId}`);
       }
@@ -942,13 +999,15 @@ export class Policies {
     return differed;
   }
 
-  /** Whether the worker's pin on `repository` differs from the current version — while one
-   *  does, the runner acts on nothing in the repository (R-BTN-189). */
+  /** Whether the worker's pins on `repository` differ from the current version — while one
+   *  does, the runner acts on nothing in the repository (R-BTN-189; a trusted runner's pins
+   *  alone are stored, so only a trusted grant can differ). */
   pinDiffers(workerId: number, repository: string): boolean {
-    const pin = this.rows<{ hash: string }>('SELECT hash FROM policy_pins WHERE worker_id = ? AND repository_id = ?', workerId, repository)[0];
+    const pin = this.rows<{ hash: string; floors_hash: string | null }>('SELECT hash, floors_hash FROM policy_pins WHERE worker_id = ? AND repository_id = ?', workerId, repository)[0];
     if (!pin) return false;
     const cur = this.current(repository);
-    return cur != null && cur.hash !== pin.hash;
+    if (cur == null) return false;
+    return cur.hash !== pin.hash || (pin.floors_hash != null && pin.floors_hash !== this.floorsHashOf(this.floors(repository)));
   }
 
   /** Whether the worker's credential is the repository's protection checker — the one claimant
@@ -962,7 +1021,12 @@ export class Policies {
       this.exec('UPDATE policy_conditions SET detail_json = ? WHERE repository_id = ? AND type = ? AND ref = ? AND closed_at IS NULL', JSON.stringify(detail), repository, type, ref);
       return;
     }
-    this.exec('INSERT INTO policy_conditions (repository_id, type, ref, raised_at, detail_json) VALUES (?, ?, ?, ?, ?)', repository, type, ref, this.c.now(), JSON.stringify(detail));
+    // A condition re-raised in the same millisecond a closed one was (a test clock that does
+    // not move between two raises): the row's key is (repository, type, ref, raised_at), so the
+    // new raise is stamped one tick after anything the key already holds.
+    const last = this.rows<{ raised_at: number }>('SELECT raised_at FROM policy_conditions WHERE repository_id = ? AND type = ? AND ref = ? ORDER BY raised_at DESC LIMIT 1', repository, type, ref)[0]?.raised_at;
+    const at = Math.max(this.c.now(), (last ?? -1) + 1);
+    this.exec('INSERT INTO policy_conditions (repository_id, type, ref, raised_at, detail_json) VALUES (?, ?, ?, ?, ?)', repository, type, ref, at, JSON.stringify(detail));
   }
 
   private closeCondition(repository: string, type: string, ref: string): void {

@@ -9,7 +9,7 @@
 // body says so. Runs on both hosts.
 import { describe, it, expect, beforeEach, inject } from 'vitest';
 import { call as hostCall } from '#host';
-import { keyCall, ORIGIN, rows, setAdminKeys, setClock, setHumanKeys, withCore } from '../helpers';
+import { keyCall, ORIGIN, rows, setAdminKeys, setClock, setHumanKeys, setPolicySigningKey, withCore } from '../helpers';
 import { makeKey, sshsig, signedRequest, type TestKey } from '../lib/sshKeys';
 
 const board = inject('board');
@@ -56,6 +56,7 @@ beforeEach(async () => {
   breakGlass = await makeKey('ssh-ed25519', 'break-glass');
   await setAdminKeys(admin);
   await setHumanKeys(breakGlass);
+  await setPolicySigningKey();
   expect((await keyCall(admin, '/v1/admin/repositories', { id: 'ops', github: 'immediately-run/ops', forge: 'github', remote: 'ssh://git@github.com/immediately-run/ops', default_branch: 'main', sync_workflow: '.github/workflows/baton-sync.yml', sync_keys: [], owner_keys: [b.publicKey] })).status).toBe(200);
 });
 

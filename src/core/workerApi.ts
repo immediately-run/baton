@@ -390,8 +390,9 @@ export class WorkerApi {
       }
     }
     // §12.8 (B-145, R-BTN-189): the policy pins a trusted runner reports — stored per
-    // repository, a differing one holding `baton.policy-unpinned` open.
-    if (this.c.policies && hb.policy_pins.length) this.c.policies.recordPins(w.id, hb.policy_pins, new Set(granted ?? []));
+    // repository, a differing one holding `baton.policy-unpinned` open (a pin from a grant not
+    // trusted on the repository drives nothing).
+    if (this.c.policies && hb.policy_pins.length) this.c.policies.recordPins(w.id, cred.id, hb.policy_pins, new Set(granted ?? []));
     if (!was?.live || rewrote || uses.changed) this.c.fleetChanged?.();
     const refused = hb.transcript_refusals;
     const unlinked = this.recordTranscripts(w.id, hb, now);

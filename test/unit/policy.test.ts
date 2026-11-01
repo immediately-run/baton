@@ -65,10 +65,13 @@ describe('the repository policy (R-BTN-188, R-BTN-189)', () => {
     };
     // outbox.git admits a class that refs.default_branch excludes under tickets.created: filed.
     expect(refuse({ ...COOPERATIVE, refs: { ...COOPERATIVE.refs, default_branch: ['human'] }, outbox: { ...COOPERATIVE.outbox, git: { deliverers: ['trusted-runner'], trust: 'any' } } })).toContain('could never land');
+    // … the courier deliverer too, not only the trusted-runner (R-BTN-180: "a class").
+    expect(refuse({ ...COOPERATIVE, refs: { ...COOPERATIVE.refs, default_branch: ['runner', 'human'] }, outbox: { ...COOPERATIVE.outbox, git: { deliverers: ['courier'], trust: 'any' } } })).toContain('could never land');
     // outbox.git admits a class that refs.other excludes under tickets.created: proposed.
     expect(refuse({ ...COOPERATIVE, tickets: { created: 'proposed' }, refs: { ...COOPERATIVE.refs, other: ['runner', 'human'] }, outbox: { ...COOPERATIVE.outbox, git: { deliverers: ['trusted-runner'], trust: 'any' } } })).toContain('could never land');
-    // refs.default_branch excludes runner while tickets.created is filed.
-    expect(refuse({ ...COOPERATIVE, refs: { ...COOPERATIVE.refs, default_branch: ['trusted-runner', 'human'] } })).toContain('file tickets nowhere');
+    // refs.default_branch excludes runner while tickets.created is filed (its outbox kept
+    // admissible, so the refusal is the runner's, not the deliverer's).
+    expect(refuse({ ...COOPERATIVE, refs: { ...COOPERATIVE.refs, default_branch: ['trusted-runner', 'human'] }, outbox: { ...COOPERATIVE.outbox, git: { deliverers: ['trusted-runner'], trust: 'any' } } })).toContain('file tickets nowhere');
   });
 
   it('a git repository refuses leg_state: forge, ci-identity and a forge-check deliverer; plain-git folds them', () => {

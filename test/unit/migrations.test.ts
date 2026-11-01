@@ -363,7 +363,7 @@ describe('migration 0029: the repository policy tables (B-145)', () => {
       const objects = sql.exec("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND type IN ('table','index')").toArray() as { type: string; name: string }[];
       for (const o of objects.filter((x) => x.type === 'table')) sql.exec(`DROP TABLE IF EXISTS "${o.name}"`);
       for (const m of MIGRATIONS.filter((x) => x.id <= 27)) sql.exec(m.sql);
-      sql.exec(MIGRATIONS.find((x) => x.id === 28)!.sql);
+      sql.exec(MIGRATIONS.find((x) => x.id === 29)!.sql);
       sql.exec('PRAGMA foreign_keys = ON');
 
       // A policy version row, a floor, a human key, a checker's report and a pin.
@@ -390,6 +390,10 @@ describe('migration 0029: the repository policy tables (B-145)', () => {
       expect(cols('worker_grants')).toEqual(expect.arrayContaining(['trust_level', 'trust_domain', 'model_family', 'role', 'trust_set_by']));
       expect(cols('couriers')).toEqual(expect.arrayContaining(['trust_level', 'trust_domain', 'trust_set_by']));
       expect(cols('instance_readings')).toEqual(expect.arrayContaining(['writer', 'nonce', 'signature']));
+      // The checker's report carries its baseline (the last matching reading) and a pin the
+      // floors' hash (R-BTN-180, R-BTN-189).
+      expect(cols('protection_reports')).toEqual(expect.arrayContaining(['matched_hash']));
+      expect(cols('policy_pins')).toEqual(expect.arrayContaining(['floors_hash']));
       for (const table of ['policy_conditions', 'protection_reports', 'policy_pins', 'human_keys']) {
         expect(sql.exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${table}'`).toArray()).toHaveLength(1);
       }

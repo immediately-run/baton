@@ -57,5 +57,7 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 25, sql: ontology },
   { id: 26, sql: stationWrites },
   { id: 27, sql: routeChoices },
-  { id: 28, sql: repositoryPolicies },
+  // 0028 is B-107's (provider-advisory retirement), merging ahead of this: this branch numbers
+  // its migration 0029, and 28 stays free for it.
+  { id: 29, sql: repositoryPolicies },
 ];

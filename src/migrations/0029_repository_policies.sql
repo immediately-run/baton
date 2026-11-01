@@ -1,4 +1,4 @@
--- 0028_repository_policies.sql — the repository policy (BATON_SPEC §12.8 R-BTN-188/R-BTN-189,
+-- 0029_repository_policies.sql — the repository policy (BATON_SPEC §12.8 R-BTN-188/R-BTN-189,
 -- B-145): one versioned policy document per repository, the floors a deployment registers over
 -- its guarantees, the human-only keys that satisfy human approver entries, the trust attributes
 -- a grant and a courier carry (their setting routes are B-147's), the protection reports that
@@ -59,21 +59,27 @@ CREATE INDEX policy_conditions_open ON policy_conditions(repository_id, type, re
 -- R-BTN-180: the latest protection report per repository — only the protection checker's
 -- heartbeat writes here (the grant's role names it); a report older than 24 hours stops
 -- feeding `no-runner-lands` (judged where the guarantee is computed, never here).
+-- `matched_hash` is the reading the latest MATCHING report read: the baseline a later matching
+-- report is compared against (a reading that differs from it raises `baton.unprotected`, so a
+-- report restoring the forge after a mismatch closes the condition at once, R-BTN-180).
 CREATE TABLE protection_reports (
   repository_id  TEXT NOT NULL PRIMARY KEY REFERENCES repositories(id),
   matched        INTEGER NOT NULL,
   reading_hash   TEXT NOT NULL,
+  matched_hash   TEXT,                           -- the last matching reading; NULL before one
   by             TEXT NOT NULL,                  -- the checker's credential
   at             INTEGER NOT NULL
 );
 
 -- R-BTN-189: the policy hash each trusted runner pinned per repository, as its heartbeat
--- reports it. A pin that differs from the current version holds `baton.policy-unpinned` open
+-- reports it — the whole document's hash, and the floors' (`floors_hash`, when the runner pins
+-- it). A pin that differs from the current version holds `baton.policy-unpinned` open
 -- and stops the runner acting on the repository (the protection checker excepted).
 CREATE TABLE policy_pins (
   worker_id      INTEGER NOT NULL REFERENCES workers(id),
   repository_id  TEXT NOT NULL REFERENCES repositories(id),
   hash           TEXT NOT NULL,
+  floors_hash    TEXT,                           -- the floors' hash, when the runner pins it
   at             INTEGER NOT NULL,
   PRIMARY KEY (worker_id, repository_id)
 );
