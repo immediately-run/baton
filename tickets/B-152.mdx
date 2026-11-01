@@ -2,7 +2,7 @@
 title: "B-152 — Dispatch is an outbox kind: Baton queues `dispatch` entries, a dispatch courier woken by the doorbell delivers them, and Baton holds no credential that acts"
 id: B-152
 project: baton
-status: available
+status: superseded
 updated: 2026-11-01
 repos:
   - baton
@@ -75,3 +75,13 @@ the path (a dispatch that fails is retried once by the courier, as an adapter's 
 ## Status
 
 - 2026-11-01: the owner confirmed the credential move; the build may start once B-120 lands.
+- 2026-11-01: **superseded.** The owner put a compromised Baton server out of scope (B-160, "Out of
+  scope") and dropped the dispatch courier ("Drop it"): Baton holds the GitHub App key and starts
+  workflows itself. Where each item went:
+  - 1, the `dispatch` kind: nowhere; Baton starts workflows directly (B-166, §7 and R-BTN-94).
+  - 2, the courier: nowhere; no dispatch courier.
+  - 3, the ring: nowhere for dispatch; the doorbell stays for runners (R-BTN-91).
+  - 4, the key leaving the Worker: reversed; `BATON_GITHUB_APP_KEY` stays in the Worker.
+  - 5, the runbook: B-166 updates R3-1208's checklist for the key staying.
+  - Exit criteria: void with the items. The confirmation of the credential move recorded above
+    is moot.

@@ -15,7 +15,8 @@ topics:
   - baton
 owns: {}
 prs: []
-depends_on: []
+depends_on:
+  - B-166
 ---
 
 **Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
@@ -30,9 +31,13 @@ verifies each against the text before changing anything.
 Review finding 7: values 3 ("The core is small and knows no course") against R-BTN-174 to
 R-BTN-177. R-BTN-98: "runners rank".
 
-### Decide first (the owner)
+### Decided (the owner)
 
-Whether derived capabilities stay in core at all, or the whole ontology moves to the runner.
+**Rulings of 2026-11-01** (the owner, answering each question in the session that continued
+immediately-run/baton#150; the restructure, B-166, writes them into the spec):
+
+- "Nothing; move it out": the whole ontology moves to the runner side; core matches capabilities
+  by name only; route choice lives in `rank.mjs` and course instructions.
 
 ### What to build
 
@@ -51,3 +56,4 @@ Whether derived capabilities stay in core at all, or the whole ontology moves to
 ## Status
 
 - 2026-11-01: filed from the whole-spec review.
+- 2026-11-01: decided by the owner (above); written into the spec by the restructure, B-166.
