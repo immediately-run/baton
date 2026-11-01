@@ -1,0 +1,53 @@
+---
+title: "B-162 — Route choices out of core: the ontology computes derived capabilities only, and ranking advice returns to rank.mjs"
+id: B-162
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1107
+tier: judgement
+description: "R-BTN-174 to R-BTN-177 (~270 lines) put a stratified ASP evaluator with a clingo conformance suite inside the core to compute route advice that R-BTN-98 already assigns to the runner's rank.mjs — the largest departure from 'the core is small and knows no course'. Keep holdings → derived capability as a gate input if wanted; move route choices, hysteresis, meters, atoms_from, field atoms and BATON_ADVICE/BATON_TAKEN out of core."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
+can any vocabulary, core concepts or actors be simplified … is the user experience intuitive …
+are the security guarantees … truly guaranteed and … do they matter"), asked for its findings
+to be filed as tickets. Source: `docs/review/spec-simplification-review-2026-11-01.mdx`.
+The review's claims are a reviewer's, checked against the spec where they cite it; this ticket
+verifies each against the text before changing anything.
+
+### Why
+
+Review finding 7: values 3 ("The core is small and knows no course") against R-BTN-174 to
+R-BTN-177. R-BTN-98: "runners rank".
+
+### Decide first (the owner)
+
+Whether derived capabilities stay in core at all, or the whole ontology moves to the runner.
+
+### What to build
+
+1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
+   every rule restating the same fact changed with it.
+2. R-BTN-174 to R-BTN-177 cut to holdings and derived capabilities; route choice, hysteresis
+   and `meters` move to `rank.mjs` and course instructions.
+3. B-104, B-105 and any ticket building the cut parts rewritten or superseded with a map.
+
+### Exit criteria
+
+- [ ] The spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] `npm run check:spec` and `npm run check:wiki` green
+- [ ] Any code item: `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from the whole-spec review.

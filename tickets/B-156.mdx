@@ -1,0 +1,56 @@
+---
+title: "B-156 — MCP's writes stated once: reconcile R-BTN-130's closed list with R-BTN-186's authority by credential"
+id: B-156
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1101
+tier: routine
+description: "R-BTN-130 says MCP's only writes add a hold and stop a leg; R-BTN-186 says tightening is open to any owner credential, MCP keys included, and replaces R-BTN-130's list. Both are in force, and R-BTN-154, §12.2, §14, R-BTN-163 and G-BTN-144 cite one or the other. State it once, and decide whether an MCP agent may also unhold, restart and resolve what it held or stopped."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
+can any vocabulary, core concepts or actors be simplified … is the user experience intuitive …
+are the security guarantees … truly guaranteed and … do they matter"), asked for its findings
+to be filed as tickets. Source: `docs/review/spec-simplification-review-2026-11-01.mdx`.
+The review's claims are a reviewer's, checked against the spec where they cite it; this ticket
+verifies each against the text before changing anything.
+
+### Why
+
+Review finding 6: "MCP is specified twice and contradictorily". R-BTN-130 / R-BTN-154 ("its
+only writes add a hold and stop a leg") and R-BTN-186 ("Tightening ... is open to any owner
+credential, MCP keys included. This replaces R-BTN-130's closed list") are both in force;
+R-BTN-163 already assumes the latter. An MCP agent can hold but not unhold, stop but not restart,
+and read `leg.why` but neither route nor adopt.
+
+### Decide first (the owner)
+
+Whether an MCP key may undo its own tightening (unhold a hold it placed, restart a leg it stopped) — the review's recommendation — or stays tighten-only.
+
+### What to build
+
+1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
+   every rule restating the same fact changed with it.
+2. One rule for what a delegated key may do, cited by R-BTN-130, R-BTN-154, R-BTN-163,
+   §12.2, §14 and G-BTN-144.
+3. The action registry's MCP entries (R-BTN-129) generated from that rule.
+
+### Exit criteria
+
+- [ ] The spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] `npm run check:spec` and `npm run check:wiki` green
+- [ ] Any code item: `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from the whole-spec review.

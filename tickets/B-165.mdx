@@ -1,0 +1,53 @@
+---
+title: "B-165 — Retire constant knobs and the smaller simplification candidates"
+id: B-165
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1110
+tier: routine
+description: "The review lists policy knobs with one realistic value (min_release, refs.baton, refs.legs, leg_state, human_key and authorship outside protected-signed, several owner settings) and smaller simplifications: next_source kinds to three, choice stations to a person leg's expiry, compensation to an ordinary cancel leg, open-world claims, held snapshots, seats, resource scopes, retry knobs, timers, presets/guarantees/floors to two layers, attestation uses: once, std:git.implied@1 as a hint, markers' attestation. Decide each in one spec PR."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
+can any vocabulary, core concepts or actors be simplified … is the user experience intuitive …
+are the security guarantees … truly guaranteed and … do they matter"), asked for its findings
+to be filed as tickets. Source: `docs/review/spec-simplification-review-2026-11-01.mdx`.
+The review's claims are a reviewer's, checked against the spec where they cite it; this ticket
+verifies each against the text before changing anything.
+
+### Why
+
+Review sections 1.2, 1.4 and F10: each constant costs a row in R-BTN-188, a loosening rule in
+R-BTN-186, an export section, a guarantee condition and a test.
+
+### Decide first (the owner)
+
+Which candidates to take; the review marks what each loses.
+
+### What to build
+
+1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
+   every rule restating the same fact changed with it.
+2. One spec PR deciding each candidate in the review's tables 1.2 and 1.4: removed, merged, or
+   kept with the reason, the PR body carrying the list.
+3. Code that implements a removed knob or noun deleted in the same or a following PR.
+
+### Exit criteria
+
+- [ ] The spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] `npm run check:spec` and `npm run check:wiki` green
+- [ ] Any code item: `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from the whole-spec review.

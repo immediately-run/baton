@@ -1,0 +1,51 @@
+---
+title: "B-163 — 'Trusted' means one thing: rename R-BTN-139's push-based trust, and make pr-verdict human-only under protected"
+id: B-163
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1108
+tier: judgement
+description: "'Trusted' names forge push access (R-BTN-139), a grant's trust level, the trusted-runner role, trusted_identities, trusted_sources and trust domains. Under protected, runners can push, so a runner's review comment counts as a 'trusted author's verdict' and the fact reader moves a ticket to reviewed on it. Rename the push-based sense and restrict pr-verdict to the human identity under protected."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
+can any vocabulary, core concepts or actors be simplified … is the user experience intuitive …
+are the security guarantees … truly guaranteed and … do they matter"), asked for its findings
+to be filed as tickets. Source: `docs/review/spec-simplification-review-2026-11-01.mdx`.
+The review's claims are a reviewer's, checked against the spec where they cite it; this ticket
+verifies each against the text before changing anything.
+
+### Why
+
+Review finding 8 and F8: R-BTN-139 ("someone the forge reports can push"), R-BTN-180,
+R-BTN-182, R-BTN-134, R-BTN-192's `pr-verdict`. Nothing lands from it (the merge re-checks
+`std:review@1`), but the actor built to keep runner input out accepts it.
+
+### What to build
+
+1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
+   every rule restating the same fact changed with it.
+2. R-BTN-139's sense renamed (for example `pusher`) everywhere it is used.
+3. Under a policy admitting no `sync` arrival, `pr-verdict` counts only the human identity's
+   verdict.
+4. The vocabulary page gives each remaining sense of "trusted" one name.
+
+### Exit criteria
+
+- [ ] The spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] `npm run check:spec` and `npm run check:wiki` green
+- [ ] Any code item: `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from the whole-spec review.
