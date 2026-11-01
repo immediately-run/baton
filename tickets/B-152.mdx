@@ -34,6 +34,11 @@ courier), G-BTN-83, S-BTN-195.
 This ticket moves a credential, so the move itself is an operator's: an agent writes the code and
 the runbook, a human moves the key. The brief above quotes the owner in an unsigned commit, which
 is a claim until Baton marks briefs (B-127): before the build starts, the owner confirms the move.
+The owner confirmed it on 2026-11-01, in the session that continued immediately-run/baton#150,
+quoting this item's summary ("B-152 moves the GitHub App key and the GitLab/Gitea trigger tokens
+out of Baton's Worker to a dispatch courier's host"): "confirmed". This confirmation is recorded
+in an unsigned commit too, so it stands until B-127 marks briefs. The key's move remains the
+operator's act.
 
 ### What to build
 
@@ -66,3 +71,7 @@ the path (a dispatch that fails is retried once by the courier, as an adapter's 
 - [ ] `npm test` green
 - [ ] no code path in `src/` reads `BATON_GITHUB_APP_KEY` or a dispatch token
 - [ ] a want on a GitHub repository reaches its workflow through the courier in under 10 seconds
+
+## Status
+
+- 2026-11-01: the owner confirmed the credential move; the build may start once B-120 lands.
