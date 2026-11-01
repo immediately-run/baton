@@ -1,0 +1,53 @@
+---
+title: "B-150 — Fold the spec's six italic patch notes into their rules: R-BTN-35, -116, -161, -165, -171 and -173 say their exceptions in their own bodies"
+id: B-150
+project: baton
+status: available
+updated: 2026-10-31
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1168
+tier: judgement
+description: "Six rules open with an italic patch note stating an exception their body does not carry. Rewrite each rule so its body says what is true, check every rule the note touches with npm run spec:impact, and empty PATCH_NOTES_ALLOWED in scripts/check-spec.mjs. Spec text only; no behaviour changes. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-10-31, asked why spec changes kept reaching the spec only partly, and
+then approved these measures. One structural cause was a patch note: an italic exception at a
+rule's head over a body that still says the opposite. `npm run check:spec` now fails a new one;
+the six written before the check are allowlisted in `PATCH_NOTES_ALLOWED`, and this ticket
+folds them.
+
+**Spec:** `spec/BATON_SPEC.md` R-BTN-35, R-BTN-116, R-BTN-161, R-BTN-165, R-BTN-171, R-BTN-173.
+
+### The six
+
+| Rule | Its patch note |
+|---|---|
+| R-BTN-35 | *Except what Baton owns: course history (B-120) and attestations (R-BTN-181, proposal).* Rewritten by immediately-run/baton#150 (Baton owns course history); only its entry here remains once that merges. |
+| R-BTN-116 | *A person leg that stands for a human approval is answered through Baton, never git (R-BTN-181, proposal).* |
+| R-BTN-161 | *Under the policy's `tickets.created: proposed`, the handler ticket is proposed, not filed, and not claimable until it lands with a `std:approval@1` …* |
+| R-BTN-165 | *Under the policy's `tickets.created: proposed`, a call leg's children are proposed, not filed, and not claimable until they land …* |
+| R-BTN-171 | *Who may deliver is the policy's `outbox` (R-BTN-188, proposal).* |
+| R-BTN-173 | *Where the policy's `refs.baton` excludes `runner`, runners push no `refs/baton/*` ref; under `tickets.created: proposed`, a promoted question is proposed …* |
+
+### What to do
+
+1. For each rule, rewrite its body so the exception is part of the rule where it applies (the
+   sentence the note contradicts, changed), and delete the note.
+2. Run `npm run spec:impact -- <the rule> --term "<the note's key phrase>"` for each, and mark
+   each entry in the PR body changed or still true, per the babysit skill's *Spec PRs*.
+3. Remove each rule from `PATCH_NOTES_ALLOWED` as it is folded; the check fails a stale entry.
+4. A history entry naming the six, with no rule's meaning changed. If folding one shows the note
+   and the body really disagree on behaviour, stop and put the choice to the owner.
+
+### Exit criteria
+
+- [ ] `PATCH_NOTES_ALLOWED` is empty and `npm run check:spec` passes
+- [ ] `npm test` green
