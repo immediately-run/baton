@@ -965,7 +965,9 @@ Baton, and it is exportable (R-BTN-88).
                         #   conditions? (bindings,
                         #   R-BTN-161); for the CLI's defaults (R-BTN-74): items, default_course,
                         #   repos, agent_command, agent_wrapper (B-95); check: {depends_line}
-                        #   (B-111, `baton tickets check` alone reads it; default off)
+                        #   (B-111, `baton tickets check` alone reads it; default off);
+                        #   ticket_prefix, legacy_ids, prefixes, project, tags, projects
+                        #   (B-112, the ticket commands alone read them)
     tickets.mjs         # optional ticket source; absent, the CLI's markdown source (R-BTN-74)
     ontology.json       # optional capability ontology and route choices; absent, none (R-BTN-174)
     courses/<course>/   # an own course; a sourced course's directory holds only overrides (R-BTN-134)
@@ -1059,6 +1061,50 @@ Baton, and it is exportable (R-BTN-88).
     a `**Used by:**` line is never read — to its `depends_on`, both ways; a ticket with no such line
     is not compared. Exit 1 with one `path: message` line per finding, 0 without; an unreadable
     root or a malformed `baton.json` is an error (exit 2). It reads; it never writes.
+  - **The ticket commands** (B-112): `baton tickets new | claim | set | done`, whose behaviour is
+    the git-lock commands docs' `claim.sh` and the repositories' `scripts/ticket.mjs` had, kept
+    once in the CLI. Each is one commit pushed straight to the default branch from a throwaway
+    worktree at the freshly fetched head (`--branch`, else the checkout's `origin/HEAD`, else
+    `main`), so the caller's branch, HEAD and working tree are never written; a push refused
+    because the branch moved is fetched again and retried, up to six tries, and a refusal for any
+    other reason is the operator's, reported in git's own words.
+    - `new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y] [--tier T]
+      [--order N] [--repos a,b] [--course C] [--body-file F]` takes the next free `<prefix>-<n>`
+      on the head it pushes to (across the items folder at any depth, `archive/` included, among
+      files whose frontmatter carries an `id`), and writes the conventional body unless
+      `--body-file` names one: `**Brief:**` (the description), `**Spec:**`, `**Depends on:**`
+      (from `--depends-on`; `none.` when empty), `**Used by:**`, `### What to build`,
+      `### Tests`, `### Exit criteria`, `**Requires:**` and `## Status` with the filing date.
+      A `--body-file` whose `**Depends on:**` line disagrees with the flag is refused. Before the
+      push it judges what it writes as `baton tickets check` judges it — the body line against
+      `depends_on`, every id a live or closed ticket, the board post's validation of §4.4 (the
+      cycle among it) over the files the commit would leave — and a filing that fails is written to
+      no branch at all. Each dependency's `**Used by:**` line gains the new id once: the reverse
+      mention. A description that ends with a `Requires:` clause (`… Requires: human-operator,
+      drivable-browser.`) has the capabilities it names written on the `**Requires:**` line.
+    - `claim <id>` moves a ticket available → in-progress, and refuses one that is not available or
+      whose `depends_on` are not all done (archived, or carrying any of the markdown source's closed
+      statuses); `set <id> <status> [--pr URL]` writes any live status — `done` is `done`'s — and
+      adds the pull request URL to `prs` once; `done <id> [--pr URL]` writes `done` and moves the
+      file to `<items>/archive/`.
+    - The settings are the repository's: `items` (below), `ticket_prefix` (`B`), `legacy_ids` — id
+      patterns the repository still accepts but never allocates (`R3-\d+` here) — `project` (the
+      default `--project`), `tags` (the default `--tags`, else `roadmap-item`) and `prefixes` (a
+      prefix to its pattern source, for a repository that allocates more than `\d+`). There is no
+      hard-coded project: `new` without one it can name refuses. `--project` and the default both
+      name a `kind: project` page in the items folder's `projects/`, which `new` refuses without.
+    - `baton tickets --help` lists the commands, every flag, the tags Baton reads and what each
+      does — `EXPEDITE` (: expedited, first in every claim's order) and `OP` (`human-operator` in the
+      ticket's `requires`) — and the `Requires:` clause a description may end with.
+  - **The "How tickets work" page** (B-112): `baton repo init` writes `HOW-TICKETS-WORK.md` into
+    the items folder — the same text in every repository, with the id prefix, the legacy patterns
+    and the default project read from that repository's `.baton/baton.json` — covering the
+    frontmatter keys and statuses; the ids; the tags Baton reads; the body's header lines
+    (`**Depends on:**` naming exactly `depends_on`; reverse mentions on `**Used by:**`; a wait on
+    another repository's ticket on `**Waits on:**`, relations staying inside one repository, §4);
+    projects (choose or create a related set's project before filing); and the commands. It is
+    written again when it differs, and `baton tickets check` reports a page that differs from the
+    release's text, so docs, baton and fieldhouse cannot diverge.
   - Standard courses' legs are stubs that run `agent_command` (R-BTN-131); the CLI ships no leg
     scripts and no station functions.
   - The sync workflow pins the CLI's npm version (`npx --yes @immediately-run/baton@<version>
@@ -6914,6 +6960,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-26 two repositories, two courses | `ops` (weight 50, course `runbook`) beside `docs`, both with `T-1`; W1 declares one course, W2 both; a CLI runner on one checkout declaring two courses | distinct tickets; W1 never offered `ops`; `docs` first, each in default order, per-group limit; tokens per repository; a shared branch blocks pushes while either is held; `min_runner_version` gates W2; the runner declares both courses, claims a leg of either in consecutive claims, loads each from the claim's `course_id` and snapshot, and `--course` narrows it to one (B-103) |
 | S-BTN-42 webhooks | a review delivery, its repeat, a forgery, a 10-delivery burst, Baton's own events, extra fields | one dispatch, then one trailing after 30 s; repeat, forgery and own events dispatch nothing; only R-BTN-73's fields read |
 | S-BTN-171 a dependency cycle is refused | a board post whose live tickets depend on each other in a loop; two of them; a self-dependency; a diamond; a post closing the very ticket it depends on | `invalid-params`, naming `B-1 → B-2 → B-1` once, and nothing of the post stored: no head, no ticket; `B-1 → B-1` alike; the diamond and the closed edge accepted |
+| S-BTN-189 the ticket commands | a bare origin; `baton tickets new` with `--depends-on`, `--tags` and `--project`, a legacy id pattern, a `--body-file` whose line disagrees with the flag, a filing that closes a cycle, a prefix the pattern cannot allocate; `claim` of a held, dependent, in-review and archived ticket; `set` with `--pr` twice; `done`; a peer's push between a command's fetch and its push; `baton repo init`, then an edited `HOW-TICKETS-WORK.md` | one commit on the origin's default branch, the ticket alone, the caller's branch and tree untouched; the next free id under the configured prefix, the skeleton with the flag's `**Depends on:**` line and the dependency's reverse mention; each refusal before the push, nothing landed; the retry takes the id after the peer's; a status, a PR once, the file archived; the page written, its edited copy one finding and exit 1, `init --force` writing it again |
 | S-BTN-172 the ticket check | `baton tickets check` on a clean repository, on one whose tickets loop, on one with no `.baton/baton.json`, and on this repository's own `tickets/` | exit 0 with the count, `✓ no findings`; exit 1 with one `path: message` line (the loop at its first ticket's file) and the count; the CLI's error, exit 2; this repository passes, which CI's `npm run check:tickets` runs |
 | S-BTN-54 a Baton without GitHub | `plain` with a `post-receive` running `baton repo sync --defaults-only` on the `branch` course; `Baton-Verdict:` trailers, one without `Baton-Claim`; `--if-wanted` cron | the ticket moves to `merged` on push syncs alone; the unclaimed verdict counts and logs `foreign-write`; `wanted` holds until a later-numbered post; no forge credential or link |
 | S-BTN-55 the sync key | a sync key posts; it is registered for a second repository; machine (sync off), mirror and revoked keys post; a replay | accepted; `conflict`; `forbidden`; `unauthenticated` |

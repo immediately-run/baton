@@ -38,14 +38,14 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 
 ## Ticket numbers and status
 
-- **Ids are taken on `main`.** `npm run ticket -- new` files a ticket with the next free id
+- **Ids are taken on `main`.** `node cli/baton.mjs tickets new` files a ticket with the next free id
   straight onto `main`. A long-running branch that filed a ticket by hand can find its id taken
   when `main` moves. Keep `main`'s ticket and give the branch's the next free id, then change every
   reference the branch added, and only those: check with `git show origin/main:<file> | grep -c <id>`
   that `main`'s copy of a file never named it before rewriting the file.
-- **Status follows the PR**, with `npm run ticket --` (`scripts/ticket.mjs`):
-  - PR opened: `npm run ticket -- set <id> in-review --pr <url>`;
-  - PR merged: `npm run ticket -- done <id> --pr <url>`, which sets `status: done` and moves the
+- **Status follows the PR**, with `node cli/baton.mjs tickets` (B-112's commands):
+  - PR opened: `node cli/baton.mjs tickets set <id> in-review --pr <url>`;
+  - PR merged: `node cli/baton.mjs tickets done <id> --pr <url>`, which sets `status: done` and moves the
     file to `tickets/archive/`.
 
   Each command is one commit pushed straight to `origin/main` from a throwaway worktree. A session
@@ -91,5 +91,5 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   (`expectedHeadSha`), so a later push cannot slip in.
 - Every push to `main` deploys Baton's server (`baton-deploy.yml`), a merge and every `npm run
   ticket` commit included; say so before merging a PR that changes `src/`.
-- After the merge: move the PR's tickets with `npm run ticket -- done` (asking first, as above),
+- After the merge: move the PR's tickets with `node cli/baton.mjs tickets done` (asking first, as above),
   and if a branch is reused for follow-up work, restart it from the new `main`.

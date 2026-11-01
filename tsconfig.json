@@ -55,6 +55,8 @@
     "test/unit/ticket-state.test.ts",
     "test/unit/bounded-git.test.ts",
     "test/unit/tickets-check.test.ts",
+    "test/unit/tickets-commands.test.ts",
+    "test/integration/S-BTN-189.ticket-commands.test.ts",
     "test/unit/request.test.ts",
     "test/unit/request-round2.test.ts",
     "test/unit/request-round4.test.ts",

@@ -90,8 +90,10 @@ checkout, run the CLI as `node cli/baton.mjs`.
 - `npm run model:links`, `npm run traces` — the code against the formal model (R3-1244; `model/README.md`).
   `npm test` runs both after the suite, and the model's own checks; `npm run model:pr` and
   `model:full` run `traces` too, on a fresh set.
-- `npm run ticket -- claim|set|done|new …` — claim and move tickets with git as the lock
-  (`scripts/ticket.mjs`; usage in `tickets/home.mdx`), until Baton claims them (R3-1266).
+- `node cli/baton.mjs tickets new|claim|set|done` — file, claim and move tickets with git as the
+  lock, each one commit pushed straight to the default branch from a throwaway worktree (B-112;
+  `baton tickets --help`, and the generated `tickets/HOW-TICKETS-WORK.md`), until Baton claims
+  them (R3-1266).
 - `npm run check:wiki` — every page in `tickets/` and `docs/` compiles as MDX, uses only known
   components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
 - `npm run check:tickets` (or `node cli/baton.mjs tickets check [--repo DIR]`) — check this

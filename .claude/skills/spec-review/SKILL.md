@@ -46,6 +46,6 @@ numbers), what each says, and the smallest fix (a rule rewritten, a ticket rewri
 reference corrected). End with the count of findings by kind against the previous review.
 
 `npm run check:wiki` must pass. Commit the review on its own. On request, file each finding as a
-ticket (`npm run ticket -- new …`, which pushes to `main`: ask before running it from a session
+ticket (`node cli/baton.mjs tickets new …`, which pushes to `main`: ask before running it from a session
 told to push only to its own branch) or fold the small ones into one spec PR that follows the
 babysit skill's *Spec PRs*.

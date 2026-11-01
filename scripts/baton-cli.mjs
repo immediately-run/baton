@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// baton-cli.mjs — the `baton repo sync`, `baton repo init`, `baton tickets check` and
-// `baton request` bundle (BATON_SPEC §2f R-BTN-74; B-111; B-98 R-BTN-131): bundles
-// `src/defaults/cli.ts`, `src/defaults/tickets-check.ts` and `src/defaults/request.ts` with
+// baton-cli.mjs — the `baton repo sync`, `baton repo init`, `baton tickets` and
+// `baton request` bundle (BATON_SPEC §2f R-BTN-74; B-111; B-112; B-98 R-BTN-131): bundles
+// `src/defaults/cli.ts`, `src/defaults/tickets.ts` and `src/defaults/request.ts` with
 // esbuild the way scripts/baton-run.mjs bundles the runner, and re-exports their command
 // entrypoints. The bundle lands in `.local/` (gitignored) and is rebuilt on every start, so the
 // commands a checkout runs are always its current source.
@@ -52,9 +52,10 @@ async function bundleCommand(entry, load) {
   }
 }
 
-// B-111: `baton tickets check`, built the same way and re-exported beside the repo commands.
-const checked = await bundleCommand('tickets-check.ts', (file) => import(pathToFileURL(file).href));
-export const checkTicketsMain = checked.checkTicketsMain;
+// B-111's `baton tickets check` and B-112's `baton tickets new|claim|set|done`, built the same
+// way and re-exported beside the repo commands.
+const tickets = await bundleCommand('tickets.ts', (file) => import(pathToFileURL(file).href));
+export const ticketsMain = tickets.ticketsMain;
 // B-98: `baton request` — a course started from one sentence, filed as a ticket and pushed.
 const requested = await bundleCommand('request.ts', (file) => import(pathToFileURL(file).href));
 export const requestMain = requested.requestMain;
