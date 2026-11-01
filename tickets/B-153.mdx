@@ -1,0 +1,82 @@
+---
+title: "B-153 — The fence's harness hooks, corrected by the R3-1210 spike: opencode cannot deny a tool call from a plugin in headless runs (wrapper + pre-push until the fork grows one), and Claude Code's tool call is not always its own process group (kill pids, not blind groups)"
+id: B-153
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1098
+tier: critical
+description: "Two measurements from the R3-1210 hook spike (docs content/plans/baton/hook-spike.mdx, PR immediately-run/docs#224) change BATON_SPEC cells the sidecar design leans on: (1) on the fleet's opencode v2.1.2-neumark.2 no plugin surface can deny a tool call in headless runs — the upstream tool.execute.before hook does not exist, ctx.tool.hook/ctx.permission.hook never fire, and configured deny/ask permission rules do not gate opencode run — so §8.1's opencode deny cell becomes wrapper scripts on PATH plus the git pre-push hook; (2) Claude Code runs simple commands in the harness's own process group, so §9.2 layer 1's 'terminate every process group the harness started' must kill the call's descendant pids (or groups verified not to contain the harness) on Claude Code. Filed by the R3-1210 implement leg with the findings note."
+topics:
+  - baton
+  - harness
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the Baton project.
+**Spec:** `BATON_SPEC` §8.1 (the sidecar table), §9.2 (the three fence layers, R-BTN-26), §9.9 (activity pairing)
+**Evidence:** `content/plans/baton/hook-spike.mdx` in immediately-run/docs (R3-1210's findings note, PR
+immediately-run/docs#224) — every claim below is a measured command and output there.
+
+### Requires
+
+- nothing beyond R3-1213/R3-1214's own resources; this item is the spec correction plus the fence's
+  implementation guidance those two consume.
+
+### Why
+
+R3-1210 measured both harnesses on a fleet VM and found two spec cells wrong. Building R3-1213
+(sidecar/fence) on them would make the fence quietly not fence: on opencode the deny hook never
+fires, and on Claude Code a naive layer-1 group kill can kill the harness itself.
+
+### What to build
+
+1. **§8.1, opencode row, "Deny fenced commands".** The cell reads `tool.execute.before`; on the
+   fleet's `v2.1.2-neumark.2` that hook does not exist upstream-style, `ctx.tool.hook("execute.before")`
+   and `ctx.permission.hook("evaluate")` register but never fire in headless `opencode run`, and
+   configured `permission` deny/ask rules do not gate headless runs (`git push --dry-run` executed
+   under explicit deny with `--auto`). Amend the cell to the fallback §9.2 layer 2 already names:
+   **wrapper scripts early on `PATH`** (`git`, `gh`) for the fenced commands, plus the git `pre-push`
+   hook (§9.2 layer 3), with a note to re-measure when the fork grows a working pre-tool hook.
+   §6.10's route advice likewise must not assume plugin interception on this harness.
+2. **§9.2 layer 1.** "The sidecar terminates every process group the harness started for a tool call
+   still running" — on Claude Code a *simple* command runs as a direct child **in the harness's own
+   process group** (measured: `tool tail pid=2978757 pgid=2978755` where 2978755 *is* claude; killing
+   the group killed claude), while compound commands get `bash -c` in their own session. Amend the
+   wording: the sidecar enumerates the harness's descendants belonging to the call and kills those
+   pids (or groups verified not to contain the harness). opencode needs no change — every call was
+   its own group and session, and the group kill left the server alive (measured).
+3. While in §8.1: the opencode "Start / stop" cell's session-end half is `session.execution.*` plus
+   the existing 10 s harness-pid poll on this build (`session.idle` never fires in headless runs), and
+   the Claude Code "Touch activity" cell must not promise a failure event — a nonzero-exit Bash call
+   fires no PostToolUse and no other event (§9.9's claim-end close already tolerates it).
+
+### Architecture — the decisions, named
+
+- The wrapper on `PATH` is installed by the runner (R3-1213) into the leg session's environment, not
+  into the VM globally; the pre-push hook is per-checkout (§9.2 layer 3 unchanged).
+- The descendant enumeration on Claude Code reuses the sidecar's existing pid poll; it kills pids, and
+  a group only after checking the group is not the harness's own.
+
+### Tests
+
+- Wrapper: a leg environment where `git push` resolves to the wrapper refuses with the ticket named,
+  exit non-zero, and the refusal line reaches the transcript.
+- Enumeration: given a fake harness pid with one own-group child and one shared-group child, the
+  sidecar's killer kills both children and not the harness (unit test with a spawned process tree).
+
+### Exit criteria
+
+- [ ] BATON_SPEC §8.1 and §9.2 amended as above, citing hook-spike.mdx
+- [ ] the wrapper path and the pid-precise kill are what R3-1213 implements, or a later re-measurement
+      supersedes them with a working hook (recorded in the note)
+- [ ] `npm run verify` green
+
+_(filed 2026-11-01 by the R3-1210 implement leg; the measurements are in
+immediately-run/docs `content/plans/baton/hook-spike.mdx`)_
