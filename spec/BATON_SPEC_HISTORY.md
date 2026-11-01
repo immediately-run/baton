@@ -724,7 +724,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   board post, accepted with it so no judgement mixes two runs; a person's answer is always a
   `std:decision@1`; a courier's delivery a `std:effect@1`. The board post keeps the ticket and
   course registries, with bars, decisions and `not_before` on each ticket. `inputs.answers` is
-  retired: whether the sync's attestations count is an `attestations` entry. Built by B-151.
+  retired: whether the sync's attestations count is an `attestations` entry. Built by B-120 (B-151, filed for it, was folded into B-120 in review round one).
   Review: pending.
 - **2026-10-31 — §12.8 R-BTN-188, R-BTN-189, §15 S-BTN-183 (owner direction):
   `independent-review` without a model-family requirement.** The owner, moving the reference
@@ -751,8 +751,46 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     Baton, which now holds no credential that acts outside it. Retired from R-BTN-171: "The
     deployment's dispatch credentials (R-BTN-94) only start workflows; a forge that cannot scope
     one below write (a Gitea bot token) is a stated exposure of the deployment, held as a Worker
-    secret and never in the database." Built by B-151 (the arrival) and B-152 (dispatch).
+    secret and never in the database." Built by B-120 (the arrival) and B-152 (dispatch).
     Review: pending.
+
+- **2026-11-01 — review round one of PR #150's parts 1–3 and 5** (two fresh reviewers, the diff,
+  the corpus and `spec:impact`'s lists, part 4 out of scope). Blocking, found by both: an export
+  lost every position and run count, since git could no longer rebuild them; confirmation by
+  evidence could not be built (the sync was never told what to look for); `protected` no longer
+  held `board-from-trusted` once `inputs.answers` was retired, and the condition was per leg in a
+  policy keyed per type. Fixed:
+  - **Export:** `ticket_stations`, the position history and `claim_legs` are owner state (R-BTN-88).
+  - **Confirmation:** the observation lists the unconfirmed ends and their evidence; the sync
+    attests `std:git.evidence@1`; an end naming none is confirmed by any later snapshot (R-BTN-8,
+    R-BTN-10).
+  - **Policy:** `protected` admits no `sync` for `std:arrival@1` or `std:decision@1`, and
+    `board-from-trusted` checks exactly that; "Records, not git" became "read from git only by the
+    sync"; a trusted leg acts only on what it re-checks; sync attestations supersede across the
+    repository's two posting credentials.
+  - **Arrivals:** idempotent by `ref`; only the queued leg (any armed leg at an unsettled choice
+    station); `next` defaults to the first leg listed; a new ticket is placed before its first
+    post is judged; readiness is keyed by `{station, path_len}`; a person leg arrives from a
+    `std:decision@1` whose `option` chooses `reached` (`commit` optional).
+  - **The standard courses' fact legs:** `create-pr`'s `reviewed-by-hand` and `merged-by-hand`;
+    `create-spec`'s `converse` and `address` declare `arrives: facts` (R-BTN-131); adding
+    `arrives: facts` is a loosening a machine post is flagged for.
+  - **Adopt:** an `approvers.policy` credential or an administrator, never MCP; it writes the
+    release and fence first, an `adopted` path entry, `--ran` runs, and supersedes an
+    unconfirmed end.
+  - **Dispatch:** one entry per repository and workflow, `tickets` merged, windows as
+    `not_before`, `unblocked_dispatch` retired; confirmed only once delivered; no entry without a
+    courier (`baton.dispatch-courier-missing`); the courier retries once and pins the workflows it
+    may start; `outbox.dispatch` is `trusted` under `protected` and part of `no-runner-lands`; the
+    App's key is written to the courier's host by `github-app create`, and the App's outbound
+    calls are the courier's; R-BTN-73's webhook path queues entries; the security model's reach 0
+    no longer lists the App key.
+  - **Leftovers of the old model** in R-BTN-48, -62, -63, -64, -165, -166, §4.3, the test kit,
+    `ticket_stations`, G-BTN-67, G-BTN-69, S-BTN-25, S-BTN-122, S-BTN-133 and S-BTN-188; a ticket
+    at a removed station waits `course-changed` until adopted.
+  - **Tickets:** B-151 folded into B-120, which also gets a migration from the newest of the
+    snapshot row, `claim_legs` and an unconfirmed end's pair; B-152 depends on B-120 and waits
+    for the owner's confirmation of the credential move; B-116, B-119 and B-137 noted.
 
 ## Retired requirements
 

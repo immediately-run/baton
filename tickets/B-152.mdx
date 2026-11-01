@@ -15,7 +15,8 @@ topics:
   - baton
 owns: {}
 prs: []
-depends_on: []
+depends_on:
+  - B-120
 ---
 
 **Brief:** the owner, 2026-11-01, on the four-noun model (attestations in, commands in, outbox
@@ -28,8 +29,11 @@ doorbell), R-BTN-91 (`outbox` rings on `GET /v1/courier/push`), R-BTN-188 (`outb
 R-BTN-55 (the bindings), R-BTN-136 (what a tenant's host holds), §12.7 (the App's key with the
 courier), G-BTN-83, S-BTN-195.
 
+**Depends on:** B-120 (the courier's `std:effect@1`, R-BTN-191).
+
 This ticket moves a credential, so the move itself is an operator's: an agent writes the code and
-the runbook, a human moves the key.
+the runbook, a human moves the key. The brief above quotes the owner in an unsigned commit, which
+is a claim until Baton marks briefs (B-127): before the build starts, the owner confirms the move.
 
 ### What to build
 

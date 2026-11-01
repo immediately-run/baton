@@ -3,7 +3,7 @@ title: "B-119 — A verdict counts from anyone who can push: the GitHub adapter 
 id: B-119
 project: baton
 status: in-review
-updated: 2026-10-26
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -73,3 +73,5 @@ verdict and push are on the PR, is invisible for the same reason.
 ## Status
 
 _(2026-10-31, a note only, the ticket being in review: under `inputs.answers: attestation` (R-BTN-187, R-BTN-188), verdicts read from git never reach a station a trusted leg acts on; those come from attestations (B-146). The verdict reading built here applies under `inputs.answers: git`.)_
+
+_(2026-11-01: `inputs.answers` is retired (immediately-run/baton#150, R-BTN-191): what it decided is now the policy's `attestations` entries — `sync` not admitted for `std:decision@1` or `std:arrival@1` is the old `inputs.answers: attestation`. Read the references above that way.)_

@@ -1,5 +1,5 @@
 ---
-title: "B-120 — Baton owns a ticket's course history: no snapshot places a ticket, git facts settle only declared legs, and baton owner ticket adopt sets a position"
+title: "B-120 — Baton owns a ticket's course history, and every statement it receives is an attestation: no snapshot places a ticket, git facts settle only declared legs, baton owner ticket adopt sets a position (R-BTN-39, R-BTN-191)"
 id: B-120
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1095
 tier: judgement
-description: "Build Baton as the one authority on a ticket's course history and position, as the spec now states it (R-BTN-35, R-BTN-39, R-BTN-10, R-BTN-63, R-BTN-70, R-BTN-71, R-BTN-81, R-BTN-83, R-BTN-85; S-BTN-18, S-BTN-34, S-BTN-47): no snapshot places a ticket; fact arrivals only on person legs and legs declaring arrives: facts; the sync reads positions in its observation; regression detection retired; confirmation by evidence; and baton owner ticket adopt for legs done outside Baton. Requires: none."
+description: "Build Baton as the one authority on a ticket's course history and position, as the spec now states it (R-BTN-35, R-BTN-39, R-BTN-10, R-BTN-63, R-BTN-70, R-BTN-71, R-BTN-81, R-BTN-83, R-BTN-85; S-BTN-18, S-BTN-34, S-BTN-47, S-BTN-195; R-BTN-191 and the one inbound path, folded in from B-151): no snapshot places a ticket; fact arrivals only on person legs and legs declaring arrives: facts; the sync reads positions in its observation; regression detection retired; confirmation by evidence; and baton owner ticket adopt for legs done outside Baton. Requires: none."
 topics:
   - baton
 owns: {}
@@ -38,7 +38,7 @@ choices below were the owner's answers the same day.
 R-BTN-1's table, R-BTN-35, R-BTN-39 (position, fact arrivals, adopt), R-BTN-69 (`arrives`),
 R-BTN-70, R-BTN-74 (`ctx.positions`), R-BTN-81, R-BTN-83, R-BTN-85 (`position-disagrees`),
 R-BTN-63, R-BTN-71 and *Disagreement, not movement*, R-BTN-10, §4.3 (the observation's
-`positions`), §4.4 (the board post's `attestations`; the readiness, arrival and implied-station types are R-BTN-191's, built by B-151), R-BTN-131 (the marker courses
+`positions`), §4.4 (the board post's `attestations`; the readiness, arrival and implied-station types are R-BTN-191's, built below), R-BTN-131 (the marker courses
 and `create-spec`'s interactive legs write no machine state), §9, §13, §14's adopt route,
 §15 S-BTN-18, S-BTN-34, S-BTN-47, G-BTN-59, G-BTN-73, and §16's Decisions.
 `docs/context/vocabulary.mdx` (*Path*, *Confirmation*, *Adopt*) is amended with it; values
@@ -71,7 +71,7 @@ write is a way around them (reset a path to escape `max_runs` or a retry hold).
    snapshot updates readiness and bars only, discarding readiness whose `at` is not Baton's
    station. `position-disagrees` replaces the retired discrepancy subs, raised under Needs you.
    Retire the regression machinery listed above, in core, the runner and the heartbeat.
-2. **The observation's `positions`**, read by the station functions (B-151 carries their readiness, arrivals and implied station as the sync's attestations);
+2. **The observation's `positions`**, read by the station functions (their readiness, arrivals and implied station are the sync's attestations, built below);
    `StationCtx.positions` in `src/defaults/courses.ts`.
 3. **The standard courses' station functions** compute readiness at the given station from
    their facts. `create-spec`'s `converse` and `address`, and the marker courses' closes, write
@@ -81,13 +81,39 @@ write is a way around them (reset a path to escape `max_runs` or a retry hold).
    `nothing-implied` refusal, releasing and fencing an active claim first, `history-adopted`,
    the attempt-window reset; MCP's `ticket.adopt` with R-BTN-130.
 5. **Confirmation** by evidence (R-BTN-10), and `baton.unconfirmed` for evidence never shown.
-6. **Migration.** At the release that ships this, each live ticket's stored position becomes
-   its course history as it stands; no git read. A ticket whose position the old code took from
-   git is the owner's to adopt if it is wrong.
+6. **Migration.** At the release that ships this, each live ticket's course history starts from
+   the newest of: its `ticket_stations` row, the last arrival in its `claim_legs`, and an
+   unconfirmed end's pair; no git read. `next_source` `marker` maps to `holder` and `inferred` to
+   `course`; every `regressed_since` is cleared. A ticket whose position is still wrong is the
+   owner's to adopt.
 7. **The model** (`model/baton.qnt`): snapshots no longer move positions; adopt as an action;
    disagreement as a no-op plus a discrepancy; `model:pr`'s report.
 
+### What to build: the inbound path (folded in from B-151 in review round one)
+
+1. **Writers.** `sync` for the board post's credential (sync key, CI identity, machine key) and
+   `courier` for a courier key, in the attestation writer enum and the policy's `attestations`
+   entries.
+2. **The board post.** `attestations: [{type, ticket, ref?, value}]` validated per type and
+   stored in the post's transaction, superseding the previous run's of the same type and
+   subject; refused with the post. `stations` and `markers` are retired from the post; bars,
+   decisions and `not_before` move into `tickets[]`.
+3. **The holder's arrival.** An `advance`, end or suspension records its pair as the holder's
+   `std:arrival@1` (writer `runner`, signed by the request), the same type as the sync's fact
+   arrival; every preset admits `runner` for it on the claim's own leg, and nothing else of the
+   sync's types (R-BTN-83, R-BTN-191).
+4. **Readers.** Readiness (R-BTN-70), fact arrivals and implied stations (R-BTN-39), outputs
+   (R-BTN-82), markers (R-BTN-46) and evidence (R-BTN-10) read from the newest accepted run's
+   attestations; a person leg settles from a `std:decision@1` by an admitted writer (R-BTN-116).
+5. **Couriers.** `POST /v1/courier/entries/{repository}/{id}` with `delivered` records a
+   `std:effect@1` by `courier`; confirmation stays the sync's later attestation of the effect.
+6. **The CLI's sync** emits the attestations from each station function's result.
+7. **The model:** one inbound path, and no judgement over two runs' attestations.
+
+
 ### Tests
+
+- S-BTN-195 and S-BTN-187 as amended, both hosts.
 
 - S-BTN-18, S-BTN-34 and S-BTN-47 as amended, on both hosts.
 - A push that rewrites a held ticket's frontmatter changes nothing in Baton (position or counts)
