@@ -66,6 +66,8 @@
   },
   "files": [
     "dist",
-    "NOTICE"
+    "NOTICE",
+    "scripts/cloud-runner.sh",
+    "skills/baton-cloud-runner/SKILL.md"
   ]
 }
