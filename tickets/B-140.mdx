@@ -88,8 +88,8 @@ branch).
    touching only the paths they name, and one `std:approval@1` whose subject is that ticket at that
    commit covers exactly those paths and blobs; R-BTN-183's paths, protected-path and leg-state
    refusals apply (a control path never lands this way), and `merge.reviews`, `merge.checks`,
-   `authorship` and continuity do not. The ticket merge (R-BTN-183, a marker course's work branch
-   on the owner's approval) and the fact reader's ticket-merge list (R-BTN-192) are B-149's, built
+   `authorship` and continuity do not. The ticket merge (R-BTN-183's built-in trusted leg
+   `baton.ticket-merge`, a marker course's work branch on the owner's approval) is B-149's, built
    on this runner.
 4. **The course override** `legs/merge.run.mjs` only adds refusals: it runs in a sandbox with no
    network, no credential, a private PID namespace, the computed diff as its only input and a fixed

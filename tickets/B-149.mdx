@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1164
 tier: critical
-description: "Build the protected route the spec now gives the standard courses (R-BTN-69 `records` and `outputs`, R-BTN-131, R-BTN-180, R-BTN-183's ticket merge, R-BTN-192's ticket-merge list, S-BTN-194). The marker courses (bug-report, draft-ticket, decision, build-app, spec-to-tickets) push the default branch at every close, which `no-runner-lands` forbids; B-130 item 4 named this and was superseded without it. Refuse an unlandable policy or registry, end a protection-refused close `released:cannot-finish:policy`, and move each marker ticket's records and outputs to its work branch, landed by a ticket merge on the owner's `std:approval@1`. Requires: none."
+description: "Build the protected route the spec now gives the standard courses (R-BTN-69 `records` and `outputs`, R-BTN-131, R-BTN-180, R-BTN-183's ticket merge, R-BTN-83's `merge` hold, `merge.ticket_courses`, S-BTN-194). The marker courses (bug-report, draft-ticket, decision, build-app, spec-to-tickets) push the default branch at every close, which `no-runner-lands` forbids; B-130 item 4 named this and was superseded without it. Refuse an unlandable policy or registry, end a protection-refused close `released:cannot-finish:policy`, and move each marker ticket's records and outputs to its work branch, landed by a ticket merge on the owner's `std:approval@1`. Requires: none."
 topics:
   - baton
 owns: {}
@@ -27,7 +27,7 @@ default branch, and `close` pushes the ticket); §12.8 R-BTN-188 (`refs.default_
 `merge.trusted`, `tickets.created`, `leg_state`, `refs.legs`), R-BTN-180 (*Nothing requires a runner
 the refs exclude to write the default branch*; the proposal route; the refusal of a policy whose
 writes could never land), R-BTN-189 (`no-runner-lands`), R-BTN-190 (the leg-state branch),
-R-BTN-183 (the ticket merge), R-BTN-192 (the fact reader), B-120's course history.
+R-BTN-183 (the ticket merge), R-BTN-83 (the `merge` hold), B-120's course history.
 
 **Depends on:** nothing to start. Items 1 and 3 need nothing; item 2 lands with B-145 (it extends
 that ticket's validator) and reads a fixed default where the policy store does not exist yet.
@@ -68,8 +68,8 @@ spec or the tickets says so.
 
 The rules are in the spec, amended with this ticket (R-BTN-69's `records` and `outputs`,
 R-BTN-131's *Under a protected default branch*, R-BTN-180's `unlandable-course` refusal and
-refused-write rule, R-BTN-183's *A ticket merge*, R-BTN-192's *Ticket merges*, `std:approval@1`'s
-`answer`, the `released:cannot-finish:policy` end, S-BTN-194). Build them:
+refused-write rule, R-BTN-183's *A ticket merge*, R-BTN-83's `merge` hold, R-BTN-168's owner cancel,
+`std:approval@1`'s `answer` and `owner_commits`, `merge.ticket_courses`, the `released:cannot-finish:policy` end, S-BTN-194). Build them:
 
 1. **Course-file fields.** The course validator accepts `records` (`default-branch` | `policy`,
    absent meaning `default-branch`) and `outputs` (path patterns with `{ticket}`, refusing a
@@ -83,23 +83,25 @@ refused-write rule, R-BTN-183's *A ticket merge*, R-BTN-192's *Ticket merges*, `
    from a moved branch, and never retries the first. The end is `released:cannot-finish:policy`
    naming the ref, the ticket held `non-retryable:policy`, and `baton.unlandable` is raised once
    per repository.
-4. **The protected route** (needs B-120, B-140, B-148), for the five marker courses:
-   - **One work branch per ticket.** The close pushes the ticket's work branch, not the default
-     branch, and the first pushing leg opens the PR; each leg's instructions stay the same, with
-     the branch in place of the default branch. `decision`'s `prepare` writes no `answer:`.
-   - **The approval gate.** Readiness waits on `owner` until a `std:approval@1` covers the head,
-     at each stage R-BTN-131 lists, and until `pr-merged` after the last. `decision`'s approval
-     carries `answer: {leg, option}`, applied as the person leg's answer. A `build-app` stage's
-     approval is its person leg's answer; `plan` writes the children beside `PLAN.md`, and
-     `file` returns the landed children as `spawned`.
-   - **Refining and rejecting.** The owner's commits on the branch are the person leg's range,
-     attested by the fact reader's `pr-pushed`; `changes` re-queues the writing leg; a cancel
-     closes the PR unmerged.
-   - **The ticket merge** in the merge runner (B-140): the owner's approval in place of
-     `merge.reviews` and `merge.checks`, every changed path in the ticket folder or `outputs`,
-     R-BTN-183's other rules, and `id-taken`. Baton lists waiting tickets in the fact-legs list;
-     the merge runner attests each merge as `pr-merged`, and Baton applies the deferred end.
-   - **After the merge**, a leg's record goes where `leg_state` says.
+4. **The ticket-merge route** (needs B-120, B-140, B-148), for the five marker courses:
+   - **The route** rides the claim response (`route`), from the policy at each claim until the
+     ticket's branch exists, then fixed; a claim the policy tightened under is queued again.
+   - **One work branch per ticket**, `baton/ticket/<id>`: the close pushes it, never the default
+     branch, refusing a path outside the ticket folder and `outputs`; the first pushing leg opens
+     the PR; each later leg merges the default branch in first; the station functions read the
+     branch's attested head. `decision`'s `prepare` writes no `answer:`.
+   - **Gates.** The course validator accepts `lands`. Baton holds a gated arrival or answer
+     (`next_source: merge`), applies an approval's `answer` (R-BTN-116) only for the head the gate
+     waits on, voids it on a later push, and queues `baton.ticket-merge` when the approval covers
+     the head. The standard courses declare their gates as S-BTN-194 lists them; `build-app`'s
+     `plan` writes the children with `called_by: {leg: file}`, and `file` returns them `spawned`.
+   - **`baton.ticket-merge`** in the merge runner (B-140): R-BTN-183's ticket merge, its named
+     refusals and `baton.ticket-merge-refused`, `owner_commits`, and its `close` action.
+   - **Owner actions:** `route` at a `merge` hold; `baton owner ticket cancel`.
+   - **After the merge:** the answer in the claim's input; records as leg state, the leg-state
+     branch kept; filings proposed.
+   - **The policy knob** `merge.ticket_courses` (with B-145), and `unlandable-course` for a `lands`
+     course it omits.
 5. **Migration.** A home whose policy tightens while marker tickets are in flight replays each
    one's frontmatter state into course history once (B-120's `baton owner ticket adopt`), then
    stops reading the frontmatter. A ticket mid-course resumes at its station with no leg re-run.
@@ -145,3 +147,8 @@ S-BTN-194, every case in its row.
   plan's children in the plan's change; no agent-filed change lands without approval). The
   proposal route, `std:proposal@1`, the `propose` outbox kind and the second kind of leg state
   are gone. Item 5 (migration) and item 6 (docs) stand as written.
+- 2026-11-01: review round one of the rework (two reviewers) found the end release, the owner's
+  commits, the gates and the merge's actor unspecified; the spec now has the `merge` hold,
+  `lands`, `baton.ticket-merge`, `owner_commits`, `merge.ticket_courses` and the owner cancel, and
+  item 4 is rewritten on them. `create-spec`'s legs need nothing here: B-120 moves their state to
+  course history.

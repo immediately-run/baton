@@ -890,6 +890,55 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 
   Built by B-149 (rewritten); B-140 notes the proposal merge's path checks.
 
+- **2026-11-01 — review round one of PR #150's reworked part 4** (two fresh reviewers, given the
+  diff and the impact list and told to check the rules it did not touch). Both found the same two
+  blocking problems:
+  - **The end release was an arrival no leg declared.** `pr-merged` is a fact arrival R-BTN-39
+    applies only on a leg declaring `arrives`, and "deferred" named no hold.
+  - **The owner's refining commits had no attestation.** `pr-pushed` is an arrival, not a range,
+    and R-BTN-183's foreign-commit and signed-authorship rules would reset or block them.
+
+  The majors:
+  - gates no course file declared;
+  - `changes` with no edge;
+  - a merge with no trusted leg or claim;
+  - an approval whose `paths` covered only protected paths;
+  - eligibility any course could claim by declaring `records: policy`;
+  - `baton request` refusing the courses that post-merge legs file;
+  - post-merge records deleted at close;
+  - cancel with no actor;
+  - an unbound decision answer;
+  - stranded branches on a policy change;
+  - `build-app`'s children unclaimable and unsettled;
+  - stale counts of the git kinds.
+
+  Fixed:
+  - **A held position.** A gated arrival is held (`next_source: merge`, R-BTN-83, R-BTN-39), and
+    the built-in trusted leg **`baton.ticket-merge`**, claimed and fenced as any trusted leg,
+    merges and releases it. The R-BTN-192 ticket-merge list is withdrawn.
+  - **Declared gates.** A leg field `lands` (`merge` on a runner leg, `stage` or `merge` on a
+    person leg) marks the gates, and S-BTN-194 lists each standard course's.
+  - **The approval.** It lists the owner's commits (`owner_commits`), which are exempt from
+    foreign-commit resets and stand under signed authorship by its signature. It carries a
+    general `answer` (R-BTN-116), which binds only to the head the gate waits on. Its `paths`
+    cover every changed path on a ticket merge.
+  - **Sending back and rejecting.** Sending a change back is the owner's `route`, allowed at a
+    `merge` hold. Rejecting is the new `baton owner ticket cancel` (R-BTN-168), whose
+    `baton.ticket-merge` `close` action closes the PR unmerged.
+  - **Who may land this way.** The policy's new `merge.ticket_courses` (empty by default, the
+    five marker courses under `protected`) decides which courses may land by ticket merge. A
+    course with `lands` that it omits is `unlandable-course`. The ticket merge requires a `human`
+    approval whatever `attestations` admits.
+  - **Refusals.** The close refuses a push outside the ticket folder and `outputs`. Merge
+    refusals are named, hold the ticket and raise `baton.ticket-merge-refused`.
+  - **After the merge.** Filings are proposed (R-BTN-180), and the leg-state branch of a ticket
+    closed on this route is kept.
+  - **The route.** It rides the claim response and is fixed once the branch exists. A claim the
+    policy tightened under is queued again on the new route.
+  - **`build-app`'s children.** They carry `called_by: {leg}`, bound and evaluated at `file`'s
+    `spawned` end.
+  - **Corrected text:** the worked example, the attestations cell and the git-kind counts.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
