@@ -2,8 +2,8 @@
 title: "B-78 — Markers and foreign writes: every marker carries its claim's nonce, the sync posts them within caps that never refuse, and Baton notices a write no claim made (R-BTN-46)"
 id: B-78
 project: baton
-status: available
-updated: 2026-10-20
+status: superseded
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -126,3 +126,5 @@ whole board once one ticket collected 20 markers.
 
 _(filed 2026-10-20 from the coverage audit of the tickets against the spec: R-BTN-46 was the one
 uncovered requirement)_
+
+_(2026-11-01: **superseded** by the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`), which drops marker attestations on the owner's ruling of 2026-11-01, B-158 "Remove it" (R-BTN-46 rewritten). Where each item went: 1 (markers carry the nonce) — kept as course evidence for people: R-BTN-46 and R-BTN-82 still have every closing marker carry `claim=<nonce>`, and `std:git.output@1` carries it for outputs; nothing new to build beyond what the standard courses write today. 2 (the sync posts markers), 3 (the board route's `markers`), 4 (`markers_seen`), 5 (judging, `foreign-write`, `baton.foreign-write`) — nowhere, retired: Baton reads markers only for the outputs they list, and an output whose nonce names no claim is dropped and logged `output-unclaimed` (R-BTN-82), which B-33's output pipeline carries. 6 (surfaces: foreign writes in stats and the discrepancy list) — retired. Tests: S-BTN-25 and G-BTN-50 are retired; S-BTN-54's `foreign-write` clause and S-BTN-122's marker case are changed (§15).)_

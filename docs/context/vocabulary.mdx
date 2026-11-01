@@ -41,7 +41,7 @@ can require an ability while workers declare only what they hold.
 
 **Route choice.** A question a repository attaches to a leg for advice — which model, through
 which key — that the ontology answers from the worker's holdings and the instruments' readings.
-Advice, never a gate; not a choice station, which is a course's race between legs.
+Advice, never a gate.
 
 **Claim.** A worker's lease on one ticket. It runs one or more legs and ends **done**,
 **suspended** at a station, or **released**.
@@ -55,8 +55,11 @@ tags. Everything else is **advice**.
 **Tag, barred tag.** Short strings a course gives workers (`family:glm`). A leg can bar tags,
 so some workers may not run it.
 
-**Owner bar, required bar.** Limits a repository's owners set in Baton that agents cannot
-change: tags barred across courses, and bars every leg must carry.
+**Owner bar, required bar.** Limits a repository's owners set in Baton, which no push changes:
+tags barred across courses, and bars every leg must carry. Under `cooperative` they, like every
+position and count Baton owns, are a **coordination record** for workers that cooperate — a
+pusher can re-file a ticket or edit its course and Baton does not try to notice; under
+`protected` the forge and the trusted runners make the same state a boundary (R-BTN-66).
 
 **Sync, snapshot, observation.** The repository's sync reads git and posts a **snapshot**.
 Each carries an **observation** number, so a stale reading never overrules a newer one.
@@ -70,8 +73,16 @@ stands from the moment Baton records it.
 
 **Hold, expedite.** An operator's overrides: stop a ticket being offered, or put it first.
 
-**Block, decision.** Why a ticket cannot move — another ticket, a missing capability, an
-outside resource — and the questions only a person can answer.
+**Block.** Why a leg cannot start — another ticket, a missing capability, an outside resource,
+a backoff, an open condition.
+
+**Person leg, question.** The one way a course waits on a person: a leg no runner runs, which
+arrives when a person answers it with a `std:decision@1`. Its question — the id, the link, the
+options — is what the ticket source posts for it, and Needs you lists it until it is answered or
+expires (R-BTN-116).
+
+**Cancel leg.** The ordinary leg a course names to undo its work outside git when a ticket is
+cancelled; Baton alone queues it, and the ticket is withdrawn when it ends (R-BTN-168).
 
 **Administrator, owner, grant.** Administrators run the instance; each repository's owners
 grant worker keys access to it.

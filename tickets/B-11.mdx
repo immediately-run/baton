@@ -3,7 +3,7 @@ title: "B-11 — Baton retries per leg: the default handler of error conditions,
 id: B-11
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -107,3 +107,5 @@ R-BTN-122 makes the retry policy per leg, the handler every `interrupt` conditio
 _(2026-10-20: rescoped to the current-state spec, PR #71 — retries are the default handler of
 `interrupt` conditions; `error_types`, `max_attempts_s`, `max_ready_s` and `retry.non_retryable`
 are gone, and counts also reset when the leg reaches an outcome.)_
+
+_(2026-11-01: **rescoped** by the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`) on the owner's ruling of 2026-11-01, B-165 "Take review's default": a retry policy is `{max_attempts, backoff_s, exhausted?}` and the owners' `retry` setting one ceiling (`max_attempts`) and one floor (`backoff_s`); `initial_s`, `coefficient`, `max_interval_s`, `in_claim`, `exhausted_on`, `first_attempt_at`, `budget-spent`, the `max_refreshes` ceiling and the `max_blocked`/`max_wait_s` settings are gone, the last two constants (5 blocked ends a day, 900 s). Item by item: 1 — `leg_attempts` without `first_attempt_at`. 2 — the three fields; a non-retryable type always holds. 3 — a constant backoff, `backoff_s` ±10%. 4 (in-claim retries) — retired; a leg loops in its own script. 5 — exhaustion at `max_attempts` or a non-retryable class, `exhausted` as before. 6 — the two bounds and the floor types. 7 — the kit warns where the bounds cut a policy. Tests: S-BTN-5, S-BTN-83 and S-BTN-86 are changed; S-BTN-85 is retired; G-BTN-31, G-BTN-105, G-BTN-106 and G-BTN-107 are changed.)_

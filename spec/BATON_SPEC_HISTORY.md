@@ -1249,6 +1249,74 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   This was the third and last round the babysit skill allows. Its findings are fixed without
   another review, and what remains is for the owner.
 
+- **2026-11-01 — the restructure, part 1: the core model (B-166; owner direction).** The owner,
+  after the whole-spec review of 2026-11-01 (`docs/review/spec-simplification-review-2026-11-01.mdx`,
+  tickets B-155 to B-165), asked whether to rewrite the spec from scratch "now that the design is
+  more mature", took the review's decisions in the same session ("Can we go through the decisions
+  together now?"), and had the spec rewritten part by part from them, the §15 scenarios as the
+  oracle (B-166). This part rewrites §1, §4, §5, §6.4, §7 and §9 — tickets, courses, stations and
+  legs, positions and course history, claims, leases and fences, person legs, conditions — from the
+  text on `main` (`c7a9b66`), applying these rulings, each quoted from the ticket that holds it:
+  - **B-158, "Remove it":** "under `cooperative` Baton's state is a coordination record, not a
+    boundary, and the adversary-only mechanisms are removed outright; `std:git.implied@1` stays
+    as a dashboard hint only." R-BTN-39, R-BTN-46 and R-BTN-66 say so, and the vocabulary page
+    with them. Removed: the `position-disagrees` discrepancy and its Needs-you listing (an arrival
+    Baton does not apply is an `arrival-unapplied` history row on the ticket, raising nothing);
+    the implied station as a discrepancy; held snapshots that "only tighten", their 24-hour
+    acceptance, `behind_confirmed`, `head-replaced` and `baton.held-history`; `baton.station-jump`;
+    `baton.machine-loosened`; marker attestations (`std:git.marker@1`), `markers_seen`, the
+    `foreign-write` discrepancy and notice, and R-BTN-149's marker caps.
+  - **B-161, "One primitive":** "a person leg answered by a `std:decision@1` is the one way a
+    course waits on a person; posted decisions become a ticket source's way to declare one; light
+    questions are retired; `baton.*` conditions keep the resolve page." R-BTN-116 is the one
+    primitive: the ticket source posts the queued person leg's **question** (`{id, url, severity,
+    options}`) with the ticket; the answer is a `std:decision@1` from the person (CLI, dashboard,
+    MCP) or, where the policy admits `sync`, from the ticket's `answer:`; expiry is the leg's
+    `expires: {after_s, reached}`. R-BTN-78 (posted decisions, the `decision` block kind,
+    `hitl.decision`, `ticket_decisions`) and R-BTN-173 (light questions, `refs/baton/questions/*`,
+    `baton_held`, the `answers` route, `condition_answers`, the `answer` outbox kind,
+    `model/lightQuestion.qnt`) are retired. A `suspend` handler course asks through a person leg,
+    and the restart is the answer's `option` (R-BTN-161, R-BTN-162, R-BTN-169).
+  - **B-155, "No ticket file"** (its second ruling, applied here because it lives in §7.3; the
+    checks half stays with part 2): "a delivery runner polls Baton's open conditions and delivers
+    the resolve link; no handler ticket, outbox entry or withdrawal for Baton's own conditions.
+    Handler tickets remain for conditions a leg raises." R-BTN-163 says so; the `handler` outbox
+    kind, bindings of `baton.*`, `announce` for `baton` and the flapping rule go with it.
+  - **B-165, "Take review's default"**, for the review's smaller candidates in part 1's sections
+    (each listed in the PR with what it loses): held positions and the eleven `next_source` kinds
+    → three sources, `holder`, `baton`, `owner` (R-BTN-83); choice stations → a person leg's
+    `expires` (R-BTN-166 retired); compensation legs and `baton.cancel` → a course's ordinary
+    `cancel` leg (R-BTN-168 rewritten; `runner:baton-legs` gone); open-world claims → a closed
+    world, a new ticket claimable after the first post that names it (R-BTN-104 and R-BTN-148
+    retired, with `provisional` claims, `declared`, `tainted_branches`, `open_world_bars` and
+    their three conditions); held snapshots and the unfounded-head protocol → a non-descendant
+    post is `head-moved` and an administrator's forced Resync adopts a rewritten branch (R-BTN-11,
+    R-BTN-147); retry knobs → `max_attempts`, `backoff_s` and `exhausted`, one owners' ceiling and
+    one floor, `max_blocked` and `max_wait_s` constants (R-BTN-122); timers → `deadline_s` and
+    `stalled_s`, the owner's `extend_to` and `cancel_at` gone (R-BTN-167, R-BTN-90). Seats,
+    resource scopes, trust levels, presets and floors, attestation `uses` and the ontology are
+    parts 2 and 4's.
+  - **Kept as they were**, their ids and meaning: the lock and the lease (R-BTN-4, R-BTN-6,
+    R-BTN-19, R-BTN-26), observation numbers and compare-and-set heads (R-BTN-62, R-BTN-11's
+    first paragraph), git first and confirmation by evidence (R-BTN-8, R-BTN-10), the course file's
+    graph and validation (R-BTN-69, R-BTN-70), contracts (R-BTN-82, R-BTN-108, R-BTN-109), calls
+    (R-BTN-165), the standard courses' shape (R-BTN-131; `build-app` gains the person leg `decide`
+    at a `stuck` station in place of the posted decision its third failing `verify` raised).
+  - **Section numbers are unchanged.** §4.5 is "Reading the ticket", §6.4 "People", §7.5
+    "Deadlines", §7.6 "Calls", §7.7 "Cancellation". Consequential edits reach §2.3 (caps), §3,
+    §6.1, §6.2, §6.6–§6.9, §8, §10, §11.4, §12.3, §12.8 (one-word removals), §13 and §14; parts 2
+    to 4 rewrite those sections.
+  - **Retired:** R-BTN-78, R-BTN-104, R-BTN-148, R-BTN-166, R-BTN-173 (the tables below);
+    scenarios S-BTN-25, S-BTN-85, S-BTN-87, S-BTN-133, S-BTN-138 and gates G-BTN-50, G-BTN-86,
+    G-BTN-151, G-BTN-158. Changed scenarios and gates are listed in the PR. Code and tests that
+    cite a retired id (`src/core/`, `model/`, `test/`) are warnings for the code tickets that
+    delete the mechanisms.
+  - **Tickets.** B-74 (light questions), B-63 (choice stations), R3-1271 (open-world claims) and
+    B-78 (markers and foreign writes) are superseded with a map; B-65, B-77, B-61, B-11, B-38,
+    B-66, B-56, B-55, B-62, B-46, B-21, B-57, B-7, B-116, B-120, B-150, B-36, B-42 and R3-1254
+    carry a dated note; B-155, B-158, B-161, B-165 and B-166 record what this part built and what
+    remains.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -1262,6 +1330,11 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 | R-BTN-118 | a running leg's output streams to its viewers and is never stored | R-BTN-128 (2026-10-21) | `baton leg log -f` follows the run's chunks in the owners' log location; the dashboard shows no live output |
 | R-BTN-164 | Baton queues no notices for people | this rewrite (2026-10-20) | one line in §7's introduction; `baton decision list` in R-BTN-163 |
 | R-BTN-170 | the window | this rewrite (2026-10-20) | **Migrations the implementation still carries**, below |
+| R-BTN-78 | posted decisions block, and are not resources | B-166 part 1 (2026-11-01, B-161 "One primitive") | the queued person leg's question, posted by the ticket source (R-BTN-116); `hitl.decision`, the `decision` block kind and `ticket_decisions` go with it |
+| R-BTN-104 | open world: a claim may name a ticket Baton has not seen | B-166 part 1 (2026-11-01, B-165's review default) | a closed world: a ticket is claimable after the first post that names it, which the sync want makes a minute away (R-BTN-5, R-BTN-94) |
+| R-BTN-148 | open-world settlement, misdeclared claims, tainted branches | B-166 part 1 (2026-11-01, B-165's review default) | nothing: no provisional claim, no author gate, no taint |
+| R-BTN-166 | a choice station: the first leg ready wins | B-166 part 1 (2026-11-01, B-165's review default) | a person leg's `expires: {after_s, reached}` (R-BTN-116); no general race between legs |
+| R-BTN-173 | light questions: answered in the claim, or promoted to git | B-166 part 1 (2026-11-01, B-161 "One primitive") | the plain path: a handler ticket written git first, asked through its person leg, the restart formed by Baton from the answer (R-BTN-161, R-BTN-162, R-BTN-169) |
 
 R-BTN-23 (retry policy) is not retired: it is merged into R-BTN-122, whose heading carries both
 ids. R-BTN-21, R-BTN-27, R-BTN-42, R-BTN-43 and R-BTN-49 are the `roadmap-pr` course's own rules,
@@ -1284,6 +1357,15 @@ defined in docs' `BATON_ROADMAP_PR_COURSE` (check-spec's `COURSE_IDS`).
 | G-BTN-95 | leg output relayed only from the holder to authorized same-origin viewers | R-BTN-128 (2026-10-21) | G-BTN-118, G-BTN-119 |
 | G-BTN-110 | notices carry severity; per-severity routing | R-BTN-164 (2026-10-20) | — |
 | G-BTN-28–30, -34, -45, -46, -48, -52, -65 | the `roadmap-pr` course's own logic | moved 2026-10-14 | docs' `BATON_ROADMAP_PR_COURSE` §7 |
+| S-BTN-25 | two runners on one ticket: markers under a foreign nonce, `foreign-write`, `baton.station-jump` | B-166 part 1 (2026-11-01, B-158) | Baton reads markers only for outputs (R-BTN-82); the fence layers cover cooperating runners (S-BTN-2, -4) |
+| S-BTN-85 | in-claim retries | B-166 part 1 (2026-11-01, B-165) | a leg that tries again loops in its own script (R-BTN-122) |
+| S-BTN-87 | timers on attempts and readiness: `first_attempt`, `ready` | B-166 part 1 (2026-11-01, B-165) | the stalled notice is S-BTN-134's and S-BTN-10's; no budget timer |
+| S-BTN-133 | a choice station | B-166 part 1 (2026-11-01, B-165) | a person leg's expiry: S-BTN-67, S-BTN-129 |
+| S-BTN-138 | a light question | B-166 part 1 (2026-11-01, B-161) | S-BTN-127, S-BTN-128 cover the plain path |
+| G-BTN-50 | markers carry their claim's nonce; a foreign one logs `foreign-write` | B-166 part 1 (2026-11-01, B-158) | — |
+| G-BTN-86 | an unknown ticket is claimable only at its `start_leg`, provisionally | B-166 part 1 (2026-11-01, B-165) | S-BTN-58: `not-eligible` until a post names it |
+| G-BTN-151 | a choice settles to the first leg whose prerequisites hold | B-166 part 1 (2026-11-01, B-165) | G-BTN-152's `expires` instant; G-BTN-90 |
+| G-BTN-158 | a light question settles once, in the claim or from git | B-166 part 1 (2026-11-01, B-161) | G-BTN-147 |
 
 Parts retired from surviving rows: S-BTN-105 and G-BTN-124 keep only the override half (the rest
 became S-BTN-110 and G-BTN-129, 2026-10-19); S-BTN-95 and G-BTN-115 lost the legacy

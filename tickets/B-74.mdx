@@ -2,8 +2,8 @@
 title: "B-74 — Light questions: answered from a channel in the claim, or promoted to an ask file through the outbox (R-BTN-173)"
 id: B-74
 project: baton
-status: available
-updated: 2026-10-31
+status: superseded
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -137,3 +137,5 @@ costs no git write when the person answers while it waits, and loses no answer w
 _(filed 2026-10-20 from the light-question model and R-BTN-173)_
 
 _(2026-10-31: under the repository policy (R-BTN-173, R-BTN-180, R-BTN-188): where `refs.baton` excludes `runner`, a light question's text is not pushed to `refs/baton/questions/…`; under `tickets.created: proposed`, a promoted question's ask file and its answers are outbox entries written on `baton/proposed/<ticket>` and landed by the proposal merge (B-64, B-140), never filed directly. `refs/baton/*` is outside every guarantee on GitHub, so nothing a trusted leg acts on is read from it.)_
+
+_(2026-11-01: **superseded** by the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`), which retires R-BTN-173 on the owner's ruling of 2026-11-01, B-161 "One primitive". Where each item went: 1 (raising light, Baton-held tickets, `refs/baton/questions/*`) — nowhere, retired; a `hitl` raise always writes its handler ticket git first (R-BTN-161). 2 (the answer report `POST …/answers`) — retired; the answer is the handler's person leg's `std:decision@1` (R-BTN-116, R-BTN-169). 3 (recording and carrying) — the carrying half survives as R-BTN-162's `resume` list, consumed at an end, with no `answers` field or `recorded` flag; B-66 builds the restart Baton forms. 4 (promotion) — retired. 5 (the `answer` outbox kind) — retired (R-BTN-171). 6 (channels that answer) — a `deliver` leg only notifies; an answer reaches Baton from the person (B-66). 7 (migration) — none of its columns is specified; `conditions.consumed_at` replaces `recorded`, built with B-66. 8 (`model/lightQuestion.qnt`) — retired; the file is deleted by the code PR that removes the light-question code, which B-66 names. Exit criteria: S-BTN-138 and G-BTN-158 are retired in `spec/BATON_SPEC_HISTORY.md`; the model check is void.)_
