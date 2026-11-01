@@ -1,0 +1,55 @@
+---
+title: "B-157 — One CLI command tree: R-BTN-127 lists every command the spec names, and baton help teaches it"
+id: B-157
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1102
+tier: judgement
+description: "The spec names the runner both baton run and baton runner start, has top-level verbs R-BTN-127 forbids (request, test-course), and names commands absent from R-BTN-127's tree (baton attest, owner policy …, courier add/start, repo protect, owner ticket adopt, owner route). The built CLI prints one line per noun and refuses --help on subcommands. Reconcile the tree in the spec, then make help generated from the action registry."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
+can any vocabulary, core concepts or actors be simplified … is the user experience intuitive …
+are the security guarantees … truly guaranteed and … do they matter"), asked for its findings
+to be filed as tickets. Source: `docs/review/spec-simplification-review-2026-11-01.mdx`.
+The review's claims are a reviewer's, checked against the spec where they cite it; this ticket
+verifies each against the text before changing anything.
+
+### Why
+
+Review finding 6 and section 2.1: `baton run` (R-BTN-131) against `baton runner start`
+(R-BTN-72, R-BTN-127); `request` and `test-course` as top-level verbs although R-BTN-127 allows
+only `help` and `version`; `baton attest` (R-BTN-181), `baton owner policy …` (R-BTN-188),
+`owner courier add`, `admin courier add`, `repo protect`, `courier start`, `owner ticket adopt`,
+`owner route`, `owner token create`, `owner mcp-key create`, `admin github-app create` missing
+from R-BTN-127; `baton-sidecar` and `baton-activity` only in §8.1 and §9.9. Today
+`baton owner grant --help` answers "not a flag of this command".
+
+### What to build
+
+1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
+   every rule restating the same fact changed with it.
+2. R-BTN-127's table lists every command any rule names, under one noun–verb shape; each rule
+   cites it.
+3. `baton help [noun [verb]]` and `--help` on every command, generated from the action registry
+   (R-BTN-129), each with its arguments and one example.
+
+### Exit criteria
+
+- [ ] The spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] `npm run check:spec` and `npm run check:wiki` green
+- [ ] Any code item: `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from the whole-spec review.

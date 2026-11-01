@@ -1,0 +1,57 @@
+---
+title: "B-160 — Decide whether a compromised Baton server is in scope, and keep or remove its defences accordingly"
+id: B-160
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1105
+tier: critical
+description: "§12.8 places a compromised Baton server or Cloudflare account outside every guarantee, yet signed outbox entries, the signing-key list, the dispatch courier's pins, signed policy reads against pinned keys, base_sha no-roll-back and the trusted runner's policy-hash pin all defend against it. Either add reach 0 to R-BTN-189 and keep them, or remove them."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
+can any vocabulary, core concepts or actors be simplified … is the user experience intuitive …
+are the security guarantees … truly guaranteed and … do they matter"), asked for its findings
+to be filed as tickets. Source: `docs/review/spec-simplification-review-2026-11-01.mdx`.
+The review's claims are a reviewer's, checked against the spec where they cite it; this ticket
+verifies each against the text before changing anything.
+
+### Why
+
+Review finding 4 and F9: each mechanism is reasonable alone, together they are "the largest
+single source of actors and knobs after §12.8 itself". The review also finds Baton's own
+notification pipeline (section 1.3: handler entry, courier, ticket file, sync, `announce`,
+`withdraw`) could be a delivery runner polling `GET …/conditions`.
+
+### Decide first (the owner)
+
+"Baton's server is trusted; its compromise is recovered, not resisted" (the review's suggestion), or reach 0 becomes a named guarantee. B-152 (just confirmed) depends on this.
+
+### What to build
+
+1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
+   every rule restating the same fact changed with it.
+2. One sentence in §12.8 and R-BTN-189 stating the decision.
+3. If out of scope: remove signed outbox entries and `GET /v1/keys/signing`, the dispatch
+   courier (with B-159), signed policy reads and policy-hash pins, and `base_sha` roll-back
+   checks, with the tickets that build them rewritten.
+4. If in scope: a guarantee row for it in R-BTN-189, each mechanism citing it.
+
+### Exit criteria
+
+- [ ] The spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] `npm run check:spec` and `npm run check:wiki` green
+- [ ] Any code item: `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from the whole-spec review.

@@ -1,0 +1,56 @@
+---
+title: "B-161 — One way to ask a person: a person leg answered by a std:decision@1, replacing posted decisions, light questions and hitl tickets for answers"
+id: B-161
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1106
+tier: judgement
+description: "The spec has five ways to ask a person (person legs, posted decisions which also raise hitl.decision, hitl conditions with handler tickets, light questions with Baton-held tickets and refs/baton/questions, baton.* conditions answered on the resolve page) and three places an answer lives. Keep one: a person leg answered by a std:decision@1 from the CLI, dashboard or MCP."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
+can any vocabulary, core concepts or actors be simplified … is the user experience intuitive …
+are the security guarantees … truly guaranteed and … do they matter"), asked for its findings
+to be filed as tickets. Source: `docs/review/spec-simplification-review-2026-11-01.mdx`.
+The review's claims are a reviewer's, checked against the spec where they cite it; this ticket
+verifies each against the text before changing anything.
+
+### Why
+
+Review finding 5 and section 1.2: R-BTN-116, R-BTN-78 (whose decision also raises
+`hitl.decision`, so Needs you lists one question twice), R-BTN-160/161, R-BTN-173 (~150 lines,
+two outbox kinds, `baton_held`, a Quint model) and R-BTN-163. Light questions exist to save one
+git commit per question.
+
+### Decide first (the owner)
+
+Retiring light questions (R-BTN-173), which the Decisions section chose over a ticket file per question.
+
+### What to build
+
+1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
+   every rule restating the same fact changed with it.
+2. Person legs as the one primitive; posted decisions become a ticket source's way to declare
+   one; light questions retired with their outbox kinds and model; `baton.*` conditions keep
+   the resolve page.
+3. Tickets building the retired parts rewritten or superseded with a map.
+
+### Exit criteria
+
+- [ ] The spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] `npm run check:spec` and `npm run check:wiki` green
+- [ ] Any code item: `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from the whole-spec review.

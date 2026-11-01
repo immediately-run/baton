@@ -1,0 +1,68 @@
+---
+title: "B-155 — The protected preset works on day one: a defined checks writer, notifications without approvals, an ask course that can be answered, a dry run"
+id: B-155
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1100
+tier: critical
+description: "The review's finding 1: as written, protected stops ordinary work — merge.checks: required with no defined writer of std:checks@1; Baton's own notification handler tickets need a human std:approval@1 under tickets.created: proposed; the standard ask course is answered by a sync attestation protected does not admit; adopt after a course rename costs a human key per ticket; a deliverer refuses repositories with their own tickets.mjs; baton request becomes a PR. Fix each and add a dry run that lists what a preset would stop."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
+can any vocabulary, core concepts or actors be simplified … is the user experience intuitive …
+are the security guarantees … truly guaranteed and … do they matter"), asked for its findings
+to be filed as tickets. Source: `docs/review/spec-simplification-review-2026-11-01.mdx`.
+The review's claims are a reviewer's, checked against the spec where they cite it; this ticket
+verifies each against the text before changing anything.
+
+### Why
+
+Review finding 1, F4 and F7, and journey "Move from `cooperative` to `protected`":
+- `merge.checks: required` and "nothing merges until `std:checks@1` is set" (R-BTN-188), but the
+  trusted executor that writes `std:checks@1` (R-BTN-181) is never registered, granted or run.
+- `tickets.created: proposed` makes every handler ticket, Baton's own `baton.*` notifications
+  included, "not claimable until it lands with a `std:approval@1`" (R-BTN-161).
+- `std:decision@1` "admits `human` alone" under `protected` (R-BTN-191), while the `ask` course's
+  answer is the sync's attestation of the ask file (R-BTN-169): every question expires.
+- `adopt` needs a `human` key under `protected` (R-BTN-39): one ceremony per in-flight ticket
+  after a course rename.
+- A trusted-runner deliverer "marks every git entry `failed` with `refused`" on a repository
+  with its own `tickets.mjs` (R-BTN-171).
+- `baton request` "opens a PR, not a push" (R-BTN-180).
+
+### Decide first (the owner)
+
+Whether `protected`'s `merge.checks` is `required` with a defined executor or `optional` with the forge's required checks.
+
+### What to build
+
+1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
+   every rule restating the same fact changed with it.
+2. Define the trusted executor (likely §10's check-runner posting `std:checks@1` as its
+   `service:` key), or make `protected`'s `merge.checks` `optional`.
+3. Exempt Baton's own notify handlers from `tickets.created: proposed`, or deliver them
+   without a ticket file (see B-160).
+4. Give `ask` a `protected` answer path (a `human` `std:decision@1`).
+5. A cheaper adopt for a course change Baton can map itself (`renamed_from`).
+6. `baton owner policy apply --dry-run`: every guarantee, ticket and leg the preset would
+   stop, before applying it.
+
+### Exit criteria
+
+- [ ] The spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] `npm run check:spec` and `npm run check:wiki` green
+- [ ] Any code item: `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from the whole-spec review.

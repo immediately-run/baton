@@ -1,0 +1,54 @@
+---
+title: "B-164 — The guarantees table claims only what holds: human-gates under protected, signed-authorship without a host signer, independent-review's cost"
+id: B-164
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1109
+tier: judgement
+description: "R-BTN-189 says protected holds human-gates while §12.8 says a human-only key an agent session can use is always possible while human_key is any, which protected sets. signed-authorship signs with a key a compromised leg can read until a host-side signer exists, and its foreign-commit reset is a denial-of-service lever. independent-review is honestly not a security gate but carries trust levels, model families and std:ran@1 as if it were. Make the table claim only what holds."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
+can any vocabulary, core concepts or actors be simplified … is the user experience intuitive …
+are the security guarantees … truly guaranteed and … do they matter"), asked for its findings
+to be filed as tickets. Source: `docs/review/spec-simplification-review-2026-11-01.mdx`.
+The review's claims are a reviewer's, checked against the spec where they cite it; this ticket
+verifies each against the text before changing anything.
+
+### Why
+
+Review F2, F5, F6 and the guarantee table (section 3.1).
+
+### Decide first (the owner)
+
+Whether `protected` requires hardware keys or stops claiming `human-gates`.
+
+### What to build
+
+1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
+   every rule restating the same fact changed with it.
+2. `human-gates` held only by `protected-signed`, or `human_key: hardware` part of
+   `protected`.
+3. `signed-authorship` either specified with a host-side signer or removed until one is
+   designed; continuity ranges kept.
+4. `independent-review`'s machinery cut to what it needs: a review count and a domain label.
+
+### Exit criteria
+
+- [ ] The spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] `npm run check:spec` and `npm run check:wiki` green
+- [ ] Any code item: `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from the whole-spec review.

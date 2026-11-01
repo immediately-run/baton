@@ -1,0 +1,60 @@
+---
+title: "B-159 — Fewer actors: merge the keys that are all a host holding a credential Baton does not"
+id: B-159
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1104
+tier: judgement
+description: "Couriers, the fact reader, the protection checker, check-runners, instruments, the dispatch courier and the adoption-era mirror and shadow machinery are each an actor with its own role, registration and conditions. The review finds most collapse into trusted runners, the sync, grant roles or service keys without weakening any guarantee in R-BTN-189. Decide each and amend the spec."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
+can any vocabulary, core concepts or actors be simplified … is the user experience intuitive …
+are the security guarantees … truly guaranteed and … do they matter"), asked for its findings
+to be filed as tickets. Source: `docs/review/spec-simplification-review-2026-11-01.mdx`.
+The review's claims are a reviewer's, checked against the spec where they cite it; this ticket
+verifies each against the text before changing anything.
+
+### Why
+
+Review finding 3 and section 1.1, candidate by candidate:
+- git courier → `runner` the cooperative deliverer, `trusted-runner` the protected one (today
+  a one-machine user with `--bind-conditions` must run a courier or notifications never leave);
+- fact reader → the sync, under `protected` restricted to `sync-key`/`ci-identity`;
+- protection checker → a mode of the merge runner;
+- check-runner → a grant role; instrument → a `service:` key;
+- dispatch courier → delete (it guards reach 0 only; see B-160);
+- mirror, shadow mode, legacy runners, adoption requests, cutover → an adoption appendix that
+  ends when docs retires its mirror.
+
+### Decide first (the owner)
+
+Each collapse, above all the fact reader and the dispatch courier, which tickets B-140 and B-152 currently build.
+
+### What to build
+
+1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
+   every rule restating the same fact changed with it.
+2. For each candidate, the PR states the merge or removal and what (if anything) it loses.
+3. Tickets that build the removed actors (B-140's fact reader, B-152's dispatch courier, the
+   protection checker) are rewritten or superseded with a map, per the babysit skill.
+
+### Exit criteria
+
+- [ ] The spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] `npm run check:spec` and `npm run check:wiki` green
+- [ ] Any code item: `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from the whole-spec review.

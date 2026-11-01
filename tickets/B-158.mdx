@@ -1,0 +1,56 @@
+---
+title: "B-158 — Say what Baton's position ownership protects under cooperative, and drop the adversary-facing parts that protect nothing there"
+id: B-158
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1103
+tier: judgement
+description: "Under cooperative any pusher can move a ticket around Baton's owned position, holds, bars and max_runs counts (re-file, change course:, add an edge or arrives leg, rename a leg). Keep the single-authority design; state that it is no boundary under cooperative, and remove or scope the apparatus that only catches an adversary (position-disagrees as Needs you, std:git.implied@1 as a discrepancy, held snapshots that only tighten, machine-loosened)."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
+can any vocabulary, core concepts or actors be simplified … is the user experience intuitive …
+are the security guarantees … truly guaranteed and … do they matter"), asked for its findings
+to be filed as tickets. Source: `docs/review/spec-simplification-review-2026-11-01.mdx`.
+The review's claims are a reviewer's, checked against the spec where they cite it; this ticket
+verifies each against the text before changing anything.
+
+### Why
+
+Review finding 2 and F3, the owner's own example: R-BTN-66 ("An agent can change every byte of
+a registered repository") lets any pusher re-file a held ticket under a new id (admitted in
+R-BTN-12), change `course:`, add an edge or an `arrives` leg, or rename a leg to dodge a bar
+(R-BTN-142). The vocabulary still calls holds and bars "limits agents cannot change".
+
+### Decide first (the owner)
+
+Which of the listed mechanisms to remove outright and which to keep under `protected` only.
+
+### What to build
+
+1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
+   every rule restating the same fact changed with it.
+2. State in R-BTN-39, R-BTN-66 and the vocabulary that under `cooperative` Baton's owned state
+   is a coordination record, not a boundary; under `protected` control paths make it one.
+3. Remove, or limit to `protected`, each mechanism whose only purpose is detecting an adversary
+   under `cooperative`, listing each in the PR with what it caught.
+
+### Exit criteria
+
+- [ ] The spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] `npm run check:spec` and `npm run check:wiki` green
+- [ ] Any code item: `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from the whole-spec review.
