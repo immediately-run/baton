@@ -655,6 +655,323 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - **Declared fields:** `leg_state` on the claim response, `legs` in the checker's report, and
     `legs_landed` on the board post.
 
+- **2026-10-31 — §5 R-BTN-69, R-BTN-131, §6 R-BTN-171, §9 end reasons, §12.8 R-BTN-180,
+  R-BTN-190, §15 S-BTN-194 (owner direction): the standard courses under a protected default
+  branch.** A design session on Fieldhouse's courses found that the marker courses (`bug-report`,
+  `draft-ticket`, `decision`, `build-app`, `spec-to-tickets`) and `create-spec`'s interactive
+  legs push the default branch at every close, which `no-runner-lands` forbids. R-BTN-180's
+  proposal route covered only what a runner's action creates, and B-130's item 4 ("No course
+  writes main directly") had been superseded without it. The owner: "This seems like a pretty
+  serious issue. Please address this now."
+  - **The route.** Under a protected default branch, machine state is Baton's course history, each
+    leg's record goes on the leg-state branch, and each output a person must accept is one
+    proposal: a `std:proposal@1` output, a new `propose` outbox kind that copies its blobs unparsed,
+    and the proposal merge. `spec-to-tickets`' children are one proposal, and a `build-app` stage's
+    approval is its proposal's.
+  - **The policy chooses.** Where `refs.default_branch` admits `runner`, nothing changes and no
+    approval is added.
+  - **Early refusal.** A course declares `records` (`default-branch` or `policy`) and its
+    proposal paths (`proposes`). Baton refuses a policy or registry that pairs a protected default
+    branch with a `default-branch` course (`unlandable-course`). A protection refusal at a close
+    ends `released:cannot-finish:policy` and raises `baton.unlandable`, and is never retried.
+  - **Leg state** gains a second kind, the protected route's records and proposed files, held on
+    the leg-state branch whatever `leg_state` says.
+
+  Built by B-149.
+  **Review, round one** (two fresh reviewers, the diff and the corpus only), found the route
+  incomplete: station functions could not read course history (R-BTN-39 said "from git alone"),
+  a proposal merge skipped R-BTN-183's path checks, so an approved proposal could land a control
+  path, a course's last leg reached its end before its proposal landed, while closing the ticket
+  deleted the blobs its copy needed, and several legs' writes, ticket-id allocation, rejection and
+  `build-app`'s refine-then-approve had no rule. The first finding was a symptom of the next
+  entry's unpropagated reversal, which is made first; the protected route is then reworked on it.
+
+- **2026-10-31 — §2e R-BTN-35, R-BTN-39, §4 R-BTN-1, R-BTN-70, R-BTN-74, R-BTN-81, R-BTN-85,
+  §4.3, §4.4, §5 R-BTN-63, R-BTN-69, R-BTN-71, R-BTN-83, R-BTN-131, §9 R-BTN-10, §13, §14,
+  §15 S-BTN-18, S-BTN-34, S-BTN-47, G-BTN-59, G-BTN-73, §16 (owner direction): Baton is the
+  one authority on a ticket's course history.** The owner's ruling of 2026-10-26 (B-120: "Git is
+  authorative in everything *except* the ticket's course history") had reached values,
+  architecture and Fieldhouse's decisions on 2026-10-28, but not the spec, which still replayed
+  positions from git. The owner, 2026-10-31: Baton is the sole authority on ticket history;
+  tickets in git may get per-leg amendments, but git need not hold the full history. On the
+  owner's command to set a position, `adopt`: "this is a useful fallback if baton is down". The
+  owner chose, the same day:
+  - **git facts move a ticket only on declared legs** (person legs, `arrives: facts`), by an
+    edge from Baton's station, over no fact ever moving one;
+  - **the sync reads Baton's positions** in its observation, over station functions computing
+    readiness for every station;
+  - **regression detection retired** (`regressed_since`, `git.regressed`, `baton.regressed`,
+    path-extension checks, the subs `position-replaced`, `route-overridden`, `regressed`,
+    `off-graph` for paths and `path-rewritten`, and the `marker` and `inferred` next sources),
+    a disagreement being `position-disagrees`, which the owner settles with adopt or a route,
+    over keeping it as advice;
+  - **confirmation by evidence**: an end's position stands at once, and the end is confirmed by
+    the first snapshot after it that shows its named evidence, over dropping confirmation.
+
+  The marker courses' closes (B-100) and `create-spec`'s interactive closes write no machine
+  state. `baton repo migrate-markers` stays as the one-time transition it was. Built by B-120,
+  rewritten as its build ticket. Review: pending.
+
+- **2026-10-31 — §12.8 R-BTN-191 (new), R-BTN-181, R-BTN-187, R-BTN-188, §4.4, R-BTN-10,
+  R-BTN-39, R-BTN-46, R-BTN-70, R-BTN-82, R-BTN-116, R-BTN-171, R-BTN-190, §15 S-BTN-187,
+  S-BTN-193, S-BTN-195 (owner direction): one inbound path.** The 2026-10-30 unification had
+  made readings attestations, but answers stayed git's by a separate knob and a courier's report
+  was only a state change. Asked whether the sync could be an instrument's reading of the
+  repository's state, then shown the answer (its facts yes, its ticket and course registries
+  no), the owner: "yes, please!" Every statement Baton receives about the work is now an
+  attestation, the writers `sync` and `courier` joining R-BTN-181's. The sync's readiness,
+  arrivals, implied stations, outputs, markers and evidence are `std:git.*` attestations in the
+  board post, accepted with it so no judgement mixes two runs; a person's answer is always a
+  `std:decision@1`; a courier's delivery a `std:effect@1`. The board post keeps the ticket and
+  course registries, with bars, decisions and `not_before` on each ticket. `inputs.answers` is
+  retired: whether the sync's attestations count is an `attestations` entry. Built by B-120 (B-151, filed for it, was folded into B-120 in review round one).
+  Review: pending.
+- **2026-10-31 — §12.8 R-BTN-188, R-BTN-189, §15 S-BTN-183 (owner direction):
+  `independent-review` without a model-family requirement.** The owner, moving the reference
+  factory to one model for writing and reviewing: "I feel like having a stronger model generate
+  and review code is the better trade-off in most cases", a hostile or compromised model being
+  out of Fieldhouse's scope. `independent-review` now requires two reviews from trust domains
+  other than the writers' and each other's; `merge.reviews.distinct` may still add
+  `model_family`, and `protected`'s value is `{count: 2, distinct: [trust_domain]}`.
+
+- **2026-11-01 — R-BTN-191, R-BTN-83, R-BTN-39, R-BTN-94, R-BTN-171, R-BTN-91, R-BTN-55,
+  R-BTN-136, R-BTN-188, §12.7, G-BTN-83, S-BTN-195 (owner direction): four nouns at the
+  boundary.** The owner asked whether every input could be an attestation and every outbound
+  request a courier message, "to greatly simplify the core mechanics … for somebody not yet
+  familiar with its concepts". Shown that commands (requests to change Baton's own state) and
+  replies are neither, and the two places the spec did not yet fit: "Yes, add the model and make
+  both changes."
+  - **The model**, in `docs/context/architecture.mdx` and the vocabulary: Baton learns through
+    attestations, is asked through commands, acts through couriers and answers in replies.
+  - **A runner's report is an attestation.** An `advance` or end is a command carrying the
+    holder's `std:arrival@1`, the same type as the sync's fact arrival (renamed from
+    `std:git.arrival@1`), differing only in writer.
+  - **Dispatch is an outbox kind.** A want queues a `dispatch` entry; a dispatch courier, rung on
+    `GET /v1/courier/push`, delivers it; the GitHub App's key and the forge trigger tokens leave
+    Baton, which now holds no credential that acts outside it. Retired from R-BTN-171: "The
+    deployment's dispatch credentials (R-BTN-94) only start workflows; a forge that cannot scope
+    one below write (a Gitea bot token) is a stated exposure of the deployment, held as a Worker
+    secret and never in the database." Built by B-120 (the arrival) and B-152 (dispatch).
+    Review: pending.
+
+- **2026-11-01 — review round one of PR #150's parts 1–3 and 5** (two fresh reviewers, the diff,
+  the corpus and `spec:impact`'s lists, part 4 out of scope). Blocking, found by both: an export
+  lost every position and run count, since git could no longer rebuild them; confirmation by
+  evidence could not be built (the sync was never told what to look for); `protected` no longer
+  held `board-from-trusted` once `inputs.answers` was retired, and the condition was per leg in a
+  policy keyed per type. Fixed:
+  - **Export:** `ticket_stations`, the position history and `claim_legs` are owner state (R-BTN-88).
+  - **Confirmation:** the observation lists the unconfirmed ends and their evidence; the sync
+    attests `std:git.evidence@1`; an end naming none is confirmed by any later snapshot (R-BTN-8,
+    R-BTN-10).
+  - **Policy:** `protected` admits no `sync` for `std:arrival@1` or `std:decision@1`, and
+    `board-from-trusted` checks exactly that; "Records, not git" became "read from git only by the
+    sync"; a trusted leg acts only on what it re-checks; sync attestations supersede across the
+    repository's two posting credentials.
+  - **Arrivals:** idempotent by `ref`; only the queued leg (any armed leg at an unsettled choice
+    station); `next` defaults to the first leg listed; a new ticket is placed before its first
+    post is judged; readiness is keyed by `{station, path_len}`; a person leg arrives from a
+    `std:decision@1` whose `option` chooses `reached` (`commit` optional).
+  - **The standard courses' fact legs:** `create-pr`'s `reviewed-by-hand` and `merged-by-hand`;
+    `create-spec`'s `converse` and `address` declare `arrives: facts` (R-BTN-131); adding
+    `arrives: facts` is a loosening a machine post is flagged for.
+  - **Adopt:** an `approvers.policy` credential or an administrator, never MCP; it writes the
+    release and fence first, an `adopted` path entry, `--ran` runs, and supersedes an
+    unconfirmed end.
+  - **Dispatch:** one entry per repository and workflow, `tickets` merged, windows as
+    `not_before`, `unblocked_dispatch` retired; confirmed only once delivered; no entry without a
+    courier (`baton.dispatch-courier-missing`); the courier retries once and pins the workflows it
+    may start; `outbox.dispatch` is `trusted` under `protected` and part of `no-runner-lands`; the
+    App's key is written to the courier's host by `github-app create`, and the App's outbound
+    calls are the courier's; R-BTN-73's webhook path queues entries; the security model's reach 0
+    no longer lists the App key.
+  - **Leftovers of the old model** in R-BTN-48, -62, -63, -64, -165, -166, §4.3, the test kit,
+    `ticket_stations`, G-BTN-67, G-BTN-69, S-BTN-25, S-BTN-122, S-BTN-133 and S-BTN-188; a ticket
+    at a removed station waits `course-changed` until adopted.
+  - **Tickets:** B-151 folded into B-120, which also gets a migration from the newest of the
+    snapshot row, `claim_legs` and an unconfirmed end's pair; B-152 depends on B-120 and waits
+    for the owner's confirmation of the credential move; B-116, B-119 and B-137 noted.
+
+- **2026-11-01 — review round two of PR #150's parts 1–3 and 5** (one fresh reviewer, the diff,
+  round one's record and fresh `spec:impact` lists). It confirmed round one's export,
+  confirmation inputs, `board-from-trusted`, readiness key, dispatch credential and ticket fold,
+  and found:
+  - **Blocking:** `create-pr`'s fact legs could never arrive, since round one let a fact arrival
+    move only the queued leg, and a runner leg is queued where they leave. A fact leg or person
+    leg now arrives whenever it leaves Baton's station and no claim is active, idempotent by
+    `ref`; its default `next` must have runs left.
+  - **Major:** no rule named who attests a fact arrival under `protected` — now the home's merge
+    runner, as its `service:` key, from the forge it already reads (R-BTN-181); `claim_legs` could
+    not hold adoption's runs or survive export — keyed by its own `id` with the ticket and a
+    nullable claim; the adopt route's callers disagreed with R-BTN-39 and B-120 still built an MCP
+    action — the route takes an `approvers.policy` approver and `ran?`, and `approvers.policy`
+    lists adopt; `std:decision@1` had no idempotence key and `std:restart@1` no longer refined it —
+    `ref` added, `std:restart@1` its own schema; §13 lacked `dispatch` — added to `outbox.kind`
+    and `couriers.delivers`, a dispatch entry has no ticket, is confirmed by observation number,
+    and a pin refusal raises `baton.dispatch-refused`; a tenant-wide dispatch courier is
+    registered per repository under `approvers.members`.
+  - **Minor:** the R-BTN-131 table (both courses' fact legs), leftovers in R-BTN-33, R-BTN-148,
+    R-BTN-109, R-BTN-122 and the `kind` field, `std:arrival@1`'s `ref`, `ticket_stations`' path and
+    `next_source`, the want's causes, and B-120's and B-152's drift.
+
+- **2026-11-01 — review round three of PR #150's parts 1–3 and 5** (one fresh reviewer, the
+  rounds' fixes as a delta, the last round the babysit skill allows). Nothing blocking. Fixed:
+  - **A fact arrival on a held ticket:** an arrival now also waits while Baton holds the ticket
+    (a call or `suspend` condition it is blocked on, a `cancel` or `outbox` override), deferred
+    with its `ref` and applied when the hold ends, raising nothing; a call settles only at its own
+    station (R-BTN-39, R-BTN-165).
+  - **Import:** `pending_owner_state` holds course history (`station`, `history`, `run`), and a
+    ticket with pending history is placed from it, not at `start` (R-BTN-88, R-BTN-39).
+  - **R-BTN-5:** a claim is re-verified against Baton's position and git's readiness; where the
+    ticket is never comes from git.
+  - **Minor:** the `approvers.policy` row's cells; the `stale-board` parentheticals removed;
+    R-BTN-116 no longer requires the queued leg; `std:decision@1`'s `ref` optional for a signed
+    human answer; `claim_legs` readers (the `call` block's ref, `no_chain_from`, export); R-BTN-181's
+    supersession exception for the sync; dispatch's routes, alarm, signed tuple, history events
+    and courierless backstop; leftovers in R-BTN-171, the dashboard, G-BTN-75, S-BTN-67 and
+    `ticket_stations`.
+  - **Open, put to the owner:** under `protected` the merge runner cannot do the attesting round
+    two gave it — a trusted runner runs no repository code, so it has no station function to read
+    the fact legs with, no trigger beyond a queued `merge`, and a preset cannot name its key.
+
+- **2026-11-01 — R-BTN-192 (new), R-BTN-69, R-BTN-131, R-BTN-181, R-BTN-188, R-BTN-191,
+  R-BTN-91, §14, S-BTN-196 (owner direction): the fact reader.** Round three's open finding —
+  under `protected` nothing could attest a fact arrival — put to the owner, who chose the built-in
+  fact reader over confirming each human action or leaving fact legs inert. A fact leg names one
+  of a closed set of forge facts (`arrives: {fact: pr-merged | pr-verdict | pr-opened |
+  pr-pushed}`); the merge runner, in its fact-reader mode, reads them through the CLI's fact
+  adapters for the tickets `GET …/fact-legs` lists, each minute and on a `facts` ring, and attests
+  them as a `service:` key the owner names; `baton.fact-reader-missing` when none is named. Built
+  by B-140; B-120 depends on it.
+
+- **2026-11-01 — §5 R-BTN-69, R-BTN-131, R-BTN-165, R-BTN-190, §6 R-BTN-171, §12.8 R-BTN-180,
+  R-BTN-181, R-BTN-183, R-BTN-188, R-BTN-189, R-BTN-192, §15 S-BTN-194, §16 (owner direction):
+  the protected route reworked as one change per ticket.** Review round one had found the first
+  draft (2026-10-31, above) incomplete. Its first finding, station functions unable to read
+  course history, was closed by Baton owning course history (same PR). The rest is closed by
+  replacing the route. The owner, 2026-10-31, chose that "a marker course's PR touching only
+  ticket and output paths merges on the owner's `std:approval@1` alone", replacing
+  `merge.reviews`. On 2026-11-01 the owner chose to rework part 4 in the same PR rather than strip
+  it, and answered its three open questions, each with the recommended option:
+  - `decision`'s packet approval carries the answer: "One action";
+  - a `build-app` plan's children land in one change: "One PR per plan";
+  - no agent-filed change, status-only included, merges without the owner: "No exemption".
+
+  The route now:
+  - **One work branch per ticket.** Each marker leg commits its record and outputs on the
+    ticket's work branch, under its usual instructions, and the first opens the PR.
+  - **The approval gate.** What follows an output waits on the owner's `std:approval@1` of the
+    head; the change merges once, at the course's last approval, by a **ticket merge**
+    (R-BTN-183). That merge takes the approval in place of `merge.reviews` and `merge.checks` and
+    is limited to the ticket folder and the course's new `outputs` field (replacing `proposes`).
+    It applies every other merge rule (paths, control paths, symlinks, leg state, continuity,
+    authorship, foreign commits) and refuses `id-taken`. `std:approval@1` gains an optional
+    `answer`. On this route `build-app`'s `plan` writes the children, and `file` returns them
+    as already landed (R-BTN-165).
+  - **The end waits for the merge.** The end arrival is deferred until the merge runner, which
+    lists waiting tickets through the fact reader (R-BTN-192), attests the merge as `pr-merged`.
+    After it, a leg's record is leg state where `leg_state` says.
+  - **Refining** is the owner's own commits, attested by `pr-pushed`. `changes` re-queues the
+    writer, and a cancel closes the PR unmerged.
+  - **Removed:** `std:proposal@1`, the `propose` outbox kind, the second kind of leg state and
+    the leg-state record path. The proposal merge (handler tickets and other template writes) now
+    takes R-BTN-183's path, control-path and leg-state refusals, which the first draft's merge
+    skipped.
+  - **Guarantees.** `no-runner-lands` and `independent-review` state the ticket merge as their
+    one approval-only route.
+
+  Round one's findings, closed:
+  - **(a) Path checks skipped:** the ticket merge and the proposal merge apply R-BTN-183's.
+  - **(b) End before landing:** the end is deferred until `pr-merged`.
+  - **(c) Close deleting the blobs a copy needed:** no copy remains; outputs are on the work
+    branch.
+  - **(d) Unruled writes, ids, rejection and refine-then-approve:** each leg's writes are on one
+    branch; `id-taken`; cancel; the owner's commits and `changes`.
+
+  Built by B-149 (rewritten); B-140 notes the proposal merge's path checks.
+
+- **2026-11-01 — review round one of PR #150's reworked part 4** (two fresh reviewers, given the
+  diff and the impact list and told to check the rules it did not touch). Both found the same two
+  blocking problems:
+  - **The end release was an arrival no leg declared.** `pr-merged` is a fact arrival R-BTN-39
+    applies only on a leg declaring `arrives`, and "deferred" named no hold.
+  - **The owner's refining commits had no attestation.** `pr-pushed` is an arrival, not a range,
+    and R-BTN-183's foreign-commit and signed-authorship rules would reset or block them.
+
+  The majors:
+  - gates no course file declared;
+  - `changes` with no edge;
+  - a merge with no trusted leg or claim;
+  - an approval whose `paths` covered only protected paths;
+  - eligibility any course could claim by declaring `records: policy`;
+  - `baton request` refusing the courses that post-merge legs file;
+  - post-merge records deleted at close;
+  - cancel with no actor;
+  - an unbound decision answer;
+  - stranded branches on a policy change;
+  - `build-app`'s children unclaimable and unsettled;
+  - stale counts of the git kinds.
+
+  Fixed:
+  - **A held position.** A gated arrival is held (`next_source: merge`, R-BTN-83, R-BTN-39), and
+    the built-in trusted leg **`baton.ticket-merge`**, claimed and fenced as any trusted leg,
+    merges and releases it. The R-BTN-192 ticket-merge list is withdrawn.
+  - **Declared gates.** A leg field `lands` (`merge` on a runner leg, `stage` or `merge` on a
+    person leg) marks the gates, and S-BTN-194 lists each standard course's.
+  - **The approval.** It lists the owner's commits (`owner_commits`), which are exempt from
+    foreign-commit resets and stand under signed authorship by its signature. It carries a
+    general `answer` (R-BTN-116), which binds only to the head the gate waits on. Its `paths`
+    cover every changed path on a ticket merge.
+  - **Sending back and rejecting.** Sending a change back is the owner's `route`, allowed at a
+    `merge` hold. Rejecting is the new `baton owner ticket cancel` (R-BTN-168), whose
+    `baton.ticket-merge` `close` action closes the PR unmerged.
+  - **Who may land this way.** The policy's new `merge.ticket_courses` (empty by default, the
+    five marker courses under `protected`) decides which courses may land by ticket merge. A
+    course with `lands` that it omits is `unlandable-course`. The ticket merge requires a `human`
+    approval whatever `attestations` admits.
+  - **Refusals.** The close refuses a push outside the ticket folder and `outputs`. Merge
+    refusals are named, hold the ticket and raise `baton.ticket-merge-refused`.
+  - **After the merge.** Filings are proposed (R-BTN-180), and the leg-state branch of a ticket
+    closed on this route is kept.
+  - **The route.** It rides the claim response and is fixed once the branch exists. A claim the
+    policy tightened under is queued again on the new route.
+  - **`build-app`'s children.** They carry `called_by: {leg}`, bound and evaluated at `file`'s
+    `spawned` end.
+  - **Corrected text:** the worked example, the attestations cell and the git-kind counts.
+
+- **2026-11-01 — R-BTN-39, R-BTN-69, R-BTN-83, R-BTN-116, R-BTN-131, R-BTN-165, R-BTN-168,
+  R-BTN-171, R-BTN-180, R-BTN-181, R-BTN-183, R-BTN-188, R-BTN-189, R-BTN-190, §9 end reasons,
+  §15 S-BTN-194, §16 (owner direction): the protected route withdrawn from this PR, to B-149.**
+  Review round two of the second draft (one fresh reviewer) found two blocking problems:
+  - **A confirmation deadlock.** A gated end is never confirmed under R-BTN-10, and the merge
+    cannot be claimed while it is unconfirmed.
+  - **A plain answer skips the gate.** A plain `std:decision@1` answers a gated person leg, so a
+    course could end before its change lands.
+
+  It found eight majors besides: a post-approval push both voiding and resetting; unverified
+  `owner_commits`; a cancel racing a claimed merge; post-merge outputs with no landing path; policy
+  changes stranding branches; `independent-review` holding while code lands unreviewed;
+  `build-app`'s children trusted from the runner's list; and person legs the course table does not
+  name. Several trace to person and call legs that B-7, B-41 and B-62 have not yet built. The
+  owner, asked whether to make a third draft in this PR or split it out, chose "Split part 4
+  out": merge this PR with parts 1–3 and 5, and specify the route in its own PR. Everything the
+  two drafts added is removed from the specification:
+  - R-BTN-131's protected route;
+  - the course fields `records`, `proposes`, `outputs` and `lands`;
+  - `std:proposal@1`, and `std:approval@1`'s `answer` and `owner_commits`;
+  - the `propose` outbox kind;
+  - the `merge` hold and `baton.ticket-merge`;
+  - `merge.ticket_courses`;
+  - `unlandable-course`, `released:cannot-finish:policy` and `baton.unlandable`;
+  - the owner cancel;
+  - the leg-state branch's second kind;
+  - S-BTN-194 and its Decisions entry.
+
+  The specification states the marker courses as before this PR's part 4, except that their
+  machine state is course history (part 1). B-149 is rewritten to carry the owner's rulings of
+  2026-10-31 and 2026-11-01, the second draft as the starting text, and every open finding as its
+  amendment's acceptance list.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

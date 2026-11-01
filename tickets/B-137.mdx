@@ -3,7 +3,7 @@ title: "B-137 — Board posts are an attack surface: machine keys out of the pol
 id: B-137
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -60,3 +60,5 @@ R-BTN-97; B-126, B-127; `docs/security-model.mdx` (reach 7, reach 8).
 ## Status
 
 _(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may post the board is the repository policy's `inputs.board` (`machine`), R-BTN-188, built by B-145. Read it through `src/core/policy.ts` once B-145 lands.)_
+
+_(2026-11-01: `inputs.answers` is retired (immediately-run/baton#150, R-BTN-191): what it decided is now the policy's `attestations` entries — `sync` not admitted for `std:decision@1` or `std:arrival@1` is the old `inputs.answers: attestation`. Read the references above that way.)_

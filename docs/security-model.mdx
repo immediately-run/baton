@@ -130,15 +130,17 @@ every tenant trusts:
 
 - its database of keys, grants, bars, holds and settings: everything *What a push cannot reach*
   lists;
-- `BATON_GITHUB_APP_KEY` (Actions write on every installed repository, so it can dispatch any
-  `workflow_dispatch` workflow, the deploy included), the webhook secrets and the cursor key;
+- the webhook secrets and the cursor key; since B-152 (BATON_SPEC R-BTN-171), no credential that
+  acts: the GitHub App's key, which can dispatch any `workflow_dispatch` workflow, lives with the
+  dispatch courier, which starts only the workflows its own configuration pins, so a compromised
+  server can queue a dispatch but not start the deploy;
 - every answer runners act on: claims, snapshot shas, recommendations, the message of the day.
 
 The token also reaches every other Worker on the account. Whether `production` requires a
 reviewer was not verified; even if it does, the reviewer is the owner's account (see *The
 decision*). **Rated critical: the largest reach on this page.** B-135 makes a production deploy
-a human act. A compromised server or Cloudflare account is recovered by rotating the App key,
-the webhook secrets and the administrator keys, and redeploying a known commit (B-125).
+a human act. A compromised server or Cloudflare account is recovered by rotating the webhook
+secrets and the administrator keys (and the App key if the courier's host was reached too), and redeploying a known commit (B-125).
 
 ### 1. Code execution on every runner that serves the home
 

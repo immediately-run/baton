@@ -11,6 +11,29 @@ tags: [context]
 code embodies, each with the reason it was taken — so a change that contradicts one is a
 change to Baton, not a change in Baton.</Lede>
 
+## Four nouns at the boundary
+
+Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN-191, R-BTN-171):
+
+| | About the outside world | Between Baton and its caller |
+|---|---|---|
+| **In** | an **attestation**: a statement Baton weighs by its writer | a **command**: a request Baton accepts or refuses |
+| **Out** | an **outbox entry**: an effect a courier delivers | a **reply**: the answer to a command or a read |
+
+- **One inbound path for facts.** A review, a human's answer, a runner's report of where its leg
+  reached, a fact the sync read from git, a courier's delivery and a provider's quota are all
+  attestations, differing only in writer; the repository's policy decides whose count. So there
+  is one place to ask "who may tell Baton this?".
+- **Commands are not evidence.** A claim or an owner's setting asks Baton to change its own state,
+  and Baton's gates decide; a command may carry an attestation (an advance carries the holder's
+  report of the leg), and the two are judged separately.
+- **One outbound path for effects.** Baton holds no credential that acts outside it: a git write,
+  a check run and a workflow dispatch are outbox entries, delivered by couriers that hold the
+  credentials and confirmed by reading the effect back. A compromised Baton can queue entries,
+  never deliver them.
+- **Replies stay replies.** The doorbell's ring, a recommendation and a signed read go to whoever
+  asked or holds the socket, and carry no effect.
+
 ## The ledger and the cache
 
 - **Git is the ledger for the work; Baton owns what no push may decide.** Every ticket, its

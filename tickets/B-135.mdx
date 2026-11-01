@@ -3,7 +3,7 @@ title: "B-135 — Baton's production deploy is a human act: a signed tag or a hu
 id: B-135
 project: baton
 status: available
-updated: 2026-10-27
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -66,3 +66,7 @@ deploy); `docs/security-model.mdx` (reach 0).
 - [ ] production deploys only from the human gate; the drill passes
 - [ ] the Cloudflare token scoped; the build job holds no secret
 - [ ] the security model's reach 0 states the recovery
+
+## Status
+
+_(2026-11-01: the dispatch credentials move out of Baton (BATON_SPEC R-BTN-94, R-BTN-171, B-152): the GitHub App's key and the forge dispatch tokens are the dispatch courier's, not Baton's; a compromised Baton exposes the webhook secrets, which verify deliveries and act on nothing.)_

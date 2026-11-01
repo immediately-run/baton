@@ -1,21 +1,22 @@
 ---
-title: "B-120 — Baton owns a ticket's course history: git writes cannot rewrite it; baton owner ticket adopt makes Baton take git's"
+title: "B-120 — Baton owns a ticket's course history, and every statement it receives is an attestation: no snapshot places a ticket, git facts settle only declared legs, baton owner ticket adopt sets a position (R-BTN-39, R-BTN-191)"
 id: B-120
 project: baton
 status: available
-updated: 2026-10-26
+updated: 2026-10-31
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1095
 tier: judgement
-description: "The owner's ruling, 2026-10-26: git is authoritative in everything except a ticket's course history (the station→leg pairs traversed). A snapshot that disagrees is a discrepancy, not a move; an owner's signed adopt command (and MCP's, later) replaces Baton's history with git's. Amends value 1, the architecture page and R-BTN-85."
+description: "Build Baton as the one authority on a ticket's course history and position, as the spec now states it (R-BTN-35, R-BTN-39, R-BTN-10, R-BTN-63, R-BTN-70, R-BTN-71, R-BTN-81, R-BTN-83, R-BTN-85; S-BTN-18, S-BTN-34, S-BTN-47, S-BTN-195; R-BTN-191 and the one inbound path, folded in from B-151): no snapshot places a ticket; fact arrivals only on person legs and legs declaring arrives (under protected, attested by the fact reader, R-BTN-192, B-140); the sync reads positions in its observation; regression detection retired; confirmation by evidence; and baton owner ticket adopt for legs done outside Baton. Requires: none."
 topics:
   - baton
 owns: {}
 prs: []
-depends_on: []
+depends_on:
+  - B-140
 ---
 
 **Brief:** the owner, 2026-10-26, verbatim: "blindly accepting git updates as tickets status in
@@ -29,64 +30,105 @@ The case that prompted it: legs completed outside the runner, in an interactive 
 during stale-PR cleanup. They should be a deliberate act of a key holder, never a side effect of
 whoever can push.
 
-**This is a change to Baton, not in Baton.** It amends:
-- `docs/context/values.mdx` value 1 ("git wins… Baton owns only what git cannot");
-- `docs/context/architecture.mdx` ("Git is the ledger; the board is a cache");
-- spec R-BTN-85 (every disagreement logged, then git wins), R-BTN-46 ("then git wins"), R-BTN-81
-  (`git-moved`), §2e (snapshot paths), and the Decisions entries dated 2026-10-14/-15/-18 that
-  chose git-wins.
-The implementing PR amends them first, with this ruling cited.
+**Clarified:** the owner, 2026-10-31, in a design session: Baton is the sole authority on
+ticket history; tickets in git may get per-leg amendments, but git need not hold a ticket's
+full history. On adopt: "this is a useful fallback if baton is down". The four mechanism
+choices below were the owner's answers the same day.
 
-**Spec:** §2e (stations and paths, R-BTN-39, R-BTN-70), R-BTN-81/-84/-85 (history,
-discrepancies), §7.1 (the board post), §12.1 (who may run the override), R-BTN-130 (MCP).
+**Spec:** `spec/BATON_SPEC.md`, amended with this ticket (immediately-run/baton#150):
+R-BTN-1's table, R-BTN-35, R-BTN-39 (position, fact arrivals, adopt), R-BTN-69 (`arrives`),
+R-BTN-70, R-BTN-74 (`ctx.positions`), R-BTN-81, R-BTN-83, R-BTN-85 (`position-disagrees`),
+R-BTN-63, R-BTN-71 and *Disagreement, not movement*, R-BTN-10, §4.3 (the observation's
+`positions`), §4.4 (the board post's `attestations`; the readiness, arrival and implied-station types are R-BTN-191's, built below), R-BTN-131 (the marker courses
+and `create-spec`'s interactive legs write no machine state), §9, §13, §14's adopt route,
+§15 S-BTN-18, S-BTN-34, S-BTN-47, G-BTN-59, G-BTN-73, and §16's Decisions.
+`docs/context/vocabulary.mdx` (*Path*, *Confirmation*, *Adopt*) is amended with it; values
+and architecture already say it (2026-10-28).
+
+**Depends on:** B-140 (the fact reader, R-BTN-192), for protected homes' fact legs.
+
+### The choices (the owner, 2026-10-31)
+
+1. **Git facts move a ticket only on declared legs:** person legs and legs declaring
+   `arrives: {fact: …}`, by an edge from Baton's station. Anything else is `position-disagrees`
+   and moves nothing.
+2. **The sync reads Baton's positions** in its observation and hands them to `stations(ctx)`;
+   station functions compute readiness at that station only.
+3. **Regression detection is retired:** `regressed_since`, `git.regressed`, the runner's abort,
+   `baton.regressed`, path-extension checks, `position-replaced`, `route-overridden`,
+   `path-rewritten` and the `marker`/`inferred` next sources.
+4. **Confirmation checks evidence, not position:** an end's position stands at once; the end is
+   confirmed by the first snapshot after it that shows its named evidence.
 
 ### Why
 
-Today every accepted snapshot overwrites `ticket_stations`. A snapshot's path that neither
-extends the last one nor is shorter is stored anyway (`off-graph`, "git wins"). Anyone who can
-push to the home repository can therefore rewrite where a ticket is and how it got there. That
-covers the ticket files, `.baton/` markers, and PR comments for PR courses. Leases, retries,
-holds and run counts all key off that traversal, so the write is a way around them. One example:
-reset a path to escape `max_runs` or a retry hold.
+Every accepted snapshot overwrites `ticket_stations` today, so anyone who can push to the home
+repository can rewrite where a ticket is and how it got there: ticket frontmatter and closes,
+markers, PR comments. Leases, retries, holds and run counts key off that traversal, so the
+write is a way around them (reset a path to escape `max_runs` or a retry hold).
 
-### What to decide and build (a judgement ticket: the open points first)
+### What to build
 
-1. **What Baton owns.** The course history: the ordered `(station, leg)` pairs a ticket has
-   traversed, and its current station. Git keeps everything else: the ticket's existence,
-   frontmatter, body, closure, and the evidence of the work.
-2. **What a snapshot may still do to a ticket's position.** Proposed:
-   - a snapshot that agrees with Baton's history, or only confirms what a claim reported,
-     is accepted;
-   - a snapshot that disagrees is recorded as a discrepancy (R-BTN-85's event, both values)
-     and listed under Needs you. It does not change the station.
-   - Closure (done or withdrawn) stays git's (value 1's remainder). Decide whether a closure
-     from git ends an active claim.
-3. **The override: `baton owner -i KEY ticket adopt REPO TICKET`**, and the same action over MCP
-   once B-25 lands. A repository owner's signed request makes Baton replace the ticket's
-   history and station with what git shows at the current head. An administrator can also
-   run it. Baton logs the before and after (`history-adopted`), ends or fences an active
-   claim first, and resets the retry count's window.
-4. **Open: "the contents of the ticket file".** On the marker courses (B-100) the ticket file is
-   the record, so adopting reads it. On `create-pr`, the position comes from PR facts (verdicts,
-   pushes, merge), not the ticket file. Decide whether `adopt` reads the snapshot's posted path
-   for the ticket (any course), or the ticket file alone (which would need PR courses to write
-   their position into the file, B-101's direction).
-5. **Runner advances** remain the normal writer of history. Nothing here changes the lease or
-   the advance.
+1. **Core.** Positions written only by advances and ends, Baton's settlements and overrides,
+   fact arrivals and adopt (R-BTN-39); a new ticket at `start` on its first snapshot. A
+   snapshot updates readiness and bars only, discarding readiness whose `at` is not Baton's
+   position `{station, path_len}`. `position-disagrees` replaces the retired discrepancy subs, raised under Needs you.
+   Retire the regression machinery listed above, in core, the runner and the heartbeat.
+2. **The observation's `positions`**, read by the station functions (their readiness, arrivals and implied station are the sync's attestations, built below);
+   `StationCtx.positions` in `src/defaults/courses.ts`.
+3. **The standard courses' station functions** compute readiness at the given station from
+   their facts. `create-spec`'s `converse` and `address`, and the marker courses' closes, write
+   no machine state; the fact legs R-BTN-131 names — `create-pr`'s `reviewed-by-hand` and
+   `merged-by-hand`, `create-spec`'s `converse` and `address` — declare `arrives: {fact: …}`, and
+   under `protected` the fact reader attests their arrivals (R-BTN-192, built by B-140).
+4. **Adopt:** the route (an `approvers.policy` approver, never a delegated key, so no MCP
+   action), `baton owner ticket adopt` with `--at`, `--next` and `--ran`, the `nothing-implied`
+   refusal, release and fence first, the `adopted` path entry, `claim_legs` runs with a null
+   claim (`claim_legs` keyed by its own `id` with `repository_id` and `ticket_id`, a new
+   migration), superseding an unconfirmed end, `history-adopted`, the attempt-window reset.
+5. **Confirmation** by evidence (R-BTN-10), and `baton.unconfirmed` for evidence never shown.
+6. **Migration.** At the release that ships this, each live ticket's course history starts from
+   the newest of: its `ticket_stations` row, the last arrival in its `claim_legs`, and an
+   unconfirmed end's pair; no git read. `next_source` `marker` maps to `holder` and `inferred` to
+   `course`; every `regressed_since` is cleared. A ticket whose position is still wrong is the
+   owner's to adopt.
+7. **The model** (`model/baton.qnt`): snapshots no longer move positions; adopt as an action;
+   disagreement as a no-op plus a discrepancy; `model:pr`'s report.
+
+### What to build: the inbound path (folded in from B-151 in review round one)
+
+1. **Writers.** `sync` for the board post's credential (sync key, CI identity, machine key) and
+   `courier` for a courier key, in the attestation writer enum and the policy's `attestations`
+   entries.
+2. **The board post.** `attestations: [{type, ticket, ref?, value}]` validated per type and
+   stored in the post's transaction, superseding the previous run's of the same type and
+   subject; refused with the post. `stations` and `markers` are retired from the post; bars,
+   decisions and `not_before` move into `tickets[]`.
+3. **The holder's arrival.** An `advance`, end or suspension records its pair as the holder's
+   `std:arrival@1` (writer `runner`, signed by the request), the same type as the sync's fact
+   arrival; every preset admits `runner` for it on the claim's own leg (R-BTN-83, R-BTN-191).
+4. **Readers.** Readiness (R-BTN-70), fact arrivals and implied stations (R-BTN-39), outputs
+   (R-BTN-82), markers (R-BTN-46) and evidence (R-BTN-10) read from the newest accepted run's
+   attestations; a person leg settles from a `std:decision@1` by an admitted writer (R-BTN-116).
+5. **Couriers.** `POST /v1/courier/entries/{repository}/{id}` with `delivered` records a
+   `std:effect@1` by `courier`; confirmation stays the sync's later attestation of the effect.
+6. **The CLI's sync** emits the attestations from each station function's result.
+7. **The model:** one inbound path, and no judgement over two runs' attestations.
+
 
 ### Tests
 
-- Scenarios, both hosts:
-  - a push that rewrites a held ticket's position changes nothing in Baton and raises a
-    discrepancy under Needs you;
-  - `adopt` by the owner moves it and records the before and after;
-  - `adopt` by a granted runner's key is `forbidden`;
-  - `adopt` during an active claim fences the claim first.
-- The model: `adopt` as an action, and snapshot disagreement as no-op plus discrepancy, with
-  `model:pr`'s report.
+- S-BTN-195 and S-BTN-187 as amended, both hosts.
+
+- S-BTN-18, S-BTN-34 and S-BTN-47 as amended, on both hosts.
+- A push that rewrites a held ticket's frontmatter changes nothing in Baton (position or counts)
+  and raises `position-disagrees`.
+- `adopt` by a granted runner's key is `forbidden`; during an active claim it releases and
+  fences the claim first.
 
 ### Exit criteria
 
-- [ ] values, architecture and spec amended with this ruling cited
-- [ ] git writes cannot change a ticket's course history; `baton owner ticket adopt` can
+- [ ] `npm test` green with the amended scenarios
+- [ ] `npm run typecheck` green
+- [ ] no snapshot path in `src/core/` writes a ticket's station, path or queued leg
 - [ ] a leg finished outside the runner is brought into Baton by one owner command
