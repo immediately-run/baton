@@ -1068,6 +1068,43 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     guarantees `no-runner-lands`, `tickets-approved`, `independent-review` and
     `signed-authorship` now state what a human's merge by hand is.
 
+- **2026-11-01 — review round two of PR #154** (one fresh reviewer, the diff and the impact
+  list). Blocking:
+  - **Continuity.** Commits no claim reported became the next leg's input, against R-BTN-183's
+    continuity, which also opened cross-ticket injection, since any runner may push a
+    per-ticket branch.
+
+  Majors:
+  - **The merge itself.** The merge's actor and paths were unchecked, and "only the human may
+    merge" was false under `protected`.
+  - **Merge methods.** Squash, rebase and fast-forward merges never counted.
+  - **Carriers.** Nothing carried the current branch, Baton cannot read git for a merge's
+    children, and core keyed on course names.
+  - **Ends.** S-BTN-107 expected the removed `released:blocked`, and `stuck` never closed the
+    ticket in git.
+  - **Migration.** It could not run in the order B-149 gave it.
+  - **`decision`.** Its settled route and `carry-out`'s side effects had no rule.
+  - **Untouched text.** R-BTN-165's empty-set sentences, R-BTN-85's table, and R-BTN-120's
+    `done`.
+  - **`cooperative` closure.** A closed ticket could drop its arrival.
+
+  Fixed:
+  - **Continuity holds.** A leg starts only at the reported head. Unreported commits raise
+    `baton.marker-unreported` and hold the next leg on the owner, who merges with them, accepts
+    them (`baton owner ticket accept-head`) or rejects.
+  - **The merge is checked.** Under `protected` the fact reader requires the human-only
+    identity as the merge's actor and the merged diff within the items glob and `writes`;
+    otherwise a `merge-refused` discrepancy, no arrival. A forge merge counts by the PR's head
+    at merge, and a git merge by the first first-parent commit containing the head.
+  - **Carriers and fields.** A course field `work_branch: per-ticket` (core keys on it) and
+    `writes` (renamed from `outputs`, which R-BTN-82 already uses). `branch` on `std:arrival@1`,
+    `positions` and `fact-legs`. `std:git.landed@1` for a merge's children.
+  - **New discrepancies:** `branch-extra`, `merge-refused` and `child-closed`.
+  - **Ends.** `verify` sets `done` at `stuck` too, and a git-closed ticket is done for dependants
+    only at its end. Closed tickets stay listed until their arrival.
+  - **`decision`.** A settled `prepare` queues `land`, and `carry-out` only records and files.
+  - **Text.** S-BTN-107, R-BTN-35 and R-BTN-165's empty-set sentences now match.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

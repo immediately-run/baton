@@ -72,17 +72,18 @@ The five marker courses cannot run on a home whose default branch is protected.
 
 ### What to build
 
-1. **The marker branch.** Each marker leg's `close` commits on the ticket's current marker branch
+1. **The current branch.** The courses declare `work_branch: per-ticket` and `writes`, and core
+   keys on the field. Each marker leg's `close` commits on the ticket's current marker branch
    (`baton/m/<id>/<n>`): the one the last writing leg reported, or a new one cut from the default
    branch, or from a closed PR's head after a route. The close then opens the PR and reports
    `{branch, head}` with the position. It refuses paths outside the ticket folder and the course's
-   `outputs`, and never pushes or merges the default branch (`src/defaults/ticket-state.ts`).
+   `writes`, and never pushes or merges the default branch (`src/defaults/ticket-state.ts`).
    The courses' `branch_pattern` is `baton/m/{ticket}/*`, and R-BTN-25 continues only the current
    branch.
 2. **The course files** (`src/defaults/courses.ts`), as R-BTN-131's table gives them: every fact
    leg with `arrives: {fact: pr-merged}`; the self-edges with `max_runs`; `decision`'s `answer`,
    `settled` and re-ask paths; `build-app`'s stage PRs, `verify`'s three outcomes, `ship-anyway`
-   and `fix`'s `unfixed`; and `outputs` (`build-app`: `product/{ticket}/**`). A writing leg's
+   and `fix`'s `unfixed`; and `writes` (`build-app`: `product/{ticket}/**`). A writing leg's
    `next` naming itself is refused.
 3. **What a leg reads and when a merge counts.**
    - The runner reads the ticket at the marker head (R-BTN-5), and the station functions read
@@ -91,7 +92,14 @@ The five marker courses cannot run on a home whose default branch is protected.
      its reported head, made by no claim, or on `forge: git` a first-parent merge commit.
    - `fact-legs` carries the branch and head, and keeps a ticket closed `done` until its arrival
      applies.
-   - `baton.marker-unreported` is raised for unreported commits.
+   - Continuity: a leg starts at the reported head, refusing `foreign-commit` otherwise.
+     `baton.marker-unreported` holds the next leg on the owner, and
+     `baton owner ticket accept-head` (an `approvers.policy` approver) records the head.
+   - Under `protected` the fact reader checks the merge's actor (the human-only identity) and its
+     paths, raising `merge-refused`. A squash or rebase merge counts by the PR's head at merge,
+     and on `forge: git` a fast-forward counts.
+   - `branch` rides `std:arrival@1`, the claim response, `positions` and `fact-legs`, and the
+     sync or fact reader attests `std:git.landed@1`.
 4. **Call legs over a merge's children** (R-BTN-165): the set is read from the applied merge,
    `child-closed` is refused, the null outcome taken on an empty set, the completion evaluated at
    the end, and the children `waiting` on `parent` until bound.
@@ -104,19 +112,20 @@ The five marker courses cannot run on a home whose default branch is protected.
      the question is settled. `carry-out` reads its claim's input `answer` and reports `asked`
      to re-ask.
    - New ids skip the open marker branches' heads.
-6. **Migration.** Before the new course files land, place every live marker ticket whose
-   position the new file lacks with `baton owner ticket adopt`, so that R-BTN-64's course test
-   passes. The map, tested on a fixture per row:
-   - `decision`: at `asked` with `carry-out` queued, to `answered` if an `answer:` was given,
-     else to `asked` with `answer` queued.
-   - `build-app`: at `defined`, `designed`, `architected` or `planned`, with the next drafting
-     leg or `file` queued:
-     - to the next `*-accepted` station if the git `answer:` approved that stage;
-     - else to the drafting station with its `accept-*` leg queued, which waits for a PR the
-       next run of the drafting leg opens.
-   - `draft-ticket` at `drafted` with `check` queued: unchanged.
-   - Any ticket a leg left with records on the default branch keeps them, and its next leg
-     opens the first marker branch.
+6. **Migration**, in this order, tested on a fixture per row:
+   1. Land the new course files. A live ticket whose queued leg the new file lacks waits on
+      `course-changed` (R-BTN-83), which R-BTN-64's course test accepts.
+   2. Place each such ticket with `baton owner ticket adopt`:
+      - `decision` at `asked`, with `carry-out` queued: to `asked` with `answer` queued, so the
+        owner answers again in Baton. A git `answer:` is not carried over.
+      - `build-app` at `defined`, `designed` or `architected`: to the next `*-accepted` station
+        if the git `answer:` approved that stage, else to the drafting station with its
+        `accept-*` leg queued and the drafting leg routed to open the stage's PR.
+      - `build-app` at `planned`: to `architecture-accepted` with `plan` queued, so the plan's PR
+        carries the children; never to `plan-accepted`.
+      - Other stations: unchanged.
+   3. Any ticket a leg left with records on the default branch keeps them, and its next leg
+      opens its first branch.
 7. **The docs.** In `docs/standard-courses.mdx`, *How each course finds where a ticket is* and
    *`build-app`, step by step*. In `docs/security-model.mdx`, the marker courses among what a
    human's merge by hand lands.
@@ -148,3 +157,5 @@ S-BTN-104, S-BTN-107 and S-BTN-194, every case in their rows, and each row of it
   is amended in its own PR, stacked on #150.
 - 2026-11-01: review round one of #154 (two reviewers) closed in the spec; this ticket's items
   rewritten on it, with B-7 and B-62 added as dependencies.
+- 2026-11-01: review round two of #154 (one reviewer) closed in the spec; items 1, 3 and 6
+  rewritten on it.
