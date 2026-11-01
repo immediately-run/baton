@@ -414,7 +414,7 @@ export async function sshsigSignedData(namespace: string, hashAlg: 'sha256' | 's
 }
 
 /** An SSHSIG blob by `key` over `message` in the `baton-request` namespace. */
-async function verifySshsig(key: SshKey, blob: Uint8Array, message: Uint8Array): Promise<void> {
+async function verifySshsig(key: SshKey, blob: Uint8Array, message: Uint8Array, namespace: string = REQUEST_NAMESPACE): Promise<void> {
   let ns: string, reserved: Uint8Array, hashAlg: string, signature: Uint8Array;
   try {
     const w = new Wire(blob);
@@ -433,10 +433,17 @@ async function verifySshsig(key: SshKey, blob: Uint8Array, message: Uint8Array):
   }
   // Namespace before anything else: a git commit's signature, or any other made with this key,
   // is never a request's.
-  if (ns !== REQUEST_NAMESPACE) throw unauthenticated(`the signature is in the namespace ${JSON.stringify(ns.slice(0, 64))}, not ${REQUEST_NAMESPACE}`);
+  if (ns !== namespace) throw unauthenticated(`the signature is in the namespace ${JSON.stringify(ns.slice(0, 64))}, not ${namespace}`);
   if (hashAlg !== 'sha256' && hashAlg !== 'sha512') throw unauthenticated('the SSHSIG hash is neither sha256 nor sha512');
   const data = await sshsigSignedData(ns, hashAlg, message, reserved);
   if (!(await verifySshSignature(key, signature, data))) throw unauthenticated('the signature does not verify');
+}
+
+/** An SSHSIG by the key `publicKeyLine` over `message` in `namespace` (R-BTN-185, B-145: a
+ *  human-only key registers each later one with a signature over the new key's public line in
+ *  `baton-human-keys@1`). The line is an OpenSSH public key as stored. */
+export async function verifyNamespacedSignature(publicKeyLine: string, blob: Uint8Array, message: Uint8Array, namespace: string): Promise<void> {
+  await verifySshsig(await parseSshKey(publicKeyLine), blob, message, namespace);
 }
 
 /** An origin's RFC 9421 `@authority`: its host, lower-case, and its port only when not the

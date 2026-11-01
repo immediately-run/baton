@@ -124,6 +124,11 @@ export interface Heartbeat {
   /** R-BTN-103: the repositories and `asks` this session delivers notices for, as a worker courier,
    *  and the entries refused as malformed. */
   couriers: { entries: { repository: string; asks: string[] }[]; refused: { repository: string; code: string }[] };
+  /** §12.8 (B-145, R-BTN-180): the protection checker's reports, one per repository; the core
+   *  checks the caller is each repository's checker and refuses the rest per entry. */
+  protection: { repository: string; matched: boolean; reading_hash: string }[];
+  /** §12.8 (B-145, R-BTN-189): the policy hash pins a trusted runner reports per repository. */
+  policy_pins: { repository: string; hash: string }[];
 }
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number }
@@ -207,6 +212,8 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     fenced: checkFenced(b.fenced),
     uses: checkUses(b.uses),
     couriers: checkCouriers(b.couriers),
+    protection: checkProtection(b.protection),
+    policy_pins: checkPolicyPins(b.policy_pins),
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
@@ -763,12 +770,22 @@ export interface Reading {
   until: number | null;
   valid_for_s: number;
   detail: unknown;
+  /** §12.8 (B-145 item 9, R-BTN-181): a reading may be signed — `nonce` and `signature` ride
+   *  beside it; which readings count for a repository is its policy's `readings` knob, read
+   *  once B-146 builds the requirements that gate on one. */
+  nonce?: string;
+  signature?: string;
 }
 export function checkReading(v: unknown, field: string, maxStateS: number): Reading {
   if (!isObj(v)) bad(field, 'must be an object');
   const r = v as Record<string, unknown>;
-  for (const k of Object.keys(r)) if (!['instance', 'kind', 'available', 'until', 'valid_for', 'detail'].includes(k)) bad(`${field}.${k}`, 'is not a reading field');
+  for (const k of Object.keys(r)) if (!['instance', 'kind', 'available', 'until', 'valid_for', 'detail', 'nonce', 'signature'].includes(k)) bad(`${field}.${k}`, 'is not a reading field');
   if (!isInstanceName(r.instance)) bad(`${field}.instance`, 'must be an instance name');
+  // R-BTN-181 (B-145 item 9): a signed reading carries both a nonce and its signature.
+  if ((r.nonce === undefined) !== (r.signature === undefined)) bad(field, 'a signed reading carries both nonce and signature');
+  if (r.nonce !== undefined && (typeof r.nonce !== 'string' || !/^[A-Za-z0-9+/_=-]{8,128}$/.test(r.nonce))) bad(`${field}.nonce`, 'must be a short nonce');
+  if (r.signature !== undefined && (typeof r.signature !== 'string' || !/^[A-Za-z0-9+/=\s]{16,8192}$/.test(r.signature))) bad(`${field}.signature`, 'must be the reading’s signature');
+  const signed = r.nonce !== undefined ? { nonce: r.nonce as string, signature: r.signature as string } : {};
   const raw = r.kind ?? 'state';
   if (raw !== 'state' && raw !== 'measure') bad(`${field}.kind`, "must be 'state' or 'measure'");
   const kind = raw as Reading['kind'];
@@ -778,11 +795,11 @@ export function checkReading(v: unknown, field: string, maxStateS: number): Read
   if (kind === 'measure') {
     if (r.available !== undefined || r.until !== undefined) bad(field, 'a measure carries only detail and valid_for');
     if (r.detail === undefined) bad(`${field}.detail`, 'a measure carries a detail');
-    return { instance: r.instance as string, kind, available: null, until: null, valid_for_s: valid as number, detail: r.detail };
+    return { instance: r.instance as string, kind, available: null, until: null, valid_for_s: valid as number, detail: r.detail, ...signed };
   }
   if (typeof r.available !== 'boolean') bad(`${field}.available`, 'must be a boolean');
   if (r.until !== undefined && (r.available || !isTime(r.until))) bad(`${field}.until`, 'is epoch ms, for an unavailable instance only');
-  return { instance: r.instance as string, kind, available: r.available as boolean, until: (r.until as number | undefined) ?? null, valid_for_s: valid as number, detail: r.detail };
+  return { instance: r.instance as string, kind, available: r.available as boolean, until: (r.until as number | undefined) ?? null, valid_for_s: valid as number, detail: r.detail, ...signed };
 }
 
 /** A readings post: `{readings: [...]}`, each checked. */
@@ -861,6 +878,49 @@ export function checkCouriers(v: unknown): { entries: { repository: string; asks
     }
   }
   return { entries, refused };
+}
+
+/** §12.8 (B-145, R-BTN-180): the heartbeat's protection reports — `{repository, matched,
+ *  reading_hash}` — malformed entries refused whole (a report a checker did not make is worth
+ *  refusing, not parsing around). */
+export function checkProtection(v: unknown): { repository: string; matched: boolean; reading_hash: string; legs?: { count: number; tickets: number } }[] {
+  if (v === undefined) return [];
+  if (!Array.isArray(v) || v.length > 16) bad('protection', 'must be a list of at most 16 reports');
+  return (v as unknown[]).map((x, i) => {
+    if (!isObj(x)) bad(`protection[${i}]`, 'must be an object');
+    const e = x as Record<string, unknown>;
+    for (const k of Object.keys(e)) if (k !== 'repository' && k !== 'matched' && k !== 'reading_hash' && k !== 'legs') bad(`protection[${i}].${k}`, 'unknown field');
+    if (typeof e.matched !== 'boolean') bad(`protection[${i}].matched`, 'must be true or false');
+    if (typeof e.reading_hash !== 'string' || !/^[A-Za-z0-9:_-]{1,128}$/.test(e.reading_hash)) bad(`protection[${i}].reading_hash`, 'must be a short reading hash');
+    // §14 (R-BTN-190): the heartbeat protection entry's `legs` — what the checker's reading
+    // covered, B-140's client sends it.
+    let legs: { count: number; tickets: number } | undefined;
+    if (e.legs !== undefined) {
+      const l = isObj(e.legs) ? e.legs : bad(`protection[${i}].legs`, 'must be {count, tickets}');
+      if (!Number.isSafeInteger(l.count) || (l.count as number) < 0 || !Number.isSafeInteger(l.tickets) || (l.tickets as number) < 0) {
+        bad(`protection[${i}].legs`, 'count and tickets are non-negative integers');
+      }
+      for (const k of Object.keys(l)) if (k !== 'count' && k !== 'tickets') bad(`protection[${i}].legs.${k}`, 'unknown field');
+      legs = { count: l.count as number, tickets: l.tickets as number };
+    }
+    return { repository: checkRepositoryId(e.repository, `protection[${i}].repository`), matched: e.matched as boolean, reading_hash: e.reading_hash as string, ...(legs ? { legs } : {}) };
+  });
+}
+
+/** §12.8 (B-145, R-BTN-189): the heartbeat's policy pins — `{repository, hash, floors_hash?}`:
+ * the whole policy document's hash, and the floors' when the runner pins it (R-BTN-189 says a
+ * trusted runner pins both). */
+export function checkPolicyPins(v: unknown): { repository: string; hash: string; floors_hash?: string }[] {
+  if (v === undefined) return [];
+  if (!Array.isArray(v) || v.length > 64) bad('policy_pins', 'must be a list of at most 64 pins');
+  return (v as unknown[]).map((x, i) => {
+    if (!isObj(x)) bad(`policy_pins[${i}]`, 'must be an object');
+    const e = x as Record<string, unknown>;
+    for (const k of Object.keys(e)) if (k !== 'repository' && k !== 'hash' && k !== 'floors_hash') bad(`policy_pins[${i}].${k}`, 'unknown field');
+    if (typeof e.hash !== 'string' || !/^[0-9a-f]{16,128}$/.test(e.hash)) bad(`policy_pins[${i}].hash`, 'must be the policy document’s SHA-256');
+    if (e.floors_hash !== undefined && (typeof e.floors_hash !== 'string' || !/^[0-9a-f]{64}$/.test(e.floors_hash))) bad(`policy_pins[${i}].floors_hash`, 'must be the floors’ SHA-256');
+    return { repository: checkRepositoryId(e.repository, `policy_pins[${i}].repository`), hash: e.hash as string, ...(e.floors_hash !== undefined ? { floors_hash: e.floors_hash as string } : {}) };
+  });
 }
 
 /** A courier's `asks` (R-BTN-80): 1 to 8 labels, each `ASKS`. */

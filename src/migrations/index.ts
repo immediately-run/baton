@@ -27,6 +27,7 @@ import windDown from './0024_wind_down.sql';
 import ontology from './0025_ontology.sql';
 import stationWrites from './0026_station_writes.sql';
 import routeChoices from './0027_route_choices.sql';
+import repositoryPolicies from './0029_repository_policies.sql';
 
 export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 1, sql: init },
@@ -56,4 +57,7 @@ export const MIGRATIONS: { id: number; sql: string }[] = [
   { id: 25, sql: ontology },
   { id: 26, sql: stationWrites },
   { id: 27, sql: routeChoices },
+  // 0028 is B-107's (provider-advisory retirement), merging ahead of this: this branch numbers
+  // its migration 0029, and 28 stays free for it.
+  { id: 29, sql: repositoryPolicies },
 ];
