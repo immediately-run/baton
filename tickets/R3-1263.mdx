@@ -3,7 +3,7 @@ title: "R3-1263 — Baton pulled syncs: sync wants, GET /v1/sync/wanted, POST /v
 id: R3-1263
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -80,3 +80,5 @@ _2026-10-16 — amended for the 2026-10-16 amendment (now BATON_SPEC §3.3 R-BTN
 
 
 _(filed 2026-10-16)_
+
+_(2026-11-01: the dispatch credentials move out of Baton (BATON_SPEC R-BTN-94, R-BTN-171, B-152): the dispatch adapters become dispatch targets a dispatch courier delivers as `dispatch` outbox entries, woken by the doorbell; Baton queues them in the transaction that records the want. B-152 builds the move.)_

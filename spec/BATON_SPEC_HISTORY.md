@@ -734,6 +734,26 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   other than the writers' and each other's; `merge.reviews.distinct` may still add
   `model_family`, and `protected`'s value is `{count: 2, distinct: [trust_domain]}`.
 
+- **2026-11-01 — R-BTN-191, R-BTN-83, R-BTN-39, R-BTN-94, R-BTN-171, R-BTN-91, R-BTN-55,
+  R-BTN-136, R-BTN-188, §12.7, G-BTN-83, S-BTN-195 (owner direction): four nouns at the
+  boundary.** The owner asked whether every input could be an attestation and every outbound
+  request a courier message, "to greatly simplify the core mechanics … for somebody not yet
+  familiar with its concepts". Shown that commands (requests to change Baton's own state) and
+  replies are neither, and the two places the spec did not yet fit: "Yes, add the model and make
+  both changes."
+  - **The model**, in `docs/context/architecture.mdx` and the vocabulary: Baton learns through
+    attestations, is asked through commands, acts through couriers and answers in replies.
+  - **A runner's report is an attestation.** An `advance` or end is a command carrying the
+    holder's `std:arrival@1`, the same type as the sync's fact arrival (renamed from
+    `std:git.arrival@1`), differing only in writer.
+  - **Dispatch is an outbox kind.** A want queues a `dispatch` entry; a dispatch courier, rung on
+    `GET /v1/courier/push`, delivers it; the GitHub App's key and the forge trigger tokens leave
+    Baton, which now holds no credential that acts outside it. Retired from R-BTN-171: "The
+    deployment's dispatch credentials (R-BTN-94) only start workflows; a forge that cannot scope
+    one below write (a Gitea bot token) is a stated exposure of the deployment, held as a Worker
+    secret and never in the database." Built by B-151 (the arrival) and B-152 (dispatch).
+    Review: pending.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

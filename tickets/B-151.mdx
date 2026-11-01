@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1096
 tier: critical
-description: "Build R-BTN-191: every statement Baton receives about the work is an attestation. The writer classes sync and courier; the board post's attestations list (std:git.readiness@1, std:git.arrival@1, std:git.implied@1, std:decision@1, std:git.output@1, std:git.marker@1, std:git.commit@1) accepted with the post, so no judgement mixes two runs; a person's answer always a std:decision@1; a courier's delivery a std:effect@1; inputs.answers retired into the attestations entries. S-BTN-195, S-BTN-187. Requires: none."
+description: "Build R-BTN-191: every statement Baton receives about the work is an attestation. The writer classes sync and courier; the board post's attestations list (std:git.readiness@1, std:arrival@1 (the sync's fact arrivals, and the holder's report carried by its advance or end), std:git.implied@1, std:decision@1, std:git.output@1, std:git.marker@1, std:git.commit@1) accepted with the post, so no judgement mixes two runs; a person's answer always a std:decision@1; a courier's delivery a std:effect@1; inputs.answers retired into the attestations entries. S-BTN-195, S-BTN-187. Requires: none."
 topics:
   - baton
 owns: {}
@@ -19,7 +19,7 @@ depends_on:
   - B-120
 ---
 
-**Brief:** the owner, 2026-10-31, on making the sync's repository facts attestations, answers
+**Brief:** the owner, 2026-11-01, on making a runner's report the same attestation as the sync's fact arrival: "make both changes". Earlier, 2026-10-31, on making the sync's repository facts attestations, answers
 included and courier deliveries with them: "yes, please!" It completes the owner's 2026-10-30
 unification ("human attestation and instrument readings can also be generalized into a single
 thing, which differs only by the participant signing the attestation").
@@ -42,13 +42,17 @@ assume). B-145 builds the policy's `attestations` entries this reads.
    stored in the post's transaction, superseding the previous run's of the same type and
    subject; refused with the post. `stations` and `markers` are retired from the post; bars,
    decisions and `not_before` move into `tickets[]`.
-3. **Readers.** Readiness (R-BTN-70), fact arrivals and implied stations (R-BTN-39), outputs
+3. **The holder's arrival.** An `advance`, end or suspension records its pair as the holder's
+   `std:arrival@1` (writer `runner`, signed by the request), the same type as the sync's fact
+   arrival; every preset admits `runner` for it on the claim's own leg, and nothing else of the
+   sync's types (R-BTN-83, R-BTN-191).
+4. **Readers.** Readiness (R-BTN-70), fact arrivals and implied stations (R-BTN-39), outputs
    (R-BTN-82), markers (R-BTN-46) and evidence (R-BTN-10) read from the newest accepted run's
    attestations; a person leg settles from a `std:decision@1` by an admitted writer (R-BTN-116).
-4. **Couriers.** `POST /v1/courier/entries/{repository}/{id}` with `delivered` records a
+5. **Couriers.** `POST /v1/courier/entries/{repository}/{id}` with `delivered` records a
    `std:effect@1` by `courier`; confirmation stays the sync's later attestation of the effect.
-5. **The CLI's sync** emits the attestations from each station function's result.
-6. **The model:** one inbound path, and no judgement over two runs' attestations.
+6. **The CLI's sync** emits the attestations from each station function's result.
+7. **The model:** one inbound path, and no judgement over two runs' attestations.
 
 ### Tests
 

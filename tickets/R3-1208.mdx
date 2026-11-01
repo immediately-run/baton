@@ -3,7 +3,7 @@ title: "R3-1208 — [OP] Provision Baton on Cloudflare: Worker route, Access, se
 id: R3-1208
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-01
 repos:
   - docs
 tags:
@@ -123,3 +123,5 @@ _(2026-10-20: extended for the adversarial review's fixes — Access, if used, c
 
 
 _(filed 2026-10-13)_
+
+_(2026-11-01: the dispatch credentials move out of Baton (BATON_SPEC R-BTN-94, R-BTN-171, B-152): `BATON_GITHUB_APP_KEY` is no longer a Worker secret: the App's key goes to the dispatch courier's host (`baton courier start --github-app-key`), and only `BATON_GITHUB_WEBHOOK_SECRET` stays with the Worker.)_

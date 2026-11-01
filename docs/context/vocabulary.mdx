@@ -82,15 +82,25 @@ attestations count — held in Baton, never in git. A preset (`cooperative`, `pr
 of values an owner applies and then tunes. A guarantee is a named condition over the policy; a
 floor is a set of guarantees Baton refuses to let any change break (§12.8).
 
-**Attestation, reading.** A typed statement Baton records — a review, a check run, a human's
-approval, a provider's remaining funds — about a ticket or commit, or about a resource instance (a
-**reading**); git never supplies one. A leg's course says which attestations it requires and
-whether a missing one blocks the leg or only steers advice; the repository's policy says whose
-count.
+**Attestation, reading.** Everything Baton is told about the world: a typed statement it records —
+a review, a check run, a human's approval or answer, a runner's report of where its leg reached,
+a fact the sync read from git, a courier's delivery, a provider's remaining funds — about a ticket
+or commit, or about a resource instance (a **reading**). Attestations differ only in who wrote
+them. A leg's course says which attestations it requires and whether a missing one blocks the leg
+or only steers advice; the repository's policy says whose count.
 
-**Outbox, courier.** Every effect Baton intends outside itself — a git write, a check run — is an
-outbox entry; a courier, a key whose host holds the credential the effect needs, delivers it, and
-Baton confirms it by reading it back.
+**Command.** A request to change Baton's own state — a claim, an advance or end, a heartbeat, an
+owner's or administrator's action. Baton accepts or refuses it by its gates; it is not evidence. A
+command may carry an attestation: an advance moves the lease and reports where the leg reached.
+
+**Outbox, courier.** Every effect Baton intends outside itself — a git write, a check run, a
+workflow dispatch — is an outbox entry; a courier, a key whose host holds the credential the
+effect needs, delivers it, and Baton confirms it by reading it back. Baton itself holds no
+credential that acts outside it.
+
+**Reply.** Baton's answer to a command or a read: a claim response, a recommendation, a signed
+policy read. The fourth noun: Baton **learns** through attestations, **is asked** through
+commands, **acts** through couriers and **answers** in replies.
 
 **Trusted runner.** A runner that claims only legs marked `trusted`, runs no repository code, and
 acts on attestations alone; the merge runner is the first.

@@ -1,0 +1,61 @@
+---
+title: "B-152 — Dispatch is an outbox kind: Baton queues `dispatch` entries, a dispatch courier woken by the doorbell delivers them, and Baton holds no credential that acts"
+id: B-152
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1097
+tier: critical
+description: "Build R-BTN-94 and R-BTN-171 as amended 2026-11-01: a want with a dispatch target queues a `dispatch` outbox entry (coalesced per repository and workflow, the latest replacing one not yet claimed; confirmed by a later board post; late after 2 minutes); couriers registered --delivers dispatch hold the GitHub App's key and the GitLab and Gitea trigger tokens and are rung `outbox` on GET /v1/courier/push; BATON_GITHUB_APP_KEY and the dispatch entries of BATON_FORGE_SECRETS leave the Worker. S-BTN-195. Requires: an operator to move the App key to the courier's host."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-01, on the four-noun model (attestations in, commands in, outbox
+entries out, replies out) and the one outbound effect left outside the outbox: "Yes, add the model
+and make both changes."
+
+**Spec:** `spec/BATON_SPEC.md` R-BTN-94 (wants, dispatch targets, the unblocked trigger, what Baton
+holds), R-BTN-171 (the `dispatch` kind, the `dispatch` delivery class, couriers woken by the
+doorbell), R-BTN-91 (`outbox` rings on `GET /v1/courier/push`), R-BTN-188 (`outbox.dispatch`),
+R-BTN-55 (the bindings), R-BTN-136 (what a tenant's host holds), §12.7 (the App's key with the
+courier), G-BTN-83, S-BTN-195.
+
+This ticket moves a credential, so the move itself is an operator's: an agent writes the code and
+the runbook, a human moves the key.
+
+### What to build
+
+1. **The kind.** `dispatch` entries queued in the transaction that records a want, an unblocked
+   trigger or a mirror's lag, where the repository has a dispatch target; coalesced to one per
+   repository per 30 seconds plus a trailing one (the alarm), a newer entry replacing one not yet
+   claimed per `(repository, workflow)`; confirmed by a board post (a mirror's acknowledgement)
+   observed after it; `baton.outbox-late` 2 minutes after queueing.
+2. **The courier.** `baton owner courier add <key> --delivers dispatch`; `baton courier start`
+   with `--github-app-key` and the forge tokens, minting installation tokens on its own host and
+   dispatching only a signed entry's workflow; a `std:effect@1` on delivery (R-BTN-191).
+3. **The ring.** `GET /v1/courier/push`, authenticated as the courier's key, rung `outbox` when an
+   entry of a class it delivers is queued.
+4. **What leaves the Worker.** `BATON_GITHUB_APP_KEY`, the GitLab trigger tokens and the Gitea bot
+   tokens; `BATON_FORGE_SECRETS` keeps only webhook secrets. The Worker makes no outbound call
+   that acts. `baton.forge-secret-missing` is raised for a dispatch target with no dispatch
+   courier.
+5. **The runbook** for moving the key, and R3-1208's checklist brought in line.
+
+### Tests
+
+S-BTN-195's dispatch cases, and S-BTN-42, S-BTN-56 and S-BTN-167 still green with the courier in
+the path (a dispatch that fails is retried once by the courier, as an adapter's was).
+
+### Exit criteria
+
+- [ ] `npm test` green
+- [ ] no code path in `src/` reads `BATON_GITHUB_APP_KEY` or a dispatch token
+- [ ] a want on a GitHub repository reaches its workflow through the courier in under 10 seconds
