@@ -62,6 +62,12 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN
   and `protected` fill it; no rule reads a preset. A deployment requires named guarantees, which
   are conditions over the policy, and Baton enforces the policy's `floors` (R-BTN-189); what Baton
   cannot observe stays the deployment's.
+- **One registry, one check; the credential decides, never the channel.** Every action a
+  credential can take is one entry in one registry, with the principals that may call it, and
+  the API, the CLI, the dashboard and MCP are generated from it behind one `authorize`
+  (BATON_SPEC R-BTN-129). A dashboard session is one principal carrying its key's role; an MCP
+  key is a delegated key acting as an owner, narrowed to what R-BTN-186 admits — tighten, and
+  undo its own (the owner, 2026-10-27 and 2026-11-01). No surface carries a rule of its own.
 - **Advice is fresh for the reader, bounded for the fleet.** A write Baton accepts — a board,
   a reading, a heartbeat, an ontology — marks what it affects stale, and anything a runner reads
   afterwards is brought up to date for that runner first; fleet-wide views (counts, blocks,

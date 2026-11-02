@@ -1693,6 +1693,76 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   grant, an apply keeping named `service:` keys; and a Fieldhouse spec PR follows this merge
   (B-166's status). No candidate in the B-165 table was vetoed. The merge waits on the owner's word.
 
+- **2026-11-02 — the restructure, part 3: the surfaces (B-166; owner direction).** The third
+  part of the rewrite the owner asked for after the whole-spec review of 2026-11-01
+  (`docs/review/spec-simplification-review-2026-11-01.mdx`, B-155 to B-165; parts 1 and 2 above).
+  This part rewrites §11.3 whole (R-BTN-129, R-BTN-127, R-BTN-130 / R-BTN-154), R-BTN-155's head,
+  §12.1's session and MCP rows, §14's callers and the rows that name a surface, and every rule that
+  names a CLI command, from the text on `main` (`2cc9bc7`), applying these rulings. The owner
+  answered each question with the words in quotation marks; the sentence after each is the
+  ticket's reading of that answer (the tickets are unsigned, so the readings are claims, as
+  `CLAUDE.md` says):
+  - **B-156, the owner: "Tighten, and undo own".** Written as R-BTN-186's rule in part 2; this
+    part makes R-BTN-130 / R-BTN-154 derive from it. An MCP key is a delegated key acting as
+    `owner` on one repository, narrowed to the ids listed at minting; each registry entry carries
+    a `delegated` mark (`true` for an owner read and a tightening, `own` for the undoing of the
+    key's own tightening, `false` for the rest) that `check:actions` keeps equal to R-BTN-186,
+    and `tools/list` is the key's ids whose mark stands. The closed list ("its only writes add a
+    hold and stop a leg"), its italic note and the `mcp: true` flag are gone; `owner.mcp-key.create`
+    is an `approvers.members` action (R-BTN-188), so a key dies with the credential that minted it.
+    Decided under the ruling, as the ticket's reading of it: a delegated key writes no attestation,
+    a `std:decision@1` moving a ticket as a route does (R-BTN-116, R-BTN-181); `ticket.resolve`
+    takes `park` alone over MCP (R-BTN-163); and R-BTN-186's "restart a leg it stopped" is gone,
+    a stopped leg being claimable again at once (R-BTN-119). R-BTN-39, R-BTN-12, R-BTN-57,
+    R-BTN-119, R-BTN-163, §12.1, §12.2 and §14 cite R-BTN-130 and R-BTN-186 in place of the list.
+  - **B-157** (the review's finding 6 and section 2.1, folded into B-166 by the owner's
+    direction). R-BTN-127's tree holds every command the specification names under one grammar —
+    `baton <noun> <verb>`; under `owner` and `admin` a two-word verb `<thing> <act>` — and help
+    at every level is generated from the registry's command table (R-BTN-129), so no command
+    answers "not a flag of this command". Renamed, with `renamed:` exits as the twelve names
+    before them: `baton run` → `runner start` (R-BTN-131 and R-BTN-72 had both); `baton request`
+    → `ticket request`; `baton tickets …` → `ticket …` (one noun for a ticket, whether the command
+    reads Baton or writes git); `baton board` → `repo board`; `baton attest` → `attestation add` |
+    `revoke`, with `decision answer` for the common case; `admin repos` → `admin repo list`;
+    `admin revoke` → `admin key revoke`; `admin resync` → `admin repo resync`; `owner grants` →
+    `owner grant list`; `owner key grant` and `owner key create --api` → `owner grant add`; `owner
+    override` → `ticket hold` | `unhold` | `expedite` | `cancel`; `owner resolve`, `owner route`
+    and `owner ticket adopt` → `ticket resolve`, `ticket route` and `ticket adopt` (the actions
+    `owner.resolve` and `owner.grants.flags` are `ticket.resolve` and `owner.grant.flags`); `owner
+    bars follow` → `owner bar follow`. Added, from parts 1 and 2: `owner grant role`, `owner grant
+    flags`, `owner policy set | apply [--dry-run] | show | diff | log`, `repo protect --print |
+    --check`, `repo policy`, `runner start --delivers`, `decision list [--all] [--watch]`,
+    `admin check-app create`, `owner consent`, `owner sync-key`, `owner sync want`, `admin key
+    hostname`, `admin settings set`. Gone with B-159: `owner courier add`, `admin courier add`,
+    `courier start`.
+  - **B-165, the owner: "Take review's default"**, for the one candidate of this part's sections,
+    table 1.1's last row: `dashboard` and `owner-session` are one principal, `session`, carrying
+    its minting key's role, the role check living in `authorize` where it already was
+    (R-BTN-129, R-BTN-155, §12.1, §14). What it loses: nothing; an entry's `callers` says which
+    roles of a session it admits.
+  - **§14.** `GET …/fact-legs` sits with the repository reads, its caller the fact reader; the
+    outbox group is "Deliverers and instruments"; the callers legend names `session` and
+    `delegated`; the `resolve`, `adopt`, `attestations`, `overrides`, `bars/{id}/lift`,
+    `mcp-keys`, `/v1/actions` and `/v1/mcp` rows say what a delegated key reaches.
+  - **B-155's item 5** (a cheaper adopt after a course rename) is R-BTN-64's already: Baton maps
+    a renamed station or leg by `renamed_from` itself. R-BTN-39's adopt now says so; only a
+    station or leg the new file lacks waits for an adopt.
+  - No rule, scenario or gate is retired. Changed §15 rows: S-BTN-97, S-BTN-101 and S-BTN-186
+    (new cases), and by the renames alone S-BTN-58, -67, -131, -166, -172, -175, -189; G-BTN-117,
+    G-BTN-121, G-BTN-144. The test files that name a renamed command (`S-BTN-166.reads`,
+    `S-BTN-172.ticket-check`, `S-BTN-175.request`, `S-BTN-189.ticket-commands`) test the built
+    CLI and move with it in B-157's code item; none changes here.
+  - Outside the spec: `spec/BATON_MCP_OAUTH_SPEC.md` (its grants are delegated keys under
+    R-BTN-186; `session` for the owner role; the scopes), `docs/context/vocabulary.mdx` (action,
+    session, delegated key), `docs/context/architecture.mdx` (one registry, one check),
+    `docs/context/design-brief.mdx` (what an owner's session may do), and README's code map,
+    which names R-BTN-163 in place of the retired notice couriers. The pages that teach the
+    built CLI (README's usage, `docs/standard-courses.mdx`, `docs/runbooks/register-baton.mdx`)
+    keep the built names until B-157's code item renames them. Tickets: B-155, B-156, B-157,
+    B-165 and B-166 record what this part wrote; B-7, B-23, B-25, B-38, B-46, B-47, B-56, B-59,
+    B-73, B-75, B-76, B-113, B-116, B-118, B-120, B-121, B-123, B-124, B-129, B-130, B-140,
+    B-146, B-147, B-154, B-161 and R3-1266 carry a dated note on what changed under them.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -1877,7 +1947,13 @@ working until the stated condition holds, then removes it.
 - **Renamed CLI commands (R-BTN-127).** The twelve old top-level names (`baton why`, `run`,
   `test-course`, `init`, `sync`, `mirror`, `spool`, `inbox`, `blocked`, `replay`, `register`,
   `start`) exit 2 printing only a "renamed:" line naming the replacement. Remove them once no
-  caller uses them (B-23 updated the known callers).
+  caller uses them (B-23 updated the known callers). The restructure's part 3 (2026-11-02) adds
+  the second set, handled the same way: `baton request`, `baton tickets …`, `baton board`, `baton
+  attest`, `admin repos`, `admin revoke`, `admin resync`, `owner grants`, `owner key grant`,
+  `owner key create`, `owner override`, `owner resolve`, `owner route`, `owner ticket adopt` and
+  `owner bars follow` (their replacements in R-BTN-127's table); B-157's code item renames the
+  built commands and their callers (`npm run check:tickets`, fieldhouse's `npm run ticket`, the
+  skills and workflows that call them).
 - **`provider-exhausted` (R-BTN-126).** Until every course's `min_worker_version` is past the CLI
   version that ships R-BTN-126, Baton accepts `released:provider-exhausted` and records it as a
   `blocked` end: with exactly one account instance in the worker's `uses` serving a resource in

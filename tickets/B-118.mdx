@@ -3,7 +3,7 @@ title: "B-118 — An administrator's key reads the dashboard state: GET /v1/admi
 id: B-118
 project: baton
 status: in-review
-updated: 2026-10-26
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -61,3 +61,5 @@ runners, claims, timeline or Needs you.
 - [x] an administrator's key reads the dashboard state from a terminal with one signed request,
   no session and no Access login: `baton admin -i KEY state` (a plan in `test/unit/cli.test.ts`;
   the answer equal to the session's in S-BTN-170, both hosts)
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`): `baton admin state` is R-BTN-127's name for the signed read; the administrator's dashboard session is the principal `session` with the administrator role (R-BTN-129).)_

@@ -3,7 +3,7 @@ title: "B-73 — OAuth 2.1 for MCP clients: Baton issues owner-approved MCP keys
 id: B-73
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -169,3 +169,5 @@ _(filed 2026-10-20 with `spec/BATON_MCP_OAUTH_SPEC.md`; revised the same day aft
 adversarial review moved consent onto the dashboard, adding B-76)_
 
 _(2026-10-31: minting MCP keys is an `approvers.members` action (R-BTN-188's first row; B-145 item 12 builds the hook): an `owner-session` mints one only where the list admits `owner`; under a human-only list it takes a `human_only` key. An MCP key is never itself an approver.)_
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`): a grant is a delegated key under R-BTN-186: scopes are `read` or any action id R-BTN-186 admits, not R-BTN-130's closed list; the consent page offers each requested write unticked; `owner-session` is the principal `session` with the owner role (R-BTN-129, R-BTN-155). The OAuth spec's §2, §5, §7, §11 and §13 are amended with it.)_

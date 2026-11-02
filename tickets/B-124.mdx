@@ -90,3 +90,5 @@ owner cannot do through an MCP client. That is the distinction the owner rejects
 _(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may post the board is the repository policy's `inputs.board` (`machine`), R-BTN-188, built by B-145. Read it through `src/core/policy.ts` once B-145 lands.)_
 
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) writes R-BTN-186's one rule for a delegated key (B-156: tighten, and undo its own) and renames `trusted_identities` to `pushers` in its list (B-163); the registry's MCP entries follow in part 3.)_
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`): written into the spec: R-BTN-130 / R-BTN-154 derive from R-BTN-186 through the registry's `delegated` marks, the closed list, the italic note and the `mcp: true` flag gone; `confirm` over MCP stays a schema check (item 4's first branch); `check:actions` keeps the marks and R-BTN-186 equal (item 5). B-25's code item builds it.)_

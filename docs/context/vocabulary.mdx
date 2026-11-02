@@ -87,6 +87,20 @@ cancelled; Baton alone queues it, and the ticket is withdrawn when it ends (R-BT
 **Administrator, owner, grant.** Administrators run the instance; each repository's owners
 grant worker keys access to it.
 
+**Action, registry.** Everything a credential can ask Baton to do is one action in one registry,
+named `<noun>.<verb>`, with the principals that may call it; the API, the CLI, the dashboard and
+MCP are generated from it and checked by one `authorize`. The CLI is `baton <noun> <verb>`, and
+its help comes from the registry (R-BTN-127, R-BTN-129).
+
+**Session.** A dashboard sign-in, minted by an administrator's or owner's key through a code the
+key holder confirms; one principal, carrying its key's role, an owner's reaching only the
+repositories the key still owns (R-BTN-155).
+
+**Delegated key.** An MCP key: a bearer an owner's tool holds, acting as an owner of one
+repository for the actions listed when it was minted. It may tighten (hold, bar, stop, cancel,
+park) and undo its own tightenings, never loosen another's, route, adopt, answer a person's leg or
+touch credentials or the policy (R-BTN-186, R-BTN-130).
+
 **Policy, preset, guarantee, floor.** A repository's policy is the one versioned document of
 every rule about authority and trust — who lands on which refs, who approves what, whose
 attestations count — held in Baton, never in git. A preset (`cooperative`, `protected`,
