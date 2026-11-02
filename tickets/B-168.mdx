@@ -49,9 +49,10 @@ default". History: the changelog entry "the restructure, part 4".
    `trigger_workflows` (the unblocked trigger names a workflow on the default branch) and
    `report_horizon_h` (6 hours) from the settings route, the course entry (ignored and logged
    while the Migrations entry lasts), the dashboard's limits and the export, each by a new
-   migration; this repository's `.baton/baton.json` drops `report_horizon_h`. The unblocked
-   trigger refuses a workflow without a `tickets` input, and setting it is a loosening under
-   `approvers.policy` (R-BTN-94, R-BTN-186).
+   migration; this repository's `.baton/baton.json` drops `report_horizon_h`. Setting or
+   changing the unblocked trigger is a loosening under `approvers.policy` (R-BTN-94,
+   R-BTN-186); Baton reads no workflow file — a forge's refusal of the dispatch is logged with
+   its reason.
 5. **Tests.** Update `S-BTN-45.block-edges` (an administrator's reading after a probe's: the
    later sets the state), `S-BTN-63.no-chain` (no owner setting), and the unit tests naming the
    removed fields.
@@ -63,9 +64,9 @@ green in `npm test` on both hosts.
 
 ### Exit criteria
 
-- [ ] no route, column or field named `uses`, `refused_uses`, `atoms_from`, `signed` (on
-      readings), `required_independence`, `trigger_workflows` or `report_horizon_h` remains
-      beyond the Migrations entry's logged reads
+- [ ] no heartbeat `uses`, `refused_uses`, `atoms_from`, readings' `signed`, `nonce` or
+      `signature`, `required_independence`, `trigger_workflows` or `report_horizon_h` remains
+      beyond the Migrations entry's logged reads (registration tokens' `uses` stays, R-BTN-117)
 - [ ] `npm test` and `npm run typecheck` green
 
 ## Status

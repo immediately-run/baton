@@ -1967,9 +1967,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     (an administrator's reading after a probe's), S-BTN-61 (no `uses`, no bill), S-BTN-63 and
     G-BTN-90 (no `required_independence`), S-BTN-91 (blocked for no runner until every instance
     is down), S-BTN-122 and G-BTN-142 (no bills), S-BTN-181 (no `signed`), G-BTN-5 (an ungranted
-    capability), G-BTN-88 (seats, not billings, count across repositories), S-BTN-19 (no advice on
-    an advance), S-BTN-20 (the leg's account instance), S-BTN-44 (a resource row once every
-    usable instance is down), and by the *adoption* mark alone S-BTN-14, S-BTN-16, G-BTN-8, -9, -19, -22, -35,
+    capability), and by the *adoption* mark alone S-BTN-14, S-BTN-16, G-BTN-8, -9, -19, -22, -35,
     -41. Test files: `S-BTN-139.ontology`, `S-BTN-147.route-choices` and `S-BTN-147.runner-half`
     test retired rows and stay in `RETIRED_TESTS_ALLOWED` until B-167 deletes them;
     `S-BTN-45.block-edges` and `S-BTN-63.no-chain` test the built behaviour and change in B-168;
@@ -2029,6 +2027,42 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   until no client sends them; B-106, B-167 and B-168 carry the rest. `docs/context/product.mdx`
   and values 12 still speak of "one alarm cycle"; they are the owner's words and are left for the
   owner.
+
+- **2026-11-02 — review round two of the restructure's part 4** (PR #164; one fresh reviewer,
+  given round one's two reviews, the round-one fix as a patch, the whole diff and the PR body).
+  Of round one's 33 findings, 24 were confirmed closed and 9 partly closed. New: 3 major, 12
+  minor. Findings: the CLI runner's `lock` taken before a claim but not before an `advance` into
+  a leg requiring it, and released at different points by R-BTN-121 and R-BTN-178; a full
+  instance requirement read two ways — by the instance's state, or reading by reading — with
+  `count` met by one writer's two readings; §16 retiring the `refs.*` `mirror` writer through a
+  "policy schema version" the spec does not define, reinterpreting stored versions without an
+  approver; adoption passages the inventory search misses (§12.7's `mirror_workflow`, the
+  heartbeat's `mode`, the webhook, seal and `events` rows); rule 11, step 4 and the why-not
+  sentence not naming the ticket's clause or `claim_seats`; a fence-pending silent reap
+  releasing seats at once; G-BTN-88's seat clause untested by S-BTN-61; the Migrations stop
+  forgetting instruments and administrators; the trigger's input bound overstated and B-168
+  having Baton read a workflow file; R-BTN-181's `nonce` on readings; `claim_seats` unnamed in
+  the export and a seal passing over a fence-pending seat; the capacity confirmation listing the
+  type's courses rather than the name's; a spent line's `capability` end looping; the vocabulary
+  page; B-168's `uses` colliding with registration tokens'; the part-4 entry edited in place
+  with round one's rows.
+  Fixed: the lock is taken before a claim or an `advance` into a leg requiring it, the claim
+  suspending rather than advancing without it, and held until the claim ends or leaves those
+  legs (R-BTN-121, R-BTN-178, B-106); a full instance requirement ignores the state, `missing`
+  meaning no admitted reading in force, `count` counting distinct writers' keys unless
+  `distinct` names another field, with S-BTN-181's two new cases (R-BTN-76); the `mirror` value
+  stays legal and inert in stored policy versions, omitted by `--print`, refused in a new
+  version, marked *adoption* in R-BTN-188's table (§16); the five passages marked; rule 11 and
+  step 4 read rule 4's set, the why-not sentence names `claim_seats`; a reap that is not
+  fence-pending releases at once, the seats counted are `claim_seats`' rows, G-BTN-162 says so
+  and covers the cross-repository count, G-BTN-88 loses its seat clause; the Migrations stop
+  waits for every credential; the trigger's bound says what GitHub enforces and that the
+  loosening gate is the bound elsewhere, and B-168 reads no workflow file; R-BTN-181 says a
+  reading has no `nonce`; R-BTN-88 names `claim_seats` among what is not exported and the seal
+  waits for no fence-pending claim; the confirmation lists the courses whose legs require the
+  capability; a spent line's check must fail until it recovers (R-BTN-76); the vocabulary
+  page's seat and the two capacities; B-168's exit criterion; the part-4 entry keeps its own
+  rows, the corrections living in the review records.
 
 ## Retired requirements
 
@@ -2203,8 +2237,9 @@ working until the stated condition holds, then removes it.
   `prefer` entry's `bills`, the advance's and end's `taken`, and a reading's `nonce` and
   `signature` are accepted and ignored, each logging one `deprecated-field` event per credential
   and field per day, so a CLI or `.baton/baton.json` older than B-167 and B-168 keeps syncing and
-  claiming. Stop when no registered repository's snapshot, and no live runner's request, has
-  carried one for 30 days: they are then refused `invalid-params`.
+  claiming. Stop when no snapshot, and no request from any credential — runners', instruments'
+  and administrators' alike — has carried one for 30 days: they are then refused
+  `invalid-params`.
 
 - **R-BTN-132's window (prerequisite primitives).** The board post's `blocked_by` and
   `operator_only`, and the `waiting_on` labels `dependencies`, `children` and `owner`, are still

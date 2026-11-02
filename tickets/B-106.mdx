@@ -35,11 +35,11 @@ and the `host` scope by B-165's review default).
 1. **Registration.** A migration adds `capability_capacity (capability, capacity, set_by,
    set_at)`. Add `baton admin capacity set <capability> <n> | --clear`, the registry action
    `admin.capacity.set` and `PUT /v1/admin/capacities`, logged `admin`.
-2. **Seats.** A migration adds `claim_seats (claim_id, capability)`. At a claim, and at each
+2. **Seats.** A migration adds `claim_seats (claim_id, capability)`; the seats counted are its rows. At a claim, and at each
    `advance` that starts a leg, write the claim's seats: each capability with a capacity in the
    set rule 4 matched (the ticket's `requires` and the leg's `requires.capabilities`). A later
-   snapshot never changes them. Delete them at the claim's end, a silent reap, or for a
-   fence-pending reap at `fence-cleared` or `fence_deadline` (the alarm row of §2). R-BTN-50's
+   snapshot never changes them. Delete them at the claim's end, a reap that is not
+   fence-pending, or for a fence-pending reap at `fence-cleared` or `fence_deadline` (the alarm row of §2). R-BTN-50's
    vocabulary row names capacity and seats; no boundary-test word changes.
 3. **Rule 11.** In the claim's and advance's committing transaction, count the seats other
    active or fence-pending claims hold on each such capability and refuse `capacity-full` past
@@ -54,9 +54,11 @@ and the `host` scope by B-165's review default).
    included, and a seat taken or released bumps `instances_version`. Seats write no block and
    send no `unblocked`.
 6. **One machine's singleton.** The CLI runner's configuration gains `lock: <path>` on a
-   capability (R-BTN-121): declare it only while an exclusive lock on the file can be taken;
-   take the lock before a claim for a leg requiring it, release it on a refused claim, and hold
-   it until the claim ends or an `advance` starts a leg not requiring it.
+   capability (R-BTN-121): declare it only while the runner holds, or can take, an exclusive lock
+   on the file; take the lock before a claim for, or the `advance` into, a leg requiring it, and
+   suspend rather than send that `advance` when it cannot; release it on a refused claim or one
+   answered for another leg, and otherwise hold it until the claim ends or an `advance` starts a
+   leg not requiring it.
 7. **The capacity command** validates the capability (one expanded `<type>:<value>`, never a
    role, `credential:`, `runner:` or bare `human-operator`) and, before signing, prints every
    course declaring its type and asks to confirm (R-BTN-178, as R-BTN-157).
