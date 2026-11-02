@@ -1408,6 +1408,41 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   timers" are the stalled and expiry instants (R-BTN-64, S-BTN-37); and this entry's B-161 bullet,
   the R-BTN-104 row and the round-one record say what the text does.
 
+- **2026-11-01 — review round three of the restructure's part 1** (one fresh reviewer, the last;
+  the diff, the impact list, round two's fixes re-checked line by line: all sixteen closed in
+  the spec, one leftover in a ticket note). One blocking: a `"replaces": "retry"` binding read a
+  handler's restart that R-BTN-161 said an `interrupt` handler never produces and R-BTN-162
+  formed only for `suspend` conditions, the `std:restart@1` output a handler once wrote having
+  gone with the one primitive. Majors: R-BTN-35 still sent the reader to R-BTN-85 to log a
+  disagreement about what Baton owns; the delivery runner polled `person=1`, which lists none of
+  Baton's `notify` conditions, after `announce` lost `baton`; nothing refused an `advance`, a
+  `next` or a route into the course's `cancel` leg; G-BTN-73 held every Baton- or owner-queued
+  leg where R-BTN-83 held four; `runs_from` was a `claim_legs` id and could not restart a fact
+  leg's count; a handler whose person leg's expiry reached a non-end station settled nothing.
+  Minors: §4.3's garbled exceptions, the pipeline query and `kept_json` list missing or naming
+  the cancel leg, a route leaving `expires` armed, `stalled_s` accepted on a person leg, `--ran`
+  against the restart, a person leg `create-pr` does not have, in-claim retries by name, the
+  timer key, `answer-invalid` as an event kind, G-BTN-152's `from_at` on a deadline, G-BTN-154's
+  `dispatch`, the CLI's forced-resync route, R-BTN-147's "while the leg runs", the B-7 note,
+  stale marks in the scratch impact list, and two table-1.4 constants decided here (scope).
+
+  Fixed: a `"replaces": "retry"` binding is a `suspend` binding for R-BTN-161 and R-BTN-162 —
+  its handler asks through a person leg whose options are `retry`, `route:<leg>` and `park`
+  (R-BTN-122, R-BTN-161). R-BTN-35 names `arrival-unapplied` and sends only git's other facts to
+  R-BTN-85. The delivery runner polls `?open=1` with `person=1` for what waits on a person and
+  `type=baton` for Baton's notices, and sends each kind what it has (R-BTN-163). The `cancel`
+  leg is refused `cancel-leg` as a holder's `next`, an `advance`'s leg or a route's (R-BTN-63,
+  R-BTN-69, R-BTN-83, rule 1). G-BTN-73 names the four held cases. `runs_from` is a
+  `ticket_history` id and counts runs and arrivals after it (R-BTN-63, §13); `--ran`'s runs are
+  recorded before it (R-BTN-39). R-BTN-161's check requires the expiry to reach an end station
+  (the `ask` shape) and R-BTN-162 settles on the expiry (R-BTN-116). A route that queues
+  another leg clears `expires`; `deadline_s` and `stalled_s` sit on no person leg (R-BTN-69). §4.3,
+  the pipeline, §6.8, §9.7, §9.9, §13.4, §13.8, G-BTN-152, G-BTN-154, R-BTN-11's CLI sentence,
+  R-BTN-147 and `tickets/B-7.mdx` read as the findings asked. The two constants (`max_blocked`
+  5, the 900 s wait) stay, declared to the owner as part 1's. The PR body's impact list carried
+  the five marks already; the scratch copy was stale. No further round: what remains is the
+  owner's (the PR body's list).
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
