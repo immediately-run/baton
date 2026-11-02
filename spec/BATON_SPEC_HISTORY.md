@@ -1888,6 +1888,17 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   names the four routes; B-156's and B-73's notes read as the rules do; the PR body marks §13.
   No further round: what remains is the owner's (the PR body's seven numbered items).
 
+- **2026-11-02 — the owner's answer on part 3's open items.** Asked the seven items PR #163's
+  body listed, each with a recommended reading, the owner answered: "I'll take your
+  recommendations." So, as rulings: `baton tickets …` is `baton ticket …`, one noun for a ticket
+  (R-BTN-74, R-BTN-127); `baton request` is `baton ticket request` (R-BTN-131); `baton attest` is
+  `baton attestation add | revoke`, with `baton decision answer` for a person leg's answer
+  (R-BTN-116, R-BTN-181); a delegated key writes no attestation and resolves no condition
+  (R-BTN-186, R-BTN-130); R-BTN-186's "restart a leg it stopped" is gone; the registry's MCP mark
+  is the per-action `delegated: true | own | false` (R-BTN-129); and the review's sign-in and
+  confirmation-code ceremonies stay as R-BTN-155 says, candidate decisions for later. No candidate
+  in the B-165 table was vetoed. The merge waits on the owner's word.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
