@@ -1184,11 +1184,29 @@ live solely in Baton, and both are exportable (R-BTN-88).
       no branch at all. Each dependency's `**Used by:**` line gains the new id once: the reverse
       mention. A description that ends with a `Requires:` clause (`… Requires: human-operator,
       drivable-browser.`) has the capabilities it names written on the `**Requires:**` line.
-    - `claim <id>` moves a ticket available → in-progress, and refuses one that is not available or
-      whose `depends_on` are not all done (archived, or carrying any of the markdown source's closed
-      statuses); `set <id> <status> [--pr URL]` writes any live status — `done` is `done`'s — and
-      adds the pull request URL to `prs` once; `done <id> [--pr URL]` writes `done` and moves the
-      file to `<items>/archive/`.
+    - `claim <id> [-i KEY] [--url URL] [--offline]` moves a ticket available → in-progress, and
+      refuses one that is not available or whose `depends_on` are not all done (archived, or
+      carrying any of the markdown source's closed statuses). Before it writes it reads the
+      ticket from Baton with the key `-i` names (else `BATON_KEY_FILE`) — the pickup side of the
+      owner's ruling that Baton owns a ticket's course history (B-120, B-129): the board answers
+      the station, the ready leg and the repository's live claims; the history answers the path
+      and the newest ended claim's branches and PRs; the branch-holder query answers a branch the
+      change lives on. A ticket Baton holds past its course's start is claimed as a **takeover**:
+      the frontmatter's status is not consulted, every `prs:` entry is kept and any Baton knows
+      is written back, the position — station, ready leg, PRs, branch, hand-off — is printed for
+      the session to continue from, and the session works that leg on that branch, never
+      checking out a new one. Only another live claim refuses — a claim whose lease has not
+      ended belongs to its holder until it is released or reaped — naming the holder and when the
+      lease ends; starting over is the owner's `adopt` (R-BTN-39), never a claim flag. An unanswered
+      read — Baton unreachable, no key, `forbidden` — refuses, naming which, rather than fall
+      through to the frontmatter, unless `--offline` claims on git's word alone (Baton's position
+      is then unknown, not refuted). `set <id> <status> [--pr URL]` writes any live status —
+      `done` is `done`'s — and adds the pull request URL to `prs` once; a release
+      (`set <id> available`) keeps every `prs:` entry, refuses a write that would drop one while
+      Baton holds the ticket past its start and still offers it, and its commit carries the
+      hand-off — the PR, the station and what is left — for the next claimant to read at
+      `git log -1 <items>/<id>.mdx`; `done <id> [--pr URL]` writes `done` and moves the file to
+      `<items>/archive/`.
     - The settings are the repository's: `items` (below), `ticket_prefix` (`B`), `legacy_ids` — id
       patterns the repository still accepts but never allocates (`R3-\d+` here) — `project` (the
       default `--project`), `tags` (the default `--tags`, else `roadmap-item`) and `prefixes` (a
@@ -1483,6 +1501,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
   | sub | when |
   |---|---|
+  | `position-disagrees` | a ticket's frontmatter saying `available` while Baton holds it past its course's start (B-129) |
   | `bars-mismatch` | posted bars lack a tag the holder declared (R-BTN-63) |
   | `closed-under-claim` | a ticket closed while a claim is active on it, a claim of its `cancel` leg excepted (R-BTN-168) |
   | `spawned-unposted` | a reported child the first snapshot after the end does not post (R-BTN-86) |
@@ -1490,8 +1509,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
   About what Baton owns there is no disagreement to log: git never writes a position (R-BTN-39),
   and an arrival Baton does not apply is an `arrival-unapplied` row on the ticket, listed under
-  no other heading. A discrepancy accompanies the events those cases log; any condition a case
-  raises is its owning rule's. The dashboard lists discrepancies by sub and age.
+  no other heading — the git-lock `status:` field is the one exception, its `available` over work
+  Baton holds past the start being the row above (B-129). A discrepancy accompanies the events
+  those cases log; any condition a case raises is its owning rule's. The dashboard lists
+  discrepancies by sub and age.
 ### 4.8 Owner state
 
 - **R-BTN-88 (owner state and course history are exportable; git holds the work).** Baton
@@ -5738,7 +5759,9 @@ repository, its owners and administrators, except where a route's rule narrows t
   `grants` and `settings`, and the bars in force or scheduled, R-BTN-146, each grant also naming
   the `other_repositories` its key holds); and
   `GET /v1/repositories/{repository}/board` (the repository reads' principals: the repository,
-  its `ready` tickets and `ready_by_tier`, `granted_capabilities`, and `server_time`). A key outside the route's role is refused as this
+  its `ready` tickets and `ready_by_tier`, `granted_capabilities`, the repository's live claims
+  as `holders` — each with its holder and when its lease ends, the lock a session claiming
+  through git reads (B-129) — and `server_time`). A key outside the route's role is refused as this
   section says — `forbidden`, or `unauthenticated` for a key Baton does not know. The CLI's
   `baton admin repos`, `baton owner grants <repository>` and `baton board <repository>` are those
   requests. The board's `granted_capabilities` names the capabilities the key's grant holds on
@@ -6832,12 +6855,12 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | **Repository reads** | | | | |
 | `GET /v1/repositories/{repository}/tickets/{ticket}/blocks` | reader | `?runner=me` | `{blocked, blocks: [{kind, leg?, ref, since, until?}], other: [{kind, detail}]}` | R-BTN-75 |
 | `GET /v1/repositories/{repository}/tickets/{ticket}/prerequisites` | machine granted there, owner, session | `?leg=` (the queued leg), `?runner=me` | `{leg, ready, prerequisites: [{kind, ref, met, why, since?, until?, url?, found?}]}` | R-BTN-120 |
-| `GET /v1/repositories/{repository}/tickets/{ticket}/history` | reader | `?before=<id>&limit=` (≤ 200) | `{rows: [{id, at, kind, claim_id?, leg?, run?, reached?, next_leg?, snapshot_sha?, course_version?, leg_version?, detail, inputs?}], next_before?}` | R-BTN-81, R-BTN-84 |
+| `GET /v1/repositories/{repository}/tickets/{ticket}/history` | reader | `?before=<id>&limit=` (≤ 200) | `{rows: [{id, at, kind, claim_id?, leg?, run?, reached?, next_leg?, snapshot_sha?, course_version?, leg_version?, detail, inputs?}], next_before?, resume?}` — `resume` (B-129) the newest ended claim's record pruned to `{end_reason, ended_at, branches, prs}` (R-BTN-24), the PR a false frontmatter lost; null when no claim ever ended | R-BTN-81, R-BTN-84, R-BTN-24 |
 | `GET /v1/repositories/{repository}/tickets/{ticket}/children` | reader | — | `{children: [{ticket_id, station, blocked, closed?}]}` | R-BTN-86 |
 | `GET /v1/repositories/{repository}/tickets/{ticket}/legs/{leg}/runs` | owner, admin | — | `{runs: [{run, claim, runner, mode, started_at, ended_at?, end?, session_url?, log_dir?, transcripts: [{repo, path, pushed_at}]}]}` | R-BTN-128, R-BTN-144 |
 | `GET /v1/repositories/{repository}/blocked` | reader | `?on=<kind>:<ref or *>&transitive=1?`, or `?cursor=` | `{tickets: [{ticket_id, blocks}]}`; with no `on`, blocked tickets grouped by kind and `ref`, 100 a page, `next_cursor` | R-BTN-75, R-BTN-79 |
 | `GET /v1/repositories/{repository}/conditions` | reader | `?open=1`, `?person=1`, `?type=<prefix>`, `?ticket=`, `?cursor=` | `{conditions: [{condition_id, ticket?, leg?, type, disposition, handler?, restarts, default?, severity, url?, detail?, resolve_url, raised_at, closed_at?, outcome?}], questions?: [{ticket, leg, asks, options: [{id, reached}], queued_at, question_id?, url?, severity?, posted_at?}], next_cursor?}`, 100 a page; `questions` only with `person=1`: the queued person legs (R-BTN-116) | R-BTN-163, R-BTN-116 |
-| `GET /v1/repositories/{repository}/board` | owner, runner granted there, admin | — | `{repository, ready[], ready_by_tier, granted_capabilities: string[] \| null, server_time}` (R-BTN-179) | R-BTN-179 |
+| `GET /v1/repositories/{repository}/board` | owner, runner granted there, admin | — | `{repository, ready[], ready_by_tier, holders[], granted_capabilities: string[] \| null, server_time}` (R-BTN-179); `holders` (B-129) the repository's live claims, each `{ticket_id, worker_id, hostname, session_name, lease_ends_at}` — the lock a session claiming through git reads with the same request | R-BTN-179 |)
 | `GET /v1/repositories/{repository}/courses` | reader | — | each course file as last accepted, with its capability types and roles | R-BTN-121, R-BTN-157 |
 | `GET /v1/repositories/{repository}/stats` | reader | `?since=` | per station and leg, wait and run times; ends by reason and detail; suspensions; advice overridden; `off-graph` — aggregates and ids only | §5 |
 | **Owner** | | | | |
@@ -7167,6 +7190,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-194 one ticket, one PR, one merge | under `cooperative` and under `protected` (plain git's reading being B-154's), each of `bug-report`, `draft-ticket`, `decision`, `spec-to-tickets` and `draft-doc` run from its start leg to its end; the last writing leg routed back after it archived the ticket, then reporting a station other than the one queuing `merged-by-hand`; a PR closed and its ticket withdrawn on the default branch; a record ticket superseded with its PR open; `prepare` finding the question settled; `carry-out` finding the chosen option gone; two tickets' branches taking the same new id; a `fold` | no leg of a record course writes to the default branch under any policy; each ticket's legs on one branch and one PR, the next leg reading the record at the branch's head, the archived file found by its `id`; `merged-by-hand` waiting on `owner` and arriving at the owner's merge as `create-pr`'s does; the ticket done at `merged` and closed in git by its own merge (`status: done`, archived); the routed run's ticket left live on the branch; the withdrawn and the superseded tickets' PRs closed by `close-pr`, nothing landed; `prepare` reaching `carried` with `merged-by-hand` queued; `carry-out` reaching `asked`; the second merge conflicting; the fold recording `duplicate_of:` in its own ticket alone |
 | S-BTN-195 one inbound path | a sync run attesting readiness, an arrival and an output for one ticket; a second run attesting only readiness; a run whose post is refused; under `cooperative`, an `answer:` in the ticket; a courier delivering a `withdraw` entry; an `advance` reaching `reviewed`, and the sync attesting the same arrival by a leg without `arrives: {fact: …}`; a want with a dispatch target and a dispatch courier holding the doorbell, then with none registered | the ticket's readiness, arrival and output are all the first run's until the second replaces readiness alone, never a mix within one judgement; the refused run's attestations are refused with it; the sync's `std:decision@1` settles the person leg; the courier's `std:effect@1` marks the entry `delivered`, and the next run's attestation of the withdrawal confirms it; the advance's `std:arrival@1` by the holder moves the ticket and the sync's for that leg is recorded `arrival-unapplied`; the want queues one `dispatch` entry, the courier is rung `outbox` and delivers it, and only a board post observed after the delivery confirms it; with none registered no entry is queued, `baton.dispatch-courier-missing` is raised and the runners answer the want; the same merged PR attested by two runs moves the ticket once and the second is silent; readiness attested at `reviewed` before a `fix → review` round returned the ticket to `reviewed` is discarded; a courier asked to dispatch a workflow its configuration does not pin refuses the entry |
 | S-BTN-196 the fact reader | under `protected`, a `create-pr` ticket at `reviewed` with `merge` queued, then a human merging its PR; a `create-spec` ticket at `requested`, then the owner's PR appearing; the same merge read twice; the reader's key not yet named, then named; a forge notification for the repository | with no key named, `baton.fact-reader-missing` is raised and nothing moves; once named, `fact-legs` lists both tickets, the reader is rung `facts`, attests `pr-merged` and `pr-opened`, and the tickets reach `merged` and `spec-open`; the second read is silent; no repository code runs on the reader's host |
+| S-BTN-197 the git-lock pickup asks Baton | a released claim that pushed a branch and opened a PR, another live claim on a second ticket, a granted key reading the board, the history and the branch-holder query; a post whose ticket frontmatter says `available` while its own placement is past the course's start (B-91's false release), repeated, then a ticket at `filed` and one whose frontmatter says `in-progress` | the board's `holders` names the live claim's ticket, holder and lease's end, and empty once it ends; the history's rows carry the path and its `resume` the ended claim's branches and PRs; the branch-holder query maps the held branch and says `held_by_other`; the false frontmatter is one `position-disagrees` discrepancy with both values, listed under the dashboard's discrepancies and not repeated by a sync that changes nothing, while a ticket at its start or one whose frontmatter agrees is no discrepancy |
 | S-BTN-190 guarantees and floors | a floor `{fieldhouse: [no-runner-lands, independent-review, signed-authorship, human-gates-hardware]}`; a change admitting `runner` to `refs.default_branch` or `refs.other`; a floor naming a broken guarantee, and a second floor named `fieldhouse`; removal by an owner key and by a `human_only` key; a trusted runner's protection report that no longer matches; an untrusted runner holding a claim on the repository; a signed read replayed for another repository, and one past `valid_until`; a trusted runner whose pin differs | the change refused `floor-violated`; both floors refused; removal refused, then accepted; `baton.unprotected` raised, `no-runner-lands` broken, trusted runners stopped, the runner's claim released `policy` and ended `released:floor`, and every claim refused `floor-broken` until a matching report; both reads rejected by a trusted runner; the trusted runner acts on nothing and `baton.policy-unpinned` stays open until its pins match |
 | S-BTN-191 the protected path in practice | the `protected` preset on GitHub; `paths.control` set to `any`; a handler raised; its proposal; an approval naming two proposals; the merge runner's workflow given the checker's credential; an MCP key raising `merge.reviews.count` to 99; the protection checker's report lapsing past 24 hours | `--check` matches with `refs.baton` admitting all five; the change to `paths.control: any` refused `floor-violated`, `no-runner-lands` still held; the handler written on `baton/proposed/<ticket>` from the CLI template and merged by a proposal merge with one `std:approval@1`, no reviews; the two-proposal approval covers neither; the checker's naming refused; the MCP key refused; `no-runner-lands` broken, no policy change refused, trusted runners stopped but the checker still checking |
 | S-BTN-187 board posts | `inputs.board` without `machine`; `attestations` entries admitting no `sync` writer for the stations and person legs a trusted leg acts on | a machine key's post is refused; a truncated delivery fails closed; a station a trusted leg acts on is not reached from the sync's attestation of a git verdict; a person leg's answer in git does not count and the human's attestation does |

@@ -49,9 +49,12 @@ class Repo {
     git(this.dir, 'commit', '-qm', 'scaffold');
     git(this.dir, 'push', '-q', 'origin', 'HEAD:main');
   }
-  /** `baton tickets …` as an operator runs it: the CLI's entry, the checkout as its home. */
+  /** `baton tickets …` as an operator runs it: the CLI's entry, the checkout as its home. The
+   *  harness's own Baton variables are scrubbed — a test's command reads the stand-in Baton its
+   *  test names, or none, never the instance this suite happens to run under. */
   tickets(...argv: string[]): { status: number | null; stdout: string; stderr: string } {
-    const out = spawnSync(process.execPath, [CLI, 'tickets', ...argv], { cwd: this.dir, encoding: 'utf8', env: { ...process.env, BATON_HOME: this.dir } });
+    const { BATON_KEY_FILE: _k, BATON_URL: _u, BATON_HOME: _h, ...env } = process.env;
+    const out = spawnSync(process.execPath, [CLI, 'tickets', ...argv], { cwd: this.dir, encoding: 'utf8', env: { ...env, BATON_HOME: this.dir } });
     return out;
   }
   at(file: string): string | null {
@@ -94,8 +97,9 @@ describe('S-BTN-189 the ticket commands', () => {
     expect(git(repo.dir, 'symbolic-ref', '--short', 'HEAD')).toBe('my-work');
     expect(readFileSync(join(repo.dir, 'draft.txt'), 'utf8')).toBe('uncommitted\n');
 
-    // The rest of a session: claim, a PR, done (archived).
-    expect(repo.tickets('claim', 'B-1').stdout).toMatch(/^✓ tickets: claim B-1 \(in progress\) — pushed as /);
+    // The rest of a session: claim (B-129: with no key in this environment, on git's word
+    // alone — the with-Baton cases are B-129's own suite), a PR, done (archived).
+    expect(repo.tickets('claim', 'B-1', '--offline').stdout).toMatch(/^✓ tickets: claim B-1 \(in progress\) — pushed as /);
     expect(parseFrontmatter(repo.at('tickets/B-1.mdx') as string)?.status).toBe('in-progress');
     const url = 'https://github.com/immediately-run/baton/pull/7';
     expect(repo.tickets('set', 'B-1', 'in-review', '--pr', url).status).toBe(0);
