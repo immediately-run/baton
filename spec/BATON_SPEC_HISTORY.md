@@ -1751,8 +1751,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   - **B-155's item 5** (a cheaper adopt after a course rename) is R-BTN-64's already: Baton maps
     a renamed station or leg by `renamed_from` itself. R-BTN-39's adopt now says so; only a
     station or leg the new file lacks waits for an adopt.
-  - No rule, scenario or gate is retired. Changed §15 rows: S-BTN-97, S-BTN-100, S-BTN-101 and
-    S-BTN-186 (new cases), and by the renames alone S-BTN-58, -67, -131, -166, -172, -175, -189; G-BTN-117,
+  - No rule, scenario or gate is retired. Changed §15 rows: S-BTN-97, S-BTN-100, S-BTN-101,
+    S-BTN-186 and S-BTN-192 (new cases), and by the renames alone S-BTN-58, -67, -131, -166, -172, -175, -189; G-BTN-117,
     G-BTN-121, G-BTN-144, and the OAuth spec's G-BTN-157. The test files that name a renamed command (`S-BTN-166.reads`,
     `S-BTN-172.ticket-check`, `S-BTN-175.request`, `S-BTN-189.ticket-commands`) test the built
     CLI and move with it in B-157's code item; none changes here.
