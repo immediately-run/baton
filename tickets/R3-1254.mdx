@@ -3,7 +3,7 @@ title: "R3-1254 — Baton model, remainder of R3-1243: exhaustive liveness on a 
 id: R3-1254
 project: baton
 status: in-progress
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -180,3 +180,4 @@ ticket is claimed. **Conflicts for the claimant to settle, not rescoped here:**_
 _(2026-10-31, a note only, the ticket being in progress: the courier lease model is now the outbox's (R-BTN-171, `model/lightQuestion.qnt`, renamed by B-64); nothing here models notices.)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): a note only, the ticket being in progress: posted decisions, choice stations, light questions, open-world claims and held snapshots left the spec (R-BTN-78, R-BTN-104, R-BTN-148, R-BTN-166, R-BTN-173 retired); `model/lightQuestion.qnt` models retired behaviour and is deleted with B-74's code; the model gains a person leg's expiry, the `cancelling` hold and the forced Resync's head reset.)_
+- 2026-11-02: the spec restructure's part 4 (B-166): every runner granted on a repository now has the same usable instances (R-BTN-76; no `uses`, no `runner` or `host` scope), so the fleet's resource answer is lost only when the repository has no live granted runner or no usable instance (R-BTN-77); the ontology's derived capabilities left the model's input (R-BTN-174, B-167), and a capability's capacity is R-BTN-178's rule 11 (B-106).
