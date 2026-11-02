@@ -1693,7 +1693,7 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   grant, an apply keeping named `service:` keys; and a Fieldhouse spec PR follows this merge
   (B-166's status). No candidate in the B-165 table was vetoed. The merge waits on the owner's word.
 
-- **2026-11-02 — the restructure, part 3: the surfaces (B-166; owner direction).** The third
+- **2026-11-02 — the restructure, part 3: the surfaces (B-166, PR #163; owner direction).** The third
   part of the rewrite the owner asked for after the whole-spec review of 2026-11-01
   (`docs/review/spec-simplification-review-2026-11-01.mdx`, B-155 to B-165; parts 1 and 2 above).
   This part rewrites §11.3 whole (R-BTN-129, R-BTN-127, R-BTN-130 / R-BTN-154), R-BTN-155's head,
