@@ -1,0 +1,88 @@
+---
+title: "B-154 — Harden merged-by-hand for every course: which merge counts, the owner's commits, what a hand merge may change, and a ticket its own merge closed"
+id: B-154
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1099
+tier: critical
+description: "`merged-by-hand` (create-pr today; every record course after B-149) has gaps review of immediately-run/baton#154 found: an early, stale or racing merge; another runner's commits reaching a leg's input through a route; no check on the paths a hand merge lands; the station function and fact reader unable to see a ticket its own merge closed; and no plain-git reading. Specify the rule once for every course in its own spec PR, then build it. Requires: B-140."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-140
+---
+
+**Brief:** the owner, 2026-11-01, on review round two of immediately-run/baton#154, choosing to
+split the `merged-by-hand` hardening out of it: "Split the hardening out".
+
+**Spec:** `spec/BATON_SPEC.md` R-BTN-131 (`create-pr`'s `merged-by-hand`, the record courses),
+R-BTN-192 (`pr-merged`, `fact-legs`), R-BTN-183 (*Continuity*, *Foreign commits*, *Paths*),
+R-BTN-5, R-BTN-74 and §4.3 (`positions`), R-BTN-83 (`route`), R-BTN-96 (plain git), R-BTN-120
+(`closed_tickets.final_station`).
+
+### Why
+
+`merged-by-hand` arrives on any merge of the ticket's PR that no `merge` leg reported. Review of
+#154's rounds one and two (`spec/BATON_SPEC_HISTORY.md`, 2026-11-01) found, for every course that
+uses it:
+
+- **Which merge counts.**
+  - A merge made before the last writing leg's push, or before the leg began waiting, can
+    satisfy a later wait.
+  - A merge racing the last leg's `advance` can strand the ticket closed in git at a non-end
+    station.
+  - Squash merges contain no ancestor head.
+  - A `prs:` field written on the branch can name another PR.
+  - Under a protected default branch, nothing checks that the human identity made the merge.
+- **The owner's commits and other runners' commits.**
+  - R-BTN-183's foreign-commit reset and continuity rules apply to every ticket's branch, so the
+    owner's refinements can be reset, and a route has no defined head.
+  - A route that records "the branch's head" would make another runner's commit a leg's input.
+- **What a hand merge may change.** Nothing checks it, so a document PR can land `.github/` or
+  `.baton/` paths on the owner's merge.
+- **A ticket its own merge closed.**
+  - `positions`, the station function's input and `fact-legs` list live tickets only, so a merge
+    that closes the ticket in git can hide its own arrival.
+  - `closed_tickets.final_station` is never rewritten afterwards.
+- **Plain git.** There is no `pr-merged` reading: whether a `--no-ff` merge or a fast-forward
+  counts, how the merged head is found, and who pushed it.
+- **The read point.** R-BTN-5 reads at the branch's fetched head, not at the last attested head,
+  and the claim response does not carry that head.
+
+### What to build
+
+1. **The spec amendment first**, its own PR with two fresh reviewers and the impact list. It
+   decides each point above for every course at once. Starting points from #154's review:
+   - **Which merge counts:** containment of the last attested head by the PR's head at merge, a
+     squash included, and the human identity's merge under a protected default branch.
+   - **Commits:** a route that takes an explicit `--head`, refused unless every commit after the
+     last attested head is the human identity's, and continuity stated for every writing claim
+     with the head carried in the claim response.
+   - **Paths:** a record course's changed paths limited to its ticket, new ticket files and
+     declared outputs, checked at the close and at the arrival.
+   - **Closed tickets:** a ticket closed in this run and waiting on a fact leg stays visible
+     until its arrival, and `final_station` is rewritten when the arrival applies.
+   - **Plain git:** a defined `pr-merged` reading, or `adopt` only.
+2. **Build it** in the fact reader (B-140), the sync, the CLI's close and `baton owner route`.
+
+### Tests
+
+The scenario rows the amendment writes, covering each point above for `create-pr` and for one
+record course.
+
+### Exit criteria
+
+- [ ] The spec amendment merged
+- [ ] `npm test` green with its cases
+- [ ] `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from immediately-run/baton#154's review round two.

@@ -3,7 +3,7 @@ title: "R3-1265 — Baton CLI without GitHub: sync and mirror runners, per-forge
 id: R3-1265
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -96,3 +96,5 @@ _(filed 2026-10-16)_
 _(2026-10-20: rescoped to the current-state spec, PR #71 — fact adapters serve `create-pr`/`review-pr` (there is no `pr` course), and `branch` is a course directory in the baton repository read from its source; depends on B-43.)_
 
 _(2026-10-20: extended for the adversarial review's fixes — `branch` verdicts carry `Baton-Claim: <nonce>` and are posted as markers, adv-1 m9; the marker pipeline that turns an unclaimed one into `foreign-write` is B-78's (R-BTN-46), which S-BTN-54's `foreign-write` case waits for.)_
+
+_(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): an unclaimed `branch` verdict counts and logs nothing: the marker pipeline that turned it into a `foreign-write` is retired with B-78 (R-BTN-46, R-BTN-96), and S-BTN-54's `foreign-write` clause is gone.)_

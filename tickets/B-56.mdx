@@ -3,7 +3,7 @@ title: "B-56 — The debugger: Needs you lists unhandled conditions and the floo
 id: B-56
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -169,3 +169,5 @@ the list of what nothing else handles.
 _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
 
 _(2026-10-20: text corrected to the current spec — a dashboard resolve is one step, `POST /v1/ui/conditions/{condition}/resolve`, not a confirmed action, adv-2 B1 and adv-4 B1.)_
+
+_(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): there are no posted decisions and no `hitl.decision`; Needs you and `baton decision list` list every queued person leg with its question instead (R-BTN-116, R-BTN-163), and a `baton.*` condition files no handler ticket: a delivery runner polling `GET …/conditions?open=1&person=1` sends the resolve link (B-155's ruling).)_

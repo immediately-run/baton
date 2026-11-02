@@ -1,0 +1,64 @@
+---
+title: "B-161 — One way to ask a person: a person leg answered by a std:decision@1, replacing posted decisions, light questions and hitl tickets for answers"
+id: B-161
+project: baton
+status: available
+updated: 2026-11-01
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1106
+tier: judgement
+description: "The spec has five ways to ask a person (person legs, posted decisions which also raise hitl.decision, hitl conditions with handler tickets, light questions with Baton-held tickets and refs/baton/questions, baton.* conditions answered on the resolve page) and three places an answer lives. Keep one: a person leg answered by a std:decision@1 from the CLI, dashboard or MCP."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - B-166
+---
+
+**Brief:** the owner, 2026-11-01, on the whole-spec review they commissioned ("assess it for …
+can any vocabulary, core concepts or actors be simplified … is the user experience intuitive …
+are the security guarantees … truly guaranteed and … do they matter"), asked for its findings
+to be filed as tickets. Source: `docs/review/spec-simplification-review-2026-11-01.mdx`.
+The review's claims are a reviewer's, checked against the spec where they cite it; this ticket
+verifies each against the text before changing anything.
+
+### Why
+
+Review finding 5 and section 1.2: R-BTN-116, R-BTN-78 (whose decision also raises
+`hitl.decision`, so Needs you lists one question twice), R-BTN-160/161, R-BTN-173 (~150 lines,
+two outbox kinds, `baton_held`, a Quint model) and R-BTN-163. Light questions exist to save one
+git commit per question.
+
+### Decided (the owner)
+
+**Rulings of 2026-11-01** (the owner, answering each question in the session that continued
+immediately-run/baton#150; the restructure, B-166, writes them into the spec):
+
+- "One primitive": a person leg answered by a `std:decision@1` is the one way a course waits on a
+  person; posted decisions become a ticket source's way to declare one; light questions are
+  retired; `baton.*` conditions keep the resolve page.
+
+### What to build
+
+1. **A spec PR first**, under the babysit skill's *Spec PRs*: two fresh reviewers, the impact list,
+   every rule restating the same fact changed with it.
+2. Person legs as the one primitive; posted decisions become a ticket source's way to declare
+   one; light questions retired with their outbox kinds and model; `baton.*` conditions keep
+   the resolve page.
+3. Tickets building the retired parts rewritten or superseded with a map.
+
+### Exit criteria
+
+- [ ] The spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] `npm run check:spec` and `npm run check:wiki` green
+- [ ] Any code item: `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-01: filed from the whole-spec review.
+- 2026-11-01: decided by the owner (above); written into the spec by the restructure, B-166.
+- 2026-11-01: the spec half is written by the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): R-BTN-116 is the one primitive (the question posted by the ticket source, the `std:decision@1` answer, `expires`), R-BTN-78 and R-BTN-173 are retired, `baton.*` conditions keep the resolve page (R-BTN-163) and the `ask` course asks through its person leg (R-BTN-169). B-74 is superseded; B-7, B-56, B-66 and B-116 carry the new shape. **What remains to build:** `ticket_questions` and the question in the board post (B-7); the Needs-you and `baton decision list` listing of queued person legs (B-56); `baton attest` for a decision and the dashboard's answer control (B-7, part 3's surfaces); the restart Baton forms from a handler's end (B-66); deleting `ticket_decisions`, `hitl.decision` and the light-question code and model (B-74's map).

@@ -3,7 +3,7 @@ title: "B-64 — The outbox and its couriers: every effect Baton intends outside
 id: B-64
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -193,3 +193,5 @@ _(filed 2026-10-20 with the current-state spec, PR #71.)_
 _(2026-10-20: adversarial review of the spec — the entry state `claimed`, never handing out a delivered entry again, `outbox-unlanded` after 3 snapshots, a dropped claimed handler withdrawn, later `answer` entries dropped with their handler, and a core `notify` condition re-raised within an hour or past 20 handler entries an hour filing no handler. Build these here.)_
 
 _(2026-10-30: rescoped by the spec amendment that folds `forge-check` notices into the outbox and replaces the built-in leg `baton.write` with couriers. The earlier plan's `--outbox` flag, `outbox` claim list, `written[]` end and `baton.write` re-verification are gone; the `notices` table migrates here.)_
+
+_(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): the outbox has one git kind, `withdraw` (R-BTN-171): the `handler` and `answer` kinds, `collision`, `skipped`, the provisional handler-ticket row and `tickets.outbox_id` are retired with light questions (R-BTN-173) and with Baton's own handler tickets (R-BTN-163, B-155's ruling). A cancelled ticket is marked `cancelling` (`ticket_overrides.cancelling_at`, a flag beside any hold) until its withdrawal lands (R-BTN-168); the `outbox-unlanded` hold is gone, `baton.outbox-late` alone marks a late entry. The rest of this ticket is part 2's to revisit (couriers into runners, B-159).)_
