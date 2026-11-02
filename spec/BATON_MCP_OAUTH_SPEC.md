@@ -303,7 +303,7 @@ standard OAuth consent on Baton's dashboard (Decisions).
       never wider than the requested scope, what R-BTN-186 admits to a delegated key or the owner's own actions;
       each write only when the owner ticked it, a destructive one confirmed;
     - authorized as its minting owner key (the approving session's) on that repository, narrowed
-      to its ids, only on `POST /v1/mcp`; a hold it sets is `hold_reason: mcp:<name>`, and it lifts only that one (R-BTN-186);
+      to its ids, only on `POST /v1/mcp`; a hold it sets is `hold_reason: mcp:<name>` with `set_by: mcp:<id>`, and it lifts only that one (R-BTN-186, R-BTN-130);
     - at most 90 days (default 30), ended by 7 days without an MCP call, its minter's removal
       or revocation, or `owner.mcp-key.revoke`; refused while the repository has
       `api_keys: false` (§9).
@@ -379,7 +379,7 @@ standard OAuth consent on Baton's dashboard (Decisions).
     of that client revokes its whole grant. It always answers `200`.
   - **Records.** Approval, denial, a grant's creation, every end and every reuse write a
     repository `events` row of kind `oauth` (`detail.act`: `approved`, `denied`, `granted`,
-    `revoked`, `replay`, `code-failed`), actor the approving owner or `mcp:<name>`.
+    `revoked`, `replay`, `code-failed`), actor the approving owner or `mcp:<id>` (R-BTN-130).
   - **`baton.oauth-replay`** (notify) sits on the repository with `detail` `{grant_id, client_id,
     kind: "code" | "refresh", client_addr}`; its cause ends when the revoked grant's row is
     deleted, or an owner resolves it.

@@ -1858,6 +1858,36 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   own route beside `http`, and the router serves both (R-BTN-129); the grants read lists
   `mcp_keys` (§14, R-BTN-130).
 
+- **2026-11-02 — review round three of the restructure's part 3** (one fresh reviewer, the last;
+  the diff, the impact list, round two's 14 fixes re-checked line by line and confirmed closed;
+  the reviewer hit the account's rate limit once and resumed on the owner's "Retry"). One
+  blocking: the `own` test keyed on "the key's row id" while §13's actor convention held
+  `mcp:<name>` and §13.2's `mcp_keys` had no `id` and was keyed `(repository_id, name)`, so the
+  data model forbade the name reuse S-BTN-101 tests or, relaxed, reopened the hole. Majors:
+  R-BTN-188's `key:` entry said nothing of sessions though OAuth §5 and R-BTN-130 cited it for
+  that; §11.4's "every other action needs its code" contradicted the OAuth spec's
+  non-destructive approval, request, status and denial, and `ui.logout`; the `human`
+  principal's `repository` scope "where it is an owner" shut out the break-glass key R-BTN-188
+  calls the only recovery. Minors: `added_by` against `owner_bars.set_by`; whether an
+  administrator key may carry the `human_only` mark, which R-BTN-57 and two §14 rows tested;
+  R-BTN-155's not-confirmed sentence missing the answer §11.4 added; R-BTN-179 and §11.4 not
+  naming `mcp_keys`; `/v1/ui/messages` absent from the `ui` list; one tree cell naming one route
+  for four actions; two ticket notes carrying statements round two retired; §13 unmarked in the
+  impact list.
+
+  Fixed: an MCP key has an immutable `id`, never reused; `mcp_keys` is keyed by it, its name
+  unique among live rows; the actor is `mcp:<id>` everywhere a column holds one and the `own`
+  test is on it, `hold_reason: mcp:<name>` staying for display (R-BTN-129, R-BTN-130, §13's
+  convention, §13.2, the OAuth spec's §7 and §9). R-BTN-188's `key:` entry admits a dashboard
+  session the key minted when it is not `human_only`, and S-BTN-192 runs the case. R-BTN-155's
+  list is the whole list of confirmed acts, §11.4 says so, and the not-confirmed sentence names
+  the answer, the OAuth consent acts and `ui.logout`. The `human` principal's scope reaches every
+  repository a break-glass line satisfies (R-BTN-129, §12.1). R-BTN-57 and the two admin rows
+  say a human gate opens on the owner route, never with an administrator key. R-BTN-179 and
+  §11.4 name `mcp_keys`; the `ui` list names `/v1/ui/messages` and its `match`; the tree cell
+  names the four routes; B-156's and B-73's notes read as the rules do; the PR body marks §13.
+  No further round: what remains is the owner's (the PR body's seven numbered items).
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
