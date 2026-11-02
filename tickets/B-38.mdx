@@ -3,7 +3,7 @@ title: "B-38 — Baton positions held by Baton: the holder's provisional queued 
 id: B-38
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -56,3 +56,5 @@ depends_on:
 _2026-10-20 — R3-1255 counts each leg's queue (R-BTN-79): an owner's re-route and the holder's provisional queued leg move a ticket between queues, so they must reach `Queues.touch` in their transaction — `Blocks.write`/`held` do, through `Blocks.evaluate`. Add the re-route to `test/unit/queues.test.ts`'s membership cases._
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — the re-route is stored with its `override_kind` so the other held positions reuse it, and `resolve … route` becomes `baton.retries`' `route:<leg>` restart.)_
+
+_(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): R-BTN-83 now has three sources of a queued leg — `holder`, `baton`, `owner` — in place of the eleven `next_source` kinds, and the `outbox` wait is a `cancelling` hold (R-BTN-168); `override_kind` is `owner` or `baton`. Build the override store to those values.)_

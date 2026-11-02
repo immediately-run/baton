@@ -3,7 +3,7 @@ title: "B-65 — Compensation, supersession and the built-in leg baton.cancel (R
 id: B-65
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -143,3 +143,5 @@ _(filed 2026-10-20 with the current-state spec, PR #71)_
 _(2026-10-20: extended for the adversarial review's fixes — `superseded_at` on a superseded unconfirmed claim, compensations recorded in `claim_legs` so a partial cancel resumes, and `baton.cancel` re-verified against Baton's record (item 7).)_
 
 _(2026-10-31: under the repository policy's `tickets.created: proposed` (R-BTN-180, R-BTN-188), a supersession's replacement ticket and the `withdraw` itself are proposed on `baton/proposed/<ticket>` and land only by the proposal merge (B-64, B-140); until then the superseded ticket waits `cancelling`. Build the queueing so it reads the knob through `src/core/policy.ts` (B-145).)_
+
+_(2026-11-01: **rescoped** by the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`) on the owner's ruling of 2026-11-01, B-165 "Take review's default": R-BTN-168 is now "supersession, lifetime and the cancel leg", and compensation legs and the built-in `baton.cancel` are gone. Item by item: 1 — the course file takes a course-level `cancel: <leg>` (an ordinary leg leaving every station a ticket may be cancelled at, reaching one end) and `spawns.lifetime`; it refuses `compensate` and `kind: compensation` (R-BTN-69). 2 — `supersede` stands, minus the choice trigger (B-63 superseded); it holds the ticket `cancelling` (`hold_reason: cancelling`, §6.8), queues the course's `cancel` leg if one leaves the station (`next_source: baton`), else closes or queues the `withdraw` entry at once. 3 — unchanged. 4 — replaced: no built-in leg, no `runner:baton-legs`; the `cancel` leg runs as any leg does, on a runner holding its capabilities, and must succeed on work already done (S-BTN-132's re-run case). 5 — unchanged. 6 — the model gains the `cancelling` hold, not a `cancel` override kind. 7 — `superseded_at` unchanged; "a partial cancel resumes" is now the leg's own idempotence; the no-git re-verification applies to no ticket here (the cancel leg has a ticket file). The 2026-10-31 note stands for the `withdraw` entry.)_

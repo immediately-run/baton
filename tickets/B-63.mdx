@@ -2,8 +2,8 @@
 title: "B-63 — Choice stations: every leg armed, the first to hold wins by Baton's clock (R-BTN-166)"
 id: B-63
 project: baton
-status: available
-updated: 2026-10-20
+status: superseded
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -125,3 +125,5 @@ the outcome.
 ## Status
 
 _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
+
+_(2026-11-01: **superseded** by the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`), which retires R-BTN-166 on the owner's ruling of 2026-11-01, B-165 "Take review's default". Where each item went: 1 (`choice`, `after_s`) — the course file refuses both; a person leg's `expires: {after_s, reached}` replaces the one use (R-BTN-69, R-BTN-116), built with B-7. 2 (arming) — nowhere: a person leg and a fact leg may arrive while another leg is queued without arming (R-BTN-83). 3 (settling, `next_source: choice`) — the expiry is Baton's own arrival, `next_source: baton` (R-BTN-83, R-BTN-116). 4 (`choice-lost`) — retired; a late answer is `arrival-unapplied` (R-BTN-39). 5 (losers) — `lifetime: station` stays B-65's. 6 (migration) — `ticket_timers.kind` `expires` replaces the `after_s` row (§13.6), built with B-7. 7 (the model) — the expiry joins the model with B-7. Exit criteria: S-BTN-133 and G-BTN-151 are retired; S-BTN-129's expiry case is B-66's; S-BTN-50's exported instant is a person leg's expiry. Exit criteria: 1 (S-BTN-133, G-BTN-151) retired, S-BTN-129's expiry case B-66's; 2 (the model with its report) joins B-7's expiry change; 3 (the generic checks) and 4 (the review gate) go nowhere, being every PR's.)_

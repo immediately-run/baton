@@ -3,7 +3,7 @@ title: "B-120 — Baton owns a ticket's course history, and every statement it r
 id: B-120
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -132,3 +132,5 @@ write is a way around them (reset a path to escape `max_runs` or a retry hold).
 - [ ] `npm run typecheck` green
 - [ ] no snapshot path in `src/core/` writes a ticket's station, path or queued leg
 - [ ] a leg finished outside the runner is brought into Baton by one owner command
+
+_(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): an arrival Baton does not apply is an `arrival-unapplied` history row on the ticket and raises nothing; `position-disagrees` and the implied-station comparison are retired (R-BTN-39, R-BTN-85), and the implied station is a hint on the ticket's view and adopt's default only.)_
