@@ -3,7 +3,7 @@ title: "B-46 — hardening within a tenant: only pushers' forge writes count, ru
 id: B-46
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-01
 repos:
   - immediately-run/baton
 tags:
@@ -216,3 +216,5 @@ _(2026-10-20: rescoped to the current-state spec, PR #71 — the courier `asks` 
 _(2026-10-20: extended for the adversarial review's fixes — settlement gates, `code_repo_consents`, the longest id winning a branch, `base_sha`, grant acceptance and roleless pending keys, the declaration budget, verified-only revocation over `http`, and no Access JWT read (item 7).)_
 
 _(2026-10-31: a code-repository consent is an `approvers.members` action of the consenting repository (R-BTN-188's first row; B-145 item 12 builds the hook).)_
+
+_(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): open-world claims are retired (R-BTN-104, R-BTN-148; R3-1271 superseded), so this ticket's items on open-world gates, the `declared` field, `misdeclared` and tainting, and its unfounded-head items (`head-replaced`) are void; `base_sha` and `released:off-branch` stand (R-BTN-143), and a forced Resync is the one way a rewritten head is adopted (R-BTN-11). G-BTN-59's open-world clause is gone.)_

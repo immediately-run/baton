@@ -3,7 +3,7 @@ title: "B-79 — Fences, idempotency and adoption after the adversarial review: 
 id: B-79
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -148,3 +148,5 @@ runner to name a legacy session adopted its claim with no one checking.
 _(filed 2026-10-20 from the coverage audit of the tickets against the spec, for the adversarial
 review's fixes to §8, §9 and §16.1; it replaces B-60's fence clearing "until the runner goes
 silent past its lease" with `fence_deadline`)_
+
+_(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): `foreign-write` is retired (R-BTN-46): a child session the runner cannot fence before `fence_deadline` has its later pushes unnoticed, and the next claimant re-reads git (R-BTN-19, R-BTN-25).)_

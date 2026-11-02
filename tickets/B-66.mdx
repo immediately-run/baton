@@ -3,7 +3,7 @@ title: "B-66 — Standard handler courses ask, deliver and announce, and the sta
 id: B-66
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -110,3 +110,5 @@ flag instead of writing its own handler courses.
 ## Status
 
 _(filed 2026-10-20 with the current-state spec, PR #71)_
+
+_(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): the `ask` course asks through its person leg `answer`, whose `expires` replaces the choice station and `expire` leg; its `cancel` leg is `retract` and `deliver`'s is `retract` too (no compensation legs); `announce` handles `warning` and `error` only, never `baton.*`, which no ticket carries (R-BTN-163); `--bind-conditions` writes `{"hitl": "ask", "warning": "announce"}`. A `suspend` condition's restart is formed by Baton from the handler's end (R-BTN-162), so no `std:restart@1` output is written in git; `deliver`'s policy is `{max_attempts: 3, backoff_s: 60, exhausted: "email"}`.)_

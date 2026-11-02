@@ -3,7 +3,7 @@ title: "B-125 — A compromised-runner runbook: bar, revoke, find what changed, 
 id: B-125
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-01
 repos:
   - baton
 tags:
@@ -66,3 +66,5 @@ cheapest measures: today revocation is improvised.
 ## Status
 
 _(2026-10-30: `machine_sync` is retired as a setting: whether a machine key may post the board is the repository policy's `inputs.board` (`machine`), R-BTN-188, built by B-145. Read it through `src/core/policy.ts` once B-145 lands.)_
+
+_(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): the runbook's "find what changed" step cannot rely on `foreign-write` discrepancies, which are retired (R-BTN-46, R-BTN-85); it reads the forge and git directly.)_
