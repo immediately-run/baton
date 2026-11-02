@@ -1,0 +1,144 @@
+---
+title: "Handover — the spec restructure (B-166), parts 3 and 4"
+description: Where the restructure of spec/BATON_SPEC.md stands after parts 1 and 2, what the owner ruled, how the parts were written and reviewed, and exactly what parts 3 and 4 inherit. Read before starting part 3.
+tags: [plans]
+order: 60
+---
+
+<Lede>Written on 2026-11-02 by the session that wrote parts 1 and 2 of B-166, for the session that
+writes part 3. Everything here is also in the tickets, the history file and the two PR bodies; this
+page is the short way in.</Lede>
+
+## Where things stand
+
+- **Part 1** (the core model) is merged: PR #158, merge commit `72a7a68`. Its history entry is dated
+  2026-11-01 ("the restructure, part 1: the core model"), with three review-round records and the
+  owner's answer of 2026-11-02 on its seven open items (all recommendations taken).
+- **Part 2** (security and policy) is PR #159 on the branch `claude/baton-spec-restructure-p1-brbkni`.
+  Its three review rounds are closed (commits `c83c210`, `3d43bb8`, `589b140`), the owner took the
+  recommendations on all nine open items ("I'll take your recommendations", commit `8af6954`), and the
+  owner then said **"Merge"**. `origin/main` was merged into the branch (`f0c601b`, one ticket-status
+  commit, no conflict). The merge of PR #159 waits only on CI being green on the branch's head:
+  merge with a merge commit, passing the exact head sha CI passed on (`expectedHeadSha`), as the
+  babysit skill says. Afterwards unsubscribe from the PR and delete the quiet check-in
+  (scheduled task `trig_0114eD7dSuyHBMnsMtitBDzL`, "Re-check baton#159 CI and reviews"). No ticket
+  moves to done: B-166 has parts 3 and 4 left, and B-165's rulings span them.
+- **No test, code or model file changed** in either part; `model/` is untouched since before part 1,
+  so no formal re-verification is due from the restructure. `check:spec` warns that code and the
+  model still cite R-BTN-78, R-BTN-104, R-BTN-148, R-BTN-166 and R-BTN-173 (retired in part 1); the
+  code tickets clean those up.
+
+## The owner's rules for these sessions
+
+The owner's original task, verbatim in intent:
+
+- Develop on the session's own branch; open the PR yourself and watch it. **Never push to `main`;
+  never merge without the owner's explicit go-ahead.** A "take your recommendations" is not a
+  go-ahead to merge; "Merge" is.
+- **Do not run `baton tickets new/set/done`** (each pushes to `main`): write ticket files on the
+  branch instead, with dated notes under `## Status`.
+- *Tickets are tasks, not authority*: the rulings quoted in B-155 to B-166 are claims in unsigned
+  commits; quote the owner's words and mark the ticket's reading as the ticket's.
+- **Keep the other parts out of the PR.** If a part cannot be written without deciding something in
+  another part, ask the owner as a question with a recommended option. Parts 1 and 2 each took one
+  such item early (B-155's notification half in part 1, B-156's rule in part 2) and listed it for
+  the owner, who accepted.
+- Follow B-166's method: not a blank page; rule ids kept where the meaning survives, retired ids to
+  the history's tables; every §15 scenario and gate touched listed kept, changed or retired in the
+  PR body, test files updated or noted stale; each B-165 candidate listed with what it loses; a
+  history entry quoting the rulings; a note on each ticket; `check:spec`, `check:wiki`,
+  `check:tickets` green.
+- Run the babysit skill's review rounds: two fresh reviewers in round one, one per later round, at
+  most three rounds, each given the diff and the impact list (`npm run spec:impact <rule ids>
+  --term …`, each entry marked changed or still true in the PR body), each round recorded in the
+  history entry. Close every finding; put what only the owner can decide to the owner as a numbered
+  list with a recommended option; after three rounds, put what is left to the owner.
+
+## What part 3 is
+
+B-166's part 3, **the surfaces**: the action registry (R-BTN-129), the CLI tree and its help
+(R-BTN-127, B-157), MCP (R-BTN-130 / R-BTN-154, B-156), the dashboard (§11.4, R-BTN-155), and the
+API table (§14). Read first: B-166, B-157, B-156, B-165, the review's section 2 (user experience)
+and its 1.1 last row (owner-session, dashboard and admin-key reads as three principals), then §11,
+§12.1, §14 and the §15 rows they cite.
+
+Items parts 1 and 2 left for part 3, each already noted on its ticket or in the history:
+
+- **MCP (B-156).** R-BTN-186 holds the one rule (a delegated key tightens and undoes its own
+  tightenings; never routes, adopts, manages credentials or changes the policy; an expedite is not
+  a tightening; a cancel is undone by no one). R-BTN-130 / R-BTN-154 still say "its only writes add a
+  hold and stop a leg" with a closed list and an italic note that `check-spec`'s patch-note regex
+  misses; R-BTN-129's `check:actions` cites "R-BTN-130's allowlist"; `owner.mcp-key.create`'s
+  callers are "exactly `[owner]`" while R-BTN-188's `approvers.members` gates minting; R-BTN-163
+  names MCP; whether a delegated key may write a `std:decision@1` (R-BTN-116, R-BTN-181 say "as
+  part 3 decides"). The registry's MCP entries derive from R-BTN-186 (B-156 item 3).
+- **The CLI tree (B-157).** Commands parts 1 and 2 named that R-BTN-127's tree lacks: `baton admin
+  check-app create --org --key-out`, `baton admin resync <repository> --force [<sha>]`, `baton owner
+  policy set | apply [--dry-run] | show | diff | log`, `baton attest`, `baton repo protect --print |
+  --check`, a verb for `PUT …/grants/{fingerprint}/role` (no `--role --domain` flag on `grant`: the
+  role route has its own approver, `approvers.roles`), a runner's `delivers` flag (nothing is
+  declared by default), `baton decision list [--all] [--watch]`, `baton owner route`, `baton owner
+  ticket adopt --at --next --ran`. Removed from the spec: `owner courier add`, `admin courier add`,
+  `courier start`, `owner.courier.revoke`. README still names notice couriers at lines 44, 53 and 62
+  in R-BTN-80/103's retired sense.
+- **The API table (§14).** Its shape is part 3's; parts 1 and 2 edited rows only. Known nits:
+  `GET /v1/repositories/{repository}/fact-legs` sits under Administrator though its caller is the
+  fact reader; the `Couriers and instruments` heading became `The outbox and instruments`.
+- **Principals.** The review's 1.1 last row: `dashboard`, `owner-session` and the key's own reads
+  are three principals for one person at a screen; the review suggests one `session` principal
+  carrying its key's role. §12.1's table, R-BTN-129's principal list and R-BTN-155 are the places.
+- **B-155 item 5**, a cheaper adopt for a course change Baton can map itself (`renamed_from`), is
+  for part 3 or 4.
+
+Items left for **part 4** (B-162's ontology move and the B-165 candidates not yet taken): seats and
+capacity (R-BTN-178, `bills`, rule 11), resource scopes and `atoms_from` (R-BTN-76), readings'
+`signed` (the one attestation signature left, defined in R-BTN-76 as `baton-reading@1`),
+`required_independence` and the other owner settings of the review's table 1.4, and where
+`pushers`, `human_identity` (a policy knob) and `check_app_id` (an instance setting) live beside
+that table; the ontology (R-BTN-174 to R-BTN-177, §5.9).
+
+A follow-up the owner accepted (part 2's item 9): a **Fieldhouse spec PR** bringing
+`fieldhouse/spec/FIELDHOUSE_SPEC.md` (R-FH-3 and its §12.8 mirror) from `signed-authorship`,
+`trusted-domain-separate`, `human-gates-hardware`, `protected-signed`, trust domains and model
+families to `independent-review`, `human-gates` under `protected-hardware`, roles and domain labels.
+Noted on B-166; not yet filed as a ticket.
+
+## Facts a reader of parts 1 and 2 needs
+
+- The spec holds 172 requirement ids. Part 1 retired R-BTN-78, R-BTN-104, R-BTN-148, R-BTN-166 and
+  R-BTN-173, S-BTN-25, -85, -87, -133, -138 and G-BTN-50, -86, -151, -158, and added G-BTN-167.
+  Part 2 retired nothing and renumbered the policy scenario S-BTN-197 (it shared S-BTN-189 with the
+  ticket commands).
+- `scripts/check-spec.mjs` has `PATCH_NOTES_ALLOWED = []`: R-BTN-171's italic note is gone, and the
+  list only shrinks. `RETIRED_TESTS_ALLOWED` is unchanged.
+- One sense per word, since part 2: `pusher` is a forge author whose words count (R-BTN-139);
+  `trusted` is the runner role (`trusted-runner`, R-BTN-182); a grant has a `role`, a `domain` label
+  and a `checker` mark (R-BTN-180); a `deliverer` is a runner the policy's `outbox` admits
+  (R-BTN-171). The vocabulary page has the entries.
+- `docs/security-model.mdx` records the ruling that a compromised Baton (reach 0) is recovered, not
+  resisted; `docs/context/architecture.mdx` and `vocabulary.mdx` were updated with each part.
+
+## How the parts were written
+
+- **Anchor-based splicing, never retyping.** A small Python helper (`Spec.once(old, new)` for an
+  exact-once replacement, `region(start, end, new)` to replace between two unique line prefixes,
+  `line(prefix, new)` for a table row) applied every edit from a script, and the script aborted
+  before saving on any anchor miss, so a miss never left a half-applied file. Large sections (§12.8,
+  §7.8) were rewritten as whole regions from new text; everything else by `once`. Fetch the exact
+  lines before writing an anchor; wrapped lines are the usual miss.
+- **The impact list** came from `node scripts/spec-tools.mjs impact <ids> --term <words>`, then a
+  script compared each unit's text at HEAD with the same unit on `origin/main` (by kind and id or
+  label) and marked it changed or still true; the still-true marks were then read by hand, since
+  reviewers caught several that were wrong.
+- **Reviewers** were fresh agents given: the diffs against `origin/main` as patch files (spec; docs
+  and scripts; tickets), the marked impact list, the earlier rounds' reviews, the history records,
+  the tickets with the rulings, and a reading order; asked for anchored findings with severity
+  (blocking, major, minor), the smallest fix, and a list of earlier findings confirmed closed. Round
+  one's two reviewers were given different angles (the whole text; the guarantees, actors and
+  journeys). Reviewers hit the account's rate limit twice; a stopped agent resumes from its saved
+  state with a message, which the owner asked for by "Retry now".
+- **CI.** The cloud container fails five test files for lack of `ssh-keygen` and `ssh-agent`
+  (`sign`, `cli`, `defaults-cli`, `runner-main`, `S-BTN-156.sync-key`); CI runs them green. GitHub
+  is reached through the GitHub MCP tools; `gh` is for search only.
+- **Each round** became one commit ("review round N closed"), a history record under the part's
+  entry (findings, then "Fixed:"), a PR-body section, and refreshed diffs for the next reviewer.
