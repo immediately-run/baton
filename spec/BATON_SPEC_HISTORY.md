@@ -1693,6 +1693,212 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   grant, an apply keeping named `service:` keys; and a Fieldhouse spec PR follows this merge
   (B-166's status). No candidate in the B-165 table was vetoed. The merge waits on the owner's word.
 
+- **2026-11-02 — the restructure, part 3: the surfaces (B-166, PR #163; owner direction).** The third
+  part of the rewrite the owner asked for after the whole-spec review of 2026-11-01
+  (`docs/review/spec-simplification-review-2026-11-01.mdx`, B-155 to B-165; parts 1 and 2 above).
+  This part rewrites §11.3 whole (R-BTN-129, R-BTN-127, R-BTN-130 / R-BTN-154), R-BTN-155's head,
+  §12.1's session and MCP rows, §14's callers and the rows that name a surface, and every rule that
+  names a CLI command, from the text on `main` (`2cc9bc7`), applying these rulings. The owner
+  answered each question with the words in quotation marks; the sentence after each is the
+  ticket's reading of that answer (the tickets are unsigned, so the readings are claims, as
+  `CLAUDE.md` says):
+  - **B-156, the owner: "Tighten, and undo own".** Written as R-BTN-186's rule in part 2; this
+    part makes R-BTN-130 / R-BTN-154 derive from it. An MCP key is a delegated key acting as
+    `owner` on one repository, narrowed to the ids listed at minting; each registry entry carries
+    a `delegated` mark (`true` for an owner read and a tightening, `own` for the undoing of the
+    key's own tightening, `false` for the rest) that `check:actions` keeps equal to R-BTN-186,
+    and `tools/list` is the key's ids whose mark stands. The closed list ("its only writes add a
+    hold and stop a leg"), its italic note and the `mcp: true` flag are gone; `owner.mcp-key.create`
+    is an `approvers.members` action (R-BTN-188), so a key dies with the credential that minted it.
+    Decided under the ruling, as the ticket's reading of it: a delegated key writes no attestation,
+    a `std:decision@1` moving a ticket as a route does (R-BTN-116, R-BTN-181), and resolves no
+    condition, a restart closing what Baton or a leg raised — ending a block or another's hold,
+    routing, or setting a `parked` hold the key's own test never matches (R-BTN-163); and R-BTN-186's
+    "restart a leg it stopped" is gone, a stopped leg being claimable again at once (R-BTN-119). R-BTN-39, R-BTN-12, R-BTN-57,
+    R-BTN-119, R-BTN-163, §12.1, §12.2 and §14 cite R-BTN-130 and R-BTN-186 in place of the list.
+  - **B-157** (the review's finding 6 and section 2.1, folded into B-166 by the owner's
+    direction). R-BTN-127's tree holds every command the specification names under one grammar —
+    `baton <noun> <verb>`; under `owner` and `admin` a two-word verb `<thing> <act>` — and help
+    at every level is generated from the registry's command table (R-BTN-129), so no command
+    answers "not a flag of this command". Renamed, with `renamed:` exits as the twelve names
+    before them (`baton run`, one of the twelve, survived in R-BTN-131 and is corrected there):
+    `baton request` → `ticket request`; `baton tickets …` → `ticket …` (one noun for a ticket, whether the command
+    reads Baton or writes git); `baton board` → `repo board`; `baton attest` → `attestation add` |
+    `revoke`, with `decision answer` for the common case; `admin repos` → `admin repo list`;
+    `admin revoke` → `admin key revoke`; `admin resync` → `admin repo resync`; `owner grants` →
+    `owner grant list`; `owner key grant` and `owner key create --api` → `owner grant add`; `owner
+    override` → `ticket hold` | `unhold` | `expedite` | `cancel`; `owner resolve`, `owner route`
+    and `owner ticket adopt` → `ticket resolve`, `ticket route` and `ticket adopt` (the actions
+    `owner.resolve` and `owner.grants.flags` are `ticket.resolve` and `owner.grant.flags`); `owner
+    bars follow` → `owner bar follow`; `owner owners add | remove` → `owner owner add | remove`;
+    `admin resource set` → `admin reading set`. Added, from parts 1 and 2: `owner grant role`, `owner grant
+    flags`, `owner policy set | apply [--dry-run] | show | diff | log`, `repo protect --print |
+    --check`, `repo policy`, `runner start --delivers`, `decision list [--all] [--watch]`,
+    `admin check-app create`, `owner consent`, `owner sync-key`, `owner sync want`, `admin key
+    hostname`, `admin settings set`, `human-key add | revoke` (R-BTN-185's route, which had no
+    command), and a key route for `admin repo resync` (`POST /v1/admin/repositories/{repository}/resync`,
+    destructive). Gone with B-159: `owner courier add`, `admin courier add`,
+    `courier start`.
+  - **B-165, the owner: "Take review's default"**, for the one candidate of this part's sections,
+    table 1.1's last row: `dashboard` and `owner-session` are one principal, `session`, carrying
+    its minting key's role, the role check living in `authorize` where it already was
+    (R-BTN-129, R-BTN-155, §12.1, §14). What it loses: nothing; an entry's `callers` says which
+    roles of a session it admits.
+  - **§14.** `GET …/fact-legs` sits with the repository reads, its caller the fact reader; the
+    outbox group is "Deliverers and instruments"; the callers legend names `session` and
+    `delegated`; the `resolve`, `adopt`, `attestations`, `overrides`, `bars/{id}/lift`,
+    `mcp-keys`, `/v1/actions` and `/v1/mcp` rows say what a delegated key reaches.
+  - **B-155's item 5** (a cheaper adopt after a course rename) is R-BTN-64's already: Baton maps
+    a renamed station or leg by `renamed_from` itself. R-BTN-39's adopt now says so; only a
+    station or leg the new file lacks waits for an adopt.
+  - No rule, scenario or gate is retired. Changed §15 rows: S-BTN-97, S-BTN-100, S-BTN-101,
+    S-BTN-186 and S-BTN-192 (new cases), and by the renames alone S-BTN-58, -67, -131, -166, -172, -175, -189; G-BTN-117,
+    G-BTN-121, G-BTN-144, and the OAuth spec's G-BTN-157. The test files that name a renamed command (`S-BTN-166.reads`,
+    `S-BTN-172.ticket-check`, `S-BTN-175.request`, `S-BTN-189.ticket-commands`) test the built
+    CLI and move with it in B-157's code item; none changes here.
+  - Outside the spec: `spec/BATON_MCP_OAUTH_SPEC.md` (its grants are delegated keys under
+    R-BTN-186; `session` for the owner role; the scopes), `docs/context/vocabulary.mdx` (action,
+    session, delegated key), `docs/context/architecture.mdx` (one registry, one check),
+    `docs/context/design-brief.mdx` (what an owner's session may do), and README's code map,
+    which names R-BTN-163 in place of the retired notice couriers. The pages that teach the
+    built CLI (README's usage, `docs/standard-courses.mdx`, `docs/runbooks/register-baton.mdx`)
+    keep the built names until B-157's code item renames them. Tickets: B-155, B-156, B-157,
+    B-165 and B-166 record what this part wrote; B-7, B-23, B-25, B-38, B-46, B-47, B-56, B-59,
+    B-73, B-75, B-76, B-113, B-116, B-118, B-120, B-121, B-123, B-124, B-129, B-130, B-140,
+    B-146, B-147, B-154, B-161 and R3-1266 carry a dated note on what changed under them.
+
+- **2026-11-02 — review round one of the restructure's part 3** (two fresh reviewers, the diff
+  and the impact list; one on the text whole, one on the actors, the guarantees and the review's
+  journeys). Blocking, found by both: `park`, the one tightening this part added to the
+  delegated set, could not be undone by the key that set it — R-BTN-163 records that hold as
+  `parked`, not `mcp:<name>`, and on `baton.retries` / `baton.contract` a park closes a Needs-you
+  entry on a hold the key never set; and the OAuth companion's G-BTN-157 still guaranteed "holds
+  only added". Blocking, one: the OAuth consent route let any owner's session mint an MCP key
+  while R-BTN-130 now requires an `approvers.members` approver, an agent-reachable path to a
+  human-gated credential under `protected`. Majors: `park` alone was an argument check that
+  `authorize(principal, action, target)` cannot make; §14 marked *delegated* on some rows and not
+  on others; a wrapped `baton attest` survived in R-BTN-191; S-BTN-100 still tested the removed
+  `mcp` flag; `admin repo resync` was a key-signed command with only a session route; the
+  attestations row's "session" was ambiguous once a session has two roles; the dashboard's
+  Needs-you entry "takes the answer" under `protected`, where a session's writer is refused; the
+  OAuth confirmation code followed the name `leg.stop`, not the destructive effect, so
+  `ticket.cancel` was grantable to a bearer unconfirmed; OAuth consent under a human-only
+  `approvers.members` was impossible and unsaid; the grammar statement did not produce `admin
+  freeze | seal | export | import | state` or the plurals; `POST /v1/human-keys` had no command.
+  Minors: a stale `mcp: true` and a fixed three-scope challenge in the OAuth spec; R-BTN-116's
+  "moves no ticket"; `check:actions` naming prose as its oracle; no `roles` field for a session
+  caller and no `notes` for a noun's help; `keys.json` with no slot for a human-only key; four
+  Calls/Signs-as mismatches (`repo protect`, `admin key hostname`, `admin resource set`,
+  `GET /v1/actions`); `mcp_keys.minted_by`'s wording; an MCP name reusable after revocation; `baton
+  run` listed as renamed twice; the administrator's session's "loses nothing" overstated; `ticket
+  claim` beside Baton's claim.
+
+  Fixed: `park` is out of the delegated set — a delegated key resolves no condition (R-BTN-186,
+  R-BTN-129, R-BTN-130, R-BTN-163, §14, S-BTN-101, the vocabulary page), put to the owner as
+  decision 4's reading. G-BTN-157 guards "loosening only a hold or bar it set itself", and the
+  consent route admits only a session whose minting key is an approver on `approvers.members`,
+  omitting human-only repositories from the picker and refusing them `forbidden` (OAuth §5,
+  §11, §13, G-BTN-157; R-BTN-130). §14's legend says an *owner* row admits a delegated key
+  wherever the mark stands, and the `release`, `bars` and `route` rows say so. R-BTN-191 names
+  `baton decision answer`. S-BTN-100 tests the `delegated` mark and the example. `admin repo
+  resync` calls a new destructive key route, `POST /v1/admin/repositories/{repository}/resync`
+  (R-BTN-11, §12.2, §14). The attestations row admits "an owner session (writer `owner`)", and
+  the Needs-you entry takes the answer where the policy admits an `owner` writer, else names
+  `baton decision answer` (R-BTN-116, R-BTN-163, §11.4, the design brief). The confirmation
+  code follows §12.2's destructive set (R-BTN-155, OAuth §5, §7, §11, G-BTN-157, the OAuth
+  Decisions line). The grammar names one-word verbs on the instance or the caller's own session
+  and the plural only where the act replaces or ends the set; `owner owners add | remove` is
+  `owner owner add | remove` (`owner.owner.*`), `admin resource set` is `admin reading set`, and
+  `human-key add | revoke` joins the tree (R-BTN-127, R-BTN-185, §12.2). The OAuth spec's
+  challenge and §13 read as R-BTN-130 does; R-BTN-116 says "answers no person's leg"; R-BTN-129's
+  list is the mark's definition and `check:actions` checks against it; a caller entry is
+  `{principal, scope, roles?}` and a noun may carry `notes`; `keys.json` maps `human` where
+  custody allows and approver rows try the list's roles; the four rows read as §14 does; an MCP
+  name is unique among every row, revoked ones included; `baton run` is one of the first twelve;
+  the B-165 note and the PR body say the administrator's session's stated power narrowed to the
+  rows the dashboard draws, and that `ticket claim` is git's claim beside Baton's.
+
+- **2026-11-02 — review round two of the restructure's part 3** (one fresh reviewer, the diff,
+  the impact list and round one's two reviews; all 37 round-one findings re-checked line by line
+  and confirmed closed). No blocking finding. Majors: the ground given for keeping
+  `ticket.resolve` from a delegated key ("every restart lifts a hold or routes") was false
+  against R-BTN-163's `baton.stalled` row, and decision 4 passed it to the owner; the OAuth
+  consent test was on the session's key, which a `human_only` owner key satisfies under
+  `[human]` while the parenthetical said no session does; `human-key.revoke` took `confirm:
+  true` but was absent from §12.2, as `attestation.revoke` had been since part 2; the registry
+  and §12.1 had no principal for a `human_only` key, so `human-key.add`'s `callers` could not be
+  written; R-BTN-130's "unique … revoked ones included" contradicted the OAuth spec's "unique
+  among live grants" and S-BTN-137; whether the dashboard's answer to a person leg needs a
+  confirmation code was said nowhere. Minors: OAuth §13's row, S-BTN-137 and its Decisions still
+  said `leg.stop` and "three scopes"; the mark's definition gave `GET /v1/actions` `true` while
+  its row said never an MCP key; an administrator matches an `owner` entry, which R-BTN-130's
+  `minted_by` sentence overlooked; a `park` survived in B-56's note; `human-key`'s noun family,
+  `keys.json` slot and the body's `signature` were half-specified; R-BTN-16's write rule covered
+  `/v1/ui/*` while a session now writes `POST …/attestations`; one action answered on two routes
+  with one `http`; nothing listed MCP keys.
+
+  Fixed: R-BTN-186 states the true ground (a restart closes what Baton or a leg raised — a
+  block, another's hold, a route, or a `parked` hold the key's own test never matches), and
+  R-BTN-129, R-BTN-130, the part-3 entry and the PR body cite it. The consent route admits a
+  session that is itself an `approvers.members` approver as R-BTN-188 reads a session — an
+  `owner` entry, or a `key:` entry naming a key not `human_only`, never `human` — the request's
+  repository list is narrowed to those, and R-BTN-185 says a session minted by a `human_only`
+  key is an owner's session, never `human` (OAuth §5, §11, §13, G-BTN-157; R-BTN-130).
+  `attestation.revoke` and `human-key.revoke` are in §12.2. `human` is a principal (R-BTN-129,
+  §12.1's new row), `human_only` a mark on an owner key or a key of no other role (§12.1), the
+  `human-key` noun is the human-only identity's, `keys.json` maps `human: <file>`, and the
+  body's `signature` is the new key's SSHSIG over its public line. An MCP name is unique among
+  live keys and grants; a hold or bar records the key's id (`set_by`), and the `own` test is on
+  the id, so a later key of the same name undoes nothing of a revoked one's (R-BTN-130, OAuth
+  §7, S-BTN-101). The dashboard's answer to a person leg is an unconfirmed act, named with its
+  reason (§11.4, R-BTN-163). OAuth §13, S-BTN-137 and the Decisions name the destructive set
+  and the open challenge; the mark's definition names the mechanically absent actions;
+  R-BTN-130 says an administrator mints none; B-56's note reads as the rule does; R-BTN-16's
+  write rule covers every session write and is marked changed; `ui` may carry the dashboard's
+  own route beside `http`, and the router serves both (R-BTN-129); the grants read lists
+  `mcp_keys` (§14, R-BTN-130).
+
+- **2026-11-02 — review round three of the restructure's part 3** (one fresh reviewer, the last;
+  the diff, the impact list, round two's 14 fixes re-checked line by line and confirmed closed;
+  the reviewer hit the account's rate limit once and resumed on the owner's "Retry"). One
+  blocking: the `own` test keyed on "the key's row id" while §13's actor convention held
+  `mcp:<name>` and §13.2's `mcp_keys` had no `id` and was keyed `(repository_id, name)`, so the
+  data model forbade the name reuse S-BTN-101 tests or, relaxed, reopened the hole. Majors:
+  R-BTN-188's `key:` entry said nothing of sessions though OAuth §5 and R-BTN-130 cited it for
+  that; §11.4's "every other action needs its code" contradicted the OAuth spec's
+  non-destructive approval, request, status and denial, and `ui.logout`; the `human`
+  principal's `repository` scope "where it is an owner" shut out the break-glass key R-BTN-188
+  calls the only recovery. Minors: `added_by` against `owner_bars.set_by`; whether an
+  administrator key may carry the `human_only` mark, which R-BTN-57 and two §14 rows tested;
+  R-BTN-155's not-confirmed sentence missing the answer §11.4 added; R-BTN-179 and §11.4 not
+  naming `mcp_keys`; `/v1/ui/messages` absent from the `ui` list; one tree cell naming one route
+  for four actions; two ticket notes carrying statements round two retired; §13 unmarked in the
+  impact list.
+
+  Fixed: an MCP key has an immutable `id`, never reused; `mcp_keys` is keyed by it, its name
+  unique among live rows; the actor is `mcp:<id>` everywhere a column holds one and the `own`
+  test is on it, `hold_reason: mcp:<name>` staying for display (R-BTN-129, R-BTN-130, §13's
+  convention, §13.2, the OAuth spec's §7 and §9). R-BTN-188's `key:` entry admits a dashboard
+  session the key minted when it is not `human_only`, and S-BTN-192 runs the case. R-BTN-155's
+  list is the whole list of confirmed acts, §11.4 says so, and the not-confirmed sentence names
+  the answer, the OAuth consent acts and `ui.logout`. The `human` principal's scope reaches every
+  repository a break-glass line satisfies (R-BTN-129, §12.1). R-BTN-57 and the two admin rows
+  say a human gate opens on the owner route, never with an administrator key. R-BTN-179 and
+  §11.4 name `mcp_keys`; the `ui` list names `/v1/ui/messages` and its `match`; the tree cell
+  names the four routes; B-156's and B-73's notes read as the rules do; the PR body marks §13.
+  No further round: what remains is the owner's (the PR body's seven numbered items).
+
+- **2026-11-02 — the owner's answer on part 3's open items.** Asked the seven items PR #163's
+  body listed, each with a recommended reading, the owner answered: "I'll take your
+  recommendations." So, as rulings: `baton tickets …` is `baton ticket …`, one noun for a ticket
+  (R-BTN-74, R-BTN-127); `baton request` is `baton ticket request` (R-BTN-131); `baton attest` is
+  `baton attestation add | revoke`, with `baton decision answer` for a person leg's answer
+  (R-BTN-116, R-BTN-181); a delegated key writes no attestation and resolves no condition
+  (R-BTN-186, R-BTN-130); R-BTN-186's "restart a leg it stopped" is gone; the registry's MCP mark
+  is the per-action `delegated: true | own | false` (R-BTN-129); and the review's sign-in and
+  confirmation-code ceremonies stay as R-BTN-155 says, candidate decisions for later. No candidate
+  in the B-165 table was vetoed. The merge waits on the owner's word.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -1877,7 +2083,14 @@ working until the stated condition holds, then removes it.
 - **Renamed CLI commands (R-BTN-127).** The twelve old top-level names (`baton why`, `run`,
   `test-course`, `init`, `sync`, `mirror`, `spool`, `inbox`, `blocked`, `replay`, `register`,
   `start`) exit 2 printing only a "renamed:" line naming the replacement. Remove them once no
-  caller uses them (B-23 updated the known callers).
+  caller uses them (B-23 updated the known callers). The restructure's part 3 (2026-11-02) adds
+  the second set, handled the same way: `baton request`, `baton tickets …`, `baton board`, `baton
+  attest`, `admin repos`, `admin revoke`, `admin resync`, `admin resource set`, `owner grants`,
+  `owner key grant`, `owner key create`, `owner override`, `owner resolve`, `owner route`, `owner
+  ticket adopt`, `owner bars follow` and `owner owners add | remove` (their replacements in
+  R-BTN-127's table); B-157's code item renames the
+  built commands and their callers (`npm run check:tickets`, fieldhouse's `npm run ticket`, the
+  skills and workflows that call them).
 - **`provider-exhausted` (R-BTN-126).** Until every course's `min_worker_version` is past the CLI
   version that ships R-BTN-126, Baton accepts `released:provider-exhausted` and records it as a
   `blocked` end: with exactly one account instance in the worker's `uses` serving a resource in

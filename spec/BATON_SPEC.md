@@ -174,15 +174,17 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
       shown on the ticket's view (§11), and raises nothing. A course whose facts place a ticket
       elsewhere than Baton does is a disagreement the owner settles with adopt or a route, not a
       fault Baton reports.
-  - **Adopt.** `baton owner ticket adopt <repository> <ticket> [--at <station>] [--next <leg>]
-    [--ran <leg>,…]` (`POST /v1/owner/{repository}/tickets/{ticket}/adopt`) sets the ticket's
+  - **Adopt.** `baton ticket adopt <ticket> [--at <station>] [--next <leg>] [--ran <leg>,…]`
+    (R-BTN-127; `POST /v1/owner/{repository}/tickets/{ticket}/adopt`) sets the ticket's
     position. It is how legs done outside Baton (while Baton was unreachable, in an owner's
     session, or in a clean-up) enter its history: a deliberate act of a key holder, never a side
     effect of a push.
     - **Who.** A credential on the repository's `approvers.policy` list (R-BTN-188; under
       `protected`, a `human` key), or an administrator under the same human gate (R-BTN-185);
-      never a delegated key, so not MCP (R-BTN-130). It overrides history and resets a limit, so
-      it is one of the actions `approvers.policy` governs (R-BTN-186).
+      never a delegated key (R-BTN-186, R-BTN-130). It overrides history and resets a limit, so
+      it is one of the actions `approvers.policy` governs (R-BTN-186). A course change that maps
+      the ticket's station and leg by `renamed_from` needs no adopt: Baton rewrites them itself
+      (R-BTN-64); only a station or leg the new file lacks waits for one.
     - **Where.** The station given, or without `--at` the station the latest snapshot's facts
       imply, refused `nothing-implied` where the course implies none. Station and `next` must be
       the course file's, `next` leaving the station; absent, `next` is the station's first listed
@@ -1005,7 +1007,7 @@ repository reachable over SSH is enough (R-BTN-105).
     `GET /repos/{owner}/{repo}/collaborators/{username}/permission` is `admin` or `write`
     (`author_association` only pre-filters); GitLab `GET /projects/:id/members/all/:user_id`
     has `access_level` ≥ 30 (approvals filtered the same); Gitea collaborator permission
-    `write`, `admin` or `owner`. `baton owner settings` warns when a shared echoing bot (such as
+    `write`, `admin` or `owner`. `baton owner settings set` warns when a shared echoing bot (such as
     `github-actions[bot]`) is listed.
   - **Failures.** A permission or editors read that errors aborts the sync run, which posts
     nothing and releases its number (R-BTN-150). Only a token known to lack the scope degrades: permissions to `pushers`
@@ -1074,7 +1076,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
                         #   conditions? (bindings,
                         #   R-BTN-161); for the CLI's defaults (R-BTN-74): items, default_course,
                         #   repos, agent_command, agent_wrapper (B-95); check: {depends_line}
-                        #   (B-111, `baton tickets check` alone reads it; default off);
+                        #   (B-111, `baton ticket check` alone reads it; default off);
                         #   ticket_prefix, legacy_ids, prefixes, project, tags, projects
                         #   (B-112, the ticket commands alone read them)
     tickets.mjs         # optional ticket source; absent, the CLI's markdown source (R-BTN-74)
@@ -1164,7 +1166,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
     Other fields are ignored. Two files with one `id`, or a `repos` name with no mapping, fail
     the sync: nothing is posted and the run names the file. `file(ticket)` writes
     `<items>/<local id>.md`; `withdraw` sets `status: withdrawn` and `withdrawn_reason`.
-  - **`baton tickets check [--repo DIR] [--quiet]`** (B-111) reads that source as a sync does — an
+  - **`baton ticket check [--repo DIR] [--quiet]`** (B-111, R-BTN-127) reads that source as a sync does — an
     ejected `.baton/tickets.mjs`, else the markdown default — and checks what it would post, without
     posting: the source's own refusal (a duplicate `id`, an unknown `repos` short name, an `order`
     that is not a number), the board post's validation (§4.4, the cycle among it), every
@@ -1174,7 +1176,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
     a `**Used by:**` line is never read — to its `depends_on`, both ways; a ticket with no such line
     is not compared. Exit 1 with one `path: message` line per finding, 0 without; an unreadable
     root or a malformed `baton.json` is an error (exit 2). It reads; it never writes.
-  - **The ticket commands** (B-112): `baton tickets new | claim | set | done`, whose behaviour is
+  - **The ticket commands** (B-112, R-BTN-127): `baton ticket new | claim | set | done`, whose behaviour is
     the git-lock commands docs' `claim.sh` and the repositories' `scripts/ticket.mjs` had, kept
     once in the CLI. Each is one commit pushed straight to the default branch from a throwaway
     worktree at the freshly fetched head (`--branch`, else the checkout's `origin/HEAD`, else
@@ -1189,7 +1191,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
       (from `--depends-on`; `none.` when empty), `**Used by:**`, `### What to build`,
       `### Tests`, `### Exit criteria`, `**Requires:**` and `## Status` with the filing date.
       A `--body-file` whose `**Depends on:**` line disagrees with the flag is refused. Before the
-      push it judges what it writes as `baton tickets check` judges it — the body line against
+      push it judges what it writes as `baton ticket check` judges it — the body line against
       `depends_on`, every id a live or closed ticket, the board post's validation of §4.4 (the
       cycle among it) over the files the commit would leave — and a filing that fails is written to
       no branch at all. Each dependency's `**Used by:**` line gains the new id once: the reverse
@@ -1206,7 +1208,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
       prefix to its pattern source, for a repository that allocates more than `\d+`). There is no
       hard-coded project: `new` without one it can name refuses. `--project` and the default both
       name a `kind: project` page in the items folder's `projects/`, which `new` refuses without.
-    - `baton tickets --help` lists the commands, every flag, the tags Baton reads and what each
+    - `baton ticket --help` lists the commands, every flag, the tags Baton reads and what each
       does — `EXPEDITE` (: expedited, first in every claim's order) and `OP` (`human-operator` in the
       ticket's `requires`) — and the `Requires:` clause a description may end with.
   - **The "How tickets work" page** (B-112): `baton repo init` writes `HOW-TICKETS-WORK.md` into
@@ -1216,7 +1218,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
     (`**Depends on:**` naming exactly `depends_on`; reverse mentions on `**Used by:**`; a wait on
     another repository's ticket on `**Waits on:**`, relations staying inside one repository, §4);
     projects (choose or create a related set's project before filing); and the commands. It is
-    written again when it differs, and `baton tickets check` reports a page that differs from the
+    written again when it differs, and `baton ticket check` reports a page that differs from the
     release's text, so docs, baton and fieldhouse cannot diverge.
   - Standard courses' legs are stubs that run `agent_command` (R-BTN-131); the CLI ships no leg
     scripts and no station functions.
@@ -1320,9 +1322,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
     commit it never saw; Baton's head stands, and the sync never posts one (R-BTN-147). An
     administrator adopts the new history with a forced **Resync** naming its head: `POST
     /v1/ui/resync {repository, force: true, sha}` (confirmed per R-BTN-155, the `sha` in the
-    confirmation) or `baton admin resync <repository> --force [<sha>]`, which reads
-    `origin/<default branch>` when none is given, shows it, and calls the same route with an
-    administrator's session, confirming its code (R-BTN-155). In one transaction
+    confirmation) or `baton admin repo resync <repository> --force [<sha>]` (R-BTN-127), which reads
+    `origin/<default branch>` when none is given, shows it, and calls `POST
+    /v1/admin/repositories/{repository}/resync {force: true, sha, confirm: true}`
+    (`admin.repo.resync`, destructive, §12.2) with the administrator's key. In one transaction
     Baton logs an `admin` event `head-reset` naming the old head and the new, replaces the head
     with `sha` and marks the board **unmaterialized** (`board_head.reset_at`; the observation
     counter runs on, so nothing older is accepted), and records a sync want (R-BTN-94). The sync
@@ -1406,7 +1409,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
   (R-BTN-153).
 - A post whose live tickets' `depends_on` form a cycle is refused `invalid-params`, naming it once
   as its path (`B-1 → B-2 → B-1`); an edge to a closed ticket, or to an id the post does not name,
-  is no cycle here — the latter is `baton tickets check`'s finding (B-111). The interim shape's
+  is no cycle here — the latter is `baton ticket check`'s finding (B-111). The interim shape's
   `state.items[].dependsOn` is the same graph and is refused the same way (B-111, round 1): no
   ticket source can post a loop, whichever shape it posts.
 - Free text and identifiers are validated on write (§12.3).
@@ -1785,7 +1788,7 @@ mean (R-BTN-50).
     `exhausted` leg, a person leg's expiry and the `cancel` leg; they are in the ticket's history
     and the owner-state export. The `start_leg`, a call's settlement and an applied arrival's
     `next` are recorded in the position alone.
-  - **Route.** `baton owner route <ticket> <leg>` (`POST /v1/owner/{repository}/tickets/{ticket}/route`)
+  - **Route.** `baton ticket route <ticket> <leg>` (R-BTN-127; `POST /v1/owner/{repository}/tickets/{ticket}/route`)
     queues any leg leaving Baton's station for the ticket, the course's `cancel` leg excepted
     (`cancel-leg`, R-BTN-168), `next_source: owner`, restarting its run count (R-BTN-63); `{clear: true}` restores the course's choice. Both are logged `re-routed`.
   - **The queue is the queued leg.** A ticket waits in exactly one queue, its queued leg's
@@ -2056,7 +2059,7 @@ mean (R-BTN-50).
     raised — when, for any owner bar in force or scheduled or any required bar, it removes or
     renames a leg the bar names, renames a leg named in `except`, or gives a name in `except` to
     a leg that carries `renamed_from` or is new. An owner releases the hold with `baton owner
-    bars follow <course>`, which rewrites the stored names to the file's, or by changing the
+    bar follow <repository> <course>` (R-BTN-127), which rewrites the stored names to the file's, or by changing the
     bars.
   - An `except` name the file simply drops (no rename) passes; Baton deletes it from the stored
     list and logs an `admin` event.
@@ -2201,7 +2204,7 @@ mean (R-BTN-50).
   | `branch` | R-BTN-96 | R-BTN-96 | branches |
   | `ask`, `deliver`, `announce` | condition handlers (R-BTN-169): `ask` asks through the person leg `answer` | R-BTN-169 | — |
 
-  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton request` — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder and `archive/`), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call: the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
+  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder and `archive/`), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call: the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
 
   - **A wait for a person's answer is a person's leg** (R-BTN-116), answered by a
     `std:decision@1`: `decision`'s `answer` and `build-app`'s `decide`. Where the policy admits `sync` for `std:decision@1`, the ticket's `answer:`
@@ -2237,7 +2240,7 @@ mean (R-BTN-50).
       - a new ticket file, its id the next free one across the default branch, `archive/` and
         the heads of the repository's open ticket branches: every branch matching a listed
         course's `branch_pattern` with a commit not reachable from the default branch (R-BTN-96).
-        Every allocator does the same: `baton request`, `baton tickets new` and the source's
+        Every allocator does the same: `baton ticket request`, `baton ticket new` and the source's
         `file` export. A collision that still happens is caught by the sync's duplicate-id
         refusal (R-BTN-74), and the owner renumbers;
       - a document.
@@ -2260,7 +2263,7 @@ mean (R-BTN-50).
       owner's own commits on the PR, and what a hand merge may change are that rule's, for every
       course alike (B-154).
     - **Sending back and rejecting.** The owner may send the last writing leg back with
-      `baton owner route` (R-BTN-83) to its own station, within its `max_runs`, or withdraw the
+      `baton ticket route` (R-BTN-83) to its own station, within its `max_runs`, or withdraw the
       ticket in git on the default branch (R-BTN-168). Each record course names one `cancel`
       leg, `close-pr`, leaving every station from the first writing leg's `to` on and reaching
       the end `closed` (R-BTN-168). It runs on an ordinary runner, closes the ticket's own PR
@@ -2299,7 +2302,7 @@ mean (R-BTN-50).
       `merge` stay runner legs.
     - `create-spec`'s `converse` declares `arrives: {fact: pr-opened}` and `address`
       `arrives: {fact: pr-pushed}` (below).
-  - **`spec-to-tickets`** (B-99) takes one merged specification — entered by `baton request`
+  - **`spec-to-tickets`** (B-99) takes one merged specification — entered by `baton ticket request`
     (`starts_from: request`), the sentence naming the spec; a `create-spec` conversation's merged
     PR is the usual input — and files its child tickets. `decompose` drafts one ticket per spec
     section or numbered decision into the request under its own heading, each with its tests and
@@ -2400,7 +2403,7 @@ mean (R-BTN-50).
     (the runner refuses one before `close`). The kit fails an override naming no leg, exporting
     no `run`, or beside a leg script that does not load it from this course's path. An override
     keeps the leg's contract `version`; `snapshot_sha` names the bytes that ran.
-  - **A runner serves every course its capabilities serve, one leg at a time.** `baton run`
+  - **A runner serves every course its capabilities serve, one leg at a time.** `baton runner start`
     declares every course its home checkout declares (`--home`) — each at its version, rule 9 per
     course — and `--course <id>` narrows that to one, a machine serving a subset; a `--course`
     naming a course the home does not declare is refused at startup, and so is a home held by
@@ -3023,8 +3026,8 @@ not" from that index, gates claims on the blocks safety needs, and advises on th
     account instance listing a
     repository its key is granted on, `uses` aside — sharing an account trusts every listed
     repository's runners. An instrument key (`POST /v1/admin/probes`, with a label), `POST
-    /v1/probe/readings`: any registered instance. An administrator, `baton admin resource set
-    <instance> …`, in force at most 7 days.
+    /v1/probe/readings`: any registered instance. An administrator, `baton admin reading set
+    <instance> …` (R-BTN-127), in force at most 7 days.
   - **Readings** name their `detail`'s schema (≤ 4 KB, R-BTN-108's validator). A `state`
     reading `{instance, available, until?, valid_for, detail?}` has `valid_for` ≤ 24 hours
     (default 1 hour) and `until` no later than its end; an unavailable reading with `until`
@@ -3086,9 +3089,11 @@ its course already has. Baton's own conditions are answered on their resolve pag
   - **The answer** is a `std:decision@1` attestation (R-BTN-191), `{id, leg, option, reached,
     ref?, answered_by?, commit?}`: `leg` a `kind: person` leg leaving Baton's station, `option` one
     of its options as the paragraph above defines them, `reached` the outcome that option names,
-    `id` the question's when one is posted. It is written by the person — `baton attest` or the
-    dashboard's Needs-you entry (R-BTN-181); what a delegated key may write is part 3's, B-156 —
-    or attested by the sync from the answer the ticket shows (the markdown source's `answer:`
+    `id` the question's when one is posted. It is written by the person — `baton decision answer`
+    (R-BTN-127) or the dashboard's Needs-you entry (R-BTN-181), the latter only where the policy's
+    `attestations` entry for `std:decision@1` admits `owner`, a session's writer (R-BTN-185);
+    never by a delegated key, which answers no person's leg (R-BTN-186, R-BTN-130) — or attested
+    by the sync from the answer the ticket shows (the markdown source's `answer:`
     field, R-BTN-74), where the policy's `attestations` entry for `std:decision@1` admits `sync`;
     under `protected` it admits `human` alone, so an answer in git does not count there
     (R-BTN-191). An answer naming a leg that is not a person's, an `option` the leg does not offer,
@@ -3292,8 +3297,9 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     sets a hold and sends the holder a `release` with reason `owner-cancel`. A hold is not
     mirrored as a status; the mirror writes a Status note (§16).
   - Owners set and clear both with `POST /v1/owner/{repository}/overrides/{ticket}` or `baton
-    owner override`, as does the dashboard; an MCP key may only add a hold (R-BTN-154). Lifting a
-    hold resets the leg's attempt and blocked-end counts.
+    ticket hold | unhold | expedite | cancel` (R-BTN-127), as does the dashboard; a delegated key
+    sets a hold and lifts only its own (R-BTN-186, R-BTN-130). Lifting a hold resets the leg's
+    attempt and blocked-end counts.
   - Each change is logged `override`; each hold also `held` with its `hold_reason`.
   - `ticket_overrides` also holds the queued leg Baton or the owner chose, until the station
     changes: an owner's route, a retry policy's `exhausted` leg, a person leg's expiry, the
@@ -3804,13 +3810,15 @@ Limits that hold throughout:
     Entries are ordered by severity, then by age. A condition's entry shows its type, restarts,
     default, detail and `url`, and links its resolve page; a person leg's entry shows the leg,
     `asks`, the options and the question's `url` where one is posted, links the ticket's view, and
-    takes the answer (R-BTN-116). No rule outside §7 has its own Needs-you listing: a rule raises a
+    takes the answer, unconfirmed (§11.4), where the policy admits an `owner` writer for
+    `std:decision@1`, else names `baton decision answer` (R-BTN-116). No rule outside §7 has its own Needs-you listing: a rule raises a
     condition `baton.<sub>`.
   - **An unhandled `suspend` condition** waits in the claim and then blocks as R-BTN-162 says,
     with the debugger in the handler's place; its `condition` row is not provisional, since no
     handler commit exists.
-  - **Resolving.** An owner answers a `suspend` condition with `baton owner resolve <ticket>
-    <restart>`, or the dashboard's equivalent, which is the registry action `owner.resolve`.
+  - **Resolving.** An owner answers a `suspend` condition with `baton ticket resolve <ticket>
+    <restart>` (R-BTN-127), or the dashboard's equivalent, which is the registry action
+    `ticket.resolve`; never a delegated key (R-BTN-130).
     - The command closes the condition with a restart the condition offers and no other.
     - A leg-raised condition resumes with `{restart, reason: "resolved", answered_by: <the
       owner's credential>}` (R-BTN-162). A resolve supersedes the condition's handler ticket, if
@@ -3841,8 +3849,8 @@ Limits that hold throughout:
         `(type, ticket, ref)` closing is the same entry, its `detail` counting the raises
         (`reraised`).
   - **Baton's own conditions need no ticket.** A `baton.*` condition is answered only through
-    Baton's own authenticated surfaces — `baton owner resolve`, an owner's or administrator's
-    dashboard session, or an MCP key allowed `owner.resolve` (R-BTN-129) — on its resolve page,
+    Baton's own authenticated surfaces — `baton ticket resolve`, an owner's or administrator's
+    dashboard session; never a delegated key (R-BTN-130) — on its resolve page,
     `https://<origin>/conditions/<condition_id>` (§11.4), where a signed-in owner chooses one of
     its restarts (R-BTN-155). Nothing in git is read for it, and Baton files no handler ticket,
     queues no outbox entry and withdraws nothing for it (the owner, 2026-11-01). How the owner
@@ -4223,7 +4231,7 @@ Limits that hold throughout:
       source posts its question from the handler file's `handles.restarts`, each option reaching
       `answered`.
     - A person answers with a `std:decision@1` naming a restart as its `option` — from the
-      dashboard's Needs-you entry or `baton attest` (R-BTN-116) — or, where the policy admits `sync`
+      dashboard's Needs-you entry or `baton decision answer` (R-BTN-116) — or, where the policy admits `sync`
       for `std:decision@1`, in the ask's own file (`answer: b`, the markdown source's `answer`
       field, R-BTN-74), which the sync attests. The raiser resumes with that restart, `reason:
       "chosen"` (R-BTN-162).
@@ -4397,13 +4405,13 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     `span`); work, readings and views follow the active grant alone. Going from span 1 to 2
     keeps the first repository's explicitly set flag, else `false`, and raises
     `baton.span-changed` on every repository of the key until an owner confirms the flags
-    (`owner.grants.flags`); returning to span 1 restores R-BTN-102's defaults.
+    (`owner.grant.flags`); returning to span 1 restores R-BTN-102's defaults.
   - `GET /v1/owner/{repository}/grants` lists each key's hostname, span and other repositories
-    (pending marked); `baton owner key grant` prints the span and needs `--confirm-span` when the
+    (pending marked); `baton owner grant add` prints the span and needs `--confirm-span` when the
     key holds a grant elsewhere.
 - **R-BTN-117 (registration tokens).** A repository owner mints a token for a session that has
-  no key yet: `baton owner token create --repo <id> --role runner [--capabilities …]
-  [--max-tier <t>] [--ttl <d>] [--uses <n>]`.
+  no key yet: `baton owner token create <repository> --role runner [--capabilities …]
+  [--max-tier <t>] [--ttl <d>] [--uses <n>]` (R-BTN-127).
   - `--uses` default 1, at most 100; TTL default 7 days, at most 30 days. Shown once as
     `brt_<id>_<secret>` (256 random bits), stored as its SHA-256 with its scope, valid in the
     minting tenant only (R-BTN-137), revoked with `baton owner token revoke`.
@@ -4493,7 +4501,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     startup — the missing ones and `missing-capability` (rule 4) — and a runner whose grant allows
     nothing says that instead of idling in silence. A worker registered before the answer carried
     `grant` asks by declaring nothing on its next beat, so the answer fills the declaration in.
-    The identity banner `baton run` logs at startup names the declaration this way: the granted
+    The identity banner `baton runner start` logs at startup names the declaration this way: the granted
     name (`grant`, or `grant:*` read as the grant) where no flag was given, the flag's own list
     where one was, beside the home checkout's HEAD, course, host and session.
   - **A wedged git never holds a claim (B-94).** Every git call the runner and a standard course's
@@ -4744,7 +4752,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
   clears its environment and leaves its group and scope survives (a hostile leg, R-BTN-46).
 - **R-BTN-119 (stopping a running leg).** Baton kills nothing; it asks the runner.
   - A `release` with reason `requested` (an owner's release message, the dashboard's **Stop
-    leg**, `baton leg stop`, MCP `leg.stop`, R-BTN-154), `owner-cancel` (Cancel: hold plus
+    leg**, `baton leg stop`, a delegated key's `leg.stop`, R-BTN-130), `owner-cancel` (Cancel: hold plus
     release, §6) or `superseded` (R-BTN-168) reaches the runner at the doorbell's ring, else at
     its next heartbeat. For these three the runner stops the leg at once: `SIGINT` to the process
     group and R-BTN-145's tagged processes, `SIGTERM` after 10 s, `SIGKILL` after 25 s; in
@@ -5148,8 +5156,8 @@ print its way to `success`.
       change the source stops posting is superseded (R-BTN-168).
     - A webhook or forge notification only triggers the sync (R-BTN-73, R-BTN-95).
   - **Check-runners.** A check-runner is a key role of its own (§12.1). A repository's owners
-    register one with `baton owner check-runner add <key> --name <hostname> [--capabilities …]
-    [--max-tier <t>]` (`POST /v1/owner/{repository}/check-runners`, stored in `check_runners`)
+    register one with `baton owner check-runner add <repository> <key> --name <hostname>
+    [--capabilities …] [--max-tier <t>]` (R-BTN-127; `POST /v1/owner/{repository}/check-runners`, stored in `check_runners`)
     and revoke it with the destructive `owner.check-runner.revoke`.
     - The `check_runners` row stands in for a grant: rule 7 reads it for a check ticket, rule 4
       its `capabilities` and rule 5 its `max_tier`. The hostname binds at `add` and is the name
@@ -5300,7 +5308,7 @@ is summarized in the principal table (§12.1).
     of secret, hex) to `FILE` (mode 0600) and its **public line** `bak_<id> sha256:<SHA-256 of
     the key> [comment]` to `FILE.pub`. Nothing is sent. The key's fingerprint is `bak_<id>`.
     Baton can mint a runner's API key instead, returned once: through a registration token
-    (R-BTN-117), or `baton owner key create --api --name <name>` (`POST
+    (R-BTN-117), or `baton owner grant add --api-key --name <name>` (`POST
     /v1/owner/{repository}/grants {name, api_key: true, capabilities, max_tier?}`).
   - **Where it is registered.** Wherever an SSH public key goes for that role: a
     `BATON_ADMIN_KEYS` line (`--admin-keys` locally), an owner key (`owner_keys`,
@@ -5315,7 +5323,7 @@ is summarized in the principal table (§12.1).
     - A bearer on `/v1/sync/*`, `/v1/probe/*` or `/v1/runner/outbox/*` is never an API key's.
     - No client sends a bearer over non-loopback `http` (R-BTN-158).
   - **Everything else is a key's.** The one-role rule holds across kinds (§12.1). Acts are
-    recorded as `admin:bak_<id>` or `owner:bak_<id>`. `baton admin revoke bak_<id>` stops a
+    recorded as `admin:bak_<id>` or `owner:bak_<id>`. `baton admin key revoke bak_<id>` stops a
     runner's or owner's key at its next call (R-BTN-57); an administrator's key, of either kind,
     stops only when its line leaves `BATON_ADMIN_KEYS`, at once, with its sessions.
   - **Bounds on API-key runners.** An API-key runner credential lives at most 90 days and ends
@@ -5337,7 +5345,7 @@ is summarized in the principal table (§12.1).
     - register and retire repositories with their first owner keys (R-BTN-47);
     - register instrument keys, external resources and account instances, and post or clear
       readings (R-BTN-76, R-BTN-151);
-    - make or change any grant, and change a key's hostname — an `approvers.members` action (R-BTN-188), `forbidden` where that list is human-only and the administrator's key is not a `human_only` key it admits; adding an owner the same
+    - make or change any grant, and change a key's hostname — an `approvers.members` action (R-BTN-188), `forbidden` where that list is human-only — the gate is opened on the owner route with a `human_only` key the list admits (R-BTN-188), never with an administrator key, which carries no `human_only` mark (§12.1); adding an owner the same
       (R-BTN-58);
     - revoke any key at once but an administrator's: revoking an owner key removes it from
       every repository it owns, the last owner included (an administrator then adds one with
@@ -5354,7 +5362,8 @@ is summarized in the principal table (§12.1).
       draws — `GET /v1/admin/state`, the same answer an administrator's session reads from
       `GET /v1/ui/state`, with no session and so no sign-in (B-118).
 
-    Each act is an `admin` event. No administrator action is reachable over MCP (R-BTN-130).
+    Each act is an `admin` event. No administrator action is reachable to a delegated key, which
+    is an owner's (R-BTN-130, R-BTN-186).
   - **An administrator key is out of every agent's reach.** It is a key of its own, never added
     to an ssh-agent that agent sessions can reach, and preferably touch-required
     (`ed25519-sk`), so no process signs with it unattended. `baton admin` signs with the key file
@@ -5397,7 +5406,7 @@ is summarized in the principal table (§12.1).
       (R-BTN-142), and consent to another repository's `code_repos` entry (R-BTN-140);
     - set and clear expedite and hold, and cancel (§6); re-route a ticket (R-BTN-83); resolve a
       condition by choosing a restart
-      (`baton owner resolve`, R-BTN-163); stop a running leg (R-BTN-119); record a sync want
+      (`baton ticket resolve`, R-BTN-163); stop a running leg (R-BTN-119); record a sync want
       (R-BTN-105);
     - read the repository's blocks, prerequisites, history, conditions and leg runs
       (R-BTN-75, R-BTN-120, R-BTN-128).
@@ -5418,18 +5427,25 @@ is summarized in the principal table (§12.1).
 
 - **R-BTN-129 (one registry of actions; every surface is derived from it).**
   - **An action** is one entry in `src/shared/actions.mjs`: `{id, summary, callers, effect,
-    input, output, http, ui?, mcp}`.
+    input, output, http, ui?, delegated}`.
     - `id` matches `^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$` (dots and hyphens, never `_`), in
-      R-BTN-127's nouns: `leg.why`, `leg.stop`, `ticket.expedite`, `owner.owners.add`,
+      R-BTN-127's nouns: `leg.why`, `leg.stop`, `ticket.expedite`, `owner.owner.add`,
       `runner.heartbeat`.
     - `callers` lists every principal that may call it, each with its scope, in the order the
-      CLI tries them. Principals: `administrator`, `dashboard` (an administrator's dashboard
-      session), `owner-session` (an owner's dashboard session, R-BTN-155), `owner`, `runner`, `check-runner`,
-      `probe` (an instrument key), `sync`, `mirror`, `mcp`, `token` (a registration token),
-      `webhook` (the GitHub App's signature), `forge` (a forge verifier) and `public` (no
-      credential: `POST /v1/login`). Scopes: `instance` (this tenant; no
-      action is the operator's, R-BTN-136), `repository` (a repository the key owns or is
-      granted on; for `owner-session`, one of the session's repositories its key still owns), `claim-holder` (the key holds the claim's lease) and `own` (its own
+      CLI tries them. Principals (§12.1): `administrator`, `owner`, `session` (a dashboard
+      session, R-BTN-155, with the role or roles the entry admits: `administrator`, `owner`, or
+      both), `runner`, `check-runner`, `probe` (an instrument key), `sync`, `mirror`, `token` (a
+      registration token), `webhook` (the GitHub App's signature), `forge` (a forge verifier)
+      `human` (a `human_only` key, R-BTN-185: scope `instance` for `human-key.*`, `repository`
+      where it is an owner or, for a `BATON_HUMAN_KEYS` line, on every repository whose
+      `human_key` it meets, R-BTN-188's break-glass) and `public` (no credential: `POST /v1/login`); an entry is
+      `{principal, scope, roles?}`,
+      `roles` only for `session` (`{principal: "session", roles: ["owner"], scope:
+      "repository"}`). A delegated key is no principal of its own:
+      it calls as `owner`, narrowed (R-BTN-130). Scopes: `instance` (this tenant; no action is
+      the operator's, R-BTN-136), `repository` (a repository the key owns or is granted on; for a
+      session, one of the repositories its key still owns, every repository for an
+      administrator's), `claim-holder` (the key holds the claim's lease) and `own` (its own
       credential or outbox entries).
     - `effect` is `read`, `write` or `destructive` (§12.2).
     - `input` and `output` are schemas in the shared validator's subset (R-BTN-108).
@@ -5437,111 +5453,195 @@ is summarized in the principal table (§12.1).
       (`/v1/runner/push`) is an action,
       authorized at the upgrade. `match` tells apart the actions of one route by body field:
       `POST …/overrides/{ticket}` serves `ticket.expedite`, `ticket.hold` (`hold: true`),
-      `ticket.unhold` (`hold: false`: an approver on `approvers.policy`, a session of one, or the MCP key that set the hold, R-BTN-186) and `ticket.cancel`, and a body
-      matching none or several is `invalid-params`.
-    - `ui` is the dashboard control (§11.4); `mcp` is whether R-BTN-130 may expose it.
+      `ticket.unhold` (`hold: false`: an approver on `approvers.policy`, a session of one, or the
+      delegated key that set the hold, R-BTN-186) and `ticket.cancel`, and a body matching none or
+      several is `invalid-params`.
+    - `ui` is the dashboard control (§11.4) and, where the dashboard calls the action through a
+      `/v1/ui/*` route of its own (`/v1/ui/resync`, `/v1/ui/overrides/{ticket}`,
+      `/v1/ui/conditions/{condition}/resolve`, and `/v1/ui/messages`, which is `leg.stop`'s for
+      `kind: release` and its own actions' for the other kinds, told apart by `match`), that
+      route: an entry may carry both an `http` and a `ui` route, and the router serves both.
+    - `delegated` is what a delegated key (R-BTN-130) may do with the action, as R-BTN-186
+      rules: `true` for a read whose `callers` include `owner`, and for a tightening —
+      `ticket.hold`, `ticket.cancel`, `leg.stop`, `owner.bar.add`; `own` for the undoing of the
+      key's own tightening — `ticket.unhold` of a hold it set (`set_by: mcp:<id>`),
+      `owner.bar.lift` of a bar it added; `false` for everything else: every other write
+      (`ticket.resolve` among them, R-BTN-186), every administrator action, machine protocol,
+      credential action, attestation (R-BTN-181), and an action absent from MCP for a mechanical
+      reason the entry names (the WebSocket upgrade; `GET /v1/actions`, whose answer over MCP is
+      `tools/list`). This list is the mark's definition, and `check:actions` fails an entry whose
+      mark differs from
+      the one it gives.
   - **The CLI's commands** are a second table in the same file. Each names the action ids it
     calls (`leg log` calls `leg.runs` and reads the log directory itself), or `local` for one that
-    calls none.
+    calls none, with its arguments, its flags, a one-line summary and one example; a noun may
+    carry a `notes` paragraph (the `ticket` noun's: the tags Baton reads and the `Requires:`
+    clause, R-BTN-74). `baton help` is printed from it (R-BTN-127).
   - **One check.** The front resolves the request's credential to a principal and a target, then
     calls `authorize(principal, action, target)` in core. No route, command, dashboard control
     or MCP tool checks permissions itself.
     - Under `/v1`, a request matching no entry is `404 not-found`. The dashboard's static assets
       are not actions.
-    - An administrator's session authorizes as `dashboard`: every administrator action, and
-      every owner action whose `callers` list `dashboard`, is open to it on every repository. An
-      owner's session authorizes as `owner-session`: only the actions whose `callers` list
-      `owner-session`, on its repositories, never an administrator's action; a target elsewhere
-      is `forbidden`.
-  - **Generated surfaces.** The router comes from `http`, the CLI tree and every `--help` from
-    the command table, and the MCP tool list from `mcp`; the API table (§14) documents the
-    registry. `npm run check:actions` fails when a route, command or API row has no entry, an
-    entry has neither a route nor a command, an id breaks the grammar, or an `mcp: true` entry
-    falls outside R-BTN-130's allowlist.
+    - A dashboard session authorizes as `session` with its minting key's role (R-BTN-155): an
+      administrator's session may take every action whose `callers` list `session` for
+      administrators, on every repository; an owner's only those listed for owners, on the
+      repositories its key still owns, never an administrator's action; a target elsewhere is
+      `forbidden`. A delegated key authorizes as `owner` on its one repository, narrowed to its
+      listed ids and their `delegated` marks (R-BTN-130).
+  - **Generated surfaces.** The router comes from `http`, the CLI tree and every `help` from the
+    command table, and an MCP key's tool list from `delegated` and the key's ids; the API table
+    (§14) documents the registry. `npm run check:actions` fails when a route, command or API row
+    has no entry, an entry has neither a route nor a command, an id breaks the grammar, a
+    `delegated` mark disagrees with R-BTN-186, or a command's example does not parse against its
+    arguments.
   - **What can I do.** `GET /v1/actions` answers the caller's own entries, each with its `input`
     schema. `baton help` with a key and MCP's `tools/list` read it. A caller is never shown an
     action it cannot take.
 
 - **R-BTN-127 (the CLI is a tree of nouns and verbs).**
   - Every command is `baton <noun> <verb> [<arguments>] [<flags>]`; the only top-level verbs
-    are `help` and `version`. Each command signs as its actions' `callers`, in order, trying the
-    first role it has a key for.
+    are `help` and `version`. Under `owner` and `admin`, a verb that acts on a kind of thing is
+    two words, `<thing> <act>`, the thing singular (`owner policy apply`, `admin repo add`,
+    `owner owner add`), plural only where the act replaces or ends the whole set (`admin keys
+    set`, `owner settings set`, `admin sessions revoke`); a verb on the whole instance or on the
+    caller's own session is one word (`admin freeze`, `admin seal`, `admin export`, `admin
+    state`, `owner open`, `owner confirm`). Two binaries, `baton-sidecar` (§8.1) and
+    `baton-activity` (§9.9), are a runner's and a harness hook's, not commands of this tree.
+    Each command signs as its actions'
+    `callers`, in order, trying the first role it has a key for. **Every command a rule of this
+    specification names is in the tree below**, and a rule that names a command cites this one;
+    a command a ticket proposes joins the tree when its spec PR lands.
   - **Keys.** The key `-i <file>` names, else the one `~/.config/baton/keys.json` maps to the
     role for the origin called: `{<origin>: {admin, owner: {<repository>: <file>},
-    runner, sync: {<repository>: <file>}, mirror: {<repository>: <file>}}}` (R-BTN-137). No key
-    for the role exits 2, naming the role.
-  - **The tree.**
+    runner, sync: {<repository>: <file>}, mirror: {<repository>: <file>}, human: <file>}}`
+    (R-BTN-137); a human-only key is mapped only where its custody allows (R-BTN-185),
+    else given as `-i`. A command whose caller is an approver list tries the roles the list in
+    force names (R-BTN-188). No key for the role exits 2, naming the role.
+  - **The tree.** `leg` and `ticket` act on work, with whatever key the caller holds;
+    `decision` and `attestation` are a person's statements, and `human-key` the human-only
+    identity's (R-BTN-185); `repo`, `course`, `runner`, `key` and `server` run the repository's
+    and the machine's side; `owner` and `admin` manage a
+    repository and the instance. `<repository>` is omitted where the key file maps one
+    repository, or the ticket names it.
 
     | Command | Calls | Signs as |
     |---|---|---|
-    | `leg why <ticket> [<leg>]` | `GET …/tickets/{ticket}/prerequisites` (R-BTN-120) | owner, or runner granted on the repository |
-    | `leg log <ticket> [<leg>] [--run <n>] [-f] [--transcripts] [--json]` | `GET …/legs/{leg}/runs`, then the log directory (R-BTN-128) | owner, or administrator |
-    | `leg runs <ticket> [<leg>]` | `GET …/legs/{leg}/runs` | owner, or administrator |
-    | `leg replay <ticket> <leg> [--run <n>] [--against <sha>]` | R-BTN-84 | R-BTN-84 |
-    | `leg stop <ticket>` | `POST /v1/owner/{repository}/tickets/{ticket}/release` `{reason: "requested", confirm: true}` (R-BTN-119) | owner |
+    | `leg why <ticket> [<leg>]` | `leg.why`: `GET …/tickets/{ticket}/prerequisites` (R-BTN-120) | owner, or runner granted on the repository |
+    | `leg log <ticket> [<leg>] [--run <n>] [-f] [--transcripts] [--json]` | `leg.runs`, then the log directory (R-BTN-128) | owner, or administrator |
+    | `leg runs <ticket> [<leg>]` | `leg.runs`: `GET …/legs/{leg}/runs` | owner, or administrator |
+    | `leg replay <ticket> <leg> [--run <n>] [--against <sha>]` | `leg.runs`, then local (R-BTN-84) | owner, or administrator |
+    | `leg stop <ticket>` | `leg.stop`: `POST /v1/owner/{repository}/tickets/{ticket}/release` `{reason: "requested", confirm: true}` (R-BTN-119) | owner |
     | `leg status`, `output`, `done`, `suspend`, `release`, `next`, `yield`, `raise`, `await` | the local channel (R-BTN-106, R-BTN-160, R-BTN-162) | the runner |
-    | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | the blocks routes (R-BTN-75) | owner, or runner granted on the repository |
-    | `ticket history <ticket>` | `GET …/tickets/{ticket}/history` (R-BTN-81) | owner, or runner granted on the repository |
-    | `board <repository>` | `GET /v1/repositories/{repository}/board` (R-BTN-179) | owner, or runner granted on the repository |
-    | `admin repos` | `GET /v1/admin/repositories` (R-BTN-179) | administrator |
-    | `owner grants <repository>` | `GET /v1/owner/{repository}/grants` (R-BTN-179, R-BTN-146) | owner |
-    | `decision list [--all] [--watch]` | `GET /v1/repositories/{repository}/conditions?open=1&person=1` (R-BTN-163) | owner, runner granted on the repository, or administrator |
-    | `course test <root> <course> [--base <ref>] [--board <file>]` | local (R-BTN-69) | — |
+    | `ticket blocked [<ticket>] [--on <kind>:<ref>]` | `ticket.blocked`, `repo.blocked`: the blocks routes (R-BTN-75) | owner, or runner granted on the repository |
+    | `ticket history <ticket>` | `ticket.history`: `GET …/tickets/{ticket}/history` (R-BTN-81) | owner, or runner granted on the repository |
+    | `ticket hold <ticket>`, `ticket unhold <ticket>`, `ticket expedite <ticket> [--clear]`, `ticket cancel <ticket>` | `ticket.hold`, `ticket.unhold`, `ticket.expedite`, `ticket.cancel`: `POST /v1/owner/{repository}/overrides/{ticket}` (R-BTN-12, §6.8) | owner; `unhold` an approver on `approvers.policy` (R-BTN-186) |
+    | `ticket route <ticket> <leg> \| --clear` | `ticket.route`: `POST …/tickets/{ticket}/route` (R-BTN-83) | owner |
+    | `ticket adopt <ticket> [--at <station>] [--next <leg>] [--ran <leg>,…]` | `ticket.adopt`: `POST …/tickets/{ticket}/adopt` (R-BTN-39) | an approver on `approvers.policy` |
+    | `ticket resolve <ticket> <restart> [--condition <id>]` | `ticket.resolve`: `POST …/tickets/{ticket}/resolve` (R-BTN-163) | owner |
+    | `ticket new --title <t> […]`, `ticket claim <id>`, `ticket set <id> <status> [--pr <url>]`, `ticket done <id> [--pr <url>]`, `ticket check [--repo <dir>] [--quiet]`, `ticket request "<one sentence>" --course <course> […]` | local: the ticket source in git, each a commit (R-BTN-74, R-BTN-131) | — |
+    | `decision list [--all] [--watch]` | `condition.list`: `GET /v1/repositories/{repository}/conditions?open=1&person=1` (R-BTN-163) | owner, runner granted on the repository, or administrator |
+    | `decision answer <ticket> <option>` | `attestation.add` with a `std:decision@1` for the ticket's queued person leg (R-BTN-116, R-BTN-181) | owner, or a human-only key |
+    | `attestation add <repository> --type <type> --subject <json> --value <json> [--lapses <duration>]`, `attestation revoke <repository> <id>` | `attestation.add`, `attestation.revoke`: `POST`, `DELETE /v1/repositories/{repository}/attestations` (R-BTN-181) | owner, a human-only key, or the `service:` key named |
+    | `human-key add <pub>`, `human-key revoke <fingerprint>` | `human-key.add`, `human-key.revoke`: `POST /v1/human-keys` (R-BTN-185) | a human-only key |
+    | `repo board <repository>` | `repo.board`: `GET /v1/repositories/{repository}/board` (R-BTN-179) | owner, runner granted on the repository, or administrator |
+    | `repo policy <repository>` | `repo.policy`: `GET /v1/repositories/{repository}/policy` (R-BTN-189) | owner, runner granted on the repository, or administrator |
+    | `repo protect --print <forge> \| --check <forge>` | `repo.policy`, then local (R-BTN-180) | owner, administrator, or runner granted on the repository |
     | `repo init`, with R-BTN-134's flags | local: writes files | — |
     | `repo sync [--if-wanted] [--defaults-only]`, `repo mirror [--if-wanted]` | `/v1/sync/*` (R-BTN-93) | CI identity, sync (mirror) key, or machine key (R-BTN-102) |
     | `repo spool <repository>` | local (R-BTN-105) | — |
-    | `runner start […]` | `/v1/runner/*` (R-BTN-72) | runner |
+    | `course test <root> <course> [--base <ref>] [--board <file>]` | local (R-BTN-69) | — |
+    | `runner start [--delivers git,forge-check] […]` | `/v1/runner/*` (R-BTN-72, R-BTN-171) | runner |
     | `runner register --token <t> --name <name> [--key ssh\|api]` | `POST /v1/register` (R-BTN-117) | the token |
-    | `runner accept-grant <repository>`, `runner decline-grant <repository>` | R-BTN-146 | runner, key alone |
+    | `runner accept-grant <repository> [--confirm]`, `runner decline-grant <repository>` | `runner.grant.accept`, `runner.grant.decline` (R-BTN-146) | runner, key alone |
     | `key create <file>` | local (R-BTN-159) | — |
     | `server start --db <file> --admin-keys <file> […]` | local: starts the local host (R-BTN-56, R-BTN-158) | — |
-    | `owner resolve <ticket> <restart>` | `POST /v1/owner/{repository}/tickets/{ticket}/resolve` (R-BTN-163) | owner |
-    | `owner …` | R-BTN-58's actions | owner |
-    | `admin …` | R-BTN-57's actions, `admin open` and `admin confirm` (R-BTN-155) | administrator |
-    | `owner open`, `owner confirm` | an owner's dashboard sign-in and confirmations (R-BTN-155) | owner |
+    | `owner grant list <repository>` | `owner.grant.list`: `GET /v1/owner/{repository}/grants` (R-BTN-179, R-BTN-146) | owner |
+    | `owner grant add <repository> --key <pub> --capabilities <a,b> [--hostname <h>] [--label <l>] [--max-tier <t>] [--confirm-span]`, or `--api-key --name <name>` | `owner.grant.add`: `POST /v1/owner/{repository}/grants` (R-BTN-58, R-BTN-146, R-BTN-159) | an approver on `approvers.members` |
+    | `owner grant revoke <repository> <fingerprint>` | `owner.grant.revoke` (R-BTN-58) | an approver on `approvers.members` |
+    | `owner grant role <repository> <fingerprint> --role runner\|trusted-runner [--domain <label>] [--checker]` | `owner.grant.role`: `PUT …/grants/{fingerprint}/role` (R-BTN-180) | an approver on `approvers.roles` |
+    | `owner grant flags <repository> <fingerprint> --sync\|--no-sync` | `owner.grant.flags`: `PUT …/grants/{fingerprint}/flags` (R-BTN-146) | owner; `--sync` an approver on `approvers.policy` |
+    | `owner owner add <repository> <pub>`, `owner owner remove <repository> <fingerprint>` | `owner.owner.add`, `owner.owner.remove` (R-BTN-58) | an approver on `approvers.members` |
+    | `owner bar add <repository> --course <c> --tag <t> […]`, `owner bar lift <repository> <id>`, `owner bar follow <repository> <course>` | `owner.bar.add`, `owner.bar.lift`, `owner.bar.follow` (R-BTN-67, R-BTN-142) | owner; `lift` an approver on `approvers.policy` |
+    | `owner settings show <repository>`, `owner settings set <repository> […]` | `owner.grant.list`; `owner.settings.set`: `PUT /v1/owner/{repository}/settings` (R-BTN-66, R-BTN-140) | owner; a loosening an approver on `approvers.policy` |
+    | `owner policy show <repository>`, `owner policy diff <repository> [<version>]`, `owner policy log <repository>`, `owner policy set <repository> <file> [--dry-run]`, `owner policy apply <repository> <preset> [--dry-run]` | `repo.policy`, `owner.policy.log`; `owner.policy.set`: `PUT /v1/owner/{repository}/policy` (R-BTN-188) | owner; `set` and `apply` an approver on `approvers.policy` |
+    | `owner consent add <repository> <home>`, `owner consent withdraw <repository> <home>` | `owner.consent.add`, `owner.consent.withdraw` (R-BTN-140) | an approver on `approvers.members` |
+    | `owner sync-key add <repository> <pub> --role sync\|mirror`, `owner sync-key revoke <repository> <fingerprint>` | `owner.sync-key.add`, `owner.sync-key.revoke` (R-BTN-93) | an approver on `approvers.members` |
+    | `owner sync want <repository>` | `owner.sync.want` (R-BTN-105) | owner |
+    | `owner token create <repository> --role runner [--capabilities …] [--max-tier <t>] [--ttl <d>] [--uses <n>]`, `owner token revoke <repository> <id>` | `owner.token.create`, `owner.token.revoke` (R-BTN-117) | an approver on `approvers.members` |
+    | `owner mcp-key create <repository> --name <name> [--actions read \| <id>,…] [--ttl <days>]`, `owner mcp-key revoke <repository> <name>` | `owner.mcp-key.create`, `owner.mcp-key.revoke` (R-BTN-130) | an approver on `approvers.members` |
+    | `owner check-runner add <repository> <pub> --name <hostname> [--capabilities …] [--max-tier <t>]`, `owner check-runner revoke <repository> <fingerprint>` | `owner.check-runner.add`, `owner.check-runner.revoke` (R-BTN-114) | an approver on `approvers.members` |
+    | `owner open`, `owner confirm <code>`, `owner sessions revoke` | an owner's dashboard sign-in, confirmations and sessions (R-BTN-155) | owner |
+    | `admin repo list` | `admin.repo.list`: `GET /v1/admin/repositories` (R-BTN-179) | administrator |
+    | `admin repo add <forge path> --owner-key <pub> […]`, `admin repo set <id> […]`, `admin repo retire <id>` | `admin.repo.add`, `admin.repo.set`, `admin.repo.retire`: `POST /v1/admin/repositories` (R-BTN-47, R-BTN-138) | administrator |
+    | `admin repo resync <repository> --force [<sha>]` | `admin.repo.resync`: `POST /v1/admin/repositories/{repository}/resync` (R-BTN-11) | administrator |
+    | `admin grant add <repository> --key <pub> --capabilities <a,b> […]` | `admin.grant.add`: `POST /v1/admin/grants` (R-BTN-57, R-BTN-188) | administrator |
+    | `admin key revoke <fingerprint>`, `admin key hostname <fingerprint> <hostname>` | `admin.key.revoke`; `admin.key.hostname`, `POST /v1/admin/grants` by `match` (R-BTN-57) | administrator |
+    | `admin keys set --file <path>`, `admin forge-secrets set --file <path>` | local: the secret sink (R-BTN-136) | administrator |
+    | `admin github-app create --org <org>`, `admin check-app create --org <org> --key-out <path>` | local: GitHub's manifest flow, then the secret sink or `admin.settings.set` (R-BTN-57, §12.7) | administrator |
+    | `admin probe add --key <pub> --label <l>`, `admin resource add <name> […]`, `admin instance add <name> […]`, `admin reading set <instance> […]` | `admin.probe.add`, `admin.resource.add`, `admin.instance.add`, `admin.reading.set`: `POST /v1/admin/probes`, `…/resources`, `…/instances`, `…/readings` (R-BTN-76, R-BTN-101) | administrator |
+    | `admin settings set [--link-hosts …] [--session-hosts …] [--check-app-id <id>]` | `admin.settings.set`: `PUT /v1/admin/settings` (R-BTN-112, R-BTN-113, §12.7) | administrator |
+    | `admin freeze`, `admin unfreeze`, `admin seal`, `admin export [--with-history]`, `admin import <file>` | `admin.freeze`, `admin.unfreeze`, `admin.seal`, `admin.export`, `admin.import` (R-BTN-88) | administrator |
+    | `admin state` | `admin.state`: `GET /v1/admin/state` (R-BTN-57, R-BTN-179) | administrator |
+    | `admin open`, `admin confirm <code>`, `admin sessions revoke --all` | an administrator's dashboard sign-in, confirmations and sessions (R-BTN-155) | administrator |
 
+    The names this table replaces — `baton request`, `baton tickets …`, `baton board`, `baton
+    attest`, `baton admin repos`, `baton admin revoke`, `baton admin resync`, `baton admin
+    resource set`, `baton owner grants`, `baton owner key grant`, `baton owner key create`,
+    `baton owner override`, `baton owner resolve`, `baton owner route`, `baton owner ticket
+    adopt`, `baton owner bars follow`, `baton owner owners add | remove` — exit 2 with a `renamed:` line naming the new command until no caller
+    uses them (the history's Migrations), as the twelve names before them did. No alias stays.
   - **A leg is named by its ticket.** `<ticket>` is a qualified id, or a local id unique among
     the signing key's repositories; one matching several exits 2, listing the qualified
     matches. `<leg>` defaults to the running leg, else the queued leg, else the most recent;
     `--run <n>` defaults to the latest.
   - **Inside a leg.** The channel verbs act on the leg whose socket `BATON_SOCKET` names and
     take no ticket; outside a leg they exit 2, "not inside a leg".
-  - **Help.** `baton help [<noun> [<verb>]]`, `baton <noun> --help` and an unknown verb print
-    that level's commands; an unknown word suggests the nearest name. Every command that reads a
-    route takes `--json` and prints the route's JSON as is; `leg log --json` prints frames as
-    JSON lines.
+  - **Help, from the registry.** `baton help [<noun> [<verb>]]`, `baton <noun> --help`, `baton
+    <noun> <verb> --help` and an unknown verb print that level, from the registry's command
+    table (R-BTN-129): a noun's verbs with their summaries, or one command's arguments, flags,
+    summary and example, so no command answers "not a flag of this command". With a key, `baton
+    help` reads `GET /v1/actions` and marks the commands that key may run. An unknown word
+    suggests the nearest name. Every command that reads a route takes `--json` and prints the
+    route's JSON as is; `leg log --json` prints frames as JSON lines.
 
-- **R-BTN-130 / R-BTN-154 (Baton serves MCP; its only writes add a hold and stop a leg).**
-  *Proposed replacement: R-BTN-186 (B-124), authority by credential, not channel.*
-  - **What MCP may reach is a closed list.** `mcp: true` is allowed only on an action whose
-    `effect` is `read`, whose `callers` include `owner`, and which is no WebSocket upgrade; and
-    on two writes: `ticket.hold` with `{hold: true}` only, and `leg.stop` (destructive).
-    `check:actions` fails on any other. So, whatever an owner lists, MCP never reaches an
-    administrator's action, a machine protocol (runner, sync, probe), an action that
-    adds, grants, mints, registers or revokes any credential or owner, a write of an R-BTN-66
-    setting or bar, `ticket.unhold`, `ticket.expedite` or `ticket.cancel`.
-  - **A hold set over MCP** is a `held` event with `hold_reason: mcp:<name>`. On a ticket already
-    held it changes nothing, so it never replaces another reason.
-  - **The MCP key.** An owner mints one with `owner.mcp-key.create`, whose `callers` are exactly
-    `[owner]`, so every key has a minting owner key to die with: `baton owner mcp-key create
-    <repository> --name <name> [--actions read | <id>,…] [--ttl <days>]` (`POST
-    /v1/owner/{repository}/mcp-keys`). `--name` is unique in the repository.
+- **R-BTN-130 / R-BTN-154 (Baton serves MCP; a delegated key reaches what R-BTN-186 admits).**
+  - **The MCP key is a delegated key** (R-BTN-186). It acts as an owner of one repository, for
+    the action ids listed at its minting, and may tighten and undo its own tightenings — never
+    anything else, whatever its minter lists. The registry's `delegated` marks (R-BTN-129) say
+    which actions those are; `check:actions` keeps the marks and R-BTN-186 equal.
+  - **Minting.** An approver on the repository's `approvers.members` (R-BTN-188) mints one:
+    `baton owner mcp-key create <repository> --name <name> [--actions read | <id>,…] [--ttl
+    <days>]` (`POST /v1/owner/{repository}/mcp-keys`). A key has an immutable `id`, never
+    reused; `--name` is unique among the repository's live keys, the OAuth spec's grants
+    included. A hold or bar the key sets records the actor `mcp:<id>` in its `set_by` (§13)
+    beside `hold_reason: mcp:<name>`, and the `own` test below is on the id, so a later key of
+    the same name undoes nothing of a revoked one's.
     - It is returned once, `bmcp_` followed by 32 random bytes in base32. Baton keeps one
-      `mcp_keys` row: repository, name, hash, the minting owner key's fingerprint, the action
+      `mcp_keys` row: repository, name, hash, the minting approver's fingerprint (an owner key:
+      an administrator matches an `owner` entry, R-BTN-188, but signs no `/v1/owner/*` route,
+      §12.1, and mints none), the action
       ids resolved at minting, expiry, last use (written at most once a minute) and revocation.
       An MCP key is not a `credentials` row.
-    - `read` means the allowlisted read ids that exist at minting, so a later release never
-      widens a key. `leg.stop` is included only when listed by id. An id outside the allowlist
-      or the owner's own actions is refused at minting.
-    - It lives at most 90 days (default 30) and ends after 7 days without a call, or when its
-      minting owner key is removed or revoked. It is refused while the repository has
-      `api_keys: false`, and works again when the setting returns, unless expired. Owners revoke
-      it with `owner.mcp-key.revoke` (`POST /v1/owner/{repository}/mcp-keys/{name}/revoke`); it
-      is listed with the repository's credentials, with its minter.
-  - **Authorization.** `authorize` treats an `mcp` principal as its minting owner on its one
-    repository, narrowed to its stored ids; an id that has lost `mcp: true` is refused. The
-    actor is recorded as `mcp:<name>` in history and release messages. An MCP key is accepted
-    only on `POST /v1/mcp`; every other route answers it `unauthenticated`.
+    - `read` means every action whose `delegated` mark is `true`, whose `effect` is `read` and
+      that exists at minting, so a later release never widens a key. A write is included only
+      when listed by id. An id whose mark is `false`, or an action the minter could not take
+      itself, is refused at minting (`invalid-params`).
+    - It lives at most 90 days (default 30) and ends after 7 days without a call, or when the
+      credential that minted it is removed or revoked. It is refused while the repository has
+      `api_keys: false` (R-BTN-159), and works again when the setting returns, unless expired.
+      It is revoked with `owner.mcp-key.revoke` (`POST /v1/owner/{repository}/mcp-keys/{name}/revoke`),
+      and listed with the repository's credentials, with its minter (`GET
+      /v1/owner/{repository}/grants`' `mcp_keys`, `baton owner grant list`).
+  - **Authorization.** `authorize` treats an MCP key as `owner` on its one repository, narrowed
+    to its stored ids and their `delegated` marks; an id whose mark has since become `false` is
+    refused. An `own`-marked action succeeds only on what the key itself set: a hold whose
+    `set_by` is `mcp:<id>`, the key (a hold set over MCP is a `held` event with `hold_reason:
+    mcp:<name>`; on a ticket already held it changes nothing, so it never replaces another
+    reason), or a bar whose `set_by` is the key. An MCP key resolves no condition (`ticket.resolve`, R-BTN-186, R-BTN-163) and writes
+    no attestation (R-BTN-181: a `std:decision@1` moves a ticket as a route does), which
+    R-BTN-186 keeps from a delegated key. The actor is recorded as `mcp:<id>` in history and
+    release messages, shown with its name. An MCP key is accepted only on `POST /v1/mcp`; every other route
+    answers it `unauthenticated`.
   - **The endpoint.** `POST /v1/mcp` speaks MCP's streamable HTTP transport, statelessly, in JSON.
     - Revisions are those in the build's `MCP_VERSIONS` (at least `2025-06-18`). `initialize`
       needs no `MCP-Protocol-Version` header; on any other request an absent header means
@@ -5550,14 +5650,15 @@ is summarized in the principal table (§12.1).
       Any other method is JSON-RPC `-32601`; a batch array is `-32600`.
     - No `Mcp-Session-Id`. `GET /v1/mcp` is `405`. A missing or unknown key is `401` with
       `WWW-Authenticate: Bearer`. A foreign `Origin` is `403`.
-  - **Tools.** `tools/list` returns the key's stored ids that still carry `mcp: true`, named by
-    the id with `.` as `_`, with `inputSchema` the entry's `input` and `readOnlyHint` or
+  - **Tools.** `tools/list` returns the key's stored ids whose `delegated` mark still stands,
+    named by the id with `.` as `_`, with `inputSchema` the entry's `input` and `readOnlyHint` or
     `destructiveHint` from `effect`. `tools/call` runs the route's core function and returns the
     output as `structuredContent` and as text through the `plain` renderer (R-BTN-112).
     - A refusal is a tool error with the route's code. A tool the key does not hold, an unknown
-      tool and a target outside its repository all answer `forbidden`.
-    - `confirm` over MCP is a schema check, not a human gate; the safeguard is the owner's
-      choice at minting.
+      tool, a target outside its repository and an `own` action on what another set all answer
+      `forbidden`.
+    - `confirm` over MCP is a schema check, not a human gate (§12.2); the safeguard is the
+      minter's choice of ids.
     - Returned values are data, never instructions, and the tool descriptions say so.
       `leg.runs` returns pointers and live state, never log bytes.
   - **Bounds.** At most 60 calls per key in any 60 seconds, counted in memory in the
@@ -5565,18 +5666,21 @@ is summarized in the principal table (§12.1).
     tool takes `cursor` and returns `next_cursor`, HMAC-bound under `CursorKey` (R-BTN-55) to
     the key, action and input. A page is at most 256 KB; a larger single item is `too-large`.
   - Clients that cannot send a bearer obtain MCP keys through OAuth 2.1, `BATON_MCP_OAUTH_SPEC`
-    (`spec/BATON_MCP_OAUTH_SPEC.md`).
-
+    (`spec/BATON_MCP_OAUTH_SPEC.md`), whose grants are MCP keys under this rule, minted by the
+    approving session's key where the session itself is an approver on `approvers.members` as
+    R-BTN-188 reads a session (an `owner` entry, or a `key:` entry naming a key not
+    `human_only`; never `human`, R-BTN-185).
 ### 11.4 The dashboard
 
 - **R-BTN-155 (dashboard sign-in is a code a key holder confirms).** An administrator signs in
   with `baton admin open` and an administrator key, an owner with `baton owner open` and an
   owner key; the session has that key's role. Its row records the role (`administrator` or
   `owner`), the minting key's fingerprint and, for an owner, the repositories the key owned at
-  binding (`dashboard_sessions`). An **administrator's session** authorizes as `dashboard`; an
-  **owner's session** as `owner-session` (R-BTN-129): it sees, watches and acts only on those of
-  its repositories the key still owns, with the actions whose `callers` list `owner-session`, and
-  never holds an administrator's action.
+  binding (`dashboard_sessions`). A session is one principal, `session`, authorizing with its
+  role (R-BTN-129, §12.1): an administrator's session takes every action listed for it, on every
+  repository; an owner's sees, watches and acts only on those of its repositories the key still
+  owns, with the actions listed for an owner's session, and never holds an administrator's
+  action.
   - **Sign-in.**
     1. `baton admin open` opens `https://<origin>/login?as=administrator`, and `baton owner
        open` `https://<origin>/login?as=owner`; the page carries nothing secret and heads itself
@@ -5605,7 +5709,7 @@ is summarized in the principal table (§12.1).
   - **Sessions.** A session lives at most 4 hours and dies with its minting key's role, checked
     on every request: an administrator's session ends as soon as its key leaves
     `BATON_ADMIN_KEYS`; an owner's session loses a repository as soon as its key stops owning it
-    (`owner.owners.remove`, or an administrator's revocation, R-BTN-57), and ends when none of its
+    (`owner.owner.remove`, or an administrator's revocation, R-BTN-57), and ends when none of its
     repositories remains. `POST /v1/ui/logout` (`ui.logout`) ends the caller's own; `baton owner
     sessions revoke` (`POST /v1/owner/sessions/revoke`, `owner.sessions.revoke`, destructive)
     ends every session the owner's key minted; `baton admin sessions revoke --all` (`POST
@@ -5626,13 +5730,16 @@ is summarized in the principal table (§12.1).
     - confirm or release an unconfirmed completion (`POST /v1/ui/claims/{id}/confirm`,
       `…/release`); confirm an adoption (`POST /v1/ui/adoptions/{claim}/confirm`) — an
       administrator's only;
-    - approve an MCP grant naming `leg.stop` (`owner.mcp-key.approve`, `BATON_MCP_OAUTH_SPEC`
-      §5) — an owner's only.
+    - approve an MCP grant naming a destructive action (§12.2: `leg.stop`, `ticket.cancel`;
+      `owner.mcp-key.approve`, `BATON_MCP_OAUTH_SPEC` §5) — an owner's only.
 
     Not confirmed, because they stop or slow work and Stop must stay one click: setting a hold,
     cancel, Stop and other `release` messages, a resync, a status request; nor resolving a
     condition, which a signed-in owner or administrator answers in one step (`POST
-    /v1/ui/conditions/{condition}/resolve`, R-BTN-163).
+    /v1/ui/conditions/{condition}/resolve`, R-BTN-163); nor a person leg's answer from Needs you
+    (§11.4, R-BTN-116), an OAuth request, its status, a denial or an approval naming no
+    destructive action (`BATON_MCP_OAUTH_SPEC` §5), or `ui.logout`. The list above is the whole
+    list.
   - **What the confirmation protects.** A same-user process can read a browser's cookie jar, so
     a session is the browser profile's; the confirmation keeps a stolen session from an
     authority-changing act only while the minting key needs a touch. An API-key or plain SSH key
@@ -5658,10 +5765,10 @@ is summarized in the principal table (§12.1).
   - **Needs you** — Baton's debugger: the open conditions and the queued person legs §7 lists
     there (R-BTN-163), ordered by severity then age, each with its restarts or options, its
     question's link, and the tickets it would unblock; a person leg's entry takes the answer
-    (R-BTN-116).
+    where the policy admits an `owner` writer, else names `baton decision answer` (R-BTN-116).
   - **Resolve** — `/conditions/<condition_id>`, the page a delivery runner links to
     (R-BTN-163): the one condition, its detail and restarts; choosing a restart is
-    `owner.resolve` for a signed-in owner of its repository or an administrator. Signed out, the
+    `ticket.resolve` for a signed-in owner of its repository or an administrator. Signed out, the
     page asks for sign-in and returns to itself.
   - **Capacity** — the request rate and live counts against the envelope (R-BTN-87).
   - **Courses** — each course file as stations and legs, every leg drawn as an edge with its
@@ -5676,12 +5783,14 @@ is summarized in the principal table (§12.1).
 - **The actions.** Every control calls a registry action through `authorize`, a destructive one
   with `confirm: true` from its dialog (§12.2). Unconfirmed, a session views, holds, cancels,
   stops a leg (`POST /v1/ui/messages` `{kind: "release", payload: {ticket_id, reason:
-  "requested"}}`, R-BTN-119), resyncs a repository (`POST /v1/ui/resync`), requests status and
-  resolves a condition; every other action it may take needs its code confirmed (R-BTN-155), so
-  the dashboard is no standalone console. An owner's session does these only on its
+  "requested"}}`, R-BTN-119), resyncs a repository (`POST /v1/ui/resync`), requests status,
+  resolves a condition and answers a person's leg from Needs you (`attestation.add`, R-BTN-116:
+  the answer is what the person came to give, and the policy's writer list bounds it); the
+  actions R-BTN-155 lists need its code confirmed, and no other does, so the dashboard is no
+  standalone console. An owner's session does these only on its
   repositories, and the administrator's controls (cutover, force-reap, a forced resync (R-BTN-11),
-  completions, adoptions) are not drawn for it. Repositories, owners, grants, instrument keys
-  and bars are shown read-only.
+  completions, adoptions) are not drawn for it. Repositories, owners, grants, MCP keys,
+  instrument keys and bars are shown read-only.
 
 ## 12. Security *(partly built; §12.8 proposal)*
 
@@ -5725,10 +5834,10 @@ stated once, in the rule it cites.
 | Instrument (probe) | `/v1/probe/*` | SSH-signed | post readings of any registered instance (R-BTN-101) |
 | Registration token | `POST /v1/register` | `Authorization: Baton-Token <token>` | register one credential within its scope (R-BTN-117, R-BTN-157) |
 | Administrator | `/v1/admin/*`; any claim's leg runs | a `BATON_ADMIN_KEYS` line, SSH-signed or API key | R-BTN-57 |
-| Administrator's dashboard session | `/`, `/v1/ui/*`, `GET …/prerequisites` (R-BTN-120) | the session cookie (R-BTN-155) | administrator actions, under R-BTN-155's confirmations |
-| Owner's dashboard session | `/`, `/v1/ui/*`, `GET …/prerequisites` of its repositories | the session cookie (R-BTN-155) | the actions listing `owner-session`, on the repositories its minting owner key still owns, under R-BTN-155's confirmations; never an administrator's |
+| Dashboard session | `/`, `/v1/ui/*`, `GET …/prerequisites` (R-BTN-120); an owner's, `POST …/attestations` (R-BTN-116) | the session cookie (R-BTN-155) | as `session` with its minting key's role (R-BTN-129): an administrator's, every action listed for it, under R-BTN-155's confirmations; an owner's, those listed for it on the repositories its key still owns, under the same confirmations, never an administrator's |
 | Repository owner | `/v1/owner/{repository}/*`; the repository's reads and leg runs | an owner key, SSH-signed or API key | R-BTN-58 |
-| MCP key | `POST /v1/mcp` only | bearer `bmcp_…` | its stored allowlisted actions on one repository, as its minting owner: tightenings, and the undoing of its own (R-BTN-186, R-BTN-130) |
+| Human-only key | `POST /v1/human-keys`; `POST`, `DELETE …/attestations` as writer `human`; as an owner, or as a break-glass line on every repository it satisfies (R-BTN-188), the owner's routes | an SSH key registered `human_only` (R-BTN-185), on an owner key or a key of no other role | open human gates: a `human` attestation, every action an `approvers.*` list names `human` for, `human-key.add` and `human-key.revoke`; as an owner, R-BTN-58; never through a session, which is `owner` (R-BTN-185) |
+| MCP key (a delegated key) | `POST /v1/mcp` only | bearer `bmcp_…` | as `owner` on one repository, narrowed to the ids listed at minting: reads, tightenings and the undoing of its own; never an attestation, a route, an adopt, a credential or the policy (R-BTN-186, R-BTN-130) |
 | Public | `POST /v1/login`, the dashboard's static assets | none | start a sign-in |
 
 The repository reads (`GET /v1/repositories/{repository}/…`) are open to any key granted on the
@@ -5739,18 +5848,19 @@ repository, its owners and administrators, except where a route's rule narrows t
   `GET /v1/admin/repositories` (administrators: the registry as `/v1/ui/state`'s
   `repositories`, plus `seed_owners` — the unretired repositories whose live owner keys are all the
   deploy seed's, or that have no live owner, R-BTN-58/B-91); `GET /v1/owner/{repository}/grants` (its owners: that repository's `owners`,
-  `grants` and `settings`, and the bars in force or scheduled, R-BTN-146, each grant also naming
+  `grants`, `mcp_keys` and `settings`, and the bars in force or scheduled, R-BTN-146, each grant also naming
   the `other_repositories` its key holds); and
   `GET /v1/repositories/{repository}/board` (the repository reads' principals: the repository,
   its `ready` tickets and `ready_by_tier`, `granted_capabilities`, and `server_time`). A key outside the route's role is refused as this
   section says — `forbidden`, or `unauthenticated` for a key Baton does not know. The CLI's
-  `baton admin repos`, `baton owner grants <repository>` and `baton board <repository>` are those
-  requests. The board's `granted_capabilities` names the capabilities the key's grant holds on
+  `baton admin repo list`, `baton owner grant list <repository>` and `baton repo board
+  <repository>` are those requests (R-BTN-127). The board's `granted_capabilities` names the capabilities the key's grant holds on
   that repository — the same grant the heartbeat's answer names for a runner that declared it —
   and is null for a key no grant binds there, an owner's or an administrator's included.
 
 - **One role per key.** In a tenant every key holds exactly one role: administrator, owner,
-  runner, check-runner, instrument, sync or mirror. Registering a key that holds
+  runner, check-runner, instrument, sync or mirror; `human_only` is a mark, not a role, carried
+  by an owner key or by a key of no other role (R-BTN-185). Registering a key that holds
   another role is refused `conflict`, whatever its kind (SSH or API); the refusal does not name
   the role. A machine key whose every grant is pending and was never accepted holds no role yet,
   so a grant naming any public key reserves nothing; its acceptance is checked as a
@@ -5770,10 +5880,10 @@ or takes `--yes`, and the dashboard's dialogs send it. Over MCP `confirm` is onl
 (R-BTN-130).
 
 - `ticket.cancel`, `leg.stop`, `claim.force-reap`;
-- `owner.owners.remove`, `owner.grant.revoke`,
+- `owner.owner.remove`, `owner.grant.revoke`,
   `owner.check-runner.revoke`, `owner.sync-key.revoke`, `owner.token.revoke`,
-  `owner.mcp-key.revoke`, `owner.sessions.revoke`;
-- `admin.key.revoke`, `admin.repo.retire`, `admin.sessions.revoke`.
+  `owner.mcp-key.revoke`, `owner.sessions.revoke`, `attestation.revoke`, `human-key.revoke`;
+- `admin.key.revoke`, `admin.repo.retire`, `admin.repo.resync`, `admin.sessions.revoke`.
 
 Two further changes take `confirm: true`: a repository's path (R-BTN-138) and a `code_repos`
 consent (R-BTN-140). A dashboard session's authority-changing actions also need a
@@ -5839,7 +5949,8 @@ Every value below is validated on write; a value over its cap is refused `invali
     frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'`,
     `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`
     and `Cross-Origin-Resource-Policy: same-origin`.
-  - **Writes.** A state-changing `/v1/ui/*` request and `POST /v1/login` must carry
+  - **Writes.** A state-changing request a dashboard session authorizes, under `/v1/ui/*` or
+    not (`POST …/attestations`, R-BTN-116), and `POST /v1/login` must carry
     `Content-Type: application/json` and an `Origin` equal to the tenant's origin
     (`BATON_ORIGIN`; locally `--origin`), else `forbidden`.
   - **Every session request.** Any request a dashboard session authorizes, reads included,
@@ -5997,7 +6108,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     |---|---|---|---|---|---|
     | `approvers.members` — adding or removing owners; granting or revoking runner keys; registering check-runners, sync and mirror keys (instrument keys are the administrator's, tenant-wide, R-BTN-101); consenting to another home's `code_repos` entry (R-BTN-140); minting registration tokens and MCP keys | `[owner]` | `[human]` | | Baton | R-BTN-58, R-BTN-93, R-BTN-114, R-BTN-117, R-BTN-130 |
     | `approvers.roles` — a grant's role (`runner`, `trusted-runner`), its domain, and whether it is the protection checker | `[owner]` | `[human]` | | Baton | R-BTN-180 |
-    | `approvers.policy` — every change to this policy, this list and `floors` included, every loosening of an R-BTN-66 setting (R-BTN-186), and every `baton owner ticket adopt` (R-BTN-39) | `[owner]` | `[human]` | | Baton | R-BTN-186, R-BTN-189 |
+    | `approvers.policy` — every change to this policy, this list and `floors` included, every loosening of an R-BTN-66 setting (R-BTN-186), and every `baton ticket adopt` (R-BTN-39) | `[owner]` | `[human]` | | Baton | R-BTN-186, R-BTN-189 |
     | `human_key` — the minimum for a human-only key acting on this repository; the instance's is a floor under it | `any` | `any` | `hardware` | Baton | R-BTN-185 |
     | `human_identity` — the human-only identity (R-BTN-185) as the fact reader and the merge runner see it: on a forge its immutable forge user id (R-BTN-138's kind), on `git` the pusher identity the `pre-receive` hook logs (R-BTN-180); the owners set it before applying `protected`, since Baton refuses `paths.control: human`, or an `attestations` entry admitting no `sync` for `std:arrival@1`, while it is null (`invalid-params`, naming it) | null | no value: an apply never writes it | no value | Baton, trusted runners | R-BTN-184, R-BTN-192 |
     | `refs.default_branch`, `refs.tags`, `refs.other` (branches outside `branch_pattern`, `baton/proposed/*` among them, `baton-legs/*` not) — who may update them, from `runner`, `trusted-runner`, `mirror`, `human` | all four, for each | `[trusted-runner, human]` for each | | the forge; Baton prints it, the protection checker checks it | R-BTN-180 |
@@ -6026,8 +6137,9 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
       matches an `owner` entry on every repository and no other;
     - `human`: any `human_only` key that is an owner of the repository and meets `human_key`
       (R-BTN-185);
-    - `key:<fingerprint>`: that one key, while it is an owner of the repository, and meeting
-      `human_key` when it is a `human_only` key.
+    - `key:<fingerprint>`: that one key, and a dashboard session it minted when the key is not
+      `human_only` (R-BTN-185), while it is an owner of the repository, and meeting `human_key`
+      when it is a `human_only` key.
 
     A key becomes an owner of a repository only by that repository's `approvers.members` action;
     registering a `human_only` key with the tenant (R-BTN-185) makes it an owner of nothing.
@@ -6204,7 +6316,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
       `std:approval@1` whose subject is that ticket at that commit covers exactly those paths and
       blobs. `merge.reviews`, `merge.checks` and continuity do not apply to it; one approval covers
       one proposal;
-    - `baton request` (R-BTN-131) run with a credential the refs exclude opens a PR, not a push;
+    - `baton ticket request` (R-BTN-131) run with a credential the refs exclude opens a PR, not a push;
     - where `refs.default_branch` excludes `mirror`, the mirror (§16) writes nothing to the
       default branch; its notes are Baton's.
   - **Secrets and privileged jobs.** Runners push some ref of the repository under every preset
@@ -6254,11 +6366,12 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     for a `baton` attestation the attested runner key, is unrevoked. A reading may carry a
     signature, defined by R-BTN-76; an unsigned reading never counts toward a trusted leg's
     requirement (R-BTN-182).
-  - **Any surface.** `POST /v1/repositories/{repository}/attestations` (`baton attest`, the
-    dashboard; a delegated key as part 3 decides, B-156) takes an attestation about work, and
+  - **Any surface.** `POST /v1/repositories/{repository}/attestations` (`baton attestation add`,
+    `baton decision answer`, the dashboard; R-BTN-127) takes an attestation about work, and
     R-BTN-76's routes take readings; whether one is accepted depends on the credential alone
-    (R-BTN-186). A delegated key is never `human`. `DELETE …/attestations/{id}` revokes one, a
-    human gate for `human` ones.
+    (R-BTN-186). A delegated key writes none (R-BTN-130), and is never `human`.
+    `DELETE …/attestations/{id}` (`baton attestation revoke`) revokes one, a human gate for
+    `human` ones.
   - **Supersession.** A new attestation supersedes an earlier one only when type, subject, writer
     and **attested key** are the same; the attested key is the writer's key, except for a `baton`
     attestation, whose attested key is the runner key it is about. So two runners' reviews at one
@@ -6361,7 +6474,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     only in writer: the holder's counts for the leg its claim runs, the sync's or the fact reader's for a leg
     that declares `arrives` (R-BTN-192); any other is kept as evidence and recorded `arrival-unapplied` (R-BTN-39).
   - **A person's answer** is always a `std:decision@1` attestation. The person writes it (`baton
-    attest`, the dashboard) or the sync attests the answer the ticket shows; which counts is
+    decision answer`, R-BTN-127, or the dashboard) or the sync attests the answer the ticket shows; which counts is
     the policy's: an entry admitting `sync` is an answer in git, one admitting only `human` or
     `owner` is an answer in Baton (R-BTN-116).
   - **A deliverer's delivery** is a `std:effect@1` attestation (`{kind, ref, at}`) about the
@@ -6533,7 +6646,8 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     where no agent session can use it: not in an agent session's environment or `ssh-agent`, not on a
     machine an agent drives. A tenant's first is a line of the host's `BATON_HUMAN_KEYS`
     configuration, as administrators are (R-BTN-57), never registered over the API; each later
-    one is registered with a signature by an existing one (`POST /v1/human-keys`), and any is
+    one is registered with a signature by an existing one (`baton human-key add`, R-BTN-127;
+    `POST /v1/human-keys`), and any is
     revoked only with a `human_only` key. Baton refuses a revocation, and an instance switch to
     `hardware`, that would leave a repository with an approver list no live key can satisfy
     (R-BTN-188). How strongly a deployment enforces "no agent can use it" is
@@ -6554,23 +6668,32 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     browser profile or desktop where it is signed in. The everyday identity the owner's agent
     sessions use has no administrative role (R-BTN-180).
   - **The owner's agent** is a principal (§12.1): an owner key not `human_only`. It acts as `owner`,
-    never as `human`.
+    never as `human`. A dashboard session minted by a `human_only` key is an owner's session
+    (`owner`, R-BTN-181), never `human`: a human gate is opened by the key's own signature alone,
+    so no session, and no OAuth approval by one, satisfies a human-only `approvers.*` list.
 - **R-BTN-186 (authority by credential, not channel).** An action is available on every surface (the
   CLI, the API, the dashboard, MCP) to the principals its `callers` list (R-BTN-129), and to no other;
   a surface lacks an action only for a mechanical reason the registry names.
-  - **A delegated key** (an MCP key, R-BTN-130) acts as its minting owner for the actions listed at
-    minting, and may **tighten, and undo its own tightenings** (the owner, 2026-11-01): add a hold
-    or a bar, stop a leg, cancel a ticket; and lift a hold it set, restart a leg it stopped, lift a
-    bar it added. An expedite reorders and tightens nothing, so it stays the owner's; a cancel is
-    undone by no one, its `cancel` leg running its course (R-BTN-168). It never loosens what another credential set, never routes or
-    adopts, never holds credential management, and never makes a change that loosens an R-BTN-66
+  - **A delegated key** (an MCP key, R-BTN-130) acts as an owner of its repository, never as
+    `human`, for the actions listed at its minting, and may **tighten, and undo its own
+    tightenings** (the owner, 2026-11-01): add a hold or a bar, stop a leg, cancel a ticket; and
+    lift a hold it set, lift a bar it added. Resolving a condition is neither: a restart closes
+    what Baton or a leg raised — ending a block or a hold another set, routing, or (`park` on
+    `baton.stalled`) setting a hold under a reason the key's own test never matches — so it is
+    neither a tightening the key could undo nor the undoing of its own, and stays the owner's
+    (R-BTN-163). An expedite reorders
+    and tightens nothing, so it stays the owner's; a cancel is undone by no one, its `cancel` leg
+    running its course (R-BTN-168); a stopped leg needs no undoing, being claimable again at once
+    (R-BTN-119). It never loosens what another credential set, never routes, adopts or answers a
+    person's leg (an answer moves a ticket, R-BTN-116), never holds credential management, and
+    never makes a change that loosens an R-BTN-66
     setting — lifting another's hold, removing or narrowing another's bar, `retry`,
     `pushers`, `code_repos`, `transcript_repos`, `artifact_buckets`, `leg_log_root`,
     `required_independence`, `checks`, `check_runners`, `api_keys`, a grant's `sync` flag, any
     action an `approvers.*` list governs (a grant's role and domain among them), and any change to
     the repository policy or its floors (R-BTN-188, R-BTN-189). This is the one rule of what a
-    delegated key may do; the registry's MCP entries (R-BTN-129, R-BTN-130) derive from it, and it
-    replaces R-BTN-130's closed list (B-124, B-156).
+    delegated key may do; the registry's `delegated` marks derive from it and R-BTN-130 exposes
+    over MCP exactly what they admit (R-BTN-129; B-124, B-156).
   - Tightening, such as adding a hold or a bar, is open to any owner credential, MCP keys
     included; loosening what another set is an `approvers.policy` approver's (R-BTN-188): an
     owner's under `[owner]`, a human's under a human-only list.
@@ -6592,7 +6715,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
 
 One SQLite database per tenant, in the tenant's Durable Object (or the local host's file). The
 schema below is the current one, together with `BATON_MCP_OAUTH_SPEC` §12's rows (the OAuth
-tables, `mcp_keys`' immutable `id`, `oauth_redirect_uris`, its alarm instants and the `oauth` event
+tables, `mcp_keys`' OAuth columns, `oauth_redirect_uris`, its alarm instants and the `oauth` event
 kind), which B-73 folds in here; `src/migrations/` holds the numbered, append-only migrations that
 reach it, and the object refuses to serve until every migration is applied (§2).
 
@@ -6605,7 +6728,7 @@ reach it, and the object refuses to serve until every migration is applied (§2)
   `repositories.id`; `credential_id` and `fingerprint` are a key's fingerprint (`SHA256:…` for an
   SSH key, `bak_<id>` for an API key); `runner_id` and `claim_id` are integers.
 - An actor column (`set_by`, `added_by`, `granted_by`, `created_by`, `actor`) holds
-  `admin:<fp>`, `owner:<fp>`, `runner:<id>`, `mcp:<name>`, `sync`, `alarm` (or `alarm:<reason>`, e.g. `alarm:leg-timeout`) or `server`.
+  `admin:<fp>`, `owner:<fp>`, `runner:<id>`, `mcp:<id>` (an MCP key's immutable id, never its reusable name, R-BTN-130), `sync`, `alarm` (or `alarm:<reason>`, e.g. `alarm:leg-timeout`) or `server`.
 - When a ticket leaves the board (closed or dropped), exactly its board rows are deleted:
   `tickets`, `ticket_requires`, `ticket_depends`, `ticket_stations`, `ticket_next_legs`,
   `ticket_bars`, `ticket_questions`, `leg_queue_members`, `ticket_blocks`, `leg_needs`,
@@ -6666,7 +6789,7 @@ and never accepted holds no role (§12.1).
 | `sync_keys` | `fingerprint` | `repository_id`, `role` (`sync`\|`mirror`), `public_key` (unique), `added_by`, `added_at`, `revoked_at` | Sync and mirror keys, one repository each (R-BTN-93) |
 | `check_runners` | `(credential_id, repository_id)` | `capabilities` JSON (expanded), `max_tier`, `added_by`, `added_at`, `revoked_at` | Check-runner keys; the row stands in for a grant (R-BTN-114) |
 | `registration_tokens` | `id` (of `brt_<id>_<secret>`) | `repository_id`, `secret_hash`, `role` (`runner`), `capabilities` JSON, `max_tier`, `uses_left` (1; ≤ 100), `grant_ttl_s`, `expires_at` (≤ 30 days), `created_by`, `created_at`, `revoked_at` | R-BTN-117, R-BTN-157 |
-| `mcp_keys` | `(repository_id, name)` | `key_hash` (unique), `minted_by` (owner fingerprint), `actions` JSON (ids resolved at minting), `expires_at` (≤ 90 days), `last_used_at` (written ≤ once a minute), `revoked_at` | R-BTN-130 |
+| `mcp_keys` | `id` (random, never reused; the OAuth spec's §12 row, folded in) | `repository_id`, `name` (unique among live rows of the repository), `key_hash` (unique; NULL for an OAuth grant), `minted_by` (owner fingerprint), `actions` JSON (ids resolved at minting), `expires_at` (≤ 90 days), `last_used_at` (written ≤ once a minute), `revoked_at` | R-BTN-130 |
 | `dashboard_sessions` | `id` (of `bds_<id>_<secret>`) | `secret_hash`, `role` (`administrator`\|`owner`), `key_fingerprint`, `repositories` JSON (an owner's: those its key owned at binding), `created_at`, `expires_at` (≤ 4 h), `revoked_at` | Valid while its key holds its role: an administrator's while the key is in the administrator set; an owner's on those `repositories` the key still owns (`repository_owners.removed_at` NULL), and ended when none remains (R-BTN-155) |
 | `login_codes` | `id` (of the pending sign-in `bps_<id>_<secret>`) | `pending_hash`, `code_hash`, `role` (`administrator`\|`owner`, from `POST /v1/login`), `client_addr`, `key_fingerprint` (set when bound by that role's route), `created_at`, `expires_at` (+2 min), `bound_at`, `used_at` | R-BTN-155 |
 | `action_confirmations` | `code_hash` | `session_id`, `action`, `params` JSON, `created_at`, `expires_at`, `used_at` | A session's action awaiting confirmation by the session's minting key, through `POST /v1/admin/confirm` or `POST /v1/owner/confirm` by its role (R-BTN-155) |
@@ -6808,8 +6931,8 @@ an unmatched request is `404 not-found`.
 updates its `last_seen_at`. A destructive action takes `confirm: true` in its body, else
 `confirm-required` (R-BTN-129). A dashboard session's actions that R-BTN-155 lists as confirmed answer
 `202 {confirm_code}` and run when the session's minting key confirms the code (`POST
-/v1/admin/confirm` or `POST /v1/owner/confirm`). Any route may
-answer `rate-limited` or `quota` (R-BTN-135).
+/v1/admin/confirm` or `POST /v1/owner/confirm`). The CLI command that calls each route is
+R-BTN-127's. Any route may answer `rate-limited` or `quota` (R-BTN-135).
 
 **Errors** are `{ok: false, code, message}`, with these codes:
 
@@ -6846,9 +6969,12 @@ answer `rate-limited` or `quota` (R-BTN-135).
 **Callers.** *machine*: a machine key with its runner secret; *machine alone*: a machine key with
 no runner secret; *holder*: the claim's runner; *reader*: a key granted on the repository, an
 owner of it, or an administrator; *owner*: an owner key of `{repository}`; *admin*: a key in the
-administrator set; *session*: an administrator's or owner's dashboard session, same-origin JSON
-(R-BTN-16), an owner's only on its repositories (R-BTN-155); *admin session*: an administrator's
-dashboard session only; *sync*: the
+administrator set; *session*: a dashboard session (the principal `session` with its minting
+key's role, R-BTN-129), same-origin JSON (R-BTN-16), an owner's only on its repositories
+(R-BTN-155); *admin session*: a session whose role is administrator; *owner session*: one whose
+role is owner; *delegated*: an MCP key, as `owner` within R-BTN-186 (R-BTN-130) — an *owner*
+row admits one wherever R-BTN-129 marks the action `true` or `own`, and a row says *delegated* or
+*never delegated* only where that needs saying; *sync*: the
 repository's sync credential — a sync key, a CI identity token, or a machine key naming
 `?repository=` (R-BTN-93, R-BTN-102); *mirror*: a mirror key or the mirror's CI identity;
 *instrument*: an instrument key.
@@ -6887,27 +7013,28 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `GET /v1/repositories/{repository}/board` | owner, runner granted there, admin | — | `{repository, ready[], ready_by_tier, granted_capabilities: string[] \| null, server_time}` (R-BTN-179) | R-BTN-179 |
 | `GET /v1/repositories/{repository}/courses` | reader | — | each course file as last accepted, with its capability types and roles | R-BTN-121, R-BTN-157 |
 | `GET /v1/repositories/{repository}/stats` | reader | `?since=` | per station and leg, wait and run times; ends by reason and detail; suspensions; advice overridden; `off-graph` — aggregates and ids only | §5 |
+| `GET /v1/repositories/{repository}/fact-legs` | a trusted runner whose `service:` key the policy names for `std:arrival@1` (the fact reader) | — | `{tickets: [{ticket, station, path_len, leg, fact, waiting_since}]}` | R-BTN-192 |
 | **Owner** | | | | |
-| `POST /v1/owner/{repository}/tickets/{ticket}/resolve` | owner | `{restart, condition_id?}` — `condition_id` required when the ticket has more than one open condition taking a restart | `{ok: true}`; `invalid-params` for a restart the condition does not offer | R-BTN-163 |
-| `POST /v1/owner/{repository}/tickets/{ticket}/route` | owner | `{leg}` or `{clear: true}` | `{ok: true}` | R-BTN-83 |
-| `POST /v1/owner/{repository}/tickets/{ticket}/adopt` | an approver on the repository's `approvers.policy`, or an administrator holding a `human_only` key where every `approvers.*` list is human-only; never a delegated key | `{at?, next?, ran?: [<leg>], confirm: true}` | `{ok: true, before, after}`; `nothing-implied`, `off-graph` | R-BTN-39 |
-| `POST /v1/owner/{repository}/tickets/{ticket}/release` | owner | `{reason: "requested", confirm: true}` | `{ok: true}` | R-BTN-119 |
-| `POST /v1/repositories/{repository}/attestations` | an owner key or session, a `human_only` key, or a `service` key (R-BTN-181) | `{type, subject, value, nonce, lapses_at?}`; the writer is the credential | `{id}` | R-BTN-181 (proposal) |
+| `POST /v1/owner/{repository}/tickets/{ticket}/resolve` | owner; never delegated (R-BTN-130) | `{restart, condition_id?}` — `condition_id` required when the ticket has more than one open condition taking a restart | `{ok: true}`; `invalid-params` for a restart the condition does not offer | R-BTN-163 |
+| `POST /v1/owner/{repository}/tickets/{ticket}/route` | owner; never delegated (R-BTN-186) | `{leg}` or `{clear: true}` | `{ok: true}` | R-BTN-83 |
+| `POST /v1/owner/{repository}/tickets/{ticket}/adopt` | an approver on the repository's `approvers.policy`, or an administrator holding a `human_only` key where every `approvers.*` list is human-only; never delegated (R-BTN-186) | `{at?, next?, ran?: [<leg>], confirm: true}` | `{ok: true, before, after}`; `nothing-implied`, `off-graph` | R-BTN-39 |
+| `POST /v1/owner/{repository}/tickets/{ticket}/release` | owner; delegated (R-BTN-130) | `{reason: "requested", confirm: true}` | `{ok: true}` | R-BTN-119 |
+| `POST /v1/repositories/{repository}/attestations` | an owner key or an owner session (writer `owner`), a `human_only` key, or a `service` key (R-BTN-181); never delegated (R-BTN-130) | `{type, subject, value, nonce, lapses_at?}`; the writer is the credential | `{id}` | R-BTN-181 (proposal) |
 | `DELETE /v1/repositories/{repository}/attestations/{id}` | its writer; for a `human` type, a `human_only` key | `{confirm: true}` | `{ok: true}` | R-BTN-181, R-BTN-185 (proposal) |
-| `POST /v1/owner/{repository}/overrides/{ticket}` | owner for `expedite`, `hold: true` and `cancel`; a lift (`hold: false`) by an approver on `approvers.policy` (R-BTN-186); an MCP key for a tightening or the undoing of its own | `{expedite}`, `{hold}` or `{cancel: true, confirm: true}` | `{ok: true}` | §6, R-BTN-186 |
+| `POST /v1/owner/{repository}/overrides/{ticket}` | owner for `expedite`, `hold: true` and `cancel`; a lift (`hold: false`) by an approver on `approvers.policy` (R-BTN-186); delegated for a tightening, and for the lift of a hold it set (R-BTN-130) | `{expedite}`, `{hold}` or `{cancel: true, confirm: true}` | `{ok: true}` | §6, R-BTN-186 |
 | `POST /v1/owner/{repository}/grants` | an approver on `approvers.members` (R-BTN-188) | `{public_key, hostname?, label?, capabilities[], max_tier?, confirm_span?}`, or `{name, api_key: true, capabilities[], max_tier?}` | `{ok, pending: true}`; `{api_key}` once for the second form; `conflict` | R-BTN-58, R-BTN-117, R-BTN-146 |
 | `POST /v1/owner/{repository}/grants/{fingerprint}/revoke` | an approver on `approvers.members` (R-BTN-188) | `{confirm: true}` | `{ok: true}` | R-BTN-58 |
-| `GET /v1/owner/{repository}/grants` | owner | — | `{repository, owners[], grants: [{credential_id, hostname, label, repository_id, capabilities, max_tier, role, domain, checker, set_by, granted_by, granted_at, other_repositories[]}], settings, bars[], server_time}` — the dashboard's `limits` over one repository (R-BTN-179); the accept-and-decline plan's own rows are R-BTN-146's | R-BTN-146, R-BTN-179 |
+| `GET /v1/owner/{repository}/grants` | owner | — | `{repository, owners[], grants: [{credential_id, hostname, label, repository_id, capabilities, max_tier, role, domain, checker, set_by, granted_by, granted_at, other_repositories[]}], mcp_keys: [{name, minted_by, actions, expires_at, last_used_at, client_host?, client_addr?}], settings, bars[], server_time}` — the dashboard's `limits` over one repository (R-BTN-179); the accept-and-decline plan's own rows are R-BTN-146's | R-BTN-146, R-BTN-179 |
 | `PUT /v1/owner/{repository}/grants/{fingerprint}/flags` | owner; `sync: true` by an approver on `approvers.policy` (R-BTN-186) | `{sync}` | `{ok: true}` | R-BTN-146, R-BTN-186 |
 | `PUT /v1/owner/{repository}/grants/{fingerprint}/role` | an approver on `approvers.roles` | `{role: "runner" \| "trusted-runner", domain?, checker?}` | `{ok: true}`; `invalid-params` for `trusted-runner` on an API key, or a `checker` mark R-BTN-180 refuses | R-BTN-180, R-BTN-188 (proposal) |
 | `POST /v1/owner/{repository}/owners` | an approver on `approvers.members` (R-BTN-188) | `{public_key}` to add; `{fingerprint, remove: true, confirm: true}` | `{ok: true}`; `conflict` | R-BTN-58 |
-| `POST /v1/owner/{repository}/bars` | owner | `{course, tag, legs?, applies, starts_at?, ends_at?, release_holders?, reason}` | `{id}` | R-BTN-67 |
-| `POST /v1/owner/{repository}/bars/{id}/lift` | an approver on `approvers.policy` (R-BTN-186); an MCP key for a bar it added | — | `{ok: true}` | R-BTN-67, R-BTN-186 |
+| `POST /v1/owner/{repository}/bars` | owner; delegated (R-BTN-130) | `{course, tag, legs?, applies, starts_at?, ends_at?, release_holders?, reason}` | `{id}` | R-BTN-67 |
+| `POST /v1/owner/{repository}/bars/{id}/lift` | an approver on `approvers.policy` (R-BTN-186); delegated for a bar it added (R-BTN-130) | — | `{ok: true}` | R-BTN-67, R-BTN-186 |
 | `POST /v1/owner/{repository}/bars/follow` | owner | `{course}` | `{ok: true}` | R-BTN-142 |
 | `PUT /v1/owner/{repository}/settings` | owner; a loosening by an approver on `approvers.policy` (R-BTN-186) | any owner setting (§13.1); `code_repos` as `[{path}]` | `{ok: true}` | R-BTN-66, R-BTN-140, R-BTN-186 |
 | `PUT /v1/owner/{repository}/policy` | an approver on `approvers.policy` as it stands; never a delegated key | `{base_version, policy, dry_run?}` or `{base_version, preset, dry_run?}` | `{version, hash, changed[], guarantees}`; with `dry_run`, `{changed[], guarantees, stops: {grants[], legs[], tickets[]}}` as R-BTN-188 defines them and nothing written; `conflict` when stale, `forbidden`, `floor-violated` | R-BTN-188, R-BTN-189 (proposal) |
 | `GET /v1/owner/{repository}/policy/log` | owner | `?after=<version>` | `{versions: [{version, hash, previous_hash, changed_by, approver, preset?, at, changed[]}]}` | R-BTN-188 (proposal) |
-| `POST /v1/human-keys` | a `human_only` key | `{public_key, signature}`; `{fingerprint, revoke: true, confirm: true}` | `{ok: true}`; `conflict` for a key holding another role; `unsatisfiable-approvers` naming a list a revocation would leave unsatisfied | R-BTN-185, R-BTN-188 (proposal) |
+| `POST /v1/human-keys` | a `human_only` key | `{public_key, signature}` — `signature` the new key's SSHSIG over its own public line, proof of possession; `{fingerprint, revoke: true, confirm: true}` | `{ok: true}`; `conflict` for a key holding another role; `unsatisfiable-approvers` naming a list a revocation would leave unsatisfied | R-BTN-185, R-BTN-188 (proposal) |
 | `GET /v1/repositories/{repository}/policy` | owner, administrator, a key granted on the repository | — | `{repository, version, hash, policy, guarantees, floors, check_app_id, at}` | R-BTN-189 (proposal) |
 | `POST /v1/owner/login-links` | an owner key of any repository | `{code}` | `{ok: true}`; `not-found` for any code but an unbound owner row's | R-BTN-155 |
 | `POST /v1/owner/confirm` | the owner key that minted the session | `{code, dry_run?}` | performs the action; with `dry_run`, `{action, target}`; `not-found` for another session's code | R-BTN-155 |
@@ -6916,7 +7043,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `POST /v1/owner/{repository}/sync-keys`, `…/sync-keys/{fingerprint}/revoke` | an approver on `approvers.members` (R-BTN-188) | `{public_key, role: "sync" \| "mirror"}`; revoke `{confirm: true}` | `{ok: true}`; `conflict` | R-BTN-93 |
 | `POST /v1/owner/{repository}/sync-want` | owner | — | `{ok: true}` | R-BTN-105 |
 | `POST /v1/owner/{repository}/tokens`, `…/tokens/{id}/revoke` | an approver on `approvers.members` (R-BTN-188) | `{role: "runner", capabilities?, max_tier?, ttl_s?, uses?, grant_ttl_s?}`; revoke `{confirm: true}` | `{id, token}`, the token once; revoking revokes every credential it registered | R-BTN-117, R-BTN-157 |
-| `POST /v1/owner/{repository}/mcp-keys`, `…/mcp-keys/{name}/revoke` | an approver on `approvers.members` (R-BTN-188) | `{name, actions, ttl}`; revoke `{confirm: true}` | the key once; `{ok: true}` | R-BTN-130 |
+| `POST /v1/owner/{repository}/mcp-keys`, `…/mcp-keys/{name}/revoke` | an approver on `approvers.members` (R-BTN-188) | `{name, actions, ttl}`; revoke `{confirm: true}` | the key once; `{ok: true}`; `invalid-params` for an id R-BTN-186 does not admit | R-BTN-130 |
 | `POST /v1/owner/{repository}/check-runners`, `…/check-runners/{fingerprint}/revoke` | an approver on `approvers.members` (R-BTN-188) | `{public_key, name, capabilities?, max_tier?}`; revoke `{confirm: true}` | `{ok: true}` | R-BTN-114 |
 | **Sync and forges** | | | | |
 | `POST /v1/sync/observation` | sync | `{renew?}`, or `{release, behind?, unfounded?}` | `{sha, observation, bars, pushers, code_repos, check_app_id, positions, unconfirmed}`; a release `{ok: true}` | R-BTN-11, R-BTN-62, R-BTN-126, R-BTN-147, R-BTN-139, R-BTN-140, R-BTN-150 |
@@ -6926,15 +7053,15 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `GET /v1/sync/events` | mirror | `?after=<seq>`, which acknowledges up to the lesser of `after` and the last `seq` a read returned to the mirror | `{events[], next}` | §16 |
 | `POST /v1/github/webhook` | the GitHub App, by `X-Hub-Signature-256` | a delivery | `204`; repeats and the sync's and mirror's own events ignored | R-BTN-73 |
 | `POST /v1/forges/{repository}/notify` | a GitLab or Gitea notification, verified against `BATON_FORGE_SECRETS` | the notification | `204`; records a want | R-BTN-95 |
-| **The outbox and instruments** | | | | |
+| **Deliverers and instruments** | | | | |
 | `POST /v1/runner/outbox/claim` | machine, SSH-signed, on a grant whose role the repository policy's `outbox` admits (R-BTN-171, R-BTN-188) | `{limit?}` (≤ 50) | `{entries: [{repository, id, kind, ticket, fields}]}` of the classes it declared, each leased 10 minutes; a ticket's git entries together, in `id` order | R-BTN-171, R-BTN-115 |
 | `POST /v1/runner/outbox/{repository}/{id}` | the entry's claimer | `{state: "delivered", ref}` (recorded as its `std:effect@1` attestation, R-BTN-191) or `{state: "failed", reason: "transient" \| "refused"}` | `{ok: true}`; `forbidden` for another runner's entry | R-BTN-171 |
 | `POST /v1/probe/readings` | instrument | `{readings: [{instance, kind, available?, until?, valid_for?, detail?, nonce?, signature?}]}` | `{ok, refused: [{instance, code}]}` | R-BTN-101 |
 | **Administrator** | | | | |
 | `GET /v1/admin/repositories` | admin | — | `{repositories: [<`/v1/ui/state`'s repository row: id, github, forge, web_base, default_branch, weight, head, mode, courses>], seed_owners?: [repository id]}` — `seed_owners` present only when some unretired repository's live owners are all `admin:seed`'s or it has no live owner, naming them (B-91, R-BTN-58) (R-BTN-179) | R-BTN-179 |
-| `POST /v1/admin/repositories` | admin; `owner_keys_add` `forbidden` where the repository's `approvers.members` is human-only and the key is no `human_only` key it admits (R-BTN-188) | register `{id, github, forge, remote, web_base?, ci_identity?, dispatch?, sync_keys?, default_branch, sync_workflow?, mirror_workflow?, mirror_pusher?, weight?, tiers?, cut_over?, owner_keys[], forge_repo_id, forge_owner_id, trigger_workflows?}`; change `{id, …, github?, forge_repo_id?, forge_owner_id?, sync_keys_add?, sync_keys_remove?, owner_keys_add?, former_paths_remove?, code_repo_consents_add?, confirm?}` (never `forge`); `{id, retire: true, confirm: true}` | `{ok: true}`; `conflict` | R-BTN-47, R-BTN-92, R-BTN-93, R-BTN-138 |
-| `GET /v1/repositories/{repository}/fact-legs` | a trusted runner whose `service:` key the policy names for `std:arrival@1` | — | `{tickets: [{ticket, station, path_len, leg, fact, waiting_since}]}` | R-BTN-192 |
-| `POST /v1/admin/grants` | admin; `forbidden` where the repository's `approvers.members` is human-only and the key is no `human_only` key it admits (R-BTN-188) | a grant, or a key's hostname | `{ok, pending: true}` | R-BTN-57, R-BTN-58, R-BTN-146, R-BTN-188 |
+| `POST /v1/admin/repositories` | admin; `owner_keys_add` `forbidden` where the repository's `approvers.members` is human-only (the gate opens on the owner route with a `human_only` key, R-BTN-188) | register `{id, github, forge, remote, web_base?, ci_identity?, dispatch?, sync_keys?, default_branch, sync_workflow?, mirror_workflow?, mirror_pusher?, weight?, tiers?, cut_over?, owner_keys[], forge_repo_id, forge_owner_id, trigger_workflows?}`; change `{id, …, github?, forge_repo_id?, forge_owner_id?, sync_keys_add?, sync_keys_remove?, owner_keys_add?, former_paths_remove?, code_repo_consents_add?, confirm?}` (never `forge`); `{id, retire: true, confirm: true}` | `{ok: true}`; `conflict` | R-BTN-47, R-BTN-92, R-BTN-93, R-BTN-138 |
+| `POST /v1/admin/repositories/{repository}/resync` | admin | `{force: true, sha, confirm: true}` | `{ok: true}`; the head reset to `sha` as the dashboard's forced Resync does (R-BTN-11) | R-BTN-11 |
+| `POST /v1/admin/grants` | admin; `forbidden` where the repository's `approvers.members` is human-only (the gate opens on the owner route with a `human_only` key, R-BTN-188) | a grant, or a key's hostname | `{ok, pending: true}` | R-BTN-57, R-BTN-58, R-BTN-146, R-BTN-188 |
 | `POST /v1/admin/keys/{fingerprint}/revoke` | admin | `{confirm: true}` | `{ok: true}`; the key stops at its next call, an owner key on every repository; `invalid-params` for an administrator's key | R-BTN-57 |
 | `POST /v1/admin/probes` | admin | `{public_key, label}` | `{ok: true}` | R-BTN-101 |
 | `POST /v1/admin/resources` | admin | `{name, scope, detail_schema, atoms_from?, capacity?}` | `{ok: true}` | R-BTN-76, R-BTN-176, R-BTN-178 |
@@ -6962,8 +7089,8 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `POST /v1/ui/adoptions/{claim}/confirm` | admin session | `{runner_id}` (the requesting runner, shown with its hostname and session name) | `202 {confirm_code}` | *adoption*, R-BTN-28 |
 | **Other** | | | | |
 | `POST /v1/register` | `Authorization: Baton-Token <token>` | `{name, public_key}` or `{name, api_key: true}` | `{credential_id, grant}`, and `{api_key}` once for the second form; `forbidden` beyond the token's scope; `unauthenticated` for a spent, expired or revoked token; `conflict` | R-BTN-117 |
-| `GET /v1/actions` | any credential | — | the caller's registry entries, with `input` schemas | R-BTN-129 |
-| `POST /v1/mcp` | an MCP key, as a bearer | JSON-RPC `initialize`, `ping`, `tools/list`, `tools/call` | streamable HTTP, JSON only; `GET` answers `405` | R-BTN-130 |
+| `GET /v1/actions` | any key (never an MCP key, R-BTN-130) | — | the caller's registry entries, with `input` schemas; `baton help` reads it | R-BTN-129 |
+| `POST /v1/mcp` | an MCP key, as a bearer | JSON-RPC `initialize`, `ping`, `tools/list`, `tools/call`; the tools are the key's ids within R-BTN-186 | streamable HTTP, JSON only; `GET` answers `405` | R-BTN-130, R-BTN-186 |
 
 **Runners drain the outbox** (R-BTN-171) through the two `/v1/runner/outbox` routes above,
 never through a claim.
@@ -7050,8 +7177,8 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-26 two repositories, two courses | `ops` (weight 50, course `runbook`) beside `docs`, both with `T-1`; W1 declares one course, W2 both; a CLI runner on one checkout declaring two courses | distinct tickets; W1 never offered `ops`; `docs` first, each in default order, per-group limit; tokens per repository; a shared branch blocks pushes while either is held; `min_runner_version` gates W2; the runner declares both courses, claims a leg of either in consecutive claims, loads each from the claim's `course_id` and snapshot, and `--course` narrows it to one (B-103) |
 | S-BTN-42 webhooks | a review delivery, its repeat, a forgery, a 10-delivery burst, Baton's own events, extra fields | one dispatch, then one trailing after 30 s; repeat, forgery and own events dispatch nothing; only R-BTN-73's fields read |
 | S-BTN-171 a dependency cycle is refused | a board post whose live tickets depend on each other in a loop; two of them; a self-dependency; a diamond; a post closing the very ticket it depends on | `invalid-params`, naming `B-1 → B-2 → B-1` once, and nothing of the post stored: no head, no ticket; `B-1 → B-1` alike; the diamond and the closed edge accepted |
-| S-BTN-189 the ticket commands | a bare origin; `baton tickets new` with `--depends-on`, `--tags` and `--project`, a legacy id pattern, a `--body-file` whose line disagrees with the flag, a filing that closes a cycle, a prefix the pattern cannot allocate; `claim` of a held, dependent, in-review and archived ticket; `set` with `--pr` twice; `done`; a peer's push between a command's fetch and its push; `baton repo init`, then an edited `HOW-TICKETS-WORK.md` | one commit on the origin's default branch, the ticket alone, the caller's branch and tree untouched; the next free id under the configured prefix, the skeleton with the flag's `**Depends on:**` line and the dependency's reverse mention; each refusal before the push, nothing landed; the retry takes the id after the peer's; a status, a PR once, the file archived; the page written, its edited copy one finding and exit 1, `init --force` writing it again |
-| S-BTN-172 the ticket check | `baton tickets check` on a clean repository, on one whose tickets loop, on one with no `.baton/baton.json`, and on this repository's own `tickets/` | exit 0 with the count, `✓ no findings`; exit 1 with one `path: message` line (the loop at its first ticket's file) and the count; the CLI's error, exit 2; this repository passes, which CI's `npm run check:tickets` runs |
+| S-BTN-189 the ticket commands | a bare origin; `baton ticket new` with `--depends-on`, `--tags` and `--project`, a legacy id pattern, a `--body-file` whose line disagrees with the flag, a filing that closes a cycle, a prefix the pattern cannot allocate; `claim` of a held, dependent, in-review and archived ticket; `set` with `--pr` twice; `done`; a peer's push between a command's fetch and its push; `baton repo init`, then an edited `HOW-TICKETS-WORK.md` | one commit on the origin's default branch, the ticket alone, the caller's branch and tree untouched; the next free id under the configured prefix, the skeleton with the flag's `**Depends on:**` line and the dependency's reverse mention; each refusal before the push, nothing landed; the retry takes the id after the peer's; a status, a PR once, the file archived; the page written, its edited copy one finding and exit 1, `init --force` writing it again |
+| S-BTN-172 the ticket check | `baton ticket check` on a clean repository, on one whose tickets loop, on one with no `.baton/baton.json`, and on this repository's own `tickets/` | exit 0 with the count, `✓ no findings`; exit 1 with one `path: message` line (the loop at its first ticket's file) and the count; the CLI's error, exit 2; this repository passes, which CI's `npm run check:tickets` runs |
 | S-BTN-54 a Baton without GitHub | `plain` with a `post-receive` running `baton repo sync --defaults-only` on the `branch` course; `Baton-Verdict:` trailers, one without `Baton-Claim`; `--if-wanted` cron | the ticket moves to `merged` on push syncs alone; the unclaimed verdict counts; `wanted` holds until a later-numbered post; no forge credential or link |
 | S-BTN-55 the sync key | a sync key posts; it is registered for a second repository; machine (sync off), mirror and revoked keys post; a replay | accepted; `conflict`; `forbidden`; `unauthenticated` |
 | S-BTN-56 other forges, edges of a want | `lab` and `tea` notifications, good and bad; `#mirror` vs `#sync` tokens; a dispatch answering 500; near-miss URLs; `--defaults-only` with a `sync.mjs`; a push by another pusher with the mirror's author email | bad refused in the Worker, good record wants, the spoofed push's included; `#mirror` `forbidden`; one dispatch retry; only `web_base` URLs kept; the ticket fails |
@@ -7066,10 +7193,10 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-36 suspension confirmed from a PR | a suspension evidenced only in a code repository; an older observation arriving late; a reap and re-claim | confirmed by the next later snapshot, never by ancestry; `stale-observation`; R-BTN-5's check passes |
 | S-BTN-40 slow and stale syncs | a whole ticket under slow, stale-checkout and held syncs, a lost delivery, an archive sync numbered before `/end` | every `advance` accepted; no stale end; the stale checkout posts nothing; the schedule covers the loss; `done` confirmed from the closure |
 | S-BTN-43 no course code | five ticket files (a dependency, a `done`, an unknown field, no `id`) on the default source; a PR through review, fix and merge; `--eject tickets`; comment verdicts | four tickets on `create-pr`; the dependent waits; `filed` → `pr-open` → `reviewed` → `fixed` → `reviewed` → `merged`; the ejected copy rules; `src/core/` unchanged |
-| S-BTN-47 positions and the owner's settlements | results with good, missing and off-graph `next`; human work no claim reported; legs added and removed; a re-route; spent retries; a leg waiting 72 h; a person's answer at Baton's station; readiness posted for a station Baton has since left | recorded at once; bad results suspend, `off-graph`; the human work is recorded `arrival-unapplied`, raising nothing, until adopted; `course-changed` raised; re-route holds until the station changes; the person's leg arrives as a `fact-arrival`; the stale readiness discarded; `baton.retries` and `baton.stalled` resolved by `baton owner resolve … retry` |
+| S-BTN-47 positions and the owner's settlements | results with good, missing and off-graph `next`; human work no claim reported; legs added and removed; a re-route; spent retries; a leg waiting 72 h; a person's answer at Baton's station; readiness posted for a station Baton has since left | recorded at once; bad results suspend, `off-graph`; the human work is recorded `arrival-unapplied`, raising nothing, until adopted; `course-changed` raised; re-route holds until the station changes; the person's leg arrives as a `fact-arrival`; the stale readiness discarded; `baton.retries` and `baton.stalled` resolved by `baton ticket resolve … retry` |
 | S-BTN-49 child tickets | a leg files C1, C2 with `parent: T` and ends `spawned`; ends with 51 ids, the parent itself, or `done`; looping and foreign parents; children `T-1`, `T-2` push branches and PRs while T is held | bad ends `invalid-params`; children and T held concurrently, T's non-calling leg offered; the children's branches and PRs map to them alone, their pushes allowed; `children` lists both, also closed; bad parents `parent-invalid` |
 | S-BTN-50 owner state exported | a Baton with claims, keys, grants with roles and domains, bars, a hold, a re-route, readings, open core conditions and a person leg's pending expiry; freeze, seal, export, import, re-heartbeat; a tampered and a second import | refusals before seal (`frozen`, `conflict` for a lagging mirror); identical exports with only owner state; source `sealed`; import restores state, continues seq, runners resume unkeyed, the expiry instant unchanged; `invalid-params`, `conflict` |
-| S-BTN-58 an unknown ticket | claims by id of a ticket Baton has not seen, before and after the first post naming it; `baton tickets new`, then the forge's notification, and on `plain` a runner's `ls-remote` poll | `not-eligible` (`unknown-ticket`), no claim; claimable at the first post; the sync within a minute of the push |
+| S-BTN-58 an unknown ticket | claims by id of a ticket Baton has not seen, before and after the first post naming it; `baton ticket new`, then the forge's notification, and on `plain` a runner's `ls-remote` poll | `not-eligible` (`unknown-ticket`), no claim; claimable at the first post; the sync within a minute of the push |
 | S-BTN-121 heads and resets | an unfounded head: a rewritten default branch, once and after a fetch lagging the head for 31 minutes; a post whose `parent_sha` is not the head; an administrator's forced Resync naming the new head, then the sync's post against it omitting a ticket with a hold; a forced Resync while a claim whose `snapshot_sha` the new history lacks runs, and one whose `snapshot_sha` it keeps | the sync posts nothing, releases `unfounded` and exits 1, `baton.head-unfounded` raised, and `baton.head-behind` at 30 minutes behind; `head-moved`; `head-reset` logged, the next post materialized as a first snapshot, the omitted ticket dropped with `baton.ticket-dropped` and its hold kept; the first claim ends `released:off-branch` at its runner's next check, the second runs on |
 | **§5** | | |
 | S-BTN-8 owner bar, no new work | a bar `applies: claim` set mid-claim | holder finishes; others `barred-tag` |
@@ -7090,7 +7217,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-104 the standard courses | `bug-report` with a holder's arrival off the graph and one malformed, `decision` answered by a `std:decision@1`, `draft-ticket` with no forge facts; an audit leg answering with prose before and after its outcome, and with none (B-85) | the bad arrivals refused, the good ones moving the ticket; `carry-out` ready once answered, with the answer as its input; the third syncs to `requested`; the prose-wrapped outcome is read, none fails naming the last line |
 | S-BTN-105 one leg overridden | `legs/review.run.mjs` on a sourced `create-pr` | the override runs at the snapshot; the standard `close` writes the verdict |
 | S-BTN-107 the build-app course | a request; `stages` filing four `draft-doc` children, each naming its `document:`; each merged in turn, the second refined by the owner on its PR before the merge; `file` filing two children on different courses from `PLAN.md` as merged; a verification files a fix; a third failing verification, then the owner's answer `building`; a second request whose design stage the owner withdraws; under `tickets.created: proposed`, a third request | each stage child waits on the one before it, unblocked by the previous one's merge closing it in git; `stages` settles at `planned` once all four are merged, and `file` reads `PLAN.md` at its snapshot, the owner's refinement included; `file` settles at `building` only once both children close, so `verify` never starts while a child is open; the fix call settles back to `building`; the third verification reports `stuck`, where the person leg `decide` waits under Needs you, and its answer queues `verify` again; the second request `abandoned` at the withdrawal, the withdrawn stage's PR closed by `close-pr`, its later stages superseded with no PR, and the request listed until withdrawn in git; the first request's `report` landing `VERIFY.md` and closing it by the owner's merge, `shipped`; the third's stages and plan tickets each proposed and claimable only once approved |
-| S-BTN-175 the request | a fresh repository on `create-spec`; `baton request "<one sentence>" --course create-spec` run through the CLI's own entry, then a sync of what it pushed, then a runner's claim | one commit on the bare origin's main, on top of the scaffold, the ticket file alone — the sentence its title and description, `course: create-spec`, `available`, `tags: [request]` — with the caller's branch, HEAD and tree untouched; the board posts it `requested` with `converse` `ready`; the claim offers `converse` |
+| S-BTN-175 the request | a fresh repository on `create-spec`; `baton ticket request "<one sentence>" --course create-spec` run through the CLI's own entry, then a sync of what it pushed, then a runner's claim | one commit on the bare origin's main, on top of the scaffold, the ticket file alone — the sentence its title and description, `course: create-spec`, `available`, `tags: [request]` — with the caller's branch, HEAD and tree untouched; the board posts it `requested` with `converse` `ready`; the claim offers `converse` |
 | S-BTN-174 the create-spec course | a request with no PR and no marker; a run of `converse` that writes its marker and suspends, then a second sync; its PR on the branch pattern, checks running and then done; a verdict asking for changes and an address round begun and suspended; its push; a second round; a third round asking for changes; a round still asking for changes with all three address rounds spent; an adjudication reproducing a finding, then one that does not; a fresh approval; the merge | `converse` ready, then — its marker committed — waiting on `owner` and not offered again; `spec-open` with `review` waiting on `ci`, then ready; `reviewed` with `address` ready; back to `spec-open` after the push; `adjudicate` once the address rounds run out; `merge` waiting on `owner` for a reproduced finding, ready for none; `merge` ready on a fresh approval; `merged` |
 | S-BTN-110 courses from their sources | the built CLI outside a checkout: `--course create-pr`; a `--source` at a tag with overrides; a copied `course.json`; an off-branch commit; no `sync.mjs`; an outside import | full-commit source, no course file; source read at its commit with home overrides; each fault refused naming it, the commit unfetched |
 | S-BTN-117 bars and renames | bars on `implement` and `*` except `review`; files dropping, swapping, double-renaming, re-adding legs | first two held, raised; collision refused; `except` updated and the new leg barred |
@@ -7114,7 +7241,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-45 edges of blocks, a queue over its bound | `$ref` resource schema; foreign runner; bounded and schema-failing readings; administrator over probe; an empty fleet overnight; K blocked overnight on a capability and a resource at once; `max_queue: 2` with three; 150 unblockings | refused, `forbidden`, `invalid-params`; lapse at `until`; `overridden`; no row, `no-instance`; K's morning heartbeat swaps its rows with no `unblocked` or `blocked`, the same `blocked_since`, no runner woken (one evaluation per transaction); `baton.queue-over` raised and the course `closed` until back to two; dispatch of 100 plus `{truncated: 50}` |
 | S-BTN-51 a series and a timed leg | a series run due at T; idle days; a retried successor write; a foreign successor id; invalid `not_before`; a `ci` wait; a withdrawn run | `waiting` on `time` until the alarm readies it at T with one message; one successor, after its predecessor; `cannot-finish:spec`; `not-before-invalid` raised; `ci` wins; missed fires not replayed; the series retires |
 | S-BTN-61 shared instances | one instance listed by `docs` and `ops`; measures from both; a key of neither; two containers on one key | both visible, no foreign ticket or host; none replaces another; `forbidden`, omitted; unlisted bill `refused` |
-| S-BTN-67 a person's leg | a queued `kind: person` leg; its question posted with options; a question posted for a ticket whose queued leg is an agent's; a runner asks; the owner answers in git under `cooperative`, and with `baton attest`; an answer naming an option the question lacks; a person leg with `expires`, unanswered, then answered after the instant | stored with its question and listed under Needs you; the stray question dropped, `question-dropped`; refused (rule `person`); the leg arriving from its `std:decision@1` as a `fact-arrival`, the answer its output; `invalid-params` from the CLI, the sync's dropped `answer-invalid`; the expiry arriving at `reached` with `question-expired`, the late answer `arrival-unapplied` |
+| S-BTN-67 a person's leg | a queued `kind: person` leg; its question posted with options; a question posted for a ticket whose queued leg is an agent's; a runner asks; the owner answers in git under `cooperative`, and with `baton decision answer`; an answer naming an option the question lacks; a person leg with `expires`, unanswered, then answered after the instant | stored with its question and listed under Needs you; the stray question dropped, `question-dropped`; refused (rule `person`); the leg arriving from its `std:decision@1` as a `fact-arrival`, the answer its output; `invalid-params` from the CLI, the sync's dropped `answer-invalid`; the expiry arriving at `reached` with `question-expired`, the late answer `arrival-unapplied` |
 | S-BTN-72 tickets at stations | `requires.tickets` on a parent `reached` and a `depends_at` `at`; a missing parent; a holder advancing into the leg while its `ticket` row stands | one `ticket` row until the dependency arrives; `reached` holds past it; the missing parent raises `baton.prerequisite-unmet`; the advance refused `blocked` (rule 1) |
 | S-BTN-74 why a leg cannot start | four unmet prerequisites; an asker lacking a capability | `baton leg why` lists each with its `why`, plus `not-declared`, from the blocks index alone |
 | S-BTN-82 cycles and closed tickets | a two-ticket cycle; a withdrawn dependency; `reached` on a closed ticket | `prerequisite-cycle` raised; never met; met from `final_path` |
@@ -7147,7 +7274,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-128 answered after the wait, withdrawn | no answer in 120 s, one 3 h later; a withdrawn ask; one answered 1 s after the wait; a waiting holder reaped, released `requested`, or reaped by `leg-timeout` | `released:blocked` on the `condition`, not failed; resumed by another runner with `resume`; default restart `withdrawn`; no block row, resumed at once; each writes the `condition` block, and no claim asks again |
 | S-BTN-129 expiry and asking again | an ask waits 2 days; push retries fail; a late answer; a retry | `answer` expires to `unanswered` (`question-expired`), the raiser resumes `restart: null`; the late answer `arrival-unapplied`; `email` queued; `error.no-answer` holds; the retry files a new ask |
 | S-BTN-130 dynamic binding | repository and epic-scope bindings; a narrowed leg; a restart-less handler course; an unmerged binding | innermost scope, longest prefix; raise refused on the channel; `course test` refuses; inert; `baton leg why` names each |
-| S-BTN-131 the debugger | no bindings: a `hitl` raise, spent retries, an invalid output; a delivery runner polling the list; `baton.retries` answered on its resolve page; `baton.queue-over` closing and reopening within an hour; a leg raising `baton.retries`; a runner's condition; a binding of `baton` | `hitl` listed by severity and age with its restarts, resumed by `baton owner resolve` (`resolved`); `baton.retries` offers `retry`, `route:<leg>`, `park`; `baton.output-invalid` listed, no ticket filed and no outbox entry queued; the runner sends each entry's resolve link once; resolved on the page by a signed-in owner, the hold cleared; one entry with `reraised` 1; `invalid-params`; never bound; the binding ignored |
+| S-BTN-131 the debugger | no bindings: a `hitl` raise, spent retries, an invalid output; a delivery runner polling the list; `baton.retries` answered on its resolve page; `baton.queue-over` closing and reopening within an hour; a leg raising `baton.retries`; a runner's condition; a binding of `baton` | `hitl` listed by severity and age with its restarts, resumed by `baton ticket resolve` (`resolved`); `baton.retries` offers `retry`, `route:<leg>`, `park`; `baton.output-invalid` listed, no ticket filed and no outbox entry queued; the runner sends each entry's resolve link once; resolved on the page by a signed-in owner, the hold cleared; one entry with `reraised` 1; `invalid-params`; never bound; the binding ignored |
 | S-BTN-132 calls and completion | a call over three `review-pr` children (2 of 3 approve; `lifetime: station`); an epic `plan` call with one child withdrawn; a `spawned` end naming none; a table without a closing `{"of": "all", "closed": true}` entry; a superseded `draft-doc` ticket whose `close-pr` is released mid-run and claimed again | settles on the second approval, the third `superseded` and, `review-pr` naming no `cancel` leg, withdrawn through the outbox at once; `settleCall` agrees; the epic settles `planned` only once all closed; empty end refused; the table refused; the `draft-doc` ticket marked `cancelling` while `close-pr` runs, the second run succeeding on work already done, then withdrawn |
 | S-BTN-134 deadlines and the stalled notice | a leg's `stalled_s` at 1 day; a `deadline_s` of 30 s and of 8 days; a file with `max_duration`, `max_ready_s`, `max_attempts_s`, `error_types`, `timers`, `after_s`, `choice`, `compensate`, `isolation`, a leg's `call`, `checks` or `retry.non_retryable` | `baton.stalled` raised after 1 day, not 3, and closed when the leg is posted `ready`; each refused naming the leg and field, previous kept |
 | S-BTN-136 the outbox | a superseded ticket's `withdraw` entry; no runner declaring `git`, then one; a write pushed by a deliverer whose lease lapsed; a forge-refused push; a ticket withdrawn in git before any deliverer claimed its entry; an entry undelivered 24 h; a `tickets.mjs` that never posts the withdrawal, then the condition's `retry`; a `runner` grant claiming under `git: {deliverers: [trusted-runner]}`, then under `{deliverers: [runner]}`; a grant with no accepted grant on the repository; a trusted-runner deliverer and a `runner` deliverer on a repository with an ejected ticket source; an owner's MCP key changing the policy | the ticket marked `cancelling` until the withdrawal lands; written with `baton_write: <id>`, `delivered` then `confirmed`, the ticket closed `withdrawn`; the next deliverer writes nothing and reports the head; held `outbox-refused` and `baton.outbox-late` naming the deliverer; `dropped`; `baton.outbox-late`; `baton.outbox-late` after 3 snapshots, the ticket still `cancelling`, the entry queued again by `retry`; `forbidden` with the unmet knob, then claimed; `forbidden`; the entry offered to the `runner` grant alone; refused, and an approver on `approvers.policy` accepted |
@@ -7185,16 +7312,16 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | **§11** | | |
 | S-BTN-30 signed requests | replayed, stale, revoked, non-administrator, cross-host and commit signatures; a machine key's reading for an unlisting instance; every key type | `unauthenticated`; `forbidden`; fresh ones pass with and without a body |
 | S-BTN-32 owners and grants | two repositories, one owner each; grants, a cross revoke, last-owner removal, a hostname change, an owner's grant of `human-operator`; an admin key as runner; a sign-in code; a pending grant naming a key later added as owner elsewhere; an owner key revoked by an administrator; `admin.key.revoke` on an administrator line | grants per repository; `forbidden`; refused; `conflict`; the grant made, admitting a runner that declares `human-operator`; refused; the confirmed code opens a session ending with the key; the owner added, the grant's acceptance `conflict` without naming the role; removed from every repository, its sessions and MCP keys dead; `invalid-params` |
-| S-BTN-97 the command tree | ambiguous, keyless and in-leg uses; CI without keys; `baton leg`; a typo; `--json` | exit 2 naming ids or role; CI signs by OIDC; channel verbs only in a leg; verbs listed; suggestion; JSON as is |
-| S-BTN-100 one registry | every surface and caller; an unregistered route, bad `mcp` flag, bad id; a body mixing `hold` and `cancel` | one entry each; own actions only; `check:actions` fails; `404`; `invalid-params` |
-| S-BTN-101 the MCP endpoint | mints within and beyond the allowlist; protocol, batch, origin, rate and paging edges; unconfirmed and out-of-scope calls; `{hold:false}`; a REST use | bad mints refused; protocol errors as specified; `confirm-required`; uniform `forbidden`; `invalid-params`; `rate-limited`; REST `unauthenticated` |
+| S-BTN-97 the command tree | ambiguous, keyless and in-leg uses; CI without keys; `baton leg`; `baton owner grant add --help`; a renamed name (`baton run`); a typo; `--json`; the tree against every command this specification names | exit 2 naming ids or role; CI signs by OIDC; channel verbs only in a leg; verbs listed; the command's arguments, flags and example from the registry; exit 2 with its `renamed:` line; suggestion; JSON as is; every named command present |
+| S-BTN-100 one registry | every surface and caller; an unregistered route, a `delegated` mark R-BTN-129's list does not give (`true` on `owner.grant.add`, `own` on `ticket.hold`), a bad id, an example that does not parse; a body mixing `hold` and `cancel` | one entry each; own actions only; `check:actions` fails each; `404`; `invalid-params` |
+| S-BTN-101 the MCP endpoint | mints within and beyond what R-BTN-186 admits (an attestation, a route, `ticket.resolve`, `owner.grant.add`); a name in live use, and one a revoked key bore; protocol, batch, origin, rate and paging edges; unconfirmed and out-of-scope calls; `{hold:false}` on its own and on another's hold, and on a hold the revoked key of the same name set; a REST use | bad mints refused `invalid-params`; `conflict`, then minted; protocol errors as specified; `confirm-required`; uniform `forbidden`; its own lifted, another's `forbidden`, the dead key's `forbidden`; `rate-limited`; REST `unauthenticated` |
 | S-BTN-102 one action, three ways | `leg.stop` by REST, CLI and MCP, allowed and refused | one core function, one output, `mcp:<name>`; one refusal code |
 | S-BTN-103 an MCP key's life | `--ttl 120`; a new read action; idle 8 days; minter revoked; `api_keys: false`; revoke | refused; not listed; dead (`401`); `401` while off; `confirm-required`, then dead |
 | S-BTN-124 MCP, sign-in, tokens | MCP hold edits; a replayed sign-in code; revoke all; token reuse, long TTL; destructive dashboard acts; polled-row eviction; an API key to `http`; an unverifying bearer naming an administrator's `bak_<id>` over `http`; an owner's session on its repository, on a foreign one and on an administrator route; an owner's code typed into `baton admin open`; the session's code confirmed by another owner key; the owner removed; `owner sessions revoke`; a session message of kind `handled`, and a `release` for a ticket the runner does not hold | add-hold and the key's own unhold work, another's unhold `forbidden` (R-BTN-186); only the confirmed browser signs in; sessions ended; `unauthenticated`, `invalid-params`; `202 {confirm_code}` until the minting key confirms, Stop at once; oldest unbound dropped; key not sent; refused, nothing revoked; acts there, `forbidden`, `forbidden`; `not-found`; `not-found`; the session ended; every session of the key ended; `invalid-params`, `forbidden` |
 | S-BTN-126 API keys beside SSH keys | an API-key administrator, owner and runner beside an SSH runner | bearers on their own routes only; runner secret checked; sync and probe `unauthenticated`; one role per key (`conflict`); revocation next call; sign-in by code |
 | S-BTN-156 a board posted by a sync key | a checkout with no CI token and no `BATON_SYNC_TOKEN`; an ssh-keygen ed25519 key registered for it, a key of another repository, an unregistered key and one in the mirror role; an API-key file passed as `--sync-key` | with the one flag every call is an SSHSIG in `baton-request`, keyid the key's fingerprint, and the board lands under the key's repository (that of another repository too, never this checkout's); `unauthenticated` and `forbidden`, each posting nothing; the file refused by name, no call made |
 | S-BTN-170 the dashboard state read with an administrator's key | an administrator, an owner of `ops`, a runner it granted that heartbeats | the administrator's signed `GET /v1/admin/state`, and its API key's, equal its session's `GET /v1/ui/state` at the same instant; an owner's key `forbidden`; an unknown key and no principal `unauthenticated`; a POST `not-found` |
-| S-BTN-166 the state with a key | `baton admin repos`, `baton owner grants` and `baton board` on the seeded two-repository instance; an owner's key on its own repository and a foreign one; an administrator's key on an owner route; a granted worker key's board and heartbeat; an unknown key; a grant revoked; a key granted on two repositories | the registry's repositories, the repository's owners, grants and settings, the board's repository and ready sections, each one JSON answer; `forbidden` on the foreign repository and the administrator's key; the board answers and `granted_capabilities` names the key's grant on that repository, the same grant the heartbeat's answer names; `unauthenticated`; `forbidden` after the revoke; each grant naming the other repository |
+| S-BTN-166 the state with a key | `baton admin repo list`, `baton owner grant list` and `baton repo board` on the seeded two-repository instance; an owner's key on its own repository and a foreign one; an administrator's key on an owner route; a granted worker key's board and heartbeat; an unknown key; a grant revoked; a key granted on two repositories | the registry's repositories, the repository's owners, grants and settings, the board's repository and ready sections, each one JSON answer; `forbidden` on the foreign repository and the administrator's key; the board answers and `granted_capabilities` names the key's grant on that repository, the same grant the heartbeat's answer names; `unauthenticated`; `forbidden` after the revoke; each grant naming the other repository |
 | **§12** | | |
 | S-BTN-180 refs from the policy | a repository whose `refs.default_branch` excludes `runner`; an ordinary `runner` grant; the forge protection printed by `baton repo protect`; then the forge setting edited | the runner's push to the default branch, a tag, `refs/baton/*` or a ref outside `branch_pattern` is refused by the forge; `--print` follows the policy's `refs.*`; the edit raises `baton.unprotected`, breaks `no-runner-lands` and stops trusted runners |
 | S-BTN-181 attestations | types with `human`, `owner`, `service` and `baton` writers; a reading-gated leg (`instance: account-funds`, `where detail.balance_usd gte 50`, `binds: gate`, `missing: block`) with the policy's `readings: {account-funds: {writers: [service:<instrument>], signed: true}}`; a course type with no policy entry; a policy admitting `owner` for a type a trusted leg requires; a course adding a trusted leg that requires a type the policy admits `runner` for; a trusted leg with `missing: allow` | an attestation about work from a credential that may not write one is refused; an approval bound to one head does not satisfy a merge at another (`other-subject`), and the merge at its own head changes the subject so the same approval lands nothing twice; a revoked or lapsed one blocks the leg with its `why`; the funds leg refused `failed-where` below 50, `missing` with no signed reading in force, offered once the instrument reports a signed 60, still refused on a runner's or an unsigned reading of 60, and a reading posted for repository B's runners never moves it; the course type's leg blocked `writer-not-allowed`; the policy change refused; the course refused at its snapshot, the previous version in force; the course refused |
@@ -7202,10 +7329,10 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-183 what merges | under `merge.reviews {count: 2}` and `merge.trusted`, a ticket written by one domain, reviewed by two others that ran none of its code; two reviews from one domain; a grant with a null domain reviewing | it merges at the attested head; a review from a domain that ran the branch's code does not count; the second review from one domain does not count, nor the null domain's; a foreign commit resets the branch and raises `baton.foreign-commit`; an unsigned commit in a reported range merges, no signature being required; a merge of main into the branch does not reset it; a push after review returns it to review; a rename, symlink or submodule into a protected path is refused |
 | S-BTN-184 protected paths | under `paths.control: human` and `paths.tickets: approval`, a PR changing `.baton/`, one changing tickets, one appending own progress | the first ends at `human-merge`; the second merges only with a matching `std:approval@1`; the third merges when every entry matches the grammar and the claim, and is a ticket change otherwise |
 | S-BTN-185 human gates | `approvers.policy: [human]`; an owner's agent key; a `human_only` key; `human_key: any` and then `hardware` | the agent key's approval, policy change or hold lift is refused; the `human_only` key's succeed; a `human_only` key registered without an existing one's signature is refused; the same policy change under `approvers.policy: [owner]` succeeds for the agent key and is refused for an MCP key; `human-gates` broken under `any` with every list human-only, held under `hardware` |
-| S-BTN-186 any surface | one owner, one action, the CLI, the API and an MCP key | each succeeds where `callers` allow it; an MCP key may add a hold and lift the hold it added, never another's |
+| S-BTN-186 any surface | one owner, one action, the CLI, the API, a dashboard session and an MCP key; an administrator's session on an owner action and an owner's session on an administrator's | each succeeds where `callers` allow it; an MCP key may add a hold and lift the hold it added, never another's; the sessions authorize as one principal with their key's role, the owner's refused |
 | S-BTN-188 a sync writes only what changed | twelve tickets placed with next legs and bars; a refresh and a new head that change nothing; a new head changing one ticket's readiness, then a refresh flipping its leg and dropping a bar; a suspension at the station a snapshot already showed, then a refresh posting it unchanged | no station, next-leg or bar row rewritten; that ticket's rows alone rewritten, its unchanged station row kept; the refresh confirms the end without rewriting the row (R-BTN-70, R-BTN-62) |
 | S-BTN-197 the repository policy | a new repository; a new `git` repository, and `protected` applied to one with `human_identity` the hook's pusher identity; `protected` applied with `human_identity` null; the `protected` preset applied, `human_identity` set, by an owner key holding no `human_only` key, then by one with a `human_only` key; `protected-hardware` on a repository whose `human_key` is `any`; then `merge.reviews.count` raised and lowered by an owner key, by an MCP key, and by a `human_only` key under `approvers.policy: [human]`; two owners setting it from one `base_version`; from `cooperative`, an MCP key and then an owner key setting `approvers.roles: [human]`; `apply protected --dry-run` on a repository with a `runner` deliverer and a queued `merge` leg; a re-apply of `protected` after the fact reader's `service:` key is named; an export and an import | the `cooperative` values; the `plain-git` values, and `protected`'s with `inputs.board` `[sync-key]` and no `forge-check` deliverer; `invalid-params` naming `human_identity`; the first apply refused, the second stored without the preset's name, every guarantee but `human-gates` held except `no-runner-lands` and every guarantee including it, which hold once the protection checker reports a match; `protected-hardware` refused until a `human_only` key meeting `hardware` owns the repository, then `human-gates` held; the owner key's changes `forbidden` both ways, the MCP key's refused (a delegated key changes no policy), the human key's accepted and logged with `changed`; the second `conflict`; the MCP key refused, the owner key's accepted with every owner-set role and domain cleared; the dry run names the grant and the leg it would stop and writes nothing; the re-apply keeps the named key and raises no `baton.fact-reader-missing`; the import keeps every version and refuses a broken chain |
-| S-BTN-192 approver lists | under `human_key: hardware`, `approvers.policy: [key:<A>]` with A a `human_only` key; an owner key B, an MCP key, and A; a change by A setting `approvers.policy: [key:<B>]`; then B setting it to `[owner]`; a list naming a revoked key; revoking A while `[key:<A>]` is the only list it satisfies | B and the MCP key `forbidden`, A accepted; A's change accepted, after which A is `forbidden` and B, matching the list in force, accepted; the list naming a revoked key refused; the revocation refused; `human-gates` held while every list is human-only and broken once `approvers.policy` is `[key:<B>]` |
+| S-BTN-192 approver lists | under `human_key: hardware`, `approvers.policy: [key:<A>]` with A a `human_only` key; an owner key B, an MCP key, and A; a change by A setting `approvers.policy: [key:<B>]`; then B's dashboard session lifting a hold, and B setting the list to `[owner]`; a list naming a revoked key; revoking A while `[key:<A>]` is the only list it satisfies | B and the MCP key `forbidden`, A accepted; A's change accepted, after which A is `forbidden` and B, matching the list in force, accepted, its session too; the list naming a revoked key refused; the revocation refused; `human-gates` held while every list is human-only and broken once `approvers.policy` is `[key:<B>]` |
 | S-BTN-193 leg state | a GitHub repository and a `git` repository; on the `git` repository, ticket B-1 on `claude/B-1-x` and ticket B-1-x on `claude/B-1-x-y`: a review leg writing round 1 to `baton-legs/B-1` at `.baton-legs/B-1/review/<nonce>/round.md`; an address leg, an `approves: true` review and an adjudicate leg; entries `CLAUDE.md`, a symlink and `../x` on the leg-state branch; a leg-state branch whose first commit has a parent; a course whose `branch_pattern` matches `baton-legs/*`; a work-branch commit adding `docs/.Baton-Legs/notes.md`; under `attestations` entries admitting no `sync` writer for verdicts (R-BTN-191), the `branch` course's review; the ticket closing; the leg-state branch merged into the default branch by hand, with and without a protection checker, and a sync posting an empty reading | on GitHub the rounds are PR comments and no leg-state branch exists, the claim response saying `leg_state: forge`; on the `git` repository `branch`, by the forge alone; the round push reports no range, raises no foreign commit and leaves the reviewer independent and `H` unmoved; B-1-x's station function and the PR mapping never see `baton-legs/B-1`; the address leg reads round 1 through `git cat-file` as quoted data, the branch never checked out; the review and the adjudication read nothing from it; the three entries skipped and reported; the non-orphan push refused by the reading leg; the course refused; the work branch refused at merge; no verdict commit on the work branch; the leg-state branch deleted; `baton.leg-state-landed` with the count and `B-1`, closed only by the checker's reading where one exists, the empty sync reading leaving it open there |
 | S-BTN-194 one ticket, one PR, one merge | under `cooperative` and under `protected` (plain git's reading being B-154's), each of `bug-report`, `draft-ticket`, `decision`, `spec-to-tickets` and `draft-doc` run from its start leg to its end; the last writing leg routed back after it archived the ticket, then reporting a station other than the one queuing `merged-by-hand`; a PR closed and its ticket withdrawn on the default branch; a record ticket superseded with its PR open; `prepare` finding the question settled; `carry-out` finding the chosen option gone; two tickets' branches taking the same new id; a `fold` | no leg of a record course writes to the default branch under any policy; each ticket's legs on one branch and one PR, the next leg reading the record at the branch's head, the archived file found by its `id`; `merged-by-hand` waiting on `owner` and arriving at the owner's merge as `create-pr`'s does; the ticket done at `merged` and closed in git by its own merge (`status: done`, archived); the routed run's ticket left live on the branch; the withdrawn and the superseded tickets' PRs closed by `close-pr`, nothing landed; `prepare` reaching `carried` with `merged-by-hand` queued; `carry-out` reaching `asked`; the second merge conflicting; the fold recording `duplicate_of:` in its own ticket alone |
 | S-BTN-195 one inbound path | a sync run attesting readiness, an arrival and an output for one ticket; a second run attesting only readiness; a run whose post is refused; under `cooperative`, an `answer:` in the ticket; a runner delivering a `withdraw` entry; an `advance` reaching `reviewed`, and the sync attesting the same arrival by a leg without `arrives: {fact: …}`; a want on a repository with a GitHub dispatch target, then on one with none; a dispatch the forge answers 500 | the ticket's readiness, arrival and output are all the first run's until the second replaces readiness alone, never a mix within one judgement; the refused run's attestations are refused with it; the sync's `std:decision@1` settles the person leg; the deliverer's `std:effect@1` marks the entry `delivered`, and the next run's attestation of the withdrawal confirms it; the advance's `std:arrival@1` by the holder moves the ticket and the sync's for that leg is recorded `arrival-unapplied`; the want is dispatched once by the host shell after commit, with an installation token minted from the App's key, and cleared by the post it causes; with no target nothing is dispatched and the runners answer the want; the failed dispatch retried once, the want standing; the same merged PR attested by two runs moves the ticket once and the second is silent; readiness attested at `reviewed` before a `fix → review` round returned the ticket to `reviewed` is discarded |
@@ -7366,11 +7493,11 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | **§11** | | |
 | G-BTN-55 | Every keyed call is an RFC 9421 SSHSIG in namespace `baton-request` by a registered key, covering `@authority` and body digest, within 5 min, nonce unseen — or the holder's API key | S-BTN-30, -126 |
 | G-BTN-57 | Keys and grants only in SQLite, administrators only in the admin set; one role per key, a never-accepted pending grant holding none — a machine key's grant may sync (R-BTN-102) and post readings for instances listing a granted repository (R-BTN-101), and it never holds the instrument, sync-key or mirror role; owners act only on their repository and never remove the last owner; a dashboard session needs a sign-in confirmed by a key of its role, and an owner's session acts only on its key's repositories, never as an administrator | S-BTN-32, -124 |
-| G-BTN-117 | Commands are `baton <noun> <verb>`, signing as the first role in their actions' `callers` they hold a key for; ambiguous ids name their matches; channel verbs only inside a leg | S-BTN-97 |
+| G-BTN-117 | Commands are `baton <noun> <verb>`, signing as the first role in their actions' `callers` they hold a key for; every command the specification names is in R-BTN-127's tree; help at every level comes from the registry's command table; ambiguous ids name their matches; channel verbs only inside a leg | S-BTN-97 |
 | G-BTN-120 | Every surface is a registry entry under one `authorize`; callers see only their actions; destructive actions need `confirm` everywhere; `check:actions` enforces it | S-BTN-100, -102 |
-| G-BTN-121 | An MCP key reaches only its allowlisted ids on one repository via `POST /v1/mcp`, never administration, machine protocols, credentials or owner changes; refusals answer alike | S-BTN-101 |
+| G-BTN-121 | An MCP key reaches only its listed ids on one repository via `POST /v1/mcp`, each one R-BTN-186 admits to a delegated key, never administration, machine protocols, credentials, owner changes, attestations, routes or adopts; refusals answer alike | S-BTN-101 |
 | G-BTN-122 | An MCP key's ids are fixed at minting; it dies with expiry, 7 idle days, its minter or revocation; refused while `api_keys` is `false` | S-BTN-103 |
-| G-BTN-144 | MCP loosens only what it tightened itself (R-BTN-186); sessions go only to the browser a key holder bound, with that key's role, die with that role, and can be ended; an owner's session reaches only its key's repositories and no administrator action; tokens are single-use by default, ≤ 100 uses and 30 days, and register runners only | S-BTN-124 |
+| G-BTN-144 | MCP loosens only what it tightened itself (R-BTN-186); sessions go only to the browser a key holder bound, authorize as one principal with that key's role, die with that role, and can be ended; an owner's session reaches only its key's repositories and no administrator action; tokens are single-use by default, ≤ 100 uses and 30 days, and register runners only | S-BTN-124 |
 | G-BTN-155 | An API key authenticates only as its holder in one role on administrator, owner, runner and read routes; it never syncs or reports as a probe | S-BTN-126 |
 | **§12** | | |
 | G-BTN-12 | Dashboard writes without a same-origin `Origin`, a JSON body and a session are refused | tests |
@@ -7525,7 +7652,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose that ticket `tier` is not a protected input, on the precondition that no runner above the VM level serves a repository runners below it push; the decision reopens if that precondition fails (2026-10-27; B-127).
 
 - Chose to run checks only on the repository's own branches over a sandbox for forks' code: a leg's logic cannot be both generally useful and safely sandboxed (2026-10-20; R-BTN-114).
-- Chose to answer a `baton.*` condition only through Baton's own authenticated surfaces (`baton owner resolve`, an owner's or administrator's dashboard session, an MCP key allowed `owner.resolve`), a delivery runner reading Baton's own list and sending the resolve link with no handler ticket, outbox entry or withdrawal (2026-11-01, the owner, "No ticket file"), over an owner-signed commit the agent-changeable sync would have to verify; and Baton's own traversal record over the posted path for every count; so that agents rewriting git can neither clear a hold nor buy runs (2026-10-20, revised the same day; R-BTN-163, R-BTN-63).
+- Chose to answer a `baton.*` condition only through Baton's own authenticated surfaces (`baton ticket resolve`, an owner's or administrator's dashboard session; never a delegated key), a delivery runner reading Baton's own list and sending the resolve link with no handler ticket, outbox entry or withdrawal (2026-11-01, the owner, "No ticket file"), over an owner-signed commit the agent-changeable sync would have to verify; and Baton's own traversal record over the posted path for every count; so that agents rewriting git can neither clear a hold nor buy runs (2026-10-20, revised the same day; R-BTN-163, R-BTN-63).
 - Chose no core default timers per tier: timers are the course's, and `baton.stalled` already flags a leg nobody takes (2026-10-20; R-BTN-167).
 - Chose to keep dependencies within one repository (2026-10-20; R-BTN-120).
 - Chose to leave reviewer-independence seats and tags as cooperative checks, without Baton recording seats or verifying a session's model, unless misuse is seen (2026-10-20; R-BTN-60, R-BTN-66).
@@ -7628,14 +7755,14 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose `attached` and `session` modes for cloud sessions over giving a child session a scoped claim token (2026-10-17; R-BTN-107).
 - Chose a runner that refreshes a filling session under the same claim over losing the lease (2026-10-17; R-BTN-123).
 - Chose stopping a leg through the authenticated release path over control from a viewer's stream (2026-10-17; R-BTN-119).
-- Chose a noun-verb CLI renamed outright over aliases (2026-10-17; R-BTN-127).
+- Chose a noun-verb CLI renamed outright over aliases (2026-10-17; R-BTN-127); and one tree holding every command the specification names, with help generated from the registry's command table, over commands defined where each rule happens to name them (2026-11-02, B-166 part 3, B-157).
 - Chose writing each leg run's output as create-only chunks to an owners' bucket (`s3:`, `gs:`) or local directory, read there with the reader's own credentials and Baton keeping only the directory, over a git transcript repository, Baton-presigned URLs or Baton-minted credentials, vendor-specific append objects, and relaying output through Baton (2026-10-21, owner; R-BTN-128).
-- Chose one action registry from which REST, the CLI, the dashboard and a remote MCP endpoint derive, MCP reaching reads, `ticket.hold` (add only) and `leg.stop` through a narrowed, expiring owner grant (2026-10-17, 2026-10-18; R-BTN-129, R-BTN-130, R-BTN-154).
+- Chose one action registry from which REST, the CLI, the dashboard and a remote MCP endpoint derive, MCP reaching reads, `ticket.hold` (add only) and `leg.stop` through a narrowed, expiring owner grant (2026-10-17, 2026-10-18; R-BTN-129, R-BTN-130, R-BTN-154); then, the closed list retired, an MCP key as a delegated key reaching what R-BTN-186 admits, marked per action in the registry (2026-11-01, the owner, "Tighten, and undo own"; 2026-11-02, B-166 part 3).
 - Chose a leg that waits on an effect git or the forge shows over waiting on "sent" (2026-10-17; R-BTN-116).
 - Chose check courses whose verdict is a command's exit status, posted under a dedicated check App by a runner holding its key, over a work key reporting its own check; and the forge's own check runs from the protected default branch as enough for `merge.checks: required`, a `std:checks@1` from a named check-runner being optional (2026-10-17, 2026-10-18; 2026-11-01, the owner, "Forge checks suffice"; R-BTN-114, R-BTN-153, R-BTN-183).
 - Chose either an SSH key (signatures) or an API key (a bearer) for every administrator, owner and runner, the holder making the trade, over one kind per role (2026-10-19; R-BTN-13, R-BTN-159).
 - Chose administrator keys anchored in the deployment's secret and owner and runner keys in SQLite behind a signed API, over keys in git or Cloudflare Access as identity (2026-10-14; R-BTN-57).
-- Chose owner dashboard sessions with a role of their own (`owner-session`), scoped to the repositories the minting owner key still owns and dying with that role, sign-in codes bound per role and confirmations by the minting key, over an administrator-only dashboard or a session acting as an administrator (owner decision, 2026-10-20; R-BTN-155, R-BTN-129).
+- Chose owner dashboard sessions with a role of their own (`owner-session`), scoped to the repositories the minting owner key still owns and dying with that role, sign-in codes bound per role and confirmations by the minting key, over an administrator-only dashboard or a session acting as an administrator (owner decision, 2026-10-20; R-BTN-155, R-BTN-129); then one `session` principal carrying its key's role in place of `dashboard` and `owner-session`, the role check living in `authorize` where it already was (2026-11-02, B-166 part 3, the review's default under B-165).
 - Chose to keep a ticket's holds, cancel, attempts and backoff when it leaves the board and restore them if its id returns, accepting that a ticket re-filed under a new id carries no hold, which owners see as the old id's closed row with its hold (owner decision, 2026-10-20; R-BTN-12).
 - Chose capabilities on each repository's grant over capabilities on the key (2026-10-14; R-BTN-58).
 - Chose one machine key that may work, sync and report readings, a key granted on several repositories syncing only where each grant opts in, over one role per machine key (2026-10-16, 2026-10-18; R-BTN-102, R-BTN-146).

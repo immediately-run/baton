@@ -80,17 +80,17 @@ standard OAuth consent on Baton's dashboard (Decisions).
     of this spec's routes (`404`), as it serves no dashboard (R-BTN-158).
   - **The challenge.** `POST /v1/mcp` with no bearer, or one that is unknown, expired, revoked
     or refused, answers `401` with
-    `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/v1/mcp", scope="read ticket.hold leg.stop"`,
-    adding `error="invalid_token"` when a bearer was sent. The scope names every action MCP can
-    reach, because clients request exactly the challenge's scope and offer no choice; the owner
+    `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/v1/mcp", scope="read …"`,
+    adding `error="invalid_token"` when a bearer was sent. The scope names every action a
+    delegated key may hold (`read` and each id R-BTN-186 admits, §7), because clients request exactly the challenge's scope and offer no choice; the owner
     narrows it at consent (§5). This replaces R-BTN-130's bare `Bearer` challenge, for `bmcp_`
     keys too. No `200` ever carries a challenge.
   - **Protected resource metadata** (RFC 9728), at
     `/.well-known/oauth-protected-resource/v1/mcp` only (the root document is `404`: its
     `resource` would have to be the bare origin, RFC 9728 §3.3):
     `{resource: "<origin>/v1/mcp", authorization_servers: ["<origin>"], scopes_supported:
-    ["read", "ticket.hold", "leg.stop"], bearer_methods_supported: ["header"], resource_name:
-    "Baton"}`.
+    ["read", …], bearer_methods_supported: ["header"], resource_name: "Baton"}`, the scopes being
+    `read` and every action id R-BTN-186 admits to a delegated key (§7).
   - **Authorization server metadata** (RFC 8414), at `/.well-known/oauth-authorization-server`:
     `issuer`, `authorization_endpoint` (`<origin>/oauth/authorize`), `token_endpoint`
     (`<origin>/v1/oauth/token`), `registration_endpoint` (`<origin>/v1/oauth/register`),
@@ -99,8 +99,8 @@ standard OAuth consent on Baton's dashboard (Decisions).
     `code_challenge_methods_supported: ["S256"]`, `token_endpoint_auth_methods_supported:
     ["none"]`, `revocation_endpoint_auth_methods_supported: ["none"]`,
     `client_id_metadata_document_supported: true`,
-    `authorization_response_iss_parameter_supported: true`, `scopes_supported: ["read",
-    "ticket.hold", "leg.stop"]`. It lists no `offline_access`: every grant gets a refresh token.
+    `authorization_response_iss_parameter_supported: true`, `scopes_supported` as above. It lists
+    no `offline_access`: every grant gets a refresh token.
   - `/.well-known/openid-configuration` is `404`: Baton issues no ID tokens. Both documents carry
     `Cache-Control: public, max-age=300` and are built from configuration, so they are equal on
     both hosts and change only with a deploy or the origin.
@@ -203,36 +203,43 @@ standard OAuth consent on Baton's dashboard (Decisions).
     the owner types that page's owner sign-in code into `baton owner open`, which binds it with
     the owner key through `POST /v1/owner/login-links` and works from any machine with the key,
     the phone's code typed at a desk included. The session that results is an owner's
-    (`owner-session`, `BATON_SPEC` R-BTN-129): it holds the repositories its key owns, and dies
+    (the principal `session` with the owner role, `BATON_SPEC` R-BTN-129, R-BTN-155): it holds the repositories its key owns, and dies
     with that key's ownership. Without a session the page
     shows nothing about the client, fetches no document and writes no row.
   - **The request.** With an owner's session, `POST /v1/ui/oauth/requests {query}` runs §4's
     checks, writes an `oauth_requests` row bound to that session and living 10 minutes, and
     answers `{request, client, redirect_uri, requested, repositories, expires_at}`: `request` is
     the handle `bor_<id>_<secret>`, kept only in the page's memory; `repositories` are the
-    session's repositories its key still owns (R-BTN-155), on which `api_keys` is not `false`. A check failing after §4's
+    session's repositories its key still owns (R-BTN-155), on which `api_keys` is not `false` and
+    the session is an `approvers.members` approver (below). A check failing after §4's
     step 2 answers `{error, redirect}`, which the page follows.
   - **What the page shows** (all through `textContent`, §6): the client as §3 names it, its
     self-declared name, the full redirect URI, and for a loopback redirect "the code goes to
     whichever program on this computer listens on port <n>"; a repository picker (preselected
-    when the session owns one); the actions, with `read` ticked, `ticket.hold` unticked, and
-    `leg.stop` unticked under its own line "destructive: stops running legs", each offered only
-    if requested; the lifetime (default 30 days, at most 90); and "Approve only a connection you
+    when the session owns one, omitting any whose `approvers.members` is human-only, below); the
+    actions, with `read` ticked and each requested write unticked, the destructive ones
+    (`leg.stop`, `ticket.cancel`, `BATON_SPEC` §12.2) under their own line "destructive", each
+    offered only if requested; the lifetime (default 30 days, at most 90); and "Approve only a connection you
     started yourself, in this browser, just now: approving lets that client act on this
     repository as you."
   - **Approve.** `POST /v1/ui/oauth/approve {request, repository, actions, ttl?, name?}`
     (`owner.mcp-key.approve`):
-    - refused unless the session is the one the request is bound to, owns `repository`, and the
-      actions are within the request's scope, R-BTN-130's allowlist and the owner's own actions;
+    - refused unless the session is the one the request is bound to, owns `repository`, is
+      itself an approver on the repository's `approvers.members` as `BATON_SPEC` R-BTN-188 reads
+      a session — it matches an `owner` entry, or a `key:` entry naming its minting key when that
+      key is not `human_only`, and never `human` (R-BTN-185, R-BTN-130), so a repository whose
+      list it does not satisfy is never offered and an approval naming it is `forbidden`; under a
+      human-only list the owners mint a `bmcp_` key with a `human_only` key instead — and the
+      actions are within the request's scope, the actions R-BTN-186 admits to a delegated key (the registry's `delegated` marks, R-BTN-129) and the owner's own actions;
     - records the approval on the request row and issues the authorization code (§8); it mints
       no grant: the grant is created at the code's first redemption (§7), so an approval that is
       never redeemed leaves nothing behind;
     - answers `{redirect, repository, actions}`; the page shows "approved for <repository>:
       <actions>" and navigates to `redirect`.
-    - An approval naming `leg.stop` is R-BTN-155's confirmed action: it answers `202
+    - An approval naming a destructive action (`leg.stop`, `ticket.cancel`) is R-BTN-155's confirmed action: it answers `202
       {confirm_code}`, the page shows the code, the owner confirms it with `baton owner confirm`
       and the key that minted the session (`POST /v1/owner/confirm`), and the page polls `POST /v1/ui/oauth/status {request}` every 2 seconds for the redirect.
-      `read` and `ticket.hold` need no confirmation code (Decisions).
+      An approval naming no destructive action needs no confirmation code (Decisions).
   - **Deny.** `POST /v1/ui/oauth/approve {request, deny: true}` (`owner.mcp-key.deny`) ends the
     request and answers `{redirect}` carrying `access_denied`. Closing the page is a silent
     denial: the request expires.
@@ -240,10 +247,11 @@ standard OAuth consent on Baton's dashboard (Decisions).
     repository, actions}` (again on every call until the code is redeemed or expires, so a lost
     answer is recoverable), `{expired: true}` or `{gone: true}` (denied, redeemed, or unknown).
   - **Who may approve.** `owner.oauth.request`, `owner.oauth.status`, `owner.mcp-key.approve` and
-    `owner.mcp-key.deny` admit only an owner's dashboard session (principal `owner-session`,
+    `owner.mcp-key.deny` admit only an owner's dashboard session (the principal `session` with the owner role,
     R-BTN-129, R-BTN-155), on its own repositories: no key, so no CLI or agent holding an owner key approves without a browser;
     and no administrator's session, which has no owner key for a grant to die with. Every grant
-    still has a minting owner key: the one that minted the approving session.
+    still has a minting owner key: the one that minted the approving session, an approver on
+    `approvers.members` as R-BTN-130 requires of every minter.
   - **What consent cannot tell.** An owner who approves a link someone else sent them connects
     that someone's client; Baton cannot see whose Claude account began a request. The page's
     sentence above, `client_addr` on the grant (§7) and the owners' listing are the defence, as
@@ -289,27 +297,29 @@ standard OAuth consent on Baton's dashboard (Decisions).
   - The first successful redemption of an approved code writes one `mcp_keys` row with an
     immutable `id`, no `bmcp_` bearer (`key_hash` NULL), and its `client_id`, `client_addr`, the
     approving session and the approval time. Everything R-BTN-130 and R-BTN-154 say of an MCP
-    key holds for it:
+    key — a delegated key within R-BTN-186 — holds for it:
     - one repository, the one the owner chose;
     - action ids resolved at approval from the actions the owner ticked, by default `read` only;
-      never wider than the requested scope, R-BTN-130's allowlist or the owner's own actions;
-      `ticket.hold` and `leg.stop` only when the owner ticked them, `leg.stop` confirmed;
+      never wider than the requested scope, what R-BTN-186 admits to a delegated key or the owner's own actions;
+      each write only when the owner ticked it, a destructive one confirmed;
     - authorized as its minting owner key (the approving session's) on that repository, narrowed
-      to its ids, only on `POST /v1/mcp`; a hold only adds (`hold_reason: mcp:<name>`);
+      to its ids, only on `POST /v1/mcp`; a hold it sets is `hold_reason: mcp:<name>` with `set_by: mcp:<id>`, and it lifts only that one (R-BTN-186, R-BTN-130);
     - at most 90 days (default 30), ended by 7 days without an MCP call, its minter's removal
       or revocation, or `owner.mcp-key.revoke`; refused while the repository has
       `api_keys: false` (§9).
-  - **Scopes are R-BTN-130's `--actions` spelled with spaces**: `read` (the allowlisted reads
-    existing at approval), `ticket.hold`, `leg.stop`, or any allowlisted read id. The token
+  - **Scopes are R-BTN-130's `--actions` spelled with spaces**: `read` (the reads a delegated key
+    may hold, existing at approval), or any action id R-BTN-186 admits to a delegated key
+    (`ticket.hold`, `ticket.unhold`, `leg.stop`, `ticket.cancel`, `owner.bar.add`, `owner.bar.lift`, a read id). The token
     response's `scope` lists the approved tokens.
   - **No step-up.** A tool the grant lacks is not listed, and calling it is `forbidden`
     (R-BTN-130), never a `403 insufficient_scope`: Baton offers no existence oracle. A client
     needing more re-authorizes into a new grant.
   - **Names.** The name defaults to the client's host (`claude.ai`; for a `bdc_` client the
     redirect URI's host, `localhost` for loopback), then `claude.ai-2`, …, at most 40
-    characters, unique among the repository's live grants and approved, unredeemed requests.
-    Tokens and requests refer to the grant by `id`, never by name, so a later grant of the same
-    name never inherits an older grant's tokens. Owners list grants with their keys: client
+    characters, unique among the repository's live grants, `bmcp_` keys and approved, unredeemed
+    requests (R-BTN-130). Tokens, requests and the `own` test on holds and bars refer to the
+    grant by `id`, never by name, so a later grant of the same name inherits neither an older
+    grant's tokens nor its holds. Owners list grants with their keys: client
     host, minter, `client_addr` and approval time.
 
 ## 8. Tokens
@@ -369,7 +379,7 @@ standard OAuth consent on Baton's dashboard (Decisions).
     of that client revokes its whole grant. It always answers `200`.
   - **Records.** Approval, denial, a grant's creation, every end and every reuse write a
     repository `events` row of kind `oauth` (`detail.act`: `approved`, `denied`, `granted`,
-    `revoked`, `replay`, `code-failed`), actor the approving owner or `mcp:<name>`.
+    `revoked`, `replay`, `code-failed`), actor the approving owner or `mcp:<id>` (R-BTN-130).
   - **`baton.oauth-replay`** (notify) sits on the repository with `detail` `{grant_id, client_id,
     kind: "code" | "refresh", client_addr}`; its cause ends when the revoked grant's row is
     deleted, or an owner resolves it.
@@ -431,8 +441,9 @@ codes, and the page shows them.
 | `/v1/ui/oauth/*` | no session; an administrator's session, a foreign `Origin` or `Sec-Fetch-Site`, or a body that is not JSON | `unauthenticated`; `forbidden` |
 | | an unknown, expired, settled or other session's request; a repository the session does not own | `not-found` |
 | | `api_keys: false` on the repository | `forbidden` |
-| | actions beyond the scope, the allowlist or the owner's actions; `ttl` over 90 | `invalid-params` |
-| | a name in use; a 51st grant; `leg.stop` without its code | `conflict`; `quota`; `202 {confirm_code}` |
+| | actions beyond the scope, what R-BTN-186 admits or the owner's actions; `ttl` over 90 | `invalid-params` |
+| | the session no approver on the repository's `approvers.members` (a human-only list among them) | `forbidden` |
+| | a name in use; a 51st grant; a destructive id without its code | `conflict`; `quota`; `202 {confirm_code}` |
 | `POST /v1/mcp` | no, unknown, expired, revoked or suspended bearer | `401` with §2's challenge |
 | | a foreign `Origin`; a tool the grant lacks | `403`; tool error `forbidden` (R-BTN-130) |
 
@@ -459,8 +470,8 @@ client's `created_at` + 24 hours, an ended grant's `ended_at` + 90 days. **`even
 For `BATON_SPEC` §14. The consent page is a static dashboard asset, not an action (R-BTN-129).
 Every other route is a registry entry: the metadata, token, register and revoke entries list
 `public`; `owner.oauth.request`, `owner.oauth.status`, `owner.mcp-key.approve` and
-`owner.mcp-key.deny` list only `owner-session` (an owner's dashboard session, R-BTN-129), scope
-`repository` (§5), and none is ever `mcp: true`.
+`owner.mcp-key.deny` list only `session` for the owner role (an owner's dashboard session, R-BTN-129), scope
+`repository` (§5), and each carries `delegated: false`.
 
 | Route | Caller | Body or query | Response | Rules |
 |---|---|---|---|---|
@@ -468,7 +479,7 @@ Every other route is a registry entry: the metadata, token, register and revoke 
 | `GET /.well-known/oauth-authorization-server` | none | — | the authorization server metadata | R-BTN-172 |
 | `GET /oauth/authorize` | none (static asset) | the authorization request | the consent page | R-BTN-172 |
 | `POST /v1/ui/oauth/requests` | an owner's session | `{query}` (the raw query string) | `{request, client, redirect_uri, requested, repositories, expires_at}`; or `{error, redirect?}` | R-BTN-172 |
-| `POST /v1/ui/oauth/approve` | an owner's session | `{request, repository, actions, ttl?, name?}`; `{request, deny: true}` | `{redirect, repository, actions}`; `202 {confirm_code}` with `leg.stop`; `{redirect}` on deny | R-BTN-172, R-BTN-155 |
+| `POST /v1/ui/oauth/approve` | an owner's session that is an `approvers.members` approver (§5) | `{request, repository, actions, ttl?, name?}`; `{request, deny: true}` | `{redirect, repository, actions}`; `202 {confirm_code}` with a destructive id; `{redirect}` on deny | R-BTN-172, R-BTN-155 |
 | `POST /v1/ui/oauth/status` | an owner's session | `{request}` | `{pending: true}`, `{redirect, repository, actions}`, `{expired: true}` or `{gone: true}` | R-BTN-172 |
 | `POST /v1/oauth/token` | a public client: PKCE, or its refresh token | form: §8's | the token response | R-BTN-172 |
 | `POST /v1/oauth/register` | none | RFC 7591 JSON | `201` with `client_id` | R-BTN-172 |
@@ -478,8 +489,8 @@ Every other route is a registry entry: the metadata, token, register and revoke 
 
 **Admission and Access** (`BATON_SPEC` §2.3, R-BTN-16): `/oauth/authorize` is a static page
 needing no session, as `/login` is; `/.well-known/oauth-*` and `/v1/oauth/*` are unauthenticated
-routes under the per-IP rule; `/v1/ui/oauth/*` needs an owner's dashboard session, as an
-`owner-session` route of `/v1/ui/*`. Codes, verifiers and tokens are checked inside the object. Where Cloudflare Access fronts
+routes under the per-IP rule; `/v1/ui/oauth/*` needs an owner's dashboard session, as a
+`session` route of `/v1/ui/*` admitting the owner role. Codes, verifiers and tokens are checked inside the object. Where Cloudflare Access fronts
 the dashboard it is bypassed on `/v1/mcp`, `/v1/oauth/*` and `/.well-known/*`, which hosted
 Claude calls without an Access cookie; `/oauth/authorize` and `/v1/ui/oauth/*` stay behind it,
 since the owner's browser passes it.
@@ -491,14 +502,14 @@ test file each (`S-BTN-137.<part>.test.ts`).
 
 | Scenario | Script | Expected |
 |---|---|---|
-| S-BTN-137 MCP clients through OAuth: (1) connecting Claude | a tokenless `POST /v1/mcp`; discovery; Claude Code's document with `http://localhost:3118/callback`, and hosted Claude's callback; the page opened by a cross-site navigation in a browser with an owner's session; the owner approves `read ticket.hold` from a request for `read ticket.hold leg.stop`; the exchange; `tools/list`; a hold; a refresh; the redirect fetched again by `status` after a lost answer | `401` with the three-scope challenge; the documents as §2, the root resource document `404`; the page's calls carry the cookie and `Sec-Fetch-Site: same-origin`; `read` alone ticked by default; redirect with `code`, `state`, `iss`; no `mcp_keys` row until the exchange; tokens; only the approved tools; `held` with `mcp:<name>`; a rotated refresh token; the same redirect |
-| (2) refused authorizations | no session; an administrator's session; another session's request handle; approve with a foreign `Origin`, a cross-site `Sec-Fetch-Site`, a form body; a framed page; `plain`, absent and 44-character challenges; an unregistered, non-allowlisted, fragment and non-ASCII redirect; a repeated `client_id`; a foreign `resource`; an unknown scope; a wrong verifier three times, then the right one; a code redeemed and presented again with a wrong and then the right verifier; a code after 60 s; a denial; an expired request; `api_keys: false`; widened actions; `leg.stop` before and after its confirmation code; a 51st grant | each as §11; no session, no request row and no document fetch; no redirect before the client and redirect validate; the code dead after three failures and no grant; the grant revoked only by the right verifier; `202 {confirm_code}`, then the redirect by `status` |
+| S-BTN-137 MCP clients through OAuth: (1) connecting Claude | a tokenless `POST /v1/mcp`; discovery; Claude Code's document with `http://localhost:3118/callback`, and hosted Claude's callback; the page opened by a cross-site navigation in a browser with an owner's session; the owner approves `read ticket.hold` from a request for `read ticket.hold leg.stop`; the exchange; `tools/list`; a hold; a refresh; the redirect fetched again by `status` after a lost answer | `401` with the challenge naming `read` and every id R-BTN-186 admits; the documents as §2, the root resource document `404`; the page's calls carry the cookie and `Sec-Fetch-Site: same-origin`; `read` alone ticked by default; redirect with `code`, `state`, `iss`; no `mcp_keys` row until the exchange; tokens; only the approved tools; `held` with `mcp:<name>`; a rotated refresh token; the same redirect |
+| (2) refused authorizations | no session; an administrator's session; another session's request handle; approve with a foreign `Origin`, a cross-site `Sec-Fetch-Site`, a form body; a framed page; `plain`, absent and 44-character challenges; an unregistered, non-allowlisted, fragment and non-ASCII redirect; a repeated `client_id`; a foreign `resource`; an unknown scope; a wrong verifier three times, then the right one; a code redeemed and presented again with a wrong and then the right verifier; a code after 60 s; a denial; an expired request; `api_keys: false`; widened actions; `leg.stop` and `ticket.cancel` before and after the confirmation code; an approval on a repository whose `approvers.members` the session does not satisfy; a 51st grant | each as §11, the unsatisfied list `forbidden`; no session, no request row and no document fetch; no redirect before the client and redirect validate; the code dead after three failures and no grant; the grant revoked only by the right verifier; `202 {confirm_code}`, then the redirect by `status` |
 | (3) a grant's life | a refresh replayed within 60 s, then the sibling used, then the killed one presented; two concurrent refreshes, one result kept; a replay after 60 s; an access token past an hour; 8 idle days; the minter revoked; `api_keys: false`; `owner.mcp-key.revoke`; RFC 7009 revoke; a new grant taking an ended grant's name; a token on a REST route, at another tenant, over non-loopback `http` | a sibling; the other killed; the grant revoked, `baton.oauth-replay`, an `oauth` `replay` event; the connection kept; revoked; `401`; dead; dead; `401`, then `invalid_grant`; dead at the next call; dead; the old tokens stay dead; `unauthenticated`; `401`; revoked and `baton.bearer-over-http` |
 | (4) registration and abuse | registration with `client_secret_basic`, 11 redirect URIs, a 21st in an hour from one IPv6 `/64`, at 500 clients with one holding an open request; an unused client after 24 h; documents over 5 KB, redirected, on a private address, on the deployment's own host, with a mismatched `client_id`, with a secret method, with one non-conforming redirect URI, with a `client_name` carrying U+202E; a document re-fetch failing and over budget; a sixth open request in one session | `invalid_client_metadata`; `invalid_redirect_uri`; `429`; the oldest client without grant or request dropped; deleted; each refused on the page, nothing cached, no linked URL fetched; that URI ignored; the name dropped; the stale copy served; the session's oldest request dropped |
 
 | Gate | Invariant | Proved by |
 |---|---|---|
-| G-BTN-157 | (1) An OAuth token grants exactly what an MCP key of the approving owner key with the approved ids grants — one repository, ids within the request's scope, R-BTN-130's allowlist and the owner's actions, holds only added — and is accepted only on `POST /v1/mcp` at its origin. (2) An authorization code issues only through `POST /v1/ui/oauth/approve` from the owner's dashboard session that opened the request, carrying that request's handle, same-origin; it goes only to a redirect URI the client registered that passes §4, with an `S256` challenge; `leg.stop` needs R-BTN-155's confirmation code; no key, administrator session or cross-origin request approves, and the page cannot be framed. (3) Codes, request handles and tokens are stored only as hashes; a code is consumed only by a successful redemption within 60 s; a refresh family has one live generation, bar the 60-second siblings, and any other reuse ends the grant; tokens name their grant by its immutable `id`, and ending it ends every token. (4) Baton fetches only an `https` client document at a globally reachable address outside the deployment, without redirects, at most 5 KB, and nothing it links; it never issues or accepts a client secret; registrations stay within §10's caps | S-BTN-137 |
+| G-BTN-157 | (1) An OAuth token grants exactly what an MCP key of the approving owner key with the approved ids grants — one repository, ids within the request's scope, what R-BTN-186 admits to a delegated key and the owner's actions, loosening only a hold or bar it set itself (R-BTN-186) — and is accepted only on `POST /v1/mcp` at its origin. (2) An authorization code issues only through `POST /v1/ui/oauth/approve` from the owner's dashboard session that opened the request, itself an approver on the repository's `approvers.members` (never under a human-only list), carrying that request's handle, same-origin; it goes only to a redirect URI the client registered that passes §4, with an `S256` challenge; a destructive id needs R-BTN-155's confirmation code; no key, administrator session or cross-origin request approves, and the page cannot be framed. (3) Codes, request handles and tokens are stored only as hashes; a code is consumed only by a successful redemption within 60 s; a refresh family has one live generation, bar the 60-second siblings, and any other reuse ends the grant; tokens name their grant by its immutable `id`, and ending it ends every token. (4) Baton fetches only an `https` client document at a globally reachable address outside the deployment, without redirects, at most 5 KB, and nothing it links; it never issues or accepts a client secret; registrations stay within §10's caps | S-BTN-137 |
 
 ## Decisions
 
@@ -516,7 +527,8 @@ test file each (`S-BTN-137.<part>.test.ts`).
   cookie over relaxing it to `Lax` or adding a consent cookie: the cross-site navigation carries
   no authority, and R-BTN-16's two cookies stay the only ones (2026-10-20; R-BTN-172 §6).
 - Chose approval of `read` and `ticket.hold` without R-BTN-155's confirmation code, and
-  `leg.stop` only with it: a session already reads and holds without confirmation, an owner on a
+  `leg.stop` only with it (since 2026-11-02, every destructive id — `ticket.cancel` with it —
+  and the approving session's key an `approvers.members` approver; B-166 part 3): a session already reads and holds without confirmation, an owner on a
   phone can then connect Claude, and the grant's longer life is bounded (90 days, 7 idle days),
   listed with `client_addr` and revocable. The cost is that a stolen session can mint a read and
   hold grant that outlives it, the exposure R-BTN-155 already accepts for an API-key owner
@@ -531,7 +543,9 @@ test file each (`S-BTN-137.<part>.test.ts`).
 - Chose a challenge naming all three scopes and consent defaulting to `read`, over a `read`
   challenge, which no Claude client widens, and over granting what the client asks: the owner,
   not the client, adds `ticket.hold` and `leg.stop`; no step-up challenge, so no `403` reveals a
-  tool (2026-10-20; R-BTN-172 §2, §7).
+  tool (2026-10-20; R-BTN-172 §2, §7). Since 2026-11-02 the challenge names `read` and every id
+  R-BTN-186 admits to a delegated key, and the owner adds each write the client asked for
+  (B-166 part 3).
 - Chose opaque access tokens looked up on each call over JWTs: Baton is its own resource server,
   and revocation is immediate (2026-10-20; R-BTN-172 §8).
 - Chose refresh families with 60-second siblings over strict single use, which a timed-out

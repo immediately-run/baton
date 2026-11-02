@@ -3,7 +3,7 @@ title: "B-76 — Owners sign in to the dashboard"
 id: B-76
 project: baton
 status: available
-updated: 2026-10-21
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -93,3 +93,5 @@ confirmation by the minting key, session revocation)_
 _(2026-10-20: extended for the adversarial review's fixes — `admin.key.revoke` refuses an administrator's key, and `baton admin keys set` and a host's load refuse an administrator line holding another role, adv-4 M1 and m4.)_
 
 _(2026-10-21: R-BTN-118 retired — leg output is written to the owners' log location and followed there by `baton leg log -f`, never relayed through Baton (R-BTN-128). Owner sessions watch no legs: item 5, S-BTN-70 and the dependency on B-9 are gone.)_
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): an owner's session authorizes as the one principal `session` with the owner role, not `owner-session`; the role check lives in `authorize` (R-BTN-129, R-BTN-155). Nothing else of this ticket changes.)_

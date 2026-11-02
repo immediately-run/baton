@@ -3,7 +3,7 @@ title: "B-73 — OAuth 2.1 for MCP clients: Baton issues owner-approved MCP keys
 id: B-73
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -169,3 +169,9 @@ _(filed 2026-10-20 with `spec/BATON_MCP_OAUTH_SPEC.md`; revised the same day aft
 adversarial review moved consent onto the dashboard, adding B-76)_
 
 _(2026-10-31: minting MCP keys is an `approvers.members` action (R-BTN-188's first row; B-145 item 12 builds the hook): an `owner-session` mints one only where the list admits `owner`; under a human-only list it takes a `human_only` key. An MCP key is never itself an approver.)_
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): a grant is a delegated key under R-BTN-186: scopes are `read` or any action id R-BTN-186 admits, not R-BTN-130's closed list; the consent page offers each requested write unticked; `owner-session` is the principal `session` with the owner role (R-BTN-129, R-BTN-155). The OAuth spec's §2, §5, §7, §11 and §13 are amended with it.)_
+
+_(2026-11-02, part 3's review round one: the consent route admits only a session whose minting key is an approver on the repository's `approvers.members` (R-BTN-130, R-BTN-188); a repository whose list is human-only is omitted from the picker and refused `forbidden`, its owners minting a `bmcp_` key with a `human_only` key; the confirmation code follows §12.2's destructive set (`leg.stop`, `ticket.cancel`), not the name `leg.stop`; G-BTN-157 guards "loosening only a hold or bar it set itself".)_
+
+_(2026-11-02, part 3's review rounds two and three: the consent test is on the session itself, as R-BTN-188 reads one — an `owner` entry, or a `key:` entry naming its minting key when that key is not `human_only`, never `human`; a `human_only` key's session is `owner` (R-BTN-185). An approval naming no destructive action, a request, its status and a denial need no confirmation code (R-BTN-155). `mcp_keys` is keyed by its immutable `id`, folded in from this spec's §12 (§13.2).)_

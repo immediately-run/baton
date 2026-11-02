@@ -3,7 +3,7 @@ title: "B-23 — Baton CLI command tree and leg logs: baton <noun> <verb>, the r
 id: B-23
 project: baton
 status: available
-updated: 2026-10-21
+updated: 2026-11-02
 repos:
   - baton
   - docs
@@ -92,3 +92,5 @@ _(2026-10-20: references moved to the current-state spec, PR #71.)_
 _(2026-10-20: extended for the adversarial review's fixes — a command signs as the first role in its actions' `callers` the user holds a key for (m12), and API keys reach `GET /v1/stream` (m13).)_
 
 _(2026-10-21: R-BTN-118 retired — leg output is written to the owners' log location and followed there by `baton leg log -f`, never relayed through Baton (R-BTN-128). Items 2–4 re-scoped from the git archive and `GET /v1/stream` to the owners' log location.)_
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): R-BTN-127's tree now holds every command the spec names, under one grammar, with help generated from the registry's command table (R-BTN-129); a second set of renames joins the first twelve (the history's Migrations). B-157's code item builds it; this ticket's leg-log half is unchanged.)_

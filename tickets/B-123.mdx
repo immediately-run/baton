@@ -3,7 +3,7 @@ title: "B-123 — A message of the day per repository: owner-set, expiring, serv
 id: B-123
 project: baton
 status: available
-updated: 2026-10-27
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -98,3 +98,5 @@ agent chooses for itself, so a leg whose `agent_command` pins the model keeps it
 - [ ] S-BTN-173 passes on both hosts; `npm test` and `npm run typecheck` green
 - [ ] `baton owner motd set fieldhouse --until … --text …` reaches a running leg's
       `BATON_MOTD`
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton board` is `baton repo board`; `owner-session` is the principal `session` with the owner role; R-BTN-130's closed list is gone, MCP deriving from R-BTN-186's `delegated` marks (R-BTN-129); `baton owner motd set | show | clear` joins R-BTN-127's tree when this ticket's spec PR lands.)_
