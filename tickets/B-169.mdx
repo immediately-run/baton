@@ -1,5 +1,5 @@
 ---
-title: "B-169 — Build the security review's spec corrections: bearer masking, the checks map's validation and loosening, notification body caps, no-store, the pending cookie, the request's PR fallback"
+title: "B-169 — Build the security review's spec corrections: bearer masking, the checks map's validation and loosening, notification body caps, no-store, the pending cookie"
 id: B-169
 project: baton
 status: available
@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1171
 tier: routine
-description: "Build what PR #165 corrected in the spec from the 2026-11-02 security review: R-BTN-144 class 5 masks every bearer prefix (bps_, bds_, bmo_, bmr_, bor_ added), R-BTN-114's conclusions map validated and every checks change a loosening, R-BTN-73's 25 MB body cap on both notification routes, R-BTN-16's Cache-Control: no-store, the __Host-baton_pending cookie name, and R-BTN-131's PR fallback when the forge refuses a request's push. Requires: none."
+description: "Build what PR #165 corrected in the spec from the 2026-11-02 security review: R-BTN-144 class 5 masks every bearer prefix (bps_, bds_, bmo_, bmr_, bor_ added), R-BTN-114's conclusions map validated and a change toward success a loosening, R-BTN-153's timeout falling back to failure, R-BTN-73's 25 MiB body cap on both notification routes, R-BTN-16's Cache-Control: no-store, the __Host-baton_pending cookie name, and R-BTN-191's supersession across all three posters. Requires: none."
 topics:
   - baton
 owns: {}
@@ -20,9 +20,10 @@ depends_on: []
 
 **Spec:** `spec/BATON_SPEC.md` as PR #165 left it: R-BTN-144 (*Masking*, class 5), R-BTN-114
 (*Conclusions are the owners'*), R-BTN-73 / R-BTN-95 (*Routes*) and §2.3 (*Admission*), R-BTN-16
-(*Cookies*, *Headers*), R-BTN-155, R-BTN-131 and R-BTN-180 (*the request command*). History: the
-changelog entry "the security review's corrections". Source:
-`docs/review/security-review-2026-11-02.mdx`, findings S1, S2, S4, C2, C5 and U3. No owner
+(*Cookies*, *Headers*), R-BTN-155, R-BTN-153 (*Mapping the status*), R-BTN-191 (*Superseded per
+writer class*). History: the changelog entry "the security review's corrections". Source:
+`docs/review/security-review-2026-11-02.mdx`, findings S1, S2, S4, S6, C5 and U3. R-BTN-84's
+replay change needs no build here: replay is not built (`src/` has no `leg replay`). No owner
 ruling: each change aligns two rules or closes a gap in the direction the spec already took.
 
 ### What to build
@@ -32,26 +33,29 @@ ruling: each change aligns two rules or closes a gap in the direction the spec a
    masking uses the same pattern (one shared definition, not two lists).
 2. **The checks map.** `PUT /v1/owner/{repository}/settings` refuses a `checks` course map that
    does not name exactly one end station `success`, exactly one `failure` and at most one
-   `neutral` (`invalid-params`, naming the course). Any change to `checks`, and any key added to
-   `check_runners`, is a loosening: it needs an approver on `approvers.policy` (R-BTN-186), and a
-   delegated key is refused as before.
+   `neutral` (`invalid-params`, naming the course). A change that moves a station toward
+   `success` (`failure` → `neutral` → `success`), or removes or renames a course's entry, is a
+   loosening: it needs an approver on `approvers.policy` (R-BTN-186); a change the other way is a
+   tightening, open to any owner credential but a delegated key, which `checks` refuses as before.
+   Where the map names no `neutral`, a timeout or `exec` error reaches the `failure` station
+   (R-BTN-153). Registering a check-runner stays `approvers.members`'s (R-BTN-188).
 3. **Notification body caps.** `POST /v1/github/webhook` and `POST /v1/forges/{repository}/notify`
-   refuse a body over 25 MB `too-large` on `Content-Length`, or once 25 MB have been read
-   (chunked bodies), before any MAC is computed. Both stay outside the per-IP rule.
-4. **Headers.** Every response to a request a credential or a dashboard session authorizes
-   carries `Cache-Control: no-store` (one place in `src/core/http.ts`, not per route).
+   refuse a body over 26,214,400 bytes `too-large` on `Content-Length`, or once that many bytes
+   have been read (chunked bodies), before any MAC is computed. Both stay outside the per-IP
+   rule.
+4. **Headers.** Every response to a request a credential or a dashboard session authorizes, and
+   every response that sets a cookie or carries a sign-in code, carries `Cache-Control: no-store`
+   (one place in `src/core/http.ts`, not per route).
 5. **The pending cookie** is `__Host-baton_pending` wherever B-46's sign-in builds it.
-6. **The request's PR fallback.** `baton ticket request` asks Baton nothing. When the forge
-   refuses its push to the default branch as protected (not a moved head, which is retried as
-   now), it pushes the same commit to `request/<ID>` and opens a PR from it through the
-   CLI's forge adapter for the home's forge (R-BTN-92), printing the URL; on a `git` forge, or
-   with no forge credential, it prints the branch and exits non-zero.
+6. **Supersession.** Where B-146's attestation store supersedes the sync's attestations, it does
+   so across a sync key, the CI identity and a machine key alike (R-BTN-191); if B-146 has not
+   landed, this item moves to it.
 
 ### Tests
 
-S-BTN-42 (the 26 MB bodies), S-BTN-68 (the two maps; the human-only `approvers.policy` cases),
-S-BTN-98 (`bmr_` and `bps_` masked) and S-BTN-124 (`no-store` on a session read) as §15 now
-states them; S-BTN-175 gains a protected default branch (a PR opened, nothing pushed to `main`).
+S-BTN-42 (the oversize bodies), S-BTN-68 (the two maps; the two `checks` changes where
+`approvers.policy` is human-only), S-BTN-98 (`bmr_` and `bps_` masked) and S-BTN-124 (`no-store`
+on a session read) as §15 now states them.
 Green in `npm test` on both hosts.
 
 ### Exit criteria

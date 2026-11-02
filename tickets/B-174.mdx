@@ -1,0 +1,58 @@
+---
+title: "B-174 — The request command where the default branch is protected: say how it opens a PR it cannot push"
+id: B-174
+project: baton
+status: available
+updated: 2026-11-02
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1176
+tier: judgement
+description: "R-BTN-131 says baton ticket request is a repository command, not an API call, that pushes straight to the default branch; R-BTN-180 says that, run with a credential the refs exclude, it opens a PR instead. The command cannot know what the policy's refs admit without asking Baton, and nothing says which branch it pushes, which credential opens the PR, what a git forge does, or how a protection refusal is told from git's other refusals. Settle it in R-BTN-131, R-BTN-180 and S-BTN-175, then build it. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** R-BTN-131 (the request command, in the standard courses' table), R-BTN-180 (*Who may
+land*, the request bullet), R-BTN-74 (a refused push reported in git's own words), R-BTN-188
+(`refs.default_branch`, `refs.other`), R-BTN-92 (forges), S-BTN-175. Source:
+`docs/review/security-review-2026-11-02.mdx`, finding C2. PR #165 tried a one-sentence fix, and its
+review round one found it underspecified (branch, credential, `git` forge, refusal kinds; a
+`request/<ID>` branch outside `branch_pattern` is refused again under `protected`'s
+`refs.other`), so the fix moved here.
+
+### Decide
+
+- **(a) recommended — decide by the forge's answer, read nothing from Baton.** The command pushes
+  as now; when the forge refuses the push as a protected branch (GitHub's and GitLab's protected-
+  branch refusals, matched by the CLI's forge adapter; any other refusal reported in git's own
+  words, as R-BTN-74 does), it pushes the same commit to a branch inside the home's
+  `branch_pattern` for the request's id and opens a PR from it with the caller's forge
+  credential through the adapter for the home's forge (R-BTN-92), printing the URL. On a `git`
+  forge, or with no forge credential, it prints the branch and exits non-zero. R-BTN-180's bullet
+  becomes "whose push the forge refuses as protected".
+- (b) read the policy first (`GET /v1/repositories/{repository}/policy`, open to owners and
+  granted keys): the command stops being "not an API call", and a human with push but no Baton
+  key cannot use it.
+
+### What to build (for (a))
+
+1. **A spec PR first** under the babysit skill's *Spec PRs*: R-BTN-131 and R-BTN-180 state the
+   above; S-BTN-175 gains a protected default branch (a PR opened from a `branch_pattern` branch,
+   nothing pushed to `main`), a `git` forge (exit non-zero, the branch printed) and a refusal that
+   is not protection (git's words, nothing opened).
+2. The adapter's refusal matcher and PR call, the command's fallback, the tests.
+
+### Exit criteria
+
+- [ ] the spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] S-BTN-175 green in `npm test`; `npm run typecheck` green
+
+## Status
+
+- 2026-11-02: drafted from the 2026-11-02 security review (PR #165).

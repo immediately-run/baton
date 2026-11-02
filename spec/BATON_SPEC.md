@@ -566,8 +566,8 @@ process for development and CI. Nothing crosses a tenant.
     in the object (R-BTN-130, `BATON_MCP_OAUTH_SPEC` §13).
   - A per-IP rule (a Workers rate-limit binding keyed `<host>|<ip>`) applies only to
     unauthenticated requests, never to the two forge-notification routes, `POST
-    /v1/github/webhook` and `POST /v1/forges/{repository}/notify` (R-BTN-73), whose bodies are
-    capped instead.
+    /v1/github/webhook` and `POST /v1/forges/{repository}/notify`, whose bodies R-BTN-73 caps
+    instead.
   - Authenticated calls are limited to 600 a minute per credential, keyed by origin and
     credential, counting only requests the object verified.
   - **Failed verifications** count in two buckets: (origin, credential id, client IP) and
@@ -871,8 +871,9 @@ repository reachable over SSH is enough (R-BTN-105).
     HMAC-SHA256) or a GitHub repository webhook (`X-Hub-Signature-256` under the repository's
     own secret, for a repository without the App). A `git` repository has no route. Both routes
     are verified in the Worker before anything is read, are outside the per-IP limit (§2.3), and
-    answer `204`. A body over 25 MB, the largest delivery GitHub sends, is refused `too-large`
-    on its `Content-Length`, or once 25 MB have been read, before any digest is computed. Every
+    answer `204`. A body over 26,214,400 bytes (25 MiB, above the largest delivery GitHub sends)
+    is refused `too-large` on its `Content-Length`, or once that many bytes have been read,
+    before any digest is computed. Every
     comparison is constant-time over equal-length digests.
   - **Events and the only fields read:**
 
@@ -2219,7 +2220,7 @@ mean (R-BTN-50).
   | `branch` | R-BTN-96 | R-BTN-96 | branches |
   | `ask`, `deliver`, `announce` | condition handlers (R-BTN-169): `ask` asks through the person leg `answer` | R-BTN-169 | — |
 
-  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder and `archive/`), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call — it reads nothing from Baton: where the forge refuses the push to a protected default branch (R-BTN-180), it opens a PR from the commit instead, and otherwise the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
+  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder and `archive/`), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call: the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
 
   - **A wait for a person's answer is a person's leg** (R-BTN-116), answered by a
     `std:decision@1`: `decision`'s `answer` and `build-app`'s `decide`. Where the policy admits `sync` for `std:decision@1`, the ticket's `answer:`
@@ -4780,9 +4781,10 @@ print its way to `success`.
     {<end station>: "success" | "failure" | "neutral"}}}` (R-BTN-66) maps end stations to
     conclusions, so no edit in git turns `failed` into `success`. A course's map names exactly
     one end station `success`, exactly one `failure` and at most one `neutral`, or
-    `PUT /v1/owner/{repository}/settings` refuses it `invalid-params`. Every change to `checks`,
-    and adding a key to `check_runners`, is a loosening (R-BTN-186): a conclusion decides what
-    branch protection sees, and a GitHub required check passes on `neutral`. A course file carries no `checks`
+    `PUT /v1/owner/{repository}/settings` refuses it `invalid-params`. A change that moves a
+    station toward `success` (`failure` → `neutral` → `success`), or removes or renames a course's
+    entry, is a loosening (R-BTN-186): a conclusion decides what branch protection sees, and a
+    GitHub required check passes on `neutral`. A change the other way is a tightening. A course file carries no `checks`
     (R-BTN-69); `baton course test` prints a check course's end stations for the owners to map.
 
 - **R-BTN-153 (a verdict is a command's exit status, from the check-runner's confirmed end).**
@@ -4801,7 +4803,8 @@ print its way to `success`.
        agent touches that sandbox, through the provider method `exec(argv, {cwd, timeout_s}) →
        {status}` (R-BTN-107). A runner whose provider has no `exec` takes no verdict leg.
   - **Mapping the status.** Status 0 reaches the station mapped to `success`; any other status
-    the one mapped to `failure`; a timeout or an `exec` error the one mapped to `neutral`. An
+    the one mapped to `failure`; a timeout or an `exec` error the one mapped to `neutral`, or
+    to `failure` where the map names no `neutral`. An
     `advance` or end reaching a success-mapped station carries `exit_status: 0`, which Baton
     requires. In a check course an agent's `baton-leg-result` or channel `done` (R-BTN-106) may
     reach only `failure` or `neutral` stations. A check course's `min_runner_version` is at least
@@ -5560,7 +5563,8 @@ Every value below is validated on write; a value over its cap is refused `invali
     frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'`,
     `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`
     and `Cross-Origin-Resource-Policy: same-origin`; every response to a request a credential
-    or a dashboard session authorizes also carries `Cache-Control: no-store`.
+    or a dashboard session authorizes, and every response that sets a cookie or carries a
+    sign-in code (`POST /v1/login`, R-BTN-155), also carries `Cache-Control: no-store`.
   - **Writes.** A state-changing request a dashboard session authorizes, under `/v1/ui/*` or
     not (`POST …/attestations`, R-BTN-116), and `POST /v1/login` must carry
     `Content-Type: application/json` and an `Origin` equal to the tenant's origin
@@ -5928,7 +5932,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
       `std:approval@1` whose subject is that ticket at that commit covers exactly those paths and
       blobs. `merge.reviews`, `merge.checks` and continuity do not apply to it; one approval covers
       one proposal;
-    - `baton ticket request` (R-BTN-131) whose push the forge refuses — its credential one the refs exclude — opens a PR, not a push;
+    - `baton ticket request` (R-BTN-131) run with a credential the refs exclude opens a PR, not a push;
     - where `refs.default_branch` excludes `mirror`, the mirror (§16) writes nothing to the
       default branch; its notes are Baton's.
   - **Secrets and privileged jobs.** Runners push some ref of the repository under every preset
@@ -6558,7 +6562,7 @@ R-BTN-127's. Any route may answer `rate-limited` or `quota` (R-BTN-135).
 | `conflict` | a key already in another role or name (R-BTN-57, R-BTN-58); duplicate forge ids (R-BTN-138); a seal or import refused (R-BTN-88) |
 | `rate-limited` | over a rate limit, with `retry_after_s` (R-BTN-135) |
 | `quota` | a row-write, storage or per-claim cap (R-BTN-135, R-BTN-149, R-BTN-160) |
-| `too-large` | an oversize body or item (R-BTN-130, R-BTN-149) |
+| `too-large` | an oversize body or item (R-BTN-73, R-BTN-130, R-BTN-149) |
 | `session-taken`, `runner-reaped` | a heartbeat for a pair held by another secret; a reaped runner (§8) |
 | `not-eligible` | a gate refused, with `rule` and `rule_code` (§6.6) |
 | `blocked` | a prerequisite unmet (R-BTN-75) |
@@ -6787,7 +6791,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-122 caps, observations, readings | oversize post, fifth-generation child, exponential pattern, 65th session, repeated `leg_finished`; competing observation numbers; a post under another credential's number; two runs that post nothing; heartbeats flipping declarations past the budget; 9 measuring sessions | `too-large`, `parent-invalid`, schema error, `quota`, one re-arm; numbers taken over after `sync-busy`; `stale-observation`; released, no bar; leases kept, declarations dropped; 8 measures kept and clearable; CI and sync key never void each other |
 | **§3** | | |
 | S-BTN-26 two repositories, two courses | `ops` (weight 50, course `runbook`) beside `docs`, both with `T-1`; W1 declares one course, W2 both; a CLI runner on one checkout declaring two courses | distinct tickets; W1 never offered `ops`; `docs` first, each in default order, per-group limit; tokens per repository; a shared branch blocks pushes while either is held; `min_runner_version` gates W2; the runner declares both courses, claims a leg of either in consecutive claims, loads each from the claim's `course_id` and snapshot, and `--course` narrows it to one (B-103) |
-| S-BTN-42 webhooks | a review delivery, its repeat, a forgery, a 10-delivery burst, Baton's own events, extra fields; a 26 MB body on each notification route | one dispatch, then one trailing after 30 s; repeat, forgery and own events dispatch nothing; only R-BTN-73's fields read; `too-large` before any digest, outside the per-IP rule |
+| S-BTN-42 webhooks | a review delivery, its repeat, a forgery, a 10-delivery burst, Baton's own events, extra fields; a body of 26,214,401 bytes on each notification route | one dispatch, then one trailing after 30 s; repeat, forgery and own events dispatch nothing; only R-BTN-73's fields read; `too-large` before any digest, outside the per-IP rule |
 | S-BTN-171 a dependency cycle is refused | a board post whose live tickets depend on each other in a loop; two of them; a self-dependency; a diamond; a post closing the very ticket it depends on | `invalid-params`, naming `B-1 → B-2 → B-1` once, and nothing of the post stored: no head, no ticket; `B-1 → B-1` alike; the diamond and the closed edge accepted |
 | S-BTN-189 the ticket commands | a bare origin; `baton ticket new` with `--depends-on`, `--tags` and `--project`, a legacy id pattern, a `--body-file` whose line disagrees with the flag, a filing that closes a cycle, a prefix the pattern cannot allocate; `claim` of a held, dependent, in-review and archived ticket; `set` with `--pr` twice; `done`; a peer's push between a command's fetch and its push; `baton repo init`, then an edited `HOW-TICKETS-WORK.md` | one commit on the origin's default branch, the ticket alone, the caller's branch and tree untouched; the next free id under the configured prefix, the skeleton with the flag's `**Depends on:**` line and the dependency's reverse mention; each refusal before the push, nothing landed; the retry takes the id after the peer's; a status, a PR once, the file archived; the page written, its edited copy one finding and exit 1, `init --force` writing it again |
 | S-BTN-172 the ticket check | `baton ticket check` on a clean repository, on one whose tickets loop, on one with no `.baton/baton.json`, and on this repository's own `tickets/` | exit 0 with the count, `✓ no findings`; exit 1 with one `path: message` line (the loop at its first ticket's file) and the count; the CLI's error, exit 2; this repository passes, which CI's `npm run check:tickets` runs |
@@ -6901,7 +6905,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-17 one session, whole ticket | five `advance`s with no sync between | `filed` → … → `merged` on the holder's word, `bars` carried, ends `done`; no hand-off or `stale-board`; confirmed by the next sync |
 | S-BTN-23 resume from a hand-off | W2 resumes W1's suspension | hand-off URL and resume record; same branch and PR; hand-off a PR comment |
 | **§10** | | |
-| S-BTN-68 the merge check | a confirmed `passed`; a new head; a same-named status; an unissued success; an edited owners' `checks`; a `checks` map with two `success` stations, and one with no `failure`; a `checks` change and a `check_runners` addition by an owner key where `approvers.policy` is human-only; a course file carrying `checks`; a push right after a `done`, before the sync; a deliverer that stalls past its lease and posts an older `seq`; a repository whose `merge.checks: required` is met by the forge's own check runs | `success` posted only after confirmation; the ticket restarts on each new head, the unconfirmed `done` marked `superseded_at` and the new head claimable; the older `seq` skipped, or raised `check-mismatch` and the newest re-queued; status ignored; `check-mismatch` raised; owners' setting holds; both maps `invalid-params`; both changes `forbidden`; course file refused; the merge runner merges on the protected workflows' runs with no `std:checks@1` |
+| S-BTN-68 the merge check | a confirmed `passed`; a new head; a same-named status; an unissued success; an edited owners' `checks`; a `checks` map with two `success` stations, and one with no `failure`; a `checks` change from `failure` to `neutral`, and one from `neutral` to `failure`, by an owner key where `approvers.policy` is human-only; a course file carrying `checks`; a push right after a `done`, before the sync; a deliverer that stalls past its lease and posts an older `seq`; a repository whose `merge.checks: required` is met by the forge's own check runs | `success` posted only after confirmation; the ticket restarts on each new head, the unconfirmed `done` marked `superseded_at` and the new head claimable; the older `seq` skipped, or raised `check-mismatch` and the newest re-queued; status ignored; `check-mismatch` raised; owners' setting holds; both maps `invalid-params`; the first change `forbidden`, the second accepted; course file refused; the merge runner merges on the protected workflows' runs with no `std:checks@1` |
 | S-BTN-81 a check nobody sends | a `forge-check` entry undelivered 15 min; a work key claims the check | `baton.outbox-late` with `kind: forge-check`, change pending; refused |
 | S-BTN-123 a forged check | posts without confirmed ends; a moved `check.sha`; a work key, a fork, an agent's verdict against the exit status, no `exit_status`, a `process` runner, a moved ref, a widened App; a post naming an earlier head | no `forge-check` entry, `check-unattested`; restart on the new head; refused, dropped; verdict from `exec`; refused; `missing-capability`; `stale-board`; delivery refused; the post refused `head-moved`, the command read from the branch tip |
 | **§11** | | |
@@ -6961,7 +6965,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-11 | A sync OIDC token from a branch or another workflow is refused | tests |
 | G-BTN-51 | Everything is per repository; a sync credential reaches only its own; runners see only declared courses at `min_runner_version`; a branch maps to every ticket a current or previous `branch_pattern` gives, and a collision refuses the push while either is held | S-BTN-26 |
 | G-BTN-61 | Recommendations merge groups by expedite, weight, place, legs to an end, `ready_since`, id; the limit is per group; every ready ticket has a rank | S-BTN-26 |
-| G-BTN-68 | Webhooks are verified before reading; only R-BTN-73's fields are read; dispatch only for named repositories, never for Baton's own events, ≤ 1 per 30 s plus a trailing one | S-BTN-42 |
+| G-BTN-68 | Webhooks are verified before reading, and a body over 25 MiB is refused before any digest; only R-BTN-73's fields are read; dispatch only for named repositories, never for Baton's own events, ≤ 1 per 30 s plus a trailing one | S-BTN-42 |
 | G-BTN-82 | A sync authenticates by a sync key in that role, a machine key the repository lets sync, or a CI identity token, through one verifier; revocation acts at the next request | S-BTN-55, -56 |
 | G-BTN-83 | A want is cleared only by a post numbered above it; `wanted` changes only its nonce; notifications only record wants; Baton's database and exports hold no forge credential (the App's key, dispatch tokens and webhook secrets are Worker secrets), a dispatch starts only a named workflow, and Baton draws links only under `web_base` | S-BTN-54, -56 |
 | G-BTN-125 | A ticket's PRs across repositories are read under one budget, batched over GraphQL, as one change | S-BTN-106 |

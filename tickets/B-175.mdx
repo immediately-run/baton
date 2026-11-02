@@ -1,0 +1,63 @@
+---
+title: "B-175 — A check that times out must not pass branch protection: the neutral conclusion is a pass on GitHub"
+id: B-175
+project: baton
+status: available
+updated: 2026-11-02
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1177
+tier: judgement
+description: "R-BTN-153 maps a check command's timeout or exec error to the station the owners map to neutral, and lets an agent's own result reach neutral; GitHub's required checks pass on neutral. So a change that hangs its own tests, or an agent that reports neutral, gets a conclusion branch protection accepts. Choose the conclusion vocabulary (recommended: timeouts and exec errors post timed_out, which GitHub treats as failing, and neutral leaves the closed set), amend R-BTN-114 and R-BTN-153, build it. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** R-BTN-114 (*Conclusions are the owners'*), R-BTN-153 (*Mapping the status*), R-BTN-115
+(the `forge-check` entry), §10's trust statement ("a check is as trustworthy as … the check
+command"), S-BTN-68, G-BTN-93. Source: PR #165's review round one, on the 2026-11-02 security
+review's S2 (`docs/review/security-review-2026-11-02.mdx`).
+
+### Why
+
+GitHub's required status checks are satisfied by a `success`, `skipped` or `neutral` conclusion.
+R-BTN-153 sends "a timeout or an `exec` error" to the station mapped to `neutral`, and lets an
+agent's `baton-leg-result` or channel `done` reach "only `failure` or `neutral` stations". The
+second was meant to keep an agent from printing its way to a pass; on GitHub `neutral` is one.
+A change whose tests hang until `timeout_s` therefore lands past a required check. PR #165 made
+a change toward `neutral` a loosening of `checks` and added the `failure` fallback where no
+`neutral` is mapped, which narrows the hole but does not close it: the standard map still names
+`neutral`.
+
+### Decide
+
+- **(a) recommended.** The conclusions set becomes `success | failure | timed_out`; a timeout or
+  an `exec` error reaches the station mapped to `timed_out`, else `failure`; an agent's result
+  reaches only `failure` or `timed_out` stations. A forge without `timed_out` (Gitea, GitLab
+  statuses) posts it as its failing state. An old `neutral` mapping is read as `timed_out` for
+  one release and logged.
+- (b) keep `neutral` but post a timeout as `failure` always, leaving `neutral` for owners who
+  want an advisory check.
+- (c) keep the rule and say in §10 that a required check on GitHub does not hold against a
+  timeout.
+
+### What to build (for (a))
+
+1. **A spec PR first** under the babysit skill's *Spec PRs*: R-BTN-114 and R-BTN-153 rewritten;
+   S-BTN-68 gains a command that times out (the check posted failing) and an agent's `done`
+   toward a `timed_out` station; G-BTN-93 names the set.
+2. The settings validation, the mapping and the `forge-check` delivery per forge.
+
+### Exit criteria
+
+- [ ] the spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] S-BTN-68 green in `npm test`; `npm run typecheck` green
+
+## Status
+
+- 2026-11-02: drafted from PR #165's review round one.
