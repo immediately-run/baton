@@ -1712,7 +1712,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     is an `approvers.members` action (R-BTN-188), so a key dies with the credential that minted it.
     Decided under the ruling, as the ticket's reading of it: a delegated key writes no attestation,
     a `std:decision@1` moving a ticket as a route does (R-BTN-116, R-BTN-181), and resolves no
-    condition, every restart lifting a hold another set or routing (R-BTN-163); and R-BTN-186's
+    condition, a restart closing what Baton or a leg raised — ending a block or another's hold,
+    routing, or setting a `parked` hold the key's own test never matches (R-BTN-163); and R-BTN-186's
     "restart a leg it stopped" is gone, a stopped leg being claimable again at once (R-BTN-119). R-BTN-39, R-BTN-12, R-BTN-57,
     R-BTN-119, R-BTN-163, §12.1, §12.2 and §14 cite R-BTN-130 and R-BTN-186 in place of the list.
   - **B-157** (the review's finding 6 and section 2.1, folded into B-166 by the owner's
@@ -1816,6 +1817,46 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   name is unique among every row, revoked ones included; `baton run` is one of the first twelve;
   the B-165 note and the PR body say the administrator's session's stated power narrowed to the
   rows the dashboard draws, and that `ticket claim` is git's claim beside Baton's.
+
+- **2026-11-02 — review round two of the restructure's part 3** (one fresh reviewer, the diff,
+  the impact list and round one's two reviews; all 37 round-one findings re-checked line by line
+  and confirmed closed). No blocking finding. Majors: the ground given for keeping
+  `ticket.resolve` from a delegated key ("every restart lifts a hold or routes") was false
+  against R-BTN-163's `baton.stalled` row, and decision 4 passed it to the owner; the OAuth
+  consent test was on the session's key, which a `human_only` owner key satisfies under
+  `[human]` while the parenthetical said no session does; `human-key.revoke` took `confirm:
+  true` but was absent from §12.2, as `attestation.revoke` had been since part 2; the registry
+  and §12.1 had no principal for a `human_only` key, so `human-key.add`'s `callers` could not be
+  written; R-BTN-130's "unique … revoked ones included" contradicted the OAuth spec's "unique
+  among live grants" and S-BTN-137; whether the dashboard's answer to a person leg needs a
+  confirmation code was said nowhere. Minors: OAuth §13's row, S-BTN-137 and its Decisions still
+  said `leg.stop` and "three scopes"; the mark's definition gave `GET /v1/actions` `true` while
+  its row said never an MCP key; an administrator matches an `owner` entry, which R-BTN-130's
+  `minted_by` sentence overlooked; a `park` survived in B-56's note; `human-key`'s noun family,
+  `keys.json` slot and the body's `signature` were half-specified; R-BTN-16's write rule covered
+  `/v1/ui/*` while a session now writes `POST …/attestations`; one action answered on two routes
+  with one `http`; nothing listed MCP keys.
+
+  Fixed: R-BTN-186 states the true ground (a restart closes what Baton or a leg raised — a
+  block, another's hold, a route, or a `parked` hold the key's own test never matches), and
+  R-BTN-129, R-BTN-130, the part-3 entry and the PR body cite it. The consent route admits a
+  session that is itself an `approvers.members` approver as R-BTN-188 reads a session — an
+  `owner` entry, or a `key:` entry naming a key not `human_only`, never `human` — the request's
+  repository list is narrowed to those, and R-BTN-185 says a session minted by a `human_only`
+  key is an owner's session, never `human` (OAuth §5, §11, §13, G-BTN-157; R-BTN-130).
+  `attestation.revoke` and `human-key.revoke` are in §12.2. `human` is a principal (R-BTN-129,
+  §12.1's new row), `human_only` a mark on an owner key or a key of no other role (§12.1), the
+  `human-key` noun is the human-only identity's, `keys.json` maps `human: <file>`, and the
+  body's `signature` is the new key's SSHSIG over its public line. An MCP name is unique among
+  live keys and grants; a hold or bar records the key's id (`set_by`), and the `own` test is on
+  the id, so a later key of the same name undoes nothing of a revoked one's (R-BTN-130, OAuth
+  §7, S-BTN-101). The dashboard's answer to a person leg is an unconfirmed act, named with its
+  reason (§11.4, R-BTN-163). OAuth §13, S-BTN-137 and the Decisions name the destructive set
+  and the open challenge; the mark's definition names the mechanically absent actions;
+  R-BTN-130 says an administrator mints none; B-56's note reads as the rule does; R-BTN-16's
+  write rule covers every session write and is marked changed; `ui` may carry the dashboard's
+  own route beside `http`, and the router serves both (R-BTN-129); the grants read lists
+  `mcp_keys` (§14, R-BTN-130).
 
 ## Retired requirements
 
