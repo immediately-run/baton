@@ -35,13 +35,13 @@ station** finishes the ticket.
 **Worker.** An agent session on a machine, identified by its key. It declares capabilities,
 a tier ceiling, tags and the courses it can run.
 
-**Holding, ontology, derived capability.** What a worker declares (a key's name, an installed
-tool) are its holdings; a repository's ontology derives further capabilities from them, so a leg
-can require an ability while workers declare only what they hold.
+**Capability.** A name a worker declares (`key:anthropic`, `capability:code-generation-llm`) and
+a leg requires; Baton matches the two by name and derives nothing. What the keys and tools a
+worker holds amount to is the worker's own statement, and which model and key a leg uses is the
+course's choice, in its ranking code and instructions (R-BTN-174, §6.10).
 
-**Route choice.** A question a repository attaches to a leg for advice — which model, through
-which key — that the ontology answers from the worker's holdings and the instruments' readings.
-Advice, never a gate.
+**Capacity, seat.** A capability with a capacity has that many seats: a claim holds one while its
+running leg requires the capability, and a claim past capacity is refused (R-BTN-178).
 
 **Claim.** A worker's lease on one ticket. It runs one or more legs and ends **done**,
 **suspended** at a station, or **released**.
@@ -49,7 +49,7 @@ Advice, never a gate.
 **Lease, heartbeat, reap, fence.** A claim lives while its worker heartbeats. A silent worker
 is **reaped** at its lease; a **fence** stops a revived worker from writing.
 
-**Gate.** A rule Baton enforces for safety: one holder, capabilities, tier, grants, barred
+**Gate.** A rule Baton enforces for safety: one holder, capabilities and their capacity, tier, grants, barred
 tags. Everything else is **advice**.
 
 **Tag, barred tag.** Short strings a course gives workers (`family:glm`). A leg can bar tags,

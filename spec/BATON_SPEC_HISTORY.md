@@ -1899,6 +1899,88 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   confirmation-code ceremonies stay as R-BTN-155 says, candidate decisions for later. No candidate
   in the B-165 table was vetoed. The merge waits on the owner's word.
 
+- **2026-11-02 — the restructure, part 4: the capability ontology moved out, and the last
+  candidates (B-166; owner direction).** The fourth and last part of the rewrite the owner asked
+  for after the whole-spec review of 2026-11-01 (`docs/review/spec-simplification-review-2026-11-01.mdx`,
+  B-155 to B-165; parts 1 to 3 above), written from the text on `main` (`e7fee93`). The owner
+  answered each question with the words in quotation marks; the sentence after each is the
+  ticket's reading of that answer (the tickets are unsigned, so the readings are claims, as
+  `CLAUDE.md` says):
+  - **B-162, the owner: "Nothing; move it out".** The whole ontology moves to the runner side;
+    core matches capabilities by name only; route choice lives in `rank.mjs` and course
+    instructions. R-BTN-174 is rewritten (§5.9, "capabilities are the runner's statement"): rule 4
+    reads declared ∩ grant by name, a runner decides for itself what the keys and tools it holds
+    amount to and declares it — the CLI runner while a check that tests them passes (R-BTN-121) —
+    and Baton derives nothing. §6.10 keeps its number as a paragraph: which model and key a leg
+    uses is the course's (`rank.mjs`, R-BTN-98; instructions and `agent_command`, R-BTN-131), a
+    new provider needing no change to Baton. Retired: R-BTN-175 (the language, its validation,
+    bounds, evaluator and conformance), R-BTN-176 (the atoms) and R-BTN-177 (route choices,
+    hysteresis, `meters`, `advice`, `taken`, `BATON_ADVICE`, `BATON_TAKEN`). Gone with them:
+    `.baton/ontology.json`, the board post's `ontology`, course entries' `route_choices`,
+    `runner_derived`, `ontologies`, `route_last`, `claim_legs.route_choices_json` / `taken_json`,
+    `not-derived`, the derived sets' alarm cycle and R-BTN-50's ontology row. R-BTN-75, R-BTN-99,
+    R-BTN-100, R-BTN-108, R-BTN-110, R-BTN-120's table, R-BTN-121, R-BTN-126, R-BTN-131, R-BTN-134,
+    R-BTN-144's table, §6.6, §11.4, §13, §14 and G-BTN-5 follow. The code goes in B-167.
+  - **B-165, the owner: "Take review's default"**, for each candidate this part's sections held:
+    - *Seats, bills, capacity* (table 1.2): a capability with a capacity, its seats held by the
+      claims whose running leg requires it, refused past capacity by rule 11 `capacity-full`
+      (R-BTN-178 rewritten; an administrator's `baton admin capacity set`, `PUT
+      /v1/admin/capacities`, `capability_capacity`). The review named rule 4; rule 11 keeps its
+      number and its own refusal, since a full capability is not a missing one. `bills`,
+      `claim_bills`, `instance-busy`, resource and instance capacities and the `host` scope go.
+      What it loses: a runner billing several seats, or a chosen instance, per leg, and a Baton
+      count of the claims spending an account (a claim's reports carry it, R-BTN-99); one
+      machine's singleton becomes a lock the runners there share, each declaring the capability
+      only while its check can take it.
+    - *Resource scopes and `atoms_from`* (table 1.2): `service` and `account` only; every runner
+      granted on a repository has the same usable instances; `uses`, `refused_uses`,
+      `runner_instances`, the `runner` and `host` scopes, `atoms_from` and the administrator's
+      7-day override go, an administrator's reading being one more instrument's (R-BTN-76,
+      R-BTN-77, R-BTN-126). What it loses: a block for one runner alone, and an administrator
+      pinning an instance's state against its instruments. `state` and `measure` kinds stay: the
+      review's replacement did not name them.
+    - *Readings' `signed`*: the reading's SSHSIG (`baton-reading@1`) and the `readings` knob's
+      `signed` go; a reading is authenticated by its request like every attestation (R-BTN-76,
+      R-BTN-181, R-BTN-188). The writers a trusted leg's readings admit post signed requests
+      already. What it loses: a policy counting a runner's reading toward a gate only when posted
+      with its SSH key rather than its API key.
+    - *Table 1.4's owner settings*: `required_independence` removed (the course file's
+      `no_chain_from`, as protected as the course, R-BTN-106); `trigger_workflows` removed (the
+      forge dispatches only a workflow on the default branch that declares a manual dispatch,
+      R-BTN-94); `report_horizon_h` a constant, 6 hours (R-BTN-99); `atoms_from` gone above. Kept,
+      each naming a place or a choice that differs between deployments: `transcript_repos`,
+      `artifact_buckets`, `leg_log_root`, `unblocked_trigger`, `weight`, `checks`,
+      `check_runners`, `api_keys`. R-BTN-66 now says where three values beside its lists live:
+      `human_identity` a policy knob, `check_app_id` an instance setting, `pushers` an owner
+      setting that adds forge authors, its addition a loosening. What it loses: an owner adding
+      a chain rule to a sourced course whose file lacks one; an administrator's allowlist of
+      dispatchable workflows; a course keeping reports longer than 6 hours.
+    - *The adoption actors* (table 1.1: the mirror key, shadow mode, legacy runners, adoption
+      requests, cutover, `reap_after`, the `legacy` credential): §16 is an appendix that ends
+      when docs retires its mirror, on which day it, every *adoption* mark in §13 and §14, the
+      *adoption* rows of §15 (S-BTN-14, S-BTN-16, G-BTN-8, -9, -19, -22, -35, -41) and the
+      mirror's places in R-BTN-73, R-BTN-88, R-BTN-93 and R-BTN-94 are deleted in one change.
+      The mirror's columns, key role, route and drop rule carry the mark now. What it loses:
+      nothing after docs retires its mirror.
+  - Retired: R-BTN-175, R-BTN-176, R-BTN-177; S-BTN-139 to S-BTN-155; G-BTN-159, G-BTN-160,
+    G-BTN-161 (the tables below). Changed §15 rows: S-BTN-21 and G-BTN-162 (capacity), S-BTN-45
+    (an administrator's reading after a probe's), S-BTN-61 (no `uses`, no bill), S-BTN-63 and
+    G-BTN-90 (no `required_independence`), S-BTN-91 (blocked for no runner until every instance
+    is down), S-BTN-122 and G-BTN-142 (no bills), S-BTN-181 (no `signed`), G-BTN-5 (an ungranted
+    capability), and by the *adoption* mark alone S-BTN-14, S-BTN-16, G-BTN-8, -9, -19, -22, -35,
+    -41. Test files: `S-BTN-139.ontology`, `S-BTN-147.route-choices` and `S-BTN-147.runner-half`
+    test retired rows and stay in `RETIRED_TESTS_ALLOWED` until B-167 deletes them;
+    `S-BTN-45.block-edges` and `S-BTN-63.no-chain` test the built behaviour and change in B-168;
+    S-BTN-21 has no test file yet (B-106).
+  - Outside the spec: `scripts/check-spec.mjs`'s `RETIRED_TESTS_ALLOWED`; `docs/context/vocabulary.mdx`
+    (capability; capacity and seat; the gate), `docs/context/architecture.mdx` (capabilities are
+    names, matched). The pages that teach the built code (README's code map,
+    `docs/runbooks/register-baton.mdx`, `docs/standard-courses.mdx`) follow B-167 and B-168.
+    Tickets: B-167 and B-168 filed for the code; B-106 rewritten for a capability's capacity,
+    with a map of its old items; B-104 and B-105 carry supersession maps of their spec half;
+    B-162, B-165 and B-166 record what this part wrote; B-10, B-15, B-21, B-46, B-47, B-107,
+    B-123, B-142, B-145, B-146, R3-1215, R3-1235, R3-1269 and R3-1272 carry a dated note.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -1917,6 +1999,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 | R-BTN-148 | open-world settlement, misdeclared claims, tainted branches | B-166 part 1 (2026-11-01, B-165's review default) | nothing: no provisional claim, no author gate, no taint |
 | R-BTN-166 | a choice station: the first leg ready wins | B-166 part 1 (2026-11-01, B-165's review default) | a person leg's `expires: {after_s, reached}` (R-BTN-116); no general race between legs |
 | R-BTN-173 | light questions: answered in the claim, or promoted to git | B-166 part 1 (2026-11-01, B-161 "One primitive") | the plain path: a handler ticket written git first, asked through its person leg, the restart formed by Baton from the answer (R-BTN-161, R-BTN-162, R-BTN-169) |
+| R-BTN-175 | the ontology language, its validation and its bounds | B-166 part 4 (2026-11-02, B-162 "Nothing; move it out") | nothing in core: a runner decides what the keys and tools it holds amount to and declares it, its check testing them (R-BTN-121, R-BTN-174); `src/core/ontology.ts`, the translator, the grammar and the conformance suite go in B-167 |
+| R-BTN-176 | the atoms a route choice reads | B-166 part 4 (2026-11-02, B-162) | nothing in core: the course's `rank.mjs` and leg instructions read the instance and fleet views (§6.10, R-BTN-98, R-BTN-99) |
+| R-BTN-177 | route choices: advice on how a leg runs | B-166 part 4 (2026-11-02, B-162) | §6.10's paragraph: which model and key a leg uses is the course's; no `advice`, `taken`, `BATON_ADVICE`, `BATON_TAKEN` or `route_last` |
 
 R-BTN-23 (retry policy) is not retired: it is merged into R-BTN-122, whose heading carries both
 ids. R-BTN-21, R-BTN-27, R-BTN-42, R-BTN-43 and R-BTN-49 are the `roadmap-pr` course's own rules,
@@ -1948,6 +2033,26 @@ defined in docs' `BATON_ROADMAP_PR_COURSE` (check-spec's `COURSE_IDS`).
 | G-BTN-86 | an unknown ticket is claimable only at its `start_leg`, provisionally | B-166 part 1 (2026-11-01, B-165) | S-BTN-58: `not-eligible` until a post names it |
 | G-BTN-151 | a choice settles to the first leg whose prerequisites hold | B-166 part 1 (2026-11-01, B-165) | G-BTN-152's `expires` instant; G-BTN-90 |
 | G-BTN-158 | a light question settles once, in the claim or from git | B-166 part 1 (2026-11-01, B-161) | G-BTN-147 |
+| S-BTN-139 | the ontology's closure over holdings | B-166 part 4 (2026-11-02, B-162) | `test/integration/S-BTN-139.ontology.test.ts` tests retired behaviour until B-167 deletes it (`RETIRED_TESTS_ALLOWED`); declared capabilities are S-BTN-92's and G-BTN-5's |
+| S-BTN-140 | a program refused | B-166 part 4 (2026-11-02, B-162) | — |
+| S-BTN-141 | bindings narrow | B-166 part 4 (2026-11-02, B-162) | — |
+| S-BTN-142 | the grant before the closure | B-166 part 4 (2026-11-02, B-162) | an ungranted capability never counts: G-BTN-5 |
+| S-BTN-143 | matching on derived capabilities | B-166 part 4 (2026-11-02, B-162) | matching by name: S-BTN-74, S-BTN-92 |
+| S-BTN-144 | why not, for a derived type | B-166 part 4 (2026-11-02, B-162) | `not-declared` and `not-granted`: S-BTN-74 |
+| S-BTN-145 | the environment is R-BTN-144's under the ontology | B-166 part 4 (2026-11-02, B-162) | R-BTN-144's own scenarios |
+| S-BTN-146 | derived sets' freshness and bounds | B-166 part 4 (2026-11-02, B-162) | — |
+| S-BTN-147 | a codegen route choice | B-166 part 4 (2026-11-02, B-162) | `test/integration/S-BTN-147.route-choices.test.ts` and `S-BTN-147.runner-half.test.ts` test retired behaviour until B-167 deletes them (`RETIRED_TESTS_ALLOWED`) |
+| S-BTN-148 | a reviewer route choice with hysteresis | B-166 part 4 (2026-11-02, B-162) | the course's ranking: S-BTN-27 |
+| S-BTN-149 | who steers a route choice (`atoms_from`) | B-166 part 4 (2026-11-02, B-162, B-165) | — |
+| S-BTN-150 | atom shapes | B-166 part 4 (2026-11-02, B-162) | — |
+| S-BTN-151 | refinement of `std:api-capacity@1` for route choices | B-166 part 4 (2026-11-02, B-162) | schema refinement stays R-BTN-108's |
+| S-BTN-152 | strata and reserved names | B-166 part 4 (2026-11-02, B-162) | — |
+| S-BTN-153 | route-choice delivery and overrides | B-166 part 4 (2026-11-02, B-162) | a mid-run unusable provider: S-BTN-20, S-BTN-91 |
+| S-BTN-154 | route-choice limits and conformance | B-166 part 4 (2026-11-02, B-162) | — |
+| S-BTN-155 | the ontology's merge and acceptance | B-166 part 4 (2026-11-02, B-162) | — |
+| G-BTN-159 | the gate stratum is monotone in granted holdings | B-166 part 4 (2026-11-02, B-162) | G-BTN-5 |
+| G-BTN-160 | the evaluator agrees with clingo, bounded by counts | B-166 part 4 (2026-11-02, B-162) | — |
+| G-BTN-161 | a route choice's advice never refuses, identifiers only | B-166 part 4 (2026-11-02, B-162) | G-BTN-49 |
 
 Parts retired from surviving rows: S-BTN-105 and G-BTN-124 keep only the override half (the rest
 became S-BTN-110 and G-BTN-129, 2026-10-19); S-BTN-95 and G-BTN-115 lost the legacy

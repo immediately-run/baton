@@ -69,3 +69,7 @@ test`.
 - [ ] §5.9 is built as specified, and every scenario named above passes on both hosts
 - [ ] the conformance suite and the strict-syntax test are green in `npm test`
 - [ ] no credential material, provider call or provider word enters `src/core/`
+
+## Status
+
+- 2026-11-02: **spec half superseded** by the spec restructure's part 4 (B-166; B-162's ruling, the owner: "Nothing; move it out"): core matches capabilities by name and holds no ontology (R-BTN-174 rewritten; R-BTN-175 retired). Where each item went: 1 (`src/core/ontology.ts`) → deleted by B-167; 2 (accepting a unit, the board post's `ontology`) → deleted by B-167; 3 (derived sets, `gatesFor` on H ∪ D(H)) → rule 4 on declared ∩ grant by name, B-167; 4 (why-not) → nowhere: `not-declared` / `not-granted` only; 5 (the built-in, the merge, `repo init`'s `ontology.json`) → deleted by B-167; 6 (removals: the ungranted-declaration refusal, `human-operator` grantable, R-BTN-126's any declared capability) → stand, in R-BTN-121 and R-BTN-126; 7 (conformance, clingo) → deleted by B-167. Exit criteria: the first two retired with S-BTN-139 to S-BTN-146 and S-BTN-155 (history, Retired scenarios); the third (no credential or provider word in `src/core/`) stands as R-BTN-50 and R-BTN-174.

@@ -69,7 +69,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN
   key is a delegated key acting as an owner, narrowed to what R-BTN-186 admits — tighten, and
   undo its own (the owner, 2026-10-27 and 2026-11-01). No surface carries a rule of its own.
 - **Advice is fresh for the reader, bounded for the fleet.** A write Baton accepts — a board,
-  a reading, a heartbeat, an ontology — marks what it affects stale, and anything a runner reads
+  a reading, a heartbeat — marks what it affects stale, and anything a runner reads
   afterwards is brought up to date for that runner first; fleet-wide views (counts, blocks,
   wake-ups, the dashboard) are current within one alarm cycle.
 
@@ -117,12 +117,12 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN
   local host (R-BTN-55); migrations are append-only; every behaviour change names its
   `S-BTN-n` scenario. The enforcement surface is `CLAUDE.md`'s rules — this page is why
   they are rules.
-- **A repository's ontology is data core interprets, not code it runs.** The capability
-  ontology (spec §5.9) is a total, bounded logic program with no I/O, evaluated by core the
-  way a course file's state machine is, which is why it may decide a gate without breaking
-  "Baton runs no repository code". Its language grows only by ASP-Core-2 constructs, and
-  readings reach its advice, never its gate; a leg that must gate on a reading says so in its
-  own requirement (BATON_SPEC R-BTN-181).
+- **Capabilities are names, matched; Baton derives none.** Core matches a leg's capabilities
+  against what a runner declares, by name (BATON_SPEC R-BTN-174). What the keys and tools a runner
+  holds amount to is the runner's own statement, and which model and key a leg uses is the
+  course's — its `rank.mjs` and its instructions read the readings (§6.10). The capability
+  ontology and route choices core once evaluated moved out (the owner, 2026-11-01, "Nothing; move
+  it out"): the core is small and knows no course.
 - **The formal model names the code.** `model/baton.qnt` and the implementation check
   each other (`model:links`, traces); a change to what the model checks carries a report.
 
