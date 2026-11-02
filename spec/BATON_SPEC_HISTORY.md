@@ -1443,6 +1443,17 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   the five marks already; the scratch copy was stale. No further round: what remains is the
   owner's (the PR body's list).
 
+- **2026-11-02 — the owner's answer on part 1's open items.** Asked the seven questions the PR
+  body listed, each with a recommended option, the owner answered: "I'll take your
+  recommendations on the above." So, as rulings: `exhausted` stays in the retry policy
+  (R-BTN-122); B-155's notification ruling is part 1's (R-BTN-163); `build-app` keeps
+  `stuck`/`decide`; a person's answer, a route or an adopt restarts the queued leg's run count,
+  recorded as `runs_from` (R-BTN-63); a cancelled ticket is a `cancelling` flag beside its hold,
+  not a block kind (R-BTN-168); a `"replaces": "retry"` binding asks through a person leg
+  (R-BTN-122, R-BTN-161); and `max_blocked` 5 and the 900 s wait are constants of this
+  specification (R-BTN-126, R-BTN-162), two rows of table 1.4 taken before part 2 reads it. No
+  candidate in the B-165 table was vetoed. The merge waits on the owner's word.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
