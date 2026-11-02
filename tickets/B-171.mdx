@@ -9,8 +9,8 @@ repos:
 tags:
   - roadmap-item
 order: 1173
-tier: judgement
-description: "R-BTN-19 holds a ticket fence-pending until the old incarnation reports fenced or fence_deadline passes — reap plus the runner's own lease_timeout, up to 24 hours (R-BTN-9) — and nothing an owner or administrator does clears it, not even after the administrator's own force-reap of a machine they know is dead. Add a confirmed administrator fence-clear (recommended) or bound the deadline; amend R-BTN-19, G-BTN-14 and S-BTN-4; build it. Requires: none."
+tier: routine
+description: "Build R-BTN-19's administrator fence clear, the owner's ruling of 2026-11-02: claim.fence-clear (POST /v1/ui/claims/{id}/fence-clear, destructive, confirmed, administrator only, never delegated) clears a pending fence at once, frees the seats and logs fence-cleared {admin}; the dashboard draws it beside force-reap. Requires: none."
 topics:
   - baton
 owns: {}
@@ -34,38 +34,33 @@ fence action. So an administrator who force-reaps a hung laptop runner, and know
 off, waits up to a day for the ticket, and its capacity seats stay held as long (R-BTN-178). A
 hostile runner turns its own reap into a day's hold on the ticket.
 
-### Decide (the owner)
+### Decided (the owner)
 
-- **(a) recommended — an administrator's fence-clear.** A new registry action,
-  `claim.fence-clear` (`POST /v1/ui/claims/{id}/fence-clear` and `baton admin claim fence-clear
-  <claim>`), destructive under §12.2, administrator only, never delegated: it clears the fence at
-  once, frees the seats, and logs `fence-cleared {admin: <fingerprint>}`. The dialog shows the
-  runner's last-seen time and says that a process the old incarnation still runs can push until
-  its own lease check fails (`last_ok + lease_timeout − 4 min`, R-BTN-26), and that R-BTN-25's
-  re-read is then the only protection. The deadline stays as it is.
-- (b) bound the deadline: `fence_deadline` = reap + min(`lease_timeout`, 2 h). Needs no new
-  action, but breaks the deadline's stated reason — a runner declaring a long lease (a sleeping
-  laptop) may still hold processes whose own checks have not yet computed the lease lost — so
-  it trades the fence's guarantee for availability for every runner, not only the one an
-  administrator vouches for.
-- (c) both.
+2026-11-02, choosing among this ticket's options: "I accept your recommendations" — option (a),
+an administrator's fence clear; the deadline stays. The spec states it (R-BTN-19 *An
+administrator's clear*, §9.5, R-BTN-155's confirmed list, §12.2, §14, G-BTN-14; S-BTN-4), PR
+`claude/baton-spec-review-2fwiga`.
 
-### What to build (for (a))
+### What to build
 
-1. **A spec PR first** under the babysit skill's *Spec PRs*: R-BTN-19 names the clear; §9.5
-   lists it with force-reap; §12.2 and the registry (R-BTN-129) gain the action; G-BTN-14 reads
-   "until `fence-cleared`, its `fence_deadline` or an administrator's clear, which nothing the
-   runner does extends"; S-BTN-4 gains the clear (claimable at once, seats freed, the event logged)
-   and an owner's and a delegated key's attempt (`forbidden`).
-2. The core action, the route, the CLI verb and the dashboard control, generated from the
-   registry entry; a seal (S-BTN-50) that waits on a fence-pending claim proceeds after a clear.
+1. The registry action `claim.fence-clear` (administrator only, destructive, never delegated) and
+   its route `POST /v1/ui/claims/{id}/fence-clear`, confirmed like force-reap: it clears the
+   fence in one transaction, frees the claim's seats (R-BTN-178) and logs
+   `fence-cleared {admin: <fingerprint>}`; a claim whose fence is not pending is `conflict`.
+2. The dashboard control beside force-reap, drawn only for administrators, with the dialog
+   R-BTN-19 describes (last-seen time; what the clear gives up).
+3. A seal waiting on a fence-pending claim (S-BTN-50) proceeds after a clear.
+
+### Tests
+
+S-BTN-4, S-BTN-21 and S-BTN-50 as §15 states them, green in `npm test` on both hosts.
 
 ### Exit criteria
 
-- [ ] the spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
 - [ ] S-BTN-4 and S-BTN-21 green in `npm test` on both hosts; `npm run typecheck` green
 - [ ] `model/baton.qnt` models the clear, or the model report says why it need not
 
 ## Status
 
 - 2026-11-02: drafted from the 2026-11-02 security review (PR #165).
+- 2026-11-02: decided by the owner (option (a)); the spec half written by PR `claude/baton-spec-review-2fwiga`; this ticket now builds it.

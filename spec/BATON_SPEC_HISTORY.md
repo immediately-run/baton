@@ -2141,6 +2141,31 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   purpose ("CI tokens, App deliveries and forge notifications count in none") and the body cap now
   bounds.
 
+- **2026-11-02 — the owner's rulings on the security review's tickets.** Asked to choose among
+  the options B-170, B-171, B-174 and B-175 lay out, each with a recommendation, the owner
+  answered: "I accept your recommendations". Changed: R-BTN-144 gains masking class 7 — every
+  variable of the leg's environment whose name ends `_KEY`, `_TOKEN` or `_SECRET`, and every
+  name `runner.json` `mask_env` lists — which archivers apply to transcripts and replay to its
+  report, and the environment table's "kept" row cites it (B-170; rejected: a list alone, empty
+  by default; leaving kept credentials unmasked); R-BTN-19 gains an administrator's fence clear,
+  `claim.fence-clear` (`POST /v1/ui/claims/{id}/fence-clear`, destructive, confirmed, never
+  delegated, logging `fence-cleared {admin}`), with §9.5, R-BTN-155's confirmed list, §12.2,
+  §14 and G-BTN-14 naming it (B-171; rejected: bounding `fence_deadline` at two hours, which
+  weakens the fence for every runner with a long lease); R-BTN-131's request command decides by
+  the forge's answer — a protected-branch refusal pushes the commit to the course's
+  `branch_pattern` for the request and opens a PR with the caller's forge credential, a `git`
+  forge or no credential exits non-zero with the branch printed, any other refusal is reported in
+  git's words — and R-BTN-180 says the same, closing the contradiction (C2) PR #165 left open
+  (B-174; rejected: reading the policy first); R-BTN-114's conclusions are `success`, `failure`
+  and `timed_out`, with no `neutral`, R-BTN-153 sends a timeout or `exec` error to `timed_out`
+  (else `failure`) and lets an agent reach only `failure` or `timed_out`, R-BTN-115 posts
+  `timed_out` as GitHub's conclusion of that name and as the failing state elsewhere, and a
+  loosening of `checks` is a station newly mapped to `success` or a removed or renamed entry
+  (B-175; rejected: keeping `neutral` as an advisory conclusion; stating the gap). No `neutral`
+  mapping was built, so no transition is carried. Scenarios S-BTN-4, S-BTN-68, S-BTN-98 and S-BTN-175
+  gain the cases; G-BTN-93 names the set; four Decisions lines. B-5's agent-stations line is
+  corrected. The four tickets now hold only their build halves.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
