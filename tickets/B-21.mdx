@@ -3,7 +3,7 @@ title: "B-21 — Baton blocked edges: a prerequisite that fails during a leg end
 id: B-21
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -76,3 +76,4 @@ landed (R-BTN-174); both named inline in item 3. A route choice's separately rep
 holding (R-BTN-177) is B-105's channel, not this end's.)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): a `blocked` end names a `ticket` prerequisite, never a `decision` (retired, R-BTN-78); the bound on blocked ends is a constant, 5 a day per ticket and leg (R-BTN-122), not the owners' `max_blocked`.)_
+- 2026-11-02: the spec restructure's part 4 (B-166): the ontology and route choices left core (R-BTN-174; R-BTN-175 to R-BTN-177 retired, B-167), so a `capability` end's `ref` is any capability the runner declared and lost, and a route choice's reported `dead` holdings are gone; a resource end blocks the leg for every runner alike once every usable instance is `unavailable` (R-BTN-76, R-BTN-126).

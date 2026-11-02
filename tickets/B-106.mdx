@@ -1,14 +1,14 @@
 ---
-title: "B-106 — Seats: a bill takes a seat on a resource instance, a host scope for VM singletons, refused past capacity"
+title: "B-106 — Capacity: a capability with a capacity has that many seats, stored when a leg starts for the claims whose leg requires it, refused past capacity"
 id: B-106
 project: baton
 status: available
-updated: 2026-10-22
+updated: 2026-11-02
 tags:
   - roadmap-item
 order: 508
 tier: judgement
-description: "Build §6.11 (R-BTN-178): resources gain a capacity and a host scope; the runner's bills at the claim or advance that starts a leg take seats, refused by rule 11 (instance-busy) past capacity, released at leg end, claim end and reap; recommendations skip legs whose usable instances are full. Requires: none."
+description: "Build §6.11 (R-BTN-178) as the spec restructure's part 4 rewrote it: an administrator sets a capability's capacity for the tenant; a claim holds a seat, stored in claim_seats when its leg starts, on each capability with a capacity in rule 4's set for the leg; rule 11 refuses capacity-full past capacity; seats release at an advance into a leg not requiring it, at claim end and at a reap that is not fence-pending; recommendations skip a full capability. Requires: none."
 topics:
   - baton
 owns: {}
@@ -23,40 +23,71 @@ the leg required RDP access to a machine which can only be controlled by a singl
 time)." And: "specific capabilities used by the leg about to be completed should travel with the
 claim request: the runner in the vm is authoritative about this… if they make the claim first,
 the later claim can fail."
-**Spec:** §6.11 R-BTN-178, with the rules it amends: R-BTN-76 (`--capacity`, the `host`
-scope), R-BTN-100 (`bills` take seats), §6.6 rule 11, §13 (`external_resources.capacity`,
-`resource_instances.capacity`, `claim_bills`) and §14 (`POST /v1/admin/resources`). The history
-is in `BATON_SPEC_HISTORY.md` (Changelog, 2026-10-22, §6.11).
+**Spec:** §6.11 R-BTN-178 (rewritten 2026-11-02 by the spec restructure's part 4, B-166), with
+the rules it touches: §6.6 rule 11 and step 4, R-BTN-75's why-not table (`full`), R-BTN-99's
+instance view, R-BTN-127's `admin capacity set`, §13 (`capability_capacity`) and §14 (`PUT
+/v1/admin/capacities`). The history is in `BATON_SPEC_HISTORY.md` (Changelog, 2026-10-22, §6.11;
+and "the restructure, part 4", which replaced seats on resource instances, `bills`, `claim_bills`
+and the `host` scope by B-165's review default).
 
 ### What to build
 
-1. **Registration.** A migration adds `capacity` to `external_resources` and
-   `resource_instances`, and admits `scope = 'host'`. Add `baton admin resource add --capacity`
-   and the `POST /v1/admin/resources` field.
-2. **Host instances.** `<resource>@host:<hostname>` is a usable instance for every runner of
-   that hostname, and those runners may report on it (R-BTN-76). `service` instances are
-   billable too.
-3. **Rule 11.** In the claim's and advance's committing transaction, count each billed
-   instance's seats held by other claims, and refuse `instance-busy` past capacity, naming the
-   holder only where the caller may see it. Per-candidate `bills` on `prefer`. This is never a failed attempt, and a `prefer` claim moves to its next candidate.
-   Add the rule to the matching code and the model (R-BTN-68).
-4. **Release.** Seats are released at each advance that stops naming an instance and at the
-   claim's end. For a fence-pending reap they are released at `fence-cleared` or the fence
-   deadline.
-5. **Recommendations and why-not.** Skip a leg whose `requires.resources` has no usable instance
-   with a free seat for this runner. `baton leg why` names the holder. The instance view serves
-   active seats.
-6. **The runner.** Add a way for a leg's course code or the runner's config to name the instances
-   it will bill. The CLI runner bills the `host` instance of each resource the starting leg
-   requires that is registered `host`.
+1. **Registration.** A migration adds `capability_capacity (capability, capacity, set_by,
+   set_at)`. Add `baton admin capacity set <capability> <n> | --clear`, the registry action
+   `admin.capacity.set` and `PUT /v1/admin/capacities`, logged `admin`.
+2. **Seats.** A migration adds `claim_seats (claim_id, capability)`; the seats counted are its rows. At a claim, and at each
+   `advance` that starts a leg, write the claim's seats: each capability with a capacity in the
+   set rule 4 matched (the ticket's `requires` and the leg's `requires.capabilities`). A later
+   snapshot never changes them. Delete them at the claim's end, a reap that is not
+   fence-pending, or for a fence-pending reap at `fence-cleared` or `fence_deadline` (the alarm row of §2). R-BTN-50's
+   vocabulary row names capacity and seats; no boundary-test word changes.
+3. **Rule 11.** In the claim's and advance's committing transaction, count the seats other
+   active or fence-pending claims hold on each such capability and refuse `capacity-full` past
+   capacity, naming the holders only where the caller may see them. Never a failed attempt; a
+   `prefer` claim moves to its next candidate. Add the rule to the matching code and the model
+   (R-BTN-68).
+4. **Release.** An `advance` into a leg not requiring the capability, the claim's end and a reap
+   that is not fence-pending release the seat; a fence-pending reap releases at `fence-cleared` or the fence deadline.
+5. **Recommendations and why-not.** Skip a leg requiring a full capability, in
+   recommendations and `launch-candidates`; `baton leg why` answers `full` from `claim_seats`.
+   The instance view serves each capacity and the claims holding its seats, fence-pending ones
+   included, and a seat taken or released bumps `instances_version`. Seats write no block and
+   send no `unblocked`.
+6. **One machine's singleton.** The CLI runner's configuration gains `lock: <path>` on a
+   capability (R-BTN-121): declare it only while the runner holds, or can take, an exclusive lock
+   on the file; take the lock before a claim for, or the `advance` into, a leg requiring it, and
+   suspend rather than send that `advance` when it cannot; release it on a refused claim or one
+   answered for another leg, and otherwise hold it until the claim ends or an `advance` starts a
+   leg not requiring it.
+7. **The capacity command** validates the capability (one expanded `<type>:<value>`, never a
+   role, `credential:`, `runner:` or bare `human-operator`) and, before signing, prints every
+   course whose legs require it (`courses.leg_capabilities_json`), with the type's definition in
+   each, and asks to confirm (R-BTN-178).
+8. **The seal** (R-BTN-88) also waits until no claim is fence-pending, so a move never frees a
+   seat a reaped incarnation may still use.
+9. **The lock's suspension.** A claim answered for a `lock` leg the runner cannot lock ends
+   `suspended` at once, touching nothing (R-BTN-121).
 
 ### Tests
 
-S-BTN-21 (rewritten) and G-BTN-162, green in `npm test` on both hosts.
+S-BTN-21 (rewritten), S-BTN-73's lock case, S-BTN-50's fence-pending seal and G-BTN-162, G-BTN-78, green in `npm test` on both hosts.
 
 ### Exit criteria
 
-- [ ] two runners on one VM never hold a capacity-1 `host` instance at once; one `service`
-      instance with capacity 1 has at most one holder across every host
-- [ ] a seat refusal is `instance-busy`, never a failed attempt, and a reap releases every seat
-- [ ] recommendations do not offer a leg whose usable instances are all full
+- [ ] one capability with capacity 1 has at most one holder across every host and repository,
+      a snapshot mid-leg changing no held seat
+- [ ] two CLI runners on one machine never run legs requiring one `lock` capability at once
+- [ ] a seat refusal is `capacity-full`, never a failed attempt, and a reap releases every seat
+- [ ] recommendations do not offer a leg whose required capability is full
+
+## Status
+
+- 2026-11-02: rewritten by the spec restructure's part 4 (B-166, B-165's review default): the
+  capacity is a capability's, not a resource instance's. Where the old plan's items went: 1
+  (resource `--capacity`, `host` scope) → item 1, a capability's capacity; the `host` scope is
+  gone, one machine's singleton being a runner-side lock (item 6). 2 (host instances) → nowhere:
+  no per-host instance. 3 (rule 11 on bills, per-candidate `bills`) → item 3, on the leg's
+  requirements; no `bills`. 4 (release) → item 4. 5 (recommendations, why-not, instance view)
+  → item 5, `full` in place of `busy`. 6 (the runner names its bills) → nowhere: the seat
+  follows from the leg. Exit criteria: the first → two runners on one VM sharing a device is
+  the runner's lock; the rest as above.

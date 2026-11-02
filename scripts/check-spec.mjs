@@ -13,7 +13,7 @@
 // - none of the scrub's terms (SCRUBBED) is in the spec: the repository is public;
 // - every test/integration/ file named for a scenario (`S-BTN-n.*.test.ts`) names one §15's
 //   scenario table defines and not one the history retired (B-71) — the RETIRED_TESTS_ALLOWED
-//   list holds the two retired files that still test their rows until B-67 deletes them;
+//   list holds the retired files that still test their rows until B-67 and B-167 delete them;
 // - no rule opens with an italic patch note (`- **R-BTN-35 (…).** *Except …*`): an amendment
 //   rewrites the rule instead of stating an exception on top of a body that still says the
 //   opposite (spec-tools.mjs's `patchNotes`). PATCH_NOTES_ALLOWED holds the ones written before
@@ -70,8 +70,9 @@ export function retiredScenarioIds(history) {
 }
 
 /** Test files that may stay named for a retired scenario: they still test their (retired) rows,
- *  and B-67 deletes them — empty the list then. */
-export const RETIRED_TESTS_ALLOWED = ['S-BTN-46', 'S-BTN-60'];
+ *  and B-67 (S-BTN-46, S-BTN-60) and B-167 (S-BTN-139, S-BTN-147: the ontology and route choices,
+ *  retired by the spec restructure's part 4) delete them — empty the list then. */
+export const RETIRED_TESTS_ALLOWED = ['S-BTN-46', 'S-BTN-60', 'S-BTN-139', 'S-BTN-147'];
 
 /** The scenario a test file is named for (`S-BTN-2.silent-runner.test.ts` → `S-BTN-2`), if any. */
 export function fileScenario(name) {
