@@ -1,0 +1,71 @@
+---
+title: "B-171 — An administrator can clear a fence: a fence-pending ticket is no longer stuck for up to 24 hours with no lever"
+id: B-171
+project: baton
+status: available
+updated: 2026-11-02
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1173
+tier: judgement
+description: "R-BTN-19 holds a ticket fence-pending until the old incarnation reports fenced or fence_deadline passes — reap plus the runner's own lease_timeout, up to 24 hours (R-BTN-9) — and nothing an owner or administrator does clears it, not even after the administrator's own force-reap of a machine they know is dead. Add a confirmed administrator fence-clear (recommended) or bound the deadline; amend R-BTN-19, G-BTN-14 and S-BTN-4; build it. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** R-BTN-19 (*fence before re-issue*), §9.5 (*Reaping*), R-BTN-9 (the lease timeout's
+clamp), R-BTN-26 (the sidecar's own fence), R-BTN-178 (seats held until `fence-cleared`), §12.2
+(destructive actions), G-BTN-14, S-BTN-4, S-BTN-21, S-BTN-50. Source:
+`docs/review/security-review-2026-11-02.mdx`, finding S3, checked against the text in PR #165.
+
+### Why
+
+A claim reaped while its runner was alive — a force-reap, an unacknowledged-release reap, a
+`leg-timeout` reap — is fence-pending until that incarnation reports `fenced` or until
+`fence_deadline`, the reap plus the runner's declared `lease_timeout_ms`, which R-BTN-9 clamps to
+at most 86,400 s. `baton.fence-pending` at 30 minutes is a notice, not a control; rule 3 refuses
+every claim meanwhile; adopt and force-reap act only on active claims; the registry has no
+fence action. So an administrator who force-reaps a hung laptop runner, and knows the machine is
+off, waits up to a day for the ticket, and its capacity seats stay held as long (R-BTN-178). A
+hostile runner turns its own reap into a day's hold on the ticket.
+
+### Decide (the owner)
+
+- **(a) recommended — an administrator's fence-clear.** A new registry action,
+  `claim.fence-clear` (`POST /v1/ui/claims/{id}/fence-clear` and `baton admin claim fence-clear
+  <claim>`), destructive under §12.2, administrator only, never delegated: it clears the fence at
+  once, frees the seats, and logs `fence-cleared {admin: <fingerprint>}`. The dialog shows the
+  runner's last-seen time and says that a process the old incarnation still runs can push until
+  its own lease check fails (`last_ok + lease_timeout − 4 min`, R-BTN-26), and that R-BTN-25's
+  re-read is then the only protection. The deadline stays as it is.
+- (b) bound the deadline: `fence_deadline` = reap + min(`lease_timeout`, 2 h). Needs no new
+  action, but breaks the deadline's stated reason — a runner declaring a long lease (a sleeping
+  laptop) may still hold processes whose own checks have not yet computed the lease lost — so
+  it trades the fence's guarantee for availability for every runner, not only the one an
+  administrator vouches for.
+- (c) both.
+
+### What to build (for (a))
+
+1. **A spec PR first** under the babysit skill's *Spec PRs*: R-BTN-19 names the clear; §9.5
+   lists it with force-reap; §12.2 and the registry (R-BTN-129) gain the action; G-BTN-14 reads
+   "until `fence-cleared`, its `fence_deadline` or an administrator's clear, which nothing the
+   runner does extends"; S-BTN-4 gains the clear (claimable at once, seats freed, the event logged)
+   and an owner's and a delegated key's attempt (`forbidden`).
+2. The core action, the route, the CLI verb and the dashboard control, generated from the
+   registry entry; a seal (S-BTN-50) that waits on a fence-pending claim proceeds after a clear.
+
+### Exit criteria
+
+- [ ] the spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] S-BTN-4 and S-BTN-21 green in `npm test` on both hosts; `npm run typecheck` green
+- [ ] `model/baton.qnt` models the clear, or the model report says why it need not
+
+## Status
+
+- 2026-11-02: drafted from the 2026-11-02 security review (PR #165).

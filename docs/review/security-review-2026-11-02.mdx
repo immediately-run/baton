@@ -335,3 +335,30 @@ verified, not assumed:
 **Count:** 8 security findings (3 Should-fix, 5 Minor), 6 contradictions, 3 unspecified
 behaviours, 5 naming gotchas — against the 2026-11-01 whole-spec review's eleven filed tickets,
 whose UX and simplification findings this review does not repeat.
+
+---
+
+## Disposition
+
+Each finding was checked against the spec's text before it was acted on (the same PR). Small
+corrections are in `spec/BATON_SPEC.md` here, recorded in `spec/BATON_SPEC_HISTORY.md` ("the
+security review's corrections") and built by B-169; findings that need a design choice are
+tickets.
+
+| Finding | Outcome |
+|---|---|
+| S1 | **Split.** Bearer prefixes: fixed — class 5 now masks every bearer prefix Baton issues, `bps_` and `bds_` included, which the review did not list. Provider keys: **B-170** — the runner inherits them and cannot tell which variable is one, so "mask the model-provider tokens the runner holds" needs a mechanism first. Also fixed: R-BTN-84 said replay keeps the provider's key, while R-BTN-144's replay allowlist keeps it only if `replay_env` names it. |
+| S2 | **Fixed.** The map names exactly one `success` and one `failure` station; every change to `checks` and every addition to `check_runners` is a loosening. |
+| S3 | **B-171.** An administrator's fence-clear is recommended over bounding the deadline, which would weaken the fence for every runner. |
+| S4 | **Fixed**, with C4: both routes named in §2.3, bodies capped at 25 MB (GitHub's own largest delivery, so no real delivery is refused) before any digest. |
+| S5 | **Not taken.** The `protected` preset's `readings` row already says "the owner narrows the resources a gate reads", and instrument keys are administrator-registered. |
+| S6 | **Fixed** in R-BTN-191's supersession bullet. The proposed R-BTN-187 clause is not needed: R-BTN-187 already applies only where `inputs.board` excludes `machine`. |
+| S7 | **B-172**, widened on checking: the CLI cannot show the row's address before binding, because the login-links routes answer only `{ok: true}`. The display the defence rests on is not specified, so it is not only a matter of reading it. |
+| S8 | **Not taken.** Many FIDO authenticators report no counter, so a monotonic check refuses real keys or exempts them. A cloned key is a custody failure, which §12.8 leaves to the deployment. |
+| C1, C3, C5, C6 | **Fixed.** C3: the field is deleted; nothing built reads it. |
+| C2 | **Fixed**: the request command reads nothing from Baton and opens a PR where the forge refuses its push. B-169 builds the fallback. |
+| C4 | **Fixed** with S4. |
+| U1 | **B-173**, widened: no rule says what retirement does to anything, not only sessions and MCP keys. |
+| U2 | **Not taken.** A leg runs as the sidecar's own OS user, which R-BTN-144 already puts outside the boundary. The fence's authority is Baton's holder query (R-BTN-26). |
+| U3 | **Fixed** in R-BTN-16. |
+| Naming | **Not taken.** A rename touches every rule, test and ticket that uses the word, and the 2026-11-01 review weighed ergonomics. §6.6 already says rule 12 is unused and why the numbers are stable. |

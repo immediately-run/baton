@@ -2093,6 +2093,33 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   requirement's reading; S-BTN-21 gains the silent reap and a ticket-level seat. The reviewer's
   verdict: with D-1 fixed, ready for the owner with only the PR's nine items open.
 
+- **2026-11-02 — the security review's corrections** (PR #165,
+  `docs/review/security-review-2026-11-02.mdx`). No owner ruling: each change makes two rules
+  agree, or closes a gap the review found, in the direction the spec already pointed; the
+  findings that need a design choice are tickets (B-169 to B-173). Changed: R-BTN-93's spliced
+  first bullet is one sentence again (C1); the claim response loses `outbox?`, which no rule
+  defined and R-BTN-171's own route replaces (C3); §2.3 names both forge-notification routes as
+  outside the per-IP rule, and R-BTN-73 caps their bodies at 25 MB, refused `too-large` before
+  any digest (C4, S4); R-BTN-131's request command reads nothing from Baton and opens a PR where
+  the forge refuses its push, and R-BTN-180 says the same (C2); the pending sign-in cookie is
+  `__Host-baton_pending`, matching the built session cookie (C5); §12's headline and R-BTN-15
+  claim that no push changes the state Baton holds for authority, the policy included, and name
+  the attestations a push may move (C6); R-BTN-144's class 5 masks every bearer prefix Baton
+  issues — `bps_`, `bds_` and the OAuth companion's `bmo_`, `bmr_`, `bor_` joining `brt_`,
+  `bak_`, `bmcp_` — and R-BTN-84's replay keeps the provider's key only where R-BTN-144's
+  allowlist names it (S1, in part; provider keys in leg output are B-170); R-BTN-114's
+  `conclusions` map names exactly one `success` and one `failure` station, and every change to
+  `checks` and every addition to `check_runners` is a loosening (S2); R-BTN-191's supersession
+  names the machine key among the sync's posters (S6); R-BTN-16 sends `Cache-Control: no-store`
+  on every authorized response (U3). Scenarios S-BTN-42, S-BTN-68, S-BTN-98 and S-BTN-124 gain
+  the cases; B-169 builds them. Not taken: S5 (the `protected` preset's `readings` row already
+  tells owners to narrow what a gate reads, and instrument keys are administrator-registered);
+  S8 (counter checks refuse authenticators that report no counter, and a cloned key is a
+  custody failure the deployment owns, §12.8); U2 (a leg is the sidecar's own OS user, which
+  R-BTN-144 already puts outside the boundary, and the fence's authority is Baton's holder
+  query, R-BTN-26); the naming gotchas (renames cost more than they would save; §6.6 already
+  marks rule 12 unused).
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
