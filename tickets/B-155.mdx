@@ -3,7 +3,7 @@ title: "B-155 — The protected preset works on day one: a defined checks writer
 id: B-155
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -77,3 +77,4 @@ immediately-run/baton#150; the restructure, B-166, writes them into the spec):
 - 2026-11-01: filed from the whole-spec review.
 - 2026-11-01: decided by the owner (above); written into the spec by the restructure, B-166.
 - 2026-11-01: the **notifications** ruling ("No ticket file") is written into R-BTN-163 by the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`), since it lives in §7.3: a delivery runner polls the open conditions and sends the resolve link; no handler ticket, outbox entry or withdrawal for Baton's own conditions; the `handler` outbox kind, bindings of `baton.*` and the flapping rule are gone. The **checks** ruling ("Forge checks suffice") and items 4 to 6 stay for part 2.
+- 2026-11-02: the **checks** ruling ("Forge checks suffice") is written by the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`): `merge.checks: required` is met by check runs from workflows on the protected default branch, or by an optional `std:checks@1` a check-runner the owner names posts (R-BTN-183, R-BTN-115, R-BTN-181, R-BTN-188); the policy table's "nothing merges until `std:checks@1` is set" is gone. Item 4 (`ask` under `protected`) is answered by part 1's person leg, a `human` `std:decision@1` through `baton attest`; item 6 is `PUT …/policy {dry_run: true}` and `baton owner policy apply --dry-run` (R-BTN-188). **Remaining:** item 5, a cheaper adopt for a course change Baton can map itself (`renamed_from`), for part 3 or 4.

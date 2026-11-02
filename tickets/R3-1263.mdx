@@ -3,7 +3,7 @@ title: "R3-1263 — Baton pulled syncs: sync wants, GET /v1/sync/wanted, POST /v
 id: R3-1263
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -84,3 +84,5 @@ _(filed 2026-10-16)_
 _(2026-11-01: the dispatch credentials move out of Baton (BATON_SPEC R-BTN-94, R-BTN-171, B-152): the dispatch adapters become dispatch targets a dispatch courier delivers as `dispatch` outbox entries, woken by the doorbell; Baton queues them in the transaction that records the want. B-152 builds the move.)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): `GET /v1/sync/wanted`'s `head_sha` is the newest commit any post named; there are no held posts (R-BTN-11, R-BTN-94).)_
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) keeps this ticket's shape — dispatch adapters behind one port in Baton, credentials in `BATON_FORGE_SECRETS` and `BATON_GITHUB_APP_KEY` — after B-152's move of them to a dispatch courier was dropped (B-159, B-160; R-BTN-94). Dispatches are Baton's own calls after commit, not outbox entries.)_

@@ -1454,6 +1454,77 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   specification (R-BTN-126, R-BTN-162), two rows of table 1.4 taken before part 2 reads it. No
   candidate in the B-165 table was vetoed. The merge waits on the owner's word.
 
+- **2026-11-02 — the restructure, part 2: security and policy (B-166; owner direction).** The
+  second part of the rewrite the owner asked for after the whole-spec review of 2026-11-01
+  (`docs/review/spec-simplification-review-2026-11-01.mdx`, B-155 to B-165; part 1 above). This
+  part rewrites §12.8 whole (R-BTN-180 to R-BTN-192), §7.8 (R-BTN-171), §3.3 (R-BTN-94 and
+  R-BTN-73's dispatch), §12.7, §10's R-BTN-115, §3.4's R-BTN-139 and §12.1 to §12.5, with the §13,
+  §14 and §15 rows that name them, from the text on `main` (`72a7a68`), applying these rulings.
+  The owner answered each question with the words in quotation marks; the sentence after each is
+  the ticket's reading of that answer (the tickets are unsigned, so the readings are claims, as
+  `CLAUDE.md` says):
+  - **B-160, the owner: "Out of scope".** The ticket's reading: Baton's server is trusted; its
+    compromise is recovered (B-125), not resisted. §12.8 opens with it. Removed: the Ed25519
+    signature on outbox entries and `GET /v1/keys/signing`; the signed policy read, its
+    `valid_until`, `kid`, `signature`, `tenant` and the three hashes in every claim response and
+    heartbeat; the trusted runner's pins (`policy_pins`, `baton.policy-unpinned`, the pinned
+    human-only keys and attestation key); R-BTN-143's `base_sha` roll-back check (an older sha's
+    post is `head-moved`, R-BTN-11); and, as a consequence the ticket did not list, the signature
+    an attestation carried of its own (R-BTN-181): nothing outside Baton verifies one, so an
+    attestation is authenticated by the request that posted it. `BATON_SIGNING_KEY` is gone.
+  - **B-159, the owner: "Couriers into runners", and "Drop it".** The ticket's reading: couriers
+    merge into runners; the dispatch courier is dropped and Baton holds the GitHub App key; the
+    fact reader, the protection checker, check-runners, instruments and the mirror stay. A
+    **deliverer** is a runner whose grant role the policy's `outbox` admits, declaring the classes
+    it delivers in its heartbeat (R-BTN-171); the `courier` credential kind, the `couriers` table,
+    `owner courier add`, `admin courier add`, `owner.courier.revoke`, the `/v1/courier/*` routes
+    (now `/v1/runner/outbox/claim` and `…/outbox/{repository}/{id}`), the `courier` writer class
+    and principal, and `outbox.*`'s `trust` and `min_release` are gone. The `dispatch` outbox kind,
+    `delivered_observation`, `baton.dispatch-courier-missing` and `baton.dispatch-refused` are
+    gone: Baton dispatches a wanted workflow itself after commit, with `BATON_GITHUB_APP_KEY` and
+    the trigger tokens in `BATON_FORGE_SECRETS` (R-BTN-94, §2.1, §12.7), B-152's supersession
+    written into the spec. The check App's key stays on the forge-check deliverer's host, never in
+    Baton (R-BTN-115).
+  - **B-164, the owner: "Only protected-signed", and "Remove until designed".** The ticket's
+    reading: `protected` stops claiming `human-gates`; `signed-authorship` leaves the spec until a
+    host-side signer is designed, continuity ranges staying. `human-gates` now holds only where
+    every `approvers.*` list is human-only **and** `human_key` is `hardware`, absorbing
+    `human-gates-hardware`; the preset that holds it is `protected-hardware`, the renamed
+    `protected-signed` (R-BTN-189). `authorship`, `signed-authorship` and R-BTN-183's signed
+    paragraph are gone; `independent-review` is `merge.reviews.count` over distinct domain labels,
+    with no model family (item 4).
+  - **B-155, the owner: "Forge checks suffice".** The ticket's reading: `protected`'s required
+    checks are met by check runs from workflows on the protected default branch; the trusted
+    executor becomes optional. R-BTN-183's checks paragraph and R-BTN-188's `merge.checks` row say
+    so; `std:checks@1`'s writer is a check-runner's key the owner names, optional (R-BTN-181,
+    R-BTN-115). B-155's item 6 is `PUT …/policy {dry_run: true}` (R-BTN-188).
+  - **B-156, the owner: "Tighten, and undo own".** The ticket's reading: an MCP key may make any
+    tightening and undo what it tightened itself; loosening others' limits, routing and adopting
+    stay with owner keys. Written as R-BTN-186's one rule for a delegated key, since §12.8 is
+    rewritten whole; R-BTN-130, R-BTN-154 and R-BTN-163's MCP words are part 3's.
+  - **B-163** (folded into this part): `pusher` names R-BTN-139's sense (the facts' flag, the
+    setting `pushers`, `baton.pushers-degraded`); `pr-verdict` under a policy admitting no `sync`
+    arrival counts only the human-only identity's verdict (R-BTN-192); `course_sources` replaces
+    `trusted_sources`; the vocabulary page names pusher, role, domain and trusted runner.
+  - **B-165, the owner: "Take review's default".** For part 2's candidates (listed in the PR body
+    with what each loses): a grant's **role** and **domain** label replace trust levels, trust
+    domains, model family, `one_per_domain`, `default_trust` and `trusted_domain` (R-BTN-180;
+    `approvers.trust` is `approvers.roles`; `trusted-domain-separate` is gone); `floors` is a knob
+    of the policy document, named floors with `remove_by` and the floors route gone (R-BTN-189);
+    attestation `uses: once`, `used_by` and compare-and-swap consumption are gone, approvals being
+    bound by subject (R-BTN-181); `min_release`, `refs.baton`, `refs.legs` and `leg_state` are
+    constants or follow the forge (R-BTN-180, R-BTN-190).
+  - No rule, scenario or gate is retired. Changed §15 rows: S-BTN-50, -68, -123, -126, -136, -183,
+    -185, -186, -189, -190, -191, -193, -195; G-BTN-83, -93, -156, -164, -165, -166. No test file
+    changes: none cites them.
+  - Outside the spec: `docs/context/vocabulary.mdx` (policy, role and domain, pusher, outbox and
+    deliverer, reply), `docs/context/architecture.mdx` (the four nouns, floors, domains),
+    `docs/security-model.mdx` (the ruling on reach 0, `pushers`), `scripts/check-spec.mjs`
+    (`PATCH_NOTES_ALLOWED` empty: R-BTN-171's note is gone). Tickets: B-152, B-155, B-156, B-159,
+    B-160, B-163, B-164, B-165 and B-166 record what this part wrote; B-64, B-5, B-6, B-145,
+    B-147, B-140, B-120, B-124, B-135, B-46, B-8, R3-1208, R3-1263, B-157, B-119 and B-126 carry a
+    dated note on what changed under them.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

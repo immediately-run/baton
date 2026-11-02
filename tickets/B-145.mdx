@@ -3,7 +3,7 @@ title: "B-145 — The repository policy: one versioned document of every trust r
 id: B-145
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -145,3 +145,5 @@ _(filed 2026-10-30 with the spec amendment that replaces landing modes with the 
   an `attestations` entry), and changes `merge.reviews`' `protected` value to
   `{count: 2, distinct: [trust_domain]}`, `independent-review` requiring distinct trust domains
   only (a policy may add `model_family`). Build the knob table as amended.
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) rewrites R-BTN-188 and R-BTN-189: no signed read (`GET …/policy` answers `{repository, version, hash, policy, guarantees, floors, at}`), no `policy_floors` table or floors route — `floors` is a knob of the document, changed under `approvers.policy` and refusing `floor-violated`; `approvers.trust` is `approvers.roles` (a grant's role and domain); the knobs `grants.*`, `authorship`, `leg_state`, `refs.baton`, `refs.legs` and `outbox.*.trust`/`min_release` are gone; `merge.reviews` is `{count}`; the presets are `cooperative`, `protected`, `protected-hardware` and `plain-git`; `PUT …/policy` takes `dry_run`. The guarantees are six (`signed-authorship`, `trusted-domain-separate` and `human-gates-hardware` gone, `human-gates` needing `human_key: hardware`). Items 1 to 12 read against the current rules.)_
