@@ -1678,6 +1678,21 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   `signed` (part 4), where `pushers`, `check_app_id` and `human_identity` live beside table 1.4
   (part 4), and `fact-legs` filed under Administrator in §14 (part 3).
 
+- **2026-11-02 — the owner's answer on part 2's open items.** Asked the nine questions the PR body
+  listed, each with a recommended option, the owner answered: "I'll take your recommendations."
+  So, as rulings: an attestation about work carries no signature of its own, readings excepted
+  (R-BTN-181, R-BTN-76); the preset is `protected-hardware` (R-BTN-188); B-156's rule stands in
+  R-BTN-186, R-BTN-130 and R-BTN-154 following in part 3; `pushers`, `baton.pushers-degraded`,
+  `course_sources` and the `human_identity` knob are the names (R-BTN-139, R-BTN-188); `human-gates`
+  requires `human_key: hardware` and binds the break-glass line and administrators to it
+  (R-BTN-189, R-BTN-188); `approvers.roles` is the knob's name; `std:checks@1` stays an optional
+  writer (R-BTN-115); the review rounds' additions stand — the `Dispatch` binding and the window in
+  `webhook_syncs`, the earlier-head refusal and R-BTN-143's residual, `baton admin check-app create`
+  and the instance's `check_app_id`, no API-key deliverer, idempotent trusted actions, the
+  null-domain writer, no repository-level secrets, ejected sources offered to no trusted-runner
+  grant, an apply keeping named `service:` keys; and a Fieldhouse spec PR follows this merge
+  (B-166's status). No candidate in the B-165 table was vetoed. The merge waits on the owner's word.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
