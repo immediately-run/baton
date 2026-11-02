@@ -177,7 +177,7 @@ key signs every request and reveals nothing reusable. An API key is a shared sec
 bearer: easier to set up, but anyone who reads one request holds it until it is revoked. `baton
 key create FILE` makes an API key on your machine. `FILE` holds the key (`-i FILE`, or a runner's
 `BATON_KEY_FILE`). `FILE.pub` holds its public line, which goes wherever an SSH public key
-would: `BATON_ADMIN_KEYS`, `--owner-key` or a grant's `--key`. Sync, probe and courier keys stay
+would: `BATON_ADMIN_KEYS`, `--owner-key` or a grant's `--key`. Sync and probe keys stay
 SSH keys. The CLI is the one path:
 
 ```
@@ -199,7 +199,7 @@ baton owner -i ~/.config/baton/docs_owner settings docs --required-bar '*' --cou
 ```
 
 `--url` (or `BATON_URL`) picks the Baton. A key holds one role — administrator, owner, worker,
-probe, courier or sync — and a key in a second is `conflict`. A granted key works only where it
+probe or sync — and a key in a second is `conflict`. A granted key works only where it
 is granted, with what that repository granted (rules 4 and 7) and under its `max_tier`; only an
 administrator grants `human-operator`, or takes over a `BATON_KEYS`-seeded key. Owner bars join the posted barred tags of their course
 (or every course, `*`), at claims and, with `--applies claim+advance`, advances; a leg missing a

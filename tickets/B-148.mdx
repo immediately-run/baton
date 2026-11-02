@@ -3,7 +3,7 @@ title: "B-148 — Leg state on an orphan `baton-legs/<ticket>` branch where ther
 id: B-148
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-02
 repos:
   - baton
   - docs
@@ -87,3 +87,5 @@ and on plain git.
 ## Status
 
 _(filed 2026-10-31 with R-BTN-190.)_
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) drops the `leg_state` knob and `refs.legs`: a `git` repository's leg state is the side branch by R-BTN-190 alone, and `runner`, `trusted-runner` and `human` may push `baton-legs/*` as a constant (R-BTN-180). The dependency on B-145 shrinks to the claim response's `leg_state` field.)_

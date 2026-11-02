@@ -3,7 +3,7 @@ title: "B-140 — The merge runner: a deterministic runner type holds the only c
 id: B-140
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
   - fieldhouse
@@ -169,3 +169,5 @@ protection checker).)_
   lists, each minute and on a `facts` ring, and attests each as `std:arrival@1` under its
   `service:` key, which the owner names in the policy. Build it with the merge runner; B-120
   depends on it.
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) rewrites R-BTN-182 and R-BTN-183: the merge runner pins nothing (no human-only keys, attestation key or policy hash; no `baton.policy-unpinned`; no signed policy read) and reads attestations from Baton as Baton's record; `authorship: signed` is gone (continuity stays); `merge.reviews` is `{count}` over distinct domain labels, no model family; `merge.checks: required` is met by the protected workflows' check runs, a `std:checks@1` being optional; `uses: once` and compare-and-swap consumption are gone, approvals being bound by subject. The fact reader stays (B-159), with `pr-verdict` counting only the human-only identity's verdict under a policy admitting no `sync` arrival (B-163). Items reading `merge`, `paths`, `authorship`, pins and the signed read are to be read against the current rules.)_

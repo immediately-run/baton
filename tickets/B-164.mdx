@@ -3,7 +3,7 @@ title: "B-164 — The guarantees table claims only what holds: human-gates under
 id: B-164
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -59,3 +59,4 @@ immediately-run/baton#150; the restructure, B-166, writes them into the spec):
 
 - 2026-11-01: filed from the whole-spec review.
 - 2026-11-01: decided by the owner (above); written into the spec by the restructure, B-166.
+- 2026-11-02: written by the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`): `human-gates` holds only where every `approvers.*` list is human-only **and** `human_key` is `hardware`, so `protected` does not claim it and `protected-hardware` (the renamed `protected-signed`) holds it; `human-gates-hardware` is merged into it (R-BTN-189). `signed-authorship` and `authorship: signed` are gone; continuity ranges stay (R-BTN-183). `independent-review` needs `merge.reviews.count` and distinct domain labels, nothing about model families (item 4). B-140 and B-147 rescoped.

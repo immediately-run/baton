@@ -3,7 +3,7 @@ title: "B-5 — Baton check courses: check-runner keys, owner-held conclusions a
 id: B-5
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -144,3 +144,5 @@ _(2026-10-30: the spec folds `forge-check` notices into the outbox (R-BTN-171, R
 _(2026-10-31: rewritten onto B-64's outbox: `forge-check` is an outbox entry, not a notice; B-5 now depends on B-64 so it builds on the outbox rather than code B-64 would migrate.)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): check tickets are never claimed open-world because nothing is (R-BTN-104 retired); a `changes` ticket its source stops posting is superseded and, having no file, closes `withdrawn` at once with no `baton.cancel` (R-BTN-168). The fileless re-verification path is this ticket's alone now.)_
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) rewrites R-BTN-115: the forge courier is a runner declaring `delivers: [forge-check]` whose grant role `outbox.forge-check` admits, holding the check App's key on its host; entries are not signed and `GET /v1/keys/signing` is gone (the run's output carries the entry's `seq`, not a signature); a `std:checks@1` from a check-runner the owner names is optional, forge check runs sufficing for `merge.checks: required` (B-155). Items 2, 3 and 7 and S-BTN-68 read accordingly.)_

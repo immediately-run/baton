@@ -3,7 +3,7 @@ title: "B-157 — One CLI command tree: R-BTN-127 lists every command the spec n
 id: B-157
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -55,3 +55,5 @@ from R-BTN-127; `baton-sidecar` and `baton-activity` only in §8.1 and §9.9. To
 
 - 2026-11-01: filed from the whole-spec review.
 - 2026-11-01: folded into the restructure, B-166, which writes it with the section it touches.
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) removes `owner courier add`, `admin courier add` and `courier start` from the spec (B-159) and adds `baton admin check-app create`, `baton owner policy apply --dry-run`, a verb for `PUT …/grants/{fingerprint}/role` (no `--role --domain` flag on `grant`, since the role route has its own approver) and the deliverer's heartbeat flag; the tree this ticket writes (part 3) reads the current §7.8, §12.7 and §12.8.)_

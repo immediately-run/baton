@@ -3,7 +3,7 @@ title: "B-147 — Grants and couriers carry a trust level, a trust domain, a mod
 id: B-147
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -80,3 +80,5 @@ read these attributes, and no ticket built them.
 ## Status
 
 _(filed 2026-10-31 after baton#145's ticket audit: no ticket built the trust attributes.)_
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) rewrites R-BTN-180: a grant carries `role` (`runner`, `trusted-runner`), a `checker` mark on a trusted-runner grant, `domain` (a label) and `set_by`, set by `approvers.roles` (review round one made the checker a mark, not a third role); no trust level, model family, `one_per_domain`, `default_trust` or `trusted_domain`, and no courier rows (B-159). Items 1 to 3 and the migration shrink to the three columns, the role route (`PUT …/grants/{fingerprint}/role`) and the clearing rule when `approvers.roles` becomes human-only; two null domains never count as distinct, and a null domain is never a trusted runner.)_
