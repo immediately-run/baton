@@ -1967,7 +1967,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     (an administrator's reading after a probe's), S-BTN-61 (no `uses`, no bill), S-BTN-63 and
     G-BTN-90 (no `required_independence`), S-BTN-91 (blocked for no runner until every instance
     is down), S-BTN-122 and G-BTN-142 (no bills), S-BTN-181 (no `signed`), G-BTN-5 (an ungranted
-    capability), and by the *adoption* mark alone S-BTN-14, S-BTN-16, G-BTN-8, -9, -19, -22, -35,
+    capability), G-BTN-88 (seats, not billings, count across repositories), S-BTN-19 (no advice on
+    an advance), S-BTN-20 (the leg's account instance), S-BTN-44 (a resource row once every
+    usable instance is down), and by the *adoption* mark alone S-BTN-14, S-BTN-16, G-BTN-8, -9, -19, -22, -35,
     -41. Test files: `S-BTN-139.ontology`, `S-BTN-147.route-choices` and `S-BTN-147.runner-half`
     test retired rows and stay in `RETIRED_TESTS_ALLOWED` until B-167 deletes them;
     `S-BTN-45.block-edges` and `S-BTN-63.no-chain` test the built behaviour and change in B-168;
@@ -1979,7 +1981,54 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
     Tickets: B-167 and B-168 filed for the code; B-106 rewritten for a capability's capacity,
     with a map of its old items; B-104 and B-105 carry supersession maps of their spec half;
     B-162, B-165 and B-166 record what this part wrote; B-10, B-15, B-21, B-46, B-47, B-107,
-    B-123, B-142, B-145, B-146, R3-1215, R3-1235, R3-1269 and R3-1272 carry a dated note.
+    B-123, B-142, B-145, B-146, R3-1215, R3-1235, R3-1254, R3-1269 and R3-1272 carry a dated note.
+
+- **2026-11-02 — review round one of the restructure's part 4** (PR #164; two fresh reviewers,
+  given the diffs as patch files, the PR body with its impact list and eight owner items, and
+  different angles: the whole text; the guarantees, actors and journeys). Reviewer A: 4 blocking,
+  5 major, 10 minor; reviewer B: 1 blocking, 7 major, 6 minor, much of it the same finding twice.
+  Findings: removed facts left in R-BTN-99 (the caller's `host` instances), §14 (the heartbeat's
+  `uses` / `refused_uses`, the claim's `refused`), §13.7 (`instance_readings.signature` /
+  `nonce`, `resource_fleet` counting runners), R-BTN-50 (a claim's billings) and G-BTN-88
+  (billings); seats recomputed from the current course and ticket, so a mid-leg snapshot could
+  seat two holders of an exclusive capability, and the claims counted unnamed; one tenant-wide
+  pool keyed by a course-vocabulary name; the per-machine singleton's `check` unable to hold a
+  lock through a leg; §16's end clause promising a one-change deletion over an incomplete list,
+  the `refs.*` knobs' `mirror` writer among the gaps; `unblocked_trigger` able to name any
+  dispatchable workflow, a deploy among them, without being a loosening; what a funds gate tests
+  once the field reading was retired, and an administrator's writer class; S-BTN-20 assuming the
+  retired `runner` scope; `full` without a source, a wake-up rule or a view bump;
+  `launch-candidates` offering a full capability; R-BTN-75's per-runner resource blocks;
+  S-BTN-19, S-BTN-44, S-BTN-21's lowering step; three Decisions lines; R-BTN-53's `unknown`;
+  R-BTN-57 and R-BTN-66 not naming capacities; a capacity's name unvalidated; the architecture
+  page's "alarm cycle"; no path from `rank`'s advice to a leg; the decision's claim that every
+  trusted-reading writer signs its requests; B-167's "refused as unknown fields" breaking older
+  CLIs; B-168 missing the built `worker` scope's registrations, `.baton/baton.json`'s
+  `report_horizon_h`, the claim's `refused`, `resource_fleet` and the readings' columns.
+  Fixed: R-BTN-99, §14, §13.7, R-BTN-50 and G-BTN-88 now state the new facts; seats are stored
+  in `claim_seats` from rule 4's matched set (the ticket's clause and the leg's) at the claim
+  and each `advance`, never changed by a later snapshot, the active and fence-pending claims
+  counted, deleted at the end or the fence (R-BTN-178, §13, B-106); setting a capacity is the
+  administrator's statement that the name is one thing tenant-wide, with the courses declaring
+  its type printed for confirmation, a role, `credential:`, `runner:` or bare `human-operator`
+  refused, and the shared pool named as the accepted cost; the CLI runner's `lock: <path>` on a
+  capability holds the machine's singleton from claim to leg end (R-BTN-121, R-BTN-178);
+  §16's end clause makes the inventory a search over *adoption* marks and the named terms, names
+  the passages it returns, and retires the `mirror` writer with a policy schema version, and the
+  remaining mirror columns, register fields, caller and route carry the mark; the unblocked
+  trigger's workflow must declare the `tickets` input, and setting it is a loosening (R-BTN-94,
+  R-BTN-186); a requirement on an instance takes each admitted reading as one attestation, the
+  short form reads the state, and an administrator's reading is writer class `admin`
+  (R-BTN-76); a runner's own spent subscription ends `blocked` on its capability; `full` reads
+  `claim_seats`, writes no block, wakes no one, bumps `instances_version`, and `launch-candidates`
+  leaves a full capability out; R-BTN-75, R-BTN-53, R-BTN-57, R-BTN-66, R-BTN-174 (wildcard
+  grants), §6.10 (no Baton channel carries `rank`'s advice to a leg), S-BTN-19, S-BTN-20,
+  S-BTN-21, S-BTN-44, G-BTN-162, the three Decisions lines and the readings decision's loss
+  corrected; `docs/context/architecture.mdx`'s freshness bullet rewritten without the alarm
+  cycle; a Migrations entry, "part 4's retired fields", ignores and logs the retired wire fields
+  until no client sends them; B-106, B-167 and B-168 carry the rest. `docs/context/product.mdx`
+  and values 12 still speak of "one alarm cycle"; they are the owner's words and are left for the
+  owner.
 
 ## Retired requirements
 
@@ -2148,6 +2197,14 @@ refused).
 
 Each entry is a transition the specification no longer describes. The code keeps the old form
 working until the stated condition holds, then removes it.
+
+- **Part 4's retired fields (B-166, 2026-11-02).** The board post's `ontology` and course
+  entries' `route_choices` and `report_horizon_h`, the heartbeat's `uses`, the claim's and a
+  `prefer` entry's `bills`, the advance's and end's `taken`, and a reading's `nonce` and
+  `signature` are accepted and ignored, each logging one `deprecated-field` event per credential
+  and field per day, so a CLI or `.baton/baton.json` older than B-167 and B-168 keeps syncing and
+  claiming. Stop when no registered repository's snapshot, and no live runner's request, has
+  carried one for 30 days: they are then refused `invalid-params`.
 
 - **R-BTN-132's window (prerequisite primitives).** The board post's `blocked_by` and
   `operator_only`, and the `waiting_on` labels `dependencies`, `children` and `owner`, are still

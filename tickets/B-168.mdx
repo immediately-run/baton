@@ -30,19 +30,28 @@ default". History: the changelog entry "the restructure, part 4".
 ### What to build
 
 1. **Resources.** `baton admin resource add` takes `--scope account|service` only; a new
-   migration drops `runner_instances`, `external_resources.atoms_from` and the `runner` / `host`
-   scopes; the heartbeat's `uses` is ignored and `refused_uses` goes; usable instances are the
-   repository's (`src/core/resources.ts`); `resource_fleet` keeps per (repository, resource) the
-   usable instances and how many are not `unavailable`.
+   migration drops `runner_instances` (the built `worker_instances`), `external_resources.atoms_from`,
+   every `runner`-scope (built: `worker`) and `host`-scope registration and the readings of their
+   implicit instances (`<resource>@worker:<id>`), logging each dropped registration as an
+   `admin` event; usable instances are the repository's (`src/core/resources.ts`);
+   `resource_fleet` becomes `usable_instances`, `open_instances`, `live_runner` (§13.7).
+   The heartbeat's `uses` and the claim's `bills` are ignored and logged `deprecated-field`
+   while the history's Migrations entry "part 4's retired fields" lasts, then refused;
+   `refused_uses` and the claim answer's `refused` go.
 2. **The administrator's reading.** `POST /v1/admin/readings` stores one more instrument's
    reading under R-BTN-76's limits; no precedence, no 7-day window, no `overridden` answer.
-3. **Readings' signature.** `POST /v1/runner/readings` and `/v1/probe/readings` stop taking
-   `nonce` and `signature`; the policy's `readings` entries lose `signed` (export and import
+3. **Readings' signature.** `POST /v1/runner/readings` and `/v1/probe/readings` ignore
+   `nonce` and `signature` (logged `deprecated-field`, as above); a migration drops
+   `instance_readings.signature` and `nonce`; an administrator's reading has writer class
+   `admin`; the policy's `readings` entries lose `signed` (export and import
    tolerate an old `signed` and drop it); the trusted-leg check of R-BTN-181 admits writers only.
 4. **Settings.** Drop `required_independence` (rule `chain` reads `no_chain_from` alone),
    `trigger_workflows` (the unblocked trigger names a workflow on the default branch) and
-   `report_horizon_h` (6 hours) from the settings route, the course entry, the dashboard's
-   limits and the export, each by a new migration.
+   `report_horizon_h` (6 hours) from the settings route, the course entry (ignored and logged
+   while the Migrations entry lasts), the dashboard's limits and the export, each by a new
+   migration; this repository's `.baton/baton.json` drops `report_horizon_h`. The unblocked
+   trigger refuses a workflow without a `tickets` input, and setting it is a loosening under
+   `approvers.policy` (R-BTN-94, R-BTN-186).
 5. **Tests.** Update `S-BTN-45.block-edges` (an administrator's reading after a probe's: the
    later sets the state), `S-BTN-63.no-chain` (no owner setting), and the unit tests naming the
    removed fields.
@@ -56,6 +65,7 @@ green in `npm test` on both hosts.
 
 - [ ] no route, column or field named `uses`, `refused_uses`, `atoms_from`, `signed` (on
       readings), `required_independence`, `trigger_workflows` or `report_horizon_h` remains
+      beyond the Migrations entry's logged reads
 - [ ] `npm test` and `npm run typecheck` green
 
 ## Status

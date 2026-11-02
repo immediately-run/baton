@@ -35,10 +35,12 @@ and the `host` scope by B-165's review default).
 1. **Registration.** A migration adds `capability_capacity (capability, capacity, set_by,
    set_at)`. Add `baton admin capacity set <capability> <n> | --clear`, the registry action
    `admin.capacity.set` and `PUT /v1/admin/capacities`, logged `admin`.
-2. **Seats.** A claim holds a seat on each capability with a capacity that its running leg
-   requires among those rule 4 matched — the claim's leg until its first `advance`, then the
-   leg the latest `advance` started. Seats are computed from claims and their legs, never stored
-   apart.
+2. **Seats.** A migration adds `claim_seats (claim_id, capability)`. At a claim, and at each
+   `advance` that starts a leg, write the claim's seats: each capability with a capacity in the
+   set rule 4 matched (the ticket's `requires` and the leg's `requires.capabilities`). A later
+   snapshot never changes them. Delete them at the claim's end, a silent reap, or for a
+   fence-pending reap at `fence-cleared` or `fence_deadline` (the alarm row of §2). R-BTN-50's
+   vocabulary row names capacity and seats; no boundary-test word changes.
 3. **Rule 11.** In the claim's and advance's committing transaction, count the seats other
    active or fence-pending claims hold on each such capability and refuse `capacity-full` past
    capacity, naming the holders only where the caller may see them. Never a failed attempt; a
@@ -46,10 +48,18 @@ and the `host` scope by B-165's review default).
    (R-BTN-68).
 4. **Release.** An `advance` into a leg not requiring the capability, the claim's end and a reap
    release the seat; a fence-pending reap releases at `fence-cleared` or the fence deadline.
-5. **Recommendations and why-not.** Skip a leg requiring a full capability; `baton leg why`
-   answers `full`. The instance view serves each capacity and the claims holding its seats.
-6. **One machine's singleton** is the runner's: document, in the runner's configuration help, a
-   capability whose check takes a lock the runners on that machine share (R-BTN-121, R-BTN-178).
+5. **Recommendations and why-not.** Skip a leg requiring a full capability, in
+   recommendations and `launch-candidates`; `baton leg why` answers `full` from `claim_seats`.
+   The instance view serves each capacity and the claims holding its seats, fence-pending ones
+   included, and a seat taken or released bumps `instances_version`. Seats write no block and
+   send no `unblocked`.
+6. **One machine's singleton.** The CLI runner's configuration gains `lock: <path>` on a
+   capability (R-BTN-121): declare it only while an exclusive lock on the file can be taken;
+   take the lock before a claim for a leg requiring it, release it on a refused claim, and hold
+   it until the claim ends or an `advance` starts a leg not requiring it.
+7. **The capacity command** validates the capability (one expanded `<type>:<value>`, never a
+   role, `credential:`, `runner:` or bare `human-operator`) and, before signing, prints every
+   course declaring its type and asks to confirm (R-BTN-178, as R-BTN-157).
 
 ### Tests
 
@@ -57,7 +67,9 @@ S-BTN-21 (rewritten) and G-BTN-162, green in `npm test` on both hosts.
 
 ### Exit criteria
 
-- [ ] one capability with capacity 1 has at most one holder across every host and repository
+- [ ] one capability with capacity 1 has at most one holder across every host and repository,
+      a snapshot mid-leg changing no held seat
+- [ ] two CLI runners on one machine never run legs requiring one `lock` capability at once
 - [ ] a seat refusal is `capacity-full`, never a failed attempt, and a reap releases every seat
 - [ ] recommendations do not offer a leg whose required capability is full
 
