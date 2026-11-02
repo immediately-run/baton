@@ -1,5 +1,5 @@
 ---
-title: "B-106 — Capacity: a capability with a capacity has that many seats, taken by the claims whose running leg requires it, refused past capacity"
+title: "B-106 — Capacity: a capability with a capacity has that many seats, stored when a leg starts for the claims whose leg requires it, refused past capacity"
 id: B-106
 project: baton
 status: available
@@ -8,7 +8,7 @@ tags:
   - roadmap-item
 order: 508
 tier: judgement
-description: "Build §6.11 (R-BTN-178) as the spec restructure's part 4 rewrote it: an administrator sets a capability's capacity for the tenant; a claim holds a seat on each capability with a capacity its running leg requires; rule 11 refuses capacity-full past capacity; seats release at an advance into a leg not requiring it, at claim end and at reap; recommendations skip a full capability. Requires: none."
+description: "Build §6.11 (R-BTN-178) as the spec restructure's part 4 rewrote it: an administrator sets a capability's capacity for the tenant; a claim holds a seat, stored in claim_seats when its leg starts, on each capability with a capacity in rule 4's set for the leg; rule 11 refuses capacity-full past capacity; seats release at an advance into a leg not requiring it, at claim end and at a reap that is not fence-pending; recommendations skip a full capability. Requires: none."
 topics:
   - baton
 owns: {}
@@ -47,7 +47,7 @@ and the `host` scope by B-165's review default).
    `prefer` claim moves to its next candidate. Add the rule to the matching code and the model
    (R-BTN-68).
 4. **Release.** An `advance` into a leg not requiring the capability, the claim's end and a reap
-   release the seat; a fence-pending reap releases at `fence-cleared` or the fence deadline.
+   that is not fence-pending release the seat; a fence-pending reap releases at `fence-cleared` or the fence deadline.
 5. **Recommendations and why-not.** Skip a leg requiring a full capability, in
    recommendations and `launch-candidates`; `baton leg why` answers `full` from `claim_seats`.
    The instance view serves each capacity and the claims holding its seats, fence-pending ones
@@ -61,11 +61,16 @@ and the `host` scope by B-165's review default).
    leg not requiring it.
 7. **The capacity command** validates the capability (one expanded `<type>:<value>`, never a
    role, `credential:`, `runner:` or bare `human-operator`) and, before signing, prints every
-   course declaring its type and asks to confirm (R-BTN-178, as R-BTN-157).
+   course whose legs require it (`courses.leg_capabilities_json`), with the type's definition in
+   each, and asks to confirm (R-BTN-178).
+8. **The seal** (R-BTN-88) also waits until no claim is fence-pending, so a move never frees a
+   seat a reaped incarnation may still use.
+9. **The lock's suspension.** A claim answered for a `lock` leg the runner cannot lock ends
+   `suspended` at once, touching nothing (R-BTN-121).
 
 ### Tests
 
-S-BTN-21 (rewritten) and G-BTN-162, green in `npm test` on both hosts.
+S-BTN-21 (rewritten), S-BTN-73's lock case, S-BTN-50's fence-pending seal and G-BTN-162, G-BTN-78, green in `npm test` on both hosts.
 
 ### Exit criteria
 

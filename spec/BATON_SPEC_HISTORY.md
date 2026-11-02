@@ -2064,6 +2064,35 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   page's seat and the two capacities; B-168's exit criterion; the part-4 entry keeps its own
   rows, the corrections living in the review records.
 
+- **2026-11-02 — review round three of the restructure's part 4** (PR #164; one fresh reviewer,
+  the last, given round two's review, its fix as a patch, the whole diff and the rewritten PR
+  body). Of round two's 15 findings, 13 were confirmed closed, C-3 closed in substance and C-2
+  partly closed; of round one's findings round two left partly open, all closed but B-5 (the
+  same point as C-2). New: 1 major, 8 minor, none blocking. Findings: a full instance
+  requirement still read two ways — every reading in force, or a writer's latest — so a stale
+  `measure` could open a funds gate against the same writer's newer reading, and "latest" not
+  said per instance; R-BTN-181's `missing` naming `unknown` unqualified; §16's inert-`mirror`
+  sentence deleted by the change it governs, in the present tense, with the `cooperative`
+  column's default naming `mirror`; G-BTN-78 and S-BTN-50 not reflecting the seal's wait for
+  fence-pending claims, which no ticket built; a claim answered for a `lock` leg the runner could
+  not lock; no scenario for the lock; "running leg requires it" left in a Decisions line,
+  R-BTN-178's recommendations bullet and B-106; R-BTN-94's "anything else is `invalid-params`"
+  reading as Baton checking the workflow; B-168 claiming S-BTN-181, which needs B-146's store,
+  and B-146's *Do not* line contradicting the spec; S-BTN-21 not testing a silent reap or a
+  ticket-level seat.
+  Fixed: for each usable instance and admitted writer's key, that writer's latest reading in
+  force is one attestation, an older one never counting, `count` over the distinct keys that
+  pass, with an S-BTN-181 case of an old 60 and a newer 30 (R-BTN-76); R-BTN-181's `unknown`
+  applies to `requires.resources` alone; §16's sentence opens "On that day", makes the
+  `cooperative` column the other three writers, names the knob in the refusal, and R-BTN-188's
+  mark carries the inert value past the deletion; G-BTN-78 and S-BTN-50 test the seal's wait, and
+  B-106 builds it; a claim answered for a `lock` leg it cannot lock ends `suspended` at once
+  (R-BTN-121), with an S-BTN-73 case and B-106 items; the seat wording in the Decisions line,
+  R-BTN-178 and B-106 now says stored from rule 4's set; R-BTN-94 leaves the input to the forge
+  at dispatch; B-168 leaves S-BTN-181 to B-146, whose *Do not* line is noted void, with the
+  requirement's reading; S-BTN-21 gains the silent reap and a ticket-level seat. The reviewer's
+  verdict: with D-1 fixed, ready for the owner with only the PR's nine items open.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
