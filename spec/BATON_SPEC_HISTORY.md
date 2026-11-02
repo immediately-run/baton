@@ -1590,6 +1590,52 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   Fieldhouse's spec requiring guarantees Baton no longer defines (a follow-up ticket, B-166's
   status).
 
+- **2026-11-02 — review round two of the restructure's part 2** (one fresh reviewer, the diff and
+  the impact list; round one's 52 fixes re-checked line by line: 51 closed in the text, the ejected
+  source closed at policy time only). Blocking: `protected` could not be applied as S-BTN-197 and
+  S-BTN-191 expected, since the new `human_identity` row refused `paths.control: human` while the
+  knob was null and neither scenario set it, and the row's `protected` column was neither a value
+  nor "no value". Majors: `human_identity` was typed as a forge user id, so `protected` on a `git`
+  repository was unbuildable; it was "set by `approvers.members`" though every policy change needs
+  `approvers.policy`; `check_app_id` was a per-repository owner setting written by an
+  administrator's command with no route, for an App that serves one tenant; the trailing dispatch
+  had no row once the `dispatch` entry that held its window was gone; the run-scoped attestation
+  subject round one added was excluded by the rule's own subject shape; lifting another's hold or
+  a bar was a human's in R-BTN-186 and an `owner`'s in §14 and R-BTN-129's `match`; the
+  ejected-source refusal looked one way only, a snapshot ejecting the source under `protected`
+  reopening the `refused` loop; and R-BTN-171's deliverers and R-BTN-182's rule `trusted` did not
+  carry the checker's and the forge-check deliverer's exclusions. Minors: `Dispatch` "from the
+  alarm's `waitUntil`" in "the Worker shell" and S-BTN-195's "by the Worker"; a per-grant refusal
+  of a per-runner `delivers` and an unchecked "shares no domain"; a null-domain grant markable
+  checker; the roles-clearing clause omitting the mark; `floors` "not met now"; "untrusted runner"
+  twice; no mechanical refusal of an API-key deliverer; README's courier keys; S-BTN-190's
+  `policy` release reason; R-BTN-186 listing a cancel among the loosenings; `pr-verdict` under
+  `cooperative` with a named fact reader never firing; "recorded as a discrepancy" by the fact
+  reader; nothing handing the sync `check_app_id`; and two ticket notes contradicting the text.
+
+  Fixed: `human_identity` is typed by forge (a forge user id, or on `git` the pusher identity the
+  hook logs), has no preset value, is governed as every knob is, and its refusal is
+  `invalid-params` naming it; S-BTN-197 and S-BTN-191 set it (R-BTN-188). `check_app_id` is an
+  instance setting (`instance_settings`, `PUT /v1/admin/settings`) the admin command writes and
+  the observation hands to the sync (§12.7, §13.1, §14, R-BTN-115, §4.3). `webhook_syncs` is keyed
+  by repository and workflow and holds `window_until` and `trailing_wanted`, which the alarm reads
+  (R-BTN-94, §13.2, §13.8). A work subject may carry the run, and a requirement asks for it with
+  `run: this` (R-BTN-181). A lift of a hold or a bar is an `approvers.policy` approver's, in §14 and
+  R-BTN-129 as in R-BTN-186. A snapshot that ejects the source while `outbox.git` admits only
+  `trusted-runner` is refused `snapshot-rejected`, so a `protected` repository never ejects its
+  source (R-BTN-188). The checker's and the forge-check deliverer's exclusions are stated where
+  deliverers and rule `trusted` are defined, and `trusted` joins §6.6's gates (R-BTN-171,
+  R-BTN-182, §6.6). `Dispatch` names the Durable Object class's wiring for the alarm (R-BTN-55);
+  S-BTN-195 says the host shell. The forge-check exclusion is per runner (R-BTN-115); a null-domain
+  grant is never marked checker, and clearing roles clears the mark (R-BTN-180, R-BTN-188).
+  `floors` is judged "by the document after the change". "Untrusted runner" is gone. An API key's
+  bearer never reaches `/v1/runner/outbox/*` (R-BTN-159, §14). `pr-verdict` is a pusher's where
+  `sync` is admitted and the human-only identity's where not (R-BTN-192). Baton records a wrong-head
+  `pr-merged` as a discrepancy (R-BTN-184). S-BTN-190, R-BTN-186, README, B-147 and B-157 read as
+  the rules do. Noted again for later parts: R-BTN-130's closed list and its italic note (part 3),
+  the CLI commands named here (part 3), readings' `signed` (part 4), and where `pushers`,
+  `check_app_id` and `human_identity` live beside table 1.4 (part 4).
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

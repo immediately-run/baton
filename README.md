@@ -177,7 +177,7 @@ key signs every request and reveals nothing reusable. An API key is a shared sec
 bearer: easier to set up, but anyone who reads one request holds it until it is revoked. `baton
 key create FILE` makes an API key on your machine. `FILE` holds the key (`-i FILE`, or a runner's
 `BATON_KEY_FILE`). `FILE.pub` holds its public line, which goes wherever an SSH public key
-would: `BATON_ADMIN_KEYS`, `--owner-key` or a grant's `--key`. Sync, probe and courier keys stay
+would: `BATON_ADMIN_KEYS`, `--owner-key` or a grant's `--key`. Sync and probe keys stay
 SSH keys. The CLI is the one path:
 
 ```
