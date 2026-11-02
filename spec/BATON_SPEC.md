@@ -565,7 +565,9 @@ process for development and CI. Nothing crosses a tenant.
     take no credential and fall under the per-IP rule, and `POST /v1/mcp`'s bearer is checked
     in the object (R-BTN-130, `BATON_MCP_OAUTH_SPEC` §13).
   - A per-IP rule (a Workers rate-limit binding keyed `<host>|<ip>`) applies only to
-    unauthenticated requests, never to `POST /v1/github/webhook`.
+    unauthenticated requests, never to the two forge-notification routes, `POST
+    /v1/github/webhook` and `POST /v1/forges/{repository}/notify`, whose bodies R-BTN-73 caps
+    instead.
   - Authenticated calls are limited to 600 a minute per credential, keyed by origin and
     credential, counting only requests the object verified.
   - **Failed verifications** count in two buckets: (origin, credential id, client IP) and
@@ -746,10 +748,10 @@ repository reachable over SSH is enough (R-BTN-105).
 ### 3.2 Who may post a board
 
 - **R-BTN-93 (sync keys and the one verifier).** A repository's sync and mirror authenticate
-  A board post from a class the policy's `inputs.board` excludes (`sync-key`, `ci-identity`,
-  `machine`; R-BTN-188) is refused `forbidden`.
   with a sync key, a CI identity token (R-BTN-15), or — for the sync only — a machine key
-  granted on the repository (R-BTN-102, R-BTN-146).
+  granted on the repository (R-BTN-102, R-BTN-146). A board post from a class the policy's
+  `inputs.board` excludes (`sync-key`, `ci-identity`, `machine`; R-BTN-188) is refused
+  `forbidden`.
   - **A sync key** is an SSH key of R-BTN-13's types in one `sync_keys` row: exactly one
     repository and one role, `sync` or `mirror`. Owners add and revoke it
     (`POST /v1/owner/{repository}/sync-keys`, `…/sync-keys/{fingerprint}/revoke`); an
@@ -790,7 +792,7 @@ repository reachable over SSH is enough (R-BTN-105).
     exist.
   - A token reads and writes its own repository's board and events only. Whoever can push the
     default branch can post any board for it — a legitimate user (R-BTN-66); the token proves
-    only default-branch origin. No push changes Baton's own state.
+    only default-branch origin. No push changes the state Baton holds for authority (§12).
 
 ### 3.3 Triggering a sync
 
@@ -868,8 +870,11 @@ repository reachable over SSH is enough (R-BTN-105).
     compared with the repository's `webhook` secret), a Gitea one (`X-Gitea-Signature`,
     HMAC-SHA256) or a GitHub repository webhook (`X-Hub-Signature-256` under the repository's
     own secret, for a repository without the App). A `git` repository has no route. Both routes
-    are verified in the Worker before anything is read, are outside the per-IP limit (§2), and
-    answer `204`. Every comparison is constant-time over equal-length digests.
+    are verified in the Worker before anything is read, are outside the per-IP limit (§2.3), and
+    answer `204`. A body over 26,214,400 bytes (25 MiB, above the largest delivery GitHub sends)
+    is refused `too-large` on its `Content-Length`, or once that many bytes have been read,
+    before any digest is computed. Every
+    comparison is constant-time over equal-length digests.
   - **Events and the only fields read:**
 
     | forge | events | fields |
@@ -4327,7 +4332,9 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     3. the value of every declared `credential:<NAME>` variable, given to the leg or not;
     4. the git and forge tokens the runner holds, and `AWS_SECRET_ACCESS_KEY` and
        `AWS_SESSION_TOKEN` when set;
-    5. by pattern, `brt_`, `bak_` or `bmcp_` followed by `[A-Za-z0-9_-]*`;
+    5. by pattern, every bearer prefix Baton issues — `brt_`, `bak_`, `bmcp_`, `bps_` and `bds_`
+       (§12.1), and `bmo_`, `bmr_` and `bor_` (`BATON_MCP_OAUTH_SPEC` §12) — followed by
+       `[A-Za-z0-9_-]*`;
     6. by pattern, every `-----BEGIN … PRIVATE KEY-----` … `-----END … -----` block, replaced
        whole: after a `BEGIN` line output is held until the `END` line or 16 KB, then the whole
        held run is masked.
@@ -4668,7 +4675,8 @@ end on an ended claim is refused `claim-ended`.
     at that sha (which must pass R-BTN-143) and the ticket's code at the run's `head_sha`;
     fetches the inputs and fails on a digest mismatch.
   - It runs `run(ctx)` with `ctx.replay` set, in R-BTN-144's replay environment: no write-capable
-    git or forge credential, ssh-agent or credential helper; the model provider's key is kept.
+    git or forge credential, ssh-agent or credential helper; the model provider's key is kept only
+    when `replay_env` or `--env` names it.
     The runner does not call `close` and records what it would have written.
   - Outputs and would-be writes go to a local replay report; `--against <sha>` compares them with
     a run of the scripts at that sha on the same inputs. A leg with `"replay_safe": false` is
@@ -4771,9 +4779,13 @@ print its way to `success`.
     a sandbox for strangers' code.
   - **Conclusions are the owners'.** The owner setting `checks: {<course>: {name, conclusions:
     {<end station>: "success" | "failure" | "neutral"}}}` (R-BTN-66) maps end stations to
-    conclusions, so no edit in git turns `failed` into `success`. A course file carries no
-    `checks` (R-BTN-69); `baton course test` prints a check course's end stations for the
-    owners to map.
+    conclusions, so no edit in git turns `failed` into `success`. A course's map names exactly
+    one end station `success`, exactly one `failure` and at most one `neutral`, or
+    `PUT /v1/owner/{repository}/settings` refuses it `invalid-params`. A change that moves a
+    station toward `success` (`failure` → `neutral` → `success`), or removes or renames a course's
+    entry, is a loosening (R-BTN-186): a conclusion decides what branch protection sees, and a
+    GitHub required check passes on `neutral`. A change the other way is a tightening. A course file carries no `checks`
+    (R-BTN-69); `baton course test` prints a check course's end stations for the owners to map.
 
 - **R-BTN-153 (a verdict is a command's exit status, from the check-runner's confirmed end).**
   - **A check claim is bound to its sha.** The claim records `claims.check_sha` and returns it
@@ -4791,7 +4803,8 @@ print its way to `success`.
        agent touches that sandbox, through the provider method `exec(argv, {cwd, timeout_s}) →
        {status}` (R-BTN-107). A runner whose provider has no `exec` takes no verdict leg.
   - **Mapping the status.** Status 0 reaches the station mapped to `success`; any other status
-    the one mapped to `failure`; a timeout or an `exec` error the one mapped to `neutral`. An
+    the one mapped to `failure`; a timeout or an `exec` error the one mapped to `neutral`, or
+    to `failure` where the map names no `neutral`. An
     `advance` or end reaching a success-mapped station carries `exit_status: 0`, which Baton
     requires. In a check course an agent's `baton-leg-result` or channel `done` (R-BTN-106) may
     reach only `failure` or `neutral` stations. A check course's `min_runner_version` is at least
@@ -5285,7 +5298,7 @@ is summarized in the principal table (§12.1).
        open` `https://<origin>/login?as=owner`; the page carries nothing secret and heads itself
        "administrator sign-in" or "owner sign-in".
     2. The page sends `POST /v1/login {role}`. Baton writes a `login_codes` row of that role, sets
-       the pending cookie `__Host-baton-pending` (value `bps_<id>_<secret>`, two minutes, R-BTN-16), and
+       the pending cookie `__Host-baton_pending` (value `bps_<id>_<secret>`, two minutes, R-BTN-16), and
        answers `{code}`: eight Crockford base32 characters, which the page shows.
     3. The key holder types the code into the CLI, which shows the row's role, client address
        and age ("owner session for <address>, <n> s old"), then sends `POST
@@ -5397,8 +5410,10 @@ is summarized in the principal table (§12.1).
   that tenant's origin (R-BTN-137); the operator is not a principal (R-BTN-136).
 - **Pushers are legitimate.** Whoever can push a registered repository's default branch is a
   legitimate user of it, and Baton does not fortify git (R-BTN-66). These rules keep people
-  **without** push from gaining anything. No push changes Baton's own state: keys, grants,
-  bars, holds and settings.
+  **without** push from gaining anything. No push changes the state Baton holds for authority:
+  keys, grants, bars, holds, settings and the policy. What a push may move through the sync's
+  attestations — positions, confirmations — each policy's `attestations` entry decides
+  (R-BTN-188, R-BTN-191).
 - **Who may push the default branch is the repository's policy** (§12.8, R-BTN-188). On one
   machine with trusted runners, runners may land their own work. Where runners are not trusted runners, the
   policy admits only trusted runners and humans to the default branch, and Baton never requires a
@@ -5541,13 +5556,15 @@ Every value below is validated on write; a value over its cap is refused `invali
 - **R-BTN-16 (same-site with the product).** A Baton may share its registrable domain with
   origins that run untrusted code. So, on every host:
   - **Cookies.** Baton sets two cookies and reads no other: the dashboard session
-    `__Host-baton_session` (at most 4 hours) and the pending sign-in `__Host-baton-pending` (2
+    `__Host-baton_session` (at most 4 hours) and the pending sign-in `__Host-baton_pending` (2
     minutes), both `__Host-` prefixed, host-only, `Secure`, `HttpOnly` and `SameSite=Strict`, so
     no other origin on the domain can set or shadow them (R-BTN-155).
   - **Headers.** Every response carries `Content-Security-Policy: default-src 'self';
     frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'`,
     `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`
-    and `Cross-Origin-Resource-Policy: same-origin`.
+    and `Cross-Origin-Resource-Policy: same-origin`; every response to a request a credential
+    or a dashboard session authorizes, and every response that sets a cookie or carries a
+    sign-in code (`POST /v1/login`, R-BTN-155), also carries `Cache-Control: no-store`.
   - **Writes.** A state-changing request a dashboard session authorizes, under `/v1/ui/*` or
     not (`POST …/attestations`, R-BTN-116), and `POST /v1/login` must carry
     `Content-Type: application/json` and an `Origin` equal to the tenant's origin
@@ -5724,7 +5741,7 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     | `readings` — `{<resource> \| "*": {writers}}`: whose readings count for this repository; `*` covers every resource not listed, one registered later included; a trusted leg's resources are further restricted by R-BTN-181 | `{"*": {writers: every writer R-BTN-76 lets report}}` | as `cooperative`; the owner narrows the resources a gate reads | | Baton | R-BTN-76, R-BTN-181 |
     | `floors` — the guarantees (R-BTN-189) no change to this policy may break | no value: an applied preset never writes it | no value | no value | Baton | R-BTN-189 |
 
-    Owner settings that tune operation rather than trust (`retry`, bars, `checks`,
+    Owner settings kept outside the policy (`retry`, bars, `checks`,
     `transcript_repos`, `leg_log_root`, `artifact_buckets`) stay R-BTN-66 settings, whose loosening
     `approvers.policy` governs. Three values that were knobs are constants: `refs/baton/*` is open
     to every writer (GitHub cannot restrict it, R-BTN-180); `baton-legs/*` is open to `runner`,
@@ -6088,8 +6105,10 @@ against the exact commit and merges it. It needs the guarantees `tickets-approve
     checks (R-BTN-189). A trusted leg acts only on attestations it re-checks itself (R-BTN-182),
     never on the arrival that queued it.
   - **Superseded per writer class.** The sync's attestations supersede by type and subject
-    whichever sync credential posted them (a sync key or the CI identity, R-BTN-62), so one
-    repository's two posting credentials never leave two runs' facts side by side.
+    whichever credential posted them (a sync key, the CI identity or a machine key, R-BTN-62,
+    R-BTN-93), so a repository's posting credentials never leave two runs' facts side by side;
+    where `inputs.board` admits `machine`, a granted machine key's post therefore replaces the
+    CI sync's facts as fully as the CI sync's replaces its.
 - **R-BTN-192 (the fact reader: forge facts a trusted runner attests, with no course code).**
   Where the policy admits no `sync` writer for `std:arrival@1` (R-BTN-191), a fact leg's arrival
   comes from the **fact reader**: a mode of the home's merge runner (R-BTN-182, B-140) that reads
@@ -6543,7 +6562,7 @@ R-BTN-127's. Any route may answer `rate-limited` or `quota` (R-BTN-135).
 | `conflict` | a key already in another role or name (R-BTN-57, R-BTN-58); duplicate forge ids (R-BTN-138); a seal or import refused (R-BTN-88) |
 | `rate-limited` | over a rate limit, with `retry_after_s` (R-BTN-135) |
 | `quota` | a row-write, storage or per-claim cap (R-BTN-135, R-BTN-149, R-BTN-160) |
-| `too-large` | an oversize body or item (R-BTN-130, R-BTN-149) |
+| `too-large` | an oversize body or item (R-BTN-73, R-BTN-130, R-BTN-149) |
 | `session-taken`, `runner-reaped` | a heartbeat for a pair held by another secret; a reaped runner (§8) |
 | `not-eligible` | a gate refused, with `rule` and `rule_code` (§6.6) |
 | `blocked` | a prerequisite unmet (R-BTN-75) |
@@ -6579,7 +6598,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 |---|---|---|---|---|
 | **Runner** | | | | |
 | `POST /v1/runner/heartbeat` | machine | `{hostname, session_name, secret_hash?, rekey?, harness, kind, isolation, capabilities[], tags[], profile, tier_ceilings?, lease_timeout_s?, courses: [{repository, course, version}], session_url?, last_activity_at?, leg_finished?: <seq>, fenced?: {claim_id, terminated: true}, transcripts?[], reports?: [{claim_id?, key?, payload}], test_harness?, delivers?: ["git" \| "forge-check"], protection?: [{repository, matched, reading_hash, legs?: {count, tickets}}]}` (`protection` from the protection checker only; R-BTN-171, R-BTN-180, R-BTN-190) | `{runner_id, incarnation, lease_timeout_s, grant: {capabilities[]}, claim: {id, ticket_id, station, leg?, nonce, claimed_at, deadline_at?, position: {station, path, next_leg}, git: {next[]} \| {closed} \| "unknown"} \| null, messages[], handled?: [{condition_id, handler, restart, reason, answered_by?}], bars[], stale_courses[], pending_grants[], mode (*adoption*), server_time}` | R-BTN-3, R-BTN-9, R-BTN-14, R-BTN-60, R-BTN-90, R-BTN-146, R-BTN-162 |
-| `POST /v1/runner/claim` | machine | `{request_id}` and at most one of `ticket_id` or `prefer: [{ticket_id, leg?}]` (≤ 50); `rationale?` (≤ 4 KB) | `{claim_id, ticket_id, course_id, course_version, leg_state, station, legs, next[], path, nonce, snapshot_sha, default_branch, handoff_url?, previous_attempts[] (newest 10), previous_attempts_total, resume?, check_sha?, check_head_ref?, leg_log?: {dir}, outbox?: [{id, kind, fields}]}`; `course_id` the ticket's course and `course_version` the version the registry holds for it, both `null` for a claim with no course (B-103); refusals as the codes above | R-BTN-4, R-BTN-45, R-BTN-100, R-BTN-143, R-BTN-153, R-BTN-162, R-BTN-171 |
+| `POST /v1/runner/claim` | machine | `{request_id}` and at most one of `ticket_id` or `prefer: [{ticket_id, leg?}]` (≤ 50); `rationale?` (≤ 4 KB) | `{claim_id, ticket_id, course_id, course_version, leg_state, station, legs, next[], path, nonce, snapshot_sha, default_branch, handoff_url?, previous_attempts[] (newest 10), previous_attempts_total, resume?, check_sha?, check_head_ref?, leg_log?: {dir}}`; `course_id` the ticket's course and `course_version` the version the registry holds for it, both `null` for a claim with no course (B-103); refusals as the codes above | R-BTN-4, R-BTN-45, R-BTN-100, R-BTN-143, R-BTN-153, R-BTN-162, R-BTN-171 |
 | `POST /v1/runner/claims/{id}/advance` | holder | `{reached?, leg, head_sha?, evidence?, outputs?: [{name, schema, uri?, digest?, value?}], bars?, exit_status?, session_url?}` | `{ok, station, next[], flags[], inputs: [{name, uri?, digest?, value?, from_leg, from_run, leg_version}], leg_log?: {dir}}` | R-BTN-63, R-BTN-64, R-BTN-82, R-BTN-108, R-BTN-153 |
 | `POST /v1/runner/claims/{id}/end` | holder | `{end_reason, reached, next?, not_before?, spawned?, outputs?, detail?, ended_at_sha?, error?: {type, message?}, prerequisite?: {kind, ref}, reading?, commit?, exit_status?, session_url?}` | `{ok: true}` | §9, R-BTN-83, R-BTN-86, R-BTN-126 |
 | `POST /v1/runner/claims/{id}/conditions` | holder | `{type, disposition, handler?, restarts, default?, severity?, url?}` | `{condition_id, handler_id?}`; `quota` past 20 open on the claim or 200 a day on the ticket; `invalid-params` for `baton` or `baton.*` | R-BTN-160 |
@@ -6772,7 +6791,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-122 caps, observations, readings | oversize post, fifth-generation child, exponential pattern, 65th session, repeated `leg_finished`; competing observation numbers; a post under another credential's number; two runs that post nothing; heartbeats flipping declarations past the budget; 9 measuring sessions | `too-large`, `parent-invalid`, schema error, `quota`, one re-arm; numbers taken over after `sync-busy`; `stale-observation`; released, no bar; leases kept, declarations dropped; 8 measures kept and clearable; CI and sync key never void each other |
 | **§3** | | |
 | S-BTN-26 two repositories, two courses | `ops` (weight 50, course `runbook`) beside `docs`, both with `T-1`; W1 declares one course, W2 both; a CLI runner on one checkout declaring two courses | distinct tickets; W1 never offered `ops`; `docs` first, each in default order, per-group limit; tokens per repository; a shared branch blocks pushes while either is held; `min_runner_version` gates W2; the runner declares both courses, claims a leg of either in consecutive claims, loads each from the claim's `course_id` and snapshot, and `--course` narrows it to one (B-103) |
-| S-BTN-42 webhooks | a review delivery, its repeat, a forgery, a 10-delivery burst, Baton's own events, extra fields | one dispatch, then one trailing after 30 s; repeat, forgery and own events dispatch nothing; only R-BTN-73's fields read |
+| S-BTN-42 webhooks | a review delivery, its repeat, a forgery, a 10-delivery burst, Baton's own events, extra fields; a body of 26,214,401 bytes on each notification route | one dispatch, then one trailing after 30 s; repeat, forgery and own events dispatch nothing; only R-BTN-73's fields read; `too-large` before any digest, outside the per-IP rule |
 | S-BTN-171 a dependency cycle is refused | a board post whose live tickets depend on each other in a loop; two of them; a self-dependency; a diamond; a post closing the very ticket it depends on | `invalid-params`, naming `B-1 → B-2 → B-1` once, and nothing of the post stored: no head, no ticket; `B-1 → B-1` alike; the diamond and the closed edge accepted |
 | S-BTN-189 the ticket commands | a bare origin; `baton ticket new` with `--depends-on`, `--tags` and `--project`, a legacy id pattern, a `--body-file` whose line disagrees with the flag, a filing that closes a cycle, a prefix the pattern cannot allocate; `claim` of a held, dependent, in-review and archived ticket; `set` with `--pr` twice; `done`; a peer's push between a command's fetch and its push; `baton repo init`, then an edited `HOW-TICKETS-WORK.md` | one commit on the origin's default branch, the ticket alone, the caller's branch and tree untouched; the next free id under the configured prefix, the skeleton with the flag's `**Depends on:**` line and the dependency's reverse mention; each refusal before the push, nothing landed; the retry takes the id after the peer's; a status, a PR once, the file archived; the page written, its edited copy one finding and exit 1, `init --force` writing it again |
 | S-BTN-172 the ticket check | `baton ticket check` on a clean repository, on one whose tickets loop, on one with no `.baton/baton.json`, and on this repository's own `tickets/` | exit 0 with the count, `✓ no findings`; exit 1 with one `path: message` line (the loop at its first ticket's file) and the count; the CLI's error, exit 2; this repository passes, which CI's `npm run check:tickets` runs |
@@ -6871,7 +6890,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-77 host allowlists | `session_url`s on allowed and other hosts, with userinfo, too long; a host added | only allowlisted kept, others logged; then kept |
 | S-BTN-78 session mode | a cloud session runs a leg | brief has no claim id or credential; its result block is checked like a move |
 | S-BTN-88 a fresh context | `max_context: 0.6`, `max_refreshes: 1` in each mode | `session` and `process` refresh under the claim, uncounted, then suspend; `attached` logs once |
-| S-BTN-98 a leg's log | `leg_log_root` on a local `file:` root; output with every kind of credential, a split secret, OSC 52; a failing write; `stream: false`; 60 MB; a short leg; a stopped leg; logs turned off; a `file:` root on the Cloudflare host; a reader without access | `dir` in the claim and `advance` replies and in `claim_legs`; create-only chunks, then `end.json`; every credential `***`, short ones logged; retries then `leg-log-write-failed`, the end not delayed; nothing written where off; `gap` at 50 MB; the Cloudflare root refused `invalid-params`; `leg log` reads the directory, escapes stripped; exit 1 |
+| S-BTN-98 a leg's log | `leg_log_root` on a local `file:` root; output with every kind of credential (an OAuth refresh token `bmr_…` and a pending sign-in `bps_…` among them), a split secret, OSC 52; a failing write; `stream: false`; 60 MB; a short leg; a stopped leg; logs turned off; a `file:` root on the Cloudflare host; a reader without access | `dir` in the claim and `advance` replies and in `claim_legs`; create-only chunks, then `end.json`; every credential `***`, short ones logged; retries then `leg-log-write-failed`, the end not delayed; nothing written where off; `gap` at 50 MB; the Cloudflare root refused `invalid-params`; `leg log` reads the directory, escapes stripped; exit 1 |
 | S-BTN-99 watching from the CLI | owner, administrator, foreign owner run `leg log -f` on a running leg; the leg ends; `leg stop` | chunks printed in order, then followed until `end.json`; a missing `seq` `[gap]`; the foreign owner's runs read `forbidden`; release sent |
 | S-BTN-109 legs in a checkout | six script extensions, a `file:` dependency, Node 22.17 then 22.18+; lockfile kept and changed; off-branch sha; lease loss and Cancel during install; duplicate scripts; `yarn.lock`; a home import; no `runner:leg-trees` | 22.17 refused; each runs, `close`/`handoff` in the wrapper; one install per digest; `off-branch` before install; install killed; `owner-cancel` within 30 s; kit fails duplicates; `cannot-finish:spec`; import refused; rule 4 |
 | S-BTN-118 off-branch code never runs | a machine-key board on a feature-branch sha; a held rewrite claimed by a verifying and a fresh runner | `released:off-branch`, not failed, raised, want recorded; cached runner passes, fresh one `off-branch` |
@@ -6886,7 +6905,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-17 one session, whole ticket | five `advance`s with no sync between | `filed` → … → `merged` on the holder's word, `bars` carried, ends `done`; no hand-off or `stale-board`; confirmed by the next sync |
 | S-BTN-23 resume from a hand-off | W2 resumes W1's suspension | hand-off URL and resume record; same branch and PR; hand-off a PR comment |
 | **§10** | | |
-| S-BTN-68 the merge check | a confirmed `passed`; a new head; a same-named status; an unissued success; an edited owners' `checks`; a course file carrying `checks`; a push right after a `done`, before the sync; a deliverer that stalls past its lease and posts an older `seq`; a repository whose `merge.checks: required` is met by the forge's own check runs | `success` posted only after confirmation; the ticket restarts on each new head, the unconfirmed `done` marked `superseded_at` and the new head claimable; the older `seq` skipped, or raised `check-mismatch` and the newest re-queued; status ignored; `check-mismatch` raised; owners' setting holds; course file refused; the merge runner merges on the protected workflows' runs with no `std:checks@1` |
+| S-BTN-68 the merge check | a confirmed `passed`; a new head; a same-named status; an unissued success; an edited owners' `checks`; a `checks` map with two `success` stations, and one with no `failure`; a `checks` change from `failure` to `neutral`, and one from `neutral` to `failure`, by an owner key where `approvers.policy` is human-only; a course file carrying `checks`; a push right after a `done`, before the sync; a deliverer that stalls past its lease and posts an older `seq`; a repository whose `merge.checks: required` is met by the forge's own check runs | `success` posted only after confirmation; the ticket restarts on each new head, the unconfirmed `done` marked `superseded_at` and the new head claimable; the older `seq` skipped, or raised `check-mismatch` and the newest re-queued; status ignored; `check-mismatch` raised; owners' setting holds; both maps `invalid-params`; the first change `forbidden`, the second accepted; course file refused; the merge runner merges on the protected workflows' runs with no `std:checks@1` |
 | S-BTN-81 a check nobody sends | a `forge-check` entry undelivered 15 min; a work key claims the check | `baton.outbox-late` with `kind: forge-check`, change pending; refused |
 | S-BTN-123 a forged check | posts without confirmed ends; a moved `check.sha`; a work key, a fork, an agent's verdict against the exit status, no `exit_status`, a `process` runner, a moved ref, a widened App; a post naming an earlier head | no `forge-check` entry, `check-unattested`; restart on the new head; refused, dropped; verdict from `exec`; refused; `missing-capability`; `stale-board`; delivery refused; the post refused `head-moved`, the command read from the branch tip |
 | **§11** | | |
@@ -6897,7 +6916,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-101 the MCP endpoint | mints within and beyond what R-BTN-186 admits (an attestation, a route, `ticket.resolve`, `owner.grant.add`); a name in live use, and one a revoked key bore; protocol, batch, origin, rate and paging edges; unconfirmed and out-of-scope calls; `{hold:false}` on its own and on another's hold, and on a hold the revoked key of the same name set; a REST use | bad mints refused `invalid-params`; `conflict`, then minted; protocol errors as specified; `confirm-required`; uniform `forbidden`; its own lifted, another's `forbidden`, the dead key's `forbidden`; `rate-limited`; REST `unauthenticated` |
 | S-BTN-102 one action, three ways | `leg.stop` by REST, CLI and MCP, allowed and refused | one core function, one output, `mcp:<name>`; one refusal code |
 | S-BTN-103 an MCP key's life | `--ttl 120`; a new read action; idle 8 days; minter revoked; `api_keys: false`; revoke | refused; not listed; dead (`401`); `401` while off; `confirm-required`, then dead |
-| S-BTN-124 MCP, sign-in, tokens | MCP hold edits; a replayed sign-in code; revoke all; token reuse, long TTL; destructive dashboard acts; polled-row eviction; an API key to `http`; an unverifying bearer naming an administrator's `bak_<id>` over `http`; an owner's session on its repository, on a foreign one and on an administrator route; an owner's code typed into `baton admin open`; the session's code confirmed by another owner key; the owner removed; `owner sessions revoke`; a session message of kind `handled`, and a `release` for a ticket the runner does not hold | add-hold and the key's own unhold work, another's unhold `forbidden` (R-BTN-186); only the confirmed browser signs in; sessions ended; `unauthenticated`, `invalid-params`; `202 {confirm_code}` until the minting key confirms, Stop at once; oldest unbound dropped; key not sent; refused, nothing revoked; acts there, `forbidden`, `forbidden`; `not-found`; `not-found`; the session ended; every session of the key ended; `invalid-params`, `forbidden` |
+| S-BTN-124 MCP, sign-in, tokens | MCP hold edits; a replayed sign-in code; revoke all; token reuse, long TTL; destructive dashboard acts; polled-row eviction; an API key to `http`; an unverifying bearer naming an administrator's `bak_<id>` over `http`; an owner's session on its repository, on a foreign one and on an administrator route; a session's read of `/v1/ui/state`; an owner's code typed into `baton admin open`; the session's code confirmed by another owner key; the owner removed; `owner sessions revoke`; a session message of kind `handled`, and a `release` for a ticket the runner does not hold | add-hold and the key's own unhold work, another's unhold `forbidden` (R-BTN-186); only the confirmed browser signs in; sessions ended; `unauthenticated`, `invalid-params`; `202 {confirm_code}` until the minting key confirms, Stop at once; oldest unbound dropped; key not sent; refused, nothing revoked; acts there, `forbidden`, `forbidden`; `Cache-Control: no-store`; `not-found`; `not-found`; the session ended; every session of the key ended; `invalid-params`, `forbidden` |
 | S-BTN-126 API keys beside SSH keys | an API-key administrator, owner and runner beside an SSH runner | bearers on their own routes only; runner secret checked; sync and probe `unauthenticated`; one role per key (`conflict`); revocation next call; sign-in by code |
 | S-BTN-156 a board posted by a sync key | a checkout with no CI token and no `BATON_SYNC_TOKEN`; an ssh-keygen ed25519 key registered for it, a key of another repository, an unregistered key and one in the mirror role; an API-key file passed as `--sync-key` | with the one flag every call is an SSHSIG in `baton-request`, keyid the key's fingerprint, and the board lands under the key's repository (that of another repository too, never this checkout's); `unauthenticated` and `forbidden`, each posting nothing; the file refused by name, no call made |
 | S-BTN-170 the dashboard state read with an administrator's key | an administrator, an owner of `ops`, a runner it granted that heartbeats | the administrator's signed `GET /v1/admin/state`, and its API key's, equal its session's `GET /v1/ui/state` at the same instant; an owner's key `forbidden`; an unknown key and no principal `unauthenticated`; a POST `not-found` |
@@ -6946,7 +6965,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | G-BTN-11 | A sync OIDC token from a branch or another workflow is refused | tests |
 | G-BTN-51 | Everything is per repository; a sync credential reaches only its own; runners see only declared courses at `min_runner_version`; a branch maps to every ticket a current or previous `branch_pattern` gives, and a collision refuses the push while either is held | S-BTN-26 |
 | G-BTN-61 | Recommendations merge groups by expedite, weight, place, legs to an end, `ready_since`, id; the limit is per group; every ready ticket has a rank | S-BTN-26 |
-| G-BTN-68 | Webhooks are verified before reading; only R-BTN-73's fields are read; dispatch only for named repositories, never for Baton's own events, ≤ 1 per 30 s plus a trailing one | S-BTN-42 |
+| G-BTN-68 | Webhooks are verified before reading, and a body over 25 MiB is refused before any digest; only R-BTN-73's fields are read; dispatch only for named repositories, never for Baton's own events, ≤ 1 per 30 s plus a trailing one | S-BTN-42 |
 | G-BTN-82 | A sync authenticates by a sync key in that role, a machine key the repository lets sync, or a CI identity token, through one verifier; revocation acts at the next request | S-BTN-55, -56 |
 | G-BTN-83 | A want is cleared only by a post numbered above it; `wanted` changes only its nonce; notifications only record wants; Baton's database and exports hold no forge credential (the App's key, dispatch tokens and webhook secrets are Worker secrets), a dispatch starts only a named workflow, and Baton draws links only under `web_base` | S-BTN-54, -56 |
 | G-BTN-125 | A ticket's PRs across repositories are read under one budget, batched over GraphQL, as one change | S-BTN-106 |

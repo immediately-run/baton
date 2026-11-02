@@ -1,0 +1,65 @@
+---
+title: "B-170 — Mask the model provider's key in leg output: the runner masks the credentials it keeps, not only the ones it was told about"
+id: B-170
+project: baton
+status: available
+updated: 2026-11-02
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1172
+tier: judgement
+description: "R-BTN-144 keeps git, forge and model-provider credentials in every leg's environment, but masks only git and forge tokens the runner holds; a provider key a leg prints reaches leg logs and transcript repositories in clear. The runner cannot tell which inherited variable is a provider key today. Choose the mechanism (recommended: mask every kept variable whose name ends _KEY, _TOKEN or _SECRET, plus runner.json mask_env), amend R-BTN-144, build it. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** R-BTN-144 (*What a leg's environment holds*, *Masking*), R-BTN-84 (replay), R-BTN-128
+(leg logs), R-BTN-20 (archivers). Source: `docs/review/security-review-2026-11-02.mdx`, finding S1.
+PR #165 added every bearer prefix to class 5 (B-169 builds it); this ticket holds the rest of S1.
+The review's claims are a reviewer's; they were checked against the spec in PR #165.
+
+### Why
+
+The environment table keeps "git, forge and model-provider credentials, `SSH_AUTH_SOCK`", but
+masking class 4 names only "the git and forge tokens the runner holds" and AWS's two variables. A
+leg that prints its provider key — the credential an agent most often echoes — writes it in clear
+to `leg_log_root` and, through an archiver, to a `transcript_repos` repository. The review's own fix
+("the git, forge and model-provider tokens the runner holds") is not implementable as written: the
+runner inherits the variables and does not know which one is a provider key, and core and the CLI
+name no provider (values 3).
+
+### Decide (the owner, or the implementing session with a stated reason)
+
+- **(a) recommended — by name, plus a list.** Class 4 also masks the value of every variable the
+  leg environment keeps whose name ends `_KEY`, `_TOKEN` or `_SECRET` (8 bytes or more, like every
+  literal), and every name in `runner.json` `mask_env`. No provider is named; a provider key under
+  an unusual name is covered by `mask_env`.
+- (b) a list only: `runner.json` `mask_env`, empty by default. Precise, but the default protects
+  nothing.
+- (c) leave it: R-BTN-144 already says masking keeps only a cooperating agent from printing what
+  it never needed, and a provider key is one it needed. Then say in R-BTN-144 that a kept
+  credential is not masked, so `leg_log_root` and `transcript_repos` owners know.
+
+### What to build (for (a))
+
+1. **A spec PR first** under the babysit skill's *Spec PRs*: R-BTN-144 class 4 rewritten; the
+   environment table's "kept" row cites it; S-BTN-98 gains a provider key under a `_KEY` name and
+   one under a `mask_env` name.
+2. The runner computes the masked set once at leg start from the leg's environment; the
+   archiver under a runner (`BATON_PARENT` set) masks the same set in transcripts, not only
+   classes 5 and 6.
+3. Replay (R-BTN-84) masks the same way in its report.
+
+### Exit criteria
+
+- [ ] the spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] S-BTN-98 green in `npm test`; `npm run typecheck` green
+
+## Status
+
+- 2026-11-02: drafted from the 2026-11-02 security review (PR #165).

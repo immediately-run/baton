@@ -1,0 +1,57 @@
+---
+title: "B-172 — The sign-in code shows its row before it binds: the CLI cannot show a client address the API never returns"
+id: B-172
+project: baton
+status: available
+updated: 2026-11-02
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1174
+tier: judgement
+description: "R-BTN-155 step 3 has the CLI show the code's row (role, client address, age) and then bind it, but login-links answers only {ok: true}, so the CLI has nothing to show until after the bind — and that display is the only defence against a relayed code. Make binding two-step (a preview answer, then confirm: true), have the CLI ask yes or no on the address, amend R-BTN-155 and §14, build it. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** R-BTN-155 (*dashboard sign-in is a code a key holder confirms*, steps 3 and 4,
+*Limits*), §14's rows for `POST /v1/admin/login-links` and `POST /v1/owner/login-links`, the open
+question *Confirmation by keys a same-user process can reach*, S-BTN-124. Source:
+`docs/review/security-review-2026-11-02.mdx`, finding S7, checked against the text in PR #165.
+
+### Why
+
+R-BTN-155 says a process that asks for a code of its own "gets nothing unless a key holder types
+that code, read from Baton's own page". Against an attacker who starts a sign-in and relays the
+code ("type this into `baton owner open`"), that holds only if the holder sees whose row the code
+binds — which step 3 promises (`owner session for <address>, <n> s old`) and the API cannot
+deliver: both login-links routes take `{code}`, bind at once and answer `{ok: true}`. A CLI built
+to the routes binds first and can show the row only afterwards, when it no longer helps.
+
+### What to build
+
+1. **A spec PR first** under the babysit skill's *Spec PRs*:
+   - step 3: the CLI sends `{code}`; Baton answers `{role, client_addr, age_s}` for the unbound,
+     unexpired row of the route's role, binding nothing (`not-found` otherwise, as now, and
+     counting toward the failed-verification buckets); the CLI prints the line and asks
+     `bind? [y/N]`, defaulting to no, then sends `{code, confirm: true}`, which binds. `--yes`
+     is refused for this command: there is nothing to confirm without reading the address.
+   - §14's two rows take `{code, confirm?}` and answer the preview or `{ok: true}`.
+   - S-BTN-124 gains a preview that binds nothing, a declined preview (the row unbound and
+     still expiring), and a relayed code from another address shown before any bind.
+   - The open question stays open (it is the owner's: whether binding needs an `sk-` touch);
+     the PR cites it and changes nothing it asks.
+2. The routes, the CLI prompt (`baton admin open`, `baton owner open`) and the tests.
+
+### Exit criteria
+
+- [ ] the spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] S-BTN-124 green in `npm test` on both hosts; `npm run typecheck` green
+
+## Status
+
+- 2026-11-02: drafted from the 2026-11-02 security review (PR #165).

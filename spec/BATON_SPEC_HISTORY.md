@@ -2093,6 +2093,54 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   requirement's reading; S-BTN-21 gains the silent reap and a ticket-level seat. The reviewer's
   verdict: with D-1 fixed, ready for the owner with only the PR's nine items open.
 
+- **2026-11-02 — the security review's corrections** (PR #165,
+  `docs/review/security-review-2026-11-02.mdx`). No owner ruling: each change makes two rules
+  agree, or closes a gap in the direction the spec already took; the findings that need a design
+  choice are tickets (B-170 to B-175). Changed: R-BTN-93's spliced first bullet is one sentence
+  again (C1); the claim response loses `outbox?`, which no rule defined and R-BTN-171's own route
+  replaces (C3); §2.3 names both forge-notification routes as outside the per-IP rule, and R-BTN-73
+  caps their bodies at 26,214,400 bytes, refused `too-large` before any digest, with G-BTN-68 and
+  the `too-large` row citing it (C4, S4); the pending sign-in cookie is `__Host-baton_pending`,
+  matching the built session cookie (C5); §12's headline and R-BTN-15 say no push changes the
+  state Baton holds for authority, the policy included, and name the attestations a push may move
+  (C6); R-BTN-144's class 5 masks every bearer prefix Baton issues — `bps_`, `bds_` and the OAuth
+  companion's `bmo_`, `bmr_`, `bor_` joining `brt_`, `bak_`, `bmcp_` — and R-BTN-84's replay
+  keeps the provider's key only where R-BTN-144's allowlist names it (S1, in part; provider keys
+  in leg output are B-170); R-BTN-114's `conclusions` map names exactly one `success` and one
+  `failure` station, a change moving a station toward `success` (or removing or renaming a course's
+  entry) is a loosening and the other way a tightening, R-BTN-153 sends a timeout to `failure`
+  where no `neutral` is mapped, and R-BTN-188's sentence calls `checks` and its neighbours settings
+  "kept outside the policy" rather than ones that "tune operation rather than trust" (S2); R-BTN-191's
+  supersession names the machine key among the sync's posters (S6); R-BTN-16 sends
+  `Cache-Control: no-store` on every authorized response and every response that sets a cookie or
+  carries a sign-in code (U3). Scenarios S-BTN-42, S-BTN-68, S-BTN-98 and S-BTN-124 gain the
+  cases; B-169 builds them. Not taken: S5 (the `protected` preset's `readings` row already tells
+  owners to narrow what a gate reads, and instrument keys are administrator-registered); S8
+  (counter checks refuse authenticators that report no counter, and a cloned key is a custody
+  failure the deployment owns, §12.8); U2 (a leg is the sidecar's own OS user, which R-BTN-144
+  already puts outside the boundary, and the fence's authority is Baton's holder query,
+  R-BTN-26); the naming gotchas (renames cost more than they would save; §6.6 already marks rule
+  12 unused).
+
+- **2026-11-02 — review round one of the security review's corrections** (PR #165; one fresh
+  reviewer, given the diff and the impact list). Findings: 4 major, 5 minor. Making an addition to
+  `check_runners` a loosening put it under `approvers.policy` while §11, §14 and R-BTN-188 give
+  registering a check-runner to `approvers.members`; R-BTN-153 sends a timeout to `neutral`, which a
+  GitHub required check passes, and a map with no `neutral` left a timeout without a station;
+  R-BTN-131's PR fallback named no branch, credential or `git`-forge outcome, and B-169 decided them
+  beyond the spec with a scenario §15 lacked; forged notifications count in no failure bucket;
+  the cap's unit, §2.3's dangling "capped instead", the `too-large` row and G-BTN-68; `no-store`
+  missing `POST /v1/login`; every `checks` change gated, tightenings included, against the 2026-10-28
+  decision that the brake stays easy; bookkeeping in this entry and B-169. Fixed: the
+  `check_runners` clause dropped; the `failure` fallback; only a change toward `success`, or a
+  removed or renamed entry, is a loosening; the cap in bytes, cited from §2.3, the `too-large` row
+  and G-BTN-68; `no-store` on responses that set a cookie or carry a code; this entry and B-169
+  corrected. Moved to tickets: the request command's fallback (C2, B-174: the PR reverts its
+  R-BTN-131 and R-BTN-180 edits, so the two still disagree until B-174 lands) and the `neutral`
+  pass (B-175). Not taken: counting forged notifications in a failure bucket, which §2.3 exempts on
+  purpose ("CI tokens, App deliveries and forge notifications count in none") and the body cap now
+  bounds.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

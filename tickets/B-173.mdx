@@ -1,0 +1,58 @@
+---
+title: "B-173 — Say what retiring a repository ends: sessions, MCP keys, OAuth grants, sync keys, grants, claims and queued effects"
+id: B-173
+project: baton
+status: available
+updated: 2026-11-02
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1175
+tier: judgement
+description: "admin.repo.retire is a registry action and a destructive one (§12.2), and the code sets retired_at, but no rule says what retirement does: whether an owner's session loses the repository, whether MCP keys and OAuth grants scoped to it end, whether its sync keys, grants, active claims and outbox entries survive, and whether it can be undone. Write the rule (recommended: retirement ends every credential and lease scoped to the repository, keeps its history, and is not reversible), then build what the code lacks. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** R-BTN-47 (registered repositories: "only an administrator registers, changes or
+retires a repository"), §12.2 (`admin.repo.retire` destructive), §14 (`POST
+/v1/admin/repositories` with `{id, retire: true, confirm: true}`), R-BTN-155 (*Sessions*),
+R-BTN-130 (an MCP key's end), `BATON_MCP_OAUTH_SPEC` (grants and tokens), R-BTN-93 (sync keys),
+R-BTN-171 (the outbox). Source: `docs/review/security-review-2026-11-02.mdx`, finding U1, widened
+on checking: no rule states retirement's effect on anything.
+
+### Why
+
+A session loses a repository "as soon as its key stops owning it"; an MCP key ends "when the
+credential that minted it is removed or revoked". Retirement is neither, so as written an
+owner's session, an MCP key and an OAuth grant on a retired repository keep their reach, and
+nothing says whether its sync keys still post, its grants still claim, a held claim keeps its
+lease, or a queued `withdraw` or `forge-check` is still offered. The code today sets
+`repositories.retired_at` and filters reads by it (`src/core/admin.ts`, `src/core/claims.ts`);
+each surface's behaviour is whatever its query happens to do.
+
+### What to build
+
+1. **A spec PR first** under the babysit skill's *Spec PRs*, recommended content: retiring a
+   repository, in the transaction that sets `retired_at`, (a) removes it from every session's
+   reach (ending a session left with none), (b) revokes every MCP key and OAuth grant scoped to it,
+   (c) revokes its sync keys and refuses its CI identity, (d) ends its active claims
+   `released:retired` with fences as R-BTN-19 applies, (e) drops its queued outbox entries, logging
+   each, and (f) keeps its events and history for export. A retired id is never registered again in
+   the tenant (registration `conflict`), so nothing scoped to it can come back to life. R-BTN-47
+   states it; S-BTN-30 (or a new scenario) tests each of (a)–(f).
+2. The core changes the rule needs beyond what `retired_at` filtering already gives, and the
+   tests.
+
+### Exit criteria
+
+- [ ] the spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
+- [ ] the scenario green in `npm test` on both hosts; `npm run typecheck` green
+
+## Status
+
+- 2026-11-02: drafted from the 2026-11-02 security review (PR #165).
