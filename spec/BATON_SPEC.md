@@ -1258,7 +1258,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
       and the ended claims' branches and PRs; the branch-holder query answers a branch the change
       lives on. Baton holds a ticket past its course's start when its current position — the
       board's ready row's station, else the newest history row that reached a station — is not
-      the start; such a ticket is claimed as a **takeover**. Baton's position overrides only a
+      the start (the checkout's course file's, else the standard course's, R-BTN-131); such a
+      ticket is claimed as a **takeover**. Baton's position overrides only a
       false `available`: a ticket git says `in-progress` or `in-review` (the git lock) or parked
       or closed is refused as before, and so is one whose dependencies are not done. A takeover
       keeps every `prs:` entry and writes back any Baton knows, prints the position — station,
@@ -1268,7 +1269,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
       `server_time`) and the claim awaits reaping, or that a legacy claim has none; starting over
       is the owner's `adopt` (R-BTN-39), never a claim flag. An unanswered read — Baton
       unreachable, `forbidden`, no key or a key that cannot be read (judged before any request,
-      and named as the key's) — refuses, naming which, rather than fall through to the
+      and named as the key's), or a position on a course whose start neither names — refuses, naming which, rather than fall through to the
       frontmatter, unless `--offline` claims on git's word alone (Baton's position is then
       unknown, not refuted). `set <id> <status> [--pr URL] [--note TEXT]` writes any live
       status — `done` is `done`'s — and adds the pull request URL to `prs` once; a release

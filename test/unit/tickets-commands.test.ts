@@ -532,13 +532,15 @@ async function fakeBaton(state: {
 /** A repository whose checkout names its Baton id: the `repos` map carries the origin's own URL,
  * so `batonTarget` resolves `baton` from it, and `.baton/courses/create-pr/course.json` is there
  * for the start station. */
-function namedRepo(opts: Parameters<typeof repo>[0] = {}): Fixture {
+function namedRepo(opts: Parameters<typeof repo>[0] & { courseFile?: boolean } = {}): Fixture {
   const f = repo(opts);
   const settings = JSON.parse(readFileSync(join(f.dir, '.baton', 'baton.json'), 'utf8')) as Record<string, unknown>;
   settings.repos = { baton: git(f.dir, 'remote', 'get-url', 'origin') };
   writeFileSync(join(f.dir, '.baton', 'baton.json'), `${JSON.stringify(settings, null, 2)}\n`);
-  mkdirSync(join(f.dir, '.baton', 'courses', 'create-pr'), { recursive: true });
-  writeFileSync(join(f.dir, '.baton', 'courses', 'create-pr', 'course.json'), JSON.stringify({ start: 'filed', start_leg: 'implement', end: ['merged'], stations: {}, legs: {} }, null, 2));
+  if (opts.courseFile !== false) {
+    mkdirSync(join(f.dir, '.baton', 'courses', 'create-pr'), { recursive: true });
+    writeFileSync(join(f.dir, '.baton', 'courses', 'create-pr', 'course.json'), JSON.stringify({ start: 'filed', start_leg: 'implement', end: ['merged'], stations: {}, legs: {} }, null, 2));
+  }
   git(f.dir, 'add', '-A');
   git(f.dir, 'commit', '-qm', 'fixture: the repos map and the course file');
   git(f.dir, 'push', '-q', 'origin', 'HEAD:main');
@@ -799,6 +801,34 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
       expect(f.at('tickets/B-91.mdx')).toContain('prs: []');
     } finally {
       baton.close();
+    }
+  }, 60_000);
+
+  it('with no local course file the start is the standard course\'s: a ticket whose newest reached row is the start is a fresh claim, one past it a takeover', async () => {
+    // No `.baton/courses/create-pr/course.json` (a sourced course, a repository with no course
+    // code): the start comes from the standard create-pr course (`filed`), never from whichever
+    // row the path reached.
+    const f = namedRepo({ courseFile: false, existing: { 'tickets/B-91.mdx': b91File('available', []), 'tickets/B-92.mdx': ticket('B-92') } });
+    expect(existsSync(join(f.dir, '.baton', 'courses', 'create-pr', 'course.json'))).toBe(false);
+    // Moved back to its start: the board offers nothing ready, and the newest row that reached a
+    // station reached `filed`, over an older pr-open.
+    const back = await fakeBaton({ ...B91, ready: [], history: [{ id: 4, kind: 'git-moved', reached: 'filed', next_leg: 'implement' }, ...B91.history] });
+    try {
+      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', back.url);
+      expect(r).toMatchObject({ code: 0, err: '' });
+      expect(r.out).toMatch(/^✓ tickets: claim B-91 \(in progress\) — pushed as [0-9a-f]{7,}\n$/);
+      expect(f.at('tickets/B-91.mdx')).toContain('prs: []');
+    } finally {
+      back.close();
+    }
+    // Past it (the history's newest reached row is `reviewed`): the takeover, as with a file.
+    const past = await fakeBaton({ ...B91, ready: [] });
+    try {
+      const r = await runAsync(f.dir, 'claim', 'B-92', '-i', keyFile, '--url', past.url);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('B-92: Baton holds it at reviewed — you are taking it over, not starting it');
+    } finally {
+      past.close();
     }
   }, 60_000);
 

@@ -29,6 +29,7 @@ import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { defaultBranch } from './request';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { remoteSlug } from './cli';
+import { builtIn, DEFAULT_COURSE } from './courses';
 import { holderRefusal, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
 
 /** The most tries one command makes when the default branch moves under it: the stopgap's. */
@@ -338,10 +339,10 @@ export function batonTarget(root: string, io: TicketsIo): { url: string; keyFile
   };
 }
 
-/** The course's `start` station, from the checkout's own `.baton/courses/<course>/course.json` —
- *  the ticket's `course:`, else `create-pr`, the default course (B-129). The takeover witness
- *  needs it only for a ticket whose Baton history is empty (a change that reached its station
- *  without a claim); null when the checkout names no such file, and the history alone witnesses. */
+/** The course's `start` station (B-129): the ticket's `course:`, else `create-pr`, the default
+ *  course — from the checkout's own `.baton/courses/<course>/course.json`, else, with no such
+ *  file (a sourced course, a repository with no course code), the standard course's file in
+ *  `courses.ts`. Null only for a course that is neither, whose takeover is then undetermined. */
 export function courseStart(root: string, id: string): string | null {
   try {
     const settings = readTicketSettings(root);
@@ -349,9 +350,9 @@ export function courseStart(root: string, id: string): string | null {
     const found = locate(items, id, (path) => existsSync(join(root, path)));
     const text = found ? readFileSync(join(root, found.path), 'utf8') : null;
     const course = text ? ticketsMarkdown([{ path: found!.path, text }], { items, repos: readSettingsJson(root).repos }).tickets[0]?.course_id : undefined;
-    const file = join(root, '.baton', 'courses', String(course ?? 'create-pr'), 'course.json');
-    if (!existsSync(file)) return null;
-    const start = (JSON.parse(readFileSync(file, 'utf8')) as { start?: unknown }).start;
+    const name = String(course ?? DEFAULT_COURSE);
+    const file = join(root, '.baton', 'courses', name, 'course.json');
+    const start = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as { start?: unknown }).start : builtIn(name)?.course.start;
     return typeof start === 'string' ? start : null;
   } catch {
     return null;

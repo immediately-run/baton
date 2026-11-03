@@ -72,8 +72,9 @@ export interface BatonPosition {
   station: string | null;
   /** Whether Baton holds the ticket past its course's `start` — the takeover witness, judged
    *  from the current position (`station`), never from any row the path ever reached: a ticket
-   *  moved back to its start is at its start. With no start known (the checkout names no course
-   *  file), only a history row witnesses, as the board's row cannot be compared. */
+   *  moved back to its start is at its start. The start is the checkout's course file's, else
+   *  the standard course's (`courseStart`); with neither, a ticket Baton places is undetermined,
+   *  never judged from whatever row the path reached. */
   pastStart: boolean;
   /** The board's `server_time`: the clock a holder's lease is judged against (R-BTN-32 — the
    *  CLI reads no clock of its own for Baton's leases). */
@@ -129,8 +130,9 @@ export function checkKey(keyFile: string): void {
 }
 
 /** Read where Baton holds `ticket` (a local id) in `repository` (Baton's id for it), with
- *  `start` its course's start station when the checkout's course file names one — the takeover
- *  witness needs it only for a ticket whose history is empty. `forgePath` (`owner/name`) is the
+ *  `start` its course's start station (`courseStart`: the checkout's course file, else the
+ *  standard course's) — the takeover witness compares the current position with it, and a
+ *  position with no start to compare is undetermined. `forgePath` (`owner/name`) is the
  *  branch-holder query's `repo=`. */
 export async function readTicketPosition(o: {
   url: string;
@@ -181,7 +183,10 @@ export async function readTicketPosition(o: {
     : null;
   const reached = rows.find((r) => r.reached != null)?.reached ?? null;
   const station = ready?.station ?? reached;
-  const pastStart = o.start != null ? station != null && station !== o.start : reached != null;
+  if (station != null && o.start == null) {
+    throw new Undetermined(`${full}'s course start`, 'the checkout has no course file for its course and it is no standard course, so whether Baton holds it past its start cannot be judged');
+  }
+  const pastStart = station != null && station !== o.start;
   const serverTime = typeof board.server_time === 'number' ? board.server_time : null;
   return { ready, rows, resume, holders, branch, station, pastStart, serverTime };
 }
