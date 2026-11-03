@@ -35,13 +35,15 @@ station** finishes the ticket.
 **Worker.** An agent session on a machine, identified by its key. It declares capabilities,
 a tier ceiling, tags and the courses it can run.
 
-**Holding, ontology, derived capability.** What a worker declares (a key's name, an installed
-tool) are its holdings; a repository's ontology derives further capabilities from them, so a leg
-can require an ability while workers declare only what they hold.
+**Capability.** A name a worker declares (`key:anthropic`, `capability:code-generation-llm`) and
+a leg requires; Baton matches the two by name and derives nothing. What the keys and tools a
+worker holds amount to is the worker's own statement, and which model and key a leg uses is the
+course's choice, in its ranking code and instructions (R-BTN-174, §6.10).
 
-**Route choice.** A question a repository attaches to a leg for advice — which model, through
-which key — that the ontology answers from the worker's holdings and the instruments' readings.
-Advice, never a gate.
+**Capacity, seat.** A capability with a capacity has that many seats: a claim holds one, fixed when
+its leg starts, for each such capability rule 4 matched for that leg (the ticket's requirements and
+the leg's), and a claim past capacity is refused (R-BTN-178). Not the tenant's capacity envelope
+(R-BTN-87), which no claim is refused by.
 
 **Claim.** A worker's lease on one ticket. It runs one or more legs and ends **done**,
 **suspended** at a station, or **released**.
@@ -49,7 +51,7 @@ Advice, never a gate.
 **Lease, heartbeat, reap, fence.** A claim lives while its worker heartbeats. A silent worker
 is **reaped** at its lease; a **fence** stops a revived worker from writing.
 
-**Gate.** A rule Baton enforces for safety: one holder, capabilities, tier, grants, barred
+**Gate.** A rule Baton enforces for safety: one holder, capabilities and their capacity, tier, grants, barred
 tags. Everything else is **advice**.
 
 **Tag, barred tag.** Short strings a course gives workers (`family:glm`). A leg can bar tags,
@@ -87,15 +89,40 @@ cancelled; Baton alone queues it, and the ticket is withdrawn when it ends (R-BT
 **Administrator, owner, grant.** Administrators run the instance; each repository's owners
 grant worker keys access to it.
 
+**Action, registry.** Everything a credential can ask Baton to do is one action in one registry,
+named `<noun>.<verb>`, with the principals that may call it; the API, the CLI, the dashboard and
+MCP are generated from it and checked by one `authorize`. The CLI is `baton <noun> <verb>`, and
+its help comes from the registry (R-BTN-127, R-BTN-129).
+
+**Session.** A dashboard sign-in, minted by an administrator's or owner's key through a code the
+key holder confirms; one principal, carrying its key's role, an owner's reaching only the
+repositories the key still owns (R-BTN-155).
+
+**Delegated key.** An MCP key: a bearer an owner's tool holds, acting as an owner of one
+repository for the actions listed when it was minted. It may tighten (hold, bar, stop,
+cancel) and undo its own tightenings, never loosen another's, route, adopt, resolve, answer a person's leg or
+touch credentials or the policy (R-BTN-186, R-BTN-130).
+
 **Policy, preset, guarantee, floor.** A repository's policy is the one versioned document of
 every rule about authority and trust — who lands on which refs, who approves what, whose
-attestations count — held in Baton, never in git. A preset (`cooperative`, `protected`) is a set
-of values an owner applies and then tunes. A guarantee is a named condition over the policy; a
-floor is a set of guarantees Baton refuses to let any change break (§12.8).
+attestations count — held in Baton, never in git. A preset (`cooperative`, `protected`,
+`protected-hardware`) is a set of values an owner applies and then tunes. A guarantee is a named
+condition over the policy; `floors` is the knob listing the guarantees Baton refuses to let any
+change break (§12.8). Baton's own server is trusted: a compromised Baton is recovered, not
+resisted, so nothing is signed for a verifier outside it.
+
+**Role, domain.** What a grant says about its runner's trust: its role (`runner`, or
+`trusted-runner` for the legs marked `trusted`) and its domain, a label for the host or VM it runs
+in, both set by the policy's `approvers.roles` approver. Two reviews count as independent when
+their domains differ; Baton compares the labels and verifies nothing about them (R-BTN-180).
+
+**Pusher.** A forge author whose words count — a verdict, a marker, an approval — because the
+forge reports they can push the PR's base, or the owners list them in `pushers`. The one sense in
+which a forge author is trusted; "trusted" otherwise names the runner role (R-BTN-139).
 
 **Attestation, reading.** Everything Baton is told about the world: a typed statement it records —
 a review, a check run, a human's approval or answer, a runner's report of where its leg reached,
-a fact the sync read from git, a courier's delivery, a provider's remaining funds — about a ticket
+a fact the sync read from git, a deliverer's delivery, a provider's remaining funds — about a ticket
 or commit, or about a resource instance (a **reading**). Attestations differ only in who wrote
 them. A leg's course says which attestations it requires and whether a missing one blocks the leg
 or only steers advice; the repository's policy says whose count.
@@ -104,14 +131,15 @@ or only steers advice; the repository's policy says whose count.
 owner's or administrator's action. Baton accepts or refuses it by its gates; it is not evidence. A
 command may carry an attestation: an advance moves the lease and reports where the leg reached.
 
-**Outbox, courier.** Every effect Baton intends outside itself — a git write, a check run, a
-workflow dispatch — is an outbox entry; a courier, a key whose host holds the credential the
-effect needs, delivers it, and Baton confirms it by reading it back. Baton itself holds no
-credential that acts outside it.
+**Outbox, deliverer.** Every git write and check run Baton intends — a ticket's withdrawal, a
+merge check — is an outbox entry; a deliverer, a runner whose host holds the credential the effect
+needs and whose grant role the policy admits, delivers it, and Baton confirms it by reading it
+back. Baton itself holds no credential that writes git or posts a check; a workflow dispatch is
+its own call, made with the App key it holds (R-BTN-94, R-BTN-171).
 
-**Reply.** Baton's answer to a command or a read: a claim response, a recommendation, a signed
-policy read. The fourth noun: Baton **learns** through attestations, **is asked** through
-commands, **acts** through couriers and **answers** in replies.
+**Reply.** Baton's answer to a command or a read: a claim response, a recommendation, a policy
+read. The fourth noun: Baton **learns** through attestations, **is asked** through commands,
+**acts** through deliverers and its own dispatches, and **answers** in replies.
 
 **Trusted runner.** A runner that claims only legs marked `trusted`, runs no repository code, and
 acts on attestations alone; the merge runner is the first.

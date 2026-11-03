@@ -7,7 +7,7 @@ import * as http from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createApiKey, duration, main, parseArgs, plan, send } from '../../cli/baton.mjs';
+import { createApiKey, duration, main, parseArgs, plan, policyDiff, send } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
 import { ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
@@ -387,5 +387,79 @@ describe('baton decision list: the CLI courier (R-BTN-80)', () => {
     expect(warned).toEqual(['baton decision list: fetch failed; trying again in a minute']);
     expect(waits).toEqual([WATCH_EVERY_MS, WATCH_EVERY_MS, WATCH_EVERY_MS]);
     expect(WATCH_EVERY_MS).toBe(60_000);
+  });
+});
+
+describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'baton-cli-policy-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const READ = {
+    repository: 'ops', tenant: 't1', version: 4, hash: 'a'.repeat(64),
+    policy: { human_key: 'any', approvers: { members: ['owner'], trust: ['owner'], policy: ['owner'] } },
+    guarantees: {}, guarantees_hash: 'b'.repeat(64), floors: [], floors_hash: 'c'.repeat(64),
+    at: 1, valid_until: 601_000, kid: 'd'.repeat(16), signature: 'Zm9v',
+  };
+
+  it('policyDiff lists the knobs a file would change, key order aside', () => {
+    expect(policyDiff(READ.policy, { ...READ.policy, human_key: 'hardware' })).toEqual(['human_key']);
+    expect(policyDiff(READ.policy, { human_key: 'any', approvers: { policy: ['owner'], members: ['owner'], trust: ['owner'] } })).toEqual([]);
+  });
+
+  it('show, set, apply, log and the floor commands each make their one request (set on the version --base names)', async () => {
+    const file = join(dir, 'owner.key');
+    createApiKey(file);
+    const policyFile = join(dir, 'policy.json');
+    writeFileSync(policyFile, JSON.stringify({ ...READ.policy, human_key: 'hardware' }));
+    const requests: { method: string; path: string; body: unknown }[] = [];
+    const was = globalThis.fetch;
+    const outs: string[] = [];
+    const outWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => { outs.push(String(chunk)); return true; }) as typeof process.stdout.write;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const u = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+      const body = init?.body == null ? undefined : JSON.parse(String(init.body));
+      requests.push({ method: (init?.method ?? 'GET') as string, path: new URL(u).pathname + new URL(u).search, body });
+      if (u.endsWith('/policy') && (init?.method ?? 'GET') === 'GET') return new Response(JSON.stringify(READ), { status: 200 });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const run = (args: string[]) => main(['owner', 'policy', ...args, '-i', file, '--url', ORIGIN]);
+      await expect(run(['show', 'ops'])).resolves.toBe(0);
+      await expect(run(['diff', 'ops', policyFile])).resolves.toBe(0);
+      await expect(run(['log', 'ops', '--after', '2'])).resolves.toBe(0);
+      await expect(run(['set', 'ops', policyFile, '--base', '4'])).resolves.toBe(0);
+      await expect(run(['apply', 'ops', 'protected', '--base', '5'])).resolves.toBe(0);
+      await expect(run(['floor', 'add', 'ops', 'fieldhouse', '--guarantees', 'no-runner-lands,human-gates', '--remove-by', 'owner'])).resolves.toBe(0);
+      await expect(run(['floor', 'remove', 'ops', 'fieldhouse'])).resolves.toBe(0);
+      // Round 1, findings 9 and 10: `set` without --base refuses rather than fetch-and-overwrite
+      // (the compare-and-set builds on the version the operator read), and `baton owner -i KEY
+      // policy show REPO` — the documented form — reaches the policy commands.
+      await expect(run(['set', 'ops', policyFile])).rejects.toThrow(/--base/);
+      await expect(main(['owner', '-i', file, 'policy', 'show', 'ops', '--url', ORIGIN])).resolves.toBe(0);
+    } finally {
+      globalThis.fetch = was;
+      process.stdout.write = outWrite;
+    }
+    expect(requests.map((r) => `${r.method} ${r.path}`)).toEqual([
+      'GET /v1/repositories/ops/policy',
+      'GET /v1/repositories/ops/policy',
+      'GET /v1/owner/ops/policy/log?after=2',
+      'PUT /v1/owner/ops/policy',
+      'PUT /v1/owner/ops/policy',
+      'POST /v1/owner/ops/policy/floors',
+      'POST /v1/owner/ops/policy/floors',
+      'GET /v1/repositories/ops/policy',
+    ]);
+    // The compare-and-set builds on the version the operator named, never one the CLI fetched.
+    expect(requests[3].body).toEqual({ base_version: 4, policy: { ...READ.policy, human_key: 'hardware' } });
+    expect(requests[4].body).toEqual({ base_version: 5, preset: 'protected' });
+    expect(requests[5].body).toEqual({ name: 'fieldhouse', guarantees: ['no-runner-lands', 'human-gates'], remove_by: 'owner' });
+    expect(requests[6].body).toEqual({ name: 'fieldhouse', remove: true, confirm: true });
+    // diff printed the one knob; show printed the read it verified the fields of.
+    expect(outs.join('')).toContain('human_key');
   });
 });

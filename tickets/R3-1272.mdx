@@ -3,7 +3,7 @@ title: "R3-1272 — Baton CLI ranks and syncs on the runner: rank.mjs from the r
 id: R3-1272
 project: baton
 status: available
-updated: 2026-10-22
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -76,3 +76,4 @@ _2026-10-22 — updated for the seats and route-choice spec: `prefer` entries ar
 `prefer` claim to its next candidate inside Baton's claim transaction, so the runner's claim
 call needs no new path. `BATON_ADVICE` for leg scripts (R-BTN-177) is B-105's, not this
 ticket's._
+- 2026-11-02: the spec restructure's part 4 (B-166): `prefer` entries are `{ticket_id, leg?}` (R-BTN-100), with no `bills`; rule 11 refuses `capacity-full` from the leg's requirements (R-BTN-178); `BATON_ADVICE` is gone (§6.10; B-167).

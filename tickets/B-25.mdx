@@ -3,7 +3,7 @@ title: "B-25 — Baton action registry and MCP endpoint: one authorize behind ev
 id: B-25
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-03
 repos:
   - baton
 tags:
@@ -85,3 +85,9 @@ _(2026-10-20: rescoped to the current-state spec, PR #71 — no `courier` grant 
 `asks`/`instances` scopes; `owner.resolve`, `condition.list` and `owner.route` registered.)_
 
 _(2026-10-20: extended for the adversarial review's fixes — API keys reach `GET /v1/actions` (m13), and a dashboard resolve is one step, `POST /v1/ui/conditions/{condition}/resolve`, not confirmed by code (adv-2 B1, adv-4 B1).)_
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): the registry entry is `{id, summary, callers, effect, input, output, http, ui?, delegated}`: the `mcp` flag and the closed allowlist are gone, `delegated` (`true` | `own` | `false`) derives from R-BTN-186 and `check:actions` keeps them equal; the principals `dashboard` and `owner-session` are one `session` carrying its key's role; `owner.resolve` is `ticket.resolve`, `owner.grants.flags` is `owner.grant.flags`; `owner.mcp-key.create` is an `approvers.members` action, not `[owner]`. Items 3, 6 and 7 read R-BTN-129 and R-BTN-130 as they now stand.)_
+
+_(2026-11-02, part 3's review round one: the owner actions are `owner.owner.add | remove`; `admin repo resync` calls a new destructive key route `POST /v1/admin/repositories/{repository}/resync` (R-BTN-11, §12.2); `human-key.add | revoke` back `baton human-key add | revoke` (R-BTN-185); a caller entry is `{principal, scope, roles?}`; `ticket.resolve` is `delegated: false`.)_
+
+_(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — MCP keys: retirement revokes every MCP key on the repository. Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_

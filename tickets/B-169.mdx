@@ -1,0 +1,65 @@
+---
+title: "B-169 — Build the security review's spec corrections: bearer masking, the checks map's validation and loosening, notification body caps, no-store, the pending cookie"
+id: B-169
+project: baton
+status: available
+updated: 2026-11-03
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1171
+tier: routine
+description: "Build what PR #165 corrected in the spec from the 2026-11-02 security review: R-BTN-144 class 5 masks every bearer prefix (bps_, bds_, bmo_, bmr_, bor_ added), R-BTN-114's conclusions map validated and a change toward success a loosening, R-BTN-153's timeout falling back to failure, R-BTN-73's 25 MiB body cap on both notification routes, R-BTN-16's Cache-Control: no-store, and the __Host-baton_pending cookie name (R-BTN-191's supersession is B-146's item 8). Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** `spec/BATON_SPEC.md` as PR #165 left it: R-BTN-144 (*Masking*, class 5), R-BTN-114
+(*Conclusions are the owners'*), R-BTN-73 / R-BTN-95 (*Routes*) and §2.3 (*Admission*), R-BTN-16
+(*Cookies*, *Headers*), R-BTN-155, R-BTN-153 (*Mapping the status*); R-BTN-191 (*Superseded per
+writer class*) is B-146's. History: the changelog entry "the security review's corrections". Source:
+`docs/review/security-review-2026-11-02.mdx`, findings S1, S2, S4, C5 and U3 (S6 is B-146's). R-BTN-84's
+replay change needs no build here: replay is not built (`src/` has no `leg replay`). No owner
+ruling: each change aligns two rules or closes a gap in the direction the spec already took.
+
+### What to build
+
+1. **Masking.** The runner's class-5 pattern matches `brt_`, `bak_`, `bmcp_`, `bps_`, `bds_`,
+   `bmo_`, `bmr_` and `bor_`, each followed by `[A-Za-z0-9_-]*`; the archiver's transcript
+   masking uses the same pattern (one shared definition, not two lists).
+2. **The checks map.** `PUT /v1/owner/{repository}/settings` refuses a `checks` course map that
+   does not name exactly one end station `success`, exactly one `failure` and at most one
+   `timed_out` (`invalid-params`, naming the course; `neutral` is not a conclusion, the owner's
+   ruling of 2026-11-02 on B-175). A station newly mapped to `success`, or a removed or renamed
+   course entry, is a loosening: it needs an approver on `approvers.policy` (R-BTN-186); any other
+   change is a tightening, open to any owner credential but a delegated key, which `checks`
+   refuses as before. (B-175 builds the same validation: build it once, in whichever lands
+   first.) Registering a check-runner stays `approvers.members`'s (R-BTN-188).
+3. **Notification body caps.** `POST /v1/github/webhook` and `POST /v1/forges/{repository}/notify`
+   refuse a body over 26,214,400 bytes `too-large` on `Content-Length`, or once that many bytes
+   have been read (chunked bodies), before any MAC is computed. Both stay outside the per-IP
+   rule.
+4. **Headers.** Every response to a request a credential or a dashboard session authorizes, and
+   every response that sets a cookie or carries a sign-in code, carries `Cache-Control: no-store`
+   (one place in `src/core/http.ts`, not per route).
+5. **The pending cookie** is `__Host-baton_pending` wherever B-46's sign-in builds it.
+### Tests
+
+S-BTN-42 (the oversize bodies), S-BTN-68 (the two maps; the two `checks` changes where
+`approvers.policy` is human-only), S-BTN-98 (`bmr_` and `bps_` masked) and S-BTN-124 (`no-store`
+on a session read) as §15 now states them.
+Green in `npm test` on both hosts.
+
+### Exit criteria
+
+- [ ] every case above passes in `npm test`; `npm run typecheck` green
+- [ ] one masking pattern in `src/`, imported by the runner and the archiver
+
+## Status
+
+- 2026-11-02: drafted from the 2026-11-02 security review (PR #165).
+- 2026-11-03: item 6 (R-BTN-191's supersession) moved to B-146, which builds the attestation store it needs.

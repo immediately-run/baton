@@ -3,7 +3,7 @@ title: "B-101 — Review rounds between legs: the PR conversation on a forge, th
 id: B-101
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-02
 tags:
   - roadmap-item
 order: 503
@@ -77,3 +77,5 @@ only do this for plain git (make it a policy setting)". R-BTN-190 is the result.
 ## Status
 
 _(2026-10-31: the plan above rewritten for R-BTN-190 (baton#148), since the earlier plan, rounds as `.baton/reviews/` files on the PR branch deleted before the squash, no longer matches the spec. The brief is kept as written; the ticket stays with the session holding it.)_
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) drops the `leg_state` knob: leg state follows the repository's `forge` (`forge` on a forge, `branch` on `git`), and the claim response still carries which (R-BTN-190, B-165's review default). Item 0 reads the value from the claim response as before; no policy sets it.)_

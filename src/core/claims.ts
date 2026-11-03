@@ -15,6 +15,7 @@ import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Graph, ty
 import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from '../shared/schema.mjs';
 import type { Seen, Stations } from './stations';
 import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
+import { legStateOf } from './policy';
 import type { Row, SqlValue, Store } from './ports';
 import type { Blocks } from './blocks';
 import type { History } from './history';
@@ -49,6 +50,11 @@ export interface Ctx {
   schema?: (repo: string, id: string) => Schema | null;
   /** §5.9 (B-104): the ontology store, for the reads that bring derived sets current. */
   ontologies?: import('./ontologies').Ontologies;
+  /** §12.8 (B-145): the repository policies — the `floor` rule (R-BTN-189), the policy pins and
+   *  the hashes the claim response carries. */
+  policies?: import('./policy').Policies;
+  /** A repository's forge, for the knobs that a `git` repository refuses (R-BTN-188). */
+  forgeOf?: (repository: string) => import('./links').Forge;
 }
 
 interface WorkerFacts {
@@ -203,6 +209,68 @@ export class Claims {
   }
   private headOf(repo: string) {
     return this.rows<{ sha: string | null }>('SELECT sha FROM board_head WHERE repository_id = ?', repo)[0]?.sha ?? null;
+  }
+
+  // ── the repository policy's stops (§12.8, B-145) ────────────────────────────────────────
+
+  /** R-BTN-189: every repository a ticket reaches — its home and each `repos:` entry that
+   *  resolves to a registered repository (R-BTN-140's code-repository entries among them). */
+  private reachedRepositories(ticketId: string): string[] {
+    const home = repositoryOf(ticketId);
+    const row = this.rows<{ repos: string }>('SELECT repos FROM tickets WHERE id = ?', ticketId)[0];
+    const paths: string[] = row ? JSON.parse(row.repos) as string[] : [];
+    if (!paths.length) return [home];
+    const reached = new Set<string>([home]);
+    for (const p of paths) {
+      const r = this.rows<{ id: string }>('SELECT id FROM repositories WHERE github = ? COLLATE NOCASE AND retired_at IS NULL', p)[0];
+      if (r) reached.add(r.id);
+    }
+    return [...reached];
+  }
+
+  /** R-BTN-189's rule `floor` and R-BTN-189's pins, at a claim and an advance: Baton itself
+   *  refuses to offer or accept work on a ticket that reaches a repository whose floored
+   *  guarantee is broken, and a runner whose policy pin differs acts on nothing in the
+   *  repository — the protection checker exempt from both, for it keeps checking. */
+  private refuseStopped(ticketId: string, worker: { id: number; credential_id: string }): void {
+    const policies = this.c.policies;
+    if (!policies) return;
+    const home = repositoryOf(ticketId);
+    if (!policies.isProtectionChecker(worker.credential_id, home)) {
+      const broken = [home, ...this.reachedRepositories(ticketId).filter((r) => r !== home)]
+        .flatMap((r) => policies.brokenUnderFloors(r).map((b) => ({ ...b, repository: r })))[0];
+      if (broken) {
+        throw new BatonError('not-eligible', `${ticketId}: the floor ${broken.floor} is broken on ${broken.repository} (${broken.guarantee}) (R-BTN-189)`, { rule: 'floor', rule_code: 'floor-broken', repository: broken.repository });
+      }
+      if (policies.pinDiffers(worker.id, home)) {
+        throw new BatonError('not-eligible', `${ticketId}: this runner's policy pin differs from ${home}'s current policy (R-BTN-189)`, { rule: 'policy-pin', rule_code: 'policy-unpinned' });
+      }
+    }
+  }
+
+  /** R-BTN-189: a floored guarantee broke on `repository` — every running claim on a ticket
+   *  that reaches it is sent a `release` with reason `floor` and ends `released:floor`, the
+   *  protection checker's excepted. Called by the policy store, from the report and alarm
+   *  paths, inside their transactions. */
+  releaseForFloor(repository: string): void {
+    const holders = this.rows<{ id: number; ticket_id: string; worker_id: number; credential_id: string }>(
+      `SELECT c.id, c.ticket_id, c.worker_id, w.credential_id FROM claims c JOIN workers w ON w.id = c.worker_id
+       WHERE c.status = 'active' AND (c.ticket_id LIKE ? || ':%' OR c.ticket_id IN (SELECT t.id FROM tickets t WHERE t.repos LIKE ?))`,
+      repository, `%${this.forgePathOf(repository)}%`).filter((h) => {
+        // R-BTN-180: the protection checker keeps checking.
+        if (this.c.policies?.isProtectionChecker(h.credential_id, repository)) return false;
+        return this.reachedRepositories(h.ticket_id).includes(repository);
+      });
+    for (const h of holders) {
+      this.exec(`INSERT INTO messages (kind, payload_json, from_principal, to_worker_id, sent_at, status) VALUES ('release', ?, 'server', ?, ?, 'pending')`,
+        JSON.stringify({ ticket_id: h.ticket_id, reason: 'floor' }), h.worker_id, this.c.now());
+      this.finish(h.id, h.ticket_id, 'released', 'released:floor', 'server', { detail: `floor on ${repository}` });
+    }
+  }
+
+  /** A repository's forge path, for matching a ticket's `repos:` entries. */
+  private forgePathOf(repository: string): string {
+    return this.rows<{ github: string }>('SELECT github FROM repositories WHERE id = ?', repository)[0]?.github ?? '';
   }
 
   // ── what matching reads ─────────────────────────────────────────────────────────────────
@@ -601,6 +669,9 @@ export class Claims {
     if (w.fresh == null) this.prepareSets(w, wanted ? 1 : 2, wanted ? repositoryOf(wanted) : undefined);
     if (wanted) {
       if (!this.cutOver(wanted)) throw new BatonError('not-cut-over', `${repositoryOf(wanted)}'s claims go through git until its cutover (R-BTN-28)`);
+      // §12.8 (B-145, R-BTN-189): a ticket that reaches a repository whose floored guarantee is
+      // broken is not claimable — rule `floor`, `floor-broken`.
+      this.refuseStopped(wanted, w);
       const item = this.item(wanted);
       if (!item || !item.station?.next_leg) throw new BatonError('not-eligible', `${wanted} has no leg to claim`, { rule: 1, rule_code: GATE_CODES[1] });
       const v = this.gate(w, item, item.station.next_leg, 'claim');
@@ -617,8 +688,15 @@ export class Claims {
       ];
       return { item, advice: overridden.length ? { recommendation: place < 0 ? null : recs[place], overridden } : place === 0 ? { recommendation: recs[0] } : null };
     }
-    const [first] = this.recommend(w, 1);
-    if (first) return { item: this.item(first.ticket_id)!, advice: { recommendation: first } };
+    const recs = this.recommend(w, 50);
+    // §12.8 (B-145): a recommended ticket is offered only where the floor rule lets it be — the
+    // first one that is not on a stopped repository.
+    const first = recs.find((r) => { try { this.refuseStopped(r.ticket_id, w); return true; } catch { return false; } })
+      ?? recs[0];
+    if (first) {
+      this.refuseStopped(first.ticket_id, w);
+      return { item: this.item(first.ticket_id)!, advice: { recommendation: first } };
+    }
     // Rule 9 is per course: say `stale-skills` when it alone stood between this worker and a
     // ticket, so the worker knows to restart from a pulled checkout (R-BTN-22). Only tickets of
     // courses the worker declares count; a worker declaring no course is stale on every course.
@@ -750,8 +828,15 @@ export class Claims {
     const previous = this.rows<{ id: number; status: string; end_reason: string | null; end_detail: string | null; ended_at: number | null; resume_json: string | null }>(
       `SELECT id, status, end_reason, end_detail, ended_at, resume_json FROM claims WHERE ticket_id = ? AND id < ? AND status != 'active' ORDER BY id DESC`, c.ticket_id, id);
     const advice = c.advice_json ? (JSON.parse(c.advice_json) as { recommendation?: Recommendation | null }) : null;
+    // §12.8 (B-145): the policy facts of the claim's repository (R-BTN-189) and where state one
+    // leg hands the next lives (R-BTN-188's `leg_state` — B-148 reads it).
+    const repo = repositoryOf(c.ticket_id);
+    const policy = this.c.policies?.hashesFor(repo) ?? null;
+    const legState = this.c.policies?.current(repo) && this.c.forgeOf ? legStateOf(this.c.policies.current(repo)!.policy, this.c.forgeOf(repo)) : null;
     return {
       claim_id: c.id, ticket_id: c.ticket_id, course_id: c.course_id, course_version: courseVersion,
+      ...(policy ? { policy_hash: policy.policy_hash, guarantees_hash: policy.guarantees_hash, floors_hash: policy.floors_hash } : {}),
+      ...(legState ? { leg_state: legState } : {}),
       station: c.station, legs: c.offered_leg ? [c.offered_leg] : [], next: this.nextLegs(c.ticket_id, c.station),
       ...(handoff ? { handoff_url: handoff } : {}), path, nonce: c.nonce, snapshot_sha: c.snapshot_sha,
       ...(defaultBranch ? { default_branch: defaultBranch } : {}),
@@ -811,6 +896,8 @@ export class Claims {
     const b = checkAdvance(body);
     const c = this.held(workerId, claimId);
     if (c.status !== 'active') throw new BatonError('claim-ended', `the claim already ended (${c.status}: ${c.end_reason})`);
+    // §12.8 (B-145, R-BTN-189): rule `floor` and the pins bind an advance as they bind a claim.
+    this.refuseStopped(c.ticket_id, this.worker(workerId));
     const repo = repositoryOf(c.ticket_id);
     const g = c.course_id ? this.stations.graph(repo, c.course_id) : null;
     const item = this.item(c.ticket_id);

@@ -3,7 +3,7 @@ title: "B-163 — 'Trusted' means one thing: rename R-BTN-139's push-based trust
 id: B-163
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -51,3 +51,4 @@ R-BTN-182, R-BTN-134, R-BTN-192's `pr-verdict`. Nothing lands from it (the merge
 
 - 2026-11-01: filed from the whole-spec review.
 - 2026-11-01: folded into the restructure, B-166, which writes it with the section it touches.
+- 2026-11-02: written by the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`): R-BTN-139's sense is `pusher` everywhere (the facts' `pusher` flag, the owner setting `pushers`, `baton.pushers-degraded`); under a policy admitting no `sync` arrival, `pr-verdict` counts only the human-only identity's verdict (R-BTN-192); `course_sources` replaces `trusted_sources`; the vocabulary page names each remaining sense (pusher, role, domain, trusted runner). B-119, B-126, B-46 note the renames.

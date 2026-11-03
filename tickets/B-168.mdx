@@ -1,0 +1,74 @@
+---
+title: "B-168 — Resources, readings and owner settings follow the restructure's part 4: two scopes, no uses, no administrator override, unsigned readings, three settings gone"
+id: B-168
+project: baton
+status: available
+updated: 2026-11-02
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1170
+tier: routine
+description: "Build the spec restructure's part 4 for B-165's remaining candidates (R-BTN-76, R-BTN-66, R-BTN-106, R-BTN-94, R-BTN-99, R-BTN-181, R-BTN-188): resource scopes service and account only, no runner uses or refused_uses, an administrator's reading one more instrument's, no reading signature or readings.signed, and required_independence, trigger_workflows and report_horizon_h removed. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** `spec/BATON_SPEC.md` as the restructure's part 4 left it: R-BTN-76 (two scopes; every
+runner granted on a repository has the same usable instances; an administrator's reading is
+one more instrument's; no signature), R-BTN-77 and R-BTN-126 (the block is the same for every
+runner), R-BTN-181 and R-BTN-188 (`readings: {writers}`, no `signed`), R-BTN-66 (the settings),
+R-BTN-106 (no `required_independence`), R-BTN-94 (no `trigger_workflows`: the forge dispatches
+only a workflow that declares a manual dispatch), R-BTN-99 (reports kept 6 hours, no
+`report_horizon_h`), §13 and §14. The owner's ruling, as B-165 quotes it: "Take review's
+default". History: the changelog entry "the restructure, part 4".
+
+### What to build
+
+1. **Resources.** `baton admin resource add` takes `--scope account|service` only; a new
+   migration drops `runner_instances` (the built `worker_instances`), `external_resources.atoms_from`,
+   every `runner`-scope (built: `worker`) and `host`-scope registration and the readings of their
+   implicit instances (`<resource>@worker:<id>`), logging each dropped registration as an
+   `admin` event; usable instances are the repository's (`src/core/resources.ts`);
+   `resource_fleet` becomes `usable_instances`, `open_instances`, `live_runner` (§13.7).
+   The heartbeat's `uses` and the claim's `bills` are ignored and logged `deprecated-field`
+   while the history's Migrations entry "part 4's retired fields" lasts, then refused;
+   `refused_uses` and the claim answer's `refused` go.
+2. **The administrator's reading.** `POST /v1/admin/readings` stores one more instrument's
+   reading under R-BTN-76's limits; no precedence, no 7-day window, no `overridden` answer.
+3. **Readings' signature.** `POST /v1/runner/readings` and `/v1/probe/readings` ignore
+   `nonce` and `signature` (logged `deprecated-field`, as above); a migration drops
+   `instance_readings.signature` and `nonce`; an administrator's reading has writer class
+   `admin`; the policy's `readings` entries lose `signed` (export and import
+   tolerate an old `signed` and drop it); the trusted-leg check of R-BTN-181 admits writers only.
+4. **Settings.** Drop `required_independence` (rule `chain` reads `no_chain_from` alone),
+   `trigger_workflows` (the unblocked trigger names a workflow on the default branch) and
+   `report_horizon_h` (6 hours) from the settings route, the course entry (ignored and logged
+   while the Migrations entry lasts), the dashboard's limits and the export, each by a new
+   migration; this repository's `.baton/baton.json` drops `report_horizon_h`. Setting or
+   changing the unblocked trigger is a loosening under `approvers.policy` (R-BTN-94,
+   R-BTN-186); Baton reads no workflow file — a forge's refusal of the dispatch is logged with
+   its reason.
+5. **Tests.** Update `S-BTN-45.block-edges` (an administrator's reading after a probe's: the
+   later sets the state), `S-BTN-63.no-chain` (no owner setting), and the unit tests naming the
+   removed fields.
+
+### Tests
+
+S-BTN-44, S-BTN-45, S-BTN-61, S-BTN-63, S-BTN-91 and G-BTN-90 as §15 now states them (S-BTN-181's reading cases arrive with B-146's attestation store),
+green in `npm test` on both hosts.
+
+### Exit criteria
+
+- [ ] no heartbeat `uses`, `refused_uses`, `atoms_from`, readings' `signed`, `nonce` or
+      `signature`, `required_independence`, `trigger_workflows` or `report_horizon_h` remains
+      beyond the Migrations entry's logged reads (registration tokens' `uses` stays, R-BTN-117)
+- [ ] `npm test` and `npm run typecheck` green
+
+## Status
+
+- 2026-11-02: filed by the spec restructure's part 4 (B-166).

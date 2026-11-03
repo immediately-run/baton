@@ -3,7 +3,7 @@ title: "B-126 — Detection: a notice when a non-owner's push changes a control 
 id: B-126
 project: baton
 status: available
-updated: 2026-10-27
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -80,3 +80,5 @@ a compromise visible within one sync, at small cost.
 
 - [ ] the spec amended citing this ticket
 - [ ] the scenario passes on both hosts; `npm test` and `npm run typecheck` green
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) renames `trusted_identities` to `pushers` (B-163, R-BTN-139); item 1's `baton owner identity add` adds to that list.)_

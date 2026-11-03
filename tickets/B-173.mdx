@@ -1,0 +1,92 @@
+---
+title: "B-173 — Retiring a repository ends everything scoped to it: sessions, MCP keys, OAuth grants, sync keys, grants, claims and queued effects"
+id: B-173
+project: baton
+status: available
+updated: 2026-11-03
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1175
+tier: routine
+description: "Build R-BTN-47's retirement: in one transaction, end the repository's reach for sessions; revoke its MCP keys, OAuth grants, tokens, requests and codes, sync and mirror keys, registration tokens, runner grants and check-runners; reap its active claims as a force-reap (fenced); drop its outbox entries; delete its wants and trigger. Later calls not-found; the seal, prune and export skip it but its tombstone; the id is never registered again. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** R-BTN-47 (registered repositories: "only an administrator registers, changes or
+retires a repository"), §12.2 (`admin.repo.retire` destructive), §14 (`POST
+/v1/admin/repositories` with `{id, retire: true, confirm: true}`), R-BTN-155 (*Sessions*),
+R-BTN-130 (an MCP key's end), `BATON_MCP_OAUTH_SPEC` (grants and tokens), R-BTN-93 (sync keys),
+R-BTN-171 (the outbox). Source: `docs/review/security-review-2026-11-02.mdx`, finding U1, widened
+on checking: no rule states retirement's effect on anything.
+
+### Why
+
+A session loses a repository "as soon as its key stops owning it"; an MCP key ends "when the
+credential that minted it is removed or revoked". Retirement is neither, so as written an
+owner's session, an MCP key and an OAuth grant on a retired repository keep their reach, and
+nothing says whether its sync keys still post, its grants still claim, a held claim keeps its
+lease, or a queued `withdraw` or `forge-check` is still offered. The code today sets
+`repositories.retired_at` and filters reads by it (`src/core/admin.ts`, `src/core/claims.ts`);
+each surface's behaviour is whatever its query happens to do.
+
+### Spec (written 2026-11-03)
+
+The spec half is written: R-BTN-47's *Retirement* (final, six steps in one transaction, the
+tombstone export and the seed), R-BTN-19, R-BTN-3's heartbeat, R-BTN-88's seal, §2.3's event
+prune, R-BTN-140's consent, R-BTN-155, R-BTN-130, R-BTN-171's *Dropping*, `BATON_MCP_OAUTH_SPEC`
+§5, §7 and §9, and S-BTN-198, in PR `claude/baton-spec-review-2fwiga` at the owner's request
+("Please ensure all tickets required to implement the spec are ready to be picked up for
+implementation"), after one round of fresh review.
+
+### What to build
+
+Retirement touches stores several tickets build. This ticket builds it over the stores in the
+code today and the rule every store reads; each store not yet built carries its own step in the
+ticket that builds it (listed in item 6), so none waits on this one and this one waits on none.
+
+1. **The transaction** that sets `retired_at` (`src/core/admin.ts`), over today's stores:
+   administrators' dashboard sessions keep showing its fence-pending claims; sync and mirror
+   keys and runner grants (`worker_grants`) revoked; each active claim reaped as a force-reap
+   (fence-pending where its runner is alive); its wants, `webhook_syncs` rows and unblocked
+   trigger deleted; its id removed from every account instance's `repositories`.
+2. **One predicate, "live repository"** (`src/core/registry.ts`), read by every rule that counts
+   registered repositories: wants and dispatches, the backstop, mirrors, the event prune, limits,
+   approver lists and ownership (a key whose only repositories are retired owns none). The
+   alarm's fence deadlines and `baton.fence-pending`, the holder queries, the seal's wait on a
+   fence and the administrator's fence clear still reach a retired repository's fence-pending
+   claims.
+3. **Refusals.** A heartbeat declaring a retired repository's course drops it rather than being
+   refused; every other route naming it answers `not-found` (one check, not each query's
+   filter); its CI identity and forge notifications are refused; registering a retired id is
+   `conflict` (today a known id takes the change path).
+4. **Export, import, seed.** The export carries a retired repository as its tombstoned registry
+   row alone; the import accepts that row without a policy; the seed skips and logs an entry
+   naming a retired id.
+5. **Tests:** S-BTN-198's cases over today's stores, in a new scenario file the later tickets
+   extend.
+6. **Each later store's step**, noted in its ticket: owner sessions (B-76), MCP keys (B-25),
+   OAuth grants, tokens, requests and codes (B-73), registration tokens exhausted (B-8),
+   check-runners (B-5), consents (B-46), ticket timers (B-61), outbox entries dropped and later
+   marks ignored (B-64). Whichever of this ticket and that one lands second adds the step and
+   its S-BTN-198 case.
+
+### Tests
+
+S-BTN-198 as §15 states it, for the stores that exist when this lands; green in `npm test` on
+both hosts.
+
+### Exit criteria
+
+- [ ] S-BTN-198's cases for today's stores green in `npm test` on both hosts; `npm run typecheck` green
+- [ ] each ticket in item 6 carries its retirement step
+
+## Status
+
+- 2026-11-02: drafted from the 2026-11-02 security review (PR #165).
+- 2026-11-03: spec half written (PR `claude/baton-spec-review-2fwiga`); this ticket now builds it.

@@ -3,7 +3,7 @@ title: "B-8 — Baton registration tokens and API keys beside SSH keys"
 id: B-8
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-03
 repos:
   - baton
 tags:
@@ -83,3 +83,7 @@ _(2026-10-20: rescoped to the current-state spec, PR #71 — tokens register run
 courier role or `--asks`; the migration raises each grant for its owners.)_
 
 _(2026-10-31: minting registration tokens is an `approvers.members` action (R-BTN-188's first row; B-145 item 12 builds the hook): only an approver on that list, never a delegated key, mints one.)_
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) confirms this ticket's reading: there is no `courier` role at all (B-159); a runner that delivers `forge-check` is a runner whose grant role the policy admits (R-BTN-171).)_
+
+_(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — registration tokens: retirement exhausts the repository's tokens without revoking the credentials they registered. Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_

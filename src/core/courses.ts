@@ -7,6 +7,7 @@ import { validateCourse, type CourseViolation } from './course';
 import { graphOf, legNeedsOf, resolveLeg } from './graph';
 import { BatonError } from './http';
 import { FREE_TEXT_MAX } from './text';
+import type { Policies } from './policy';
 import type { Store } from './ports';
 import { COURSE_ID, COURSE_VERSION_MAX, COURSES_MAX } from './validate';
 import { checkSchema, checkSchemaSet, parseSchemaId, POST_STATES_MAX, SCHEMA_MAX_BYTES, type Schema } from '../shared/schema.mjs';
@@ -181,7 +182,7 @@ export interface CourseRow {
 }
 
 export class Courses {
-  constructor(private readonly c: { store: Store; requiredBars?: (repo: string) => { course: string; leg: string }[] }) {}
+  constructor(private readonly c: { store: Store; requiredBars?: (repo: string) => { course: string; leg: string }[]; /** §12.8 (B-145, R-BTN-181): the repository policies — the `service:` writer check runs again at every snapshot, against the roles as they stand now. */ policies?: Policies }) {}
 
   private rows<T>(q: string, ...p: unknown[]): T[] {
     return this.c.store.exec<T>(q, ...p).toArray();
@@ -216,6 +217,15 @@ export class Courses {
           if (bar.course === e.id && bar.leg !== '*' && !resolveLeg(g, bar.leg)) {
             violations.push({ rule: 'required-bar', path: `legs.${bar.leg}`, message: `an owner's required bar names the leg ${bar.leg}, which this file no longer has` });
           }
+        }
+      }
+      // R-BTN-181 (B-145 item 2: "checked again at every course snapshot"): a `service:` writer
+      // the current policy names that has since gained an owner, runner or courier role — the
+      // roles move with membership actions, the policy document does not. A drifted policy
+      // holds every course at its previous version until an approver fixes the policy.
+      if (!violations.length) {
+        for (const message of this.c.policies?.serviceWriterDrift(repo) ?? []) {
+          violations.push({ rule: 'policy', path: '', message });
         }
       }
       faults.set(e.id, violations);
