@@ -45,9 +45,18 @@ not all done.
 node cli/baton.mjs tickets claim R3-1249                  # available → in-progress
 node cli/baton.mjs tickets set R3-1249 in-review --pr https://github.com/immediately-run/baton/pull/40
 node cli/baton.mjs tickets done R3-1249                   # done, moved to archive/
+node cli/baton.mjs tickets claim B-110 --rules-reread     # claim once the rules it cites, amended since, are re-read
 node cli/baton.mjs tickets new --title "…" --depends-on R3-1249 --order 1100   # the next B-n
+node cli/baton.mjs tickets reserve B-110 migration        # the next migration number (or scenario id), held for B-110
 node cli/baton.mjs tickets --help                         # every flag, the tags Baton reads
 ```
+
+`claim` refuses a ticket that cites a rule `spec/BATON_SPEC_HISTORY.md` amended after the
+ticket last changed, naming each; re-read them, rewrite what they contradict, and claim with
+`--rules-reread`. Migration numbers and scenario ids are never taken by looking: `reserve` holds
+the next one in [`reserved.json`](reserved.json), and `npm run check:spec` fails one above its
+baseline that the ledger does not hold. A ticket filed from 2026-11-03 carries `### Trust` and
+`### Invariants` (`check.sections_since` in `.baton/baton.json`).
 
 [The project page](projects/baton.mdx) has Baton's rollout steps and how the tickets group.
 
