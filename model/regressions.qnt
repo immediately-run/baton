@@ -10,7 +10,8 @@ module regressions {
                // w3 declares vpn:corp without a grant: it counts toward no row (round 1, 1-B-3)
                GRANTED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp"), "w3" -> Set()),
                REQUIRES = Map("t1" -> Set(), "t2" -> Set("vpn:corp")),
-               RESOURCES = Set("llm", "gpu", "disk"), NEEDS = Map("implement" -> Set("llm", "gpu"), "review" -> Set("disk"), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())).* from "./baton"
+               RESOURCES = Set("llm", "gpu", "disk"), NEEDS = Map("implement" -> Set("llm", "gpu"), "review" -> Set("disk"), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set()),
+               CAPPED = Set(), SEATCAP = Map()).* from "./baton"
 
   val c1 = st.claims.get(1)
   val c2 = st.claims.get(2)
