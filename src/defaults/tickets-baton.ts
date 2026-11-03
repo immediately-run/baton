@@ -24,7 +24,7 @@
 // lock, so that one read is skipped, not fatal.
 import { readFileSync } from 'node:fs';
 import { send } from '../../cli/baton.mjs';
-import { signingKey } from '../../cli/sign.mjs';
+import { requestCredential } from '../../cli/sign.mjs';
 
 /** One live claim on a ticket, as the board's `holders` answers it (B-129). */
 export interface Holder {
@@ -106,24 +106,21 @@ async function getJson(o: { url: string; keyFile: string; path: string; which: s
   throw new Undetermined(o.which, code ? `${code} — ${String(answer.json?.message ?? '')}`.trim() : `HTTP ${answer.status}`);
 }
 
-/** An API key's shape (R-BTN-159), which `send` sends as a bearer rather than signing with. */
-const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
-
 /** The key the reads sign with, judged before any request (B-129): a key that is missing or
  *  that neither parses as an API key nor as an SSH key is the key's problem, never Baton's — so
  *  it is not reported as Baton unreachable. */
 export function checkKey(keyFile: string): void {
-  let text: string;
   try {
-    text = readFileSync(keyFile, 'utf8').trim();
+    readFileSync(keyFile, 'utf8');
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') throw new Undetermined('the key', `no key: ${keyFile} does not exist`);
     throw new Undetermined('the key', `key unreadable: ${keyFile} (${(e as Error).message})`);
   }
-  if (API_KEY.test(text)) return;
+  // `send`'s own dispatch (an API key as a bearer, else an SSH key that signs), so the check
+  // and the request never judge one key two ways.
   try {
-    signingKey(keyFile);
+    requestCredential(keyFile);
   } catch (e) {
     throw new Undetermined('the key', `key unreadable: ${(e as Error).message}`);
   }

@@ -108,7 +108,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { signHeaders, signingKey } from './sign.mjs';
+import { requestCredential, signHeaders } from './sign.mjs';
 
 export const DEFAULT_URL = 'https://baton.immediately.run';
 const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -404,9 +404,6 @@ function grantBody(flags, readKey, extra) {
   };
 }
 
-/** R-BTN-159: an API key, `bak_<id>_<secret>` — an administrator's, an owner's or a worker's. */
-const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
-
 /** `baton key create FILE [--comment TEXT]` (R-BTN-159): an API key, made here and never sent
  *  anywhere. FILE (mode 0600) holds the key, for `-i FILE` or a runner's BATON_KEY_FILE;
  *  FILE.pub holds its public line — what BATON_ADMIN_KEYS lists, `--owner-key FILE.pub` or
@@ -432,11 +429,11 @@ const redirectAnswered = (target, status, to) => new Error(
  *  never followed (B-80): a 3xx is an error naming what answered — a login page in front of
  *  Baton is not Baton's answer. */
 export async function send(url, p, keyFile, fetchImpl = fetch) {
-  const text = readFileSync(keyFile, 'utf8').trim();
+  const cred = requestCredential(keyFile);
   const target = new URL(p.path, url).toString();
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
-  const auth = API_KEY.test(text) ? { Authorization: `Bearer ${text}` } : signHeaders({ method: p.method, url: target, body, key: signingKey(keyFile) });
+  const auth = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
   const headers = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
   let res;

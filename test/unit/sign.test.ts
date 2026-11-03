@@ -9,7 +9,8 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { KEYGEN_TIMEOUT_MS, NAMESPACE, signHeaders, signingKey } from '../../cli/sign.mjs';
+import { API_KEY, KEYGEN_TIMEOUT_MS, NAMESPACE, requestCredential, signHeaders, signingKey } from '../../cli/sign.mjs';
+import { API_KEY as CORE_API_KEY } from '../../src/core/auth';
 
 /** A passphrase ssh-keygen decrypts and ssh-add reads from SSH_ASKPASS, so a passphrase key is
  *  loaded without a TTY. */
@@ -123,6 +124,20 @@ describe('cli/sign.mjs — the one signer (B-88)', () => {
     const file = join(dir, 'not-a-key');
     writeFileSync(file, '');
     expect(() => signingKey(file)).toThrow(new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} is not an SSH key ssh-keygen can read`));
+  });
+
+  it('one key dispatch (R-BTN-159, B-129): an API key is a bearer, an SSH key signs, anything else is refused — the core\'s key shape', () => {
+    dir = mkdtempSync(join(tmpdir(), 'baton-sign-'));
+    expect(API_KEY.source).toBe(CORE_API_KEY.source);
+    const api = join(dir, 'api.key');
+    const bak = `bak_${'0'.repeat(16)}_${'a'.repeat(64)}`;
+    writeFileSync(api, `${bak}\n`);
+    expect(requestCredential(api)).toEqual({ bearer: bak });
+    const ssh = keyPair();
+    expect(requestCredential(ssh)).toEqual({ key: signingKey(ssh) });
+    const neither = join(dir, 'neither');
+    writeFileSync(neither, 'bak_short\n');
+    expect(() => requestCredential(neither)).toThrow(/is not an SSH key ssh-keygen can read/);
   });
 
   it('a passphrase-protected key loaded in ssh-agent reads and signs (R-BTN-13, §8.1)', () => {

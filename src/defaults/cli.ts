@@ -18,7 +18,7 @@ import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../r
 import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { signingKey } from '../../cli/sign.mjs';
+import { API_KEY, signingKey } from '../../cli/sign.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type PrFact, type StationsResult } from './course-pr';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
 import { GIT_SHA } from '../core/validate';
@@ -199,11 +199,6 @@ export const BUSY_RETRY_S = 60;
 const BUSY_RETRY_MAX_S = 600;
 /** `BATON_SYNC_KEY`'s environment form of `--sync-key` (B-88). */
 const SYNC_KEY_ENV = 'BATON_SYNC_KEY';
-
-/** R-BTN-159's API key, as `src/runner/api.ts` names it (its `API_KEY` is module-private): a
- * `--sync-key` file holding one is refused by name — it is a worker's credential, never a
- * sync's, and `envAuth` would spend it as a bearer the sync routes deny. */
-const API_KEY_FILE = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
 
 export function parseSyncArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): Omit<SyncArgs, 'log'> {
   const out: Omit<SyncArgs, 'log'> = {
@@ -612,7 +607,9 @@ function bearerAuth(token: string | null): Auth {
  * key — a worker's credential, never a sync's — is refused by name here instead of being spent as
  * a bearer the server would deny. */
 function syncKeyAuth(file: string): Auth {
-  if (existsSync(file) && API_KEY_FILE.test(readFileSync(file, 'utf8').trim())) {
+  // R-BTN-159's API key (`cli/sign.mjs`): a worker's credential, never a sync's — `envAuth` would
+  // spend it as a bearer the sync routes deny, so it is refused by name.
+  if (existsSync(file) && API_KEY.test(readFileSync(file, 'utf8').trim())) {
     throw new Error(`--sync-key ${file}: an API key is a worker's credential, not a sync key — register an SSH key (\`baton admin repo add --sync-key <key.pub>\`) and pass its private file`);
   }
   let auth: Auth;

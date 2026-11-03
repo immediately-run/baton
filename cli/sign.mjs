@@ -6,6 +6,7 @@
 // half ssh-agent holds. The private key never reaches stdout, stderr or an argument list.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 export const NAMESPACE = 'baton-request';
 
@@ -43,6 +44,19 @@ export function signingKey(file, keygen = KEYGEN) {
   const fingerprint = listing.status === 0 ? /\b(SHA256:[A-Za-z0-9+/]{43})\b/.exec(listing.stdout)?.[1] ?? null : null;
   if (!fingerprint) throw new Error(`${file} is not an SSH key ssh-keygen can read${reason(listing) ? ` (${reason(listing)})` : ''}`);
   return { file, fingerprint };
+}
+
+/** R-BTN-159: an API key, `bak_<id>_<secret>` — an administrator's, an owner's or a worker's.
+ *  The one copy outside `src/core/auth.ts` (whose `API_KEY` the CLI and the runner do not import:
+ *  it would bring jose); every client tests a key file against this. */
+export const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
+
+/** The credential a key file holds, as a request sends it: an API key (R-BTN-159) as a bearer,
+ *  `{bearer}`, else an SSH key that signs (R-BTN-13), `{key}` from `signingKey` — which throws
+ *  for a file that is neither. The one dispatch `send` and the ticket commands' key check share. */
+export function requestCredential(file, keygen = KEYGEN) {
+  const text = readFileSync(file, 'utf8').trim();
+  return API_KEY.test(text) ? { bearer: text } : { key: signingKey(file, keygen) };
 }
 
 /** `Content-Digest` (RFC 9530): sha-256 of the body. */
