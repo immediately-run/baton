@@ -305,7 +305,7 @@ standard OAuth consent on Baton's dashboard (Decisions).
     - authorized as its minting owner key (the approving session's) on that repository, narrowed
       to its ids, only on `POST /v1/mcp`; a hold it sets is `hold_reason: mcp:<name>` with `set_by: mcp:<id>`, and it lifts only that one (R-BTN-186, R-BTN-130);
     - at most 90 days (default 30), ended by 7 days without an MCP call, its minter's removal
-      or revocation, or `owner.mcp-key.revoke`; refused while the repository has
+      or revocation, its repository's retirement (R-BTN-47), or `owner.mcp-key.revoke`; refused while the repository has
       `api_keys: false` (§9).
   - **Scopes are R-BTN-130's `--actions` spelled with spaces**: `read` (the reads a delegated key
     may hold, existing at approval), or any action id R-BTN-186 admits to a delegated key
@@ -336,7 +336,8 @@ standard OAuth consent on Baton's dashboard (Decisions).
     - `grant_type=authorization_code` with `code`, `redirect_uri` (equal to the request's),
       `client_id` (equal), `code_verifier` (43–128 unreserved characters, whose `S256` is the
       challenge) and optional `resource` (§4's check). Its first success creates the grant (§7)
-      and its first tokens in one transaction, rechecking §10's grant cap and `api_keys`.
+      and its first tokens in one transaction, rechecking §10's grant cap, `api_keys` and that the
+      repository is not retired (R-BTN-47; else `invalid_grant`).
     - `grant_type=refresh_token` with `refresh_token`, `client_id` (equal to the grant's) and
       optional `scope`: the answer carries the grant's scope whatever is asked; only a malformed
       scope string is `invalid_scope`.
@@ -366,7 +367,8 @@ standard OAuth consent on Baton's dashboard (Decisions).
 ## 9. Revocation
 
 - **A grant ends as an MCP key ends, and takes every token with it.**
-  - A grant ends by `owner.mcp-key.revoke` by name, the minter's removal or revocation, expiry,
+  - A grant ends by `owner.mcp-key.revoke` by name, the minter's removal or revocation, its
+    repository's retirement (R-BTN-47, which also ends its pending requests and codes), expiry,
     7 idle days, code or refresh reuse (§8), RFC 7009 revocation, or a bearer crossing `http`
     (R-BTN-158, which adds `bmo_` and `bmr_` to its bearers). Every token resolves its grant by
     `id` and checks it on each use; an act that ends a grant also marks every token of it

@@ -10,7 +10,8 @@
 
 export type CourseRule =
   | 'shape' | 'unknown-key' | 'id' | 'unknown-station' | 'start-leg' | 'unreachable' | 'no-end' | 'terminal'
-  | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar' | 'no-chain-from' | 'entry' | 'schema' | 'role-in-roles' | 'starts-from';
+  | 'unbounded-cycle' | 'input' | 'bound' | 'renamed-from' | 'required-bar' | 'no-chain-from' | 'entry' | 'schema' | 'role-in-roles' | 'starts-from'
+  | 'policy'; // §12.8 (B-145, R-BTN-181): the repository policy the snapshot is judged against
 
 export interface CourseViolation {
   rule: CourseRule;

@@ -13,6 +13,7 @@ export type ErrorCode =
   | 'head-moved' | 'snapshot-rejected' | 'stale-observation' | 'sync-busy' | 'unavailable' | 'internal'
   | 'session-taken' | 'worker-reaped' | 'claim-ended' | 'not-holder'
   | 'not-eligible' | 'no-eligible-ticket' | 'provider-suspended' | 'stale-skills' | 'backing-off' | 'not-cut-over' | 'conflict' | 'barred-tag' | 'blocked' | 'closed' | 'invalid-prerequisite'
+  | 'floor-violated' | 'unsatisfiable-approvers' | 'confirm-required' // §12.8 (B-145): the policy's refusals
   | 'capacity-full';
 
 const STATUS: Record<ErrorCode, number> = {
@@ -24,6 +25,8 @@ const STATUS: Record<ErrorCode, number> = {
   'capacity-full': 409, // §6.6 rule 11 (R-BTN-178): every seat of a capability is held
   blocked: 409, // an open dependency or decision (R-BTN-75, R-BTN-78)
   closed: 409, // a notice whose decision was answered (R-BTN-80)
+  'floor-violated': 409, 'unsatisfiable-approvers': 409, // R-BTN-189's floor, R-BTN-188's unsatisfiable list
+  'confirm-required': 428, // a destructive action without confirm: true (§14)
 };
 
 /** Thrown anywhere below the router; the router turns it into the §11 error body. */

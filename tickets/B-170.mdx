@@ -3,14 +3,14 @@ title: "B-170 — Mask the model provider's key in leg output: the runner masks 
 id: B-170
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-03
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1172
-tier: judgement
-description: "R-BTN-144 keeps git, forge and model-provider credentials in every leg's environment, but masks only git and forge tokens the runner holds; a provider key a leg prints reaches leg logs and transcript repositories in clear. The runner cannot tell which inherited variable is a provider key today. Choose the mechanism (recommended: mask every kept variable whose name ends _KEY, _TOKEN or _SECRET, plus runner.json mask_env), amend R-BTN-144, build it. Requires: none."
+tier: routine
+description: "Build R-BTN-144's masking class 7, the owner's ruling of 2026-11-02: the runner masks every kept variable whose name ends _KEY, _TOKEN, _SECRET, _PASSWORD or _PAT, or is PGPASSWORD (case-sensitive), and every name runner.json mask_env lists, so a model provider's key a leg prints never reaches a leg log or a transcript repository; archivers and replay mask the same set. Requires: none."
 topics:
   - baton
 owns: {}
@@ -33,33 +33,33 @@ to `leg_log_root` and, through an archiver, to a `transcript_repos` repository. 
 runner inherits the variables and does not know which one is a provider key, and core and the CLI
 name no provider (values 3).
 
-### Decide (the owner, or the implementing session with a stated reason)
+### Decided (the owner)
 
-- **(a) recommended — by name, plus a list.** Class 4 also masks the value of every variable the
-  leg environment keeps whose name ends `_KEY`, `_TOKEN` or `_SECRET` (8 bytes or more, like every
-  literal), and every name in `runner.json` `mask_env`. No provider is named; a provider key under
-  an unusual name is covered by `mask_env`.
-- (b) a list only: `runner.json` `mask_env`, empty by default. Precise, but the default protects
-  nothing.
-- (c) leave it: R-BTN-144 already says masking keeps only a cooperating agent from printing what
-  it never needed, and a provider key is one it needed. Then say in R-BTN-144 that a kept
-  credential is not masked, so `leg_log_root` and `transcript_repos` owners know.
+2026-11-02, choosing among this ticket's options: "I accept your recommendations" — option (a).
+The spec states it (R-BTN-144 masking class 7, the environment table, R-BTN-84; S-BTN-98), PR
+`claude/baton-spec-review-2fwiga`.
 
-### What to build (for (a))
+### What to build
 
-1. **A spec PR first** under the babysit skill's *Spec PRs*: R-BTN-144 class 4 rewritten; the
-   environment table's "kept" row cites it; S-BTN-98 gains a provider key under a `_KEY` name and
-   one under a `mask_env` name.
-2. The runner computes the masked set once at leg start from the leg's environment; the
-   archiver under a runner (`BATON_PARENT` set) masks the same set in transcripts, not only
-   classes 5 and 6.
-3. Replay (R-BTN-84) masks the same way in its report.
+1. The runner computes class 7 once at leg start from the environment it gives the leg: every
+   variable whose name ends `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD` or `_PAT`, or is
+   `PGPASSWORD`, compared case-sensitively, and every name `runner.json`
+   `mask_env` lists, each value of 8 bytes or more
+   masked as a literal, with the others' classes.
+2. An archiver under a runner (`BATON_PARENT` set) masks classes 5, 6 and 7 in transcripts,
+   computing class 7 from its own environment.
+3. Replay (R-BTN-84) masks its report the same way, when replay is built.
+
+### Tests
+
+S-BTN-98 and S-BTN-119 as §15 states them, green in `npm test`.
 
 ### Exit criteria
 
-- [ ] the spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
-- [ ] S-BTN-98 green in `npm test`; `npm run typecheck` green
+- [ ] S-BTN-98 and S-BTN-119 green in `npm test`; `npm run typecheck` green
 
 ## Status
 
 - 2026-11-02: drafted from the 2026-11-02 security review (PR #165).
+- 2026-11-02: decided by the owner (option (a)); the spec half written by PR `claude/baton-spec-review-2fwiga`; this ticket now builds it.
+- 2026-11-03: the owner added `_PASSWORD`, `_PAT` and `PGPASSWORD` to class 7 ("Ok, please draft the spec change for this"); item 1 reads accordingly.

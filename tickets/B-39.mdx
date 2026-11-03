@@ -3,7 +3,7 @@ title: "B-39 — Baton leg contracts and replay: inputs and outputs as envelopes
 id: B-39
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-03
 repos:
   - baton
 tags:
@@ -34,7 +34,7 @@ depends_on:
 3. Inputs resolved at the advance that starts a leg. `input-missing`/`input-version` stored as `waiting` before the leg is offered. A foreign marker's outputs are never resolved.
 4. `baton runner start` validates inputs before and outputs after the script, failing the leg `cannot-finish:contract-input` (held `non-retryable:contract-input`, raising `baton.contract`) or `contract-output` (a failed attempt). Landing before B-56, `baton.contract` is raised through R3-1257's Baton-raised decision path, which B-56 converts to the `suspend` core condition. The closing marker is written only from a validated result. `ctx.inputs` is set.
 5. `inputs`/`outputs` history rows (R-BTN-81, built by R3-1257).
-6. `baton leg replay [--run n] [--against sha]` with write credentials withheld; `replay_safe: false` refused.
+6. `baton leg replay [--run n] [--against sha]` in R-BTN-144's replay environment (write credentials withheld; the model provider's key only where `replay_env` or `--env` names it), its report masked as a leg's output is (classes 1–7); `replay_safe: false` refused.
 7. `baton course test`'s dataflow and version checks.
 
 ### Tests
@@ -46,3 +46,5 @@ depends_on:
 
 - [ ] S-BTN-48 passes on both hosts; G-BTN-74 holds
 - [ ] `npm test` and `npm run typecheck` green
+
+_(2026-11-03: R-BTN-84 now keeps the provider's key only where R-BTN-144's allowlist names it, and masks the replay report as a leg's output (PR #165, PR #167); item 6 reads accordingly.)_

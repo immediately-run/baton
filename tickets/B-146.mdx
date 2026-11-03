@@ -3,7 +3,7 @@ title: "B-146 — Attestations and readings: one record, and each requirement ch
 id: B-146
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-03
 repos:
   - baton
 tags:
@@ -79,6 +79,11 @@ requirement's choice; B-140's merge runner, B-141's harness and every trusted le
 7. **Export.** Attestations about work are exported with the owner state and dropped on import;
    in-flight work re-attests (R-BTN-88).
 
+8. **The sync's supersession** (R-BTN-191, *Superseded per writer class*): the sync's
+   attestations supersede by type and subject across every credential that posts the board — a
+   sync key, the CI identity and a machine key alike — so a machine key's post replaces the CI
+   sync's facts as fully as the CI sync's replaces its. (Moved from B-169, 2026-11-03.)
+
 ### Do not
 
 - Read an attestation from git or the forge.
@@ -106,3 +111,5 @@ gate-or-advice requirement.)_
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton attest` is `baton attestation add`, or `baton decision answer` for a person leg's answer (R-BTN-127).)_
 - 2026-11-02: the spec restructure's part 4 (B-166, B-165's review default): readings carry no `nonce` or signature and `readings` entries have no `signed` (R-BTN-76, R-BTN-188; B-168); the trusted-leg check of R-BTN-181 admits writers only. Build the attestations without the signed-reading paths.
 - 2026-11-02: the spec restructure's part 4, review rounds two and three (B-166): the *Do not* line on unsigned readings is void — no reading is signed, and an admitted reading counts toward a trusted leg's requirement. A full requirement on an instance reads as R-BTN-76 now says: the instance's state is ignored; for each usable instance and admitted writer's key, that writer's latest reading in force is one attestation (an older one of the same writer never counts); `missing` means none; `count` counts the distinct writers' keys that pass unless `distinct` names another field. S-BTN-181's new reading cases are this ticket's.
+
+- 2026-11-03: item 8 added — R-BTN-191's supersession across all three posters, corrected by the 2026-11-02 security review (PR #165) and moved here from B-169, which has no store to build it on.

@@ -3,7 +3,7 @@ title: "B-46 — hardening within a tenant: only pushers' forge writes count, ru
 id: B-46
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-03
 repos:
   - immediately-run/baton
 tags:
@@ -223,3 +223,5 @@ _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructu
 
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton owner grants` is `baton owner grant list` (R-BTN-127).)_
 - 2026-11-02: the spec restructure's part 4 (B-166): `trigger_workflows` is gone — an unblocked trigger names any workflow on the default branch that declares a manual dispatch (R-BTN-94; B-168); cutover and foreign claims sit in §16, now an appendix that ends when docs retires its mirror.
+
+_(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — `code_repo_consents`: retirement deletes every consent the repository gave or was given, and an entry naming a retired repository's id (with no live one) never has reach (R-BTN-140). Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_

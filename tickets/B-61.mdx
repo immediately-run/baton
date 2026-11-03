@@ -3,7 +3,7 @@ title: "B-61 — Timers on a leg: arrival, ready and first-attempt clocks, inter
 id: B-61
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-03
 repos:
   - baton
 tags:
@@ -166,3 +166,5 @@ _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
 _(2026-10-20: extended for the adversarial review's fixes — R-BTN-64's rename (from the schema review) carries every per-leg record, not only timers (item 8); B-11 and B-38 need no rename path of their own.)_
 
 _(2026-11-01: **rescoped** by the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`) on the owner's ruling of 2026-11-01, B-165 "Take review's default": R-BTN-167 is now two clocks on a leg — `deadline_s` (one run's deadline, 60 s–7 d, R-BTN-90) and `stalled_s` (the stalled notice, default 72 h) — and a person leg's `expires` (R-BTN-116); `timers`, `after_s`, `from: arrival|ready|first_attempt`, non-interrupting `raise` timers, a timer's `leg`, `baton.ready-late`, `budget-spent` and the owner's `extend_to` and `cancel_at` are gone. Item by item: 1 — the validator refuses `timers` and `after_s` and bounds `deadline_s`, `stalled_s` and `expires.after_s`. 2 — `ticket_timers (ticket_id, leg, kind)`, `kind` `deadline|stalled|expires`; no `timer` source. 3 — `stalled` arms at the ticket's arrival at the station and counts only while the leg is posted `waiting`; `deadline` is B-60's `deadline_at`; `expires` is B-7's. 4 — a deadline's firing is always a failed attempt; no `leg`, no budget. 5 — retired. 6 — the default stall watch stands as `stalled_s`'s default, overridden per leg by the field. 7 — the model loses the `first_attempt` and `ready` clocks. 8 (renames carry every per-leg record) — unchanged, `ticket_questions` added to the list. Tests: S-BTN-87 is retired; S-BTN-134 is changed; S-BTN-10 and S-BTN-37 stand.)_
+
+_(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — ticket timers: retirement deletes the repository's ticket timers. Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_
