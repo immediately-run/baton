@@ -383,6 +383,51 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   readiness, not blocks. S-BTN-43 gained the gate and the owner round; the model's course is
   docs' own `roadmap-pr`, untouched by this change.
 
+- **2026-11-03 — review round one of PR #161 (B-110): §3.4, §5.8, §6.8, §11, §15** (two fresh
+  reviewers, nineteen merged findings). Blocking, found by both: the gate ran and pushed in the
+  runner's home checkout, not on the PR's head; a marker or an adjudication answer counted from
+  any commit's trailers, so a fix agent could skip the gate or answer the owner's question; no
+  surface sent the round's run grant; the decision carried no question. The owner ruled on
+  three, 2026-11-03:
+  - "Revert, re-pin after merge": the sync workflow's CLI pin and `.baton/baton.json`'s source,
+    with the committed stubs regenerated at the moved pin, went back to main's values.
+  - "Through Baton, not git": the owner's answer goes through Baton's authenticated owner
+    surface, and a `Baton-Tests` marker counts only as an empty-tree commit carrying the nonce
+    Baton issued to that run-tests claim, verified against Baton's record; commit trailers are a
+    record only, never the authority.
+  - "The answer carries the grant": an authenticated `round` answer itself grants exactly one
+    more `review` run, with no separate grant step.
+
+  Fixed, amending the rules in place:
+  - **The gate runs on the PR's head.** The stub finds the ticket's one home PR branch by the
+    branch patterns, fetches it, runs the script in a scratch worktree and makes the marker with
+    `git commit-tree` on the tested head (`Baton-Tested`); the close only pushes it, never
+    forced. Failures are told apart (a timeout or overflow red and named; npm that cannot start,
+    or a kill the bound did not send, no verdict), the red body names the script, and the lease
+    arithmetic is the close's one push (the run is the leg's own process).
+  - **A marker is a record.** It counts only as an empty-tree commit on the head it names whose
+    sha is the evidence Baton recorded for that claim's run-tests leg, read by the sync with its
+    observation (`legs`); the gate's state is read by commit order, and a content commit carrying
+    the trailers is a push. The `Baton-Adjudicated` trailer and, for `create-pr`, the
+    adjudication comment line answer nothing.
+  - **The owner answers through Baton.** The sync posts `review-rounds-<n>` with the question,
+    the PR and the options; the owner's key answers on the ticket's owner route, which records
+    the answer, applies the option's grant (each leg its own key) and hands the answer back in
+    the observation (`answers`). The override route lost `runs`. The review stub suspends at
+    `adjudicate` on a last round asking for changes rather than spend a fix.
+  - **A gate that cannot reach the change asks the owner** (`run-tests-unreachable`, `skip`)
+    rather than loop, for a ticket whose PRs are in other repositories or several at home.
+  - The plain-git reading (`commitsOf`) now reads a fact with no commits from the checkout's own
+    git. `fix`'s instructions gained the red-gate entry; `adjudicate`'s give the owner's command.
+    R-BTN-131's PR-courses bullet and `docs/standard-courses.mdx` no longer give `create-pr` a
+    comment-line adjudication, the table's `review` leaves `reviewed` too, and the retired marker
+    courses' bullet the main merge kept is gone.
+
+  Argued, not changed: the gate's routing reads git's markers, verified against Baton's record,
+  not the traversal record's own placement, which waits on B-120 (the PR's Deviations). Open for
+  the owner: R-BTN-116's person leg is the specification's one way to ask a person, and person
+  legs are not built (B-161), so the owner's question rides the built posted-decision route.
+
 - **2026-10-29 — the standard courses serve the simpler end (owner direction).** The owner:
   "baton is a general tool designed to scale from single-user naive setups where security is an
   afterthought and automation and lock management is the primary concern to something like our

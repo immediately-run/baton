@@ -1011,10 +1011,11 @@ repository reachable over SSH is enough (R-BTN-105).
   reviews — mapped to one set of facts: a PR's head branch, state, head checks and verdicts on
   the head. Each fact carries `repository`, fork-ness and `pusher` (R-BTN-139). The verdict line
   `<!-- baton:verdict approve|changes -->` works on every forge. The adapter also reads each
-  PR's commits' messages, parsing the `Baton-*` trailers the run-tests gate's close and the
-  owner's adjudication answer write (B-110, §5.8) — a commit carrying one is a marker, never a
-  push — so the gate and the owner round read identically on every forge and, through the
-  checkout's own git, on a plain one.
+  PR's commits — sha, first parent, whether the tree changed, message — for the run-tests gate
+  (B-110, §5.8), and the PR's web page when the forge has one. A fact whose adapter read no
+  commits (a facts file, a forge with no adapter) gets its open branch's commits from the
+  checkout's own git, so a plain-git repository reads the gate the same way. Which commit is a
+  marker is the station function's to judge, against Baton's record (R-BTN-131).
   - The adapter reads the home repository and every `code_repos` repository a live ticket on a
     PR-reading course names (deduplicated, case-insensitive), under one request budget. An
     unreadable or missing repository fails the sync, naming the tickets; a partial reading is
@@ -2253,7 +2254,7 @@ mean (R-BTN-50).
 
   | Course | Legs (`from` → `to`) | Ends | Reads |
   |---|---|---|---|
-  | `create-pr` (the default) | `implement` (`filed` → `pr-open`); `run-tests` (`pr-open`, `fixed` → `pr-open` \| `fixed`, a deterministic self-loop the stub itself runs, `max_runs` 30, B-110); `review` (`pr-open`, `fixed` → `reviewed`, `max_runs` 3); `fix` (`reviewed`, `pr-open`, `fixed` → `fixed`, `max_runs` 30); `adjudicate` (`reviewed` → `adjudicated`, waiting on the owner, B-110); `merge` (`reviewed`, `adjudicated` → `merged`); and the fact legs `reviewed-by-hand` (`pr-open`, `fixed` → `reviewed`, `pr-verdict`) and `merged-by-hand` (`pr-open`, `fixed`, `reviewed`, `adjudicated` → `merged`, `pr-merged`) | `merged` | PRs and the branch's `Baton-*` trailer commits |
+  | `create-pr` (the default) | `implement` (`filed` → `pr-open`); `run-tests` (`pr-open`, `fixed` → `pr-open` \| `fixed`, a deterministic self-loop the stub itself runs, `max_runs` 30, B-110); `review` (`pr-open`, `fixed`, `reviewed` → `reviewed`, `max_runs` 3, `reviewed` the owner's granted round, B-110); `fix` (`reviewed`, `pr-open`, `fixed` → `fixed`, `max_runs` 30); `adjudicate` (`reviewed` → `adjudicated`, waiting on the owner, B-110); `merge` (`reviewed`, `adjudicated` → `merged`); and the fact legs `reviewed-by-hand` (`pr-open`, `fixed` → `reviewed`, `pr-verdict`) and `merged-by-hand` (`pr-open`, `fixed`, `reviewed`, `adjudicated` → `merged`, `pr-merged`) | `merged` | PRs, their branches' commits, and the owner's answers Baton records |
   | `review-pr` | `review` (`requested`, `changes-requested` → `approved` \| `changes-requested`, `max_runs` 3); `conclude` (`requested`, `changes-requested` → `concluded`) | `approved`, `concluded` | PRs |
   | `bug-report` | `trace` (`reported` → `traced`); `origin` (`traced` → `explained`); `dedupe` (`explained` → `new-cause` \| `duplicate`); `file` (`new-cause` → `ticketed`); `fold` (`duplicate` → `folded`); `prevent` (`ticketed`, `folded`, `prevented` → `prevented`, `max_runs` 3); the fact leg `merged-by-hand` (`prevented` → `merged`, `pr-merged`) | `merged`; `closed` by `close-pr` | PRs |
   | `draft-ticket` | `research`, `draft`, `check` (`requested` → `researched` → `drafted` → `checked`; `check` also leaves `checked`, `max_runs` 3); `merged-by-hand` (`checked` → `merged`, `pr-merged`) | `merged`; `closed` by `close-pr` | PRs |
@@ -2280,9 +2281,10 @@ mean (R-BTN-50).
     closed unmerged counts as none; `review` waits on `ci` until every open PR's checks finish;
     a **verdict** is the forge's review state or a pusher's (R-BTN-139) comment whose first line
     is `<!-- baton:verdict approve|changes -->`, queuing `merge` or `fix`; a push after it
-    reaches `fixed`; all merged is `merged`; when fixes run out and the last round asks for
-    changes, `adjudicate` is queued if the file has it, and a pusher's `<!-- baton:adjudicated
-    merge|owner -->` is its answer. `review-pr` reviews a PR named in `prs:`: each pusher's
+    reaches `fixed`; all merged is `merged`; when the review rounds run out and the last round
+    asks for changes, `adjudicate` is queued waiting on the owner, who answers through Baton
+    (below). `create-spec`'s `adjudicate` is a fresh reader's, and a pusher's
+    `<!-- baton:adjudicated merge|owner -->` is its answer. `review-pr` reviews a PR named in `prs:`: each pusher's
     verdict is a round; after changes the next waits on `author` until a push; on close or when
     rounds run out `conclude` is queued, and a pusher's `<!-- baton:concluded -->` is that leg.
     A commenting leg's answer line may name its PR (`<answer> <PR URL>`; `conclude`'s the URL
@@ -2290,38 +2292,56 @@ mean (R-BTN-50).
   - **The run-tests gate (B-110, the owner 2026-10-24).** `create-pr`'s `implement` and `fix`
     are each followed by a deterministic run: a leg of the graph — `from` and `to` both
     `pr-open`/`fixed`, a self-loop, so the claim's path can walk it while the posted station
-    stays forge-computable — whose stub runs **no agent**: it executes `npm run <test_script>`
-    (the course file's field, default `test`) in the checkout, bounded (`RUN_TESTS_TIMEOUT_MS`,
-    its lease arithmetic named and pinned beside `CLOSE_TIMEOUT_MS`'s) and non-interactive
-    exactly as B-94 bounds git. Green advances to `review`; red routes to `fix` — never back to
-    `implement` (making the tests green is fixing, wherever the push came from) — so no review
-    round starts on red checks, and the red-fix loop (`implement → run-tests → fix → run-tests
-    → …`) runs to its generous budget of 30 while the review rounds stay at 3. The gate's
-    outcome is its advance, read from the leg it moved into; its state for the sync's placement
-    is the marker its close commits on the branch: an empty commit whose trailers carry
-    `Baton-Tests: green|red` (and `Baton-Claim: <nonce>`, its ref a marker the sync posts,
-    R-BTN-46) and whose red body names the failing script's last lines. A content commit
-    following the marker re-opens the gate, whatever the marker said; a marker commit changes
-    no tree, so it is never a push. The loop's runs are counted from Baton's traversal record
-    alone (§4, 2026-10-24), never from a forge.
+    stays forge-computable — whose stub runs **no agent**. It finds the ticket's one PR branch in
+    the home repository by the course's branch patterns (`git ls-remote`, no forge), fetches its
+    head, and runs `npm run <test_script>` (the course file's field, default `test`) there, in a
+    scratch worktree — the home checkout's branch and working tree untouched, its `node_modules`
+    linked in when it has one — bounded (`RUN_TESTS_TIMEOUT_MS`) and non-interactive exactly as
+    B-94 bounds git, in the leg's own process, where the runner keeps beating. Green advances to
+    `review`; red routes to `fix` — never back to `implement` (making the tests green is fixing,
+    wherever the push came from) — so no review round starts on red checks, and the red-fix
+    loop (`implement → run-tests → fix → run-tests → …`) runs to its generous budget of 30 while
+    the review rounds stay at 3. A non-zero exit, a timeout or output past the bound is red,
+    named; npm that cannot start, or a kill the bound did not send, fails the leg with no
+    verdict. The run makes the gate's marker on the head it tested (`git commit-tree`): an
+    empty-tree commit whose trailers carry `Baton-Tests: green|red`, `Baton-Tested: <the head>`
+    and `Baton-Claim: <nonce>`, and whose red body names the failing script and its last lines.
+    The close pushes it to the branch, never forced — a branch that moved since the fetch refuses
+    the push and the leg fails — one git call, under `CLOSE_TIMEOUT_MS`'s arithmetic, and its sha
+    is the evidence the advance carries (R-BTN-63).
+    - **A marker is a record, never the authority** (the owner, 2026-11-03, "Through Baton, not
+      git"). The station function counts a marker only as an empty-tree commit on the head it
+      names whose sha is the evidence Baton recorded for a `run-tests` leg of that ticket,
+      finished by the claim whose nonce it carries; the sync reads that record with its
+      observation number (`legs`, R-BTN-62). Any other commit is a push, whatever its message
+      says — a forged marker, a copied nonce or a content commit carrying the trailers included.
+    - **The gate's state is read by commit order.** The branch's content head is its newest
+      commit that is not a counted marker; the gate is the newest counted marker that tested
+      exactly that head — green or red — and open when none did: no marker yet, or a push after
+      the last one. Routing at `pr-open`/`fixed`: open → `run-tests` ready (the gate before every
+      review round); green → the path gains its `run-tests` step and `review` queues,
+      `ci`-waited as today; red → `fix` ready. The loop's runs are counted from Baton's
+      traversal record alone (§4, 2026-10-24), never from a forge.
+    - **A change the gate cannot reach asks the owner.** The stub tests the home repository's one
+      PR branch, so a ticket with an open PR in another repository, or several at home, would
+      loop the gate with no marker any PR reads. Its `run-tests` waits on the owner instead,
+      with the question `run-tests-unreachable` naming the PRs and the one option `skip`, which
+      waives the gate for the ticket once the owner answers it through Baton (below).
   - **The third round's blockers are the owner's (B-110).** When the third review round still
     finds blockers, `adjudicate` queues `waiting`, `waiting_on: 'owner'` — a human in the loop —
-    and the decision the sync posts (R-BTN-78) carries the question to Needs you (§14): *"3
-    failed reviews — manual review or start a 4th round?"*. No agent reproduces anything. The
-    owner answers with a `Baton-Adjudicated: merge|owner|round` trailer on a commit pushed to
-    the branch — git, the durable record, the forge-comment spelling of the adjudication
-    (`<!-- baton:adjudicated merge|owner -->`, and `round`) one reader beside it: `merge` →
-    `adjudicated`, merge ready; `owner` → parked, merge waiting on the owner; `round` → exactly
-    one more review round, its run budget granted by the owner override that carries the answer
-    (§6.8). An answer older than the round's last verdict counts for nothing.
-  - **The marker courses** open no PR. Each leg commits its work to the default branch under its
-    own `## <leg>` heading in the ticket's body: a note for people, and the input the course's
-    next leg reads. Where the ticket is, is Baton's (R-BTN-39): `close` writes no machine state
-    into the ticket. Before committing, the close validates the ticket: its frontmatter against
-    the repository's item schema (`item.schema.json` beside the tickets) and the leg's own
-    heading; a violation fails the leg naming the rule. A `station:` or `next_leg:` field a
-    ticket still carries is not read. Their station functions post readiness from the ticket's
-    facts (its sections, `answer:`, its children) at Baton's station.
+    and the sync posts the question `review-rounds-<n>` with the ticket, `<n>` the rounds spent,
+    linking the PR whose last round holds the blockers and asking *"3 failed reviews — manual
+    review or start a 4th round?"*; it is listed under Needs you (§14). No agent reproduces
+    anything, and the review stub queues `adjudicate` and suspends on a last round asking for
+    changes, never a fix. **The owner answers through Baton, never in git** (the owner,
+    2026-11-03, "Through Baton, not git"): an owner key's answer on the ticket's owner route
+    (`POST /v1/owner/{repository}/tickets/{ticket}/resolve` with `{decision: review-rounds-<n>,
+    answer: merge|owner|round}`, §11), which Baton records and hands back in the sync's observation (`answers`); a commit trailer or a
+    comment line answers nothing. `merge` → `adjudicated`, merge ready; `owner` → parked, merge
+    waiting on the owner; `round` → exactly one more review round on the same head, the answer
+    itself granting its run (§6.8, the owner, 2026-11-03, "The answer carries the grant"). The
+    question names the rounds it was asked about, so an answer buys that round alone: a fourth
+    round asking for changes asks `review-rounds-4`.
   - **One ticket, one PR, one merge.** Every standard course that writes a ticket's work is a PR
     course. Its legs commit their records and outputs on the ticket's branch (`branch_pattern`,
     continued by R-BTN-25), the first push opens the ticket's PR, and the course ends at `merged`.
@@ -2477,11 +2497,11 @@ mean (R-BTN-50).
      at most one PR URL after it on that line (prose before or after it fails nothing); a value
      word mid-line only is not an answer, and no such line fails the leg, naming the value wanted
      and the last line read. **The run-tests gate is a stub of another kind (B-110): it runs no
-     `agent_command` at all** — the stub itself executes the course's `test_script` (§5.2) in the
-     checkout, one bounded synchronous run, and its position is read from the claim's station and
-     the script's exit; its close writes the branch's `Baton-Tests` marker (above), and a
-     repository overrides it as any leg's run (`legs/run-tests.run.mjs`, R-BTN-131), keeping the
-     close. The agent spawn is shell-free (B-84):
+     `agent_command` at all** — the stub itself executes the course's `test_script` (§5.2) on the
+     PR branch's fetched head in a scratch worktree, one bounded run in the leg's process, and its
+     position is read from the claim's station and the script's exit; its close pushes the marker
+     the run made (above), and a repository overrides it as any leg's run
+     (`legs/run-tests.run.mjs`, R-BTN-131), keeping the close. The agent spawn is shell-free (B-84):
     the command string splits into words as `sh` would — quotes, no substitutions — and runs as
     `execFile(command, args)` with the ticket id, the leg and the checkout appended, stdin never
     an open pipe (a closed fd — nothing to read), stdout and stderr captured pipes. A repository's
@@ -3157,13 +3177,15 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     ticket hold | unhold | expedite | cancel` (R-BTN-127), as does the dashboard; a delegated key
     sets a hold and lifts only its own (R-BTN-186, R-BTN-130). Lifting a hold resets the leg's
     attempt and blocked-end counts.
-  - **Owner-granted runs (B-110).** An owner may grant one leg more runs beyond its `max_runs`,
-    for this ticket alone — `{runs: {leg, add: 1–10}}` on the same override surface, stored
-    beside the hold. It is the override that carries a `round` adjudication answer (§5.8): the
-    owner grants the fourth review round its run budget when they answer. The grant is read at
-    the advance that starts the leg, added to its `max_runs`; the count itself stays Baton's
-    traversal record (R-BTN-63), so each grant buys exactly what it says, is never spent or
-    reset, and granting again buys another round.
+  - **Owner-granted runs (B-110).** An owner's answer may grant one leg of the ticket more runs
+    beyond its `max_runs` — the answer carries the grant, with no separate grant step (the
+    owner, 2026-11-03, "The answer carries the grant"). A question the sync posts names, per
+    option, what that option grants (`grants: {leg, runs}`, 1–10 runs); the answer's own
+    transaction adds it to the ticket's grants, each leg its own key, so granting one leg never
+    resets another. `create-pr`'s `round` grants exactly one more `review` run (§5.8). The grant
+    is read at the advance that starts the leg, added to its `max_runs`; the count itself stays
+    Baton's traversal record (R-BTN-63), so each grant buys exactly what it says, is never spent
+    or reset, and another answer grants again. The override route takes no `runs`.
   - Each change is logged `override`; each hold also `held` with its `hold_reason`.
   - `ticket_overrides` also holds the queued leg Baton or the owner chose, until the station
     changes: an owner's route, a retry policy's `exhausted` leg, a person leg's expiry, the
@@ -6610,7 +6632,7 @@ Under §12.8 (proposal), `repository_policies` `(repository_id, version)` holds 
 | `ticket_blocks` | `(ticket_id, kind, ref, leg)`; `leg` `''` for the whole ticket | `repository_id`, `kind` (`ticket`\|`capability`\|`resource`\|`retry`\|`condition`\|`call`\|`attestation`), `ref`, `since`, `until`, `provisional` (the commit a runner-written row waits for), `found` (`before-start`\|`during-run`), `binds` (`gate`\|`advice`; set for `resource` and `attestation` rows from their requirement, R-BTN-181) | Each unmet prerequisite, maintained, never recomputed on read (R-BTN-75, R-BTN-120, R-BTN-126) |
 | `leg_needs` | `(ticket_id, leg, resource)` | `repository_id`, `source` (`posted`\|`end`), `added_at`, `found_at` | Resources a next leg needs; an `end` need is never removed by a post (R-BTN-76, R-BTN-126) |
 | `leg_attempts` | `(ticket_id, leg)` | `repository_id`, `attempts`, `retry_after`, `last_error_type` | Retry state per ticket and leg; reset when the leg reaches an outcome or a hold is lifted (R-BTN-122) |
-| `ticket_overrides` | `ticket_id` | `expedite`, `hold`, `hold_reason` (`owner`\|`attempts-exhausted`\|`non-retryable:<class>`\|`blocked-exhausted`\|`parked`\|`outbox-refused`\|`mcp:<name>`), `runs_json` (JSON `{<leg>: <granted runs>}`, B-110), `cancelling_at` (set by a cancellation, cleared at the close, never in `kept_json`, R-BTN-168), `route_leg`, `route_station`, `override_kind` (`owner`\|`baton`), `set_by`, `set_at` | Expedite, hold and cancellation (§6); owner-granted runs of one leg beyond its `max_runs` (B-110, §6.8); the queued leg Baton or the owner chose, held until the station changes — an owner's route, retry's `exhausted` leg, a person leg's expiry, the `cancel` leg (R-BTN-12, R-BTN-83, R-BTN-116, R-BTN-122, R-BTN-168) |
+| `ticket_overrides` | `ticket_id` | `expedite`, `hold`, `hold_reason` (`owner`\|`attempts-exhausted`\|`non-retryable:<class>`\|`blocked-exhausted`\|`parked`\|`outbox-refused`\|`mcp:<name>`), `runs_json` (JSON `{<leg>: <granted runs>}`, one key per leg an owner's answer granted, B-110), `cancelling_at` (set by a cancellation, cleared at the close, never in `kept_json`, R-BTN-168), `route_leg`, `route_station`, `override_kind` (`owner`\|`baton`), `set_by`, `set_at` | Expedite, hold and cancellation (§6); runs an owner's answers granted a leg beyond its `max_runs` (B-110, §6.8); the queued leg Baton or the owner chose, held until the station changes — an owner's route, retry's `exhausted` leg, a person leg's expiry, the `cancel` leg (R-BTN-12, R-BTN-83, R-BTN-116, R-BTN-122, R-BTN-168) |
 | `owner_bars` | `id` | `repository_id`, `course` (an id or `*`), `tag`, `legs` JSON, `applies` (`claim`\|`claim+advance`), `starts_at`, `ends_at`, `release_holders`, `reason` (`^[a-z][a-z0-9-]{0,39}$`), `set_by`, `lifted_at` | R-BTN-67 |
 | `conditions` | `id` | `repository_id`, `ticket_id` (NULL for a repository's), `ref` (what a core condition is about: a runner, an instance, `<course>:<leg>`, a question id), `claim_id`, `leg`, `run`, `type`, `disposition` (`interrupt`\|`suspend`\|`notify`), `handler` (the handler ticket), `restarts` JSON, `default`, `severity` (`critical`\|`high`\|`normal`), `url`, `detail` JSON (a core condition's identifiers and numbers), `raised_at`, `closed_at`, `outcome`, `restart`, `reason`, `answered_by` (the answer's, or an owner's credential), `consumed_at` (an end of the raiser's claim consumed the restart, R-BTN-162) | Raised conditions, filter fields only; indexed open by repository, and by `handler`; an open core condition is unique on `(repository_id, type, ticket_id, ref)` (R-BTN-160, R-BTN-162, R-BTN-163) |
 | `ticket_timers` | `(ticket_id, leg, kind)`; `kind` `stalled`\|`expires` | `repository_id`, `from_at`, `due_at`, `fired_at` | The instants Baton holds per leg; each fires once per `from_at`; renamed with their leg (R-BTN-64, R-BTN-116, R-BTN-167) |
@@ -6765,7 +6787,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `GET /v1/repositories/{repository}/stats` | reader | `?since=` | per station and leg, wait and run times; ends by reason and detail; suspensions; advice overridden; `off-graph` — aggregates and ids only | §5 |
 | `GET /v1/repositories/{repository}/fact-legs` | a trusted runner whose `service:` key the policy names for `std:arrival@1` (the fact reader) | — | `{tickets: [{ticket, station, path_len, leg, fact, waiting_since}]}` | R-BTN-192 |
 | **Owner** | | | | |
-| `POST /v1/owner/{repository}/tickets/{ticket}/resolve` | owner; never delegated (R-BTN-130) | `{restart, condition_id?}` — `condition_id` required when the ticket has more than one open condition taking a restart | `{ok: true}`; `invalid-params` for a restart the condition does not offer | R-BTN-163 |
+| `POST /v1/owner/{repository}/tickets/{ticket}/resolve` | owner; never delegated (R-BTN-130) | `{restart, condition_id?}` — `condition_id` required when the ticket has more than one open condition taking a restart; or `{decision, answer}`, the owner's answer to a question the ticket's sync posted (B-110), applying the option's grant (§6.8) | `{ok: true}`; `invalid-params` for a restart the condition, or an answer the question, does not offer; `not-found` for a question not open | R-BTN-163, R-BTN-131 |
 | `POST /v1/owner/{repository}/tickets/{ticket}/route` | owner; never delegated (R-BTN-186) | `{leg}` or `{clear: true}` | `{ok: true}` | R-BTN-83 |
 | `POST /v1/owner/{repository}/tickets/{ticket}/adopt` | an approver on the repository's `approvers.policy`, or an administrator holding a `human_only` key where every `approvers.*` list is human-only; never delegated (R-BTN-186) | `{at?, next?, ran?: [<leg>], confirm: true}` | `{ok: true, before, after}`; `nothing-implied`, `off-graph` | R-BTN-39 |
 | `POST /v1/owner/{repository}/tickets/{ticket}/release` | owner; delegated (R-BTN-130) | `{reason: "requested", confirm: true}` | `{ok: true}` | R-BTN-119 |
@@ -6796,7 +6818,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `POST /v1/owner/{repository}/mcp-keys`, `…/mcp-keys/{name}/revoke` | an approver on `approvers.members` (R-BTN-188) | `{name, actions, ttl}`; revoke `{confirm: true}` | the key once; `{ok: true}`; `invalid-params` for an id R-BTN-186 does not admit | R-BTN-130 |
 | `POST /v1/owner/{repository}/check-runners`, `…/check-runners/{fingerprint}/revoke` | an approver on `approvers.members` (R-BTN-188) | `{public_key, name, capabilities?, max_tier?}`; revoke `{confirm: true}` | `{ok: true}` | R-BTN-114 |
 | **Sync and forges** | | | | |
-| `POST /v1/sync/observation` | sync | `{renew?}`, or `{release, behind?, unfounded?}` | `{sha, observation, bars, pushers, code_repos, check_app_id, positions, unconfirmed}`; a release `{ok: true}` | R-BTN-11, R-BTN-62, R-BTN-126, R-BTN-147, R-BTN-139, R-BTN-140, R-BTN-150 |
+| `POST /v1/sync/observation` | sync | `{renew?}`, or `{release, behind?, unfounded?}` | `{sha, observation, bars, pushers, code_repos, check_app_id, positions, unconfirmed, answers, legs}` — `answers` the owner's answers to the questions the sync posted (B-110), `legs` the legs claims finished with an evidence pointer and their claim's nonce, both for live tickets; a release `{ok: true}` | R-BTN-11, R-BTN-62, R-BTN-126, R-BTN-147, R-BTN-139, R-BTN-140, R-BTN-150, R-BTN-131 |
 | `POST /v1/sync/board` | sync | the board post (§4), with `legs_landed?: {count, tickets}` (R-BTN-190) | `{ok: true}`; `head-moved` | R-BTN-11, R-BTN-147, R-BTN-149, R-BTN-190 |
 | `POST /v1/sync/want` | sync | — | `{ok: true}` | R-BTN-94 |
 | `GET /v1/sync/wanted` | sync, mirror (*adoption*) | — | `{wanted, since?, head_sha}` for the credential's role; changes nothing but its nonce | R-BTN-94, R-BTN-105 |
@@ -6944,8 +6966,8 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-13 board ordering | two syncs finishing out of order; a force-push of the default branch, read by the CLI sync and posted by hand; an administrator's forced Resync naming the new head, then a post of an unrelated `sha` and the CLI sync's refresh of the new head | head never moves back; the CLI sync posts nothing, releases `unfounded` and `baton.head-unfounded` is raised, and the hand-made post is `head-moved`; after the reset (`head-reset`), the unrelated post is `head-moved` and the refresh is accepted and materialized as a first snapshot |
 | S-BTN-36 suspension confirmed from a PR | a suspension evidenced only in a code repository; an older observation arriving late; a reap and re-claim | confirmed by the next later snapshot, never by ancestry; `stale-observation`; R-BTN-5's check passes |
 | S-BTN-40 slow and stale syncs | a whole ticket under slow, stale-checkout and held syncs, a lost delivery, an archive sync numbered before `/end` | every `advance` accepted; no stale end; the stale checkout posts nothing; the schedule covers the loss; `done` confirmed from the closure |
-| S-BTN-43 no course code | five ticket files (a dependency, a `done`, an unknown field, no `id`) on the default source; a PR through the run-tests gate (B-110), review, fix, three failed rounds and the owner's trailer answers, merge; `--eject tickets`; comment verdicts | four tickets on `create-pr`; the dependent waits; `filed` → `pr-open` (gate ready, then review) → `reviewed` → `fixed` (gate ready, then review) → `reviewed` → `adjudicate` waiting on the owner with the decision posted, `round` then `owner` then `merge` answered on the branch → `merged`; the ejected copy rules; `src/core/` unchanged |
-| S-BTN-47 positions and the owner's settlements | results with good, missing and off-graph `next`; human work no claim reported; legs added and removed; a re-route; spent retries; a leg waiting 72 h; a person's answer at Baton's station; readiness posted for a station Baton has since left | recorded at once; bad results suspend, `off-graph`; the human work is recorded `arrival-unapplied`, raising nothing, until adopted; `course-changed` raised; re-route holds until the station changes; the person's leg arrives as a `fact-arrival`; the stale readiness discarded; `baton.retries` and `baton.stalled` resolved by `baton ticket resolve … retry` |
+| S-BTN-43 no course code | five ticket files (a dependency, a `done`, an unknown field, no `id`) on the default source; a PR through the run-tests gate (B-110) — a marker Baton has no record of, then the recorded one — review, fix, three failed rounds and the owner's answers through Baton, merge; a ticket whose PRs the gate cannot reach; `--eject tickets`; comment verdicts | four tickets on `create-pr`; the dependent waits; `filed` → `pr-open` (gate ready, still ready under the unrecorded marker, then review) → `reviewed` → `fixed` (gate ready, then review) → `reviewed` → `adjudicate` waiting on the owner with `review-rounds-3` posted, `round` granting one review run, the fourth round's changes asking `review-rounds-4`, `owner` parking it → `merged`; the unreachable gate waiting on the owner until `skip`; the ejected copy rules; `src/core/` unchanged |
+| S-BTN-47 positions and the owner's settlements | results with good, missing and off-graph `next`; human work no claim reported; legs added and removed; a re-route; spent retries; a leg waiting 72 h; a person's answer at Baton's station; readiness posted for a station Baton has since left | recorded at once; bad results suspend, `off-graph`; the human work is recorded `arrival-unapplied`, raising nothing, until adopted; `course-changed` raised; re-route holds until the station changes; the person's leg arrives as a `fact-arrival`; the stale readiness discarded; `baton.retries` and `baton.stalled` resolved by `baton ticket resolve … retry`; a question the sync posted answered on the owner route with one of its options, its grant lifting the leg's `max_runs` by exactly what it says, each leg its own key — an advance refused without the grant, accepted with it, refused once it is spent — the answer recorded, never posted open again, and handed back in the observation (B-110) |
 | S-BTN-49 child tickets | a leg files C1, C2 with `parent: T` and ends `spawned`; ends with 51 ids, the parent itself, or `done`; looping and foreign parents; children `T-1`, `T-2` push branches and PRs while T is held | bad ends `invalid-params`; children and T held concurrently, T's non-calling leg offered; the children's branches and PRs map to them alone, their pushes allowed; `children` lists both, also closed; bad parents `parent-invalid` |
 | S-BTN-50 owner state exported | a Baton with claims, keys, grants with roles and domains, bars, a hold, a re-route, readings, open core conditions and a person leg's pending expiry; freeze, seal, export, import, re-heartbeat; a fence-pending claim at the seal, then an administrator's fence clear during the freeze; a tampered and a second import | refusals before seal (`frozen`, `conflict` for a lagging mirror, `conflict` naming the fence-pending claim until `fence-cleared`, the clear accepted while frozen and the seal then proceeding); identical exports with only owner state; source `sealed`; import restores state, continues seq, runners resume unkeyed, the expiry instant unchanged; `invalid-params`, `conflict` |
 | S-BTN-58 an unknown ticket | claims by id of a ticket Baton has not seen, before and after the first post naming it; `baton ticket new`, then the forge's notification, and on `plain` a runner's `ls-remote` poll | `not-eligible` (`unknown-ticket`), no claim; claimable at the first post; the sync within a minute of the push |
@@ -7553,6 +7575,9 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose `timed_out` over `neutral` for a check command's timeout or `exec` error, and no `neutral` at all, over posting a timeout as `failure` beside an advisory `neutral` or stating the gap: a GitHub required check passes on `neutral`, so a change that hung its own tests landed (2026-11-02, the owner, B-175; R-BTN-114, R-BTN-153).
 - Chose a two-step sign-in bind — the code's row previewed (role, client address, age), then bound only on an explicit yes the CLI takes no `--yes` for — over one call that binds at once: the address is the one defence against a relayed code, and it must be read before anything binds (2026-11-03, B-172, written at the owner's request; R-BTN-155).
 - Chose a final retirement that ends everything scoped to the repository — sessions' reach, MCP keys and OAuth grants with their codes, sync, mirror and runner keys and registration tokens, active claims (fenced as a force-reap), outbox entries, wants and dispatches — exports only its tombstone and never re-registers its id, over a reversible flag each surface interprets: nothing scoped to it can come back to life (2026-11-03, B-173, written at the owner's request; R-BTN-47).
+- Chose the owner's answer to `create-pr`'s third failed round given through Baton's authenticated owner surface, and a run-tests marker counted only as an empty-tree commit whose sha is the evidence Baton recorded for the run-tests leg of the claim whose nonce it carries, over a `Baton-Adjudicated` or `Baton-Tests` trailer on any commit: anyone who can push writes a trailer, a fix agent or a compromised runner included, so a trailer is a record, never the authority (2026-11-03, the owner, "Through Baton, not git", B-110 round one; R-BTN-131).
+- Chose an authenticated `round` answer that itself grants exactly one more `review` run, over a separate grant the owner sends beside the answer: no shipped surface sent the grant, and an answer without it started a round Baton then refused at `max_runs` (2026-11-03, the owner, "The answer carries the grant", B-110 round one; §6.8, R-BTN-131).
+- Chose to revert the PR's move of the sync workflow's CLI pin and `.baton`'s course source to a branch-only commit, re-pinning after the merge, over shipping the pin with the change: the branch commit predates code main had gained, so the sync would have run older code (2026-11-03, the owner, "Revert, re-pin after merge", B-110 round one).
 
 ## Open questions
 

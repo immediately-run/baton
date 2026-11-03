@@ -31,29 +31,33 @@ keeps until it switches.
 Two things in `create-pr` run without an agent (2026-10-24):
 
 - **`run-tests` — the gate before every review round.** After `implement` pushes, and after
-  every `fix`, the stub itself runs the repository's test script — `npm run <test_script>` in
-  the checkout, the course file's `test_script` (default `test`) — bounded and
-  non-interactive, one synchronous run. No model runs, so the outcome never depends on one:
-  green advances to the review round; red routes straight to `fix` — never back to
-  `implement` — naming the failing script's last lines in the marker the close commits on the
-  branch. The gate may run 30 times (and `fix` 30 with it) while the review rounds stay at
-  3: the gate is deterministic and cheap, and spending retries there harms nothing the way a
-  wasted review round does. A repository whose suite runs longer than the gate's bound raises
-  it in its own copy of the leg script (`baton repo init --course create-pr --override
-  run-tests`).
+  every `fix`, the stub itself finds the ticket's PR branch in the home repository, fetches its
+  head and runs the repository's test script there — `npm run <test_script>`, the course file's
+  `test_script` (default `test`) — in a scratch worktree, bounded and non-interactive; your
+  checkout is never touched. No model runs, so the outcome never depends on one: green advances
+  to the review round; red routes straight to `fix` — never back to `implement` — and the
+  marker it leaves on the branch, an empty commit on the head it tested, names the failing
+  script and its last lines. The gate may run 30 times (and `fix` 30 with it) while the review
+  rounds stay at 3: the gate is deterministic and cheap, and spending retries there harms
+  nothing the way a wasted review round does. A repository whose suite runs longer than the
+  gate's bound raises it in its own copy of the leg script (`baton repo init --course create-pr
+  --override run-tests`).
 - **The third round's blockers are the owner's.** When the third review round still asks for
-  changes, `adjudicate` waits on the owner — listed under Needs you, asking *"3 failed
-  reviews — manual review or start a 4th round?"* — and no agent reproduces anything. The
-  owner answers by pushing one commit to the branch with a trailer: `Baton-Adjudicated:
-  merge` (it merges), `owner` (they take it over by hand; the ticket parks), or `round`
-  (exactly one more review round, its run budget granted by the ticket override that carries
-  the answer). A push after a green gate re-opens the gate, and an answer older than the
-  round's last verdict counts for nothing.
+  changes, `adjudicate` waits on the owner — listed under Needs you as `review-rounds-3`, asking
+  *"3 failed reviews — manual review or start a 4th round?"* and linking the PR — and no agent
+  reproduces anything. The owner answers through Baton, with their owner key:
+  `baton owner -i <key> resolve <repository> <ticket> review-rounds-3 merge` (it merges),
+  `owner` (they take it over by hand; the ticket parks), or `round` (exactly one more review
+  round — the answer itself grants its run). A fourth round still asking for changes asks
+  again, as `review-rounds-4`.
 
-The gate's marker commits (`Baton-Tests: green|red`, and the owner's `Baton-Adjudicated`
-answer) are read from the branch's commits, so both work identically on a plain git
-repository with no forge at all; on a forge, the `<!-- baton:adjudicated merge|owner -->`
-comment line is read as the same answer.
+The gate's marker (`Baton-Tests: green|red`, `Baton-Tested`, `Baton-Claim`) is a record, not
+the authority: it counts only as the evidence Baton recorded for that claim's run, so a marker
+anyone else pushes is a push like any other and re-opens the gate. Nothing in git answers the
+owner's question either — no trailer, no comment line. The sync reads the branch's commits from
+the forge, or from the checkout's own git on a plain git repository. A ticket whose PRs are in
+other repositories, or that has several at home, is one the gate cannot test: it waits on the
+owner as `run-tests-unreachable`, whose `skip` waives the gate for it.
 
 ## Starting a course from one sentence
 
@@ -169,9 +173,9 @@ its harness, and with no command named, it is the command.
   `<!-- baton:verdict approve -->` or `<!-- baton:verdict changes -->`. `create-pr`'s adjudication
   and `review-pr`'s conclusion are comment lines of the same kind. The leg's `close` writes each
   of these lines from the agent's answer, so the agent never writes them itself. `create-pr`
-  also reads its branch's `Baton-*` trailer commits — the run-tests gate's green/red marker and
-  the owner's adjudication answer ([above](#create-prs-test-gate-and-its-owner-round)) — which a
-  plain-git repository reads the same way, no forge at all.
+  also reads its branch's commits for the run-tests gate's markers, each counted only as Baton
+  recorded it, and takes the owner's answer after the third round from Baton, never from a line
+  ([above](#create-prs-test-gate-and-its-owner-round)).
 - **A ticket's PRs may be in other repositories.** A ticket that names repositories in its
   `repos:` (docs' roadmap items name the code repositories they change) gets one PR in each, on
   a branch of the same name; its home may get none. The sync reads every repository a live
@@ -326,9 +330,10 @@ themselves, and `answer:` is the approval.
 ## `create-spec`, step by step
 
 `create-spec` takes a request for a specification — what a thing must be, decided — from the
-owner's design conversation to a merged PR. Its review and adjudication are `create-pr`'s; its
-two conversations are the course's own, and Baton neither runs them nor waits inside a claim for
-them.
+owner's design conversation to a merged PR. Its review is `create-pr`'s; its adjudication is
+its own — a fresh reader reproducing what the last round left open, which `create-pr` handed to
+the owner (2026-10-24) — and so are its two conversations, which Baton neither runs nor waits
+inside a claim for.
 
 ```
 npx baton repo init --course create-spec
@@ -352,7 +357,8 @@ which the owner and an agent decide how each blocking finding is answered — fi
 split into another ticket — and push the amendment. That round's claim ends with an `address`
 marker, so `address` waits on the owner too, until the push lands and the ticket goes back to
 `spec-open` for the next round. `review` runs four times and `address` three: the fourth review is
-the one that finds the rounds spent, and queues `adjudicate` on what is left, as in `create-pr`.
+the one that finds the rounds spent, and queues `adjudicate` on what is left: a fresh reader
+reproduces each open blocking finding and writes `<!-- baton:adjudicated merge|owner -->`.
 `merge` lands the specification and closes the ticket.
 
 As with `build-app`, until Baton launches interactive sessions itself (B-34), the conversation is
