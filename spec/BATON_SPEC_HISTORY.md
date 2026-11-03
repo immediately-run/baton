@@ -2283,6 +2283,33 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   up now. S-BTN-198 follows. B-172 is superseded into B-76, which builds the code sign-in flow
   for both roles: the two steps are built where the flow is.
 
+- **2026-11-03 — R-BTN-74, R-BTN-127, R-BTN-31, §13: process guards against review-round
+  thrashing (owner direction).** The owner: "I would like you to implement the process changes
+  that prevent the sort of thrashing we are seeing now." The evidence was PRs #160 and #161, where
+  six of the seven owner questions came from tickets, not code: tickets filed 2026-10-29 were
+  built as written after later rulings (B-129 kept "listed under Needs you" after the 2026-11-01
+  ruling, though a spec PR touched it on 11-02); tickets prescribed mechanisms that broke standing
+  rules (B-129 had core read `prs`, against R-BTN-50 and R-BTN-33; B-110 asked Baton to store
+  question text, against R-BTN-33); B-110 added two inputs read from git, commit trailers, with no
+  word on who may write them (the security model's reach 3); long-lived branches collided on
+  numbers (B-110 and B-107 both took migration 0028; B-129 and B-145 both took S-BTN-197); and
+  restated rules drifted. Five guards follow. R-BTN-74: `ticket claim` refuses a ticket whose
+  body cites a rule that a dated entry here, dated after the ticket file's last commit, names,
+  until `--rules-reread`, which leaves a dated Status line; `ticket check` reports such tickets
+  without failing; the skeleton gains `### Trust` and `### Invariants`, and `check.sections_since`
+  (this repository: 2026-11-03) makes a ticket filed from that day without them a finding;
+  `ticket reserve` allocates migration numbers and scenario ids from `tickets/reserved.json`,
+  seeded with the numbers open PRs hold (migration 0028 B-107, 0030 B-106, 0031 B-110; scenario
+  199 B-129) above a baseline of main's highest (migration 30, scenario 198), and `check:spec`
+  fails an unreserved number above it or one held twice. R-BTN-127's tree gains the two command
+  forms; R-BTN-31's new scenario and §13's migrations take reserved numbers. The babysit skill
+  brings in main when main changes `spec/`, `src/migrations/` or `tickets/reserved.json` and at
+  least daily, merges main before reviewing a PR more than a day behind, and has a spec PR
+  rewrite or strike, in place, each live ticket clause an amendment contradicts. S-BTN-189 and
+  S-BTN-172 cover the commands and the check. Rejected: failing the check on stale tickets (most of
+  this repository's live tickets cite a rule amended since they last changed, and every pull
+  request would turn red at each ruling); requiring the new sections of tickets already filed.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

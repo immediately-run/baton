@@ -1226,8 +1226,14 @@ live solely in Baton, and both are exportable (R-BTN-88).
     `check: {depends_line: true}` in `.baton/baton.json` (default off) it also holds each markdown
     ticket's `**Depends on:**` body line — which runs to the next blank line or `**Label:**` line;
     a `**Used by:**` line is never read — to its `depends_on`, both ways; a ticket with no such line
-    is not compared. Exit 1 with one `path: message` line per finding, 0 without; an unreadable
-    root or a malformed `baton.json` is an error (exit 2). It reads; it never writes.
+    is not compared. With `check: {sections_since: "<YYYY-MM-DD>"}` (default off), a live ticket
+    whose `## Status` says it was `_filed` on or after that day and that lacks a `### Trust` or
+    `### Invariants` heading is a finding; a ticket with no `_filed` line is not judged. It also
+    reports, never as a finding, each live ticket citing a rule id that a dated entry of the
+    spec's history, dated after the ticket file's last commit, names (`check.rules: {history,
+    prefix}`, default `spec/BATON_SPEC_HISTORY.md` and `R-BTN`; no file, no report): one line per
+    ticket, then their count. Exit 1 with one `path: message` line per finding, 0 without; an
+    unreadable root or a malformed `baton.json` is an error (exit 2). It reads; it never writes.
   - **The ticket commands** (B-112, R-BTN-127): `baton ticket new | claim | set | done`, whose behaviour is
     the git-lock commands docs' `claim.sh` and the repositories' `scripts/ticket.mjs` had, kept
     once in the CLI. Each is one commit pushed straight to the default branch from a throwaway
@@ -1241,7 +1247,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
       files whose frontmatter carries an `id`), and writes the conventional body unless
       `--body-file` names one: `**Brief:**` (the description), `**Spec:**`, `**Depends on:**`
       (from `--depends-on`; `none.` when empty), `**Used by:**`, `### What to build`,
-      `### Tests`, `### Exit criteria`, `**Requires:**` and `## Status` with the filing date.
+      `### Trust` (every new input the ticket adds — a field, a file, a commit trailer, a request —
+      who may write it and how Baton verifies it, by `docs/security-model.mdx`'s reaches, or "no
+      new input"), `### Invariants` (the rules it must not break, by id, and how the design keeps
+      each), `### Tests`, `### Exit criteria`, `**Requires:**` and `## Status` with the filing date.
       A `--body-file` whose `**Depends on:**` line disagrees with the flag is refused. Before the
       push it judges what it writes as `baton ticket check` judges it — the body line against
       `depends_on`, every id a live or closed ticket, the board post's validation of §4.4 (the
@@ -1249,11 +1258,23 @@ live solely in Baton, and both are exportable (R-BTN-88).
       no branch at all. Each dependency's `**Used by:**` line gains the new id once: the reverse
       mention. A description that ends with a `Requires:` clause (`… Requires: human-operator,
       drivable-browser.`) has the capabilities it names written on the `**Requires:**` line.
-    - `claim <id>` moves a ticket available → in-progress, and refuses one that is not available or
-      whose `depends_on` are not all done (archived, or carrying any of the markdown source's closed
-      statuses); `set <id> <status> [--pr URL]` writes any live status — `done` is `done`'s — and
+    - `claim <id> [--rules-reread]` moves a ticket available → in-progress, and refuses one that is
+      not available, whose `depends_on` are not all done (archived, or carrying any of the markdown
+      source's closed statuses), or whose body cites a rule that a history entry dated after the
+      ticket file's last commit names (the check's stale-rule reading, above, at the head the
+      claim lands on), listing each id with the entry's date and title. With `--rules-reread` it
+      claims, and the claim's commit adds `_(<date>: rules re-read at claim: <id> (amended
+      <date>), …)_` to the ticket's `## Status`. `set <id> in-progress` is a claim and reads the
+      same. `set <id> <status> [--pr URL]` writes any live status — `done` is `done`'s — and
       adds the pull request URL to `prs` once; `done <id> [--pr URL]` writes `done` and moves the
       file to `<items>/archive/`.
+    - `reserve <id> migration|scenario` holds the next migration number (`src/migrations/NNNN_*.sql`)
+      or scenario id (§15's `| S-BTN-n` rows) for a live ticket in `<items>/reserved.json`
+      (`{"baseline": {"migration": n, "scenario": n}, "migration": {"NNNN": "<id>"}, "scenario":
+      {"n": "<id>"}}`): one above both the highest in the tree at the head it pushes to (the
+      scenario ids the spec and its history name, retired ones included) and the highest reserved.
+      These numbers are allocated only so: `npm run check:spec` fails a migration or §15 row above
+      the ledger's `baseline` that the ledger does not hold, and a number held or used twice.
     - The settings are the repository's: `items` (below), `ticket_prefix` (`B`), `legacy_ids` — id
       patterns the repository still accepts but never allocates (`R3-\d+` here) — `project` (the
       default `--project`), `tags` (the default `--tags`, else `roadmap-item`) and `prefixes` (a
@@ -5218,7 +5239,7 @@ is summarized in the principal table (§12.1).
     | `ticket route <ticket> <leg> \| --clear` | `ticket.route`: `POST …/tickets/{ticket}/route` (R-BTN-83) | owner |
     | `ticket adopt <ticket> [--at <station>] [--next <leg>] [--ran <leg>,…]` | `ticket.adopt`: `POST …/tickets/{ticket}/adopt` (R-BTN-39) | an approver on `approvers.policy` |
     | `ticket resolve <ticket> <restart> [--condition <id>]` | `ticket.resolve`: `POST …/tickets/{ticket}/resolve` (R-BTN-163) | owner |
-    | `ticket new --title <t> […]`, `ticket claim <id>`, `ticket set <id> <status> [--pr <url>]`, `ticket done <id> [--pr <url>]`, `ticket check [--repo <dir>] [--quiet]`, `ticket request "<one sentence>" --course <course> […]` | local: the ticket source in git, each a commit (R-BTN-74, R-BTN-131) | — |
+    | `ticket new --title <t> […]`, `ticket claim <id> [--rules-reread]`, `ticket set <id> <status> [--pr <url>]`, `ticket done <id> [--pr <url>]`, `ticket reserve <id> migration\|scenario`, `ticket check [--repo <dir>] [--quiet]`, `ticket request "<one sentence>" --course <course> […]` | local: the ticket source in git, each a commit (R-BTN-74, R-BTN-131) | — |
     | `decision list [--all] [--watch]` | `condition.list`: `GET /v1/repositories/{repository}/conditions?open=1&person=1` (R-BTN-163) | owner, runner granted on the repository, or administrator |
     | `decision answer <ticket> <option>` | `attestation.add` with a `std:decision@1` for the ticket's queued person leg (R-BTN-116, R-BTN-181) | owner, or a human-only key |
     | `attestation add <repository> --type <type> --subject <json> --value <json> [--lapses <duration>]`, `attestation revoke <repository> <id>` | `attestation.add`, `attestation.revoke`: `POST`, `DELETE /v1/repositories/{repository}/attestations` (R-BTN-181) | owner, a human-only key, or the `service:` key named |
@@ -6415,7 +6436,7 @@ One SQLite database per tenant, in the tenant's Durable Object (or the local hos
 schema below is the current one, together with `BATON_MCP_OAUTH_SPEC` §12's rows (the OAuth
 tables, `mcp_keys`' OAuth columns, `oauth_redirect_uris`, its alarm instants and the `oauth` event
 kind), which B-73 folds in here; `src/migrations/` holds the numbered, append-only migrations that
-reach it, and the object refuses to serve until every migration is applied (§2).
+reach it, each number reserved (R-BTN-74), and the object refuses to serve until every migration is applied (§2).
 
 **Conventions.**
 
@@ -6824,9 +6845,9 @@ never through a claim.
   passes on the hosts it runs on (G-BTN-37). A gate `G-BTN-<n>` is an invariant the
   implementation must establish, proved by the scenarios or tests its row names.
 - **R-BTN-31 (scenarios are part of drafting).** Every ticket that changes Baton's behaviour
-  names, under **Tests**, the scenarios it adds or makes pass; a new scenario takes the next
-  number and a row here in the same change, and the ticket's exit criteria require `npm test`
-  green with it. A behaviour change without a scenario is incomplete.
+  names, under **Tests**, the scenarios it adds or makes pass; a new scenario takes the number
+  `baton ticket reserve` holds for its ticket (R-BTN-74) and a row here in the same change, and
+  the ticket's exit criteria require `npm test` green with it. A behaviour change without a scenario is incomplete.
 - **R-BTN-68 (the core is a checked model).**
   - The core's state machine — claims, fencing, stations and legs, observations, ends and their
     confirmation, bars and gates — is a Quint model (`model/baton.qnt`), with the sync's output
@@ -6873,8 +6894,8 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-26 two repositories, two courses | `ops` (weight 50, course `runbook`) beside `docs`, both with `T-1`; W1 declares one course, W2 both; a CLI runner on one checkout declaring two courses | distinct tickets; W1 never offered `ops`; `docs` first, each in default order, per-group limit; tokens per repository; a shared branch blocks pushes while either is held; `min_runner_version` gates W2; the runner declares both courses, claims a leg of either in consecutive claims, loads each from the claim's `course_id` and snapshot, and `--course` narrows it to one (B-103) |
 | S-BTN-42 webhooks | a review delivery, its repeat, a forgery, a 10-delivery burst, Baton's own events, extra fields; a body of 26,214,401 bytes on each notification route | one dispatch, then one trailing after 30 s; repeat, forgery and own events dispatch nothing; only R-BTN-73's fields read; `too-large` before any digest, outside the per-IP rule |
 | S-BTN-171 a dependency cycle is refused | a board post whose live tickets depend on each other in a loop; two of them; a self-dependency; a diamond; a post closing the very ticket it depends on | `invalid-params`, naming `B-1 → B-2 → B-1` once, and nothing of the post stored: no head, no ticket; `B-1 → B-1` alike; the diamond and the closed edge accepted |
-| S-BTN-189 the ticket commands | a bare origin; `baton ticket new` with `--depends-on`, `--tags` and `--project`, a legacy id pattern, a `--body-file` whose line disagrees with the flag, a filing that closes a cycle, a prefix the pattern cannot allocate; `claim` of a held, dependent, in-review and archived ticket; `set` with `--pr` twice; `done`; a peer's push between a command's fetch and its push; `baton repo init`, then an edited `HOW-TICKETS-WORK.md` | one commit on the origin's default branch, the ticket alone, the caller's branch and tree untouched; the next free id under the configured prefix, the skeleton with the flag's `**Depends on:**` line and the dependency's reverse mention; each refusal before the push, nothing landed; the retry takes the id after the peer's; a status, a PR once, the file archived; the page written, its edited copy one finding and exit 1, `init --force` writing it again |
-| S-BTN-172 the ticket check | `baton ticket check` on a clean repository, on one whose tickets loop, on one with no `.baton/baton.json`, and on this repository's own `tickets/` | exit 0 with the count, `✓ no findings`; exit 1 with one `path: message` line (the loop at its first ticket's file) and the count; the CLI's error, exit 2; this repository passes, which CI's `npm run check:tickets` runs |
+| S-BTN-189 the ticket commands | a bare origin; `baton ticket new` with `--depends-on`, `--tags` and `--project`, a legacy id pattern, a `--body-file` whose line disagrees with the flag, a filing that closes a cycle, a prefix the pattern cannot allocate; `claim` of a held, dependent, in-review and archived ticket; `claim` of a ticket citing a rule a history entry dated after its file's last commit names, without and then with `--rules-reread`; `set` with `--pr` twice; `done`; `reserve` of a migration and of a scenario with numbers in the tree and in `reserved.json`; a peer's push between a command's fetch and its push; `baton repo init`, then an edited `HOW-TICKETS-WORK.md` | one commit on the origin's default branch, the ticket alone, the caller's branch and tree untouched; the next free id under the configured prefix, the skeleton with the flag's `**Depends on:**` line and the dependency's reverse mention; each refusal before the push, nothing landed; the stale claim refused naming the id, the entry's date and its title, then landed with its dated `rules re-read at claim` Status line; the retry takes the id after the peer's; a status, a PR once, the file archived; each reservation one above the higher of the tree's and the ledger's highest, one commit writing `reserved.json` alone; the page written, its edited copy one finding and exit 1, `init --force` writing it again |
+| S-BTN-172 the ticket check | `baton ticket check` on a clean repository, on one whose tickets loop, on one with no `.baton/baton.json`, and on this repository's own `tickets/`; on one whose live ticket cites a rule a later history entry names; on tickets filed before and on `check.sections_since`, one without `### Trust` | exit 0 with the count, `✓ no findings`; exit 1 with one `path: message` line (the loop at its first ticket's file) and the count; the CLI's error, exit 2; this repository passes, which CI's `npm run check:tickets` runs; the stale ticket's line and the stale count, exit 0; the earlier ticket passing and the later one a finding, exit 1 |
 | S-BTN-54 a Baton without GitHub | `plain` with a `post-receive` running `baton repo sync --defaults-only` on the `branch` course; `Baton-Verdict:` trailers, one without `Baton-Claim`; `--if-wanted` cron | the ticket moves to `merged` on push syncs alone; the unclaimed verdict counts; `wanted` holds until a later-numbered post; no forge credential or link |
 | S-BTN-55 the sync key | a sync key posts; it is registered for a second repository; machine (sync off), mirror and revoked keys post; a replay | accepted; `conflict`; `forbidden`; `unauthenticated` |
 | S-BTN-56 other forges, edges of a want | `lab` and `tea` notifications, good and bad; `#mirror` vs `#sync` tokens; a dispatch answering 500; near-miss URLs; `--defaults-only` with a `sync.mjs`; a push by another pusher with the mirror's author email | bad refused in the Worker, good record wants, the spoofed push's included; `#mirror` `forbidden`; one dispatch retry; only `web_base` URLs kept; the ticket fails |
@@ -7497,6 +7518,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose `timed_out` over `neutral` for a check command's timeout or `exec` error, and no `neutral` at all, over posting a timeout as `failure` beside an advisory `neutral` or stating the gap: a GitHub required check passes on `neutral`, so a change that hung its own tests landed (2026-11-02, the owner, B-175; R-BTN-114, R-BTN-153).
 - Chose a two-step sign-in bind — the code's row previewed (role, client address, age), then bound only on an explicit yes the CLI takes no `--yes` for — over one call that binds at once: the address is the one defence against a relayed code, and it must be read before anything binds (2026-11-03, B-172, written at the owner's request; R-BTN-155).
 - Chose a final retirement that ends everything scoped to the repository — sessions' reach, MCP keys and OAuth grants with their codes, sync, mirror and runner keys and registration tokens, active claims (fenced as a force-reap), outbox entries, wants and dispatches — exports only its tombstone and never re-registers its id, over a reversible flag each surface interprets: nothing scoped to it can come back to life (2026-11-03, B-173, written at the owner's request; R-BTN-47).
+- Chose process guards in the ticket commands and checks over reviewers catching the same faults round by round: migration and scenario numbers reserved in a ledger with git as the lock over taken by looking; a claim refused while its ticket cites a rule amended since the ticket last changed, unless the claimer says it re-read them, over a failing check, so a ruling never turns every older ticket's pull request red; and `### Trust` and `### Invariants` required of tickets filed from a cutover day over a sweep of the tickets already filed (2026-11-03, the owner, "I would like you to implement the process changes that prevent the sort of thrashing we are seeing now."; R-BTN-74, R-BTN-31).
 
 ## Open questions
 
