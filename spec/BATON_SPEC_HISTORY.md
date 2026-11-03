@@ -2152,19 +2152,35 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   delegated, logging `fence-cleared {admin}`), with §9.5, R-BTN-155's confirmed list, §12.2,
   §14 and G-BTN-14 naming it (B-171; rejected: bounding `fence_deadline` at two hours, which
   weakens the fence for every runner with a long lease); R-BTN-131's request command decides by
-  the forge's answer — a protected-branch refusal pushes the commit to the course's
-  `branch_pattern` for the request and opens a PR with the caller's forge credential, a `git`
-  forge or no credential exits non-zero with the branch printed, any other refusal is reported in
-  git's words — and R-BTN-180 says the same, closing the contradiction (C2) PR #165 left open
+  the forge's answer — a protected-branch refusal pushes the commit to `baton-request/<ID>`
+  and opens a PR with the caller's forge credential; no credential prints the branch and exits
+  non-zero; a `git` forge and any other refusal are reported in git's words — and R-BTN-180 says the same, closing the contradiction (C2) PR #165 left open
   (B-174; rejected: reading the policy first); R-BTN-114's conclusions are `success`, `failure`
   and `timed_out`, with no `neutral`, R-BTN-153 sends a timeout or `exec` error to `timed_out`
   (else `failure`) and lets an agent reach only `failure` or `timed_out`, R-BTN-115 posts
-  `timed_out` as GitHub's conclusion of that name and as the failing state elsewhere, and a
+  `timed_out` as GitHub's conclusion of that name (checks are GitHub only), and a
   loosening of `checks` is a station newly mapped to `success` or a removed or renamed entry
   (B-175; rejected: keeping `neutral` as an advisory conclusion; stating the gap). No `neutral`
   mapping was built, so no transition is carried. Scenarios S-BTN-4, S-BTN-68, S-BTN-98 and S-BTN-175
   gain the cases; G-BTN-93 names the set; four Decisions lines. B-5's agent-stations line is
   corrected. The four tickets now hold only their build halves.
+
+- **2026-11-03 — review round one of the owner's rulings** (one fresh reviewer, given the diff and
+  the impact list). Findings: 1 blocking, 2 major, 5 minor. Blocking: the request's side branch,
+  inside the course's `branch_pattern`, made the request's own merged PR one of the new ticket's
+  PRs, so `converse` arrived at once and R-BTN-25 continued the merged branch. Asked to choose, the
+  owner answered "Outside pattern": the side branch is `baton-request/<ID>`, a `git` forge and any
+  other refusal are reported in git's words, and S-BTN-175 checks that the merged request leaves
+  the ticket with no PR. Major: S-BTN-68's two `checks` changes broke R-BTN-114's own validation
+  (now a swap of `success` and `failure`, `forbidden`, and a dropped `timed_out`, accepted); the
+  GitLab and Gitea delivery of `timed_out` contradicted R-BTN-115's "Checks are GitHub only"
+  (dropped; R-BTN-114 says "a GitHub required check"). Minor, fixed: R-BTN-90 and §9.5 name the
+  administrator's clear; the clear resolves `baton.fence-pending`, is drawn on the claim and on
+  that condition, and is never a condition restart, with the `conflict` row; R-BTN-144's closing
+  sentence says what masking covers, class 4 no longer repeats the AWS names class 7 matches, and
+  the archiver's limit is named; B-175 and B-170 copy the spec's wording. Offered to the owner, not
+  edited: credential names outside the three endings (`*_PASSWORD`, `PGPASSWORD`, `*_PAT`), which
+  `mask_env` covers meanwhile.
 
 ## Retired requirements
 

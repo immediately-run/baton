@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1176
 tier: routine
-description: "Build R-BTN-131's protected-branch fallback, the owner's ruling of 2026-11-02: baton ticket request decides by the forge's answer — on a protected-branch refusal it pushes to the course's branch_pattern and opens a PR with the caller's forge credential; a git forge or no credential exits non-zero; other refusals are reported in git's words. Requires: none."
+description: "Build R-BTN-131's protected-branch fallback, the owner's rulings of 2026-11-02 and 2026-11-03: baton ticket request decides by the forge's answer — on a protected-branch refusal it pushes to baton-request/<ID>, outside every branch_pattern, and opens a PR with the caller's forge credential; no credential exits non-zero with the branch printed; a git forge and other refusals are reported in git's words. Requires: none."
 topics:
   - baton
 owns: {}
@@ -29,21 +29,26 @@ review round one found it underspecified (branch, credential, `git` forge, refus
 ### Decided (the owner)
 
 2026-11-02, choosing among this ticket's options: "I accept your recommendations" — option (a),
-decide by the forge's answer and ask Baton nothing. The spec states it (R-BTN-131's request
-command, R-BTN-180's bullet), PR `claude/baton-spec-review-2fwiga`.
+decide by the forge's answer and ask Baton nothing. 2026-11-03, on the review finding that a
+side branch inside `branch_pattern` makes the request's own merged PR the new ticket's PR (so
+`converse` is skipped): "Outside pattern" — the side branch is `baton-request/<ID>`. The spec
+states both (R-BTN-131's request command, R-BTN-180's bullet, S-BTN-175), PR
+`claude/baton-spec-review-2fwiga`.
 
 ### What to build
 
-1. In each forge adapter (R-BTN-92), a matcher that recognises the forge's protected-branch
-   refusal of a push (GitHub's and GitLab's hook-declined messages; Gitea's), and a call that
-   opens a PR with the caller's forge credential.
-2. `baton ticket request`: on that refusal, push the same commit to the course's
-   `branch_pattern` with the id as `{ticket}` and `request` for the rest, open a PR from it,
-   print the URL; on a `git` forge, or with no forge credential, print the branch and exit
-   non-zero; any other refusal reported in git's own words, nothing opened; a moved head
-   retried as now.
-3. The three S-BTN-175 cases §15 now states: a protected default branch, a `git` forge, a
-   refusal that is not protection.
+1. In the GitHub, GitLab and Gitea adapters (R-BTN-92), a matcher for the forge's own
+   protected-branch refusal — not a generic hook refusal: GitHub's `GH006: Protected branch
+   update failed`, and a `GH013` ruleset refusal only when it names a pull-request or update
+   rule (not secret push protection); GitLab's `You are not allowed to push code to protected
+   branches`; Gitea's `Not allowed to push to protected branch` — and a call that opens a PR
+   with the caller's forge credential.
+2. `baton ticket request`: on that refusal, push the same commit to `baton-request/<ID>`, open a
+   PR from it, print the URL; with no forge credential, print the pushed branch and exit
+   non-zero; on a `git` forge and for any other refusal, git's own words, nothing opened, exit
+   non-zero; a moved head retried as now.
+3. The S-BTN-175 cases §15 now states: a protected default branch (and, after the PR's merge, the
+   ticket with no PR and `converse` waiting), a `git` forge, a refusal that is not protection.
 
 ### Tests
 

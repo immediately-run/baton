@@ -2220,7 +2220,7 @@ mean (R-BTN-50).
   | `branch` | R-BTN-96 | R-BTN-96 | branches |
   | `ask`, `deliver`, `announce` | condition handlers (R-BTN-169): `ask` asks through the person leg `answer` | R-BTN-169 | — |
 
-  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder and `archive/`), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call — it asks Baton nothing. Where the forge refuses the push because the branch is protected (the CLI's adapter for the home's forge, R-BTN-92, recognises that refusal), it pushes the same commit to the course's `branch_pattern` with the request's id as `{ticket}` and `request` for the rest, opens a PR from it with the caller's forge credential and prints its URL; on a `git` forge, or with no forge credential, it prints the branch and exits non-zero; any other refusal it reports in git's own words (R-BTN-74), opening nothing. Otherwise the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
+  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder and `archive/`), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call — it asks Baton nothing. Where the forge refuses the push because the branch is protected (the CLI's adapter for the home's forge, R-BTN-92, recognises that refusal by the forge's own protected-branch message), it pushes the same commit to `baton-request/<ID>` — a branch no `branch_pattern` matches, so the request's PR is never one of the new ticket's PRs and no leg continues it (R-BTN-25) — opens a PR from it with the caller's forge credential and prints its URL. With no forge credential it prints the pushed branch and exits non-zero. On a `git` forge, which has no adapter, and for any other refusal — `refs.other` refusing the side branch to a runner under `protected` among them — it reports git's own words (R-BTN-74), opens nothing and exits non-zero. Otherwise the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
 
   - **A wait for a person's answer is a person's leg** (R-BTN-116), answered by a
     `std:decision@1`: `decision`'s `answer` and `build-app`'s `decide`. Where the policy admits `sync` for `std:decision@1`, the ticket's `answer:`
@@ -3603,8 +3603,8 @@ Limits that hold throughout:
       `released:leg-timeout`, a failed attempt (R-BTN-122).
     - A delivered `leg-timeout` release left unacknowledged for 15 minutes is reaped by the
       alarm with a fence, actor `alarm:leg-timeout` (R-BTN-19). The ticket is not re-issued
-      until the runner's sidecar confirms that it killed the tool processes, or until the
-      fence's deadline passes. This reap counts as the `leg-timeout` end would.
+      until the runner's sidecar confirms that it killed the tool processes, the fence's
+      deadline passes, or an administrator clears the fence (R-BTN-19). This reap counts as the `leg-timeout` end would.
   - **The owner's controls** on a running claim are Stop (`release` with reason `requested`,
     R-BTN-119) and Cancel (a hold and a `release` with reason `owner-cancel`, §6.8), each at once.
     The heartbeat response (§14) and the dashboard's claim row carry `deadline_at`.
@@ -4330,8 +4330,7 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
     2. the runner's Baton credentials (`BATON_KEY`, the contents of the file
        `BATON_KEY_FILE` names, `BATON_TOKEN`, an API key);
     3. the value of every declared `credential:<NAME>` variable, given to the leg or not;
-    4. the git and forge tokens the runner holds, and `AWS_SECRET_ACCESS_KEY` and
-       `AWS_SESSION_TOKEN` when set;
+    4. the git and forge tokens the runner holds;
     5. by pattern, every bearer prefix Baton issues — `brt_`, `bak_`, `bmcp_`, `bps_` and `bds_`
        (§12.1), and `bmo_`, `bmr_` and `bor_` (`BATON_MCP_OAUTH_SPEC` §12) — followed by
        `[A-Za-z0-9_-]*`;
@@ -4351,8 +4350,11 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
   - **Replay** (R-BTN-84) builds its environment from an allowlist: `PATH`, `LANG`, `TZ`,
     `TERM`, an isolated `HOME`, the read-only clone credential `runner.json`
     `replay_clone_credential` if configured, and names in `runner.json` `replay_env` or `--env`.
-  - This keeps a cooperating agent from printing a credential it never needed; a hostile leg
-    can read the runner's key file as the same user (R-BTN-14).
+  - This keeps a cooperating agent's output free of every credential the runner can recognise —
+    `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` by class 7 — whether the leg needed it or not;
+    a credential under any other name is masked only once `mask_env` names it, and an archiver
+    masks only what its own environment holds. A hostile leg can read the runner's key file as
+    the same user (R-BTN-14).
 - **R-BTN-145 (every process a leg starts is stopped with it).** Each leg runs with
   `BATON_LEG=<claim id>.<leg>.<run>`. When a leg stops — Stop, a release, a lost lease, the
   runner's exit, a supersession — the runner signals its process group and every visible process
@@ -4594,7 +4596,7 @@ end on an ended claim is refused `claim-ended`.
   delivered `release` stays unacknowledged for 2 hours (15 minutes for `leg-timeout`). An
   administrator may force-reap any active claim from the dashboard (`POST
   /v1/ui/claims/{id}/reap`, confirmed per R-BTN-155), shown the runner's last-seen and
-  last-activity times, and clear the fence such a reap leaves (R-BTN-19). The next claimant concludes from what git holds and the resume record.
+  last-activity times, and clear any pending fence (R-BTN-19). The next claimant concludes from what git holds and the resume record.
 - **R-BTN-19 (fence before re-issue).** A claim reaped while its runner was **alive** — a
   force-reap, an unacknowledged-release reap, a `leg-timeout` reap — is `fence_pending` with its
   `fence_incarnation` and `fence_deadline`, the reap instant plus the runner's
@@ -4611,8 +4613,11 @@ end on an ended claim is refused `claim-ended`.
   A re-key never clears a fence (R-BTN-14).
   - **An administrator's clear.** An administrator may clear a pending fence at once
     (`claim.fence-clear`, `POST /v1/ui/claims/{id}/fence-clear`, destructive and confirmed per
-    R-BTN-155, never delegated): the ticket is claimable and its seats free (R-BTN-178), and
-    Baton logs `fence-cleared {admin: <fingerprint>}`. The dialog shows the runner's last-seen
+    R-BTN-155, never delegated): the ticket is claimable and its seats free (R-BTN-178), its
+    `baton.fence-pending` condition, if raised, is resolved, and Baton logs `fence-cleared {admin:
+    <fingerprint>}`. The control is drawn, for an administrator only, on the claim wherever the
+    dashboard shows it and on the `baton.fence-pending` condition in Needs you; it is its own
+    action, never a condition restart (`ticket.resolve` clears no fence). The dialog shows the runner's last-seen
     time and says what the clear gives up: a process the old incarnation still runs can push
     until its own lease check fails (`last_ok + lease_timeout − 4 min`, R-BTN-26), and the next
     claimant's re-read of git (R-BTN-25) is then the only protection. Nothing a runner does
@@ -4794,8 +4799,8 @@ print its way to `success`.
   - **Conclusions are the owners'.** The owner setting `checks: {<course>: {name, conclusions:
     {<end station>: "success" | "failure" | "timed_out"}}}` (R-BTN-66) maps end stations to
     conclusions, so no edit in git turns `failed` into `success`. Every conclusion but `success`
-    fails a required check on every forge: `neutral`, which a GitHub required check passes, is
-    not in the set. A course's map names exactly one end station `success`, exactly one
+    fails a GitHub required check (checks are GitHub only, R-BTN-115): `neutral`, which a required
+    check passes, is not in the set. A course's map names exactly one end station `success`, exactly one
     `failure` and at most one `timed_out`, or `PUT /v1/owner/{repository}/settings` refuses it
     `invalid-params`. A change that maps a station to `success` that was not, or removes or
     renames a course's entry, is a loosening (R-BTN-186), since a conclusion decides what branch
@@ -4858,8 +4863,7 @@ print its way to `success`.
     whose `forge_repo_id` is null or not the target repository's. It writes `<repository>:<id>` to
     the check run's `external_id`, the entry's `seq` into its output, and `summary` inside a code
     fence one backtick longer than any backtick run in it, never as Markdown. The conclusion
-    posts as GitHub's check-run conclusion of the same name; a forge with no `timed_out` (GitLab
-    and Gitea commit statuses) posts it as its failing state.
+    posts as GitHub's check-run conclusion of the same name.
     - `seq` increases per `(repository, sha, name)`; the deliverer posts only the highest it has
       claimed and drops older ones. Before posting it also reads the sha's check runs of that
       name and skips its entry when one carries a higher `seq`, so neither a second deliverer nor
@@ -6577,7 +6581,7 @@ R-BTN-127's. Any route may answer `rate-limited` or `quota` (R-BTN-135).
 | `invalid-params` | a body or query that fails validation |
 | `invalid-prerequisite` | a `blocked` end whose prerequisite fails the runner's checks (R-BTN-126) |
 | `confirm-required` | a destructive action without `confirm: true` |
-| `conflict` | a key already in another role or name (R-BTN-57, R-BTN-58); duplicate forge ids (R-BTN-138); a seal or import refused (R-BTN-88) |
+| `conflict` | a key already in another role or name (R-BTN-57, R-BTN-58); duplicate forge ids (R-BTN-138); a seal or import refused (R-BTN-88); a fence clear on a claim whose fence is not pending (R-BTN-19) |
 | `rate-limited` | over a rate limit, with `retry_after_s` (R-BTN-135) |
 | `quota` | a row-write, storage or per-claim cap (R-BTN-135, R-BTN-149, R-BTN-160) |
 | `too-large` | an oversize body or item (R-BTN-73, R-BTN-130, R-BTN-149) |
@@ -6852,7 +6856,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-104 the standard courses | `bug-report` with a holder's arrival off the graph and one malformed, `decision` answered by a `std:decision@1`, `draft-ticket` with no forge facts; an audit leg answering with prose before and after its outcome, and with none (B-85) | the bad arrivals refused, the good ones moving the ticket; `carry-out` ready once answered, with the answer as its input; the third syncs to `requested`; the prose-wrapped outcome is read, none fails naming the last line |
 | S-BTN-105 one leg overridden | `legs/review.run.mjs` on a sourced `create-pr` | the override runs at the snapshot; the standard `close` writes the verdict |
 | S-BTN-107 the build-app course | a request; `stages` filing four `draft-doc` children, each naming its `document:`; each merged in turn, the second refined by the owner on its PR before the merge; `file` filing two children on different courses from `PLAN.md` as merged; a verification files a fix; a third failing verification, then the owner's answer `building`; a second request whose design stage the owner withdraws; under `tickets.created: proposed`, a third request | each stage child waits on the one before it, unblocked by the previous one's merge closing it in git; `stages` settles at `planned` once all four are merged, and `file` reads `PLAN.md` at its snapshot, the owner's refinement included; `file` settles at `building` only once both children close, so `verify` never starts while a child is open; the fix call settles back to `building`; the third verification reports `stuck`, where the person leg `decide` waits under Needs you, and its answer queues `verify` again; the second request `abandoned` at the withdrawal, the withdrawn stage's PR closed by `close-pr`, its later stages superseded with no PR, and the request listed until withdrawn in git; the first request's `report` landing `VERIFY.md` and closing it by the owner's merge, `shipped`; the third's stages and plan tickets each proposed and claimable only once approved |
-| S-BTN-175 the request | a fresh repository on `create-spec`; `baton ticket request "<one sentence>" --course create-spec` run through the CLI's own entry, then a sync of what it pushed, then a runner's claim; again against a protected default branch on a forge, on a `git` forge refusing as protected, and with a refusal that is not protection | one commit on the bare origin's main, on top of the scaffold, the ticket file alone — the sentence its title and description, `course: create-spec`, `available`, `tags: [request]` — with the caller's branch, HEAD and tree untouched; the board posts it `requested` with `converse` `ready`; the claim offers `converse`; protected: the commit on the `branch_pattern` branch for the request and a PR opened from it, nothing on main; `git`: the branch printed, exit non-zero; otherwise git's words, nothing opened |
+| S-BTN-175 the request | a fresh repository on `create-spec`; `baton ticket request "<one sentence>" --course create-spec` run through the CLI's own entry, then a sync of what it pushed, then a runner's claim; again against a protected default branch on a forge, on a `git` forge refusing as protected, and with a refusal that is not protection | one commit on the bare origin's main, on top of the scaffold, the ticket file alone — the sentence its title and description, `course: create-spec`, `available`, `tags: [request]` — with the caller's branch, HEAD and tree untouched; the board posts it `requested` with `converse` `ready`; the claim offers `converse`; protected: the commit on `baton-request/<ID>` and a PR opened from it, nothing on main, and after its merge the ticket has no PR and `converse` still waits; `git`: git's words, nothing opened, exit non-zero; otherwise git's words, nothing opened |
 | S-BTN-174 the create-spec course | a request with no PR and no marker; a run of `converse` that writes its marker and suspends, then a second sync; its PR on the branch pattern, checks running and then done; a verdict asking for changes and an address round begun and suspended; its push; a second round; a third round asking for changes; a round still asking for changes with all three address rounds spent; an adjudication reproducing a finding, then one that does not; a fresh approval; the merge | `converse` ready, then — its marker committed — waiting on `owner` and not offered again; `spec-open` with `review` waiting on `ci`, then ready; `reviewed` with `address` ready; back to `spec-open` after the push; `adjudicate` once the address rounds run out; `merge` waiting on `owner` for a reproduced finding, ready for none; `merge` ready on a fresh approval; `merged` |
 | S-BTN-110 courses from their sources | the built CLI outside a checkout: `--course create-pr`; a `--source` at a tag with overrides; a copied `course.json`; an off-branch commit; no `sync.mjs`; an outside import | full-commit source, no course file; source read at its commit with home overrides; each fault refused naming it, the commit unfetched |
 | S-BTN-117 bars and renames | bars on `implement` and `*` except `review`; files dropping, swapping, double-renaming, re-adding legs | first two held, raised; collision refused; `except` updated and the new leg barred |
@@ -6924,7 +6928,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-17 one session, whole ticket | five `advance`s with no sync between | `filed` → … → `merged` on the holder's word, `bars` carried, ends `done`; no hand-off or `stale-board`; confirmed by the next sync |
 | S-BTN-23 resume from a hand-off | W2 resumes W1's suspension | hand-off URL and resume record; same branch and PR; hand-off a PR comment |
 | **§10** | | |
-| S-BTN-68 the merge check | a confirmed `passed`; a new head; a same-named status; an unissued success; an edited owners' `checks`; a `checks` map with two `success` stations, one with no `failure`, and one naming `neutral`; a `checks` change from `failure` to `success`, and one from `timed_out` to `failure`, by an owner key where `approvers.policy` is human-only; a check command that times out, with and without a `timed_out` station; an agent's `done` toward a `timed_out` station and toward a `success` one; a course file carrying `checks`; a push right after a `done`, before the sync; a deliverer that stalls past its lease and posts an older `seq`; a repository whose `merge.checks: required` is met by the forge's own check runs | `success` posted only after confirmation; the ticket restarts on each new head, the unconfirmed `done` marked `superseded_at` and the new head claimable; the older `seq` skipped, or raised `check-mismatch` and the newest re-queued; status ignored; `check-mismatch` raised; owners' setting holds; the three maps `invalid-params`; the first change `forbidden`, the second accepted; the timeout posts `timed_out`, else `failure`, neither passing the forge's required check; the first `done` accepted, the second refused; course file refused; the merge runner merges on the protected workflows' runs with no `std:checks@1` |
+| S-BTN-68 the merge check | a confirmed `passed`; a new head; a same-named status; an unissued success; an edited owners' `checks`; a `checks` map with two `success` stations, one with no `failure`, and one naming `neutral`; a `checks` change swapping the `success` and `failure` stations, and one dropping the `timed_out` station, by an owner key where `approvers.policy` is human-only; a check command that times out, with and without a `timed_out` station; an agent's `done` toward a `timed_out` station and toward a `success` one; a course file carrying `checks`; a push right after a `done`, before the sync; a deliverer that stalls past its lease and posts an older `seq`; a repository whose `merge.checks: required` is met by the forge's own check runs | `success` posted only after confirmation; the ticket restarts on each new head, the unconfirmed `done` marked `superseded_at` and the new head claimable; the older `seq` skipped, or raised `check-mismatch` and the newest re-queued; status ignored; `check-mismatch` raised; owners' setting holds; the three maps `invalid-params`; the first change `forbidden`, the second accepted; the timeout posts `timed_out`, else `failure`, neither passing the forge's required check; the first `done` accepted, the second refused; course file refused; the merge runner merges on the protected workflows' runs with no `std:checks@1` |
 | S-BTN-81 a check nobody sends | a `forge-check` entry undelivered 15 min; a work key claims the check | `baton.outbox-late` with `kind: forge-check`, change pending; refused |
 | S-BTN-123 a forged check | posts without confirmed ends; a moved `check.sha`; a work key, a fork, an agent's verdict against the exit status, no `exit_status`, a `process` runner, a moved ref, a widened App; a post naming an earlier head | no `forge-check` entry, `check-unattested`; restart on the new head; refused, dropped; verdict from `exec`; refused; `missing-capability`; `stale-board`; delivery refused; the post refused `head-moved`, the command read from the branch tip |
 | **§11** | | |
@@ -7431,7 +7435,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose, under a policy admitting no `sync` arrival, a fact reader — the merge runner reading a closed set of forge facts (`pr-merged`, `pr-verdict`, `pr-opened`, `pr-pushed`) through the CLI's own adapters, as a `service:` key the owner names — over an owner's confirmation per human action or fact legs inert until adopted: a human's merge or a spec conversation should cost the owner nothing more (2026-11-01, the owner; R-BTN-192).
 - Chose to mask, besides the credentials the runner knows, every kept variable whose name ends `_KEY`, `_TOKEN` or `_SECRET` and every name `runner.json` `mask_env` lists, over a list alone (empty by default, so protecting nothing) or leaving kept credentials unmasked: a provider key is masked without core or the runner naming a provider (2026-11-02, the owner, B-170; R-BTN-144).
 - Chose an administrator's confirmed fence clear over bounding `fence_deadline`: the person who knows the machine is dead takes the risk for one ticket, and the fence stays whole for every runner that declared a long lease (2026-11-02, the owner, B-171; R-BTN-19).
-- Chose to let `baton ticket request` decide between a push and a PR by the forge's answer over reading the policy first: it stays a repository command, usable by a person with push and no Baton key (2026-11-02, the owner, B-174; R-BTN-131, R-BTN-180).
+- Chose to let `baton ticket request` decide between a push and a PR by the forge's answer over reading the policy first: it stays a repository command, usable by a person with push and no Baton key (2026-11-02, the owner, B-174; R-BTN-131, R-BTN-180); and its side branch `baton-request/<ID>`, outside every `branch_pattern`, over one inside it with exceptions in the PR courses and R-BTN-25, so the request's own PR is never the new ticket's (2026-11-03, the owner).
 - Chose `timed_out` over `neutral` for a check command's timeout or `exec` error, and no `neutral` at all, over posting a timeout as `failure` beside an advisory `neutral` or stating the gap: a GitHub required check passes on `neutral`, so a change that hung its own tests landed (2026-11-02, the owner, B-175; R-BTN-114, R-BTN-153).
 
 ## Open questions

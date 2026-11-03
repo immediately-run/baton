@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1177
 tier: routine
-description: "Build R-BTN-114 and R-BTN-153's conclusions, the owner's ruling of 2026-11-02: success, failure and timed_out, no neutral; a timeout or exec error reaches timed_out, else failure; an agent reaches only failure or timed_out; the deliverer posts timed_out as GitHub's conclusion and as the failing state elsewhere. Requires: none."
+description: "Build R-BTN-114 and R-BTN-153's conclusions, the owner's ruling of 2026-11-02: success, failure and timed_out, no neutral; a timeout or exec error reaches timed_out, else failure; an agent reaches only failure or timed_out; the deliverer posts timed_out as GitHub's conclusion. Requires: none."
 topics:
   - baton
 owns: {}
@@ -48,9 +48,10 @@ R-BTN-115's delivery, G-BTN-93; S-BTN-68), PR `claude/baton-spec-review-2fwiga`.
    `approvers.policy` approver (R-BTN-186). (B-169's item 2 is the same validation: build it once,
    in whichever lands first.)
 2. The check runner maps a timeout or `exec` error to the `timed_out` station, else `failure`;
-   Baton refuses an agent's `done` toward a `success` station.
-3. The `forge-check` deliverer posts `timed_out` as GitHub's check-run conclusion and as the
-   failing state on GitLab and Gitea.
+   Baton refuses an agent's `baton-leg-result` or channel `done` toward any station but a
+   `failure` or `timed_out` one (R-BTN-153).
+3. The `forge-check` deliverer posts `timed_out` as GitHub's check-run conclusion of that name
+   (checks are GitHub only, R-BTN-115).
 
 ### Tests
 
