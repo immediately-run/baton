@@ -2212,15 +2212,38 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   sign-in binds in two steps — the login-links routes answer `{role, client_addr, age_s}` and bind
   nothing, the CLI asks `bind? [y/N]` with no `--yes`, and `{code, confirm: true}` binds — with
   §14's two rows and S-BTN-124's cases (B-172; the open question on `sk-`-only binding is
-  untouched); R-BTN-47 gains *Retirement*: final, in one transaction ending every session's reach,
-  revoking MCP keys and OAuth grants with their tokens, sync and mirror keys, runner grants and
-  check-runners, releasing active claims `released:retired` and dropping queued outbox entries,
-  keeping owners and history for export, every later call `not-found` and the id never registered
-  again; R-BTN-155 and R-BTN-130 cite it; a new end-reason row; new scenario S-BTN-198 (B-173).
+  untouched); R-BTN-47 gains *Retirement* (as round one below left it): final, in one transaction
+  ending every session's reach, revoking MCP keys and OAuth grants with their tokens, requests and
+  codes, sync and mirror keys, registration tokens, runner grants and check-runners, reaping
+  active claims as a force-reap (fence-pending), dropping its outbox entries and deleting its
+  wants and dispatches; every later call `not-found`, only its tombstone exported, a seed entry
+  for it skipped, and the id never registered again; R-BTN-155, R-BTN-130, R-BTN-19, R-BTN-3,
+  R-BTN-88's seal, §2.3's prune, R-BTN-140's consent, R-BTN-171 and the OAuth companion's §5,
+  §7 and §9 cite it; new scenario S-BTN-198 (B-173).
   Two Decisions lines. Tickets: B-172 and B-173 now hold only their build halves; B-169's
   supersession item moved to B-146, which builds the store; B-175's vendored-enum item dropped
   (the read-back records GitHub's conclusions, `neutral` among them, and R-BTN-183 counts only
   `success`); B-140 and B-39 updated for R-BTN-183, R-BTN-184 and R-BTN-84.
+
+- **2026-11-03 — review round one of the credential names, the sign-in preview and retirement**
+  (one fresh reviewer, given the diff and the impact list). Findings: 4 blocking, 4 major, 4
+  minor. Blocking: retirement sent its claims a `release` while revoking the grants their
+  heartbeats need, so the message was never delivered and the claim never fenced; registration
+  tokens and approved OAuth codes outlived it; "kept for export" contradicted R-BTN-88, which
+  exports no events; a revoked mirror held the seal for good and the retired repository's wants
+  kept dispatching. Major: the OAuth companion's lists of how a grant ends; the seed naming a
+  retired id; B-76 still building a one-step owner bind. Minor: R-BTN-171's *Dropping*;
+  `code_repos` consent lapsing on retirement; the preview's closing sentence and its
+  failed-verification count; `_PAT` matching pattern variables; stale ticket dates. Fixed:
+  claims reaped as a force-reap, fence-pending, and a heartbeat drops a retired repository's
+  course instead of being refused; registration tokens, pending requests and codes revoked, the
+  token exchange rechecking the repository; the export carries the tombstone alone; the seal
+  and the event prune count live repositories only, and wants, trailing dispatches and the
+  trigger are deleted; the companion's §5, §7 and §9; the seed skips and logs; R-BTN-171's
+  *Dropping* names retirement; consent judged for a retired repository too; the preview
+  sentence says the CLI previews, and a `not-found` is no failed verification; the `_PAT`
+  cost stated; B-76 builds the owner's two steps and B-172 the administrator's; ticket dates.
+  The `released:retired` end reason is withdrawn.
 
 ## Retired requirements
 

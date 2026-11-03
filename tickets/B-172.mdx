@@ -3,7 +3,7 @@ title: "B-172 — The sign-in code shows its row before it binds: the CLI cannot
 id: B-172
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-03
 repos:
   - baton
 tags:
@@ -42,13 +42,16 @@ untouched.
 
 ### What to build
 
-1. Both login-links routes: without `confirm`, answer `{role, client_addr, age_s}` for the
-   unbound, unexpired row of the route's role and bind nothing; with `confirm: true`, bind as
-   today. `not-found` at either step as R-BTN-155 says.
-2. `baton admin open` and `baton owner open`: send the preview, print `owner session for
-   <address>, <n> s old` (or the administrator form), ask `bind? [y/N]` defaulting to no, refuse
-   `--yes`, and on yes send the confirm. An `sk-` key touches for each request.
-3. The tests.
+1. `POST /v1/admin/login-links`: without `confirm`, answer `{role, client_addr, age_s}` for the
+   unbound, unexpired administrator row and bind nothing; with `confirm: true`, bind (the route
+   is built today and binds at once, `src/core/admin.ts`). `not-found` at either step as R-BTN-155
+   says, counted as no failed verification.
+2. `baton admin open`: send the preview, print `administrator session for <address>, <n> s old`,
+   ask `bind? [y/N]` defaulting to no, refuse `--yes`, and on yes send the confirm. An `sk-` key
+   touches for each request.
+3. The owner's route and `baton owner open` take the same two steps in B-76 (item 1), which
+   builds that route; whichever of B-76 and B-172 lands second reuses the first's CLI prompt.
+4. The tests.
 
 ### Tests
 

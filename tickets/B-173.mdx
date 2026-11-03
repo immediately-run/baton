@@ -3,14 +3,14 @@ title: "B-173 — Retiring a repository ends everything scoped to it: sessions, 
 id: B-173
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-03
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1175
 tier: routine
-description: "Build R-BTN-47's retirement: in the transaction that sets retired_at, end the repository's reach for sessions, revoke its MCP keys and OAuth grants with their tokens, its sync and mirror keys, runner grants and check-runners, release its active claims (released:retired), drop its queued outbox entries; later calls not-found, the id never registered again. Requires: none."
+description: "Build R-BTN-47's retirement: in one transaction, end the repository's reach for sessions; revoke its MCP keys, OAuth grants, tokens, requests and codes, sync and mirror keys, registration tokens, runner grants and check-runners; reap its active claims as a force-reap (fenced); drop its outbox entries; delete its wants and trigger. Later calls not-found; the seal, prune and export skip it but its tombstone; the id is never registered again. Requires: none."
 topics:
   - baton
 owns: {}
@@ -37,25 +37,31 @@ each surface's behaviour is whatever its query happens to do.
 
 ### Spec (written 2026-11-03)
 
-The spec half is written: R-BTN-47's *Retirement* (final; sessions, MCP keys and OAuth grants,
-sync and mirror keys, runner grants and check-runners, active claims `released:retired`, queued
-and claimed outbox entries, owners and history kept; later calls `not-found`, the id never
-registered again), R-BTN-155 and R-BTN-130 citing it, the end-reason row and S-BTN-198, in PR
-`claude/baton-spec-review-2fwiga` at the owner's request ("Please ensure all tickets required to
-implement the spec are ready to be picked up for implementation").
+The spec half is written: R-BTN-47's *Retirement* (final, six steps in one transaction, the
+tombstone export and the seed), R-BTN-19, R-BTN-3's heartbeat, R-BTN-88's seal, §2.3's event
+prune, R-BTN-140's consent, R-BTN-155, R-BTN-130, R-BTN-171's *Dropping*, `BATON_MCP_OAUTH_SPEC`
+§5, §7 and §9, and S-BTN-198, in PR `claude/baton-spec-review-2fwiga` at the owner's request
+("Please ensure all tickets required to implement the spec are ready to be picked up for
+implementation"), after one round of fresh review.
 
 ### What to build
 
 1. `admin.repo.retire` runs R-BTN-47's six steps in the one transaction that sets `retired_at`
-   (`src/core/admin.ts`): the session reach, the MCP key and OAuth grant revocations with their
-   tokens, the sync and mirror key, runner grant and check-runner revocations, a `release` with
-   reason `retired` to each active claim (fenced as R-BTN-19 says when unacknowledged), and the
-   outbox entries `dropped`, each logged.
-2. Every route naming a retired repository answers `not-found` (today several filter by
-   `retired_at`; make it one check), forge notifications for it are refused, and registering a
-   retired id is `conflict` (today a known id takes the change path).
-3. The export keeps a retired repository's owners, events, history and closed tickets.
-4. `released:retired` in the end-reason vocabulary.
+   (`src/core/admin.ts`): session reach; MCP keys, OAuth grants with their tokens, pending OAuth
+   requests and codes; sync and mirror keys, registration tokens, runner grants and
+   check-runners; each active claim reaped as a force-reap (fence-pending where its runner is
+   alive); `queued`, `claimed` and `delivered` outbox entries `dropped`, each logged; sync wants,
+   trailing dispatches and the unblocked trigger deleted.
+2. A heartbeat declaring a retired repository's course drops that course instead of being
+   refused, so the old holder reports `fenced`; a deliverer's later mark is ignored.
+3. Every other route naming a retired repository answers `not-found` (one check, not each
+   query's filter); its forge notifications and CI identity are refused; registering a retired
+   id is `conflict` (today a known id takes the change path); the OAuth token exchange refuses a
+   code for a retired repository `invalid_grant`.
+4. The seal and the event prune count only live repositories' mirrors; the export carries a
+   retired repository as its tombstoned registry row alone; the seed skips and logs an entry
+   naming a retired id.
+5. `code_repos` consent is judged for a retired repository as for a live one.
 
 ### Tests
 
