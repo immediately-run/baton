@@ -2283,6 +2283,22 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   up now. S-BTN-198 follows. B-172 is superseded into B-76, which builds the code sign-in flow
   for both roles: the two steps are built where the flow is.
 
+- **2026-11-03 — review round one of B-129's pickup** (PR #160; fresh reviewers, given the
+  diff). Findings closed: a takeover skipped every frontmatter status check, so it overrode the
+  git lock and parked or closed statuses as well as a false `available`; the board's `holders`
+  left out legacy claims; "past its start" was judged from any station the path ever reached,
+  not the current one; the history's `resume` read only the newest ended claim, so a review
+  claim that pushed nothing hid the PR; the release's hand-off lacked what is left; a key
+  problem was reported as Baton unreachable; the drop-PR refusal claimed a PR "still open" and
+  could block `done`; `position-disagrees` fired on a release that kept its PRs and deduplicated
+  against any discrepancy; a lease that had ended was reported as not ended. Fixed in R-BTN-74
+  (the takeover overrides only a false `available`; the position is the board's ready station,
+  else the newest reached; the key is judged first; the hand-off's lines are stated, with
+  `set --note`; `done` is never refused), R-BTN-24 (the history read's `resume` across the
+  ended claims, and who may read it), R-BTN-85's `position-disagrees` row (only when the posted
+  `prs` lacks a PR Baton's record holds; both values carry the PR lists), R-BTN-127's CLI row
+  (the flags are R-BTN-74's), the board and history route rows, and S-BTN-199.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
