@@ -2,8 +2,8 @@
 title: "B-129 — A pickup asks Baton, not the frontmatter: ticket claim continues a ticket where Baton holds it — its station, leg, PR and branch"
 id: B-129
 project: baton
-status: available
-updated: 2026-10-27
+status: in-review
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -14,7 +14,8 @@ description: "B-91's duplicate (2026-10-27): a release wrote status: available, 
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/160
 depends_on: []
 ---
 
@@ -131,3 +132,5 @@ wastes a whole implementation and opens a second PR for one ticket.
 
 A Baton key the session can sign with (a granted worker key, or an owner key) for the reads.
 No forge credential, Terraform or human operator is needed.
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton owner ticket adopt` is `baton ticket adopt` (R-BTN-127).)_

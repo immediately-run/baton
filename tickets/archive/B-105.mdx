@@ -73,3 +73,7 @@ in `npm test`.
       S-BTN-148 state
 - [ ] a reading never reaches a gate, and advice carries identifiers only
 - [ ] the standard courses and this repository read `BATON_ADVICE` before their static models
+
+## Status
+
+- 2026-11-02: **spec half superseded** by the spec restructure's part 4 (B-166; B-162's ruling, the owner: "Nothing; move it out"): which model and key a leg uses is the course's (§6.10; R-BTN-176 and R-BTN-177 retired). Where each item went: 1 (atom formation) → deleted by B-167; 2 (`--atoms-from`, the `x-baton-base` chain, `std:api-capacity@1`) → `atoms_from` deleted by B-168, schema refinement and `std:api-capacity@1` stand (R-BTN-108, R-BTN-110), the latter for a course's `rank.mjs`; 3 (choices, `route_last`, `advice`) → deleted by B-167; 4 (`BATON_ADVICE`, `BATON_TAKEN`, `dead`, `advice-overridden` from `taken`) → deleted by B-167; 5 (the standard courses read `BATON_ADVICE`; this repository's route choices and `meters`) → the standard courses choose from the repository's configuration (R-BTN-131), B-167; the `anthropic-capacity` account resource may stay registered as an instrument's reading target; 6 (conformance) → deleted by B-167; 7 (the old provider tables) → B-142. Exit criteria: retired with S-BTN-147 to S-BTN-154 (history, Retired scenarios); "a reading never reaches a gate" is now a requirement's own choice (R-BTN-181).

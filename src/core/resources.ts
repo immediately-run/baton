@@ -240,10 +240,13 @@ export class Resources {
         // reading carries a new one or the instrument's row lapses whole.
         const priorDetail = this.rows<{ detail: string | null }>('SELECT detail FROM instance_readings WHERE instance = ? AND source = ? AND kind = ?', r.instance, source, r.kind)[0]?.detail ?? null;
         const detail = r.detail === undefined && r.kind === 'state' ? priorDetail : r.detail === undefined ? null : JSON.stringify(r.detail);
-        this.exec(`INSERT INTO instance_readings (instance, source, kind, available, until, observed_at, lapses_at, detail, posted_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        // §12.8 (B-145 item 9, R-BTN-181): the writer class the credential names, with the
+        // nonce and signature a signed reading carries.
+        const writer = who.kind === 'admin' ? 'admin' : who.kind === 'probe' ? 'instrument' : 'runner';
+        this.exec(`INSERT INTO instance_readings (instance, source, kind, available, until, observed_at, lapses_at, detail, posted_by, writer, nonce, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT (instance, source, kind) DO UPDATE SET available = excluded.available, until = excluded.until, observed_at = excluded.observed_at,
-                     lapses_at = excluded.lapses_at, detail = excluded.detail, posted_by = excluded.posted_by`,
-          r.instance, source, r.kind, r.kind === 'state' ? (r.available ? 1 : 0) : null, r.until, now, lapses, detail, postedBy);
+                     lapses_at = excluded.lapses_at, detail = excluded.detail, posted_by = excluded.posted_by, writer = excluded.writer, nonce = excluded.nonce, signature = excluded.signature`,
+          r.instance, source, r.kind, r.kind === 'state' ? (r.available ? 1 : 0) : null, r.until, now, lapses, detail, postedBy, writer, r.nonce ?? null, r.signature ?? null);
         if (r.kind === 'state') {
           touched.add(r.instance);
           if (who.kind !== 'admin' && this.adminInForce(r.instance, now)) overridden.push(r.instance);

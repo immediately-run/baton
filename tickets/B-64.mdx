@@ -3,7 +3,7 @@ title: "B-64 — The outbox and its couriers: every effect Baton intends outside
 id: B-64
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-03
 repos:
   - baton
 tags:
@@ -195,3 +195,9 @@ _(2026-10-20: adversarial review of the spec — the entry state `claimed`, neve
 _(2026-10-30: rescoped by the spec amendment that folds `forge-check` notices into the outbox and replaces the built-in leg `baton.write` with couriers. The earlier plan's `--outbox` flag, `outbox` claim list, `written[]` end and `baton.write` re-verification are gone; the `notices` table migrates here.)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): the outbox has one git kind, `withdraw` (R-BTN-171): the `handler` and `answer` kinds, `collision`, `skipped`, the provisional handler-ticket row and `tickets.outbox_id` are retired with light questions (R-BTN-173) and with Baton's own handler tickets (R-BTN-163, B-155's ruling). A cancelled ticket is marked `cancelling` (`ticket_overrides.cancelling_at`, a flag beside any hold) until its withdrawal lands (R-BTN-168); the `outbox-unlanded` hold is gone, `baton.outbox-late` alone marks a late entry. The rest of this ticket is part 2's to revisit (couriers into runners, B-159).)_
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) rewrites R-BTN-171: couriers are runners (no `courier` credential kind, no `couriers` table, no `owner courier add`, no `/v1/courier/*`; `POST /v1/runner/outbox/claim` and `…/outbox/{repository}/{id}`, a runner's heartbeat `delivers`, the doorbell's `outbox` ring on the runner's socket); the kinds are `withdraw` and `forge-check` alone, the `dispatch` kind gone (Baton dispatches, R-BTN-94); entries carry no `kid` or `signature` and no `SigningKey` exists; `trust` and `min_release` are gone from the policy's `outbox`, which names grant roles. Items 1 to 3 and the migration are to be read against the current R-BTN-171 and §13.8.)_
+
+_(2026-11-02: part 2's review round one: `test/integration/S-BTN-126.people-api-keys.test.ts` asserts an API-key runner's refusal at `/v1/courier/deliveries`; when this ticket builds `/v1/runner/outbox/claim`, retarget that assertion to it (an API-key runner never delivers, R-BTN-171, R-BTN-159).)_
+
+_(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — the outbox: retirement drops the repository's `queued`, `claimed` and `delivered` entries, logging each, ignores a later mark, and owes no cancel leg for its tickets (R-BTN-171). Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_

@@ -3,7 +3,7 @@ title: "B-15 — The roadmap-pr course adopts the course schema: capability type
 id: B-15
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-02
 repos:
   - docs
   - baton
@@ -81,3 +81,4 @@ counts retries per ticket, and leaves the independence of `review` to convention
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — item 3 declares `interrupt` condition
 types with `retryable` and throws `LegError(type, …)`; `error_types` is gone.)_
+- 2026-11-02: the spec restructure's part 4 (B-166, B-165's review default): the owners' `required_independence` setting is gone — the course file's `no_chain_from` alone says which legs may not chain (R-BTN-106; B-168). docs' reference course gives `review` its `no_chain_from` and needs no owner setting.

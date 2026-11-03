@@ -3,7 +3,7 @@ title: "B-46 — hardening within a tenant: only pushers' forge writes count, ru
 id: B-46
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-03
 repos:
   - immediately-run/baton
 tags:
@@ -218,3 +218,10 @@ _(2026-10-20: extended for the adversarial review's fixes — settlement gates, 
 _(2026-10-31: a code-repository consent is an `approvers.members` action of the consenting repository (R-BTN-188's first row; B-145 item 12 builds the hook).)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): open-world claims are retired (R-BTN-104, R-BTN-148; R3-1271 superseded), so this ticket's items on open-world gates, the `declared` field, `misdeclared` and tainting, and its unfounded-head items (`head-replaced`) are void; `base_sha` and `released:off-branch` stand (R-BTN-143), and a forced Resync is the one way a rewritten head is adopted (R-BTN-11). G-BTN-59's open-world clause is gone.)_
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`): R-BTN-139's flag and setting are `pusher` and `pushers` (`baton.pushers-degraded`; B-163), and R-BTN-143's `base_sha` no-roll-back check is gone (B-160: an older sha's post is refused `head-moved`, R-BTN-11; S-BTN-123 changed). The rows naming `trusted`, `trusted_identities` and `base_sha` read accordingly.)_
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton owner grants` is `baton owner grant list` (R-BTN-127).)_
+- 2026-11-02: the spec restructure's part 4 (B-166): `trigger_workflows` is gone — an unblocked trigger names any workflow on the default branch that declares a manual dispatch (R-BTN-94; B-168); cutover and foreign claims sit in §16, now an appendix that ends when docs retires its mirror.
+
+_(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — `code_repo_consents`: retirement deletes every consent the repository gave or was given, and an entry naming a retired repository's id (with no live one) never has reach (R-BTN-140). Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_

@@ -3,7 +3,7 @@ title: "B-59 — Suspend: a leg waits in its claim for a restart, then blocks on
 id: B-59
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -135,3 +135,5 @@ the answer comes quickly and in a later claim when it does not.
 _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
 
 _(2026-10-20: adversarial review of the spec — R-BTN-162 now blocks the leg on its `suspend` condition at any end of the waiting claim other than the consuming one, and at any reap, `leg-timeout` included, for every suspend, light or not; `resume` is a list and carries `answered`. Build this here; S-BTN-128 and G-BTN-147 are extended.)_
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton owner resolve` is `baton ticket resolve` (R-BTN-127).)_

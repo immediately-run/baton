@@ -3,7 +3,7 @@ title: "R3-1269 — Baton serves state: retire hooks; fleet and instance views, 
 id: R3-1269
 project: baton
 status: available
-updated: 2026-10-22
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -84,3 +84,4 @@ _(2026-10-22: updated for the ontology, route-choice and seats spec (§5.9, §6.
 billings with seats and the caller's `host` instances (R-BTN-178, rule 11 arriving with B-106);
 the fleet view and the ETag's bumps gain the ontology's `runner_derived` (R-BTN-174, arriving
 with B-104). Each seam is named inline above; whichever ticket lands second wires its half.)_
+- 2026-11-02: the spec restructure's part 4 (B-166): `claim_bills` and the instance view's billings are gone — it serves each capability with a capacity and the claims holding its seats (R-BTN-178, B-106); the caller's `host` instances and the ontology's `runner_derived` are gone (R-BTN-76, R-BTN-174; B-167, B-168).

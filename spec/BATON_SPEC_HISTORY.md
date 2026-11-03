@@ -1454,6 +1454,835 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   specification (R-BTN-126, R-BTN-162), two rows of table 1.4 taken before part 2 reads it. No
   candidate in the B-165 table was vetoed. The merge waits on the owner's word.
 
+- **2026-11-02 — the restructure, part 2: security and policy (B-166; owner direction).** The
+  second part of the rewrite the owner asked for after the whole-spec review of 2026-11-01
+  (`docs/review/spec-simplification-review-2026-11-01.mdx`, B-155 to B-165; part 1 above). This
+  part rewrites §12.8 whole (R-BTN-180 to R-BTN-192), §7.8 (R-BTN-171), §3.3 (R-BTN-94 and
+  R-BTN-73's dispatch), §12.7, §10's R-BTN-115, §3.4's R-BTN-139 and §12.1 to §12.5, with the §13,
+  §14 and §15 rows that name them, from the text on `main` (`72a7a68`), applying these rulings.
+  The owner answered each question with the words in quotation marks; the sentence after each is
+  the ticket's reading of that answer (the tickets are unsigned, so the readings are claims, as
+  `CLAUDE.md` says):
+  - **B-160, the owner: "Out of scope".** The ticket's reading: Baton's server is trusted; its
+    compromise is recovered (B-125), not resisted. §12.8 opens with it. Removed: the Ed25519
+    signature on outbox entries and `GET /v1/keys/signing`; the signed policy read, its
+    `valid_until`, `kid`, `signature`, `tenant` and the three hashes in every claim response and
+    heartbeat; the trusted runner's pins (`policy_pins`, `baton.policy-unpinned`, the pinned
+    human-only keys and attestation key); R-BTN-143's `base_sha` roll-back check (a post naming an
+    earlier head is `head-moved`, R-BTN-11; a never-posted older commit is admitted only from a
+    poster `inputs.board` trusts); and, as a consequence the ticket did not list, the signature
+    an attestation carried of its own (R-BTN-181): nothing outside Baton verifies one, so an
+    attestation is authenticated by the request that posted it. `BATON_SIGNING_KEY` is gone.
+  - **B-159, the owner: "Couriers into runners", and "Drop it".** The ticket's reading: couriers
+    merge into runners; the dispatch courier is dropped and Baton holds the GitHub App key; the
+    fact reader, the protection checker, check-runners, instruments and the mirror stay. A
+    **deliverer** is a runner whose grant role the policy's `outbox` admits, declaring the classes
+    it delivers in its heartbeat (R-BTN-171); the `courier` credential kind, the `couriers` table,
+    `owner courier add`, `admin courier add`, `owner.courier.revoke`, the `/v1/courier/*` routes
+    (now `/v1/runner/outbox/claim` and `…/outbox/{repository}/{id}`), the `courier` writer class
+    and principal, and `outbox.*`'s `trust` and `min_release` are gone. The `dispatch` outbox kind,
+    `delivered_observation`, `baton.dispatch-courier-missing` and `baton.dispatch-refused` are
+    gone: Baton dispatches a wanted workflow itself after commit, with `BATON_GITHUB_APP_KEY` and
+    the trigger tokens in `BATON_FORGE_SECRETS` (R-BTN-94, §2.1, §12.7), B-152's supersession
+    written into the spec. The check App's key stays on the forge-check deliverer's host, never in
+    Baton (R-BTN-115).
+  - **B-164, the owner: "Only protected-signed", and "Remove until designed".** The ticket's
+    reading: `protected` stops claiming `human-gates`; `signed-authorship` leaves the spec until a
+    host-side signer is designed, continuity ranges staying. `human-gates` now holds only where
+    every `approvers.*` list is human-only **and** `human_key` is `hardware`, absorbing
+    `human-gates-hardware`; the preset that holds it is `protected-hardware`, the renamed
+    `protected-signed` (R-BTN-189). `authorship`, `signed-authorship` and R-BTN-183's signed
+    paragraph are gone; `independent-review` is `merge.reviews.count` over distinct domain labels,
+    with no model family (item 4).
+  - **B-155, the owner: "Forge checks suffice".** The ticket's reading: `protected`'s required
+    checks are met by check runs from workflows on the protected default branch; the trusted
+    executor becomes optional. R-BTN-183's checks paragraph and R-BTN-188's `merge.checks` row say
+    so; `std:checks@1`'s writer is a check-runner's key the owner names, optional (R-BTN-181,
+    R-BTN-115). B-155's item 6 is `PUT …/policy {dry_run: true}` (R-BTN-188).
+  - **B-156, the owner: "Tighten, and undo own".** The ticket's reading: an MCP key may make any
+    tightening and undo what it tightened itself; loosening others' limits, routing and adopting
+    stay with owner keys. Written as R-BTN-186's one rule for a delegated key, since §12.8 is
+    rewritten whole; R-BTN-130, R-BTN-154 and R-BTN-163's MCP words are part 3's.
+  - **B-163** (folded into this part): `pusher` names R-BTN-139's sense (the facts' flag, the
+    setting `pushers`, `baton.pushers-degraded`); `pr-verdict` under a policy admitting no `sync`
+    arrival counts only the human-only identity's verdict (R-BTN-192); `course_sources` replaces
+    `trusted_sources`; the vocabulary page names pusher, role, domain and trusted runner.
+  - **B-165, the owner: "Take review's default".** For part 2's candidates (listed in the PR body
+    with what each loses): a grant's **role** and **domain** label replace trust levels, trust
+    domains, model family, `one_per_domain`, `default_trust` and `trusted_domain` (R-BTN-180;
+    `approvers.trust` is `approvers.roles`; `trusted-domain-separate` is gone); `floors` is a knob
+    of the policy document, named floors with `remove_by` and the floors route gone (R-BTN-189);
+    attestation `uses: once`, `used_by` and compare-and-swap consumption are gone, approvals being
+    bound by subject (R-BTN-181); `min_release`, `refs.baton`, `refs.legs` and `leg_state` are
+    constants or follow the forge (R-BTN-180, R-BTN-190).
+  - No rule, scenario or gate is retired. Changed §15 rows: S-BTN-50, -68, -123, -124, -126, -136,
+    -180, -181, -183, -185, -186, -190, -191, -192, -193, -195 and the policy scenario, renumbered
+    S-BTN-197 from a duplicate S-BTN-189 (the ticket commands keep S-BTN-189; B-145 cites the old
+    number); G-BTN-83, -93, -144, -154, -156, -163, -164, -165, -166. One test file names a changed
+    row: `test/integration/S-BTN-126.people-api-keys.test.ts` asserts that an API-key runner is
+    refused at `/v1/courier/deliveries`, a route this part removes; it passes against the code on
+    `main` and is retargeted to `/v1/runner/outbox/claim` when B-64 builds that route, so it is not
+    changed here.
+  - Outside the spec: `docs/context/vocabulary.mdx` (policy, role and domain, pusher, outbox and
+    deliverer, reply), `docs/context/architecture.mdx` (the four nouns, floors, domains),
+    `docs/security-model.mdx` (the ruling on reach 0, `pushers`), `scripts/check-spec.mjs`
+    (`PATCH_NOTES_ALLOWED` empty: R-BTN-171's note is gone). Tickets: B-152, B-155, B-156, B-159,
+    B-160, B-163, B-164, B-165 and B-166 record what this part wrote; B-64, B-5, B-6, B-145,
+    B-147, B-140, B-120, B-124, B-135, B-46, B-8, R3-1208, R3-1263, B-157, B-119 and B-126 carry a
+    dated note on what changed under them.
+
+- **2026-11-02 — review round one of the restructure's part 2** (two fresh reviewers, the diff
+  and the impact list; one on the text whole, one on the guarantees, the actors and the review's
+  three journeys). Blocking, found by both: G-BTN-154 still named the `dispatch` outbox kind;
+  S-BTN-181 and §6's prerequisite and block tables still expected use-once consumption; the
+  Decisions line on `human-gates` said `protected` claims it, inverting the ruling and R-BTN-189.
+  Blocking, one each: every preset carried `floors: []`, so an apply erased the floors in the same
+  version that broke them, against G-BTN-164; S-BTN-192 expected `human-gates` held with no
+  `human_key: hardware`; and §2.1 had "the Worker" make every dispatch while the trailing
+  dispatch, the webhook backstop, the unblocked window and the seal fire from the object's alarm,
+  and the local host has no Worker. Majors: R-BTN-46 still had trusted runners checking commit
+  signatures; four `trusted (R-BTN-139)` uses survived in R-BTN-131; R-BTN-88 exported the removed
+  `policy_floors`; the protection checker was a mark in R-BTN-180 and a third role in §13 and
+  §14; nothing recorded the human-only identity's forge id that R-BTN-184 and R-BTN-192 compare
+  against; a null-domain writer made `independent-review` vacuous; the no-secrets precondition
+  was conditioned on `refs.*` admitting `runner`, which `protected` never does while runners still
+  push pattern branches; nothing created the check App or stored its id; §12.1's rows omitted
+  delivery, the fact reader, the checker's report and a check-runner's `std:checks@1`; the merge
+  runner's grant could hold the check App's key; G-BTN-144, S-BTN-124 and R-BTN-129's `match`
+  still said MCP never unholds; no row held a runner's `delivers` or the checker's report; "bound
+  by subject, not consumed" was argued from merges alone; readings' signature lost its only
+  definition; `human-gates` promised a hardware key while the break-glass line was not bound to
+  `hardware`; a cancelled ticket on an ejected-source repository under `protected` looped
+  `outbox-refused`; `human-merge` had no edge to `merged`; the architecture page still called
+  `leg_state` a knob; and the history's "no test file cites them" was false. Minors: "calls no
+  service", a CLI flag in R-BTN-180, "an untrusted runner" in two scenarios, the `attestations`
+  columns' wording, an expedite counted as a tightening and no word on undoing a cancel, S-BTN-191
+  expecting a refusal R-BTN-180 did not define, `owner` callers on `approvers.members` routes and
+  two refusal codes missing from the table, a `nonce` with no purpose, a dangling "signature to
+  R-BTN-33", `dry_run`'s "stop" undefined, the duplicate id S-BTN-189, and README's `courier`.
+
+  Fixed: G-BTN-154, S-BTN-181, §6's tables and the Decisions line say what the rules say;
+  S-BTN-192 runs under `hardware`. `floors` has no preset value, an apply never touches it, and a
+  change is judged against the list in force before it (R-BTN-188, R-BTN-189). The host shell
+  performs a dispatch through a new `Dispatch` binding (R-BTN-55), from a request or the alarm, on
+  both hosts; the object records it and holds no credential (§2.1, R-BTN-94, §12.7). R-BTN-46
+  names the chain of ranges; R-BTN-131 says `pusher` four times and `merged-by-hand` leaves
+  `human-merge`, which the fact reader's `pr-merged` arrival moves (R-BTN-184). R-BTN-88 exports
+  the document's `floors`. The checker is a `checker` mark on a `trusted-runner` grant, admitted to
+  no `outbox` class and offered no leg, refused on a shared domain, a trusted claim or a delivering
+  grant, its last report kept in `repositories.protection_json` and voided when the mark clears
+  (R-BTN-180, §13, §14). The policy's `human_identity` knob names the human-only identity's forge
+  id, required by `paths.control: human` and by a policy admitting no `sync` arrival (R-BTN-188,
+  R-BTN-184, R-BTN-192). A chain with a null-domain writer never merges under `merge.reviews`
+  (R-BTN-183). No repository-level secrets anywhere (R-BTN-180). `baton admin check-app create`
+  makes the check App and the owner setting `check_app_id` records it (§12.7, R-BTN-66, §13.1,
+  R-BTN-115). §12.1's rows name what each actor may do. A grant that delivers `forge-check` is
+  offered no trusted leg and the reverse (R-BTN-115). G-BTN-144, S-BTN-124 and R-BTN-129's `match`
+  follow R-BTN-186. `runners.delivers` holds the declaration; an API-key runner never delivers
+  (R-BTN-171, R-BTN-159). A trusted leg's action is idempotent on its subject or names its run
+  (R-BTN-181, R-BTN-182). R-BTN-76 defines a reading's signature (`baton-reading@1`). A break-glass
+  line satisfies nothing where it does not meet `human_key`. A policy admitting only
+  `trusted-runner` for `git` on an ejected-source repository is refused, and the hold's lift
+  follows R-BTN-186 (R-BTN-188, R-BTN-171). `nonce` is an idempotency key; `dry_run` names what it
+  lists; R-BTN-186 counts no expedite and undoes no cancel; `approvers.members` routes and the two
+  refusal codes are in §14; the policy scenario is S-BTN-197; the architecture page and README
+  read as the rules do. Noted for later parts: R-BTN-130's closed list and its italic note (part
+  3), a runner's `delivers` flag in the CLI tree (part 3, B-157), readings' `signed` (part 4), and
+  Fieldhouse's spec requiring guarantees Baton no longer defines (a follow-up ticket, B-166's
+  status).
+
+- **2026-11-02 — review round two of the restructure's part 2** (one fresh reviewer, the diff and
+  the impact list; round one's 52 fixes re-checked line by line: 51 closed in the text, the ejected
+  source closed at policy time only). Blocking: `protected` could not be applied as S-BTN-197 and
+  S-BTN-191 expected, since the new `human_identity` row refused `paths.control: human` while the
+  knob was null and neither scenario set it, and the row's `protected` column was neither a value
+  nor "no value". Majors: `human_identity` was typed as a forge user id, so `protected` on a `git`
+  repository was unbuildable; it was "set by `approvers.members`" though every policy change needs
+  `approvers.policy`; `check_app_id` was a per-repository owner setting written by an
+  administrator's command with no route, for an App that serves one tenant; the trailing dispatch
+  had no row once the `dispatch` entry that held its window was gone; the run-scoped attestation
+  subject round one added was excluded by the rule's own subject shape; lifting another's hold or
+  a bar was a human's in R-BTN-186 and an `owner`'s in §14 and R-BTN-129's `match`; the
+  ejected-source refusal looked one way only, a snapshot ejecting the source under `protected`
+  reopening the `refused` loop; and R-BTN-171's deliverers and R-BTN-182's rule `trusted` did not
+  carry the checker's and the forge-check deliverer's exclusions. Minors: `Dispatch` "from the
+  alarm's `waitUntil`" in "the Worker shell" and S-BTN-195's "by the Worker"; a per-grant refusal
+  of a per-runner `delivers` and an unchecked "shares no domain"; a null-domain grant markable
+  checker; the roles-clearing clause omitting the mark; `floors` "not met now"; "untrusted runner"
+  twice; no mechanical refusal of an API-key deliverer; README's courier keys; S-BTN-190's
+  `policy` release reason; R-BTN-186 listing a cancel among the loosenings; `pr-verdict` under
+  `cooperative` with a named fact reader never firing; "recorded as a discrepancy" by the fact
+  reader; nothing handing the sync `check_app_id`; and two ticket notes contradicting the text.
+
+  Fixed: `human_identity` is typed by forge (a forge user id, or on `git` the pusher identity the
+  hook logs), has no preset value, is governed as every knob is, and its refusal is
+  `invalid-params` naming it; S-BTN-197 and S-BTN-191 set it (R-BTN-188). `check_app_id` is an
+  instance setting (`instance_settings`, `PUT /v1/admin/settings`) the admin command writes and
+  the observation hands to the sync (§12.7, §13.1, §14, R-BTN-115, §4.3). `webhook_syncs` is keyed
+  by repository and workflow and holds `window_until` and `trailing_wanted`, which the alarm reads
+  (R-BTN-94, §13.2, §13.8). A work subject may carry the run, and a requirement asks for it with
+  `run: this` (R-BTN-181). A lift of a hold or a bar is an `approvers.policy` approver's, in §14 and
+  R-BTN-129 as in R-BTN-186. A snapshot that ejects the source while `outbox.git` admits only
+  `trusted-runner` is refused `snapshot-rejected`, so a `protected` repository never ejects its
+  source (R-BTN-188). The checker's and the forge-check deliverer's exclusions are stated where
+  deliverers and rule `trusted` are defined, and `trusted` joins §6.6's gates (R-BTN-171,
+  R-BTN-182, §6.6). `Dispatch` names the Durable Object class's wiring for the alarm (R-BTN-55);
+  S-BTN-195 says the host shell. The forge-check exclusion is per runner (R-BTN-115); a null-domain
+  grant is never marked checker, and clearing roles clears the mark (R-BTN-180, R-BTN-188).
+  `floors` is judged "by the document after the change". "Untrusted runner" is gone. An API key's
+  bearer never reaches `/v1/runner/outbox/*` (R-BTN-159, §14). `pr-verdict` is a pusher's where
+  `sync` is admitted and the human-only identity's where not (R-BTN-192). Baton records a wrong-head
+  `pr-merged` as a discrepancy (R-BTN-184). S-BTN-190, R-BTN-186, README, B-147 and B-157 read as
+  the rules do. Noted again for later parts: R-BTN-130's closed list and its italic note (part 3),
+  the CLI commands named here (part 3), readings' `signed` (part 4), and where `pushers`,
+  `check_app_id` and `human_identity` live beside table 1.4 (part 4).
+
+- **2026-11-02 — review round three of the restructure's part 2** (one fresh reviewer, the last;
+  the diff, the impact list, round two's 23 fixes re-checked line by line and confirmed closed).
+  No blocking finding. Majors: R-BTN-143 and S-BTN-123 said a post naming an older default-branch
+  commit is refused `head-moved` by R-BTN-11, which checks only `parent_sha`, so the removed
+  `base_sha` check had no replacement and `{sha: older, parent_sha: head}` moved the head
+  backwards; an administrator matched no `approvers.*` entry yet granted and added owners through
+  `/v1/admin/*` routes with no approver condition, past the gate `human-gates` promises; under an
+  owner-tuned `outbox.git: [runner, trusted-runner]` on an ejected source a trusted-runner
+  deliverer still looped the `refused` hold; and an apply wrote `attestations` whole, un-naming
+  the fact reader's and a check-runner's `service:` keys. Minors: `check_app_id` reachable to
+  `repo protect --print`/`--check` by no route and `--check` not verifying the required check's
+  App; R-BTN-57 omitting `check_app_id` and `check-app create`; the grant `sync` flag's route an
+  `owner`'s though R-BTN-186 calls it a loosening; "the author is trusted" in R-BTN-139; "by an
+  owner" lift wording in R-BTN-171 and R-BTN-186 against §14's approver; the `webhook_syncs` stamp
+  "written when sent" though the object writes in its transaction; "notification-caused"
+  coalescing and an undefined "pending" for the mirror; `Dispatch` wired through the Worker for a
+  request; R-BTN-102 omitting delivery; `BATON_HUMAN_KEYS` in no host table; who installs the
+  check App; §6.6's pipeline not naming rule `trusted`'s columns.
+
+  Fixed: a post whose `sha` was an earlier head is `head-moved` (`board_snapshots` holds every
+  head), and R-BTN-143 states the residual — a never-posted older commit is admitted only from a
+  poster `inputs.board` trusts (R-BTN-11, R-BTN-143, S-BTN-123, this entry). An administrator
+  matches an `owner` entry and no other; `POST /v1/admin/grants` and `owner_keys_add` are
+  `forbidden` where `approvers.members` is human-only and the key is no `human_only` key it admits
+  (R-BTN-188, R-BTN-57, §14). On an ejected source Baton offers a git entry to no `trusted-runner`
+  grant (R-BTN-171, S-BTN-136). An apply keeps every named `service:` entry in `attestations`
+  (R-BTN-188, S-BTN-197). The policy read answers `check_app_id`, `--print` prints the required
+  check by name and App id and `--check` verifies it (R-BTN-180, §14); R-BTN-57 names the setting
+  and the command; `sync: true` is an `approvers.policy` approver's (§14); R-BTN-139 says pusher;
+  lifts are "an approver on `approvers.policy`" everywhere (R-BTN-171, R-BTN-186); the stamp is
+  written in the deciding transaction (R-BTN-73); every workflow's dispatches coalesce and the
+  mirror's pending dispatch is its row's `trailing_wanted` (R-BTN-94); `Dispatch` is the Durable
+  Object class's wiring for request and alarm alike (R-BTN-55); R-BTN-102 lists delivery;
+  `HumanKeys` is a host binding (R-BTN-55, §2.2); the check App is installed per repository whose
+  `checks` names a course (§12.7); the pipeline reads `role`, `checker` and `delivers` for a
+  trusted leg (§6.6). No further round: what remains is the owner's, in the PR body — and, as the
+  reviewer noted for later parts, R-BTN-130's closed list and `owner.mcp-key.create`'s callers
+  (part 3), the CLI tree's new commands (part 3), README's notice-courier lines (part 3), readings'
+  `signed` (part 4), where `pushers`, `check_app_id` and `human_identity` live beside table 1.4
+  (part 4), and `fact-legs` filed under Administrator in §14 (part 3).
+
+- **2026-11-02 — the owner's answer on part 2's open items.** Asked the nine questions the PR body
+  listed, each with a recommended option, the owner answered: "I'll take your recommendations."
+  So, as rulings: an attestation about work carries no signature of its own, readings excepted
+  (R-BTN-181, R-BTN-76); the preset is `protected-hardware` (R-BTN-188); B-156's rule stands in
+  R-BTN-186, R-BTN-130 and R-BTN-154 following in part 3; `pushers`, `baton.pushers-degraded`,
+  `course_sources` and the `human_identity` knob are the names (R-BTN-139, R-BTN-188); `human-gates`
+  requires `human_key: hardware` and binds the break-glass line and administrators to it
+  (R-BTN-189, R-BTN-188); `approvers.roles` is the knob's name; `std:checks@1` stays an optional
+  writer (R-BTN-115); the review rounds' additions stand — the `Dispatch` binding and the window in
+  `webhook_syncs`, the earlier-head refusal and R-BTN-143's residual, `baton admin check-app create`
+  and the instance's `check_app_id`, no API-key deliverer, idempotent trusted actions, the
+  null-domain writer, no repository-level secrets, ejected sources offered to no trusted-runner
+  grant, an apply keeping named `service:` keys; and a Fieldhouse spec PR follows this merge
+  (B-166's status). No candidate in the B-165 table was vetoed. The merge waits on the owner's word.
+
+- **2026-11-02 — the restructure, part 3: the surfaces (B-166, PR #163; owner direction).** The third
+  part of the rewrite the owner asked for after the whole-spec review of 2026-11-01
+  (`docs/review/spec-simplification-review-2026-11-01.mdx`, B-155 to B-165; parts 1 and 2 above).
+  This part rewrites §11.3 whole (R-BTN-129, R-BTN-127, R-BTN-130 / R-BTN-154), R-BTN-155's head,
+  §12.1's session and MCP rows, §14's callers and the rows that name a surface, and every rule that
+  names a CLI command, from the text on `main` (`2cc9bc7`), applying these rulings. The owner
+  answered each question with the words in quotation marks; the sentence after each is the
+  ticket's reading of that answer (the tickets are unsigned, so the readings are claims, as
+  `CLAUDE.md` says):
+  - **B-156, the owner: "Tighten, and undo own".** Written as R-BTN-186's rule in part 2; this
+    part makes R-BTN-130 / R-BTN-154 derive from it. An MCP key is a delegated key acting as
+    `owner` on one repository, narrowed to the ids listed at minting; each registry entry carries
+    a `delegated` mark (`true` for an owner read and a tightening, `own` for the undoing of the
+    key's own tightening, `false` for the rest) that `check:actions` keeps equal to R-BTN-186,
+    and `tools/list` is the key's ids whose mark stands. The closed list ("its only writes add a
+    hold and stop a leg"), its italic note and the `mcp: true` flag are gone; `owner.mcp-key.create`
+    is an `approvers.members` action (R-BTN-188), so a key dies with the credential that minted it.
+    Decided under the ruling, as the ticket's reading of it: a delegated key writes no attestation,
+    a `std:decision@1` moving a ticket as a route does (R-BTN-116, R-BTN-181), and resolves no
+    condition, a restart closing what Baton or a leg raised — ending a block or another's hold,
+    routing, or setting a `parked` hold the key's own test never matches (R-BTN-163); and R-BTN-186's
+    "restart a leg it stopped" is gone, a stopped leg being claimable again at once (R-BTN-119). R-BTN-39, R-BTN-12, R-BTN-57,
+    R-BTN-119, R-BTN-163, §12.1, §12.2 and §14 cite R-BTN-130 and R-BTN-186 in place of the list.
+  - **B-157** (the review's finding 6 and section 2.1, folded into B-166 by the owner's
+    direction). R-BTN-127's tree holds every command the specification names under one grammar —
+    `baton <noun> <verb>`; under `owner` and `admin` a two-word verb `<thing> <act>` — and help
+    at every level is generated from the registry's command table (R-BTN-129), so no command
+    answers "not a flag of this command". Renamed, with `renamed:` exits as the twelve names
+    before them (`baton run`, one of the twelve, survived in R-BTN-131 and is corrected there):
+    `baton request` → `ticket request`; `baton tickets …` → `ticket …` (one noun for a ticket, whether the command
+    reads Baton or writes git); `baton board` → `repo board`; `baton attest` → `attestation add` |
+    `revoke`, with `decision answer` for the common case; `admin repos` → `admin repo list`;
+    `admin revoke` → `admin key revoke`; `admin resync` → `admin repo resync`; `owner grants` →
+    `owner grant list`; `owner key grant` and `owner key create --api` → `owner grant add`; `owner
+    override` → `ticket hold` | `unhold` | `expedite` | `cancel`; `owner resolve`, `owner route`
+    and `owner ticket adopt` → `ticket resolve`, `ticket route` and `ticket adopt` (the actions
+    `owner.resolve` and `owner.grants.flags` are `ticket.resolve` and `owner.grant.flags`); `owner
+    bars follow` → `owner bar follow`; `owner owners add | remove` → `owner owner add | remove`;
+    `admin resource set` → `admin reading set`. Added, from parts 1 and 2: `owner grant role`, `owner grant
+    flags`, `owner policy set | apply [--dry-run] | show | diff | log`, `repo protect --print |
+    --check`, `repo policy`, `runner start --delivers`, `decision list [--all] [--watch]`,
+    `admin check-app create`, `owner consent`, `owner sync-key`, `owner sync want`, `admin key
+    hostname`, `admin settings set`, `human-key add | revoke` (R-BTN-185's route, which had no
+    command), and a key route for `admin repo resync` (`POST /v1/admin/repositories/{repository}/resync`,
+    destructive). Gone with B-159: `owner courier add`, `admin courier add`,
+    `courier start`.
+  - **B-165, the owner: "Take review's default"**, for the one candidate of this part's sections,
+    table 1.1's last row: `dashboard` and `owner-session` are one principal, `session`, carrying
+    its minting key's role, the role check living in `authorize` where it already was
+    (R-BTN-129, R-BTN-155, §12.1, §14). What it loses: nothing; an entry's `callers` says which
+    roles of a session it admits.
+  - **§14.** `GET …/fact-legs` sits with the repository reads, its caller the fact reader; the
+    outbox group is "Deliverers and instruments"; the callers legend names `session` and
+    `delegated`; the `resolve`, `adopt`, `attestations`, `overrides`, `bars/{id}/lift`,
+    `mcp-keys`, `/v1/actions` and `/v1/mcp` rows say what a delegated key reaches.
+  - **B-155's item 5** (a cheaper adopt after a course rename) is R-BTN-64's already: Baton maps
+    a renamed station or leg by `renamed_from` itself. R-BTN-39's adopt now says so; only a
+    station or leg the new file lacks waits for an adopt.
+  - No rule, scenario or gate is retired. Changed §15 rows: S-BTN-97, S-BTN-100, S-BTN-101,
+    S-BTN-186 and S-BTN-192 (new cases), and by the renames alone S-BTN-58, -67, -131, -166, -172, -175, -189; G-BTN-117,
+    G-BTN-121, G-BTN-144, and the OAuth spec's G-BTN-157. The test files that name a renamed command (`S-BTN-166.reads`,
+    `S-BTN-172.ticket-check`, `S-BTN-175.request`, `S-BTN-189.ticket-commands`) test the built
+    CLI and move with it in B-157's code item; none changes here.
+  - Outside the spec: `spec/BATON_MCP_OAUTH_SPEC.md` (its grants are delegated keys under
+    R-BTN-186; `session` for the owner role; the scopes), `docs/context/vocabulary.mdx` (action,
+    session, delegated key), `docs/context/architecture.mdx` (one registry, one check),
+    `docs/context/design-brief.mdx` (what an owner's session may do), and README's code map,
+    which names R-BTN-163 in place of the retired notice couriers. The pages that teach the
+    built CLI (README's usage, `docs/standard-courses.mdx`, `docs/runbooks/register-baton.mdx`)
+    keep the built names until B-157's code item renames them. Tickets: B-155, B-156, B-157,
+    B-165 and B-166 record what this part wrote; B-7, B-23, B-25, B-38, B-46, B-47, B-56, B-59,
+    B-73, B-75, B-76, B-113, B-116, B-118, B-120, B-121, B-123, B-124, B-129, B-130, B-140,
+    B-146, B-147, B-154, B-161 and R3-1266 carry a dated note on what changed under them.
+
+- **2026-11-02 — review round one of the restructure's part 3** (two fresh reviewers, the diff
+  and the impact list; one on the text whole, one on the actors, the guarantees and the review's
+  journeys). Blocking, found by both: `park`, the one tightening this part added to the
+  delegated set, could not be undone by the key that set it — R-BTN-163 records that hold as
+  `parked`, not `mcp:<name>`, and on `baton.retries` / `baton.contract` a park closes a Needs-you
+  entry on a hold the key never set; and the OAuth companion's G-BTN-157 still guaranteed "holds
+  only added". Blocking, one: the OAuth consent route let any owner's session mint an MCP key
+  while R-BTN-130 now requires an `approvers.members` approver, an agent-reachable path to a
+  human-gated credential under `protected`. Majors: `park` alone was an argument check that
+  `authorize(principal, action, target)` cannot make; §14 marked *delegated* on some rows and not
+  on others; a wrapped `baton attest` survived in R-BTN-191; S-BTN-100 still tested the removed
+  `mcp` flag; `admin repo resync` was a key-signed command with only a session route; the
+  attestations row's "session" was ambiguous once a session has two roles; the dashboard's
+  Needs-you entry "takes the answer" under `protected`, where a session's writer is refused; the
+  OAuth confirmation code followed the name `leg.stop`, not the destructive effect, so
+  `ticket.cancel` was grantable to a bearer unconfirmed; OAuth consent under a human-only
+  `approvers.members` was impossible and unsaid; the grammar statement did not produce `admin
+  freeze | seal | export | import | state` or the plurals; `POST /v1/human-keys` had no command.
+  Minors: a stale `mcp: true` and a fixed three-scope challenge in the OAuth spec; R-BTN-116's
+  "moves no ticket"; `check:actions` naming prose as its oracle; no `roles` field for a session
+  caller and no `notes` for a noun's help; `keys.json` with no slot for a human-only key; four
+  Calls/Signs-as mismatches (`repo protect`, `admin key hostname`, `admin resource set`,
+  `GET /v1/actions`); `mcp_keys.minted_by`'s wording; an MCP name reusable after revocation; `baton
+  run` listed as renamed twice; the administrator's session's "loses nothing" overstated; `ticket
+  claim` beside Baton's claim.
+
+  Fixed: `park` is out of the delegated set — a delegated key resolves no condition (R-BTN-186,
+  R-BTN-129, R-BTN-130, R-BTN-163, §14, S-BTN-101, the vocabulary page), put to the owner as
+  decision 4's reading. G-BTN-157 guards "loosening only a hold or bar it set itself", and the
+  consent route admits only a session whose minting key is an approver on `approvers.members`,
+  omitting human-only repositories from the picker and refusing them `forbidden` (OAuth §5,
+  §11, §13, G-BTN-157; R-BTN-130). §14's legend says an *owner* row admits a delegated key
+  wherever the mark stands, and the `release`, `bars` and `route` rows say so. R-BTN-191 names
+  `baton decision answer`. S-BTN-100 tests the `delegated` mark and the example. `admin repo
+  resync` calls a new destructive key route, `POST /v1/admin/repositories/{repository}/resync`
+  (R-BTN-11, §12.2, §14). The attestations row admits "an owner session (writer `owner`)", and
+  the Needs-you entry takes the answer where the policy admits an `owner` writer, else names
+  `baton decision answer` (R-BTN-116, R-BTN-163, §11.4, the design brief). The confirmation
+  code follows §12.2's destructive set (R-BTN-155, OAuth §5, §7, §11, G-BTN-157, the OAuth
+  Decisions line). The grammar names one-word verbs on the instance or the caller's own session
+  and the plural only where the act replaces or ends the set; `owner owners add | remove` is
+  `owner owner add | remove` (`owner.owner.*`), `admin resource set` is `admin reading set`, and
+  `human-key add | revoke` joins the tree (R-BTN-127, R-BTN-185, §12.2). The OAuth spec's
+  challenge and §13 read as R-BTN-130 does; R-BTN-116 says "answers no person's leg"; R-BTN-129's
+  list is the mark's definition and `check:actions` checks against it; a caller entry is
+  `{principal, scope, roles?}` and a noun may carry `notes`; `keys.json` maps `human` where
+  custody allows and approver rows try the list's roles; the four rows read as §14 does; an MCP
+  name is unique among every row, revoked ones included; `baton run` is one of the first twelve;
+  the B-165 note and the PR body say the administrator's session's stated power narrowed to the
+  rows the dashboard draws, and that `ticket claim` is git's claim beside Baton's.
+
+- **2026-11-02 — review round two of the restructure's part 3** (one fresh reviewer, the diff,
+  the impact list and round one's two reviews; all 37 round-one findings re-checked line by line
+  and confirmed closed). No blocking finding. Majors: the ground given for keeping
+  `ticket.resolve` from a delegated key ("every restart lifts a hold or routes") was false
+  against R-BTN-163's `baton.stalled` row, and decision 4 passed it to the owner; the OAuth
+  consent test was on the session's key, which a `human_only` owner key satisfies under
+  `[human]` while the parenthetical said no session does; `human-key.revoke` took `confirm:
+  true` but was absent from §12.2, as `attestation.revoke` had been since part 2; the registry
+  and §12.1 had no principal for a `human_only` key, so `human-key.add`'s `callers` could not be
+  written; R-BTN-130's "unique … revoked ones included" contradicted the OAuth spec's "unique
+  among live grants" and S-BTN-137; whether the dashboard's answer to a person leg needs a
+  confirmation code was said nowhere. Minors: OAuth §13's row, S-BTN-137 and its Decisions still
+  said `leg.stop` and "three scopes"; the mark's definition gave `GET /v1/actions` `true` while
+  its row said never an MCP key; an administrator matches an `owner` entry, which R-BTN-130's
+  `minted_by` sentence overlooked; a `park` survived in B-56's note; `human-key`'s noun family,
+  `keys.json` slot and the body's `signature` were half-specified; R-BTN-16's write rule covered
+  `/v1/ui/*` while a session now writes `POST …/attestations`; one action answered on two routes
+  with one `http`; nothing listed MCP keys.
+
+  Fixed: R-BTN-186 states the true ground (a restart closes what Baton or a leg raised — a
+  block, another's hold, a route, or a `parked` hold the key's own test never matches), and
+  R-BTN-129, R-BTN-130, the part-3 entry and the PR body cite it. The consent route admits a
+  session that is itself an `approvers.members` approver as R-BTN-188 reads a session — an
+  `owner` entry, or a `key:` entry naming a key not `human_only`, never `human` — the request's
+  repository list is narrowed to those, and R-BTN-185 says a session minted by a `human_only`
+  key is an owner's session, never `human` (OAuth §5, §11, §13, G-BTN-157; R-BTN-130).
+  `attestation.revoke` and `human-key.revoke` are in §12.2. `human` is a principal (R-BTN-129,
+  §12.1's new row), `human_only` a mark on an owner key or a key of no other role (§12.1), the
+  `human-key` noun is the human-only identity's, `keys.json` maps `human: <file>`, and the
+  body's `signature` is the new key's SSHSIG over its public line. An MCP name is unique among
+  live keys and grants; a hold or bar records the key's id (`set_by`), and the `own` test is on
+  the id, so a later key of the same name undoes nothing of a revoked one's (R-BTN-130, OAuth
+  §7, S-BTN-101). The dashboard's answer to a person leg is an unconfirmed act, named with its
+  reason (§11.4, R-BTN-163). OAuth §13, S-BTN-137 and the Decisions name the destructive set
+  and the open challenge; the mark's definition names the mechanically absent actions;
+  R-BTN-130 says an administrator mints none; B-56's note reads as the rule does; R-BTN-16's
+  write rule covers every session write and is marked changed; `ui` may carry the dashboard's
+  own route beside `http`, and the router serves both (R-BTN-129); the grants read lists
+  `mcp_keys` (§14, R-BTN-130).
+
+- **2026-11-02 — review round three of the restructure's part 3** (one fresh reviewer, the last;
+  the diff, the impact list, round two's 14 fixes re-checked line by line and confirmed closed;
+  the reviewer hit the account's rate limit once and resumed on the owner's "Retry"). One
+  blocking: the `own` test keyed on "the key's row id" while §13's actor convention held
+  `mcp:<name>` and §13.2's `mcp_keys` had no `id` and was keyed `(repository_id, name)`, so the
+  data model forbade the name reuse S-BTN-101 tests or, relaxed, reopened the hole. Majors:
+  R-BTN-188's `key:` entry said nothing of sessions though OAuth §5 and R-BTN-130 cited it for
+  that; §11.4's "every other action needs its code" contradicted the OAuth spec's
+  non-destructive approval, request, status and denial, and `ui.logout`; the `human`
+  principal's `repository` scope "where it is an owner" shut out the break-glass key R-BTN-188
+  calls the only recovery. Minors: `added_by` against `owner_bars.set_by`; whether an
+  administrator key may carry the `human_only` mark, which R-BTN-57 and two §14 rows tested;
+  R-BTN-155's not-confirmed sentence missing the answer §11.4 added; R-BTN-179 and §11.4 not
+  naming `mcp_keys`; `/v1/ui/messages` absent from the `ui` list; one tree cell naming one route
+  for four actions; two ticket notes carrying statements round two retired; §13 unmarked in the
+  impact list.
+
+  Fixed: an MCP key has an immutable `id`, never reused; `mcp_keys` is keyed by it, its name
+  unique among live rows; the actor is `mcp:<id>` everywhere a column holds one and the `own`
+  test is on it, `hold_reason: mcp:<name>` staying for display (R-BTN-129, R-BTN-130, §13's
+  convention, §13.2, the OAuth spec's §7 and §9). R-BTN-188's `key:` entry admits a dashboard
+  session the key minted when it is not `human_only`, and S-BTN-192 runs the case. R-BTN-155's
+  list is the whole list of confirmed acts, §11.4 says so, and the not-confirmed sentence names
+  the answer, the OAuth consent acts and `ui.logout`. The `human` principal's scope reaches every
+  repository a break-glass line satisfies (R-BTN-129, §12.1). R-BTN-57 and the two admin rows
+  say a human gate opens on the owner route, never with an administrator key. R-BTN-179 and
+  §11.4 name `mcp_keys`; the `ui` list names `/v1/ui/messages` and its `match`; the tree cell
+  names the four routes; B-156's and B-73's notes read as the rules do; the PR body marks §13.
+  No further round: what remains is the owner's (the PR body's seven numbered items).
+
+- **2026-11-02 — the owner's answer on part 3's open items.** Asked the seven items PR #163's
+  body listed, each with a recommended reading, the owner answered: "I'll take your
+  recommendations." So, as rulings: `baton tickets …` is `baton ticket …`, one noun for a ticket
+  (R-BTN-74, R-BTN-127); `baton request` is `baton ticket request` (R-BTN-131); `baton attest` is
+  `baton attestation add | revoke`, with `baton decision answer` for a person leg's answer
+  (R-BTN-116, R-BTN-181); a delegated key writes no attestation and resolves no condition
+  (R-BTN-186, R-BTN-130); R-BTN-186's "restart a leg it stopped" is gone; the registry's MCP mark
+  is the per-action `delegated: true | own | false` (R-BTN-129); and the review's sign-in and
+  confirmation-code ceremonies stay as R-BTN-155 says, candidate decisions for later. No candidate
+  in the B-165 table was vetoed. The merge waits on the owner's word.
+
+- **2026-11-02 — the restructure, part 4: the capability ontology moved out, and the last
+  candidates (B-166; owner direction).** The fourth and last part of the rewrite the owner asked
+  for after the whole-spec review of 2026-11-01 (`docs/review/spec-simplification-review-2026-11-01.mdx`,
+  B-155 to B-165; parts 1 to 3 above), written from the text on `main` (`e7fee93`). The owner
+  answered each question with the words in quotation marks; the sentence after each is the
+  ticket's reading of that answer (the tickets are unsigned, so the readings are claims, as
+  `CLAUDE.md` says):
+  - **B-162, the owner: "Nothing; move it out".** The whole ontology moves to the runner side;
+    core matches capabilities by name only; route choice lives in `rank.mjs` and course
+    instructions. R-BTN-174 is rewritten (§5.9, "capabilities are the runner's statement"): rule 4
+    reads declared ∩ grant by name, a runner decides for itself what the keys and tools it holds
+    amount to and declares it — the CLI runner while a check that tests them passes (R-BTN-121) —
+    and Baton derives nothing. §6.10 keeps its number as a paragraph: which model and key a leg
+    uses is the course's (`rank.mjs`, R-BTN-98; instructions and `agent_command`, R-BTN-131), a
+    new provider needing no change to Baton. Retired: R-BTN-175 (the language, its validation,
+    bounds, evaluator and conformance), R-BTN-176 (the atoms) and R-BTN-177 (route choices,
+    hysteresis, `meters`, `advice`, `taken`, `BATON_ADVICE`, `BATON_TAKEN`). Gone with them:
+    `.baton/ontology.json`, the board post's `ontology`, course entries' `route_choices`,
+    `runner_derived`, `ontologies`, `route_last`, `claim_legs.route_choices_json` / `taken_json`,
+    `not-derived`, the derived sets' alarm cycle and R-BTN-50's ontology row. R-BTN-75, R-BTN-99,
+    R-BTN-100, R-BTN-108, R-BTN-110, R-BTN-120's table, R-BTN-121, R-BTN-126, R-BTN-131, R-BTN-134,
+    R-BTN-144's table, §6.6, §11.4, §13, §14 and G-BTN-5 follow. The code goes in B-167.
+  - **B-165, the owner: "Take review's default"**, for each candidate this part's sections held:
+    - *Seats, bills, capacity* (table 1.2): a capability with a capacity, its seats held by the
+      claims whose running leg requires it, refused past capacity by rule 11 `capacity-full`
+      (R-BTN-178 rewritten; an administrator's `baton admin capacity set`, `PUT
+      /v1/admin/capacities`, `capability_capacity`). The review named rule 4; rule 11 keeps its
+      number and its own refusal, since a full capability is not a missing one. `bills`,
+      `claim_bills`, `instance-busy`, resource and instance capacities and the `host` scope go.
+      What it loses: a runner billing several seats, or a chosen instance, per leg, and a Baton
+      count of the claims spending an account (a claim's reports carry it, R-BTN-99); one
+      machine's singleton becomes a lock the runners there share, each declaring the capability
+      only while its check can take it.
+    - *Resource scopes and `atoms_from`* (table 1.2): `service` and `account` only; every runner
+      granted on a repository has the same usable instances; `uses`, `refused_uses`,
+      `runner_instances`, the `runner` and `host` scopes, `atoms_from` and the administrator's
+      7-day override go, an administrator's reading being one more instrument's (R-BTN-76,
+      R-BTN-77, R-BTN-126). What it loses: a block for one runner alone, and an administrator
+      pinning an instance's state against its instruments. `state` and `measure` kinds stay: the
+      review's replacement did not name them.
+    - *Readings' `signed`*: the reading's SSHSIG (`baton-reading@1`) and the `readings` knob's
+      `signed` go; a reading is authenticated by its request like every attestation (R-BTN-76,
+      R-BTN-181, R-BTN-188). The writers a trusted leg's readings admit post signed requests
+      already. What it loses: a policy counting a runner's reading toward a gate only when posted
+      with its SSH key rather than its API key.
+    - *Table 1.4's owner settings*: `required_independence` removed (the course file's
+      `no_chain_from`, as protected as the course, R-BTN-106); `trigger_workflows` removed (the
+      forge dispatches only a workflow on the default branch that declares a manual dispatch,
+      R-BTN-94); `report_horizon_h` a constant, 6 hours (R-BTN-99); `atoms_from` gone above. Kept,
+      each naming a place or a choice that differs between deployments: `transcript_repos`,
+      `artifact_buckets`, `leg_log_root`, `unblocked_trigger`, `weight`, `checks`,
+      `check_runners`, `api_keys`. R-BTN-66 now says where three values beside its lists live:
+      `human_identity` a policy knob, `check_app_id` an instance setting, `pushers` an owner
+      setting that adds forge authors, its addition a loosening. What it loses: an owner adding
+      a chain rule to a sourced course whose file lacks one; an administrator's allowlist of
+      dispatchable workflows; a course keeping reports longer than 6 hours.
+    - *The adoption actors* (table 1.1: the mirror key, shadow mode, legacy runners, adoption
+      requests, cutover, `reap_after`, the `legacy` credential): §16 is an appendix that ends
+      when docs retires its mirror, on which day it, every *adoption* mark in §13 and §14, the
+      *adoption* rows of §15 (S-BTN-14, S-BTN-16, G-BTN-8, -9, -19, -22, -35, -41) and the
+      mirror's places in R-BTN-73, R-BTN-88, R-BTN-93 and R-BTN-94 are deleted in one change.
+      The mirror's columns, key role, route and drop rule carry the mark now. What it loses:
+      nothing after docs retires its mirror.
+  - Retired: R-BTN-175, R-BTN-176, R-BTN-177; S-BTN-139 to S-BTN-155; G-BTN-159, G-BTN-160,
+    G-BTN-161 (the tables below). Changed §15 rows: S-BTN-21 and G-BTN-162 (capacity), S-BTN-45
+    (an administrator's reading after a probe's), S-BTN-61 (no `uses`, no bill), S-BTN-63 and
+    G-BTN-90 (no `required_independence`), S-BTN-91 (blocked for no runner until every instance
+    is down), S-BTN-122 and G-BTN-142 (no bills), S-BTN-181 (no `signed`), G-BTN-5 (an ungranted
+    capability), and by the *adoption* mark alone S-BTN-14, S-BTN-16, G-BTN-8, -9, -19, -22, -35,
+    -41. Test files: `S-BTN-139.ontology`, `S-BTN-147.route-choices` and `S-BTN-147.runner-half`
+    test retired rows and stay in `RETIRED_TESTS_ALLOWED` until B-167 deletes them;
+    `S-BTN-45.block-edges` and `S-BTN-63.no-chain` test the built behaviour and change in B-168;
+    S-BTN-21 has no test file yet (B-106).
+  - Outside the spec: `scripts/check-spec.mjs`'s `RETIRED_TESTS_ALLOWED`; `docs/context/vocabulary.mdx`
+    (capability; capacity and seat; the gate), `docs/context/architecture.mdx` (capabilities are
+    names, matched). The pages that teach the built code (README's code map,
+    `docs/runbooks/register-baton.mdx`, `docs/standard-courses.mdx`) follow B-167 and B-168.
+    Tickets: B-167 and B-168 filed for the code; B-106 rewritten for a capability's capacity,
+    with a map of its old items; B-104 and B-105 carry supersession maps of their spec half;
+    B-162, B-165 and B-166 record what this part wrote; B-10, B-15, B-21, B-46, B-47, B-107,
+    B-123, B-142, B-145, B-146, R3-1215, R3-1235, R3-1254, R3-1269 and R3-1272 carry a dated note.
+
+- **2026-11-02 — review round one of the restructure's part 4** (PR #164; two fresh reviewers,
+  given the diffs as patch files, the PR body with its impact list and eight owner items, and
+  different angles: the whole text; the guarantees, actors and journeys). Reviewer A: 4 blocking,
+  5 major, 10 minor; reviewer B: 1 blocking, 7 major, 6 minor, much of it the same finding twice.
+  Findings: removed facts left in R-BTN-99 (the caller's `host` instances), §14 (the heartbeat's
+  `uses` / `refused_uses`, the claim's `refused`), §13.7 (`instance_readings.signature` /
+  `nonce`, `resource_fleet` counting runners), R-BTN-50 (a claim's billings) and G-BTN-88
+  (billings); seats recomputed from the current course and ticket, so a mid-leg snapshot could
+  seat two holders of an exclusive capability, and the claims counted unnamed; one tenant-wide
+  pool keyed by a course-vocabulary name; the per-machine singleton's `check` unable to hold a
+  lock through a leg; §16's end clause promising a one-change deletion over an incomplete list,
+  the `refs.*` knobs' `mirror` writer among the gaps; `unblocked_trigger` able to name any
+  dispatchable workflow, a deploy among them, without being a loosening; what a funds gate tests
+  once the field reading was retired, and an administrator's writer class; S-BTN-20 assuming the
+  retired `runner` scope; `full` without a source, a wake-up rule or a view bump;
+  `launch-candidates` offering a full capability; R-BTN-75's per-runner resource blocks;
+  S-BTN-19, S-BTN-44, S-BTN-21's lowering step; three Decisions lines; R-BTN-53's `unknown`;
+  R-BTN-57 and R-BTN-66 not naming capacities; a capacity's name unvalidated; the architecture
+  page's "alarm cycle"; no path from `rank`'s advice to a leg; the decision's claim that every
+  trusted-reading writer signs its requests; B-167's "refused as unknown fields" breaking older
+  CLIs; B-168 missing the built `worker` scope's registrations, `.baton/baton.json`'s
+  `report_horizon_h`, the claim's `refused`, `resource_fleet` and the readings' columns.
+  Fixed: R-BTN-99, §14, §13.7, R-BTN-50 and G-BTN-88 now state the new facts; seats are stored
+  in `claim_seats` from rule 4's matched set (the ticket's clause and the leg's) at the claim
+  and each `advance`, never changed by a later snapshot, the active and fence-pending claims
+  counted, deleted at the end or the fence (R-BTN-178, §13, B-106); setting a capacity is the
+  administrator's statement that the name is one thing tenant-wide, with the courses declaring
+  its type printed for confirmation, a role, `credential:`, `runner:` or bare `human-operator`
+  refused, and the shared pool named as the accepted cost; the CLI runner's `lock: <path>` on a
+  capability holds the machine's singleton from claim to leg end (R-BTN-121, R-BTN-178);
+  §16's end clause makes the inventory a search over *adoption* marks and the named terms, names
+  the passages it returns, and retires the `mirror` writer with a policy schema version, and the
+  remaining mirror columns, register fields, caller and route carry the mark; the unblocked
+  trigger's workflow must declare the `tickets` input, and setting it is a loosening (R-BTN-94,
+  R-BTN-186); a requirement on an instance takes each admitted reading as one attestation, the
+  short form reads the state, and an administrator's reading is writer class `admin`
+  (R-BTN-76); a runner's own spent subscription ends `blocked` on its capability; `full` reads
+  `claim_seats`, writes no block, wakes no one, bumps `instances_version`, and `launch-candidates`
+  leaves a full capability out; R-BTN-75, R-BTN-53, R-BTN-57, R-BTN-66, R-BTN-174 (wildcard
+  grants), §6.10 (no Baton channel carries `rank`'s advice to a leg), S-BTN-19, S-BTN-20,
+  S-BTN-21, S-BTN-44, G-BTN-162, the three Decisions lines and the readings decision's loss
+  corrected; `docs/context/architecture.mdx`'s freshness bullet rewritten without the alarm
+  cycle; a Migrations entry, "part 4's retired fields", ignores and logs the retired wire fields
+  until no client sends them; B-106, B-167 and B-168 carry the rest. `docs/context/product.mdx`
+  and values 12 still speak of "one alarm cycle"; they are the owner's words and are left for the
+  owner.
+
+- **2026-11-02 — review round two of the restructure's part 4** (PR #164; one fresh reviewer,
+  given round one's two reviews, the round-one fix as a patch, the whole diff and the PR body).
+  Of round one's 33 findings, 24 were confirmed closed and 9 partly closed. New: 3 major, 12
+  minor. Findings: the CLI runner's `lock` taken before a claim but not before an `advance` into
+  a leg requiring it, and released at different points by R-BTN-121 and R-BTN-178; a full
+  instance requirement read two ways — by the instance's state, or reading by reading — with
+  `count` met by one writer's two readings; §16 retiring the `refs.*` `mirror` writer through a
+  "policy schema version" the spec does not define, reinterpreting stored versions without an
+  approver; adoption passages the inventory search misses (§12.7's `mirror_workflow`, the
+  heartbeat's `mode`, the webhook, seal and `events` rows); rule 11, step 4 and the why-not
+  sentence not naming the ticket's clause or `claim_seats`; a fence-pending silent reap
+  releasing seats at once; G-BTN-88's seat clause untested by S-BTN-61; the Migrations stop
+  forgetting instruments and administrators; the trigger's input bound overstated and B-168
+  having Baton read a workflow file; R-BTN-181's `nonce` on readings; `claim_seats` unnamed in
+  the export and a seal passing over a fence-pending seat; the capacity confirmation listing the
+  type's courses rather than the name's; a spent line's `capability` end looping; the vocabulary
+  page; B-168's `uses` colliding with registration tokens'; the part-4 entry edited in place
+  with round one's rows.
+  Fixed: the lock is taken before a claim or an `advance` into a leg requiring it, the claim
+  suspending rather than advancing without it, and held until the claim ends or leaves those
+  legs (R-BTN-121, R-BTN-178, B-106); a full instance requirement ignores the state, `missing`
+  meaning no admitted reading in force, `count` counting distinct writers' keys unless
+  `distinct` names another field, with S-BTN-181's two new cases (R-BTN-76); the `mirror` value
+  stays legal and inert in stored policy versions, omitted by `--print`, refused in a new
+  version, marked *adoption* in R-BTN-188's table (§16); the five passages marked; rule 11 and
+  step 4 read rule 4's set, the why-not sentence names `claim_seats`; a reap that is not
+  fence-pending releases at once, the seats counted are `claim_seats`' rows, G-BTN-162 says so
+  and covers the cross-repository count, G-BTN-88 loses its seat clause; the Migrations stop
+  waits for every credential; the trigger's bound says what GitHub enforces and that the
+  loosening gate is the bound elsewhere, and B-168 reads no workflow file; R-BTN-181 says a
+  reading has no `nonce`; R-BTN-88 names `claim_seats` among what is not exported and the seal
+  waits for no fence-pending claim; the confirmation lists the courses whose legs require the
+  capability; a spent line's check must fail until it recovers (R-BTN-76); the vocabulary
+  page's seat and the two capacities; B-168's exit criterion; the part-4 entry keeps its own
+  rows, the corrections living in the review records.
+
+- **2026-11-02 — review round three of the restructure's part 4** (PR #164; one fresh reviewer,
+  the last, given round two's review, its fix as a patch, the whole diff and the rewritten PR
+  body). Of round two's 15 findings, 13 were confirmed closed, C-3 closed in substance and C-2
+  partly closed; of round one's findings round two left partly open, all closed but B-5 (the
+  same point as C-2). New: 1 major, 8 minor, none blocking. Findings: a full instance
+  requirement still read two ways — every reading in force, or a writer's latest — so a stale
+  `measure` could open a funds gate against the same writer's newer reading, and "latest" not
+  said per instance; R-BTN-181's `missing` naming `unknown` unqualified; §16's inert-`mirror`
+  sentence deleted by the change it governs, in the present tense, with the `cooperative`
+  column's default naming `mirror`; G-BTN-78 and S-BTN-50 not reflecting the seal's wait for
+  fence-pending claims, which no ticket built; a claim answered for a `lock` leg the runner could
+  not lock; no scenario for the lock; "running leg requires it" left in a Decisions line,
+  R-BTN-178's recommendations bullet and B-106; R-BTN-94's "anything else is `invalid-params`"
+  reading as Baton checking the workflow; B-168 claiming S-BTN-181, which needs B-146's store,
+  and B-146's *Do not* line contradicting the spec; S-BTN-21 not testing a silent reap or a
+  ticket-level seat.
+  Fixed: for each usable instance and admitted writer's key, that writer's latest reading in
+  force is one attestation, an older one never counting, `count` over the distinct keys that
+  pass, with an S-BTN-181 case of an old 60 and a newer 30 (R-BTN-76); R-BTN-181's `unknown`
+  applies to `requires.resources` alone; §16's sentence opens "On that day", makes the
+  `cooperative` column the other three writers, names the knob in the refusal, and R-BTN-188's
+  mark carries the inert value past the deletion; G-BTN-78 and S-BTN-50 test the seal's wait, and
+  B-106 builds it; a claim answered for a `lock` leg it cannot lock ends `suspended` at once
+  (R-BTN-121), with an S-BTN-73 case and B-106 items; the seat wording in the Decisions line,
+  R-BTN-178 and B-106 now says stored from rule 4's set; R-BTN-94 leaves the input to the forge
+  at dispatch; B-168 leaves S-BTN-181 to B-146, whose *Do not* line is noted void, with the
+  requirement's reading; S-BTN-21 gains the silent reap and a ticket-level seat. The reviewer's
+  verdict: with D-1 fixed, ready for the owner with only the PR's nine items open.
+
+- **2026-11-02 — the security review's corrections** (PR #165,
+  `docs/review/security-review-2026-11-02.mdx`). No owner ruling: each change makes two rules
+  agree, or closes a gap in the direction the spec already took; the findings that need a design
+  choice are tickets (B-170 to B-175). Changed: R-BTN-93's spliced first bullet is one sentence
+  again (C1); the claim response loses `outbox?`, which no rule defined and R-BTN-171's own route
+  replaces (C3); §2.3 names both forge-notification routes as outside the per-IP rule, and R-BTN-73
+  caps their bodies at 26,214,400 bytes, refused `too-large` before any digest, with G-BTN-68 and
+  the `too-large` row citing it (C4, S4); the pending sign-in cookie is `__Host-baton_pending`,
+  matching the built session cookie (C5); §12's headline and R-BTN-15 say no push changes the
+  state Baton holds for authority, the policy included, and name the attestations a push may move
+  (C6); R-BTN-144's class 5 masks every bearer prefix Baton issues — `bps_`, `bds_` and the OAuth
+  companion's `bmo_`, `bmr_`, `bor_` joining `brt_`, `bak_`, `bmcp_` — and R-BTN-84's replay
+  keeps the provider's key only where R-BTN-144's allowlist names it (S1, in part; provider keys
+  in leg output are B-170); R-BTN-114's `conclusions` map names exactly one `success` and one
+  `failure` station, a change moving a station toward `success` (or removing or renaming a course's
+  entry) is a loosening and the other way a tightening, R-BTN-153 sends a timeout to `failure`
+  where no `neutral` is mapped, and R-BTN-188's sentence calls `checks` and its neighbours settings
+  "kept outside the policy" rather than ones that "tune operation rather than trust" (S2); R-BTN-191's
+  supersession names the machine key among the sync's posters (S6); R-BTN-16 sends
+  `Cache-Control: no-store` on every authorized response and every response that sets a cookie or
+  carries a sign-in code (U3). Scenarios S-BTN-42, S-BTN-68, S-BTN-98 and S-BTN-124 gain the
+  cases; B-169 builds them. Not taken: S5 (the `protected` preset's `readings` row already tells
+  owners to narrow what a gate reads, and instrument keys are administrator-registered); S8
+  (counter checks refuse authenticators that report no counter, and a cloned key is a custody
+  failure the deployment owns, §12.8); U2 (a leg is the sidecar's own OS user, which R-BTN-144
+  already puts outside the boundary, and the fence's authority is Baton's holder query,
+  R-BTN-26); the naming gotchas (renames cost more than they would save; §6.6 already marks rule
+  12 unused).
+
+- **2026-11-02 — review round one of the security review's corrections** (PR #165; one fresh
+  reviewer, given the diff and the impact list). Findings: 4 major, 5 minor. Making an addition to
+  `check_runners` a loosening put it under `approvers.policy` while §11, §14 and R-BTN-188 give
+  registering a check-runner to `approvers.members`; R-BTN-153 sends a timeout to `neutral`, which a
+  GitHub required check passes, and a map with no `neutral` left a timeout without a station;
+  R-BTN-131's PR fallback named no branch, credential or `git`-forge outcome, and B-169 decided them
+  beyond the spec with a scenario §15 lacked; forged notifications count in no failure bucket;
+  the cap's unit, §2.3's dangling "capped instead", the `too-large` row and G-BTN-68; `no-store`
+  missing `POST /v1/login`; every `checks` change gated, tightenings included, against the 2026-10-28
+  decision that the brake stays easy; bookkeeping in this entry and B-169. Fixed: the
+  `check_runners` clause dropped; the `failure` fallback; only a change toward `success`, or a
+  removed or renamed entry, is a loosening; the cap in bytes, cited from §2.3, the `too-large` row
+  and G-BTN-68; `no-store` on responses that set a cookie or carry a code; this entry and B-169
+  corrected. Moved to tickets: the request command's fallback (C2, B-174: the PR reverts its
+  R-BTN-131 and R-BTN-180 edits, so the two still disagree until B-174 lands) and the `neutral`
+  pass (B-175). Not taken: counting forged notifications in a failure bucket, which §2.3 exempts on
+  purpose ("CI tokens, App deliveries and forge notifications count in none") and the body cap now
+  bounds.
+
+- **2026-11-02 — the owner's rulings on the security review's tickets.** Asked to choose among
+  the options B-170, B-171, B-174 and B-175 lay out, each with a recommendation, the owner
+  answered: "I accept your recommendations". Changed: R-BTN-144 gains masking class 7 — every
+  variable of the leg's environment whose name ends `_KEY`, `_TOKEN` or `_SECRET`, and every
+  name `runner.json` `mask_env` lists — which archivers apply to transcripts and replay to its
+  report, and the environment table's "kept" row cites it (B-170; rejected: a list alone, empty
+  by default; leaving kept credentials unmasked); R-BTN-19 gains an administrator's fence clear,
+  `claim.fence-clear` (`POST /v1/ui/claims/{id}/fence-clear`, destructive, confirmed, never
+  delegated, logging `fence-cleared {admin}`), with §9.5, R-BTN-155's confirmed list, §12.2,
+  §14 and G-BTN-14 naming it (B-171; rejected: bounding `fence_deadline` at two hours, which
+  weakens the fence for every runner with a long lease); R-BTN-131's request command decides by
+  the forge's answer — a protected-branch refusal pushes the commit to a side branch and
+  opens a PR with the caller's forge credential (the branch, first inside `branch_pattern`, moved
+  outside it on 2026-11-03, below) — and R-BTN-180 says the same, closing the contradiction (C2) PR #165 left open
+  (B-174; rejected: reading the policy first); R-BTN-114's conclusions are `success`, `failure`
+  and `timed_out`, with no `neutral`, R-BTN-153 sends a timeout or `exec` error to `timed_out`
+  (else `failure`) and lets an agent reach only `failure` or `timed_out`, R-BTN-115 posts
+  `timed_out` as GitHub's conclusion of that name (checks are GitHub only), and a
+  loosening of `checks` is a station newly mapped to `success` or a removed or renamed entry
+  (B-175; rejected: keeping `neutral` as an advisory conclusion; stating the gap). No `neutral`
+  mapping was built, so no transition is carried. Scenarios S-BTN-4, S-BTN-68, S-BTN-98 and S-BTN-175
+  gain the cases; G-BTN-93 names the set; four Decisions lines. B-5's agent-stations line is
+  corrected. The four tickets now hold only their build halves.
+
+- **2026-11-03 — review round one of the owner's rulings** (one fresh reviewer, given the diff and
+  the impact list). Findings: 1 blocking, 2 major, 5 minor. Blocking: the request's side branch,
+  inside the course's `branch_pattern`, made the request's own merged PR one of the new ticket's
+  PRs, so `converse` arrived at once and R-BTN-25 continued the merged branch. Asked to choose, the
+  owner answered "Outside pattern": the side branch is `baton-request/<ID>`, a `git` forge and any
+  other refusal are reported in git's words, and S-BTN-175 checks that the merged request leaves
+  the ticket with no PR. Major: S-BTN-68's two `checks` changes broke R-BTN-114's own validation
+  (now a swap of `success` and `failure`, `forbidden`, and a dropped `timed_out`, accepted); the
+  GitLab and Gitea delivery of `timed_out` contradicted R-BTN-115's "Checks are GitHub only"
+  (dropped; R-BTN-114 says "a GitHub required check"). Minor, fixed: R-BTN-90 and §9.5 name the
+  administrator's clear; the clear resolves `baton.fence-pending`, is drawn on the claim and on
+  that condition, and is never a condition restart, with the `conflict` row; R-BTN-144's closing
+  sentence says what masking covers, class 4 no longer repeats the AWS names class 7 matches, and
+  the archiver's limit is named; B-175 and B-170 copy the spec's wording. Offered to the owner, not
+  edited: credential names outside the three endings (`*_PASSWORD`, `PGPASSWORD`, `*_PAT`), which
+  `mask_env` covers meanwhile.
+
+- **2026-11-03 — review round two of the owner's rulings** (PR #167; one fresh reviewer, given
+  the whole diff and the impact list). Findings: 5 major, 7 minor, none blocking. Major: G-BTN-20
+  bound the process kill to `fence-cleared`, which an administrator's clear now reaches at once;
+  the id allocators scanned only `branch_pattern` branches, so an open request PR's id could be
+  handed out again; nothing stopped a `branch_pattern` matching `baton-request/*`; the clear's
+  dialog understated the risk on a `session`-mode leg; the request command's forge was unnamed,
+  though the command asks Baton nothing. Fixed: G-BTN-20 reads "before the runner reports
+  `fenced`"; R-BTN-131's allocators scan `baton-request/*` heads and the command takes the next
+  free id when the branch exists; R-BTN-190's validator refuses a pattern matching
+  `baton-request/*`; the dialog names the `session`-mode case; the adapter is the one `--forge`
+  names, else `github` for a `github.com` origin, and R-BTN-131 states the matched refusal
+  messages. Minor, fixed: a request PR's merge by a human approves its ticket files (R-BTN-184,
+  the `paths.tickets` row, `tickets-approved`); R-BTN-19's main sentence names the clear; a
+  freeze does not refuse the clear, with an S-BTN-50 case; S-BTN-175's protected case, its
+  missing exit status and the no-credential and existing-branch cases; B-170, B-171 and B-174
+  match the spec; this history's 2026-11-02 entry no longer names the branch the round-one
+  answer chose; R-BTN-183 counts a check run concluded `success`, never `neutral` or `skipped`,
+  and B-175 changes the vendored `std:forge.check@1` enum in docs. Not taken: renaming the
+  `baton-request/` prefix, which shares a string with the SSHSIG namespace `baton-request` but
+  names a different thing in a different place.
+
+- **2026-11-03 — more credential names, the sign-in preview and retirement.** The owner, asked
+  whether masking should catch `*_PASSWORD`, `PGPASSWORD` and `*_PAT` by default: "Ok, please draft
+  the spec change for this"; and, on B-172 and B-173 still holding their spec halves: "Please
+  ensure all tickets required to implement the spec are ready to be picked up for
+  implementation". Changed: R-BTN-144's class 7 adds names ending `_PASSWORD` or `_PAT` and the
+  name `PGPASSWORD`, matched case-sensitively, with S-BTN-98's fixtures (B-170); R-BTN-155's
+  sign-in binds in two steps — the login-links routes answer `{role, client_addr, age_s}` and bind
+  nothing, the CLI asks `bind? [y/N]` with no `--yes`, and `{code, confirm: true}` binds — with
+  §14's two rows and S-BTN-124's cases (B-172; the open question on `sk-`-only binding is
+  untouched); R-BTN-47 gains *Retirement* (as round one below left it): final, in one transaction
+  ending every session's reach, revoking MCP keys and OAuth grants with their tokens, requests and
+  codes, sync and mirror keys, registration tokens, runner grants and check-runners, reaping
+  active claims as a force-reap (fence-pending), dropping its outbox entries and deleting its
+  wants and dispatches; every later call `not-found`, only its tombstone exported, a seed entry
+  for it skipped, and the id never registered again; R-BTN-155, R-BTN-130, R-BTN-19, R-BTN-3,
+  R-BTN-88's seal, §2.3's prune, R-BTN-140's consent, R-BTN-171 and the OAuth companion's §5,
+  §7 and §9 cite it; new scenario S-BTN-198 (B-173).
+  Two Decisions lines. Tickets: B-172 and B-173 now hold only their build halves; B-169's
+  supersession item moved to B-146, which builds the store; B-175's vendored-enum item dropped
+  (the read-back records GitHub's conclusions, `neutral` among them, and R-BTN-183 counts only
+  `success`); B-140 and B-39 updated for R-BTN-183, R-BTN-184 and R-BTN-84.
+
+- **2026-11-03 — review round one of the credential names, the sign-in preview and retirement**
+  (one fresh reviewer, given the diff and the impact list). Findings: 4 blocking, 4 major, 4
+  minor. Blocking: retirement sent its claims a `release` while revoking the grants their
+  heartbeats need, so the message was never delivered and the claim never fenced; registration
+  tokens and approved OAuth codes outlived it; "kept for export" contradicted R-BTN-88, which
+  exports no events; a revoked mirror held the seal for good and the retired repository's wants
+  kept dispatching. Major: the OAuth companion's lists of how a grant ends; the seed naming a
+  retired id; B-76 still building a one-step owner bind. Minor: R-BTN-171's *Dropping*;
+  `code_repos` consent lapsing on retirement; the preview's closing sentence and its
+  failed-verification count; `_PAT` matching pattern variables; stale ticket dates. Fixed:
+  claims reaped as a force-reap, fence-pending, and a heartbeat drops a retired repository's
+  course instead of being refused; registration tokens, pending requests and codes revoked, the
+  token exchange rechecking the repository; the export carries the tombstone alone; the seal
+  and the event prune count live repositories only, and wants, trailing dispatches and the
+  trigger are deleted; the companion's §5, §7 and §9; the seed skips and logs; R-BTN-171's
+  *Dropping* names retirement; consent judged for a retired repository too; the preview
+  sentence says the CLI previews, and a `not-found` is no failed verification; the `_PAT`
+  cost stated; B-76 builds the owner's two steps and B-172 the administrator's; ticket dates.
+  The `released:retired` end reason is withdrawn.
+
+- **2026-11-03 — review round two of the credential names, the sign-in preview and retirement**
+  (a new fresh reviewer, given the whole diff). Findings: 2 blocking, 2 major, 5 minor.
+  Blocking: R-BTN-88's import refused the tombstone, since it holds no policy; the backstop,
+  the mirror dispatch and later wants still dispatched for a retired repository. Major:
+  revoking registration tokens revoked the credentials they registered, so a token-registered
+  holder could not report `fenced`; whether the administrator's fence clear still reached a
+  retired repository's claim was undecided. Minor: "each is fence-pending" overstated R-BTN-19;
+  what a retired repository's owner rows confer; consents B gave could never be withdrawn;
+  R-BTN-56 made retiring the owners' act; B-170 attributed case-sensitivity to the owner. Fixed:
+  the export's `repositories` section and the import's policy check name the tombstone; one
+  sentence puts a retired repository outside every rule that reads registered repositories
+  (wants, dispatches, the alarm, the backstop, mirrors, the seal, the prune, limits, approver
+  lists), with R-BTN-94, the backstop and R-BTN-93 saying so, and step 6 deletes its
+  `webhook_syncs` rows, timers and consents; tokens are exhausted, not revoked; the fence clear
+  is the named exception to `not-found`; a claim is fence-pending only where its runner is
+  alive; owner rows confer nothing; R-BTN-56 says the owners have an administrator retire it;
+  the attribution dropped. S-BTN-198 and B-173 follow.
+
+- **2026-11-03 — review round three of the credential names, the sign-in preview and
+  retirement** (a new fresh reviewer, the last round). Findings: 4 major, 2 minor, none blocking.
+  Major: the alarm skipping a retired repository left its fence-pending claims with no deadline
+  and no condition, and the seal both waited on them and did not count them; the holder queries
+  fell under `not-found` while the former-path fence still relies on them; R-BTN-140's entry
+  matched two repositories once the forge repository is registered again under a new id; B-173
+  acted on stores no code has yet (MCP keys, OAuth, owner sessions, registration tokens,
+  check-runners, consents, timers, the outbox), so it could not be picked up. Minor: "every
+  dashboard session" took in the administrator's, who must still reach the clear; account
+  instances kept listing the retired id. Fixed: the fence-pending claims are the one live part
+  of a retired repository — the alarm's deadline and condition, the holder queries and the seal's
+  wait reach them; the holder queries join the fence clear as exceptions to `not-found`;
+  R-BTN-140 reads the live repository with that id, else a retired one whose entry never has
+  reach; step 1 names owner sessions and keeps the claims on the administrator's dashboard;
+  step 6 removes the id from account instances; B-173 builds retirement over today's stores and
+  the "live repository" predicate, and each later store's step is noted in the ticket that
+  builds the store (B-76, B-25, B-73, B-8, B-5, B-46, B-61, B-64), so every ticket can be picked
+  up now. S-BTN-198 follows. B-172 is superseded into B-76, which builds the code sign-in flow
+  for both roles: the two steps are built where the flow is.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
@@ -1472,6 +2301,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
 | R-BTN-148 | open-world settlement, misdeclared claims, tainted branches | B-166 part 1 (2026-11-01, B-165's review default) | nothing: no provisional claim, no author gate, no taint |
 | R-BTN-166 | a choice station: the first leg ready wins | B-166 part 1 (2026-11-01, B-165's review default) | a person leg's `expires: {after_s, reached}` (R-BTN-116); no general race between legs |
 | R-BTN-173 | light questions: answered in the claim, or promoted to git | B-166 part 1 (2026-11-01, B-161 "One primitive") | the plain path: a handler ticket written git first, asked through its person leg, the restart formed by Baton from the answer (R-BTN-161, R-BTN-162, R-BTN-169) |
+| R-BTN-175 | the ontology language, its validation and its bounds | B-166 part 4 (2026-11-02, B-162 "Nothing; move it out") | nothing in core: a runner decides what the keys and tools it holds amount to and declares it, its check testing them (R-BTN-121, R-BTN-174); `src/core/ontology.ts`, the translator, the grammar and the conformance suite go in B-167 |
+| R-BTN-176 | the atoms a route choice reads | B-166 part 4 (2026-11-02, B-162) | nothing in core: the course's `rank.mjs` and leg instructions read the instance and fleet views (§6.10, R-BTN-98, R-BTN-99) |
+| R-BTN-177 | route choices: advice on how a leg runs | B-166 part 4 (2026-11-02, B-162) | §6.10's paragraph: which model and key a leg uses is the course's; no `advice`, `taken`, `BATON_ADVICE`, `BATON_TAKEN` or `route_last` |
 
 R-BTN-23 (retry policy) is not retired: it is merged into R-BTN-122, whose heading carries both
 ids. R-BTN-21, R-BTN-27, R-BTN-42, R-BTN-43 and R-BTN-49 are the `roadmap-pr` course's own rules,
@@ -1503,6 +2335,26 @@ defined in docs' `BATON_ROADMAP_PR_COURSE` (check-spec's `COURSE_IDS`).
 | G-BTN-86 | an unknown ticket is claimable only at its `start_leg`, provisionally | B-166 part 1 (2026-11-01, B-165) | S-BTN-58: `not-eligible` until a post names it |
 | G-BTN-151 | a choice settles to the first leg whose prerequisites hold | B-166 part 1 (2026-11-01, B-165) | G-BTN-152's `expires` instant; G-BTN-90 |
 | G-BTN-158 | a light question settles once, in the claim or from git | B-166 part 1 (2026-11-01, B-161) | G-BTN-147 |
+| S-BTN-139 | the ontology's closure over holdings | B-166 part 4 (2026-11-02, B-162) | `test/integration/S-BTN-139.ontology.test.ts` tests retired behaviour until B-167 deletes it (`RETIRED_TESTS_ALLOWED`); declared capabilities are S-BTN-92's and G-BTN-5's |
+| S-BTN-140 | a program refused | B-166 part 4 (2026-11-02, B-162) | — |
+| S-BTN-141 | bindings narrow | B-166 part 4 (2026-11-02, B-162) | — |
+| S-BTN-142 | the grant before the closure | B-166 part 4 (2026-11-02, B-162) | an ungranted capability never counts: G-BTN-5 |
+| S-BTN-143 | matching on derived capabilities | B-166 part 4 (2026-11-02, B-162) | matching by name: S-BTN-74, S-BTN-92 |
+| S-BTN-144 | why not, for a derived type | B-166 part 4 (2026-11-02, B-162) | `not-declared` and `not-granted`: S-BTN-74 |
+| S-BTN-145 | the environment is R-BTN-144's under the ontology | B-166 part 4 (2026-11-02, B-162) | R-BTN-144's own scenarios |
+| S-BTN-146 | derived sets' freshness and bounds | B-166 part 4 (2026-11-02, B-162) | — |
+| S-BTN-147 | a codegen route choice | B-166 part 4 (2026-11-02, B-162) | `test/integration/S-BTN-147.route-choices.test.ts` and `S-BTN-147.runner-half.test.ts` test retired behaviour until B-167 deletes them (`RETIRED_TESTS_ALLOWED`) |
+| S-BTN-148 | a reviewer route choice with hysteresis | B-166 part 4 (2026-11-02, B-162) | the course's ranking: S-BTN-27 |
+| S-BTN-149 | who steers a route choice (`atoms_from`) | B-166 part 4 (2026-11-02, B-162, B-165) | — |
+| S-BTN-150 | atom shapes | B-166 part 4 (2026-11-02, B-162) | — |
+| S-BTN-151 | refinement of `std:api-capacity@1` for route choices | B-166 part 4 (2026-11-02, B-162) | schema refinement stays R-BTN-108's |
+| S-BTN-152 | strata and reserved names | B-166 part 4 (2026-11-02, B-162) | — |
+| S-BTN-153 | route-choice delivery and overrides | B-166 part 4 (2026-11-02, B-162) | a mid-run unusable provider: S-BTN-20, S-BTN-91 |
+| S-BTN-154 | route-choice limits and conformance | B-166 part 4 (2026-11-02, B-162) | — |
+| S-BTN-155 | the ontology's merge and acceptance | B-166 part 4 (2026-11-02, B-162) | — |
+| G-BTN-159 | the gate stratum is monotone in granted holdings | B-166 part 4 (2026-11-02, B-162) | G-BTN-5 |
+| G-BTN-160 | the evaluator agrees with clingo, bounded by counts | B-166 part 4 (2026-11-02, B-162) | — |
+| G-BTN-161 | a route choice's advice never refuses, identifiers only | B-166 part 4 (2026-11-02, B-162) | G-BTN-49 |
 
 Parts retired from surviving rows: S-BTN-105 and G-BTN-124 keep only the override half (the rest
 became S-BTN-110 and G-BTN-129, 2026-10-19); S-BTN-95 and G-BTN-115 lost the legacy
@@ -1599,6 +2451,15 @@ refused).
 Each entry is a transition the specification no longer describes. The code keeps the old form
 working until the stated condition holds, then removes it.
 
+- **Part 4's retired fields (B-166, 2026-11-02).** The board post's `ontology` and course
+  entries' `route_choices` and `report_horizon_h`, the heartbeat's `uses`, the claim's and a
+  `prefer` entry's `bills`, the advance's and end's `taken`, and a reading's `nonce` and
+  `signature` are accepted and ignored, each logging one `deprecated-field` event per credential
+  and field per day, so a CLI or `.baton/baton.json` older than B-167 and B-168 keeps syncing and
+  claiming. Stop when no snapshot, and no request from any credential — runners', instruments'
+  and administrators' alike — has carried one for 30 days: they are then refused
+  `invalid-params`.
+
 - **R-BTN-132's window (prerequisite primitives).** The board post's `blocked_by` and
   `operator_only`, and the `waiting_on` labels `dependencies`, `children` and `owner`, are still
   read: `blocked_by` as whole-ticket `ticket` blocks, `operator_only` as `human-operator` in
@@ -1638,7 +2499,14 @@ working until the stated condition holds, then removes it.
 - **Renamed CLI commands (R-BTN-127).** The twelve old top-level names (`baton why`, `run`,
   `test-course`, `init`, `sync`, `mirror`, `spool`, `inbox`, `blocked`, `replay`, `register`,
   `start`) exit 2 printing only a "renamed:" line naming the replacement. Remove them once no
-  caller uses them (B-23 updated the known callers).
+  caller uses them (B-23 updated the known callers). The restructure's part 3 (2026-11-02) adds
+  the second set, handled the same way: `baton request`, `baton tickets …`, `baton board`, `baton
+  attest`, `admin repos`, `admin revoke`, `admin resync`, `admin resource set`, `owner grants`,
+  `owner key grant`, `owner key create`, `owner override`, `owner resolve`, `owner route`, `owner
+  ticket adopt`, `owner bars follow` and `owner owners add | remove` (their replacements in
+  R-BTN-127's table); B-157's code item renames the
+  built commands and their callers (`npm run check:tickets`, fieldhouse's `npm run ticket`, the
+  skills and workflows that call them).
 - **`provider-exhausted` (R-BTN-126).** Until every course's `min_worker_version` is past the CLI
   version that ships R-BTN-126, Baton accepts `released:provider-exhausted` and records it as a
   `blocked` end: with exactly one account instance in the worker's `uses` serving a resource in
