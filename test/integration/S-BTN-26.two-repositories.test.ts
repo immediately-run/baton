@@ -143,9 +143,14 @@ describe('S-BTN-26 two repositories (registry half)', () => {
     const fleet = () => rows(`SELECT key, value FROM baton_settings WHERE key = 'reviewer_matrix'`);
     const before = await fleet();
     expect(before.length).toBe(1);
+    // B-107: `providers` is no longer fleet data — an ops post carrying it (residue the sync
+    // still posts through the window) is ignored on its own, without the fleet refusal.
     const res = await opsCall('/v1/sync/board', payload('e'.repeat(40), OPS_SHA, opsBoard, { matrix: { ...(board.states.A.matrix as Record<string, unknown>), families: {} }, providers: board.states.A.providers }));
     expect(await res.json()).toMatchObject({ ok: true, fleet_ignored: true });
     expect(await fleet()).toEqual(before);
+    const residueOnly = await opsCall('/v1/sync/board', payload('f'.repeat(40), 'e'.repeat(40), opsBoard, { providers: board.states.A.providers }));
+    expect(residueOnly.status).toBe(200);
+    expect(await residueOnly.json()).not.toHaveProperty('fleet_ignored');
     // docs' own post still writes it, and says nothing was ignored.
     const docs = await (await syncCall('/v1/sync/board', payload(sha.B, sha.A, board.states.B, { matrix: { ...(board.states.A.matrix as Record<string, unknown>), families: {} } }))).json();
     expect(docs).not.toHaveProperty('fleet_ignored');

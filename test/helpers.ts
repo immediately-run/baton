@@ -150,11 +150,12 @@ export async function signedCall(name: string, path: string, o: Omit<SignOptions
   return { res, replay };
 }
 
-/** A heartbeat body with sensible defaults for `cred`'s host. */
+/** A heartbeat body with sensible defaults for `cred`'s host. B-107: the advisory's fields
+ *  (`model_provider_id`, `billing`) are gone from the shape; the window test posts them. */
 export function hbBody(cred: keyof typeof TOKENS, over: Record<string, unknown> = {}) {
   return {
     hostname: HOSTS[cred], session_name: `s-${cred}`, harness: 'opencode', kind: 'vm', model_id: 'zai-coding-plan/glm-5.3',
-    model_provider_id: 'zai', billing: { 'zai-coding-plan': 'zai', 'opencode-go': 'opencode_go_plus' }, capabilities: ['agent-venue'],
+    capabilities: ['agent-venue'],
     tier_ceiling: 'critical', lease_timeout_s: 900, courses: [{ repository: 'docs', course: 'roadmap-pr', version: 3 }], ...over,
   };
 }

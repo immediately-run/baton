@@ -1,10 +1,11 @@
-// app.js — the dashboard (BATON_SPEC §14): Needs you, Running, Timeline, Ready, Providers,
-// Workers, Suspensions and Limits (owners, grants, owner bars and settings — read-only: the
+// app.js — the dashboard (BATON_SPEC §14): Needs you, Running, Timeline, Ready,
+// Workers and Limits (owners, grants, owner bars and settings — read-only: the
 // `baton` CLI changes them, R-BTN-66), with the owner's actions (status request, release,
-// force-reap, accept a held history, suspend and lift). At /login it trades the one-time token in
+// force-reap, accept a held history). At /login it trades the one-time token in
 // the URL's fragment for a session (R-BTN-57, R-BTN-16) and goes to /. It polls
 // GET /v1/ui/state every 10 seconds and renders with textContent only (§10.4): no markup is
-// ever built from server text.
+// ever built from server text. B-107: the provider advisory's views are gone — a peak-cost
+// preference or an unavailable provider is a route choice over readings (§6.10), not a dashboard row.
 
 const POLL_MS = 10_000;
 let state = null;
@@ -132,28 +133,6 @@ function renderResources() {
   if (!box.children.length) box.append(el('li', { text: 'No external resource is registered.', cls: 'muted' }));
 }
 
-function renderProviders() {
-  const box = document.getElementById('providers');
-  box.replaceChildren();
-  for (const p of state.providers) {
-    const card = el('div', { cls: 'card' }, el('h3', { text: p.name }), el('div', { text: `${p.id} · ${p.billing}`, cls: 'muted' }));
-    if (p.window_limits) {
-      card.append(el('div', { text: `Limits: ${Object.entries(p.window_limits).map(([w, f]) => `${Math.round(f * 100)}% per ${w}`).join(', ')}`, cls: 'muted' }));
-    }
-    for (const pk of p.peaks) {
-      const line = el('div');
-      line.append(el('span', { text: pk.in_peak ? 'Peak now' : 'Off-peak now', cls: pk.in_peak ? 'peak' : 'offpeak' }));
-      line.append(document.createTextNode(` (${pk.schedule}) · changes ${fmtTime(pk.next_change)}`));
-      card.append(line);
-    }
-    if (!p.peaks.length) card.append(el('div', { text: 'No peak schedule', cls: 'muted' }));
-    const limited = p.models.filter((m) => m.monthly_limit_usd != null);
-    if (limited.length) card.append(el('div', { text: `${limited.length} model(s) with a monthly limit`, cls: 'muted' }));
-    box.append(card);
-  }
-  if (!state.providers.length) box.append(el('p', { text: 'No provider data yet.', cls: 'muted' }));
-}
-
 /** An owner action (R-BTN-16: a JSON body from this Origin; the Access cookie authenticates it).
  *  The reply's error, if any, goes to the footer; the next poll shows the result. */
 async function act(path, body) {
@@ -186,14 +165,12 @@ function renderWorkers() {
   body.replaceChildren();
   for (const w of state.workers) {
     const who = el('td', {}, el('div', { text: w.hostname }), el('div', { text: `${w.session_name} · ${w.harness} · ${w.kind} · ${w.isolation ?? 'process'} · #${w.id}`, cls: 'muted' }));
-    // §14: tier ceiling, capabilities, providers and lease timeout.
+    // §14: tier ceiling, capabilities and lease timeout.
     const caps = (w.capabilities ?? []).map((c) => c.capability).join(', ') || 'no capabilities';
-    const provs = (w.providers ?? []).map((p) => `${p.prefix}→${p.provider_id}`).join(', ') || 'no known accounts';
     // R-BTN-66: a ceiling per repository where the worker named one.
     const per = Object.entries(w.tier_ceilings ?? {}).map(([r, t]) => `${r} ${t}`).join(', ');
     who.append(el('div', { text: `ceiling ${w.tier_ceiling}${per ? ` (${per})` : ''} · lease ${Math.round(w.lease_timeout_ms / 60_000)} min`, cls: 'muted' }));
     who.append(el('div', { text: caps, cls: 'muted' }));
-    who.append(el('div', { text: provs, cls: 'muted' }));
     // R-BTN-48: the courses its checkouts run, flagged where below the course's minimum.
     const runs = (w.courses ?? []).map((c) => `${c.repository}:${c.course} v${c.version}${c.min_worker_version != null && c.version < c.min_worker_version ? ` (below ${c.min_worker_version})` : ''}`).join(', ') || 'declares no course';
     who.append(el('div', { text: runs, cls: 'muted' }));
@@ -229,47 +206,10 @@ function renderWorkers() {
         }));
       }
     }
-    body.append(el('tr', {}, who, el('td', { text: `${w.model_id ?? '—'}${w.model_provider_id ? ` (${w.model_provider_id})` : ''}` }), stateCell, claim, activity, el('td', { text: report, cls: 'muted' }), actions));
+    body.append(el('tr', {}, who, el('td', { text: w.model_id ?? '—' }), stateCell, claim, activity, el('td', { text: report, cls: 'muted' }), actions));
   }
   if (!state.workers.length) body.append(el('tr', {}, el('td', { text: 'No worker has sent a heartbeat.', attrs: { colspan: '7' }, cls: 'muted' })));
 }
-
-function renderSuspensions() {
-  const list = document.getElementById('suspensions');
-  list.replaceChildren();
-  for (const s of state.suspensions) {
-    const when = s.starts_at > state.server_time ? `from ${fmtTime(s.starts_at)}` : 'in force';
-    const li = el('li', { text: `${s.provider_id}${s.model_id ? ` / ${s.model_id}` : ''} · ${s.mode} · ${when}${s.ends_at ? ` until ${fmtTime(s.ends_at)}` : ''}${s.reason ? ` · ${s.reason}` : ''}` });
-    li.append(button('Lift', () => act(`/v1/ui/suspensions/${s.id}/lift`)));
-    list.append(li);
-  }
-  if (!state.suspensions.length) list.append(el('li', { text: 'No account is suspended.', cls: 'muted' }));
-  const select = document.getElementById('s-provider');
-  const chosen = select.value;
-  select.replaceChildren(...state.providers.map((p) => el('option', { text: p.name, attrs: { value: p.id } })));
-  if (chosen) select.value = chosen;
-}
-
-/** datetime-local is the viewer's local time; empty means "now" (start) or "until lifted" (end). */
-const localMs = (id) => {
-  const v = document.getElementById(id).value;
-  return v ? new Date(v).getTime() : undefined;
-};
-
-document.getElementById('suspend').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const body = { provider_id: document.getElementById('s-provider').value, mode: document.getElementById('s-mode').value };
-  const model = document.getElementById('s-model').value.trim();
-  const reason = document.getElementById('s-reason').value.trim();
-  if (model) body.model_id = model;
-  if (reason) body.reason = reason;
-  const starts = localMs('s-start');
-  const ends = localMs('s-end');
-  if (starts !== undefined) body.starts_at = starts;
-  if (ends !== undefined) body.ends_at = ends;
-  if (body.mode === 'stop' && !confirm('Stop sends a release to every holder on this account. Continue?')) return;
-  act('/v1/ui/suspensions', body);
-});
 
 const minutes = (ms) => `${Math.round(ms / 60_000)} min`;
 
@@ -521,13 +461,11 @@ function render() {
   renderBlocked();
   renderDiscrepancies();
   renderResources();
-  renderProviders();
   renderMode();
   renderNeeds();
   renderRunning();
   renderTimeline();
   renderWorkers();
-  renderSuspensions();
   renderLimits();
   document.getElementById('status').textContent = `Updated ${fmtTime(state.server_time)}`;
 }

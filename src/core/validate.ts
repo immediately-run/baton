@@ -43,8 +43,6 @@ export function checkRepositoryId(v: unknown, field = 'repository'): string {
   if (typeof v !== 'string' || !REPOSITORY_ID.test(v)) throw new BatonError('invalid-params', `${field}: must be a repository id`);
   return v;
 }
-const ACCOUNT = /^[a-z0-9_]{1,64}$/;
-const PREFIX = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MODEL = /^[A-Za-z0-9._/:-]{1,200}$/;
 const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** A typed holding (R-BTN-174, B-104): `<type>:<value>` — the type a course type such as `key`,
@@ -99,8 +97,9 @@ export interface Heartbeat {
   harness: 'opencode' | 'claude-code';
   kind: 'vm' | 'local' | 'cloud';
   model_id?: string;
-  model_provider_id?: string;
-  billing: Record<string, string>;
+  /** B-107: the provider advisory's fields are gone and read nowhere — a heartbeat still
+   *  carrying `model_provider_id`, `billing`, `usage` or `rate_limits` is accepted with them
+   *  ignored, until no registered runner posts them. */
   capabilities: string[];
   /** R-BTN-60: course-defined strings the tag gate matches. */
   tags: string[];
@@ -116,8 +115,6 @@ export interface Heartbeat {
   test_harness: boolean;
   fenced?: { claim_id: number };
   transcripts: TranscriptReport[];
-  usage: { provider_id: string; model_id: string; hour: number; usd_list: number }[];
-  rate_limits: { provider_id: string; model_id?: string; resets_at?: number }[];
   transcript_refusals: { index: number; code: string; message: string }[];
   /** R-BTN-76: the account instances it uses (absent declares none), and the strings refused as names. */
   uses: { names: string[]; refused: { instance: string; code: string }[] };
@@ -144,13 +141,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   if (b.harness !== 'opencode' && b.harness !== 'claude-code') bad('harness', "must be 'opencode' or 'claude-code'");
   if (b.kind !== 'vm' && b.kind !== 'local' && b.kind !== 'cloud') bad('kind', "must be 'vm', 'local' or 'cloud'");
   const model_id = optional(b.model_id, matches(MODEL, 'model_id'));
-  const model_provider_id = optional(b.model_provider_id, matches(ACCOUNT, 'model_provider_id'));
-  if (!isObj(b.billing)) bad('billing', 'must map provider prefixes to accounts');
-  const billing: Record<string, string> = {};
-  for (const [prefix, account] of Object.entries(b.billing as object)) {
-    matches(PREFIX, `billing prefix ${prefix}`)(prefix);
-    billing[prefix] = matches(ACCOUNT, `billing.${prefix}`)(account);
-  }
   // B-104 (R-BTN-174): a declaration may hold a typed holding — `<type>:<value>`, R-BTN-121's
   // labels — beside the legacy names. Shape only: a holding is the runner's own statement,
   // checked by nothing (§11.1's refusal deleted), bounded at matching by the grant.
@@ -181,10 +171,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   if (b.isolation !== undefined && !ISOLATIONS.includes(b.isolation as Heartbeat['isolation'])) bad('isolation', `must be one of ${ISOLATIONS.join(', ')}`);
   const transcripts = (b.transcripts ?? []) as unknown[];
   if (!Array.isArray(transcripts) || transcripts.length > 50) bad('transcripts', 'must be a list of at most 50');
-  const usage = (b.usage ?? []) as unknown[];
-  if (!Array.isArray(usage) || usage.length > 100) bad('usage', 'must be a list of at most 100');
-  const rate_limits = (b.rate_limits ?? []) as unknown[];
-  if (!Array.isArray(rate_limits) || rate_limits.length > 50) bad('rate_limits', 'must be a list of at most 50');
   return {
     hostname,
     session_name,
@@ -193,8 +179,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     harness: b.harness as Heartbeat['harness'],
     kind: b.kind as Heartbeat['kind'],
     model_id,
-    model_provider_id,
-    billing,
     capabilities,
     tags,
     tier_ceiling: tier as Heartbeat['tier_ceiling'],
@@ -210,19 +194,6 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
-    usage: usage.map((u, i) => {
-      if (!isObj(u)) bad(`usage[${i}]`, 'must be an object');
-      const x = u as Record<string, unknown>;
-      if (!isTime(x.hour) || (x.hour as number) % 3_600_000 !== 0) bad(`usage[${i}].hour`, 'must be the start of a UTC hour in epoch ms');
-      if (typeof x.usd_list !== 'number' || !Number.isFinite(x.usd_list) || x.usd_list < 0) bad(`usage[${i}].usd_list`, 'must be a non-negative number');
-      return { provider_id: matches(ACCOUNT, `usage[${i}].provider_id`)(x.provider_id), model_id: matches(MODEL, `usage[${i}].model_id`)(x.model_id), hour: x.hour as number, usd_list: x.usd_list as number };
-    }),
-    rate_limits: rate_limits.map((r, i) => {
-      if (!isObj(r)) bad(`rate_limits[${i}]`, 'must be an object');
-      const x = r as Record<string, unknown>;
-      if (x.resets_at !== undefined && !isTime(x.resets_at)) bad(`rate_limits[${i}].resets_at`, 'must be epoch ms');
-      return { provider_id: matches(ACCOUNT, `rate_limits[${i}].provider_id`)(x.provider_id), model_id: optional(x.model_id, matches(MODEL, `rate_limits[${i}].model_id`)), resets_at: x.resets_at as number | undefined };
-    }),
   };
 }
 
@@ -388,28 +359,6 @@ export function checkMessage(body: unknown): { to_worker_id: number; kind: 'rele
   const ticket_id = matches(TICKET_ID, 'payload.ticket_id')(x.ticket_id);
   if (!RELEASE_REASONS.includes(x.reason as never)) bad('payload.reason', `must be one of ${RELEASE_REASONS.join(', ')}`);
   return { to_worker_id: b.to_worker_id as number, kind: 'release', payload: { ticket_id, reason: x.reason } };
-}
-
-export function checkSuspension(body: unknown, now: number) {
-  if (!isObj(body)) bad('body', 'must be a JSON object');
-  const b = body as Record<string, unknown>;
-  const provider_id = matches(ACCOUNT, 'provider_id')(b.provider_id);
-  const model_id = optional(b.model_id, matches(MODEL, 'model_id'));
-  const mode = b.mode ?? 'no-new-work';
-  if (mode !== 'no-new-work' && mode !== 'stop') bad('mode', "must be 'no-new-work' or 'stop'");
-  if (b.starts_at !== undefined && !isTime(b.starts_at)) bad('starts_at', 'must be epoch ms');
-  const starts_at = (b.starts_at as number | undefined) ?? now;
-  if (b.ends_at !== undefined && b.ends_at !== null && (!isTime(b.ends_at) || (b.ends_at as number) <= Math.max(starts_at, now))) {
-    bad('ends_at', 'must be epoch ms after starts_at and after now');
-  }
-  return {
-    provider_id,
-    model_id: model_id ?? null,
-    mode: mode as 'no-new-work' | 'stop',
-    starts_at,
-    ends_at: (b.ends_at as number | null | undefined) ?? null,
-    reason: optional(b.reason, (v) => freeText(v, 'reason')) ?? null,
-  };
 }
 
 export function checkShadowReport(body: unknown) {
