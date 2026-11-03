@@ -11,7 +11,8 @@ module witnesses {
                DECLARED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp", "db:orders:rw"), "w3" -> Set("db:orders:rw")),
                GRANTED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp"), "w3" -> Set("vpn:corp", "db:orders:rw")),
                REQUIRES = Map("t1" -> Set(), "t2" -> Set("db:orders:rw")),
-               RESOURCES = Set("llm"), NEEDS = Map("implement" -> Set("llm"), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())).* from "./baton"
+               RESOURCES = Set("llm"), NEEDS = Map("implement" -> Set("llm"), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set()),
+               CAPPED = Set(), SEATCAP = Map()).* from "./baton"
   action winit = init
   action wstep = step
   action wprogress = progressStep

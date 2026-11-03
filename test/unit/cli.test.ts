@@ -7,7 +7,7 @@ import * as http from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createApiKey, duration, main, parseArgs, plan, policyDiff, send } from '../../cli/baton.mjs';
+import { confirmCapacity, createApiKey, duration, main, parseArgs, plan, policyDiff, send } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
 import { ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
@@ -15,6 +15,15 @@ import { call as hostCall } from '#host';
 
 const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwner';
 const key = (p: string) => p;
+
+/** A stdin for confirmCapacity's tests: a TTY that answers `line` once asked. */
+import { EventEmitter } from 'node:events';
+const fakeIn = (line?: string) => {
+  const input = new EventEmitter() as EventEmitter & { isTTY: boolean };
+  input.isTTY = true;
+  if (line !== undefined) process.nextTick(() => input.emit('data', `${line}\n`));
+  return input;
+};
 
 describe('plan: one request per command', () => {
   it('admin commands', () => {
@@ -34,9 +43,45 @@ describe('plan: one request per command', () => {
     expect(plan('admin', ['resource', 'add', 'anthropic-capacity', '--scope', 'account', '--schema', '{"type":"object"}', '--atoms-from', 'any'], key).body)
       .toEqual({ name: 'anthropic-capacity', scope: 'account', detail_schema: { type: 'object' }, atoms_from: 'any' });
     expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'account', '--schema', '{"type":"object"}', '--atoms-from', 'sometimes'], key)).toThrow('admin or any');
+    // R-BTN-178 (B-106): a capacity is set, cleared and listed — the set carries the read its
+    // confirm prints (`preflight`) and the --yes that answers the prompt beforehand.
+    expect(plan('admin', ['capacity', 'set', 'capability:rdp-lab', '1'], key)).toEqual({
+      method: 'PUT', path: '/v1/admin/capacities', body: { capability: 'capability:rdp-lab', capacity: 1 },
+      preflight: { method: 'GET', path: '/v1/admin/capacities?capability=capability%3Ardp-lab', question: 'set capability:rdp-lab\'s capacity to 1?' }, yes: false,
+    });
+    expect(plan('admin', ['capacity', 'set', 'capability:rdp-lab', '2', '--yes'], key).body).toEqual({ capability: 'capability:rdp-lab', capacity: 2 });
+    expect(plan('admin', ['capacity', 'set', 'capability:rdp-lab', '--clear'], key).body).toEqual({ capability: 'capability:rdp-lab', capacity: null });
+    expect(plan('admin', ['capacity', 'list'], key)).toEqual({ method: 'GET', path: '/v1/admin/capacities' });
+    expect(() => plan('admin', ['capacity', 'set', 'capability:rdp-lab'], key)).toThrow('the capacity (1-64), or --clear');
+    expect(() => plan('admin', ['capacity', 'set', 'capability:rdp-lab', '65'], key)).toThrow('an integer 1 to 64');
+    expect(() => plan('admin', ['capacity', 'set', 'capability:rdp-lab', '2', '--clear'], key)).toThrow('--clear');
+    expect(() => plan('admin', ['capacity', 'raise', 'capability:rdp-lab', '2'], key)).toThrow('baton admin repos');
     expect(() => plan('admin', ['state', 'docs'], key)).toThrow('takes no further argument');
     expect(() => plan('admin', ['state', '--repository', 'docs'], key)).toThrow('not a flag');
     expect(() => plan('admin', ['repo', 'add', 'x/y'], key)).toThrow('--owner-key is required');
+  });
+
+  it('capacity set\'s confirm (R-BTN-178): the courses print, and the prompt decides', async () => {
+    const lines: string[] = [];
+    const out = { write: (s: string) => lines.push(s) };
+    const answer = {
+      capacities: [{ capability: 'capability:rdp-lab', capacity: 1, set_by: 'admin:x', set_at: Date.parse('2026-11-03T12:00:00Z') }],
+      requiring: [{ repository: 'docs', course: 'rdp-course', version: 1, legs: ['implement'], type: { description: 'the lab', values: '^[-a-z0-9]{1,64}$' } }],
+    };
+    // --yes answers beforehand.
+    expect(await confirmCapacity(answer, 'set capability:rdp-lab\'s capacity to 1?', true, out, fakeIn())).toBe(true);
+    expect(lines.shift()).toContain('docs/rdp-course v1: its legs implement require it — the lab (values ^[-a-z0-9]{1,64}$)');
+    expect(lines.shift()).toContain('capability:rdp-lab: capacity 1');
+    // A terminal's y confirms; anything else does not.
+    expect(await confirmCapacity(answer, 'set it?', false, out, fakeIn('y'))).toBe(true);
+    expect(await confirmCapacity(answer, 'set it?', false, out, fakeIn('n'))).toBe(false);
+    // No terminal: refused rather than a prompt on a pipe.
+    const pipe = fakeIn('y'); pipe.isTTY = false;
+    expect(await confirmCapacity(answer, 'set it?', false, out, pipe)).toBe(false);
+    expect(lines.at(-1)).toContain('not confirmed');
+    // No course names it: setting is the administrator's own statement, still confirmed.
+    expect(await confirmCapacity({ capacities: [], requiring: [] }, 'set it?', true, out, fakeIn())).toBe(true);
+    expect(lines.at(-1)).toContain('no course of this Baton names the capability');
   });
 
   it('owner commands, the required bars in their groups', () => {

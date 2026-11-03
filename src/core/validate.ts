@@ -833,6 +833,30 @@ export function checkInstance(body: unknown): { name: string; serves: string[]; 
   return { name: b.name as string, serves: [...new Set(b.serves as string[])].sort(), repositories: [...new Set(repositories)].sort() };
 }
 
+/** `PUT /v1/admin/capacities` (R-BTN-178, §6.11): `{capability, capacity}` — the capability one
+ *  expanded `<type>:<value>`, never a role (a role has no colon), a `credential:` or `runner:`
+ *  capability, `<type>:*` or the bare `human-operator`; the capacity an integer 1–64, or null to
+ *  clear. A capability with no capacity has unlimited seats. */
+export function checkCapacity(body: unknown): { capability: string; capacity: number | null } {
+  if (!isObj(body)) bad('body', 'must be a JSON object');
+  const b = body as Record<string, unknown>;
+  for (const k of Object.keys(b)) if (!['capability', 'capacity'].includes(k)) bad(`body.${k}`, 'is not a field of a capacity');
+  const CAPABILITY_TYPE = /^[a-z][a-z0-9-]{0,31}$/;
+  if (typeof b.capability !== 'string' || !b.capability.includes(':')) {
+    bad('capability', 'must be one expanded <type>:<value> capability — a role or the bare human-operator names no thing to share (R-BTN-121, R-BTN-178)');
+  }
+  const colon = (b.capability as string).indexOf(':');
+  const type = (b.capability as string).slice(0, colon);
+  const value = (b.capability as string).slice(colon + 1);
+  if (!CAPABILITY_TYPE.test(type)) bad('capability', `the type ${JSON.stringify(type)} must match ${CAPABILITY_TYPE}`);
+  if (type === 'credential') bad('capability', 'a credential:<NAME> names a secret this runner alone receives, never a shared thing (R-BTN-144)');
+  if (type === 'runner') bad('capability', 'a runner:<name> is per runner identity, never a shared thing (R-BTN-133)');
+  if (!/^[^\s:*]{1,128}$/.test(value)) bad('capability', 'the value must be 1 to 128 characters, none of them whitespace, "*" or ":"');
+  if (b.capacity === null) return { capability: b.capability as string, capacity: null };
+  if (typeof b.capacity !== 'number' || !Number.isInteger(b.capacity) || b.capacity < 1 || b.capacity > 64) bad('capacity', 'must be an integer 1 to 64, or null to clear');
+  return { capability: b.capability as string, capacity: b.capacity as number };
+}
+
 /** A blocks query's `on` (R-BTN-75): `<kind>:<ref>`, the ref an id, a name or `*`. */
 export function checkBlockedOn(v: string): { kind: 'ticket' | 'capability' | 'resource' | 'decision'; ref: string } {
   const i = v.indexOf(':');

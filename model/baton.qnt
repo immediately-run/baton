@@ -16,8 +16,10 @@
 // In sync with the 2026-10-22 spec: rule 4 reads H ∪ D(H) — the ontology's derived capabilities
 // join the holdings before the check (R-BTN-174; §5.9 names the model's abstraction: it
 // receives the union as the runner's capabilities); route choices are advice that never
-// refuses (R-BTN-177) and seats are capacity counting (R-BTN-178) — neither an interleaving
-// of modelled state; README.md's *Not modelled* says why.
+// refuses (R-BTN-177). Seats are modelled (R-BTN-178, B-106): a capability with a capacity
+// has that many, held by the claims whose tickets require it and refused past by rule 11 —
+// an instance with no capped capability never checks it. README.md's *Not modelled* says what
+// else that abstracts (a leg's own requires among it).
 // Abstracted: wall-clock time (timeouts and the 30-minute and 6-hour flags are
 // "eventually"), held histories (R-BTN-11), more than one repository (R-BTN-61), course
 // changes and renames (R-BTN-64), tiers, grants and requires (rules 4-7). README.md says why.
@@ -55,6 +57,13 @@ module baton {
   const REQUIRES: str -> Set[str]
   const RESOURCES: Set[str]
   const NEEDS: str -> Set[str]
+  // R-BTN-178 (B-106, §6.11): the capabilities with a capacity, and each one's capacity (a
+  // capability with no capacity has unlimited seats). The seats a claim holds are its ticket's
+  // posted `requires` intersected with them — a leg's own `requires.capabilities` is not
+  // modelled (README.md, *Not modelled*), so rule 11 reads the ticket's clause as rule 4's own
+  // model does.
+  const CAPPED: Set[str]
+  const SEATCAP: str -> int
 
   // ---- the course: roadmap-pr's course.json (BATON_SPEC §5.2, R-BTN-69) ----
   pure val START = "filed"
@@ -231,6 +240,7 @@ module baton {
     endNeeds: str -> Set[Need],      // `end`-sourced leg_needs (R-BTN-126)
     resRows: str -> Set[Need],       // `resource` rows, each on its leg
     lost: str -> Set[Need],          // tickets.answer_lost: the rows the emptied fleet took
+    seats: int -> Set[str],          // claim_seats: the capabilities a claim holds seats on (R-BTN-178)
   }
   var st: State
 
@@ -249,6 +259,20 @@ module baton {
       .fold(-1, (m, i) => if (st.claims.get(i).endObs > m) st.claims.get(i).endObs else m)
   pure def expected(c: Claim): List[str] = c.startPath.concat(c.finished)
   def theClaim(w: str): Claim = st.claims.get(workerClaim(w).fold(0, (a, i) => i))
+
+  // ---- seats (R-BTN-178, §6.11) ----
+  // A claim holds its seats while it holds — active, or a fence-pending reap (R-BTN-19), whose
+  // reaped incarnation may still be driving the thing; every other end released them. The
+  // holders of a capability's seats, the asking claim's own excluded (a claim's own seat never
+  // counts against it).
+  def seatHolders(cap: str, except: int): Set[int] =
+    claimsWhere(c => c.id != except and (c.status == "active" or (c.status == "reaped" and c.fencePending))
+                    and st.seats.get(c.id).contains(cap))
+  // Rule 11: a leg of `t` finds every seat of a required capability held
+  def seatsFull(t: str, except: int): bool =
+    REQUIRES.get(t).intersect(CAPPED).exists(cap => seatHolders(cap, except).size() >= SEATCAP.get(cap))
+  // The seats a claim of `t` holds: the ticket's clause intersected with the capped names
+  def seatSet(t: str): Set[str] = REQUIRES.get(t).intersect(CAPPED)
 
   // R-BTN-60, R-BTN-67, rule 8: the tags barred from `leg` of `t` at a claim or an advance
   def postedBarsOf(t: str, leg: str): Set[str] =
@@ -445,6 +469,7 @@ module baton {
       provs: Set(), blocked: TICKETS.mapBy(t => REQUIRES.get(t).exists(c => not(WORKERS.exists(w =>
                                      DECLARED.get(w).contains(c) and GRANTED.get(w).contains(c))))),
       claims: Map(), nextId: 1,
+      seats: Map(),
       held: TICKETS.mapBy(t => false), ownerBars: Set(), ownerBudget: OWNER_BUDGET,
       up: WORKERS.mapBy(w => true), pushed: WORKERS.mapBy(w => false),
       asleep: WORKERS.mapBy(w => false), localClaim: WORKERS.mapBy(w => 0),
@@ -474,10 +499,12 @@ module baton {
   // @impl pending — the per-leg `at`/`reached` prerequisites (R-BTN-120, B-10), the per-leg backoff (R-BTN-122, B-11) and provisional rows (R-BTN-126, B-21) as gates
   action claim(w: str, t: str): bool = all {
     workerFree(w), st.nextId <= MAX_CLAIMS, claimableBy(t, w), rule4(w, t),
+    not(seatsFull(t, -1)),                                  // rule 11 (R-BTN-178): a free seat
     // ghost, written apart from the guard: the gates as they stand at the grant
     val leg = st.queued.get(t)
     val violated = not(ticketClaimable(t)) or barred(t, leg, "claim", Set()).intersect(TAGS.get(w)).size() > 0
                    or confirmedRowsIn(st, t, leg) or provisionalIn(st, t, leg)
+                   or seatsFull(t, -1)
                    or not(REQUIRES.get(t).subseteq(st.declared.get(w).intersect(GRANTED.get(w))))
     // a claimed ticket is not waiting: blocked_since clears silently (R-BTN-75)
     st' = settle(st.with("claims", st.claims.put(st.nextId, {
@@ -487,6 +514,7 @@ module baton {
               claimObs: st.counter, endObs: -1, regressed: false, endedRegressed: false,
               confirmed: false, confirmObs: -1, fencePending: false,
               leaseUntil: st.now + TIMEOUT, gateViolation: violated }))
+            .with("seats", st.seats.put(st.nextId, seatSet(t)))
             .with("nextId", st.nextId + 1)
             .with("localClaim", st.localClaim.set(w, st.nextId))
             .with("localLease", st.localLease.set(w, st.now + TIMEOUT))
@@ -533,6 +561,7 @@ module baton {
       policyOk(c.ticket, leg, bars),
       not(advanceRowsIn(st, c.ticket, leg)), not(provisionalIn(st, c.ticket, leg)), // decided, backing-off (§6.6; R-BTN-78, -122, -126)
       rule4(w, c.ticket),                                     // rule 4 at each advance (§6.6)
+      not(seatsFull(c.ticket, c.id)),                         // rule 11 at each advance (R-BTN-178)
     }
     all {
       c.leg == "" or st.pushed.get(w),                        // git first
@@ -545,10 +574,12 @@ module baton {
                      or (c.leg == "" and c.finished.length() == 0 and leg != c.offered)
                      or advanceRowsIn(st, c.ticket, leg) or provisionalIn(st, c.ticket, leg)
                      or TAGS.get(w).exists(g => barred(c.ticket, leg, "advance", bars).contains(g))
+                     or seatsFull(c.ticket, c.id)
                      or not(REQUIRES.get(c.ticket).subseteq(st.declared.get(w).intersect(GRANTED.get(w))))
       st' = st.with("claims", st.claims.set(c.id, c.with("station", stn).with("finished", fin)
                 .with("leg", leg).with("startBars", postedBarsOf(c.ticket, leg).union(bars))
                 .with("claimObs", st.counter).with("gateViolation", c.gateViolation or violated)))
+              .with("seats", st.seats.set(c.id, seatSet(c.ticket)))
               .with("pushed", st.pushed.set(w, false))
               .with("lastSeen", st.lastSeen.set(w, st.now)),
     },
@@ -580,6 +611,7 @@ module baton {
                 .with("regressed", false)                     // §4: regressed_since clears at the end
                 .with("confirmed", closedEarly)
                 .with("confirmObs", if (closedEarly) st.lastAccepted else -1)))
+              .with("seats", st.seats.set(c.id, Set()))       // R-BTN-178: the end releases them
               .with("localClaim", st.localClaim.set(w, 0))
               .with("pushed", st.pushed.set(w, false))
               .with("lastSeen", st.lastSeen.set(w, st.now))
@@ -647,6 +679,7 @@ module baton {
     s.with("claims", s.claims.set(c.id, c.with("leg", "").with("status", "released")
        .with("kind", "blocked").with("endObs", s.counter).with("endedRegressed", c.regressed)
        .with("regressed", false)))
+     .with("seats", s.seats.set(c.id, Set()))                 // R-BTN-178: the end releases them
      .with("blockedEnds", s.blockedEnds.set(c.ticket, s.blockedEnds.get(c.ticket).set(l, n)))
      .with("held", if (n > MAX_BLOCKED) s.held.set(c.ticket, true) else s.held)
      .with("localClaim", s.localClaim.set(w, 0)).with("pushed", s.pushed.set(w, false))
@@ -750,7 +783,8 @@ module baton {
       c.status == "active", c.leaseUntil <= st.now,
       // the leg stays recorded: the worker, which does not know yet, may still try to push it
       st' = settle(failIn(st.with("claims", st.claims.set(i, c.with("status", "reaped").with("kind", "reap")
-                  .with("endObs", st.counter).with("endedRegressed", c.regressed).with("regressed", false))),
+                  .with("endObs", st.counter).with("endedRegressed", c.regressed).with("regressed", false)))
+              .with("seats", st.seats.set(i, Set())),         // R-BTN-178: a silent reap is not fenced
                  c.ticket, legOf(c)), Set()),
     },
   }
@@ -783,8 +817,10 @@ module baton {
     val c = st.claims.get(i)
     all {
       c.status == "reaped", c.fencePending, c.leaseUntil <= st.now,
-      // no longer held: blocked_since follows, with its event (R-BTN-75)
-      st' = settle(st.with("claims", st.claims.set(i, c.with("fencePending", false))), Set()),
+      // no longer held: blocked_since follows, with its event (R-BTN-75); the fence deadline
+      // releases the reaped claim's seats (R-BTN-178)
+      st' = settle(st.with("claims", st.claims.set(i, c.with("fencePending", false)))
+                    .with("seats", st.seats.set(i, Set())), Set()),
     },
   }
   // R-BTN-6, R-BTN-26: the worker learns its lease is lost, kills its tool calls and reports.
@@ -796,6 +832,9 @@ module baton {
     val s = st.with("claims", st.claims.keys().mapBy(i => {
               val c = st.claims.get(i)
               if (c.worker == w and c.fencePending) c.with("fencePending", false) else c }))
+            .with("seats", st.claims.keys().mapBy(i => {
+              val c = st.claims.get(i)
+              if (c.worker == w and c.fencePending) Set() else st.seats.get(i) }))  // R-BTN-178
             .with("localClaim", st.localClaim.set(w, 0))
             .with("lastSeen", st.lastSeen.set(w, st.now))
     st' = if (FLEET and st.now >= st.lastSeen.get(w) + TIMEOUT) recount(s) else settle(s, Set()),

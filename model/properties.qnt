@@ -13,6 +13,10 @@ module properties {
   const P_REQUIRES: str -> Set[str]
   const P_RESOURCES: Set[str]
   const P_NEEDS: str -> Set[str]
+  // R-BTN-178 (B-106): the capabilities with a capacity and each one's capacity — `sim` seats
+  // one to explore rule 11, `small` none (capacity off, the proof's shape unchanged).
+  const P_CAPPED: Set[str]
+  const P_SEATCAP: str -> int
   import baton(TICKETS = P_TICKETS, WORKERS = P_WORKERS, SLOTS = P_SLOTS,
                MAX_CLAIMS = P_MAX_CLAIMS, GIT_BUDGET = P_GIT_BUDGET,
                OWNER_BUDGET = P_OWNER_BUDGET,
@@ -20,7 +24,8 @@ module properties {
                REQUIRED = Set("fix", "merge"), MAX_TIME = 12,
                MAX_ATTEMPTS = 2, BACKOFF = 2, MAX_BLOCKED = 1,
                DECLARED = P_DECLARED, GRANTED = P_GRANTED, REQUIRES = P_REQUIRES,
-               RESOURCES = P_RESOURCES, NEEDS = P_NEEDS).* from "./baton"
+               RESOURCES = P_RESOURCES, NEEDS = P_NEEDS,
+               CAPPED = P_CAPPED, SEATCAP = P_SEATCAP).* from "./baton"
   action pinit = init
   action pstep = step
   action pprogress = progressStep
@@ -166,12 +171,19 @@ module properties {
   val answerLostOwesUnblocked = TICKETS.forall(t =>
     st.lost.get(t) == Set() or (not(st.blocked.get(t)) and st.lastEvent.get(t) == "blocked"))
 
+  // R-BTN-178 (B-106): no capability is seated past its capacity — the seats of the claims that
+  // hold (an active claim, or a fence-pending reap; every other end released them) never exceed
+  // it. With no capped capability the property is trivially true, as the instance means it to be.
+  val capacityRespected = CAPPED.forall(cap =>
+    claimsWhere(c => (c.status == "active" or (c.status == "reaped" and c.fencePending))
+                     and st.seats.get(c.id).contains(cap)).size() <= SEATCAP.get(cap))
+
   // `safety` in four groups, so the proof can check them in four processes at once (B-37,
   // `npm run model:verify`); `safety` is their conjunction, so no property is left out of a split.
   val safetyA = and { observationsIncrease, oneLiveHolderPerTicket, oneClaimPerWorker, staleOnlyWhenTakenAway, writingLegsBarred }
   val safetyB = and { confirmationAfterEnd, gatesHeld, noActAfterLoss, noStuckTicket, unblockedFollowsBlocked }
   val safetyC = and { confirmedIsInGit, regressedOnlyWhenGitRegressed, capabilityRowsCounted, answerLostOwesUnblocked }
-  val safetyD = and { boundedLoops, blockedIsStored, attemptsBounded, blockedEndsBounded }
+  val safetyD = and { boundedLoops, blockedIsStored, attemptsBounded, blockedEndsBounded, capacityRespected }
   val safety = and { safetyA, safetyB, safetyC, safetyD }
 
   // ---- liveness: in liveness.qnt, so the safety proof does not carry the fairness terms ----
