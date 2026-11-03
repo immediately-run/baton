@@ -3,7 +3,7 @@
 // named for a scenario names one §15 defines and not one the history retired (B-71).
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error a plain .mjs script, no types
-import { check, definedIds, retiredIds, retiredScenarioIds, scenarioIds } from '../../scripts/check-spec.mjs';
+import { check, checkReserved, definedIds, rawKeys, retiredIds, retiredScenarioIds, scenarioIds } from '../../scripts/check-spec.mjs';
 // @ts-expect-error a plain .mjs script, no types
 import { impact, patchNotes, render, units } from '../../scripts/spec-tools.mjs';
 
@@ -79,6 +79,44 @@ describe('check-spec', () => {
     expect([...check(SPEC, [], new Set(['R3-1205']), '', [], ['R-BTN-5'])]).toEqual([
       'R-BTN-5 no longer has a patch note: remove it from PATCH_NOTES_ALLOWED',
     ]);
+  });
+});
+
+describe('check-spec: reserved numbers (2026-11-03)', () => {
+  const spec = (...ns: number[]) => `### Scenarios\n\n| Scenario | x |\n|---|---|\n${ns.map((n) => `| S-BTN-${n} a row | x |`).join('\n')}\n\n### Gates\n\n| S-BTN-999 not a row here |\n`;
+  const ledger = (o: object) => JSON.stringify({ baseline: { migration: 30, scenario: 198 }, migration: {}, scenario: {}, ...o }, null, 2);
+  const tickets = new Set(['B-107', 'B-110', 'B-129']);
+
+  it('passes numbers at or below the baseline unledgered, and ledgered numbers above it', () => {
+    const l = ledger({ migration: { '0028': 'B-107', '0031': 'B-110' }, scenario: { 199: 'B-129' } });
+    expect(checkReserved(l, ['0029_a.sql', '0030_b.sql', '0031_c.sql', 'index.ts'], spec(197, 198, 199), tickets)).toEqual([]);
+    expect(checkReserved(null, ['0099_x.sql'], spec(500), tickets)).toEqual([]);
+  });
+
+  it('fails a migration and a scenario above the baseline the ledger does not hold — a branch that invented its number', () => {
+    expect(checkReserved(ledger({}), ['0030_b.sql', '0031_c.sql'], spec(198, 199), tickets)).toEqual([
+      'src/migrations/0031_c.sql: migration 0031 is above the baseline (30) and tickets/reserved.json does not hold it — reserve it with `baton tickets reserve <ticket> migration`',
+      "§15's S-BTN-199 row: S-BTN-199 is above the baseline (198) and tickets/reserved.json does not hold it — reserve it with `baton tickets reserve <ticket> scenario`",
+    ]);
+  });
+
+  it('fails a number held twice — a merge of two branches’ reservations — and one used twice in the tree', () => {
+    const twice = '{"baseline":{"migration":30,"scenario":198},"migration":{"0031":"B-110","0031":"B-107"},"scenario":{}}';
+    expect(rawKeys(twice, 'migration')).toEqual(['0031', '0031']);
+    expect(checkReserved(twice, ['0031_c.sql'], spec(), tickets)).toEqual([
+      'tickets/reserved.json holds migration 0031 twice — give one of its tickets the next number with `baton tickets reserve`',
+    ]);
+    expect(checkReserved(ledger({ migration: { '0028': 'B-107' } }), ['0028_a.sql', '0028_b.sql'], spec(197, 197), tickets)).toEqual([
+      'migration 0028 is used 2 times in the tree — renumber all but one with `baton tickets reserve`',
+      'S-BTN-197 is used 2 times in the tree — renumber all but one with `baton tickets reserve`',
+    ]);
+  });
+
+  it('fails a holder that is not a ticket here, and a ledger that is not JSON', () => {
+    expect(checkReserved(ledger({ scenario: { 199: 'B-999' } }), [], spec(199), tickets)).toEqual([
+      'tickets/reserved.json: S-BTN-199 is held by B-999, which is not a ticket here',
+    ]);
+    expect(checkReserved('{', [], spec(), tickets)[0]).toMatch(/^tickets\/reserved.json is not JSON/);
   });
 });
 

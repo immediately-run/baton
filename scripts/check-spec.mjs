@@ -17,7 +17,12 @@
 // - no rule opens with an italic patch note (`- **R-BTN-35 (…).** *Except …*`): an amendment
 //   rewrites the rule instead of stating an exception on top of a body that still says the
 //   opposite (spec-tools.mjs's `patchNotes`). PATCH_NOTES_ALLOWED holds the ones written before
-//   this check; it only shrinks (B-150).
+//   this check; it only shrinks (B-150);
+// - every migration number (src/migrations/NNNN_*.sql) and every §15 scenario id (`| S-BTN-n`) above
+//   tickets/reserved.json's `baseline` is held in that ledger, and no number is held, or used in the
+//   tree, twice: numbers are reserved by `baton tickets reserve`, never taken by looking, so a
+//   branch that invents one fails here (BATON_SPEC R-BTN-74; B-110 and B-107 both took 0028,
+//   B-129 and B-145 both took S-BTN-197).
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -128,6 +133,56 @@ export function check(spec, code, tickets, history = '', testNames = [], allowed
   return problems;
 }
 
+/** The keys of one top-level object of a JSON text, in order and with repeats — `JSON.parse`
+ *  keeps only the last of two equal keys, which is how a merge of two branches' reservations of
+ *  one number would read as one. Reads the object `"<name>": { … }` holding flat string values. */
+export function rawKeys(text, name) {
+  const m = new RegExp(`"${name}"\\s*:\\s*\\{([^{}]*)\\}`).exec(text);
+  return m ? [...m[1].matchAll(/"([^"\\]*)"\s*:/g)].map((k) => k[1]) : [];
+}
+
+/** The problems with the reservations: `ledgerText` is tickets/reserved.json's text (null: none),
+ *  `migrations` the migrations folder's file names, `spec` the spec, `tickets` the ids that exist.
+ *  Every number above the baseline is held; none is held twice, or used twice in the tree; every
+ *  holder is a ticket here. */
+export function checkReserved(ledgerText, migrations, spec, tickets) {
+  const problems = [];
+  if (ledgerText == null) return problems;
+  let ledger;
+  try {
+    ledger = JSON.parse(ledgerText);
+  } catch (e) {
+    return [`tickets/reserved.json is not JSON: ${e.message.split('\n')[0]}`];
+  }
+  const baseline = ledger.baseline ?? {};
+  const kinds = {
+    migration: { label: (n) => `migration ${String(n).padStart(4, '0')}`, used: migrations.map((f) => /^(\d{4})_.*\.sql$/.exec(f)?.[1]).filter(Boolean).map(Number), where: (n) => `src/migrations/${migrations.find((f) => f.startsWith(String(n).padStart(4, '0') + '_'))}` },
+    scenario: { label: (n) => `S-BTN-${n}`, used: [...spec.split(/^### /m).find((x) => x.startsWith('Scenarios'))?.matchAll(/^\| *S-BTN-(\d+)\b/gm) ?? []].map((m) => Number(m[1])), where: (n) => `§15's S-BTN-${n} row` },
+  };
+  for (const [kind, k] of Object.entries(kinds)) {
+    const held = ledger[kind] ?? {};
+    const keys = rawKeys(ledgerText, kind);
+    const seen = new Map();
+    for (const key of keys) {
+      const n = Number(key);
+      if (seen.has(n)) problems.push(`tickets/reserved.json holds ${k.label(n)} twice — give one of its tickets the next number with \`baton tickets reserve\``);
+      seen.set(n, key);
+    }
+    for (const [key, id] of Object.entries(held)) {
+      if (!/^\d+$/.test(key)) problems.push(`tickets/reserved.json: ${kind}.${key} is not a number`);
+      else if (!tickets.has(id)) problems.push(`tickets/reserved.json: ${k.label(Number(key))} is held by ${id}, which is not a ticket here`);
+    }
+    const count = new Map();
+    for (const n of k.used) count.set(n, (count.get(n) ?? 0) + 1);
+    for (const [n, c] of count) if (c > 1) problems.push(`${k.label(n)} is used ${c} times in the tree — renumber all but one with \`baton tickets reserve\``);
+    const base = Number.isInteger(baseline[kind]) ? baseline[kind] : 0;
+    for (const n of [...count.keys()].sort((a, b) => a - b)) {
+      if (n > base && !seen.has(n)) problems.push(`${k.where(n)}: ${k.label(n)} is above the baseline (${base}) and tickets/reserved.json does not hold it — reserve it with \`baton tickets reserve <ticket> ${kind}\``);
+    }
+  }
+  return problems;
+}
+
 function files(dir) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).flatMap((name) => {
@@ -148,6 +203,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const integration = join(REPO, 'test', 'integration');
   const testNames = existsSync(integration) ? readdirSync(integration) : [];
   const problems = check(spec, code, tickets, history, testNames, PATCH_NOTES_ALLOWED);
+  const ledgerPath = join(REPO, 'tickets', 'reserved.json');
+  const migrationsDir = join(REPO, 'src', 'migrations');
+  problems.push(...checkReserved(existsSync(ledgerPath) ? readFileSync(ledgerPath, 'utf8') : null, existsSync(migrationsDir) ? readdirSync(migrationsDir) : [], spec, tickets));
   for (const w of problems.warnings) console.warn(`! ${w}`);
   if (problems.length) {
     for (const p of problems) console.error(`✗ ${p}`);
