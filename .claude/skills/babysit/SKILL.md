@@ -22,7 +22,7 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   | `spec/`, `docs/`, `tickets/` | `npm run check:spec`, `npm run check:wiki`, `npm run check:tickets`; for `spec/`, `npm run spec:impact` (below) |
   | `src/`, `cli/`, `scripts/` | `npm run typecheck`, and `npm test` (or `npm run test:no-quint` without quint) |
   | `src/shared/` | never by hand: change it in docs, then `npm run vendor` |
-  | `src/migrations/` | only a new numbered file; never edit an old one |
+  | `src/migrations/` | only a new numbered file, its number reserved (below); never edit an old one |
 
 - **Local failures that are not yours**: a cloud container without `ssh-keygen` or `ssh-agent`
   fails the signing tests (`sign.test.ts`, `cli.test.ts`, `defaults-cli.test.ts`,
@@ -33,11 +33,26 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 
 - Merge, never rebase or force-push: `git fetch origin main && git merge origin/main`, committed as
   "Merge origin/main into …". The repository's history is merge commits.
+- **When.** Merge `origin/main` whenever main has changed `spec/`, `src/migrations/` or
+  `tickets/reserved.json` since the branch last merged it — `git diff --quiet $(git merge-base HEAD
+  origin/main) origin/main -- spec src/migrations tickets/reserved.json` fails when it has — and at
+  least daily for an open PR. Before reviewing, a PR more than a day behind main (the oldest
+  main commit it lacks, `git log --reverse --format=%ci HEAD..origin/main | head -1`, is more than
+  a day old) merges main first: a review of a stale base
+  reviews rulings the branch has not seen. On #160 and #161 the branches built tickets filed
+  2026-10-29 as written after the 2026-11-01 rulings, and collided with main on numbers.
 - After the merge, re-run the fast checks; `npm run check:spec` catches a requirement or scenario
   id the other side retired.
 
 ## Ticket numbers and status
 
+- **Migration and scenario numbers are reserved, never taken by looking.** `node cli/baton.mjs
+  tickets reserve <ticket> migration|scenario` holds the next one for the ticket in
+  `tickets/reserved.json` and pushes the ledger to `origin/main`, as `new` does — so a session told
+  to push only to its own branch asks the user first. `npm run check:spec` fails a migration or a
+  §15 `S-BTN-n` row above the ledger's `baseline` that the ledger does not hold, and a number held
+  twice (B-110 and B-107 both took 0028; B-129 and B-145 both took S-BTN-197). After merging main,
+  a branch whose number the ledger gives another ticket reserves a new one and renumbers.
 - **Ids are taken on `main`.** `node cli/baton.mjs tickets new` files a ticket with the next free id
   straight onto `main`. A long-running branch that filed a ticket by hand can find its id taken
   when `main` moves. Keep `main`'s ticket and give the branch's the next free id, then change every
@@ -51,7 +66,14 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   Each command is one commit pushed straight to `origin/main` from a throwaway worktree. A session
   told to push only to its own branch asks the user before running one.
 - A PR that changes a ticket another session holds `in-progress` or `in-review` adds a dated note
-  under its `## Status`, and leaves the plan alone.
+  under its `## Status`, and leaves the plan alone — except a clause an amendment or ruling
+  contradicts, which is struck through with `~~…~~` in place, the note saying what replaced it
+  (Spec PRs, below).
+- **Claiming re-reads the rules.** `tickets claim` refuses a ticket citing a rule that a
+  `spec/BATON_SPEC_HISTORY.md` entry dated after the ticket's last commit names, listing each.
+  Re-read each rule and entry, rewrite or strike what they contradict, then claim with
+  `--rules-reread`, which records the re-read in `## Status`. `npm run check:tickets` lists such
+  tickets without failing.
 
 ## Spec PRs
 
@@ -63,6 +85,18 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 - Keep the open tickets in sync in the same PR: a ticket whose plan the amendment contradicts is
   rewritten, superseded with a note saying where each item went, or noted; new functionality gets
   a ticket.
+- **Rewrite or strike the contradicted clause in place.** When an amendment or an owner ruling
+  contradicts a clause of a live ticket, the same PR rewrites that clause, or strikes it. A dated
+  note beside a clause that still says the opposite is not enough: B-129 kept "listed under Needs
+  you" after 2026-11-01's ruling, though a spec PR touched it on 11-02, and the next session built
+  the clause. For a ticket another session holds (above), strike the clause with `~~…~~` and say
+  in the dated Status note what replaced it; leave the rest of the plan alone. Run `npm run
+  spec:impact` with the changed ids and terms to find the tickets.
+- **New tickets say who writes their inputs and what they must not break.** A ticket the PR files
+  fills `### Trust` (every new input — a field, a file, a commit trailer, a request — who may write
+  it and how Baton verifies it, by `docs/security-model.mdx`'s reaches) and `### Invariants` (the
+  rules it must not break, by id, and how the design keeps each); `npm run check:tickets` fails a
+  ticket filed on or after `.baton/baton.json`'s `check.sections_since` without them.
 - **Decide in the spec, in the session that decides.** An owner's ruling becomes a spec PR the
   same session, with the history entry quoting it. A ticket may *build* a ruling, but never holds
   its spec half: "the implementing PR amends the spec first" is how B-120's ruling of 2026-10-26
