@@ -96,8 +96,10 @@ checkout, run the CLI as `node cli/baton.mjs`.
   them (R3-1266). `claim` asks Baton first (B-129): with the session's key (`-i KEY`, else
   `BATON_KEY_FILE`) it reads the ticket's position from Baton's board and history, continues a
   ticket past its course's start where Baton holds it (the PRs written back, the position
-  printed) instead of starting over, and refuses — rather than trust the frontmatter — when a
-  read cannot be answered (`--offline` for an unreachable Baton).
+  printed) instead of starting over — overriding only a false `available`, never the git lock or
+  a parked or closed status — and refuses, rather than trust the frontmatter, when a read cannot
+  be answered (`--offline` for an unreachable Baton). A release (`set <id> available
+  [--note TEXT]`) keeps every `prs:` entry and its commit is the hand-off.
 - `npm run check:wiki` — every page in `tickets/` and `docs/` compiles as MDX, uses only known
   components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
 - `npm run check:tickets` (or `node cli/baton.mjs tickets check [--repo DIR]`) — check this

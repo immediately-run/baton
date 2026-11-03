@@ -65,17 +65,19 @@
 //                — file one ticket, the next free id under .baton/baton.json's ticket_prefix,
 //                with the conventional body, as one commit pushed to the default branch (B-112)
 //   baton tickets claim <id> [-i KEY] [--url URL] [--offline]
-//   baton tickets set <id> <status> [--pr URL] [-i KEY] [--url URL] [--offline] | done <id> [--pr URL]
+//   baton tickets set <id> <status> [--pr URL] [--note TEXT] [-i KEY] [--url URL] [--offline] | done <id> [--pr URL]
 //                — claim asks Baton first (B-129): before it writes, it reads the ticket from
 //                Baton with the key -i names (else BATON_KEY_FILE) — the board for the station,
 //                the ready leg and the live claims, the history for the path and the PRs of the
-//                newest ended claim, the branch-holder query for the branch — and continues the
-//                ticket where Baton holds it: past its course's start is a takeover (the PRs are
-//                written back, the position printed), never a fresh start; only another live
-//                claim refuses, naming its holder and the lease's end; an unanswered read refuses
+//                ended claims, the branch-holder query for the branch — and continues the ticket
+//                where Baton holds it: past its course's start, a false `available` is a takeover
+//                (the PRs are written back, the position printed), never a fresh start, while the
+//                git lock and a parked or closed status still refuse; another claim refuses,
+//                naming its holder and its lease; an unanswered read or an unreadable key refuses
 //                rather than trust the frontmatter, unless --offline. set/done write any live
 //                status, each one commit pushed to the default branch (B-112); a release
-//                (set <id> available) keeps every prs: entry and carries the hand-off (B-129)
+//                (set <id> available) keeps every prs: entry and its commit is the hand-off — the
+//                PRs, Baton's station and next leg, the branch and --note's what is left (B-129)
 //   baton tickets check [--repo DIR] [--quiet]
 //                — check this repository's ticket source without posting it: ids, the board
 //                post's validation, depends_on targets and cycles, (with check.depends_line in

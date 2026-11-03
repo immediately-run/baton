@@ -503,7 +503,8 @@ async function fakeBaton(state: {
   resume?: Record<string, unknown> | null;
   branchHolder?: Record<string, unknown>;
   boardStatus?: number;
-}): { url: string; asked: string[]; close: () => void } {
+  serverTime?: number;
+}): Promise<{ url: string; asked: string[]; close: () => void }> {
   const asked: string[] = [];
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://baton.test');
@@ -515,7 +516,7 @@ async function fakeBaton(state: {
     if (req.method !== 'GET') return reply(405, { ok: false, code: 'not-found', message: 'the reads are GETs' });
     if (url.pathname === '/v1/repositories/baton/board') {
       if (state.boardStatus != null) return reply(state.boardStatus, { ok: false, code: state.boardStatus === 403 ? 'forbidden' : 'unauthenticated', message: 'not this key' });
-      return reply(200, { repository: { id: 'baton' }, ready: state.ready ?? [], ready_by_tier: {}, holders: state.holders ?? [], granted_capabilities: null, server_time: 0 });
+      return reply(200, { repository: { id: 'baton' }, ready: state.ready ?? [], ready_by_tier: {}, holders: state.holders ?? [], granted_capabilities: null, server_time: state.serverTime ?? 0 });
     }
     if (/^\/v1\/repositories\/baton\/tickets\/([^/]+)\/history$/.test(url.pathname)) {
       return reply(200, { rows: state.history ?? [], ...(state.resume === undefined ? {} : { resume: state.resume }) });
@@ -598,8 +599,9 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
       const message = git(f.origin, 'log', '-1', '--format=%B', 'main');
       expect(message).toContain('tickets: claim B-91 (in progress — continuing where Baton holds it: pr-open, review ready)');
       expect(message).toContain(`PR ${PR109}`);
-      expect(message).toContain('Baton: pr-open, review ready — the next claim continues there');
-      expect(message).toContain('branch claude/B-91-seed-owner-keys');
+      expect(message).toContain('Station: pr-open (Baton)');
+      expect(message).toContain("Next: review from pr-open (Baton's ready row) — baton tickets claim B-91 continues there");
+      expect(message).toContain('Branch: claude/B-91-seed-owner-keys');
       expect(f.head().parent).toBe(before);
     } finally {
       baton.close();
@@ -692,12 +694,38 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
       expect(fmOf(f, 'tickets/B-91.mdx')).toMatchObject({ status: 'available' });
       expect(f.at('tickets/B-91.mdx')).toContain(`prs:\n  - ${PR109}`);
       const message = git(f.origin, 'log', '-1', '--format=%B', 'main');
-      expect(message).toContain('tickets: release B-91 → available');
-      expect(message).toContain(`PR ${PR109}`);
-      expect(message).toContain('Baton: pr-open, review ready');
+      expect(message).toBe([
+        'tickets: release B-91 → available',
+        '',
+        `PR ${PR109}`,
+        'Station: pr-open (Baton)',
+        "Next: review from pr-open (Baton's ready row) — baton tickets claim B-91 continues there",
+        'Branch: claude/B-91-seed-owner-keys',
+      ].join('\n'));
     } finally {
       baton.close();
     }
+  }, 60_000);
+
+  it('a release\'s --note is the hand-off\'s "what is left", and --note is a release\'s alone', async () => {
+    const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('in-progress', [PR109]) } });
+    const baton = await fakeBaton(B91);
+    try {
+      const r = await runAsync(f.dir, 'set', 'B-91', 'available', '--note', 'round 3 findings 2 and 5 open;\n the rest fixed', '-i', keyFile, '--url', baton.url);
+      expect(r).toMatchObject({ code: 0, err: '' });
+      const message = git(f.origin, 'log', '-1', '--format=%B', 'main');
+      expect(message).toContain("Next: review from pr-open (Baton's ready row)");
+      expect(message).toContain('Left: round 3 findings 2 and 5 open; the rest fixed');
+      const wrong = await runAsync(f.dir, 'set', 'B-91', 'in-review', '--note', 'x', '-i', keyFile, '--url', baton.url);
+      expect(wrong.code).toBe(2);
+      expect(wrong.err).toContain('--note is a release\'s hand-off');
+    } finally {
+      baton.close();
+    }
+    // Offline, the note is still the hand-off — Baton's lines are left out, never guessed.
+    const f2 = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('in-progress', [PR109]) } });
+    expect(run(f2.dir, 'set', 'B-91', 'available', '--offline', '--note', 'review round 2 next').code).toBe(0);
+    expect(git(f2.origin, 'log', '-1', '--format=%B', 'main')).toBe(`tickets: release B-91 → available\n\nPR ${PR109}\nLeft: review round 2 next`);
   }, 60_000);
 
   it("a write that would drop an open PR is refused: Baton holds the ticket past its start", async () => {
@@ -707,7 +735,7 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
       const before = f.head().sha;
       const r = await runAsync(f.dir, 'set', 'B-91', 'available', '-i', keyFile, '--url', baton.url);
       expect(r.code).toBe(2);
-      expect(r.err).toContain(`B-91: this write would drop ${PR109} — Baton holds the ticket at pr-open`);
+      expect(r.err).toContain(`B-91: this write would drop ${PR109} — Baton's record holds that PR for a ticket it offers ready at pr-open (review), past its start`);
       expect(r.err).toContain('take it over instead');
       expect(f.head().sha).toBe(before);
     } finally {
@@ -719,5 +747,99 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
     expect(warned.code).toBe(0);
     expect(warned.err).toContain('continuing on git\'s own record');
     expect(fmOf(f, 'tickets/B-91.mdx')).toMatchObject({ status: 'available' });
+  }, 60_000);
+
+  it('done is never refused by the drop-PR guard', async () => {
+    const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('in-review', []) } });
+    const baton = await fakeBaton(B91);
+    try {
+      const r = await runAsync(f.dir, 'done', 'B-91', '-i', keyFile, '--url', baton.url);
+      expect(r).toMatchObject({ code: 0, err: '' });
+      expect(parseFrontmatter(f.at('tickets/archive/B-91.mdx')!)).toMatchObject({ status: 'done' });
+    } finally {
+      baton.close();
+    }
+  }, 60_000);
+
+  it('a takeover overrides only a false available: the git lock, a parked or closed status and an undone dependency still refuse', async () => {
+    const baton = await fakeBaton(B91);
+    try {
+      for (const status of ['in-progress', 'in-review']) {
+        const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File(status, [PR109]) } });
+        const before = f.head().sha;
+        const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', baton.url);
+        expect(r.code).toBe(2);
+        expect(r.err).toBe(`baton: B-91 is ${status} in git — a git-lock holder may hold it; Baton's position (pr-open) overrides only a false available, never the git lock\n`);
+        expect(f.head().sha).toBe(before);
+      }
+      for (const status of ['deferred', 'deprioritized', 'superseded']) {
+        const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File(status, [PR109]) } });
+        const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', baton.url);
+        expect(r.code).toBe(2);
+        expect(r.err).toMatch(/^baton: B-91 is [a-z-]+ in git — parked or closed; Baton's position \(pr-open\) overrides only a false available\n$/);
+      }
+      const depends = b91File('available', []).replace('**Depends on:** none.', '**Depends on:** B-1.').replace('depends_on: []', 'depends_on:\n  - B-1');
+      const f = namedRepo({ existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/B-91.mdx': depends } });
+      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', baton.url);
+      expect(r.code).toBe(2);
+      expect(r.err).toBe('baton: B-91 depends on B-1, not done yet\n');
+    } finally {
+      baton.close();
+    }
+  }, 120_000);
+
+  it('a ticket moved back to its start is judged by where Baton holds it now: a fresh claim, not a takeover', async () => {
+    const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
+    // The history once reached pr-open; the board now offers implement from filed — the start.
+    const baton = await fakeBaton({ ...B91, ready: [{ id: 'baton:B-91', local_id: 'B-91', station: 'filed', leg: 'implement' }] });
+    try {
+      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', baton.url);
+      expect(r).toMatchObject({ code: 0, err: '' });
+      expect(r.out).toMatch(/^✓ tickets: claim B-91 \(in progress\) — pushed as [0-9a-f]{7,}\n$/);
+      expect(f.at('tickets/B-91.mdx')).toContain('prs: []');
+    } finally {
+      baton.close();
+    }
+  }, 60_000);
+
+  it('a holder whose lease has ended awaits reaping, and a legacy holder has no lease: both refuse, naming it', async () => {
+    const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
+    const ended = Date.parse('2026-10-27T11:00:00Z');
+    const stale = await fakeBaton({ ...B91, serverTime: ended + 60_000, holders: [{ ticket_id: 'baton:B-91', worker_id: 7, hostname: 'host-3', session_name: 'claude-review', lease_ends_at: ended }] });
+    try {
+      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', stale.url);
+      expect(r.code).toBe(2);
+      expect(r.err).toBe("baton: B-91 is held by host-3 · claude-review (worker 7), its lease ended 2026-10-27T11:00:00.000Z and the claim awaits reaping; it is reaped first (Baton's board, B-129)\n");
+    } finally {
+      stale.close();
+    }
+    const legacy = await fakeBaton({ ...B91, holders: [{ ticket_id: 'baton:B-91', worker_id: 3, hostname: 'legacy', session_name: 'item-B-91', lease_ends_at: null }] });
+    try {
+      const r = await runAsync(f.dir, 'claim', 'B-91', '-i', keyFile, '--url', legacy.url);
+      expect(r.code).toBe(2);
+      expect(r.err).toBe("baton: B-91 is held by legacy · item-B-91 (worker 3), a claim with no lease to end (a legacy claim); it is released, adopted or reaped first (Baton's board, B-129)\n");
+    } finally {
+      legacy.close();
+    }
+  }, 60_000);
+
+  it('a key that is missing or unreadable is named as the key\'s problem, never Baton unreachable — and Baton is not asked', async () => {
+    const f = namedRepo({ existing: { 'tickets/B-5.mdx': ticket('B-5') } });
+    const baton = await fakeBaton({});
+    try {
+      const missing = await runAsync(f.dir, 'claim', 'B-5', '-i', join(dirname(keyFile), 'nope.key'), '--url', baton.url);
+      expect(missing.code).toBe(2);
+      expect(missing.err).toContain(`no key: ${join(dirname(keyFile), 'nope.key')} does not exist — the reads cannot be signed, so Baton was not asked`);
+      expect(missing.err).not.toContain('unreachable');
+      const junk = join(dirname(keyFile), 'junk.key');
+      writeFileSync(junk, 'not a key\n');
+      const unreadable = await runAsync(f.dir, 'claim', 'B-5', '-i', junk, '--url', baton.url);
+      expect(unreadable.code).toBe(2);
+      expect(unreadable.err).toContain('key unreadable:');
+      expect(unreadable.err).not.toContain('unreachable');
+      expect(baton.asked).toEqual([]);
+    } finally {
+      baton.close();
+    }
   }, 60_000);
 });

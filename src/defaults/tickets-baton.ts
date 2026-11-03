@@ -9,19 +9,22 @@
 // The reads are the routes that already exist: the board (`GET /v1/repositories/{repo}/board`)
 // answers the station, the ready leg and — the field B-129 adds — the repository's live claims
 // (`holders`, each with its holder and when its lease ends); the history
-// (`GET …/tickets/{ticket}/history`) answers the path and — B-129's other field — the newest
-// ended claim's branches and PRs (`resume`, R-BTN-24's record pruned); and the branch-holder
+// (`GET …/tickets/{ticket}/history`) answers the path and — B-129's other field — the ended
+// claims' branches and PRs (`resume`, R-BTN-24's record pruned); and the branch-holder
 // query (§9) answers whether a branch the ticket's change lives on is held, asked only when the
 // history names a branch. Nothing here reads the forge: Baton must work without it (value 8),
 // and the branch-holder query already maps branches to tickets.
 //
-// An unanswered read is undetermined, never "no record" — a network fault, a missing key or a
-// `forbidden` is thrown as `Undetermined` naming which, and the claim refuses rather than fall
+// An unanswered read is undetermined, never "no record" — a network fault, a missing or
+// unreadable key (judged before any request, so a key problem is never reported as Baton
+// unreachable) or a `forbidden` is thrown as `Undetermined` naming which, and the claim refuses rather than fall
 // through to the frontmatter (the failure this ticket exists to end). The one exception is the
 // branch-holder query asked with a key that is not a worker's: an owner's or an administrator's
 // key cannot sign worker routes, and the board's `holders` has already answered the ticket's own
 // lock, so that one read is skipped, not fatal.
+import { readFileSync } from 'node:fs';
 import { send } from '../../cli/baton.mjs';
+import { signingKey } from '../../cli/sign.mjs';
 
 /** One live claim on a ticket, as the board's `holders` answers it (B-129). */
 export interface Holder {
@@ -33,7 +36,8 @@ export interface Holder {
   lease_ends_at: number | null;
 }
 
-/** The newest ended claim's record as the history's `resume` answers it (R-BTN-24, pruned). */
+/** The ticket's ended claims' record as the history's `resume` answers it (R-BTN-24, pruned):
+ *  the branches and PRs of every ended claim, newest first, and how the newest ended. */
 export interface Resume {
   end_reason: string;
   ended_at: number;
@@ -55,7 +59,7 @@ export interface BatonPosition {
   ready: { station: string; leg: string } | null;
   /** The history's rows, newest first (the path's evidence). */
   rows: PathRow[];
-  /** The newest ended claim's branches and PRs, when a claim ever ended. */
+  /** The ended claims' branches and PRs, when a claim ever ended. */
   resume: Resume | null;
   /** The repository's live claims (the lock Baton holds). */
   holders: Holder[];
@@ -63,9 +67,17 @@ export interface BatonPosition {
    *  `unavailable` names a key that cannot sign worker routes — the board's `holders` answered
    *  the ticket's own lock instead. */
   branch: { branch: string; held_by_other: boolean; fence_pending: boolean; tickets: string[] } | { unavailable: string } | null;
-  /** Whether Baton holds the ticket past its course's `start` — the takeover witness: a history
-   *  row that reached a station, or a board row at a station that is not the start. */
+  /** Where Baton holds the ticket now: the board's ready row's station when it is ready, else
+   *  the newest history row that reached a station; null when neither says. */
+  station: string | null;
+  /** Whether Baton holds the ticket past its course's `start` — the takeover witness, judged
+   *  from the current position (`station`), never from any row the path ever reached: a ticket
+   *  moved back to its start is at its start. With no start known (the checkout names no course
+   *  file), only a history row witnesses, as the board's row cannot be compared. */
   pastStart: boolean;
+  /** The board's `server_time`: the clock a holder's lease is judged against (R-BTN-32 — the
+   *  CLI reads no clock of its own for Baton's leases). */
+  serverTime: number | null;
 }
 
 /** Why a read could not be answered — thrown, never returned: undetermined, not "no record". */
@@ -93,6 +105,29 @@ async function getJson(o: { url: string; keyFile: string; path: string; which: s
   throw new Undetermined(o.which, code ? `${code} — ${String(answer.json?.message ?? '')}`.trim() : `HTTP ${answer.status}`);
 }
 
+/** An API key's shape (R-BTN-159), which `send` sends as a bearer rather than signing with. */
+const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
+
+/** The key the reads sign with, judged before any request (B-129): a key that is missing or
+ *  that neither parses as an API key nor as an SSH key is the key's problem, never Baton's — so
+ *  it is not reported as Baton unreachable. */
+export function checkKey(keyFile: string): void {
+  let text: string;
+  try {
+    text = readFileSync(keyFile, 'utf8').trim();
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') throw new Undetermined('the key', `no key: ${keyFile} does not exist`);
+    throw new Undetermined('the key', `key unreadable: ${keyFile} (${(e as Error).message})`);
+  }
+  if (API_KEY.test(text)) return;
+  try {
+    signingKey(keyFile);
+  } catch (e) {
+    throw new Undetermined('the key', `key unreadable: ${(e as Error).message}`);
+  }
+}
+
 /** Read where Baton holds `ticket` (a local id) in `repository` (Baton's id for it), with
  *  `start` its course's start station when the checkout's course file names one — the takeover
  *  witness needs it only for a ticket whose history is empty. `forgePath` (`owner/name`) is the
@@ -107,6 +142,7 @@ export async function readTicketPosition(o: {
   fetchImpl?: typeof fetch;
 }): Promise<BatonPosition> {
   const full = `${o.repository}:${o.ticket}`;
+  checkKey(o.keyFile);
   const board = await getJson({ ...o, which: `the board of ${o.repository}`, path: `/v1/repositories/${encodeURIComponent(o.repository)}/board` }) ?? {};
   const readyRow = (Array.isArray(board.ready) ? (board.ready as Record<string, unknown>[]) : [])
     .find((t) => t.local_id === o.ticket || t.id === full) ?? null;
@@ -143,12 +179,22 @@ export async function readTicketPosition(o: {
   const ready = readyRow && typeof readyRow.station === 'string' && typeof readyRow.leg === 'string'
     ? { station: readyRow.station, leg: readyRow.leg }
     : null;
-  const pastStart = rows.some((r) => r.reached != null) || (ready != null && o.start != null && ready.station !== o.start);
-  return { ready, rows, resume, holders, branch, pastStart };
+  const reached = rows.find((r) => r.reached != null)?.reached ?? null;
+  const station = ready?.station ?? reached;
+  const pastStart = o.start != null ? station != null && station !== o.start : reached != null;
+  const serverTime = typeof board.server_time === 'number' ? board.server_time : null;
+  return { ready, rows, resume, holders, branch, station, pastStart, serverTime };
 }
 
-/** The one line a refusal names a holder with (B-129): who holds it and when its lease ends. */
-export function holderLine(h: { worker_id: number; hostname: string | null; session_name: string | null; lease_ends_at: number | null }): string {
-  const who = [h.hostname, h.session_name].filter((x): x is string => x != null).join(' · ') || `worker ${h.worker_id}`;
-  return `${who} (worker ${h.worker_id})${h.lease_ends_at != null ? `, its lease ends ${new Date(h.lease_ends_at).toISOString()}` : ' (no lease to end)'}`;
+/** The refusal that names a holder (B-129): who holds it and its lease — not ended yet, ended
+ *  (judged against Baton's own `server_time`) with the claim awaiting reaping, or none at all
+ *  (a legacy claim, reaped at its own deadline). */
+export function holderRefusal(id: string, h: { worker_id: number; hostname: string | null; session_name: string | null; lease_ends_at: number | null }, now: number | null): string {
+  const who = `${[h.hostname, h.session_name].filter((x): x is string => x != null).join(' · ') || `worker ${h.worker_id}`} (worker ${h.worker_id})`;
+  const lease = h.lease_ends_at == null
+    ? 'a claim with no lease to end (a legacy claim); it is released, adopted or reaped first'
+    : now != null && h.lease_ends_at <= now
+      ? `its lease ended ${new Date(h.lease_ends_at).toISOString()} and the claim awaits reaping; it is reaped first`
+      : `its lease ends ${new Date(h.lease_ends_at).toISOString()} — its lease has not ended; it is released or reaped first`;
+  return `${id} is held by ${who}, ${lease} (Baton's board, B-129)`;
 }

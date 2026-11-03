@@ -29,7 +29,7 @@ import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { defaultBranch } from './request';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
 import { remoteSlug } from './cli';
-import { holderLine, readTicketPosition, type BatonPosition } from './tickets-baton';
+import { holderRefusal, readTicketPosition, Undetermined, type BatonPosition } from './tickets-baton';
 
 /** The most tries one command makes when the default branch moves under it: the stopgap's. */
 export const TICKET_TRIES = 6;
@@ -176,16 +176,18 @@ const acceptedList = (settings: TicketSettings): string => Object.keys(settings.
 
 /** `baton tickets claim <id>` (B-129: Baton first) — available → in-progress, refusing a ticket
  *  that is not available or whose `depends_on` are not all done (archived, or a live closed
- *  status); a ticket Baton holds past its course's start is claimed as a **takeover**: the
- *  frontmatter's word is not consulted, every `prs:` entry is kept and any Baton knows is
- *  written back, and the session starts from Baton's position — the station, the ready leg, the
- *  PRs, the branch and the hand-off. Only another live claim refuses, naming its holder and the
- *  lease's end. `baton tickets set <id> <status> [--pr URL]` — any live status, as the session
- *  that left it; a release (`set <id> available`) keeps every `prs:` entry and its commit
- *  carries the hand-off. `baton tickets done <id> [--pr URL]` — done, and the file moved to
- *  `archive/`. `claim` is the one that refuses: it is the lock, and `set` is the session keeping
- *  its own ticket's word. */
-export function moveTicket(root: string, io: TicketsIo, id: string, status: Status, pr?: string, claim = false, baton: BatonPosition | null = null): void {
+ *  status); a ticket Baton holds past its course's start is claimed as a **takeover**: Baton's
+ *  position overrides only a false `available` — the git lock (`in-progress`, `in-review`) and
+ *  a parked or closed status still refuse, and so do undone dependencies — every `prs:` entry is
+ *  kept and any Baton knows is written back, and the session starts from Baton's position — the
+ *  station, the ready leg, the PRs, the branch and the hand-off. Another live claim refuses,
+ *  naming its holder and its lease. `baton tickets set <id> <status> [--pr URL] [--note TEXT]` —
+ *  any live status, as the session that left it; a release (`set <id> available`) keeps every
+ *  `prs:` entry and its commit carries the hand-off (the PRs, Baton's station and next leg, the
+ *  branch, and `--note`'s "what is left"). `baton tickets done <id> [--pr URL]` — done, and the
+ *  file moved to `archive/`. `claim` is the one that refuses: it is the lock, and `set` is the
+ *  session keeping its own ticket's word. */
+export function moveTicket(root: string, io: TicketsIo, id: string, status: Status, pr?: string, claim = false, baton: BatonPosition | null = null, note?: string): void {
   if (pr != null && !GITHUB_PR.test(pr)) throw new Error(`--pr ${pr} is not a GitHub pull request URL`);
   const date = io.date ?? today();
   const remote = io.remote ?? 'origin';
@@ -195,11 +197,11 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
   // where its file is, set inside the change and read here (the cast keeps the narrowable type —
   // the change sets it inside the worktree callback).
   let pushed = null as { prs: string[]; path: string } | null;
-  // The lock Baton holds (B-129): a live claim's lease belongs to its holder until it is
-  // released or reaped, whatever the frontmatter says — the takeover and the fresh claim alike.
+  // The lock Baton holds (B-129): a live claim belongs to its holder until it is released or
+  // reaped, whatever the frontmatter says — the takeover and the fresh claim alike.
   if (claim && baton != null) {
     const holder = baton.holders.find((h) => h.ticket_id.endsWith(`:${id}`));
-    if (holder) throw new Error(`${id} is held by ${holderLine(holder)} — its lease has not ended; it is released or reaped first (Baton's board, B-129)`);
+    if (holder) throw new Error(holderRefusal(id, holder, baton.serverTime));
     if (baton.branch && 'held_by_other' in baton.branch) {
       if (baton.branch.held_by_other) throw new Error(`${id}'s branch ${baton.branch.branch} is held by another live claim (Baton's branch-holder query) — the branch maps to ${baton.branch.tickets.join(', ')}`);
       if (baton.branch.fence_pending) throw new Error(`${id}'s branch ${baton.branch.branch} has a reaped claim still fence-pending (Baton's branch-holder query)`);
@@ -215,14 +217,21 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
     let text = readFileSync(join(dir, found.path), 'utf8');
     const read = sourceAt(dir, settings);
     const current = read.tickets.find((t) => t.id === id)?.display?.status ?? 'closed';
-    // A takeover continues the ticket where Baton holds it (B-129): the frontmatter's status is
-    // not consulted — the false `available` of a hurried release is the case this exists for —
-    // and the dependencies were judged when the ticket was first claimed, not now.
+    // A takeover continues the ticket where Baton holds it (B-129). Baton's position overrides
+    // only a false `available` — the hurried release's word, the case this exists for; it never
+    // overrides the git lock (a session holding the ticket through git, which Baton cannot see)
+    // nor a parked or closed status (an owner's or a filer's deliberate word).
     const takeover = claim && baton?.pastStart === true;
-    // In-progress is the claim status, so it is written only on an available ticket — the
-    // stopgap's rule, for `claim` and `set` alike: anything else may be held by another session.
-    if (status === 'in-progress' && !takeover && current !== 'available') throw new Error(`${id} is ${current}, not available — someone may hold it${baton == null ? ' (claimed with --offline: Baton was not asked)' : ''}`);
-    if (status === 'in-progress' && !takeover) {
+    if (status === 'in-progress' && current !== 'available') {
+      if (takeover && (current === 'in-progress' || current === 'in-review')) {
+        throw new Error(`${id} is ${current} in git — a git-lock holder may hold it; Baton's position (${baton!.station ?? 'past its start'}) overrides only a false available, never the git lock`);
+      }
+      if (takeover) throw new Error(`${id} is ${current} in git — parked or closed; Baton's position (${baton!.station ?? 'past its start'}) overrides only a false available`);
+      throw new Error(`${id} is ${current}, not available — someone may hold it${baton == null ? ' (claimed with --offline: Baton was not asked)' : ''}`);
+    }
+    // The dependencies are judged for a takeover too: a dependency reopened since the first
+    // claim is still open work the ticket waits on.
+    if (status === 'in-progress') {
       const open = (read.tickets.find((t) => t.id === id)?.depends_on ?? []).filter((dep) => !isDone(dir, settings, dep));
       if (open.length) throw new Error(`${id} depends on ${open.join(', ')}, not done yet`);
     }
@@ -232,27 +241,24 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
     if (takeover) for (const known of baton!.resume?.prs ?? []) if (!had.includes(known)) text = addPr(text, known);
     text = setKey(setKey(text, 'status', status), 'updated', date);
     if (pr) text = addPr(text, pr);
-    // A release cannot drop an open PR (B-129, item 2): while Baton holds the ticket past its
-    // start and still offers it, the PRs it knows must survive the write — over the false
-    // `prs: []` of a broken release the write refuses, naming what it would drop.
-    if (baton?.pastStart && baton.ready != null) {
+    // A write cannot drop a PR Baton's record holds (B-129, item 2) while Baton offers the
+    // ticket ready past its start: the write refuses, naming what it would drop. `done` is never
+    // refused — the ticket's work is finished, whatever its PR list says.
+    if (status !== 'done' && baton?.pastStart && baton.ready != null) {
       const lost = [...new Set([...had, ...(baton.resume?.prs ?? [])])].filter((p) => !prsOf(text).includes(p));
       if (lost.length) {
-        throw new Error(`${id}: this write would drop ${lost.join(', ')} — Baton holds the ticket at ${baton.ready.station}, its PR still open; take it over instead (\`baton tickets claim ${id}\` writes what Baton knows back), or pass --offline to write git's word alone`);
+        throw new Error(`${id}: this write would drop ${lost.join(', ')} — Baton's record holds ${lost.length > 1 ? 'those PRs' : 'that PR'} for a ticket it offers ready at ${baton.ready.station} (${baton.ready.leg}), past its start; take it over instead (\`baton tickets claim ${id}\` writes what Baton knows back), or pass --offline to write git's word alone`);
       }
     }
     const from = `${items}/${id}.mdx`;
     const to = `${items}/archive/${id}.mdx`;
-    // A release on a PR course is a hand-off to the next claimant (B-129, item 2): the commit
-    // carries the PR, the station and what is left, so the next session reads it at
-    // `git log -1 tickets/<id>.mdx`; a takeover's commit carries Baton's position the same way.
-    const handoff = baton?.pastStart
-      ? [
-        '',
-        ...prsOf(text).map((p) => `PR ${p}`),
-        ...(baton?.ready ? [`Baton: ${baton.ready.station}, ${baton.ready.leg} ready — the next claim continues there (baton tickets claim ${id})`] : []),
-        ...(baton?.resume?.branches.length ? [`branch ${baton.resume.branches.join(', ')}`] : []),
-      ].join('\n')
+    // A release is a hand-off to the next claimant (B-129, item 2): the commit carries the PRs,
+    // Baton's station, the next leg from Baton's ready row, the branch and what is left
+    // (`--note`), so the next session reads it at `git log -1 tickets/<id>.mdx`; a takeover's
+    // commit carries Baton's position the same way.
+    const release = status === 'available' && !claim;
+    const handoff = baton?.pastStart || (release && note)
+      ? `\n\n${handoffLines({ id, prs: prsOf(text), baton, note: release ? note : undefined }).join('\n')}`
       : '';
     const message = status === 'done'
       ? `tickets: ${id} done (archived)${pr ? `\n\n${pr}` : ''}`
@@ -260,7 +266,7 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
         ? takeover
           ? `tickets: claim ${id} (in progress — continuing where Baton holds it${baton?.ready ? `: ${baton.ready.station}, ${baton.ready.leg} ready` : ''})${handoff}`
           : `tickets: claim ${id} (in progress)`
-        : status === 'available' && baton?.pastStart
+        : release && handoff
           ? `tickets: release ${id} → available${handoff}`
           : `tickets: ${id} → ${status}${pr ? `\n\n${pr}` : ''}`;
     // A done ticket is written at its archive path, and the live file moved there: the move
@@ -273,11 +279,34 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
   // PR, the branch to check out — never `checkout -b` a new one — and where the hand-off is.
   if (claim && baton != null && baton.pastStart) {
     const at = baton;
-    log(`${id}: Baton holds it${at.ready ? ` at ${at.ready.station}, ${at.ready.leg} ready` : ' past its course\'s start'} — you are taking it over, not starting it`);
+    log(`${id}: Baton holds it${at.ready ? ` at ${at.ready.station}, ${at.ready.leg} ready` : at.station ? ` at ${at.station}` : ' past its course\'s start'} — you are taking it over, not starting it`);
     for (const p of pushed?.prs ?? at.resume?.prs ?? []) log(`  PR: ${p}`);
     for (const b of at.resume?.branches ?? []) log(`  branch: ${b} — continue on it, never \`checkout -b\` a new one`);
     if (at.resume) log(`  hand-off: ${at.resume.end_reason} ${new Date(at.resume.ended_at).toISOString()} — read it: git log -1 ${pushed?.path ?? `tickets/${id}.mdx`}`);
   }
+}
+
+/** The hand-off a release's (or a takeover's) commit carries (B-129, R-BTN-74), one line each:
+ *  `PR <url>` for every PR the written file names; `Station: <s> (Baton)` — where Baton holds
+ *  the ticket; `Next: <leg> from <station> (Baton's ready row) — baton tickets claim <id>
+ *  continues there`, or, when the board does not offer it ready, that Baton's board names no
+ *  next leg; `Branch: <b>` for each branch Baton's record names; and `Left: <note>` — `--note`'s
+ *  "what is left", in the releasing session's own words. Lines Baton cannot answer (offline, or
+ *  a ticket at its start) are left out, never guessed. */
+function handoffLines(o: { id: string; prs: string[]; baton: BatonPosition | null; note?: string | undefined }): string[] {
+  const { id, prs, baton, note } = o;
+  const past = baton?.pastStart === true;
+  return [
+    ...prs.map((p) => `PR ${p}`),
+    ...(past && baton!.station ? [`Station: ${baton!.station} (Baton)`] : []),
+    ...(past
+      ? [baton!.ready
+        ? `Next: ${baton!.ready.leg} from ${baton!.ready.station} (Baton's ready row) — baton tickets claim ${id} continues there`
+        : `Next: Baton's board offers no leg ready — read baton ticket history ${id} before claiming`]
+      : []),
+    ...(past ? (baton!.resume?.branches ?? []).map((b) => `Branch: ${b}`) : []),
+    ...(note?.trim() ? [`Left: ${note.replace(/\s+/g, ' ').trim()}`] : []),
+  ];
 }
 
 /** Whether `id` is done, for a claim's dependency: archived, or a live file whose `status:` is
@@ -620,7 +649,8 @@ export function ticketsHelp(): string[] {
     '                   [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]',
     'baton tickets claim <id> [-i KEY] [--url URL] [--offline]   available → in-progress;',
     '                   a ticket Baton holds past its start is taken over where Baton holds it',
-    'baton tickets set <id> <status> [--pr URL] [-i KEY] [--url URL] [--offline]    any live status; --pr adds a pull request',
+    'baton tickets set <id> <status> [--pr URL] [--note TEXT] [-i KEY] [--url URL] [--offline]',
+    '                   any live status; --pr adds a pull request; --note is a release\'s "what is left"',
     'baton tickets done <id> [--pr URL]            done, moved to archive/',
     'baton tickets check [--repo DIR] [--quiet]    check the tickets without posting them',
     '',
@@ -631,12 +661,16 @@ export function ticketsHelp(): string[] {
     'claim asks Baton first (B-129): before it writes, it reads the ticket from Baton with the',
     'key -i names (or BATON_KEY_FILE) — the board for the station and ready leg, the history for',
     'the path, the branch-holder query for the branch — and continues the ticket where Baton',
-    'holds it: a ticket past its course\'s start is a takeover (the PRs are written back, the',
-    'position printed), never a fresh start. Only another live claim refuses, naming its holder',
-    'and the lease\'s end. An unanswered read — Baton unreachable, no key, forbidden — refuses',
+    'holds it: a ticket past its course\'s start that git says available is a takeover (the PRs',
+    'are written back, the position printed), never a fresh start. Baton overrides only a false',
+    'available: in-progress or in-review in git (the git lock) and a parked or closed status still',
+    'refuse, as do undone dependencies. Another live claim refuses, naming its holder and its',
+    'lease. An unanswered read — Baton unreachable, no key, an unreadable key, forbidden — refuses',
     'rather than trust the frontmatter; --offline claims on git\'s word alone (Baton\'s position',
-    'is then unknown, not refuted). A release (set <id> available) keeps every prs: entry, and',
-    'its commit carries the hand-off: the PR, the station and what is left.',
+    'is then unknown, not refuted). A release (set <id> available) keeps every prs: entry, refuses',
+    'to drop a PR Baton\'s record holds while Baton offers the ticket ready past its start, and its',
+    'commit carries the hand-off, one line each: PR <url>, Station: <s> (Baton), Next: <leg> from',
+    '<station> (Baton\'s ready row), Branch: <b>, and Left: <--note TEXT>. done is never refused.',
     '',
     'Settings are .baton/baton.json\'s: items (tickets/), ticket_prefix (B), legacy_ids (id patterns',
     'still accepted, never allocated), project (the default --project), tags (the default --tags,',
@@ -675,7 +709,7 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   const allowed: Record<string, string[]> = {
     new: ['title', 'description', 'project', 'depends-on', 'tags', 'tier', 'order', 'repos', 'course', 'body-file', ...COMMON],
     claim: ['url', 'offline', ...COMMON],
-    set: ['url', 'offline', 'pr', ...COMMON],
+    set: ['url', 'offline', 'pr', 'note', ...COMMON],
     done: ['url', 'offline', 'pr', ...COMMON],
   };
   if (!allowed[command]) throw new Error(`${command}: baton tickets new|claim|set|done|check (baton tickets --help)`);
@@ -732,6 +766,7 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   const status = command === 'claim' ? 'in-progress' : command === 'done' ? 'done' : positional[1];
   if (command === 'set' && status === 'done') throw new Error('done archives a ticket — `baton tickets done <id>`, past this push');
   if (status !== 'done' && !LIVE_STATUSES.includes(status as Status)) throw new Error(`${status} is not a status \`set\` writes — the live ones are ${LIVE_STATUSES.join(', ')}; \`baton tickets done\` archives a ticket`);
+  if (flags.note != null && status !== 'available') throw new Error(`--note is a release's hand-off ("what is left") — \`baton tickets set <id> available --note …\`, not ${status}`);
   // B-129: the ticket commands ask Baton first. A claim refuses on any read it cannot answer —
   // the frontmatter is not a fallback, it is the failure this exists to end; a set or done only
   // warn, for a release must be possible while Baton is down (it keeps git's own word, and the
@@ -746,7 +781,9 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
       try {
         baton = await readTicketPosition({ url: target.url, keyFile: target.keyFile, repository: target.repository, ticket: id, forgePath: target.forgePath, start: courseStart(root, id), ...(at.fetchImpl ? { fetchImpl: at.fetchImpl } : {}) });
       } catch (e) {
-        // Undetermined, not "no record" (B-129): the frontmatter is never the fallback.
+        // Undetermined, not "no record" (B-129): the frontmatter is never the fallback. A key
+        // problem is the key's, named as such — Baton was never asked.
+        if (e instanceof Undetermined && e.which === 'the key') throw new Error(`${id}: ${e.why} — the reads cannot be signed, so Baton was not asked; pass -i KEY (or BATON_KEY_FILE) naming a readable key, or --offline to claim on git's word alone`);
         throw new Error(`${id}: ${(e as Error).message} — Baton's answer is undetermined; pass --offline to claim on git's word alone`);
       }
     } else {
@@ -759,7 +796,7 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
       }
     }
   }
-  moveTicket(root, at, id, status as Status, flags.pr, command === 'claim', baton);
+  moveTicket(root, at, id, status as Status, flags.pr, command === 'claim', baton, flags.note);
   if (at.offline && command === 'claim') warn(`… ${id}: claimed on git's word alone (--offline) — Baton's position is unknown, not refuted; the frontmatter may say available of work Baton still holds`);
   return 0;
 }
