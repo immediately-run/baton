@@ -71,9 +71,6 @@
 //                — claim, move or finish one, each one commit pushed to the default branch (B-112);
 //                claim refuses a ticket citing a rule the spec's history amended since the ticket
 //                last changed, until --rules-reread (R-BTN-74)
-//   baton tickets reserve <id> migration|scenario
-//                — hold the next migration number or scenario id for a ticket in
-//                tickets/reserved.json, one commit pushed to the default branch (R-BTN-74)
 //   baton tickets check [--repo DIR] [--quiet]
 //                — check this repository's ticket source without posting it: ids, the board
 //                post's validation, depends_on targets and cycles, (with check.depends_line in

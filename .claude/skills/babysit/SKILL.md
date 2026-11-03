@@ -22,7 +22,7 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   | `spec/`, `docs/`, `tickets/` | `npm run check:spec`, `npm run check:wiki`, `npm run check:tickets`; for `spec/`, `npm run spec:impact` (below) |
   | `src/`, `cli/`, `scripts/` | `npm run typecheck`, and `npm test` (or `npm run test:no-quint` without quint) |
   | `src/shared/` | never by hand: change it in docs, then `npm run vendor` |
-  | `src/migrations/` | only a new numbered file, its number reserved (below); never edit an old one |
+  | `src/migrations/` | only a new numbered file, the next free number at merge (below); never edit an old one |
 
 - **Local failures that are not yours**: a cloud container without `ssh-keygen` or `ssh-agent`
   fails the signing tests (`sign.test.ts`, `cli.test.ts`, `defaults-cli.test.ts`,
@@ -33,9 +33,9 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 
 - Merge, never rebase or force-push: `git fetch origin main && git merge origin/main`, committed as
   "Merge origin/main into …". The repository's history is merge commits.
-- **When.** Merge `origin/main` whenever main has changed `spec/`, `src/migrations/` or
-  `tickets/reserved.json` since the branch last merged it — `git diff --quiet $(git merge-base HEAD
-  origin/main) origin/main -- spec src/migrations tickets/reserved.json` fails when it has — and at
+- **When.** Merge `origin/main` whenever main has changed `spec/` or `src/migrations/` since the
+  branch last merged it — `git diff --quiet $(git merge-base HEAD origin/main) origin/main -- spec
+  src/migrations` fails when it has — and at
   least daily for an open PR. Before reviewing, a PR more than a day behind main (the oldest
   main commit it lacks, `git log --reverse --format=%ci HEAD..origin/main | head -1`, is more than
   a day old) merges main first: a review of a stale base
@@ -46,13 +46,11 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 
 ## Ticket numbers and status
 
-- **Migration and scenario numbers are reserved, never taken by looking.** `node cli/baton.mjs
-  tickets reserve <ticket> migration|scenario` holds the next one for the ticket in
-  `tickets/reserved.json` and pushes the ledger to `origin/main`, as `new` does — so a session told
-  to push only to its own branch asks the user first. `npm run check:spec` fails a migration or a
-  §15 `S-BTN-n` row above the ledger's `baseline` that the ledger does not hold, and a number held
-  twice (B-110 and B-107 both took 0028; B-129 and B-145 both took S-BTN-197). After merging main,
-  a branch whose number the ledger gives another ticket reserves a new one and renumbers.
+- **Migration and scenario numbers are the next free ones at merge.** Until Baton hands them out
+  (B-176), a branch's new migration (`src/migrations/NNNN_*.sql`) or §15 `S-BTN-n` row takes the
+  next free number when the PR merges, not when the branch started: merge `origin/main` right
+  before merging, and if main took the number, renumber the branch's and every reference it added
+  (B-110 and B-107 both took 0028; B-129 and B-145 both took S-BTN-197).
 - **Ids are taken on `main`.** `node cli/baton.mjs tickets new` files a ticket with the next free id
   straight onto `main`. A long-running branch that filed a ticket by hand can find its id taken
   when `main` moves. Keep `main`'s ticket and give the branch's the next free id, then change every

@@ -15,9 +15,8 @@ import { join, resolve } from 'node:path';
 import { checkTickets } from '../../src/defaults/tickets-check';
 import { accepts, readTicketSettings, requiresFrom } from '../../src/defaults/tickets-config';
 import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
-import { moveTicket, reserveNumber, reverseMention, skeletonBody } from '../../src/defaults/tickets';
+import { moveTicket, reverseMention, skeletonBody } from '../../src/defaults/tickets';
 import { appendStatus, historyEntries, missingSections, rereadNote, ruleIds, rulesConfig, staleRules, fileDate, rulesSince } from '../../src/defaults/tickets-rules';
-import { ledgerKey, nextReserved, parseLedger, scenarioNumbers, writeLedger } from '../../src/defaults/tickets-reserve';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -366,7 +365,7 @@ describe('baton tickets claim | set | done (B-112)', () => {
 
   it('a command the CLI does not take, and a flag it does not know, are refusals', () => {
     const f = repo();
-    expect(run(f.dir, 'archive', 'B-1').err).toBe('baton: archive: baton tickets new|claim|set|done|reserve|check (baton tickets --help)\n');
+    expect(run(f.dir, 'archive', 'B-1').err).toBe('baton: archive: baton tickets new|claim|set|done|check (baton tickets --help)\n');
     expect(run(f.dir, 'claim', 'B-1', '--bogus', 'x').err).toBe('baton: --bogus: not a flag of baton tickets claim\n');
     expect(run(f.dir, 'new').err).toBe('baton: new needs --title\n');
   });
@@ -668,58 +667,5 @@ describe('baton tickets new --body-file: filed and judged like the skeleton (202
     expect(f.head().sha).toBe(before);
     writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n### What to build\n\nMine.\n\n### Trust\n\nno new input\n\n### Invariants\n\nR-BTN-33: posts no prose.\n');
     expect(run(f.dir, 'new', '--title', 'a', '--body-file', body).code).toBe(0);
-  });
-});
-
-describe('baton tickets reserve (2026-11-03)', () => {
-  const SPEC = '### Scenarios\n\n| Scenario | Steps |\n|---|---|\n| S-BTN-3 one | x |\n| S-BTN-4 two | x |\n';
-  const HIST = '## Retired scenarios and gates\n\n| S-BTN-9 | retired |\n';
-
-  it('a migration: one above the higher of the tree’s highest and the ledger’s, one commit writing the ledger alone', () => {
-    const f = repo({
-      existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/B-2.mdx': ticket('B-2') },
-      files: { 'src/migrations/0001_init.sql': '', 'src/migrations/0005_more.sql': '', 'src/migrations/index.ts': '', 'tickets/reserved.json': writeLedger({ baseline: { migration: 5, scenario: 4 }, migration: { '0007': 'B-2' }, scenario: {} }) },
-    });
-    const before = f.head().sha;
-    const r = run(f.dir, 'reserve', 'B-1', 'migration');
-    expect(r).toMatchObject({ code: 0, err: '' });
-    expect(r.out).toMatch(/^✓ tickets: reserve migration 0008 for B-1 — pushed as [0-9a-f]{7,}\n$/);
-    expect(f.head().parent).toBe(before);
-    expect(execFileSync('git', ['-C', f.origin, 'show', '--name-only', '--format=%s', 'main'], { encoding: 'utf8' }).trim().split('\n')).toEqual(['tickets: reserve migration 0008 for B-1', '', 'tickets/reserved.json']);
-    expect(JSON.parse(f.at('tickets/reserved.json')!)).toEqual({ baseline: { migration: 5, scenario: 4 }, migration: { '0007': 'B-2', '0008': 'B-1' }, scenario: {} });
-    // The tree's highest wins when the ledger's is lower: a second reservation takes 0009.
-    expect(run(f.dir, 'reserve', 'B-2', 'migration').out).toMatch(/^✓ tickets: reserve migration 0009 for B-2/);
-  });
-
-  it('a scenario: above every id the spec and its history name, retired ones included, and the ledger’s; a ledger written where there was none', () => {
-    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1') }, files: { 'spec/BATON_SPEC.md': SPEC, 'spec/BATON_SPEC_HISTORY.md': HIST } });
-    expect(run(f.dir, 'reserve', 'B-1', 'scenario').out).toMatch(/^✓ tickets: reserve scenario S-BTN-10 for B-1/);
-    expect(JSON.parse(f.at('tickets/reserved.json')!)).toEqual({ baseline: { migration: 0, scenario: 0 }, migration: {}, scenario: { 10: 'B-1' } });
-    expect(run(f.dir, 'reserve', 'B-1', 'scenario').out).toMatch(/^✓ tickets: reserve scenario S-BTN-11 for B-1/);
-  });
-
-  it('refuses an unknown kind, a ticket that is not here or is archived, and lands nothing', () => {
-    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/archive/B-2.mdx': ticket('B-2').replace('status: available', 'status: done') } });
-    const before = f.head().sha;
-    expect(run(f.dir, 'reserve', 'B-1', 'table').err).toBe('baton: table: reserve takes migration or scenario\n');
-    expect(run(f.dir, 'reserve', 'B-9', 'migration').err).toBe('baton: B-9: no tickets/B-9.mdx on origin/main\n');
-    expect(run(f.dir, 'reserve', 'B-2', 'migration').err).toBe('baton: B-2 is archived (done): a number is reserved for live work\n');
-    expect(run(f.dir, 'reserve', 'B-1').err).toBe('baton: baton tickets reserve <id> migration|scenario\n');
-    expect(f.head().sha).toBe(before);
-  });
-
-  it('the parts: the next number, the ledger read and written in number order, the keys', () => {
-    const l = parseLedger('{"baseline":{"migration":30,"scenario":198},"migration":{"0031":"B-110","0028":"B-107"},"scenario":{"199":"B-129"}}');
-    expect(nextReserved('migration', [1, 29, 30], l)).toBe(32);
-    expect(nextReserved('migration', [40], l)).toBe(41);
-    expect(nextReserved('scenario', [12], parseLedger(null))).toBe(13);
-    expect(Object.keys(JSON.parse(writeLedger(l)).migration)).toEqual(['0028', '0031']);
-    expect(ledgerKey('migration', 7)).toBe('0007');
-    expect(scenarioNumbers(['S-BTN-3, XS-BTN-99, S-BTN-30'])).toEqual([3, 30]);
-    expect(() => parseLedger('{"migration":{"x":"B-1"}}')).toThrow('migration.x is not a number held by a ticket id');
-    expect(() => parseLedger('{')).toThrow('reserved.json is not JSON');
-    // The function the CLI calls, for a caller that needs the number.
-    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1') } });
-    expect(reserveNumber(f.dir, { root: f.dir, log: () => {} }, 'B-1', 'migration')).toBe(1);
   });
 });

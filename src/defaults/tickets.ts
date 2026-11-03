@@ -26,7 +26,6 @@ import { addPr, idOf, locate, nextNumber, scalar, setKey } from './tickets-file'
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
 import { appendStatus, fileDate, historyEntries, missingSections, rulesSince, rereadNote, rulesConfig, sectionsSince, staleList, staleRules } from './tickets-rules';
-import { LEDGER_NAME, ledgerKey, migrationNumbers, nextReserved, parseLedger, RESERVE_KINDS, reserveConfig, scenarioNumbers, writeLedger, type ReserveKind } from './tickets-reserve';
 import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { defaultBranch } from './request';
 
@@ -496,42 +495,6 @@ function projectPage(dir: string, settings: TicketSettings, project: string): vo
 }
 
 /* ------------------------------------------------------------------------------------------
- * reserve
- * ---------------------------------------------------------------------------------------- */
-
-/** `baton tickets reserve <id> migration|scenario`: the next migration number or scenario id, held
- *  for a live ticket in `<items>/reserved.json` (tickets-reserve.ts) — one above both the highest
- *  in the tree at the head it pushes to and the highest reserved — as one commit through the
- *  git-lock path `new` uses, so two branches never take one number. Returns the number. */
-export function reserveNumber(root: string, io: TicketsIo, id: string, kind: ReserveKind): number {
-  if (!RESERVE_KINDS.includes(kind)) throw new Error(`${kind}: reserve takes migration or scenario`);
-  const remote = io.remote ?? 'origin';
-  const branch = io.branch ?? defaultBranch(root);
-  let took = 0;
-  transact(root, io, `reserve ${kind} for ${id}`, (dir) => {
-    const settings = settingsAt(dir, remote, branch);
-    if (!accepts(settings, id)) throw new Error(`${id} is not a ticket id of this repository — its ids are ${acceptedList(settings)}`);
-    const items = (settings.items ?? 'tickets').replace(/\/$/, '');
-    const found = locate(items, id, fileAt(dir));
-    if (!found) throw new Error(`${id}: no ${items}/${id}.mdx on ${remote}/${branch}`);
-    if (found.archived) throw new Error(`${id} is archived (done): a number is reserved for live work`);
-    const config = reserveConfig(readSettingsJson(dir) as { reserve?: unknown });
-    const ledgerPath = `${items}/${LEDGER_NAME}`;
-    const ledger = parseLedger(existsSync(join(dir, ledgerPath)) ? readFileSync(join(dir, ledgerPath), 'utf8') : null);
-    const read = (p: string): string => (existsSync(join(dir, p)) ? readFileSync(join(dir, p), 'utf8') : '');
-    const tree = kind === 'migration'
-      ? migrationNumbers(existsSync(join(dir, config.migrations)) ? readdirSync(join(dir, config.migrations)) : [])
-      : scenarioNumbers([read(config.spec), read(config.history)], config.scenario_prefix);
-    took = nextReserved(kind, tree, ledger);
-    const key = ledgerKey(kind, took);
-    const next = { ...ledger, [kind]: { ...ledger[kind], [key]: id } };
-    const label = kind === 'migration' ? `migration ${key}` : `scenario ${config.scenario_prefix}-${key}`;
-    return { message: `tickets: reserve ${label} for ${id}`, write: [{ path: ledgerPath, text: writeLedger(next) }], move: [] };
-  });
-  return took;
-}
-
-/* ------------------------------------------------------------------------------------------
  * check — B-111's, and the generated page
  * ---------------------------------------------------------------------------------------- */
 
@@ -588,7 +551,6 @@ export function ticketsHelp(): string[] {
     '                   [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]',
     'baton tickets claim <id> [--rules-reread]     available → in-progress; refused while the ticket cites a',
     '                                              rule amended since it last changed, until --rules-reread',
-    'baton tickets reserve <id> migration|scenario the next migration or scenario number, for that ticket',
     'baton tickets set <id> <status> [--pr URL] [--rules-reread]   any live status; --pr adds a pull request',
     'baton tickets done <id> [--pr URL]            done, moved to archive/',
     'baton tickets check [--repo DIR] [--quiet]    check the tickets without posting them',
@@ -615,16 +577,12 @@ export function ticketsHelp(): string[] {
     "drivable-browser.”, has the capabilities it names written on the new ticket's **Requires:**",
     'line, which is where a runner’s capability requirement lives.',
     '',
-    'reserve takes the next number above both the highest in the tree (src/migrations/NNNN_*.sql;',
-    "§15's | S-BTN-n rows and the spec's history) and the highest in tickets/reserved.json, and records",
-    'it there for the ticket, so two branches never take one number.',
-    '',
     'statuses: available, in-progress, in-review, deprioritized (set); done (done, archived);',
     '          deferred, superseded (set, and closed as withdrawn)',
   ];
 }
 
-/** `baton tickets …` (B-112): new, claim, set, done, reserve and check. Exit 0 when the command did what
+/** `baton tickets …` (B-112): new, claim, set, done and check. Exit 0 when the command did what
  *  it says, 1 when `check` found something; a refusal throws, which the CLI prints as one
  *  `baton: …` line and exits 2 on. */
 export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<number> {
@@ -640,10 +598,9 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
     new: ['title', 'description', 'project', 'depends-on', 'tags', 'tier', 'order', 'repos', 'course', 'body-file', ...COMMON],
     claim: ['rules-reread', ...COMMON],
     set: ['pr', 'rules-reread', ...COMMON],
-    reserve: COMMON,
     done: ['pr', ...COMMON],
   };
-  if (!allowed[command]) throw new Error(`${command}: baton tickets new|claim|set|done|reserve|check (baton tickets --help)`);
+  if (!allowed[command]) throw new Error(`${command}: baton tickets new|claim|set|done|check (baton tickets --help)`);
   /** The flags that take no value. */
   const SWITCHES = ['rules-reread'];
   const positional: string[] = [];
@@ -688,11 +645,6 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
       ...(flags.course ? { course: flags.course } : {}),
       ...(body != null ? { body } : {}),
     });
-    return 0;
-  }
-  if (command === 'reserve') {
-    if (positional.length !== 2) throw new Error('baton tickets reserve <id> migration|scenario');
-    reserveNumber(root, at, positional[0], positional[1] as ReserveKind);
     return 0;
   }
   if (command === 'set' ? positional.length !== 2 : positional.length !== 1) throw new Error(`baton tickets ${command} ${command === 'set' ? '<id> <status>' : '<id>'} [--pr URL]`);
