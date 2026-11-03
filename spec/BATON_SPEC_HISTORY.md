@@ -2302,6 +2302,20 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   2026-11-01 ruling keeps position discrepancies off it. The owner ruled on 2026-11-03: "Keep
   your Decision" — the discrepancies list only, nothing adopted (R-BTN-85's row, Decisions).
 
+  Review round two (one fresh reviewer) found round one's `position-disagrees` fix had core read
+  the posted opaque `course.prs` and store both PR lists in the discrepancy, against R-BTN-50 and
+  R-BTN-33. Reverted: the row fires on a posted `available` over a ticket the post places past its
+  start, once per station, both values positions, so a release that kept its PRs logs it too —
+  telling the two apart is left to the owner (a field the ticket source posts for core, or a
+  ruling that core may read `prs`). Also closed: with no local course file the start was still
+  any reached row (now the standard course's, R-BTN-131, else undetermined, R-BTN-74); a release
+  not past its start without `--note` lacked its subject and `PR` lines (every release writes
+  them, R-BTN-74); the 2026-10-15 Decision still said Baton's state is never a discrepancy (it
+  names the git-lock `status:` exception, and the 2026-11-03 entry keeps only its own choice);
+  the ticket commands copied the API-key shape and `send`'s key dispatch (one copy, in
+  `cli/sign.mjs`); and R-BTN-24 restated the history route row and *reader* (it cites them).
+  S-BTN-199's row follows.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
