@@ -9,9 +9,10 @@
 // lost; a legacy claim is a holder with no lease; the branch-holder query answers a held branch;
 // the CLI's own reader (`readTicketPosition`) reads the real core's answers as the takeover's
 // position (local host: it reads a key file); and a post whose frontmatter says `available`
-// while it places the ticket past its course's start and whose `prs` lacks a PR Baton's record
-// holds is a `position-disagrees` discrepancy with both values (prs included), listed once among
-// the dashboard's discrepancies — a release that keeps its PRs is none. Runs on both hosts.
+// while it places the ticket past its course's start is a `position-disagrees` discrepancy with
+// both values, listed once per station among the dashboard's discrepancies — core reads no
+// course field and stores no PR list (R-BTN-50, R-BTN-33), so a release that kept its PRs logs
+// one too. Runs on both hosts.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { adminSession, advance, claimItem, cutover, endClaim, Git, keyCall, placed, register, rows, sessionCall, setAdminKeys, setClock, workerCall } from '../helpers';
 import { makeKey, signedRequest, type TestKey } from '../lib/sshKeys';
@@ -173,7 +174,7 @@ describe('S-BTN-199 the git-lock pickup asks Baton', () => {
     expect(asked).toEqual(['/v1/repositories/docs/board', '/v1/repositories/docs/tickets/docs%3AT-1/history', '/v1/runner/branch-holder']);
   });
 
-  it('a post saying available, without a PR Baton holds, of a ticket past its start is a position-disagrees discrepancy with both values, named once', async () => {
+  it('a post saying available of a ticket past its start is a position-disagrees discrepancy with both values, no PR list, named once per station', async () => {
     const PR2 = 'https://github.com/immediately-run/docs/pull/110';
     const git = new Git()
       .add('T-1', { display: { status: 'in-progress' } }, placed('filed', [], [['implement', 'ready']]))
@@ -185,43 +186,46 @@ describe('S-BTN-199 the git-lock pickup asks Baton', () => {
     const disagreements = () => rows<{ ticket_id: string; detail_json: string }>(
       `SELECT ticket_id, detail_json FROM events WHERE kind = 'discrepancy' AND json_extract(detail_json, '$.sub') = 'position-disagrees' ORDER BY seq`);
     // The false release: T-1's frontmatter says `available` with `prs: []` while the same post's
-    // PR facts place it at pr-open and Baton's record holds #109 — B-91's 2026-10-27 state. T-2's
-    // release kept its PR: the ordinary hand-off, no disagreement.
+    // PR facts place it at pr-open — B-91's 2026-10-27 state. T-2's release kept its PR, but core
+    // reads no course field (R-BTN-50): it fires on `available` past the start alone, so both log.
     git.add('T-1', { display: { status: 'available' } }, placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]));
     git.add('T-2', { display: { status: 'available' }, course: { prs: [PR2] } }, placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]));
     await git.post();
     const event = await disagreements();
-    expect(event).toHaveLength(1);
-    expect(event[0].ticket_id).toBe('docs:T-1');
-    expect(JSON.parse(event[0].detail_json)).toEqual({
-      sub: 'position-disagrees',
-      baton: { station: 'pr-open', path: [{ leg: 'implement', reached: 'pr-open' }], prs: [PR] },
-      git: { status: 'available', prs: [] },
-      observation: 2,
-    });
+    expect(event.map((e) => e.ticket_id)).toEqual(['docs:T-1', 'docs:T-2']);
+    // Both values, positions only: no PR list is stored (R-BTN-33).
+    for (const e of event) {
+      expect(JSON.parse(e.detail_json)).toEqual({
+        sub: 'position-disagrees',
+        baton: { station: 'pr-open', path: [{ leg: 'implement', reached: 'pr-open' }] },
+        git: { status: 'available' },
+        observation: 2,
+      });
+      expect(e.detail_json).not.toContain('pull/');
+    }
     expect(await rows<{ detail_json: string }>(`SELECT detail_json FROM ticket_history WHERE kind = 'discrepancy' AND ticket_id = 'docs:T-1' AND json_extract(detail_json, '$.sub') = 'position-disagrees'`))
       .toEqual([{ detail_json: event[0].detail_json }]);
     // The dashboard lists it (R-BTN-85, the Discrepancies of the last 7 days)…
     const cookie = await adminSession(admin);
     const state = (await (await sessionCall(cookie, '/v1/ui/state')).json()) as Record<string, any>;
-    expect(state.discrepancies.by_kind['position-disagrees']).toBe(1);
+    expect(state.discrepancies.by_kind['position-disagrees']).toBe(2);
     expect(state.discrepancies.rows).toEqual(expect.arrayContaining([expect.objectContaining({ ticket_id: 'docs:T-1', sub: 'position-disagrees' })]));
-    // …and a later post with the same two values is the same disagreement, not a new one every
+    // …and a later post with the same station is the same disagreement, not a new one every
     // sync — judged against the last `position-disagrees` row, whatever other discrepancy the
-    // ticket logged since; a ticket at its course's start, one whose frontmatter says otherwise,
-    // and one whose release kept its PR are none.
+    // ticket logged since; a ticket at its course's start, and one whose frontmatter says
+    // otherwise, are none.
     // Another case's discrepancy on the same ticket since (R-BTN-85's `regressed`, logged as the
     // core logs it): the dedup reads the last `position-disagrees` row, not the last row.
     await rows(`INSERT INTO events (at, kind, ticket_id, claim_id, actor, detail_json, repository_id) VALUES (?, 'discrepancy', 'docs:T-1', NULL, 'sync', ?, 'docs')`,
       T0, JSON.stringify({ sub: 'regressed', baton: {}, git: {}, observation: 2 }));
     await git.post();
-    expect(await disagreements()).toHaveLength(1);
+    expect(await disagreements()).toHaveLength(2);
     git.add('T-9', { display: { status: 'available' } });
     await git.post();
     git.add('T-9', { display: { status: 'available' } }, placed('filed', [], [['implement', 'ready']]));
     await git.post();
     git.add('T-1', { display: { status: 'in-progress' } }, placed('pr-open', [['implement', 'pr-open']], [['review', 'ready']]));
     await git.post();
-    expect(await disagreements()).toHaveLength(1);
+    expect(await disagreements()).toHaveLength(2);
   });
 });
