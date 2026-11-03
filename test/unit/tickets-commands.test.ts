@@ -832,6 +832,28 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
     }
   }, 60_000);
 
+  it('every release writes its subject and PR lines; Baton\'s lines only past the start', async () => {
+    const PR7 = 'https://github.com/immediately-run/baton/pull/7';
+    const f = namedRepo({ existing: { 'tickets/B-5.mdx': ticket('B-5', 'status: in-progress').replace('status: available\n', '').replace('prs: []', `prs:\n  - ${PR7}`) } });
+    // At its start, no note: the release subject and the PR line, no Baton line.
+    const atStart = await fakeBaton({ ready: [{ id: 'baton:B-5', local_id: 'B-5', station: 'filed', leg: 'implement' }], holders: [], history: [], resume: null });
+    try {
+      const r = await runAsync(f.dir, 'set', 'B-5', 'available', '-i', keyFile, '--url', atStart.url);
+      expect(r).toMatchObject({ code: 0, err: '' });
+      expect(git(f.origin, 'log', '-1', '--format=%B', 'main')).toBe(`tickets: release B-5 → available\n\nPR ${PR7}`);
+    } finally {
+      atStart.close();
+    }
+    // Offline, no note: the same two lines — git's word, Baton's lines left out.
+    expect(run(f.dir, 'set', 'B-5', 'in-progress', '--offline').code).toBe(0);
+    expect(run(f.dir, 'set', 'B-5', 'available', '--offline').code).toBe(0);
+    expect(git(f.origin, 'log', '-1', '--format=%B', 'main')).toBe(`tickets: release B-5 → available\n\nPR ${PR7}`);
+    // A ticket naming no PR: the subject alone.
+    const g = namedRepo({ existing: { 'tickets/B-6.mdx': ticket('B-6', 'status: in-progress').replace('status: available\n', '') } });
+    expect(run(g.dir, 'set', 'B-6', 'available', '--offline').code).toBe(0);
+    expect(git(g.origin, 'log', '-1', '--format=%B', 'main')).toBe('tickets: release B-6 → available');
+  }, 60_000);
+
   it('a holder whose lease has ended awaits reaping, and a legacy holder has no lease: both refuse, naming it', async () => {
     const f = namedRepo({ existing: { 'tickets/B-91.mdx': b91File('available', []) } });
     const ended = Date.parse('2026-10-27T11:00:00Z');

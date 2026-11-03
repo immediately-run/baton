@@ -257,17 +257,17 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
     // Baton's station, the next leg from Baton's ready row, the branch and what is left
     // (`--note`), so the next session reads it at `git log -1 tickets/<id>.mdx`; a takeover's
     // commit carries Baton's position the same way.
+    // Every release carries its subject and its `PR` lines; Baton's lines only past the start.
     const release = status === 'available' && !claim;
-    const handoff = baton?.pastStart || (release && note)
-      ? `\n\n${handoffLines({ id, prs: prsOf(text), baton, note: release ? note : undefined }).join('\n')}`
-      : '';
+    const lines = release || baton?.pastStart ? handoffLines({ id, prs: prsOf(text), baton, note: release ? note : undefined }) : [];
+    const handoff = lines.length ? `\n\n${lines.join('\n')}` : '';
     const message = status === 'done'
       ? `tickets: ${id} done (archived)${pr ? `\n\n${pr}` : ''}`
       : claim
         ? takeover
           ? `tickets: claim ${id} (in progress — continuing where Baton holds it${baton?.ready ? `: ${baton.ready.station}, ${baton.ready.leg} ready` : ''})${handoff}`
           : `tickets: claim ${id} (in progress)`
-        : release && handoff
+        : release
           ? `tickets: release ${id} → available${handoff}`
           : `tickets: ${id} → ${status}${pr ? `\n\n${pr}` : ''}`;
     // A done ticket is written at its archive path, and the live file moved there: the move
