@@ -1396,7 +1396,7 @@ export class Claims {
     return this.rows<{ ticket_id: string; worker_id: number; hostname: string; session_name: string; kind: string; last_seen_at: number; lease_timeout_ms: number }>(
       `SELECT c.ticket_id, c.worker_id, w.hostname, w.session_name, w.kind, w.last_seen_at, w.lease_timeout_ms
        FROM claims c JOIN workers w ON w.id = c.worker_id
-       WHERE c.status = 'active' AND w.kind != 'legacy' AND (c.ticket_id IN (SELECT id FROM tickets WHERE repository_id = ?) OR c.ticket_id LIKE ?)
+       WHERE c.status = 'active' AND (c.ticket_id IN (SELECT id FROM tickets WHERE repository_id = ?) OR c.ticket_id LIKE ?)
        ORDER BY c.claimed_at, c.id`,
       repo, `${repo}:%`).map((c) => ({
       ticket_id: c.ticket_id,
@@ -1407,22 +1407,30 @@ export class Claims {
     }));
   }
 
-  /** The ticket's newest ended claim's resume record (R-BTN-24), pruned to what a claimant
-   *  picking the ticket up through git needs (B-129): the branches and PRs its activities
-   * recorded, and how it ended — the history read's `resume` field, so `baton tickets claim`
-   * learns from Baton the PR a broken frontmatter lost. Null when no claim ever ended. */
+  /** The ticket's ended claims' resume records (R-BTN-24), pruned to what a claimant picking
+   *  the ticket up through git needs (B-129): the branches and PRs every ended claim's
+   *  activities recorded, newest claim first and each named once, with how the newest ended —
+   *  the history read's `resume` field, so `baton tickets claim` learns from Baton the PR a
+   *  broken frontmatter lost even when the newest claim (a review that pushed nothing) named
+   *  none. Null when no claim ever ended. */
   resumeOf(ticket: string) {
-    const r = this.rows<{ end_reason: string; ended_at: number; resume_json: string | null }>(
-      `SELECT end_reason, ended_at, resume_json FROM claims WHERE ticket_id = ? AND status != 'active' ORDER BY id DESC LIMIT 1`, ticket)[0];
-    if (!r) return null;
-    let parsed: Record<string, unknown> = {};
-    try {
-      parsed = r.resume_json ? (JSON.parse(r.resume_json) as Record<string, unknown>) : {};
-    } catch {
-      parsed = {};
-    }
+    const ended = this.rows<{ end_reason: string; ended_at: number; resume_json: string | null }>(
+      `SELECT end_reason, ended_at, resume_json FROM claims WHERE ticket_id = ? AND status != 'active' ORDER BY id DESC`, ticket);
+    if (!ended.length) return null;
     const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
-    return { end_reason: r.end_reason, ended_at: r.ended_at, branches: list(parsed.branches), prs: list(parsed.prs) };
+    const branches = new Set<string>();
+    const prs = new Set<string>();
+    for (const r of ended) {
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = r.resume_json ? (JSON.parse(r.resume_json) as Record<string, unknown>) : {};
+      } catch {
+        parsed = {};
+      }
+      for (const b of list(parsed.branches)) branches.add(b);
+      for (const p of list(parsed.prs)) prs.add(p);
+    }
+    return { end_reason: ended[0].end_reason, ended_at: ended[0].ended_at, branches: [...branches], prs: [...prs] };
   }
 
   /** `GET /v1/runner/branch-holder?repo=&branch=` (§6.3, R-BTN-51): every live ticket the branch

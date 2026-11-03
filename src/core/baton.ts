@@ -1018,7 +1018,7 @@ export class BatonCore {
       const n = limit == null ? 50 : Number(limit);
       if (b != null && !(Number.isInteger(b) && b > 0)) throw new BatonError('invalid-params', 'before: must be the next_before a page gave');
       if (!(Number.isInteger(n) && n >= 1 && n <= HISTORY_PAGE_MAX)) throw new BatonError('invalid-params', `limit: must be an integer from 1 to ${HISTORY_PAGE_MAX}`);
-      // B-129: the newest ended claim's branches and PRs ride with the path (R-BTN-24's record,
+      // B-129: the ended claims' branches and PRs ride with the path (R-BTN-24's records,
       // pruned) — the PR a ticket's frontmatter lost, so a claimant continues the change.
       return json({ ...this.history.list(id, b, n), resume: this.claims.resumeOf(id) });
     }
@@ -1279,25 +1279,35 @@ export class BatonCore {
 
   /** B-129 (R-BTN-85, "every disagreement with git is logged", both values): the accepted post's
    *  tickets whose frontmatter says `available` while the post itself places them past their
-   *  course's start — the false `status: available` / `prs: []` a hurried release wrote over an
-   *  open PR (B-91, 2026-10-27). Logged once per distinct pair of values (the sync posts every
-   * 15 minutes), moving nothing (B-120's rule; until it lands, named). The path's length is the
-   *  witness: a ticket past its start has one. */
+   *  course's start AND whose posted `prs` lacks a PR Baton's record holds (the ended claims'
+   *  resume records, R-BTN-24) — the false `status: available` / `prs: []` a hurried release
+   *  wrote over an open PR (B-91, 2026-10-27). A release that keeps its PRs is the ordinary
+   *  hand-off and no disagreement. Logged once per distinct pair of values (the sync posts every
+   *  15 minutes), judged against the ticket's last `position-disagrees` row, moving nothing
+   *  (B-120's rule; until it lands, named). */
   private notePositionDisagreements(r: string, p: BoardPayload, seen: Map<string, Seen>, n: number): void {
     if (!p.tickets) return;
-    const statusOf = new Map(p.tickets.map((t) => [qualify(r, t.id), t.display?.status ?? null]));
+    const posted = new Map(p.tickets.map((t) => {
+      const prs = (t as { course?: { prs?: unknown } }).course?.prs;
+      return [qualify(r, t.id), { status: t.display?.status ?? null, prs: Array.isArray(prs) ? prs.filter((x): x is string => typeof x === 'string') : [] }];
+    }));
     for (const [id, s] of seen) {
-      if (s.path.length === 0 || statusOf.get(id) !== 'available') continue;
+      const git = posted.get(id);
+      if (s.path.length === 0 || git?.status !== 'available') continue;
+      const held = this.claims.resumeOf(id)?.prs ?? [];
+      if (!held.some((pr) => !git.prs.includes(pr))) continue;
+      const baton = { station: s.station, path: s.path, prs: held };
+      const said = { status: 'available', prs: git.prs };
       const last = this.sql<{ detail_json: string }>(
-        `SELECT detail_json FROM events WHERE ticket_id = ? AND kind = 'discrepancy' ORDER BY seq DESC LIMIT 1`, id)[0];
-      let held: { sub?: unknown; baton?: { station?: unknown } } = {};
+        `SELECT detail_json FROM events WHERE ticket_id = ? AND kind = 'discrepancy' AND json_extract(detail_json, '$.sub') = 'position-disagrees' ORDER BY seq DESC LIMIT 1`, id)[0];
+      let before: { baton?: { station?: unknown; prs?: unknown }; git?: { prs?: unknown } } = {};
       try {
-        held = last ? JSON.parse(last.detail_json) : {};
+        before = last ? JSON.parse(last.detail_json) : {};
       } catch {
-        held = {};
+        before = {};
       }
-      if (held.sub === 'position-disagrees' && held.baton?.station === s.station) continue;
-      this.history.discrepancy(id, 'position-disagrees', { station: s.station, path: s.path }, { status: 'available' }, n);
+      if (before.baton?.station === s.station && JSON.stringify(before.baton?.prs) === JSON.stringify(held) && JSON.stringify(before.git?.prs) === JSON.stringify(git.prs)) continue;
+      this.history.discrepancy(id, 'position-disagrees', baton, said, n);
     }
   }
 
