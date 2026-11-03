@@ -33,12 +33,12 @@ ruling: each change aligns two rules or closes a gap in the direction the spec a
    masking uses the same pattern (one shared definition, not two lists).
 2. **The checks map.** `PUT /v1/owner/{repository}/settings` refuses a `checks` course map that
    does not name exactly one end station `success`, exactly one `failure` and at most one
-   `neutral` (`invalid-params`, naming the course). A change that moves a station toward
-   `success` (`failure` → `neutral` → `success`), or removes or renames a course's entry, is a
-   loosening: it needs an approver on `approvers.policy` (R-BTN-186); a change the other way is a
-   tightening, open to any owner credential but a delegated key, which `checks` refuses as before.
-   Where the map names no `neutral`, a timeout or `exec` error reaches the `failure` station
-   (R-BTN-153). Registering a check-runner stays `approvers.members`'s (R-BTN-188).
+   `timed_out` (`invalid-params`, naming the course; `neutral` is not a conclusion, the owner's
+   ruling of 2026-11-02 on B-175). A station newly mapped to `success`, or a removed or renamed
+   course entry, is a loosening: it needs an approver on `approvers.policy` (R-BTN-186); any other
+   change is a tightening, open to any owner credential but a delegated key, which `checks`
+   refuses as before. (B-175 builds the same validation: build it once, in whichever lands
+   first.) Registering a check-runner stays `approvers.members`'s (R-BTN-188).
 3. **Notification body caps.** `POST /v1/github/webhook` and `POST /v1/forges/{repository}/notify`
    refuse a body over 26,214,400 bytes `too-large` on `Content-Length`, or once that many bytes
    have been read (chunked bodies), before any MAC is computed. Both stay outside the per-IP
