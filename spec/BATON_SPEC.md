@@ -1130,8 +1130,9 @@ live solely in Baton, and both are exportable (R-BTN-88).
                         #   protocol_files, source?, facts?}]; imports?;
                         #   conditions? (bindings,
                         #   R-BTN-161); for the CLI's defaults (R-BTN-74): items, default_course,
-                        #   repos, agent_command, agent_wrapper (B-95); check: {depends_line}
-                        #   (B-111, `baton ticket check` alone reads it; default off);
+                        #   repos, agent_command, agent_wrapper (B-95); check: {depends_line,
+                        #   sections_since, rules} (B-111, R-BTN-74's, which says what each does:
+                        #   the ticket check and commands alone read them; default off);
                         #   ticket_prefix, legacy_ids, prefixes, project, tags, projects
                         #   (B-112, the ticket commands alone read them)
     tickets.mjs         # optional ticket source; absent, the CLI's markdown source (R-BTN-74)

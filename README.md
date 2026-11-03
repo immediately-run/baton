@@ -93,15 +93,23 @@ checkout, run the CLI as `node cli/baton.mjs`.
 - `node cli/baton.mjs tickets new|claim|set|done` — file, claim and move tickets with git as the
   lock, each one commit pushed straight to the default branch from a throwaway worktree (B-112;
   `baton tickets --help`, and the generated `tickets/HOW-TICKETS-WORK.md`), until Baton claims
-  them (R3-1266).
+  them (R3-1266). `claim` refuses a ticket citing a rule whose `spec/BATON_SPEC_HISTORY.md`
+  entry, by its title, amended it after the ticket was filed or last re-read it, until
+  `--rules-reread <id>,…` names exactly those ids (R-BTN-74); in a shallow clone it deepens the
+  clone first. A new migration or scenario number is the next free one at merge (B-176 moves it
+  into Baton).
 - `npm run check:wiki` — every page in `tickets/` and `docs/` compiles as MDX, uses only known
   components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
 - `npm run check:tickets` (or `node cli/baton.mjs tickets check [--repo DIR]`) — check this
   repository's ticket source without posting it, as `baton repo sync` reads it: the board post's
   validation, every `depends_on` target and dependency cycle, and — with
   `check.depends_line` in `.baton/baton.json` — each ticket's `**Depends on:**` line against its
-  `depends_on` (B-111). One `path: message` line per finding, exit 1 with findings; CI runs it on
-  `tickets/`.
+  `depends_on` (B-111); with `check.sections_since`, a ticket filed on or after that day (its
+  `_filed` line, else its first commit) whose `### Trust` or `### Invariants` is absent, empty or
+  a placeholder (R-BTN-74). One `path: message` line per finding, exit 1 with findings; CI runs it
+  on `tickets/`. It also lists, never as a finding, the live tickets citing a rule amended since
+  they were filed or re-read it (`check.rules`), and says so when a shallow clone skips that list
+  or leaves a ticket's filing day undetermined.
 - `node cli/baton.mjs request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B]` —
   start a course whose product is a spec or a ticket — `create-spec`, `build-app` — from one
   sentence (B-98). Files one request ticket (the sentence as title and description, `course: C`,
