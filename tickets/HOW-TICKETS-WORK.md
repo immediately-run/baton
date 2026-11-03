@@ -66,11 +66,19 @@ because the branch moved is fetched again and retried on the new head.
 ```sh
 baton tickets new --title "…" --project baton    # file a ticket, B-<n>, with the conventional body
 baton tickets claim <id>                   # available → in-progress; refuses a ticket not available,
-                                           # or one whose dependencies are not done
+                                           # one whose dependencies are not done, or one citing a rule
+                                           # amended since it last changed (--rules-reread, once re-read)
 baton tickets set <id> <status> [--pr URL] # any live status; --pr adds a pull request URL
 baton tickets done <id> [--pr URL]         # done, moved to archive/
+baton tickets reserve <id> migration|scenario  # the next migration or scenario number, held for <id>
 baton tickets check [--repo DIR]           # check the tickets without posting them
 ```
+
+A new migration number or scenario id is reserved, never taken by looking: `reserve` records it
+in `tickets/reserved.json`, and two branches that looked the same day would take the same one.
+A ticket filed by `new` carries `### Trust` (every new input it adds, who may write it, how it is
+verified) and `### Invariants` (the rules it must not break, by id); with `check.sections_since`
+set, `baton tickets check` fails a ticket filed on or after that day without them.
 
 `baton tickets --help` lists every flag, the tags Baton reads and the `Requires:` clause a
 description ends with.

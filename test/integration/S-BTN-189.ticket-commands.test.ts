@@ -142,6 +142,47 @@ describe('S-BTN-189 the ticket commands', () => {
     const out = spawnSync(process.execPath, [CLI, 'tickets', 'check', '--repo', ROOT], { encoding: 'utf8', cwd: ROOT });
     expect(out.stderr).toBe('');
     expect(out.status).toBe(0);
-    expect(out.stdout).toMatch(/^baton tickets check: \d+ ticket\(s\), ✓ no findings\n$/);
+    // The stale-rule report may precede the count; it is never a finding (S-BTN-172).
+    expect(out.stdout).toMatch(/(^|\n)baton tickets check: \d+ ticket\(s\), ✓ no findings\n$/);
   }, 60_000);
+
+  it('claim refuses a ticket citing a rule amended since it last changed, until --rules-reread; reserve holds the next number', () => {
+    const repo = new Repo();
+    // The scaffold, a ticket citing R-BTN-50, and a migration and scenario in the tree, all dated
+    // 2026-10-29; then a history entry of 2026-11-01 naming R-BTN-50.
+    mkdirSync(join(repo.dir, 'tickets'), { recursive: true });
+    mkdirSync(join(repo.dir, 'src', 'migrations'), { recursive: true });
+    mkdirSync(join(repo.dir, 'spec'), { recursive: true });
+    writeFileSync(join(repo.dir, 'tickets', 'B-1.mdx'), '---\ntitle: "B-1 — x"\nid: B-1\nproject: baton\nstatus: available\nupdated: 2026-10-29\ntags:\n  - roadmap-item\nprs: []\ndepends_on: []\n---\n\nThe core reads `prs` (R-BTN-50).\n');
+    writeFileSync(join(repo.dir, 'src', 'migrations', '0030_x.sql'), '');
+    writeFileSync(join(repo.dir, 'spec', 'BATON_SPEC.md'), '### Scenarios\n\n| S-BTN-198 x | y |\n');
+    writeFileSync(join(repo.dir, 'tickets', 'reserved.json'), '{"baseline":{"migration":30,"scenario":198},"migration":{"0031":"B-1"},"scenario":{}}\n');
+    const dated = { GIT_COMMITTER_DATE: '2026-10-29T12:00:00Z', GIT_AUTHOR_DATE: '2026-10-29T12:00:00Z' };
+    Object.assign(process.env, dated);
+    try {
+      repo.publish();
+    } finally {
+      for (const k of Object.keys(dated)) delete process.env[k];
+    }
+    writeFileSync(join(repo.dir, 'spec', 'BATON_SPEC_HISTORY.md'), '## Changelog\n\n- **2026-11-01 — the ruling on prs.** R-BTN-50: core reads no `prs`.\n');
+    git(repo.dir, 'add', '-A');
+    git(repo.dir, 'commit', '-qm', 'the ruling');
+    git(repo.dir, 'push', '-q', 'origin', 'HEAD:main');
+
+    const before = git(repo.bare, 'rev-parse', 'main');
+    const refused = repo.tickets('claim', 'B-1');
+    expect(refused.status).toBe(2);
+    expect(refused.stderr).toContain('B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket last changed (2026-10-29):\n  R-BTN-50 — 2026-11-01 — the ruling on prs\n');
+    expect(git(repo.bare, 'rev-parse', 'main')).toBe(before);
+    const claimed = repo.tickets('claim', 'B-1', '--rules-reread');
+    expect(claimed).toMatchObject({ status: 0, stderr: '' });
+    expect(parseFrontmatter(repo.at('tickets/B-1.mdx')!)?.status).toBe('in-progress');
+    expect(repo.at('tickets/B-1.mdx')).toMatch(/## Status\n\n_\(\d{4}-\d{2}-\d{2}: rules re-read at claim: R-BTN-50 \(amended 2026-11-01\)\)_\n$/);
+
+    // reserve: above the tree's 0030 and the ledger's 0031 → 0032; above §15's 198 → 199.
+    expect(repo.tickets('reserve', 'B-1', 'migration').stdout).toMatch(/^✓ tickets: reserve migration 0032 for B-1 — pushed as /);
+    expect(repo.tickets('reserve', 'B-1', 'scenario').stdout).toMatch(/^✓ tickets: reserve scenario S-BTN-199 for B-1 — pushed as /);
+    expect(JSON.parse(repo.at('tickets/reserved.json')!)).toEqual({ baseline: { migration: 30, scenario: 198 }, migration: { '0031': 'B-1', '0032': 'B-1' }, scenario: { 199: 'B-1' } });
+    expect(git(repo.bare, 'log', '--format=%s', '-2', 'main').split('\n')).toEqual(['tickets: reserve scenario S-BTN-199 for B-1', 'tickets: reserve migration 0032 for B-1']);
+  }, 120_000);
 });

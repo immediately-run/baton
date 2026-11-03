@@ -71,6 +71,36 @@ describe('S-BTN-172 the ticket check', () => {
     expect(r.stderr).toContain('has no .baton/baton.json');
   });
 
+  it('a live ticket citing a rule amended since it last changed: its line and the count, exit 0', () => {
+    const env = { GIT_COMMITTER_DATE: '2026-10-29T12:00:00Z', GIT_AUTHOR_DATE: '2026-10-29T12:00:00Z' };
+    const saved = { ...process.env };
+    Object.assign(process.env, env);
+    let dir: string;
+    try {
+      dir = repo({ 'tickets/A-1.md': ticket('id: A-1').replace('Prose.', 'Reads `prs` (R-BTN-50).'), 'spec/BATON_SPEC_HISTORY.md': '- **2026-11-01 — the ruling.** R-BTN-50 changed.\n' });
+    } finally {
+      for (const k of Object.keys(env)) if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
+    const r = check(dir);
+    expect(r).toMatchObject({ status: 0, stderr: '' });
+    expect(r.lines).toEqual([
+      'tickets/A-1.md: cites rules amended since it last changed (2026-10-29): R-BTN-50 (2026-11-01)',
+      'baton tickets check: 1 live ticket(s) cite rules amended since they last changed (reported, not a finding)',
+      'baton tickets check: 1 ticket(s), ✓ no findings',
+    ]);
+  });
+
+  it('check.sections_since: a ticket filed before it passes, one filed on it without ### Trust fails', () => {
+    const body = (day: string) => `---\ntitle: t\nid: A-${day.slice(-1)}\n---\n\n### Invariants\n\nR-BTN-33.\n\n## Status\n\n_filed ${day}._\n`;
+    const dir = repo({ 'tickets/A-2.md': body('2026-11-02'), 'tickets/A-3.md': body('2026-11-03') }, { check: { sections_since: '2026-11-03' } });
+    const r = check(dir);
+    expect(r.status).toBe(1);
+    expect(r.lines).toEqual([
+      'tickets/A-3.md: filed 2026-11-03, on or after check.sections_since (2026-11-03), and has no ### Trust section — every new input it adds, who may write it and how Baton verifies it (docs/security-model.mdx), or "no new input"',
+      'baton tickets check: 2 ticket(s), 1 finding(s)',
+    ]);
+  });
+
   it('this repository’s own tickets pass — the repository CI runs the check on', () => {
     const r = check(ROOT);
     expect(r.stderr).toBe('');

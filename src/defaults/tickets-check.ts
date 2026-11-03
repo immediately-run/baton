@@ -6,6 +6,11 @@
 // ticket, and the dependencies forming no cycle. For the markdown source, behind
 // `.baton/baton.json`'s `check.depends_line`, each body's `**Depends on:**` line against its
 // `depends_on` — a dependency written only in prose hides a loop the cycle check cannot see.
+// Two process guards over the live tickets' files (tickets-rules.ts, 2026-11-03): behind
+// `check.sections_since`, a ticket filed on or after that day without `### Trust` and
+// `### Invariants` is a finding; and every live ticket citing a rule the spec's history amended
+// after the ticket's file last changed is reported — a count and a line each, never a finding, so
+// a ruling cannot turn every older ticket's pull request red.
 // Course code in the CLI, never core (§2b): defaults import core, never the reverse.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -14,6 +19,7 @@ import { pathToFileURL } from 'node:url';
 import { bodyDependencies, checkPayload, dependsCycle, dependsCycles } from '../core/board';
 import { LOCAL_ID } from '../core/validate'; // the board's own grammar, cited below (§4.4)
 import { readItems } from './read-items';
+import { fileDates, filedDate, historyEntries, missingSections, rulesConfig, sectionsSince, staleRules, staleSummary, type RulesConfig, type StaleRule } from './tickets-rules';
 import { ticketsMarkdown, type MarkdownFile, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
 /** The ids a `**Depends on:**` line may name, as prose writes them (B-111, round 1): an
@@ -54,6 +60,9 @@ export interface TicketsCheckResult {
   findings: TicketFinding[];
   /** What was checked: the tickets the source posted, and the closed list it built. */
   counts: { tickets: number; closed: number };
+  /** The live tickets citing a rule amended since their file last changed — reported, never a
+   *  finding; present only when there is one. */
+  stale?: { path: string; since: string; rules: StaleRule[] }[];
 }
 
 /** `.baton/baton.json`'s `check` settings (B-111): the ticket check's, all off by default. */
@@ -61,6 +70,12 @@ export interface CheckSettings {
   /** Compare each markdown ticket's `**Depends on:**` body line with its `depends_on`
    *  (`check: {depends_line: true}`). Off, no line is read. */
   depends_line?: boolean;
+  /** The day (`YYYY-MM-DD`) from which a live ticket's `_filed` Status line obliges it to carry
+   *  `### Trust` and `### Invariants` (`check: {sections_since: "2026-11-03"}`). Absent, off. */
+  sections_since?: string;
+  /** Where the amendments are and the rule ids they name, for the stale-rule report:
+   *  `{history: "spec/BATON_SPEC_HISTORY.md", prefix: "R-BTN"}` unless set. No file, no report. */
+  rules?: Partial<RulesConfig>;
 }
 
 /** Check a repository's ticket source without posting it, as `baton tickets check` does (B-111):
@@ -185,7 +200,40 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
       for (const id of deps) if (!named.includes(id)) add({ path: t.path, message: `depends_on names ${id}, which **Depends on:** does not` });
     }
   }
-  return { findings, counts };
+
+  // The live tickets' own files, whichever source posted them: the two process guards read them.
+  const since = sectionsSince(check);
+  const rules = rulesConfig(check);
+  const historyPath = join(root, rules.history);
+  const entries = existsSync(historyPath) ? historyEntries(readFileSync(historyPath, 'utf8')) : [];
+  const dates = entries.length ? fileDates(root, used.items ?? 'tickets') : new Map<string, string>();
+  const stale: NonNullable<TicketsCheckResult['stale']> = [];
+  for (const t of live) {
+    if (!/\.mdx?$/.test(t.path) || !existsSync(join(root, t.path))) continue;
+    const text = readFileSync(join(root, t.path), 'utf8');
+    // Trust and Invariants, for a ticket the skeleton dated on or after the cutover.
+    const filed = since ? filedDate(text) : null;
+    if (since && filed && filed >= since) {
+      for (const s of missingSections(text)) add({ path: t.path, message: `filed ${filed}, on or after check.sections_since (${since}), and has no ### ${s} section — ${s === 'Trust' ? 'every new input it adds, who may write it and how Baton verifies it (docs/security-model.mdx), or "no new input"' : 'the rules it must not break, by id, and how the design keeps each'}` });
+    }
+    // Rules amended since the ticket last changed: reported, never a finding.
+    const date = dates.get(t.path);
+    if (date) {
+      const amended = staleRules(text, date, entries, rules.prefix);
+      if (amended.length) stale.push({ path: t.path, since: date, rules: amended });
+    }
+  }
+  return { findings, counts, ...(stale.length ? { stale } : {}) };
+}
+
+/** The stale-rule report's lines: one per ticket, then the count. Not findings: the exit code is
+ *  the findings' alone. */
+export function staleLines(stale: NonNullable<TicketsCheckResult['stale']>): string[] {
+  if (!stale.length) return [];
+  return [
+    ...stale.map((s) => `${s.path}: cites rules amended since it last changed (${s.since}): ${staleSummary(s.rules)}`),
+    `baton tickets check: ${stale.length} live ticket(s) cite rules amended since they last changed (reported, not a finding)`,
+  ];
 }
 
 /** The root's commit, the cachebuster `baton repo sync` imports a ticket source at (cli.ts
@@ -227,8 +275,9 @@ export async function checkTicketsMain(argv: string[], io: { log?: (l: string) =
       throw new Error(`.baton/baton.json is not JSON: ${(e as Error).message.split('\n')[0]}`);
     }
   }
-  const { findings, counts } = await checkTickets(root, {}, check);
+  const { findings, counts, stale } = await checkTickets(root, {}, check);
   if (!quiet) for (const f of findings) log(`${f.path}: ${f.message}`);
+  if (!quiet) for (const l of staleLines(stale ?? [])) log(l);
   if (findings.length) {
     log(`baton tickets check: ${counts.tickets} ticket(s), ${findings.length} finding(s)`);
     return 1;

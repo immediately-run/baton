@@ -67,13 +67,20 @@
 //                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]
 //                — file one ticket, the next free id under .baton/baton.json's ticket_prefix,
 //                with the conventional body, as one commit pushed to the default branch (B-112)
-//   baton tickets claim <id> | set <id> <status> [--pr URL] | done <id> [--pr URL]
-//                — claim, move or finish one, each one commit pushed to the default branch (B-112)
+//   baton tickets claim <id> [--rules-reread] | set <id> <status> [--pr URL] | done <id> [--pr URL]
+//                — claim, move or finish one, each one commit pushed to the default branch (B-112);
+//                claim refuses a ticket citing a rule the spec's history amended since the ticket
+//                last changed, until --rules-reread (R-BTN-74)
+//   baton tickets reserve <id> migration|scenario
+//                — hold the next migration number or scenario id for a ticket in
+//                tickets/reserved.json, one commit pushed to the default branch (R-BTN-74)
 //   baton tickets check [--repo DIR] [--quiet]
 //                — check this repository's ticket source without posting it: ids, the board
 //                post's validation, depends_on targets and cycles, (with check.depends_line in
-//                .baton/baton.json) each **Depends on:** line, and the generated "How tickets
-//                work" page; exit 1 naming every finding (B-111, B-112)
+//                .baton/baton.json) each **Depends on:** line, (with check.sections_since) the
+//                ### Trust and ### Invariants sections, and the generated "How tickets work" page;
+//                exit 1 naming every finding (B-111, B-112); live tickets citing a rule amended
+//                since they last changed are listed, never a finding (R-BTN-74)
 //   baton tickets --help
 //                — the commands, the tags Baton reads and their meanings, the Requires: clause (B-112)
 //   baton request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B] [--remote R]

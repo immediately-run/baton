@@ -25,6 +25,8 @@ import { accepts, accepting, allocates, allocatingPrefix, GITHUB_PR, LIVE_STATUS
 import { addPr, idOf, locate, nextNumber, scalar, setKey } from './tickets-file';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
+import { appendStatus, fileDate, historyEntries, rereadNote, rulesConfig, staleList, staleRules } from './tickets-rules';
+import { LEDGER_NAME, ledgerKey, migrationNumbers, nextReserved, parseLedger, RESERVE_KINDS, reserveConfig, scenarioNumbers, writeLedger, type ReserveKind } from './tickets-reserve';
 import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { defaultBranch } from './request';
 
@@ -162,12 +164,15 @@ const acceptedList = (settings: TicketSettings): string => Object.keys(settings.
  * claim | set | done
  * ---------------------------------------------------------------------------------------- */
 
-/** `baton tickets claim <id>` — available → in-progress, refusing a ticket that is not available
- *  or whose `depends_on` are not all done (archived, or a live closed status); `baton tickets
+/** `baton tickets claim <id> [--rules-reread]` — available → in-progress, refusing a ticket that is
+ *  not available, whose `depends_on` are not all done (archived, or a live closed status), or that
+ *  cites a rule the spec's history amended after the ticket's file last changed, unless
+ *  `--rules-reread` says the claimer re-read them, which the claim's commit records as a dated
+ *  Status line (tickets-rules.ts; the 2026-11-03 process guards); `baton tickets
  *  set <id> <status> [--pr URL]` — any live status, as the session that left it; `baton tickets
  *  done <id> [--pr URL]` — done, and the file moved to `archive/`. `claim` is the one that
  *  refuses: it is the lock, and `set` is the session keeping its own ticket's word. */
-export function moveTicket(root: string, io: TicketsIo, id: string, status: Status, pr?: string, claim = false): void {
+export function moveTicket(root: string, io: TicketsIo, id: string, status: Status, pr?: string, claim = false, rulesReread = false): void {
   if (pr != null && !GITHUB_PR.test(pr)) throw new Error(`--pr ${pr} is not a GitHub pull request URL`);
   const date = io.date ?? today();
   const remote = io.remote ?? 'origin';
@@ -189,7 +194,25 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
       const open = (read.tickets.find((t) => t.id === id)?.depends_on ?? []).filter((dep) => !isDone(dir, settings, dep));
       if (open.length) throw new Error(`${id} depends on ${open.join(', ')}, not done yet`);
     }
+    // The rules the ticket cites that were amended after it last changed: read at the head the
+    // claim lands on, the ticket's date its file's last commit there — git, nothing fetched.
+    let note: string | null = null;
+    if (status === 'in-progress') {
+      const rules = rulesConfig((readSettingsJson(dir) as { check?: { rules?: unknown } }).check);
+      const history = join(dir, rules.history);
+      const since = existsSync(history) ? fileDate(dir, found.path) : null;
+      const stale = since ? staleRules(text, since, historyEntries(readFileSync(history, 'utf8')), rules.prefix) : [];
+      if (stale.length && !rulesReread) {
+        throw new Error([
+          `${id} cites rules that ${rules.history} amended after the ticket last changed (${since}):`,
+          staleList(stale),
+          'Re-read each rule and entry, rewrite or strike what in the ticket they contradict, then claim with --rules-reread.',
+        ].join('\n'));
+      }
+      if (stale.length) note = rereadNote(date, stale);
+    }
     text = setKey(setKey(text, 'status', status), 'updated', date);
+    if (note) text = appendStatus(text, note);
     if (pr) text = addPr(text, pr);
     const from = `${items}/${id}.mdx`;
     const to = `${items}/archive/${id}.mdx`;
@@ -240,9 +263,11 @@ export const ORDER_AFTER_LAST = 1_000_000;
 export const dependsLineOf = (deps: readonly string[]): string => `**Depends on:** ${deps.length ? `${deps.join(', ')}.` : 'none.'}`;
 
 /** The conventional body `new` writes: `**Brief:**` (the description), `**Spec:**`, `**Depends
- *  on:**` (from `--depends-on`), `**Used by:**`, the three headings a filer fills, `**Requires:**`
- *  and `## Status`. A description that ends with a `Requires:` clause is written on the requires
- *  line; the others say the line is the filer's to write. */
+ *  on:**` (from `--depends-on`), `**Used by:**`, the five headings a filer fills — `### Trust` and
+ *  `### Invariants` among them, which `baton tickets check` requires of a ticket filed on or after
+ *  `check.sections_since` — `**Requires:**` and `## Status`. A description that ends with a
+ *  `Requires:` clause is written on the requires line; the others say the line is the filer's to
+ *  write. */
 export function skeletonBody(o: { description: string; deps: readonly string[]; course?: string; date: string }): string {
   const requires = requiresFrom(o.description);
   return [
@@ -257,6 +282,14 @@ export function skeletonBody(o: { description: string; deps: readonly string[]; 
     '### What to build',
     '',
     '_(the change, and the architecture it prescribes: name the code it follows.)_',
+    '',
+    '### Trust',
+    '',
+    '_(every new input this adds — a field, a file, a commit trailer, a request — who may write it and how Baton verifies it, per `docs/security-model.mdx`’s reaches; or “no new input”.)_',
+    '',
+    '### Invariants',
+    '',
+    '_(the rules this must not break, by id — e.g. R-BTN-1 one home, R-BTN-33 filter fields, R-BTN-50 opaque fields — and how the design keeps each.)_',
     '',
     '### Tests',
     '',
@@ -450,6 +483,42 @@ function projectPage(dir: string, settings: TicketSettings, project: string): vo
 }
 
 /* ------------------------------------------------------------------------------------------
+ * reserve
+ * ---------------------------------------------------------------------------------------- */
+
+/** `baton tickets reserve <id> migration|scenario`: the next migration number or scenario id, held
+ *  for a live ticket in `<items>/reserved.json` (tickets-reserve.ts) — one above both the highest
+ *  in the tree at the head it pushes to and the highest reserved — as one commit through the
+ *  git-lock path `new` uses, so two branches never take one number. Returns the number. */
+export function reserveNumber(root: string, io: TicketsIo, id: string, kind: ReserveKind): number {
+  if (!RESERVE_KINDS.includes(kind)) throw new Error(`${kind}: reserve takes migration or scenario`);
+  const remote = io.remote ?? 'origin';
+  const branch = io.branch ?? defaultBranch(root);
+  let took = 0;
+  transact(root, io, `reserve ${kind} for ${id}`, (dir) => {
+    const settings = settingsAt(dir, remote, branch);
+    if (!accepts(settings, id)) throw new Error(`${id} is not a ticket id of this repository — its ids are ${acceptedList(settings)}`);
+    const items = (settings.items ?? 'tickets').replace(/\/$/, '');
+    const found = locate(items, id, fileAt(dir));
+    if (!found) throw new Error(`${id}: no ${items}/${id}.mdx on ${remote}/${branch}`);
+    if (found.archived) throw new Error(`${id} is archived (done): a number is reserved for live work`);
+    const config = reserveConfig(readSettingsJson(dir) as { reserve?: unknown });
+    const ledgerPath = `${items}/${LEDGER_NAME}`;
+    const ledger = parseLedger(existsSync(join(dir, ledgerPath)) ? readFileSync(join(dir, ledgerPath), 'utf8') : null);
+    const read = (p: string): string => (existsSync(join(dir, p)) ? readFileSync(join(dir, p), 'utf8') : '');
+    const tree = kind === 'migration'
+      ? migrationNumbers(existsSync(join(dir, config.migrations)) ? readdirSync(join(dir, config.migrations)) : [])
+      : scenarioNumbers([read(config.spec), read(config.history)], config.scenario_prefix);
+    took = nextReserved(kind, tree, ledger);
+    const key = ledgerKey(kind, took);
+    const next = { ...ledger, [kind]: { ...ledger[kind], [key]: id } };
+    const label = kind === 'migration' ? `migration ${key}` : `scenario ${config.scenario_prefix}-${key}`;
+    return { message: `tickets: reserve ${label} for ${id}`, write: [{ path: ledgerPath, text: writeLedger(next) }], move: [] };
+  });
+  return took;
+}
+
+/* ------------------------------------------------------------------------------------------
  * check — B-111's, and the generated page
  * ---------------------------------------------------------------------------------------- */
 
@@ -504,8 +573,10 @@ export function ticketsHelp(): string[] {
   return [
     'baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]',
     '                   [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]',
-    'baton tickets claim <id>                      available → in-progress',
-    'baton tickets set <id> <status> [--pr URL]    any live status; --pr adds a pull request',
+    'baton tickets claim <id> [--rules-reread]     available → in-progress; refused while the ticket cites a',
+    '                                              rule amended since it last changed, until --rules-reread',
+    'baton tickets reserve <id> migration|scenario the next migration or scenario number, for that ticket',
+    'baton tickets set <id> <status> [--pr URL] [--rules-reread]   any live status; --pr adds a pull request',
     'baton tickets done <id> [--pr URL]            done, moved to archive/',
     'baton tickets check [--repo DIR] [--quiet]    check the tickets without posting them',
     '',
@@ -515,11 +586,13 @@ export function ticketsHelp(): string[] {
     '',
     'Settings are .baton/baton.json\'s: items (tickets/), ticket_prefix (B), legacy_ids (id patterns',
     'still accepted, never allocated), project (the default --project), tags (the default --tags,',
-    'roadmap-item when it names none) and check.depends_line.',
+    'roadmap-item when it names none), check.depends_line, check.sections_since (the day from which a',
+    'filed ticket must carry ### Trust and ### Invariants) and check.rules ({history, prefix}: where the',
+    'amendments claim and check read are; spec/BATON_SPEC_HISTORY.md and R-BTN unless set).',
     '',
     'new writes the conventional body unless --body-file names one — **Brief:**, **Spec:**,',
     '**Depends on:** (from --depends-on; none. when empty), **Used by:**, ### What to build,',
-    '### Tests, ### Exit criteria, **Requires:**, ## Status — and judges it as `baton tickets',
+    '### Trust, ### Invariants, ### Tests, ### Exit criteria, **Requires:**, ## Status — and judges it as `baton tickets',
     'check` would before pushing, so a filing introduces no cycle and no undeclared dependency.',
     '',
     'The tags Baton reads:',
@@ -529,12 +602,16 @@ export function ticketsHelp(): string[] {
     "drivable-browser.”, has the capabilities it names written on the new ticket's **Requires:**",
     'line, which is where a runner’s capability requirement lives.',
     '',
+    'reserve takes the next number above both the highest in the tree (src/migrations/NNNN_*.sql;',
+    "§15's | S-BTN-n rows and the spec's history) and the highest in tickets/reserved.json, and records",
+    'it there for the ticket, so two branches never take one number.',
+    '',
     'statuses: available, in-progress, in-review, deprioritized (set); done (done, archived);',
     '          deferred, superseded (set, and closed as withdrawn)',
   ];
 }
 
-/** `baton tickets …` (B-112): new, claim, set, done and check. Exit 0 when the command did what
+/** `baton tickets …` (B-112): new, claim, set, done, reserve and check. Exit 0 when the command did what
  *  it says, 1 when `check` found something; a refusal throws, which the CLI prints as one
  *  `baton: …` line and exits 2 on. */
 export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<number> {
@@ -548,11 +625,14 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   const COMMON = ['repo', 'branch', 'remote'];
   const allowed: Record<string, string[]> = {
     new: ['title', 'description', 'project', 'depends-on', 'tags', 'tier', 'order', 'repos', 'course', 'body-file', ...COMMON],
-    claim: COMMON,
-    set: ['pr', ...COMMON],
+    claim: ['rules-reread', ...COMMON],
+    set: ['pr', 'rules-reread', ...COMMON],
+    reserve: COMMON,
     done: ['pr', ...COMMON],
   };
-  if (!allowed[command]) throw new Error(`${command}: baton tickets new|claim|set|done|check (baton tickets --help)`);
+  if (!allowed[command]) throw new Error(`${command}: baton tickets new|claim|set|done|reserve|check (baton tickets --help)`);
+  /** The flags that take no value. */
+  const SWITCHES = ['rules-reread'];
   const positional: string[] = [];
   const flags: Record<string, string> = {};
   for (let i = 0; i < rest.length; i++) {
@@ -560,6 +640,10 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
     if (a.startsWith('--')) {
       const name = a.slice(2);
       if (!allowed[command].includes(name)) throw new Error(`${a}: not a flag of baton tickets ${command}`);
+      if (SWITCHES.includes(name)) {
+        flags[name] = 'true';
+        continue;
+      }
       const value = rest[++i];
       if (value === undefined) throw new Error(`${a} needs a value`);
       flags[name] = value;
@@ -593,10 +677,15 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
     });
     return 0;
   }
+  if (command === 'reserve') {
+    if (positional.length !== 2) throw new Error('baton tickets reserve <id> migration|scenario');
+    reserveNumber(root, at, positional[0], positional[1] as ReserveKind);
+    return 0;
+  }
   if (command === 'set' ? positional.length !== 2 : positional.length !== 1) throw new Error(`baton tickets ${command} ${command === 'set' ? '<id> <status>' : '<id>'} [--pr URL]`);
   const status = command === 'claim' ? 'in-progress' : command === 'done' ? 'done' : positional[1];
   if (command === 'set' && status === 'done') throw new Error('done archives a ticket — `baton tickets done <id>`, past this push');
   if (status !== 'done' && !LIVE_STATUSES.includes(status as Status)) throw new Error(`${status} is not a status \`set\` writes — the live ones are ${LIVE_STATUSES.join(', ')}; \`baton tickets done\` archives a ticket`);
-  moveTicket(root, at, positional[0], status as Status, flags.pr, command === 'claim');
+  moveTicket(root, at, positional[0], status as Status, flags.pr, command === 'claim', flags['rules-reread'] === 'true');
   return 0;
 }

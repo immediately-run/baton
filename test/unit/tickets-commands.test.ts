@@ -15,7 +15,9 @@ import { join, resolve } from 'node:path';
 import { checkTickets } from '../../src/defaults/tickets-check';
 import { accepts, readTicketSettings, requiresFrom } from '../../src/defaults/tickets-config';
 import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
-import { moveTicket, reverseMention, skeletonBody } from '../../src/defaults/tickets';
+import { moveTicket, reserveNumber, reverseMention, skeletonBody } from '../../src/defaults/tickets';
+import { appendStatus, historyEntries, missingSections, rereadNote, ruleIds, rulesConfig, staleRules } from '../../src/defaults/tickets-rules';
+import { ledgerKey, nextReserved, parseLedger, scenarioNumbers, writeLedger } from '../../src/defaults/tickets-reserve';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -364,7 +366,7 @@ describe('baton tickets claim | set | done (B-112)', () => {
 
   it('a command the CLI does not take, and a flag it does not know, are refusals', () => {
     const f = repo();
-    expect(run(f.dir, 'archive', 'B-1').err).toBe('baton: archive: baton tickets new|claim|set|done|check (baton tickets --help)\n');
+    expect(run(f.dir, 'archive', 'B-1').err).toBe('baton: archive: baton tickets new|claim|set|done|reserve|check (baton tickets --help)\n');
     expect(run(f.dir, 'claim', 'B-1', '--bogus', 'x').err).toBe('baton: --bogus: not a flag of baton tickets claim\n');
     expect(run(f.dir, 'new').err).toBe('baton: new needs --title\n');
   });
@@ -462,3 +464,196 @@ describe('baton repo init and baton tickets check: the generated page (B-112)', 
 /** The CLI's own init, bundled as the CLI runs it (src/defaults/cli.ts through scripts/baton-cli.mjs). */
 const CLI_MODULE = async (): Promise<{ initMain: (argv: string[], io: { root?: string; log?: (l: string) => void }) => Promise<number> }> =>
   (await import('../../src/defaults/cli')) as unknown as { initMain: (argv: string[], io: { root?: string; log?: (l: string) => void }) => Promise<number> };
+
+/** A fixture whose commit is dated `day` (the committer's date, which `%cs` reads): the ticket's
+ *  "last changed" the stale-rule reading compares the history with. */
+function datedRepo(day: string, opts: Parameters<typeof repo>[0]): Fixture {
+  const before = { a: process.env.GIT_COMMITTER_DATE, b: process.env.GIT_AUTHOR_DATE };
+  process.env.GIT_COMMITTER_DATE = `${day}T12:00:00Z`;
+  process.env.GIT_AUTHOR_DATE = `${day}T12:00:00Z`;
+  try {
+    return repo(opts);
+  } finally {
+    if (before.a === undefined) delete process.env.GIT_COMMITTER_DATE; else process.env.GIT_COMMITTER_DATE = before.a;
+    if (before.b === undefined) delete process.env.GIT_AUTHOR_DATE; else process.env.GIT_AUTHOR_DATE = before.b;
+  }
+}
+
+/** A history file in the spec's shape: dated entries, one with a wrapped title, one a range. */
+const HISTORY = [
+  '# History',
+  '',
+  '## Changelog',
+  '',
+  '- **2026-10-01 — before the ticket.** Amended R-BTN-50.',
+  '',
+  '- **2026-10-20 — the same day as the ticket.** Amended R-BTN-50 again.',
+  '',
+  '- **2026-11-01 — the owner’s ruling on Needs you.** R-BTN-50 now says the core reads no `prs`;',
+  '  R-BTN-5 is untouched in substance.',
+  '',
+  '- **2026-10-27 to 2026-11-02 — a range, its',
+  '  title wrapped** (PR #9). R-BTN-33 and R-BTN-150.',
+  '',
+  '## Retired requirements',
+  '',
+  '| R-BTN-50 | never an entry |',
+  '',
+].join('\n');
+
+/** A live ticket citing rules in its body (and one only in its frontmatter, which is not read). */
+const citing = (id: string): string => ticket(id, 'description: cites R-BTN-77 in frontmatter only')
+  .replace('**Used by:** nothing yet.\n', '**Used by:** nothing yet.\n\nThe core reads `prs` (R-BTN-50); keep R-BTN-33 and R-BTN-150 and R-BTN-7.\n\n## Status\n\n_filed 2026-10-20._\n');
+
+describe('the stale-rule guard: its reading (2026-11-03)', () => {
+  it('reads dated entries, a range by its last day, a wrapped title, and no table row', () => {
+    expect(historyEntries(HISTORY).map((e) => [e.date, e.title])).toEqual([
+      ['2026-10-01', 'before the ticket'],
+      ['2026-10-20', 'the same day as the ticket'],
+      ['2026-11-01', 'the owner’s ruling on Needs you'],
+      ['2026-11-02', 'a range, its title wrapped'],
+    ]);
+  });
+
+  it('a rule id is never a longer one’s head', () => {
+    expect(ruleIds('R-BTN-5, R-BTN-50 and XR-BTN-6, R-BTN-150.')).toEqual(['R-BTN-5', 'R-BTN-50', 'R-BTN-150']);
+    expect(ruleIds('R-FH-3 and R-BTN-3', 'R-FH')).toEqual(['R-FH-3']);
+  });
+
+  it('a cited rule named by an entry dated after the ticket is stale; one of its own day or before, an uncited one, or a frontmatter one is not', () => {
+    const stale = staleRules(citing('B-1'), '2026-10-20', historyEntries(HISTORY));
+    expect(stale.map((s) => `${s.id} ${s.date}`)).toEqual(['R-BTN-33 2026-11-02', 'R-BTN-50 2026-11-01', 'R-BTN-150 2026-11-02']);
+    expect(staleRules(citing('B-1'), '2026-11-02', historyEntries(HISTORY))).toEqual([]);
+    expect(rereadNote('2026-11-03', stale)).toBe('_(2026-11-03: rules re-read at claim: R-BTN-33 (amended 2026-11-02), R-BTN-50 (amended 2026-11-01), R-BTN-150 (amended 2026-11-02))_');
+  });
+
+  it('the note goes at the end of the Status section, or in a Status section of its own', () => {
+    expect(appendStatus('a\n\n## Status\n\n_filed x._\n\n## Later\n\nb\n', 'N')).toBe('a\n\n## Status\n\n_filed x._\n\nN\n\n## Later\n\nb\n');
+    expect(appendStatus('a\n', 'N')).toBe('a\n\n## Status\n\nN\n');
+  });
+
+  it('check.rules overrides the history and the prefix; anything else keeps the defaults', () => {
+    expect(rulesConfig(undefined)).toEqual({ prefix: 'R-BTN', history: 'spec/BATON_SPEC_HISTORY.md' });
+    expect(rulesConfig({ rules: { prefix: 'R-FH', history: 'spec/FIELDHOUSE_SPEC_HISTORY.md' } })).toEqual({ prefix: 'R-FH', history: 'spec/FIELDHOUSE_SPEC_HISTORY.md' });
+    expect(rulesConfig({ rules: { prefix: '' } }).prefix).toBe('R-BTN');
+  });
+});
+
+describe('baton tickets claim: the stale-rule guard (2026-11-03)', () => {
+  it('refuses a ticket citing a rule amended after its last commit, naming each id, date and title; nothing lands', () => {
+    const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
+    const before = f.head().sha;
+    const r = run(f.dir, 'claim', 'B-1');
+    expect(r.code).toBe(2);
+    expect(r.err).toBe([
+      'baton: B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket last changed (2026-10-20):',
+      '  R-BTN-33 — 2026-11-02 — a range, its title wrapped',
+      '  R-BTN-50 — 2026-11-01 — the owner’s ruling on Needs you',
+      '  R-BTN-150 — 2026-11-02 — a range, its title wrapped',
+      'Re-read each rule and entry, rewrite or strike what in the ticket they contradict, then claim with --rules-reread.',
+      '',
+    ].join('\n'));
+    expect(f.head().sha).toBe(before);
+    expect(fmOf(f, 'tickets/B-1.mdx').status).toBe('available');
+    // `set in-progress` is a claim, and is refused the same way.
+    expect(run(f.dir, 'set', 'B-1', 'in-progress').code).toBe(2);
+  });
+
+  it('--rules-reread claims, and the claim’s commit records the re-read under ## Status', () => {
+    const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
+    const r = run(f.dir, 'claim', 'B-1', '--rules-reread');
+    expect(r).toMatchObject({ code: 0, err: '' });
+    const text = f.at('tickets/B-1.mdx')!;
+    expect(parseFrontmatter(text)).toMatchObject({ status: 'in-progress', updated: today() });
+    expect(text).toContain(`## Status\n\n_filed 2026-10-20._\n\n_(${today()}: rules re-read at claim: R-BTN-33 (amended 2026-11-02), R-BTN-50 (amended 2026-11-01), R-BTN-150 (amended 2026-11-02))_\n`);
+    expect(execFileSync('git', ['-C', f.origin, 'show', '--name-only', '--format=%s', 'main'], { encoding: 'utf8' }).trim().split('\n')).toEqual(['tickets: claim B-1 (in progress)', '', 'tickets/B-1.mdx']);
+  });
+
+  it('a ticket changed after the amendments, or a repository with no history file, claims without the flag and without a note', () => {
+    const fresh = datedRepo('2026-11-02', { existing: { 'tickets/B-1.mdx': citing('B-1') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
+    expect(run(fresh.dir, 'claim', 'B-1').code).toBe(0);
+    expect(fresh.at('tickets/B-1.mdx')).not.toContain('rules re-read');
+    const none = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1') } });
+    expect(run(none.dir, 'claim', 'B-1').code).toBe(0);
+  });
+
+  it('check.rules points the guard at another spec’s history and prefix (fieldhouse’s shape)', () => {
+    const fh = HISTORY.replace(/R-BTN/g, 'R-FH');
+    const f = datedRepo('2026-10-20', {
+      existing: { 'tickets/B-1.mdx': citing('B-1').replace('(R-BTN-50)', '(R-FH-50)') },
+      files: { 'spec/FIELDHOUSE_SPEC_HISTORY.md': fh, 'spec/BATON_SPEC_HISTORY.md': HISTORY },
+      settings: { check: { rules: { prefix: 'R-FH', history: 'spec/FIELDHOUSE_SPEC_HISTORY.md' } } },
+    });
+    const r = run(f.dir, 'claim', 'B-1');
+    expect(r.code).toBe(2);
+    expect(r.err).toContain('spec/FIELDHOUSE_SPEC_HISTORY.md amended after the ticket last changed (2026-10-20):\n  R-FH-50 — 2026-11-01');
+    expect(r.err).not.toContain('R-BTN');
+  });
+});
+
+describe('baton tickets new: the Trust and Invariants sections (2026-11-03)', () => {
+  it('the skeleton carries ### Trust and ### Invariants, with their placeholders, between the build and the tests', () => {
+    const body = skeletonBody({ description: 'd', deps: [], date: '2026-11-03' });
+    expect(missingSections(body)).toEqual([]);
+    const at = (h: string) => body.indexOf(`\n${h}\n`);
+    expect(at('### What to build')).toBeLessThan(at('### Trust'));
+    expect(at('### Trust')).toBeLessThan(at('### Invariants'));
+    expect(at('### Invariants')).toBeLessThan(at('### Tests'));
+    expect(body).toContain('who may write it and how Baton verifies it');
+    expect(body).toContain('R-BTN-33 filter fields');
+    expect(missingSections('---\nid: B-1\n---\n\n### Trust\n\n```\n### Invariants\n```\n')).toEqual(['Invariants']);
+  });
+});
+
+describe('baton tickets reserve (2026-11-03)', () => {
+  const SPEC = '### Scenarios\n\n| Scenario | Steps |\n|---|---|\n| S-BTN-3 one | x |\n| S-BTN-4 two | x |\n';
+  const HIST = '## Retired scenarios and gates\n\n| S-BTN-9 | retired |\n';
+
+  it('a migration: one above the higher of the tree’s highest and the ledger’s, one commit writing the ledger alone', () => {
+    const f = repo({
+      existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/B-2.mdx': ticket('B-2') },
+      files: { 'src/migrations/0001_init.sql': '', 'src/migrations/0005_more.sql': '', 'src/migrations/index.ts': '', 'tickets/reserved.json': writeLedger({ baseline: { migration: 5, scenario: 4 }, migration: { '0007': 'B-2' }, scenario: {} }) },
+    });
+    const before = f.head().sha;
+    const r = run(f.dir, 'reserve', 'B-1', 'migration');
+    expect(r).toMatchObject({ code: 0, err: '' });
+    expect(r.out).toMatch(/^✓ tickets: reserve migration 0008 for B-1 — pushed as [0-9a-f]{7,}\n$/);
+    expect(f.head().parent).toBe(before);
+    expect(execFileSync('git', ['-C', f.origin, 'show', '--name-only', '--format=%s', 'main'], { encoding: 'utf8' }).trim().split('\n')).toEqual(['tickets: reserve migration 0008 for B-1', '', 'tickets/reserved.json']);
+    expect(JSON.parse(f.at('tickets/reserved.json')!)).toEqual({ baseline: { migration: 5, scenario: 4 }, migration: { '0007': 'B-2', '0008': 'B-1' }, scenario: {} });
+    // The tree's highest wins when the ledger's is lower: a second reservation takes 0009.
+    expect(run(f.dir, 'reserve', 'B-2', 'migration').out).toMatch(/^✓ tickets: reserve migration 0009 for B-2/);
+  });
+
+  it('a scenario: above every id the spec and its history name, retired ones included, and the ledger’s; a ledger written where there was none', () => {
+    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1') }, files: { 'spec/BATON_SPEC.md': SPEC, 'spec/BATON_SPEC_HISTORY.md': HIST } });
+    expect(run(f.dir, 'reserve', 'B-1', 'scenario').out).toMatch(/^✓ tickets: reserve scenario S-BTN-10 for B-1/);
+    expect(JSON.parse(f.at('tickets/reserved.json')!)).toEqual({ baseline: { migration: 0, scenario: 0 }, migration: {}, scenario: { 10: 'B-1' } });
+    expect(run(f.dir, 'reserve', 'B-1', 'scenario').out).toMatch(/^✓ tickets: reserve scenario S-BTN-11 for B-1/);
+  });
+
+  it('refuses an unknown kind, a ticket that is not here or is archived, and lands nothing', () => {
+    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1'), 'tickets/archive/B-2.mdx': ticket('B-2').replace('status: available', 'status: done') } });
+    const before = f.head().sha;
+    expect(run(f.dir, 'reserve', 'B-1', 'table').err).toBe('baton: table: reserve takes migration or scenario\n');
+    expect(run(f.dir, 'reserve', 'B-9', 'migration').err).toBe('baton: B-9: no tickets/B-9.mdx on origin/main\n');
+    expect(run(f.dir, 'reserve', 'B-2', 'migration').err).toBe('baton: B-2 is archived (done): a number is reserved for live work\n');
+    expect(run(f.dir, 'reserve', 'B-1').err).toBe('baton: baton tickets reserve <id> migration|scenario\n');
+    expect(f.head().sha).toBe(before);
+  });
+
+  it('the parts: the next number, the ledger read and written in number order, the keys', () => {
+    const l = parseLedger('{"baseline":{"migration":30,"scenario":198},"migration":{"0031":"B-110","0028":"B-107"},"scenario":{"199":"B-129"}}');
+    expect(nextReserved('migration', [1, 29, 30], l)).toBe(32);
+    expect(nextReserved('migration', [40], l)).toBe(41);
+    expect(nextReserved('scenario', [12], parseLedger(null))).toBe(13);
+    expect(Object.keys(JSON.parse(writeLedger(l)).migration)).toEqual(['0028', '0031']);
+    expect(ledgerKey('migration', 7)).toBe('0007');
+    expect(scenarioNumbers(['S-BTN-3, XS-BTN-99, S-BTN-30'])).toEqual([3, 30]);
+    expect(() => parseLedger('{"migration":{"x":"B-1"}}')).toThrow('migration.x is not a number held by a ticket id');
+    expect(() => parseLedger('{')).toThrow('reserved.json is not JSON');
+    // The function the CLI calls, for a caller that needs the number.
+    const f = repo({ existing: { 'tickets/B-1.mdx': ticket('B-1') } });
+    expect(reserveNumber(f.dir, { root: f.dir, log: () => {} }, 'B-1', 'migration')).toBe(1);
+  });
+});
