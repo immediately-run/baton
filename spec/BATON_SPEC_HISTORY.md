@@ -2245,6 +2245,24 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   cost stated; B-76 builds the owner's two steps and B-172 the administrator's; ticket dates.
   The `released:retired` end reason is withdrawn.
 
+- **2026-11-03 — review round two of the credential names, the sign-in preview and retirement**
+  (a new fresh reviewer, given the whole diff). Findings: 2 blocking, 2 major, 5 minor.
+  Blocking: R-BTN-88's import refused the tombstone, since it holds no policy; the backstop,
+  the mirror dispatch and later wants still dispatched for a retired repository. Major:
+  revoking registration tokens revoked the credentials they registered, so a token-registered
+  holder could not report `fenced`; whether the administrator's fence clear still reached a
+  retired repository's claim was undecided. Minor: "each is fence-pending" overstated R-BTN-19;
+  what a retired repository's owner rows confer; consents B gave could never be withdrawn;
+  R-BTN-56 made retiring the owners' act; B-170 attributed case-sensitivity to the owner. Fixed:
+  the export's `repositories` section and the import's policy check name the tombstone; one
+  sentence puts a retired repository outside every rule that reads registered repositories
+  (wants, dispatches, the alarm, the backstop, mirrors, the seal, the prune, limits, approver
+  lists), with R-BTN-94, the backstop and R-BTN-93 saying so, and step 6 deletes its
+  `webhook_syncs` rows, timers and consents; tokens are exhausted, not revoked; the fence clear
+  is the named exception to `not-found`; a claim is fence-pending only where its runner is
+  alive; owner rows confer nothing; R-BTN-56 says the owners have an administrator retire it;
+  the attribution dropped. S-BTN-198 and B-173 follow.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

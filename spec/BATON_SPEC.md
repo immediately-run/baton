@@ -514,8 +514,9 @@ process for development and CI. Nothing crosses a tenant.
   servers (R-BTN-18). `.baton/baton.json`'s `baton_url` names the repository's one Baton; its
   sync posts only there. Each Baton checks the OIDC `aud` against its origin: `aud` is
   `BATON_ORIGIN` verbatim (scheme included, no trailing slash; GitLab's adds `#sync` or
-  `#mirror`, R-BTN-15), and the sync and mirror request tokens for `baton_url`, the same string. Moving a repository is its owners' act: retire it on
-  one Baton, register it on the other, change `baton_url`. Baton never checks this across
+  `#mirror`, R-BTN-15), and the sync and mirror request tokens for `baton_url`, the same string. Moving a repository is its owners' act: they have an
+  administrator retire it on one Baton (R-BTN-47) and register it on the other, and change
+  `baton_url`. Baton never checks this across
   tenants.
 
 ### 2.3 Capacity and admission
@@ -637,24 +638,31 @@ repository reachable over SSH is enough (R-BTN-105).
        none (R-BTN-155);
     2. revokes every MCP key on it, OAuth grants included, with their tokens, and every pending
        OAuth request and unredeemed code naming it (`BATON_MCP_OAUTH_SPEC` §5, §7, §9; R-BTN-130);
-    3. revokes its sync and mirror keys, its registration tokens and its runner grants,
-       check-runners included; its CI identity and its forge notifications are refused from then
-       on (R-BTN-93, R-BTN-117, R-BTN-15, R-BTN-73);
-    4. reaps each active claim on its tickets as an administrator's force-reap does, so each is
-       fence-pending (R-BTN-19), actor `admin:<fingerprint>`; a heartbeat declaring a retired
-       repository's course drops that course rather than being refused (R-BTN-3), so the old
-       holder can still report `fenced`;
+    3. revokes its sync and mirror keys and its runner grants, check-runners included, and
+       exhausts its registration tokens — no use remains, but the credentials they registered are
+       not revoked, so a holder they registered can still heartbeat; its CI identity and its forge
+       notifications are refused from then on (R-BTN-93, R-BTN-117, R-BTN-15, R-BTN-73);
+    4. reaps each active claim on its tickets as an administrator's force-reap does, so a claim
+       whose runner is alive is fence-pending (R-BTN-19), actor `admin:<fingerprint>`; a heartbeat
+       declaring a retired repository's course drops that course rather than being refused
+       (R-BTN-3), so the old holder can still report `fenced`;
     5. drops its `queued`, `claimed` and `delivered` outbox entries, logging each; a deliverer's
        later mark of one is ignored, and no cancel leg is owed for its tickets (R-BTN-171,
        R-BTN-168);
-    6. deletes its sync wants, trailing dispatches and unblocked trigger, so Baton never
-       dispatches for it again (R-BTN-94).
+    6. deletes its sync wants, `webhook_syncs` rows, ticket timers and unblocked trigger, and
+       every `code_repo_consents` row it gave or was given (R-BTN-94, R-BTN-140).
 
-    Its rows stay, read-only, for administrators' reads. Every other call naming the repository is
-    `not-found`, as for one never registered. An export carries it as its tombstoned registry row
-    alone (`~retired/<id>`, R-BTN-138; R-BTN-88), so an import keeps the id taken; its id is
-    never registered again in the tenant (`conflict`), so nothing scoped to it comes back. A seed
-    entry naming a retired id is skipped and logged, never a stop, as a revoked owner key is.
+    From then on a retired repository is outside every rule that reads registered repositories:
+    Baton records no want and sends no dispatch for it, the alarm and the backstop skip it, it has
+    no mirror, and it counts toward no seal, prune, limit or approver list (R-BTN-94, R-BTN-93,
+    R-BTN-88). Its owner rows confer nothing: a key whose only repositories are retired owns none
+    (R-BTN-155), and a retired repository's policy blocks no revocation (R-BTN-57). Its rows stay,
+    read-only, for administrators' reads. Every other call naming the repository is `not-found`,
+    as for one never registered, except an administrator's fence clear of one of its claims
+    (R-BTN-19). An export carries it as its tombstoned registry row alone (`~retired/<id>`,
+    R-BTN-138; R-BTN-88), so an import keeps the id taken; its id is never registered again in
+    the tenant (`conflict`), so nothing scoped to it comes back. A seed entry naming a retired id
+    is skipped and logged, never a stop, as a revoked owner key is.
 
   - **The seed (B-91).** `BATON_REPOSITORIES` seeds the registry at start, insert-only, through
     the same validation: each entry is a registration (`POST /v1/admin/repositories`' body,
@@ -794,8 +802,8 @@ repository reachable over SSH is enough (R-BTN-105).
     (no credential, bad signature, unknown or revoked key, a token that fails) or `forbidden`
     (another role, a key that is no sync credential, a machine key whose grant does not sync
     there). Every `/v1/sync/*` route uses only its answer.
-  - **A repository has a mirror** when it has a `mirror_workflow`, `ci_identity.mirror` is
-    true, or it has a `mirror`-role sync key. Only sync keys and CI tokens act as the mirror.
+  - **A repository has a mirror** when it is not retired (R-BTN-47) and has a `mirror_workflow`,
+    `ci_identity.mirror` is true, or it has a `mirror`-role sync key. Only sync keys and CI tokens act as the mirror.
 
 - **R-BTN-15 / R-BTN-156 (CI identity tokens).** `ci_identity` (§13) is NULL (sync keys only),
   `{kind: 'github-actions'}` or `{kind: 'gitlab-ci', issuer, mirror}`.
@@ -823,8 +831,8 @@ repository reachable over SSH is enough (R-BTN-105).
 ### 3.3 Triggering a sync
 
 - **R-BTN-94 (Baton records that a run is wanted; a runner pulls it, and Baton may dispatch it).** Where this
-  specification says Baton dispatches a sync, Baton **records a want** in the transaction that
-  causes it — a claim, an `advance`, an end, a fact arrival, an adoption, a forced Resync (R-BTN-11),
+  specification says Baton dispatches a sync, Baton **records a want** — never for a retired
+  repository (R-BTN-47) — in the transaction that causes it — a claim, an `advance`, an end, a fact arrival, an adoption, a forced Resync (R-BTN-11),
   a raise that names a handler (R-BTN-161),
   a person's answer held in Baton, an owner bar set or lifted,
   an unblocked ticket, a forge notification, the dashboard's **Resync**, `POST /v1/sync/want`
@@ -942,7 +950,7 @@ repository reachable over SSH is enough (R-BTN-105).
     another once the stamp is stale, whatever the schedule does. A repository with no dispatch
     target gets no dispatch and no stamp (R-BTN-94), and the backstop skips it, so it never
     re-fires there.
-  - **The webhook path's own backstop (B-89).** A registered repository whose `webhook_syncs`
+  - **The webhook path's own backstop (B-89).** A live registered repository whose `webhook_syncs`
     row is stale — `last_dispatch_at` under the alarm's `now` less 10 minutes, strictly, so a
     stamp is never due again on the tick that wrote it, and a row exactly ten minutes old is not
     yet due — is sent a dispatch at R-BTN-73's alarm: the App's deliveries reached Baton, and
@@ -1553,7 +1561,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
   - **Format** `baton.owner-state/v1`: `{format, schema_version (highest applied migration),
     exported_at, origin, events_seq, sections, digest}`; `digest` is SHA-256 over the RFC 8785
     canonical JSON of the rest. `sections` holds every column §13 gives these tables:
-    `repositories` (every setting), `repository_owners`, `credentials`, `sync_keys`,
+    `repositories` (every setting; a retired repository's tombstoned row alone, and no row of it
+    in any other section, R-BTN-47), `repository_owners`, `credentials`, `sync_keys`,
     `runner_grants`, `runners` (with `secret_hash` and `incarnation`; import writes
     `last_seen_at` 0), `owner_bars`, `ticket_overrides`, `ticket_stations` and the live
     tickets' position rows of `ticket_history` and their `claim_legs` (course history, so an
@@ -1562,9 +1571,9 @@ live solely in Baton, and both are exportable (R-BTN-88).
     `resource_instances`, `instance_serves`, `capability_capacity`, `check_runners`, `mcp_keys` (hashes only), `instance_settings`, unexpired
     `registration_tokens` (hashes only), open `conditions`, `ticket_timers`, git-kind `outbox`
     entries not `confirmed`, every `repository_policies` version (its `floors` a field of the
-    document, R-BTN-188, R-BTN-189). An import refuses a repository whose policy versions do not chain by
+    document, R-BTN-188, R-BTN-189). An import refuses a live repository whose policy versions do not chain by
     `previous_hash` from version 1, or whose export holds no policy: it never falls back to a
-    preset.
+    preset. A retired repository's tombstone needs no policy and is imported retired.
   - **Not exported**: claims and their `claim_seats`, events, `forge-check` entries, readings (an administrator's
     included, R-BTN-76), sync wants; and, unless
     `--with-history`, the history, `leg_outputs` and `leg_run_inputs`, which an import without
@@ -7001,7 +7010,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-194 one ticket, one PR, one merge | under `cooperative` and under `protected` (plain git's reading being B-154's), each of `bug-report`, `draft-ticket`, `decision`, `spec-to-tickets` and `draft-doc` run from its start leg to its end; the last writing leg routed back after it archived the ticket, then reporting a station other than the one queuing `merged-by-hand`; a PR closed and its ticket withdrawn on the default branch; a record ticket superseded with its PR open; `prepare` finding the question settled; `carry-out` finding the chosen option gone; two tickets' branches taking the same new id; a `fold` | no leg of a record course writes to the default branch under any policy; each ticket's legs on one branch and one PR, the next leg reading the record at the branch's head, the archived file found by its `id`; `merged-by-hand` waiting on `owner` and arriving at the owner's merge as `create-pr`'s does; the ticket done at `merged` and closed in git by its own merge (`status: done`, archived); the routed run's ticket left live on the branch; the withdrawn and the superseded tickets' PRs closed by `close-pr`, nothing landed; `prepare` reaching `carried` with `merged-by-hand` queued; `carry-out` reaching `asked`; the second merge conflicting; the fold recording `duplicate_of:` in its own ticket alone |
 | S-BTN-195 one inbound path | a sync run attesting readiness, an arrival and an output for one ticket; a second run attesting only readiness; a run whose post is refused; under `cooperative`, an `answer:` in the ticket; a runner delivering a `withdraw` entry; an `advance` reaching `reviewed`, and the sync attesting the same arrival by a leg without `arrives: {fact: …}`; a want on a repository with a GitHub dispatch target, then on one with none; a dispatch the forge answers 500 | the ticket's readiness, arrival and output are all the first run's until the second replaces readiness alone, never a mix within one judgement; the refused run's attestations are refused with it; the sync's `std:decision@1` settles the person leg; the deliverer's `std:effect@1` marks the entry `delivered`, and the next run's attestation of the withdrawal confirms it; the advance's `std:arrival@1` by the holder moves the ticket and the sync's for that leg is recorded `arrival-unapplied`; the want is dispatched once by the host shell after commit, with an installation token minted from the App's key, and cleared by the post it causes; with no target nothing is dispatched and the runners answer the want; the failed dispatch retried once, the want standing; the same merged PR attested by two runs moves the ticket once and the second is silent; readiness attested at `reviewed` before a `fix → review` round returned the ticket to `reviewed` is discarded |
 | S-BTN-196 the fact reader | under `protected`, a `create-pr` ticket at `reviewed` with `merge` queued, then a human merging its PR; a `create-spec` ticket at `requested`, then the owner's PR appearing; the same merge read twice; the reader's key not yet named, then named; a forge notification for the repository | with no key named, `baton.fact-reader-missing` is raised and nothing moves; once named, `fact-legs` lists both tickets, the reader is rung `facts`, attests `pr-merged` and `pr-opened`, and the tickets reach `merged` and `spec-open`; the second read is silent; no repository code runs on the reader's host |
-| S-BTN-198 retirement | a repository with an owner session reaching it and another, an owner session reaching only it, an MCP key and an OAuth grant with live tokens, a pending OAuth request and an approved unredeemed code, a sync key, a registration token, a CI identity, a runner grant, a check-runner, an active claim held by a live runner, a queued, a claimed and a delivered outbox entry, a sync want and a mirror; `admin repo retire`; then the holder's heartbeat declaring its course, a board post, a notification, a registration with the token, the code's redemption and a re-registration of its id; a seal; an export and import; a seed naming the id | the two-repository session keeps the other, the single one ends; the MCP key, grant, tokens, request and code refused; the sync key, token, CI identity, grant and check-runner refused; the claim fence-pending, the heartbeat answered without it and its course dropped, then `fence-cleared` on its report; the three entries `dropped` and logged, the deliverer's mark ignored; no dispatch; the seal not held by its mirror; every later call `not-found`, the re-registration `conflict`; the export carries the tombstone alone and the import keeps the id taken; the seed entry skipped and logged |
+| S-BTN-198 retirement | a repository with an owner session reaching it and another, an owner session reaching only it, an MCP key and an OAuth grant with live tokens, a pending OAuth request and an approved unredeemed code, a sync key, a registration token, a CI identity, a runner grant, a check-runner, an active claim held by a live runner the token registered, a queued, a claimed and a delivered outbox entry, a sync want, a stale `webhook_syncs` row, a mirror, a consent it gave, an owner key owning only it; `admin repo retire`; then the holder's heartbeat declaring its course, an administrator's fence clear of the claim, the owner key's sign-in, a board post, a notification, a registration with the token, the code's redemption and a re-registration of its id; a seal; an export and import; a seed naming the id | the two-repository session keeps the other, the single one ends; the MCP key, grant, tokens, request and code refused; the sync key, token, CI identity, grant and check-runner refused; the claim fence-pending, the token-registered holder's heartbeat answered without it and its course dropped, then `fence-cleared` on its report, or at once by the administrator's clear; the owner key's sign-in `not-found`; the consent gone; no backstop dispatch; the three entries `dropped` and logged, the deliverer's mark ignored; no dispatch; the seal not held by its mirror; every later call `not-found`, the re-registration `conflict`; the export carries the tombstone alone, and the import accepts it without a policy and keeps the id taken; the seed entry skipped and logged |
 | S-BTN-190 guarantees and floors | `floors: [no-runner-lands, independent-review, human-gates]` set under `protected-hardware`; a change admitting `runner` to `refs.default_branch` or `refs.other`; `floors` naming a broken guarantee; shortening `floors` by an owner key and by a `human_only` key; a trusted runner's protection report that no longer matches; an ordinary `runner` grant holding a claim on the repository; the policy read by a trusted runner and by an audit key | the change refused `floor-violated`; the broken guarantee's floor refused; the shortening refused, then accepted; `baton.unprotected` raised, `no-runner-lands` broken, trusted runners stopped, the runner's claim released `floor` and ended `released:floor`, and every claim refused `floor-broken` until a matching report; both reads answer the same `{version, hash, policy, guarantees, floors}` with no signature, and the trusted runner acts on it as Baton's |
 | S-BTN-191 the protected path in practice | the `protected` preset on GitHub, `human_identity` set; `paths.control` set to `any`; a handler raised; its proposal; an approval naming two proposals; the merge runner's workflow given the checker's credential; an MCP key raising `merge.reviews.count` to 99; an MCP key holding a ticket, lifting its own hold, then lifting an owner's hold; the protection checker's report lapsing past 24 hours | `--check` matches with `refs/baton/*` open to every writer; the change to `paths.control: any` refused `floor-violated`, `no-runner-lands` still held; the handler written on `baton/proposed/<ticket>` from the CLI template and merged by a proposal merge with one `std:approval@1`, no reviews; the two-proposal approval covers neither; the checker's naming refused; the MCP key refused; the MCP key's hold set and lifted, the owner's hold `forbidden`; `no-runner-lands` broken, no policy change refused, trusted runners stopped but the checker still checking |
 | S-BTN-187 board posts | `inputs.board` without `machine`; `attestations` entries admitting no `sync` writer for the stations and person legs a trusted leg acts on | a machine key's post is refused; a truncated delivery fails closed; a station a trusted leg acts on is not reached from the sync's attestation of a git verdict; a person leg's answer in git does not count and the human's attestation does |

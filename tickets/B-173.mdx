@@ -48,20 +48,24 @@ implementation"), after one round of fresh review.
 
 1. `admin.repo.retire` runs R-BTN-47's six steps in the one transaction that sets `retired_at`
    (`src/core/admin.ts`): session reach; MCP keys, OAuth grants with their tokens, pending OAuth
-   requests and codes; sync and mirror keys, registration tokens, runner grants and
-   check-runners; each active claim reaped as a force-reap (fence-pending where its runner is
-   alive); `queued`, `claimed` and `delivered` outbox entries `dropped`, each logged; sync wants,
-   trailing dispatches and the unblocked trigger deleted.
+   requests and codes; sync and mirror keys, runner grants and check-runners revoked;
+   registration tokens exhausted without revoking what they registered; each active claim
+   reaped as a force-reap (fence-pending where its runner is alive); `queued`, `claimed` and
+   `delivered` outbox entries `dropped`, each logged; sync wants, `webhook_syncs` rows, ticket
+   timers, the unblocked trigger and every consent it gave or was given deleted.
 2. A heartbeat declaring a retired repository's course drops that course instead of being
    refused, so the old holder reports `fenced`; a deliverer's later mark is ignored.
 3. Every other route naming a retired repository answers `not-found` (one check, not each
    query's filter); its forge notifications and CI identity are refused; registering a retired
    id is `conflict` (today a known id takes the change path); the OAuth token exchange refuses a
    code for a retired repository `invalid_grant`.
-4. The seal and the event prune count only live repositories' mirrors; the export carries a
-   retired repository as its tombstoned registry row alone; the seed skips and logs an entry
-   naming a retired id.
-5. `code_repos` consent is judged for a retired repository as for a live one.
+4. One predicate, "live repository", read by every rule that counts registered repositories:
+   wants and dispatches, the alarm and the backstop, mirrors, the seal, the event prune, limits,
+   approver lists and ownership (a key whose only repositories are retired owns none). The
+   administrator's fence clear is the one write that still names a retired repository.
+5. The export carries a retired repository as its tombstoned registry row alone; the import
+   accepts that row without a policy; the seed skips and logs an entry naming a retired id.
+6. `code_repos` consent is judged for a retired repository as for a live one.
 
 ### Tests
 

@@ -43,7 +43,7 @@ The spec states it (R-BTN-144 masking class 7, the environment table, R-BTN-84; 
 
 1. The runner computes class 7 once at leg start from the environment it gives the leg: every
    variable whose name ends `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD` or `_PAT`, or is
-   `PGPASSWORD`, compared case-sensitively (the owner, 2026-11-03), and every name `runner.json`
+   `PGPASSWORD`, compared case-sensitively, and every name `runner.json`
    `mask_env` lists, each value of 8 bytes or more
    masked as a literal, with the others' classes.
 2. An archiver under a runner (`BATON_PARENT` set) masks classes 5, 6 and 7 in transcripts,
