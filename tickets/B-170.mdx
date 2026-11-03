@@ -3,14 +3,14 @@ title: "B-170 — Mask the model provider's key in leg output: the runner masks 
 id: B-170
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-03
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1172
 tier: routine
-description: "Build R-BTN-144's masking class 7, the owner's ruling of 2026-11-02: the runner masks every kept variable whose name ends _KEY, _TOKEN or _SECRET and every name runner.json mask_env lists, so a model provider's key a leg prints never reaches a leg log or a transcript repository; archivers and replay mask the same set. Requires: none."
+description: "Build R-BTN-144's masking class 7, the owner's ruling of 2026-11-02: the runner masks every kept variable whose name ends _KEY, _TOKEN, _SECRET, _PASSWORD or _PAT, or is PGPASSWORD (case-sensitive), and every name runner.json mask_env lists, so a model provider's key a leg prints never reaches a leg log or a transcript repository; archivers and replay mask the same set. Requires: none."
 topics:
   - baton
 owns: {}
@@ -42,7 +42,8 @@ The spec states it (R-BTN-144 masking class 7, the environment table, R-BTN-84; 
 ### What to build
 
 1. The runner computes class 7 once at leg start from the environment it gives the leg: every
-   variable whose name ends `_KEY`, `_TOKEN` or `_SECRET`, and every name `runner.json`
+   variable whose name ends `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD` or `_PAT`, or is
+   `PGPASSWORD`, compared case-sensitively, and every name `runner.json`
    `mask_env` lists, each value of 8 bytes or more
    masked as a literal, with the others' classes.
 2. An archiver under a runner (`BATON_PARENT` set) masks classes 5, 6 and 7 in transcripts,
@@ -61,3 +62,4 @@ S-BTN-98 and S-BTN-119 as §15 states them, green in `npm test`.
 
 - 2026-11-02: drafted from the 2026-11-02 security review (PR #165).
 - 2026-11-02: decided by the owner (option (a)); the spec half written by PR `claude/baton-spec-review-2fwiga`; this ticket now builds it.
+- 2026-11-03: the owner added `_PASSWORD`, `_PAT` and `PGPASSWORD` to class 7 ("Ok, please draft the spec change for this"); item 1 reads accordingly.

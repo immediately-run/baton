@@ -2203,6 +2203,86 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   `baton-request/` prefix, which shares a string with the SSHSIG namespace `baton-request` but
   names a different thing in a different place.
 
+- **2026-11-03 — more credential names, the sign-in preview and retirement.** The owner, asked
+  whether masking should catch `*_PASSWORD`, `PGPASSWORD` and `*_PAT` by default: "Ok, please draft
+  the spec change for this"; and, on B-172 and B-173 still holding their spec halves: "Please
+  ensure all tickets required to implement the spec are ready to be picked up for
+  implementation". Changed: R-BTN-144's class 7 adds names ending `_PASSWORD` or `_PAT` and the
+  name `PGPASSWORD`, matched case-sensitively, with S-BTN-98's fixtures (B-170); R-BTN-155's
+  sign-in binds in two steps — the login-links routes answer `{role, client_addr, age_s}` and bind
+  nothing, the CLI asks `bind? [y/N]` with no `--yes`, and `{code, confirm: true}` binds — with
+  §14's two rows and S-BTN-124's cases (B-172; the open question on `sk-`-only binding is
+  untouched); R-BTN-47 gains *Retirement* (as round one below left it): final, in one transaction
+  ending every session's reach, revoking MCP keys and OAuth grants with their tokens, requests and
+  codes, sync and mirror keys, registration tokens, runner grants and check-runners, reaping
+  active claims as a force-reap (fence-pending), dropping its outbox entries and deleting its
+  wants and dispatches; every later call `not-found`, only its tombstone exported, a seed entry
+  for it skipped, and the id never registered again; R-BTN-155, R-BTN-130, R-BTN-19, R-BTN-3,
+  R-BTN-88's seal, §2.3's prune, R-BTN-140's consent, R-BTN-171 and the OAuth companion's §5,
+  §7 and §9 cite it; new scenario S-BTN-198 (B-173).
+  Two Decisions lines. Tickets: B-172 and B-173 now hold only their build halves; B-169's
+  supersession item moved to B-146, which builds the store; B-175's vendored-enum item dropped
+  (the read-back records GitHub's conclusions, `neutral` among them, and R-BTN-183 counts only
+  `success`); B-140 and B-39 updated for R-BTN-183, R-BTN-184 and R-BTN-84.
+
+- **2026-11-03 — review round one of the credential names, the sign-in preview and retirement**
+  (one fresh reviewer, given the diff and the impact list). Findings: 4 blocking, 4 major, 4
+  minor. Blocking: retirement sent its claims a `release` while revoking the grants their
+  heartbeats need, so the message was never delivered and the claim never fenced; registration
+  tokens and approved OAuth codes outlived it; "kept for export" contradicted R-BTN-88, which
+  exports no events; a revoked mirror held the seal for good and the retired repository's wants
+  kept dispatching. Major: the OAuth companion's lists of how a grant ends; the seed naming a
+  retired id; B-76 still building a one-step owner bind. Minor: R-BTN-171's *Dropping*;
+  `code_repos` consent lapsing on retirement; the preview's closing sentence and its
+  failed-verification count; `_PAT` matching pattern variables; stale ticket dates. Fixed:
+  claims reaped as a force-reap, fence-pending, and a heartbeat drops a retired repository's
+  course instead of being refused; registration tokens, pending requests and codes revoked, the
+  token exchange rechecking the repository; the export carries the tombstone alone; the seal
+  and the event prune count live repositories only, and wants, trailing dispatches and the
+  trigger are deleted; the companion's §5, §7 and §9; the seed skips and logs; R-BTN-171's
+  *Dropping* names retirement; consent judged for a retired repository too; the preview
+  sentence says the CLI previews, and a `not-found` is no failed verification; the `_PAT`
+  cost stated; B-76 builds the owner's two steps and B-172 the administrator's; ticket dates.
+  The `released:retired` end reason is withdrawn.
+
+- **2026-11-03 — review round two of the credential names, the sign-in preview and retirement**
+  (a new fresh reviewer, given the whole diff). Findings: 2 blocking, 2 major, 5 minor.
+  Blocking: R-BTN-88's import refused the tombstone, since it holds no policy; the backstop,
+  the mirror dispatch and later wants still dispatched for a retired repository. Major:
+  revoking registration tokens revoked the credentials they registered, so a token-registered
+  holder could not report `fenced`; whether the administrator's fence clear still reached a
+  retired repository's claim was undecided. Minor: "each is fence-pending" overstated R-BTN-19;
+  what a retired repository's owner rows confer; consents B gave could never be withdrawn;
+  R-BTN-56 made retiring the owners' act; B-170 attributed case-sensitivity to the owner. Fixed:
+  the export's `repositories` section and the import's policy check name the tombstone; one
+  sentence puts a retired repository outside every rule that reads registered repositories
+  (wants, dispatches, the alarm, the backstop, mirrors, the seal, the prune, limits, approver
+  lists), with R-BTN-94, the backstop and R-BTN-93 saying so, and step 6 deletes its
+  `webhook_syncs` rows, timers and consents; tokens are exhausted, not revoked; the fence clear
+  is the named exception to `not-found`; a claim is fence-pending only where its runner is
+  alive; owner rows confer nothing; R-BTN-56 says the owners have an administrator retire it;
+  the attribution dropped. S-BTN-198 and B-173 follow.
+
+- **2026-11-03 — review round three of the credential names, the sign-in preview and
+  retirement** (a new fresh reviewer, the last round). Findings: 4 major, 2 minor, none blocking.
+  Major: the alarm skipping a retired repository left its fence-pending claims with no deadline
+  and no condition, and the seal both waited on them and did not count them; the holder queries
+  fell under `not-found` while the former-path fence still relies on them; R-BTN-140's entry
+  matched two repositories once the forge repository is registered again under a new id; B-173
+  acted on stores no code has yet (MCP keys, OAuth, owner sessions, registration tokens,
+  check-runners, consents, timers, the outbox), so it could not be picked up. Minor: "every
+  dashboard session" took in the administrator's, who must still reach the clear; account
+  instances kept listing the retired id. Fixed: the fence-pending claims are the one live part
+  of a retired repository — the alarm's deadline and condition, the holder queries and the seal's
+  wait reach them; the holder queries join the fence clear as exceptions to `not-found`;
+  R-BTN-140 reads the live repository with that id, else a retired one whose entry never has
+  reach; step 1 names owner sessions and keeps the claims on the administrator's dashboard;
+  step 6 removes the id from account instances; B-173 builds retirement over today's stores and
+  the "live repository" predicate, and each later store's step is noted in the ticket that
+  builds the store (B-76, B-25, B-73, B-8, B-5, B-46, B-61, B-64), so every ticket can be picked
+  up now. S-BTN-198 follows. B-172 is superseded into B-76, which builds the code sign-in flow
+  for both roles: the two steps are built where the flow is.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

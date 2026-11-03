@@ -3,7 +3,7 @@ title: "B-5 — Baton check courses: check-runner keys, owner-held conclusions a
 id: B-5
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-03
 repos:
   - baton
 tags:
@@ -148,3 +148,5 @@ _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructu
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) rewrites R-BTN-115: the forge courier is a runner declaring `delivers: [forge-check]` whose grant role `outbox.forge-check` admits, holding the check App's key on its host; entries are not signed and `GET /v1/keys/signing` is gone (the run's output carries the entry's `seq`, not a signature); a `std:checks@1` from a check-runner the owner names is optional, forge check runs sufficing for `merge.checks: required` (B-155). Items 2, 3 and 7 and S-BTN-68 read accordingly.)_
 
 _(2026-11-02: the owner's ruling on B-175 — the conclusions are `success`, `failure` and `timed_out`; a timeout or `exec` error reaches `timed_out`, else `failure`; an agent reaches only `failure` or `timed_out` (R-BTN-114, R-BTN-153). B-175 builds the mapping; the line naming an agent's stations is corrected.)_
+
+_(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — check-runners: retirement revokes the repository's check-runners. Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_

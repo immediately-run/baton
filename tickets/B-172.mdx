@@ -2,15 +2,15 @@
 title: "B-172 — The sign-in code shows its row before it binds: the CLI cannot show a client address the API never returns"
 id: B-172
 project: baton
-status: available
-updated: 2026-11-02
+status: superseded
+updated: 2026-11-03
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1174
-tier: judgement
-description: "R-BTN-155 step 3 has the CLI show the code's row (role, client address, age) and then bind it, but login-links answers only {ok: true}, so the CLI has nothing to show until after the bind — and that display is the only defence against a relayed code. Make binding two-step (a preview answer, then confirm: true), have the CLI ask yes or no on the address, amend R-BTN-155 and §14, build it. Requires: none."
+tier: routine
+description: "Build R-BTN-155's two-step sign-in bind: the login-links routes answer a code's row (role, client address, age) without binding unless confirm: true, and baton admin open / owner open print the address and ask bind? [y/N] before confirming, so a relayed code is seen before it binds. Requires: none."
 topics:
   - baton
 owns: {}
@@ -32,26 +32,43 @@ binds — which step 3 promises (`owner session for <address>, <n> s old`) and t
 deliver: both login-links routes take `{code}`, bind at once and answer `{ok: true}`. A CLI built
 to the routes binds first and can show the row only afterwards, when it no longer helps.
 
+### Spec (written 2026-11-03)
+
+The spec half is written: R-BTN-155 step 3 (preview, then `{code, confirm: true}`), its closing
+sentence, §14's two login-links rows and S-BTN-124's cases, in PR `claude/baton-spec-review-2fwiga`
+at the owner's request ("Please ensure all tickets required to implement the spec are ready to be
+picked up for implementation"). The open question on `sk-`-only binding stays the owner's and is
+untouched.
+
 ### What to build
 
-1. **A spec PR first** under the babysit skill's *Spec PRs*:
-   - step 3: the CLI sends `{code}`; Baton answers `{role, client_addr, age_s}` for the unbound,
-     unexpired row of the route's role, binding nothing (`not-found` otherwise, as now, and
-     counting toward the failed-verification buckets); the CLI prints the line and asks
-     `bind? [y/N]`, defaulting to no, then sends `{code, confirm: true}`, which binds. `--yes`
-     is refused for this command: there is nothing to confirm without reading the address.
-   - §14's two rows take `{code, confirm?}` and answer the preview or `{ok: true}`.
-   - S-BTN-124 gains a preview that binds nothing, a declined preview (the row unbound and
-     still expiring), and a relayed code from another address shown before any bind.
-   - The open question stays open (it is the owner's: whether binding needs an `sk-` touch);
-     the PR cites it and changes nothing it asks.
-2. The routes, the CLI prompt (`baton admin open`, `baton owner open`) and the tests.
+1. `POST /v1/admin/login-links`: without `confirm`, answer `{role, client_addr, age_s}` for the
+   unbound, unexpired administrator row and bind nothing; with `confirm: true`, bind (the route
+   is built today and binds at once, `src/core/admin.ts`). `not-found` at either step as R-BTN-155
+   says, counted as no failed verification.
+2. `baton admin open`: send the preview, print `administrator session for <address>, <n> s old`,
+   ask `bind? [y/N]` defaulting to no, refuse `--yes`, and on yes send the confirm. An `sk-` key
+   touches for each request.
+3. The owner's route and `baton owner open` take the same two steps in B-76 (item 1), which
+   builds that route; whichever of B-76 and B-172 lands second reuses the first's CLI prompt.
+4. The tests.
+
+### Tests
+
+S-BTN-124 as §15 states it, green in `npm test` on both hosts.
 
 ### Exit criteria
 
-- [ ] the spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
 - [ ] S-BTN-124 green in `npm test` on both hosts; `npm run typecheck` green
 
 ## Status
 
 - 2026-11-02: drafted from the 2026-11-02 security review (PR #165).
+- 2026-11-03: spec half written (PR `claude/baton-spec-review-2fwiga`); this ticket now builds it.
+- 2026-11-03: superseded by B-76 on review round three of the readiness PR: the code sign-in
+  flow this ticket adds a step to is B-76's to build (today's administrator route mints a
+  one-time link, `src/core/admin.ts`), so the two steps are built where the flow is. Map: item 1
+  (the administrator's route, preview and confirm) → B-76 item 1; item 2 (`baton admin open`'s
+  prompt) → B-76 item 1; item 3 (the owner's route and `baton owner open`) → B-76 item 1, as
+  before; item 4 and the exit criterion (S-BTN-124's preview cases) → B-76 item 1 and its
+  tests. Nothing remains here.

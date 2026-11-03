@@ -3,7 +3,7 @@ title: "B-140 — The merge runner: a deterministic runner type holds the only c
 id: B-140
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-03
 repos:
   - baton
   - fieldhouse
@@ -61,7 +61,8 @@ branch).
      writer domain of `H` (`std:wrote@1`, `std:ran@1`), from a review claim that started at `H`,
      differing in each field `distinct` names; null domains and families never count as distinct;
    - `merge.checks: required`: a `std:checks@1` at `H`, or check runs whose workflow file is on the
-     protected default branch with the same blob as at merge time;
+     protected default branch with the same blob as at merge time, concluded `success` at `H`
+     (never `neutral` or `skipped`, R-BTN-183);
    - `authorship: signed`: every commit in every attested range signed by its leg's key;
    - continuity: a writing claim's start head is the last attested head; a commit no claim
      reported resets the branch and raises `baton.foreign-commit`;
@@ -173,3 +174,5 @@ protection checker).)_
 _(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) rewrites R-BTN-182 and R-BTN-183: the merge runner pins nothing (no human-only keys, attestation key or policy hash; no `baton.policy-unpinned`; no signed policy read) and reads attestations from Baton as Baton's record; `authorship: signed` is gone (continuity stays); `merge.reviews` is `{count}` over distinct domain labels, no model family; `merge.checks: required` is met by the protected workflows' check runs, a `std:checks@1` being optional; `uses: once` and compare-and-swap consumption are gone, approvals being bound by subject. The fact reader stays (B-159), with `pr-verdict` counting only the human-only identity's verdict under a policy admitting no `sync` arrival (B-163). Items reading `merge`, `paths`, `authorship`, pins and the signed read are to be read against the current rules.)_
 
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): R-BTN-130's closed list is gone; what a delegated key reaches is R-BTN-186's, marked per registry entry (R-BTN-129).)_
+
+_(2026-11-03: R-BTN-183 counts a check run only when it concluded `success` (the 2026-11-02 security review's follow-up, PR #167), and R-BTN-184 counts a human's merge of a request PR (R-BTN-131) as approval of the ticket files it carries, as a ticket's PR's merge is; item 2's checks line reads accordingly.)_

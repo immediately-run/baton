@@ -3,14 +3,14 @@ title: "B-169 — Build the security review's spec corrections: bearer masking, 
 id: B-169
 project: baton
 status: available
-updated: 2026-11-02
+updated: 2026-11-03
 repos:
   - baton
 tags:
   - roadmap-item
 order: 1171
 tier: routine
-description: "Build what PR #165 corrected in the spec from the 2026-11-02 security review: R-BTN-144 class 5 masks every bearer prefix (bps_, bds_, bmo_, bmr_, bor_ added), R-BTN-114's conclusions map validated and a change toward success a loosening, R-BTN-153's timeout falling back to failure, R-BTN-73's 25 MiB body cap on both notification routes, R-BTN-16's Cache-Control: no-store, the __Host-baton_pending cookie name, and R-BTN-191's supersession across all three posters. Requires: none."
+description: "Build what PR #165 corrected in the spec from the 2026-11-02 security review: R-BTN-144 class 5 masks every bearer prefix (bps_, bds_, bmo_, bmr_, bor_ added), R-BTN-114's conclusions map validated and a change toward success a loosening, R-BTN-153's timeout falling back to failure, R-BTN-73's 25 MiB body cap on both notification routes, R-BTN-16's Cache-Control: no-store, and the __Host-baton_pending cookie name (R-BTN-191's supersession is B-146's item 8). Requires: none."
 topics:
   - baton
 owns: {}
@@ -20,9 +20,9 @@ depends_on: []
 
 **Spec:** `spec/BATON_SPEC.md` as PR #165 left it: R-BTN-144 (*Masking*, class 5), R-BTN-114
 (*Conclusions are the owners'*), R-BTN-73 / R-BTN-95 (*Routes*) and §2.3 (*Admission*), R-BTN-16
-(*Cookies*, *Headers*), R-BTN-155, R-BTN-153 (*Mapping the status*), R-BTN-191 (*Superseded per
-writer class*). History: the changelog entry "the security review's corrections". Source:
-`docs/review/security-review-2026-11-02.mdx`, findings S1, S2, S4, S6, C5 and U3. R-BTN-84's
+(*Cookies*, *Headers*), R-BTN-155, R-BTN-153 (*Mapping the status*); R-BTN-191 (*Superseded per
+writer class*) is B-146's. History: the changelog entry "the security review's corrections". Source:
+`docs/review/security-review-2026-11-02.mdx`, findings S1, S2, S4, C5 and U3 (S6 is B-146's). R-BTN-84's
 replay change needs no build here: replay is not built (`src/` has no `leg replay`). No owner
 ruling: each change aligns two rules or closes a gap in the direction the spec already took.
 
@@ -47,10 +47,6 @@ ruling: each change aligns two rules or closes a gap in the direction the spec a
    every response that sets a cookie or carries a sign-in code, carries `Cache-Control: no-store`
    (one place in `src/core/http.ts`, not per route).
 5. **The pending cookie** is `__Host-baton_pending` wherever B-46's sign-in builds it.
-6. **Supersession.** Where B-146's attestation store supersedes the sync's attestations, it does
-   so across a sync key, the CI identity and a machine key alike (R-BTN-191); if B-146 has not
-   landed, this item moves to it.
-
 ### Tests
 
 S-BTN-42 (the oversize bodies), S-BTN-68 (the two maps; the two `checks` changes where
@@ -66,3 +62,4 @@ Green in `npm test` on both hosts.
 ## Status
 
 - 2026-11-02: drafted from the 2026-11-02 security review (PR #165).
+- 2026-11-03: item 6 (R-BTN-191's supersession) moved to B-146, which builds the attestation store it needs.
