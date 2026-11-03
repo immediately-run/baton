@@ -18,6 +18,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkTickets } from '../../src/defaults/tickets-check';
 import { defaultBranch, fileRequest, nextId, readRequestPlan, requestFile, requestMain, requestMessage } from '../../src/defaults/request';
+import { filedDate, sectionsExempt } from '../../src/defaults/tickets-rules';
 import { CREATE_SPEC_COURSE, stationsSpec } from '../../src/defaults/course-pr';
 import { BUILD_APP_COURSE } from '../../src/defaults/courses';
 import { parseFrontmatter, ticketsMarkdown } from '../../src/defaults/tickets-markdown';
@@ -191,6 +192,13 @@ describe('baton request: the ticket it files (B-98)', () => {
     for (const key of ['title', 'id', 'status', 'description', 'course']) expect(Object.keys(fm), key).toContain(key);
     for (const key of Object.keys(fm)) expect(schema.propertyNames.enum, key).toContain(key);
     expect(fm.updated).toBe('2026-10-28');
+  });
+
+  it('round 2, finding 3: the file carries the _filed Status line new writes, and the check exempts it as a request', () => {
+    const text = requestFile('B-9', 'create-spec', SENTENCE, 'routine', '2026-10-28');
+    expect(filedDate(text)).toBe('2026-10-28');
+    expect(text.trimEnd().endsWith('## Status\n\n_filed 2026-10-28._')).toBe(true);
+    expect(sectionsExempt(parseFrontmatter(text))).toBe('request');
   });
 });
 

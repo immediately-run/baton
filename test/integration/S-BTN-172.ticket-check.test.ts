@@ -92,11 +92,36 @@ describe('S-BTN-172 the ticket check', () => {
 
   it('check.sections_since: a ticket filed before it passes, one filed on it without ### Trust fails', () => {
     const body = (day: string) => `---\ntitle: t\nid: A-${day.slice(-1)}\n---\n\n### Invariants\n\nR-BTN-33.\n\n## Status\n\n_filed ${day}._\n`;
-    const dir = repo({ 'tickets/A-2.md': body('2026-11-02'), 'tickets/A-3.md': body('2026-11-03') }, { check: { sections_since: '2026-11-03' } });
+    // Committed on 2026-11-02: the sections check takes the later of `_filed` and the first commit.
+    const env = { GIT_COMMITTER_DATE: '2026-11-02T12:00:00Z', GIT_AUTHOR_DATE: '2026-11-02T12:00:00Z' };
+    const saved = { ...process.env };
+    Object.assign(process.env, env);
+    let dir: string;
+    try {
+      dir = repo({ 'tickets/A-2.md': body('2026-11-02'), 'tickets/A-3.md': body('2026-11-03') }, { check: { sections_since: '2026-11-03' } });
+    } finally {
+      for (const k of Object.keys(env)) if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
     const r = check(dir);
     expect(r.status).toBe(1);
     expect(r.lines).toEqual([
       'tickets/A-3.md: filed 2026-11-03, on or after check.sections_since (2026-11-03), and has no ### Trust section — every new input it adds (a field, a file, a commit trailer, a request), who may write it and how it is verified, or "no new input"',
+      'baton tickets check: 2 ticket(s), 1 finding(s)',
+    ]);
+  });
+
+  it('check.sections_from_id in a depth-1 clone, as CI checks out: a new hand-filed ticket without a _filed line is a finding, exit 1', () => {
+    const settings = { check: { sections_since: '2026-11-03', sections_from_id: 'A-10' } };
+    const full = repo({ 'tickets/A-9.md': ticket('id: A-9'), 'tickets/A-10.md': ticket('id: A-10') }, settings);
+    const clone = mkdtempSync(join(tmpdir(), 'baton-s172-shallow-'));
+    dirs.push(clone);
+    rmSync(clone, { recursive: true, force: true });
+    expect(spawnSync('git', ['clone', '-q', '--depth', '1', `file://${full}`, clone]).status).toBe(0);
+    const r = check(clone);
+    expect(r.status).toBe(1);
+    expect(r.lines).toEqual([
+      'tickets/A-10.md: A-10 is at or above check.sections_from_id (A-10) and has no `_filed YYYY-MM-DD` line in its ## Status — the line `baton ticket new` writes; add the day it was filed',
+      'baton tickets check: 1 ticket(s) lacking ### Trust or ### Invariants, with no _filed line and a first commit this shallow clone does not show, not judged against check.sections_since (2026-11-03) — each below check.sections_from_id (A-10): A-9',
       'baton tickets check: 2 ticket(s), 1 finding(s)',
     ]);
   });

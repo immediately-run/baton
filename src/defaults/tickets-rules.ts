@@ -236,6 +236,52 @@ export function filingDate(text: string, first: FirstCommit | null | undefined, 
   return first.boundary ? { undetermined: true } : { date: first.date };
 }
 
+/** When a ticket was filed, for the sections check (R-BTN-74): the later of its `_filed` line and
+ *  its file's first commit where git shows that commit — so a `_filed` line copied from an older
+ *  ticket cannot date a new one before the cutover where the history is there to say otherwise —
+ *  else whichever of the two there is; `undetermined` with no `_filed` line and a first commit
+ *  that is a shallow clone's boundary; `today` with neither. */
+export function sectionsDate(text: string, first: FirstCommit | null | undefined, today: string): { date: string } | { undetermined: true } {
+  const filed = filedDate(text);
+  const known = first && !first.boundary ? first.date : null;
+  if (filed && known) return { date: filed > known ? filed : known };
+  if (filed) return { date: filed };
+  return filingDate(text, first, today);
+}
+
+/** `check.sections_from_id`: the first id (`B-176`) of the tickets that must carry a `_filed` line
+ *  and are judged by it, so a shallow clone can date them; absent, none must. It names a prefix and
+ *  a number, and needs `check.sections_since`; anything else is the operator's mistake, refused as
+ *  the malformed `baton.json` is. */
+export function sectionsFromId(check: { sections_from_id?: unknown; sections_since?: unknown } | undefined): { prefix: string; n: number } | null {
+  const v = check?.sections_from_id;
+  if (v == null) return null;
+  const m = typeof v === 'string' ? /^([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)-(\d+)$/.exec(v.trim()) : null;
+  if (!m) throw new Error(`.baton/baton.json: check.sections_from_id is a ticket id, <prefix>-<n> (B-176), not ${JSON.stringify(v)}`);
+  if (check?.sections_since == null) throw new Error('.baton/baton.json: check.sections_from_id needs check.sections_since, the day the tickets it names are judged against');
+  return { prefix: m[1], n: Number(m[2]) };
+}
+
+/** Whether `id` is at or above `check.sections_from_id`: the same prefix, and a number at or above
+ *  its own. A legacy prefix's id (`R3-1205`) never is. */
+export function atOrAbove(id: string, from: { prefix: string; n: number }): boolean {
+  const m = /^(.*)-(\d+)$/.exec(id);
+  return !!m && m[1] === from.prefix && Number(m[2]) >= from.n;
+}
+
+/** Why a live ticket is not judged by the sections check at all, or null (R-BTN-74): a project page
+ *  (`kind: project`) builds nothing; a request ticket (`tags: [request]`, as `baton ticket request`
+ *  writes it) and a child a leg filed (`parent:`) are the course's to judge — its legs write the
+ *  work's own tickets, and those are judged. */
+export function sectionsExempt(fm: Record<string, unknown> | null): 'project' | 'request' | 'child' | null {
+  if (!fm) return null;
+  if (fm.kind === 'project') return 'project';
+  const tags = Array.isArray(fm.tags) ? fm.tags : typeof fm.tags === 'string' ? fm.tags.replace(/^\[|\]$/g, '').split(',') : [];
+  if (tags.some((t) => String(t).trim() === 'request')) return 'request';
+  if (fm.parent != null && String(fm.parent).trim() !== '') return 'child';
+  return null;
+}
+
 /** What a required section still needs: the headings a ticket's text lacks (`absent` — a `##`,
  *  `###` or `####` heading of that name, outside a fenced block) and those present whose body is
  *  empty or still a skeleton placeholder, one `_(…)_` and nothing else (`unfilled`). A body runs

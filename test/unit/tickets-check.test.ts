@@ -541,6 +541,64 @@ describe('checkTickets: Trust and Invariants after check.sections_since (2026-11
     expect(r.notes).toEqual(['baton tickets check: 2 ticket(s) lacking ### Trust or ### Invariants, with no _filed line and a first commit this shallow clone does not show, not judged against check.sections_since (2026-11-03): A-1, A-4']);
   });
 
+  it('round 2, finding 6: a _filed line older than the first commit git shows does not date the ticket; the later of the two does', async () => {
+    // Copied from an older ticket: `_filed 2026-10-20`, committed on 2026-11-04.
+    const dir = datedRepo('2026-11-04', { 'tickets/A-1.md': ticket('id: A-1', filed('2026-10-20', '')) });
+    expect(lines(await checkTickets(dir, {}, { sections_since: '2026-11-03' })).map((l) => l.split(' — ')[0])).toEqual([
+      'tickets/A-1.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Trust section',
+      'tickets/A-1.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Invariants section',
+    ]);
+    // Truly older: committed before the cutover, so the later of the two is still before it.
+    const old = datedRepo('2026-10-21', { 'tickets/A-1.md': ticket('id: A-1', filed('2026-10-20', '')) });
+    expect((await checkTickets(old, {}, { sections_since: '2026-11-03' })).findings).toEqual([]);
+    // A `_filed` line later than the commit wins, as it did.
+    const later = datedRepo('2026-11-01', { 'tickets/A-1.md': ticket('id: A-1', filed('2026-11-05', '')) });
+    expect((await checkTickets(later, {}, { sections_since: '2026-11-03' })).findings.map((f) => f.message.split(',')[0])).toEqual(['filed 2026-11-05', 'filed 2026-11-05']);
+  });
+
+  it('round 2, finding 3: a request ticket and a leg’s child are not judged; the tickets their legs write are', async () => {
+    const files = {
+      'tickets/A-1.md': ticket('id: A-1\ntags:\n  - request', '**Brief:** a sentence.\n'),
+      'tickets/A-2.md': ticket('id: A-2\ntags: [request]', '**Brief:** a sentence.\n'),
+      'tickets/A-3.md': ticket('id: A-3\nparent: A-1', '**Brief:** a child a leg filed.\n'),
+      'tickets/A-4.md': ticket('id: A-4', '**Brief:** the work’s own ticket, which a leg wrote.\n'),
+    };
+    const dir = datedRepo('2026-11-04', files);
+    expect(lines(await checkTickets(dir, {}, { sections_since: '2026-11-03', sections_from_id: 'A-1' })).map((l) => l.split(' — ')[0])).toEqual([
+      'tickets/A-4.md: A-4 is at or above check.sections_from_id (A-1) and has no `_filed YYYY-MM-DD` line in its ## Status',
+      'tickets/A-4.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Trust section',
+      'tickets/A-4.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Invariants section',
+    ]);
+  });
+
+  it('round 2, finding 2: in a depth-1 clone, a ticket at or above sections_from_id without _filed is a finding; one with it is judged by it; one below is undetermined', async () => {
+    const dir = datedRepo('2026-11-02', {
+      'tickets/A-5.md': ticket('id: A-5', '**Brief:** filed by hand before the cutover.\n'),
+      'tickets/R3-9.md': ticket('id: R3-9', '**Brief:** a legacy id.\n'),
+    }, { check: { sections_since: '2026-11-03', sections_from_id: 'A-10' } });
+    edit(dir, 'tickets/A-10.md', ticket('id: A-10', '**Brief:** filed by hand after the cutover, no _filed line.\n'), '2026-11-04');
+    edit(dir, 'tickets/A-11.md', ticket('id: A-11', filed('2026-11-04', '### Trust\n\nno new input')), '2026-11-04');
+    edit(dir, 'tickets/A-12.md', ticket('id: A-12', filed('2026-11-04', BOTH)), '2026-11-04');
+    const clone = shallowClone(dir);
+    const r = await checkTickets(clone, {}, { sections_since: '2026-11-03', sections_from_id: 'A-10' });
+    expect(lines(r).map((l) => l.split(' — ')[0])).toEqual([
+      'tickets/A-10.md: A-10 is at or above check.sections_from_id (A-10) and has no `_filed YYYY-MM-DD` line in its ## Status',
+      'tickets/A-11.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Invariants section',
+    ]);
+    expect(r.notes).toEqual(['baton tickets check: 2 ticket(s) lacking ### Trust or ### Invariants, with no _filed line and a first commit this shallow clone does not show, not judged against check.sections_since (2026-11-03) — each below check.sections_from_id (A-10): A-5, R3-9']);
+    // The same through the CLI's entry, as CI runs it: exit 1.
+    writeFileSync(join(clone, '.baton', 'baton.json'), JSON.stringify({ items: 'tickets', default_course: 'create-pr', repos: {}, legacy_ids: ['R3-\\d+'], check: { sections_since: '2026-11-03', sections_from_id: 'A-10' } }));
+    const out: string[] = [];
+    expect(await checkTicketsMain(['--repo', clone], { log: (l) => out.push(l) })).toBe(1);
+    expect(out.at(-1)).toBe('baton tickets check: 5 ticket(s), 2 finding(s)');
+  });
+
+  it('a sections_from_id that is no id, or set without sections_since, is the operator’s error', async () => {
+    const dir = repo({ 'tickets/A-1.md': ticket('id: A-1') });
+    await expect(checkTickets(dir, {}, { sections_since: '2026-11-03', sections_from_id: '176' })).rejects.toThrow('check.sections_from_id is a ticket id, <prefix>-<n> (B-176), not "176"');
+    await expect(checkTickets(dir, {}, { sections_from_id: 'A-1' })).rejects.toThrow('check.sections_from_id needs check.sections_since');
+  });
+
   it('a sections_since that is not a day is the operator’s error', async () => {
     const dir = repo({ 'tickets/A-1.md': ticket('id: A-1') }, { check: { sections_since: 'yesterday' } });
     await expect(checkTicketsMain(['--repo', dir], { log: () => {} })).rejects.toThrow('check.sections_since is a day, YYYY-MM-DD, not "yesterday"');

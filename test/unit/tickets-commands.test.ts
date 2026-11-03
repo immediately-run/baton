@@ -18,7 +18,7 @@ import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
 import { moveTicket, reverseMention, skeletonBody } from '../../src/defaults/tickets';
 // @ts-expect-error a plain .mjs script, no types
 import { unnamedEntries } from '../../scripts/check-spec.mjs';
-import { appendStatus, entryIds, filingDate, firstCommit, firstCommits, historyEntries, missingSections, rereadNote, rereads, ruleIds, rulesConfig, sectionGaps, staleRules } from '../../src/defaults/tickets-rules';
+import { appendStatus, entryIds, filingDate, firstCommit, firstCommits, historyEntries, missingSections, rereadNote, rereads, ruleIds, rulesConfig, sectionGaps, sectionsDate, staleRules } from '../../src/defaults/tickets-rules';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
 
 // Every case spawns the CLI against real git repositories, several times; under the full suite's
@@ -644,6 +644,15 @@ describe('the stale-rule guard: how a ticket is dated (2026-11-03)', () => {
     expect(filingDate(citing('B-1', null), null, '2026-11-03')).toEqual({ date: '2026-11-03' });
     expect(filingDate(citing('B-1', null), { date: '2026-11-03', boundary: true }, '2026-11-03')).toEqual({ undetermined: true });
     expect(filingDate(citing('B-1', '2026-10-25'), { date: '2026-11-03', boundary: true }, '2026-11-03')).toEqual({ date: '2026-10-25' });
+  });
+
+  it('round 2, finding 6: the sections check takes the later of _filed and a first commit git shows', () => {
+    expect(sectionsDate(citing('B-1', '2026-10-25'), { date: '2026-11-04', boundary: false }, '2026-11-09')).toEqual({ date: '2026-11-04' });
+    expect(sectionsDate(citing('B-1', '2026-11-05'), { date: '2026-11-04', boundary: false }, '2026-11-09')).toEqual({ date: '2026-11-05' });
+    expect(sectionsDate(citing('B-1', '2026-10-25'), { date: '2026-11-04', boundary: true }, '2026-11-09')).toEqual({ date: '2026-10-25' });
+    expect(sectionsDate(citing('B-1', '2026-10-25'), null, '2026-11-09')).toEqual({ date: '2026-10-25' });
+    expect(sectionsDate(citing('B-1', null), { date: '2026-11-04', boundary: true }, '2026-11-09')).toEqual({ undetermined: true });
+    expect(sectionsDate(citing('B-1', null), null, '2026-11-09')).toEqual({ date: '2026-11-09' });
   });
 });
 

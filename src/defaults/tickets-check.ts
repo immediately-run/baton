@@ -8,7 +8,8 @@
 // `depends_on` — a dependency written only in prose hides a loop the cycle check cannot see.
 // Two process guards over the live tickets' files (tickets-rules.ts, 2026-11-03): behind
 // `check.sections_since`, a ticket filed on or after that day without `### Trust` and
-// `### Invariants` is a finding; and every live ticket citing a rule the spec's history amended
+// `### Invariants` is a finding, and behind `check.sections_from_id` a ticket at or above that id
+// without a `_filed` line is one too, so a shallow clone decides them; and every live ticket citing a rule the spec's history amended
 // after the ticket answered for it (filed, or re-read) is reported — a count and a line each,
 // never a finding, so a ruling cannot turn every older ticket's pull request red.
 // Course code in the CLI, never core (§2b): defaults import core, never the reverse.
@@ -19,7 +20,7 @@ import { pathToFileURL } from 'node:url';
 import { bodyDependencies, checkPayload, dependsCycle, dependsCycles } from '../core/board';
 import { LOCAL_ID } from '../core/validate'; // the board's own grammar, cited below (§4.4)
 import { readItems } from './read-items';
-import { filingDate, firstCommits, historyEntries, isShallow, missingSections, rulesConfig, sectionGaps, sectionHint, sectionsSince, staleRules, staleSummary, type RulesConfig, type StaleRule } from './tickets-rules';
+import { atOrAbove, filedDate, filingDate, firstCommits, historyEntries, isShallow, missingSections, rulesConfig, sectionGaps, sectionHint, sectionsDate, sectionsExempt, sectionsFromId, sectionsSince, staleRules, staleSummary, type RulesConfig, type StaleRule } from './tickets-rules';
 import { parseFrontmatter, ticketsMarkdown, type MarkdownFile, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
 /** The ids a `**Depends on:**` line may name, as prose writes them (B-111, round 1): an
@@ -77,6 +78,11 @@ export interface CheckSettings {
    *  line, else its file's first commit — must carry `### Trust` and `### Invariants`
    *  (`check: {sections_since: "2026-11-03"}`). Absent, off. */
   sections_since?: string;
+  /** The first ticket id (`B-176`) that must carry a `_filed` Status line — a finding without
+   *  one — and is judged by it, so the sections check is decided in a shallow clone too; ids below
+   *  it, and other prefixes', are dated by `_filed` or first commit (`check: {sections_from_id:
+   *  "B-176"}`). Absent, none must. Needs `sections_since`. */
+  sections_from_id?: string;
   /** Where the amendments are and the rule ids they name, for the stale-rule report:
    *  `{history: "spec/BATON_SPEC_HISTORY.md", prefix: "R-BTN"}` unless set. No file, no report. */
   rules?: Partial<RulesConfig>;
@@ -210,6 +216,7 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
   // never by a later edit. In a shallow clone the boundary commit would date every file older than
   // it, so the stale report is skipped there, and a ticket it cannot date is said, not passed.
   const since = sectionsSince(check);
+  const fromId = sectionsFromId(check);
   const rules = rulesConfig(check);
   const historyPath = join(root, rules.history);
   const entries = existsSync(historyPath) ? historyEntries(readFileSync(historyPath, 'utf8')) : [];
@@ -222,15 +229,25 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
   for (const t of live) {
     if (!/\.mdx?$/.test(t.path) || !existsSync(join(root, t.path))) continue;
     const text = readFileSync(join(root, t.path), 'utf8');
-    const filed = filingDate(text, firsts.get(t.path), today);
-    // Trust and Invariants, for a ticket filed on or after the cutover — a project page (`kind:
-    // project`) is not one: it describes a set of tickets and builds nothing.
-    const missing = since && parseFrontmatter(text)?.kind !== 'project' ? missingSections(text) : [];
-    if (since && missing.length) {
-      if ('undetermined' in filed) undetermined.push(t.id);
-      else if (filed.date >= since) {
-        const { absent } = sectionGaps(text);
-        for (const s of missing) add({ path: t.path, message: `filed ${filed.date}, on or after check.sections_since (${since}), and ${absent.includes(s) ? `has no ### ${s} section` : `its ### ${s} section is empty or still the skeleton's placeholder`} — ${sectionHint(s)}` });
+    const first = firsts.get(t.path);
+    const filed = filingDate(text, first, today);
+    // Trust and Invariants, for a ticket filed on or after the cutover — not a project page, which
+    // builds nothing, nor a request ticket or a leg's child, whose course's legs write the
+    // work's own tickets (sectionsExempt). A ticket at or above `sections_from_id` carries a
+    // `_filed` line, so it is judged in a depth-1 clone too; each is dated by the later of that
+    // line and the first commit git shows (sectionsDate).
+    if (since && !sectionsExempt(parseFrontmatter(text))) {
+      const isNew = fromId != null && atOrAbove(t.id, fromId);
+      if (isNew && !filedDate(text)) add({ path: t.path, message: `${t.id} is at or above check.sections_from_id (${check.sections_from_id}) and has no \`_filed YYYY-MM-DD\` line in its ## Status — the line \`baton ticket new\` writes; add the day it was filed` });
+      const missing = missingSections(text);
+      const when = sectionsDate(text, first, today);
+      if (missing.length) {
+        if ('undetermined' in when) {
+          if (!isNew) undetermined.push(t.id);
+        } else if (when.date >= since) {
+          const { absent } = sectionGaps(text);
+          for (const s of missing) add({ path: t.path, message: `filed ${when.date}, on or after check.sections_since (${since}), and ${absent.includes(s) ? `has no ### ${s} section` : `its ### ${s} section is empty or still the skeleton's placeholder`} — ${sectionHint(s)}` });
+        }
       }
     }
     // Rules amended since the ticket answered for them: reported, never a finding.
@@ -241,7 +258,7 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
   }
   const notes: string[] = [];
   if (entries.length && shallow) notes.push('baton tickets check: a shallow clone — the stale-rule report is skipped, since its dates need the whole history (`git fetch --unshallow` to read it; never a finding)');
-  if (undetermined.length) notes.push(`baton tickets check: ${undetermined.length} ticket(s) lacking ### Trust or ### Invariants, with no _filed line and a first commit this shallow clone does not show, not judged against check.sections_since (${since}): ${undetermined.join(', ')}`);
+  if (undetermined.length) notes.push(`baton tickets check: ${undetermined.length} ticket(s) lacking ### Trust or ### Invariants, with no _filed line and a first commit this shallow clone does not show, not judged against check.sections_since (${since})${fromId ? ` — each below check.sections_from_id (${check.sections_from_id})` : ''}: ${undetermined.join(', ')}`);
   return { findings, counts, ...(stale.length ? { stale } : {}), ...(notes.length ? { notes } : {}) };
 }
 
