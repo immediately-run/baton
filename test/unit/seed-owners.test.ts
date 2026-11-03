@@ -112,7 +112,7 @@ describe('the seed’s owner keys (R-BTN-47, R-BTN-58)', () => {
       // A rotation: a second owner beside the seed's, then the administrator revokes the seed's
       // key through the real route's function (`removed_at` and `revoked_at`, R-BTN-57).
       await c.admin.owners(`owner:${owner.fingerprint}`, 'ops', { public_key: second.publicKey });
-      c.admin.revokeKey('admin:test', owner.fingerprint);
+      await c.admin.revokeKey('admin:test', owner.fingerprint);
       // The next start reads the same seed: it starts, writes nothing, and the rotation stands.
       await seedOwners(c, config);
       // (The route stores the line without its comment.)
