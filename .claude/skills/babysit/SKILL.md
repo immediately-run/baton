@@ -71,8 +71,8 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   `spec/BATON_SPEC_HISTORY.md` entry names, dated after the ticket answered for that rule — the
   day it was filed (its `_filed` line, else its file's first commit), or a later `rules re-read`
   note naming the rule; an ordinary edit answers for nothing. Re-read each rule and entry, rewrite
-  or strike what they contradict, then claim with `--rules-reread`, which records the re-read in
-  `## Status`. `npm run check:tickets` lists such tickets without failing; in a shallow clone it
+  or strike what they contradict, then claim with `--rules-reread <id>,…` naming exactly the ids
+  it listed (it refuses any other set), which records the re-read in `## Status`. `npm run check:tickets` lists such tickets without failing; in a shallow clone it
   skips the list and says so, and `claim` deepens the clone first (`git fetch --unshallow`).
 
 ## Spec PRs

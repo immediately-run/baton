@@ -25,7 +25,7 @@ import { accepts, accepting, allocates, allocatingPrefix, GITHUB_PR, LIVE_STATUS
 import { addPr, idOf, locate, nextNumber, scalar, setKey } from './tickets-file';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
-import { appendStatus, filingDate, firstCommit, historyEntries, missingSections, rereadNote, rulesConfig, sectionsSince, staleList, staleRules, unshallow } from './tickets-rules';
+import { appendStatus, filingDate, firstCommit, historyEntries, missingSections, rereadMismatch, rereadNote, rulesConfig, sectionsSince, staleIds, staleList, staleRules, unshallow } from './tickets-rules';
 import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { defaultBranch } from './request';
 
@@ -163,15 +163,15 @@ const acceptedList = (settings: TicketSettings): string => Object.keys(settings.
  * claim | set | done
  * ---------------------------------------------------------------------------------------- */
 
-/** `baton tickets claim <id> [--rules-reread]` — available → in-progress, refusing a ticket that is
+/** `baton tickets claim <id> [--rules-reread <ids>]` — available → in-progress, refusing a ticket that is
  *  not available, whose `depends_on` are not all done (archived, or a live closed status), or that
  *  cites a rule the spec's history amended after the ticket answered for it (filed, or re-read), unless
- *  `--rules-reread` says the claimer re-read them, which the claim's commit records as a dated
- *  Status line (tickets-rules.ts; the 2026-11-03 process guards); `baton tickets
+ *  `--rules-reread` names exactly those ids, saying the claimer re-read them, which the claim's
+ *  commit records as a dated Status line (tickets-rules.ts; the 2026-11-03 process guards); `baton tickets
  *  set <id> <status> [--pr URL]` — any live status, as the session that left it; `baton tickets
  *  done <id> [--pr URL]` — done, and the file moved to `archive/`. `claim` is the one that
  *  refuses: it is the lock, and `set` is the session keeping its own ticket's word. */
-export function moveTicket(root: string, io: TicketsIo, id: string, status: Status, pr?: string, claim = false, rulesReread = false): void {
+export function moveTicket(root: string, io: TicketsIo, id: string, status: Status, pr?: string, claim = false, rulesReread?: readonly string[]): void {
   if (pr != null && !GITHUB_PR.test(pr)) throw new Error(`--pr ${pr} is not a GitHub pull request URL`);
   const date = io.date ?? today();
   const remote = io.remote ?? 'origin';
@@ -213,12 +213,16 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
           throw new Error([
             `${id} cites rules that ${rules.history} amended after the ticket answered for them (filed ${since}, or a later rules re-read note naming the rule):`,
             staleList(stale),
-            'Re-read each rule and entry, rewrite or strike what in the ticket they contradict, then claim with --rules-reread.',
+            `Re-read each rule and entry, rewrite or strike what in the ticket they contradict, then claim with --rules-reread ${staleIds(stale).join(',')}.`,
           ].join('\n'));
         }
+        // The re-read names exactly the stale ids: a claimer who re-read them can list them, and
+        // one passing the flag by reflex is told which they did not.
+        const mismatch = rulesReread ? rereadMismatch(rulesReread, stale) : null;
+        if (mismatch) throw new Error(`${id}: ${mismatch}${stale.length ? `\n${staleList(stale)}` : ''}`);
         if (stale.length) note = rereadNote(date, stale);
-      }
-    }
+      } else if (rulesReread) throw new Error(`${id}: --rules-reread ${rulesReread.join(',')}, but ${rules.history} does not exist here, so no rule is amended`);
+    } else if (rulesReread) throw new Error(`--rules-reread is a claim's (claim, or set <id> in-progress), not set ${status}'s`);
     text = setKey(setKey(text, 'status', status), 'updated', date);
     if (note) text = appendStatus(text, note);
     if (pr) text = addPr(text, pr);
@@ -558,9 +562,10 @@ export function ticketsHelp(): string[] {
   return [
     'baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]',
     '                   [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]',
-    'baton tickets claim <id> [--rules-reread]     available → in-progress; refused while the ticket cites a',
-    '                                              rule amended since it was filed, until --rules-reread',
-    'baton tickets set <id> <status> [--pr URL] [--rules-reread]   any live status; --pr adds a pull request',
+    'baton tickets claim <id> [--rules-reread <ids>]  available → in-progress; refused while the ticket',
+    '                                              cites a rule amended since it was filed, until',
+    '                                              --rules-reread names exactly those ids (A,B)',
+    'baton tickets set <id> <status> [--pr URL] [--rules-reread <ids>]  any live status; --pr adds a pull request',
     'baton tickets done <id> [--pr URL]            done, moved to archive/',
     'baton tickets check [--repo DIR] [--quiet]    check the tickets without posting them',
     '',
@@ -610,8 +615,6 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
     done: ['pr', ...COMMON],
   };
   if (!allowed[command]) throw new Error(`${command}: baton tickets new|claim|set|done|check (baton tickets --help)`);
-  /** The flags that take no value. */
-  const SWITCHES = ['rules-reread'];
   const positional: string[] = [];
   const flags: Record<string, string> = {};
   for (let i = 0; i < rest.length; i++) {
@@ -619,10 +622,6 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
     if (a.startsWith('--')) {
       const name = a.slice(2);
       if (!allowed[command].includes(name)) throw new Error(`${a}: not a flag of baton tickets ${command}`);
-      if (SWITCHES.includes(name)) {
-        flags[name] = 'true';
-        continue;
-      }
       const value = rest[++i];
       if (value === undefined) throw new Error(`${a} needs a value`);
       flags[name] = value;
@@ -660,6 +659,8 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   const status = command === 'claim' ? 'in-progress' : command === 'done' ? 'done' : positional[1];
   if (command === 'set' && status === 'done') throw new Error('done archives a ticket — `baton tickets done <id>`, past this push');
   if (status !== 'done' && !LIVE_STATUSES.includes(status as Status)) throw new Error(`${status} is not a status \`set\` writes — the live ones are ${LIVE_STATUSES.join(', ')}; \`baton tickets done\` archives a ticket`);
-  moveTicket(root, at, positional[0], status as Status, flags.pr, command === 'claim', flags['rules-reread'] === 'true');
+  const reread = flags['rules-reread']?.split(',').map((x) => x.trim()).filter(Boolean);
+  if (flags['rules-reread'] != null && !reread?.length) throw new Error('--rules-reread takes the re-read rule ids, comma-separated: --rules-reread <id>,<id>');
+  moveTicket(root, at, positional[0], status as Status, flags.pr, command === 'claim', reread);
   return 0;
 }

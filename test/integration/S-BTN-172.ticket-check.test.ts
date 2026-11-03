@@ -77,7 +77,7 @@ describe('S-BTN-172 the ticket check', () => {
     Object.assign(process.env, env);
     let dir: string;
     try {
-      dir = repo({ 'tickets/A-1.md': ticket('id: A-1').replace('Prose.', 'Reads `prs` (R-BTN-50).'), 'spec/BATON_SPEC_HISTORY.md': '- **2026-11-01 — the ruling.** R-BTN-50 changed.\n' });
+      dir = repo({ 'tickets/A-1.md': ticket('id: A-1').replace('Prose.', 'Reads `prs` (R-BTN-50).'), 'spec/BATON_SPEC_HISTORY.md': '- **2026-11-01 — R-BTN-50: the ruling.** R-BTN-50 changed.\n' });
     } finally {
       for (const k of Object.keys(env)) if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
     }

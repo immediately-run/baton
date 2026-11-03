@@ -498,7 +498,8 @@ const HISTORY = [
   '',
   '- **2026-10-20 — R-BTN-50: the same day as the ticket.** Amended R-BTN-50 again.',
   '',
-  '- **2026-11-01 — R-BTN-50: the owner’s ruling on Needs you.** R-BTN-50 now says the core reads no `prs`.',
+  '- **2026-11-01 — R-BTN-50: the owner’s ruling on Needs you.** R-BTN-50 now says the core reads no `prs`;',
+  '  R-BTN-7 is cited as evidence only, and the review round’s log names R-BTN-33.',
   '',
   '- **2026-10-27 to 2026-11-02 — R-BTN-33, R-BTN-150: a range, its',
   '  title wrapped** (PR #9). R-BTN-33 and R-BTN-150.',
@@ -532,6 +533,7 @@ describe('the stale-rule guard: its reading (2026-11-03)', () => {
   it('a cited rule named by an entry dated after the filing is stale; one of the filing’s own day or before, an uncited one, or a frontmatter one is not', () => {
     const stale = staleRules(citing('B-1'), '2026-10-20', historyEntries(HISTORY));
     // 2026-10-20's entry is the filing's own day: not after it (the day boundary, R-BTN-74).
+    // 2026-11-01's body names R-BTN-7 and R-BTN-33, which its title does not: not amended there.
     expect(stale.map((s) => `${s.id} ${s.date}`)).toEqual(['R-BTN-33 2026-11-02', 'R-BTN-50 2026-11-01', 'R-BTN-150 2026-11-02']);
     expect(staleRules(citing('B-1'), '2026-11-02', historyEntries(HISTORY))).toEqual([]);
     expect(rereadNote('2026-11-03', stale)).toBe('_(2026-11-03: rules re-read at claim: R-BTN-33 (amended 2026-11-02), R-BTN-50 (amended 2026-11-01), R-BTN-150 (amended 2026-11-02))_');
@@ -594,7 +596,7 @@ describe('baton tickets claim: the stale-rule guard (2026-11-03)', () => {
       '  R-BTN-33 — 2026-11-02 — R-BTN-33, R-BTN-150: a range, its title wrapped',
       '  R-BTN-50 — 2026-11-01 — R-BTN-50: the owner’s ruling on Needs you',
       '  R-BTN-150 — 2026-11-02 — R-BTN-33, R-BTN-150: a range, its title wrapped',
-      'Re-read each rule and entry, rewrite or strike what in the ticket they contradict, then claim with --rules-reread.',
+      'Re-read each rule and entry, rewrite or strike what in the ticket they contradict, then claim with --rules-reread R-BTN-33,R-BTN-50,R-BTN-150.',
       '',
     ].join('\n'));
     expect(f.head().sha).toBe(before);
@@ -605,12 +607,33 @@ describe('baton tickets claim: the stale-rule guard (2026-11-03)', () => {
 
   it('--rules-reread claims, and the claim’s commit records the re-read under ## Status', () => {
     const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
-    const r = run(f.dir, 'claim', 'B-1', '--rules-reread');
+    const r = run(f.dir, 'claim', 'B-1', '--rules-reread', 'R-BTN-50, R-BTN-150,R-BTN-33');
     expect(r).toMatchObject({ code: 0, err: '' });
     const text = f.at('tickets/B-1.mdx')!;
     expect(parseFrontmatter(text)).toMatchObject({ status: 'in-progress', updated: today() });
     expect(text).toContain(`## Status\n\n_filed 2026-10-20._\n\n_(${today()}: rules re-read at claim: R-BTN-33 (amended 2026-11-02), R-BTN-50 (amended 2026-11-01), R-BTN-150 (amended 2026-11-02))_\n`);
     expect(execFileSync('git', ['-C', f.origin, 'show', '--name-only', '--format=%s', 'main'], { encoding: 'utf8' }).trim().split('\n')).toEqual(['tickets: claim B-1 (in progress)', '', 'tickets/B-1.mdx']);
+  });
+
+  it('--rules-reread names exactly the stale ids, or refuses listing the difference; nothing lands', () => {
+    const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
+    const before = f.head().sha;
+    const r = run(f.dir, 'claim', 'B-1', '--rules-reread', 'R-BTN-50,R-BTN-7');
+    expect(r.code).toBe(2);
+    expect(r.err.split('\n').slice(0, 3)).toEqual([
+      'baton: B-1: --rules-reread names R-BTN-50,R-BTN-7; the rules amended since the ticket answered for them are R-BTN-33,R-BTN-50,R-BTN-150',
+      '  not named: R-BTN-33, R-BTN-150',
+      '  not amended since: R-BTN-7',
+    ]);
+    expect(run(f.dir, 'claim', 'B-1', '--rules-reread').err).toBe('baton: --rules-reread needs a value\n');
+    expect(run(f.dir, 'claim', 'B-1', '--rules-reread', ',').err).toBe('baton: --rules-reread takes the re-read rule ids, comma-separated: --rules-reread <id>,<id>\n');
+    expect(run(f.dir, 'set', 'B-1', 'in-review', '--rules-reread', 'R-BTN-50').err).toBe("baton: --rules-reread is a claim's (claim, or set <id> in-progress), not set in-review's\n");
+    expect(f.head().sha).toBe(before);
+    // A ticket with nothing stale refuses the flag too: it names ids not amended since.
+    const fresh = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1', '2026-11-02') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
+    expect(run(fresh.dir, 'claim', 'B-1', '--rules-reread', 'R-BTN-50').err).toContain('the rules amended since the ticket answered for them are none\n  not amended since: R-BTN-50');
+    // `set in-progress` with the right ids claims.
+    expect(run(f.dir, 'set', 'B-1', 'in-progress', '--rules-reread', 'R-BTN-33,R-BTN-50,R-BTN-150').code).toBe(0);
   });
 
   it('an edit after the amendments clears nothing, a `tickets: …` subject or not; with no _filed line, the first commit dates the ticket', () => {

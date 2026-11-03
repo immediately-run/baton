@@ -1234,8 +1234,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
     `_filed` line into every filing, `--body-file`'s included, and refuses one lacking either
     heading on or after the day, before it pushes. It also reports, never as a finding, each live
     ticket citing a rule id that a dated entry of the spec's history (`check.rules: {history,
-    prefix}`, default `spec/BATON_SPEC_HISTORY.md` and `R-BTN`; no file, no report) names, dated
-    after the day the ticket answered for that rule — the day it was filed, or the day of a later `rules
+    prefix}`, default `spec/BATON_SPEC_HISTORY.md` and `R-BTN`; no file, no report) names in its
+    bold title (`**YYYY-MM-DD — <ids>: …**`, the history's convention; an id only the entry's
+    body mentions, as evidence or in a review round, is not one it amended), dated after the day
+    the ticket answered for that rule — the day it was filed, or the day of a later `rules
     re-read` note in its `## Status` naming the rule (the claim's, below, or `_(<date>: rules
     re-read: <id>, …)_`, which a spec PR that rewrote a clause adds for the ids it handled). The
     comparison is by day: an entry dated the same day as that answer is not after it. One line per
@@ -1268,16 +1270,18 @@ live solely in Baton, and both are exportable (R-BTN-88).
       no branch at all. Each dependency's `**Used by:**` line gains the new id once: the reverse
       mention. A description that ends with a `Requires:` clause (`… Requires: human-operator,
       drivable-browser.`) has the capabilities it names written on the `**Requires:**` line.
-    - `claim <id> [--rules-reread]` moves a ticket available → in-progress, and refuses one that is
+    - `claim <id> [--rules-reread <ids>]` moves a ticket available → in-progress, and refuses one that is
       not available, whose `depends_on` are not all done (archived, or carrying any of the markdown
       source's closed statuses), or whose body cites a rule that a history entry dated after the
       ticket answered for it names (the check's stale-rule reading, above, at the head the claim
       lands on), listing each id with the entry's date and title. In a shallow clone whose
       boundary would date the ticket, it first runs `git fetch --unshallow` (bounded, quiet), and
       refuses, naming that fix, when the fetch fails. With `--rules-reread` it
-      claims, and the claim's commit adds `_(<date>: rules re-read at claim: <id> (amended
-      <date>), …)_` to the ticket's `## Status`. `set <id> in-progress` is a claim and reads the
-      same. `set <id> <status> [--pr URL]` writes any live status — `done` is `done`'s — and
+      claims only when the comma-separated ids it names (`--rules-reread R-BTN-33,R-BTN-50`) are
+      exactly the stale ones, refusing otherwise with the ids not named and those not amended
+      since; the claim's commit adds `_(<date>: rules re-read at claim: <id> (amended <date>),
+      …)_` to the ticket's `## Status`. `set <id> in-progress` is a claim and reads the same, and
+      no other `set` takes the flag. `set <id> <status> [--pr URL] [--rules-reread <ids>]` writes any live status — `done` is `done`'s — and
       adds the pull request URL to `prs` once; `done <id> [--pr URL]` writes `done` and moves the
       file to `<items>/archive/`.
     - The settings are the repository's: `items` (below), `ticket_prefix` (`B`), `legacy_ids` — id
@@ -5244,7 +5248,7 @@ is summarized in the principal table (§12.1).
     | `ticket route <ticket> <leg> \| --clear` | `ticket.route`: `POST …/tickets/{ticket}/route` (R-BTN-83) | owner |
     | `ticket adopt <ticket> [--at <station>] [--next <leg>] [--ran <leg>,…]` | `ticket.adopt`: `POST …/tickets/{ticket}/adopt` (R-BTN-39) | an approver on `approvers.policy` |
     | `ticket resolve <ticket> <restart> [--condition <id>]` | `ticket.resolve`: `POST …/tickets/{ticket}/resolve` (R-BTN-163) | owner |
-    | `ticket new --title <t> […]`, `ticket claim <id> [--rules-reread]`, `ticket set <id> <status> [--pr <url>]`, `ticket done <id> [--pr <url>]`, `ticket check [--repo <dir>] [--quiet]`, `ticket request "<one sentence>" --course <course> […]` | local: the ticket source in git, each a commit (R-BTN-74, R-BTN-131) | — |
+    | `ticket new --title <t> […]`, `ticket claim <id> [--rules-reread <ids>]`, `ticket set <id> <status> [--pr <url>] [--rules-reread <ids>]`, `ticket done <id> [--pr <url>]`, `ticket check [--repo <dir>] [--quiet]`, `ticket request "<one sentence>" --course <course> […]` | local: the ticket source in git, each a commit (R-BTN-74, R-BTN-131) | — |
     | `decision list [--all] [--watch]` | `condition.list`: `GET /v1/repositories/{repository}/conditions?open=1&person=1` (R-BTN-163) | owner, runner granted on the repository, or administrator |
     | `decision answer <ticket> <option>` | `attestation.add` with a `std:decision@1` for the ticket's queued person leg (R-BTN-116, R-BTN-181) | owner, or a human-only key |
     | `attestation add <repository> --type <type> --subject <json> --value <json> [--lapses <duration>]`, `attestation revoke <repository> <id>` | `attestation.add`, `attestation.revoke`: `POST`, `DELETE /v1/repositories/{repository}/attestations` (R-BTN-181) | owner, a human-only key, or the `service:` key named |

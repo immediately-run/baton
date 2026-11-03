@@ -67,10 +67,11 @@
 //                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]
 //                — file one ticket, the next free id under .baton/baton.json's ticket_prefix,
 //                with the conventional body, as one commit pushed to the default branch (B-112)
-//   baton tickets claim <id> [--rules-reread] | set <id> <status> [--pr URL] | done <id> [--pr URL]
+//   baton tickets claim <id> [--rules-reread <ids>] | set <id> <status> [--pr URL] [--rules-reread <ids>]
+//                | done <id> [--pr URL]
 //                — claim, move or finish one, each one commit pushed to the default branch (B-112);
 //                claim refuses a ticket citing a rule the spec's history amended since the ticket
-//                was filed or last re-read it, until --rules-reread (R-BTN-74)
+//                was filed or last re-read it, until --rules-reread names those ids (R-BTN-74)
 //   baton tickets check [--repo DIR] [--quiet]
 //                — check this repository's ticket source without posting it: ids, the board
 //                post's validation, depends_on targets and cycles, (with check.depends_line in

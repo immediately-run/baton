@@ -418,7 +418,7 @@ function shallowClone(dir: string): string {
   return clone;
 }
 
-const HISTORY = '## Changelog\n\n- **2026-11-01 — the ruling.** R-BTN-50 changed.\n\n- **2026-11-02 — another.** R-BTN-50 and R-BTN-33 changed.\n\n## Retired requirements\n';
+const HISTORY = '## Changelog\n\n- **2026-11-01 — R-BTN-50: the ruling.** R-BTN-50 changed.\n\n- **2026-11-02 — R-BTN-50, R-BTN-33: another.** Both changed.\n\n- **2026-11-03 — R-BTN-9: a third.** Its review round cites R-BTN-50 and R-BTN-33 as evidence, which amends neither.\n\n## Retired requirements\n';
 
 describe('checkTickets: the stale-rule report (2026-11-03)', () => {
   it('a live ticket citing a rule amended after it was filed is reported, never a finding; a closed one, or one that cites nothing amended, is not', async () => {

@@ -38,7 +38,8 @@ export function rulesConfig(check: { rules?: unknown } | undefined): RulesConfig
 const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** One dated entry of the history's changelog: `- **YYYY-MM-DD — title.** …` (a range,
- *  `YYYY-MM-DD to YYYY-MM-DD — …`, is dated by its last day), to the next entry or heading. */
+ *  `YYYY-MM-DD to YYYY-MM-DD — …`, is dated by its last day), to the next entry or heading. The
+ *  rule ids the title names are the ones the entry amended. */
 export interface HistoryEntry {
   date: string;
   title: string;
@@ -101,7 +102,7 @@ export function rereads(text: string, prefix = RULES_DEFAULTS.prefix): Map<strin
 }
 
 /** The rules a ticket's body cites that a history entry dated after the day the ticket answered
- *  for them names: one row per id and entry, by id then date. A rule is answered for on the day
+ *  for them names in its title: one row per id and entry, by id then date. A rule is answered for on the day
  *  the ticket was `filed` (`YYYY-MM-DD`), or on the day of a later `rules re-read` note naming it.
  *  The comparison is by day: an entry of the same day as that answer is not after it. */
 export function staleRules(ticketText: string, filed: string, entries: readonly HistoryEntry[], prefix = RULES_DEFAULTS.prefix): StaleRule[] {
@@ -109,7 +110,10 @@ export function staleRules(ticketText: string, filed: string, entries: readonly 
   const cited = ruleIds(body, prefix);
   if (!cited.length) return [];
   const reread = rereads(body, prefix);
-  const named = entries.map((e) => ({ e, ids: new Set(ruleIds(e.text, prefix)) }));
+  // An entry amends the ids its bold title names (`**YYYY-MM-DD — R-BTN-74, R-BTN-31: …**`), the
+  // history's convention; an id its body mentions — evidence, a review round, a rejected
+  // alternative — is not one it amended.
+  const named = entries.map((e) => ({ e, ids: new Set(ruleIds(e.title, prefix)) }));
   const out: StaleRule[] = [];
   for (const id of cited) {
     const since = [filed, reread.get(id) ?? ''].sort().at(-1)!;
@@ -124,6 +128,23 @@ export function latestByRule(stale: readonly StaleRule[]): { id: string; date: s
   const by = new Map<string, string>();
   for (const s of stale) if (!by.has(s.id) || by.get(s.id)! < s.date) by.set(s.id, s.date);
   return [...by].map(([id, date]) => ({ id, date }));
+}
+
+/** The ids `--rules-reread` must name: each stale id once. */
+export const staleIds = (stale: readonly StaleRule[]): string[] => latestByRule(stale).map((r) => r.id);
+
+/** Why `--rules-reread <ids>` does not match the stale set — the ids it misses and the ids it
+ *  names that are not stale — or null when they are the same set. */
+export function rereadMismatch(given: readonly string[], stale: readonly StaleRule[]): string | null {
+  const want = staleIds(stale);
+  const missing = want.filter((id) => !given.includes(id));
+  const extra = given.filter((id) => !want.includes(id));
+  if (!missing.length && !extra.length) return null;
+  return [
+    `--rules-reread names ${given.length ? given.join(',') : 'nothing'}; the rules amended since the ticket answered for them are ${want.length ? want.join(',') : 'none'}`,
+    ...(missing.length ? [`  not named: ${missing.join(', ')}`] : []),
+    ...(extra.length ? [`  not amended since: ${extra.join(', ')}`] : []),
+  ].join('\n');
 }
 
 const shortTitle = (t: string): string => (t.length > 80 ? `${t.slice(0, 79).trimEnd()}…` : t);

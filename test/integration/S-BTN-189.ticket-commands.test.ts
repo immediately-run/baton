@@ -160,7 +160,7 @@ describe('S-BTN-189 the ticket commands', () => {
     } finally {
       for (const k of Object.keys(dated)) delete process.env[k];
     }
-    writeFileSync(join(repo.dir, 'spec', 'BATON_SPEC_HISTORY.md'), '## Changelog\n\n- **2026-11-01 — the ruling on prs.** R-BTN-50: core reads no `prs`.\n');
+    writeFileSync(join(repo.dir, 'spec', 'BATON_SPEC_HISTORY.md'), '## Changelog\n\n- **2026-11-01 — R-BTN-50: the ruling on prs.** Core reads no `prs`.\n');
     git(repo.dir, 'add', '-A');
     git(repo.dir, 'commit', '-qm', 'the ruling');
     git(repo.dir, 'push', '-q', 'origin', 'HEAD:main');
@@ -168,9 +168,9 @@ describe('S-BTN-189 the ticket commands', () => {
     const before = git(repo.bare, 'rev-parse', 'main');
     const refused = repo.tickets('claim', 'B-1');
     expect(refused.status).toBe(2);
-    expect(refused.stderr).toContain('B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket answered for them (filed 2026-10-29, or a later rules re-read note naming the rule):\n  R-BTN-50 — 2026-11-01 — the ruling on prs\n');
+    expect(refused.stderr).toContain('B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket answered for them (filed 2026-10-29, or a later rules re-read note naming the rule):\n  R-BTN-50 — 2026-11-01 — R-BTN-50: the ruling on prs\n');
     expect(git(repo.bare, 'rev-parse', 'main')).toBe(before);
-    const claimed = repo.tickets('claim', 'B-1', '--rules-reread');
+    const claimed = repo.tickets('claim', 'B-1', '--rules-reread', 'R-BTN-50');
     expect(claimed).toMatchObject({ status: 0, stderr: '' });
     expect(parseFrontmatter(repo.at('tickets/B-1.mdx')!)?.status).toBe('in-progress');
     expect(repo.at('tickets/B-1.mdx')).toMatch(/## Status\n\n_\(\d{4}-\d{2}-\d{2}: rules re-read at claim: R-BTN-50 \(amended 2026-11-01\)\)_\n$/);
