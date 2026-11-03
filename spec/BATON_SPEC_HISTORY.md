@@ -2293,22 +2293,45 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   question text, against R-BTN-33); B-110 added two inputs read from git, commit trailers, with no
   word on who may write them (the security model's reach 3); long-lived branches collided on
   numbers (B-110 and B-107 both took migration 0028; B-129 and B-145 both took S-BTN-197); and
-  restated rules drifted. Five guards follow. R-BTN-74: `ticket claim` refuses a ticket whose
-  body cites a rule that a dated entry here, dated after the ticket file's last commit, names,
-  until `--rules-reread`, which leaves a dated Status line; `ticket check` reports such tickets
-  without failing; the skeleton gains `### Trust` and `### Invariants`, and `check.sections_since`
-  (this repository: 2026-11-03) makes a ticket filed from that day without them a finding;
-  `ticket reserve` allocates migration numbers and scenario ids from `tickets/reserved.json`,
-  seeded with the numbers open PRs hold (migration 0028 B-107, 0030 B-106, 0031 B-110; scenario
-  199 B-129) above a baseline of main's highest (migration 30, scenario 198), and `check:spec`
-  fails an unreserved number above it or one held twice. R-BTN-127's tree gains the two command
-  forms; R-BTN-31's new scenario and §13's migrations take reserved numbers. The babysit skill
-  brings in main when main changes `spec/`, `src/migrations/` or `tickets/reserved.json` and at
-  least daily, merges main before reviewing a PR more than a day behind, and has a spec PR
-  rewrite or strike, in place, each live ticket clause an amendment contradicts. S-BTN-189 and
-  S-BTN-172 cover the commands and the check. Rejected: failing the check on stale tickets (most of
-  this repository's live tickets cite a rule amended since they last changed, and every pull
-  request would turn red at each ruling); requiring the new sections of tickets already filed.
+  restated rules drifted. Four guards follow. R-BTN-74: `ticket claim` refuses a ticket whose
+  body cites a rule that a dated entry here amended after the ticket answered for it, until
+  `--rules-reread`, which leaves a dated Status line; `ticket check` reports such tickets
+  without failing. R-BTN-74: the skeleton gains `### Trust` and `### Invariants`, and
+  `check.sections_since` (this repository: 2026-11-03) makes a ticket filed from that day without
+  them a finding. The babysit skill brings in main when main changes `spec/` or `src/migrations/`
+  and at least daily, and merges main before reviewing a PR more than a day behind. And a spec PR
+  rewrites or strikes, in place, each live ticket clause an amendment contradicts. R-BTN-127's tree
+  gains the claim's flag; R-BTN-31's new scenario and §13's migrations take the next free number
+  at merge. S-BTN-189 and S-BTN-172 cover the commands and the check. Rejected: failing the check
+  on stale tickets (most of this repository's live tickets cite a rule amended since they were
+  filed, and every pull request would turn red at each ruling); requiring the new sections of
+  tickets already filed.
+
+  Review round one (two reviewers, fifteen findings merged) changed the guards. The first draft
+  had a fifth: `ticket reserve` held migration numbers and scenario ids in `tickets/reserved.json`,
+  and `check:spec` failed a number above a baseline the ledger did not hold. The reviewers found
+  that the ledger never tied a number to its holder, that a branch could hand-edit its own copy,
+  and that entries at or below the baseline and racing reservations went unchecked. The owner:
+  "Wouldn't it be simpler to solve this if Baton also handed out ticket IDs?" — and B-176 files
+  that: Baton hands out every identifier written to git from one sequence per repository and kind.
+  The ledger, `reserve` and the check are removed, and until B-176 lands a migration or scenario
+  number is the next free one at merge, the branch merging main first. A workflow change to give
+  CI the whole history was proposed and declined: "These divergent systems must be resolved
+  anyway." So the guards read git as a shallow clone gives it: `claim` runs `git fetch
+  --unshallow` when a clone's boundary would date the ticket, and refuses naming the fix if it
+  cannot; `check` skips the stale report with one line saying so, and lists as undetermined the
+  tickets it cannot date for the sections check, never a finding. The stale reading had reset on
+  any edit that was not a merge or a `tickets: …` commit, so the spec PR edits the skill asks for
+  cleared it — B-129's own case; now a ticket answers for a rule only by the day it was filed (its
+  `_filed` line, else its file's first commit, by author day) and by a later `rules re-read` note
+  naming that rule, which a spec PR adds for the ids it handled. An entry amends only the ids its
+  bold title names, not every id its text mentions, and `--rules-reread` takes those ids and
+  refuses any other set, so it cannot be a reflex. The sections check had judged only tickets
+  with a `_filed` line, which no hand-filed ticket has, and passed a heading left empty or holding
+  the skeleton's placeholder; it now dates a ticket by its first commit and counts an empty or
+  placeholder section as missing, and the skeleton's placeholders name no repository's ids or
+  paths. R-BTN-51 names the `check` keys and cites R-BTN-74 for them; the same-day boundary (an
+  entry the day of the ticket's answer is not after it) is stated.
 
 ## Retired requirements
 
