@@ -7456,7 +7456,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose the course file to travel with every sync over a hash with the body only on change (2026-10-16; R-BTN-69).
 - Chose owner state exported and imported, not mirrored to git, where agents could change it (2026-10-15; R-BTN-88).
 - Chose one Baton per team at a stated, load-tested envelope over sharding (2026-10-15; R-BTN-87).
-- Chose to list B-129's `position-disagrees` only among the dashboard's discrepancies over listing it under Needs you as the ticket asked: the 2026-11-01 ruling keeps position discrepancies off Needs you (2026-11-03, the owner, "Keep your Decision"; R-BTN-85, R-BTN-39).
+- Chose to list B-129's `position-disagrees` only among the dashboard's discrepancies over listing it under Needs you as the ticket asked: the 2026-11-01 ruling keeps position discrepancies off Needs you (2026-11-03, the owner, "Keep your Decision"; R-BTN-85, R-BTN-39). Chose to let that discrepancy fire on every posted `available` past the start, a release that kept its PRs included, over telling the two apart by a field the ticket source posts for core or by core reading `prs` (R-BTN-50, R-BTN-33): the extra entries are a dashboard list that adopts nothing, and they end when R3-1266 moves the claim onto Baton (2026-11-03, the owner, "Accept the extra entries"; R-BTN-85).
 
 **Conditions, calls, deadlines and cancellation**
 
