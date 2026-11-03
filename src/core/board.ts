@@ -6,7 +6,7 @@ import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { parseTranscriptRepo } from './links';
 import { BatonError } from './http';
 import { checkRegistry, COURSE_ID, type RegistryEntry } from './courses';
-import { ASKS, COURSE_ID as LEG_ID, DECISION_ID, DECISIONS_MAX, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE } from './validate';
+import { ASKS, COURSE_ID as LEG_ID, DECISION_GRANT_MAX, DECISION_ID, DECISION_OPTION, DECISION_OPTIONS_MAX, DECISION_QUESTION, DECISIONS_MAX, isHttpsPointer, LOCAL_ID, NEEDS_MAX, SESSION_NAME, TAG, HOLDING_TYPE, HOLDING_VALUE } from './validate';
 import type { Step } from './graph';
 
 /** One factory-state item, as the sync posts it (`docs/scripts/factory-state.mjs`). Only the
@@ -80,6 +80,11 @@ export interface PostedDecision {
   leg?: string | null;
   asks: string;
   url?: string | null;
+  /** B-110: the question, one line of display text (rendered as text, §10.4). */
+  question?: string | null;
+  /** B-110: what the owner may answer (`baton owner resolve`), and the runs each answer grants
+   *  a leg of the ticket beyond its `max_runs` (§6.8) — the answer carries the grant. */
+  options?: { id: string; grants?: { leg: string; runs: number } }[];
 }
 
 export interface BoardPayload {
@@ -319,6 +324,22 @@ function checkNormative(p: BoardPayload) {
           if (typeof d.asks !== 'string' || !ASKS.test(d.asks)) fail(`${at}.decisions[${j}].asks`, `must match ${ASKS}`);
           if (d.leg != null && (typeof d.leg !== 'string' || !LEG_ID.test(d.leg))) fail(`${at}.decisions[${j}].leg`, 'must be a leg id');
           if (d.url != null && typeof d.url !== 'string') fail(`${at}.decisions[${j}].url`, 'must be a string');
+          if (d.question != null && (typeof d.question !== 'string' || !DECISION_QUESTION.test(d.question))) fail(`${at}.decisions[${j}].question`, 'must be one line of at most 200 characters');
+          if (d.options !== undefined) {
+            if (!isObjArr(d.options, DECISION_OPTIONS_MAX)) fail(`${at}.decisions[${j}].options`, `must be a list of at most ${DECISION_OPTIONS_MAX}`);
+            const seen = new Set<string>();
+            for (const [k, o] of (d.options as unknown[]).entries()) {
+              const oat = `${at}.decisions[${j}].options[${k}]`;
+              if (!isObj(o) || typeof o.id !== 'string' || !DECISION_OPTION.test(o.id)) fail(`${oat}.id`, `must match ${DECISION_OPTION}`);
+              const oid = (o as Record<string, unknown>).id as string;
+              if (seen.has(oid)) fail(`${oat}.id`, `${oid} appears twice`);
+              seen.add(oid);
+              const g = (o as Record<string, unknown>).grants;
+              if (g !== undefined && (!isObj(g) || typeof g.leg !== 'string' || !LEG_ID.test(g.leg) || !Number.isInteger(g.runs) || (g.runs as number) < 1 || (g.runs as number) > DECISION_GRANT_MAX)) {
+                fail(`${oat}.grants`, `must be {leg, runs: 1–${DECISION_GRANT_MAX}}`);
+              }
+            }
+          }
           if (ids.has(d.id)) fail(`${at}.decisions[${j}].id`, `${d.id} appears twice`);
           ids.add(d.id);
         }
@@ -422,7 +443,12 @@ export function stationOf(st: PostedStation): PostedStation {
     next_source: st.next_source,
     handoff_url: st.handoff_url ?? null,
     next: st.next.map((n) => ({ leg: n.leg, state: n.state, waiting_on: n.waiting_on ?? null, needs: [...new Set(n.needs ?? [])] })),
-    decisions: (st.decisions ?? []).map((d) => ({ id: d.id, leg: d.leg ?? null, asks: d.asks, url: d.url ?? null })),
+    decisions: (st.decisions ?? []).map((d) => ({
+      id: d.id, leg: d.leg ?? null, asks: d.asks, url: d.url ?? null,
+      // B-110: the question and the options, when posted — the owner's answer is one of these.
+      ...(d.question != null ? { question: d.question } : {}),
+      ...(d.options?.length ? { options: d.options.map((o) => ({ id: o.id, ...(o.grants ? { grants: { leg: o.grants.leg, runs: o.grants.runs } } : {}) })) } : {}),
+    })),
     bars: Object.fromEntries(Object.entries(st.bars).map(([leg, tags]) => [leg, [...new Set(tags)].sort()])),
   };
 }

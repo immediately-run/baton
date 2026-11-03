@@ -180,18 +180,11 @@ describe('G-BTN-31 through the server', () => {
     expect((await workerCall('/v1/runner/next', { secret })).status).toBe(200);
   });
 
-  it('an owner grants one more run of a leg — the override that carries a round answer (B-110, §6.8)', async () => {
-    // The grant is checked at the advance that starts the leg, beside its max_runs; the count
-    // itself stays the traversal record's, so each grant buys exactly one round and the owner
-    // may grant again. A malformed grant is refused like a malformed hold.
-    expect((await owner('/v1/ui/overrides/docs:R3-9002', { runs: { leg: 'no leg', add: 1 } })).status).toBe(400);
-    expect((await owner('/v1/ui/overrides/docs:R3-9002', { runs: { leg: 'review', add: 0 } })).status).toBe(400);
-    expect((await owner('/v1/ui/overrides/docs:R3-9002', { runs: { leg: 'review', add: 'one' } })).status).toBe(400);
+  it('no override grants runs: the answer carries the grant (B-110 round 1, finding 6)', async () => {
+    // The owner, 2026-11-03, "The answer carries the grant": a run beyond a leg's max_runs is
+    // granted only by the owner's authenticated answer to a posted decision (S-BTN-47), never by
+    // a separate override, so the override route takes no `runs`.
+    expect((await owner('/v1/ui/overrides/docs:R3-9002', { runs: { leg: 'review', add: 1 } })).status).toBe(400);
     expect(await rows(`SELECT runs_json FROM ticket_overrides WHERE ticket_id = 'docs:R3-9002'`)).toEqual([]);
-    expect((await owner('/v1/ui/overrides/docs:R3-9002', { runs: { leg: 'review', add: 1 } })).status).toBe(200);
-    expect(await rows(`SELECT runs_json FROM ticket_overrides WHERE ticket_id = 'docs:R3-9002'`)).toEqual([{ runs_json: '{"review":1}' }]);
-    // A second grant adds: two bought rounds stand.
-    expect((await owner('/v1/ui/overrides/docs:R3-9002', { runs: { leg: 'review', add: 1 } })).status).toBe(200);
-    expect(await rows(`SELECT runs_json FROM ticket_overrides WHERE ticket_id = 'docs:R3-9002'`)).toEqual([{ runs_json: '{"review":2}' }]);
   });
 });

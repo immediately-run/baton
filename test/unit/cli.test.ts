@@ -116,7 +116,7 @@ describe('plan: one request per command', () => {
     expect(plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries', 'retry'], key))
       .toEqual({ method: 'POST', path: '/v1/owner/docs/tickets/docs%3AR3-1/resolve', body: { decision: 'baton:retries', answer: 'retry' } });
     expect(plan('owner', ['resolve', 'docs', 'docs:R3-1', 'baton:stalled', 'park'], key).path).toBe('/v1/owner/docs/tickets/docs%3AR3-1/resolve');
-    expect(() => plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries'], key)).toThrow('the answer (retry or park) is required');
+    expect(() => plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries'], key)).toThrow("the answer (retry or park, or one of the posted decision's options) is required");
     expect(() => plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries', 'retry', 'extra'], key)).toThrow('no further argument');
     expect(plan('ticket', ['history', 'docs:R3-1'], key)).toEqual({ method: 'GET', path: '/v1/repositories/docs/tickets/R3-1/history' });
     expect(plan('ticket', ['history', 'docs:R3-1', '--before', '40', '--limit', '20'], key).path).toBe('/v1/repositories/docs/tickets/R3-1/history?before=40&limit=20');

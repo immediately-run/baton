@@ -172,6 +172,9 @@ export function branchMatches(pattern: string, branch: string, local: string, re
   return j === p.length;
 }
 
+/** B-110: the most rows of each kind `syncRecord` hands the sync. */
+const SYNC_RECORD_MAX = 2000;
+
 export class Claims {
   constructor(private readonly c: Ctx) {}
 
@@ -1407,29 +1410,54 @@ export class Claims {
     }
     if (o.hold === true) this.hold(item, 'owner', actor);
     if (o.hold === false) this.liftHold(item, actor);
-    if (o.runs !== undefined) {
-      // B-110 (§6.8): one more run of a named leg — the override that carries a `round`
-      // adjudication answer, the fourth review round the owner granted. Added to the leg's
-      // `max_runs` for this ticket alone, at the advance that starts it; the traversal record
-      // still counts the runs (R-BTN-63), so each grant buys exactly what it says.
-      const granted = this.grantedRuns(item, o.runs.leg) + o.runs.add;
-      this.upsertOverride(item, actor, {});
-      this.exec('UPDATE ticket_overrides SET runs_json = ? WHERE ticket_id = ?', JSON.stringify({ [o.runs.leg]: granted }), item);
-      this.event('override', actor, { runs: { [o.runs.leg]: granted } }, item);
-    }
     return { ok: true };
+  }
+
+  /** B-110: what the sync reads of Baton's own record with its observation number, for the
+   *  repository's live tickets (local ids): the owner's answers to the sync's posted decisions,
+   *  and the legs claims finished with an evidence pointer, each with its claim's nonce — what a
+   *  station function checks a marker in git against (a marker counts only as the evidence a
+   *  claim's own advance recorded). Newest first, bounded. */
+  syncRecord(repo: string): { answers: { ticket: string; decision: string; answer: string; answered_at: number }[]; legs: { ticket: string; leg: string; claim_nonce: string; evidence: string }[] } {
+    const local = (id: string) => id.slice(id.indexOf(':') + 1);
+    const live = `t.repository_id = ? AND NOT EXISTS (SELECT 1 FROM closed_tickets x WHERE x.ticket_id = t.id)`;
+    const answers = this.rows<{ ticket_id: string; decision_id: string; answer: string; answered_at: number }>(
+      `SELECT a.ticket_id, a.decision_id, a.answer, a.answered_at FROM decision_answers a JOIN tickets t ON t.id = a.ticket_id
+       WHERE ${live} ORDER BY a.answered_at DESC LIMIT ${SYNC_RECORD_MAX}`, repo);
+    const legs = this.rows<{ ticket_id: string; leg: string; nonce: string; evidence: string }>(
+      `SELECT c.ticket_id, l.leg, c.nonce, l.evidence FROM claim_legs l JOIN claims c ON c.id = l.claim_id JOIN tickets t ON t.id = c.ticket_id
+       WHERE ${live} AND l.evidence IS NOT NULL AND l.finished_at IS NOT NULL ORDER BY l.finished_at DESC LIMIT ${SYNC_RECORD_MAX}`, repo);
+    return {
+      answers: answers.map((a) => ({ ticket: local(a.ticket_id), decision: a.decision_id, answer: a.answer, answered_at: a.answered_at })),
+      legs: legs.map((l) => ({ ticket: local(l.ticket_id), leg: l.leg, claim_nonce: l.nonce, evidence: l.evidence })),
+    };
+  }
+
+  /** B-110: the runs an owner's answers have granted each leg of this ticket beyond its
+   *  `max_runs` (§6.8), one key per leg. */
+  private grants(item: string): Record<string, number> {
+    const row = this.rows<{ runs_json: string | null }>('SELECT runs_json FROM ticket_overrides WHERE ticket_id = ?', item)[0];
+    if (row?.runs_json == null) return {};
+    try {
+      const v = JSON.parse(row.runs_json) as Record<string, unknown>;
+      return Object.fromEntries(Object.entries(v).filter((e): e is [string, number] => typeof e[1] === 'number' && Number.isInteger(e[1]) && e[1] > 0));
+    } catch {
+      return {};
+    }
   }
 
   /** B-110: the runs an owner has granted a leg of this ticket beyond its `max_runs` (§6.8). */
   private grantedRuns(item: string, leg: string): number {
-    const row = this.rows<{ runs_json: string | null }>('SELECT runs_json FROM ticket_overrides WHERE ticket_id = ?', item)[0];
-    if (row?.runs_json == null) return 0;
-    try {
-      const v = (JSON.parse(row.runs_json) as Record<string, unknown>)[leg];
-      return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : 0;
-    } catch {
-      return 0;
-    }
+    return this.grants(item)[leg] ?? 0;
+  }
+
+  /** B-110 (§6.8): an answer's grant — `runs` more of `leg` for this ticket, beside every other
+   *  leg's grant (each leg its own key: granting one never resets another). */
+  private grantRuns(item: string, actor: string, leg: string, runs: number): void {
+    const all = { ...this.grants(item), [leg]: this.grantedRuns(item, leg) + runs };
+    this.upsertOverride(item, actor, {});
+    this.exec('UPDATE ticket_overrides SET runs_json = ? WHERE ticket_id = ?', JSON.stringify(all), item);
+    this.event('override', actor, { runs: { [leg]: all[leg] } }, item);
   }
 
   /** §8, §6.10: a hold lifted, its reason and backoff cleared and the attempt count reset; any
@@ -1449,8 +1477,23 @@ export class Claims {
    */
   resolveDecision(owner: string, ticket: string, body: unknown) {
     const a = checkDecisionAnswer(body);
-    if (!this.c.blocks?.hasDecision(ticket, a.decision)) throw new BatonError('not-found', `${ticket} has no open ${a.decision} decision`);
     const actor = `owner:${owner}`;
+    if ('posted' in a) {
+      // B-110: the owner's answer to a decision the ticket's sync posted — create-pr's third
+      // failed review round — through this authenticated route alone, never a commit any pusher
+      // could write (the owner, 2026-11-03, "Through Baton, not git"). The answer is one of the
+      // decision's options; an option's grant is applied here, in the answer's own transaction
+      // (the owner, 2026-11-03, "The answer carries the grant"): no separate grant step.
+      const d = this.c.blocks?.postedDecision(ticket, a.decision);
+      if (!d) throw new BatonError('not-found', `${ticket} has no open ${a.decision} decision`);
+      const option = d.options.find((o) => o.id === a.answer);
+      if (!option) throw new BatonError('invalid-params', `${a.decision} offers ${d.options.length ? d.options.map((o) => o.id).join(', ') : 'no options'}, not ${a.answer}`);
+      this.c.blocks!.answerPosted(ticket, a.decision, a.answer, owner, this.c.now());
+      if (option.grants) this.grantRuns(ticket, actor, option.grants.leg, option.grants.runs);
+      this.event('admin', actor, { act: 'resolve', decision: a.decision, answer: a.answer, ...(option.grants ? { grants: option.grants } : {}) }, ticket);
+      return { ok: true };
+    }
+    if (!this.c.blocks?.hasDecision(ticket, a.decision)) throw new BatonError('not-found', `${ticket} has no open ${a.decision} decision`);
     if (a.decision === 'baton:retries') {
       if (a.answer === 'retry') this.liftHold(ticket, actor);
       else this.c.blocks.answer(ticket, a.decision);

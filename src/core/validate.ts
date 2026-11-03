@@ -698,13 +698,24 @@ export function checkResolve(body: unknown): { action: 'confirm' | 'release' } {
 
 /** `POST /v1/owner/{repository}/tickets/{ticket}/resolve` (R-BTN-78, §11): `{decision, answer}`.
  *  `baton:contract` is raised from B-39 on, and the `route` answer arrives with the owner's
- *  re-route (B-38); until then each is refused by name rather than accepted and ignored. */
-export function checkDecisionAnswer(body: unknown): { decision: 'baton:retries' | 'baton:stalled'; answer: 'retry' | 'park' } {
+ *  re-route (B-38); until then each is refused by name rather than accepted and ignored. Any
+ *  other decision id is one a sync posted on the ticket (B-110): its answer is one of the
+ *  options the decision carries, checked against the stored decision by the route. */
+export function checkDecisionAnswer(body: unknown):
+  | { decision: 'baton:retries' | 'baton:stalled'; answer: 'retry' | 'park' }
+  | { decision: string; answer: string; posted: true } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
   for (const k of Object.keys(b)) if (!['decision', 'answer', 'leg'].includes(k)) bad(`body.${k}`, 'unknown field');
   if (b.decision === 'baton:contract') bad('decision', 'baton:contract is raised with leg contracts (B-39), not yet');
-  if (b.decision !== 'baton:retries' && b.decision !== 'baton:stalled') bad('decision', "must be 'baton:retries' or 'baton:stalled'");
+  if (typeof b.decision === 'string' && !b.decision.startsWith('baton:') && DECISION_ID.test(b.decision)) {
+    // B-110: a decision the ticket's sync posted — the owner's answer to the course's own
+    // question (create-pr's third failed review round), one of the decision's options.
+    if (typeof b.answer !== 'string' || !DECISION_OPTION.test(b.answer)) bad('answer', `must be one of the decision's options (${DECISION_OPTION})`);
+    if (b.leg !== undefined) bad('leg', 'only with the route answer');
+    return { decision: b.decision, answer: b.answer as string, posted: true };
+  }
+  if (b.decision !== 'baton:retries' && b.decision !== 'baton:stalled') bad('decision', "must be 'baton:retries', 'baton:stalled' or a decision the ticket's sync posted");
   if (b.answer === 'route') bad('answer', "route needs the owner's re-route (B-38), not yet: answer retry or park");
   if (b.answer !== 'retry' && b.answer !== 'park') bad('answer', "must be 'retry' or 'park'");
   if (b.leg !== undefined) bad('leg', 'only with the route answer');
@@ -712,19 +723,12 @@ export function checkDecisionAnswer(body: unknown): { decision: 'baton:retries' 
 }
 
 /** §8, §11: `{expedite?, hold?}` — booleans, at least one. */
-export function checkOverride(body: unknown): { expedite?: boolean; hold?: boolean; runs?: { leg: string; add: number } } {
+export function checkOverride(body: unknown): { expedite?: boolean; hold?: boolean } {
   if (!isObj(body)) bad('body', 'must be a JSON object');
   const b = body as Record<string, unknown>;
   for (const k of ['expedite', 'hold']) if (b[k] !== undefined && typeof b[k] !== 'boolean') bad(k, 'must be a boolean');
-  if (b.runs !== undefined) {
-    // B-110: an owner-granted run of one leg (§6.8) — the override that carries a `round`
-    // adjudication answer, one more review round. The leg must be a name and the grant a small
-    // count, so one answer buys one round.
-    if (!isObj(b.runs) || typeof (b.runs as Record<string, unknown>).leg !== 'string' || !COURSE_ID.test((b.runs as Record<string, unknown>).leg as string)) bad('runs.leg', 'must be a leg id');
-    if (!isObj(b.runs) || !Number.isInteger((b.runs as Record<string, unknown>).add) || ((b.runs as Record<string, unknown>).add as number) < 1 || ((b.runs as Record<string, unknown>).add as number) > 10) bad('runs.add', 'must be an integer of 1 to 10 runs');
-  }
-  if (b.expedite === undefined && b.hold === undefined && b.runs === undefined) bad('body', 'names expedite, hold or runs');
-  return { expedite: b.expedite as boolean | undefined, hold: b.hold as boolean | undefined, ...(isObj(b.runs) ? { runs: b.runs as { leg: string; add: number } } : {}) };
+  if (b.expedite === undefined && b.hold === undefined) bad('body', 'names expedite or hold');
+  return { expedite: b.expedite as boolean | undefined, hold: b.hold as boolean | undefined };
 }
 
 // ── blocks, external resources and readings (§2g R-BTN-75–78, §2l R-BTN-101; R3-1251) ─────
@@ -746,6 +750,13 @@ export const USES_MAX = 64;
 export const READINGS_MAX = 50;
 export const NEEDS_MAX = 32;
 export const DECISIONS_MAX = 32;
+/** B-110: a posted decision's option id — what the owner answers (`merge`, `round`, …). */
+export const DECISION_OPTION = /^[a-z][a-z0-9-]{0,31}$/;
+/** B-110: a posted decision's options, at most this many, each granting at most this many runs. */
+export const DECISION_OPTIONS_MAX = 8;
+export const DECISION_GRANT_MAX = 10;
+/** B-110: a posted decision's question — one line of display text, rendered as text (§10.4). */
+export const DECISION_QUESTION = /^[^\u0000-\u001f\u007f]{1,200}$/;
 /** R-BTN-76, R-BTN-101: how long a reading may stay in force, in seconds, by who posts it. */
 export const VALID_FOR = { default_s: 3600, state_s: 24 * 3600, measure_s: 31 * 24 * 3600, admin_s: 7 * 24 * 3600 } as const;
 

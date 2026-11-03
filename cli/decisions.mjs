@@ -18,7 +18,11 @@ export const plain = (v) => String(v).replace(/[\u0000-\u001f\u007f-\u009f\u2028
 /** One decision as lines of text: `<ticket> — <title>`, its question, and its link. */
 export function formatDecision(d) {
   const lines = [`${plain(d.ticket)} — ${plain(d.title)}`, `  decision ${plain(d.decision.id)} (asks ${plain(d.decision.asks)})`];
+  if (d.decision.question) lines.push(`  ${plain(d.decision.question)}`);
   if (d.decision.url) lines.push(`  ${plain(d.decision.url)}`);
+  // B-110: a decision a ticket's sync posted names its options — the owner answers one with
+  // `baton owner -i KEY resolve <repository> <ticket> <decision> <option>`.
+  if (Array.isArray(d.decision.options) && d.decision.options.length) lines.push(`  answer: baton owner resolve ${plain(d.repository)} ${plain(d.ticket)} ${plain(d.decision.id)} ${d.decision.options.map(plain).join('|')}`);
   if (d.notice_state !== undefined) lines.push(`  notice: ${d.notice_state == null ? 'none' : plain(d.notice_state)}`);
   return lines.join('\n');
 }
