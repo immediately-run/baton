@@ -4755,10 +4755,8 @@ end on an ended claim is refused `claim-ended`.
   `previous_attempts`, the newest 10, newest first, each with its resume record, legs run and
   hand-off URL, and `previous_attempts_total`;
   a leg receives them only as data in `BATON_RESUME` (R-BTN-144). The ticket history read
-  (R-BTN-81) carries the records pruned as `resume` — every ended claim's branches and PRs,
-  newest first and each once, with the newest's end reason and time — to the repository's
-  readers (a key granted on it, its owners and administrators), so a claim through git
-  continues the change (R-BTN-74). (`ctx.resume`, a condition's chosen restart, is R-BTN-162's
+  (R-BTN-81) serves the records pruned, as its route row's `resume` (§14), to its *reader*, so a
+  claim through git continues the change (R-BTN-74). (`ctx.resume`, a condition's chosen restart, is R-BTN-162's
   and unrelated.)
 - **R-BTN-25 (idempotent side effects).** Every side effect is keyed by the ticket so a later
   attempt finds the earlier one's work: before creating a branch the claimant continues an
