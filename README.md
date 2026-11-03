@@ -104,12 +104,15 @@ checkout, run the CLI as `node cli/baton.mjs`.
   repository's ticket source without posting it, as `baton repo sync` reads it: the board post's
   validation, every `depends_on` target and dependency cycle, and — with
   `check.depends_line` in `.baton/baton.json` — each ticket's `**Depends on:**` line against its
-  `depends_on` (B-111); with `check.sections_since`, a ticket filed on or after that day (its
-  `_filed` line, else its first commit) whose `### Trust` or `### Invariants` is absent, empty or
-  a placeholder (R-BTN-74). One `path: message` line per finding, exit 1 with findings; CI runs it
-  on `tickets/`. It also lists, never as a finding, the live tickets citing a rule amended since
-  they were filed or re-read it (`check.rules`), and says so when a shallow clone skips that list
-  or leaves a ticket's filing day undetermined.
+  `depends_on` (B-111); with `check.sections_since`, a ticket filed on or after that day (the
+  later of its `_filed` line and its first commit) whose `### Trust` or `### Invariants` is absent,
+  empty or a placeholder (R-BTN-74), request tickets and leg-filed children aside; with
+  `check.sections_from_id` (here `B-176`), a ticket at or above that id without a `_filed` line.
+  One `path: message` line per finding, exit 1 with findings; CI runs it on `tickets/`. CI's
+  clone is depth 1, so there it judges the tickets from `B-176` on by their `_filed` lines and
+  only lists, as undetermined, an older ticket without one. It also lists, never as a finding,
+  the live tickets citing a rule amended since they were filed or re-read it (`check.rules`), and
+  says so when a shallow clone skips that list.
 - `node cli/baton.mjs request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B]` —
   start a course whose product is a spec or a ticket — `create-spec`, `build-app` — from one
   sentence (B-98). Files one request ticket (the sentence as title and description, `course: C`,

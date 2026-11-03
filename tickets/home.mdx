@@ -55,7 +55,8 @@ ticket was filed, naming each; re-read them, rewrite what they contradict, and c
 `--rules-reread` and the ids it named. A new migration number or scenario id is the next free
 one at merge: merge main before merging, and renumber if main took it (until B-176 has Baton
 hand them out). A ticket filed from 2026-11-03 carries `### Trust` and `### Invariants`
-(`check.sections_since` in `.baton/baton.json`).
+(`check.sections_since` in `.baton/baton.json`), and every ticket from B-176 on carries the
+`_filed` Status line `new` writes, by which CI's shallow clone judges it (`check.sections_from_id`).
 
 [The project page](projects/baton.mdx) has Baton's rollout steps and how the tickets group.
 

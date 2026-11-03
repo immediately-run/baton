@@ -2284,7 +2284,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   for both roles: the two steps are built where the flow is.
 
 - **2026-11-03 — R-BTN-74, R-BTN-127, R-BTN-31, §13: process guards against review-round
-  thrashing (owner direction).** The owner: "I would like you to implement the process changes
+  thrashing (owner direction).**
+  Rules changed: R-BTN-74, R-BTN-127, R-BTN-31, R-BTN-51, R-BTN-131.
+  The owner: "I would like you to implement the process changes
   that prevent the sort of thrashing we are seeing now." The evidence was PRs #160 and #161, where
   six of the seven owner questions came from tickets, not code: tickets filed 2026-10-29 were
   built as written after later rulings (B-129 kept "listed under Needs you" after the 2026-11-01
@@ -2335,6 +2337,30 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   After the round, `tickets new` refuses an unfilled skeleton after the cutover instead of warning
   (`--trust` and `--invariants` fill it): a placeholder that reached the default branch would
   fail every open PR's `check:tickets` until someone filled it.
+
+  Review round two (one reviewer, six findings) made each guard decidable where CI decides it.
+  An entry here had amended only the ids its bold title names, and 53 of the 66 dated entries
+  name none — the restructure's parts, the owner's rulings, every review round — so the stale
+  report missed most amendments. The convention is now enforced going forward: `check:spec`
+  fails an entry dated after 2026-11-03 whose title names no rule id and that has no `Rules
+  changed: <ids>` line (or `Rules changed: none.`) directly under it, and the stale reading takes
+  the ids of both; past entries are not rewritten, so entries dated on or before 2026-11-03 count
+  only where their titles name ids, and R-BTN-74 says the report covers amendments from
+  2026-11-04 on. CI's clone is depth 1, so the sections check had judged only tickets with a
+  `_filed` line and listed every other one as undetermined; `check.sections_from_id` (here
+  `B-176`) makes every ticket at or above that id carry a `_filed` line — a finding without one —
+  and judges it by that line, so a new hand-filed ticket is decided in a depth-1 clone, while an
+  older ticket without one is dated by its first commit as before. A request ticket and a child a
+  leg files (`parent:`) are not judged — their course's legs write the work's own tickets — and
+  `ticket request` writes the `_filed` line too (R-BTN-131). For the sections check a ticket is
+  dated by the later of its `_filed` line and the first commit git shows, so a line copied from an
+  older ticket cannot carry a new one past the cutover in a full clone. R-BTN-74 gains *What the
+  guards trust*: the `_filed` line, the request tag, `parent:` and the `rules re-read` notes are
+  claims the author writes, verified only by review, and a re-read note naming ids its author did
+  not re-read is the author's false statement, which review catches, not the machine. B-176's
+  `floor` reads the default branch and every open branch's head for every kind, as R-BTN-131's
+  ticket scan does, with the duplicate check at merge as the backstop, and it cites §12.3 and
+  `src/core/validate.ts` for validation, not R-BTN-16.
 
 ## Retired requirements
 

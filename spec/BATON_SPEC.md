@@ -1131,8 +1131,9 @@ live solely in Baton, and both are exportable (R-BTN-88).
                         #   conditions? (bindings,
                         #   R-BTN-161); for the CLI's defaults (R-BTN-74): items, default_course,
                         #   repos, agent_command, agent_wrapper (B-95); check: {depends_line,
-                        #   sections_since, rules} (B-111, R-BTN-74's, which says what each does:
-                        #   the ticket check and commands alone read them; default off);
+                        #   sections_since, sections_from_id, rules} (B-111; R-BTN-74 says what
+                        #   each does and what CI judges with them: the ticket check and commands
+                        #   alone read them; default off);
                         #   ticket_prefix, legacy_ids, prefixes, project, tags, projects
                         #   (B-112, the ticket commands alone read them)
     tickets.mjs         # optional ticket source; absent, the CLI's markdown source (R-BTN-74)
@@ -1229,27 +1230,50 @@ live solely in Baton, and both are exportable (R-BTN-88).
     a `**Used by:**` line is never read — to its `depends_on`, both ways; a ticket with no such line
     is not compared. A ticket is dated by the day it was filed: its `## Status` `_filed
     YYYY-MM-DD` line, else the author day (`%as`) of its file's first commit
-    (`--diff-filter=A`), else — a file not yet committed — today; never by a later edit. With
-    `check: {sections_since: "<YYYY-MM-DD>"}` (default off), a live ticket filed on or after that
-    day whose `### Trust` or `### Invariants` section is absent, empty or still the skeleton's
-    `_(…)_` placeholder is a finding (a `kind: project` page is not a ticket here); `tickets new`
-    writes the `_filed` line into every filing, `--body-file`'s included, and on or after the day
-    refuses, before it pushes, a filing whose either section is absent, empty or a placeholder —
-    the skeleton is filled by `--trust` and `--invariants` — so no unfilled ticket reaches the
-    default branch to fail every open PR's check. It also reports, never as a finding, each live
-    ticket citing a rule id that a dated entry of the spec's history (`check.rules: {history,
-    prefix}`, default `spec/BATON_SPEC_HISTORY.md` and `R-BTN`; no file, no report) names in its
-    bold title (`**YYYY-MM-DD — <ids>: …**`, the history's convention; an id only the entry's
-    body mentions, as evidence or in a review round, is not one it amended), dated after the day
-    the ticket answered for that rule — the day it was filed, or the day of a later `rules
-    re-read` note in its `## Status` naming the rule (the claim's, below, or `_(<date>: rules
-    re-read: <id>, …)_`, which a spec PR that rewrote a clause adds for the ids it handled). The
-    comparison is by day: an entry dated the same day as that answer is not after it. One line per
-    ticket, then their count. In a shallow clone (`git rev-parse
-    --is-shallow-repository`), whose boundary commit shows every older file as added there, the
-    report is skipped with one line saying so, and a ticket the sections check would judge whose
-    first commit is the boundary is listed as undetermined, on one line; neither is a finding. Exit 1 with one `path: message` line per finding, 0 without; an
-    unreadable root or a malformed `baton.json` is an error (exit 2). It reads; it never writes.
+    (`--diff-filter=A`), else — a file not yet committed — today; never by a later edit. The
+    sections check alone dates it by the later of the `_filed` line and that first commit where
+    git shows the commit, so a `_filed` line copied from an older ticket cannot carry a new one
+    back past the cutover in a full clone. With `check: {sections_since: "<YYYY-MM-DD>"}` (default
+    off), a live ticket filed on or after that day whose `### Trust` or `### Invariants` section is
+    absent, empty or still the skeleton's `_(…)_` placeholder is a finding. Not judged: a `kind:
+    project` page, which builds nothing; a request ticket (`tags: [request]`, as `ticket request`
+    writes it, R-BTN-127); and a child a leg files (`parent:`, R-BTN-86, R-BTN-165) — their
+    course's legs write the work's own tickets, and those are judged. With `check:
+    {sections_from_id: "<prefix>-<n>"}` beside it (default off; this repository: `B-176`), a live
+    ticket under that prefix numbered `n` or above without a `_filed` line is a finding too, and is
+    otherwise judged by it, so the check decides it without history, in CI's depth-1 clone
+    included; a ticket below `n`, or under a legacy prefix, without a `_filed` line is dated by its
+    first commit, which a shallow clone (`git rev-parse --is-shallow-repository`, whose boundary
+    commit shows every older file as added there) does not show: it is listed as undetermined, on
+    one line, never a finding. `tickets new` writes the `_filed` line into every filing,
+    `--body-file`'s included, as `ticket request` does, and on or after the day refuses, before it
+    pushes, a filing whose either section is absent, empty or a placeholder — the skeleton is
+    filled by `--trust` and `--invariants` — so no unfilled ticket reaches the default branch to
+    fail every open PR's check. It also reports, never as a finding, each live ticket citing a
+    rule id that a dated entry of the spec's history (`check.rules: {history, prefix}`, default
+    `spec/BATON_SPEC_HISTORY.md` and `R-BTN`; no file, no report) amended — one its bold title
+    names (`**YYYY-MM-DD — <ids>: …**`) or its `Rules changed: <ids>` line names, the line
+    directly under the one the title closes on (an id only the entry's body mentions, as evidence
+    or in a review round, is not one it amended) — dated after the day the ticket answered for
+    that rule: the day it was filed, or the day of a later `rules re-read` note in its `## Status`
+    naming the rule (the claim's, below, or `_(<date>: rules re-read: <id>, …)_`, which a spec PR
+    that rewrote a clause adds for the ids it handled). The comparison is by day: an entry dated
+    the same day as that answer is not after it. `npm run check:spec` fails an entry dated after
+    2026-11-03 that names no rule id in its title and has no `Rules changed:` line (`Rules
+    changed: none.` for one that amends no rule); an entry dated on or before 2026-11-03 counts
+    only where its title names ids, so the report covers the amendments from 2026-11-04 on, and of
+    the earlier ones only those whose titles name their rules. One line per ticket, then their
+    count. In a shallow clone the report is skipped with one line saying so; that is never a
+    finding. Exit 1 with one `path: message` line per finding, 0 without; an unreadable root or a
+    malformed `baton.json` is an error (exit 2). It reads; it never writes.
+  - **What the guards trust.** The `_filed` line, `tags: [request]`, `parent:` and the `rules
+    re-read` notes are claims the ticket's author writes in git, which anyone who can push can
+    write (`docs/security-model.mdx`, reach 3); the check and the claim read them and verify
+    nothing about them beyond their form, and review is what verifies them. A `_filed` line dated
+    falsely, a tag or `parent:` written to escape the sections check, or a re-read note naming ids
+    its author did not re-read is the author's false statement, which review catches, not the
+    machine. The guards prevent the honest mistake — a ticket built as written after a ruling, a
+    filing without its sections — and claim no more.
   - **The ticket commands** (B-112, R-BTN-127): `baton ticket new | claim | set | done`, whose behaviour is
     the git-lock commands docs' `claim.sh` and the repositories' `scripts/ticket.mjs` had, kept
     once in the CLI. Each is one commit pushed straight to the default branch from a throwaway
@@ -2295,7 +2319,7 @@ mean (R-BTN-50).
   | `branch` | R-BTN-96 | R-BTN-96 | branches |
   | `ask`, `deliver`, `announce` | condition handlers (R-BTN-169): `ask` asks through the person leg `answer` | R-BTN-169 | — |
 
-  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder, `archive/` and the open ticket and request branches, as every allocator below), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call — it asks Baton nothing. Where the forge refuses the push because the branch is protected (the CLI's adapter for the forge `--forge` names, else `github` where `origin`'s host is `github.com`, recognises that refusal by the forge's own message: GitHub's `GH006` protected-branch refusal, or a `GH013` ruleset refusal naming a pull-request or update rule and never secret push protection; GitLab's `not allowed to push code to protected branches`; Gitea's `Not allowed to push to protected branch`), it pushes the same commit to `baton-request/<ID>`, or takes the next free id when that branch exists — a branch no `branch_pattern` may match (R-BTN-190), so the request's PR is never one of the new ticket's PRs and no leg continues it (R-BTN-25) — opens a PR from it with the caller's forge credential and prints its URL. With no forge credential it prints the pushed branch and exits non-zero. On a `git` forge, which has no adapter, and for any other refusal — `refs.other` refusing the side branch to a runner under `protected` among them — it reports git's own words (R-BTN-74), opens nothing and exits non-zero. Otherwise the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
+  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder, `archive/` and the open ticket and request branches, as every allocator below), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and a `## Status` with the `_filed` line (R-BTN-74), and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call — it asks Baton nothing. Where the forge refuses the push because the branch is protected (the CLI's adapter for the forge `--forge` names, else `github` where `origin`'s host is `github.com`, recognises that refusal by the forge's own message: GitHub's `GH006` protected-branch refusal, or a `GH013` ruleset refusal naming a pull-request or update rule and never secret push protection; GitLab's `not allowed to push code to protected branches`; Gitea's `Not allowed to push to protected branch`), it pushes the same commit to `baton-request/<ID>`, or takes the next free id when that branch exists — a branch no `branch_pattern` may match (R-BTN-190), so the request's PR is never one of the new ticket's PRs and no leg continues it (R-BTN-25) — opens a PR from it with the caller's forge credential and prints its URL. With no forge credential it prints the pushed branch and exits non-zero. On a `git` forge, which has no adapter, and for any other refusal — `refs.other` refusing the side branch to a runner under `protected` among them — it reports git's own words (R-BTN-74), opens nothing and exits non-zero. Otherwise the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
 
   - **A wait for a person's answer is a person's leg** (R-BTN-116), answered by a
     `std:decision@1`: `decision`'s `answer` and `build-app`'s `decide`. Where the policy admits `sync` for `std:decision@1`, the ticket's `answer:`
@@ -6909,7 +6933,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-42 webhooks | a review delivery, its repeat, a forgery, a 10-delivery burst, Baton's own events, extra fields; a body of 26,214,401 bytes on each notification route | one dispatch, then one trailing after 30 s; repeat, forgery and own events dispatch nothing; only R-BTN-73's fields read; `too-large` before any digest, outside the per-IP rule |
 | S-BTN-171 a dependency cycle is refused | a board post whose live tickets depend on each other in a loop; two of them; a self-dependency; a diamond; a post closing the very ticket it depends on | `invalid-params`, naming `B-1 → B-2 → B-1` once, and nothing of the post stored: no head, no ticket; `B-1 → B-1` alike; the diamond and the closed edge accepted |
 | S-BTN-189 the ticket commands | a bare origin; `baton ticket new` with `--depends-on`, `--tags` and `--project`, a legacy id pattern, a `--body-file` whose line disagrees with the flag, a filing that closes a cycle, a prefix the pattern cannot allocate; `claim` of a held, dependent, in-review and archived ticket; `claim` of a ticket citing a rule a history entry dated after the ticket's first commit names, without and then with `--rules-reread`; `set` with `--pr` twice; `done`; a peer's push between a command's fetch and its push; `baton repo init`, then an edited `HOW-TICKETS-WORK.md` | one commit on the origin's default branch, the ticket alone, the caller's branch and tree untouched; the next free id under the configured prefix, the skeleton with the flag's `**Depends on:**` line and the dependency's reverse mention; each refusal before the push, nothing landed; the stale claim refused naming the id, the entry's date and its title, then landed with its dated `rules re-read at claim` Status line; the retry takes the id after the peer's; a status, a PR once, the file archived; the page written, its edited copy one finding and exit 1, `init --force` writing it again |
-| S-BTN-172 the ticket check | `baton ticket check` on a clean repository, on one whose tickets loop, on one with no `.baton/baton.json`, and on this repository's own `tickets/`; on one whose live ticket cites a rule a later history entry names; on tickets filed before and on `check.sections_since`, one without `### Trust` | exit 0 with the count, `✓ no findings`; exit 1 with one `path: message` line (the loop at its first ticket's file) and the count; the CLI's error, exit 2; this repository passes, which CI's `npm run check:tickets` runs; the stale ticket's line and the stale count, exit 0; the earlier ticket passing and the later one a finding, exit 1 |
+| S-BTN-172 the ticket check | `baton ticket check` on a clean repository, on one whose tickets loop, on one with no `.baton/baton.json`, and on this repository's own `tickets/`; on one whose live ticket cites a rule a later history entry names; on tickets filed before and on `check.sections_since`, one without `### Trust`; a depth-1 clone with `check.sections_from_id`, a hand-filed ticket at that id without a `_filed` line | exit 0 with the count, `✓ no findings`; exit 1 with one `path: message` line (the loop at its first ticket's file) and the count; the CLI's error, exit 2; this repository passes, which CI's `npm run check:tickets` runs; the stale ticket's line and the stale count, exit 0; the earlier ticket passing and the later one a finding, exit 1; the hand-filed ticket's missing `_filed` line a finding, exit 1 |
 | S-BTN-54 a Baton without GitHub | `plain` with a `post-receive` running `baton repo sync --defaults-only` on the `branch` course; `Baton-Verdict:` trailers, one without `Baton-Claim`; `--if-wanted` cron | the ticket moves to `merged` on push syncs alone; the unclaimed verdict counts; `wanted` holds until a later-numbered post; no forge credential or link |
 | S-BTN-55 the sync key | a sync key posts; it is registered for a second repository; machine (sync off), mirror and revoked keys post; a replay | accepted; `conflict`; `forbidden`; `unauthenticated` |
 | S-BTN-56 other forges, edges of a want | `lab` and `tea` notifications, good and bad; `#mirror` vs `#sync` tokens; a dispatch answering 500; near-miss URLs; `--defaults-only` with a `sync.mjs`; a push by another pusher with the mirror's author email | bad refused in the Worker, good record wants, the spoofed push's included; `#mirror` `forbidden`; one dispatch retry; only `web_base` URLs kept; the ticket fails |
