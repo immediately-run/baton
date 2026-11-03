@@ -39,12 +39,20 @@ const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** One dated entry of the history's changelog: `- **YYYY-MM-DD — title.** …` (a range,
  *  `YYYY-MM-DD to YYYY-MM-DD — …`, is dated by its last day), to the next entry or heading. The
- *  rule ids the title names are the ones the entry amended. */
+ *  rule ids it amended are those its bold title names and those of its `Rules changed: <ids>`
+ *  line, the line directly under the one the title closes on (`entryIds`). */
 export interface HistoryEntry {
   date: string;
   title: string;
   text: string;
+  /** The `Rules changed:` line's text after the colon, or null when the entry has none. */
+  changed: string | null;
 }
+
+/** The line that names the rule ids an entry amended when its title names none (R-BTN-74; the
+ *  same grammar as scripts/check-spec.mjs's `rulesChangedLine`, which fails a new entry without
+ *  either): `Rules changed: R-BTN-74, R-BTN-51.`, or `Rules changed: none.` */
+const RULES_CHANGED = /^\s*Rules changed:\s*(.*?)\s*$/;
 
 const ENTRY = /^- \*\*(\d{4}-\d{2}-\d{2})(?: to (\d{4}-\d{2}-\d{2}))? — /;
 
@@ -59,7 +67,11 @@ export function historyEntries(history: string): HistoryEntry[] {
     const m = ENTRY.exec(text)!;
     const rest = text.slice(m[0].length).replace(/\s+/g, ' ');
     const title = (/^(.*?)\*\*/.exec(rest)?.[1] ?? rest).trim().replace(/\.$/, '');
-    out.push({ date: m[2] ?? m[1], title, text });
+    // The line under the one the title's bold closes on.
+    const close = text.indexOf('**', m[0].length);
+    const at = close < 0 ? -1 : text.slice(0, close).split('\n').length;
+    const changed = at < 0 ? null : (RULES_CHANGED.exec(cur[at] ?? '')?.[1] ?? null);
+    out.push({ date: m[2] ?? m[1], title, text, changed });
     cur = null;
   };
   for (const line of history.split(/\r?\n/)) {
@@ -79,6 +91,12 @@ export function ruleIds(text: string, prefix = RULES_DEFAULTS.prefix): string[] 
   const re = new RegExp(`(?<![A-Za-z0-9_-])${esc(prefix)}-(\\d+)(?!\\d)`, 'g');
   return [...new Set([...text.matchAll(re)].map((m) => `${prefix}-${m[1]}`))];
 }
+
+/** The rule ids a history entry amended: those its bold title names, then those of its `Rules
+ *  changed:` line (R-BTN-74). An id only its body mentions — evidence, a review round, a rejected
+ *  alternative — is not one it amended. */
+export const entryIds = (e: HistoryEntry, prefix = RULES_DEFAULTS.prefix): string[] =>
+  [...new Set([...ruleIds(e.title, prefix), ...ruleIds(e.changed ?? '', prefix)])];
 
 /** A ticket's body: its text with the frontmatter cut. */
 const bodyOf = (text: string): string => text.replace(/^---\r?\n[\s\S]*?\r?\n---(?=\r?\n|$)/, '');
@@ -102,7 +120,7 @@ export function rereads(text: string, prefix = RULES_DEFAULTS.prefix): Map<strin
 }
 
 /** The rules a ticket's body cites that a history entry dated after the day the ticket answered
- *  for them names in its title: one row per id and entry, by id then date. A rule is answered for on the day
+ *  for them names in its title or its `Rules changed:` line: one row per id and entry, by id then date. A rule is answered for on the day
  *  the ticket was `filed` (`YYYY-MM-DD`), or on the day of a later `rules re-read` note naming it.
  *  The comparison is by day: an entry of the same day as that answer is not after it. */
 export function staleRules(ticketText: string, filed: string, entries: readonly HistoryEntry[], prefix = RULES_DEFAULTS.prefix): StaleRule[] {
@@ -110,10 +128,9 @@ export function staleRules(ticketText: string, filed: string, entries: readonly 
   const cited = ruleIds(body, prefix);
   if (!cited.length) return [];
   const reread = rereads(body, prefix);
-  // An entry amends the ids its bold title names (`**YYYY-MM-DD — R-BTN-74, R-BTN-31: …**`), the
-  // history's convention; an id its body mentions — evidence, a review round, a rejected
-  // alternative — is not one it amended.
-  const named = entries.map((e) => ({ e, ids: new Set(ruleIds(e.title, prefix)) }));
+  // An entry amends the ids its bold title names (`**YYYY-MM-DD — R-BTN-74, R-BTN-31: …**`) and
+  // those of its `Rules changed:` line; an id its body mentions is not one it amended.
+  const named = entries.map((e) => ({ e, ids: new Set(entryIds(e, prefix)) }));
   const out: StaleRule[] = [];
   for (const id of cited) {
     const since = [filed, reread.get(id) ?? ''].sort().at(-1)!;

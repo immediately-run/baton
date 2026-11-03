@@ -16,7 +16,9 @@ import { checkTickets } from '../../src/defaults/tickets-check';
 import { accepts, readTicketSettings, requiresFrom } from '../../src/defaults/tickets-config';
 import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
 import { moveTicket, reverseMention, skeletonBody } from '../../src/defaults/tickets';
-import { appendStatus, filingDate, firstCommit, firstCommits, historyEntries, missingSections, rereadNote, rereads, ruleIds, rulesConfig, sectionGaps, staleRules } from '../../src/defaults/tickets-rules';
+// @ts-expect-error a plain .mjs script, no types
+import { unnamedEntries } from '../../scripts/check-spec.mjs';
+import { appendStatus, entryIds, filingDate, firstCommit, firstCommits, historyEntries, missingSections, rereadNote, rereads, ruleIds, rulesConfig, sectionGaps, staleRules } from '../../src/defaults/tickets-rules';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
 
 // Every case spawns the CLI against real git repositories, several times; under the full suite's
@@ -541,6 +543,62 @@ describe('the stale-rule guard: its reading (2026-11-03)', () => {
     expect(stale.map((s) => `${s.id} ${s.date}`)).toEqual(['R-BTN-33 2026-11-02', 'R-BTN-50 2026-11-01', 'R-BTN-150 2026-11-02']);
     expect(staleRules(citing('B-1'), '2026-11-02', historyEntries(HISTORY))).toEqual([]);
     expect(rereadNote('2026-11-03', stale)).toBe('_(2026-11-03: rules re-read at claim: R-BTN-33 (amended 2026-11-02), R-BTN-50 (amended 2026-11-01), R-BTN-150 (amended 2026-11-02))_');
+  });
+
+  it('round 2, finding 1: an entry amends the ids of its Rules changed line, the line directly under its title’s close; one further down, or none, amends nothing', () => {
+    const history = [
+      '- **2026-11-04 — the restructure, part 5.**',
+      '  Rules changed: R-BTN-33, R-BTN-150.',
+      '  The body names R-BTN-50 as evidence.',
+      '',
+      '- **2026-11-05 — the owner’s rulings on the',
+      '  review’s tickets.**',
+      '  Rules changed: R-BTN-7.',
+      '',
+      '- **2026-11-06 — R-BTN-50: a titled one.** Text.',
+      '  Rules changed: R-BTN-33.',
+      '',
+      '- **2026-11-07 — a later line is not the one.** The owner said so.',
+      '  More text.',
+      '  Rules changed: R-BTN-50.',
+      '',
+      '- **2026-11-08 — scenarios only.**',
+      '  Rules changed: none.',
+      '',
+    ].join('\n');
+    const entries = historyEntries(history);
+    expect(entries.map((e) => [e.date, e.changed, entryIds(e)])).toEqual([
+      ['2026-11-04', 'R-BTN-33, R-BTN-150.', ['R-BTN-33', 'R-BTN-150']],
+      ['2026-11-05', 'R-BTN-7.', ['R-BTN-7']],
+      ['2026-11-06', 'R-BTN-33.', ['R-BTN-50', 'R-BTN-33']],
+      ['2026-11-07', null, []],
+      ['2026-11-08', 'none.', []],
+    ]);
+    expect(staleRules(citing('B-1'), '2026-10-20', entries).map((s) => `${s.id} ${s.date}`)).toEqual(['R-BTN-7 2026-11-05', 'R-BTN-33 2026-11-04', 'R-BTN-33 2026-11-06', 'R-BTN-50 2026-11-06', 'R-BTN-150 2026-11-04']);
+  });
+
+  it('round 2, finding 1: check:spec passes exactly the entries whose ids the guard reads (one grammar, two copies)', () => {
+    const history = [
+      '- **2026-11-04 — R-BTN-74: titled.** Text.',
+      '',
+      '- **2026-11-04 — wrapped',
+      '  title.**',
+      '  Rules changed: R-BTN-50.',
+      '',
+      '- **2026-11-05 — inline.** The body cites R-BTN-7.',
+      '  Rules changed: R-BTN-7.',
+      '',
+      '- **2026-11-05 — further down.** Text,',
+      '  more.',
+      '  Rules changed: R-BTN-9.',
+      '',
+      '- **2026-11-06 — no ids.** R-BTN-1 in the body only.',
+      '',
+    ].join('\n');
+    const unnamed = (unnamedEntries(history) as { title: string }[]).map((e) => e.title);
+    const blind = historyEntries(history).filter((e) => e.changed == null && !entryIds(e).length).map((e) => e.title);
+    expect(unnamed).toEqual(['further down', 'no ids']);
+    expect(blind).toEqual(unnamed);
   });
 
   it('a rules re-read note answers for the ids it names up to its day, and no others — a claim’s, and a spec PR’s', () => {
