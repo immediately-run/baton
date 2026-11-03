@@ -52,6 +52,9 @@ R-BTN-115's delivery, G-BTN-93; S-BTN-68), PR `claude/baton-spec-review-2fwiga`.
    `failure` or `timed_out` one (R-BTN-153).
 3. The `forge-check` deliverer posts `timed_out` as GitHub's check-run conclusion of that name
    (checks are GitHub only, R-BTN-115).
+4. The vendored `std:forge.check@1` enum (`src/shared/std.mjs`) still lists `neutral` among the
+   conclusions the sync reads back; R-BTN-183 counts only `success`. Change it in docs and
+   `npm run vendor` here (never by hand), or say in the PR why the read-back keeps `neutral`.
 
 ### Tests
 

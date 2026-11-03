@@ -10,7 +10,7 @@ tags:
   - roadmap-item
 order: 1173
 tier: routine
-description: "Build R-BTN-19's administrator fence clear, the owner's ruling of 2026-11-02: claim.fence-clear (POST /v1/ui/claims/{id}/fence-clear, destructive, confirmed, administrator only, never delegated) clears a pending fence at once, frees the seats and logs fence-cleared {admin}; the dashboard draws it beside force-reap. Requires: none."
+description: "Build R-BTN-19's administrator fence clear, the owner's ruling of 2026-11-02: claim.fence-clear (POST /v1/ui/claims/{id}/fence-clear, destructive, confirmed, administrator only, never delegated) clears a pending fence at once, frees the seats and logs fence-cleared {admin}; the dashboard draws it on the claim and on its baton.fence-pending condition, which the clear resolves. Requires: none."
 topics:
   - baton
 owns: {}
@@ -47,9 +47,12 @@ administrator's clear*, §9.5, R-BTN-155's confirmed list, §12.2, §14, G-BTN-1
    its route `POST /v1/ui/claims/{id}/fence-clear`, confirmed like force-reap: it clears the
    fence in one transaction, frees the claim's seats (R-BTN-178) and logs
    `fence-cleared {admin: <fingerprint>}`; a claim whose fence is not pending is `conflict`.
-2. The dashboard control beside force-reap, drawn only for administrators, with the dialog
-   R-BTN-19 describes (last-seen time; what the clear gives up).
-3. A seal waiting on a fence-pending claim (S-BTN-50) proceeds after a clear.
+2. The dashboard control, drawn only for administrators, on the claim wherever the dashboard
+   shows it and on its `baton.fence-pending` condition in Needs you, with the dialog R-BTN-19
+   describes (last-seen time; what the clear gives up, the `session`-mode case included); the
+   clear resolves that condition. It is its own action, never a condition restart.
+3. A freeze does not refuse the clear, so a seal waiting on a fence-pending claim (S-BTN-50)
+   proceeds after it.
 
 ### Tests
 
