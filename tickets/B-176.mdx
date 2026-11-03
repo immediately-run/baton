@@ -21,7 +21,8 @@ depends_on: []
 **Brief:** the owner, 2026-11-03: "Wouldn't it be simpler to solve this if Baton also handed out
 ticket IDs?" — and then: "check the spec for any other situation where identifiers were written to
 Git without being assigned by a baton. This is a classic case where central coordination by baton
-can make it much easier to choose non-colliding IDs."
+can make it much easier to choose non-colliding IDs." — and, asked whether new tickets should go
+into a PR before merge, "Yes".
 
 **Spec:** R-BTN-74 (`baton ticket new`'s next free id), R-BTN-131 (*Every allocator does the same*:
 `baton ticket request`, `new`, the source's `file` export, the record courses' filings; "a
@@ -90,10 +91,23 @@ their own tickets.
 3. **Fallback.** No Baton configured, unreachable, or `--offline`: today's next-free scan,
    unchanged, said in the output. The sync's duplicate-id refusal and `baton.renumbered` stay as
    the backstop for that path (R-BTN-131, R-BTN-147).
-4. **Filing no longer needs its own push to `main`** for the id's sake: the id is unique before the
-   push, so `new` may file on a branch where the repository's policy wants that (the push itself
-   stays as R-BTN-74 says until a separate ruling changes it).
-5. **Spec.** Amend R-BTN-74, R-BTN-131 (the allocator rule: Baton first, the scan as the
+4. **Tickets are filed through a PR by default** (the owner, 2026-11-03: "Yes", to filing new
+   tickets in a PR before merge "now that they get ids from baton"). With the id unique before
+   any push, `baton ticket new` writes the ticket file, and its dependencies' `**Used by:**`
+   lines, on a branch `baton-ticket/<id>` and opens a PR for it through the same forge path
+   `baton ticket request` uses (R-BTN-131, B-174: a PR where the forge answers one, the push
+   otherwise). The ticket is claimable when the PR merges, after `check:tickets` and a person
+   have read it — its Trust and Invariants included (R-BTN-184: tickets land only with a human
+   approval). `--direct` keeps today's push to the default branch, refused where the repository's
+   policy protects the default branch (R-BTN-180) and allowed under `cooperative`, so a small
+   project run locally files as before. `request`, the source's `file` export and the record
+   courses' filings already land through a branch and are unchanged; only `new` changes.
+   With Baton unreachable (item 3), `new` files through a PR as well — the scanned id may then
+   collide, and the duplicate check on the PR is the backstop.
+   `baton-ticket/*` joins `baton-request/*` as a reserved namespace: outside every
+   `branch_pattern` (R-BTN-131's rule for request branches, cited, not restated), and read by the
+   `floor` scan of item 2 like any open branch.
+5. **Spec.** Amend R-BTN-74 (`new` files through a PR; `--direct`), R-BTN-131 (the allocator rule: Baton first, the scan as the
    fallback), R-BTN-86/R-BTN-165/R-BTN-161's filing sentences (cite R-BTN-131, do not restate),
    R-BTN-31 and §13 (the next number comes from `baton ticket next`), the route table, §13's
    tables; one home for the sequence rule, cited elsewhere.
@@ -135,7 +149,9 @@ A new scenario row in §15 (its number taken at merge, from this ticket's own `n
 else the next free): two filers racing for a ticket id get distinct ids; a fresh Baton seeded by a
 `floor` never reissues a number git holds; an inflated `floor` is refused; `next scenario` and
 `next migration` issue increasing numbers per repository and never across two; Baton unreachable
-falls back to the scan and says so; a delegated key may take a number. Unit tests for the CLI's
+falls back to the scan and says so; a delegated key may take a number; `new` opens a PR on
+`baton-ticket/<id>` and the ticket is not on the board until it merges; `--direct` pushes under
+`cooperative` and is refused under a protected policy. Unit tests for the CLI's
 `floor` computation (a number on an open branch's head only, for a ticket and for a migration
 kind, raises it) and fallback.
 
@@ -144,6 +160,7 @@ kind, raises it) and fallback.
 - [ ] Two concurrent `baton ticket new` runs against one Baton file two distinct ids (the scenario).
 - [ ] `baton ticket next migration` and `next scenario` give the next numbers, and the babysit skill
       and `tickets/home.mdx` tell PR authors to take them that way.
+- [ ] `baton ticket new` opens a PR by default; `--direct` pushes only where the policy allows.
 - [ ] With Baton unreachable, `new` files by the scan and says so; `npm test` green.
 
 **Requires:** none.
