@@ -96,7 +96,7 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   - **Opaque blobs** are the other inline values, capped by §12.3 (16 KB each, 256 KB of a
     repository's course data): a ticket's `course` and `display`, a next leg's `course`,
     `course_data`, profiles, reports, `rationale`, a reading's `detail`. Core never reads them,
-    so it cannot stop a course from putting prose in one; doing so breaks this rule, and the
+    `display`'s two keys above excepted, so it cannot stop a course from putting prose in one; doing so breaks this rule, and the
     CLI's default sources and standard station functions post no prose in them.
 - **R-BTN-35 (the home repository wins, except about what Baton owns).** Baton owns each
   ticket's course history and position (R-BTN-39), claims and leases, attestations (R-BTN-181)
@@ -1463,7 +1463,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
                depends_at?: [{ ticket, at | reached | done, leg? }],   -- R-BTN-120
                conditions?: { <type prefix>: <course> | { course, replaces } },  -- bindings, R-BTN-161
                check?: { sha, head_repo_id, head_ref },          -- check tickets, R-BTN-153
-               display: { status?, group?, project? },           -- shown, never read
+               display: { status?, group?, project? },           -- shown; core reads project and status only (R-BTN-33)
                handoff_url?,                                     -- R-BTN-24
                question?: { id, url?, severity?, options?: [{ id, reached }] },  -- the queued person leg's, R-BTN-116
                bars: { <leg>: [<tag>] },                         -- R-BTN-60

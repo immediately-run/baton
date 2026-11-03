@@ -167,11 +167,12 @@ export function requiresFrom(description: string): string[] {
 
 /** `.baton/baton.json` as JSON, for the fields outside the ticket settings — the `repos` map the
  *  markdown source resolves a short name through, and `baton_url` (B-129: where the ticket
- *  commands' Baton reads go, the sync's own default). `{}` for a file that is missing or
+ *  commands' Baton reads go, the sync's own default) and `default_course` (the course a ticket
+ *  naming none follows, read by `courseStart`). `{}` for a file that is missing or
  *  unreadable: the caller read the same file as settings and has already refused it if it must. */
 export function readSettingsJson(root: string): { repos?: Record<string, string>; baton_url?: string; default_course?: string } {
   try {
-    return JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8')) as { repos?: Record<string, string> };
+    return JSON.parse(readFileSync(join(root, '.baton', 'baton.json'), 'utf8')) as { repos?: Record<string, string>; baton_url?: string; default_course?: string };
   } catch {
     return {};
   }
