@@ -67,18 +67,26 @@ their own tickets.
 
 1. **Sequences in core.** A table keyed by `(repository_id, kind)` with the last number issued,
    and `POST /v1/repositories/{repository}/sequences/{kind}/next` → `{kind, number}`. Validated
-   before any SQL (R-BTN-16): `kind` matches `^[a-z][a-z0-9-]{0,31}$`. Core knows no kind's
+   before any SQL (§12.3, `src/core/validate.ts`): `kind` matches `^[a-z][a-z0-9-]{0,31}$`. Core knows no kind's
    meaning (value 3); the CLI names them: `ticket` (per allocating prefix, so the kind is
    `ticket-<prefix>`), `request` if the request id is its own, `rule`, `scenario`, `gate`,
    `migration`. The first call for a kind seeds from a `floor` the caller passes — the highest
-   number the caller sees in git — and every call takes `max(stored, floor) + 1`, so a lost or
-   fresh Baton never issues a number git already holds (value 1: lost state fails closed). Each
-   issue is an event naming the caller and, when given, the ticket it is for.
+   number the caller sees in git, on the default branch and on every open branch's head — and
+   every call takes `max(stored, floor) + 1`, so a lost or fresh Baton never issues a number
+   pushed to the default branch or to an open branch (value 1: lost state fails closed). A number
+   a branch holds only locally, not yet pushed, is the one a floor cannot see; the duplicate check
+   at merge stays the backstop for it: for tickets the sync's duplicate-id refusal (R-BTN-131),
+   and for the rest the branch merging main before it merges and renumbering if main took the
+   number (R-BTN-31, §13). Each issue is an event naming the caller
+   and, when given, the ticket it is for.
 2. **The CLI asks Baton first.** `baton ticket new` and `request`, the ticket source's `file`
    export, and the record courses' filing legs take a ticket id from the sequence; a spawning or
    call leg's children take theirs the same way. `baton ticket next <kind> [--for <ticket>]`
    prints the next rule, scenario, gate or migration number for a PR author (and an agent) to use.
-   The CLI computes `floor` by today's scan, so the scan stays the one place that reads git.
+   The CLI computes `floor` for every kind as the highest number on the default branch and on
+   every open branch's head — R-BTN-131's ticket scan, which reads the open branches, extended
+   to the rule, scenario, gate and migration kinds, whose scan today (R-BTN-31) reads the default
+   branch alone — so the scan stays the one place that reads git.
 3. **Fallback.** No Baton configured, unreachable, or `--offline`: today's next-free scan,
    unchanged, said in the output. The sync's duplicate-id refusal and `baton.renumbered` stay as
    the backstop for that path (R-BTN-131, R-BTN-147).
@@ -113,8 +121,11 @@ New inputs: the `next` request, and the `floor` and `for` it carries.
   in the CLI.
 - **Value 8 (Baton runs without GitHub) and value 9 (two hosts):** the sequence is core state on
   both hosts; nothing forge-specific.
-- **R-BTN-131's backstop:** the duplicate-id refusal and `baton.renumbered` are kept for the
-  fallback path.
+- **R-BTN-131's backstop:** the duplicate-id refusal and `baton.renumbered` are kept, for the
+  fallback path and for a number a floor could not see (a branch not yet pushed); for the rule,
+  scenario, gate and migration kinds the duplicate check at merge is that backstop.
+- **Value 1 (lost state fails closed):** a fresh Baton's first number for a kind is above every
+  number on the default branch and every open branch's head, because `floor` reads them all.
 - **Migrations are append-only:** the sequence table is a new numbered migration, itself taken from
   the `migration` sequence once this lands (until then, the next free number at merge).
 
@@ -125,7 +136,8 @@ else the next free): two filers racing for a ticket id get distinct ids; a fresh
 `floor` never reissues a number git holds; an inflated `floor` is refused; `next scenario` and
 `next migration` issue increasing numbers per repository and never across two; Baton unreachable
 falls back to the scan and says so; a delegated key may take a number. Unit tests for the CLI's
-`floor` computation and fallback.
+`floor` computation (a number on an open branch's head only, for a ticket and for a migration
+kind, raises it) and fallback.
 
 ### Exit criteria
 
