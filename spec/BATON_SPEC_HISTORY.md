@@ -2283,6 +2283,18 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   up now. S-BTN-198 follows. B-172 is superseded into B-76, which builds the code sign-in flow
   for both roles: the two steps are built where the flow is.
 
+- **2026-11-03 — R-BTN-193: git is never a lock or a counter.** The owner, after the process
+  guards' third review round: "I understand that until the baton spec is fully realized, it may be
+  beneficial to keep the pre-existing Git-based locking and sequencing mechanisms. However, I want
+  the spec to be very clear that this is not how Baton is meant to be used. And it is merely a
+  legacy to be phased out as soon as possible." R-BTN-193 states it beside R-BTN-1, names each
+  legacy mechanism and the work that retires it (R3-1266 and B-120 for the git-lock ticket
+  commands; B-176 for every next-free scan; the other repositories' own tools when they adopt
+  Baton's), and R-BTN-74's ticket commands, R-BTN-131's allocators and R-BTN-31's numbering now
+  say "legacy" where they are specified. The architecture page's allocator decision says the same.
+  Logs and transcripts kept in git, which the owner named as a separate and less critical concern
+  ("blob storage is a better candidate"), are not changed here.
+
 - **2026-11-03 — R-BTN-74, R-BTN-127, R-BTN-31, §13: process guards against review-round
   thrashing (owner direction).**
   Rules changed: R-BTN-74, R-BTN-127, R-BTN-31, R-BTN-51, R-BTN-131.

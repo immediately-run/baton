@@ -24,7 +24,7 @@ Git without being assigned by a baton. This is a classic case where central coor
 can make it much easier to choose non-colliding IDs." — and, asked whether new tickets should go
 into a PR before merge, "Yes".
 
-**Spec:** R-BTN-74 (`baton ticket new`'s next free id), R-BTN-131 (*Every allocator does the same*:
+**Spec:** R-BTN-193 (git is never a lock or a counter: this ticket retires its next-free scans), R-BTN-74 (`baton ticket new`'s next free id), R-BTN-131 (*Every allocator does the same*:
 `baton ticket request`, `new`, the source's `file` export, the record courses' filings; "a
 collision that still happens is caught by the sync's duplicate-id refusal, and the owner
 renumbers"), R-BTN-86 and R-BTN-165 (spawned and call children), R-BTN-161 (handler tickets),

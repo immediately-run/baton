@@ -80,7 +80,29 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   | transcripts | pointers to them |
   | | runners, messages, readings; keys, grants, owners, settings, bars (R-BTN-66); overrides; conditions, timers and the outbox (§7) |
 
-- **R-BTN-33 (Baton holds filter fields, never content).** Per live ticket Baton stores what
+- **R-BTN-193 (git is never a lock or a counter).** Baton is the one place concurrent writers are
+  serialized: who holds a ticket is Baton's lease (R-BTN-4), and a number that must be unique
+  across concurrent branches is one Baton hands out (B-176). Git records the work; it never decides
+  who holds something or which number is next. Writing a status to git and counting on a refused
+  push to stop a second writer, or choosing the next number by scanning branches, is not how Baton
+  is meant to be used (the owner, 2026-11-03).
+  - **Legacy, phased out as soon as possible.** Until the work that retires each lands, these stay,
+    each marked legacy where it is specified and never extended or copied into a new mechanism:
+    - the git-lock ticket commands — `baton ticket claim | set | done` writing `status:` and
+      retrying a refused push (R-BTN-74) — retired by R3-1266 (Baton hosts its own tickets) and
+      B-120;
+    - every next-free scan of git for a ticket, child, request, rule, scenario, gate or migration
+      number (R-BTN-74, R-BTN-131, R-BTN-86, R-BTN-165, R-BTN-161, R-BTN-31, §13) — retired by
+      B-176, after which a scan only seeds Baton's sequence or serves a session without Baton;
+    - the same pattern in other repositories' own tools (docs' `scripts/claim.sh`, fieldhouse's
+      `scripts/ticket.mjs`), retired when each adopts Baton's.
+  - **Nothing new uses git as a lock or a counter.** A ticket or amendment proposing one is a
+    change to Baton, not in it, and goes to the owner.
+  - A collision a legacy path still produces is caught where it is today — the sync's
+    duplicate-id refusal (R-BTN-74, R-BTN-147), the duplicate number at merge — as a backstop,
+    never the design.
+
+- **R-BTN-33 (Baton holds filter fields, never content). Per live ticket Baton stores what
   matching (§6) and the dashboard's lists read: id, title, path, course, tier, `requires`,
   expedite, `depends_at`, `parent`, `repos`, rank, the position Baton holds (R-BTN-39), and an
   opaque `display` object core never reads. It never stores a body, Status notes, exit
@@ -1277,7 +1299,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
     filing without its sections — and claim no more.
   - **The ticket commands** (B-112, R-BTN-127): `baton ticket new | claim | set | done`, whose behaviour is
     the git-lock commands docs' `claim.sh` and the repositories' `scripts/ticket.mjs` had, kept
-    once in the CLI. Each is one commit pushed straight to the default branch from a throwaway
+    once in the CLI — legacy, to be retired (R-BTN-193). Each is one commit pushed straight to the default branch from a throwaway
     worktree at the freshly fetched head (`--branch`, else the checkout's `origin/HEAD`, else
     `main`), so the caller's branch, HEAD and working tree are never written; a push refused
     because the branch moved is fetched again and retried, up to six tries, and a refusal for any
@@ -2358,7 +2380,7 @@ mean (R-BTN-50).
         course's `branch_pattern`, and every `baton-request/*` branch (R-BTN-131), with a commit
         not reachable from the default branch (R-BTN-96).
         Every allocator does the same: `baton ticket request`, `baton ticket new` and the source's
-        `file` export. A collision that still happens is caught by the sync's duplicate-id
+        `file` export — a legacy scan, retired by B-176 (R-BTN-193). A collision that still happens is caught by the sync's duplicate-id
         refusal (R-BTN-74), and the owner renumbers;
       - a document.
 
@@ -6884,7 +6906,7 @@ never through a claim.
   implementation must establish, proved by the scenarios or tests its row names.
 - **R-BTN-31 (scenarios are part of drafting).** Every ticket that changes Baton's behaviour
   names, under **Tests**, the scenarios it adds or makes pass; a new scenario takes the next free
-  number at merge — the branch merges main before it merges, and renumbers if main took the
+  number at merge (legacy until B-176, R-BTN-193) — the branch merges main before it merges, and renumbers if main took the
   number — and a row here in the same change, and the ticket's exit criteria require `npm test`
   green with it. A behaviour change without a scenario is incomplete.
 - **R-BTN-68 (the core is a checked model).**
@@ -7392,6 +7414,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 
 **Scope and truth**
 
+- Chose Baton as the only lock and the only counter — its lease decides who holds a ticket, its sequences which number is next — and git as the record of the work alone, over git as a lock (a status pushed, a refused push as the mutex) or a counter (the next free number by a scan): the git-based mechanisms that exist are legacy, kept only until the work that retires each lands, and nothing new is built on them (2026-11-03, the owner, "I want the spec to be very clear that this is not how Baton is meant to be used. And it is merely a legacy to be phased out as soon as possible."; R-BTN-193, R-BTN-4, R-BTN-74, R-BTN-131).
 - Chose standard courses that assume no particular deployment and serve the simpler end of Baton's range, with a factory's security and quality-assurance courses kept by that factory, over standard courses that carry every factory's guarantees: Baton scales from a single user's naive setup to a factory whose threat model shapes its architecture, and only the mechanisms are common to both (2026-10-29; R-BTN-131).
 - Chose a protected default branch that only a deterministic merge runner and humans update, with merge criteria in Baton, over a git proxy, per-worker forks, or accepting unsigned pushes and verifying signatures: protected branches are what engineers already reason with and every forge has one, and the merge decision belongs in deterministic code (2026-10-28; R-BTN-180, R-BTN-182, R-BTN-183).
 - Chose to keep Baton cooperative on one trusted machine and leave enforcement to the deployment, over requiring a merge runner, proxy or sandbox everywhere: Baton must stay usable for a small project run locally (2026-10-28; R-BTN-180).
