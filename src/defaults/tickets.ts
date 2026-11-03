@@ -25,7 +25,7 @@ import { accepts, accepting, allocates, allocatingPrefix, GITHUB_PR, LIVE_STATUS
 import { addPr, idOf, locate, nextNumber, scalar, setKey } from './tickets-file';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
-import { appendStatus, fileDate, historyEntries, missingSections, rulesSince, rereadNote, rulesConfig, sectionsSince, staleList, staleRules } from './tickets-rules';
+import { appendStatus, filingDate, firstCommit, historyEntries, missingSections, rereadNote, rulesConfig, sectionsSince, staleList, staleRules, unshallow } from './tickets-rules';
 import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { defaultBranch } from './request';
 
@@ -165,7 +165,7 @@ const acceptedList = (settings: TicketSettings): string => Object.keys(settings.
 
 /** `baton tickets claim <id> [--rules-reread]` — available → in-progress, refusing a ticket that is
  *  not available, whose `depends_on` are not all done (archived, or a live closed status), or that
- *  cites a rule the spec's history amended after the ticket's file last changed, unless
+ *  cites a rule the spec's history amended after the ticket answered for it (filed, or re-read), unless
  *  `--rules-reread` says the claimer re-read them, which the claim's commit records as a dated
  *  Status line (tickets-rules.ts; the 2026-11-03 process guards); `baton tickets
  *  set <id> <status> [--pr URL]` — any live status, as the session that left it; `baton tickets
@@ -193,22 +193,31 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
       const open = (read.tickets.find((t) => t.id === id)?.depends_on ?? []).filter((dep) => !isDone(dir, settings, dep));
       if (open.length) throw new Error(`${id} depends on ${open.join(', ')}, not done yet`);
     }
-    // The rules the ticket cites that were amended after it last changed: read at the head the
-    // claim lands on, the ticket's date its file's last commit there — git, nothing fetched.
+    // The rules the ticket cites that were amended after it answered for them: read at the head
+    // the claim lands on, the ticket dated by its `_filed` line, else its file's first commit there
+    // — a shallow clone is deepened first, since its boundary commit would date every file.
     let note: string | null = null;
     if (status === 'in-progress') {
       const rules = rulesConfig((readSettingsJson(dir) as { check?: { rules?: unknown } }).check);
       const history = join(dir, rules.history);
-      const since = existsSync(history) ? rulesSince(fileDate(dir, found.path), text) : null;
-      const stale = since ? staleRules(text, since, historyEntries(readFileSync(history, 'utf8')), rules.prefix) : [];
-      if (stale.length && !rulesReread) {
-        throw new Error([
-          `${id} cites rules that ${rules.history} amended after the ticket last changed (${since}):`,
-          staleList(stale),
-          'Re-read each rule and entry, rewrite or strike what in the ticket they contradict, then claim with --rules-reread.',
-        ].join('\n'));
+      if (existsSync(history)) {
+        let filed = filingDate(text, firstCommit(dir, found.path), date);
+        if ('undetermined' in filed) {
+          const why = unshallow(dir, remote);
+          if (why) throw new Error(`${id}: this clone is shallow, so the day ${found.path} was filed cannot be read, and \`git fetch --unshallow ${remote}\` failed (${why}) — deepen the clone (\`git fetch --unshallow\`, or clone without --depth), then claim again`);
+          filed = filingDate(text, firstCommit(dir, found.path), date);
+        }
+        const since = 'date' in filed ? filed.date : date;
+        const stale = staleRules(text, since, historyEntries(readFileSync(history, 'utf8')), rules.prefix);
+        if (stale.length && !rulesReread) {
+          throw new Error([
+            `${id} cites rules that ${rules.history} amended after the ticket answered for them (filed ${since}, or a later rules re-read note naming the rule):`,
+            staleList(stale),
+            'Re-read each rule and entry, rewrite or strike what in the ticket they contradict, then claim with --rules-reread.',
+          ].join('\n'));
+        }
+        if (stale.length) note = rereadNote(date, stale);
       }
-      if (stale.length) note = rereadNote(date, stale);
     }
     text = setKey(setKey(text, 'status', status), 'updated', date);
     if (note) text = appendStatus(text, note);
@@ -550,7 +559,7 @@ export function ticketsHelp(): string[] {
     'baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]',
     '                   [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]',
     'baton tickets claim <id> [--rules-reread]     available → in-progress; refused while the ticket cites a',
-    '                                              rule amended since it last changed, until --rules-reread',
+    '                                              rule amended since it was filed, until --rules-reread',
     'baton tickets set <id> <status> [--pr URL] [--rules-reread]   any live status; --pr adds a pull request',
     'baton tickets done <id> [--pr URL]            done, moved to archive/',
     'baton tickets check [--repo DIR] [--quiet]    check the tickets without posting them',

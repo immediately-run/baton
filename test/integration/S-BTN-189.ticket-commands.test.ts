@@ -146,7 +146,7 @@ describe('S-BTN-189 the ticket commands', () => {
     expect(out.stdout).toMatch(/(^|\n)baton tickets check: \d+ ticket\(s\), ✓ no findings\n$/);
   }, 60_000);
 
-  it('claim refuses a ticket citing a rule amended since it last changed, until --rules-reread', () => {
+  it('claim refuses a ticket citing a rule amended since it was filed, until --rules-reread', () => {
     const repo = new Repo();
     // The scaffold and a ticket citing R-BTN-50, dated 2026-10-29; then a history entry of
     // 2026-11-01 naming R-BTN-50.
@@ -168,7 +168,7 @@ describe('S-BTN-189 the ticket commands', () => {
     const before = git(repo.bare, 'rev-parse', 'main');
     const refused = repo.tickets('claim', 'B-1');
     expect(refused.status).toBe(2);
-    expect(refused.stderr).toContain('B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket last changed (2026-10-29):\n  R-BTN-50 — 2026-11-01 — the ruling on prs\n');
+    expect(refused.stderr).toContain('B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket answered for them (filed 2026-10-29, or a later rules re-read note naming the rule):\n  R-BTN-50 — 2026-11-01 — the ruling on prs\n');
     expect(git(repo.bare, 'rev-parse', 'main')).toBe(before);
     const claimed = repo.tickets('claim', 'B-1', '--rules-reread');
     expect(claimed).toMatchObject({ status: 0, stderr: '' });

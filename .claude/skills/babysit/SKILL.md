@@ -68,10 +68,12 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   contradicts, which is struck through with `~~…~~` in place, the note saying what replaced it
   (Spec PRs, below).
 - **Claiming re-reads the rules.** `tickets claim` refuses a ticket citing a rule that a
-  `spec/BATON_SPEC_HISTORY.md` entry dated after the ticket's last commit names, listing each.
-  Re-read each rule and entry, rewrite or strike what they contradict, then claim with
-  `--rules-reread`, which records the re-read in `## Status`. `npm run check:tickets` lists such
-  tickets without failing.
+  `spec/BATON_SPEC_HISTORY.md` entry names, dated after the ticket answered for that rule — the
+  day it was filed (its `_filed` line, else its file's first commit), or a later `rules re-read`
+  note naming the rule; an ordinary edit answers for nothing. Re-read each rule and entry, rewrite
+  or strike what they contradict, then claim with `--rules-reread`, which records the re-read in
+  `## Status`. `npm run check:tickets` lists such tickets without failing; in a shallow clone it
+  skips the list and says so, and `claim` deepens the clone first (`git fetch --unshallow`).
 
 ## Spec PRs
 
@@ -89,12 +91,16 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   you" after 2026-11-01's ruling, though a spec PR touched it on 11-02, and the next session built
   the clause. For a ticket another session holds (above), strike the clause with `~~…~~` and say
   in the dated Status note what replaced it; leave the rest of the plan alone. Run `npm run
-  spec:impact` with the changed ids and terms to find the tickets.
+  spec:impact` with the changed ids and terms to find the tickets. Then add
+  `_(<date>: rules re-read: <id>, …)_` under the ticket's `## Status`, naming the ids whose
+  amendments the PR handled there: that note, not the edit, is what answers for them at the next
+  claim, and only for the ids it names.
 - **New tickets say who writes their inputs and what they must not break.** A ticket the PR files
   fills `### Trust` (every new input — a field, a file, a commit trailer, a request — who may write
   it and how Baton verifies it, by `docs/security-model.mdx`'s reaches) and `### Invariants` (the
   rules it must not break, by id, and how the design keeps each); `npm run check:tickets` fails a
-  ticket filed on or after `.baton/baton.json`'s `check.sections_since` without them.
+  ticket filed on or after `.baton/baton.json`'s `check.sections_since` without them — filed by
+  its `_filed` line, or, for a ticket written by hand without one, its file's first commit.
 - **Decide in the spec, in the session that decides.** An owner's ruling becomes a spec PR the
   same session, with the history entry quoting it. A ticket may *build* a ruling, but never holds
   its spec half: "the implementing PR amends the spec first" is how B-120's ruling of 2026-10-26

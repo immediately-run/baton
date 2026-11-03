@@ -71,7 +71,7 @@ describe('S-BTN-172 the ticket check', () => {
     expect(r.stderr).toContain('has no .baton/baton.json');
   });
 
-  it('a live ticket citing a rule amended since it last changed: its line and the count, exit 0', () => {
+  it('a live ticket citing a rule amended since it was filed: its line and the count, exit 0', () => {
     const env = { GIT_COMMITTER_DATE: '2026-10-29T12:00:00Z', GIT_AUTHOR_DATE: '2026-10-29T12:00:00Z' };
     const saved = { ...process.env };
     Object.assign(process.env, env);
@@ -84,8 +84,8 @@ describe('S-BTN-172 the ticket check', () => {
     const r = check(dir);
     expect(r).toMatchObject({ status: 0, stderr: '' });
     expect(r.lines).toEqual([
-      'tickets/A-1.md: cites rules amended since it last changed (2026-10-29): R-BTN-50 (2026-11-01)',
-      'baton tickets check: 1 live ticket(s) cite rules amended since they last changed (reported, not a finding)',
+      'tickets/A-1.md: cites rules amended since it answered for them (filed 2026-10-29): R-BTN-50 (2026-11-01)',
+      'baton tickets check: 1 live ticket(s) cite rules amended since they answered for them (reported, not a finding)',
       'baton tickets check: 1 ticket(s), ✓ no findings',
     ]);
   });

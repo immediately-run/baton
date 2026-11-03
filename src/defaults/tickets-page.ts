@@ -92,7 +92,7 @@ export function ticketsPage(settings: TicketSettings): string {
     `baton tickets new --title "…" --project ${project ?? '<id>'}    # file a ticket, ${prefix}<n>, with the conventional body`,
     'baton tickets claim <id>                   # available → in-progress; refuses a ticket not available,',
     '                                           # one whose dependencies are not done, or one citing a rule',
-    '                                           # amended since it last changed (--rules-reread, once re-read)',
+    '                                           # amended since it was filed (--rules-reread, once re-read)',
     'baton tickets set <id> <status> [--pr URL] # any live status; --pr adds a pull request URL',
     'baton tickets done <id> [--pr URL]         # done, moved to archive/',
     'baton tickets check [--repo DIR]           # check the tickets without posting them',

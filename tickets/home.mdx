@@ -51,7 +51,7 @@ node cli/baton.mjs tickets --help                         # every flag, the tags
 ```
 
 `claim` refuses a ticket that cites a rule `spec/BATON_SPEC_HISTORY.md` amended after the
-ticket last changed, naming each; re-read them, rewrite what they contradict, and claim with
+ticket was filed, naming each; re-read them, rewrite what they contradict, and claim with
 `--rules-reread`. A new migration number or scenario id is the next free one at merge: merge
 main before merging, and renumber if main took it (until B-176 has Baton hand them out). A
 ticket filed from 2026-11-03 carries `### Trust` and `### Invariants` (`check.sections_since` in

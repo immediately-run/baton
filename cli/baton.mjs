@@ -70,14 +70,14 @@
 //   baton tickets claim <id> [--rules-reread] | set <id> <status> [--pr URL] | done <id> [--pr URL]
 //                — claim, move or finish one, each one commit pushed to the default branch (B-112);
 //                claim refuses a ticket citing a rule the spec's history amended since the ticket
-//                last changed, until --rules-reread (R-BTN-74)
+//                was filed or last re-read it, until --rules-reread (R-BTN-74)
 //   baton tickets check [--repo DIR] [--quiet]
 //                — check this repository's ticket source without posting it: ids, the board
 //                post's validation, depends_on targets and cycles, (with check.depends_line in
 //                .baton/baton.json) each **Depends on:** line, (with check.sections_since) the
 //                ### Trust and ### Invariants sections, and the generated "How tickets work" page;
 //                exit 1 naming every finding (B-111, B-112); live tickets citing a rule amended
-//                since they last changed are listed, never a finding (R-BTN-74)
+//                since they were filed are listed, never a finding (R-BTN-74)
 //   baton tickets --help
 //                — the commands, the tags Baton reads and their meanings, the Requires: clause (B-112)
 //   baton request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B] [--remote R]

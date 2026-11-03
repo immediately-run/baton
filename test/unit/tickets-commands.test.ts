@@ -16,7 +16,7 @@ import { checkTickets } from '../../src/defaults/tickets-check';
 import { accepts, readTicketSettings, requiresFrom } from '../../src/defaults/tickets-config';
 import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
 import { moveTicket, reverseMention, skeletonBody } from '../../src/defaults/tickets';
-import { appendStatus, historyEntries, missingSections, rereadNote, ruleIds, rulesConfig, staleRules, fileDate, rulesSince } from '../../src/defaults/tickets-rules';
+import { appendStatus, filingDate, firstCommit, firstCommits, historyEntries, missingSections, rereadNote, rereads, ruleIds, rulesConfig, staleRules } from '../../src/defaults/tickets-rules';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -464,8 +464,8 @@ describe('baton repo init and baton tickets check: the generated page (B-112)', 
 const CLI_MODULE = async (): Promise<{ initMain: (argv: string[], io: { root?: string; log?: (l: string) => void }) => Promise<number> }> =>
   (await import('../../src/defaults/cli')) as unknown as { initMain: (argv: string[], io: { root?: string; log?: (l: string) => void }) => Promise<number> };
 
-/** A fixture whose commit is dated `day` (the committer's date, which `%cs` reads): the ticket's
- *  "last changed" the stale-rule reading compares the history with. */
+/** A fixture whose commit is dated `day` (the author's date, which `%as` reads): the day a ticket
+ *  with no `_filed` line was filed, which the stale-rule reading compares the history with. */
 function datedRepo(day: string, opts: Parameters<typeof repo>[0]): Fixture {
   const before = { a: process.env.GIT_COMMITTER_DATE, b: process.env.GIT_AUTHOR_DATE };
   process.env.GIT_COMMITTER_DATE = `${day}T12:00:00Z`;
@@ -478,20 +478,29 @@ function datedRepo(day: string, opts: Parameters<typeof repo>[0]): Fixture {
   }
 }
 
+/** Commit `text` to `path` in `dir` as `subject`, authored on `author` (and committed on
+ *  `committer`, the same unless given), and push it to the fixture's origin. */
+function edit(f: Fixture, path: string, text: string, subject: string, author: string, committer = author): void {
+  mkdirSync(join(f.dir, path, '..'), { recursive: true });
+  writeFileSync(join(f.dir, path), text);
+  git(f.dir, 'add', '-A');
+  execFileSync('git', ['-C', f.dir, 'commit', '-q', '-m', subject], { stdio: 'ignore', env: { ...process.env, GIT_AUTHOR_DATE: `${author}T12:00:00Z`, GIT_COMMITTER_DATE: `${committer}T12:00:00Z` } });
+  git(f.dir, 'push', '-q', 'origin', 'HEAD:main');
+}
+
 /** A history file in the spec's shape: dated entries, one with a wrapped title, one a range. */
 const HISTORY = [
   '# History',
   '',
   '## Changelog',
   '',
-  '- **2026-10-01 — before the ticket.** Amended R-BTN-50.',
+  '- **2026-10-01 — R-BTN-50: before the ticket.** Amended R-BTN-50.',
   '',
-  '- **2026-10-20 — the same day as the ticket.** Amended R-BTN-50 again.',
+  '- **2026-10-20 — R-BTN-50: the same day as the ticket.** Amended R-BTN-50 again.',
   '',
-  '- **2026-11-01 — the owner’s ruling on Needs you.** R-BTN-50 now says the core reads no `prs`;',
-  '  R-BTN-5 is untouched in substance.',
+  '- **2026-11-01 — R-BTN-50: the owner’s ruling on Needs you.** R-BTN-50 now says the core reads no `prs`.',
   '',
-  '- **2026-10-27 to 2026-11-02 — a range, its',
+  '- **2026-10-27 to 2026-11-02 — R-BTN-33, R-BTN-150: a range, its',
   '  title wrapped** (PR #9). R-BTN-33 and R-BTN-150.',
   '',
   '## Retired requirements',
@@ -500,17 +509,18 @@ const HISTORY = [
   '',
 ].join('\n');
 
-/** A live ticket citing rules in its body (and one only in its frontmatter, which is not read). */
-const citing = (id: string): string => ticket(id, 'description: cites R-BTN-77 in frontmatter only')
-  .replace('**Used by:** nothing yet.\n', '**Used by:** nothing yet.\n\nThe core reads `prs` (R-BTN-50); keep R-BTN-33 and R-BTN-150 and R-BTN-7.\n\n## Status\n\n_filed 2026-10-20._\n');
+/** A live ticket citing rules in its body (and one only in its frontmatter, which is not read),
+ *  filed 2026-10-20 by its `_filed` line unless `filed` says otherwise (null: no such line). */
+const citing = (id: string, filed: string | null = '2026-10-20'): string => ticket(id, 'description: cites R-BTN-77 in frontmatter only')
+  .replace('**Used by:** nothing yet.\n', `**Used by:** nothing yet.\n\nThe core reads \`prs\` (R-BTN-50); keep R-BTN-33 and R-BTN-150 and R-BTN-7.\n${filed ? `\n## Status\n\n_filed ${filed}._\n` : ''}`);
 
 describe('the stale-rule guard: its reading (2026-11-03)', () => {
   it('reads dated entries, a range by its last day, a wrapped title, and no table row', () => {
     expect(historyEntries(HISTORY).map((e) => [e.date, e.title])).toEqual([
-      ['2026-10-01', 'before the ticket'],
-      ['2026-10-20', 'the same day as the ticket'],
-      ['2026-11-01', 'the owner’s ruling on Needs you'],
-      ['2026-11-02', 'a range, its title wrapped'],
+      ['2026-10-01', 'R-BTN-50: before the ticket'],
+      ['2026-10-20', 'R-BTN-50: the same day as the ticket'],
+      ['2026-11-01', 'R-BTN-50: the owner’s ruling on Needs you'],
+      ['2026-11-02', 'R-BTN-33, R-BTN-150: a range, its title wrapped'],
     ]);
   });
 
@@ -519,11 +529,23 @@ describe('the stale-rule guard: its reading (2026-11-03)', () => {
     expect(ruleIds('R-FH-3 and R-BTN-3', 'R-FH')).toEqual(['R-FH-3']);
   });
 
-  it('a cited rule named by an entry dated after the ticket is stale; one of its own day or before, an uncited one, or a frontmatter one is not', () => {
+  it('a cited rule named by an entry dated after the filing is stale; one of the filing’s own day or before, an uncited one, or a frontmatter one is not', () => {
     const stale = staleRules(citing('B-1'), '2026-10-20', historyEntries(HISTORY));
+    // 2026-10-20's entry is the filing's own day: not after it (the day boundary, R-BTN-74).
     expect(stale.map((s) => `${s.id} ${s.date}`)).toEqual(['R-BTN-33 2026-11-02', 'R-BTN-50 2026-11-01', 'R-BTN-150 2026-11-02']);
     expect(staleRules(citing('B-1'), '2026-11-02', historyEntries(HISTORY))).toEqual([]);
     expect(rereadNote('2026-11-03', stale)).toBe('_(2026-11-03: rules re-read at claim: R-BTN-33 (amended 2026-11-02), R-BTN-50 (amended 2026-11-01), R-BTN-150 (amended 2026-11-02))_');
+  });
+
+  it('a rules re-read note answers for the ids it names up to its day, and no others — a claim’s, and a spec PR’s', () => {
+    const claimed = '## Status\n\n_(2026-11-04: rules re-read at claim: R-BTN-33 (amended 2026-11-02), R-BTN-50 (amended 2026-11-01))_\n';
+    expect([...rereads(claimed)]).toEqual([['R-BTN-33', '2026-11-04'], ['R-BTN-50', '2026-11-04']]);
+    const specPr = '_(2026-11-01: rules re-read: R-BTN-50)_\n\n_(2026-11-03: rules re-read: R-BTN-50, R-BTN-33)_\n';
+    expect([...rereads(specPr)]).toEqual([['R-BTN-50', '2026-11-03'], ['R-BTN-33', '2026-11-03']]);
+    // A spec PR that handled R-BTN-50 alone leaves R-BTN-33 and R-BTN-150 stale.
+    const handled = `${citing('B-1')}\n_(2026-11-03: rules re-read: R-BTN-50)_\n`;
+    expect(staleRules(handled, '2026-10-20', historyEntries(HISTORY)).map((s) => s.id)).toEqual(['R-BTN-33', 'R-BTN-150']);
+    expect(rereads('_(2026-11-03: a note naming R-BTN-50)_')).toEqual(new Map());
   });
 
   it('the note goes at the end of the Status section, or in a Status section of its own', () => {
@@ -538,56 +560,40 @@ describe('the stale-rule guard: its reading (2026-11-03)', () => {
   });
 });
 
-describe('the stale-rule guard: whose commits count (2026-11-03)', () => {
-  const commit = (dir: string, day: string, subject: string, text: string) => {
-    writeFileSync(join(dir, 'tickets', 'B-1.mdx'), text);
-    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', dir, 'commit', '-q', '-m', subject], { stdio: 'ignore', env: { ...process.env, GIT_COMMITTER_DATE: `${day}T12:00:00Z`, GIT_AUTHOR_DATE: `${day}T12:00:00Z` } });
-  };
-  const fresh = () => {
-    const dir = mkdtempSync(join(tmpdir(), 'baton-edits-'));
-    execFileSync('git', ['init', '-q', '-b', 'main', dir], { stdio: 'ignore' });
-    execFileSync('git', ['-C', dir, 'config', 'user.email', 'e@test'], { stdio: 'ignore' });
-    execFileSync('git', ['-C', dir, 'config', 'user.name', 'e'], { stdio: 'ignore' });
-    mkdirSync(join(dir, 'tickets'), { recursive: true });
-    return dir;
-  };
-
-  it('the ticket commands\' own commits never clear a stale reading; a person\'s edit does', () => {
-    const dir = fresh();
-    commit(dir, '2026-10-20', 'B-1: the plan', 'v1\n');
-    commit(dir, '2026-11-05', 'tickets: file B-2 — a reverse mention', 'v2\n');
-    expect(fileDate(dir, 'tickets/B-1.mdx')).toBe('2026-10-20');
-    commit(dir, '2026-11-06', 'B-1: rewrite what the 2026-11-01 ruling contradicts', 'v3\n');
-    expect(fileDate(dir, 'tickets/B-1.mdx')).toBe('2026-11-06');
+describe('the stale-rule guard: how a ticket is dated (2026-11-03)', () => {
+  it('by its file’s first commit, never by a later edit: a spec PR’s note or strike answers for nothing', () => {
+    const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1', null) } });
+    edit(f, 'tickets/B-1.mdx', `${citing('B-1', null)}\n_(2026-11-05: noted by a spec PR.)_\n`, 'spec: strike the clause the ruling contradicts', '2026-11-05');
+    expect(firstCommit(f.dir, 'tickets/B-1.mdx')).toEqual({ date: '2026-10-20', boundary: false });
+    expect(firstCommits(f.dir, 'tickets').get('tickets/B-1.mdx')).toEqual({ date: '2026-10-20', boundary: false });
   });
 
-  it('a ticket only the ticket commands wrote takes the day it was filed', () => {
-    const dir = fresh();
-    commit(dir, '2026-10-20', 'tickets: file B-1 — new', 'v1\n');
-    commit(dir, '2026-11-05', 'tickets: claim B-1 (in progress)', 'v2\n');
-    expect(fileDate(dir, 'tickets/B-1.mdx')).toBe('2026-10-20');
+  it('by the author’s day, not the committer’s: a rebase or a cherry-pick moves nothing', () => {
+    const f = repo();
+    edit(f, 'tickets/B-1.mdx', citing('B-1', null), 'B-1: filed by hand', '2026-10-20', '2026-11-09');
+    expect(firstCommit(f.dir, 'tickets/B-1.mdx')!.date).toBe('2026-10-20');
   });
 
-  it('the newest rules-re-read note answers for the rules up to its day', () => {
-    const text = '## Status\n\n_(2026-11-04: rules re-read at claim: R-BTN-33 (amended 2026-11-02))_\n';
-    expect(rulesSince('2026-10-20', text)).toBe('2026-11-04');
-    expect(rulesSince('2026-11-09', text)).toBe('2026-11-09');
-    expect(rulesSince(null, 'no note')).toBeNull();
+  it('a _filed line wins; a file never committed is filed today; a shallow boundary is undetermined', () => {
+    expect(filingDate(citing('B-1', '2026-10-25'), { date: '2026-10-20', boundary: false }, '2026-11-03')).toEqual({ date: '2026-10-25' });
+    expect(filingDate(citing('B-1', null), { date: '2026-10-20', boundary: false }, '2026-11-03')).toEqual({ date: '2026-10-20' });
+    expect(filingDate(citing('B-1', null), null, '2026-11-03')).toEqual({ date: '2026-11-03' });
+    expect(filingDate(citing('B-1', null), { date: '2026-11-03', boundary: true }, '2026-11-03')).toEqual({ undetermined: true });
+    expect(filingDate(citing('B-1', '2026-10-25'), { date: '2026-11-03', boundary: true }, '2026-11-03')).toEqual({ date: '2026-10-25' });
   });
 });
 
 describe('baton tickets claim: the stale-rule guard (2026-11-03)', () => {
-  it('refuses a ticket citing a rule amended after its last commit, naming each id, date and title; nothing lands', () => {
+  it('refuses a ticket citing a rule amended after it was filed, naming each id, date and title; nothing lands', () => {
     const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
     const before = f.head().sha;
     const r = run(f.dir, 'claim', 'B-1');
     expect(r.code).toBe(2);
     expect(r.err).toBe([
-      'baton: B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket last changed (2026-10-20):',
-      '  R-BTN-33 — 2026-11-02 — a range, its title wrapped',
-      '  R-BTN-50 — 2026-11-01 — the owner’s ruling on Needs you',
-      '  R-BTN-150 — 2026-11-02 — a range, its title wrapped',
+      'baton: B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket answered for them (filed 2026-10-20, or a later rules re-read note naming the rule):',
+      '  R-BTN-33 — 2026-11-02 — R-BTN-33, R-BTN-150: a range, its title wrapped',
+      '  R-BTN-50 — 2026-11-01 — R-BTN-50: the owner’s ruling on Needs you',
+      '  R-BTN-150 — 2026-11-02 — R-BTN-33, R-BTN-150: a range, its title wrapped',
       'Re-read each rule and entry, rewrite or strike what in the ticket they contradict, then claim with --rules-reread.',
       '',
     ].join('\n'));
@@ -607,10 +613,21 @@ describe('baton tickets claim: the stale-rule guard (2026-11-03)', () => {
     expect(execFileSync('git', ['-C', f.origin, 'show', '--name-only', '--format=%s', 'main'], { encoding: 'utf8' }).trim().split('\n')).toEqual(['tickets: claim B-1 (in progress)', '', 'tickets/B-1.mdx']);
   });
 
-  it('a ticket changed after the amendments, or a repository with no history file, claims without the flag and without a note', () => {
-    const fresh = datedRepo('2026-11-02', { existing: { 'tickets/B-1.mdx': citing('B-1') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
+  it('an edit after the amendments clears nothing, a `tickets: …` subject or not; with no _filed line, the first commit dates the ticket', () => {
+    const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1', null) }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
+    edit(f, 'tickets/B-1.mdx', `${citing('B-1', null)}\nA clause struck by a spec PR.\n`, 'spec: R-BTN-50 — strike B-1’s clause\n\ntickets: a body line that is not the subject', '2026-11-05');
+    edit(f, 'tickets/B-1.mdx', `${citing('B-1', null)}\nA hand edit with a bookkeeping subject.\n`, 'tickets: B-1 — a hand edit', '2026-11-06');
+    const r = run(f.dir, 'claim', 'B-1');
+    expect(r.code).toBe(2);
+    expect(r.err).toContain('(filed 2026-10-20, or a later rules re-read note naming the rule):\n  R-BTN-33 — 2026-11-02');
+  });
+
+  it('a ticket filed after the amendments, one whose re-read notes name every stale id, or a repository with no history file, claims without the flag and without a note', () => {
+    const fresh = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1', '2026-11-02') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
     expect(run(fresh.dir, 'claim', 'B-1').code).toBe(0);
-    expect(fresh.at('tickets/B-1.mdx')).not.toContain('rules re-read');
+    expect(fresh.at('tickets/B-1.mdx')).not.toContain('rules re-read at claim');
+    const handled = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': `${citing('B-1')}\n_(2026-11-03: rules re-read: R-BTN-33, R-BTN-50, R-BTN-150)_\n` }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
+    expect(run(handled.dir, 'claim', 'B-1').code).toBe(0);
     const none = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1') } });
     expect(run(none.dir, 'claim', 'B-1').code).toBe(0);
   });
@@ -624,8 +641,45 @@ describe('baton tickets claim: the stale-rule guard (2026-11-03)', () => {
     });
     const r = run(f.dir, 'claim', 'B-1');
     expect(r.code).toBe(2);
-    expect(r.err).toContain('spec/FIELDHOUSE_SPEC_HISTORY.md amended after the ticket last changed (2026-10-20):\n  R-FH-50 — 2026-11-01');
-    expect(r.err).not.toContain('R-BTN');
+    expect(r.err).toContain('spec/FIELDHOUSE_SPEC_HISTORY.md amended after the ticket answered for them (filed 2026-10-20, or a later rules re-read note naming the rule):\n  R-FH-50 — 2026-11-01');
+    expect(r.err).not.toContain('  R-BTN');
+  });
+});
+
+describe('baton tickets claim in a shallow clone (2026-11-03)', () => {
+  /** A full fixture with a ticket filed 2026-10-20 and no `_filed` line, a later commit, and a
+   *  `--depth 1` clone of its origin: the clone's boundary commit is the later one. */
+  const shallowOf = (): { f: Fixture; clone: string } => {
+    const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1', null) } });
+    edit(f, 'spec/BATON_SPEC_HISTORY.md', HISTORY, 'spec: the history', '2026-11-05');
+    const clone = tmp('baton-shallow-');
+    rmSync(clone, { recursive: true, force: true });
+    execFileSync('git', ['clone', '-q', '--depth', '1', `file://${f.origin}`, clone], { stdio: 'ignore' });
+    git(clone, 'config', 'user.email', 'b112@test');
+    git(clone, 'config', 'user.name', 'b112 test');
+    expect(git(clone, 'rev-parse', '--is-shallow-repository')).toBe('true');
+    return { f, clone };
+  };
+
+  it('deepens the clone first, so the ticket is dated by its real first commit, not the boundary', () => {
+    const { clone } = shallowOf();
+    const r = run(clone, 'claim', 'B-1');
+    expect(r.code).toBe(2);
+    expect(r.err).toContain('(filed 2026-10-20, or a later rules re-read note naming the rule):\n  R-BTN-33 — 2026-11-02');
+    expect(git(clone, 'rev-parse', '--is-shallow-repository')).toBe('false');
+  });
+
+  it('refuses, naming the fix, when the clone cannot be deepened; nothing lands', () => {
+    const { f, clone } = shallowOf();
+    const before = f.head().sha;
+    // A `git` on PATH that fails `fetch --unshallow` and runs every other command.
+    const bin = tmp('baton-bin-');
+    const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    writeFileSync(join(bin, 'git'), `#!/bin/sh\nfor a in "$@"; do [ "$a" = --unshallow ] && { echo "fatal: unable to access the remote" >&2; exit 128; }; done\nexec ${real} "$@"\n`, { mode: 0o755 });
+    const out = spawnSync(process.execPath, [CLI, 'tickets', 'claim', 'B-1'], { cwd: clone, encoding: 'utf8', env: { ...process.env, BATON_HOME: clone, PATH: `${bin}:${process.env.PATH}` } });
+    expect(out.status).toBe(2);
+    expect(out.stderr).toContain("baton: B-1: this clone is shallow, so the day tickets/B-1.mdx was filed cannot be read, and `git fetch --unshallow origin` failed (fatal: unable to access the remote) — deepen the clone (`git fetch --unshallow`, or clone without --depth), then claim again");
+    expect(f.head().sha).toBe(before);
   });
 });
 

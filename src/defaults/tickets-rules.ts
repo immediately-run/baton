@@ -1,16 +1,20 @@
 // tickets-rules.ts — the two process guards on a ticket's text (BATON_SPEC §2f R-BTN-74): the
-// rules it cites that the spec's history says were amended after the ticket last changed, read at
+// rules it cites that the spec's history says were amended after the ticket answered for them, read at
 // `baton tickets claim` and reported by `baton tickets check`; and the `### Trust` and
 // `### Invariants` sections a ticket filed after `.baton/baton.json`'s `check.sections_since`
 // must carry. Both answer what PRs #160 and #161 taught (spec/BATON_SPEC_HISTORY.md, 2026-11-03):
 // tickets filed before a ruling were built as written after it, and tickets prescribed inputs with
 // no word on who may write them and mechanisms that broke standing rules.
 //
-// Deterministic and git-only: the ticket's date is its file's last commit, the amendments are the
-// history file's dated entries, and nothing is fetched. Pure over the texts it is given, apart from
-// the two `git log` readers at the bottom, so the decisions are tested without a repository.
-// Course code in the CLI, never core (§2b).
+// Deterministic and git-only: a ticket answers for its rules by the day it was filed — its
+// `_filed` Status line, else its file's first commit — and by its `rules re-read` notes, never by
+// an incidental edit; the amendments are the history file's dated entries. Pure over the texts it
+// is given, apart from the git readers at the bottom, so the decisions are tested without a
+// repository. Course code in the CLI, never core (§2b).
 import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { CLOSE_TIMEOUT_MS, GIT_NONINTERACTIVE_ENV } from './ticket-state';
 
 /** Where the amendments are, and the rule ids they name: the shape spec-tools.mjs's CONFIG has
  *  (fieldhouse's copy names `R-FH` and its own history), overridden by `.baton/baton.json`'s
@@ -85,15 +89,32 @@ export interface StaleRule {
   title: string;
 }
 
-/** The rules a ticket's body cites that a history entry dated after `since` (the ticket file's
- *  last commit, `YYYY-MM-DD`) names: one row per id and entry, by id then date. A day's entry is
- *  after a ticket of the day before, never after one of its own day. */
-export function staleRules(ticketText: string, since: string, entries: readonly HistoryEntry[], prefix = RULES_DEFAULTS.prefix): StaleRule[] {
-  const cited = ruleIds(bodyOf(ticketText), prefix);
+/** The days a ticket re-read each rule id, from its `rules re-read` notes — the one a claim writes,
+ *  `_(YYYY-MM-DD: rules re-read at claim: R-BTN-x (amended …), …)_`, and the one a spec PR adds for
+ *  the ids it handled, `_(YYYY-MM-DD: rules re-read: R-BTN-x, …)_` — the latest per id. */
+export function rereads(text: string, prefix = RULES_DEFAULTS.prefix): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const m of text.matchAll(/_\((\d{4}-\d{2}-\d{2}): rules re-read\b[^:\n]*:([^\n]*)\)_/g)) {
+    for (const id of ruleIds(m[2], prefix)) if (!out.has(id) || out.get(id)! < m[1]) out.set(id, m[1]);
+  }
+  return out;
+}
+
+/** The rules a ticket's body cites that a history entry dated after the day the ticket answered
+ *  for them names: one row per id and entry, by id then date. A rule is answered for on the day
+ *  the ticket was `filed` (`YYYY-MM-DD`), or on the day of a later `rules re-read` note naming it.
+ *  The comparison is by day: an entry of the same day as that answer is not after it. */
+export function staleRules(ticketText: string, filed: string, entries: readonly HistoryEntry[], prefix = RULES_DEFAULTS.prefix): StaleRule[] {
+  const body = bodyOf(ticketText);
+  const cited = ruleIds(body, prefix);
   if (!cited.length) return [];
-  const later = entries.filter((e) => e.date > since).map((e) => ({ e, ids: new Set(ruleIds(e.text, prefix)) }));
+  const reread = rereads(body, prefix);
+  const named = entries.map((e) => ({ e, ids: new Set(ruleIds(e.text, prefix)) }));
   const out: StaleRule[] = [];
-  for (const id of cited) for (const { e, ids } of later) if (ids.has(id)) out.push({ id, date: e.date, title: e.title });
+  for (const id of cited) {
+    const since = [filed, reread.get(id) ?? ''].sort().at(-1)!;
+    for (const { e, ids } of named) if (e.date > since && ids.has(id)) out.push({ id, date: e.date, title: e.title });
+  }
   const n = (id: string): number => Number(/(\d+)$/.exec(id)![1]);
   return out.sort((a, b) => n(a.id) - n(b.id) || a.date.localeCompare(b.date));
 }
@@ -159,6 +180,24 @@ export const REQUIRED_SECTIONS = ['Trust', 'Invariants'] as const;
 /** The day the skeleton's Status line says the ticket was filed (`_filed YYYY-MM-DD…_`), or null. */
 export const filedDate = (text: string): string | null => /^_filed (\d{4}-\d{2}-\d{2})\b/m.exec(text)?.[1] ?? null;
 
+/** A file's first commit as git shows it: its author day, and whether that commit is a shallow
+ *  clone's boundary — where git shows every file as added, so the day is the clone's, not the
+ *  file's. */
+export interface FirstCommit {
+  date: string;
+  boundary: boolean;
+}
+
+/** When a ticket was filed: its `_filed` line, else its file's first commit; `undetermined` when
+ *  that commit is a shallow clone's boundary; `today` for a file git has never committed (one
+ *  being filed now). */
+export function filingDate(text: string, first: FirstCommit | null | undefined, today: string): { date: string } | { undetermined: true } {
+  const filed = filedDate(text);
+  if (filed) return { date: filed };
+  if (!first) return { date: today };
+  return first.boundary ? { undetermined: true } : { date: first.date };
+}
+
 /** The required headings a ticket's text lacks — a `##`, `###` or `####` heading of that name,
  *  outside a fenced block. */
 export function missingSections(text: string): string[] {
@@ -187,57 +226,63 @@ export function sectionsSince(check: { sections_since?: unknown } | undefined): 
  * git
  * ---------------------------------------------------------------------------------------- */
 
-/** The commits that count as someone editing a ticket: not the ticket commands' own bookkeeping
- *  (`tickets: …` — a claim, a move, a reverse mention, a reservation) and not a merge, either
- *  of which would otherwise clear a stale reading without anyone re-reading the rules. */
-const EDITS = ['--no-merges', '--invert-grep', '--grep=^tickets: '];
+const gitOut = (root: string, args: string[]): string =>
+  execFileSync('git', ['-C', root, '-c', 'core.quotePath=false', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024, timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_NONINTERACTIVE_ENV } });
 
-/** The day a ticket's rules were last answered for: the later of its last edit and the newest
- *  `rules re-read at claim` note in its Status — the note a claim with `--rules-reread` writes
- *  is itself a `tickets:` commit, so it is read from the text. */
-export function rulesSince(edited: string | null, text: string): string | null {
-  const notes = [...text.matchAll(/_\((\d{4}-\d{2}-\d{2}): rules re-read at claim:/g)].map((m) => m[1]);
-  const all = [edited, ...notes].filter((d): d is string => !!d).sort();
-  return all.length ? all[all.length - 1] : null;
+/** Whether `root` is a shallow clone (`git rev-parse --is-shallow-repository`); false where it is
+ *  no git checkout. */
+export function isShallow(root: string): boolean {
+  try {
+    return gitOut(root, ['rev-parse', '--is-shallow-repository']).trim() === 'true';
+  } catch {
+    return false;
+  }
 }
 
-/** The day (`%cs`, the committer's) of the last commit that touched `path` in `root`, or null —
- *  not a git checkout, or the file never committed. */
-export function fileDate(root: string, path: string): string | null {
-  const day = (args: string[]): string | null => {
-    try {
-      const out = execFileSync('git', ['-C', root, 'log', ...args, '--format=%cs', '--', path], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n');
-      const d = args.includes('--diff-filter=A') ? out[out.length - 1] : out[0];
-      return /^\d{4}-\d{2}-\d{2}$/.test(d ?? '') ? d : null;
-    } catch {
-      return null;
-    }
-  };
-  // The last edit, else — a ticket only the ticket commands ever wrote — the day it was filed.
-  return day(['-1', ...EDITS]) ?? day(['--diff-filter=A']);
+/** A shallow clone's boundary commits: the `shallow` file's hashes. Empty for a full clone. */
+function boundaries(root: string): Set<string> {
+  try {
+    const path = resolve(root, gitOut(root, ['rev-parse', '--git-path', 'shallow']).trim());
+    return new Set(existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean) : []);
+  } catch {
+    return new Set();
+  }
 }
 
-/** The last commit day of every file under `dir` in `root`, from one `git log` walk (the first
- *  date a path appears with is its latest). Empty where `root` is no git checkout. */
-export function fileDates(root: string, dir: string): Map<string, string> {
-  const walk = (extra: string[], latest: boolean): Map<string, string> => {
-    const out = new Map<string, string>();
-    let log = '';
-    try {
-      log = execFileSync('git', ['-C', root, '-c', 'core.quotePath=false', 'log', ...extra, '--format=@%cs', '--name-only', '--relative', '--', dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 });
-    } catch {
-      return out;
-    }
-    let date = '';
-    for (const line of log.split('\n')) {
-      if (line.startsWith('@')) date = line.slice(1);
-      else if (line !== '' && (!latest || !out.has(line))) out.set(line, date);
-    }
+/** The first commit of every file under `dir` in `root` — the oldest that added it (author day,
+ *  `%as`; renames not followed, merges not read), from one `git log` walk. Empty where `root` is
+ *  no git checkout. */
+export function firstCommits(root: string, dir: string): Map<string, FirstCommit> {
+  const out = new Map<string, FirstCommit>();
+  let log = '';
+  try {
+    log = gitOut(root, ['log', '--diff-filter=A', '--no-renames', '--format=@%H %as', '--name-only', '--relative', '--', dir]);
+  } catch {
     return out;
-  };
-  // A path's last edit; a path only the ticket commands ever wrote takes the day it was filed
-  // (its oldest commit: the walk runs newest first, so the last date seen wins).
-  const edits = walk(EDITS, true);
-  for (const [path, date] of walk([], false)) if (!edits.has(path)) edits.set(path, date);
-  return edits;
+  }
+  const shallow = boundaries(root);
+  let at: FirstCommit = { date: '', boundary: false };
+  // Newest first, so the last commit a path is seen with is its oldest.
+  for (const line of log.split('\n')) {
+    if (line.startsWith('@')) {
+      const [sha, date] = line.slice(1).split(' ');
+      at = { date, boundary: shallow.has(sha) };
+    } else if (line !== '') out.set(line, at);
+  }
+  return out;
+}
+
+/** One file's first commit (`firstCommits` for one path), or null — never committed. */
+export const firstCommit = (root: string, path: string): FirstCommit | null => firstCommits(root, path).get(path) ?? null;
+
+/** Deepen a shallow clone to its whole history, quietly and bounded, as the claim needs it to date
+ *  a ticket; the error (git's own words) when it cannot. */
+export function unshallow(root: string, remote: string): string | null {
+  try {
+    execFileSync('git', ['-C', root, 'fetch', '-q', '--unshallow', remote], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CLOSE_TIMEOUT_MS, killSignal: 'SIGKILL', env: { ...process.env, ...GIT_NONINTERACTIVE_ENV } });
+    return null;
+  } catch (e) {
+    const err = e as { stderr?: string; message?: string };
+    return (err.stderr || err.message || String(e)).trim().split('\n').at(-1) ?? 'no reason given';
+  }
 }

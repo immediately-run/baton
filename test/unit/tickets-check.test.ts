@@ -388,7 +388,7 @@ describe('dependsLine and bodyDependencies: the line’s bounds', () => {
   });
 });
 
-/** `repo`, its commit dated `day`: the tickets' "last changed" the stale-rule report reads. */
+/** `repo`, its commit dated `day`: the day the tickets were filed, which the stale-rule report reads. */
 function datedRepo(day: string, files: Record<string, string>, settings: Record<string, unknown> = {}): string {
   const before = { a: process.env.GIT_COMMITTER_DATE, b: process.env.GIT_AUTHOR_DATE };
   process.env.GIT_COMMITTER_DATE = `${day}T12:00:00Z`;
@@ -401,10 +401,27 @@ function datedRepo(day: string, files: Record<string, string>, settings: Record<
   }
 }
 
+/** Commit `text` to `path` in `dir`, authored and committed on `day`. */
+function edit(dir: string, path: string, text: string, day: string, subject = 'an edit'): void {
+  mkdirSync(join(dir, path, '..'), { recursive: true });
+  writeFileSync(join(dir, path), text);
+  execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' });
+  execFileSync('git', ['-C', dir, 'commit', '-q', '-m', subject], { stdio: 'ignore', env: { ...process.env, GIT_AUTHOR_DATE: `${day}T12:00:00Z`, GIT_COMMITTER_DATE: `${day}T12:00:00Z` } });
+}
+
+/** A `--depth 1` clone of `dir`: its boundary commit is `dir`'s head. */
+function shallowClone(dir: string): string {
+  const clone = mkdtempSync(join(tmpdir(), 'baton-shallow-'));
+  dirs.push(clone);
+  rmSync(clone, { recursive: true, force: true });
+  execFileSync('git', ['clone', '-q', '--depth', '1', `file://${dir}`, clone], { stdio: 'ignore' });
+  return clone;
+}
+
 const HISTORY = '## Changelog\n\n- **2026-11-01 — the ruling.** R-BTN-50 changed.\n\n- **2026-11-02 — another.** R-BTN-50 and R-BTN-33 changed.\n\n## Retired requirements\n';
 
 describe('checkTickets: the stale-rule report (2026-11-03)', () => {
-  it('a live ticket citing a rule amended after its last commit is reported, never a finding; a closed one, or one that cites nothing amended, is not', async () => {
+  it('a live ticket citing a rule amended after it was filed is reported, never a finding; a closed one, or one that cites nothing amended, is not', async () => {
     const dir = datedRepo('2026-10-29', {
       'spec/BATON_SPEC_HISTORY.md': HISTORY,
       'tickets/A-1.md': ticket('id: A-1', 'The core reads `prs` (R-BTN-50, R-BTN-33).\n'),
@@ -419,14 +436,35 @@ describe('checkTickets: the stale-rule report (2026-11-03)', () => {
     const out: string[] = [];
     expect(await checkTicketsMain(['--repo', dir], { log: (l) => out.push(l) })).toBe(0);
     expect(out).toEqual([
-      'tickets/A-1.md: cites rules amended since it last changed (2026-10-29): R-BTN-33 (2026-11-02), R-BTN-50 (2026-11-02, 2 entries)',
-      'baton tickets check: 1 live ticket(s) cite rules amended since they last changed (reported, not a finding)',
+      'tickets/A-1.md: cites rules amended since it answered for them (filed 2026-10-29): R-BTN-33 (2026-11-02), R-BTN-50 (2026-11-02, 2 entries)',
+      'baton tickets check: 1 live ticket(s) cite rules amended since they answered for them (reported, not a finding)',
       'baton tickets check: 2 ticket(s), ✓ no findings',
     ]);
     // --quiet keeps stdout for the exit code, the report included.
     const quiet: string[] = [];
     expect(await checkTicketsMain(['--repo', dir, '--quiet'], { log: (l) => quiet.push(l) })).toBe(0);
     expect(quiet).toEqual([]);
+  });
+
+  it('a later edit of the ticket — a spec PR’s note, a strike — clears nothing; only a re-read note naming the rule does', async () => {
+    const dir = datedRepo('2026-10-29', { 'spec/BATON_SPEC_HISTORY.md': HISTORY, 'tickets/A-1.md': ticket('id: A-1', 'The core reads `prs` (R-BTN-50, R-BTN-33).\n') });
+    edit(dir, 'tickets/A-1.md', ticket('id: A-1', 'The core reads ~~`prs`~~ (R-BTN-50, R-BTN-33).\n\n_(2026-11-05: struck by a spec PR.)_\n'), '2026-11-05', 'spec: strike what R-BTN-50 contradicts');
+    expect((await checkTickets(dir)).stale?.map((s) => [s.since, s.rules.map((x) => x.id)])).toEqual([['2026-10-29', ['R-BTN-33', 'R-BTN-50', 'R-BTN-50']]]);
+    edit(dir, 'tickets/A-1.md', ticket('id: A-1', 'The core reads ~~`prs`~~ (R-BTN-50, R-BTN-33).\n\n_(2026-11-05: rules re-read: R-BTN-50)_\n'), '2026-11-05', 'spec: re-read R-BTN-50 for A-1');
+    expect((await checkTickets(dir)).stale?.map((s) => s.rules.map((x) => x.id))).toEqual([['R-BTN-33']]);
+  });
+
+  it('a shallow clone skips the report with one line saying so, never a finding', async () => {
+    const dir = datedRepo('2026-10-29', { 'spec/BATON_SPEC_HISTORY.md': HISTORY, 'tickets/A-1.md': ticket('id: A-1', 'The core reads `prs` (R-BTN-50).\n') });
+    edit(dir, 'tickets/A-2.md', ticket('id: A-2'), '2026-11-05');
+    const clone = shallowClone(dir);
+    const r = await checkTickets(clone);
+    expect(r.findings).toEqual([]);
+    expect(r.stale).toBeUndefined();
+    expect(r.notes).toEqual(['baton tickets check: a shallow clone — the stale-rule report is skipped, since its dates need the whole history (`git fetch --unshallow` to read it; never a finding)']);
+    const out: string[] = [];
+    expect(await checkTicketsMain(['--repo', clone], { log: (l) => out.push(l) })).toBe(0);
+    expect(out).toEqual([r.notes![0], 'baton tickets check: 2 ticket(s), ✓ no findings']);
   });
 
   it('check.rules names another history and prefix; a repository without the file has no report', async () => {
@@ -441,15 +479,15 @@ describe('checkTickets: Trust and Invariants after check.sections_since (2026-11
   const filed = (day: string, sections: string) => `**Brief:** b\n\n${sections}\n\n## Status\n\n_filed ${day}._\n`;
   const BOTH = '### Trust\n\nno new input\n\n### Invariants\n\nR-BTN-33, kept by storing nothing';
 
-  it('fails a ticket filed on or after the day without either heading; passes one filed before, one with both, and one with no _filed line', async () => {
+  it('fails a ticket filed on or after the day without either heading; passes one filed before, and one with both', async () => {
     const files = {
       'tickets/A-1.md': ticket('id: A-1', filed('2026-11-02', '')),
       'tickets/A-2.md': ticket('id: A-2', filed('2026-11-03', '### Trust\n\nno new input')),
       'tickets/A-3.md': ticket('id: A-3', filed('2026-11-04', BOTH)),
-      'tickets/A-4.md': ticket('id: A-4', 'no status line\n'),
+      'tickets/A-4.md': ticket('id: A-4', 'no status line: dated by its first commit, 2026-11-02\n'),
       'tickets/A-5.md': ticket('id: A-5\nstatus: done', filed('2026-11-04', '')),
     };
-    const dir = repo(files, { check: { sections_since: '2026-11-03' } });
+    const dir = datedRepo('2026-11-02', files, { check: { sections_since: '2026-11-03' } });
     expect(lines(await checkTickets(dir, {}, { sections_since: '2026-11-03' }))).toEqual([
       'tickets/A-2.md: filed 2026-11-03, on or after check.sections_since (2026-11-03), and has no ### Invariants section — the rules it must not break, by id, and how the design keeps each',
     ]);
@@ -464,6 +502,43 @@ describe('checkTickets: Trust and Invariants after check.sections_since (2026-11
       'tickets/A-1.md: filed 2026-11-03, on or after check.sections_since (2026-11-03), and has no ### Trust section',
       'tickets/A-1.md: filed 2026-11-03, on or after check.sections_since (2026-11-03), and has no ### Invariants section',
     ]);
+  });
+
+  it('a ticket with no _filed line is dated by its file’s first commit — a hand filing is judged too; an uncommitted one is filed today', async () => {
+    const dir = datedRepo('2026-11-03', { 'tickets/A-1.md': ticket('id: A-1', '**Brief:** filed by hand in a PR.\n') });
+    edit(dir, 'tickets/A-1.md', ticket('id: A-1', '**Brief:** filed by hand in a PR, then edited.\n'), '2026-11-09');
+    expect(lines(await checkTickets(dir, {}, { sections_since: '2026-11-03' })).map((l) => l.split(' — ')[0])).toEqual([
+      'tickets/A-1.md: filed 2026-11-03, on or after check.sections_since (2026-11-03), and has no ### Trust section',
+      'tickets/A-1.md: filed 2026-11-03, on or after check.sections_since (2026-11-03), and has no ### Invariants section',
+    ]);
+    // Filed by hand the day before the cutover: not judged, however late its last edit.
+    const before = datedRepo('2026-11-02', { 'tickets/A-1.md': ticket('id: A-1', '**Brief:** b\n') });
+    edit(before, 'tickets/A-1.md', ticket('id: A-1', '**Brief:** b, edited\n'), '2026-11-09');
+    expect((await checkTickets(before, {}, { sections_since: '2026-11-03' })).findings).toEqual([]);
+    // Not yet committed: filed today.
+    writeFileSync(join(before, 'tickets', 'A-2.md'), ticket('id: A-2', '**Brief:** new\n'));
+    expect(lines(await checkTickets(before, {}, { sections_since: '2026-11-03' }, { today: '2026-11-04' })).map((l) => l.split(' — ')[0])).toEqual([
+      'tickets/A-2.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Trust section',
+      'tickets/A-2.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Invariants section',
+    ]);
+  });
+
+  it('in a shallow clone, a ticket whose first commit is the boundary is undetermined: said, never a finding, never passed silently', async () => {
+    const dir = datedRepo('2026-11-04', {
+      'tickets/A-1.md': ticket('id: A-1', '**Brief:** filed by hand, no sections.\n'),
+      'tickets/A-2.md': ticket('id: A-2', filed('2026-11-04', '')),
+      'tickets/A-3.md': ticket('id: A-3', `**Brief:** b\n\n${BOTH}\n`),
+    });
+    edit(dir, 'tickets/A-4.md', ticket('id: A-4', '**Brief:** after the boundary\n'), '2026-11-05');
+    const clone = shallowClone(dir);
+    // The clone's boundary is the 2026-11-05 commit, so A-1..A-3 are seen as added there.
+    const r = await checkTickets(clone, {}, { sections_since: '2026-11-03' });
+    expect(lines(r).map((l) => l.split(' — ')[0])).toEqual([
+      'tickets/A-2.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Trust section',
+      'tickets/A-2.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Invariants section',
+    ]);
+    // A-4's first commit is the boundary too: a depth-1 clone sees nothing older than its head.
+    expect(r.notes).toEqual(['baton tickets check: 2 ticket(s) lacking ### Trust or ### Invariants, with no _filed line and a first commit this shallow clone does not show, not judged against check.sections_since (2026-11-03): A-1, A-4']);
   });
 
   it('a sections_since that is not a day is the operator’s error', async () => {
