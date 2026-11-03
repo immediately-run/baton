@@ -1228,9 +1228,13 @@ live solely in Baton, and both are exportable (R-BTN-88).
     a `**Used by:**` line is never read — to its `depends_on`, both ways; a ticket with no such line
     is not compared. With `check: {sections_since: "<YYYY-MM-DD>"}` (default off), a live ticket
     whose `## Status` says it was `_filed` on or after that day and that lacks a `### Trust` or
-    `### Invariants` heading is a finding; a ticket with no `_filed` line is not judged. It also
+    `### Invariants` heading is a finding; a ticket with no `_filed` line is not judged, and
+    `tickets new` writes that line into every filing, `--body-file`'s included, and refuses one
+    lacking either heading on or after the day, before it pushes. It also
     reports, never as a finding, each live ticket citing a rule id that a dated entry of the
-    spec's history, dated after the ticket file's last commit, names (`check.rules: {history,
+    spec's history names, dated after the ticket was last answered for — its file's last edit (a
+    commit that is neither a merge nor the ticket commands' own `tickets: …` bookkeeping, else the
+    commit that filed it), or its newest `rules re-read` note if later (`check.rules: {history,
     prefix}`, default `spec/BATON_SPEC_HISTORY.md` and `R-BTN`; no file, no report): one line per
     ticket, then their count. Exit 1 with one `path: message` line per finding, 0 without; an
     unreadable root or a malformed `baton.json` is an error (exit 2). It reads; it never writes.
@@ -1261,7 +1265,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
     - `claim <id> [--rules-reread]` moves a ticket available → in-progress, and refuses one that is
       not available, whose `depends_on` are not all done (archived, or carrying any of the markdown
       source's closed statuses), or whose body cites a rule that a history entry dated after the
-      ticket file's last commit names (the check's stale-rule reading, above, at the head the
+      ticket was last answered for names (the check's stale-rule reading, above, at the head the
       claim lands on), listing each id with the entry's date and title. With `--rules-reread` it
       claims, and the claim's commit adds `_(<date>: rules re-read at claim: <id> (amended
       <date>), …)_` to the ticket's `## Status`. `set <id> in-progress` is a claim and reads the

@@ -19,7 +19,7 @@ import { pathToFileURL } from 'node:url';
 import { bodyDependencies, checkPayload, dependsCycle, dependsCycles } from '../core/board';
 import { LOCAL_ID } from '../core/validate'; // the board's own grammar, cited below (§4.4)
 import { readItems } from './read-items';
-import { fileDates, filedDate, historyEntries, missingSections, rulesConfig, sectionsSince, staleRules, staleSummary, type RulesConfig, type StaleRule } from './tickets-rules';
+import { fileDates, filedDate, rulesSince, historyEntries, missingSections, rulesConfig, sectionsSince, staleRules, staleSummary, type RulesConfig, type StaleRule } from './tickets-rules';
 import { ticketsMarkdown, type MarkdownFile, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
 /** The ids a `**Depends on:**` line may name, as prose writes them (B-111, round 1): an
@@ -217,7 +217,7 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
       for (const s of missingSections(text)) add({ path: t.path, message: `filed ${filed}, on or after check.sections_since (${since}), and has no ### ${s} section — ${s === 'Trust' ? 'every new input it adds, who may write it and how Baton verifies it (docs/security-model.mdx), or "no new input"' : 'the rules it must not break, by id, and how the design keeps each'}` });
     }
     // Rules amended since the ticket last changed: reported, never a finding.
-    const date = dates.get(t.path);
+    const date = rulesSince(dates.get(t.path) ?? null, text);
     if (date) {
       const amended = staleRules(text, date, entries, rules.prefix);
       if (amended.length) stale.push({ path: t.path, since: date, rules: amended });

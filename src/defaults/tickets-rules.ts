@@ -187,31 +187,57 @@ export function sectionsSince(check: { sections_since?: unknown } | undefined): 
  * git
  * ---------------------------------------------------------------------------------------- */
 
+/** The commits that count as someone editing a ticket: not the ticket commands' own bookkeeping
+ *  (`tickets: …` — a claim, a move, a reverse mention, a reservation) and not a merge, either
+ *  of which would otherwise clear a stale reading without anyone re-reading the rules. */
+const EDITS = ['--no-merges', '--invert-grep', '--grep=^tickets: '];
+
+/** The day a ticket's rules were last answered for: the later of its last edit and the newest
+ *  `rules re-read at claim` note in its Status — the note a claim with `--rules-reread` writes
+ *  is itself a `tickets:` commit, so it is read from the text. */
+export function rulesSince(edited: string | null, text: string): string | null {
+  const notes = [...text.matchAll(/_\((\d{4}-\d{2}-\d{2}): rules re-read at claim:/g)].map((m) => m[1]);
+  const all = [edited, ...notes].filter((d): d is string => !!d).sort();
+  return all.length ? all[all.length - 1] : null;
+}
+
 /** The day (`%cs`, the committer's) of the last commit that touched `path` in `root`, or null —
  *  not a git checkout, or the file never committed. */
 export function fileDate(root: string, path: string): string | null {
-  try {
-    const out = execFileSync('git', ['-C', root, 'log', '-1', '--format=%cs', '--', path], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    return /^\d{4}-\d{2}-\d{2}$/.test(out) ? out : null;
-  } catch {
-    return null;
-  }
+  const day = (args: string[]): string | null => {
+    try {
+      const out = execFileSync('git', ['-C', root, 'log', ...args, '--format=%cs', '--', path], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n');
+      const d = args.includes('--diff-filter=A') ? out[out.length - 1] : out[0];
+      return /^\d{4}-\d{2}-\d{2}$/.test(d ?? '') ? d : null;
+    } catch {
+      return null;
+    }
+  };
+  // The last edit, else — a ticket only the ticket commands ever wrote — the day it was filed.
+  return day(['-1', ...EDITS]) ?? day(['--diff-filter=A']);
 }
 
 /** The last commit day of every file under `dir` in `root`, from one `git log` walk (the first
  *  date a path appears with is its latest). Empty where `root` is no git checkout. */
 export function fileDates(root: string, dir: string): Map<string, string> {
-  const out = new Map<string, string>();
-  let log = '';
-  try {
-    log = execFileSync('git', ['-C', root, '-c', 'core.quotePath=false', 'log', '--format=@%cs', '--name-only', '--relative', '--', dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 });
-  } catch {
+  const walk = (extra: string[], latest: boolean): Map<string, string> => {
+    const out = new Map<string, string>();
+    let log = '';
+    try {
+      log = execFileSync('git', ['-C', root, '-c', 'core.quotePath=false', 'log', ...extra, '--format=@%cs', '--name-only', '--relative', '--', dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 });
+    } catch {
+      return out;
+    }
+    let date = '';
+    for (const line of log.split('\n')) {
+      if (line.startsWith('@')) date = line.slice(1);
+      else if (line !== '' && (!latest || !out.has(line))) out.set(line, date);
+    }
     return out;
-  }
-  let date = '';
-  for (const line of log.split('\n')) {
-    if (line.startsWith('@')) date = line.slice(1);
-    else if (line !== '' && !out.has(line)) out.set(line, date);
-  }
-  return out;
+  };
+  // A path's last edit; a path only the ticket commands ever wrote takes the day it was filed
+  // (its oldest commit: the walk runs newest first, so the last date seen wins).
+  const edits = walk(EDITS, true);
+  for (const [path, date] of walk([], false)) if (!edits.has(path)) edits.set(path, date);
+  return edits;
 }

@@ -25,7 +25,7 @@ import { accepts, accepting, allocates, allocatingPrefix, GITHUB_PR, LIVE_STATUS
 import { addPr, idOf, locate, nextNumber, scalar, setKey } from './tickets-file';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
-import { appendStatus, fileDate, historyEntries, rereadNote, rulesConfig, staleList, staleRules } from './tickets-rules';
+import { appendStatus, fileDate, historyEntries, missingSections, rulesSince, rereadNote, rulesConfig, sectionsSince, staleList, staleRules } from './tickets-rules';
 import { LEDGER_NAME, ledgerKey, migrationNumbers, nextReserved, parseLedger, RESERVE_KINDS, reserveConfig, scenarioNumbers, writeLedger, type ReserveKind } from './tickets-reserve';
 import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { defaultBranch } from './request';
@@ -200,7 +200,7 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
     if (status === 'in-progress') {
       const rules = rulesConfig((readSettingsJson(dir) as { check?: { rules?: unknown } }).check);
       const history = join(dir, rules.history);
-      const since = existsSync(history) ? fileDate(dir, found.path) : null;
+      const since = existsSync(history) ? rulesSince(fileDate(dir, found.path), text) : null;
       const stale = since ? staleRules(text, since, historyEntries(readFileSync(history, 'utf8')), rules.prefix) : [];
       if (stale.length && !rulesReread) {
         throw new Error([
@@ -346,6 +346,13 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
     }
     const text = ticketText({ id, title, project, settings, deps, t, date });
     judgeFiling({ id, text, deps, settings });
+    // A filing after `check.sections_since` carries Trust and Invariants, `--body-file` included:
+    // refused here, before the push, rather than found by the next check.
+    const since = sectionsSince((readSettingsJson(dir) as { check?: { sections_since?: unknown } }).check);
+    if (since && date >= since) {
+      const missing = missingSections(text);
+      if (missing.length) throw new Error(`${id}: filed on or after check.sections_since (${since}), so the body needs ${missing.map((m) => `### ${m}`).join(' and ')} — ${missing.includes('Trust') ? 'Trust: every new input it adds, who may write it and how Baton verifies it (docs/security-model.mdx), or "no new input"' : ''}${missing.length === 2 ? '; ' : ''}${missing.includes('Invariants') ? 'Invariants: the rules it must not break, by id, and how the design keeps each' : ''}`);
+    }
     // The reverse mentions: each dependency's `**Used by:**` line gains this id, so a file says
     // who waits on it without a search (the generated page's rule).
     const updates = reverseMentions(files, id, deps);
@@ -377,7 +384,13 @@ function ticketText(o: { id: string; title: string; project: string; settings: T
   const { id, title, project, settings, deps, t, date } = o;
   const description = (t.description ?? t.title).replace(/\s+/g, ' ').trim();
   const tags = t.tags?.length ? t.tags : settings.tags;
-  const body = t.body?.trim() ? t.body.trim() : skeletonBody({ description, deps, ...(t.course ? { course: t.course } : {}), date });
+  // `--body-file`'s body gains the skeleton's `_filed` Status line when it has none, so the
+  // sections check sees every filing, not only the skeleton's.
+  const given = t.body?.trim();
+  const filedLine = t.course ? `_filed ${date}; the \`${t.course}\` course._` : `_filed ${date}._`;
+  const body = given
+    ? (/^_filed \d{4}-\d{2}-\d{2}/m.test(given) ? given : appendStatus(given, filedLine).trim())
+    : skeletonBody({ description, deps, ...(t.course ? { course: t.course } : {}), date });
   return [
     '---',
     `title: ${scalar(`${id} — ${title}`)}`,

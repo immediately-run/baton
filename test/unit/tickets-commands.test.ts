@@ -16,7 +16,7 @@ import { checkTickets } from '../../src/defaults/tickets-check';
 import { accepts, readTicketSettings, requiresFrom } from '../../src/defaults/tickets-config';
 import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
 import { moveTicket, reserveNumber, reverseMention, skeletonBody } from '../../src/defaults/tickets';
-import { appendStatus, historyEntries, missingSections, rereadNote, ruleIds, rulesConfig, staleRules } from '../../src/defaults/tickets-rules';
+import { appendStatus, historyEntries, missingSections, rereadNote, ruleIds, rulesConfig, staleRules, fileDate, rulesSince } from '../../src/defaults/tickets-rules';
 import { ledgerKey, nextReserved, parseLedger, scenarioNumbers, writeLedger } from '../../src/defaults/tickets-reserve';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
 
@@ -539,6 +539,45 @@ describe('the stale-rule guard: its reading (2026-11-03)', () => {
   });
 });
 
+describe('the stale-rule guard: whose commits count (2026-11-03)', () => {
+  const commit = (dir: string, day: string, subject: string, text: string) => {
+    writeFileSync(join(dir, 'tickets', 'B-1.mdx'), text);
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', dir, 'commit', '-q', '-m', subject], { stdio: 'ignore', env: { ...process.env, GIT_COMMITTER_DATE: `${day}T12:00:00Z`, GIT_AUTHOR_DATE: `${day}T12:00:00Z` } });
+  };
+  const fresh = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baton-edits-'));
+    execFileSync('git', ['init', '-q', '-b', 'main', dir], { stdio: 'ignore' });
+    execFileSync('git', ['-C', dir, 'config', 'user.email', 'e@test'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', dir, 'config', 'user.name', 'e'], { stdio: 'ignore' });
+    mkdirSync(join(dir, 'tickets'), { recursive: true });
+    return dir;
+  };
+
+  it('the ticket commands\' own commits never clear a stale reading; a person\'s edit does', () => {
+    const dir = fresh();
+    commit(dir, '2026-10-20', 'B-1: the plan', 'v1\n');
+    commit(dir, '2026-11-05', 'tickets: file B-2 — a reverse mention', 'v2\n');
+    expect(fileDate(dir, 'tickets/B-1.mdx')).toBe('2026-10-20');
+    commit(dir, '2026-11-06', 'B-1: rewrite what the 2026-11-01 ruling contradicts', 'v3\n');
+    expect(fileDate(dir, 'tickets/B-1.mdx')).toBe('2026-11-06');
+  });
+
+  it('a ticket only the ticket commands wrote takes the day it was filed', () => {
+    const dir = fresh();
+    commit(dir, '2026-10-20', 'tickets: file B-1 — new', 'v1\n');
+    commit(dir, '2026-11-05', 'tickets: claim B-1 (in progress)', 'v2\n');
+    expect(fileDate(dir, 'tickets/B-1.mdx')).toBe('2026-10-20');
+  });
+
+  it('the newest rules-re-read note answers for the rules up to its day', () => {
+    const text = '## Status\n\n_(2026-11-04: rules re-read at claim: R-BTN-33 (amended 2026-11-02))_\n';
+    expect(rulesSince('2026-10-20', text)).toBe('2026-11-04');
+    expect(rulesSince('2026-11-09', text)).toBe('2026-11-09');
+    expect(rulesSince(null, 'no note')).toBeNull();
+  });
+});
+
 describe('baton tickets claim: the stale-rule guard (2026-11-03)', () => {
   it('refuses a ticket citing a rule amended after its last commit, naming each id, date and title; nothing lands', () => {
     const f = datedRepo('2026-10-20', { existing: { 'tickets/B-1.mdx': citing('B-1') }, files: { 'spec/BATON_SPEC_HISTORY.md': HISTORY } });
@@ -602,6 +641,33 @@ describe('baton tickets new: the Trust and Invariants sections (2026-11-03)', ()
     expect(body).toContain('who may write it and how Baton verifies it');
     expect(body).toContain('R-BTN-33 filter fields');
     expect(missingSections('---\nid: B-1\n---\n\n### Trust\n\n```\n### Invariants\n```\n')).toEqual(['Invariants']);
+  });
+});
+
+describe('baton tickets new --body-file: filed and judged like the skeleton (2026-11-03)', () => {
+  it('a body with no _filed line gains one under ## Status, so the sections check sees it', () => {
+    const f = repo();
+    const body = join(f.dir, 'body.md');
+    writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n### What to build\n\nMine.\n');
+    expect(run(f.dir, 'new', '--title', 'a', '--body-file', body).code).toBe(0);
+    expect(f.at('tickets/B-1.mdx')).toMatch(/\n## Status\n\n_filed \d{4}-\d{2}-\d{2}\._\n/);
+    // A body that already has its own _filed line keeps it, once.
+    writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n## Status\n\n_filed 2026-01-02._\n');
+    expect(run(f.dir, 'new', '--title', 'b', '--body-file', body).code).toBe(0);
+    expect(f.at('tickets/B-2.mdx')!.match(/_filed /g)).toHaveLength(1);
+  });
+
+  it('after check.sections_since, a body without ### Trust and ### Invariants is refused before the push', () => {
+    const f = repo({ settings: { check: { sections_since: '2000-01-01' } } });
+    const before = f.head().sha;
+    const body = join(f.dir, 'body.md');
+    writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n### What to build\n\nMine.\n\n### Trust\n\nno new input\n');
+    const r = run(f.dir, 'new', '--title', 'a', '--body-file', body);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain('B-1: filed on or after check.sections_since (2000-01-01), so the body needs ### Invariants');
+    expect(f.head().sha).toBe(before);
+    writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n### What to build\n\nMine.\n\n### Trust\n\nno new input\n\n### Invariants\n\nR-BTN-33: posts no prose.\n');
+    expect(run(f.dir, 'new', '--title', 'a', '--body-file', body).code).toBe(0);
   });
 });
 
