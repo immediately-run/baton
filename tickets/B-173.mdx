@@ -1,5 +1,5 @@
 ---
-title: "B-173 — Say what retiring a repository ends: sessions, MCP keys, OAuth grants, sync keys, grants, claims and queued effects"
+title: "B-173 — Retiring a repository ends everything scoped to it: sessions, MCP keys, OAuth grants, sync keys, grants, claims and queued effects"
 id: B-173
 project: baton
 status: available
@@ -9,8 +9,8 @@ repos:
 tags:
   - roadmap-item
 order: 1175
-tier: judgement
-description: "admin.repo.retire is a registry action and a destructive one (§12.2), and the code sets retired_at, but no rule says what retirement does: whether an owner's session loses the repository, whether MCP keys and OAuth grants scoped to it end, whether its sync keys, grants, active claims and outbox entries survive, and whether it can be undone. Write the rule (recommended: retirement ends every credential and lease scoped to the repository, keeps its history, and is not reversible), then build what the code lacks. Requires: none."
+tier: routine
+description: "Build R-BTN-47's retirement: in the transaction that sets retired_at, end the repository's reach for sessions, revoke its MCP keys and OAuth grants with their tokens, its sync and mirror keys, runner grants and check-runners, release its active claims (released:retired), drop its queued outbox entries; later calls not-found, the id never registered again. Requires: none."
 topics:
   - baton
 owns: {}
@@ -35,24 +35,37 @@ lease, or a queued `withdraw` or `forge-check` is still offered. The code today 
 `repositories.retired_at` and filters reads by it (`src/core/admin.ts`, `src/core/claims.ts`);
 each surface's behaviour is whatever its query happens to do.
 
+### Spec (written 2026-11-03)
+
+The spec half is written: R-BTN-47's *Retirement* (final; sessions, MCP keys and OAuth grants,
+sync and mirror keys, runner grants and check-runners, active claims `released:retired`, queued
+and claimed outbox entries, owners and history kept; later calls `not-found`, the id never
+registered again), R-BTN-155 and R-BTN-130 citing it, the end-reason row and S-BTN-198, in PR
+`claude/baton-spec-review-2fwiga` at the owner's request ("Please ensure all tickets required to
+implement the spec are ready to be picked up for implementation").
+
 ### What to build
 
-1. **A spec PR first** under the babysit skill's *Spec PRs*, recommended content: retiring a
-   repository, in the transaction that sets `retired_at`, (a) removes it from every session's
-   reach (ending a session left with none), (b) revokes every MCP key and OAuth grant scoped to it,
-   (c) revokes its sync keys and refuses its CI identity, (d) ends its active claims
-   `released:retired` with fences as R-BTN-19 applies, (e) drops its queued outbox entries, logging
-   each, and (f) keeps its events and history for export. A retired id is never registered again in
-   the tenant (registration `conflict`), so nothing scoped to it can come back to life. R-BTN-47
-   states it; S-BTN-30 (or a new scenario) tests each of (a)–(f).
-2. The core changes the rule needs beyond what `retired_at` filtering already gives, and the
-   tests.
+1. `admin.repo.retire` runs R-BTN-47's six steps in the one transaction that sets `retired_at`
+   (`src/core/admin.ts`): the session reach, the MCP key and OAuth grant revocations with their
+   tokens, the sync and mirror key, runner grant and check-runner revocations, a `release` with
+   reason `retired` to each active claim (fenced as R-BTN-19 says when unacknowledged), and the
+   outbox entries `dropped`, each logged.
+2. Every route naming a retired repository answers `not-found` (today several filter by
+   `retired_at`; make it one check), forge notifications for it are refused, and registering a
+   retired id is `conflict` (today a known id takes the change path).
+3. The export keeps a retired repository's owners, events, history and closed tickets.
+4. `released:retired` in the end-reason vocabulary.
+
+### Tests
+
+S-BTN-198 as §15 states it (a new scenario file), green in `npm test` on both hosts.
 
 ### Exit criteria
 
-- [ ] the spec PR merged, its review rounds recorded in `spec/BATON_SPEC_HISTORY.md`
 - [ ] the scenario green in `npm test` on both hosts; `npm run typecheck` green
 
 ## Status
 
 - 2026-11-02: drafted from the 2026-11-02 security review (PR #165).
+- 2026-11-03: spec half written (PR `claude/baton-spec-review-2fwiga`); this ticket now builds it.

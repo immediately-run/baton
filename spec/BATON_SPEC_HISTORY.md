@@ -2203,6 +2203,25 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   `baton-request/` prefix, which shares a string with the SSHSIG namespace `baton-request` but
   names a different thing in a different place.
 
+- **2026-11-03 — more credential names, the sign-in preview and retirement.** The owner, asked
+  whether masking should catch `*_PASSWORD`, `PGPASSWORD` and `*_PAT` by default: "Ok, please draft
+  the spec change for this"; and, on B-172 and B-173 still holding their spec halves: "Please
+  ensure all tickets required to implement the spec are ready to be picked up for
+  implementation". Changed: R-BTN-144's class 7 adds names ending `_PASSWORD` or `_PAT` and the
+  name `PGPASSWORD`, matched case-sensitively, with S-BTN-98's fixtures (B-170); R-BTN-155's
+  sign-in binds in two steps — the login-links routes answer `{role, client_addr, age_s}` and bind
+  nothing, the CLI asks `bind? [y/N]` with no `--yes`, and `{code, confirm: true}` binds — with
+  §14's two rows and S-BTN-124's cases (B-172; the open question on `sk-`-only binding is
+  untouched); R-BTN-47 gains *Retirement*: final, in one transaction ending every session's reach,
+  revoking MCP keys and OAuth grants with their tokens, sync and mirror keys, runner grants and
+  check-runners, releasing active claims `released:retired` and dropping queued outbox entries,
+  keeping owners and history for export, every later call `not-found` and the id never registered
+  again; R-BTN-155 and R-BTN-130 cite it; a new end-reason row; new scenario S-BTN-198 (B-173).
+  Two Decisions lines. Tickets: B-172 and B-173 now hold only their build halves; B-169's
+  supersession item moved to B-146, which builds the store; B-175's vendored-enum item dropped
+  (the read-back records GitHub's conclusions, `neutral` among them, and R-BTN-183 counts only
+  `success`); B-140 and B-39 updated for R-BTN-183, R-BTN-184 and R-BTN-84.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

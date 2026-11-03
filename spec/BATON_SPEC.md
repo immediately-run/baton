@@ -630,6 +630,24 @@ repository reachable over SSH is enough (R-BTN-105).
   (`POST /v1/admin/repositories`, R-BTN-57). A change never alters `forge`; it changes the
   forge path only by R-BTN-138's rules.
 
+  - **Retirement** (`admin.repo.retire`, destructive, §12.2) is final. In the transaction that
+    sets `retired_at`, Baton:
+    1. removes the repository from every dashboard session's reach, ending a session left with
+       none (R-BTN-155);
+    2. revokes every MCP key on it, OAuth grants included (`BATON_MCP_OAUTH_SPEC` §7), and with
+       them their tokens (R-BTN-130);
+    3. revokes its sync and mirror keys and its runner grants, check-runners included; its CI
+       identity and its forge notifications are refused from then on (R-BTN-93, R-BTN-15,
+       R-BTN-73);
+    4. sends each active claim on its tickets a `release` with reason `retired`
+       (`released:retired`), which R-BTN-19 fences as any unacknowledged release;
+    5. drops its `queued` and `claimed` outbox entries, logging each (R-BTN-171);
+    6. keeps its owners, events, history and closed tickets for export (R-BTN-88); an owner row
+       of a retired repository confers nothing.
+
+    Every later call naming the repository is `not-found`, as for one never registered, and its
+    id is never registered again in the tenant (`conflict`), so nothing scoped to it comes back.
+
   - **The seed (B-91).** `BATON_REPOSITORIES` seeds the registry at start, insert-only, through
     the same validation: each entry is a registration (`POST /v1/admin/repositories`' body,
     §11) less its `owner_keys`, or **with** them — the owner keys the administrator registered
@@ -4340,7 +4358,8 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
        whole: after a `BEGIN` line output is held until the `END` line or 16 KB, then the whole
        held run is masked;
     7. by name, the value of every variable of the leg's environment whose name ends `_KEY`,
-       `_TOKEN` or `_SECRET`, and of every variable `runner.json` `mask_env` names — so a kept
+       `_TOKEN`, `_SECRET`, `_PASSWORD` or `_PAT`, or is `PGPASSWORD`, each compared exactly as
+       the environment spells it, and of every variable `runner.json` `mask_env` names — so a kept
        credential the runner cannot otherwise recognise, a model provider's key among them, is
        masked without core or the runner naming any provider. The set is computed once, at leg
        start, from the environment the leg is given.
@@ -4572,6 +4591,7 @@ end on an ended claim is refused `claim-ended`.
 | `released:<bar reason>` | `released` | an owner bar that releases holders, with that bar's `reason` (R-BTN-67) | no |
 | `released:course-changed` | `released` | the leg left the course under the claim (R-BTN-64) | no |
 | `released:off-branch` | `released` | the claim's sha is not on the default branch (R-BTN-143) | no |
+| `released:retired` | `released` | the ticket's repository was retired (R-BTN-47) | no |
 | reaped, actor `alarm` | `reaped` | the runner was silent past its lease timeout (§9.5) | yes |
 | reaped, actor `admin:<fingerprint>` | `reaped` | an administrator's force-reap | no |
 | reaped, actor `alarm:unacked-release` | `reaped` | a delivered `release` unacknowledged for 2 hours | no |
@@ -5263,8 +5283,9 @@ is summarized in the principal table (§12.1).
       that exists at minting, so a later release never widens a key. A write is included only
       when listed by id. An id whose mark is `false`, or an action the minter could not take
       itself, is refused at minting (`invalid-params`).
-    - It lives at most 90 days (default 30) and ends after 7 days without a call, or when the
-      credential that minted it is removed or revoked. It is refused while the repository has
+    - It lives at most 90 days (default 30) and ends after 7 days without a call, when the
+      credential that minted it is removed or revoked, or when its repository is retired
+      (R-BTN-47). It is refused while the repository has
       `api_keys: false` (R-BTN-159), and works again when the setting returns, unless expired.
       It is revoked with `owner.mcp-key.revoke` (`POST /v1/owner/{repository}/mcp-keys/{name}/revoke`),
       and listed with the repository's credentials, with its minter (`GET
@@ -5325,20 +5346,25 @@ is summarized in the principal table (§12.1).
     2. The page sends `POST /v1/login {role}`. Baton writes a `login_codes` row of that role, sets
        the pending cookie `__Host-baton_pending` (value `bps_<id>_<secret>`, two minutes, R-BTN-16), and
        answers `{code}`: eight Crockford base32 characters, which the page shows.
-    3. The key holder types the code into the CLI, which shows the row's role, client address
-       and age ("owner session for <address>, <n> s old"), then sends `POST
-       /v1/admin/login-links {code}` with the administrator key, or `POST /v1/owner/login-links
-       {code}` with the owner key (an `sk-` key needs a touch). Baton binds the key to the
-       unexpired, unbound row with that code and the route's role; any other code, a row of the
-       other role included, is `not-found`, as is an owner key that owns no repository, and the
-       CLI then reports how many rows the address made and lost in the last two minutes.
+    3. The key holder types the code into the CLI, which sends `POST /v1/admin/login-links
+       {code}` with the administrator key, or `POST /v1/owner/login-links {code}` with the owner
+       key. Baton answers the unexpired, unbound row with that code and the route's role as
+       `{role, client_addr, age_s}` and binds nothing. The CLI prints it ("owner session for
+       <address>, <n> s old") and asks `bind? [y/N]`, defaulting to no and taking no `--yes`,
+       since the address is the one thing the key holder must read. On yes it sends the same
+       route `{code, confirm: true}`, and Baton binds the key to that row; on no it sends
+       nothing, and the row expires unbound. An `sk-` key needs a touch for each request. At
+       either step any other code, a row of the other role included, is `not-found`, as is an
+       owner key that owns no repository, and the CLI then reports how many rows the address
+       made and lost in the last two minutes.
     4. The page polls `POST /v1/login {poll: true}` (`{pending: true}` until bound). The request
        carrying the bound row's pending cookie gets the session cookie `__Host-baton_session`
        (value `bds_<id>_<secret>`), and the row is marked used.
 
     No command line, URL, history or capture carries anything that becomes a session: a process
     that asks for a code of its own gets nothing unless a key holder types that code, read from
-    Baton's own page, and an owner's code never becomes an administrator's session.
+    Baton's own page, and confirms the client address Baton shows for it before anything binds;
+    an owner's code never becomes an administrator's session.
   - **Limits.** At most five unbound rows per client address, each living two minutes. A sixth
     drops the oldest row whose pending cookie has never polled, else the oldest polled row; it
     never refuses. The client address is the connection's, or a forwarded one only from the
@@ -5346,8 +5372,8 @@ is summarized in the principal table (§12.1).
   - **Sessions.** A session lives at most 4 hours and dies with its minting key's role, checked
     on every request: an administrator's session ends as soon as its key leaves
     `BATON_ADMIN_KEYS`; an owner's session loses a repository as soon as its key stops owning it
-    (`owner.owner.remove`, or an administrator's revocation, R-BTN-57), and ends when none of its
-    repositories remains. `POST /v1/ui/logout` (`ui.logout`) ends the caller's own; `baton owner
+    (`owner.owner.remove`, or an administrator's revocation, R-BTN-57) or the repository is
+    retired (R-BTN-47), and ends when none of its repositories remains. `POST /v1/ui/logout` (`ui.logout`) ends the caller's own; `baton owner
     sessions revoke` (`POST /v1/owner/sessions/revoke`, `owner.sessions.revoke`, destructive)
     ends every session the owner's key minted; `baton admin sessions revoke --all` (`POST
     /v1/admin/sessions/revoke`, `admin.sessions.revoke`, destructive) ends every session.
@@ -6678,7 +6704,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `GET /v1/owner/{repository}/policy/log` | owner | `?after=<version>` | `{versions: [{version, hash, previous_hash, changed_by, approver, preset?, at, changed[]}]}` | R-BTN-188 (proposal) |
 | `POST /v1/human-keys` | a `human_only` key | `{public_key, signature}` — `signature` the new key's SSHSIG over its own public line, proof of possession; `{fingerprint, revoke: true, confirm: true}` | `{ok: true}`; `conflict` for a key holding another role; `unsatisfiable-approvers` naming a list a revocation would leave unsatisfied | R-BTN-185, R-BTN-188 (proposal) |
 | `GET /v1/repositories/{repository}/policy` | owner, administrator, a key granted on the repository | — | `{repository, version, hash, policy, guarantees, floors, check_app_id, at}` | R-BTN-189 (proposal) |
-| `POST /v1/owner/login-links` | an owner key of any repository | `{code}` | `{ok: true}`; `not-found` for any code but an unbound owner row's | R-BTN-155 |
+| `POST /v1/owner/login-links` | an owner key of any repository | `{code, confirm?}` | without `confirm`, `{role, client_addr, age_s}`, binding nothing; with `confirm: true`, `{ok: true}`, bound; `not-found` for any code but an unbound owner row's | R-BTN-155 |
 | `POST /v1/owner/confirm` | the owner key that minted the session | `{code, dry_run?}` | performs the action; with `dry_run`, `{action, target}`; `not-found` for another session's code | R-BTN-155 |
 | `POST /v1/owner/sessions/revoke` | an owner key | `{confirm: true}` | `{ok: true}`; ends every session the key minted | R-BTN-155 |
 | `POST /v1/owner/{repository}/code-repo-consents` | an approver on `{repository}`'s `approvers.members` | `{repository: <home listing it>, confirm: true}` or `{repository, withdraw: true}` | `{ok: true}` | R-BTN-140 |
@@ -6711,7 +6737,7 @@ repository's sync credential — a sync key, a CI identity token, or a machine k
 | `POST /v1/admin/readings` | admin | a reading, as an instrument's; or `{instance, clear: {source?}}` | `{ok: true}` | R-BTN-76, R-BTN-151 |
 | `PUT /v1/admin/capacities` | admin | `{capability, capacity: <1–64> \| null}` | `{ok: true}` | R-BTN-178 |
 | `PUT /v1/admin/settings` | admin | `{link_hosts?, session_hosts?, check_app_id?}` | `{ok: true}` | R-BTN-112, R-BTN-113, §12.7 |
-| `POST /v1/admin/login-links` | admin | `{code}` | `{ok: true}`; `not-found` for any code but an unbound administrator row's | R-BTN-155 |
+| `POST /v1/admin/login-links` | admin | `{code, confirm?}` | without `confirm`, `{role, client_addr, age_s}`, binding nothing; with `confirm: true`, `{ok: true}`, bound; `not-found` for any code but an unbound administrator row's | R-BTN-155 |
 | `POST /v1/admin/confirm` | the administrator key that minted the session | `{code, dry_run?}` | performs the action; with `dry_run`, `{action, target}`; `not-found` for another session's code | R-BTN-155 |
 | `POST /v1/admin/sessions/revoke` | admin | `{all: true, confirm: true}` | `{ok: true}` | R-BTN-155 |
 | `POST /v1/admin/freeze`, `…/unfreeze`, `…/seal` | admin | — | `{ok: true}`; seal `conflict` naming active or fence-pending claims and lagging mirrors (*adoption*) | R-BTN-88 |
@@ -6918,7 +6944,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-77 host allowlists | `session_url`s on allowed and other hosts, with userinfo, too long; a host added | only allowlisted kept, others logged; then kept |
 | S-BTN-78 session mode | a cloud session runs a leg | brief has no claim id or credential; its result block is checked like a move |
 | S-BTN-88 a fresh context | `max_context: 0.6`, `max_refreshes: 1` in each mode | `session` and `process` refresh under the claim, uncounted, then suspend; `attached` logs once |
-| S-BTN-98 a leg's log | `leg_log_root` on a local `file:` root; output with every kind of credential (an OAuth refresh token `bmr_…`, a pending sign-in `bps_…`, a provider key in `ANTHROPIC_API_KEY` and one in a variable `mask_env` names among them), a split secret, OSC 52; a failing write; `stream: false`; 60 MB; a short leg; a stopped leg; logs turned off; a `file:` root on the Cloudflare host; a reader without access | `dir` in the claim and `advance` replies and in `claim_legs`; create-only chunks, then `end.json`; every credential `***`, short ones logged; retries then `leg-log-write-failed`, the end not delayed; nothing written where off; `gap` at 50 MB; the Cloudflare root refused `invalid-params`; `leg log` reads the directory, escapes stripped; exit 1 |
+| S-BTN-98 a leg's log | `leg_log_root` on a local `file:` root; output with every kind of credential (an OAuth refresh token `bmr_…`, a pending sign-in `bps_…`, a provider key in `ANTHROPIC_API_KEY`, `PGPASSWORD`, a `GH_PAT` and one in a variable `mask_env` names among them), a split secret, OSC 52; a failing write; `stream: false`; 60 MB; a short leg; a stopped leg; logs turned off; a `file:` root on the Cloudflare host; a reader without access | `dir` in the claim and `advance` replies and in `claim_legs`; create-only chunks, then `end.json`; every credential `***`, short ones logged; retries then `leg-log-write-failed`, the end not delayed; nothing written where off; `gap` at 50 MB; the Cloudflare root refused `invalid-params`; `leg log` reads the directory, escapes stripped; exit 1 |
 | S-BTN-99 watching from the CLI | owner, administrator, foreign owner run `leg log -f` on a running leg; the leg ends; `leg stop` | chunks printed in order, then followed until `end.json`; a missing `seq` `[gap]`; the foreign owner's runs read `forbidden`; release sent |
 | S-BTN-109 legs in a checkout | six script extensions, a `file:` dependency, Node 22.17 then 22.18+; lockfile kept and changed; off-branch sha; lease loss and Cancel during install; duplicate scripts; `yarn.lock`; a home import; no `runner:leg-trees` | 22.17 refused; each runs, `close`/`handoff` in the wrapper; one install per digest; `off-branch` before install; install killed; `owner-cancel` within 30 s; kit fails duplicates; `cannot-finish:spec`; import refused; rule 4 |
 | S-BTN-118 off-branch code never runs | a machine-key board on a feature-branch sha; a held rewrite claimed by a verifying and a fresh runner | `released:off-branch`, not failed, raised, want recorded; cached runner passes, fresh one `off-branch` |
@@ -6944,7 +6970,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-101 the MCP endpoint | mints within and beyond what R-BTN-186 admits (an attestation, a route, `ticket.resolve`, `owner.grant.add`); a name in live use, and one a revoked key bore; protocol, batch, origin, rate and paging edges; unconfirmed and out-of-scope calls; `{hold:false}` on its own and on another's hold, and on a hold the revoked key of the same name set; a REST use | bad mints refused `invalid-params`; `conflict`, then minted; protocol errors as specified; `confirm-required`; uniform `forbidden`; its own lifted, another's `forbidden`, the dead key's `forbidden`; `rate-limited`; REST `unauthenticated` |
 | S-BTN-102 one action, three ways | `leg.stop` by REST, CLI and MCP, allowed and refused | one core function, one output, `mcp:<name>`; one refusal code |
 | S-BTN-103 an MCP key's life | `--ttl 120`; a new read action; idle 8 days; minter revoked; `api_keys: false`; revoke | refused; not listed; dead (`401`); `401` while off; `confirm-required`, then dead |
-| S-BTN-124 MCP, sign-in, tokens | MCP hold edits; a replayed sign-in code; revoke all; token reuse, long TTL; destructive dashboard acts; polled-row eviction; an API key to `http`; an unverifying bearer naming an administrator's `bak_<id>` over `http`; an owner's session on its repository, on a foreign one and on an administrator route; a session's read of `/v1/ui/state`; an owner's code typed into `baton admin open`; the session's code confirmed by another owner key; the owner removed; `owner sessions revoke`; a session message of kind `handled`, and a `release` for a ticket the runner does not hold | add-hold and the key's own unhold work, another's unhold `forbidden` (R-BTN-186); only the confirmed browser signs in; sessions ended; `unauthenticated`, `invalid-params`; `202 {confirm_code}` until the minting key confirms, Stop at once; oldest unbound dropped; key not sent; refused, nothing revoked; acts there, `forbidden`, `forbidden`; `Cache-Control: no-store`; `not-found`; `not-found`; the session ended; every session of the key ended; `invalid-params`, `forbidden` |
+| S-BTN-124 MCP, sign-in, tokens | MCP hold edits; a replayed sign-in code; revoke all; token reuse, long TTL; destructive dashboard acts; polled-row eviction; an API key to `http`; an unverifying bearer naming an administrator's `bak_<id>` over `http`; an owner's session on its repository, on a foreign one and on an administrator route; a session's read of `/v1/ui/state`; an owner's code typed into `baton admin open`; a code previewed and declined, and one previewed and confirmed; a relayed code made from another address; the session's code confirmed by another owner key; the owner removed; `owner sessions revoke`; a session message of kind `handled`, and a `release` for a ticket the runner does not hold | add-hold and the key's own unhold work, another's unhold `forbidden` (R-BTN-186); only the confirmed browser signs in; the declined preview binds nothing and the row expires unbound, the confirmed one binds, and the relayed code shows the other address before anything binds; sessions ended; `unauthenticated`, `invalid-params`; `202 {confirm_code}` until the minting key confirms, Stop at once; oldest unbound dropped; key not sent; refused, nothing revoked; acts there, `forbidden`, `forbidden`; `Cache-Control: no-store`; `not-found`; `not-found`; the session ended; every session of the key ended; `invalid-params`, `forbidden` |
 | S-BTN-126 API keys beside SSH keys | an API-key administrator, owner and runner beside an SSH runner | bearers on their own routes only; runner secret checked; sync and probe `unauthenticated`; one role per key (`conflict`); revocation next call; sign-in by code |
 | S-BTN-156 a board posted by a sync key | a checkout with no CI token and no `BATON_SYNC_TOKEN`; an ssh-keygen ed25519 key registered for it, a key of another repository, an unregistered key and one in the mirror role; an API-key file passed as `--sync-key` | with the one flag every call is an SSHSIG in `baton-request`, keyid the key's fingerprint, and the board lands under the key's repository (that of another repository too, never this checkout's); `unauthenticated` and `forbidden`, each posting nothing; the file refused by name, no call made |
 | S-BTN-170 the dashboard state read with an administrator's key | an administrator, an owner of `ops`, a runner it granted that heartbeats | the administrator's signed `GET /v1/admin/state`, and its API key's, equal its session's `GET /v1/ui/state` at the same instant; an owner's key `forbidden`; an unknown key and no principal `unauthenticated`; a POST `not-found` |
@@ -6964,6 +6990,7 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-194 one ticket, one PR, one merge | under `cooperative` and under `protected` (plain git's reading being B-154's), each of `bug-report`, `draft-ticket`, `decision`, `spec-to-tickets` and `draft-doc` run from its start leg to its end; the last writing leg routed back after it archived the ticket, then reporting a station other than the one queuing `merged-by-hand`; a PR closed and its ticket withdrawn on the default branch; a record ticket superseded with its PR open; `prepare` finding the question settled; `carry-out` finding the chosen option gone; two tickets' branches taking the same new id; a `fold` | no leg of a record course writes to the default branch under any policy; each ticket's legs on one branch and one PR, the next leg reading the record at the branch's head, the archived file found by its `id`; `merged-by-hand` waiting on `owner` and arriving at the owner's merge as `create-pr`'s does; the ticket done at `merged` and closed in git by its own merge (`status: done`, archived); the routed run's ticket left live on the branch; the withdrawn and the superseded tickets' PRs closed by `close-pr`, nothing landed; `prepare` reaching `carried` with `merged-by-hand` queued; `carry-out` reaching `asked`; the second merge conflicting; the fold recording `duplicate_of:` in its own ticket alone |
 | S-BTN-195 one inbound path | a sync run attesting readiness, an arrival and an output for one ticket; a second run attesting only readiness; a run whose post is refused; under `cooperative`, an `answer:` in the ticket; a runner delivering a `withdraw` entry; an `advance` reaching `reviewed`, and the sync attesting the same arrival by a leg without `arrives: {fact: …}`; a want on a repository with a GitHub dispatch target, then on one with none; a dispatch the forge answers 500 | the ticket's readiness, arrival and output are all the first run's until the second replaces readiness alone, never a mix within one judgement; the refused run's attestations are refused with it; the sync's `std:decision@1` settles the person leg; the deliverer's `std:effect@1` marks the entry `delivered`, and the next run's attestation of the withdrawal confirms it; the advance's `std:arrival@1` by the holder moves the ticket and the sync's for that leg is recorded `arrival-unapplied`; the want is dispatched once by the host shell after commit, with an installation token minted from the App's key, and cleared by the post it causes; with no target nothing is dispatched and the runners answer the want; the failed dispatch retried once, the want standing; the same merged PR attested by two runs moves the ticket once and the second is silent; readiness attested at `reviewed` before a `fix → review` round returned the ticket to `reviewed` is discarded |
 | S-BTN-196 the fact reader | under `protected`, a `create-pr` ticket at `reviewed` with `merge` queued, then a human merging its PR; a `create-spec` ticket at `requested`, then the owner's PR appearing; the same merge read twice; the reader's key not yet named, then named; a forge notification for the repository | with no key named, `baton.fact-reader-missing` is raised and nothing moves; once named, `fact-legs` lists both tickets, the reader is rung `facts`, attests `pr-merged` and `pr-opened`, and the tickets reach `merged` and `spec-open`; the second read is silent; no repository code runs on the reader's host |
+| S-BTN-198 retirement | a repository with an owner session reaching it and another, an owner session reaching only it, an MCP key and an OAuth grant with live tokens, a sync key, a CI identity, a runner grant, a check-runner, an active claim, a queued and a claimed outbox entry; `admin repo retire`; then a board post, a notification, a heartbeat naming it and a re-registration of its id; an export | the two-repository session keeps the other, the single one ends; the MCP key, the grant and its tokens refused; the sync key, CI identity, grant and check-runner refused; the claim sent `release` and ended `released:retired`, or fenced and reaped if unacknowledged; both entries `dropped` and logged; every later call `not-found`, the re-registration `conflict`; the export carries its owners, events and history |
 | S-BTN-190 guarantees and floors | `floors: [no-runner-lands, independent-review, human-gates]` set under `protected-hardware`; a change admitting `runner` to `refs.default_branch` or `refs.other`; `floors` naming a broken guarantee; shortening `floors` by an owner key and by a `human_only` key; a trusted runner's protection report that no longer matches; an ordinary `runner` grant holding a claim on the repository; the policy read by a trusted runner and by an audit key | the change refused `floor-violated`; the broken guarantee's floor refused; the shortening refused, then accepted; `baton.unprotected` raised, `no-runner-lands` broken, trusted runners stopped, the runner's claim released `floor` and ended `released:floor`, and every claim refused `floor-broken` until a matching report; both reads answer the same `{version, hash, policy, guarantees, floors}` with no signature, and the trusted runner acts on it as Baton's |
 | S-BTN-191 the protected path in practice | the `protected` preset on GitHub, `human_identity` set; `paths.control` set to `any`; a handler raised; its proposal; an approval naming two proposals; the merge runner's workflow given the checker's credential; an MCP key raising `merge.reviews.count` to 99; an MCP key holding a ticket, lifting its own hold, then lifting an owner's hold; the protection checker's report lapsing past 24 hours | `--check` matches with `refs/baton/*` open to every writer; the change to `paths.control: any` refused `floor-violated`, `no-runner-lands` still held; the handler written on `baton/proposed/<ticket>` from the CLI template and merged by a proposal merge with one `std:approval@1`, no reviews; the two-proposal approval covers neither; the checker's naming refused; the MCP key refused; the MCP key's hold set and lifted, the owner's hold `forbidden`; `no-runner-lands` broken, no policy change refused, trusted runners stopped but the checker still checking |
 | S-BTN-187 board posts | `inputs.board` without `machine`; `attestations` entries admitting no `sync` writer for the stations and person legs a trusted leg acts on | a machine key's post is refused; a truncated delivery fails closed; a station a trusted leg acts on is not reached from the sync's attestation of a git verdict; a person leg's answer in git does not count and the human's attestation does |
@@ -7438,10 +7465,12 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose every statement Baton receives about the work, whoever states it, to be an attestation whose writer the policy admits per type, over a board post that carried readiness, arrivals, outputs and markers as its own fields beside attestations, a person's answer read from git or Baton by a separate knob, and a delivery as a state change only. The sync becomes the writer `sync`, a delivery the deliverer's `std:effect@1`; a run's attestations are accepted with its post, so no judgement mixes two runs; `inputs.answers` is retired into the `attestations` entries (2026-10-31, the owner; R-BTN-191).
 - Chose four nouns for everything that crosses Baton's boundary — attestations (statements about the world, weighed by writer), commands (requests to change Baton's own state, accepted or refused by its gates), outbox entries (effects, delivered by runners) and replies — over one noun per direction: a command is not evidence, and a reply is not an effect. A workflow dispatch is Baton's own call, the one effect it makes with a credential of its own (R-BTN-94). A runner's report of where its leg reached is the holder's `std:arrival@1`, the same type as the sync's fact arrival, carried by the command that moves the lease (2026-11-01, the owner; R-BTN-191).
 - Chose, under a policy admitting no `sync` arrival, a fact reader — the merge runner reading a closed set of forge facts (`pr-merged`, `pr-verdict`, `pr-opened`, `pr-pushed`) through the CLI's own adapters, as a `service:` key the owner names — over an owner's confirmation per human action or fact legs inert until adopted: a human's merge or a spec conversation should cost the owner nothing more (2026-11-01, the owner; R-BTN-192).
-- Chose to mask, besides the credentials the runner knows, every kept variable whose name ends `_KEY`, `_TOKEN` or `_SECRET` and every name `runner.json` `mask_env` lists, over a list alone (empty by default, so protecting nothing) or leaving kept credentials unmasked: a provider key is masked without core or the runner naming a provider (2026-11-02, the owner, B-170; R-BTN-144).
+- Chose to mask, besides the credentials the runner knows, every kept variable whose name ends `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD` or `_PAT` or is `PGPASSWORD` (the last three added 2026-11-03, the owner) and every name `runner.json` `mask_env` lists, over a list alone (empty by default, so protecting nothing) or leaving kept credentials unmasked: a provider key is masked without core or the runner naming a provider (2026-11-02, the owner, B-170; R-BTN-144).
 - Chose an administrator's confirmed fence clear over bounding `fence_deadline`: the person who knows the machine is dead takes the risk for one ticket, and the fence stays whole for every runner that declared a long lease (2026-11-02, the owner, B-171; R-BTN-19).
 - Chose to let `baton ticket request` decide between a push and a PR by the forge's answer over reading the policy first: it stays a repository command, usable by a person with push and no Baton key (2026-11-02, the owner, B-174; R-BTN-131, R-BTN-180); and its side branch `baton-request/<ID>`, outside every `branch_pattern`, over one inside it with exceptions in the PR courses and R-BTN-25, so the request's own PR is never the new ticket's (2026-11-03, the owner).
 - Chose `timed_out` over `neutral` for a check command's timeout or `exec` error, and no `neutral` at all, over posting a timeout as `failure` beside an advisory `neutral` or stating the gap: a GitHub required check passes on `neutral`, so a change that hung its own tests landed (2026-11-02, the owner, B-175; R-BTN-114, R-BTN-153).
+- Chose a two-step sign-in bind — the code's row previewed (role, client address, age), then bound only on an explicit yes the CLI takes no `--yes` for — over one call that binds at once: the address is the one defence against a relayed code, and it must be read before anything binds (2026-11-03, B-172, written at the owner's request; R-BTN-155).
+- Chose a final retirement that ends everything scoped to the repository — sessions' reach, MCP keys and OAuth grants, sync, mirror and runner keys, active claims, queued effects — and never re-registers its id, over a reversible flag each surface interprets: nothing scoped to it can come back to life (2026-11-03, B-173, written at the owner's request; R-BTN-47).
 
 ## Open questions
 
