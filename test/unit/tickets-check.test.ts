@@ -562,6 +562,8 @@ describe('checkTickets: Trust and Invariants after check.sections_since (2026-11
       'tickets/A-2.md': ticket('id: A-2\ntags: [request]', '**Brief:** a sentence.\n'),
       'tickets/A-3.md': ticket('id: A-3\nparent: A-1', '**Brief:** a child a leg filed.\n'),
       'tickets/A-4.md': ticket('id: A-4', '**Brief:** the work’s own ticket, which a leg wrote.\n'),
+      'tickets/A-1.c1.md': ticket('id: A-1.c1\nparent: A-1\nhandles:\n  type: x\n  condition_id: 1', 'the leg’s subject and body\n'),
+      'tickets/A-5.md': ticket('id: A-5\nparent: A-1\ncalled_by:\n  leg: verify\n  run: 1', 'the call’s body\n'),
     };
     const dir = datedRepo('2026-11-04', files);
     expect(lines(await checkTickets(dir, {}, { sections_since: '2026-11-03', sections_from_id: 'A-1' })).map((l) => l.split(' — ')[0])).toEqual([

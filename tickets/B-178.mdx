@@ -1,0 +1,82 @@
+---
+title: "B-178 — Retire the git-lock ticket commands: claim, set and done go through Baton's lease once a repository's tickets are Baton's"
+id: B-178
+project: baton
+status: available
+updated: 2026-11-03
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1180
+tier: routine
+description: "R-BTN-193's legacy: `baton ticket claim | set | done` write `status:` to the default branch and use a refused push as the mutex. Once Baton holds a repository's leases (R3-1266 for this repository), claim takes Baton's lease, set and done report to Baton, and the git-lock path is removed for that repository; it stays only for a repository with no Baton, said so on every run. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on:
+  - R3-1266
+---
+
+**Brief:** the owner, 2026-11-03: "I want the spec to be very clear that this is not how Baton is
+meant to be used. And it is merely a legacy to be phased out as soon as possible." Review round
+four of PR #171 found R-BTN-193's legacy list named no ticket that retires the CLI's `claim`, `set`
+and `done` themselves: R3-1266 retires only the old `scripts/ticket.mjs`, and B-120 does not touch
+the commands.
+
+**Spec:** R-BTN-193 (git is never a lock or a counter), R-BTN-74 (*The ticket commands*), R-BTN-4
+(the lock: one active claim per ticket), R-BTN-39 (Baton holds the position), R3-1266 (Baton hosts
+this repository's tickets), B-129 (the pickup asks Baton first — the interim this replaces).
+
+**Depends on:** R3-1266.
+
+**Used by:** nothing yet.
+
+### What to build
+
+1. **Claim is Baton's lease.** For a repository Baton serves, `baton ticket claim <id>` takes the
+   claim through Baton (the session's key, R-BTN-4's lock) and writes nothing to git as the lock;
+   the ticket file's `status:` is no longer the record of who holds it (R-BTN-39). The stale-rule
+   guard (R-BTN-74, PR #171) moves with it: it runs before the claim request, unchanged in what it
+   reads.
+2. **Set and done report to Baton.** `set <id> in-review|blocked|…` and `done` become Baton
+   calls (an advance or an end, by the course), with the PR recorded as today; `done`'s move to the
+   archive stays a git write, because it is the work's record, not a lock.
+3. **No Baton, no change.** A repository with no Baton configured keeps the git-lock path, and every
+   run says so in one line naming R-BTN-193 — the legacy is visible where it is used.
+4. **Remove, don't keep both.** For a repository Baton serves, the git-lock path is removed, not
+   kept as a fallback; B-129's pickup-asks-Baton-first interim is then deleted.
+5. **Spec.** R-BTN-74's ticket commands and R-BTN-193's legacy entry say what remains (the
+   no-Baton path) and cite this ticket as done.
+
+### Trust
+
+New inputs: none beyond Baton's existing claim, advance and end requests, under their existing
+principals and validation (R-BTN-4, §12.3). The ticket file's `status:` stops being an input that
+decides anything.
+
+### Invariants
+
+- **R-BTN-193:** git is never the lock for a repository Baton serves.
+- **R-BTN-4:** one active claim per ticket, enforced by Baton alone.
+- **R-BTN-1:** who holds a ticket has one home, Baton; a status in git is derived and says so.
+- **Value 8:** a repository with no Baton keeps working, on the visible legacy path.
+
+### Tests
+
+The S-BTN-189 row extended (the ticket commands): against a repository Baton serves, two sessions
+claiming one ticket get one lease and one refusal from Baton, with no push to the default branch;
+`set` and `done` reach Baton; against a repository with no Baton, the git-lock path runs and prints
+its legacy line.
+
+### Exit criteria
+
+- [ ] For a Baton-served repository, `claim | set | done` push nothing to git as a lock (S-BTN-189).
+- [ ] The no-Baton path prints its R-BTN-193 legacy line; `npm test` green.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-03._

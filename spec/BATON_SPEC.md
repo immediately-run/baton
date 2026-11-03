@@ -89,11 +89,12 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   - **Legacy, phased out as soon as possible.** Until the work that retires each lands, these stay,
     each marked legacy where it is specified and never extended or copied into a new mechanism:
     - the git-lock ticket commands — `baton ticket claim | set | done` writing `status:` and
-      retrying a refused push (R-BTN-74) — retired by R3-1266 (Baton hosts its own tickets) and
-      B-120;
-    - every next-free scan of git for a ticket, child, request, rule, scenario, gate or migration
-      number (R-BTN-74, R-BTN-131, R-BTN-86, R-BTN-165, R-BTN-161, R-BTN-31, §13) — retired by
-      B-176, after which a scan only seeds Baton's sequence or serves a session without Baton;
+      retrying a refused push as the mutex (R-BTN-74) — retired by B-178, once Baton holds the
+      repository's leases (R3-1266 for this repository);
+    - every next-free scan of git — a ticket or child id by R-BTN-131's allocator (R-BTN-74's
+      `new` among them), a rule, scenario or gate id by R-BTN-31, a migration number by §13 —
+      retired by B-176, after which a scan only seeds Baton's sequence or serves a session without
+      Baton;
     - the same pattern in other repositories' own tools (docs' `scripts/claim.sh`, fieldhouse's
       `scripts/ticket.mjs`), retired when each adopts Baton's.
   - **Nothing new uses git as a lock or a counter.** A ticket or amendment proposing one is a
@@ -102,7 +103,7 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
     duplicate-id refusal (R-BTN-74, R-BTN-147), the duplicate number at merge — as a backstop,
     never the design.
 
-- **R-BTN-33 (Baton holds filter fields, never content). Per live ticket Baton stores what
+- **R-BTN-33 (Baton holds filter fields, never content).** Per live ticket Baton stores what
   matching (§6) and the dashboard's lists read: id, title, path, course, tier, `requires`,
   expedite, `depends_at`, `parent`, `repos`, rank, the position Baton holds (R-BTN-39), and an
   opaque `display` object core never reads. It never stores a body, Status notes, exit
@@ -1260,8 +1261,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
     absent, empty or still the skeleton's `_(…)_` placeholder is a finding. Not judged: a `kind:
     project` page, which builds nothing, and a request ticket (`tags: [request]`, as `ticket
     request` writes it, R-BTN-127), one sentence its course's legs turn into the work's own
-    tickets. A child a leg files (`parent:`, R-BTN-86, R-BTN-165) is such a ticket and is judged
-    like any other, so the standard filing legs write both sections. With `check:
+    tickets; and a ticket the runner writes for a condition (`handles:`, R-BTN-161) or a call
+    (`called_by:`, R-BTN-165), whose body is the leg's own subject and body. A child a filing leg
+    writes (`parent:` alone) is the work's own ticket and is judged like any other; the standard
+    filing legs write both sections and the `_filed` line. With `check:
     {sections_from_id: "<prefix>-<n>"}` beside it (default off; this repository: `B-176`), a live
     ticket under that prefix numbered `n` or above without a `_filed` line is a finding too, and is
     otherwise judged by it, so the check decides it without history, in CI's depth-1 clone
@@ -1299,7 +1302,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
     filing without its sections — and claim no more.
   - **The ticket commands** (B-112, R-BTN-127): `baton ticket new | claim | set | done`, whose behaviour is
     the git-lock commands docs' `claim.sh` and the repositories' `scripts/ticket.mjs` had, kept
-    once in the CLI — legacy, to be retired (R-BTN-193). Each is one commit pushed straight to the default branch from a throwaway
+    once in the CLI. `claim`, `set` and `done`'s push-retry as the mutex, and `new`'s next free
+    id, are legacy, to be retired (R-BTN-193); `new` itself stays. Each is one commit pushed straight to the default branch from a throwaway
     worktree at the freshly fetched head (`--branch`, else the checkout's `origin/HEAD`, else
     `main`), so the caller's branch, HEAD and working tree are never written; a push refused
     because the branch moved is fetched again and retried, up to six tries, and a refusal for any
@@ -6496,7 +6500,7 @@ One SQLite database per tenant, in the tenant's Durable Object (or the local hos
 schema below is the current one, together with `BATON_MCP_OAUTH_SPEC` §12's rows (the OAuth
 tables, `mcp_keys`' OAuth columns, `oauth_redirect_uris`, its alarm instants and the `oauth` event
 kind), which B-73 folds in here; `src/migrations/` holds the numbered, append-only migrations that
-reach it, each new one the next free number at merge as R-BTN-31 numbers a scenario, and the object refuses to serve until every migration is applied (§2).
+reach it, each new one the next free number at merge as R-BTN-31 numbers a scenario (legacy until B-176, R-BTN-193), and the object refuses to serve until every migration is applied (§2).
 
 **Conventions.**
 

@@ -2382,6 +2382,15 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   which `spec-to-tickets`' work tickets are not; children are now judged like any ticket, and the
   standard filing legs (`draft-ticket`, `bug-report`, `spec-to-tickets`' `decompose`) write both
   sections. The babysit skill names the `Rules changed:` line.
+  An owner-approved fourth round (one reviewer) confirmed round three's six closures. R-BTN-193's
+  legacy list named no work retiring the CLI's `claim | set | done` (R3-1266 retires only an old
+  script), so B-178 is filed for it, after R3-1266; R-BTN-74 marks only `claim | set | done`'s
+  push-retry and `new`'s next free id legacy, not `new` itself; the list cites R-BTN-131, R-BTN-31
+  and §13 for the scans, not R-BTN-161, whose handler ids are not scanned. Machine-written children
+  — a condition's handler ticket (`handles:`) and a call's child (`called_by:`) — are exempt from
+  the sections check, and the filing legs write the `_filed` line. The transcript ticket first
+  drafted here as B-177 moved to fieldhouse as FLDH-51, at the owner's word ("this belongs on
+  fieldhouse, not baton core"), and was redesigned there as create-only objects keyed by session.
 
 ## Retired requirements
 

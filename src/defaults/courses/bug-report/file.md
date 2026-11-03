@@ -29,6 +29,7 @@ ticket for the fix exists and the bug ticket names it.
   regression test that fails today), **Exit criteria**, and what it **requires** beyond a
   checkout.
 - Put an **`### Origin`** section directly after Why, copied from the bug ticket's `## Origin`.
+- Write Trust and Invariants as `###` sections, and end the file in `## Status` with `_filed <today, YYYY-MM-DD>.`.
 - If the dedupe named a related or a closed ticket, link it.
 - **A live check is its own ticket.** If proving the fix needs a running host, a driven browser
   or a device, file that check as a second ticket that depends on the first.
