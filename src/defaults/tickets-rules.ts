@@ -270,15 +270,14 @@ export function atOrAbove(id: string, from: { prefix: string; n: number }): bool
 }
 
 /** Why a live ticket is not judged by the sections check at all, or null (R-BTN-74): a project page
- *  (`kind: project`) builds nothing; a request ticket (`tags: [request]`, as `baton ticket request`
- *  writes it) and a child a leg filed (`parent:`) are the course's to judge — its legs write the
- *  work's own tickets, and those are judged. */
-export function sectionsExempt(fm: Record<string, unknown> | null): 'project' | 'request' | 'child' | null {
+ *  (`kind: project`) builds nothing, and a request ticket (`tags: [request]`, as `baton ticket
+ *  request` writes it) is one sentence its course's legs turn into the work's own tickets. A child
+ *  a leg files (`parent:`) is such a ticket, so it is judged like any other (round 3). */
+export function sectionsExempt(fm: Record<string, unknown> | null): 'project' | 'request' | null {
   if (!fm) return null;
   if (fm.kind === 'project') return 'project';
   const tags = Array.isArray(fm.tags) ? fm.tags : typeof fm.tags === 'string' ? fm.tags.replace(/^\[|\]$/g, '').split(',') : [];
   if (tags.some((t) => String(t).trim() === 'request')) return 'request';
-  if (fm.parent != null && String(fm.parent).trim() !== '') return 'child';
   return null;
 }
 

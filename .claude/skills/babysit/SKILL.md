@@ -106,8 +106,10 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   finding without one) and is judged by it; an older ticket without one is only listed. A
   hand-written ticket therefore carries `_filed <today>.` under `## Status`, and is filled before
   the PR's first push; `tickets new` writes the line and refuses to file one unfilled (`--trust`,
-  `--invariants`, or a `--body-file` that fills them). A request ticket and a leg's child
-  (`parent:`) are not judged. The `_filed` line is the author's claim: date it truly.
+  `--invariants`, or a `--body-file` that fills them). A request ticket is not judged; a leg's
+  child (`parent:`) is. The `_filed` line is the author's claim: date it truly. A history entry
+  dated after 2026-11-03 names the rules it changes in its bold title or on a `Rules changed:
+  <ids>` line directly under it (`none.` for an entry that changes none), or `check:spec` fails.
 - **Decide in the spec, in the session that decides.** An owner's ruling becomes a spec PR the
   same session, with the history entry quoting it. A ticket may *build* a ruling, but never holds
   its spec half: "the implementing PR amends the spec first" is how B-120's ruling of 2026-10-26

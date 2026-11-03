@@ -23,7 +23,9 @@ ticket for the fix exists and the bug ticket names it.
   repository has a tool that allocates ticket ids, use it. Its course is the repository's
   default (`create-pr` unless it says otherwise).
 - Write it the way the `draft-ticket` course does: **Why** (the symptom and the cause at
-  `file:line`), **What to build**, **Architecture** (the decisions, named), **Tests** (the
+  `file:line`), **What to build**, **Architecture** (the decisions, named), **Trust** (every new
+  input it adds, who may write it and how it is verified, or "no new input"), **Invariants** (the
+  rules it must not break, by id, and how the design keeps each), **Tests** (the
   regression test that fails today), **Exit criteria**, and what it **requires** beyond a
   checkout.
 - Put an **`### Origin`** section directly after Why, copied from the bug ticket's `## Origin`.

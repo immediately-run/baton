@@ -1236,9 +1236,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
     back past the cutover in a full clone. With `check: {sections_since: "<YYYY-MM-DD>"}` (default
     off), a live ticket filed on or after that day whose `### Trust` or `### Invariants` section is
     absent, empty or still the skeleton's `_(…)_` placeholder is a finding. Not judged: a `kind:
-    project` page, which builds nothing; a request ticket (`tags: [request]`, as `ticket request`
-    writes it, R-BTN-127); and a child a leg files (`parent:`, R-BTN-86, R-BTN-165) — their
-    course's legs write the work's own tickets, and those are judged. With `check:
+    project` page, which builds nothing, and a request ticket (`tags: [request]`, as `ticket
+    request` writes it, R-BTN-127), one sentence its course's legs turn into the work's own
+    tickets. A child a leg files (`parent:`, R-BTN-86, R-BTN-165) is such a ticket and is judged
+    like any other, so the standard filing legs write both sections. With `check:
     {sections_from_id: "<prefix>-<n>"}` beside it (default off; this repository: `B-176`), a live
     ticket under that prefix numbered `n` or above without a `_filed` line is a finding too, and is
     otherwise judged by it, so the check decides it without history, in CI's depth-1 clone
@@ -1266,11 +1267,11 @@ live solely in Baton, and both are exportable (R-BTN-88).
     count. In a shallow clone the report is skipped with one line saying so; that is never a
     finding. Exit 1 with one `path: message` line per finding, 0 without; an unreadable root or a
     malformed `baton.json` is an error (exit 2). It reads; it never writes.
-  - **What the guards trust.** The `_filed` line, `tags: [request]`, `parent:` and the `rules
+  - **What the guards trust.** The `_filed` line, `tags: [request]` and the `rules
     re-read` notes are claims the ticket's author writes in git, which anyone who can push can
     write (`docs/security-model.mdx`, reach 3); the check and the claim read them and verify
     nothing about them beyond their form, and review is what verifies them. A `_filed` line dated
-    falsely, a tag or `parent:` written to escape the sections check, or a re-read note naming ids
+    falsely, a tag written to escape the sections check, or a re-read note naming ids
     its author did not re-read is the author's false statement, which review catches, not the
     machine. The guards prevent the honest mistake — a ticket built as written after a ruling, a
     filing without its sections — and claim no more.

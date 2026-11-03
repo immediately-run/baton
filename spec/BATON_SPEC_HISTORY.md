@@ -2361,6 +2361,15 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   `floor` reads the default branch and every open branch's head for every kind, as R-BTN-131's
   ticket scan does, with the duplicate check at merge as the backstop, and it cites §12.3 and
   `src/core/validate.ts` for validation, not R-BTN-16.
+  Review round three (one reviewer) confirmed round two's six closures and found three problems in
+  what round two added. B-176's PR filing had misread `ticket request` (it pushes first and opens a
+  PR only on a protected-branch refusal, the B-174 Decision) and would have had two open filings
+  rewrite one dependency's `**Used by:**` line; B-176 now has `new` open a PR first by the owner's
+  "Yes" as a recorded departure for `new` alone, carry the new ticket only, and push and print a
+  branch on a `git` forge. The `parent:` exemption claimed a leg's children were judged elsewhere,
+  which `spec-to-tickets`' work tickets are not; children are now judged like any ticket, and the
+  standard filing legs (`draft-ticket`, `bug-report`, `spec-to-tickets`' `decompose`) write both
+  sections. The babysit skill names the `Rules changed:` line.
 
 ## Retired requirements
 

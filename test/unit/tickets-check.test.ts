@@ -556,7 +556,7 @@ describe('checkTickets: Trust and Invariants after check.sections_since (2026-11
     expect((await checkTickets(later, {}, { sections_since: '2026-11-03' })).findings.map((f) => f.message.split(',')[0])).toEqual(['filed 2026-11-05', 'filed 2026-11-05']);
   });
 
-  it('round 2, finding 3: a request ticket and a leg’s child are not judged; the tickets their legs write are', async () => {
+  it('round 2, finding 3 (narrowed in round 3): a request ticket is not judged; a leg’s child and the tickets its legs write are', async () => {
     const files = {
       'tickets/A-1.md': ticket('id: A-1\ntags:\n  - request', '**Brief:** a sentence.\n'),
       'tickets/A-2.md': ticket('id: A-2\ntags: [request]', '**Brief:** a sentence.\n'),
@@ -565,6 +565,9 @@ describe('checkTickets: Trust and Invariants after check.sections_since (2026-11
     };
     const dir = datedRepo('2026-11-04', files);
     expect(lines(await checkTickets(dir, {}, { sections_since: '2026-11-03', sections_from_id: 'A-1' })).map((l) => l.split(' — ')[0])).toEqual([
+      'tickets/A-3.md: A-3 is at or above check.sections_from_id (A-1) and has no `_filed YYYY-MM-DD` line in its ## Status',
+      'tickets/A-3.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Trust section',
+      'tickets/A-3.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Invariants section',
       'tickets/A-4.md: A-4 is at or above check.sections_from_id (A-1) and has no `_filed YYYY-MM-DD` line in its ## Status',
       'tickets/A-4.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Trust section',
       'tickets/A-4.md: filed 2026-11-04, on or after check.sections_since (2026-11-03), and has no ### Invariants section',
