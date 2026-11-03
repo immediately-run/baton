@@ -2298,6 +2298,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   ended claims, and who may read it), R-BTN-85's `position-disagrees` row (only when the posted
   `prs` lacks a PR Baton's record holds; both values carry the PR lists), R-BTN-127's CLI row
   (the flags are R-BTN-74's), the board and history route rows, and S-BTN-199.
+  The reviewers also found that the ticket asks for the discrepancy under Needs you while the
+  2026-11-01 ruling keeps position discrepancies off it. The owner ruled on 2026-11-03: "Keep
+  your Decision" — the discrepancies list only, nothing adopted (R-BTN-85's row, Decisions).
 
 ## Retired requirements
 

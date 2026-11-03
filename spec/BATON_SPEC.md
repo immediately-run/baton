@@ -1577,7 +1577,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
   | sub | when |
   |---|---|
-  | `position-disagrees` | a ticket's frontmatter saying `available` while Baton holds it past its course's start and its posted `prs` lacking a PR Baton's record holds (R-BTN-24) (B-129) |
+  | `position-disagrees` | a ticket's frontmatter saying `available` while Baton holds it past its course's start and its posted `prs` lacking a PR Baton's record holds (R-BTN-24) (B-129): logged and listed among the dashboard's discrepancies, nothing adopted, never on Needs you |
   | `bars-mismatch` | posted bars lack a tag the holder declared (R-BTN-63) |
   | `closed-under-claim` | a ticket closed while a claim is active on it, a claim of its `cancel` leg excepted (R-BTN-168) |
   | `spawned-unposted` | a reported child the first snapshot after the end does not post (R-BTN-86) |
@@ -7458,6 +7458,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose the course file to travel with every sync over a hash with the body only on change (2026-10-16; R-BTN-69).
 - Chose owner state exported and imported, not mirrored to git, where agents could change it (2026-10-15; R-BTN-88).
 - Chose one Baton per team at a stated, load-tested envelope over sharding (2026-10-15; R-BTN-87).
+- Chose to log B-129's `position-disagrees` (a false `available` over work Baton holds past the start, without a PR Baton's record holds) only among the dashboard's discrepancies, adopting nothing, over listing it under Needs you as the ticket asked: the 2026-11-01 ruling keeps position discrepancies off Needs you (2026-11-03, the owner, "Keep your Decision"; R-BTN-85, R-BTN-39).
 
 **Conditions, calls, deadlines and cancellation**
 
