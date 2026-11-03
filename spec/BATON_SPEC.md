@@ -1230,9 +1230,11 @@ live solely in Baton, and both are exportable (R-BTN-88).
     YYYY-MM-DD` line, else the author day (`%as`) of its file's first commit
     (`--diff-filter=A`), else — a file not yet committed — today; never by a later edit. With
     `check: {sections_since: "<YYYY-MM-DD>"}` (default off), a live ticket filed on or after that
-    day that lacks a `### Trust` or `### Invariants` heading is a finding; `tickets new` writes the
-    `_filed` line into every filing, `--body-file`'s included, and refuses one lacking either
-    heading on or after the day, before it pushes. It also reports, never as a finding, each live
+    day whose `### Trust` or `### Invariants` section is absent, empty or still the skeleton's
+    `_(…)_` placeholder is a finding (a `kind: project` page is not a ticket here); `tickets new`
+    writes the `_filed` line into every filing, `--body-file`'s included, and on or after the day
+    refuses, before it pushes, a body lacking either heading, and warns that the check will fail
+    one still unfilled — the skeleton's placeholders included. It also reports, never as a finding, each live
     ticket citing a rule id that a dated entry of the spec's history (`check.rules: {history,
     prefix}`, default `spec/BATON_SPEC_HISTORY.md` and `R-BTN`; no file, no report) names in its
     bold title (`**YYYY-MM-DD — <ids>: …**`, the history's convention; an id only the entry's
@@ -1260,9 +1262,9 @@ live solely in Baton, and both are exportable (R-BTN-88).
       `--body-file` names one: `**Brief:**` (the description), `**Spec:**`, `**Depends on:**`
       (from `--depends-on`; `none.` when empty), `**Used by:**`, `### What to build`,
       `### Trust` (every new input the ticket adds — a field, a file, a commit trailer, a request —
-      who may write it and how Baton verifies it, by `docs/security-model.mdx`'s reaches, or "no
-      new input"), `### Invariants` (the rules it must not break, by id, and how the design keeps
-      each), `### Tests`, `### Exit criteria`, `**Requires:**` and `## Status` with the filing date.
+      who may write it and how it is verified, or "no new input"), `### Invariants` (the rules it
+      must not break, by id, and how the design keeps each), each with a placeholder naming no
+      repository's ids or paths, `### Tests`, `### Exit criteria`, `**Requires:**` and `## Status` with the filing date.
       A `--body-file` whose `**Depends on:**` line disagrees with the flag is refused. Before the
       push it judges what it writes as `baton ticket check` judges it — the body line against
       `depends_on`, every id a live or closed ticket, the board post's validation of §4.4 (the

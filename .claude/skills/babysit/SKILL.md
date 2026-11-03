@@ -99,8 +99,9 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
   fills `### Trust` (every new input — a field, a file, a commit trailer, a request — who may write
   it and how Baton verifies it, by `docs/security-model.mdx`'s reaches) and `### Invariants` (the
   rules it must not break, by id, and how the design keeps each); `npm run check:tickets` fails a
-  ticket filed on or after `.baton/baton.json`'s `check.sections_since` without them — filed by
-  its `_filed` line, or, for a ticket written by hand without one, its file's first commit.
+  ticket filed on or after `.baton/baton.json`'s `check.sections_since` without them, empty, or
+  still holding the skeleton's `_(…)_` placeholder — filed by its `_filed` line, or, for a ticket
+  written by hand without one, its file's first commit. Fill both before the PR's first push.
 - **Decide in the spec, in the session that decides.** An owner's ruling becomes a spec PR the
   same session, with the history entry quoting it. A ticket may *build* a ruling, but never holds
   its spec half: "the implementing PR amends the spec first" is how B-120's ruling of 2026-10-26

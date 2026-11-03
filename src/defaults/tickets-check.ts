@@ -19,8 +19,8 @@ import { pathToFileURL } from 'node:url';
 import { bodyDependencies, checkPayload, dependsCycle, dependsCycles } from '../core/board';
 import { LOCAL_ID } from '../core/validate'; // the board's own grammar, cited below (§4.4)
 import { readItems } from './read-items';
-import { filingDate, firstCommits, historyEntries, isShallow, missingSections, rulesConfig, sectionsSince, staleRules, staleSummary, type RulesConfig, type StaleRule } from './tickets-rules';
-import { ticketsMarkdown, type MarkdownFile, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
+import { filingDate, firstCommits, historyEntries, isShallow, missingSections, rulesConfig, sectionGaps, sectionHint, sectionsSince, staleRules, staleSummary, type RulesConfig, type StaleRule } from './tickets-rules';
+import { parseFrontmatter, ticketsMarkdown, type MarkdownFile, type MarkdownSettings, type TicketsResult } from './tickets-markdown';
 
 /** The ids a `**Depends on:**` line may name, as prose writes them (B-111, round 1): an
  *  id-shaped token — a prefix and a number, `B-2`, `R3-1205`, `R-BTN-83` — which the board
@@ -223,11 +223,15 @@ export async function checkTickets(root: string, settings: MarkdownSettings = {}
     if (!/\.mdx?$/.test(t.path) || !existsSync(join(root, t.path))) continue;
     const text = readFileSync(join(root, t.path), 'utf8');
     const filed = filingDate(text, firsts.get(t.path), today);
-    // Trust and Invariants, for a ticket filed on or after the cutover.
-    const missing = since ? missingSections(text) : [];
+    // Trust and Invariants, for a ticket filed on or after the cutover — a project page (`kind:
+    // project`) is not one: it describes a set of tickets and builds nothing.
+    const missing = since && parseFrontmatter(text)?.kind !== 'project' ? missingSections(text) : [];
     if (since && missing.length) {
       if ('undetermined' in filed) undetermined.push(t.id);
-      else if (filed.date >= since) for (const s of missing) add({ path: t.path, message: `filed ${filed.date}, on or after check.sections_since (${since}), and has no ### ${s} section — ${s === 'Trust' ? 'every new input it adds, who may write it and how Baton verifies it (docs/security-model.mdx), or "no new input"' : 'the rules it must not break, by id, and how the design keeps each'}` });
+      else if (filed.date >= since) {
+        const { absent } = sectionGaps(text);
+        for (const s of missing) add({ path: t.path, message: `filed ${filed.date}, on or after check.sections_since (${since}), and ${absent.includes(s) ? `has no ### ${s} section` : `its ### ${s} section is empty or still the skeleton's placeholder`} — ${sectionHint(s)}` });
+      }
     }
     // Rules amended since the ticket answered for them: reported, never a finding.
     if (reportStale && 'date' in filed) {

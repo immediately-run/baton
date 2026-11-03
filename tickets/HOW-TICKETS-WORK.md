@@ -75,7 +75,8 @@ baton tickets check [--repo DIR]           # check the tickets without posting t
 
 A ticket filed by `new` carries `### Trust` (every new input it adds, who may write it, how it is
 verified) and `### Invariants` (the rules it must not break, by id); with `check.sections_since`
-set, `baton tickets check` fails a ticket filed on or after that day without them.
+set, `baton tickets check` fails a ticket filed on or after that day without them, or with either
+still empty or the skeleton’s placeholder: fill both once `new` has filed the ticket.
 
 `baton tickets --help` lists every flag, the tags Baton reads and the `Requires:` clause a
 description ends with.

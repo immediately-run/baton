@@ -219,19 +219,50 @@ export function filingDate(text: string, first: FirstCommit | null | undefined, 
   return first.boundary ? { undetermined: true } : { date: first.date };
 }
 
-/** The required headings a ticket's text lacks — a `##`, `###` or `####` heading of that name,
- *  outside a fenced block. */
-export function missingSections(text: string): string[] {
-  const have = new Set<string>();
+/** What a required section still needs: the headings a ticket's text lacks (`absent` — a `##`,
+ *  `###` or `####` heading of that name, outside a fenced block) and those present whose body is
+ *  empty or still a skeleton placeholder, one `_(…)_` and nothing else (`unfilled`). A body runs
+ *  to the next heading of the same level or higher. */
+export function sectionGaps(text: string): { absent: string[]; unfilled: string[] } {
+  const bodies = new Map<string, string[]>();
   let fenced = false;
+  let open: { name: string; level: number } | null = null;
   for (const line of bodyOf(text).split('\n')) {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    else if (!fenced) {
-      const m = /^#{2,4} +(.+?)\s*$/.exec(line);
-      if (m) have.add(m[1]);
+    const fence = /^\s*(```|~~~)/.test(line);
+    if (fence) fenced = !fenced;
+    const m = fence || fenced ? null : /^(#{1,6}) +(.+?)\s*$/.exec(line);
+    if (m) {
+      const level = m[1].length;
+      if (open && level <= open.level) open = null;
+      if (level >= 2 && level <= 4 && (REQUIRED_SECTIONS as readonly string[]).includes(m[2]) && !bodies.has(m[2])) {
+        bodies.set(m[2], []);
+        open = { name: m[2], level };
+        continue;
+      }
     }
+    if (open) bodies.get(open.name)!.push(line);
   }
-  return REQUIRED_SECTIONS.filter((s) => !have.has(s));
+  const absent = REQUIRED_SECTIONS.filter((s) => !bodies.has(s));
+  const unfilled = REQUIRED_SECTIONS.filter((s) => {
+    const body = bodies.get(s)?.join('\n').trim();
+    return body != null && (body === '' || /^_\((?:(?!\)_)[\s\S])*\)_$/.test(body));
+  });
+  return { absent, unfilled };
+}
+
+/** The required sections a ticket does not carry filled: absent, empty, or still the skeleton's
+ *  placeholder — what `baton tickets check` fails after `check.sections_since`. */
+export function missingSections(text: string): string[] {
+  const { absent, unfilled } = sectionGaps(text);
+  return REQUIRED_SECTIONS.filter((s) => absent.includes(s) || unfilled.includes(s));
+}
+
+/** Why one required section counts as missing, for the check's finding and `new`'s refusal or
+ *  warning; repository-neutral, since every repository's tickets get it. */
+export function sectionHint(section: string): string {
+  return section === 'Trust'
+    ? 'every new input it adds (a field, a file, a commit trailer, a request), who may write it and how it is verified, or "no new input"'
+    : 'the rules it must not break, by id, and how the design keeps each';
 }
 
 /** `check.sections_since`: a `YYYY-MM-DD` day, or absent (the check off). Anything else is the

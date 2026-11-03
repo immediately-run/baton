@@ -16,7 +16,7 @@ import { checkTickets } from '../../src/defaults/tickets-check';
 import { accepts, readTicketSettings, requiresFrom } from '../../src/defaults/tickets-config';
 import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
 import { moveTicket, reverseMention, skeletonBody } from '../../src/defaults/tickets';
-import { appendStatus, filingDate, firstCommit, firstCommits, historyEntries, missingSections, rereadNote, rereads, ruleIds, rulesConfig, staleRules } from '../../src/defaults/tickets-rules';
+import { appendStatus, filingDate, firstCommit, firstCommits, historyEntries, missingSections, rereadNote, rereads, ruleIds, rulesConfig, sectionGaps, staleRules } from '../../src/defaults/tickets-rules';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -707,16 +707,45 @@ describe('baton tickets claim in a shallow clone (2026-11-03)', () => {
 });
 
 describe('baton tickets new: the Trust and Invariants sections (2026-11-03)', () => {
-  it('the skeleton carries ### Trust and ### Invariants, with their placeholders, between the build and the tests', () => {
+  it('the skeleton carries ### Trust and ### Invariants, with repository-neutral placeholders, between the build and the tests', () => {
     const body = skeletonBody({ description: 'd', deps: [], date: '2026-11-03' });
-    expect(missingSections(body)).toEqual([]);
+    expect(sectionGaps(body)).toEqual({ absent: [], unfilled: ['Trust', 'Invariants'] });
+    expect(missingSections(body)).toEqual(['Trust', 'Invariants']);
     const at = (h: string) => body.indexOf(`\n${h}\n`);
     expect(at('### What to build')).toBeLessThan(at('### Trust'));
     expect(at('### Trust')).toBeLessThan(at('### Invariants'));
     expect(at('### Invariants')).toBeLessThan(at('### Tests'));
-    expect(body).toContain('who may write it and how Baton verifies it');
-    expect(body).toContain('R-BTN-33 filter fields');
-    expect(missingSections('---\nid: B-1\n---\n\n### Trust\n\n```\n### Invariants\n```\n')).toEqual(['Invariants']);
+    expect(body).toContain('who may write it and how it is verified');
+    // No other repository's ids or paths: every repository's `new` writes this text.
+    expect(body).not.toMatch(/R-BTN|docs\/|Baton/);
+  });
+
+  it('a section counts as missing when absent, empty or still a placeholder; filled once anything else is written', () => {
+    const t = (trust: string, inv = 'R-1: kept.') => `---\nid: B-1\n---\n\n### Trust\n\n${trust}\n\n### Invariants\n\n${inv}\n\n### Tests\n\nx\n`;
+    expect(sectionGaps(t('no new input'))).toEqual({ absent: [], unfilled: [] });
+    expect(sectionGaps(t(''))).toEqual({ absent: [], unfilled: ['Trust'] });
+    expect(sectionGaps(t('_(who may write it.)_'))).toEqual({ absent: [], unfilled: ['Trust'] });
+    expect(sectionGaps(t('_(who may write it,\nwrapped.)_'))).toEqual({ absent: [], unfilled: ['Trust'] });
+    expect(sectionGaps(t('_(a note)_ and the answer: no new input'))).toEqual({ absent: [], unfilled: [] });
+    expect(sectionGaps(t('_(a)_\n\n_(b)_'))).toEqual({ absent: [], unfilled: [] });
+    // A sub-heading is the section's own content; the next heading of its level ends it.
+    expect(sectionGaps(t('#### The trailer\n\nwritten by the runner, verified by its key'))).toEqual({ absent: [], unfilled: [] });
+    expect(sectionGaps('### Trust\n\n## Status\n\nx\n### Invariants\n\nR-1.\n')).toEqual({ absent: [], unfilled: ['Trust'] });
+    expect(missingSections('---\nid: B-1\n---\n\n### Trust\n\nx\n\n```\n### Invariants\n```\n')).toEqual(['Invariants']);
+  });
+
+  it('after check.sections_since, the skeleton lands with its placeholders and a warning to fill them; the check then fails it until filled', async () => {
+    const f = repo({ settings: { check: { sections_since: '2000-01-01' } } });
+    const r = run(f.dir, 'new', '--title', 'a');
+    expect(r.code).toBe(0);
+    expect(r.err).toBe("! B-1: fill ### Trust and ### Invariants — still empty or the skeleton's placeholder, which `baton tickets check` fails as missing (check.sections_since)\n");
+    git(f.dir, 'pull', '-q', 'origin', 'main');
+    expect((await checkTickets(f.dir, {}, { sections_since: '2000-01-01' })).findings.map((x) => x.message.split(' — ')[0])).toEqual([
+      `filed ${today()}, on or after check.sections_since (2000-01-01), and its ### Trust section is empty or still the skeleton's placeholder`,
+      `filed ${today()}, on or after check.sections_since (2000-01-01), and its ### Invariants section is empty or still the skeleton's placeholder`,
+    ]);
+    // Before the cutover (no setting), no warning.
+    expect(run(repo().dir, 'new', '--title', 'b').err).toBe('');
   });
 });
 
@@ -740,7 +769,7 @@ describe('baton tickets new --body-file: filed and judged like the skeleton (202
     writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n### What to build\n\nMine.\n\n### Trust\n\nno new input\n');
     const r = run(f.dir, 'new', '--title', 'a', '--body-file', body);
     expect(r.code).toBe(2);
-    expect(r.err).toContain('B-1: filed on or after check.sections_since (2000-01-01), so the body needs ### Invariants');
+    expect(r.err).toContain('B-1: filed on or after check.sections_since (2000-01-01), so the body needs ### Invariants (the rules it must not break, by id, and how the design keeps each)');
     expect(f.head().sha).toBe(before);
     writeFileSync(body, '**Brief:** mine\n\n**Depends on:** none.\n\n### What to build\n\nMine.\n\n### Trust\n\nno new input\n\n### Invariants\n\nR-BTN-33: posts no prose.\n');
     expect(run(f.dir, 'new', '--title', 'a', '--body-file', body).code).toBe(0);

@@ -25,7 +25,7 @@ import { accepts, accepting, allocates, allocatingPrefix, GITHUB_PR, LIVE_STATUS
 import { addPr, idOf, locate, nextNumber, scalar, setKey } from './tickets-file';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
-import { appendStatus, filingDate, firstCommit, historyEntries, missingSections, rereadMismatch, rereadNote, rulesConfig, sectionsSince, staleIds, staleList, staleRules, unshallow } from './tickets-rules';
+import { appendStatus, filingDate, firstCommit, historyEntries, rereadMismatch, rereadNote, rulesConfig, sectionGaps, sectionHint, sectionsSince, staleIds, staleList, staleRules, unshallow } from './tickets-rules';
 import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { defaultBranch } from './request';
 
@@ -297,11 +297,11 @@ export function skeletonBody(o: { description: string; deps: readonly string[]; 
     '',
     '### Trust',
     '',
-    '_(every new input this adds — a field, a file, a commit trailer, a request — who may write it and how Baton verifies it, per `docs/security-model.mdx`’s reaches; or “no new input”.)_',
+    '_(every new input this adds — a field, a file, a commit trailer, a request — who may write it and how it is verified; or “no new input”.)_',
     '',
     '### Invariants',
     '',
-    '_(the rules this must not break, by id — e.g. R-BTN-1 one home, R-BTN-33 filter fields, R-BTN-50 opaque fields — and how the design keeps each.)_',
+    '_(the rules this must not break, by id, and how the design keeps each.)_',
     '',
     '### Tests',
     '',
@@ -336,6 +336,7 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
   const remote = io.remote ?? 'origin';
   const branch = io.branch ?? defaultBranch(root);
   let filed: string | null = null;
+  let unfilled: string[] = [];
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   transact(root, { ...io, quiet: true }, 'new ticket', (dir) => {
     const settings = settingsAt(dir, remote, branch);
@@ -360,10 +361,14 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
     judgeFiling({ id, text, deps, settings });
     // A filing after `check.sections_since` carries Trust and Invariants, `--body-file` included:
     // refused here, before the push, rather than found by the next check.
+    // The skeleton writes both with placeholders, so an unfilled one is not refused here — the
+    // filer fills it next, and `check` fails the ticket until then; `new` says so.
     const since = sectionsSince((readSettingsJson(dir) as { check?: { sections_since?: unknown } }).check);
+    unfilled = [];
     if (since && date >= since) {
-      const missing = missingSections(text);
-      if (missing.length) throw new Error(`${id}: filed on or after check.sections_since (${since}), so the body needs ${missing.map((m) => `### ${m}`).join(' and ')} — ${missing.includes('Trust') ? 'Trust: every new input it adds, who may write it and how Baton verifies it (docs/security-model.mdx), or "no new input"' : ''}${missing.length === 2 ? '; ' : ''}${missing.includes('Invariants') ? 'Invariants: the rules it must not break, by id, and how the design keeps each' : ''}`);
+      const { absent, unfilled: gaps } = sectionGaps(text);
+      if (absent.length) throw new Error(`${id}: filed on or after check.sections_since (${since}), so the body needs ${absent.map((m) => `### ${m} (${sectionHint(m)})`).join(' and ')}`);
+      unfilled = gaps;
     }
     // The reverse mentions: each dependency's `**Used by:**` line gains this id, so a file says
     // who waits on it without a search (the generated page's rule).
@@ -387,6 +392,7 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
     };
   });
   log(`✓ tickets: file ${filed} — ${title}`);
+  if (unfilled.length) (io.warn ?? ((l: string) => process.stderr.write(`${l}\n`)))(`! ${filed}: fill ${unfilled.map((m) => `### ${m}`).join(' and ')} — still empty or the skeleton's placeholder, which \`baton tickets check\` fails as missing (check.sections_since)`);
   return filed!;
 }
 
@@ -576,7 +582,7 @@ export function ticketsHelp(): string[] {
     'Settings are .baton/baton.json\'s: items (tickets/), ticket_prefix (B), legacy_ids (id patterns',
     'still accepted, never allocated), project (the default --project), tags (the default --tags,',
     'roadmap-item when it names none), check.depends_line, check.sections_since (the day from which a',
-    'filed ticket must carry ### Trust and ### Invariants) and check.rules ({history, prefix}: where the',
+    'filed ticket must carry ### Trust and ### Invariants, filled) and check.rules ({history, prefix}: where the',
     'amendments claim and check read are; spec/BATON_SPEC_HISTORY.md and R-BTN unless set).',
     '',
     'new writes the conventional body unless --body-file names one — **Brief:**, **Spec:**,',

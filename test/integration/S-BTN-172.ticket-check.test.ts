@@ -96,7 +96,7 @@ describe('S-BTN-172 the ticket check', () => {
     const r = check(dir);
     expect(r.status).toBe(1);
     expect(r.lines).toEqual([
-      'tickets/A-3.md: filed 2026-11-03, on or after check.sections_since (2026-11-03), and has no ### Trust section — every new input it adds, who may write it and how Baton verifies it (docs/security-model.mdx), or "no new input"',
+      'tickets/A-3.md: filed 2026-11-03, on or after check.sections_since (2026-11-03), and has no ### Trust section — every new input it adds (a field, a file, a commit trailer, a request), who may write it and how it is verified, or "no new input"',
       'baton tickets check: 2 ticket(s), 1 finding(s)',
     ]);
   });
