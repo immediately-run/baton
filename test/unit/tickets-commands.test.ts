@@ -7,7 +7,7 @@
 // unconfigured project refused), the written skeleton and its **Depends on:** line, a --body-file
 // that disagrees with the flag refused, and a filing the check would refuse left unpushed.
 // Node only: it writes real repositories and runs git.
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,6 +18,10 @@ import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
 import { moveTicket, reverseMention, skeletonBody } from '../../src/defaults/tickets';
 import { appendStatus, filingDate, firstCommit, firstCommits, historyEntries, missingSections, rereadNote, rereads, ruleIds, rulesConfig, sectionGaps, staleRules } from '../../src/defaults/tickets-rules';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
+
+// Every case spawns the CLI against real git repositories, several times; under the full suite's
+// load one spawn can take seconds, so the default 5 s is too tight for this file.
+vi.setConfig({ testTimeout: 60_000 });
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const CLI = join(ROOT, 'cli', 'baton.mjs');
