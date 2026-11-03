@@ -119,6 +119,14 @@ interface LegChild {
   ctxPath: string;
 }
 
+/** The watcher a held lock runs: prints one line the moment the lock is its own, then polls the
+ *  runner's pid and exits when it is gone — the lock dies with the runner within a second, even
+ *  a SIGKILL (round 1, finding 3; the test guards exactly this contract). */
+export const LOCK_WATCHER = 'echo baton:held; while kill -0 "$1" 2>/dev/null; do sleep 1; done';
+/** The watcher's argv tail as `MachineLocks` spawns it (the name the watcher runs under, and the
+ *  runner's pid it watches). */
+export const lockWatcherArgv = (pid: number): string[] => ['sh', '-c', LOCK_WATCHER, 'baton-lock-watch', String(pid)];
+
 /** B-106 (R-BTN-178): one machine's singleton is the runner's own business, never Baton's. A
  *  configured capability is declared only while this process holds an exclusive lock on its file:
  *  util-linux `flock --nonblock` over a watcher this process keeps alive. The watcher prints one
@@ -154,8 +162,7 @@ class MachineLocks {
       try {
         mkdirSync(dirname(path), { recursive: true });
       } catch { /* an unwritable directory: the spawn below says it */ }
-      const child = spawn('flock', ['--exclusive', '--nonblock', path, 'sh', '-c',
-        'echo baton:held; while kill -0 "$1" 2>/dev/null; do sleep 1; done', 'baton-lock-watch', String(process.pid)],
+      const child = spawn('flock', ['--exclusive', '--nonblock', path, ...lockWatcherArgv(process.pid)],
         { stdio: ['ignore', 'pipe', 'ignore'], detached: true });
       const done = (ok: boolean) => {
         if (settled) return;
@@ -971,13 +978,17 @@ export class Runner {
       this.log(`baton: ${leg} requires a lock another process on this machine holds — the claim suspends rather than run it (R-BTN-178)`);
       return false;
     }
-    // A take the last answered beat did not declare is followed by one beat before the caller
+    // A take the last answered beat did not declare is followed by a beat before the caller
     // goes on: rule 4 re-checks the advance against the server's record of the declaration, so
     // a lock re-taken mid-claim (an unlocked leg between two locked ones released it) must be
     // declared again before the advance that needs it is sent, or the server refuses
     // `missing-capability` a machine that holds the thing cannot be refused (review round 1,
-    // finding 2).
-    if (needed.some((c) => this.sent != null && !this.sent.includes(c))) await this.tick();
+    // finding 2). At most two beats: the first may join the timer's in-flight one, which built
+    // its declaration before the take (round 2, finding 2) — the second is fresh. A capability
+    // the runner's own list never names (one only the server derives, R-BTN-174) cannot be
+    // declared at all, so it asks for no beat (round 2, finding 4).
+    const sendable = needed.filter((c) => (this.declared ?? this.o.capabilities ?? []).includes(c));
+    for (let beats = 0; beats < 2 && sendable.some((c) => this.sent != null && !this.sent.includes(c)); beats++) await this.tick();
     return true;
   }
 

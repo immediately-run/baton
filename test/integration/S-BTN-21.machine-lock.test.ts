@@ -9,12 +9,12 @@
 // the claim's end. Node only: it runs git, spawns the legs' child processes and takes real
 // file locks (the S-BTN-41 pattern).
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { BatonApi } from '../../src/runner/api';
-import { Runner, type RunnerOptions } from '../../src/runner/runner';
+import { lockWatcherArgv, Runner, type RunnerOptions } from '../../src/runner/runner';
 import { call as hostCall } from '#host';
 import { course, cutover, ORIGIN, placed, rows, setClock, syncCall, tick, ticket, TOKENS } from '../helpers';
 
@@ -287,4 +287,30 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
     expect(claim.end_reason).toBe('done');
     expect(home.evidence().filter((l) => l.startsWith('run'))).toEqual(['run rdp1', 'run rdp2', 'run rdp3', 'run plain']);
   }, 20_000);
+
+  it('a lock held by a killed runner dies with it — the watcher watches the pid (round 2, finding 1)', async () => {
+    // The watcher `MachineLocks` spawns, in its own process: a child node runner takes the lock
+    // exactly as the runner does (`lockWatcherArgv`, its own pid), is SIGKILLed, and the lock
+    // must free within the watcher's second — a plain `sleep infinity` (round 1's shape) leaves
+    // it held and this test fails.
+    const path = join(tmpdir(), `baton-s21l-death-${process.pid}`);
+    const holder = spawn('node', ['-e', `
+      const { spawn } = require('node:child_process');
+      const argv = ${JSON.stringify(lockWatcherArgv(0))};
+      // watch THIS node process's pid, exactly as the runner watches its own
+      argv[argv.length - 1] = String(process.pid);
+      const child = spawn('flock', ['--exclusive', '--nonblock', process.argv[1], ...argv],
+        { stdio: ['ignore', 'pipe', 'ignore'], detached: true });
+      child.stdout.on('data', () => process.stdout.write('held'));
+      setInterval(() => {}, 1000);
+    `, path], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let held = false;
+    holder.stdout.on('data', () => (held = true));
+    await until(() => held);
+    // While the holder lives, the lock is its…
+    expect(spawnSync('flock', ['--nonblock', path, 'true']).status).not.toBe(0);
+    // …and a SIGKILL — no stop(), no finally — frees it within the watcher's second.
+    holder.kill('SIGKILL');
+    await until(() => spawnSync('flock', ['--nonblock', path, 'true']).status === 0);
+  }, 15_000);
 });
