@@ -19,6 +19,9 @@
 //   baton admin -i KEY probe add --key PUB --label L
 //   baton admin -i KEY resource add NAME --scope worker|account|service --schema FILE|JSON [--atoms-from admin|any]    (R-BTN-76, R-BTN-176)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
+//   baton admin -i KEY capacity set <capability> <n> [--yes]                 (R-BTN-178)
+//   baton admin -i KEY capacity set <capability> --clear [--yes]             (R-BTN-178)
+//   baton admin -i KEY capacity list
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
@@ -267,7 +270,32 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       const { flags, positional } = parseArgs(rest.slice(1), [], ['serves', 'repositories'], 1);
       return { method: 'POST', path: '/v1/admin/instances', body: { name: need(positional[0], 'the instance name'), serves: need(list(flags.serves), '--serves'), repositories: list(flags.repositories) ?? [] } };
     }
-    throw new Error('baton admin repos|repo|grant|probe|resource|instance|revoke|open');
+    if (cmd === 'capacity' && rest[0] === 'set') {
+      // R-BTN-178: an administrator's statement that the name denotes one thing across every
+      // repository — so the command reads what the courses' legs require first (the preflight
+      // GET) and asks to confirm before it signs the PUT. --yes answers the prompt beforehand.
+      const { flags, positional } = parseArgs(rest.slice(1), ['clear', 'yes'], [], 2);
+      const capability = need(positional[0], 'the capability');
+      let capacity = null;
+      if (!flags.clear) {
+        capacity = Number(need(positional[1], 'the capacity (1-64), or --clear'));
+        if (!Number.isInteger(capacity) || capacity < 1 || capacity > 64) throw new Error(`the capacity is an integer 1 to 64, not ${positional[1]}`);
+      } else if (positional[1] != null) {
+        throw new Error('baton admin capacity set <capability> <n> | baton admin capacity set <capability> --clear');
+      }
+      return {
+        method: 'PUT', path: '/v1/admin/capacities', body: { capability, capacity },
+        // The confirm print's own read, and the prompt's question:
+        preflight: { method: 'GET', path: `/v1/admin/capacities?capability=${encodeURIComponent(capability)}`,
+          question: flags.clear ? `clear ${capability}'s capacity (its seats become unlimited)?` : `set ${capability}'s capacity to ${capacity}?` },
+        yes: !!flags.yes,
+      };
+    }
+    if (cmd === 'capacity' && rest[0] === 'list') {
+      parseArgs(rest.slice(1), [], [], 0);
+      return { method: 'GET', path: '/v1/admin/capacities' };
+    }
+    throw new Error('baton admin repos|repo|grant|probe|resource|instance|capacity|revoke|open');
   }
   if (role === 'owner') {
     if (cmd === 'grants') {
@@ -359,6 +387,34 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
 const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier'];
 
 /** A JSON argument: inline (`{…}`), else a file holding it. */
+/** R-BTN-178's confirm (B-106): print every course whose legs require the capability, with the
+ *  type's definition in each, then ask. `--yes` answers beforehand; without a TTY the command
+ *  refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
+export async function confirmCapacity(answer, question, yes, out, input) {
+  const requiring = Array.isArray(answer?.requiring) ? answer.requiring : [];
+  if (requiring.length) {
+    for (const c of requiring) {
+      const type = c.type ? ` — ${c.type.description} (values ${c.type.values})` : '';
+      out.write(`${c.repository}/${c.course} v${c.version}: its legs ${c.legs.join(', ')} require it${type}\n`);
+    }
+  } else {
+    out.write(`no course of this Baton names the capability in a leg's requires — setting it is the administrator's own statement of the name\n`);
+  }
+  for (const c of Array.isArray(answer?.capacities) ? answer.capacities : []) {
+    if (c.capacity != null) out.write(`${c.capability}: capacity ${c.capacity} (set ${new Date(c.set_at).toISOString()} by ${c.set_by})\n`);
+  }
+  if (yes) return true;
+  if (!input.isTTY) {
+    out.write('baton: not confirmed — answer the prompt on a terminal, or pass --yes\n');
+    return false;
+  }
+  out.write(`${question} [y/N] `);
+  const line = await new Promise((resolve) => {
+    input.once('data', (d) => resolve(String(d).trim().toLowerCase()));
+  });
+  return line === 'y' || line === 'yes';
+}
+
 function jsonArg(v, readJson) {
   const text = v.trim().startsWith('{') ? v : readJson(v);
   try {
@@ -541,7 +597,19 @@ export async function main(argv) {
   const { flags } = parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
   const args = rest.filter((_, i, a) => !(a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
   const p = plan(role, args);
-  const { status, json, text } = await send(flags.url ?? process.env.BATON_URL ?? DEFAULT_URL, p, need(flags.identity, '-i KEY (an administrator, owner or worker key file)'));
+  const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+  const keyFile = need(flags.identity, '-i KEY (an administrator, owner or worker key file)');
+  // R-BTN-178: `capacity set` reads what the courses' legs require and asks to confirm before
+  // the PUT goes out — one name, one thing (R-BTN-137) is the administrator's own statement.
+  if (p.preflight) {
+    const read = await send(url, p.preflight, keyFile);
+    if (!(read.status >= 200 && read.status < 300)) {
+      process.stdout.write(`${JSON.stringify(read.json)}\n`);
+      return 1;
+    }
+    if (!(await confirmCapacity(read.json, p.preflight.question, p.yes, process.stdout, process.stdin))) return 1;
+  }
+  const { status, json, text } = await send(url, p, keyFile);
   // A 2xx whose body is not JSON — an intermediary's login page, an HTML error, an empty body —
   // is a refusal, never success (B-80): the command fails, showing what arrived.
   if (status >= 200 && status < 300 && json === null) {

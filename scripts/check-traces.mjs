@@ -161,6 +161,9 @@ export function translate(trace) {
     REQUIRES: `Map(${T.map((t) => `${q(t)} -> Set()`).join(', ')})`,
     RESOURCES: 'Set()',
     NEEDS: 'Map("implement" -> Set(), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())',
+    // R-BTN-178 (B-106): the traces carry no seats — no capability has a capacity in a replay.
+    CAPPED: 'Set()',
+    SEATCAP: 'Map()',
   };
 
   // The environment the model has and Baton cannot see: git, each sync run's phase, the claim

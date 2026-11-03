@@ -33,6 +33,10 @@ export interface RunArgs {
   /** B-103: narrows the courses this runner serves to this one, of those its home checkout
    *  declares (R-BTN-131); absent, it serves and declares every one of them. */
   course?: string;
+  /** B-106 (R-BTN-178): one machine's singleton — a capability mapped to a lock file the runner
+   *  holds an exclusive lock on while it declares the capability. `--lock capability=path`,
+   *  repeatable; empty when none. */
+  locks: Record<string, string>;
   /** B-83: the run is a test harness — the heartbeat says so (R-BTN-32, refused from any
    * credential but the test one), and the bare `echo` agent_command is permitted as the stub
    * it is, for tests. */
@@ -45,7 +49,7 @@ export interface RunArgs {
 
 /** `baton run [--harness opencode|claude-code] [--home <checkout>] [--url <url>] [--session <id>]
  * [--repository <id>] [--hostname <name>] [--tier <tier>] [--capabilities a,b] [--beat-every <ms>]
- * [--course <id>] [--test-harness] [--verbose]`.
+ * [--course <id>] [--lock <capability>=<path>]… [--test-harness] [--verbose]`.
  * Unknown flags are refused, never dropped. `--capabilities` narrows the grant: without it the
  * runner declares what the grant allows (B-86). `--help` prints this, before any credential. */
 export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): RunArgs {
@@ -53,7 +57,7 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     harness: 'opencode', home: env.BATON_HOME ?? process.cwd(), url: env.BATON_URL ?? DEFAULT_URL,
     session: env.BATON_SESSION ?? `run-${Math.random().toString(16).slice(2, 10)}`,
     repository: env.BATON_REPOSITORY ?? 'docs', hostname: env.BATON_HOSTNAME ?? hostname(),
-    tier: 'critical', capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false,
+    tier: 'critical', capabilities: null, beatEvery: 2 * 60_000, testHarness: false, verbose: false, locks: {},
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -76,7 +80,17 @@ export function parseRunArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     else if (a === '--tier') out.tier = value();
     else if (a === '--course') out.course = value();
     else if (a === '--capabilities') out.capabilities = value().split(',').map((s) => s.trim()).filter(Boolean);
-    else if (a === '--beat-every') {
+    else if (a === '--lock') {
+      // R-BTN-178: `--lock <capability>=<path>`, repeatable — the capability is declared only
+      // while this process holds the file's exclusive lock.
+      const v = value();
+      const eq = v.indexOf('=');
+      const capability = eq > 0 ? v.slice(0, eq) : '';
+      const path = eq > 0 ? v.slice(eq + 1) : '';
+      const type = capability.slice(0, capability.indexOf(':'));
+      if (!capability.includes(':') || !type || capability.endsWith(':') || !path) throw new Error(`--lock ${v}: <capability>=<path>, the capability an expanded <type>:<value> name`);
+      out.locks[capability] = path;
+    } else if (a === '--beat-every') {
       const n = Number(value());
       if (!Number.isInteger(n) || n < 50) throw new Error('--beat-every: an integer of at least 50 ms');
       out.beatEvery = n;
@@ -103,6 +117,9 @@ export const RUN_USAGE = [
   '                      serve the grant. A machine without a browser narrows, e.g. llm-call,create-pr.',
   '  --course <id>       narrows the courses served to this one, of those the home declares.',
   '                      Absent, the runner serves and declares every course the home declares.',
+  '  --lock cap=path     one machine\'s singleton (R-BTN-178), repeatable: the capability is declared',
+  '                      only while this runner holds an exclusive lock on the file, and it takes',
+  '                      the lock before a claim for, or the advance into, a leg requiring it.',
 ].join('\n');
 
 /** B-86: whether the arguments ask for the usage — `--help` or `-h`, anywhere in them. */
@@ -357,6 +374,9 @@ export async function runMain(argv: string[], io: { log?: (l: string) => void; f
     home: a.home, repository: a.repository, hostname: a.hostname, harness: a.harness, session: a.session,
     tierCeiling: a.tier, ...(a.capabilities ? { capabilities: a.capabilities } : {}),
     courses,
+    // B-106 (R-BTN-178): one machine's singleton — the lock files this runner was configured
+    // with, empty when none.
+    ...(Object.keys(a.locks).length ? { locks: a.locks } : {}),
     // B-86: the legs the runner's courses require, from the home checkout's working tree — what
     // a never-eligible runner says it lacks at startup. B-103: every served course's legs, as each
     // of them must declare by its own version (rule 9 per course).

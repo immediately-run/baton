@@ -266,7 +266,7 @@ export class BatonCore {
 
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
-  // @model alarmLive sha256:ca9f6ccd8aa0
+  // @model alarmLive sha256:e92b9b16d800
   async alarm(): Promise<void> {
     // Re-armed first, so one failing tick never ends the cycle.
     await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
@@ -721,6 +721,10 @@ export class BatonCore {
       if (m === 'POST' && p === '/v1/admin/resources') return json(this.resources.addResource(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/instances') return json(this.resources.addInstance(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/readings') return json(this.resources.post({ kind: 'admin', fingerprint: fp }, await body(), null));
+      // R-BTN-178: a capability's capacity, and the courses whose legs require one — the read
+      // `baton admin capacity set` prints before it asks to confirm.
+      if (m === 'PUT' && p === '/v1/admin/capacities') return json(this.resources.setCapacity(actor, await body()));
+      if (m === 'GET' && p === '/v1/admin/capacities') return json(this.resources.capacities(url.searchParams.get('capability') ?? undefined));
       if (m === 'POST' && p === '/v1/admin/grants') {
         const b = await body();
         const repo = checkRepositoryId((b as { repository?: unknown } | null)?.repository);
@@ -953,7 +957,7 @@ export class BatonCore {
    * a rewind to a once-accepted history included — is a fresh hold with a fresh row. The 0001
    * schema's "written once" and "the first force post" describe that one hold.
    */
-  // @model syncPost sha256:710161d0a3b7
+  // @model syncPost sha256:e11273132f73
   async board(repo: Repository, p: BoardPayload) {
     // Course graphs are read per post: a registry applied, or a post refused after applying one,
     // must not leave another request reading a graph that is not in force.

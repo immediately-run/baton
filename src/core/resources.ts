@@ -12,7 +12,7 @@ import { logEvent } from './db';
 import { baseChainOf, detailProblem, sameSchema, schemaProblem, type Schema } from './detailSchema';
 import { refinementGaps } from '../shared/schema.mjs';
 import { stdSchema } from '../shared/std.mjs';
-import { checkInstance, checkReadings, checkResource, VALID_FOR, WORKER_INSTANCE } from './validate';
+import { checkCapacity, checkInstance, checkReadings, checkResource, VALID_FOR, WORKER_INSTANCE } from './validate';
 import type { Blocks } from './blocks';
 import type { Store } from './ports';
 
@@ -46,6 +46,63 @@ export class Resources {
   }
 
   // ── registration (an administrator, R-BTN-76) ─────────────────────────────────────────────
+
+  /** `PUT /v1/admin/capacities` (R-BTN-178, §6.11): `{capability, capacity}` — an integer 1–64,
+   *  or null to clear the capability's capacity, giving it unlimited seats again. A lower
+   *  capacity never takes back a held seat; it applies to the next claim or advance. Seats write
+   *  no block and wake no one (R-BTN-72): a freed seat sends no `unblocked`. */
+  setCapacity(actor: string, body: unknown) {
+    const b = checkCapacity(body);
+    return this.c.store.transaction(() => {
+      const now = this.c.now();
+      if (b.capacity == null) {
+        this.exec('DELETE FROM capability_capacity WHERE capability = ?', b.capability);
+        logEvent(this.c.store, now, 'admin', actor, { act: 'capacity-cleared', capability: b.capability }, null, null, null);
+      } else {
+        this.exec(`INSERT INTO capability_capacity (capability, capacity, set_by, set_at) VALUES (?, ?, ?, ?)
+                   ON CONFLICT (capability) DO UPDATE SET capacity = excluded.capacity, set_by = excluded.set_by, set_at = excluded.set_at`,
+          b.capability, b.capacity, actor, now);
+        logEvent(this.c.store, now, 'admin', actor, { act: 'capacity-set', capability: b.capability, capacity: b.capacity }, null, null, null);
+      }
+      return { ok: true };
+    });
+  }
+
+  /** `GET /v1/admin/capacities[?capability=<c>]` (R-BTN-178): every capacity, and, for one named
+   *  capability, every course of the tenant whose legs require it with the type's definition in
+   *  each — what `baton admin capacity set` prints before it asks to confirm, the administrator's
+   *  statement being that the name denotes the same thing in every repository (R-BTN-137). */
+  capacities(capability?: string) {
+    const capacities = this.rows<{ capability: string; capacity: number; set_by: string; set_at: number }>(
+      'SELECT capability, capacity, set_by, set_at FROM capability_capacity ORDER BY capability');
+    if (capability === undefined) return { capacities };
+    const courses = this.rows<{ repository_id: string; id: string; version: number; course_json: string; leg_capabilities_json: string }>(
+      'SELECT repository_id, id, version, course_json, leg_capabilities_json FROM courses ORDER BY repository_id, id')
+      .flatMap((c) => {
+        let legs: Record<string, string[]> = {};
+        let types: Record<string, unknown> = {};
+        try {
+          legs = JSON.parse(c.leg_capabilities_json) as Record<string, string[]>;
+          types = ((JSON.parse(c.course_json) as { capability_types?: unknown }).capability_types ?? {}) as Record<string, unknown>;
+        } catch { /* a course file the registry accepted never fails this */ }
+        return Object.entries(legs).some(([, needs]) => (needs ?? []).includes(capability))
+          ? [{
+            repository: c.repository_id, course: c.id, version: c.version,
+            legs: Object.entries(legs).filter(([, needs]) => (needs ?? []).includes(capability)).map(([leg]) => leg).sort(),
+            type: this.typeOf(types, capability),
+          }]
+          : [];
+      });
+    return { capacities, requiring: courses };
+  }
+
+  /** The named capability's type as the course file declared it, for the confirm print. */
+  private typeOf(types: Record<string, unknown>, capability: string): { description: string; values: string } | null {
+    const t = types[capability.slice(0, capability.indexOf(':'))];
+    return t && typeof t === 'object' && typeof (t as { description?: unknown }).description === 'string' && typeof (t as { values?: unknown }).values === 'string'
+      ? { description: (t as { description: string }).description, values: (t as { values: string }).values }
+      : null;
+  }
 
   /** `POST /v1/admin/resources`: `{name, scope, detail_schema, atoms_from?}`. The schema is refused outside
    *  R-BTN-76's subset; an `x-baton-base` names a `std:` schema (and only one — R-BTN-176), and a
@@ -197,7 +254,7 @@ export class Resources {
    * answered with its code, never the post. A `state` reading posted while an administrator's is
    * in force is stored and answered `overridden`.
    */
-  // @model reading sha256:f9345e5715a2
+  // @model reading sha256:7c747d85a0b4
   post(who: Instrument, body: unknown, repos: string[] | null) {
     const readings = checkReadings(body, who.kind === 'admin' ? VALID_FOR.admin_s : VALID_FOR.state_s);
     return this.c.store.transaction(() => {
@@ -297,7 +354,7 @@ export class Resources {
 
   /** The alarm's share: lapsed readings are dropped (every reading in force is kept, R-BTN-101),
    *  and the states they held change. Returns when the next one lapses. */
-  // @model readingLapses sha256:5a264f29fafa
+  // @model readingLapses sha256:5a1fa56a409d
   alarm(): number | null {
     const now = this.c.now();
     const lapsed = this.rows<{ instance: string }>('SELECT DISTINCT instance FROM instance_readings WHERE lapses_at <= ?', now).map((r) => r.instance);

@@ -25,7 +25,7 @@ describe('gatesFor: every gate of the table', () => {
   });
 
   // [gate, the input that fails it, the verdict at a claim, the verdict at an advance (null: passes)]
-  const cases: [string, () => Parameters<typeof gatesFor>, { rule: number | string; code: string }, { rule: number | string; code: string } | null][] = [
+  const cases: [string, () => Parameters<typeof gatesFor>, { rule: number | string; code: string; capability?: string }, { rule: number | string; code: string; capability?: string } | null][] = [
     ['rule 1: the queued leg is not ready', () => [worker(), ticket(), leg({ state: 'waiting' }), 'claim', facts()], { rule: 1, code: 'not-ready' }, null],
     ['rule 1: a leg no snapshot posted', () => [worker(), ticket(), leg({ state: null }), 'claim', facts()], { rule: 1, code: 'not-ready' }, null],
     ['§6.7: no sync since the last end', () => [worker(), ticket(), leg(), 'claim', facts({ headObservation: 4 })], { rule: 1, code: 'awaiting-sync' }, null],
@@ -43,11 +43,25 @@ describe('gatesFor: every gate of the table', () => {
     ['isolation (R-BTN-107): a session floor, a process worker', () => [worker(), ticket(), leg({ isolation: 'session' }), 'claim', facts()], { rule: 'isolation', code: 'isolation' }, { rule: 'isolation', code: 'isolation' }],
     ['isolation (R-BTN-107): a session floor, an attached worker', () => [worker({ isolation: 'attached' }), ticket(), leg({ isolation: 'session' }), 'claim', facts()], { rule: 'isolation', code: 'isolation' }, { rule: 'isolation', code: 'isolation' }],
     ['rule 10: backing off', () => [worker(), ticket(), leg(), 'claim', facts({ override: { hold: 0, retry_after: T0 + 1 } })], { rule: 10, code: 'backing-off' }, { rule: 10, code: 'backing-off' }],
+    ['rule 11 (R-BTN-178): every seat of a required capability is held', () => [worker({ declared: ['agent-venue', 'capability:rdp-lab'] }), ticket({ requires: ['agent-venue', 'capability:rdp-lab'] }), leg(), 'claim', facts({ seats: { 'capability:rdp-lab': { capacity: 1, held: 1 } } })], { rule: 11, code: 'capacity-full', capability: 'capability:rdp-lab' }, { rule: 11, code: 'capacity-full', capability: 'capability:rdp-lab' }],
+    ['rule 11: the leg\'s own requires seats it too', () => [worker({ declared: ['agent-venue', 'capability:rdp-lab'] }), ticket({ requires: [] }), leg({ requires: ['capability:rdp-lab'] }), 'claim', facts({ seats: { 'capability:rdp-lab': { capacity: 2, held: 2 } } })], { rule: 11, code: 'capacity-full', capability: 'capability:rdp-lab' }, { rule: 11, code: 'capacity-full', capability: 'capability:rdp-lab' }],
   ];
   it.each(cases)('%s', (_name, args, atClaim, atAdvance) => {
     const [w, t, l, , f] = args();
     expect(gatesFor(w, t, l, 'claim', f)).toEqual({ ok: false, ...atClaim });
     expect(gatesFor(w, t, l, 'advance', f)).toEqual(atAdvance ? { ok: false, ...atAdvance } : { ok: true });
+  });
+
+  it('rule 11 (R-BTN-178): a seat free, a capability with no capacity, and the asking claim\'s own seat all pass', () => {
+    const holds = worker({ declared: ['agent-venue', 'capability:rdp-lab'] });
+    // One seat of two held: free.
+    expect(gatesFor(holds, ticket({ requires: ['capability:rdp-lab'] }), leg(), 'claim', facts({ seats: { 'capability:rdp-lab': { capacity: 2, held: 1 } } }))).toEqual({ ok: true });
+    // A capability with no capacity has unlimited seats: no fact, no check.
+    expect(gatesFor(holds, ticket({ requires: ['capability:rdp-lab'] }), leg(), 'claim', facts())).toEqual({ ok: true });
+    // The asking claim's own seat never counts against it — `held` arrives excluding it.
+    expect(gatesFor(holds, ticket({ requires: ['capability:rdp-lab'] }), leg(), 'advance', facts({ seats: { 'capability:rdp-lab': { capacity: 1, held: 0 } } }))).toEqual({ ok: true });
+    // A capacity on a capability neither the clause nor the leg names never refuses.
+    expect(gatesFor(holds, ticket(), leg(), 'claim', facts({ seats: { 'capability:other-lab': { capacity: 1, held: 1 } } }))).toEqual({ ok: true });
   });
 
   it('rule 6 is retired: an operator-only ticket is never refused for the tag alone (B-104, R-BTN-121 as amended)', () => {

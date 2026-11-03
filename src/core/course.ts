@@ -42,12 +42,16 @@ const WAIT_LABEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 // its CPU on a hostile file. COURSE_LIST_MAX bounds every other list a file holds.
 const COURSE_STATIONS_MAX = 100;
 const COURSE_LEGS_MAX = 200;
+/** A type's `values` pattern (R-BTN-121): printable ASCII, bounded — the full engine check is
+ * B-10's acceptance of a leg's names; this one only bounds what is stored and printed. */
+const VALUES_PATTERN = /^[\x20-\x7e]{1,256}$/;
 const COURSE_LIST_MAX = 64;
+
 /** The most violations a result holds: enough to fix a file from, small enough for a Needs
  *  you entry (spec-silent, recorded on R3-1231). The list is kept to this while it fills, so a
  *  hostile file's thousand faults cost no more memory than a hundred. */
 const COURSE_VIOLATIONS_MAX = 100;
-const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs', 'capability_roles', 'starts_from']);
+const TOP_KEYS = new Set(['start', 'start_leg', 'end', 'short_waits', 'stations', 'legs', 'capability_roles', 'capability_types', 'starts_from']);
 /** R-BTN-131 (B-98): the one way a course is entered that is not a hand-filed ticket —
  *  `starts_from: request`, which `baton request` reads before it files the ticket that starts the
  *  course. A closed set: anything else is a file Baton would record and never act on. */
@@ -96,6 +100,25 @@ export function validateCourse(json: unknown): CourseViolation[] {
     return out;
   }
   for (const k of Object.keys(json)) if (!TOP_KEYS.has(k)) add('unknown-key', k, `unknown key "${k}"`);
+  // R-BTN-121 (B-106's slice): a course's `capability_types` — the types its capabilities are of,
+  // each with a one-line description and the pattern a value matches (R-BTN-108's engine). Stored
+  // verbatim in the registry for what names a thing shared across repositories (R-BTN-178's
+  // confirm print); checking a leg's names against them is B-10's acceptance, not this one.
+  if ('capability_types' in json) {
+    const types = json.capability_types;
+    if (!isObject(types)) add('shape', 'capability_types', 'capability_types is an object of type declarations');
+    else if (Object.keys(types).length > COURSE_LIST_MAX) add('shape', 'capability_types', `at most ${COURSE_LIST_MAX} capability types`);
+    else for (const [type, def] of Object.entries(types)) {
+      if (!/^[a-z][a-z0-9-]{0,31}$/.test(type) || type === 'runner' || type === 'human-operator') {
+        add('shape', `capability_types.${type}`, 'a type id matches ^[a-z][a-z0-9-]{0,31}$ and is neither "runner" nor "human-operator" (R-BTN-121)');
+        continue;
+      }
+      if (!isObject(def) || typeof def.description !== 'string' || def.description.length < 1 || def.description.length > 200
+        || typeof def.values !== 'string' || def.values.length > 256 || !VALUES_PATTERN.test(def.values)) {
+        add('shape', `capability_types.${type}`, 'a type is {description: 1-200 chars, values: a pattern of at most 256 chars} (R-BTN-121)');
+      }
+    }
+  }
   // R-BTN-120, R-BTN-121: a course's capability roles — named capability lists a leg's
   // `requires.capabilities` may name; `graphOf` expands them (`legCapabilities`), so rule 4, the
   // candidate query and the runner's never-eligible line all compare capabilities.

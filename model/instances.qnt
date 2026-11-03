@@ -7,13 +7,17 @@ module sim {
                     P_OWNER_BUDGET = 2,
                     P_DECLARED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp", "db:orders:rw"), "w3" -> Set("db:orders:rw")),
                     P_GRANTED = Map("w1" -> Set("vpn:corp"), "w2" -> Set("vpn:corp"), "w3" -> Set("vpn:corp", "db:orders:rw")),
-                    P_REQUIRES = Map("t1" -> Set(), "t2" -> Set("db:orders:rw")),
-                    P_RESOURCES = Set("llm"), P_NEEDS = Map("implement" -> Set("llm"), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())).* from "./properties"
+                    // B-106 (R-BTN-178): both tickets share vpn:corp, whose capacity is 1, so a
+                    // claim on one refuses the other's rule 11 — the fence keeps a reaped one's.
+                    P_REQUIRES = Map("t1" -> Set("vpn:corp"), "t2" -> Set("vpn:corp", "db:orders:rw")),
+                    P_RESOURCES = Set("llm"), P_NEEDS = Map("implement" -> Set("llm"), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set()),
+                    P_CAPPED = Set("vpn:corp"), P_SEATCAP = Map("vpn:corp" -> 1)).* from "./properties"
 }
 module small {
   import properties(P_TICKETS = Set("t1"), P_WORKERS = Set("w1", "w2"),
                     P_SLOTS = Set(1), P_MAX_CLAIMS = 3, P_GIT_BUDGET = 1,
                     P_OWNER_BUDGET = 1,
                     P_DECLARED = Map("w1" -> Set(), "w2" -> Set()), P_GRANTED = Map("w1" -> Set(), "w2" -> Set()),
-                    P_REQUIRES = Map("t1" -> Set()), P_RESOURCES = Set(), P_NEEDS = Map("implement" -> Set(), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())).* from "./properties"
+                    P_REQUIRES = Map("t1" -> Set()), P_RESOURCES = Set(), P_NEEDS = Map("implement" -> Set(), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set()),
+                    P_CAPPED = Set(), P_SEATCAP = Map()).* from "./properties"
 }

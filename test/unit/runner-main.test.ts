@@ -45,6 +45,13 @@ describe('parseRunArgs', () => {
     expect(parseRunArgs(['--test-harness'], {}).testHarness).toBe(true);
     // B-86: --capabilities narrows; no flag is no declaration (`null`), never `agent-venue` alone.
     expect(parseRunArgs(['--capabilities', 'llm-call'], {}).capabilities).toEqual(['llm-call']);
+    // B-106 (R-BTN-178): --lock <capability>=<path>, repeatable — one machine's singleton. An
+    // unexpanded name is refused: the lock's capability is a thing, typed like any other.
+    expect(parseRunArgs(['--lock', 'mcp:chrome=/run/baton/chrome.lock', '--lock', 'rdp:bench=/run/baton/rdp.lock'], {}).locks)
+      .toEqual({ 'mcp:chrome': '/run/baton/chrome.lock', 'rdp:bench': '/run/baton/rdp.lock' });
+    expect(parseRunArgs([], {}).locks).toEqual({});
+    expect(() => parseRunArgs(['--lock', 'mcp-chrome=/run/x'], {})).toThrow('<capability>=<path>');
+    expect(() => parseRunArgs(['--lock', 'mcp:chrome'], {})).toThrow('<capability>=<path>');
     // Verbose logging (2026-10-23): timestamps, the claim's id and nonce, the leg's command.
     expect(parseRunArgs(['--verbose'], {}).verbose).toBe(true);
   });

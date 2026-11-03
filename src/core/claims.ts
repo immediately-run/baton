@@ -6,7 +6,7 @@
 import { BatonError } from './http';
 import { transcriptUrl } from './links';
 import { isUniqueViolation, logEvent, randomHex } from './db';
-import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
+import { fitsTier, capabilitiesOf, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
 import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
@@ -405,8 +405,67 @@ export class Claims {
       blocks: this.rows<{ kind: string; leg: string }>(
         `SELECT b.kind, b.leg FROM ticket_blocks b WHERE b.ticket_id = ? AND b.kind IN ('ticket', 'decision')
            AND NOT (b.kind = 'decision' AND EXISTS (SELECT 1 FROM ticket_decisions d WHERE d.ticket_id = b.ticket_id AND d.decision_id = b.ref AND d.source = 'baton'))`, item.id),
+      // R-BTN-178: rule 11's fact — the seats claims other than the asking one hold (a claim's
+      // own seat never counts against it, so an advance excludes the advancing claim here).
+      seats: this.seatFacts(item, leg, opts.except ?? null),
     };
     return gatesFor({ declared: w.declared, derived: w.derived, tier_ceiling: this.ceiling(w, item.repository), tags: w.tags, courses: w.courses, grants: w.grants, isolation: w.isolation }, ticket, this.postedLeg(item, leg, phase), phase, facts);
+  }
+
+  /** R-BTN-178: the capabilities rule 4 matched for this leg — the ticket's requires clause and
+   *  the leg's own (§6.6), expanded as `graphOf` expanded the file. Seats are written from this
+   *  set as it stands when the leg starts; a later snapshot never changes a held seat. */
+  private rule4Set(item: ItemFacts, leg: string): Set<string> {
+    const def = this.stations.graph(item.repository, item.course)?.legs.get(leg);
+    return new Set([...capabilitiesOf(item.requires), ...(def?.requires ?? [])]);
+  }
+
+  /** Rule 11's fact (R-BTN-178, §6.11): each capability with a capacity in rule 4's set for this
+   *  leg, with the seats claims other than `except` hold on it — active claims and fence-pending
+   *  reaped ones (R-BTN-19), counted across every repository of the tenant (R-BTN-137). Empty,
+   *  and one query, when no capability has a capacity. */
+  private seatFacts(item: ItemFacts, leg: string, except: number | null): Record<string, { capacity: number; held: number }> {
+    const out: Record<string, { capacity: number; held: number }> = {};
+    const caps = this.rows<{ capability: string; capacity: number }>('SELECT capability, capacity FROM capability_capacity');
+    if (!caps.length) return out;
+    const needs = this.rule4Set(item, leg);
+    for (const c of caps) {
+      if (!needs.has(c.capability)) continue;
+      const held = this.rows<{ n: number }>(
+        `SELECT count(*) AS n FROM claim_seats s JOIN claims k ON k.id = s.claim_id
+          WHERE s.capability = ? AND k.id IS NOT ?
+            AND (k.status = 'active' OR (k.status = 'reaped' AND k.fence_pending = 1))`, c.capability, except)[0].n;
+      out[c.capability] = { capacity: c.capacity, held };
+    }
+    return out;
+  }
+
+  /** R-BTN-178: the claim's seats, written in the claim's or the advance's own transaction — one
+   *  row per capability with a capacity in rule 4's set for the leg it starts, the set as it
+   *  stands then (a later snapshot changes no held seat). An advance rewrites the set, so one
+   *  into a leg not requiring a capability releases that seat; the claim's end deletes the rest. */
+  private writeSeats(claimId: number, item: ItemFacts, leg: string | null): void {
+    this.exec('DELETE FROM claim_seats WHERE claim_id = ?', claimId);
+    if (leg == null) return;
+    const capped = this.rows<{ capability: string }>('SELECT capability FROM capability_capacity').map((r) => r.capability);
+    if (!capped.length) return;
+    const needs = this.rule4Set(item, leg);
+    for (const capability of capped) {
+      if (needs.has(capability)) this.exec('INSERT OR IGNORE INTO claim_seats (claim_id, capability) VALUES (?, ?)', claimId, capability);
+    }
+  }
+
+  /** R-BTN-178: the claims holding a capability's seats, for a rule-11 refusal's message — named
+   *  only where the caller's key is granted on the holder's repository (R-BTN-99); an interim
+   *  key, granted everywhere (B-104, A1), sees them all. */
+  private seatHolders(capability: string, except: number | null, w?: WorkerFacts): string[] {
+    return this.rows<{ id: number; ticket_id: string }>(
+      `SELECT k.id, k.ticket_id FROM claim_seats s JOIN claims k ON k.id = s.claim_id
+        WHERE s.capability = ? AND k.id IS NOT ?
+          AND (k.status = 'active' OR (k.status = 'reaped' AND k.fence_pending = 1))
+        ORDER BY k.id`, capability, except)
+      .filter((h) => w == null || w.grants == null || w.grants[repositoryOf(h.ticket_id)] != null)
+      .map((h) => `claim ${h.id} on ${h.ticket_id}`);
   }
 
   /** Rule 2's count (advice): active Baton claims on expedited tickets, not git in-progress. */
@@ -583,11 +642,17 @@ export class Claims {
     return this.c.intake?.(item.repository, item.course) === 'closed';
   }
 
-  /** The refusal a failed gate becomes (§11): `barred-tag`, `stale-skills` and `backing-off` have
-   *  codes of their own; every other gate is `not-eligible` naming the rule — `chain` and
-   *  `isolation` by name (R-BTN-106, R-BTN-107). */
-  private refusal(ticketId: string, v: Exclude<GateVerdict, { ok: true }>, phase: Phase): BatonError {
-    const code = v.code === 'blocked' ? 'blocked' : v.rule === 8 ? 'barred-tag' : v.rule === 9 ? 'stale-skills' : v.rule === 10 ? 'backing-off' : 'not-eligible';
+  /** The refusal a failed gate becomes (§11): `barred-tag`, `stale-skills`, `backing-off` and
+   *  `capacity-full` have codes of their own; every other gate is `not-eligible` naming the rule
+   *  — `chain` and `isolation` by name (R-BTN-106, R-BTN-107). A rule-11 refusal names the
+   *  capability and the holders the caller's key may see (R-BTN-178, R-BTN-99). */
+  private refusal(ticketId: string, v: Exclude<GateVerdict, { ok: true }>, phase: Phase, w?: WorkerFacts, except: number | null = null): BatonError {
+    const code = v.code === 'blocked' ? 'blocked' : v.rule === 8 ? 'barred-tag' : v.rule === 9 ? 'stale-skills' : v.rule === 10 ? 'backing-off' : v.rule === 11 ? 'capacity-full' : 'not-eligible';
+    if (v.rule === 11 && v.capability) {
+      const holders = this.seatHolders(v.capability, except, w);
+      return new BatonError(code, `${ticketId}: ${v.capability}'s seats are full at ${phase === 'claim' ? 'a claim' : 'an advance'}${holders.length ? ` (held by ${holders.join(', ')})` : ''}`,
+        { rule: v.rule, rule_code: v.code, capability: v.capability });
+    }
     return new BatonError(code, `${ticketId}: ${v.code} at ${phase === 'claim' ? 'a claim' : 'an advance'}`, { rule: v.rule, rule_code: v.code });
   }
 
@@ -604,7 +669,7 @@ export class Claims {
       const item = this.item(wanted);
       if (!item || !item.station?.next_leg) throw new BatonError('not-eligible', `${wanted} has no leg to claim`, { rule: 1, rule_code: GATE_CODES[1] });
       const v = this.gate(w, item, item.station.next_leg, 'claim');
-      if (!v.ok) throw this.refusal(wanted, v, 'claim');
+      if (!v.ok) throw this.refusal(wanted, v, 'claim', w);
       // R-BTN-45: advice never refuses; a claim against it is accepted and recorded.
       const recs = this.recommend(w, 50);
       const place = recs.findIndex((r) => r.ticket_id === wanted);
@@ -670,7 +735,7 @@ export class Claims {
 
   /** `POST /v1/runner/claim` (§6.2): idempotent by `request_id`; the lock is the index. The claim
    *  is at the ticket's posted station, running nothing, its path recorded (R-BTN-63). */
-  // @model claim sha256:ae05eab25b84
+  // @model claim sha256:2474e2bb5224
   claim(workerId: number, body: unknown, prepared?: WorkerFacts) {
     const b = checkClaim(body);
     if (!this.anyCutOver()) throw new BatonError('not-cut-over', 'claims go through git until cutover (R-BTN-28)');
@@ -704,6 +769,9 @@ export class Claims {
     }
     const id = this.rows<{ id: number }>('SELECT last_insert_rowid() AS id')[0].id;
     this.event('claimed', `worker:${workerId}`, { request_id: b.request_id, station: st.station, leg: st.next_leg }, item.id, id);
+    // R-BTN-178: the claim's seats, for the leg it is for — the set as rule 4 matched it here,
+    // rewritten at each advance that starts a leg.
+    this.writeSeats(id, item, st.next_leg);
     this.c.blocks?.held(item.id, true); // a claimed ticket is not waiting (R-BTN-77: silently)
     if (advice?.overridden) this.event('advice-overridden', `worker:${workerId}`, { overridden: advice.overridden }, item.id, id);
     this.c.dispatch?.('mirror', item.id);
@@ -806,7 +874,7 @@ export class Claims {
    * nothing. The answer carries the latest snapshot's next legs and the course's advice (none
    * until the course's hook, R3-1236).
    */
-  // @model advance sha256:86d70456f6d8
+  // @model advance sha256:4d03ba461c46
   advance(workerId: number, claimId: number, body: unknown, prepared?: WorkerFacts) {
     const b = checkAdvance(body);
     const c = this.held(workerId, claimId);
@@ -855,7 +923,7 @@ export class Claims {
     const advancing = prepared ?? this.worker(workerId);
     if (advancing.fresh == null) this.prepareSets(advancing, 1, repo);
     const v = this.gate(advancing, item, leg, 'advance', { except: claimId, holderBars: b.bars });
-    if (!v.ok) throw this.refusal(c.ticket_id, v, 'advance');
+    if (!v.ok) throw this.refusal(c.ticket_id, v, 'advance', advancing, claimId);
     // R-BTN-109: the finished leg arrives at `at` with what its entry asks; inline values in full.
     if (run) this.checkEntry(repo, g, at, b.outputs);
     else this.checkOutputValues(repo, b.outputs);
@@ -886,6 +954,9 @@ export class Claims {
     this.c.history?.record(started.ticket, { kind: 'leg-started', ...started.row, detail: { from: at, ...(b.bars.length ? { bars: b.bars } : {}), ...(resolved ? { route_choices: resolved.route_choices.map((r) => r.choice) } : {}) } });
     // R-BTN-62: only a reading numbered above the counter now can judge the claim stale.
     this.exec('UPDATE claims SET station = ?, leg = ?, claim_observation = ? WHERE id = ?', at, leg, n, claimId);
+    // R-BTN-178: the seats of the leg this advance starts, rewritten in its transaction — an
+    // advance into a leg not requiring a capability releases that seat.
+    this.writeSeats(claimId, item, leg);
     this.event('advanced', `worker:${workerId}`, { from: station, reached: at, leg, ...(b.bars.length ? { bars: b.bars } : {}), ...(b.evidence ? { evidence: b.evidence } : {}) }, c.ticket_id, claimId);
     this.c.dispatch?.('sync', c.ticket_id); // R-BTN-73: after every advance
     return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), advice: resolved ?? null };
@@ -952,7 +1023,7 @@ export class Claims {
   }
 
   /** `POST /v1/runner/claims/{id}/end` (§6.5, R-BTN-8, R-BTN-71). A retried identical end is a no-op. */
-  // @model endClaim sha256:635ae173693f
+  // @model endClaim sha256:1fe3c51207a8
   end(workerId: number, claimId: number, body: unknown) {
     const e = checkEnd(body);
     const c = this.held(workerId, claimId);
@@ -1128,6 +1199,10 @@ export class Claims {
       status, now, reason, opts.detail ?? null, status === 'completed' ? opts.ended_at_sha ?? '' : null, opts.fence ? 1 : 0, opts.fence?.incarnation ?? null,
       this.handedOut(repositoryOf(ticketId)), reached, c.regressed_since != null ? 1 : 0, claimId);
     this.exec(`UPDATE activities SET ended_at = ?, outcome = 'abandoned' WHERE claim_id = ? AND ended_at IS NULL`, now, claimId);
+    // R-BTN-178: the claim's seats release at its end — except a fence-pending reap's, which a
+    // reaped incarnation may still be driving (R-BTN-19): those go at `fence-cleared` or the
+    // fence deadline (the alarm's lapse, or `fenced`).
+    if (!opts.fence) this.exec('DELETE FROM claim_seats WHERE claim_id = ?', claimId);
     this.event(status, actor, { end_reason: reason, reached, ...(opts.detail ? { detail: opts.detail } : {}), ...(opts.ended_at_sha ? { ended_at_sha: opts.ended_at_sha } : {}), ...(opts.fence ? { fence_pending: true } : {}) }, ticketId, claimId);
     // §12: the mirror writes the end; R-BTN-73: every end dispatches a sync, which confirms a
     // completion (R-BTN-10) without waiting for an unrelated push and makes the ticket claimable.
@@ -1231,7 +1306,7 @@ export class Claims {
 
   /** `POST /v1/ui/overrides/{item}` (§8, §11): `{expedite?, hold?}`. Lifting a hold clears its
    *  reason and any backoff, and resets the attempt count (§6.10). */
-  // @model setHold sha256:a37f12a0ff1c
+  // @model setHold sha256:7498c6ed9d71
   setOverride(owner: string, item: string, body: unknown) {
     const o = checkOverride(body);
     const actor = `owner:${owner}`;
@@ -1350,14 +1425,16 @@ export class Claims {
 
   /** The heartbeat's `fenced` report (R-BTN-19): clears the fence of a claim reaped while this
    *  worker was alive — only in the incarnation it was reaped in, since a re-key never clears one. */
-  // @model fenceCleared sha256:5131749a791b
-  // @model heartbeat sha256:eed54b91ad1d
+  // @model fenceCleared sha256:8576937278c1
+  // @model heartbeat sha256:e9da1acd5895
   fenced(workerId: number, incarnation: number, claimId: number) {
     const c = this.rows<{ ticket_id: string }>(
       `SELECT ticket_id FROM claims WHERE id = ? AND worker_id = ? AND status = 'reaped' AND fence_pending = 1 AND fence_incarnation = ?`,
       claimId, workerId, incarnation)[0];
     if (!c) return false;
     this.exec('UPDATE claims SET fence_pending = 0 WHERE id = ?', claimId);
+    // R-BTN-178: the fence clearing releases the reaped claim's seats.
+    this.exec('DELETE FROM claim_seats WHERE claim_id = ?', claimId);
     this.event('fence-cleared', `worker:${workerId}`, { by: 'sidecar' }, c.ticket_id, claimId);
     this.c.blocks?.held(c.ticket_id, false);
     return true;
@@ -1368,7 +1445,7 @@ export class Claims {
   /** `POST /v1/ui/claims/{id}/reap`: any active claim. A live worker's claim is fence-pending
    *  (R-BTN-19) and the worker is not reaped, so its sidecar can still report the fence; a
    *  silent worker's is reaped as the alarm would. */
-  // @model forceReap sha256:f73dbf2851f1
+  // @model forceReap sha256:1748a36146fd
   forceReap(owner: string, claimId: number, body: unknown) {
     checkConfirm(body);
     const c = this.rows<{ id: number; ticket_id: string; worker_id: number; status: string }>('SELECT id, ticket_id, worker_id, status FROM claims WHERE id = ?', claimId)[0];
@@ -1385,7 +1462,7 @@ export class Claims {
   /** `POST /v1/ui/claims/{id}/resolve` (§6.7): an unconfirmed completion is never confirmed
    *  automatically; the owner confirms it (git does carry it) or releases it (it never landed),
    *  which makes the item claimable again. The commit it named stays in the event. */
-  // @model ownerResolve sha256:e7110e723f10
+  // @model ownerResolve sha256:0ffe5ac34edf
   resolve(owner: string, claimId: number, body: unknown) {
     const { action } = checkResolve(body);
     const c = this.rows<{ ticket_id: string; end_reason: string; ended_at_sha: string }>(
@@ -1502,7 +1579,7 @@ export class Claims {
    * - R-BTN-63: a holder's declared bars the snapshot posts that leg's bars without log
    *   `bars-mismatch`.
    */
-  // @model syncPost sha256:710161d0a3b7
+  // @model syncPost sha256:e11273132f73
   judge(repo: string, observation: number, seen: Map<string, Seen>) {
     let confirmed = 0;
     // A `done` is also confirmed by a reading numbered after the claim's latest advance that shows
@@ -1607,7 +1684,7 @@ export class Claims {
    *  or at an interim status that ends the item — ends `released:stale-board`, and the holder is
    *  told. A station that lags the holder's advances is never staleness (§2e). Before cutover git
    *  decides alone and the shadow reports end claims. */
-  // @model syncPost sha256:710161d0a3b7
+  // @model syncPost sha256:e11273132f73
   private staleBoard(repo: string, observation: number) {
     if (!this.rows('SELECT 1 FROM repositories WHERE id = ? AND cutover_at IS NOT NULL', repo).length) return 0;
     const active = this.rows<{ id: number; ticket_id: string; worker_id: number; tier_ceiling: string; tier_ceilings: string; kind: string }>(
@@ -1645,8 +1722,8 @@ export class Claims {
 
   // ── the alarm's share (§6.6, §7.1, §9) ──────────────────────────────────────────────────
 
-  // @model alarmReap sha256:eb1dfc9503f7
-  // @model fenceTimeout sha256:228feb72ec63
+  // @model alarmReap sha256:9767a3813e32
+  // @model fenceTimeout sha256:b982fa4ef61b
   alarm() {
     const now = this.c.now();
     this.releaseBarHolders(now);
@@ -1679,6 +1756,8 @@ export class Claims {
        WHERE c.status = 'reaped' AND c.fence_pending = 1 AND ? - w.last_seen_at >= w.lease_timeout_ms`, now);
     for (const c of lapsed) {
       this.exec('UPDATE claims SET fence_pending = 0 WHERE id = ?', c.id);
+      // R-BTN-178: the fence deadline releasing, the reaped claim's seats go with it.
+      this.exec('DELETE FROM claim_seats WHERE claim_id = ?', c.id);
       this.exec('UPDATE workers SET reaped_at = ? WHERE id = ? AND reaped_at IS NULL', now, c.worker_id);
       this.event('fence-cleared', 'alarm', { by: 'timeout' }, c.ticket_id, c.id);
       this.c.blocks?.held(c.ticket_id, false);
