@@ -7402,7 +7402,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose legs stateless at their boundaries (the branch, reviews, threads and a hand-off comment) over a lease per leg with affinity: any session can run any leg (2026-10-14; R-BTN-44).
 - Chose a claim that goes stale only when git takes the ticket away over "stale when the leg is no longer ready" (2026-10-14; R-BTN-35).
 - Chose commit ancestry and Baton's own observation numbers over commit timestamps to order snapshots: commit times are each pusher's clock (2026-10-13; R-BTN-10, R-BTN-62).
-- Chose to log every disagreement with git, both values, and to adopt git's value; what Baton owns is never in a discrepancy, since git never writes a position and an arrival Baton does not apply is recorded on the ticket and raises nothing (2026-10-15, 2026-10-31, 2026-11-01; R-BTN-85, R-BTN-39).
+- Chose to log every disagreement with git, both values, and to adopt git's value; what Baton owns is never in a discrepancy, since git never writes a position and an arrival Baton does not apply is recorded on the ticket and raises nothing — except the git-lock `status:`, whose `available` over a ticket placed past its start is B-129's `position-disagrees`, logged with nothing adopted (2026-10-15, 2026-10-31, 2026-11-01, 2026-11-03; R-BTN-85, R-BTN-39).
 - Chose a mirror that records a claim's status and time without the holder (2026-10-13; R-BTN-36).
 - Chose no git fallback after cutover: two lock servers allow two holders (2026-10-13; R-BTN-18).
 
@@ -7457,7 +7457,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose the course file to travel with every sync over a hash with the body only on change (2026-10-16; R-BTN-69).
 - Chose owner state exported and imported, not mirrored to git, where agents could change it (2026-10-15; R-BTN-88).
 - Chose one Baton per team at a stated, load-tested envelope over sharding (2026-10-15; R-BTN-87).
-- Chose to log B-129's `position-disagrees` (a false `available` over work Baton holds past the start, without a PR Baton's record holds) only among the dashboard's discrepancies, adopting nothing, over listing it under Needs you as the ticket asked: the 2026-11-01 ruling keeps position discrepancies off Needs you (2026-11-03, the owner, "Keep your Decision"; R-BTN-85, R-BTN-39).
+- Chose to list B-129's `position-disagrees` only among the dashboard's discrepancies over listing it under Needs you as the ticket asked: the 2026-11-01 ruling keeps position discrepancies off Needs you (2026-11-03, the owner, "Keep your Decision"; R-BTN-85, R-BTN-39).
 
 **Conditions, calls, deadlines and cancellation**
 
