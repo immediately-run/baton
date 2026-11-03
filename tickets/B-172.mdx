@@ -2,7 +2,7 @@
 title: "B-172 — The sign-in code shows its row before it binds: the CLI cannot show a client address the API never returns"
 id: B-172
 project: baton
-status: available
+status: superseded
 updated: 2026-11-03
 repos:
   - baton
@@ -65,3 +65,10 @@ S-BTN-124 as §15 states it, green in `npm test` on both hosts.
 
 - 2026-11-02: drafted from the 2026-11-02 security review (PR #165).
 - 2026-11-03: spec half written (PR `claude/baton-spec-review-2fwiga`); this ticket now builds it.
+- 2026-11-03: superseded by B-76 on review round three of the readiness PR: the code sign-in
+  flow this ticket adds a step to is B-76's to build (today's administrator route mints a
+  one-time link, `src/core/admin.ts`), so the two steps are built where the flow is. Map: item 1
+  (the administrator's route, preview and confirm) → B-76 item 1; item 2 (`baton admin open`'s
+  prompt) → B-76 item 1; item 3 (the owner's route and `baton owner open`) → B-76 item 1, as
+  before; item 4 and the exit criterion (S-BTN-124's preview cases) → B-76 item 1 and its
+  tests. Nothing remains here.

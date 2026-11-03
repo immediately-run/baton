@@ -2263,6 +2263,26 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   alive; owner rows confer nothing; R-BTN-56 says the owners have an administrator retire it;
   the attribution dropped. S-BTN-198 and B-173 follow.
 
+- **2026-11-03 — review round three of the credential names, the sign-in preview and
+  retirement** (a new fresh reviewer, the last round). Findings: 4 major, 2 minor, none blocking.
+  Major: the alarm skipping a retired repository left its fence-pending claims with no deadline
+  and no condition, and the seal both waited on them and did not count them; the holder queries
+  fell under `not-found` while the former-path fence still relies on them; R-BTN-140's entry
+  matched two repositories once the forge repository is registered again under a new id; B-173
+  acted on stores no code has yet (MCP keys, OAuth, owner sessions, registration tokens,
+  check-runners, consents, timers, the outbox), so it could not be picked up. Minor: "every
+  dashboard session" took in the administrator's, who must still reach the clear; account
+  instances kept listing the retired id. Fixed: the fence-pending claims are the one live part
+  of a retired repository — the alarm's deadline and condition, the holder queries and the seal's
+  wait reach them; the holder queries join the fence clear as exceptions to `not-found`;
+  R-BTN-140 reads the live repository with that id, else a retired one whose entry never has
+  reach; step 1 names owner sessions and keeps the claims on the administrator's dashboard;
+  step 6 removes the id from account instances; B-173 builds retirement over today's stores and
+  the "live repository" predicate, and each later store's step is noted in the ticket that
+  builds the store (B-76, B-25, B-73, B-8, B-5, B-46, B-61, B-64), so every ticket can be picked
+  up now. S-BTN-198 follows. B-172 is superseded into B-76, which builds the code sign-in flow
+  for both roles: the two steps are built where the flow is.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

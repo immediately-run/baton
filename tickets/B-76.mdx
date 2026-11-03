@@ -39,8 +39,10 @@ None: a checkout, a terminal and a browser.
    signed by an owner key bind only an owner row (`POST /v1/admin/login-links` only an
    administrator row; any other code `not-found`), in R-BTN-155's two steps: `{code}` answers
    `{role, client_addr, age_s}` and binds nothing, `baton owner open` prints it and asks
-   `bind? [y/N]` (no `--yes`), and `{code, confirm: true}` binds. (B-172 builds the same two
-   steps on the administrator's route and `baton admin open`.)
+   `bind? [y/N]` (no `--yes`), and `{code, confirm: true}` binds. The administrator's route
+   and `baton admin open` take the same two steps (B-172's items, folded in here), replacing
+   today's one-time login link (`src/core/admin.ts` `loginLink`). A `not-found` at either step
+   is no failed verification. S-BTN-124's preview cases.
 2. `dashboard_sessions` gains `role`, `key_fingerprint` and `repositories` (one new migration);
    an owner's session drops a repository its key stops owning and ends when none remains, or
    when an administrator revokes the key (R-BTN-57); `POST /v1/owner/sessions/revoke`
@@ -100,3 +102,7 @@ _(2026-10-21: R-BTN-118 retired — leg output is written to the owners' log loc
 _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): an owner's session authorizes as the one principal `session` with the owner role, not `owner-session`; the role check lives in `authorize` (R-BTN-129, R-BTN-155). Nothing else of this ticket changes.)_
 
 _(2026-11-03: R-BTN-155's sign-in binds in two steps (B-172's spec half); item 1's owner route and `baton owner open` build them, B-172 the administrator's.)_
+
+_(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — owner sessions: retirement removes the repository from every owner session's reach, ending a session left with none, and a key whose only repositories are retired owns none for sign-in. Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_
+
+_(2026-11-03: B-172 superseded into item 1: both sign-in routes build R-BTN-155's two steps here, since the administrator's code flow does not exist yet either (today's admin route mints a one-time link).)_

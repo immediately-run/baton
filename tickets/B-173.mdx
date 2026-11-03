@@ -46,34 +46,45 @@ implementation"), after one round of fresh review.
 
 ### What to build
 
-1. `admin.repo.retire` runs R-BTN-47's six steps in the one transaction that sets `retired_at`
-   (`src/core/admin.ts`): session reach; MCP keys, OAuth grants with their tokens, pending OAuth
-   requests and codes; sync and mirror keys, runner grants and check-runners revoked;
-   registration tokens exhausted without revoking what they registered; each active claim
-   reaped as a force-reap (fence-pending where its runner is alive); `queued`, `claimed` and
-   `delivered` outbox entries `dropped`, each logged; sync wants, `webhook_syncs` rows, ticket
-   timers, the unblocked trigger and every consent it gave or was given deleted.
-2. A heartbeat declaring a retired repository's course drops that course instead of being
-   refused, so the old holder reports `fenced`; a deliverer's later mark is ignored.
-3. Every other route naming a retired repository answers `not-found` (one check, not each
-   query's filter); its forge notifications and CI identity are refused; registering a retired
-   id is `conflict` (today a known id takes the change path); the OAuth token exchange refuses a
-   code for a retired repository `invalid_grant`.
-4. One predicate, "live repository", read by every rule that counts registered repositories:
-   wants and dispatches, the alarm and the backstop, mirrors, the seal, the event prune, limits,
+Retirement touches stores several tickets build. This ticket builds it over the stores in the
+code today and the rule every store reads; each store not yet built carries its own step in the
+ticket that builds it (listed in item 6), so none waits on this one and this one waits on none.
+
+1. **The transaction** that sets `retired_at` (`src/core/admin.ts`), over today's stores:
+   administrators' dashboard sessions keep showing its fence-pending claims; sync and mirror
+   keys and runner grants (`worker_grants`) revoked; each active claim reaped as a force-reap
+   (fence-pending where its runner is alive); its wants, `webhook_syncs` rows and unblocked
+   trigger deleted; its id removed from every account instance's `repositories`.
+2. **One predicate, "live repository"** (`src/core/registry.ts`), read by every rule that counts
+   registered repositories: wants and dispatches, the backstop, mirrors, the event prune, limits,
    approver lists and ownership (a key whose only repositories are retired owns none). The
-   administrator's fence clear is the one write that still names a retired repository.
-5. The export carries a retired repository as its tombstoned registry row alone; the import
-   accepts that row without a policy; the seed skips and logs an entry naming a retired id.
-6. `code_repos` consent is judged for a retired repository as for a live one.
+   alarm's fence deadlines and `baton.fence-pending`, the holder queries, the seal's wait on a
+   fence and the administrator's fence clear still reach a retired repository's fence-pending
+   claims.
+3. **Refusals.** A heartbeat declaring a retired repository's course drops it rather than being
+   refused; every other route naming it answers `not-found` (one check, not each query's
+   filter); its CI identity and forge notifications are refused; registering a retired id is
+   `conflict` (today a known id takes the change path).
+4. **Export, import, seed.** The export carries a retired repository as its tombstoned registry
+   row alone; the import accepts that row without a policy; the seed skips and logs an entry
+   naming a retired id.
+5. **Tests:** S-BTN-198's cases over today's stores, in a new scenario file the later tickets
+   extend.
+6. **Each later store's step**, noted in its ticket: owner sessions (B-76), MCP keys (B-25),
+   OAuth grants, tokens, requests and codes (B-73), registration tokens exhausted (B-8),
+   check-runners (B-5), consents (B-46), ticket timers (B-61), outbox entries dropped and later
+   marks ignored (B-64). Whichever of this ticket and that one lands second adds the step and
+   its S-BTN-198 case.
 
 ### Tests
 
-S-BTN-198 as §15 states it (a new scenario file), green in `npm test` on both hosts.
+S-BTN-198 as §15 states it, for the stores that exist when this lands; green in `npm test` on
+both hosts.
 
 ### Exit criteria
 
-- [ ] the scenario green in `npm test` on both hosts; `npm run typecheck` green
+- [ ] S-BTN-198's cases for today's stores green in `npm test` on both hosts; `npm run typecheck` green
+- [ ] each ticket in item 6 carries its retirement step
 
 ## Status
 
