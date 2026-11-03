@@ -1,0 +1,112 @@
+---
+title: "B-177 — Transcripts go to blob storage, not git: a transcript root beside leg_log_root, Baton keeping pointers and digests"
+id: B-177
+project: baton
+status: available
+updated: 2026-11-03
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1179
+tier: routine
+description: "Archive agent transcripts to an owners' blob root (s3://, gs://, file:// on the local host), as leg_log_root already does for a leg run's output, instead of git repositories named by transcript_repos; Baton keeps pointers and digests, never content; transcript_repos stays a read-only legacy until each archiver moves. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-03: "I also don't think it's a good idea to use Git to store logs and
+transcripts, as this can also lead to contention and blob storage is a better candidate for
+persisting these kinds of files. But this is a separate concern and less critical than the question
+of locks and sequences."
+
+**Spec:** R-BTN-1 (git holds transcripts, Baton pointers to them), R-BTN-33 (pointers and digests,
+never content), §9.9 (*Activities and transcripts*: an archiver pushes each transcript to a
+`transcript_repos` repository and reports `{repo, path}`), R-BTN-20 (`transcript_repos`), R-BTN-128
+(`leg_log_root`: a leg run's output already goes to `s3://`, `gs://` or a local `file://` root — the
+precedent this follows), R-BTN-66 (owner settings), R-BTN-144 (masking), R-BTN-193 (git is never a
+lock or a counter; this ticket is the separate, less critical half the owner named beside it).
+
+**Depends on:** none.
+
+**Used by:** nothing yet.
+
+### Why
+
+Every session's transcript is pushed to a git repository (`immediately-run/claude-sessions` here,
+by docs' Stop-hook archiver). A transcript is a large, append-mostly blob: git stores every version
+whole, every archiving session pushes to the same default branch, and a push that loses the race is
+fetched and retried — contention for files no one edits or merges. A clone that fails leaves the
+session with nothing archived (this session's own `archive-transcript.log`). Run logs already avoid
+this: R-BTN-128 writes a leg run's output under an owners' blob root and Baton records only the
+directory. Transcripts should follow the same rule.
+
+### What to build
+
+1. **`transcript_root`**, an owners' setting beside `leg_log_root` (R-BTN-66, default unset), with
+   R-BTN-128's grammar: `s3://<bucket>[/<prefix>]`, `gs://<bucket>[/<prefix>]`, and on the local
+   host `file://<absolute path>`; the same refusals. Cite R-BTN-128 for the grammar; do not restate it.
+2. **The archiver writes the blob.** A runner's or session's archiver writes each transcript under
+   `<root>/<repository id>/<runner id>/<claim id or "unclaimed">/<path>` with the credentials the
+   runner already holds for `leg_log_root` (none pass through Baton), masked per R-BTN-144, and
+   reports `{uri, digest, bytes}` in place of `{repo, path}`. Overwrites of a growing transcript are
+   the blob's own; nothing is pushed, so nothing races.
+3. **Baton holds the pointer.** §9.9's transcript row stores `{uri, digest}`; the dashboard and
+   `baton leg log --transcripts` read the blob with the viewer's own access, as they read `log_dir`.
+   Validation as R-BTN-128's `dir`: the URI under the claim's home repository's `transcript_root`.
+4. **`transcript_repos` becomes legacy**: still accepted for reports and links while an archiver
+   moves, marked legacy where §9.9 and R-BTN-20 specify it, never extended (the same treatment
+   R-BTN-193 gives the git-based locks); removed once no runner reports a `repo` (a Migrations entry
+   in the history).
+5. **Spec.** Amend R-BTN-1's table (transcripts: the blob root's; Baton: pointers and digests),
+   §9.9, R-BTN-20, R-BTN-66's settings list and §13's tables; one home for the root's rules.
+
+Out of scope, the same concern elsewhere: docs' Stop-hook archiver (`.claude/hooks/archive-transcript.sh`,
+the `claude-sessions` repository) and the review gate's shared logs in docs (findings, provenance,
+token usage appended on `main`) — their own repository's tickets, adopting this root once it exists.
+
+### Trust
+
+New inputs: the `transcript_root` setting, and an archiver's `{uri, digest, bytes}` report.
+- `transcript_root` is an owner setting (R-BTN-66): only the owner sets it; loosening it follows
+  R-BTN-66's rules as `leg_log_root` does.
+- The report comes from the runner (machine key) or a session's archiver under it; Baton validates
+  that `uri` lies under the root and stores it, never fetches it. A false digest or a URI to a
+  blob the runner did not write misleads a reader of that transcript only; the digest lets a
+  reader detect a changed blob.
+- Transcript content never passes through Baton and Baton holds no blob credential (R-BTN-128's
+  rule); a reader needs their own access.
+
+### Invariants
+
+- **R-BTN-33 (pointers and digests, never content):** Baton stores the URI and digest only.
+- **R-BTN-1 (one home per fact):** the transcript's home moves from a git repository to the blob
+  root; Baton's pointer is derived and says so.
+- **R-BTN-144 (masking):** the archiver masks before it writes, as before.
+- **Value 8 (Baton runs without GitHub) and value 9 (two hosts):** the root works with no forge,
+  and `file://` serves the local host.
+- **R-BTN-193:** nothing about a transcript is decided by a push; no write races.
+
+### Tests
+
+A new scenario row in §15 (its number the next free at merge, legacy until B-176): a runner with
+`transcript_root` set archives a session's transcript and a subagent's, reports `{uri, digest}`,
+and `baton leg log --transcripts` reads both from the root; a URI outside the root is refused; a
+`file://` root on the Cloudflare host is refused; with only `transcript_repos` set, the legacy
+report still links. Unit tests for the root grammar (by citation to R-BTN-128's validator) and the
+archiver's write path against a local `file://` root.
+
+### Exit criteria
+
+- [ ] A session archived under `transcript_root` is read back by `baton leg log --transcripts`
+      from the blob, and nothing is pushed to git (the scenario).
+- [ ] `transcript_repos` is marked legacy in §9.9 and R-BTN-20; `npm test` green.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-03._
