@@ -266,6 +266,10 @@ export interface NewTicket {
   course?: string;
   /** `--body-file`'s text: kept as given, judged with the flags. */
   body?: string;
+  /** `--trust` / `--invariants`: the skeleton's two sections, written in place of their
+   *  placeholders (ignored with `--body-file`, whose body carries its own). */
+  trust?: string;
+  invariants?: string;
 }
 
 /** The order a ticket ranks at when `--order` names none: after every order a filer writes. */
@@ -280,7 +284,7 @@ export const dependsLineOf = (deps: readonly string[]): string => `**Depends on:
  *  `check.sections_since` — `**Requires:**` and `## Status`. A description that ends with a
  *  `Requires:` clause is written on the requires line; the others say the line is the filer's to
  *  write. */
-export function skeletonBody(o: { description: string; deps: readonly string[]; course?: string; date: string }): string {
+export function skeletonBody(o: { description: string; deps: readonly string[]; course?: string; date: string; trust?: string; invariants?: string }): string {
   const requires = requiresFrom(o.description);
   return [
     `**Brief:** ${o.description.replace(/\s+/g, ' ').trim()}`,
@@ -297,11 +301,11 @@ export function skeletonBody(o: { description: string; deps: readonly string[]; 
     '',
     '### Trust',
     '',
-    '_(every new input this adds — a field, a file, a commit trailer, a request — who may write it and how it is verified; or “no new input”.)_',
+    o.trust?.trim() ? o.trust.trim() : '_(every new input this adds — a field, a file, a commit trailer, a request — who may write it and how it is verified; or “no new input”.)_',
     '',
     '### Invariants',
     '',
-    '_(the rules this must not break, by id, and how the design keeps each.)_',
+    o.invariants?.trim() ? o.invariants.trim() : '_(the rules this must not break, by id, and how the design keeps each.)_',
     '',
     '### Tests',
     '',
@@ -336,7 +340,6 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
   const remote = io.remote ?? 'origin';
   const branch = io.branch ?? defaultBranch(root);
   let filed: string | null = null;
-  let unfilled: string[] = [];
   const log = io.log ?? ((l: string) => process.stdout.write(`${l}\n`));
   transact(root, { ...io, quiet: true }, 'new ticket', (dir) => {
     const settings = settingsAt(dir, remote, branch);
@@ -359,16 +362,14 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
     }
     const text = ticketText({ id, title, project, settings, deps, t, date });
     judgeFiling({ id, text, deps, settings });
-    // A filing after `check.sections_since` carries Trust and Invariants, `--body-file` included:
-    // refused here, before the push, rather than found by the next check.
-    // The skeleton writes both with placeholders, so an unfilled one is not refused here — the
-    // filer fills it next, and `check` fails the ticket until then; `new` says so.
+    // A filing after `check.sections_since` carries Trust and Invariants, filled — `--body-file`'s
+    // or the skeleton's (`--trust`, `--invariants`): refused here, before the push. A placeholder
+    // landed on the default branch would fail every open PR's check until someone filled it.
     const since = sectionsSince((readSettingsJson(dir) as { check?: { sections_since?: unknown } }).check);
-    unfilled = [];
     if (since && date >= since) {
       const { absent, unfilled: gaps } = sectionGaps(text);
       if (absent.length) throw new Error(`${id}: filed on or after check.sections_since (${since}), so the body needs ${absent.map((m) => `### ${m} (${sectionHint(m)})`).join(' and ')}`);
-      unfilled = gaps;
+      if (gaps.length) throw new Error(`${id}: filed on or after check.sections_since (${since}), so ${gaps.map((m) => `### ${m} (${sectionHint(m)})`).join(' and ')} must be filled — pass ${gaps.map((m) => `--${m.toLowerCase()} "<text>"`).join(' and ')}, or a --body-file that fills them`);
     }
     // The reverse mentions: each dependency's `**Used by:**` line gains this id, so a file says
     // who waits on it without a search (the generated page's rule).
@@ -392,7 +393,6 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
     };
   });
   log(`✓ tickets: file ${filed} — ${title}`);
-  if (unfilled.length) (io.warn ?? ((l: string) => process.stderr.write(`${l}\n`)))(`! ${filed}: fill ${unfilled.map((m) => `### ${m}`).join(' and ')} — still empty or the skeleton's placeholder, which \`baton tickets check\` fails as missing (check.sections_since)`);
   return filed!;
 }
 
@@ -408,7 +408,7 @@ function ticketText(o: { id: string; title: string; project: string; settings: T
   const filedLine = t.course ? `_filed ${date}; the \`${t.course}\` course._` : `_filed ${date}._`;
   const body = given
     ? (/^_filed \d{4}-\d{2}-\d{2}/m.test(given) ? given : appendStatus(given, filedLine).trim())
-    : skeletonBody({ description, deps, ...(t.course ? { course: t.course } : {}), date });
+    : skeletonBody({ description, deps, ...(t.course ? { course: t.course } : {}), date, ...(t.trust ? { trust: t.trust } : {}), ...(t.invariants ? { invariants: t.invariants } : {}) });
   return [
     '---',
     `title: ${scalar(`${id} — ${title}`)}`,
@@ -568,6 +568,7 @@ export function ticketsHelp(): string[] {
   return [
     'baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]',
     '                   [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]',
+    '                   [--trust T] [--invariants I]',
     'baton tickets claim <id> [--rules-reread <ids>]  available → in-progress; refused while the ticket',
     '                                              cites a rule amended since it was filed, until',
     '                                              --rules-reread names exactly those ids (A,B)',
@@ -615,7 +616,7 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   if (command === 'check') return ticketsCheckMain(rest, io);
   const COMMON = ['repo', 'branch', 'remote'];
   const allowed: Record<string, string[]> = {
-    new: ['title', 'description', 'project', 'depends-on', 'tags', 'tier', 'order', 'repos', 'course', 'body-file', ...COMMON],
+    new: ['title', 'description', 'project', 'depends-on', 'tags', 'tier', 'order', 'repos', 'course', 'body-file', 'trust', 'invariants', ...COMMON],
     claim: ['rules-reread', ...COMMON],
     set: ['pr', 'rules-reread', ...COMMON],
     done: ['pr', ...COMMON],
@@ -658,6 +659,8 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
       ...(deps.length ? { dependsOn: deps } : {}),
       ...(flags.course ? { course: flags.course } : {}),
       ...(body != null ? { body } : {}),
+      ...(flags.trust != null ? { trust: flags.trust } : {}),
+      ...(flags.invariants != null ? { invariants: flags.invariants } : {}),
     });
     return 0;
   }

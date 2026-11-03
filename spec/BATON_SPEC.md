@@ -1234,8 +1234,9 @@ live solely in Baton, and both are exportable (R-BTN-88).
     day whose `### Trust` or `### Invariants` section is absent, empty or still the skeleton's
     `_(…)_` placeholder is a finding (a `kind: project` page is not a ticket here); `tickets new`
     writes the `_filed` line into every filing, `--body-file`'s included, and on or after the day
-    refuses, before it pushes, a body lacking either heading, and warns that the check will fail
-    one still unfilled — the skeleton's placeholders included. It also reports, never as a finding, each live
+    refuses, before it pushes, a filing whose either section is absent, empty or a placeholder —
+    the skeleton is filled by `--trust` and `--invariants` — so no unfilled ticket reaches the
+    default branch to fail every open PR's check. It also reports, never as a finding, each live
     ticket citing a rule id that a dated entry of the spec's history (`check.rules: {history,
     prefix}`, default `spec/BATON_SPEC_HISTORY.md` and `R-BTN`; no file, no report) names in its
     bold title (`**YYYY-MM-DD — <ids>: …**`, the history's convention; an id only the entry's
@@ -1257,7 +1258,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
     because the branch moved is fetched again and retried, up to six tries, and a refusal for any
     other reason is the operator's, reported in git's own words.
     - `new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y] [--tier T]
-      [--order N] [--repos a,b] [--course C] [--body-file F]` takes the next free `<prefix>-<n>`
+      [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]` takes the next free `<prefix>-<n>`
       on the head it pushes to (across the items folder at any depth, `archive/` included, among
       files whose frontmatter carries an `id`), and writes the conventional body unless
       `--body-file` names one: `**Brief:**` (the description), `**Spec:**`, `**Depends on:**`

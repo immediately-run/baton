@@ -64,7 +64,7 @@
 //                   [--eject tickets|stations] [--pin owner/name@commit] [--force]
 //                — a repository's own sync and scaffold (§2f R-BTN-74, R-BTN-131)
 //   baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]
-//                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]
+//                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]
 //                — file one ticket, the next free id under .baton/baton.json's ticket_prefix,
 //                with the conventional body, as one commit pushed to the default branch (B-112)
 //   baton tickets claim <id> [--rules-reread <ids>] | set <id> <status> [--pr URL] [--rules-reread <ids>]

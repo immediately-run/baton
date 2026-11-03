@@ -2332,6 +2332,9 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   placeholder section as missing, and the skeleton's placeholders name no repository's ids or
   paths. R-BTN-51 names the `check` keys and cites R-BTN-74 for them; the same-day boundary (an
   entry the day of the ticket's answer is not after it) is stated.
+  After the round, `tickets new` refuses an unfilled skeleton after the cutover instead of warning
+  (`--trust` and `--invariants` fill it): a placeholder that reached the default branch would
+  fail every open PR's `check:tickets` until someone filled it.
 
 ## Retired requirements
 

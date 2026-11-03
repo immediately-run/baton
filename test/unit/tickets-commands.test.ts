@@ -738,19 +738,25 @@ describe('baton tickets new: the Trust and Invariants sections (2026-11-03)', ()
     expect(missingSections('---\nid: B-1\n---\n\n### Trust\n\nx\n\n```\n### Invariants\n```\n')).toEqual(['Invariants']);
   });
 
-  it('after check.sections_since, the skeleton lands with its placeholders and a warning to fill them; the check then fails it until filled', async () => {
+  it('after check.sections_since, an unfilled skeleton is refused before the push; --trust and --invariants fill it', async () => {
     const f = repo({ settings: { check: { sections_since: '2000-01-01' } } });
+    const before = f.head().sha;
     const r = run(f.dir, 'new', '--title', 'a');
-    expect(r.code).toBe(0);
-    expect(r.err).toBe("! B-1: fill ### Trust and ### Invariants — still empty or the skeleton's placeholder, which `baton tickets check` fails as missing (check.sections_since)\n");
+    expect(r.code).toBe(2);
+    expect(r.err).toContain('B-1: filed on or after check.sections_since (2000-01-01), so ### Trust');
+    expect(r.err).toContain('pass --trust "<text>" and --invariants "<text>", or a --body-file that fills them');
+    expect(f.head().sha).toBe(before);
+    // One filled is still refused, naming only the other.
+    expect(run(f.dir, 'new', '--title', 'a', '--trust', 'no new input').err).toContain('pass --invariants "<text>"');
+    const ok = run(f.dir, 'new', '--title', 'a', '--trust', 'no new input', '--invariants', 'keeps the board post valid');
+    expect(ok).toMatchObject({ code: 0, err: '' });
+    expect(f.at('tickets/B-1.mdx')).toContain('### Trust\n\nno new input\n\n### Invariants\n\nkeeps the board post valid\n');
     git(f.dir, 'pull', '-q', 'origin', 'main');
-    expect((await checkTickets(f.dir, {}, { sections_since: '2000-01-01' })).findings.map((x) => x.message.split(' — ')[0])).toEqual([
-      `filed ${today()}, on or after check.sections_since (2000-01-01), and its ### Trust section is empty or still the skeleton's placeholder`,
-      `filed ${today()}, on or after check.sections_since (2000-01-01), and its ### Invariants section is empty or still the skeleton's placeholder`,
-    ]);
-    // Before the cutover (no setting), no warning.
-    expect(run(repo().dir, 'new', '--title', 'b').err).toBe('');
+    expect((await checkTickets(f.dir, {}, { sections_since: '2000-01-01' })).findings).toEqual([]);
+    // Before the cutover (no setting), the skeleton files as before.
+    expect(run(repo().dir, 'new', '--title', 'b')).toMatchObject({ code: 0, err: '' });
   });
+
 });
 
 describe('baton tickets new --body-file: filed and judged like the skeleton (2026-11-03)', () => {
