@@ -386,7 +386,6 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
 
 const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier'];
 
-/** A JSON argument: inline (`{…}`), else a file holding it. */
 /** R-BTN-178's confirm (B-106): print every course whose legs require the capability, with the
  *  type's definition in each, then ask. `--yes` answers beforehand; without a TTY the command
  *  refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
@@ -415,6 +414,7 @@ export async function confirmCapacity(answer, question, yes, out, input) {
   return line === 'y' || line === 'yes';
 }
 
+/** A JSON argument: inline (`{…}`), else a file holding it. */
 function jsonArg(v, readJson) {
   const text = v.trim().startsWith('{') ? v : readJson(v);
   try {

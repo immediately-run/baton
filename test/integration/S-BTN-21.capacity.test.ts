@@ -167,6 +167,14 @@ describe('S-BTN-21 capacity (R-BTN-178)', () => {
     expect(await seatsOf(took.json.claim_id)).toEqual([]);
     expect((await endAs(w2, W2.secret, took.json.claim_id, { status: 'released', end_reason: 'released:requested', reached: 'review' })).status).toBe(200);
 
+    // Where the caller's key IS granted on the holder's repository, the holders are named —
+    // hostnames and tickets both (R-BTN-99, R-BTN-178); W3, granted on docs, sees W1's claim.
+    const W3 = await up(w3, 'vm-14', 'w3', 'docs');
+    const named = await claimAs(w3, W3.secret, { ticket_id: 'docs:RDP2' });
+    expect(named.status).toBe(409);
+    expect(named.json).toMatchObject({ code: 'capacity-full', rule: 11 });
+    expect(named.json.message).toContain(`claim ${c1.json.claim_id} on docs:RDP1 by vm-12`);
+
     // W1's own seat never refuses its advance into the other RDP leg, and the advance into
     // `merge` releases it.
     expect((await advanceAs(w1, W1.secret, c1.json.claim_id, { leg: 'implement' })).status).toBe(200);
@@ -226,6 +234,27 @@ describe('S-BTN-21 capacity (R-BTN-178)', () => {
     expect(await seatsOf(took.json.claim_id)).toEqual([]);
     const again = await claimAs(w1, W1.secret, { ticket_id: 'docs:RDP2' });
     expect(again.status).toBe(200);
+  });
+
+  it('a fence that lapses by time releases the seat with it (the alarm, not the sidecar)', async () => {
+    const W1 = await up(w1, 'vm-12', 'w1', 'docs');
+    const W3 = await up(w3, 'vm-14', 'w3', 'docs');
+    const c1 = await claimAs(w1, W1.secret, { ticket_id: 'docs:RDP1' });
+    expect(c1.status).toBe(200);
+    expect((await advanceAs(w1, W1.secret, c1.json.claim_id, { leg: 'implement' })).status).toBe(200);
+    // Force-reaped while alive: fenced, the seat kept, W3 refused.
+    const session = await adminSession(admin);
+    const reap = await sessionCall(session, `/v1/ui/claims/${c1.json.claim_id}/reap`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN }, body: JSON.stringify({ confirm: true }) });
+    expect(await reap.json()).toMatchObject({ fence_pending: true });
+    expect((await claimAs(w3, W3.secret, { ticket_id: 'docs:RDP2' })).status).toBe(409);
+    // No fence report ever comes: W1 goes silent, its own lease timeout lapses, and the alarm's
+    // fence deadline releases the seat (R-BTN-19, R-BTN-178).
+    await setClock(T0 + 2 * 3_600_000);
+    await tick();
+    expect((await rows<{ fence_pending: number }>('SELECT fence_pending FROM claims WHERE id = ?', c1.json.claim_id))[0].fence_pending).toBe(0);
+    expect(await seatsOf(c1.json.claim_id)).toEqual([]);
+    const took = await claimAs(w3, W3.secret, { ticket_id: 'docs:RDP2' });
+    expect(took.status).toBe(200);
   });
 
   it('raising the capacity seats two, lowering takes no seat back and refuses the next', async () => {

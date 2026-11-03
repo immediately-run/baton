@@ -121,9 +121,12 @@ interface LegChild {
 
 /** B-106 (R-BTN-178): one machine's singleton is the runner's own business, never Baton's. A
  *  configured capability is declared only while this process holds an exclusive lock on its file:
- *  util-linux `flock --nonblock` over a `sleep` it keeps alive, so the lock is this process's and
- *  dies with it. The child prints one line once the lock is held, so a take is settled fact, not
- *  a spawn that may still fail; `flock` exit 1 is another process on this machine holding it. */
+ *  util-linux `flock --nonblock` over a watcher this process keeps alive. The watcher prints one
+ *  line once the lock is held — a take is settled fact, not a spawn that may still fail — and
+ *  polls this process's pid every second, exiting when it is gone: the lock dies with the runner
+ *  within a second, SIGKILL included (review round 1, finding 3), and at once on `release`, which
+ *  kills the watcher's process group. `flock` exit 1 is another process on this machine holding
+ *  the lock. */
 class MachineLocks {
   private readonly held = new Map<string, { child: ReturnType<typeof spawn>; path: string }>();
   private readonly busy = new Set<string>();
@@ -151,7 +154,8 @@ class MachineLocks {
       try {
         mkdirSync(dirname(path), { recursive: true });
       } catch { /* an unwritable directory: the spawn below says it */ }
-      const child = spawn('flock', ['--exclusive', '--nonblock', path, 'sh', '-c', 'echo baton:held; exec sleep infinity'],
+      const child = spawn('flock', ['--exclusive', '--nonblock', path, 'sh', '-c',
+        'echo baton:held; while kill -0 "$1" 2>/dev/null; do sleep 1; done', 'baton-lock-watch', String(process.pid)],
         { stdio: ['ignore', 'pipe', 'ignore'], detached: true });
       const done = (ok: boolean) => {
         if (settled) return;
@@ -963,8 +967,18 @@ export class Runner {
       if (!(await locks.take(capability))) ok = false;
     }
     locks.releaseAll((c) => needed.includes(c));
-    if (!ok) this.log(`baton: ${leg} requires a lock another process on this machine holds — the claim suspends rather than run it (R-BTN-178)`);
-    return ok;
+    if (!ok) {
+      this.log(`baton: ${leg} requires a lock another process on this machine holds — the claim suspends rather than run it (R-BTN-178)`);
+      return false;
+    }
+    // A take the last answered beat did not declare is followed by one beat before the caller
+    // goes on: rule 4 re-checks the advance against the server's record of the declaration, so
+    // a lock re-taken mid-claim (an unlocked leg between two locked ones released it) must be
+    // declared again before the advance that needs it is sent, or the server refuses
+    // `missing-capability` a machine that holds the thing cannot be refused (review round 1,
+    // finding 2).
+    if (needed.some((c) => this.sent != null && !this.sent.includes(c))) await this.tick();
+    return true;
   }
 
   private async runClaim(claim: Record<string, any>): Promise<ClaimOutcome> {

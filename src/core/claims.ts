@@ -455,17 +455,17 @@ export class Claims {
     }
   }
 
-  /** R-BTN-178: the claims holding a capability's seats, for a rule-11 refusal's message — named
-   *  only where the caller's key is granted on the holder's repository (R-BTN-99); an interim
-   *  key, granted everywhere (B-104, A1), sees them all. */
+  /** R-BTN-178: the claims holding a capability's seats, for a rule-11 refusal's message — the
+   *  holders' hostnames and tickets, named only where the caller's key is granted on the holder's
+   *  repository (R-BTN-99); an interim key, granted everywhere (B-104, A1), sees them all. */
   private seatHolders(capability: string, except: number | null, w?: WorkerFacts): string[] {
-    return this.rows<{ id: number; ticket_id: string }>(
-      `SELECT k.id, k.ticket_id FROM claim_seats s JOIN claims k ON k.id = s.claim_id
+    return this.rows<{ id: number; ticket_id: string; hostname: string }>(
+      `SELECT k.id, k.ticket_id, w.hostname FROM claim_seats s JOIN claims k ON k.id = s.claim_id JOIN workers w ON w.id = k.worker_id
         WHERE s.capability = ? AND k.id IS NOT ?
           AND (k.status = 'active' OR (k.status = 'reaped' AND k.fence_pending = 1))
         ORDER BY k.id`, capability, except)
       .filter((h) => w == null || w.grants == null || w.grants[repositoryOf(h.ticket_id)] != null)
-      .map((h) => `claim ${h.id} on ${h.ticket_id}`);
+      .map((h) => `claim ${h.id} on ${h.ticket_id} by ${h.hostname}`);
   }
 
   /** Rule 2's count (advice): active Baton claims on expedited tickets, not git in-progress. */

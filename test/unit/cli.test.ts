@@ -56,7 +56,8 @@ describe('plan: one request per command', () => {
     expect(() => plan('admin', ['capacity', 'set', 'capability:rdp-lab', '65'], key)).toThrow('an integer 1 to 64');
     expect(() => plan('admin', ['capacity', 'set', 'capability:rdp-lab', '2', '--clear'], key)).toThrow('--clear');
     expect(() => plan('admin', ['capacity', 'raise', 'capability:rdp-lab', '2'], key)).toThrow('baton admin repos');
-    expect(() => plan('admin', ['state', 'docs'], key)).toThrow('takes no further argument');    expect(() => plan('admin', ['state', '--repository', 'docs'], key)).toThrow('not a flag');
+    expect(() => plan('admin', ['state', 'docs'], key)).toThrow('takes no further argument');
+    expect(() => plan('admin', ['state', '--repository', 'docs'], key)).toThrow('not a flag');
     expect(() => plan('admin', ['repo', 'add', 'x/y'], key)).toThrow('--owner-key is required');
   });
 
