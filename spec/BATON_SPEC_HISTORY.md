@@ -427,6 +427,11 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   not the traversal record's own placement, which waits on B-120 (the PR's Deviations). Open for
   the owner: R-BTN-116's person leg is the specification's one way to ask a person, and person
   legs are not built (B-161), so the owner's question rides the built posted-decision route.
+  The owner then ruled on the three questions the fixes left open: a posted decision's question is
+  one line of at most 200 characters ("Allow one short line", the one prose R-BTN-33 admits); the
+  owner's answer waits for person legs ("Wait for B-161", so B-110 holds until B-161 lands, and the
+  owner-resolve answer is interim on its branch only); and the owner may waive an unreachable gate
+  ("Keep skip").
 
 - **2026-10-29 — the standard courses serve the simpler end (owner direction).** The owner:
   "baton is a general tool designed to scale from single-user naive setups where security is an

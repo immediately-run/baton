@@ -84,7 +84,8 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   matching (§6) and the dashboard's lists read: id, title, path, course, tier, `requires`,
   expedite, `depends_at`, `parent`, `repos`, rank, the position Baton holds (R-BTN-39), and an
   opaque `display` object core never reads. It never stores a body, Status notes, exit
-  criteria, a PR list or other prose; the dashboard links each ticket to its file on the forge.
+  criteria, a PR list or other prose — a posted decision's question excepted, one line of at most
+  200 characters rendered as text (B-110) — and the dashboard links each ticket to its file on the forge.
   - It may hold **pointers and digests, never content**: a leg's evidence pointer and position,
     input and output URIs and digests (R-BTN-82, R-BTN-83), a leg run's log directory (R-BTN-128),
     `session_url`, transcript pointers, `closed_tickets`' final station and path, and the
@@ -7578,6 +7579,9 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose the owner's answer to `create-pr`'s third failed round given through Baton's authenticated owner surface, and a run-tests marker counted only as an empty-tree commit whose sha is the evidence Baton recorded for the run-tests leg of the claim whose nonce it carries, over a `Baton-Adjudicated` or `Baton-Tests` trailer on any commit: anyone who can push writes a trailer, a fix agent or a compromised runner included, so a trailer is a record, never the authority (2026-11-03, the owner, "Through Baton, not git", B-110 round one; R-BTN-131).
 - Chose an authenticated `round` answer that itself grants exactly one more `review` run, over a separate grant the owner sends beside the answer: no shipped surface sent the grant, and an answer without it started a round Baton then refused at `max_runs` (2026-11-03, the owner, "The answer carries the grant", B-110 round one; §6.8, R-BTN-131).
 - Chose to revert the PR's move of the sync workflow's CLI pin and `.baton`'s course source to a branch-only commit, re-pinning after the merge, over shipping the pin with the change: the branch commit predates code main had gained, so the sync would have run older code (2026-11-03, the owner, "Revert, re-pin after merge", B-110 round one).
+- Chose to let a posted decision carry its question as one line of at most 200 characters, rendered as text, over rendering the question from a fixed table keyed by the decision's id: the one exception to Baton storing no prose (R-BTN-33) (2026-11-03, the owner, "Allow one short line"; R-BTN-78).
+- Chose to wait for person legs (B-161) and answer `create-pr`'s third failed round through them, over answering it through the built owner-resolve route meanwhile: R-BTN-116's person leg is the one way to ask a person (2026-11-01, "One primitive"); B-110 holds until B-161 lands (2026-11-03, the owner, "Wait for B-161"; R-BTN-116).
+- Chose to let the owner waive the run-tests gate for a ticket the gate cannot reach (a PR in a `repos:` repository, or several PRs) by the answer `skip`, logged, over parking the ticket until the gate reaches cross-repository PRs (2026-11-03, the owner, "Keep skip"; R-BTN-131).
 
 ## Open questions
 
