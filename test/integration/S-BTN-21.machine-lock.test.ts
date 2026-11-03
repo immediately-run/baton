@@ -162,6 +162,10 @@ beforeEach(async () => {
 
 afterEach(async () => {
   for (const r of runners.splice(0)) r.stop();
+  // A claim a stopped runner had already sent may still land in the next test's window — the
+  // trace of that test then opens with a 404 no model action explains. Draining the in-flight
+  // attempt keeps each trace the model can replay.
+  await new Promise((r) => setTimeout(r, 150));
   rmSync(home.dir, { recursive: true, force: true });
 });
 
@@ -250,7 +254,7 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
       const a = makeRunner('vm-a', { capabilities: ['key:zai'] });
       const aLog = logs.at(-1)!;
       void a.work();
-      await until(async () => (await rows(`SELECT status, end_reason FROM claims WHERE ticket_id = 'docs:T-1'`)).length > 0);
+      await until(async () => (await rows(`SELECT status FROM claims WHERE ticket_id = 'docs:T-1'`))[0]?.status === 'completed');
       // The claim was answered for the lock leg — the server derived the capability — and the
       // runner, unable to take the machine's lock, ended it suspended at once: no leg started,
       // no advance sent, nothing run.
