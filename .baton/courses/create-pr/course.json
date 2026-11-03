@@ -7,7 +7,6 @@
   "short_waits": [
     "ci"
   ],
-  "test_script": "test",
   "stations": {
     "filed": {
       "label": "Filed, no PR yet"
@@ -36,23 +35,10 @@
       "to": "pr-open",
       "label": "Implement it and open the PR"
     },
-    "run-tests": {
-      "from": [
-        "pr-open",
-        "fixed"
-      ],
-      "to": [
-        "pr-open",
-        "fixed"
-      ],
-      "max_runs": 30,
-      "label": "Run the deterministic tests"
-    },
     "review": {
       "from": [
         "pr-open",
-        "fixed",
-        "reviewed"
+        "fixed"
       ],
       "to": "reviewed",
       "max_runs": 3,
@@ -60,12 +46,10 @@
     },
     "fix": {
       "from": [
-        "reviewed",
-        "pr-open",
-        "fixed"
+        "reviewed"
       ],
       "to": "fixed",
-      "max_runs": 30,
+      "max_runs": 2,
       "label": "Fix or answer the findings"
     },
     "adjudicate": {
@@ -73,7 +57,7 @@
         "reviewed"
       ],
       "to": "adjudicated",
-      "label": "The owner answers the third round"
+      "label": "Reproduce the findings left open"
     },
     "merge": {
       "from": [

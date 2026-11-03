@@ -1,4 +1,4 @@
-// ../../baton-bundle-i9YJ8i/entry.ts
+// ../../../../tmp/baton-bundle-kz3UlD/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync as rmSync2, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -356,7 +356,7 @@ baton: ${ctx.ticket.id} ${ctx.leg}, claim ${ctx.claim?.nonce ?? "?"}`;
   return closeTicket({ ...ctx, heading: false }, result, run2);
 }
 
-// ../../baton-bundle-i9YJ8i/entry.ts
+// ../../../../tmp/baton-bundle-kz3UlD/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });

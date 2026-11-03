@@ -1,4 +1,4 @@
-// ../../baton-bundle-vGGPln/entry.ts
+// ../../../../tmp/baton-bundle-dtOQ10/entry.ts
 import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync as rmSync2, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -344,9 +344,8 @@ var CREATE_SPEC_COURSE = {
 var SPEC_BOUNDS = {
   legs: { open: "converse", opened: "spec-open", back: "address", backTo: "spec-open" },
   back: "address",
-  rounds: CREATE_SPEC_COURSE.legs.review.max_runs,
-  adjudicates: true,
-  gate: false
+  rounds: CREATE_SPEC_COURSE.legs.address.max_runs,
+  adjudicates: true
 };
 function branchMatches(pattern, branch) {
   const p = pattern.toLowerCase();
@@ -473,7 +472,7 @@ function verifyPrOpen(ask, run2) {
   throw new Error(`the implement agent exited 0, but no open PR on a branch matching ${patterns.join(" or ")} for ticket ${id} exists in ${read.join(" or ")}${unread.length ? ` \u2014 ${unread.map((f) => label(f.repo)).join(" or ")} could not be read` : ""} \u2014 open one from a matching branch with its head pushed, or the leg fails here`);
 }
 
-// ../../baton-bundle-vGGPln/entry.ts
+// ../../../../tmp/baton-bundle-dtOQ10/entry.ts
 var GIT_BOUND_MS = 12e4;
 var GIT_ENV = { "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=20" };
 var gitRun = (cmd, args, opts = {}) => execFileSync2(cmd, args, { encoding: "utf8", timeout: GIT_BOUND_MS, killSignal: "SIGKILL", env: { ...process.env, ...GIT_ENV }, stdio: ["ignore", "pipe", "pipe"], ...opts });
@@ -600,7 +599,7 @@ async function standard(ctx) {
   void out;
   await verifyPrOpen({ checkout: ctx.checkout, ticket: ctx.ticket, branchPatterns: patterns, repositories: ticketRepositories(ticketText, settings.repos) }, legRun);
   if (process.env.BATON_VERBOSE) process.stderr.write("baton: create-pr/implement ticket " + ctx.ticket.id + ": the forge verified an open PR on a branch matching " + patterns.join(" or ") + "\n");
-  return { reached: "pr-open", next: "run-tests" };
+  return { reached: "pr-open", next: "review" };
 }
 var closeCtx2 = (ctx) => ({ ...ctx, ...ctx.default_branch == null && typeof process.env.BATON_DEFAULT_BRANCH === "string" && process.env.BATON_DEFAULT_BRANCH !== "" ? { default_branch: process.env.BATON_DEFAULT_BRANCH } : {} });
 var close = (ctx, result) => prClose(closeCtx2(ctx), result);
