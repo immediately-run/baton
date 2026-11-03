@@ -7,30 +7,27 @@ is reproduced by an agent, and no claim runs while you have not answered. The ti
 
 > **3 failed reviews — manual review or start a 4th round?**
 
-Read the three rounds' findings on the ticket's PRs (one per repository its `repos:` names,
-besides this one), then answer by pushing one commit to the ticket's branch carrying exactly
-one of these trailers (a trailer is a line `Key: value` in the last block of the commit
-message):
-
-- **`Baton-Adjudicated: merge`** — you reviewed it yourself and it merges: the ticket moves to
-  `adjudicated` with `merge` ready.
-- **`Baton-Adjudicated: owner`** — you take the change over by hand: the ticket parks, `merge`
-  waiting on you, until you say otherwise.
-- **`Baton-Adjudicated: round`** — start a 4th review round: the round runs once more, its run
-  budget granted by the owner override that carries this answer (`baton`, the dashboard's
-  ticket override — `runs: {leg: review, add: 1}`), so push the trailer **and** grant the run;
-  a third refused round will come back here, and you may answer again.
-
-For example:
+Read the rounds' findings on the ticket's PRs (one per repository its `repos:` names, besides
+this one — the Needs-you entry links the PR whose last round holds them), then answer through
+Baton, with your owner key — the way Baton's own decisions are answered:
 
 ```
-git commit --allow-empty -m "adjudicate: one more round" -m "Baton-Adjudicated: round"
-git push
+baton owner -i <your owner key> resolve <repository> <ticket> review-rounds-3 merge|owner|round
 ```
 
-A plain `git commit` trailer is the durable record; on a forge, the comment line
-`<!-- baton:adjudicated merge -->` (or `owner`) is read as the same answer. An answer older
-than the round's last verdict counts for nothing — answer after reading the third round.
+(`baton decision list` prints the line for you, with the decision's id.)
+
+- **`merge`** — you reviewed it yourself and it merges: the ticket moves to `adjudicated` with
+  `merge` ready.
+- **`owner`** — you take the change over by hand: the ticket parks, `merge` waiting on you,
+  until you say otherwise.
+- **`round`** — start a 4th review round. The answer itself grants exactly one more `review`
+  run beyond the course's three — there is no second step — and the round runs on the same
+  head. If that round still asks for changes, you are asked again (`review-rounds-4`), and may
+  answer again.
+
+The answer counts only because your key gave it to Baton. A commit trailer, or a comment line
+such as `<!-- baton:adjudicated merge -->`, answers nothing: anyone who can push could write it.
 
 ## Do not
 

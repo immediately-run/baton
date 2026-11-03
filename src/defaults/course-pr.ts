@@ -8,6 +8,7 @@
 import type { PostedStation } from '../core/board';
 import type { SourceTicket } from './tickets-markdown';
 import type { Step } from '../core/graph';
+import { gateOfBranch, verifiedMarkers, type BranchCommit, type GateMarker, type RecordedLeg } from './pr-markers';
 
 /** One PR as the fact adapter records it (R-BTN-96): GitHub's shape, GitLab's and Gitea's
  * mapped to the same fields. */
@@ -27,31 +28,17 @@ export interface PrFact {
   /** The PR's reviews and its plain comments — a comment is `COMMENTED`, read only for a
    * verdict line (R-BTN-74: "a comment or comment-only review"). */
   reviews: { author: string; state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED'; submittedAt: number; body?: string }[];
-  /** The branch's `Baton-*` marker commits, oldest first (B-110, `pr-markers.ts`): the
-   *  run-tests gate's green/red and the owner's adjudication answer, read from the commits'
-   *  trailers — git, the record — with the forge's comment spellings readers beside them. A
-   *  marker commit changes no tree, so it is never among `pushes`: absent, no marker stands. */
-  markers?: FactMarker[];
+  /** The branch's commits, oldest first, when the adapter reads them (B-110, `pr-markers.ts`):
+   *  each one's sha, date, first parent, whether it changes no tree, and message — what the
+   *  run-tests gate's state is read from (a counted marker is no push; everything else is). The
+   *  GitHub adapter reads them from the forge, a plain-git reading from the checkout's own git
+   *  (`commitsOf`). Absent, the gate stays open: no marker can be counted. */
+  commits?: BranchCommit[];
+  /** The PR's web page, when the forge has one — where its rounds' findings are (B-110: the
+   *  owner's decision links it). */
+  url?: string;
   /** The repository the PR is in, `owner/name` (B-29); absent, the home repository's. */
   repository?: string;
-}
-
-/** One `Baton-*` marker commit on a PR's branch (B-110), as the fact adapter reads the commits'
- *  messages: the run-tests gate's green/red — the close's own record of a leg no agent ran — or
- *  the owner's adjudication answer after the rounds ran out. A commit carrying one is a marker,
- *  never a push: it changes no tree, so a content commit following it re-opens the gate
- *  whatever the marker said. */
-export interface FactMarker {
-  /** The commit's date, epoch ms — its place in the branch's order. */
-  at: number;
-  /** The commit's sha, the marker's ref. */
-  sha: string;
-  /** The gate's outcome (`Baton-Tests`). */
-  tests?: 'green' | 'red';
-  /** The owner's answer (`Baton-Adjudicated`). */
-  adjudicated?: 'merge' | 'owner' | 'round';
-  /** The claim whose close wrote the marker (`Baton-Claim`), when it names one. */
-  claim?: string | null;
 }
 
 /** What a station function returns (R-BTN-74): the stations, the markers it saw and its
@@ -78,7 +65,8 @@ export const DEFAULT_BRANCH_PATTERN = 'claude/{ticket}-*';
  * (implement → run-tests → fix — making the tests green is fixing, wherever the push came
  * from), and the loop it forms runs to a generous budget of 30 while the review rounds stay
  * at 3. And the third round's blockers are the owner's: `adjudicate` waits on them — a human
- * in the loop — until they answer `Baton-Adjudicated: merge|owner|round` on the branch. */
+ * in the loop — until they answer `merge`, `owner` or `round` through Baton (the owner,
+ * 2026-11-03, "Through Baton, not git"), never by a line in git. */
 export const CREATE_PR_COURSE = {
   start: 'filed',
   start_leg: 'implement',
@@ -94,7 +82,7 @@ export const CREATE_PR_COURSE = {
     implement: { from: ['filed'], to: 'pr-open', label: 'Implement it and open the PR' },
     'run-tests': { from: ['pr-open', 'fixed'], to: ['pr-open', 'fixed'], max_runs: 30, label: 'Run the deterministic tests' },
     // B-110: review also leaves `reviewed` — the owner's `round` answer grants exactly one more
-    // round on the same head (§6.8's run grant is what lets it start; the round's verdict is
+    // round on the same head (the answer itself carries the run, §6.8; the round's verdict is
     // its marker, and a round still asking for changes comes straight back to the owner).
     review: { from: ['pr-open', 'fixed', 'reviewed'], to: 'reviewed', max_runs: 3, label: 'Review round' },
     fix: { from: ['reviewed', 'pr-open', 'fixed'], to: 'fixed', max_runs: 30, label: 'Fix or answer the findings' },
@@ -160,7 +148,7 @@ export interface PrGraph {
 }
 
 const VERDICT = /^<!--\s*baton:verdict\s+(approve|changes)\s*-->/;
-const ADJUDICATED = /^<!--\s*baton:adjudicated\s+(merge|owner|round)\s*-->/;
+const ADJUDICATED = /^<!--\s*baton:adjudicated\s+(merge|owner)\s*-->/;
 const CONCLUDED = /^<!--\s*baton:concluded\s*-->/;
 /** A comment's marker line, read like a verdict line: the body's first line. */
 const markerOf = (r: PrFact['reviews'][number], re: RegExp): RegExpExecArray | null => (r.state === 'COMMENTED' ? re.exec((r.body ?? '').trim()) : null);
@@ -207,12 +195,12 @@ const CREATE_PR_LEGS: TimelineLegs = { open: 'implement', opened: 'pr-open', bac
  * one head — are one review.
  *
  * Under the gate (B-110, `gate`), the walk reads one order of verdicts, content pushes and the
- * branch's `Baton-Tests` markers: each marker is the `run-tests` leg's own step, at the station
+ * branch's counted `Baton-Tests` markers (`markers`, verified against Baton's record): each marker is the `run-tests` leg's own step, at the station
  * the path rested at when it landed; a push after a red marker is the `back` leg's work landing
  * wherever the push came from (the implement → run-tests → fix edge — making the tests green is
  * fixing), so it is a `back` step like a push after a verdict; and a run of pushes with nothing
  * between them is one leg's work, counted once. */
-function timelineOf(f: PrFact, legs: TimelineLegs = CREATE_PR_LEGS, gate = false): Step[] {
+function timelineOf(f: PrFact, legs: TimelineLegs = CREATE_PR_LEGS, gate = false, markers: GateMarker[] = [], rounds: number[] = []): Step[] {
   const path: Step[] = [{ leg: legs.open, reached: legs.opened }];
   const pushes = f.pushes?.length ? f.pushes : [f.pushedAt];
   const verdicts = verdictsOf(f);
@@ -224,18 +212,25 @@ function timelineOf(f: PrFact, legs: TimelineLegs = CREATE_PR_LEGS, gate = false
     });
     return path;
   }
-  type Ev = { t: number; kind: 'verdict' } | { t: number; kind: 'push' } | { t: number; kind: 'tests'; m: FactMarker };
+  type Ev = { t: number; kind: 'verdict' } | { t: number; kind: 'push' } | { t: number; kind: 'tests'; m: GateMarker } | { t: number; kind: 'round' };
   const events: Ev[] = [
     ...verdicts.map((v): Ev => ({ t: v.submittedAt, kind: 'verdict' })),
     ...pushes.map((p): Ev => ({ t: p, kind: 'push' })),
-    ...(f.markers ?? []).filter((m): m is FactMarker & { tests: 'green' | 'red' } => m.tests != null).map((m): Ev => ({ t: m.at, kind: 'tests', m })),
+    ...markers.map((m): Ev => ({ t: m.at, kind: 'tests', m })),
+    ...rounds.map((t): Ev => ({ t, kind: 'round' })),
   ].sort((a, b) => a.t - b.t);
+  let granted = false; // the owner granted a round on this head: its verdict is a round of its own
   let red = false; // a red marker whose fix has not landed: the push that follows is the fix's
   let run = false; // a run of pushes with nothing between: one leg's work, counted once
   for (const ev of events) {
     const rest = path.at(-1)!.reached;
-    if (ev.kind === 'verdict') {
-      if (rest !== 'reviewed') path.push({ leg: 'review', reached: 'reviewed' });
+    if (ev.kind === 'round') {
+      granted = true;
+    } else if (ev.kind === 'verdict') {
+      // Verdicts with nothing between them are one round (two reviewers of one head) — unless
+      // the owner granted a round since (`review` from `reviewed`, the graph's own edge).
+      if (rest !== 'reviewed' || granted) path.push({ leg: 'review', reached: 'reviewed' });
+      granted = false;
       red = false;
       run = false;
     } else if (ev.kind === 'push') {
@@ -343,38 +338,73 @@ const specMarkersOf = (tickets: { id: string; course?: Record<string, unknown> }
 };
 
 /** The adjudication after the last verdict, when one was written: `merge` (no open blocking
- * finding reproduced), `owner` (one did — the owner decides) or `round` (the owner granted one
- * more review round, B-110) — the forge-comment spelling of the answer, one reader beside the
- * branch's `Baton-Adjudicated` trailer. The answer's time orders the two spellings. */
-function adjudicationAt(fact: PrFact): { answer: 'merge' | 'owner' | 'round'; at: number } | null {
+ * finding reproduced) or `owner` (one did — the owner decides). `create-spec`'s own adjudicate,
+ * a fresh reader whose close writes the line; `create-pr`'s third round is the owner's, answered
+ * through Baton (B-110, `PlaceInput.answers`), never a line any pusher could write. */
+function adjudicationOf(fact: PrFact): 'merge' | 'owner' | null {
   const last = verdictsOf(fact).at(-1)?.submittedAt ?? Number.NEGATIVE_INFINITY;
   const marks = fact.reviews.filter((r) => r.submittedAt > last && markerOf(r, ADJUDICATED)).sort((a, b) => a.submittedAt - b.submittedAt);
   const m = marks.length ? markerOf(marks.at(-1)!, ADJUDICATED) : null;
-  return m ? { answer: m[1] as 'merge' | 'owner' | 'round', at: marks.at(-1)!.submittedAt } : null;
+  return m ? (m[1] === 'merge' ? 'merge' : 'owner') : null;
 }
 
-/** The owner's adjudication answer (B-110): the newest of the branch's `Baton-Adjudicated`
- *  trailers — git, the record — and the comment line a forge adapter reads beside it. Under the
- *  gate an answer is read only after the last verdict, so a `round` the owner granted once never
- *  outlives the round it bought; a stale answer never outranks a newer one, whichever spelling
- *  carried it. */
-function ownerAnswerOf(fact: PrFact, gate: boolean): 'merge' | 'owner' | 'round' | null {
-  const last = verdictsOf(fact).at(-1)?.submittedAt ?? Number.NEGATIVE_INFINITY;
-  const marks = (fact.markers ?? []).filter((m) => m.adjudicated != null && (!gate || m.at > last)).sort((a, b) => a.at - b.at).at(-1) ?? null;
-  const comment = adjudicationAt(fact);
-  if (marks == null) return comment?.answer ?? null;
-  return comment == null || comment.at < marks.at ? marks.adjudicated! : comment.answer;
+/** What the sync read of Baton's own record with its observation number (B-110,
+ *  `Claims.syncRecord`): the owner's answers to the decisions the sync posted, and the legs
+ *  claims finished with an evidence pointer — what a marker in git is judged against. */
+export interface BatonRecord {
+  /** Each answer's time is Baton's clock: a `round` answer opens a round of its own on the head
+   *  the third round refused, its verdict a round apart from the one before it. */
+  answers?: { ticket: string; decision: string; answer: string; answered_at?: number }[];
+  legs?: RecordedLeg[];
 }
 
-/** The run-tests gate's state on a PR's head (B-110): the newest `Baton-Tests` marker names it
- *  — green or red — unless a content commit followed it, which re-opens the gate as any push
- *  re-readies a fix. No marker at all is the open gate: the gate before every review round. */
-export function gateOf(f: Pick<PrFact, 'markers' | 'pushes' | 'pushedAt'>): 'open' | 'green' | 'red' {
-  const last = (f.markers ?? []).filter((m): m is FactMarker & { tests: 'green' | 'red' } => m.tests != null).sort((a, b) => a.at - b.at).at(-1) ?? null;
-  if (last == null) return 'open';
-  const pushes = f.pushes?.length ? f.pushes : [f.pushedAt];
-  return pushes.some((p) => p > last.at) ? 'open' : last.tests;
+/** The gate's reading of one ticket's PRs (B-110): the run-tests gate's state, the counted
+ *  markers the walk places, the owner's answers to the sync's decisions, and where the rounds'
+ *  findings are. */
+interface PlaceInput {
+  /** `open` (no counted marker tested the head), `green`, `red`; `unreachable` when the gate
+   *  cannot test the change — a PR outside the home repository, or several in it. */
+  gate: 'open' | 'green' | 'red' | 'unreachable';
+  markers: GateMarker[];
+  answers: Map<string, string>;
+  /** When the owner granted each extra round (a `round` answer, Baton's clock). */
+  rounds: number[];
+  /** The PR whose last round asked for changes, when the forge gives its page. */
+  url: string | null;
+  /** The PRs the gate cannot test, named for the owner's question. */
+  unreachable: string[];
 }
+
+const NO_GATE: PlaceInput = { gate: 'green', markers: [], answers: new Map(), rounds: [], url: null, unreachable: [] };
+
+/** `3rd`, `4th`, `21st`: the owner's question names the round it would start. */
+const ordinal = (n: number): string => {
+  const tens = n % 100;
+  const suffix = tens >= 11 && tens <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th';
+  return `${n}${suffix}`;
+};
+
+/** The decision the rounds' blockers post (B-110): `review-rounds-<n>`, asked of the owner — the
+ *  human in the loop — with the owner's own question (2026-10-24) and the three answers, `round`
+ *  granting exactly one more review run (the owner, 2026-11-03, "The answer carries the grant").
+ *  The id names the rounds spent, so an answer buys the round it was asked about and no later
+ *  one: a fourth round still asking for changes asks `review-rounds-4`. */
+const roundsDecision = (rounds: number, url: string | null): NonNullable<PostedStation['decisions']>[number] => ({
+  id: `review-rounds-${rounds}`, leg: 'adjudicate', asks: 'owner', ...(url ? { url } : {}),
+  question: `${rounds} failed reviews — manual review or start a ${ordinal(rounds + 1)} round?`,
+  options: [{ id: 'merge' }, { id: 'owner' }, { id: 'round', grants: { leg: 'review', runs: 1 } }],
+});
+
+/** The decision a gate that cannot run posts (B-110 round 1, finding 2): the stub tests the home
+ *  repository's one PR branch, so a ticket with a PR elsewhere, or several at home, would loop
+ *  the gate to its budget with no marker any PR reads. It asks the owner instead — `skip` waives
+ *  the gate for this ticket — rather than looping. */
+const UNREACHABLE = 'run-tests-unreachable';
+const unreachableDecision = (prs: string[], url: string | null): NonNullable<PostedStation['decisions']>[number] => ({
+  id: UNREACHABLE, leg: 'run-tests', asks: 'owner', ...(url ? { url } : {}),
+  question: `The test gate cannot run on ${prs.slice(0, 3).join(', ')}${prs.length > 3 ? ', …' : ''} — skip it for this ticket?`.slice(0, 200),
+  options: [{ id: 'skip' }],
+});
 
 /** Where one PR puts the ticket: the end of its timeline, and the queued leg leaving it. The
  *  course file's bounds decide what follows a verdict asking for changes once the rounds run out:
@@ -387,15 +417,21 @@ export function gateOf(f: Pick<PrFact, 'markers' | 'pushes' | 'pushedAt'>): 'ope
  *  (ci-waited as ever), and a red one queues the back leg from either edge of its loop. And the
  *  rounds spent with blockers still open are the owner's: `adjudicate` waits on them and the
  *  posted decision carries their question, until the owner answers on the branch. */
-function placeOf(fact: PrFact, graph: PrGraph, bounds: PrBounds = boundsOf(graph), pending = false): PostedStation {
-  const path = timelineOf(fact, bounds.legs, bounds.gate);
+function placeOf(fact: PrFact, graph: PrGraph, bounds: PrBounds = boundsOf(graph), pending = false, input: PlaceInput = NO_GATE): PostedStation {
+  const path = timelineOf(fact, bounds.legs, bounds.gate, input.markers, input.rounds);
   const last = path.at(-1)!.reached;
-  // The rounds are the review steps the timeline walked. The owner's answer is read once they
-  // are spent (B-110's gate; create-spec keeps its own adjudicate, read whenever the change
-  // rests at `reviewed` as before), never before, so an owner answering early changes nothing.
+  // The rounds are the review steps the timeline walked. Under the gate (B-110) the owner's
+  // answer is read once they are spent, from Baton's record of the decision they posted — never
+  // a line in git or on the forge, which any pusher can write (the owner, 2026-11-03); its id
+  // names the rounds spent, so an answer buys the round it was asked about. create-spec keeps
+  // its own adjudicate, read from the line its close writes whenever the change rests at
+  // `reviewed`, as before.
   const rounds = path.filter((s) => s.leg === 'review').length;
   const spent = rounds >= bounds.rounds;
-  const adjudication = bounds.adjudicates && last === 'reviewed' && (spent || !bounds.gate) ? ownerAnswerOf(fact, bounds.gate) : null;
+  const answer = bounds.gate ? input.answers.get(`review-rounds-${rounds}`) : undefined;
+  const adjudication: 'merge' | 'owner' | 'round' | null = !bounds.adjudicates || last !== 'reviewed' ? null
+    : bounds.gate ? (spent && (answer === 'merge' || answer === 'owner' || answer === 'round') ? answer : null)
+      : adjudicationOf(fact);
   if (fact.state === 'merged') {
     // Every PR merged is `merged` — the end station: done for Baton (R-BTN-70) whether or not
     // the file says `done` yet, which the merge leg's script also writes. A merge leaves
@@ -406,26 +442,28 @@ function placeOf(fact: PrFact, graph: PrGraph, bounds: PrBounds = boundsOf(graph
     return at('merged', [...path, { leg: 'merge', reached: 'merged' }], []);
   }
   if (adjudication === 'round') {
-    // Exactly one more review round, its run budget granted by the owner override that carried
-    // the answer (§6.8): the ticket stays at `reviewed` with the round ready — the fourth, on
-    // the holder's word as ever, its marker the next verdict.
+    // Exactly one more review round: the owner's `round` answer granted its run when Baton
+    // accepted it (§6.8) — the ticket stays at `reviewed` with the round ready, on the same
+    // head, its marker the next verdict.
     return at('reviewed', path, [{ leg: 'review', state: 'ready', waiting_on: null }]);
   }
   if (adjudication) path.push({ leg: 'adjudicate', reached: 'adjudicated' });
-  // Adjudicated: merge, ready — or waiting on the owner when the answer parked it (B-110: the
-  // owner took the change over by hand).
+  // Adjudicated: merge, ready — or waiting on the owner when the answer parked it (the owner took
+  // the change over by hand).
   if (adjudication) return at('adjudicated', path, [{ leg: 'merge', state: adjudication === 'merge' ? 'ready' : 'waiting', waiting_on: adjudication === 'merge' ? null : 'owner' }]);
   // `review` waits on ci while the head's checks run, and is ready once they finish.
   const wait = checksDone(fact) ? null : 'ci';
   if (last === bounds.legs.opened || last === bounds.legs.backTo) {
     if (bounds.gate) {
-      // The gate before every review round (B-110): open — no marker on this head — is
-      // `run-tests` ready; green queues `review`, ci-waited as today; red queues the back leg,
+      // The gate before every review round (B-110): open — no counted marker tested this head —
+      // is `run-tests` ready; green queues `review`, ci-waited as today; red queues the back leg,
       // wherever the push came from, the deterministic gate refusing to spend a review round on
-      // red checks.
-      const gate = gateOf(fact);
-      if (gate === 'open') return at(last, path, [{ leg: 'run-tests', state: 'ready', waiting_on: null }]);
-      if (gate === 'red') return at(last, path, [{ leg: bounds.back, state: 'ready', waiting_on: null }]);
+      // red checks. A gate that cannot test the change asks the owner rather than looping.
+      if (input.gate === 'unreachable') {
+        return { ...at(last, path, [{ leg: 'run-tests', state: 'waiting', waiting_on: 'owner' }]), decisions: [unreachableDecision(input.unreachable, input.url ?? fact.url ?? null)] };
+      }
+      if (input.gate === 'open') return at(last, path, [{ leg: 'run-tests', state: 'ready', waiting_on: null }]);
+      if (input.gate === 'red') return at(last, path, [{ leg: bounds.back, state: 'ready', waiting_on: null }]);
     }
     return at(last, path, [{ leg: 'review', state: wait ? 'waiting' : 'ready', waiting_on: wait }]);
   }
@@ -438,17 +476,12 @@ function placeOf(fact: PrFact, graph: PrGraph, bounds: PrBounds = boundsOf(graph
   if (spent) {
     if (!bounds.adjudicates) return at('reviewed', path, [{ leg: 'merge', state: 'waiting', waiting_on: 'owner' }]);
     // The third round's blockers are the owner's (B-110): no agent reproduces anything — the
-    // third pair of eyes is the person's. `adjudicate` waits on them and the decision the sync
-    // posts (R-BTN-78) carries the question to Needs you: "3 failed reviews — manual review or
-    // start a 4th round?", answered with a `Baton-Adjudicated` trailer on the branch. A course
-    // without the gate keeps its own adjudicate: a fresh reader, ready as before.
+    // third pair of eyes is the person's. `adjudicate` waits on them, and the decision posted
+    // (R-BTN-78) carries their question and the PR holding the blockers to Needs you, answered
+    // through Baton (`baton owner resolve <repository> <ticket> review-rounds-<n> merge|owner|round`).
+    // A course without the gate keeps its own adjudicate: a fresh reader, ready as before.
     if (!bounds.gate) return at('reviewed', path, [{ leg: 'adjudicate', state: 'ready', waiting_on: null }]);
-    return {
-      station: 'reviewed', path, next_leg: 'adjudicate', next_source: 'course', handoff_url: null,
-      next: [{ leg: 'adjudicate', state: 'waiting', waiting_on: 'owner' }],
-      decisions: [{ id: 'review-rounds', leg: 'adjudicate', asks: 'owner' }],
-      bars: {},
-    };
+    return { ...at('reviewed', path, [{ leg: 'adjudicate', state: 'waiting', waiting_on: 'owner' }]), decisions: [roundsDecision(rounds, input.url ?? fact.url ?? null)] };
   }
   if (pending) return at('reviewed', path, [{ leg: bounds.back, state: 'waiting', waiting_on: 'owner' }]);
   return at('reviewed', path, [{ leg: bounds.back, state: 'ready', waiting_on: null }]);
@@ -541,12 +574,10 @@ function together(facts: PrFact[]): PrFact {
   if (facts.length === 1) return facts[0];
   const open = facts.filter((f) => f.state === 'open');
   const pushes = facts.flatMap((f) => (f.pushes?.length ? f.pushes : [f.pushedAt])).sort((a, b) => a - b);
-  const markers = facts.flatMap((f) => f.markers ?? []).sort((a, b) => a.at - b.at);
   return {
     number: Math.min(...facts.map((f) => f.number)), head: facts[0].head, repository: facts[0].repository,
     state: open.length ? 'open' : 'merged', pushedAt: Math.max(...pushes), pushes,
     checks: open.flatMap((f) => f.checks), reviews: facts.flatMap((f) => f.reviews),
-    ...(markers.length ? { markers } : {}),
   };
 }
 
@@ -555,11 +586,13 @@ function together(facts: PrFact[]): PrFact {
  * pattern, in its home or a repository its `repos:` names; several are read together as one
  * change (`together`, B-29) — and every PR merged is `merged`, the end station. No PR is
  * `filed`, with `implement` waiting while a dependency or an open child is not done. `graph` is the course file; absent, the `pr` course's bounds. */
-export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; branchPatterns?: string[]; closed: Set<string>; done?: Set<string>; repository?: string | null; graph?: PrGraph }): StationsResult {
+export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; branchPatterns?: string[]; closed: Set<string>; done?: Set<string>; repository?: string | null; graph?: PrGraph; baton?: BatonRecord }): StationsResult {
   const graph = ctx.graph ?? {};
   const stations: Record<string, PostedStation> = {};
   const patterns = matchPatterns(ctx.branchPatterns);
   const markers: StationsResult['markers'] = [];
+  const bounds = boundsOf(graph);
+  const record = ctx.baton?.legs ?? [];
   // A dependency counts once it is closed `done` (R-BTN-74); `done` absent, every closed id.
   const done = ctx.done ?? ctx.closed;
   for (const t of ctx.tickets) {
@@ -578,13 +611,45 @@ export function stationsPr(ctx: { tickets: SourceTicket[]; facts: PrFact[]; bran
       };
       continue;
     }
-    stations[t.id] = placeOf(together(mine), graph);
-    // The gate's markers (B-110): each `Baton-Tests` commit of the ticket's PRs, its sha the
-    // ref and its `Baton-Claim` the nonce — evidence in git (R-BTN-46), the sync's placement
-    // input beside the pushes, never the counter.
-    for (const m of mine.flatMap((f) => f.markers ?? [])) {
-      if (m.tests != null) markers.push({ ticket: t.id, leg: 'run-tests', ref: m.sha, claim_nonce: m.claim ?? null });
+    if (!bounds.gate) {
+      stations[t.id] = placeOf(together(mine), graph, bounds);
+      continue;
     }
+    // The gate (B-110): each PR's markers count only as the evidence Baton recorded for a
+    // run-tests leg of this ticket (the claim's nonce and its advance's evidence sha, read with
+    // the sync's observation) — a pusher can write any trailer, not Baton's record. A counted
+    // marker changes no tree, so it is no push; every other commit is one, a forged marker
+    // included. The gate's state is read by commit order from the tested head the marker names.
+    const counted = new Map(mine.map((f) => [f, f.commits ? verifiedMarkers(f.commits, t.id, record) : []] as const));
+    const facts = mine.map((f) => {
+      if (!f.commits) return f;
+      const skip = new Set(counted.get(f)!.map((m) => m.sha));
+      const pushes = f.commits.filter((c) => !skip.has(c.sha)).map((c) => c.at);
+      return { ...f, pushes, pushedAt: Math.max(0, ...pushes) };
+    });
+    const mineAnswers = (ctx.baton?.answers ?? []).filter((a) => a.ticket === t.id);
+    const answers = new Map(mineAnswers.map((a) => [a.decision, a.answer] as const));
+    const rounds = mineAnswers.filter((a) => /^review-rounds-\d+$/.test(a.decision) && a.answer === 'round' && typeof a.answered_at === 'number').map((a) => a.answered_at!);
+    const open = mine.filter((f) => f.state === 'open');
+    // The stub tests the home repository's one PR branch; a PR elsewhere, or several at home,
+    // is one it cannot test — the owner is asked (`skip` waives the gate) rather than the gate
+    // looping to its budget with no marker any PR reads (round 1, finding 2).
+    const home = open.filter((f) => f.repository == null || ctx.repository == null || sameRepo(f.repository, ctx.repository));
+    const unreachable = home.length === open.length && home.length <= 1 ? [] : open.map((f) => `${f.repository ?? ctx.repository ?? 'the home repository'}#${f.number}`);
+    const gate: PlaceInput['gate'] = answers.get(UNREACHABLE) === 'skip' ? 'green'
+      : unreachable.length ? 'unreachable'
+        : home.length === 0 ? 'green'
+          : home[0].commits ? gateOfBranch(home[0].commits, counted.get(home[0])!) : 'open';
+    // The PR the owner reads: the newest open one with a verdict asking for changes, else the
+    // first open one.
+    const withChanges = open.filter((f) => f.reviews.some((r) => verdictOf(r) === 'changes'));
+    const url = (withChanges.at(-1) ?? open[0] ?? mine[0]).url ?? null;
+    stations[t.id] = placeOf(together(facts), graph, bounds, false, {
+      gate, markers: [...counted.values()].flat().sort((a, b) => a.at - b.at), answers, rounds, url, unreachable,
+    });
+    // The gate's counted markers: evidence in git (R-BTN-46), each ref a sha Baton recorded and
+    // its nonce the claim's — the sync's placement input beside the pushes, never the counter.
+    for (const m of [...counted.values()].flat()) markers.push({ ticket: t.id, leg: 'run-tests', ref: m.sha, claim_nonce: m.claim });
   }
   return { stations, markers, course_data: {} };
 }
