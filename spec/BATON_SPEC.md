@@ -83,7 +83,8 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
 - **R-BTN-33 (Baton holds filter fields, never content).** Per live ticket Baton stores what
   matching (§6) and the dashboard's lists read: id, title, path, course, tier, `requires`,
   expedite, `depends_at`, `parent`, `repos`, rank, the position Baton holds (R-BTN-39), and an
-  opaque `display` object core never reads. It never stores a body, Status notes, exit
+  opaque `display` object core never reads, except its `project` for the ticket's row and its
+  `status` for R-BTN-85's `position-disagrees`. It never stores a body, Status notes, exit
   criteria, a PR list or other prose; the dashboard links each ticket to its file on the forge.
   - It may hold **pointers and digests, never content**: a leg's evidence pointer and position,
     input and output URIs and digests (R-BTN-82, R-BTN-83), a leg run's log directory (R-BTN-128),
@@ -242,7 +243,7 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   | block, `depends_at`, resource, instance, a reading's envelope, a leg's `needs` | keeps rows, answers queries, gates or advises (R-BTN-75) |
   | condition (type, disposition, restart, binding, handler), supersession, outbox entry | records, routes, resumes (§7) |
   | a claim's preference list; a capability's capacity and the seats claims hold | takes the first passing, counts seats (R-BTN-100, R-BTN-178) |
-  | opaque blobs (course data, course fields, profile, reports, a reading's `detail`, `rationale`, an output value); hand-off, resume record, input and output pointers | stores and returns, validated against a named schema; never reads, except a path in a value that an attestation requirement's `where` tests (R-BTN-181) |
+  | opaque blobs (course data, course fields, profile, reports, a reading's `detail`, `rationale`, an output value); hand-off, resume record, input and output pointers | stores and returns, validated against a named schema; never reads, except a path in a value that an attestation requirement's `where` tests (R-BTN-181), and a resume record's `branches` and `prs`, which the history read prunes the records to (R-BTN-24) |
 
   Everything else — PRs, reviews, providers, models, rate limits — is course vocabulary: a
   mechanism that must know what a leg or profile *means* is course code. A **boundary test**
@@ -1578,7 +1579,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
 
   | sub | when |
   |---|---|
-  | `position-disagrees` | a posted ticket whose `status` is `available` while the same post places it past its course's start, a non-empty path (B-129); judged on those two alone, since core reads no course field (R-BTN-50), so a release that kept its PRs logs it too; once per station; both values are positions, never a PR list (R-BTN-33): logged and listed among the dashboard's discrepancies, nothing adopted, never on Needs you |
+  | `position-disagrees` | a posted ticket whose `status` is `available` while the same post places it past its course's start (R-BTN-74), core's witness being a non-empty path (B-129); judged on those two alone, since core reads no course field (R-BTN-50), so a release that kept its PRs logs it too; once per station; both values are positions, never a PR list (R-BTN-33): logged and listed among the dashboard's discrepancies, nothing adopted, never on Needs you |
   | `bars-mismatch` | posted bars lack a tag the holder declared (R-BTN-63) |
   | `closed-under-claim` | a ticket closed while a claim is active on it, a claim of its `cancel` leg excepted (R-BTN-168) |
   | `spawned-unposted` | a reported child the first snapshot after the end does not post (R-BTN-86) |
@@ -7456,7 +7457,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose the course file to travel with every sync over a hash with the body only on change (2026-10-16; R-BTN-69).
 - Chose owner state exported and imported, not mirrored to git, where agents could change it (2026-10-15; R-BTN-88).
 - Chose one Baton per team at a stated, load-tested envelope over sharding (2026-10-15; R-BTN-87).
-- Chose to list B-129's `position-disagrees` only among the dashboard's discrepancies over listing it under Needs you as the ticket asked: the 2026-11-01 ruling keeps position discrepancies off Needs you (2026-11-03, the owner, "Keep your Decision"; R-BTN-85, R-BTN-39). Chose to let that discrepancy fire on every posted `available` past the start, a release that kept its PRs included, over telling the two apart by a field the ticket source posts for core or by core reading `prs` (R-BTN-50, R-BTN-33): the extra entries are a dashboard list that adopts nothing, and they end when R3-1266 moves the claim onto Baton (2026-11-03, the owner, "Accept the extra entries"; R-BTN-85).
+- Chose to list B-129's `position-disagrees` only among the dashboard's discrepancies over listing it under Needs you as the ticket asked: the 2026-11-01 ruling keeps position discrepancies off Needs you (2026-11-03, the owner, "Keep your Decision"; R-BTN-85, R-BTN-39). Chose to let that discrepancy fire on every posted `available` past the start, a release that kept its PRs included, over telling the two apart by a field the ticket source posts for core or by core reading `prs` (R-BTN-50, R-BTN-33): the extra entries are a dashboard list that adopts nothing, and they end when R3-1266 moves the claim onto Baton (2026-11-03, the owner, "Accept the extra entries"; R-BTN-85). Chose two narrow exceptions to core reading nothing opaque, each written in its rule, over posting the git-lock status as a filter field and serving resume records whole for the CLI to prune: `display.status` for `position-disagrees` beside `display.project` (R-BTN-33), and a resume record's `branches` and `prs` for the history read (R-BTN-50, R-BTN-24) (2026-11-03, the owner, "Write narrow exceptions").
 
 **Conditions, calls, deadlines and cancellation**
 

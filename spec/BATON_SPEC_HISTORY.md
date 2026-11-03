@@ -2315,6 +2315,13 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   names the git-lock `status:` exception, and the 2026-11-03 entry keeps only its own choice);
   the ticket commands copied the API-key shape and `send`'s key dispatch (one copy, in
   `cli/sign.mjs`); and R-BTN-24 restated the history route row and *reader* (it cites them).
+  Review round three (one fresh reviewer) found round two's standard-course fallback ignored the
+  repository's `default_course`, so a ticket at a build-app repository's start was taken over;
+  an adjudicator reproduced it, and the owner chose "Fix, one more fresh round": the start now
+  follows `default_course`. It also found core reading `display.status` (R-BTN-33) and resume
+  records' `branches` and `prs` (R-BTN-50) against rules saying core reads neither; the owner
+  ruled "Write narrow exceptions", each now in its rule, and R-BTN-85's row cites R-BTN-74 for
+  "past its start".
   S-BTN-199's row follows.
 
 ## Retired requirements

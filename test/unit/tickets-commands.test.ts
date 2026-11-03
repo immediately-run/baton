@@ -16,7 +16,7 @@ import { dirname, join, resolve } from 'node:path';
 import { checkTickets } from '../../src/defaults/tickets-check';
 import { accepts, readTicketSettings, requiresFrom } from '../../src/defaults/tickets-config';
 import { PAGE_NAME, ticketsPage } from '../../src/defaults/tickets-page';
-import { moveTicket, reverseMention, skeletonBody } from '../../src/defaults/tickets';
+import { courseStart, moveTicket, reverseMention, skeletonBody } from '../../src/defaults/tickets';
 import { parseFrontmatter } from '../../src/defaults/tickets-markdown';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -831,6 +831,25 @@ describe('baton tickets claim asks Baton first (B-129)', () => {
       past.close();
     }
   }, 60_000);
+
+  it('the start follows the repository\'s default_course when the ticket names no course (round 3)', () => {
+    // A build-app repository with no course code: a ticket with no `course:` starts at build-app's
+    // `requested`, not create-pr's `filed`, so a ticket Baton holds at `requested` is no takeover.
+    const root = mkdtempSync(join(tmpdir(), 'baton-start-'));
+    mkdirSync(join(root, '.baton'), { recursive: true });
+    mkdirSync(join(root, 'tickets'), { recursive: true });
+    writeFileSync(join(root, 'tickets', 'T-1.mdx'), '---\nid: T-1\ntitle: probe\nstatus: available\n---\n\nbody\n');
+    writeFileSync(join(root, 'tickets', 'T-2.mdx'), '---\nid: T-2\ntitle: probe\nstatus: available\ncourse: create-pr\n---\n\nbody\n');
+    writeFileSync(join(root, '.baton', 'baton.json'), JSON.stringify({ items: 'tickets', default_course: 'build-app', repos: {} }));
+    try {
+      expect(courseStart(root, 'T-1')).toBe('requested');
+      expect(courseStart(root, 'T-2')).toBe('filed');
+      writeFileSync(join(root, '.baton', 'baton.json'), JSON.stringify({ items: 'tickets', repos: {} }));
+      expect(courseStart(root, 'T-1')).toBe('filed');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 
   it('every release writes its subject and PR lines; Baton\'s lines only past the start', async () => {
     const PR7 = 'https://github.com/immediately-run/baton/pull/7';
