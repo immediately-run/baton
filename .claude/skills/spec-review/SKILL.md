@@ -12,7 +12,7 @@ babysit skill's *Spec PRs*.
 ## Scope
 
 - `spec/BATON_SPEC.md` whole, against:
-  - `docs/context/` (product, architecture, values, vocabulary);
+  - `docs/context/` (product, architecture, values, vocabulary, spec-writing);
   - `spec/BATON_SPEC_HISTORY.md`'s changelog since the previous review (`docs/review/*-spec-review.mdx`, the newest);
   - the live tickets in `tickets/` (not `archive/`) whose brief quotes an owner ruling.
 - Out of scope: whether the design is right. A finding is a disagreement, a gap or a dangling
@@ -27,7 +27,9 @@ babysit skill's *Spec PRs*.
    finding of kind `unpropagated`.
 2. **Facts stated twice.** For each ruling found in step 1, and for each rule changed since the
    previous review, run `npm run spec:impact -- <rule> --term "<key phrase>"`. Read every entry:
-   one that states the fact differently is `contradiction`.
+   one that states the fact differently is `contradiction`; one outside the fact's home that
+   repeats its conditions, numbers or lists instead of citing its id is `restatement`
+   (`docs/context/spec-writing.mdx`, *Writing* 2) — agreeing today, it is the copy that drifts.
 3. **Patch notes and stale lists.** `npm run check:spec` must pass. Any entry still in
    `PATCH_NOTES_ALLOWED` is reported with its age (`patch-note`).
 4. **References.** Every `R-BTN-n` the spec cites is defined and not retired; every `S-BTN`/`G-BTN`
