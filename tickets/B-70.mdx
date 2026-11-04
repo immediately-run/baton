@@ -24,14 +24,14 @@ depends_on:
 (2026-10-20)" item 2): "`isolation` merged into `requires.capabilities` as `runner:session`". A
 leg's `isolation` floor was a second way to say what a capability says; the ticket plan's §2
 B-70 builds the merge.
-**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) R-BTN-107 (the three modes; a session-only leg requires
+**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) [R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3) (the three modes; a session-only leg requires
 `runner:session`, which only a `session`-mode runner declares; rule 4 refuses others, omits the
 leg from their recommendations, and with no such runner live the leg carries a `capability`
-block); [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) R-BTN-133 (the `runner` capability type and its CLI-defined values `leg-trees`,
+block); [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) [R-BTN-133](../spec/BATON_SPEC/08-runners.md#sec-8-4) (the `runner` capability type and its CLI-defined values `leg-trees`,
 `baton-legs`, `session`); [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) rule 4 and the note after the table ("a leg's `session` mode is
-rule 4's `runner:session`"); [§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) R-BTN-120 (`baton leg why`, `capability` → `no-live-runner`);
-[§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) R-BTN-75 (capability blocks); [§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) R-BTN-69 (the validator refuses `isolation`); [§10](../spec/BATON_SPEC/10-checks.md#sec-10)
-R-BTN-114 (check legs require `runner:session`); `spec/BATON_SPEC_HISTORY.md` Migrations,
+rule 4's `runner:session`"); [§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) [R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) (`baton leg why`, `capability` → `no-live-runner`);
+[§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) [R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) (capability blocks); [§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2) [R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2) (the validator refuses `isolation`); [§10](../spec/BATON_SPEC/10-checks.md#sec-10)
+[R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10) (check legs require `runner:session`); `spec/BATON_SPEC_HISTORY.md` Migrations,
 "Course fields the schema review removed"; §15 S-BTN-64, S-BTN-123, S-BTN-134; G-BTN-90.
 **Depends on:** B-42 (the built-in `runner` capability type, counted as granted to every runner
 key; this ticket adds its `session` value), B-10 (a leg's own `requires.capabilities`, which

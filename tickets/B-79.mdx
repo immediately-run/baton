@@ -25,15 +25,15 @@ depends_on:
 review's fixes to fences, claims and cutover adoption (spec/BATON_SPEC_HISTORY.md, "Adversarial
 review (2026-10-20)", adv-3 F1, F2, F10–F14; adv-4 M5) ticketed nowhere, and B-60's text still
 clearing a `leg-timeout` fence on the runner's silence. This ticket builds them.
-**Spec:** [BATON_SPEC §9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5) R-BTN-19 (`fence_deadline`, `baton.fence-pending`,
-`session`-mode reaps) and reaping; [§7.5](../spec/BATON_SPEC/07-conditions.md#sec-7-5) R-BTN-90 (the `leg-timeout` reap clears at the fence's
-deadline); [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) R-BTN-9 (the lowest declared timeout) and R-BTN-14 (a re-key never clears a
-fence); [§9.2](../spec/BATON_SPEC/09-claims.md#sec-9-2) R-BTN-6, R-BTN-26 (what the old incarnation computes); [§9.8](../spec/BATON_SPEC/09-claims.md#sec-9-8) R-BTN-24 (the resume
-record) and R-BTN-25 (continuing a branch); [§9.1](../spec/BATON_SPEC/09-claims.md#sec-9-1) (idempotency per runner, the public nonce);
-[§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) R-BTN-144 (the nonce is not masked); [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) R-BTN-107 (`session` mode); [§16.1](../spec/BATON_SPEC/16-adoption.md#sec-16-1) R-BTN-28
+**Spec:** [BATON_SPEC §9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5) [R-BTN-19](../spec/BATON_SPEC/09-claims.md#sec-9-5) (`fence_deadline`, `baton.fence-pending`,
+`session`-mode reaps) and reaping; [§7.5](../spec/BATON_SPEC/07-conditions.md#sec-7-5) [R-BTN-90](../spec/BATON_SPEC/07-conditions.md#sec-7-5) (the `leg-timeout` reap clears at the fence's
+deadline); [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) [R-BTN-9](../spec/BATON_SPEC/08-runners.md#sec-8-1) (the lowest declared timeout) and [R-BTN-14](../spec/BATON_SPEC/08-runners.md#sec-8-1) (a re-key never clears a
+fence); [§9.2](../spec/BATON_SPEC/09-claims.md#sec-9-2) [R-BTN-6](../spec/BATON_SPEC/09-claims.md#sec-9-2), [R-BTN-26](../spec/BATON_SPEC/09-claims.md#sec-9-2) (what the old incarnation computes); [§9.8](../spec/BATON_SPEC/09-claims.md#sec-9-8) [R-BTN-24](../spec/BATON_SPEC/09-claims.md#sec-9-8) (the resume
+record) and [R-BTN-25](../spec/BATON_SPEC/09-claims.md#sec-9-8) (continuing a branch); [§9.1](../spec/BATON_SPEC/09-claims.md#sec-9-1) (idempotency per runner, the public nonce);
+[§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) [R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4) (the nonce is not masked); [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) [R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3) (`session` mode); [§16.1](../spec/BATON_SPEC/16-adoption.md#sec-16-1) [R-BTN-28](../spec/BATON_SPEC/16-adoption.md#sec-16-1)
 (adoption requests, legacy runners); [§13.3](../spec/BATON_SPEC/13-data-model.md#sec-13-3) `runners`, [§13.5](../spec/BATON_SPEC/13-data-model.md#sec-13-5) `claims` (`fence_deadline`,
-`request_id` unique per runner) and `adoption_requests`; [§14](../spec/BATON_SPEC/14-api.md#sec-14) `POST /v1/runner/adopt`; §15 S-BTN-4,
-S-BTN-16, G-BTN-2, G-BTN-14, G-BTN-19.
+`request_id` unique per runner) and `adoption_requests`; [§14](../spec/BATON_SPEC/14-api.md#sec-14) `POST /v1/runner/adopt`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-4](../spec/BATON_SPEC/15-verification.md#scenarios),
+[S-BTN-16](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-2](../spec/BATON_SPEC/15-verification.md#gates), [G-BTN-14](../spec/BATON_SPEC/15-verification.md#gates), [G-BTN-19](../spec/BATON_SPEC/15-verification.md#gates).
 **Depends on:** B-60 (the `leg-timeout` reap, whose clearing this ticket replaces with
 `fence_deadline`); B-47 (`session`-mode legs, whose reaps become fence-pending); B-57
 (`baton.<sub>` conditions).

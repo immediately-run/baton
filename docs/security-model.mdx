@@ -14,7 +14,7 @@ mitigations, with what each costs.</Lede>
 ## The decision
 
 - **The perimeter is push.** Whoever can push a registered repository's default branch, or
-  is in its `pushers`, is a legitimate user of it (BATON_SPEC R-BTN-66, [§12](../spec/BATON_SPEC/12-security.md#sec-12)
+  is in its `pushers`, is a legitimate user of it (BATON_SPEC [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [§12](../spec/BATON_SPEC/12-security.md#sec-12)
   "Pushers are legitimate"). Baton does not fortify git: people without push gain nothing,
   and people with push are trusted with everything git controls.
 - **What agents must not change lives in Baton, not in git** (R-BTN-66): keys, grants and
@@ -105,7 +105,7 @@ with runners you trust, it needs no merge runner, protected branch, proxy or san
 may land their own work. Baton's part of the guarantee is never to require a runner to write
 protected state, to hold the policy (protected paths, who lands), and to print each forge's
 setting for it. Fieldhouse, where runners are untrusted, sets that policy, registers the
-guarantees it relies on as a floor (BATON_SPEC R-BTN-188, R-BTN-189), and supplies what Baton
+guarantees it relies on as a floor (BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-189](../spec/BATON_SPEC/12-security.md#sec-12-8)), and supplies what Baton
 cannot observe: the VMs, their resets and where keys live.
 
 ## Who holds push
@@ -139,7 +139,7 @@ every tenant trusts:
 - its database of keys, grants, bars, holds and settings: everything *What a push cannot reach*
   lists;
 - the webhook secrets, the cursor key, the GitHub App's key and the forge trigger tokens
-  (BATON_SPEC R-BTN-94, [§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7)): the App's key can dispatch any `workflow_dispatch` workflow, so a
+  (BATON_SPEC [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), [§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7)): the App's key can dispatch any `workflow_dispatch` workflow, so a
   compromised server can start a deploy whose workflow accepts dispatch. B-152's move of the key
   to a dispatch courier was dropped with the ruling above (2026-11-01); the recovery is the
   rotation below;
@@ -276,7 +276,7 @@ repository content itself, so what a board post says is what Baton believes. A c
 can post a board that marks its own verdicts and approvals trusted (R-BTN-139's marking runs in
 the CLI), reports no control change (so G and B-126 stay silent), and names an older commit as
 the one runners load (a rollback). B-127's signature check, as first specified, ran in that
-same sync. None of this needs a push. B-137 and the policy's `inputs.board` (BATON_SPEC R-BTN-188) take `machine` out below the human level and
+same sync. None of this needs a push. B-137 and the policy's `inputs.board` (BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8)) take `machine` out below the human level and
 moves what Baton must trust (changed paths, signatures) to the server and the runners.
 
 ### 8. Denial of service by a key
@@ -562,7 +562,7 @@ session on docs is only as trusted as docs' last push.
      session uses;
    - move docs' deploy App key and `baton`'s sync read token into environments with such
      reviewers, and rotate them (FLDH-37);
-   - take `machine` out of the policy's `inputs.board` (BATON_SPEC R-BTN-188) on every home a VM runner serves (`machine_sync: false` until B-145 lands);
+   - take `machine` out of the policy's `inputs.board` (BATON_SPEC [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8)) on every home a VM runner serves (`machine_sync: false` until B-145 lands);
    - run owner and administrator commands from the published CLI at a pinned version, never from
      a checkout;
    - push rulesets on `.claude/**` and `CLAUDE.md` in docs, fieldhouse and hq.

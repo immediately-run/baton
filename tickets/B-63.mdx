@@ -26,12 +26,12 @@ depends_on:
 schema review of 2026-10-20 (`spec/BATON_SPEC_HISTORY.md`, "Schema review", items 6 and 12): a
 choice leg's `after_s` takes a timer's range and is held in `ticket_timers`, and a timer `leg` on
 a choice station's leg is refused. The standard `ask` course (B-66) is built on a choice station.
-**Spec:** [BATON_SPEC §7.6](../spec/BATON_SPEC/07-conditions.md#sec-7-6) R-BTN-166; R-BTN-120 ([§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1), prerequisites, and the `time`
-kind's `after_s`); R-BTN-116 ([§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4), a person's leg and its answer); R-BTN-83 ([§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3), overrides held
-until the station changes; provisional positions); R-BTN-85 ([§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7), `choice-lost`); R-BTN-88 ([§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8),
-owner state); R-BTN-167 ([§7.5](../spec/BATON_SPEC/07-conditions.md#sec-7-5), `ticket_timers`, the refusal of a timer `leg` on a choice leg);
-R-BTN-32 ([§2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1), Baton's clock); R-BTN-69 ([§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2), `choice` and `after_s` in the course file); [§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6)
-`ticket_overrides.override_kind`, `ticket_timers`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15) S-BTN-50, S-BTN-129, S-BTN-133, G-BTN-151.
+**Spec:** [BATON_SPEC §7.6](../spec/BATON_SPEC/07-conditions.md#sec-7-6) R-BTN-166; [R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) ([§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1), prerequisites, and the `time`
+kind's `after_s`); [R-BTN-116](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4) ([§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4), a person's leg and its answer); [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3) ([§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3), overrides held
+until the station changes; provisional positions); [R-BTN-85](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) ([§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7), `choice-lost`); [R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) ([§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8),
+owner state); [R-BTN-167](../spec/BATON_SPEC/07-conditions.md#sec-7-5) ([§7.5](../spec/BATON_SPEC/07-conditions.md#sec-7-5), `ticket_timers`, the refusal of a timer `leg` on a choice leg);
+[R-BTN-32](../spec/BATON_SPEC/02-deployments.md#sec-2-1) ([§2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1), Baton's clock); [R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2), `choice` and `after_s` in the course file); [§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6)
+`ticket_overrides.override_kind`, `ticket_timers`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-50](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-129](../spec/BATON_SPEC/15-verification.md#scenarios), S-BTN-133, G-BTN-151.
 **Depends on:**
 - B-38 (overrides held with their kind until the station changes);
 - B-7 (person legs and their answers);

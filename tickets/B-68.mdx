@@ -24,12 +24,12 @@ term" (history, Integration). The spec now names every process that runs a leg a
 (interactive or CLI) and keeps "Worker" only for the Cloudflare Worker; the code still says
 `worker` everywhere. Ticket plan §2's B-68.
 **Spec:** `spec/BATON_SPEC_HISTORY.md` "Migrations the implementation still carries", the entry
-"\"Worker\" is \"runner\" (2026-10-20, owner)". In `spec/BATON_SPEC.md`: [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) R-BTN-3, R-BTN-14
-(`X-Runner-Secret`, `runner-reaped`); [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) and [§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) (`?runner=me`); [§5.7](../spec/BATON_SPEC/05-courses.md#sec-5-7) R-BTN-22 / R-BTN-65 and [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6)
+"\"Worker\" is \"runner\" (2026-10-20, owner)". In BATON_SPEC: [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) [R-BTN-3](../spec/BATON_SPEC/08-runners.md#sec-8-1), [R-BTN-14](../spec/BATON_SPEC/08-runners.md#sec-8-1)
+(`X-Runner-Secret`, `runner-reaped`); [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) and [§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) (`?runner=me`); [§5.7](../spec/BATON_SPEC/05-courses.md#sec-5-7) [R-BTN-22](../spec/BATON_SPEC/05-courses.md#sec-5-7) / [R-BTN-65](../spec/BATON_SPEC/05-courses.md#sec-5-7) and [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6)
 rule 9 (`min_runner_version`, `Min-Runner-Version`); [§13.2](../spec/BATON_SPEC/13-data-model.md#sec-13-2) `credentials.kind` `runner`; [§13.3](../spec/BATON_SPEC/13-data-model.md#sec-13-3)
-`runners` and the `runner_*` tables; [§13.8](../spec/BATON_SPEC/13-data-model.md#sec-13-8) `runner_instances_by_instance`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15) S-BTN-30.
+`runners` and the `runner_*` tables; [§13.8](../spec/BATON_SPEC/13-data-model.md#sec-13-8) `runner_instances_by_instance`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-30](../spec/BATON_SPEC/15-verification.md#scenarios).
 **Depends on:** nothing. Schedule it right after B-49 merges (its PR #67 touches
-`src/core/blocks.ts`) and before the §7 wave (B-55 onward) adds new `worker` code.
+`src/core/blocks.ts`) and before the [§7](../spec/BATON_SPEC/07-conditions.md#sec-7) wave (B-55 onward) adds new `worker` code.
 
 ### Requires
 

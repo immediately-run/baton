@@ -9,15 +9,22 @@
 // that GitHub follows and Grove opens in the spec bundle. This turns `` `spec/BATON_SPEC.md` §6.1 ``
 // and the bare `BATON_SPEC §6.1` into `[BATON_SPEC §6.1](../spec/BATON_SPEC/06-….md#sec-6-1)`,
 // and each further `§n[.m]` of the same paragraph that follows such a citation into
-// `[§n.m](…)` — up to another spec's name (`BATON_MCP_OAUTH_SPEC`, `BATON_SPEC_HISTORY.md`, a
-// code span naming another file), which ends the run. A `§` before any BATON_SPEC citation is
-// left alone: it may be another spec's.
+// `[§n.m](…)`, and each rule, scenario or gate id (`R-BTN-n`, `S-BTN-n`, `G-BTN-n`) into
+// `[R-BTN-n](…)`, a link to the section the index puts it in — up to another spec's name
+// (`BATON_MCP_OAUTH_SPEC`, `BATON_SPEC_HISTORY.md`, a code span naming one), which ends the run;
+// any other code span (`` `schemas/<name>.json` ``) leaves it going. A `§` or an id before any
+// BATON_SPEC citation is left alone: it may be another spec's. A `` `spec/BATON_SPEC.md` `` code
+// span that opens a run becomes the plain name `BATON_SPEC` when citations after it in the
+// paragraph are now links; on a `**Spec:**` line that cites nothing linkable after it (`the whole
+// spec`) it becomes a link to the index (`[BATON_SPEC](…/spec/BATON_SPEC.md)`, no anchor);
+// anywhere else it stays, since it may name the file itself.
 //
-// The file and the heading come from the generated index (spec/BATON_SPEC.md: each section's file
-// and its subsections); the anchor is `headingId` of that heading as read from the section's
-// file — the function Grove's heading anchors use (@immediately-run/mdx-plugins). A `§` the index
-// does not list (an old number like `§2f`, or a third level) is reported and left as it is,
-// never guessed. Text in code, in a link, in an expression or in the frontmatter is not touched.
+// The file and the heading come from the generated index (spec/BATON_SPEC.md: each section's file,
+// its subsections and the rules each defines, and the file of every scenario and gate); the anchor
+// is `headingId` of that heading as read from the section's file — the function Grove's heading
+// anchors use (@immediately-run/mdx-plugins). A scenario or gate links to its file's `Scenarios` or
+// `Gates` heading. A `§` or an id the index does not list (an old number like `§2f`, a third level,
+// a retired rule) is reported and left as it is, never guessed. Text in code, in a link, in an expression or in the frontmatter is not touched.
 // A second run changes nothing. Archived tickets (`tickets/archive/`) and the dated reviews
 // (`docs/review/`) are history, cited in the numbering of their day, and are not rewritten.
 import { readFileSync, readdirSync, statSync, writeFileSync, existsSync } from 'node:fs';
@@ -44,23 +51,39 @@ function headingText(node) {
   return out;
 }
 
-/** The sections the index lists: `§n` and `§n.m` → { file (repository-relative), id, heading }.
- *  The index names each section's file and its subsections; the heading and its anchor are read
- *  from that file. */
+const ID = /[RSG]-BTN-\d+/g;
+
+/** What the index lists, each with where it links: `§n` and `§n.m` (keyed `6` and `6.1`) and
+ *  every rule, scenario and gate id (keyed `R-BTN-120`) → { file (repository-relative), id,
+ *  heading }. The index names each section's file, its subsections and the rules defined in each,
+ *  and each scenario's and gate's file; the heading and its anchor are read from that file. */
 export function specTargets(root = REPO, index = SPEC_INDEX) {
   const text = readFileSync(join(root, index), 'utf8');
   const wanted = new Map(); // number → file
+  const ruleAt = new Map(); // rule id → number
+  const rowAt = new Map(); // scenario or gate id → file
+  const at = (link) => join(dirname(index), link).split(sep).join('/');
   let file = null;
+  let number = null;
   for (const line of text.split('\n')) {
-    const row = /^\| \[`[^`]+`\]\(([^)]+)\) \| \*\*(\d+)\. /.exec(line);
-    if (row) { file = join(dirname(index), row[1]).split(sep).join('/'); wanted.set(row[2], file); continue; }
+    const row = /^\| \[`[^`]+`\]\(([^)]+)\) \| \*\*(\d+)\. [^|]*\| ([^|]*)\|/.exec(line);
+    if (row) {
+      file = at(row[1]); number = row[2]; wanted.set(number, file);
+      for (const id of row[3].match(ID) ?? []) ruleAt.set(id, number);
+      continue;
+    }
     if (/^\| \[`/.test(line)) { file = null; continue; }
-    const sub = /^\| \| (\d+\.\d+) /.exec(line);
-    if (sub && file) wanted.set(sub[1], file);
+    const sub = /^\| \| (\d+\.\d+) [^|]*\| ([^|]*)\|/.exec(line);
+    if (sub && file) {
+      wanted.set(sub[1], file);
+      for (const id of sub[2].match(ID) ?? []) ruleAt.set(id, sub[1]);
+      continue;
+    }
+    const sg = /^\| ([SG]-BTN-\d+) \|.*\[`[^`]+`\]\(([^)]+)\) \|$/.exec(line);
+    if (sg) rowAt.set(sg[1], at(sg[2]));
   }
   const headings = new Map(); // file → [{number, text}]
-  const out = new Map();
-  for (const [number, path] of wanted) {
+  const headingsOf = (path) => {
     if (!headings.has(path)) {
       const raw = readFileSync(join(root, path), 'utf8');
       const tree = processor.parse(raw.slice(frontmatterBlock(raw).length));
@@ -68,22 +91,34 @@ export function specTargets(root = REPO, index = SPEC_INDEX) {
       for (const node of tree.children) {
         if (node.type !== 'heading' || node.depth > 3) continue;
         const t = headingText(node).trim();
-        const n = /^(\d+(?:\.\d+)?)\.?(?:\s|$)/.exec(t);
-        if (n) list.push({ number: n[1], text: t });
+        list.push({ number: /^(\d+(?:\.\d+)?)\.?(?:\s|$)/.exec(t)?.[1] ?? null, text: t });
       }
       headings.set(path, list);
     }
-    const h = headings.get(path).find((x) => x.number === number);
-    if (h) out.set(number, { file: path, id: headingId(h.text), heading: h.text });
+    return headings.get(path);
+  };
+  const out = new Map();
+  for (const [n, path] of wanted) {
+    const h = headingsOf(path).find((x) => x.number === n);
+    if (h) out.set(n, { file: path, id: headingId(h.text), heading: h.text });
+  }
+  for (const [id, n] of ruleAt) if (out.has(n)) out.set(id, out.get(n));
+  for (const [id, path] of rowAt) {
+    const name = id.startsWith('S') ? 'Scenarios' : 'Gates';
+    const h = headingsOf(path).find((x) => x.text === name) ?? headingsOf(path).find((x) => x.number);
+    if (h) out.set(id, { file: path, id: headingId(h.text), heading: h.text });
   }
   return out;
 }
 
 const ANCHOR_CODE = new Set(['spec/BATON_SPEC.md', 'spec/BATON_SPEC/', 'BATON_SPEC']);
-/** A code span that names another file or another spec ends a run of BATON_SPEC citations. */
-const OTHER_CODE = /[A-Z0-9]_SPEC|\.mdx?\b|\//;
-// In text: the bare spec name, another spec's name, a `§` number, or a table cell's edge.
-const TOKEN = /(?<![\w/.-])BATON_SPEC(?![\w/.-])|\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_SPEC(?:_[A-Z0-9]+)*\b|§(\d+[a-z]?(?:\.\d+[a-z]?)*)(?![\w])|\|/g;
+/** A code span that names another spec ends a run of BATON_SPEC citations; any other leaves it. */
+const OTHER_CODE = /[A-Z0-9]_SPEC/;
+/** A link into the spec (a section's file, or the index) is a BATON_SPEC citation itself. */
+const SPEC_LINK = /(?:^|\/)spec\/BATON_SPEC(?:\/|\.md(?:$|#))/;
+// In text: the bare spec name, another spec's name, a `§` number, a rule, scenario or gate id, or
+// a table cell's edge.
+const TOKEN = /(?<![\w/.-])BATON_SPEC(?![\w/.-])|\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_SPEC(?:_[A-Z0-9]+)*\b|§(\d+[a-z]?(?:\.\d+[a-z]?)*)(?![\w])|(?<![\w/.-])([RSG]-BTN-\d+)(?![\w-]|\.\w)|\|/g;
 
 /** Rewrite one page's text. `page` is its repository-relative path, for the links' relative
  *  paths. Answers the new text, the citations linked and the ones that could not be mapped. */
@@ -98,7 +133,8 @@ export function rewrite(text, page, targets) {
   const linked = [];
   const unmapped = [];
   const lineOf = (offset) => fm.split('\n').length - 1 + body.slice(0, offset).split('\n').length;
-  const url = (t) => `${relative(dirname(page), t.file).split(sep).join('/')}#${t.id}`;
+  const rel = (file) => relative(dirname(page), file).split(sep).join('/');
+  const url = (t) => `${rel(t.file)}#${t.id}`;
 
   /** The leaves of an inline run, in order: text slices, code spans and links. */
   function leaves(nodes, out = []) {
@@ -112,15 +148,17 @@ export function rewrite(text, page, targets) {
     return out;
   }
 
-  function run(nodes) {
+  function run(nodes, specLine) {
     let active = false;
     let skipTo = -1; // a code span's citation consumed the start of the next text
+    const opened = []; // `spec/BATON_SPEC.md` spans that open a run: { start, end, edits }
     const items = leaves(nodes);
     items.forEach((leaf, i) => {
-      if (leaf.kind === 'link') { if (leaf.url.includes('spec/BATON_SPEC/')) active = true; return; }
+      if (leaf.kind === 'link') { if (SPEC_LINK.test(leaf.url)) active = true; return; }
       if (leaf.kind === 'code') {
         if (ANCHOR_CODE.has(leaf.value.trim())) {
           active = true;
+          let consumed = false;
           const next = items[i + 1];
           if (next?.kind === 'text' && next.start === leaf.end) {
             const m = /^[ \t]*\n?[ \t]*§(\d+(?:\.\d+)?)(?!\w|\.\d)/.exec(body.slice(next.start, next.end));
@@ -129,8 +167,10 @@ export function rewrite(text, page, targets) {
               edits.push({ start: leaf.start, end: next.start + m[0].length, replacement: `[BATON_SPEC §${m[1]}](${url(t)})` });
               linked.push({ line: lineOf(leaf.start), ref: `§${m[1]}` });
               skipTo = next.start + m[0].length;
+              consumed = true;
             }
           }
+          if (!consumed && leaf.value.trim() === 'spec/BATON_SPEC.md') opened.push({ start: leaf.start, end: leaf.end, edits: edits.length });
         } else if (OTHER_CODE.test(leaf.value)) active = false;
         return;
       }
@@ -152,6 +192,14 @@ export function rewrite(text, page, targets) {
           }
           continue;
         }
+        if (m[2]) {
+          if (at < skipTo || !active) continue;
+          const t = targets.get(m[2]);
+          if (!t) { unmapped.push({ line: lineOf(at), ref: m[2] }); continue; }
+          edits.push({ start: at, end: at + m[2].length, replacement: `[${m[2]}](${url(t)})` });
+          linked.push({ line: lineOf(at), ref: m[2] });
+          continue;
+        }
         if (!m[0].startsWith('§')) { active = false; continue; }
         if (at < skipTo || !active) continue;
         const t = targets.get(m[1]);
@@ -160,13 +208,24 @@ export function rewrite(text, page, targets) {
         linked.push({ line: lineOf(at), ref: m[0] });
       }
     });
+    // A `spec/BATON_SPEC.md` span that opened a run: the plain name when what follows it in the
+    // paragraph is now linked, else a link to the whole spec, its index.
+    for (const o of opened) {
+      if (edits.length > o.edits) edits.push({ start: o.start, end: o.end, replacement: 'BATON_SPEC' });
+      else if (specLine) edits.push({ start: o.start, end: o.end, replacement: `[BATON_SPEC](${rel(SPEC_INDEX)})` });
+    }
   }
 
   const BLOCKS = new Set(['paragraph', 'heading', 'tableCell']);
   const SKIP = new Set(['code', 'html', 'mdxjsEsm', 'mdxFlowExpression', 'yaml', 'toml']);
   (function walk(node) {
     if (SKIP.has(node.type)) return;
-    if (BLOCKS.has(node.type)) { run(node.children ?? []); return; }
+    if (BLOCKS.has(node.type)) {
+      const first = node.children?.[0];
+      const specLine = first?.type === 'strong' && /^Spec:?$/.test(first.children?.[0]?.value ?? '');
+      run(node.children ?? [], specLine);
+      return;
+    }
     for (const c of node.children ?? []) walk(c);
   })(tree);
 

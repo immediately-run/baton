@@ -27,15 +27,15 @@ the 2026-10-30 amendment (one outbox, couriers; `spec/BATON_SPEC_HISTORY.md`). B
 or forge credential, so the handler tickets of its own conditions (R-BTN-163), the withdrawals of
 superseded tickets (R-BTN-168), promoted light questions' files (R-BTN-173) and check runs
 (R-BTN-115) reach the outside only through a courier.
-**Spec:** [BATON_SPEC §7.8](../spec/BATON_SPEC/07-conditions.md#sec-7-8) R-BTN-171 (the outbox and couriers); [§10](../spec/BATON_SPEC/10-checks.md#sec-10) R-BTN-115 (the
-`forge-check` kind); [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) R-BTN-163 ("Binding core's conditions": the handler id `<local>.c<n>` or
-`baton.<sub>.<condition_id>`, `baton.outbox-late` never bound); [§4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) R-BTN-74 (`file(ticket)` and
-`withdraw(ticket, reason)`); [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) R-BTN-83 (the `outbox` held position, which queues no leg);
+**Spec:** [BATON_SPEC §7.8](../spec/BATON_SPEC/07-conditions.md#sec-7-8) [R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8) (the outbox and couriers); [§10](../spec/BATON_SPEC/10-checks.md#sec-10) [R-BTN-115](../spec/BATON_SPEC/10-checks.md#sec-10) (the
+`forge-check` kind); [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ("Binding core's conditions": the handler id `<local>.c<n>` or
+`baton.<sub>.<condition_id>`, `baton.outbox-late` never bound); [§4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (`file(ticket)` and
+`withdraw(ticket, reason)`); [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3) (the `outbox` held position, which queues no leg);
 [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (the courier principal, one role per key); [§13.1](../spec/BATON_SPEC/13-data-model.md#sec-13-1) `couriers.delivers`; [§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6)
 `ticket_overrides` (`override_kind` `outbox`, `hold_reason` `outbox-unlanded`, `outbox-refused`,
 `outbox-collision`); [§13.8](../spec/BATON_SPEC/13-data-model.md#sec-13-8) the `outbox` table, `outbox_due`, `outbox_alarm`, `outbox_pending`;
-[§14](../spec/BATON_SPEC/14-api.md#sec-14) `/v1/owner/{repository}/couriers` and `/v1/courier/entries/*`; §15 S-BTN-136, S-BTN-81,
-G-BTN-156. After the adversarial review (`spec/BATON_SPEC_HISTORY.md`, "Adversarial review
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) `/v1/owner/{repository}/couriers` and `/v1/courier/entries/*`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-136](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-81](../spec/BATON_SPEC/15-verification.md#scenarios),
+[G-BTN-156](../spec/BATON_SPEC/15-verification.md#gates). After the adversarial review (`spec/BATON_SPEC_HISTORY.md`, "Adversarial review
 (2026-10-20)"): §4.4's top-level `bindings`, R-BTN-163's "Binding core's conditions" and §13's
 `condition_bindings` (adv-2 M12); R-BTN-171's `outbox-collision` (adv-2 m2); S-BTN-131.
 **Depends on:** B-58 (bindings, handler ticket frontmatter, the source's `file` export,

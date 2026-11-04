@@ -27,14 +27,14 @@ directly. Otherwise, the parent course's leg will be interrupted and the HITL re
 written to git." The design was checked against every failure point the owner named (process
 death, lost responses, two channels, wait expiry, the outbox writer) by `model/lightQuestion.qnt`
 before it was written into the spec.
-**Spec:** [BATON_SPEC §7.2](../spec/BATON_SPEC/07-conditions.md#sec-7-2) R-BTN-173 (with its failure table); R-BTN-160 ([§7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1), `light`
-on the raise, the declaration and the report); R-BTN-161 (handler tickets, delivery runners);
-R-BTN-162 (the wait, `handled`, the blocked end, `resume`); R-BTN-169 ([§7.9](../spec/BATON_SPEC/07-conditions.md#sec-7-9), `ask` and `deliver`,
-`retract`); R-BTN-171 ([§7.8](../spec/BATON_SPEC/07-conditions.md#sec-7-8), the outbox's `handler` and `answer` kinds, `skipped`); R-BTN-114
-([§10](../spec/BATON_SPEC/10-checks.md#sec-10), tickets Baton holds without a file); R-BTN-10 ([§9.6](../spec/BATON_SPEC/09-claims.md#sec-9-6), confirmation); [§9.4](../spec/BATON_SPEC/09-claims.md#sec-9-4) (the end's
+**Spec:** [BATON_SPEC §7.2](../spec/BATON_SPEC/07-conditions.md#sec-7-2) R-BTN-173 (with its failure table); [R-BTN-160](../spec/BATON_SPEC/07-conditions.md#sec-7-1) ([§7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1), `light`
+on the raise, the declaration and the report); [R-BTN-161](../spec/BATON_SPEC/07-conditions.md#sec-7-2) (handler tickets, delivery runners);
+[R-BTN-162](../spec/BATON_SPEC/07-conditions.md#sec-7-2) (the wait, `handled`, the blocked end, `resume`); [R-BTN-169](../spec/BATON_SPEC/07-conditions.md#sec-7-9) ([§7.9](../spec/BATON_SPEC/07-conditions.md#sec-7-9), `ask` and `deliver`,
+`retract`); [R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8) ([§7.8](../spec/BATON_SPEC/07-conditions.md#sec-7-8), the outbox's `handler` and `answer` kinds, `skipped`); [R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10)
+([§10](../spec/BATON_SPEC/10-checks.md#sec-10), tickets Baton holds without a file); [R-BTN-10](../spec/BATON_SPEC/09-claims.md#sec-9-6) ([§9.6](../spec/BATON_SPEC/09-claims.md#sec-9-6), confirmation); [§9.4](../spec/BATON_SPEC/09-claims.md#sec-9-4) (the end's
 `answers`); [§13.4](../spec/BATON_SPEC/13-data-model.md#sec-13-4), [§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6), [§13.8](../spec/BATON_SPEC/13-data-model.md#sec-13-8) (`tickets.baton_held`, `conditions.light`, `promoted_at`,
 `recorded`, `condition_answers`, the outbox's `answer` kind, `answer-ignored`); [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`POST
-/v1/runner/claims/{id}/answers`); §15 S-BTN-138, G-BTN-158.
+/v1/runner/claims/{id}/answers`); [§15](../spec/BATON_SPEC/15-verification.md#sec-15) S-BTN-138, G-BTN-158.
 **Depends on:**
 - B-59 (the wait in the claim, `handled`, the blocked end and `resume`);
 - B-64 (the outbox and its couriers);

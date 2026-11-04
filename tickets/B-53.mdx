@@ -21,7 +21,7 @@ depends_on:
 ---
 
 **Brief:** continues B-3 (split 2026-10-20).
-**Spec:** [BATON_SPEC §5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5) R-BTN-109 (the sync checks pointers; a sync-posted arrival is checked when the snapshot is accepted), R-BTN-82 (an invalid output is never resolved as an input; its consumer waits on `input-missing`); [§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) R-BTN-85 (`output-invalid`); [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) R-BTN-163 (`baton.output-invalid`); [§15](../spec/BATON_SPEC/15-verification.md#sec-15) S-BTN-66's third move; G-BTN-92's pointer clause.
+**Spec:** [BATON_SPEC §5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5) [R-BTN-109](../spec/BATON_SPEC/05-courses.md#sec-5-5) (the sync checks pointers; a sync-posted arrival is checked when the snapshot is accepted), [R-BTN-82](../spec/BATON_SPEC/05-courses.md#sec-5-5) (an invalid output is never resolved as an input; its consumer waits on `input-missing`); [§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) [R-BTN-85](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) (`output-invalid`); [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3) (`baton.output-invalid`); [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-66](../spec/BATON_SPEC/15-verification.md#scenarios)'s third move; [G-BTN-92](../spec/BATON_SPEC/15-verification.md#gates)'s pointer clause.
 **Depends on:** B-3 (the validator and the entry rule) and B-39 (outputs recorded and resolved as inputs, `input-missing`).
 
 ### Requires

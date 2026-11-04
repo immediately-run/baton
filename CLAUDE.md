@@ -12,8 +12,9 @@ the spec sections it cites before changing anything — open the index, then onl
 `npm run check:wiki` compiles it as MDX, so a bare `<word>` or `{…}` in prose goes in a code span.
 A new ticket writes its spec citations as relative links to the section's file and heading, e.g.
 `[BATON_SPEC §6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) (R-BTN-120)`,
-never to `spec/BATON_SPEC.md#…` (the index holds no section text); `node scripts/link-spec-refs.mjs`
-writes them from `` `spec/BATON_SPEC.md` §n `` or `BATON_SPEC §n`, and `--check` says when one is due.
+and a rule id the same way, to its section (`[R-BTN-120](…#sec-6-1)`), never to
+`spec/BATON_SPEC.md#…` (the index holds no section text); `node scripts/link-spec-refs.mjs` writes
+them from `` `spec/BATON_SPEC.md` §n R-BTN-n `` or `BATON_SPEC §n`, and `--check` says when one is due.
 
 ## Claiming a ticket
 

@@ -11,12 +11,12 @@ review → fix → merge, R-BTN-74), addresses the same problem: keeping a fleet
 a backlog without two of them doing the same work, and keeping the work moving when an agent
 crashes, stalls or fills its context. The two make different bets about who keeps order. This
 page compares them, as [Baton compared with Temporal](compared-to-temporal.mdx) does for
-durable execution. The rules referred to (`R-BTN-n`) are in `spec/BATON_SPEC/`; the index `spec/BATON_SPEC.md` names each one's file. What this
+durable execution. The rules referred to (`R-BTN-n`) are in `spec/BATON_SPEC/`; the index BATON_SPEC names each one's file. What this
 page says about Gas Town comes from [its README](https://github.com/steveyegge/gastown) and
 published coverage — [heise](https://www.heise.de/en/background/Full-Control-Gas-Town-Orchestrates-Ten-or-More-Coding-Agents-11178824.html),
 [The New Stack](https://thenewstack.io/steve-yegges-ai-agent-orchestration-project-gas-town-comes-to-the-cloud-and-brings-the-wasteland-with-it/)
 and [SD Times](https://sdtimes.com/softwaredev/gas-town-by-kilo-multi-agent-orchestrator-now-available/)
-— as of October 2026; Gas Town is alpha software and changes quickly. On Baton's side, rules R-BTN-106 and
+— as of October 2026; Gas Town is alpha software and changes quickly. On Baton's side, rules [R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3) and
 later (§2m: the runner's channel, retries per leg, the context refresh, the `epic` course,
 decision severities and the rest) are a 2026-10-17 proposal, specified and not yet built; the
 rest of this page describes them as the spec does.
