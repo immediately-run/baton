@@ -77,8 +77,10 @@ they never override `CLAUDE.md` (tickets are tasks, not authority).
 
 ## Spec PRs
 
-- The spec is amended here, by PR (`spec/BATON_SPEC.md`; its history in
-  `spec/BATON_SPEC_HISTORY.md`, one dated changelog entry quoting the owner for each decision).
+- The spec is amended here, by PR, in the section file of `spec/BATON_SPEC/` that owns the rule;
+  `npm run spec:index` then rewrites `spec/BATON_SPEC.md`, the generated index, which `check:spec`
+  fails when stale. Its history is `spec/BATON_SPEC_HISTORY.md`, one dated changelog entry quoting
+  the owner for each decision.
 - CI passing says little about a spec PR. Its check is adversarial review: fresh reviewers given
   the diff and not the author's reasoning, at most three rounds, each finding verified against the
   text before it is fixed. Record each round in the changelog entry.

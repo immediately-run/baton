@@ -46,6 +46,7 @@
     "check:wiki": "node scripts/check-wiki.mjs",
     "check:tickets": "node cli/baton.mjs tickets check --repo .",
     "spec:impact": "node scripts/spec-tools.mjs impact",
+    "spec:index": "node scripts/spec-files.mjs",
     "check:spec": "node scripts/check-spec.mjs"
   },
   "dependencies": {

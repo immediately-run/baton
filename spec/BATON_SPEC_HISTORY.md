@@ -2283,6 +2283,24 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   up now. S-BTN-198 follows. B-172 is superseded into B-76, which builds the code sign-in flow
   for both roles: the two steps are built where the flow is.
 
+- **2026-11-04 — the spec split into one file per section (B-179).**
+  Rules changed: none.
+  The owner, on the 7,500-line spec: "It's challenging for agents to work with such a large file";
+  asked whether an index "pointing to the authoritative spec file for a list of topics" would help;
+  and agreed the plan "keep cooperative, retire the legacy paths as planned, and then split the
+  spec". `spec/BATON_SPEC.md` (blob `c6656dc`) moved into `spec/BATON_SPEC/`, one file per
+  top-level heading — `00-front.md`, `01-…` to `16-…`, `90-load-bearing-assumptions.md`,
+  `91-decisions.md`, `92-open-questions.md` — with no byte changed: the parts joined in name order
+  have the old file's sha-256 (`ca8c0a92…5dd7849`), which `node scripts/spec-files.mjs --prove
+  616e5d8 05b4945` shows. The only later edit is the front matter's two
+  relative links, one directory deeper. `spec/BATON_SPEC.md` is now the generated index (`npm run
+  spec:index`): each file, its subsections and the rules each defines, and every rule, scenario
+  and gate id with its title and file; `check:spec` fails a stale index, a file in the directory
+  that is not a part, or a part out of order or malformed, and
+  reads the parts joined, as `spec:impact` does, which now names `file:line`. Ids and `§n.m`
+  numbers are unchanged. B-179 asked for a hand-written topic table; review round one flagged the
+  generated one as a deviation, and the owner ruled "Keep it generated" (2026-11-04).
+
 - **2026-11-03 — R-BTN-193: git is never a lock or a counter.** The owner, after the process
   guards' third review round: "I understand that until the baton spec is fully realized, it may be
   beneficial to keep the pre-existing Git-based locking and sequencing mechanisms. However, I want

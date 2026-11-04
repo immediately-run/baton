@@ -1,4 +1,4 @@
-// check-spec (R3-1252): spec/BATON_SPEC.md defines every requirement the code cites, cites only
+// check-spec (R3-1252): the spec (spec/BATON_SPEC/'s parts joined, B-179) defines every requirement the code cites, cites only
 // tickets that exist here, and carries none of the scrubbed terms; every test/integration/ file
 // named for a scenario names one §15 defines and not one the history retired (B-71).
 import { describe, expect, it } from 'vitest';

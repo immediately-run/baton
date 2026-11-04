@@ -1,9 +1,11 @@
 # CLAUDE.md — Baton
 
-Baton is specified by `BATON_SPEC`, `spec/BATON_SPEC.md` in this repository (moved from
-`immediately-run/docs` in R3-1252), and built through the tickets in `tickets/`. Amend the spec
-here, by pull request; docs' `content/specs/BATON_SPEC.mdx` is a stub. Read the item and the spec
-sections it cites before changing anything. See `README.md` for the layout.
+Baton is specified by `BATON_SPEC`, in this repository (moved from `immediately-run/docs` in
+R3-1252): `spec/BATON_SPEC/`, one file per section, and `spec/BATON_SPEC.md`, their generated index
+of sections, subsections and every rule, scenario and gate id (B-179). It is built through the
+tickets in `tickets/`. Amend the spec here, by pull request, in the section file that owns the
+rule, then `npm run spec:index`; docs' `content/specs/BATON_SPEC.mdx` is a stub. Read the item and
+the spec sections it cites before changing anything — open the index, then only the files you need. See `README.md` for the layout.
 
 ## Claiming a ticket
 
