@@ -8,6 +8,7 @@ import { logEvent } from './db';
 import { NONCE_TTL_MS, parseSshKey } from './auth';
 import { isForgePath, isPullRequestUrl, transcriptUrl, type Forge } from './links';
 import { DEFAULT_TRANSCRIPT_REPOS, repositoryOf, transcriptReposOf } from './registry';
+import { DEFAULT_SESSION_HOSTS, sessionLink } from './validate';
 
 export { DEFAULT_TRANSCRIPT_REPOS };
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
@@ -15,6 +16,7 @@ import {
   checkAck, checkActivity, checkHeartbeat, checkMessage, checkShadowReport, checkSuspension, bad, HOSTNAME, isGrantedKey,
   type ActivityReport, type Heartbeat, HOLDING } from './validate';
 
+export { DEFAULT_SESSION_HOSTS };
 import type { Config, Row, SqlValue, Store } from './ports';
 const CLOSE_GRACE_MS = 10 * 60_000; // §6.9: closing updates are accepted 10 minutes after a claim ends
 const SCHEDULED_WINDOW_MS = 24 * 3_600_000; // §7.4: the heartbeat carries suspensions starting within 24 h
@@ -50,6 +52,8 @@ export interface Ctx {
   /** R-BTN-103: store the repositories and `asks` a heartbeat delivers notices for (`granted`: the
    *  repositories a machine key works on, null for any other key), returning what was refused. */
   couriers?: (workerId: number, granted: string[] | null, entries: { repository: string; asks: string[] }[]) => { repository: string; code: string }[];
+  /** R-BTN-113: the instance's `session_hosts`, the allowlist a session link passes. */
+  sessionHosts?: () => string[];
   /** R-BTN-75, R-BTN-76: a worker became live or changed what it declares or uses. */
   fleetChanged?: () => void;
   /** R-BTN-75: a shadow report's claim holds its ticket, or no longer does. */
@@ -381,6 +385,9 @@ export class WorkerApi {
     // R-BTN-19: only a heartbeat with the secret (never the hash path) clears a fence.
     if (hb.fenced && secretSeen) this.c.fenced?.(w.id, fresh.incarnation, hb.fenced.claim_id);
     const claim = this.activeClaim(w.id);
+    // R-BTN-113: the running leg carries its session's link — latest wins while it runs. A link
+    // the rule refuses is dropped and logged, never refusing the heartbeat.
+    const sessionUrlRefused = hb.session_url != null ? this.linkSession(w.id, hb.session_url, claim) : null;
     // B-86: the capabilities a runner with no `--capabilities` declares (see `grantCapabilities`).
     const grantCapabilities = this.grantCapabilities(cred, w.id);
     return {
@@ -403,7 +410,25 @@ export class WorkerApi {
       ...(refusedUses.length ? { refused_uses: refusedUses } : {}),
       ...(refusedCouriers.length ? { refused_couriers: refusedCouriers } : {}),
       ...(unlinked.length ? { transcripts_unlinked: unlinked } : {}),
+      ...(sessionUrlRefused ? { session_url_refused: sessionUrlRefused } : {}),
     };
+  }
+
+  /** R-BTN-113: store a heartbeat's `session_url` on the worker's running leg (latest wins while
+   *  it runs) — or log the drop when the rule refuses the link, which never refuses the
+   *  heartbeat. Returns the refusal reason, or null when the link was kept or none was carried.
+   *  With no leg running there is nothing to carry it: the link is for the running leg alone. */
+  private linkSession(workerId: number, url: string, claim: { id: number; ticket_id: string } | null): string | null {
+    const run = claim ? this.rows<{ seq: number }>(
+      'SELECT seq FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claim.id)[0] : null;
+    const checked = sessionLink(url, this.c.sessionHosts?.() ?? DEFAULT_SESSION_HOSTS);
+    if ('url' in checked) {
+      if (run) this.exec('UPDATE claim_legs SET session_url = ? WHERE claim_id = ? AND seq = ?', checked.url, claim!.id, run.seq);
+      return null;
+    }
+    this.event('session-url-dropped', `worker:${workerId}`, { reason: checked.dropped, ...(checked.host != null ? { host: checked.host } : {}) },
+      claim?.ticket_id ?? null, claim?.id ?? null);
+    return checked.dropped;
   }
 
   /**

@@ -20,6 +20,8 @@
 //   baton admin -i KEY resource add NAME --scope worker|account|service --schema FILE|JSON [--atoms-from admin|any]    (R-BTN-76, R-BTN-176)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
+//   baton admin -i KEY settings [--link-hosts a,b | --link-hosts none] [--session-hosts a,b | --session-hosts default|none]
+//                [--check-app-id N | --check-app-id none]     (R-BTN-112, R-BTN-113, §12.7)
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
 //                decision (R-BTN-75); `--on decision:*` is every decision waiting on a person
@@ -267,7 +269,26 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       const { flags, positional } = parseArgs(rest.slice(1), [], ['serves', 'repositories'], 1);
       return { method: 'POST', path: '/v1/admin/instances', body: { name: need(positional[0], 'the instance name'), serves: need(list(flags.serves), '--serves'), repositories: list(flags.repositories) ?? [] } };
     }
-    throw new Error('baton admin repos|repo|grant|probe|resource|instance|revoke|open');
+    if (cmd === 'settings') {
+      // R-BTN-57 (§14): the instance's allowlists and the check App's id. `--session-hosts
+      // default` returns to `claude.ai` (R-BTN-113); `none` empties a list.
+      const { flags } = parseArgs(rest, [], ['link-hosts', 'session-hosts', 'check-app-id'], 0);
+      const body = {};
+      if (flags['link-hosts'] === 'none') body.link_hosts = [];
+      else if (flags['link-hosts']) body.link_hosts = list(flags['link-hosts']);
+      if (flags['session-hosts'] === 'default') body.session_hosts = ['claude.ai'];
+      else if (flags['session-hosts'] === 'none') body.session_hosts = [];
+      else if (flags['session-hosts']) body.session_hosts = list(flags['session-hosts']);
+      if (flags['check-app-id'] === 'none') body.check_app_id = null;
+      else if (flags['check-app-id'] != null) {
+        const id = Number(flags['check-app-id']);
+        if (!Number.isSafeInteger(id) || id <= 0) throw new Error('--check-app-id must be the check App’s id, or none');
+        body.check_app_id = id;
+      }
+      if (!Object.keys(body).length) throw new Error('baton admin settings names at least one setting');
+      return { method: 'PUT', path: '/v1/admin/settings', body };
+    }
+    throw new Error('baton admin repos|repo|grant|probe|resource|instance|settings|revoke|open');
   }
   if (role === 'owner') {
     if (cmd === 'grants') {

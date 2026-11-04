@@ -43,9 +43,10 @@ export class Mirror {
     const n = Math.min(Math.max(1, limit || MAX_PAGE), MAX_PAGE);
     const rows = this.rows<{ seq: number; at: number; kind: string; ticket_id: string | null; claim_id: number | null; actor: string; detail_json: string | null }>(
       // R-BTN-75–77's `blocked`, `unblocked` and `resource` are Baton's own state, nothing git
-      // holds (§12 writes claims, holds and overrides): the feed leaves them out.
+      // holds (§12 writes claims, holds and overrides): the feed leaves them out. So is
+      // R-BTN-113's `session-url-dropped` (a link the allowlist refused — Baton's own log).
       `SELECT seq, at, kind, ticket_id, claim_id, actor, detail_json FROM events WHERE repository_id = ? AND seq > ?
-         AND kind NOT IN ('blocked', 'unblocked', 'resource') ORDER BY seq LIMIT ?`, repo, after, n);
+         AND kind NOT IN ('blocked', 'unblocked', 'resource', 'session-url-dropped') ORDER BY seq LIMIT ?`, repo, after, n);
     const events = rows.map((e) => {
       let detail: Record<string, unknown> = {};
       try {

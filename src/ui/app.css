@@ -44,5 +44,7 @@ td button, li button { margin-left: 0.25rem; }
 .seg.k-review { background: var(--ok); }
 .seg.k-wait { background: var(--line); }
 .seg.failed { outline: 2px solid var(--warn); }
+.legseg { position: absolute; top: 20px; height: 4px; background: var(--accent); border: 0; padding: 0; cursor: pointer; opacity: 0.75; }
+.legseg:hover { opacity: 1; }
 .detail { margin-top: 8px; }
 .detail div { overflow-wrap: anywhere; }

@@ -9,7 +9,7 @@ import { BatonError, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId, HOLDING_TYPE } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, TAG, checkAsks, checkRepositoryId, DEFAULT_SESSION_HOSTS, HOLDING_TYPE } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkRegistration, seedEntries, tierPosition, type Registration, type Registry } from './registry';
@@ -30,6 +30,8 @@ const LEGS_MAX = 64;
 const OWNERS_MAX = 16;
 const CAPABILITIES_MAX = 64;
 const BACKOFFS_MAX = 8;
+/** Spec-silent bound (recorded on B-4): hosts per instance allowlist setting. */
+const HOSTS_MAX = 32;
 /** A registered repository's fields §11's change form may set besides weight, tiers and keys. */
 const LINK_FIELDS = ['remote', 'web_base', 'ci_identity', 'sync_workflow', 'mirror_workflow'] as const;
 /** A capability or role name, as a heartbeat declares one. */
@@ -723,6 +725,53 @@ export class Admin {
     });
   }
 
+  // ── the instance's settings (R-BTN-57, §13.1) ────────────────────────────────────────────
+
+  /** §13.1's one row of instance settings, as written or the defaults — `link_hosts` empty
+   *  (R-BTN-112), `session_hosts` `["claude.ai"]` (R-BTN-113), no check App (§12.7). */
+  instanceSettingsRow(): { link_hosts: string[]; session_hosts: string[]; check_app_id: number | null } {
+    const row = this.rows<{ link_hosts: string; session_hosts: string; check_app_id: number | null }>(
+      'SELECT link_hosts, session_hosts, check_app_id FROM instance_settings WHERE id = 1')[0];
+    return row
+      ? { link_hosts: JSON.parse(row.link_hosts), session_hosts: JSON.parse(row.session_hosts), check_app_id: row.check_app_id }
+      : { link_hosts: [], session_hosts: [...DEFAULT_SESSION_HOSTS], check_app_id: null };
+  }
+
+  /** R-BTN-113: the hosts a session link may come from, lowercased as the setting wrote them. */
+  sessionHosts(): string[] {
+    return this.instanceSettingsRow().session_hosts.map((h) => h.toLowerCase());
+  }
+
+  /** `PUT /v1/admin/settings` (§11.2, §14): the instance's `link_hosts` (R-BTN-112),
+   *  `session_hosts` (R-BTN-113) and `check_app_id` (§12.7) — each given replaces that setting
+   *  whole; hostnames are lowercased, the link rules comparing by name. */
+  instanceSettings(actor: string, body: unknown) {
+    if (!isObj(body)) bad('body', 'must be a JSON object');
+    const b = body as Record<string, unknown>;
+    only(b, ['link_hosts', 'session_hosts', 'check_app_id'], 'body');
+    if (!Object.keys(b).length) bad('body', 'names at least one setting');
+    const hosts = (v: unknown, field: string) => Array.isArray(v) && v.length <= HOSTS_MAX
+      && v.every((h) => typeof h === 'string' && HOSTNAME.test(h))
+      ? [...new Set((v as string[]).map((h) => h.toLowerCase()))] : bad(field, `must be a list of at most ${HOSTS_MAX} hostnames`);
+    const appId = b.check_app_id === undefined ? undefined
+      : b.check_app_id === null ? null
+        : Number.isSafeInteger(b.check_app_id) && (b.check_app_id as number) > 0 ? b.check_app_id as number : bad('check_app_id', 'must be the check App’s id, or null');
+    return this.c.store.transaction(() => {
+      const cur = this.instanceSettingsRow();
+      const next = {
+        link_hosts: b.link_hosts !== undefined ? hosts(b.link_hosts, 'link_hosts') : cur.link_hosts,
+        session_hosts: b.session_hosts !== undefined ? hosts(b.session_hosts, 'session_hosts') : cur.session_hosts,
+        check_app_id: appId !== undefined ? appId : cur.check_app_id,
+      };
+      this.exec(`INSERT INTO instance_settings (id, link_hosts, session_hosts, check_app_id) VALUES (1, ?, ?, ?)
+                 ON CONFLICT (id) DO UPDATE SET link_hosts = excluded.link_hosts, session_hosts = excluded.session_hosts,
+                   check_app_id = excluded.check_app_id`,
+        JSON.stringify(next.link_hosts), JSON.stringify(next.session_hosts), next.check_app_id);
+      this.event(actor, { act: 'instance-settings', ...next }, null);
+      return { ok: true };
+    });
+  }
+
   // ── reads ───────────────────────────────────────────────────────────────────────────────
 
   /** The owner bars of `repositories` in force at `now` — and, with `scheduled`, those not yet
@@ -774,6 +823,8 @@ export class Admin {
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
       settings: this.rows('SELECT id AS repository_id, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, required_independence FROM repositories WHERE retired_at IS NULL ORDER BY id'),
+      // The instance's own settings (§13.1): read-only here, set with `baton admin settings`.
+      instance: this.instanceSettingsRow(),
       // R-BTN-80: the personal channels, by repository.
       couriers: this.c.notices?.couriers() ?? [],
     };

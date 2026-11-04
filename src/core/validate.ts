@@ -66,6 +66,34 @@ export const TAG = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/;
 /** Tags one heartbeat declares, or one advance bars (spec-silent, recorded on R3-1232). */
 export const TAGS_MAX = 64;
 
+/** R-BTN-113's length bound: a longer link is dropped, never refused. */
+export const SESSION_URL_MAX = 512;
+/** R-BTN-113's default allowlist, until an administrator sets `session_hosts`: `claude.ai`. */
+export const DEFAULT_SESSION_HOSTS = ['claude.ai'];
+
+/** R-BTN-113: a session link is kept only when it is `https`, at most 512 characters, without
+ *  userinfo and its host is one of `hosts` (the instance's `session_hosts`, lowercased as the
+ *  setting writes them); anything else is dropped and logged by the caller, never refusing the
+ *  heartbeat, advance or end that carried it. `host` names the host that was not allowed, for
+ *  the log alone. */
+export function sessionLink(v: string, hosts: string[]): { url: string } | { dropped: 'not-https' | 'userinfo' | 'too-long' | 'host' | 'unparsed'; host?: string } {
+  if (v.length > SESSION_URL_MAX) return { dropped: 'too-long' };
+  let u: URL;
+  try {
+    u = new URL(v);
+  } catch {
+    return { dropped: 'unparsed' };
+  }
+  if (u.protocol !== 'https:') return { dropped: 'not-https' };
+  if (u.username !== '' || u.password !== '') return { dropped: 'userinfo' };
+  return hosts.includes(u.hostname) ? { url: v } : { dropped: 'host', host: u.hostname };
+}
+
+/** A session link as a request carries it: absent or a string — the rule is the caller's, which
+ *  can drop what fails it, so only the shape refuses. */
+const carriedLink = (v: unknown, field: string): string | null =>
+  v === undefined || v === null ? null : typeof v === 'string' ? v : bad(field, 'must be a link (R-BTN-113)');
+
 export const ACTIVITY_KINDS = ['orient', 'implement', 'local-verify', 'open-pr', 'push', 'ci-wait', 'review-round', 'reviewer',
   'fix-findings', 'adjudicate', 'merge', 'reconcile', 'status-write', 'decision-packet', 'other'] as const;
 export const OUTCOMES = ['succeeded', 'failed', 'cancelled', 'abandoned'] as const;
@@ -124,6 +152,9 @@ export interface Heartbeat {
   /** R-BTN-103: the repositories and `asks` this session delivers notices for, as a worker courier,
    *  and the entries refused as malformed. */
   couriers: { entries: { repository: string; asks: string[] }[]; refused: { repository: string; code: string }[] };
+  /** R-BTN-113: the running leg's session link, as the runner sent it — kept only under the
+   *  rule, which the heartbeat's own store applies. */
+  session_url: string | null;
 }
 
 export interface TranscriptReport { index?: number; repo: string; path: string; role: 'session' | 'subagent'; activity_id?: string; pushed_at?: number }
@@ -181,6 +212,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
   if (b.isolation !== undefined && !ISOLATIONS.includes(b.isolation as Heartbeat['isolation'])) bad('isolation', `must be one of ${ISOLATIONS.join(', ')}`);
   const transcripts = (b.transcripts ?? []) as unknown[];
   if (!Array.isArray(transcripts) || transcripts.length > 50) bad('transcripts', 'must be a list of at most 50');
+  const session_url = carriedLink(b.session_url, 'session_url');
   const usage = (b.usage ?? []) as unknown[];
   if (!Array.isArray(usage) || usage.length > 100) bad('usage', 'must be a list of at most 100');
   const rate_limits = (b.rate_limits ?? []) as unknown[];
@@ -207,6 +239,7 @@ export function checkHeartbeat(body: unknown, transcriptRepos: string[]): Heartb
     fenced: checkFenced(b.fenced),
     uses: checkUses(b.uses),
     couriers: checkCouriers(b.couriers),
+    session_url,
     // One bad pointer is refused on its own and reported, never the heartbeat (§6.8): a failed
     // heartbeat would stop last_seen_at and get a live worker reaped.
     ...splitTranscripts(transcripts, transcriptRepos),
@@ -528,6 +561,9 @@ export interface End {
    *  choices by the claims (a file that is unparseable or over 4 KB was dropped by the runner
    *  and never arrives). */
   taken: { kept: TakenEntry[]; dropped: number } | null;
+  /** R-BTN-113: the ending claim's running leg carries its session link here — kept only under
+   *  the rule, which the claims apply. */
+  session_url: string | null;
 }
 
 /** One entry of a leg's `taken` (R-BTN-177): the alternative it ran for a route choice, and the
@@ -623,7 +659,7 @@ export function checkEnd(body: unknown): End {
     }
     prerequisite = { kind: 'capability', ref: (p as { ref: string }).ref };
   }
-  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), taken: checkTaken(b.taken) };
+  return { end_reason: reason, status: status!, suspended_at, reached: reached ?? suspended_at, next, detail, ended_at_sha: sha, owner_bar: ownerBar, prerequisite, outputs: checkOutputs(b.outputs), taken: checkTaken(b.taken), session_url: carriedLink(b.session_url, 'session_url') };
 }
 
 export interface Advance {
@@ -636,6 +672,9 @@ export interface Advance {
   /** R-BTN-177 (B-105): what the finished leg wrote to BATON_TAKEN, reported on the advance or
    *  end that finishes it. */
   taken: { kept: TakenEntry[]; dropped: number } | null;
+  /** R-BTN-113: the link of the leg this advance finishes, kept only under the rule, which the
+   *  claims apply. */
+  session_url: string | null;
 }
 
 /** `POST /v1/runner/claims/{id}/advance` (R-BTN-63, §11): the leg to start; `reached`, the
@@ -650,7 +689,7 @@ export function checkAdvance(body: unknown): Advance {
   const raw = b.bars ?? [];
   if (!Array.isArray(raw) || raw.length > TAGS_MAX || !raw.every((t) => typeof t === 'string' && TAG.test(t))) bad('bars', `must be a list of at most ${TAGS_MAX} tags`);
   if (b.course !== undefined && JSON.stringify(b.course).length > 4096) bad('course', 'must be at most 4 KB');
-  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), taken: checkTaken(b.taken) };
+  return { leg, reached, evidence, bars: [...new Set(raw as string[])], outputs: checkOutputs(b.outputs), taken: checkTaken(b.taken), session_url: carriedLink(b.session_url, 'session_url') };
 }
 
 /** §6.7: the sync's confirmations, `[{claim_id, sha}]`. */

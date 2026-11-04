@@ -113,6 +113,8 @@ export class BatonCore {
       uses: (w, repos, names) => this.resources.applyUses(w, repos, names), fleetChanged: () => this.blocks.recount(),
       // R-BTN-103: what it delivers as a worker courier.
       couriers: (w, granted, entries) => this.notices.declare(w, granted, entries),
+      // R-BTN-113: the allowlist a heartbeat's session link passes.
+      sessionHosts: () => this.admin.sessionHosts(),
       held: (ticket) => this.blocks.held(ticket, true),
       claimView: (id) => this.claims.holderView(id),
       // A granted key's repositories are its grants' (R-BTN-58); an ungranted one's, every one it may reach.
@@ -715,6 +717,9 @@ export class BatonCore {
       // B-118: what an administrator's dashboard session reads, for the key itself — the same
       // `uiState()`, so the dashboard and a terminal cannot drift.
       if (m === 'GET' && p === '/v1/admin/state') return json(this.uiState());
+      // R-BTN-57 (§14): the instance's own settings — `link_hosts` (R-BTN-112),
+      // `session_hosts` (R-BTN-113) and `check_app_id` (§12.7).
+      if (m === 'PUT' && p === '/v1/admin/settings') return json(this.admin.instanceSettings(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/repositories') return json(await this.admin.repositories(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/probes') return json(await this.admin.addProbe(actor, await body()));
       // R-BTN-76: external resources, their account instances, and a reading by hand.

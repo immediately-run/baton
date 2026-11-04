@@ -279,6 +279,8 @@ function renderRunning() {
   for (const c of state.running) {
     const item = el('td', {}, el('div', { text: c.ticket_id }), el('div', { text: c.title ?? '', cls: 'muted' }));
     if (c.stalled) item.append(el('div', { text: 'stalled: no activity for 2 h', cls: 'stalled' }));
+    // R-BTN-113: the running leg's session link, as on the Timeline (§11.4).
+    if (c.session_url) item.append(el('div', {}, httpsLink('session', c.session_url)));
     const worker = el('td', {}, el('div', { text: `${c.hostname} · #${c.worker_id}` }), el('div', { text: c.alive ? 'alive' : 'silent', cls: c.alive ? 'alive' : 'dead' }));
     const events = el('td', { cls: 'muted' });
     for (const e of c.events.slice(-3)) events.append(el('div', { text: `${fmtTime(e.at)} ${e.kind}` }));
@@ -322,6 +324,15 @@ function showActivity(a) {
   box.hidden = false;
 }
 
+/** The clicked claim's leg run (§11.4): its times and, under R-BTN-113, its session link. */
+function showLegRun(claim, leg) {
+  const box = document.getElementById('timeline-detail');
+  box.replaceChildren(el('div', { text: `${leg.leg} · ${claim.ticket_id}` }),
+    el('div', { text: `${fmtTime(leg.started_at)} → ${leg.finished_at != null ? fmtTime(leg.finished_at) : leg.abandoned_at != null ? `${fmtTime(leg.abandoned_at)} (given up)` : 'running'}`, cls: 'muted' }));
+  if (leg.session_url) box.append(el('div', {}, httpsLink('session', leg.session_url)));
+  box.hidden = false;
+}
+
 function renderTimeline() {
   const box = document.getElementById('timeline');
   box.replaceChildren();
@@ -337,6 +348,16 @@ function renderTimeline() {
       bar.style.left = pct(c.claimed_at);
       bar.style.width = width(c.claimed_at, c.ended_at);
       track.append(bar);
+      // §11.4, R-BTN-113: a leg run that carried its session's link is a marker on the claim's
+      // lower band; its detail shows the link.
+      for (const l of c.legs ?? []) {
+        if (!l.session_url) continue;
+        const seg = el('button', { cls: 'legseg', attrs: { type: 'button', 'aria-label': `${l.leg} session`, title: `${l.leg}: session link` } });
+        seg.style.left = pct(l.started_at);
+        seg.style.width = width(l.started_at, l.finished_at ?? l.abandoned_at);
+        seg.addEventListener('click', () => showLegRun(c, l));
+        track.append(seg);
+      }
       // A review round's reviewers are nested: drawn on a lower band beneath their round.
       for (const a of c.activities) {
         const cls = ['seg', `k-${KIND_GROUP[a.kind] ?? 'other'}`, a.parent_id ? 'child' : '', a.outcome === 'failed' ? 'failed' : ''].filter(Boolean).join(' ');
@@ -491,6 +512,13 @@ function renderLimits() {
     if (!lines.length) ul.append(el('li', { text: empty, cls: 'muted' }));
     box.append(ul);
   };
+  // §13.1's instance settings (R-BTN-112, R-BTN-113): what an administrator set for the
+  // tenant — set with `baton admin settings`.
+  if (l.instance) list('Instance', [
+    `session hosts: ${l.instance.session_hosts.join(', ')}`,
+    `link hosts: ${l.instance.link_hosts.length ? l.instance.link_hosts.join(', ') : 'none (a view links only the ticket’s repositories)'}`,
+    ...(l.instance.check_app_id != null ? [`check App ${l.instance.check_app_id}`] : []),
+  ], '');
   list('Owners', l.owners.map((o) => `${o.repository_id}: ${o.fingerprint} (added by ${o.added_by}, ${fmtTime(o.added_at)})`), 'No repository has an owner key yet.');
   list('Grants', l.grants.map((g) => `${g.repository_id}: ${g.hostname}${g.label ? ` (${g.label})` : ''} — ${parsed(g.capabilities, []).join(', ') || 'no capabilities'}${g.max_tier != null ? ` · up to ${g.max_tier}` : ''} · by ${g.granted_by}`), 'No key is granted.');
   // R-BTN-101: a probe reports on any registered instance.

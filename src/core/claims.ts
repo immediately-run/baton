@@ -8,7 +8,7 @@ import { transcriptUrl } from './links';
 import { isUniqueViolation, logEvent, randomHex } from './db';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
-import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
+import { checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOverride, checkResolve, isGrantedKey, sessionLink, type End, type Output } from './validate';
 import { ceilingIn, repositoryOf, transcriptReposOf } from './registry';
 import { GATE_CODES, gatesFor, type GateContext, type GateLeg, type GateTicket, type GateVerdict, type Phase } from './gates';
 import { extendsPath, leaves, resolveLeg, resolveStation, runsOf, type Graph, type Step } from './graph';
@@ -772,8 +772,19 @@ export class Claims {
 
   /** The claim's running leg, if any: its last started leg not yet finished or given up. */
   private runningLeg(claimId: number) {
-    return this.rows<{ seq: number; leg: string; from_station: string }>(
-      'SELECT seq, leg, from_station FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
+    return this.rows<{ seq: number; leg: string; from_station: string; session_url: string | null }>(
+      'SELECT seq, leg, from_station, session_url FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', claimId)[0] ?? null;
+  }
+
+  /** R-BTN-113 (B-4): the link of the leg a finishing advance or end carries — kept under the
+   *  rule, else dropped and logged; a link already stored by a heartbeat stands. Returns the
+   *  URL to store (null keeps what is stored) and the refusal reason when the rule dropped it. */
+  private finishingSessionUrl(workerId: number, v: string | null, ticketId: string, claimId: number, leg: string): { stored: string | null; refused: string | null } {
+    if (v == null) return { stored: null, refused: null };
+    const checked = sessionLink(v, this.c.admin.sessionHosts());
+    if ('url' in checked) return { stored: checked.url, refused: null };
+    this.event('session-url-dropped', `worker:${workerId}`, { reason: checked.dropped, leg, ...(checked.host != null ? { host: checked.host } : {}) }, ticketId, claimId);
+    return { stored: null, refused: checked.dropped };
   }
 
   /** R-BTN-81: what a leg row of the history carries — the leg's run number on the ticket (its
@@ -865,10 +876,19 @@ export class Claims {
 
     const now = this.c.now();
     const n = this.handedOut(repo);
+    // R-BTN-113: the refusal a finishing advance's link met, if it met one (the reply's field).
+    let sessionUrlRefused: string | null = null;
     if (run) {
-      this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', at, now, b.evidence, claimId, run.seq);
+      // R-BTN-113: the link this advance carries is the finishing leg's; a heartbeat's already
+      // stored link stands when it carries none. The kept link rides the history row (R-BTN-81).
+      const link = this.finishingSessionUrl(workerId, b.session_url, c.ticket_id, claimId, run.leg);
+      sessionUrlRefused = link.refused;
+      this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ?, session_url = COALESCE(?, session_url) WHERE claim_id = ? AND seq = ?',
+        at, now, b.evidence, link.stored, claimId, run.seq);
       const f = this.legFacts(claimId, run.leg);
-      this.c.history?.record(f.ticket, { kind: 'leg-finished', ...f.row, reached: at, next_leg: leg, ...(b.evidence ? { detail: { evidence: b.evidence } } : {}) });
+      const stored = this.rows<{ session_url: string | null }>('SELECT session_url FROM claim_legs WHERE claim_id = ? AND seq = ?', claimId, run.seq)[0]?.session_url ?? null;
+      const detail = { ...(b.evidence ? { evidence: b.evidence } : {}), ...(stored ? { session_url: stored } : {}) };
+      this.c.history?.record(f.ticket, { kind: 'leg-finished', ...f.row, reached: at, next_leg: leg, ...(Object.keys(detail).length ? { detail } : {}) });
       // R-BTN-177 (B-105): the finished leg's reported taken, judged against the snapshot it ran
       // under — BEFORE the resolution below, so a dead holding it named is gone from `has` and
       // the leg this advance starts is advised without it.
@@ -888,7 +908,7 @@ export class Claims {
     this.exec('UPDATE claims SET station = ?, leg = ?, claim_observation = ? WHERE id = ?', at, leg, n, claimId);
     this.event('advanced', `worker:${workerId}`, { from: station, reached: at, leg, ...(b.bars.length ? { bars: b.bars } : {}), ...(b.evidence ? { evidence: b.evidence } : {}) }, c.ticket_id, claimId);
     this.c.dispatch?.('sync', c.ticket_id); // R-BTN-73: after every advance
-    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), advice: resolved ?? null };
+    return { ok: true, station: at, next: this.nextLegs(c.ticket_id, at), advice: resolved ?? null, ...(sessionUrlRefused ? { session_url_refused: sessionUrlRefused } : {}) };
   }
 
   /** The route choices a course entry attaches to a leg (R-BTN-177): the `route_choices` map the
@@ -989,6 +1009,9 @@ export class Claims {
     // in this transaction.
     const ending = this.runningLeg(c.id);
     if (ending) this.reportTaken(workerId, c.id, c.ticket_id, ending.seq, e.taken);
+    // R-BTN-113: no advance finished the leg, so its link arrives here — kept under the rule or
+    // dropped and logged; a heartbeat's stored link stands.
+    const sessionUrl = ending ? this.finishingSessionUrl(workerId, e.session_url, c.ticket_id, c.id, ending.leg) : { stored: null, refused: null };
     // R-BTN-126's capability branch (B-104): the holding the runner says it lost leaves its
     // declared set, its derived sets re-evaluate in this transaction, and the fleet's counts
     // follow — rule 4 refuses this runner at once. A valid blocked end is not a failed attempt,
@@ -1001,8 +1024,9 @@ export class Claims {
       }
       // (No extra write: the transaction is the end's own; the rows above are its shape.)
     }
-    this.finish(c.id, c.ticket_id, e.status, e.end_reason, `worker:${workerId}`, { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next });
-    return { ok: true };
+    this.finish(c.id, c.ticket_id, e.status, e.end_reason, `worker:${workerId}`,
+      { ended_at_sha: e.ended_at_sha, detail: e.detail, reached, finished, evidence: e.ended_at_sha, next: e.next, session_url: sessionUrl.stored });
+    return { ok: true, ...(sessionUrl.refused ? { session_url_refused: sessionUrl.refused } : {}) };
   }
 
   /** R-BTN-126 (round 1, B9): the invalid blocked end, recorded in its own committed
@@ -1104,21 +1128,27 @@ export class Claims {
    *  `from` (R-BTN-71), open activities close `abandoned` (§6.9), the resume record is written
    *  for every end (R-BTN-24), and the end is logged. */
   private finish(claimId: number, ticketId: string, status: 'completed' | 'released' | 'reaped', reason: string, actor: string,
-    opts: { ended_at_sha?: string | null; fence?: { incarnation: number } | null; detail?: string | null; reached?: string | null; finished?: boolean; evidence?: string | null; next?: string | null } = {}) {
+    opts: { ended_at_sha?: string | null; fence?: { incarnation: number } | null; detail?: string | null; reached?: string | null; finished?: boolean; evidence?: string | null; next?: string | null; session_url?: string | null } = {}) {
     const now = this.c.now();
     const c = this.rows<{ station: string; regressed_since: number | null }>('SELECT station, regressed_since FROM claims WHERE id = ?', claimId)[0];
     const run = this.runningLeg(claimId);
     const reached = opts.reached ?? c.station;
+    // R-BTN-113: the end's own link, or a heartbeat's already stored one, rides the run's
+    // history row (R-BTN-81) whether the leg finished or was given up.
+    const sessionUrl = run ? (opts.session_url ?? run.session_url) : null;
     if (run && opts.finished) {
-      this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', reached, now, opts.evidence ?? null, claimId, run.seq);
+      this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ?, session_url = COALESCE(?, session_url) WHERE claim_id = ? AND seq = ?',
+        reached, now, opts.evidence ?? null, opts.session_url ?? null, claimId, run.seq);
     } else if (run) {
       // A reap, a stale-board release or an end at the leg's `from`: the leg was given up.
-      this.exec('UPDATE claim_legs SET abandoned_at = ? WHERE claim_id = ? AND seq = ?', now, claimId, run.seq);
+      this.exec('UPDATE claim_legs SET abandoned_at = ?, session_url = COALESCE(?, session_url) WHERE claim_id = ? AND seq = ?',
+        now, opts.session_url ?? null, claimId, run.seq);
     }
     if (run) {
       // R-BTN-81: the run's end, with the position the holder reported (B-38 makes it provisional).
       const f = this.legFacts(claimId, run.leg);
-      this.c.history?.record(f.ticket, { kind: opts.finished ? 'leg-finished' : 'leg-abandoned', ...f.row, reached, next_leg: opts.next ?? null, detail: { end_reason: reason } });
+      this.c.history?.record(f.ticket, { kind: opts.finished ? 'leg-finished' : 'leg-abandoned', ...f.row, reached, next_leg: opts.next ?? null,
+        detail: { end_reason: reason, ...(sessionUrl ? { session_url: sessionUrl } : {}) } });
     }
     // R-BTN-62: only a reading numbered above the counter's value now can confirm this end. §2e:
     // regressed_since clears with the end; a suspension made while regressed is confirmed by any
@@ -1722,11 +1752,16 @@ export class Claims {
        FROM claims c JOIN workers w ON w.id = c.worker_id LEFT JOIN tickets wi ON wi.id = c.ticket_id
        WHERE c.status = 'active' ORDER BY c.claimed_at`).map((c) => {
       const alive = c.kind !== 'legacy' && now - (c.last_seen_at as number) < (c.lease_timeout_ms as number);
+      // R-BTN-113: the running leg's session link, as on the Timeline.
+      const leg = this.rows<{ leg: string; session_url: string | null }>(
+        'SELECT leg, session_url FROM claim_legs WHERE claim_id = ? AND finished_at IS NULL AND abandoned_at IS NULL ORDER BY seq DESC LIMIT 1', c.id)[0] ?? null;
       return {
         ...c,
         alive,
         reap_at: c.kind === 'legacy' ? null : (c.last_seen_at as number) + (c.lease_timeout_ms as number),
         stalled: alive && (c.last_activity_at == null ? now - (c.claimed_at as number) : now - (c.last_activity_at as number)) > STALLED_MS,
+        leg: leg?.leg ?? null,
+        session_url: leg?.session_url ?? null,
         events: this.rows('SELECT at, kind, actor, detail_json FROM events WHERE claim_id = ? ORDER BY seq', c.id),
         activities: this.rows('SELECT id, kind, label, started_at, ended_at, outcome, parent_id FROM activities WHERE claim_id = ? ORDER BY started_at', c.id),
       };
@@ -1746,6 +1781,8 @@ export class Claims {
         claims: this.rows<Row>(`SELECT id, ticket_id, claimed_at, ended_at, status, end_reason FROM claims
                                 WHERE worker_id = ? AND (ended_at IS NULL OR ended_at >= ?) ORDER BY claimed_at`, l.id, from).map((c) => ({
           ...c,
+          // R-BTN-113: the claim's leg runs, their session links for the Timeline's detail.
+          legs: this.rows<Row>('SELECT seq, leg, started_at, finished_at, abandoned_at, session_url FROM claim_legs WHERE claim_id = ? ORDER BY seq', c.id),
           activities: this.rows<Row>('SELECT id, kind, seq, label, started_at, ended_at, outcome, parent_id, detail_json FROM activities WHERE claim_id = ? ORDER BY started_at', c.id)
             .map((a) => {
               // §6.8: a link built only from validated parts — the activity's own transcript, else the session's.

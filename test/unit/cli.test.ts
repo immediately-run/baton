@@ -145,6 +145,20 @@ describe('plan: one request per command', () => {
     expect(plan('owner', ['grant', 'docs', '--key', PUB, '--capabilities', 'create-pr'], key).method).toBe('POST');
   });
 
+  it('admin settings (R-BTN-112, R-BTN-113, B-4): the instance’s allowlists and the check App, one PUT', () => {
+    expect(plan('admin', ['settings', '--session-hosts', 'claude.ai,sessions.example'])).toEqual({
+      method: 'PUT', path: '/v1/admin/settings', body: { session_hosts: ['claude.ai', 'sessions.example'] },
+    });
+    expect(plan('admin', ['settings', '--link-hosts', 'none', '--check-app-id', '41276']).body)
+      .toEqual({ link_hosts: [], check_app_id: 41276 });
+    expect(plan('admin', ['settings', '--session-hosts', 'default']).body).toEqual({ session_hosts: ['claude.ai'] });
+    expect(plan('admin', ['settings', '--check-app-id', 'none']).body).toEqual({ check_app_id: null });
+    // A settings call names at least one setting, and a flag it does not know is refused.
+    expect(() => plan('admin', ['settings'])).toThrow('names at least one setting');
+    expect(() => plan('admin', ['settings', '--session-hosts', 'a,b', '--check-app-id', 'zero'])).toThrow('check App');
+    expect(() => plan('admin', ['settings', '--session-hosts', 'a,b', '--owners', 'x'])).toThrow('not a flag of this command');
+  });
+
   it('parseArgs and duration', () => {
     expect(parseArgs(['a', '--x', '1', '--flag'], ['flag'])).toEqual({ flags: { x: '1', flag: true }, positional: ['a'], groups: [] });
     expect(() => parseArgs(['--x'])).toThrow('needs a value');
