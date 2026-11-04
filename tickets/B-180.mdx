@@ -1,0 +1,119 @@
+---
+title: "B-180 — The spec is a bundle: spec/ opens in Grove beside tickets and docs, and tickets link to the sections they cite"
+id: B-180
+project: baton
+status: available
+updated: 2026-11-04
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1182
+tier: judgement
+description: "Add spec/immediately.run.json (open-wiki), ”spec” in package.json's immediately.run.content and spec/home.mdx; give every spec file frontmatter and MDX-safe prose so check:wiki passes; rewrite live tickets' BATON_SPEC citations into relative links with scripts/link-spec-refs.mjs (anchors from mdx-plugins headingId). Owner ruling 2026-11-04. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-04, in a Claude Code session on the baton load failure: "I want the
+specs dir in baton to be a bundle as well (i want cross-bundle references from tickets to the
+specs bundle)." The link form was ruled the same day: a plain relative path.
+
+**Spec:** immediately.run `REPO_CONTENT_DISPATCH_SPEC` §9, both 2026-11-04 rulings (the bundle
+selector; "A relative link that leaves its bundle is a cross-bundle link"), at docs@df0ea87;
+`docs/context/spec-writing.mdx` (cite by id); `spec/BATON_SPEC.md` (the generated index, B-179).
+
+**Depends on:** none. **Sequencing, not a dependency:** the links work live once the
+immediately.run host and Grove changes for cross-bundle links ship; until then they render as
+plain relative links, which GitHub already follows.
+
+**Used by:** immediately.run R3-1323 (the live check: the selector shows three bundles, and a
+ticket's spec link opens the spec bundle).
+
+### Requires
+
+- none — files and scripts in this repository, checked by `npm run check:wiki`,
+  `npm run check:spec` and `npm run check:tickets`.
+
+### Why
+
+`spec/` is not a bundle, so a ticket's `**Spec:**` line is a code span (`` `spec/BATON_SPEC.md`
+§6.1 (R-BTN-120) ``) that nobody can click. In Grove, the spec cannot be read beside the tickets.
+tier: judgement — it changes the spec tooling's input format and every live ticket.
+
+### What to build
+
+1. `spec/` is a third bundle: `spec/immediately.run.json` with the `open-wiki` task form, the same
+   as `docs/immediately.run.json`; `"spec"` is appended to `package.json`'s
+   `"immediately.run".content`; `spec/home.mdx` introduces the spec and links to `BATON_SPEC.md`
+   (the index), `BATON_SPEC_HISTORY.md` and `BATON_MCP_OAUTH_SPEC.md`.
+2. Every `spec/**/*.md` page passes `check:wiki`: frontmatter `title` and `description`, and
+   compiles as MDX.
+3. Every LIVE ticket (not `tickets/archive/`) has its `**Spec:**` citations of `BATON_SPEC` as
+   links, e.g. `[§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#<headingId('6.1 Prerequisites')>)
+   (R-BTN-120)`; `docs/` pages that cite sections the same way get the same treatment.
+4. The `draft-ticket` course's instructions, and this repo's `CLAUDE.md`, say that a new ticket
+   writes its spec citations as such links.
+
+### Architecture — the decisions, named
+
+- **Frontmatter on each spec file**, not a checker exemption: one page rule for every bundle.
+  `scripts/spec-files.mjs` writes `title` (the section heading) and `description` (the section's
+  first sentence) when it generates, and every spec reader skips a leading `---` block:
+  `check-spec.mjs`, `spec-tools.mjs` (`spec:impact`), `check-model-links.mjs`, and B-179's
+  joined-equality check, which compares bodies with the frontmatter stripped. Put the strip in
+  ONE helper, `stripFrontmatter(text)`, in `scripts/lib/`, imported by all four.
+- **MDX safety is fixed in the text, not by a renderer switch:** a bare `<word>` or `{…}` in prose
+  goes into a code span. This is a formatting change; no rule's wording changes. `check:spec` must
+  report the same rule, scenario and gate ids before and after; capture both lists in the PR.
+- **The link rewrite is a script, run once and kept:** `scripts/link-spec-refs.mjs` rewrites
+  `` `spec/BATON_SPEC.md` §n[.m] `` (and the bare `BATON_SPEC §n[.m]`) in live tickets and `docs/`
+  into links. It finds the file and heading from the generated index, and builds the anchor with
+  `headingId` from `@immediately-run/mdx-plugins` (`src/remarkHeadingAnchors.ts`), the function
+  Grove's heading anchors use, added as a devDependency. It has a `--check` mode that writes nothing and exits 1 when a rewrite is due. It is
+  idempotent (a second run changes nothing) and reports any citation it could not map, without guessing.
+- **Archived tickets are not rewritten:** they are history, and their `§` numbers may predate the
+  current section numbering.
+- **Do not:** link to `spec/BATON_SPEC.md#…` (the index carries no section text); exempt `spec/`
+  from `check:wiki`; hand-type anchors; change any rule's wording; touch `tickets/archive/`.
+
+### Trust
+
+New inputs: `spec/immediately.run.json` and `spec/home.mdx`, written by anyone who can push, the
+same as the existing `docs/` and `tickets/` markers. The marker names a contract (`open-wiki`), not
+an app; the host resolves the viewer through its binding table and grants it read-only, so the file
+confers no authority. `link-spec-refs.mjs` reads only this repository's files and writes only live
+tickets and `docs/` pages, and its output is reviewed in the PR like any edit.
+
+### Invariants
+
+- **Stable ids (the spec's header):** no `R-BTN-n`, `S-BTN-n`, `G-BTN-n` or `§n.m` changes number or
+  meaning; `check:spec`'s id lists are identical before and after.
+- **R-BTN-1 and spec-writing.mdx (one home per statement):** a ticket's link points at the rule's
+  one home and restates nothing; `spec/home.mdx` lists files, not rules.
+- **The model and traces cite rule ids, not lines:** `check-model-links` and `check-traces` stay
+  green with frontmatter in the spec files.
+
+### Tests
+
+- `scripts/link-spec-refs.test.mjs` (vitest): over a REAL ticket body copied from
+  `tickets/B-10.mdx`, the `**Spec:**` line becomes links whose files exist and whose anchors equal
+  `headingId` of the target heading as read from the real section file; a second run is a no-op; an
+  unmappable `§99` is reported and left unchanged.
+- `scripts/lib/stripFrontmatter.test.mjs`: with and without a frontmatter block; a `---` rule
+  later in the body is untouched.
+- `check:wiki`'s self-test gains a `spec`-shaped bundle (no `item.schema.json`, `.md` pages).
+
+### Exit criteria
+
+- [ ] `npm run check:wiki` passes with three bundles, `spec` among them.
+- [ ] `npm run check:spec` passes, with id lists identical before and after (in the PR body).
+- [ ] `node scripts/link-spec-refs.mjs --check` reports nothing left to rewrite in live tickets.
+- [ ] `npm run check:tickets` and `npm run test:no-quint` pass.
+
+## Status
+
+_filed 2026-11-04._
