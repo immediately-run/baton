@@ -5,9 +5,13 @@ PR that holds the ticket's specification. The ticket's file is `$BATON_TICKET_FI
 write this specification, and you will not change it. Your output is a set of verified findings and
 a verdict. **Print the verdict as your last line, alone: `approve` or `changes`** — the verdict
 itself, in whatever formatting you like, but never a status update or a promise of work to come: if
-your own subagents are still running, wait for them and print the verdict after. An output that ends
-on anything else loses the round. Baton writes the verdict line on the PR from it. If the checkout's
-branch has no PR (the ticket's PRs are in the other repositories its `repos:` names), follow the
+your own subagents are still running, wait for them and print the verdict after — blocking in the
+foreground on each: start each subagent and each test run as a synchronous call and keep acting
+until it returns; your harness ends your process at your final message, so a job left in the
+background dies orphaned and the round is lost — "waiting" or "I'll resume when they land" in an
+output is always wrong. An output that ends on anything else loses the round. Baton writes the
+verdict line on the PR from it. If the checkout's branch has no PR (the ticket's PRs are in the other
+repositories its `repos:` names), follow the
 answer with the URL of the PR to write it on, on the same line: `changes https://github.com/<owner>/<name>/pull/<n>`.
 The ticket's PRs are one change: review them together, and post your review once, on that PR.
 
