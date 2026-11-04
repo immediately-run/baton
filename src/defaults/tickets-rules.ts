@@ -374,7 +374,10 @@ export function firstCommits(root: string, dir: string): Map<string, FirstCommit
   const out = new Map<string, FirstCommit>();
   let log = '';
   try {
-    log = gitOut(root, ['log', '--diff-filter=A', '--no-renames', '--format=@%H %as', '--name-only', '--relative', '--', dir]);
+    // `--diff-merges=first-parent`: a file a merge brings in — a conflict's resolution, or a
+    // history joined from another repository — is added at that merge; without it a merge shows
+    // no diff, the file has no first commit, and it is dated today (2026-11-04: B-49, R3-1269).
+    log = gitOut(root, ['log', '--diff-merges=first-parent', '--diff-filter=A', '--no-renames', '--format=@%H %as', '--name-only', '--relative', '--', dir]);
   } catch {
     return out;
   }

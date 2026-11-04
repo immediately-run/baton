@@ -120,6 +120,7 @@ export const RUN_USAGE = [
   '  --lock cap=path     one machine\'s singleton (R-BTN-178), repeatable: the capability is declared',
   '                      only while this runner holds an exclusive lock on the file, and it takes',
   '                      the lock before a claim for, or the advance into, a leg requiring it.',
+  '                      Needs util-linux `flock` on PATH (macOS: `brew install flock`).',
 ].join('\n');
 
 /** B-86: whether the arguments ask for the usage — `--help` or `-h`, anywhere in them. */

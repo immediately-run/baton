@@ -27,6 +27,9 @@ instructions `build:cli` prebuilt into `dist/defaults/`, so it needs no checkout
 `--eject` copies prebuilt defaults the same way. In a
 checkout, run the CLI as `node cli/baton.mjs`.
 
+`baton run --lock` (R-BTN-178) and its tests (`npm test`, `npm run model:pr`) need util-linux
+`flock` on `PATH`; macOS has none — `brew install flock` gives one with the same flags.
+
 ## Layout
 
 | Path | What |

@@ -654,6 +654,21 @@ describe('the stale-rule guard: how a ticket is dated (2026-11-03)', () => {
     expect(firstCommits(f.dir, 'tickets').get('tickets/B-1.mdx')).toEqual({ date: '2026-10-20', boundary: false });
   });
 
+  it('by the merge that brings it in, when no commit before it adds it: never today (2026-11-04)', () => {
+    // B-49 was born in a merge's conflict resolution, the R3 tickets in a merge joining docs'
+    // history: a merge shows no diff by default, so they read as never committed — filed today.
+    const f = datedRepo('2026-10-19', { existing: {} });
+    git(f.dir, 'checkout', '-q', '-b', 'side');
+    edit(f, 'tickets/side.txt', 'x\n', 'side: a commit to merge', '2026-10-19');
+    git(f.dir, 'checkout', '-q', 'main');
+    mkdirSync(join(f.dir, 'tickets'), { recursive: true });
+    execFileSync('git', ['-C', f.dir, 'merge', '-q', '--no-ff', '--no-commit', 'side'], { stdio: 'ignore' });
+    writeFileSync(join(f.dir, 'tickets', 'B-1.mdx'), citing('B-1', null));
+    git(f.dir, 'add', '-A');
+    execFileSync('git', ['-C', f.dir, 'commit', '-q', '-m', 'Merge side; B-1 filed in the resolution'], { stdio: 'ignore', env: { ...process.env, GIT_AUTHOR_DATE: '2026-10-19T12:00:00Z', GIT_COMMITTER_DATE: '2026-10-19T12:00:00Z' } });
+    expect(firstCommits(f.dir, 'tickets').get('tickets/B-1.mdx')).toEqual({ date: '2026-10-19', boundary: false });
+  });
+
   it('by the author’s day, not the committer’s: a rebase or a cherry-pick moves nothing', () => {
     const f = repo();
     edit(f, 'tickets/B-1.mdx', citing('B-1', null), 'B-1: filed by hand', '2026-10-20', '2026-11-09');
