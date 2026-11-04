@@ -14,7 +14,9 @@ added to this folder appears here without anyone editing this page.</Lede>
 ## Next available
 
 The first ticket that can be claimed, in execution order: the lowest `order` among available
-tickets whose dependencies are all done.
+tickets whose dependencies are all done. This is **git's view of the board** — the frontmatter
+this folder carries. Baton's own board is the authority on where a ticket stands (B-129): before
+claiming, read it.
 
 <NextAvailable />
 
@@ -35,15 +37,32 @@ tickets whose dependencies are all done.
 
 ## Claiming a ticket
 
+**Ask Baton first (B-129).** A ticket's frontmatter is written by whoever can push, including a
+session releasing its claim in a hurry; Baton's record of where a ticket stands comes from
+claims, advances and the forge's PR facts, and the owner has ruled that about a ticket's position
+Baton wins over git (B-120). Before claiming, read Baton's board —
+`node cli/baton.mjs board baton` (or `node cli/baton.mjs ticket history baton:B-129`) — and trust
+its station over the frontmatter: a ticket at a station past `filed` already has work and a PR to
+continue, and `baton tickets claim` takes it over there, on its branch. Never `checkout -b` a new
+branch for a ticket Baton holds past its start.
+
 Until Baton claims this repository's tickets itself (R3-1266), git is the lock, and the
 commands are the CLI's — the same ones docs and fieldhouse run (B-112). Each is one commit
 pushed straight to `main` from a fresh checkout of it; if someone else pushed first, it retries
-on the new head, and `claim` refuses a ticket that is not available or whose dependencies are
-not all done.
+on the new head. `claim` reads the ticket from Baton with the session's key (`-i KEY`, else
+`BATON_KEY_FILE`) before it writes, and refuses — rather than trust the frontmatter — when it
+cannot: pass `--offline` only when Baton is unreachable and git's word is all there is. It
+refuses a ticket that is not available or whose dependencies are not all done — Baton's
+position overrides only a false `available`, never `in-progress`, `in-review` or a parked or
+closed status — and a ticket another claim holds, naming its holder and its lease. Releasing a
+claim (`set <id> available`) keeps every `prs:` entry; its commit is the hand-off — the PRs,
+Baton's station and next leg, the branch, and what is left in your words (`--note`).
 
 ```sh
-node cli/baton.mjs tickets claim R3-1249                  # available → in-progress
+node cli/baton.mjs board baton                              # Baton's station for every ready ticket, first
+node cli/baton.mjs tickets claim R3-1249 -i ~/.config/baton/worker   # available → in-progress, or the takeover
 node cli/baton.mjs tickets set R3-1249 in-review --pr https://github.com/immediately-run/baton/pull/40
+node cli/baton.mjs tickets set R3-1249 available --note "review round 2 next" -i ~/.config/baton/worker   # a release: the hand-off
 node cli/baton.mjs tickets done R3-1249                   # done, moved to archive/
 node cli/baton.mjs tickets claim B-110 --rules-reread R-BTN-33,R-BTN-50   # claim once the amended rules it cites are re-read
 node cli/baton.mjs tickets new --title "…" --depends-on R3-1249 --order 1100   # the next B-n

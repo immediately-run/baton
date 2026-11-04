@@ -93,8 +93,14 @@ checkout, run the CLI as `node cli/baton.mjs`.
 - `node cli/baton.mjs tickets new|claim|set|done` — file, claim and move tickets with git as the
   lock, each one commit pushed straight to the default branch from a throwaway worktree (B-112;
   `baton tickets --help`, and the generated `tickets/HOW-TICKETS-WORK.md`), until Baton claims
-  them (R3-1266). `claim` refuses a ticket citing a rule whose `spec/BATON_SPEC_HISTORY.md`
-  entry, by its title, amended it after the ticket was filed or last re-read it, until
+  them (R3-1266). `claim` asks Baton first (B-129): with the session's key (`-i KEY`, else
+  `BATON_KEY_FILE`) it reads the ticket's position from Baton's board and history, continues a
+  ticket past its course's start where Baton holds it (the PRs written back, the position
+  printed) instead of starting over — overriding only a false `available`, never the git lock or
+  a parked or closed status — and refuses, rather than trust the frontmatter, when a read cannot
+  be answered (`--offline` for an unreachable Baton). A release (`set <id> available
+  [--note TEXT]`) keeps every `prs:` entry and its commit is the hand-off. `claim` also refuses a ticket
+  citing a rule whose `spec/BATON_SPEC_HISTORY.md` entry, by its title, amended it after the ticket was filed or last re-read it, until
   `--rules-reread <id>,…` names exactly those ids (R-BTN-74); in a shallow clone it deepens the
   clone first. A new migration or scenario number is the next free one at merge (B-176 moves it
   into Baton).

@@ -497,7 +497,7 @@ describe('checkTickets: Trust and Invariants after check.sections_since (2026-11
     // Off without the setting: the same tickets pass.
     expect((await checkTickets(dir)).findings).toEqual([]);
     // A Trust missing too is its own finding.
-    const both = repo({ 'tickets/A-1.md': ticket('id: A-1', filed('2026-11-03', '')) });
+    const both = datedRepo('2026-11-03', { 'tickets/A-1.md': ticket('id: A-1', filed('2026-11-03', '')) });
     expect(lines(await checkTickets(both, {}, { sections_since: '2026-11-03' })).map((l) => l.split(' — ')[0])).toEqual([
       'tickets/A-1.md: filed 2026-11-03, on or after check.sections_since (2026-11-03), and has no ### Trust section',
       'tickets/A-1.md: filed 2026-11-03, on or after check.sections_since (2026-11-03), and has no ### Invariants section',

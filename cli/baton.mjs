@@ -67,9 +67,20 @@
 //                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]
 //                — file one ticket, the next free id under .baton/baton.json's ticket_prefix,
 //                with the conventional body, as one commit pushed to the default branch (B-112)
-//   baton tickets claim <id> [--rules-reread <ids>] | set <id> <status> [--pr URL] [--rules-reread <ids>]
-//                | done <id> [--pr URL]
-//                — claim, move or finish one, each one commit pushed to the default branch (B-112);
+//   baton tickets claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]
+//   baton tickets set <id> <status> [--pr URL] [--note TEXT] [-i KEY] [--url URL] [--offline] [--rules-reread <ids>] | done <id> [--pr URL]
+//                — claim asks Baton first (B-129): before it writes, it reads the ticket from
+//                Baton with the key -i names (else BATON_KEY_FILE) — the board for the station,
+//                the ready leg and the live claims, the history for the path and the PRs of the
+//                ended claims, the branch-holder query for the branch — and continues the ticket
+//                where Baton holds it: past its course's start, a false `available` is a takeover
+//                (the PRs are written back, the position printed), never a fresh start, while the
+//                git lock and a parked or closed status still refuse; another claim refuses,
+//                naming its holder and its lease; an unanswered read or an unreadable key refuses
+//                rather than trust the frontmatter, unless --offline. set/done write any live
+//                status, each one commit pushed to the default branch (B-112); a release
+//                (set <id> available) keeps every prs: entry and its commit is the hand-off — the
+//                PRs, Baton's station and next leg, the branch and --note's what is left (B-129);
 //                claim refuses a ticket citing a rule the spec's history amended since the ticket
 //                was filed or last re-read it, until --rules-reread names those ids (R-BTN-74)
 //   baton tickets check [--repo DIR] [--quiet]
@@ -105,7 +116,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { signHeaders, signingKey } from './sign.mjs';
+import { requestCredential, signHeaders } from './sign.mjs';
 
 export const DEFAULT_URL = 'https://baton.immediately.run';
 const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -454,9 +465,6 @@ function grantBody(flags, readKey, extra) {
   };
 }
 
-/** R-BTN-159: an API key, `bak_<id>_<secret>` — an administrator's, an owner's or a worker's. */
-const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
-
 /** `baton key create FILE [--comment TEXT]` (R-BTN-159): an API key, made here and never sent
  *  anywhere. FILE (mode 0600) holds the key, for `-i FILE` or a runner's BATON_KEY_FILE;
  *  FILE.pub holds its public line — what BATON_ADMIN_KEYS lists, `--owner-key FILE.pub` or
@@ -482,11 +490,11 @@ const redirectAnswered = (target, status, to) => new Error(
  *  never followed (B-80): a 3xx is an error naming what answered — a login page in front of
  *  Baton is not Baton's answer. */
 export async function send(url, p, keyFile, fetchImpl = fetch) {
-  const text = readFileSync(keyFile, 'utf8').trim();
+  const cred = requestCredential(keyFile);
   const target = new URL(p.path, url).toString();
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
-  const auth = API_KEY.test(text) ? { Authorization: `Bearer ${text}` } : signHeaders({ method: p.method, url: target, body, key: signingKey(keyFile) });
+  const auth = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
   const headers = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
   let res;
