@@ -54,11 +54,12 @@ lets an agent open only the file it needs.
    the join equals the spec the PR started from, byte for byte, in the PR that moves it (a one-time
    assertion against the pre-move blob, recorded in the PR), and from then on checks the files'
    order and that each starts with its heading.
-3. **The index.** `spec/BATON_SPEC.md` becomes the entry point: the front matter's status and
-   companions, a hand-written topic table (topic → section file → the rule ids that own it —
-   pointers only, never a summary of a rule), and a **generated** table of every `R-BTN-n`,
-   `S-BTN-n` and `G-BTN-n`: id → title → file. `npm run spec:index` writes it; `check:spec` fails
-   when it is stale or a topic row points at a missing file or id.
+3. **The index.** `spec/BATON_SPEC.md` becomes the entry point, every line of it **generated**:
+   a topic table (each section file, its `###` subsections and the rule ids each defines —
+   pointers only, never a summary of a rule) and a table of every `R-BTN-n`, `S-BTN-n` and
+   `G-BTN-n`: id → title → file. `npm run spec:index` writes it; `check:spec` fails when it is
+   stale. (The owner, 2026-11-04, on PR #173's round one: keep the topic table generated, not
+   hand-written.)
 4. **The tools follow.** `check-spec.mjs`, `spec-tools.mjs` (`CONFIG.spec` becomes the directory,
    read as the join), `check-model-links.mjs`, `check-traces.mjs` and any script reading the
    spec by path; the `baton:spec-review` skill ("the whole of spec/BATON_SPEC.md" becomes the
@@ -70,9 +71,9 @@ lets an agent open only the file it needs.
 
 ### Trust
 
-No new input. The index's generated table is derived from the spec files and checked against them;
-the topic table is hand-written and checked only for dangling pointers, so a wrong topic mapping is
-a review finding, not a machine one.
+No new input. The index is derived from the spec files and checked against them; a subsection
+whose title does not name its topic is a review finding against that section, not against the
+index.
 
 ### Invariants
 
@@ -87,8 +88,7 @@ a review finding, not a machine one.
 ### Tests
 
 - `check:spec` against a fixture directory: a join that differs from the recorded pre-move blob
-  fails; files out of order fail; a stale generated index fails; a topic row naming a missing
-  file or id fails.
+  fails; files out of order fail; a stale generated index fails.
 - `spec:impact` on the directory lists the same rules, scenarios, gates, decisions, tickets and
   context pages for a sample id as it did on the single file (a fixture comparison).
 - `npm test` green, with `check-model-links` and `check-traces` reading the directory.
@@ -109,4 +109,4 @@ _filed 2026-11-03._
 
 _(2026-11-04: built on `claude/B-179-spec-split`. The topic table is generated from the sections' `###` subsections and the rules each defines, rather than hand-written, so nothing in the index can drift; the byte-identity proof is the move commit's, recorded in the history.)_
 
-_(2026-11-04, review round one: the move's byte-identity is a one-time command, `node scripts/spec-files.mjs --prove 616e5d8 05b4945`, run in the PR and recorded there and in the history; `check:spec` keeps the parts' order (numbered parts under their own numbers, none missing or repeated) and fails a stray file. The script is `scripts/spec-files.mjs`, not `spec-join.mjs`: it also writes the index. The generated topic table stays a deviation for the owner to rule on — PR #173, Deviations.)_
+_(2026-11-04, review round one: the move's byte-identity is a one-time command, `node scripts/spec-files.mjs --prove 616e5d8 05b4945`, run in the PR and recorded there and in the history; `check:spec` keeps the parts' order (numbered parts under their own numbers, none missing or repeated) and fails a stray file. The script is `scripts/spec-files.mjs`, not `spec-join.mjs`: it also writes the index. The generated topic table: the owner, 2026-11-04, "Keep it generated"; What to build 3, Trust and Tests are rewritten to match.)_

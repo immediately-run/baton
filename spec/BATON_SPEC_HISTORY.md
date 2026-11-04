@@ -2298,7 +2298,8 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   and gate id with its title and file; `check:spec` fails a stale index, a file in the directory
   that is not a part, or a part out of order or malformed, and
   reads the parts joined, as `spec:impact` does, which now names `file:line`. Ids and `§n.m`
-  numbers are unchanged.
+  numbers are unchanged. B-179 asked for a hand-written topic table; review round one flagged the
+  generated one as a deviation, and the owner ruled "Keep it generated" (2026-11-04).
 
 - **2026-11-03 — R-BTN-193: git is never a lock or a counter.** The owner, after the process
   guards' third review round: "I understand that until the baton spec is fully realized, it may be
