@@ -13,7 +13,7 @@ change to Baton, not a change in Baton.</Lede>
 
 ## Four nouns at the boundary
 
-Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BTN-191](../../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-171](../../spec/BATON_SPEC/07-conditions.md#sec-7-8)):
+Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN-191, R-BTN-171):
 
 | | About the outside world | Between Baton and its caller |
 |---|---|---|
@@ -31,7 +31,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
   a git write and a check run are outbox entries, delivered by runners that hold the credentials
   and confirmed by reading the effect back. A workflow dispatch is Baton's own call, with the App
   key it holds: Baton's server is trusted, and its compromise is recovered, not resisted
-  ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8), the owner, 2026-11-01).
+  (BATON_SPEC §12.8, the owner, 2026-11-01).
 - **Replies stay replies.** The doorbell's ring, a recommendation and a policy read go to whoever
   asked or holds the socket, and carry no effect.
 
@@ -40,7 +40,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
 - **Git is the ledger for the work; Baton owns what no push may decide.** Every ticket, its
   body and its evidence live in the repository, and Baton's board is a cache of them, rebuilt
   by each sync. Baton owns the rest: claims and leases, each ticket's course history (B-120),
-  attestations (BATON_SPEC [R-BTN-181](../../spec/BATON_SPEC/12-security.md#sec-12-8)), owner settings and grants. Some of it is duplicated in
+  attestations (BATON_SPEC R-BTN-181), owner settings and grants. Some of it is duplicated in
   git for people to read; some of it is in git nowhere, because a push must not be able to
   write it. Losing it fails closed: work is reviewed and approved again, never restored from
   git (the owner, 2026-10-28).
@@ -56,17 +56,17 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
   settings (values 12). A threat that needs a runner stopped belongs to the sandbox, the forge
   or the credential proxy, not here.
   A repository's policy may opt into one exception: Baton's trusted runners decide what lands,
-  and the forge lets only them and the human-only identity land it ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
+  and the forge lets only them and the human-only identity land it (BATON_SPEC §12.8).
 - **Policy, not modes.** Every rule about authority and trust is a knob of one versioned policy
-  document per repository, held in Baton (BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8)). Presets such as `cooperative`
+  document per repository, held in Baton (BATON_SPEC R-BTN-188). Presets such as `cooperative`
   and `protected` fill it; no rule reads a preset. A deployment requires named guarantees, which
-  are conditions over the policy, and Baton enforces the policy's `floors` ([R-BTN-189](../../spec/BATON_SPEC/12-security.md#sec-12-8)); what Baton
+  are conditions over the policy, and Baton enforces the policy's `floors` (R-BTN-189); what Baton
   cannot observe stays the deployment's.
 - **One registry, one check; the credential decides, never the channel.** Every action a
   credential can take is one entry in one registry, with the principals that may call it, and
   the API, the CLI, the dashboard and MCP are generated from it behind one `authorize`
-  (BATON_SPEC [R-BTN-129](../../spec/BATON_SPEC/11-people.md#sec-11-3)). A dashboard session is one principal carrying its key's role; an MCP
-  key is a delegated key acting as an owner, narrowed to what [R-BTN-186](../../spec/BATON_SPEC/12-security.md#sec-12-8) admits — tighten, and
+  (BATON_SPEC R-BTN-129). A dashboard session is one principal carrying its key's role; an MCP
+  key is a delegated key acting as an owner, narrowed to what R-BTN-186 admits — tighten, and
   undo its own (the owner, 2026-10-27 and 2026-11-01). No surface carries a rule of its own.
 - **Advice is fresh for the reader, bounded for the fleet.** A write Baton accepts — a board,
   a reading, a heartbeat — is in force for the next read: recommendations and gates are computed
@@ -107,7 +107,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
   its recovery routine (the `reaped:silent` path). A single process multiplexing legs
   across threads or subprocesses is a possible later evolution, decided when the sandbox
   fleet's evidence is in — not the plan.
-  A sandbox is one domain, the label its grants carry (BATON_SPEC [R-BTN-180](../../spec/BATON_SPEC/12-security.md#sec-12-8)), so several runners
+  A sandbox is one domain, the label its grants carry (BATON_SPEC R-BTN-180), so several runners
   in one sandbox count as one for independent review; Fieldhouse runs one runner per VM (FLDH-13).
 
 ## Where code lives
@@ -121,9 +121,9 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
   `S-BTN-n` scenario. The enforcement surface is `CLAUDE.md`'s rules — this page is why
   they are rules.
 - **Capabilities are names, matched; Baton derives none.** Core matches a leg's capabilities
-  against what a runner declares, by name (BATON_SPEC [R-BTN-174](../../spec/BATON_SPEC/05-courses.md#sec-5-9)). What the keys and tools a runner
+  against what a runner declares, by name (BATON_SPEC R-BTN-174). What the keys and tools a runner
   holds amount to is the runner's own statement, and which model and key a leg uses is the
-  course's — its `rank.mjs` and its instructions read the readings ([§6.10](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-10)). The capability
+  course's — its `rank.mjs` and its instructions read the readings (§6.10). The capability
   ontology and route choices core once evaluated moved out (the owner, 2026-11-01, "Nothing; move
   it out"): the core is small and knows no course.
 - **The formal model names the code.** `model/baton.qnt` and the implementation check
@@ -140,7 +140,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BT
   course history. Every course that records work is one ticket, one PR, one merge.
 - **The conversation seam** (PR courses, B-101): review rounds live in the forge's PR
   conversation; on plain `git`, which has none, as files on an orphan per-ticket branch,
-  `baton-legs/<ticket>`, which nothing merges. The repository's `forge` decides, not a policy knob (BATON_SPEC [R-BTN-190](../../spec/BATON_SPEC/05-courses.md#sec-5-8)).
+  `baton-legs/<ticket>`, which nothing merges. The repository's `forge` decides, not a policy knob (BATON_SPEC R-BTN-190).
 - **The entry seam** (B-98): a course whose product is tickets or specs starts from a
   request — one sentence, filed by a command — never ticket-less.
 

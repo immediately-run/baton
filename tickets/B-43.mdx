@@ -22,10 +22,10 @@ depends_on:
 not package standard courses", then "the CLI shouldn't include any hardcoded course graphs or
 associated legs. baton CLI should not assume it has the correct version of a course. Using a
 specific commit hash instead of @main is fine."
-**Spec:** [BATON_SPEC §5.1](../spec/BATON_SPEC/05-courses.md#sec-5-1) [R-BTN-134](../spec/BATON_SPEC/05-courses.md#sec-5-1), as merged from PR 57 after three adversarial
-review rounds; [§5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) [R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8) (the standard courses); history, "Migrations the implementation
-still carries" (B-33's source form and the `pr` course). It amended [R-BTN-5](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5), -22, -51, -65, -69,
--72, -74, -96, -97, -98, -104, -105, -124, -131, -133 and [§4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3); [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-110](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-129](../spec/BATON_SPEC/15-verification.md#gates). This
+**Spec:** `spec/BATON_SPEC.md` §5.1 R-BTN-134, as merged from PR 57 after three adversarial
+review rounds; §5.8 R-BTN-131 (the standard courses); history, "Migrations the implementation
+still carries" (B-33's source form and the `pr` course). It amended R-BTN-5, -22, -51, -65, -69,
+-72, -74, -96, -97, -98, -104, -105, -124, -131, -133 and §4.3; §15 S-BTN-110, G-BTN-129. This
 ticket builds it. The owner's ruling in it is settled: a
 source's code runs with the sync job's full environment, stated plainly, not sandboxed.
 **Depends on:** B-42 (trees, wrapper, leg module, `runner:` capability), and the CLI's first

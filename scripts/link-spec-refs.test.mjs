@@ -144,4 +144,41 @@ describe('link-spec-refs (B-180)', () => {
     expect(text).toContain('`BATON_SPEC §6.1` stays code.');
     expect(text).toContain('```\nBATON_SPEC §6.1\n```');
   });
+  it('renames a span only for the citation right after it: a second span in the paragraph stays (B-73)', () => {
+    const page = [
+      '---', 'title: T', 'description: D.', '---', '',
+      '**Spec:** `spec/BATON_SPEC.md` R-BTN-35. Defining R-BTN-172 in `spec/BATON_SPEC.md` is what lets',
+      'code cite it: `check-spec` reads only that file.',
+      '',
+    ].join('\n');
+    const { text } = rewrite(page, 'tickets/B-73.mdx', targets);
+    expect(text).toContain('**Spec:** BATON_SPEC [R-BTN-35](../spec/BATON_SPEC/01-what-baton-is.md#sec-1). Defining R-BTN-172 in `spec/BATON_SPEC.md` is what lets');
+  });
+
+  it('keeps a span that names the file, though a later sentence of the paragraph is linked', () => {
+    const page = [
+      '---', 'title: T', 'description: D.', '---', '',
+      // docs/compared-to-gastown.mdx, its line 14 as filed, with a citation later in the paragraph.
+      'durable execution. The rules referred to (`R-BTN-n`) are in `spec/BATON_SPEC/`; the index `spec/BATON_SPEC.md` names each one\'s file. What this',
+      'page says comes from BATON_SPEC §6.1.',
+      '',
+      'Regenerate `spec/BATON_SPEC.md` with `npm run spec:index`; see BATON_SPEC §6.1.',
+      '',
+    ].join('\n');
+    const { text } = rewrite(page, 'docs/compared-to-gastown.mdx', targets);
+    expect(text).toContain("the index `spec/BATON_SPEC.md` names each one's file.");
+    expect(text).toContain('Regenerate `spec/BATON_SPEC.md` with `npm run spec:index`; see [BATON_SPEC §6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1).');
+    expect(rewrite(text, 'docs/compared-to-gastown.mdx', targets).text).toBe(text);
+  });
+  it('the span that opens a **Spec:** line, after a **Brief:** line, is the spec name when what follows is linked (B-14)', () => {
+    const page = [
+      '---', 'title: T', 'description: D.', '---', '',
+      '**Brief:** the owner, 2026-10-18.',
+      '**Spec:** `spec/BATON_SPEC.md` §2m.6b (R-BTN-125), R-BTN-78, R-BTN-80 and R-BTN-103 as amended.',
+      '',
+    ].join('\n');
+    const { text, unmapped } = rewrite(page, 'tickets/B-14.mdx', targets);
+    expect(text).toContain('**Spec:** BATON_SPEC §2m.6b ([R-BTN-125](../spec/BATON_SPEC/07-conditions.md#sec-7-1)), R-BTN-78,');
+    expect(unmapped.map((u) => u.ref)).toEqual(['§2m.6b', 'R-BTN-78', 'R-BTN-80', 'R-BTN-103']);
+  });
 });

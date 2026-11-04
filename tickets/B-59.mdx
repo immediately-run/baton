@@ -24,13 +24,13 @@ depends_on:
 **Brief:** the owner, 2026-10-20: a leg that needs a person raises a condition and goes on with
 the handler's restart (`spec/BATON_SPEC_HISTORY.md`, "Decisions in full"). Filed from the ticket
 plan for the current-state spec (PR #71).
-**Spec:** [BATON_SPEC §7.2](../spec/BATON_SPEC/07-conditions.md#sec-7-2) [R-BTN-162](../spec/BATON_SPEC/07-conditions.md#sec-7-2); [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3), an unhandled `suspend` with the
-debugger as handler, resolving inline); [R-BTN-161](../spec/BATON_SPEC/07-conditions.md#sec-7-2) (`std:restart@1`); [R-BTN-122](../spec/BATON_SPEC/07-conditions.md#sec-7-4) ([§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4), `max_wait_s`
-and `max_blocked`); [R-BTN-167](../spec/BATON_SPEC/07-conditions.md#sec-7-5) ([§7.5](../spec/BATON_SPEC/07-conditions.md#sec-7-5), the wait counts toward the `start` timer); [R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) and
-[R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) ([§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2), [§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1), the blocked end and the prerequisite); [R-BTN-44](../spec/BATON_SPEC/09-claims.md#sec-9-3) ([§9.3](../spec/BATON_SPEC/09-claims.md#sec-9-3), the hand-off);
-[R-BTN-77](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) and [R-BTN-91](../spec/BATON_SPEC/08-runners.md#sec-8-1) ([§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2), [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1), `unblocked`, messages and the ring); [R-BTN-82](../spec/BATON_SPEC/05-courses.md#sec-5-5) ([§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5),
-pointers); [R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3), the local channel); [§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6) `ticket_blocks.kind`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-127](../spec/BATON_SPEC/15-verification.md#scenarios),
-[S-BTN-128](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-131](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-147](../spec/BATON_SPEC/15-verification.md#gates).
+**Spec:** `spec/BATON_SPEC.md` §7.2 R-BTN-162; R-BTN-163 (§7.3, an unhandled `suspend` with the
+debugger as handler, resolving inline); R-BTN-161 (`std:restart@1`); R-BTN-122 (§7.4, `max_wait_s`
+and `max_blocked`); R-BTN-167 (§7.5, the wait counts toward the `start` timer); R-BTN-126 and
+R-BTN-120 (§6.2, §6.1, the blocked end and the prerequisite); R-BTN-44 (§9.3, the hand-off);
+R-BTN-77 and R-BTN-91 (§6.2, §8.1, `unblocked`, messages and the ring); R-BTN-82 (§5.5,
+pointers); R-BTN-106 (§8.3, the local channel); §13.6 `ticket_blocks.kind`; §15 S-BTN-127,
+S-BTN-128, S-BTN-131, G-BTN-147.
 **Depends on:**
 - B-58 (handler tickets and bindings);
 - B-56 (resolve, and the debugger as handler);

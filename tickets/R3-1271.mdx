@@ -21,7 +21,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project; the owner, 2026-10-16: there can be a race between sync and claim, so Baton operates under the open world assumption.
-**Spec:** [BATON_SPEC §4.5](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5) R-BTN-104 / R-BTN-148 (the request, unknown, entry legs, the gates at the claim, provisional, settlement, ending), [§9.7](../spec/BATON_SPEC/09-claims.md#sec-9-7) (attempts: `unknown-ticket` does not count), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`claims.provisional`, `provisional_json`), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (`provisional` refusal, the observation's `provisional`, the board post's `contains`), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-58](../spec/BATON_SPEC/15-verification.md#scenarios)
+**Spec:** `spec/BATON_SPEC.md` §4.5 R-BTN-104 / R-BTN-148 (the request, unknown, entry legs, the gates at the claim, provisional, settlement, ending), §9.7 (attempts: `unknown-ticket` does not count), §13 (`claims.provisional`, `provisional_json`), §14 (`provisional` refusal, the observation's `provisional`, the board post's `contains`), §15 S-BTN-58
 **Depends on:** R3-1269 (its migration adds the columns; the claim path it reshapes)
 
 ### Requires

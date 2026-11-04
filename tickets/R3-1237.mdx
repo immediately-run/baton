@@ -23,7 +23,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project.
-**Spec:** [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) ([R-BTN-50](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), the boundary test; the what-moves table is in
+**Spec:** `spec/BATON_SPEC.md` §1 (R-BTN-50, the boundary test; the what-moves table is in
 `spec/BATON_SPEC_HISTORY.md`), §2.1 R-BTN-37 (the vendored set ends), §5.6 R-BTN-60 and R-BTN-67
 (owner and required bars in the gate), §6.6 rule 8, §15 S-BTN-28, -33, -39
 **Depends on:** R3-1232, R3-1233
@@ -56,7 +56,7 @@ ties a course change to a Baton deploy. Tier: judgement — removals behind a te
 ### Architecture — the decisions, named
 
 - **Core compares tag strings and leg names, never meanings**; the boundary test's word list
-  is [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)'s.
+  is BATON_SPEC §1's.
 - **Owner and required bars are read from SQLite at every gate**, never from the board.
 - **Do not**: keep a compatibility shim that reads the old reviewer tables; let the toy course
   share a fixture with `roadmap-pr`.

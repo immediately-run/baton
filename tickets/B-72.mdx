@@ -26,10 +26,11 @@ made a retired citation a warning "so the code that still names it can be cleane
 breaking the check"; once the clean-up tickets land, the warning should stop new citations of
 retired rules.
 **Spec:** `spec/BATON_SPEC_HISTORY.md` "Retired requirements" (R-BTN-41, -52, -54, -59, -80,
--103, -164, -170), the table `scripts/check-spec.mjs`'s `retiredIds` reads; [BATON_SPEC §15](../spec/BATON_SPEC/15-verification.md#sec-15) [R-BTN-68](../spec/BATON_SPEC/15-verification.md#sec-15) (the model cites only live rules; `npm run model:links`).
+-103, -164, -170), the table `scripts/check-spec.mjs`'s `retiredIds` reads; `spec/BATON_SPEC.md`
+§15 R-BTN-68 (the model cites only live rules; `npm run model:links`).
 **Depends on:** B-67 (removes the notice code citing R-BTN-80 and R-BTN-103 from `src/`, `cli/`,
 `ui/` and `test/`), R3-1269 (removes the `HookRunner` residue citing R-BTN-52 and R-BTN-59 in
-`src/core/ports.ts`), B-71 (repoints [S-BTN-22](../spec/BATON_SPEC/15-verification.md#scenarios)'s R-BTN-41).
+`src/core/ports.ts`), B-71 (repoints S-BTN-22's R-BTN-41).
 
 ### Requires
 

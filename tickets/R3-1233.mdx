@@ -44,7 +44,7 @@ judgement — one repository's course code, but its output feeds every gate.
 1. `.baton/baton.json` (the course, its `version`, `min_worker_version`, `step_kinds`,
    `branch_pattern`, `protocol_files`) and `.baton/courses/roadmap-pr/course.json` exactly as
    BATON_SPEC §2e shows it, `"short_waits": ["ci"]` and `"start_leg": "implement"` included
-   ([R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2), [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3)) — `locate`'s `waiting_on` for a
+   (R-BTN-69, R-BTN-83) — `locate`'s `waiting_on` for a
    leg held by checks is exactly `ci`, so the runner waits on it rather than suspend.
 2. `scripts/lib/courses/roadmap-pr/locate.mjs`: `locate(ticket, evidence, course, bars)` →
    `{station, path: [{leg, reached}], next_leg, next_source, next: [{leg, state, waiting_on}],
@@ -55,7 +55,7 @@ judgement — one repository's course code, but its output feeds every gate.
    the ticket; `review` waits on `review-seats` only under
    a `stop` owner bar; `fix` and `merge` carry the seats' families; each `review` leg posts
    `needs` — the `account:`/`model:` line each seat bills, after substitution (BATON_SPEC
-   [R-BTN-76](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3), as on docs#213).
+   R-BTN-76, as on docs#213).
 3. `.baton/courses/roadmap-pr/sync.mjs` (`stations(ctx)` → stations, every marker on live
    tickets' primary PRs with its nonce, and the course's `course_data`) and
    `.baton/tickets.mjs` (`tickets(ctx)`, wrapping `factory-state.mjs`), run by `npx baton
@@ -84,7 +84,7 @@ judgement — one repository's course code, but its output feeds every gate.
 - `scripts/lib/courses/roadmap-pr/locate.test.mjs`: recorded evidence for a ticket at every
   station, through two review/fix loops, a closed PR (path shrinks), a ticket `in-review`
   from before markers, and a `stop` bar on a seat's line.
-- `scripts/baton-sync.test.mjs`: the post validates against [BATON_SPEC §7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1)'s schema.
+- `scripts/baton-sync.test.mjs`: the post validates against BATON_SPEC §7.1's schema.
 
 ### Exit criteria
 

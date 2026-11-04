@@ -25,11 +25,11 @@ depends_on:
 **Brief:** the Baton project; the owner, 2026-10-15: recurring jobs such as the
 decision-packet routine as Baton courses, one child ticket per run; legs that time out or are
 cancelled administratively (that half is B-60's now).
-**Spec:** [BATON_SPEC §6.5](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-5) [R-BTN-89](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-5) (time waits, series), [§4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) and [§4.4](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4)
-(`not_before` in the board post), [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3) (the closing marker's `not_before=`), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3)
-[R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3) (the leg result), [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) [R-BTN-77](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) (`unblocked`), [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) rule 1, [§5.1](../spec/BATON_SPEC/05-courses.md#sec-5-1) [R-BTN-134](../spec/BATON_SPEC/05-courses.md#sec-5-1) (course
-directories), [§2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) (the alarm), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`ticket_next_legs.not_before`, `ticket_next_legs_due`, the
-`not-before-invalid` event), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-51](../spec/BATON_SPEC/15-verification.md#scenarios); [G-BTN-79](../spec/BATON_SPEC/15-verification.md#gates))
+**Spec:** `spec/BATON_SPEC.md` §6.5 R-BTN-89 (time waits, series), §4.2 R-BTN-74 and §4.4
+(`not_before` in the board post), §5.3 R-BTN-83 (the closing marker's `not_before=`), §8.3
+R-BTN-72 (the leg result), §6.2 R-BTN-77 (`unblocked`), §6.6 rule 1, §5.1 R-BTN-134 (course
+directories), §2.1 (the alarm), §13 (`ticket_next_legs.not_before`, `ticket_next_legs_due`, the
+`not-before-invalid` event), §14, §15 (S-BTN-51; G-BTN-79)
 **Depends on:** R3-1257 (positions and closing markers, which carry `not_before`), R3-1258
 (child tickets, which series use), B-43 (course directories, where `series` lives)
 

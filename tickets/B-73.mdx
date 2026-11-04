@@ -61,7 +61,7 @@ device-code phishing kit, so consent is now the standard OAuth shape: spec Decis
    (which B-76 builds);
    [R-BTN-158](../spec/BATON_SPEC/12-security.md#sec-12-5)'s and [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1)'s new bearer prefixes (`bmo_`, `bmr_`, `bor_`); [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1)'s Public row
    (`/oauth/authorize`, the OAuth machine routes). [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3)'s admission and [R-BTN-16](../spec/BATON_SPEC/12-security.md#sec-12-4)'s Access
-   bypass already name the OAuth routes. Defining R-BTN-172 in BATON_SPEC is what lets
+   bypass already name the OAuth routes. Defining R-BTN-172 in `spec/BATON_SPEC.md` is what lets
    code cite it: `check-spec` reads only that file.
 2. **Discovery** (R-BTN-172 §2), in `src/core/oauth/metadata.ts`: both documents built from
    `Config` (the origin), served on both hosts, the root protected-resource document `404`; the

@@ -26,12 +26,12 @@ depends_on:
 schema review of 2026-10-20 (`spec/BATON_SPEC_HISTORY.md`, "Schema review", items 1, 5 and 14):
 there is no `call` field and no `select: "run"`, and `spawns.course` may be one id, a list or
 `"*"`.
-**Spec:** [BATON_SPEC §7.6](../spec/BATON_SPEC/07-conditions.md#sec-7-6) [R-BTN-165](../spec/BATON_SPEC/07-conditions.md#sec-7-6); [R-BTN-111](../spec/BATON_SPEC/05-courses.md#sec-5-5) ([§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5), `spawns` and the signature);
-[R-BTN-86](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6) ([§4.6](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6), children and `spawned`); [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([§4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2), `file(ticket)`); [R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) ([§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1), no
-`requires.tickets` selects a call's children); [R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2), the blocked end, `max_blocked`);
-[R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3) ([§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3), provisional positions, git wins); [R-BTN-82](../spec/BATON_SPEC/05-courses.md#sec-5-5) ([§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5), the `called` input as pointers);
-[R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2)); [§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6) `ticket_blocks.kind`, [§13.4](../spec/BATON_SPEC/13-data-model.md#sec-13-4) `ticket_stations.next_source`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-49](../spec/BATON_SPEC/15-verification.md#scenarios),
-[S-BTN-80](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-132](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-76](../spec/BATON_SPEC/15-verification.md#gates), [G-BTN-150](../spec/BATON_SPEC/15-verification.md#gates). After the adversarial review (adv-2 M9,
+**Spec:** `spec/BATON_SPEC.md` §7.6 R-BTN-165; R-BTN-111 (§5.5, `spawns` and the signature);
+R-BTN-86 (§4.6, children and `spawned`); R-BTN-74 (§4.2, `file(ticket)`); R-BTN-120 (§6.1, no
+`requires.tickets` selects a call's children); R-BTN-126 (§6.2, the blocked end, `max_blocked`);
+R-BTN-83 (§5.3, provisional positions, git wins); R-BTN-82 (§5.5, the `called` input as pointers);
+R-BTN-69 (§5.2); §13.6 `ticket_blocks.kind`, §13.4 `ticket_stations.next_source`; §15 S-BTN-49,
+S-BTN-80, S-BTN-132, G-BTN-76, G-BTN-150. After the adversarial review (adv-2 M9,
 `spec/BATON_SPEC_HISTORY.md`): R-BTN-165's closing entry.
 **Depends on:**
 - R3-1258 (child tickets and `spawned`);

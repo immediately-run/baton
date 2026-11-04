@@ -14,10 +14,11 @@
 // (`BATON_MCP_OAUTH_SPEC`, `BATON_SPEC_HISTORY.md`, a code span naming one), which ends the run;
 // any other code span (`` `schemas/<name>.json` ``) leaves it going. A `§` or an id before any
 // BATON_SPEC citation is left alone: it may be another spec's. A `` `spec/BATON_SPEC.md` `` code
-// span that opens a run becomes the plain name `BATON_SPEC` when citations after it in the
-// paragraph are now links; on a `**Spec:**` line that cites nothing linkable after it (`the whole
-// spec`) it becomes a link to the index (`[BATON_SPEC](…/spec/BATON_SPEC.md)`, no anchor);
-// anywhere else it stays, since it may name the file itself.
+// span becomes the plain name `BATON_SPEC` when the citation right after it (nothing but spaces,
+// `:` or `(` between) is now a link. The span that opens a `**Spec:**` line names the spec its
+// citations are in, not the file: it becomes `BATON_SPEC` when anything after it in the paragraph
+// is now a link, and a link to the index (`[BATON_SPEC](…/spec/BATON_SPEC.md)`, no anchor) when
+// nothing is (`the whole spec`). Any other span stays, since it may name the file itself.
 //
 // The file and the heading come from the generated index (spec/BATON_SPEC.md: each section's file,
 // its subsections and the rules each defines, and the file of every scenario and gate); the anchor
@@ -148,10 +149,15 @@ export function rewrite(text, page, targets) {
     return out;
   }
 
-  function run(nodes, specLine) {
+  function run(nodes, specAt) {
     let active = false;
     let skipTo = -1; // a code span's citation consumed the start of the next text
-    const opened = []; // `spec/BATON_SPEC.md` spans that open a run: { start, end, edits }
+    const opened = []; // `spec/BATON_SPEC.md` spans that open a run: { start, end, edits, named }
+    /** A citation at `at` was linked: the span it directly follows names it, so becomes the name. */
+    const cited = (at) => {
+      const o = opened.at(-1);
+      if (o && !o.named && /^[\s:(]*$/.test(body.slice(o.end, at))) o.named = true;
+    };
     const items = leaves(nodes);
     items.forEach((leaf, i) => {
       if (leaf.kind === 'link') { if (SPEC_LINK.test(leaf.url)) active = true; return; }
@@ -170,7 +176,7 @@ export function rewrite(text, page, targets) {
               consumed = true;
             }
           }
-          if (!consumed && leaf.value.trim() === 'spec/BATON_SPEC.md') opened.push({ start: leaf.start, end: leaf.end, edits: edits.length });
+          if (!consumed && leaf.value.trim() === 'spec/BATON_SPEC.md') opened.push({ start: leaf.start, end: leaf.end, edits: edits.length, named: false });
         } else if (OTHER_CODE.test(leaf.value)) active = false;
         return;
       }
@@ -196,6 +202,7 @@ export function rewrite(text, page, targets) {
           if (at < skipTo || !active) continue;
           const t = targets.get(m[2]);
           if (!t) { unmapped.push({ line: lineOf(at), ref: m[2] }); continue; }
+          cited(at);
           edits.push({ start: at, end: at + m[2].length, replacement: `[${m[2]}](${url(t)})` });
           linked.push({ line: lineOf(at), ref: m[2] });
           continue;
@@ -204,15 +211,20 @@ export function rewrite(text, page, targets) {
         if (at < skipTo || !active) continue;
         const t = targets.get(m[1]);
         if (!t) { unmapped.push({ line: lineOf(at), ref: m[0] }); continue; }
+        cited(at);
         edits.push({ start: at, end: at + m[0].length, replacement: `[${m[0]}](${url(t)})` });
         linked.push({ line: lineOf(at), ref: m[0] });
       }
     });
-    // A `spec/BATON_SPEC.md` span that opened a run: the plain name when what follows it in the
-    // paragraph is now linked, else a link to the whole spec, its index.
+    // A `spec/BATON_SPEC.md` span that opened a run: the plain name when the citation right after
+    // it is now a link; the span that opens a `**Spec:**` line, the name when anything after it is
+    // linked and a link to the index when nothing is. Decided against the edits made before this
+    // loop, which adds to them.
+    const made = edits.length;
     for (const o of opened) {
-      if (edits.length > o.edits) edits.push({ start: o.start, end: o.end, replacement: 'BATON_SPEC' });
-      else if (specLine) edits.push({ start: o.start, end: o.end, replacement: `[BATON_SPEC](${rel(SPEC_INDEX)})` });
+      const opensSpec = specAt != null && /^\s*$/.test(body.slice(specAt, o.start));
+      if (o.named || (opensSpec && made > o.edits)) edits.push({ start: o.start, end: o.end, replacement: 'BATON_SPEC' });
+      else if (opensSpec) edits.push({ start: o.start, end: o.end, replacement: `[BATON_SPEC](${rel(SPEC_INDEX)})` });
     }
   }
 
@@ -221,9 +233,10 @@ export function rewrite(text, page, targets) {
   (function walk(node) {
     if (SKIP.has(node.type)) return;
     if (BLOCKS.has(node.type)) {
-      const first = node.children?.[0];
-      const specLine = first?.type === 'strong' && /^Spec:?$/.test(first.children?.[0]?.value ?? '');
-      run(node.children ?? [], specLine);
+      // The `**Spec:**` label, wherever its line falls in the paragraph (a `**Brief:**` line may
+      // come first).
+      const label = (node.children ?? []).find((c) => c.type === 'strong' && /^Spec:?$/.test(c.children?.[0]?.value ?? ''));
+      run(node.children ?? [], label ? label.position.end.offset : null);
       return;
     }
     for (const c of node.children ?? []) walk(c);

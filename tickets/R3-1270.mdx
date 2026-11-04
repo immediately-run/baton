@@ -22,7 +22,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project; the owner, 2026-10-16: runners are fully trusted to sync the tickets from git, none of it required of them.
-**Spec:** [BATON_SPEC §8.2](../spec/BATON_SPEC/08-runners.md#sec-8-2) [R-BTN-102](../spec/BATON_SPEC/08-runners.md#sec-8-2) (sync under a machine key, `posted_by`, `baton.machine-post`) and [R-BTN-146](../spec/BATON_SPEC/08-runners.md#sec-8-2) (active grants, span), [§3.2](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) [R-BTN-93](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-2) (one verifier for sync routes), [§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (principals), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`board_snapshots.posted_by`, `repositories.machine_sync`), [§14](../spec/BATON_SPEC/14-api.md#sec-14), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-59](../spec/BATON_SPEC/15-verification.md#scenarios)
+**Spec:** `spec/BATON_SPEC.md` §8.2 R-BTN-102 (sync under a machine key, `posted_by`, `baton.machine-post`) and R-BTN-146 (active grants, span), §3.2 R-BTN-93 (one verifier for sync routes), §12.1 (principals), §13 (`board_snapshots.posted_by`, `repositories.machine_sync`), §14, §15 S-BTN-59
 **Depends on:** R3-1263 (pulled syncs: `/v1/sync/want` and `/v1/sync/wanted`), R3-1269 (the migration this extends)
 
 ### Requires

@@ -18,7 +18,7 @@ prs: []
 depends_on: []
 ---
 
-**Brief:** the owner, 2026-10-29, on [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)'s F1: "a domain that runs a branch's code is
+**Brief:** the owner, 2026-10-29, on BATON_SPEC §12.8's F1: "a domain that runs a branch's code is
 a writer, with reviewers never executing branch code" — "Yes, this makes sense to me." The fifth
 adversarial review found the runner contradicts it: `src/runner/harness.ts` starts every leg's
 agent with `opencode run --auto` or `claude --permission-mode bypassPermissions` in the ticket's

@@ -31,9 +31,9 @@ ticket moves to `archive/`, so the URL breaks exactly when the dependency is met
 ties identity to a forge, branch and path that Baton cannot resolve. Baton already names
 tickets by **qualified id** (`docs:R3-1205`, §4); this ticket lets `depends_on` use it.
 Expedited: a ticket that changes the ticketing system itself is finished first.
-**Spec:** [BATON_SPEC §4](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4) (*Home*, *Relations stay home*), [R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) (a leg's
-prerequisites, `depends_at`), [R-BTN-140](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) and [S-BTN-116](../spec/BATON_SPEC/15-verification.md#scenarios) (cross-repository reach and its
-consent), [R-BTN-12](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8), [R-BTN-31](../spec/BATON_SPEC/15-verification.md#sec-15).
+**Spec:** `spec/BATON_SPEC.md` §4 (*Home*, *Relations stay home*), R-BTN-120 (a leg's
+prerequisites, `depends_at`), R-BTN-140 and S-BTN-116 (cross-repository reach and its
+consent), R-BTN-12, R-BTN-31.
 **Depends on:** B-111 (board validation and `baton tickets check`, which this extends) and
 B-112 (`baton tickets claim`, which this extends).
 **Used by:** fieldhouse FLDH-27 and FLDH-30, whose waits become declared dependencies.
