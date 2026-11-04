@@ -11,9 +11,12 @@
 //       says the opposite. check-spec fails on any not in its shrinking allowlist.
 //
 // The same file lives in immediately-run/baton and immediately-run/fieldhouse (one copy each,
-// since neither imports the other's scripts); CONFIG below is the only difference.
+// since neither imports the other's scripts). Two differences: CONFIG below, and baton's spec is
+// a directory (B-179), which `readSpecAt` reads through baton's own spec-files.mjs — re-syncing
+// from fieldhouse's single-file copy keeps both.
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
+import { joinParts, locate, specParts } from './spec-files.mjs';
 import { fileURLToPath } from 'node:url';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -102,21 +105,13 @@ export function impact(spec, ids, terms = [], files = [], prefix = CONFIG.prefix
 }
 
 /** The spec at `path` under `root` as one text, and a locator from a line of it to where it is:
- *  a file is itself (`l. n`); a directory's `.md` parts are joined in name order (`file:line`). */
+ *  a file is itself (`l. n`); a directory is its parts joined, read as check:spec reads them
+ *  (spec-files.mjs's `specParts`), each line placed as `file:line`. */
 export function readSpecAt(root, path) {
   const at = join(root, path);
   if (!statSync(at).isDirectory()) return { text: readFileSync(at, 'utf8'), where: (n) => `l. ${n}` };
-  const parts = readdirSync(at).filter((n) => /\.md$/.test(n)).sort().map((n) => ({ path: `${path}/${n}`, text: readFileSync(join(at, n), 'utf8') }));
-  const where = (n) => {
-    let start = 1;
-    for (const p of parts) {
-      const lines = p.text.split('\n').length - (p.text.endsWith('\n') ? 1 : 0);
-      if (n < start + lines) return `${p.path}:${n - start + 1}`;
-      start += lines;
-    }
-    return `${path}:${n}`;
-  };
-  return { text: parts.map((p) => p.text).join(''), where };
+  const parts = specParts(root, path);
+  return { text: joinParts(parts), where: (n) => locate(parts, n, path) };
 }
 
 /** The checklist an amendment's PR body carries. `where` turns a line of the spec into its place. */

@@ -108,3 +108,5 @@ a review finding, not a machine one.
 _filed 2026-11-03._
 
 _(2026-11-04: built on `claude/B-179-spec-split`. The topic table is generated from the sections' `###` subsections and the rules each defines, rather than hand-written, so nothing in the index can drift; the byte-identity proof is the move commit's, recorded in the history.)_
+
+_(2026-11-04, review round one: the move's byte-identity is a one-time command, `node scripts/spec-files.mjs --prove 616e5d8 05b4945`, run in the PR and recorded there and in the history; `check:spec` keeps the parts' order (numbered parts under their own numbers, none missing or repeated) and fails a stray file. The script is `scripts/spec-files.mjs`, not `spec-join.mjs`: it also writes the index. The generated topic table stays a deviation for the owner to rule on — PR #173, Deviations.)_

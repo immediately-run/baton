@@ -461,148 +461,148 @@ is stale. Never edit it by hand.
 
 | Id | Title | File |
 |---|---|---|
-| G-BTN-1 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-2 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-3 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-4 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-5 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-6 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-7 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-8 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-9 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-10 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-11 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-12 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-13 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-14 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-15 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-16 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-17 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-18 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-19 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-20 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-21 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-22 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-23 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-24 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-25 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-26 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-27 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-31 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-32 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-33 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-35 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-36 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-37 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-38 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-39 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-40 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-41 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-42 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-43 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-44 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-47 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-49 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-51 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-53 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-55 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-56 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-57 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-58 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-59 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-61 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-62 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-63 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-64 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-66 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-67 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-68 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-69 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-70 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-71 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-73 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-74 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-75 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-76 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-77 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-78 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-79 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-80 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-81 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-82 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-83 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-84 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-85 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-87 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-88 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-89 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-90 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-91 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-92 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-93 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-94 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-96 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-97 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-98 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-99 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-100 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-101 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-102 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-103 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-104 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-105 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-106 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-107 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-108 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-109 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-111 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-112 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-113 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-114 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-115 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-116 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-117 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-118 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-119 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-120 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-121 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-122 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-123 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-124 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-125 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-126 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-127 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-128 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-129 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-130 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-131 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-132 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-133 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-134 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-135 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-136 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-137 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-138 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-139 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-140 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-141 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-142 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-143 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-144 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-145 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-146 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-147 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-148 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-149 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-150 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-152 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-153 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-154 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-155 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-156 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-162 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-163 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-164 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-165 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-166 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
-| G-BTN-167 | — | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-1 | Two concurrent claims for one ticket, or two by one runner: exactly one succeeds | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-2 | A repeated `request_id` from the same runner returns the original claim; another runner's never matches | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-3 | A claim is reaped at its runner's clamped timeout, not 1 s earlier | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-4 | A sidecar unable to heartbeat for `timeout − 4 min` marks the lease lost | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-5 | A heartbeat without its session's secret is refused; a key cannot claim another hostname or an ungranted repository's course; an ungranted capability never counts for a claim, however it is declared (R-BTN-174) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-6 | A completion is confirmed only by a later-observed snapshot showing it; unclaimable until then | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-7 | A post whose `parent_sha` is not the head is refused `head-moved`, a rewritten default branch included; only an administrator's forced Resync adopts a new history, as a first snapshot | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-8 | *adoption:* The mirror never overwrites an unexpected status; a replay is a no-op | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-9 | *adoption:* Mirror commits parse identically with docs' readers | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-10 | For one course, matching's order equals the course's claim order filtered by the matching rules | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-11 | A sync OIDC token from a branch or another workflow is refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-12 | Dashboard writes without a same-origin `Origin`, a JSON body and a session are refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-13 | Free text with `{`, `<` or control characters is refused; the dashboard never sets `innerHTML` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-14 | A force-reaped claim of a live runner, and any reaped claim running a `session`-mode leg, is not re-issued until `fence-cleared` — the runner's report, its `fence_deadline` or an administrator's clear — and nothing the runner does extends the fence | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-15 | With the lease lost, the harness's pre-tool hook denies pushes, merges and status writes | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-16 | A non-holder's status write succeeds with no live holder and is refused with one | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-17 | A retried first heartbeat is idempotent; a re-key revives a reaped, claimless runner | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-18 | An older push's sync never moves the head back | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-19 | *adoption:* The cutover import makes one legacy runner per ticket; adoption only after an administrator confirms | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-20 | A lost lease kills the tool call's process group before the runner reports `fenced`; `pre-push` refuses, even with a crashed sidecar, after sleep, or a hung heartbeat | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-21 | A re-key never clears a fence; a refused heartbeat marks the lease lost | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-22 | *adoption:* A foreign git claim never makes the Baton holder release | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-23 | Transcript `repo`s outside the allow-list and paths with `..` are refused; links only to the transcript repository | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-24 | Activities upsert; another runner's ids are refused; closes within 10 min of the end accepted; open ones close `abandoned`; `claim-ended` never marks the lease lost | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-25 | A harness hook records an activity without blocking; offline, the spool keeps it | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-26 | A reviewer with `BATON_PARENT` starts no sidecar or runner; its transcript lands on the parent's activity | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-27 | Harness hook matchers recognise pushes, PR creates and merges, and reviewer spawns in compound lines | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-31 | Only listed ends are failed attempts; the owners' default backs off 1 h after each; the third failure or a non-retryable condition holds with `baton.retries` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-32 | Below `min_runner_version` a runner gets no new claim but keeps and advances its own | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-33 | A claim response carries earlier claims' resume records | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-35 | *adoption:* Cutover is one-way; a checkout that saw it never claims through git; CI flags a `cut_over` flip | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-36 | A `protocol_files` change without a `version` bump fails CI | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-37 | Every scenario here passes on its hosts (`npm test`) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-38 | No environment variable changes `batonNow()`; `clock-offset` only from a loopback `--test-harness` sidecar; `pre-push` asks Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-39 | `tickets` holds no body or note; only changed rows are rewritten; a runner missing the snapshot commit fetches once, else releases `stale-board` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-40 | The matching query and `isEligible` agree on every fixture | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-41 | *adoption:* No mirrored note, subject or export names a session, runner or host | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-42 | `locate` gives each fixture ticket the leg states its repositories and PRs imply; Baton overrides it only by R-BTN-83's held overrides | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-43 | `advance` moves to the next leg whenever the gates pass, in one transaction; a refusal changes nothing | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-44 | A suspension is confirmed by a later path extending it by edges; `done` by an end station or closure under a greater observation, or absence, a `cancel` leg's by acceptance alone; claimable only after a later snapshot; suspensions and `course-changed` never fail; every end writes a resume record and every self-release a hand-off | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-47 | Recommendations follow the default order (expedite, resume before start, rank, age, id) and pass every gate | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-49 | Advice never refuses (the override is recorded `advice-overridden`); R-BTN-45's gates always refuse | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-51 | Everything is per repository; a sync credential reaches only its own; runners see only declared courses at `min_runner_version`; a branch maps to every ticket a current or previous `branch_pattern` gives, and a collision refuses the push while either is held | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-53 | `src/` names no course vocabulary outside a shrinking exceptions list; a toy course runs the generic scenarios | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-55 | Every keyed call is an RFC 9421 SSHSIG in namespace `baton-request` by a registered key, covering `@authority` and body digest, within 5 min, nonce unseen — or the holder's API key | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-56 | `src/core/` imports no `cloudflare:*` module; every scenario passes on the hosts it runs on | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-57 | Keys and grants only in SQLite, administrators only in the admin set; one role per key, a never-accepted pending grant holding none — a machine key's grant may sync (R-BTN-102) and post readings for instances listing a granted repository (R-BTN-101), and it never holds the instrument, sync-key or mirror role; owners act only on their repository and never remove the last owner; a dashboard session needs a sign-in confirmed by a key of its role, and an owner's session acts only on its key's repositories, never as an administrator | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-58 | A runner whose tags meet a leg's `barred_tags` is never offered it and is refused `barred-tag`; core never interprets a tag | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-59 | `stale-board` only when the ticket is withdrawn, re-tiered above the ceiling or dropped without `closed`; a git rewrite of the ticket's position moves nothing and raises nothing | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-61 | Recommendations merge groups by expedite, weight, place, legs to an end, `ready_since`, id; the limit is per group; every ready ticket has a rank | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-62 | Posts carry an observation number handed out before reading, accepted whole only above the last; ends and staleness are judged only by a greater number; a strict-ancestor checkout posts nothing | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-63 | An `advance` needs an edge from the station, `max_runs` room, every holder gate and the holder's word; old names resolve through `renamed_from`; a course file with unreachable stations or ends, unbounded loops or legs leaving an end is refused and the previous kept | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-64 | A renamed station or leg carries a claim and every per-leg record (attempts, backoff, timers, blocks, needs, held positions) over; a removed one ends `course-changed`, never failed; stats only for granted keys | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-66 | Owner bars join posted barred tags on time; a leg missing a required bar's prefix waits on `policy`; bars, tiers, retry and transcript repositories come only from Baton settings | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-67 | The runner knows no course: it loads verified trees at the claim's commit, follows only named edges, holds the claim only on `short_waits` (≤ 30 min), suspends on `max-runs` with a hand-off, aborts on release or lost lease, ends `course-changed`; leg sessions never claim | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-68 | Webhooks are verified before reading, and a body over 25 MiB is refused before any digest; only R-BTN-73's fields are read; dispatch only for named repositories, never for Baton's own events, ≤ 1 per 30 s plus a trailing one | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-69 | With no `.baton/tickets.mjs` or course `sync.mjs`, `baton repo sync` posts the default markdown source's tickets on `create-pr` with readiness and fact arrivals from PR facts; a duplicate id, an unmapped `repos` name or another course without `sync.mjs` fails the sync; an ejected file replaces the default for its repository alone; the default source is the CLI's, never core's | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-70 | Blocks are written in the transaction changing their cause and read from one index; every kind refuses as R-BTN-75's table says, a `resource` row only where its requirement binds as a gate; lapsed readings are `unknown`; no fleet row without a live runner; `blocked`/`unblocked` transitions message idle runners and dispatch once, capped at 100 | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-71 | A queue over `max_queue` raises `baton.queue-over` and closes the course to new unexpedited tickets as advice; nothing is held, blocked or refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-73 | Every result's `(reached, next)` is recorded by Baton when reported, after its evidence is pushed, and no snapshot replaces it; `next` is never inferred; a removed queued leg waits `course-changed`; an owner's route, an `exhausted` leg, a person leg's expiry and the `cancel` leg hold until the station changes; a `start_leg`, a call's settlement and an applied arrival's `next` are the position alone | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-74 | A leg with missing or unaccepted inputs waits `input-missing`/`input-version`; inputs and outputs are validated (`contract-input` held with `baton.contract`; `contract-output` failed); markers only from validated results; Baton stores URIs and digests only; replay writes nothing | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-75 | Every disagreement between git and a Baton value logs a `discrepancy` in the transaction that accepts the snapshot, never delaying it, and git's value is adopted; what Baton owns is never in one: an arrival it does not apply is recorded `arrival-unapplied` on the ticket and raises nothing | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-76 | One holder, one position; children are files with a same-repository `parent`, reported `spawned` (≤ 50, never the parent); unposted ones are `spawned-unposted`; an invalid `parent` is dropped and logged; an open child blocks its parent only through a call | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-77 | At the envelope (50 runners, 20 repositories, 5,000 tickets, 1,000,000 history rows, 20 req/s, bursts of 100 in 5 s) no error and every route within p99; 80% logs `capacity` and is raised; nothing refused past 100% | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-78 | Freeze is undoable until seal; seal needs no active or fence-pending claim and every mirror acknowledged; a sealed source answers `sealed`; export is identical and exactly R-BTN-88's sections; import is one transaction into an empty Baton of the same schema | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-79 | `not_before` comes only from git, validated (≤ 400 days, else `not-before-invalid`); a `time` wait raises nothing; the alarm readies it at the instant; series runs write one successor each, after their predecessor | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-80 | A leg's deadline re-arms to 40 min on `leg_finished`; at it `leg-timeout`, a failed attempt, then a fenced reap at +15 min; a leg with no `deadline_s` has no deadline | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-81 | The doorbell carries rings only; a lost socket changes only latency; ≤ 1 ring a second plus a trailing one; it closes on reap, re-key, revocation, liveness loss and seal | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-82 | A sync authenticates by a sync key in that role, a machine key the repository lets sync, or a CI identity token, through one verifier; revocation acts at the next request | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-83 | A want is cleared only by a post numbered above it; `wanted` changes only its nonce; notifications only record wants; Baton's database and exports hold no forge credential (the App's key, dispatch tokens and webhook secrets are Worker secrets), a dispatch starts only a named workflow, and Baton draws links only under `web_base` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-84 | Baton loads, stores and calls no repository code; recommendations are gates plus the default order | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-85 | `prefer` takes the first passing entry in one transaction or reports each refusal; with `ticket_id` it is `invalid-params` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-87 | A granted machine key may sync (not mirror) unless turned off, and report on instances listing a granted repository; each post records its credential; it is never an owner or administrator key | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-88 | Each instrument session's latest reading is kept; only `state` readings set state; tickets and hosts shown only where granted | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-89 | A session's move reaches Baton only after the runner checks it; a session never holds a runner secret | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-90 | `no_chain_from`, `runner:session` and person legs refuse claims and advances; a person leg's question carries the leg's options, and its answer is an arrival | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-91 | A value is valid only against its schema and every base; one validator module serves every part | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-92 | An arrival lacking entry outputs is refused; an invalid posted pointer is never resolved | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-93 | A `success` check is queued only after a confirmed end, with the owners' conclusions, and no other conclusion passes a required check (a timeout posts `timed_out` or `failure`); unissued runs are logged; the check App's key is on a deliverer's host, never Baton's | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-94 | A token-registered credential stays within the token's scope and dies with it; API keys are refused under `api_keys: false` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-96 | A release stops the leg's process group within 30 s and reports no output of it | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-97 | A leg is offered only when every prerequisite holds; each unmet one is a block row on the leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-98 | Capabilities are of declared types or built-in; a checked capability is declared only while its check passes; `<type>:*` grants cover the type | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-99 | A bounded run claims only named legs, at most `n` per claim, none after `until` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-100 | Renderers escape or text-set every value and link only to `web_base` or `link_hosts` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-101 | A `session_url` is kept only on an allowlisted `https` host, without userinfo, ≤ 512 characters | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-102 | Schemas with a changed digest, outside the subset, cyclic, or under `std:` or another course's prefix are refused; schemas are per repository | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-103 | Only check-runner keys claim check tickets, their `check_runners` row standing in for a grant (rules 4, 5, 7); an unsent `forge-check` is raised after 15 min | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-104 | Cycles keep their blocks and are raised; a withdrawn ticket meets nothing; `reached` reads a closed ticket's final path | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-105 | Backoff is a `retry` block until `retry_after`, `backoff_s` jittered ±10%, per ticket and leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-106 | A non-retryable `interrupt` type holds at once; an untyped error is `error.transient` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-107 | The policy in force is field by field the stricter of course and owners; the floor binds built-in types; a leg reaching an outcome resets its attempts | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-108 | A full context refreshes under the claim at most `max_refreshes` times, uncounted, then suspends | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-109 | An `epic` call settles `built` only when every child of its run closed `done`, else `planned` once all closed, so `replan` answers every withdrawal | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-111 | A `resource` blocked end stores its reading and need and writes the row in one transaction, spending nothing | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-112 | A `capability` blocked end drops the capability at once; a row only when no live runner holds it | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-113 | A `ticket` blocked end's row is provisional, raises nothing, and is confirmed only by a snapshot containing its commit, else dropped after an hour | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-114 | An invalid prerequisite is a counted `cannot-finish:transient`; an error naming a valid one is never retried | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-115 | Blocked ends per (ticket, leg) past `max_blocked` (5) in 24 h hold the ticket with `baton.retries`; call blocks are not counted | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-116 | Every view draws legs as edges with state in colour and text, and no station the file lacks | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-117 | Commands are `baton <noun> <verb>`, signing as the first role in their actions' `callers` they hold a key for; every command the specification names is in R-BTN-127's tree; help at every level comes from the registry's command table; ambiguous ids name their matches; channel verbs only inside a leg | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-118 | Leg logs are written only while `leg_log_root` is set, to the directory Baton named, create-only, masked before framing, ≤ 50 MB a run, never delaying the end; Baton keeps only the directory and holds no bucket credential; `leg log` strips every escape and exits 1 when it cannot read | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-119 | `leg log` reads runs only for the repository's owners and administrators, and follows a running leg's chunks in `seq` order until `end.json` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-120 | Every surface is a registry entry under one `authorize`; callers see only their actions; destructive actions need `confirm` everywhere; `check:actions` enforces it | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-121 | An MCP key reaches only its listed ids on one repository via `POST /v1/mcp`, each one R-BTN-186 admits to a delegated key, never administration, machine protocols, credentials, owner changes, attestations, routes or adopts; refusals answer alike | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-122 | An MCP key's ids are fixed at minting; it dies with expiry, 7 idle days, its minter or revocation; refused while `api_keys` is `false` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-123 | A standard course needs no course code; closing markers carry outputs and move nothing; instructions are read at the snapshot; a stub reads an answer line with prose around it and still fails one missing or misspelled, naming what it read (B-85) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-124 | A `<leg>.run.mjs` replaces only that leg's run, never its `close` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-125 | A ticket's PRs across repositories are read under one budget, batched over GraphQL, as one change | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-126 | A `build-app` leg never starts on an unapproved document; `verify` never while a child is open, because `file` and `verify` are call legs | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-127 | Ticket prerequisites reach core only as `requires.tickets` (`parent`, `posted`) or `depends_at`, and a parent waits on its children only through a call; `human-operator` by rule 4; `waiting_on` is never `dependencies`, `children`, `owner` or `policy` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-128 | Leg code loads only from verified, stamped, read-only worktrees and lockfile installs at default-branch commits; `close`/`handoff` run outside the runner's process; Node's own resolution; `runner:leg-trees` gates such legs | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-129 | The CLI holds no course; a course is read from one directory at one full, default-branch-reachable commit, never fetched by id; the home holds only overrides | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-130 | A request is served only at its origin and authenticated only in its tenant; no data crosses tenants | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-131 | No `src/core/` function takes a tenant id; one helper names objects (`idFromName('baton')`, `'baton/<kind>/<key>'`); inbound `x-baton-tenant` stripped | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-132 | A runner serves only its origin and refuses one key for two | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-133 | Stored forge ids decide every token, delivery and notification; renames onto a live path are held; fences follow former paths only while free; retired rows are tombstones | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-134 | Clients back off and report `too-large`; lease upkeep has its own bucket and is never refused; failed verifications are bounded per credential and IP without refusing one that verifies | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-135 | No fork PR found by pattern and no verdict, approval or marker from a non-pusher counts, failing closed | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-136 | Reach beyond the home is only `code_repos`; patterns follow the grammar; input digests are verified before a leg runs | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-137 | Bars name legs literally; removing or renaming a barred or exempt leg holds the file; `renamed_from` collisions are refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-138 | A runner reads nothing at a sha off the default branch, except a held rewrite's head it verified before | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-139 | Legs get only the `credential:` variables they require and never Baton's; the masked set covers every credential, token and key block; stopped legs' processes are gone in 30 s; replay uses an allowlist | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-140 | A pending grant gives nothing until accepted; declining is logged; a key of span ≥ 2 syncs only where its grant opts in | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-141 | A rewritten default branch is adopted only by an administrator's forced Resync, never by a post, whoever posted it; a lagging fetch posts nothing; an unfounded head raises `baton.head-unfounded`; a reset drops the tickets the new head lacks with their owner state kept | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-142 | Caps refuse oversize items, never upkeep; observation numbers can be taken over; readings are bounded and clearable | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-143 | A concluding check comes only from a confirmed check-runner end for its bound sha; no post, work key, fork or agent report yields `success` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-144 | MCP loosens only what it tightened itself (R-BTN-186); sessions go only to the browser a key holder bound, authorize as one principal with that key's role, die with that role, and can be ended; an owner's session reaches only its key's repositories and no administrator action; tokens are single-use by default, ≤ 100 uses and 30 days, and register runners only | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-145 | CI tokens pass only for push, schedule or dispatch runs of the top-level default-branch workflow; a notification wants only its repository; import re-validates and refuses pre-seal signatures; the local host binds loopback and refuses unsafe file modes | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-146 | A raise is checked and reported before effect; its handler is pushed before it returns; no subject or body is stored; legs cannot raise `baton` or `baton.*` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-147 | A `suspend` waits ≤ `min(wait_s, 900 s)`, resumes only with a restart Baton formed from its handler's end, and past the wait blocks with no failed attempt; any other end or reap of the wait blocks on the condition too, so no question is asked twice; no answer is lost; withdrawn → default | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-148 | Resolution is innermost scope, then repository, longest prefix; `suspend` binds only to courses that end by a person's leg or its expiry; unmerged bindings and bindings of `baton.*` are inert | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-149 | Open `hitl`, `baton.retries`, `baton.contract`, `baton.stalled` and queued person legs stay on Needs you until closed; Baton files no ticket and queues no entry for its own conditions; `resolve` invokes only offered restarts | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-150 | A call settles on the first holding entry, in table order, over its run's children, never over none; `settleCall` agrees | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-152 | The stalled and expiry instants fire once per `from_at`; a deadline fires once per run and releases and fences; the retired course fields are refused | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-153 | A superseded claim is released `superseded` in the settling transaction; a cancelled ticket is marked `cancelling`, runs its course's `cancel` leg if one leaves its station, and only then is withdrawn | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-154 | Baton queues nothing for a person; the outbox's one kind outside git is `forge-check`, a workflow dispatch being Baton's own call and never an entry (R-BTN-94) | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-155 | An API key authenticates only as its holder in one role on administrator, owner, runner and read routes; it never syncs or reports as a probe | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-156 | Baton holds no credential to write git or post a check, and does both only through outbox entries runners deliver, each carrying its id and applied at most once, git kinds in id order per ticket; only a grant whose role the repository policy's `outbox` admits claims an entry, and only an approver on `approvers.policy` changes that (R-BTN-188); a `withdraw` entry is queued only after the ticket's `cancel` leg ends, and dropped when git withdrew the ticket first; an entry late by its kind raises `baton.outbox-late` | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-162 | A claim or `advance` that would hold a seat on a capability past its capacity is never admitted, a claim's own seat never counting against it; a held seat is fixed when its leg starts, never changed by a later snapshot; a capacity lowered below the seats held takes none back; seats are released at every `advance` into a leg not requiring the capability, at claim end, at a reap that is not fence-pending, and after the fence for a fence-pending reap; seats count across every repository of the tenant; a seat refusal is never a failed attempt | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-163 | Every rule about authority and trust is a knob of one versioned policy document per repository; every change to it, in any direction and the approver lists included, needs an approver on `approvers.policy` as it stands before the change, never a delegated key; no rule reads a preset; no list is left that no live credential can satisfy; versions are append-only and survive export | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-164 | A guarantee is a condition over the policy that includes the guarantees it rests on, computed for each version; `floors` is a knob, and a change that would break a guarantee it names is refused whoever asks; only the protection checker's report feeds `no-runner-lands`; the policy read is unsigned and trusted as Baton's; while a floored guarantee is broken Baton itself refuses every claim and advance on every ticket reaching the repository and releases running claims, relying on no runner's check | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-165 | `no-runner-lands` requires control paths a runner cannot land, proposed tickets, trusted-runner delivery through the CLI's templates, and a matching report from a protection checker that holds no merge credential; a proposal lands only by a proposal merge with one approval; a delegated key changes no policy and loosens only what it tightened | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-166 | Leg state is the PR conversation on a forge and, on a `git` repository, an orphan `baton-legs/<ticket>` branch no `branch_pattern` matches, never a work branch, never merged, never checked out by the runner, read only as data, and never read by a counted review or an adjudication; no policy knob chooses it; on either, a work branch carrying a segment that folds to `.baton-legs` is refused at merge, and detection on the default branch is closed only by a trusted reading where one exists | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| G-BTN-167 | A ticket no accepted post names is refused `not-eligible` (`unknown-ticket`); the first accepted post naming it makes it claimable; nothing is ever claimed provisionally | [`15-verification.md`](BATON_SPEC/15-verification.md) |

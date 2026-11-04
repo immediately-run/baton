@@ -25,7 +25,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { patchNotes } from './spec-tools.mjs';
-import { SPEC_INDEX, indexText, joinParts, partProblems, specParts } from './spec-files.mjs';
+import { joinParts, layoutProblems, specParts } from './spec-files.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -188,9 +188,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const integration = join(REPO, 'test', 'integration');
   const testNames = existsSync(integration) ? readdirSync(integration) : [];
   const problems = check(spec, code, tickets, history, testNames, PATCH_NOTES_ALLOWED);
-  problems.push(...partProblems(parts));
-  const index = existsSync(join(REPO, SPEC_INDEX)) ? readFileSync(join(REPO, SPEC_INDEX), 'utf8') : null;
-  if (index !== indexText(parts)) problems.push(`${SPEC_INDEX} is ${index == null ? 'missing' : 'stale'} — \`npm run spec:index\` writes it from spec/BATON_SPEC/ (B-179)`);
+  problems.push(...layoutProblems(REPO));
   for (const w of problems.warnings) console.warn(`! ${w}`);
   if (problems.length) {
     for (const p of problems) console.error(`✗ ${p}`);

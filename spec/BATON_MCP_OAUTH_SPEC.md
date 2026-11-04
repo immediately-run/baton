@@ -6,7 +6,7 @@ updated: 2026-10-20
 
 # Baton as the authorization server for its own MCP endpoint
 
-**Status:** proposal — a companion to `BATON_SPEC` (`spec/BATON_SPEC.md`), which R-BTN-130 points
+**Status:** proposal — a companion to `BATON_SPEC` (`spec/BATON_SPEC/`, indexed by `spec/BATON_SPEC.md`), which R-BTN-130 points
 at for clients that cannot send a bearer. Built by B-73, which folds R-BTN-172 into `BATON_SPEC`
 §11.3 and this spec's §12, §13 and §14 rows into `BATON_SPEC` §13, §14 and §15. Revised
 2026-10-20 after its adversarial review: consent moved from an owner key approving a code to

@@ -2291,10 +2291,12 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   spec". `spec/BATON_SPEC.md` (blob `c6656dc`) moved into `spec/BATON_SPEC/`, one file per
   top-level heading — `00-front.md`, `01-…` to `16-…`, `90-load-bearing-assumptions.md`,
   `91-decisions.md`, `92-open-questions.md` — with no byte changed: the parts joined in name order
-  have the old file's sha-256 (`ca8c0a92…5dd7849`). The only later edit is the front matter's two
+  have the old file's sha-256 (`ca8c0a92…5dd7849`), which `node scripts/spec-files.mjs --prove
+  616e5d8 05b4945` shows. The only later edit is the front matter's two
   relative links, one directory deeper. `spec/BATON_SPEC.md` is now the generated index (`npm run
   spec:index`): each file, its subsections and the rules each defines, and every rule, scenario
-  and gate id with its title and file; `check:spec` fails a stale index or a malformed part, and
+  and gate id with its title and file; `check:spec` fails a stale index, a file in the directory
+  that is not a part, or a part out of order or malformed, and
   reads the parts joined, as `spec:impact` does, which now names `file:line`. Ids and `§n.m`
   numbers are unchanged.
 
