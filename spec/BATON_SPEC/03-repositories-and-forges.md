@@ -1,3 +1,7 @@
+---
+title: "3. Repositories and forges"
+description: "A Baton hands out the tickets of the repositories its administrator registers."
+---
 ## 3. Repositories and forges *(proposal)*
 
 A Baton hands out the tickets of the repositories its administrator registers. A repository

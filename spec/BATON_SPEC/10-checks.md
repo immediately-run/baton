@@ -1,3 +1,7 @@
+---
+title: "10. Checks"
+description: "A check course runs a repository's merge checks in place of a CI service."
+---
 ## 10. Checks *(proposal)*
 
 A check course runs a repository's merge checks in place of a CI service. Baton schedules the
@@ -38,8 +42,8 @@ print its way to `success`.
     credential and secret withheld, as replay does (R-BTN-84). Checks run only changes from the
     repository's own branches, never a fork's: a leg's logic cannot be both generally useful and
     a sandbox for strangers' code.
-  - **Conclusions are the owners'.** The owner setting `checks: {<course>: {name, conclusions:
-    {<end station>: "success" | "failure" | "timed_out"}}}` (R-BTN-66) maps end stations to
+  - **Conclusions are the owners'.** The owner setting `checks: {<course>: {name,
+    conclusions: {<end station>: "success" | "failure" | "timed_out"}}}` (R-BTN-66) maps end stations to
     conclusions, so no edit in git turns `failed` into `success`. Every conclusion but `success`
     fails a GitHub required check (checks are GitHub only, R-BTN-115): `neutral`, which a required
     check passes, is not in the set. A course's map names exactly one end station `success`, exactly one
@@ -62,8 +66,8 @@ print its way to `success`.
        commit cannot pass as the branch's. When the branch has moved, the claim ends
        `released:stale-board`, not a failed attempt, and Baton records a sync want (R-BTN-94).
     2. It runs the command **first**, in a fresh sandbox checked out at `check_sha`, before any
-       agent touches that sandbox, through the provider method `exec(argv, {cwd, timeout_s}) →
-       {status}` (R-BTN-107). A runner whose provider has no `exec` takes no verdict leg.
+       agent touches that sandbox, through the provider method `exec(argv, {cwd, timeout_s})
+       → {status}` (R-BTN-107). A runner whose provider has no `exec` takes no verdict leg.
   - **Mapping the status.** Status 0 reaches the station mapped to `success`; any other status
     the one mapped to `failure`; a timeout or an `exec` error the one mapped to `timed_out`, or
     to `failure` where the map names no `timed_out`. An

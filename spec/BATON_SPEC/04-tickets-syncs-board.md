@@ -1,3 +1,7 @@
+---
+title: "4. Tickets, syncs and the board"
+description: "A repository describes itself in its .baton/ folder."
+---
 ## 4. Tickets, syncs and the board *(proposal)*
 
 A repository describes itself in its `.baton/` folder. Its **sync** — `baton repo sync`, run by
@@ -130,8 +134,8 @@ live solely in Baton, and both are exportable (R-BTN-88).
     tickets; and a ticket the runner writes for a condition (`handles:`, R-BTN-161) or a call
     (`called_by:`, R-BTN-165), whose body is the leg's own subject and body. A child a filing leg
     writes (`parent:` alone) is the work's own ticket and is judged like any other; the standard
-    filing legs write both sections and the `_filed` line. With `check:
-    {sections_from_id: "<prefix>-<n>"}` beside it (default off; this repository: `B-176`), a live
+    filing legs write both sections and the `_filed` line. With
+    `check: {sections_from_id: "<prefix>-<n>"}` beside it (default off; this repository: `B-176`), a live
     ticket under that prefix numbered `n` or above without a `_filed` line is a finding too, and is
     otherwise judged by it, so the check decides it without history, in CI's depth-1 clone
     included; a ticket below `n`, or under a legacy prefix, without a `_filed` line is dated by its
