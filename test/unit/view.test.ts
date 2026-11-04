@@ -1,7 +1,9 @@
 // view.test.ts — S-BTN-76 hostile values rendered (BATON_SPEC §15, §5.5 R-BTN-112; B-54): markup
-// and `javascript:` in a view's templates and table cells, and a link to a host in neither the
-// ticket's repositories' `web_base` nor the instance's `link_hosts`, through all three renderers —
-// `plain` draws them as text, `html` escapes every value, `ui` hands the dashboard text it sets
+// and `javascript:` in a view's templates and table cells, control and bidi characters in the
+// plain channel's values, and a link to a host in neither the ticket's repositories' `web_base`
+// nor the instance's `link_hosts` — checked as written, backslash and scheme-only forms included
+// — through all three renderers: `plain` draws them as text (controls inert, for a terminal is a
+// medium that acts on them), `html` escapes every value, `ui` hands the dashboard text it sets
 // through `textContent`, and the link is a link only under R-BTN-92's rule or `link_hosts`
 // (R-BTN-157), else text (G-BTN-100). Beside it: each `as`, the base-chain fallback and the
 // generic two-level rendering, the `std:` library's views (R-BTN-110), and core's own event
@@ -32,7 +34,7 @@ describe('S-BTN-76 hostile values rendered, through all three renderers', () => 
     ],
   });
   const value = {
-    title: '<script>alert(1)</script>',
+    title: '<script>alert(1)</script>\nconclusion: success\u001b]8;;https://evil.example.com\u0007go\u001b]8;;\u0007\u202e',
     url: 'https://evil.example.com/x',
     rows: [{ cell: '<img src=x onerror=alert(1)>', other: 'javascript:alert(1)' }],
   };
@@ -49,6 +51,13 @@ describe('S-BTN-76 hostile values rendered, through all three renderers', () => 
     expect(text).toContain('rows:');
     expect(text).toContain('<img src=x onerror=alert(1)> | javascript:alert(1)');
     expect(text).not.toContain('<a href');
+    // The plain channel's medium is a terminal: no control or bidi character a terminal would
+    // act on survives — no OSC 8 link, no forged line, no reordering mark — each drawn inert.
+    expect(text).not.toContain('\u001b');
+    expect(text).not.toContain('\u0007');
+    expect(text).not.toContain('\u202e');
+    expect(text).not.toMatch(/^conclusion: success/m);
+    expect(text).toContain('conclusion: success?]8;;https://evil.example.com?go?]8;;??');
   });
 
   it('html: every value escaped, no script, no image, no remote resource, the link no <a>', () => {
@@ -93,6 +102,13 @@ describe('S-BTN-76 hostile values rendered, through all three renderers', () => 
       ['https://user:pass@github.com/immediately-run/docs/pull/7', [], [], null],
       ['javascript:alert(1)', [], ['evil.example.com'], null],
       ['http://github.com/immediately-run/docs/pull/7', [], ['github.com'], null],
+      // As-written forms whose parse here names a listed host while another parser's does not:
+      // a backslash (WHATWG path separator, RFC 3986 userinfo), a scheme-only `https:host`, and a
+      // tab the parser strips — the gate checks the text as written (cleanUrl), so none passes.
+      ['https://status.example.com\\@evil.com/', [], ['status.example.com'], null],
+      ['https://status.example.com\\@evil.com/', ['https://status.example.com'], [], null],
+      ['https:status.example.com/x', [], ['status.example.com'], null],
+      ['https://status.example.com/x\ty=1', [], ['status.example.com'], null],
     ];
     for (const [url, webBases, linkHosts, want] of cases) {
       expect([url, viewLink(url, { webBases: webBases.length ? webBases : ctx.webBases, linkHosts })]).toEqual([url, want]);
@@ -119,6 +135,8 @@ describe('each `as` (R-BTN-112)', () => {
       { label: 'state', pointer: '/state', as: 'status', tones: { pass: 'ok', fail: 'bad' } },
       { label: 'unmapped', pointer: '/state', as: 'status', tones: { pass: 'ok' } },
       { label: 'gone', pointer: '/missing', as: 'text' },
+      { label: 'raw', pointer: 'n', as: 'text' },
+      { label: 'missed number', pointer: '/missing', as: 'number' },
       { label: 'rows', pointer: '/rows', as: 'table' },
       { label: 'odd', pointer: '/n', as: 'verbose' },
     ],
@@ -135,6 +153,10 @@ describe('each `as` (R-BTN-112)', () => {
       'state: fail',
       'unmapped: fail',
       'gone: —',
+      // `pointer: 'n'` is not a pointer (no leading `/`): it resolves to nothing — never the
+      // whole value as the field's text — and an unresolved number draws `—`, like text and time.
+      'raw: —',
+      'missed number: —',
       'rows:',
       '  a | b',
       '  1 | x',
@@ -177,6 +199,13 @@ describe('each `as` (R-BTN-112)', () => {
     expect(renderPlain({ text: long }, 'c:fields@1', r, ctx)).toContain(`${'x'.repeat(VIEW_TEXT_MAX)}…`);
     expect(renderPlain({ text: long }, 'c:fields@1', r, ctx)).not.toContain('x'.repeat(VIEW_TEXT_MAX + 1));
   });
+
+  it('a field with no label draws no bare colon — a table without one heads straight to its columns', () => {
+    const L = schema({ fields: [{ pointer: '/rows', as: 'table' }, { pointer: '/text', as: 'text' }] });
+    const lr = resolveWith({ 'c:labelless@1': L });
+    const lines = renderPlain({ rows: [{ a: 1 }], text: 'x' }, 'c:labelless@1', lr, ctx).split('\n');
+    expect(lines).toEqual(['  a', '  1', 'x']);
+  });
 });
 
 describe('the fallback (R-BTN-112)', () => {
@@ -191,16 +220,28 @@ describe('the fallback (R-BTN-112)', () => {
   });
 
   it('the generic rendering: keys and values two levels deep, truncated', () => {
-    const deep = { a: 1, b: { c: 'x', d: { e: 'three levels' } }, list: ['one', 'two'], s: 'top' };
+    const deep = { a: 1, b: { c: 'x', d: { e: 'three levels' } }, list: ['one', 'two'], objs: [{ k: 'v', inner: { e: 'three levels' } }], s: 'top' };
     const text = renderPlain(deep, 'c:nothing@1', stdSchema, ctx);
     expect(text).toContain('a: 1');
     expect(text).toContain('b.c: x');
     // The third level never opens: the object is the value, as text.
     expect(text).toContain(`b.d: ${JSON.stringify({ e: 'three levels' })}`);
     expect(text).toContain('list[0]: one');
+    // An array's object elements open their keys, as an object's object values do.
+    expect(text).toContain('objs[0].k: v');
+    expect(text).toContain(`objs[0].inner: ${JSON.stringify({ e: 'three levels' })}`);
     expect(text).toContain('s: top');
     expect(renderHtml(deep, 'c:nothing@1', stdSchema, ctx)).toContain('b.c:</span> x');
     expect(mount(renderUi(deep, 'c:nothing@1', stdSchema, ctx), document0()).text).toContain('list[0]:one');
+  });
+
+  it('RFC 6901 empty tokens resolve in a template: {/} the empty key, {/a//b} an empty key mid-path', () => {
+    const E = schema({ title: '{/} and {/a//b}' });
+    const r = resolveWith({ 'c:pointer@1': E });
+    const text = renderPlain({ '': 'EMPTY-TOP', a: { '': { b: 'DEEP' } } }, 'c:pointer@1', r, ctx);
+    expect(text).toContain('EMPTY-TOP and DEEP');
+    expect(text).not.toContain('{/}');
+    expect(text).not.toContain('{/a//b}');
   });
 
   it('the generic rendering bounds its fields and names the cut', () => {
@@ -260,6 +301,8 @@ describe('core\'s own event templates (R-BTN-112)', () => {
 
   it('bounds what a hostile row may say', () => {
     expect(renderEvent('leg-started', { leg: 'x'.repeat(600) })).toBe(`leg ${'x'.repeat(VIEW_TEXT_MAX - 4)}…`);
+    // A control character in a row's own words draws inert, like every plain text.
+    expect(renderEvent('leg-started', { leg: 'a\u001bb\u202ec' })).toBe('leg a?b?c started');
   });
 });
 

@@ -1,5 +1,6 @@
 // Types for view.mjs (R-BTN-112): the repository type-checks TypeScript only (allowJs off).
-export type Resolve = (id: string) => Record<string, unknown> | null;
+import type { Resolve } from './schema.mjs';
+export type { Resolve };
 /** What links a render may draw: the ticket's repositories' `web_base`s (R-BTN-92) and the
  *  instance's `link_hosts` (R-BTN-157), and the clock `time` fields read. */
 export interface ViewContext {
@@ -7,8 +8,9 @@ export interface ViewContext {
   linkHosts?: string[];
   now?: number;
 }
-/** A ui node, as src/ui/app.js's `el` builds it: text set through `textContent`, positions
- *  through the CSSOM (`style`), never markup. */
+/** A ui node, as src/ui/app.js's `el` mounts it: text set through `textContent`, positions
+ *  through the CSSOM (`style`) — an extension B-56/B-57 owe `el()`, which drops them today —
+ *  never markup. */
 export interface UiNode {
   tag: string;
   text?: string;

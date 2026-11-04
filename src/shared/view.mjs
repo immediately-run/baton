@@ -3,10 +3,11 @@
 // untrusted text (§12.3): `plain` renders it as text (the CLI, a forge-check summary, a handler
 // course's text), `html` escapes every value (a handler course's mail: inline styles only, no
 // script, image or remote resource) and `ui` hands the dashboard a tree of nodes it mounts with
-// `createElement` and `textContent` only. A `link` field is a link only under R-BTN-92's link rule
-// for the ticket's repositories (`ctx.webBases`) or with its host on the instance's `link_hosts`
-// (R-BTN-157: `https`, no userinfo; an administrator's setting, default empty) — else text
-// (S-BTN-76, G-BTN-100).
+// `createElement` and `textContent` only. Plain's medium is a terminal, so it draws every control
+// and bidi character inert: no OSC escape or forged line survives into it. A `link` field is a
+// link only under R-BTN-92's link rule for the ticket's repositories (`ctx.webBases`) or with its
+// host on the instance's `link_hosts` (R-BTN-157: `https`, no userinfo; an administrator's
+// setting, default empty) — else text (S-BTN-76, G-BTN-100).
 //
 // The fallback is the value's own schema's view, else the nearest up its `x-baton-base` chain,
 // else a generic rendering of keys and values two levels deep, truncated. Core's events render by
@@ -14,7 +15,7 @@
 // value.
 
 import { baseChain } from './schema.mjs';
-import { underWebBase } from './links.mjs';
+import { cleanUrl, underWebBase } from './links.mjs';
 
 /** §10.4's free-text bound: every value a renderer draws is truncated to it, hostile or not. */
 export const VIEW_TEXT_MAX = 500;
@@ -39,8 +40,9 @@ function textOf(v) {
 
 // ── JSON Pointer (RFC 6901), the only thing a template interprets ───────────────────────────
 
-/** A pointer is empty or `/`-prefixed tokens of anything but a bare `~` (`~0` is `~`, `~1` `/`). */
-const POINTER = /^(?:|\/(?:[^/~]|~[01])*)$/;
+/** A pointer is `/`-prefixed tokens of anything but a bare `~` (`~0` is `~`, `~1` `/`); RFC 6901's
+ *  empty tokens are tokens too (`/a//b` has `a`, ``, `b`; `/` is the empty-string key). */
+const POINTER = /^(?:\/(?:[^/~]|~[01])*)*$/;
 
 /** The value at `pointer`, or `{ok: false}` when it does not resolve. */
 function atPointer(value, pointer) {
@@ -90,18 +92,15 @@ function ctxOf(ctx) {
 /** R-BTN-112's link gate: the url a view may draw as a link — under one of the ticket's
  *  repositories' `web_base`s (R-BTN-92, which checks `https`, no userinfo and clean whole-segment
  *  paths) or with its host on `link_hosts` (R-BTN-157: an `https` URL with no userinfo) — or null,
- *  when every channel draws it as text. */
+ *  when every channel draws it as text. Both branches check the text as written (`cleanUrl`): a
+ *  backslash, a stray control character or a scheme-only `https:host` can name a listed host to
+ *  this parser and another to the one that opens the link. */
 export function viewLink(url, ctx = {}) {
   if (typeof url !== 'string') return null;
   const c = ctxOf(ctx);
   for (const base of c.webBases) if (underWebBase(url, base)) return url;
-  try {
-    const u = new URL(url);
-    if (u.protocol !== 'https:' || u.username || u.password) return null;
-    return c.linkHosts.has(u.hostname.toLowerCase()) ? url : null;
-  } catch {
-    return null;
-  }
+  const u = cleanUrl(url, true);
+  return u && c.linkHosts.has(u.hostname.toLowerCase()) ? url : null;
 }
 
 // ── one view, resolved to channel-neutral parts ─────────────────────────────────────────────
@@ -111,12 +110,16 @@ export function viewLink(url, ctx = {}) {
  *  `rows` and `more`. No channel interprets a value further. */
 function fieldOf(spec, value, ctx) {
   const label = typeof spec.label === 'string' ? clip(spec.label) : '';
-  const at = atPointer(value, typeof spec.pointer === 'string' ? spec.pointer : '');
+  // A field's pointer is a pointer — the template path's own `POINTER` guard: anything else (an
+  // `a` without its leading `/`) does not resolve, rather than reading the whole value as text.
+  const ptr = typeof spec.pointer === 'string' ? spec.pointer : '';
+  const at = POINTER.test(ptr) ? atPointer(value, ptr) : { ok: false };
   const v = at.ok ? at.value : undefined;
   const unit = typeof spec.unit === 'string' ? ` ${clip(spec.unit)}` : '';
   switch (spec.as) {
     case 'number': {
-      const text = typeof v === 'number' && Number.isFinite(v) ? `${v}${unit}`.trim() : clip(textOf(v));
+      const text = !at.ok ? '—'
+        : typeof v === 'number' && Number.isFinite(v) ? `${v}${unit}`.trim() : clip(textOf(v));
       return { kind: 'number', label, text };
     }
     case 'time': {
@@ -152,8 +155,10 @@ function fieldOf(spec, value, ctx) {
   }
 }
 
-/** R-BTN-112's last fallback: the value's keys and values two levels deep — an object or array
- *  inside opens one level, anything inside that is text — truncated to the field and text bounds. */
+/** R-BTN-112's last fallback: the value's keys and values two levels deep — a container inside
+ *  (object or array) opens one level, and an object inside an array opens its keys too, so an
+ *  array of objects shows its scalars as an object's object values do; anything deeper is text —
+ *  truncated to the field and text bounds. */
 function genericFields(value) {
   const fields = [];
   let cut = 0;
@@ -163,7 +168,10 @@ function genericFields(value) {
   };
   const open = (prefix, v) => {
     if (isObj(v)) for (const [k, x] of Object.entries(v)) add(clip(`${prefix}.${k}`), x);
-    else if (Array.isArray(v)) v.forEach((x, i) => add(clip(`${prefix}[${i}]`), x));
+    else if (Array.isArray(v)) v.forEach((x, i) => {
+      if (isObj(x)) for (const [k, y] of Object.entries(x)) add(clip(`${prefix}[${i}].${k}`), y);
+      else add(clip(`${prefix}[${i}]`), x);
+    });
     else add(clip(prefix || 'value'), v);
   };
   if (isObj(value)) {
@@ -207,27 +215,36 @@ function modelOf(value, schemaId, resolve, ctx) {
 
 // ── the plain channel: the CLI, a forge-check summary, a handler course's text ───────────────
 
-/** One field as plain text; a table's rows follow indented, its columns `|`-separated. */
+/** What the plain channel's medium cannot carry, drawn inert: C0 and C1 controls (an OSC 8 escape
+ *  draws a clickable link into the terminal, a `\n` forges whole lines) and the bidi marks and
+ *  embeddings that reorder what a terminal shows. §12.3 bans them in free text; where one reaches
+ *  a renderer anyway it draws as `?`, inert — core's own `safeText` precedent (src/core/courses.ts). */
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
+const inert = (s) => [...s].map((ch) => (CONTROL.test(ch) ? '?' : ch)).join('');
+
+/** One field as plain text; a table's rows follow indented, its columns `|`-separated. Every text
+ *  is drawn inert — no control or bidi character a terminal would act on survives. */
 function plainField(f) {
   const head = f.label ? `${f.label}: ` : '';
   switch (f.kind) {
     case 'table': {
-      const out = [`${f.label}:`];
+      const out = f.label ? [`${f.label}:`] : [];
       if (f.columns.length) out.push(`  ${f.columns.join(' | ')}`);
       for (const row of f.rows) out.push(`  ${row.join(' | ')}`);
       if (f.more) out.push(`  +${f.more} more rows`);
-      return out.join('\n');
+      return out.map(inert).join('\n');
     }
     default:
-      return `${head}${f.text}`;
+      return inert(`${head}${f.text}`);
   }
 }
 
-/** The `plain` renderer (R-BTN-112): every value as text — a link as its URL, whether or not the
- *  gate passed, for plain has no markup to click. */
+/** The `plain` renderer (R-BTN-112): every value as text, controls and bidi marks drawn inert — a
+ *  link as its URL, whether or not the gate passed, for plain has no markup to click. */
 export function renderPlain(value, schemaId, resolve, ctx = {}) {
   const m = modelOf(value, schemaId, resolve, ctxOf(ctx));
-  return [m.title, m.summary, ...m.fields.map(plainField)].filter((x) => x !== null && x !== '').join('\n');
+  return [m.title !== null ? inert(m.title) : null, m.summary !== null ? inert(m.summary) : null, ...m.fields.map(plainField)]
+    .filter((x) => x !== null && x !== '').join('\n');
 }
 
 // ── the html channel: a handler course's mail ───────────────────────────────────────────────
@@ -284,10 +301,10 @@ export function renderHtml(value, schemaId, resolve, ctx = {}) {
 
 // ── the ui channel: the dashboard, through textContent ──────────────────────────────────────
 
-/** A node the dashboard mounts: `el(tag, { text, cls, attrs, style }, ...children)` — the shape
- *  src/ui/app.js already builds with, every text set through `textContent` (§12.3: no markup is
- *  ever built from server text) and every position through the CSSOM (`style`), never a parsed
- *  style attribute. */
+/** A node for the dashboard: `{ text, cls, attrs, style }`, the shape src/ui/app.js's `el()`
+ *  builds — except `style`, which today's `el()` drops: B-56/B-57 must extend it to set each entry
+ *  through the CSSOM (never a parsed style attribute), the only position a gauge's fill needs.
+ *  Every text is set through `textContent` (§12.3: no markup is ever built from server text). */
 function node(tag, opts = {}, ...children) {
   const n = { tag };
   if (opts.text !== undefined) n.text = String(opts.text);
@@ -367,8 +384,9 @@ function eventLine(kind, row) {
 
 /** Core's own templates for its events (R-BTN-112): one line each, with one slot — `slot`, the
  *  course's view of the relevant value, rendered by `renderPlain` by the caller — appended where
- *  the event carries one (`outputs` does; most kinds carry no value and leave the slot empty). */
+ *  the event carries one (`outputs` does; most kinds carry no value and leave the slot empty).
+ *  The line itself is drawn inert, like every plain text (the slot already is, by renderPlain). */
 export function renderEvent(kind, row = {}, slot = '') {
-  const line = clip(eventLine(kind, isObj(row) ? row : {}));
+  const line = inert(clip(eventLine(kind, isObj(row) ? row : {})));
   return slot ? `${line} — ${slot}` : line;
 }
