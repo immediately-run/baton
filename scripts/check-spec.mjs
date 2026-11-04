@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // check-spec.mjs — the spec and the code agree on what the spec defines (R3-1252).
 //
-//   npm run check:spec        check spec/BATON_SPEC.md against src/, test/, model/ and cli/ (the
+//   npm run check:spec        check spec/BATON_SPEC/ (its parts joined, B-179) against src/, test/, model/ and cli/ (the
 //                             requirement ids they cite) and tickets/ (the tickets it cites)
 //
 // - every requirement id (`R-BTN-n`) the code cites is defined in the spec — as a bold
@@ -25,6 +25,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { patchNotes } from './spec-tools.mjs';
+import { SPEC_INDEX, indexText, joinParts, partProblems, specParts } from './spec-files.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -175,7 +176,9 @@ function files(dir) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const spec = readFileSync(join(REPO, 'spec', 'BATON_SPEC.md'), 'utf8');
+  // The spec is spec/BATON_SPEC/'s parts joined (B-179); spec/BATON_SPEC.md is their generated index.
+  const parts = specParts(REPO);
+  const spec = joinParts(parts);
   const code = ['src', 'test', 'model', 'cli'].flatMap((d) => files(join(REPO, d)))
     .map((p) => [relative(REPO, p), readFileSync(p, 'utf8')]);
   const tickets = new Set(['tickets', 'tickets/archive'].flatMap((d) => readdirSync(join(REPO, d)))
@@ -185,6 +188,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const integration = join(REPO, 'test', 'integration');
   const testNames = existsSync(integration) ? readdirSync(integration) : [];
   const problems = check(spec, code, tickets, history, testNames, PATCH_NOTES_ALLOWED);
+  problems.push(...partProblems(parts));
+  const index = existsSync(join(REPO, SPEC_INDEX)) ? readFileSync(join(REPO, SPEC_INDEX), 'utf8') : null;
+  if (index !== indexText(parts)) problems.push(`${SPEC_INDEX} is ${index == null ? 'missing' : 'stale'} — \`npm run spec:index\` writes it from spec/BATON_SPEC/ (B-179)`);
   for (const w of problems.warnings) console.warn(`! ${w}`);
   if (problems.length) {
     for (const p of problems) console.error(`✗ ${p}`);

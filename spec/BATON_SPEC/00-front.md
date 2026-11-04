@@ -8,7 +8,7 @@ updated: 2026-11-02
 
 **Status:** proposal — Baton's specification as it stands. How it got here — dated
 amendments, rationale, retired requirement ids and the map from the old section numbers — is
-in [`spec/BATON_SPEC_HISTORY.md`](BATON_SPEC_HISTORY.md).
+in [`spec/BATON_SPEC_HISTORY.md`](../BATON_SPEC_HISTORY.md).
 
 **Updated:** 2026-11-02
 
@@ -16,7 +16,7 @@ in [`spec/BATON_SPEC_HISTORY.md`](BATON_SPEC_HISTORY.md).
 > its `roadmap-pr` course, the first repository Baton served — is in docs'
 > `BATON_DOCS_DEPLOYMENT` (its cutover rows and code anchors) and `BATON_ROADMAP_PR_COURSE`
 > (the course's own logic and gates); where this spec names docs, it is an example, not core.
-> Tickets cited as `R3-n` and `B-n` are in [`tickets/`](../tickets/). Requirement ids
+> Tickets cited as `R3-n` and `B-n` are in [`tickets/`](../../tickets/). Requirement ids
 > `R-BTN-n`, scenario ids `S-BTN-n` and gate ids `G-BTN-n` are stable: code, tests and the
 > Quint model cite them.
 

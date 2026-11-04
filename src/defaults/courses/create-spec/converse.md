@@ -67,7 +67,7 @@ lands do not change.
 - The ticket file itself, if the request belongs in its body, moves with it.
 
 A specification in this repository's corpus — read the conventions the specifications around
-yours keep (this repository's are in `spec/`, and `spec/BATON_SPEC.md` is the worked example) —
+yours keep (this repository's are in `spec/`, and `spec/BATON_SPEC/` is the worked example, one file per section) —
 carries, in an order the corpus already uses:
 
 - **What it is** — three sentences: what the thing is, for whom, why they would use it.
