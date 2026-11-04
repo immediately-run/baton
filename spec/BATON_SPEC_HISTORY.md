@@ -1,3 +1,8 @@
+---
+title: "Baton specification — history"
+description: "What BATON_SPEC no longer says: its dated amendments, retired requirement, scenario and gate ids, the map from old section numbers, and the decisions in full."
+---
+
 # Baton specification — history
 
 This file holds the history of `spec/BATON_SPEC.md`. The specification itself states only what is

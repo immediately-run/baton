@@ -25,10 +25,10 @@ legs run as they do on any process-mode runner: the leg's `agent_command` (or `b
 container the same day: `claude -p` answers with the session's own model login and no setup. In
 the same check the child had no GitHub tools and `gh` refused the container's `GH_TOKEN`, so a
 leg that opens a PR or comments on one fails there; the owner will supply a token.
-**Spec:** `spec/BATON_SPEC.md` §8.1 (R-BTN-3 `cloud` hosts, R-BTN-9, the heartbeat, the
-sidecar's credentials: `BATON_KEY` and `BATON_HOSTNAME` as environment secrets), §8.3 R-BTN-72,
-R-BTN-107 (`process` isolation), §8.4 R-BTN-144 (a leg's environment keeps forge credentials),
-§9.5 (reaping).
+**Spec:** [BATON_SPEC §8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) ([R-BTN-3](../spec/BATON_SPEC/08-runners.md#sec-8-1) `cloud` hosts, [R-BTN-9](../spec/BATON_SPEC/08-runners.md#sec-8-1), the heartbeat, the
+sidecar's credentials: `BATON_KEY` and `BATON_HOSTNAME` as environment secrets), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) [R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3),
+[R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3) (`process` isolation), [§8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) [R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4) (a leg's environment keeps forge credentials),
+[§9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5) (reaping).
 **Depends on:** none — `baton run` exists.
 **Used by:** B-117's spike, which hosts its launcher in the same session.
 

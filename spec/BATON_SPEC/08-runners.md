@@ -1,3 +1,7 @@
+---
+title: "8. Runners"
+description: "A runner is any process that can execute a leg; it registers by heartbeat and holds claims (§9)."
+---
 ## 8. Runners *(partly built — B-8, B-9, B-12, B-42, B-46, B-47, R3-1213, R3-1260)*
 
 A **runner** is any process that can execute a leg; it registers by heartbeat and holds claims

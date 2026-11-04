@@ -1,3 +1,7 @@
+---
+title: "14. API"
+description: "Every route below is an action registry entry (R-BTN-129); the router, the CLI tree and the MCP tools are generated from the registry, and npm run check:actions keeps the registry and this table, with BATON_MCP_OAUTH_SPEC §13's rows until B-73 folds them in here, equal."
+---
 ## 14. API *(proposal)*
 
 Every route below is an action registry entry (R-BTN-129); the router, the CLI tree and the MCP

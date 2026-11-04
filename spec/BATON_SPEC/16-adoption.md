@@ -1,3 +1,7 @@
+---
+title: "16. Adoption"
+description: "This section is an appendix with an end."
+---
 ## 16. Adoption *(appendix; partly built — R3-1208, R3-1216, R3-1220)*
 
 **This section is an appendix with an end.** Everything in it serves one migration: a

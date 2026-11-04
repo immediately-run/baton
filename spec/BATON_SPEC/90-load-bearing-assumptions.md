@@ -1,3 +1,7 @@
+---
+title: "Load-bearing assumptions"
+description: "Every claim this spec rests on about code that exists today is about the reference deployment's code (docs' claim.sh, its factory-state library, its skills and harness hooks)."
+---
 ## Load-bearing assumptions
 
 Every claim this spec rests on about code that exists today is about the reference deployment's

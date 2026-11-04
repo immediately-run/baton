@@ -20,11 +20,19 @@
 // file, its subsections and the rule ids each defines, then every rule, scenario and gate id with
 // its title and file. It restates no rule (R-BTN-1, docs/context/spec-writing.mdx); `check:spec`
 // fails when it is stale.
+//
+// `spec/` is a Grove bundle (B-180), so every part opens with frontmatter: `title` (the part's
+// heading) and `description` (its first sentence), which `npm run spec:index` writes
+// (`partFrontmatter`) beside any other keys a part keeps (the front's `status`, `updated`). A
+// part's `text` is its body, the frontmatter stripped (scripts/lib/stripFrontmatter.mjs), so the
+// join, the ids and the checks read only the spec's text; `offset` keeps `locate` on the file's
+// own line numbers, and a part whose frontmatter is not the generated one is stale.
 import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { frontmatterBlock } from './lib/stripFrontmatter.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -46,22 +54,31 @@ function entries(root, dir) {
   return { at, parts: names.filter((n) => PART.test(n)), others: names.filter((n) => !PART.test(n)) };
 }
 
-/** The parts of the spec at `dir` (under `root`), in name order: [{name, path, text}]. A name
- *  outside the grammar is no part; `layoutProblems` reports it rather than reading it. */
+/** A part read from its file's `raw` text: `text` is the body with the frontmatter stripped,
+ *  `frontmatter` the block itself and `offset` its line count (B-180). */
+export function part(name, path, raw) {
+  const frontmatter = frontmatterBlock(raw);
+  return { name, path, text: raw.slice(frontmatter.length), frontmatter, offset: frontmatter.split('\n').length - 1 };
+}
+
+/** The parts of the spec at `dir` (under `root`), in name order: [{name, path, text, frontmatter,
+ *  offset}]. A name outside the grammar is no part; `layoutProblems` reports it rather than
+ *  reading it. */
 export function specParts(root = REPO, dir = SPEC_DIR) {
   const { at, parts } = entries(root, dir);
-  return parts.map((name) => ({ name, path: `${dir}/${name}`, text: readFileSync(join(at, name), 'utf8') }));
+  return parts.map((name) => part(name, `${dir}/${name}`, readFileSync(join(at, name), 'utf8')));
 }
 
 /** The spec as one text: its parts joined in order. */
 export const joinParts = (parts) => parts.map((p) => p.text).join('');
 
-/** `file:line` for line `n` (1-based) of the join; past the end, `<dir>:n`. */
+/** `file:line` for line `n` (1-based) of the join — the file's own line, past its frontmatter;
+ *  past the end, `<dir>:n`. */
 export function locate(parts, n, dir = SPEC_DIR) {
   let start = 1;
   for (const p of parts) {
     const lines = p.text.split('\n').length - (p.text.endsWith('\n') ? 1 : 0);
-    if (n < start + lines) return `${p.path}:${n - start + 1}`;
+    if (n < start + lines) return `${p.path}:${n - start + 1 + (p.offset ?? 0)}`;
     start += lines;
   }
   return `${dir}:${n}`;
@@ -102,12 +119,59 @@ export function partProblems(parts) {
   return out;
 }
 
+/** Inline markdown as plain text: code spans, emphasis and links reduced to their words. */
+const plain = (s) => s
+  .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+  .replace(/`+([^`]*)`+/g, '$1')
+  .replace(/\*\*|__|(?<![\w*])\*(?=\S)|(?<=\S)\*(?![\w*])/g, '')
+  .replace(/\\([\\`*_{}[\]()#+.!<>-])/g, '$1')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+/** A part's title: its first heading (the front's `# `, a section's `## `), as plain text, with a
+ *  section heading's status note (`*(proposal)*`) left to the body. */
+export function partTitle(p) {
+  const line = p.text.split('\n').find((l) => /^#{1,2} /.test(l)) ?? p.name;
+  return plain(line.replace(/^#+ /, '').replace(/\s*\*\([^)]*\)\*\s*$/, ''));
+}
+
+/** A part's description: the first sentence of the first prose paragraph before its first `### `
+ *  (not a heading, list, table, quote or bold label line), as plain text. The front's says what the
+ *  front holds; a part with no such paragraph is described by its title. */
+export function partDescription(p) {
+  if (p.name.startsWith('00-')) return "BATON_SPEC's front: its title, status, companions and contents.";
+  const blocks = p.text.split(/^### /m)[0].split(/\n\s*\n/);
+  const prose = blocks.find((b) => !/^\s*(#|-|\*\s|\d+\.\s|\||>|```|<|\*\*[^*]+:\*\*)/.test(b) && b.trim());
+  if (!prose) return `BATON_SPEC — ${partTitle(p)}.`;
+  const text = plain(prose);
+  return (/^(.+?[.!?])(?=\s+[A-Z(`"*§]|$)/.exec(text)?.[1] ?? text).trim();
+}
+
+/** A double-quoted YAML scalar (JSON's escapes are YAML's), as Grove's frontmatter reader decodes. */
+const quoted = (s) => JSON.stringify(s);
+
+/** The frontmatter `npm run spec:index` writes on a part: `title` and `description` generated
+ *  (`partTitle`, `partDescription`), then every other key the part's block holds, in its order. */
+export function partFrontmatter(p) {
+  const kept = [];
+  let skipping = false;
+  for (const line of (p.frontmatter ?? '').split('\n').slice(1, -2)) {
+    if (/^\S/.test(line)) skipping = /^(title|description)\s*:/.test(line);
+    if (!skipping) kept.push(line);
+  }
+  return ['---', `title: ${quoted(partTitle(p))}`, `description: ${quoted(partDescription(p))}`, ...kept, '---', ''].join('\n');
+}
+
 /** check:spec's check of the spec's directory under `root`: every entry a part, the parts well
- *  formed (`partProblems`), and the index the one `indexText` generates. */
+ *  formed (`partProblems`), each part's frontmatter the generated one (B-180), and the index the
+ *  one `indexText` generates. */
 export function layoutProblems(root = REPO, dir = SPEC_DIR, index = SPEC_INDEX) {
   const out = entries(root, dir).others.map((n) => `${dir}/${n}: not a part — a part is named NN-slug.md, and nothing else lives in ${dir}/ (B-179)`);
   const parts = specParts(root, dir);
   out.push(...partProblems(parts));
+  for (const p of parts) {
+    if (p.frontmatter !== partFrontmatter(p)) out.push(`${p.path}: its frontmatter is ${p.frontmatter ? 'stale' : 'missing'} — \`npm run spec:index\` writes its title and description (B-180)`);
+  }
   const committed = existsSync(join(root, index)) ? readFileSync(join(root, index), 'utf8') : null;
   if (committed !== indexText(parts)) out.push(`${index} is ${committed == null ? 'missing' : 'stale'} — \`npm run spec:index\` writes it from ${dir}/ (B-179)`);
   return out;
@@ -115,10 +179,12 @@ export function layoutProblems(root = REPO, dir = SPEC_DIR, index = SPEC_INDEX) 
 
 const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 
-/** The move's proof: the parts, joined, against the one file they were cut from. */
+/** The move's proof: the parts' bodies, joined, against the body of the one file they were cut
+ *  from — both with their frontmatter stripped (B-180: each part is a page with its own). */
 export function moveProof(before, parts) {
   const joined = joinParts(parts);
-  return { ok: joined === before, before: sha256(before), after: sha256(joined), parts: parts.length };
+  const body = before.slice(frontmatterBlock(before).length);
+  return { ok: joined === body, before: sha256(body), after: sha256(joined), parts: parts.length };
 }
 
 const RULE = /^- \*\*(R-BTN-\d+(?: \/ R-BTN-\d+)*) \(([^)]*?)(?:\)|$)/;
@@ -132,6 +198,7 @@ export function indexText(parts) {
   const out = [
     '---',
     'title: "BATON_SPEC — the index"',
+    'description: "Each section\'s file, its subsections and the rules each defines, and every rule, scenario and gate id with its file. Generated by npm run spec:index."',
     'status: generated',
     '---',
     '',
@@ -205,7 +272,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === '-
   }
   const git = (...args) => execFileSync('git', args, { cwd: REPO, encoding: 'utf8', maxBuffer: 1 << 26 });
   const names = git('ls-tree', '--name-only', `${after}:${SPEC_DIR}`).split('\n').filter((n) => PART.test(n)).sort();
-  const parts = names.map((name) => ({ name, path: `${SPEC_DIR}/${name}`, text: git('show', `${after}:${SPEC_DIR}/${name}`) }));
+  const parts = names.map((name) => part(name, `${SPEC_DIR}/${name}`, git('show', `${after}:${SPEC_DIR}/${name}`)));
   const proof = moveProof(git('show', `${before}:${SPEC_INDEX}`), parts);
   console.log(`${before}:${SPEC_INDEX}  sha-256 ${proof.before}`);
   console.log(`${after}:${SPEC_DIR}/ (${proof.parts} parts, joined)  sha-256 ${proof.after}`);
@@ -216,6 +283,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === '-
   process.exit(2);
 } else if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const parts = specParts();
+  let written = 0;
+  for (const p of parts) {
+    const fm = partFrontmatter(p);
+    if (fm !== p.frontmatter) { writeFileSync(join(REPO, p.path), fm + p.text); written++; }
+  }
   writeFileSync(join(REPO, SPEC_INDEX), indexText(parts));
-  console.log(`spec:index — wrote ${SPEC_INDEX} from ${parts.length} part(s) of ${SPEC_DIR}/`);
+  console.log(`spec:index — wrote ${SPEC_INDEX} from ${parts.length} part(s) of ${SPEC_DIR}/, and the frontmatter of ${written} part(s)`);
 }

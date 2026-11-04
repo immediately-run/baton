@@ -75,6 +75,10 @@ const textModules: Plugin = {
   },
 };
 
+/** The repository scripts' own tests, beside them (B-180: scripts/link-spec-refs.test.mjs,
+ *  scripts/lib/stripFrontmatter.test.mjs): Node only, they read the checkout. */
+const SCRIPT_TESTS = ['scripts/**/*.test.mjs'];
+
 /** The tests only the local project runs: they need Node (the request queue, the file scan,
  *  the runner's leg child processes, the model replay). It also runs every integration scenario
  *  and the mirror's unit tests (S-BTN-14's server half). */
@@ -139,7 +143,7 @@ export default defineConfig({
           environment: 'node',
           globalSetup: ['./test/global-setup.ts'],
           setupFiles: ['./test/setup.ts'],
-          include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...NODE_ONLY],
+          include: ['test/integration/**/*.test.ts', 'test/unit/mirror.test.ts', 'test/unit/runner-protocol.test.ts', ...NODE_ONLY, ...SCRIPT_TESTS],
           exclude: [...configDefaults.exclude, ...QUINT_TESTS],
           provide: { localConfig: { ...testVars(wranglerVars()), ...bindings } },
         },

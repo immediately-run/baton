@@ -1,3 +1,7 @@
+---
+title: "9. Claims"
+description: "A claim is a fenced lease on one ticket."
+---
 ## 9. Claims *(partly built — B-11, B-21, B-38, B-39, B-46, R3-1213)*
 
 A claim is a fenced lease on one ticket. Baton owns it outright, as it owns the ticket's course

@@ -1,3 +1,7 @@
+---
+title: "12. Security"
+description: "BATON_SPEC — 12. Security."
+---
 ## 12. Security *(partly built; §12.8 proposal)*
 
 - **Whose rules these are.** Every principal belongs to one tenant and authenticates only at

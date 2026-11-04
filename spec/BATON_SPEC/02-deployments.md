@@ -1,3 +1,7 @@
+---
+title: "2. Deployments: tenants, hosts and the service"
+description: "A tenant is one Baton: one origin, one Durable Object with SQLite, its administrators and everything they govern."
+---
 ## 2. Deployments: tenants, hosts and the service *(partly built — B-45, B-46)*
 
 A **tenant** is one Baton: one origin, one Durable Object with SQLite, its administrators and
