@@ -11,8 +11,9 @@ Before your first change in a session — and before arguing a design — read
 `docs/context/`: [what Baton is](docs/context/product.mdx), [the architectural
 decisions](docs/context/architecture.mdx) (git is the ledger, the server is the only
 allocator, verification at the boundary, separate tickets never share a write target),
-[the values](docs/context/values.mdx) and [the vocabulary](docs/context/vocabulary.mdx)
-(core's words, one sentence each — `step_kinds` included). A change that contradicts a
+[the values](docs/context/values.mdx), [the vocabulary](docs/context/vocabulary.mdx)
+(core's words, one sentence each — `step_kinds` included) and [how to read and write the
+spec](docs/context/spec-writing.mdx) (one home per statement, cite by id). A change that contradicts a
 decision there is a change to Baton, not a change in Baton.
 
 ## Rules
