@@ -1,0 +1,182 @@
+---
+title: "B-176 — Baton hands out identifiers: one sequence per repository and kind, for every id written to git"
+id: B-176
+project: baton
+status: available
+updated: 2026-11-03
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1178
+tier: routine
+description: "Baton allocates every identifier that concurrent branches write into git (ticket ids from every filer, request ids, spec rule/scenario/gate ids, migration numbers) from a per-repository, per-kind sequence on the Durable Object, replacing next-free scans of the default branch and open branches; git keeps the work, the sync's duplicate-id refusal stays the backstop, and a repository or session without Baton keeps today's scan. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-03: "Wouldn't it be simpler to solve this if Baton also handed out
+ticket IDs?" — and then: "check the spec for any other situation where identifiers were written to
+Git without being assigned by a baton. This is a classic case where central coordination by baton
+can make it much easier to choose non-colliding IDs." — and, asked whether new tickets should go
+into a PR before merge, "Yes".
+
+**Spec:** R-BTN-193 (git is never a lock or a counter: this ticket retires its next-free scans), R-BTN-74 (`baton ticket new`'s next free id), R-BTN-131 (*Every allocator does the same*:
+`baton ticket request`, `new`, the source's `file` export, the record courses' filings; "a
+collision that still happens is caught by the sync's duplicate-id refusal, and the owner
+renumbers"), R-BTN-86 and R-BTN-165 (spawned and call children), R-BTN-161 (handler tickets),
+R-BTN-147 (`baton.renumbered`), R-BTN-31 (*a new scenario takes the next free number at merge*), §13's
+migrations, R-BTN-62 (the observation counter, the precedent), values 1 and 11.
+
+**Depends on:** none.
+
+**Used by:** nothing yet.
+
+### Why
+
+Every identifier below is chosen today by a writer looking at git — the default branch, `archive/`
+and whichever open branches it can see — and pushed. Git cannot serialize two writers without a
+round trip to the default branch, so two branches open at once can take the same number, and the
+collision surfaces only when the second merges. It did on 2026-11-02 and -03: B-110 and B-107 both
+took migration 0028; B-129 and B-145 both took S-BTN-197. Ticket ids have the same hole by the
+spec's own admission (R-BTN-131), and each `ticket new` pushes to `main`, which redeploys Baton's
+server. Baton already serializes concurrent writers (claims, leases, advances) and already hands
+out one per-repository counter (the observation number, R-BTN-62); a unique number across
+concurrent branches is what value 1 calls "what no push may decide".
+
+### The inventory (the spec on origin/main d69210a)
+
+| Identifier | Who writes it to git today | Where the spec says so |
+|---|---|---|
+| ticket id (`<prefix>-<n>`) | `baton ticket new`; `baton ticket request`; the ticket source's `file` export; the record courses' legs (`bug-report`, `draft-ticket`, `decision`, `spec-to-tickets`, `draft-doc`, `build-app`'s `report`) | R-BTN-74, R-BTN-131 |
+| child ticket ids | a spawning leg (`spawned`), a call leg's children, handler tickets | R-BTN-86, R-BTN-165, R-BTN-161 |
+| request id (`product/<request id>/`, `baton-request/*`) | `baton ticket request` | R-BTN-131 — confirm whether it is the request ticket's id (then it is the ticket sequence) or its own |
+| requirement, scenario and gate ids (`R-BTN-n`, `S-BTN-n`, `G-BTN-n`) | whoever writes the spec PR, by reading the spec | R-BTN-31 ("takes the next number"), the spec's header |
+| migration numbers (`src/migrations/NNNN_*.sql`) | whoever writes the PR, by reading the tree | §13 |
+
+Not in scope, already Baton's or not shared: the observation number (R-BTN-62); claim
+`request_id`s (client-generated, unique per runner, idempotency only); posted decision ids
+(`review-rounds-<n>`, derived from the ticket's own record); leg-state branch names (derived from
+the ticket id). Other repositories with the same pattern (docs' `R3-n` via `claim.sh`,
+fieldhouse's `R-FH-n` and tickets) adopt this through the CLI once it lands; their adoption is
+their own tickets.
+
+### What to build
+
+1. **Sequences in core.** A table keyed by `(repository_id, kind)` with the last number issued,
+   and `POST /v1/repositories/{repository}/sequences/{kind}/next` → `{kind, number}`. Validated
+   before any SQL (§12.3, `src/core/validate.ts`): `kind` matches `^[a-z][a-z0-9-]{0,31}$`. Core knows no kind's
+   meaning (value 3); the CLI names them: `ticket` (per allocating prefix, so the kind is
+   `ticket-<prefix>`), `request` if the request id is its own, `rule`, `scenario`, `gate`,
+   `migration`. The first call for a kind seeds from a `floor` the caller passes — the highest
+   number the caller sees in git, on the default branch and on every open branch's head — and
+   every call takes `max(stored, floor) + 1`, so a lost or fresh Baton never issues a number
+   pushed to the default branch or to an open branch (value 1: lost state fails closed). A number
+   a branch holds only locally, not yet pushed, is the one a floor cannot see; the duplicate check
+   at merge stays the backstop for it: for tickets the sync's duplicate-id refusal (R-BTN-131),
+   and for the rest the branch merging main before it merges and renumbering if main took the
+   number (R-BTN-31, §13). Each issue is an event naming the caller
+   and, when given, the ticket it is for.
+2. **The CLI asks Baton first.** `baton ticket new` and `request`, the ticket source's `file`
+   export, and the record courses' filing legs take a ticket id from the sequence; a spawning or
+   call leg's children take theirs the same way. `baton ticket next <kind> [--for <ticket>]`
+   prints the next rule, scenario, gate or migration number for a PR author (and an agent) to use.
+   The CLI computes `floor` for every kind as the highest number on the default branch and on
+   every open branch's head — R-BTN-131's ticket scan, which reads the open branches, extended
+   to the rule, scenario, gate and migration kinds, whose scan today (R-BTN-31) reads the default
+   branch alone — so the scan stays the one place that reads git.
+3. **Fallback.** No Baton configured, unreachable, or `--offline`: today's next-free scan,
+   unchanged, said in the output. The sync's duplicate-id refusal and `baton.renumbered` stay as
+   the backstop for that path (R-BTN-131, R-BTN-147).
+4. **`new` files through a PR by default** (the owner, 2026-11-03: "Yes", to filing new tickets
+   in a PR before merge "now that they get ids from baton"). With the id unique before any push,
+   `baton ticket new` writes the new ticket file alone on a branch `baton-ticket/<id>` and asks the
+   forge for a PR — on a `git` forge, which has none, it pushes the branch and prints it for a
+   person to merge. The ticket is claimable when that branch merges, after `check:tickets` has run
+   on it; where `paths.tickets` is `approval` (R-BTN-184, under `protected`), a person approves it
+   too. `--direct` keeps today's push to the default branch; a push the forge refuses as protected
+   falls back to the PR, by the forge's answer and never by reading the policy — the B-174
+   Decision's order, which `ticket request` keeps (push first, PR on refusal). For `new` the order
+   is reversed by the owner's ruling: this is a deliberate departure from that Decision for `new`
+   alone, recorded as its own Decisions entry, and `request` is unchanged.
+   The PR carries the new ticket only. The dependencies' `**Used by:**` lines, which nothing
+   reads (R-BTN-74), are not written by a PR filing, so two open filings that name one dependency
+   never share a write target (architecture: separate tickets never share a write target);
+   `--direct` writes them as today. The source's `file` export and the record courses' filings
+   already land through a branch and are unchanged.
+   With Baton unreachable (item 3), `new` files through a PR as well — the scanned id may then
+   collide, and the duplicate check on the PR is the backstop.
+   `baton-ticket/*` joins `baton-legs/*` and `baton-request/*` as a reserved namespace: outside
+   every `branch_pattern` (R-BTN-190's validator refuses a pattern matching it, as it does the
+   other two), and read by the `floor` scan of item 2 like any open branch.
+5. **Spec.** Amend R-BTN-74 (`new` files through a PR; `--direct`; no `**Used by:**` in a PR filing), R-BTN-190 and R-BTN-25's reserved side-branch namespaces (`baton-ticket/*`), a Decisions entry for `new`'s PR-first order beside B-174's, R-BTN-131 (the allocator rule: Baton first, the scan as the
+   fallback), R-BTN-86/R-BTN-165/R-BTN-161's filing sentences (cite R-BTN-131, do not restate),
+   R-BTN-31 and §13 (the next number comes from `baton ticket next`), the route table, §13's
+   tables; one home for the sequence rule, cited elsewhere.
+
+### Trust
+
+New inputs: the `next` request, and the `floor` and `for` it carries.
+- Who may call: a key granted on the repository with the `runner` or owner role, the sync key, and
+  the owner's CLI — the principals that file tickets today. A delegated (MCP) key may call it: a
+  number is not authority, and issuing one more than needed only leaves a gap.
+- `floor` is caller-supplied and could be inflated to burn numbers; it is capped (a floor more than
+  10 000 above the stored number is refused `invalid-params`) and logged. Gaps are harmless.
+- `for` is recorded, never trusted: it names a ticket for the log, and decides nothing.
+- Nothing read from git is trusted beyond computing `floor`; the number Baton returns is the
+  authority for uniqueness, and git remains the truth about the work (value 1).
+
+### Invariants
+
+- **Separate tickets never share a write target** (architecture.mdx): a PR filing writes the new
+  ticket file alone; the dependencies' `**Used by:**` lines are written only by `--direct`.
+- **Value 8 (Baton runs without GitHub):** on a `git` forge `new` pushes `baton-ticket/<id>` and
+  prints it, rather than needing a PR API.
+- **R-BTN-1 (one home per fact):** the sequence's last number is Baton's; the identifiers
+  themselves are git's. The CLI writes the number into git and never reads it back from Baton as
+  the record of the work.
+- **R-BTN-33 (filter fields, never content):** the table holds a kind and an integer; the event
+  holds the caller and an optional ticket id. No prose.
+- **Value 3 (the core knows no course):** kinds are opaque strings to core; their meaning lives
+  in the CLI.
+- **Value 8 (Baton runs without GitHub) and value 9 (two hosts):** the sequence is core state on
+  both hosts; nothing forge-specific.
+- **R-BTN-131's backstop:** the duplicate-id refusal and `baton.renumbered` are kept, for the
+  fallback path and for a number a floor could not see (a branch not yet pushed); for the rule,
+  scenario, gate and migration kinds the duplicate check at merge is that backstop.
+- **Value 1 (lost state fails closed):** a fresh Baton's first number for a kind is above every
+  number on the default branch and every open branch's head, because `floor` reads them all.
+- **Migrations are append-only:** the sequence table is a new numbered migration, itself taken from
+  the `migration` sequence once this lands (until then, the next free number at merge).
+
+### Tests
+
+A new scenario row in §15 (its number taken at merge, from this ticket's own `next` once built,
+else the next free): two filers racing for a ticket id get distinct ids; a fresh Baton seeded by a
+`floor` never reissues a number git holds; an inflated `floor` is refused; `next scenario` and
+`next migration` issue increasing numbers per repository and never across two; Baton unreachable
+falls back to the scan and says so; a delegated key may take a number; `new` opens a PR on
+`baton-ticket/<id>` carrying the new ticket alone, and the ticket is not on the board until it
+merges; on a `git` forge the branch is pushed and printed; `--direct` pushes, and falls back to the
+PR when the forge refuses the push as protected; a `branch_pattern` matching `baton-ticket/*` is
+refused. Unit tests for the CLI's
+`floor` computation (a number on an open branch's head only, for a ticket and for a migration
+kind, raises it) and fallback.
+
+### Exit criteria
+
+- [ ] Two concurrent `baton ticket new` runs against one Baton file two distinct ids (the scenario).
+- [ ] `baton ticket next migration` and `next scenario` give the next numbers, and the babysit skill
+      and `tickets/home.mdx` tell PR authors to take them that way.
+- [ ] `baton ticket new` opens a PR (or, on a `git` forge, pushes and prints a branch) by default;
+      `--direct` pushes, falling back to the PR on a protected-branch refusal.
+- [ ] With Baton unreachable, `new` files by the scan and says so; `npm test` green.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-03._

@@ -7,6 +7,10 @@
   ],
   "project": "baton",
   "default_course": "create-pr",
+  "check": {
+    "sections_since": "2026-11-03",
+    "sections_from_id": "B-176"
+  },
   "repos": {
     "baton": "immediately-run/baton",
     "baton-board": "immediately-run/baton-board",

@@ -25,6 +25,7 @@ import { accepts, accepting, allocates, allocatingPrefix, GITHUB_PR, LIVE_STATUS
 import { addPr, idOf, locate, nextNumber, prsOf, scalar, setKey } from './tickets-file';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
+import { appendStatus, filingDate, firstCommit, historyEntries, rereadMismatch, rereadNote, rulesConfig, sectionGaps, sectionHint, sectionsSince, staleIds, staleList, staleRules, unshallow } from './tickets-rules';
 import { ticketsMarkdown, type MarkdownFile } from './tickets-markdown';
 import { defaultBranch } from './request';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
@@ -187,8 +188,12 @@ const acceptedList = (settings: TicketSettings): string => Object.keys(settings.
  *  `prs:` entry and its commit carries the hand-off (the PRs, Baton's station and next leg, the
  *  branch, and `--note`'s "what is left"). `baton tickets done <id> [--pr URL]` — done, and the
  *  file moved to `archive/`. `claim` is the one that refuses: it is the lock, and `set` is the
- *  session keeping its own ticket's word. */
-export function moveTicket(root: string, io: TicketsIo, id: string, status: Status, pr?: string, claim = false, baton: BatonPosition | null = null, note?: string): void {
+ *  session keeping its own ticket's word.
+ *  `claim` also refuses a ticket that cites a rule the spec's history amended after the ticket
+ *  answered for it (filed, or re-read), unless `--rules-reread` names exactly those ids, saying the
+ *  claimer re-read them, which the claim's commit records as a dated Status line (tickets-rules.ts;
+ *  the 2026-11-03 process guards). */
+export function moveTicket(root: string, io: TicketsIo, id: string, status: Status, pr?: string, claim = false, baton: BatonPosition | null = null, note?: string, rulesReread?: readonly string[]): void {
   if (pr != null && !GITHUB_PR.test(pr)) throw new Error(`--pr ${pr} is not a GitHub pull request URL`);
   const date = io.date ?? today();
   const remote = io.remote ?? 'origin';
@@ -236,11 +241,42 @@ export function moveTicket(root: string, io: TicketsIo, id: string, status: Stat
       const open = (read.tickets.find((t) => t.id === id)?.depends_on ?? []).filter((dep) => !isDone(dir, settings, dep));
       if (open.length) throw new Error(`${id} depends on ${open.join(', ')}, not done yet`);
     }
+    // The rules the ticket cites that were amended after it answered for them: read at the head
+    // the claim lands on, the ticket dated by its `_filed` line, else its file's first commit there
+    // — a shallow clone is deepened first, since its boundary commit would date every file.
+    let rereadLine: string | null = null;
+    if (status === 'in-progress') {
+      const rules = rulesConfig((readSettingsJson(dir) as { check?: { rules?: unknown } }).check);
+      const history = join(dir, rules.history);
+      if (existsSync(history)) {
+        let filed = filingDate(text, firstCommit(dir, found.path), date);
+        if ('undetermined' in filed) {
+          const why = unshallow(dir, remote);
+          if (why) throw new Error(`${id}: this clone is shallow, so the day ${found.path} was filed cannot be read, and \`git fetch --unshallow ${remote}\` failed (${why}) — deepen the clone (\`git fetch --unshallow\`, or clone without --depth), then claim again`);
+          filed = filingDate(text, firstCommit(dir, found.path), date);
+        }
+        const since = 'date' in filed ? filed.date : date;
+        const stale = staleRules(text, since, historyEntries(readFileSync(history, 'utf8')), rules.prefix);
+        if (stale.length && !rulesReread) {
+          throw new Error([
+            `${id} cites rules that ${rules.history} amended after the ticket answered for them (filed ${since}, or a later rules re-read note naming the rule):`,
+            staleList(stale),
+            `Re-read each rule and entry, rewrite or strike what in the ticket they contradict, then claim with --rules-reread ${staleIds(stale).join(',')}.`,
+          ].join('\n'));
+        }
+        // The re-read names exactly the stale ids: a claimer who re-read them can list them, and
+        // one passing the flag by reflex is told which they did not.
+        const mismatch = rulesReread ? rereadMismatch(rulesReread, stale) : null;
+        if (mismatch) throw new Error(`${id}: ${mismatch}${stale.length ? `\n${staleList(stale)}` : ''}`);
+        if (stale.length) rereadLine = rereadNote(date, stale);
+      } else if (rulesReread) throw new Error(`${id}: --rules-reread ${rulesReread.join(',')}, but ${rules.history} does not exist here, so no rule is amended`);
+    } else if (rulesReread) throw new Error(`--rules-reread is a claim's (claim, or set <id> in-progress), not set ${status}'s`);
     // Every PR the head named is kept, and a takeover writes back any Baton knows and the
     // frontmatter lost (B-129: `baton ticket history`'s `resume` is Baton's record of them).
     const had = prsOf(text);
     if (takeover) for (const known of baton!.resume?.prs ?? []) if (!had.includes(known)) text = addPr(text, known);
     text = setKey(setKey(text, 'status', status), 'updated', date);
+    if (rereadLine) text = appendStatus(text, rereadLine);
     if (pr) text = addPr(text, pr);
     // A write cannot drop a PR Baton's record holds (B-129, item 2) while Baton offers the
     // ticket ready past its start: the write refuses, naming what it would drop. `done` is never
@@ -376,6 +412,10 @@ export interface NewTicket {
   course?: string;
   /** `--body-file`'s text: kept as given, judged with the flags. */
   body?: string;
+  /** `--trust` / `--invariants`: the skeleton's two sections, written in place of their
+   *  placeholders (ignored with `--body-file`, whose body carries its own). */
+  trust?: string;
+  invariants?: string;
 }
 
 /** The order a ticket ranks at when `--order` names none: after every order a filer writes. */
@@ -385,10 +425,12 @@ export const ORDER_AFTER_LAST = 1_000_000;
 export const dependsLineOf = (deps: readonly string[]): string => `**Depends on:** ${deps.length ? `${deps.join(', ')}.` : 'none.'}`;
 
 /** The conventional body `new` writes: `**Brief:**` (the description), `**Spec:**`, `**Depends
- *  on:**` (from `--depends-on`), `**Used by:**`, the three headings a filer fills, `**Requires:**`
- *  and `## Status`. A description that ends with a `Requires:` clause is written on the requires
- *  line; the others say the line is the filer's to write. */
-export function skeletonBody(o: { description: string; deps: readonly string[]; course?: string; date: string }): string {
+ *  on:**` (from `--depends-on`), `**Used by:**`, the five headings a filer fills — `### Trust` and
+ *  `### Invariants` among them, which `baton tickets check` requires of a ticket filed on or after
+ *  `check.sections_since` — `**Requires:**` and `## Status`. A description that ends with a
+ *  `Requires:` clause is written on the requires line; the others say the line is the filer's to
+ *  write. */
+export function skeletonBody(o: { description: string; deps: readonly string[]; course?: string; date: string; trust?: string; invariants?: string }): string {
   const requires = requiresFrom(o.description);
   return [
     `**Brief:** ${o.description.replace(/\s+/g, ' ').trim()}`,
@@ -402,6 +444,14 @@ export function skeletonBody(o: { description: string; deps: readonly string[]; 
     '### What to build',
     '',
     '_(the change, and the architecture it prescribes: name the code it follows.)_',
+    '',
+    '### Trust',
+    '',
+    o.trust?.trim() ? o.trust.trim() : '_(every new input this adds — a field, a file, a commit trailer, a request — who may write it and how it is verified; or “no new input”.)_',
+    '',
+    '### Invariants',
+    '',
+    o.invariants?.trim() ? o.invariants.trim() : '_(the rules this must not break, by id, and how the design keeps each.)_',
     '',
     '### Tests',
     '',
@@ -458,6 +508,15 @@ export function newTicket(root: string, io: TicketsIo, t: NewTicket): string {
     }
     const text = ticketText({ id, title, project, settings, deps, t, date });
     judgeFiling({ id, text, deps, settings });
+    // A filing after `check.sections_since` carries Trust and Invariants, filled — `--body-file`'s
+    // or the skeleton's (`--trust`, `--invariants`): refused here, before the push. A placeholder
+    // landed on the default branch would fail every open PR's check until someone filled it.
+    const since = sectionsSince((readSettingsJson(dir) as { check?: { sections_since?: unknown } }).check);
+    if (since && date >= since) {
+      const { absent, unfilled: gaps } = sectionGaps(text);
+      if (absent.length) throw new Error(`${id}: filed on or after check.sections_since (${since}), so the body needs ${absent.map((m) => `### ${m} (${sectionHint(m)})`).join(' and ')}`);
+      if (gaps.length) throw new Error(`${id}: filed on or after check.sections_since (${since}), so ${gaps.map((m) => `### ${m} (${sectionHint(m)})`).join(' and ')} must be filled — pass ${gaps.map((m) => `--${m.toLowerCase()} "<text>"`).join(' and ')}, or a --body-file that fills them`);
+    }
     // The reverse mentions: each dependency's `**Used by:**` line gains this id, so a file says
     // who waits on it without a search (the generated page's rule).
     const updates = reverseMentions(files, id, deps);
@@ -489,7 +548,13 @@ function ticketText(o: { id: string; title: string; project: string; settings: T
   const { id, title, project, settings, deps, t, date } = o;
   const description = (t.description ?? t.title).replace(/\s+/g, ' ').trim();
   const tags = t.tags?.length ? t.tags : settings.tags;
-  const body = t.body?.trim() ? t.body.trim() : skeletonBody({ description, deps, ...(t.course ? { course: t.course } : {}), date });
+  // `--body-file`'s body gains the skeleton's `_filed` Status line when it has none, so the
+  // sections check sees every filing, not only the skeleton's.
+  const given = t.body?.trim();
+  const filedLine = t.course ? `_filed ${date}; the \`${t.course}\` course._` : `_filed ${date}._`;
+  const body = given
+    ? (/^_filed \d{4}-\d{2}-\d{2}/m.test(given) ? given : appendStatus(given, filedLine).trim())
+    : skeletonBody({ description, deps, ...(t.course ? { course: t.course } : {}), date, ...(t.trust ? { trust: t.trust } : {}), ...(t.invariants ? { invariants: t.invariants } : {}) });
   return [
     '---',
     `title: ${scalar(`${id} — ${title}`)}`,
@@ -649,9 +714,12 @@ export function ticketsHelp(): string[] {
   return [
     'baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]',
     '                   [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]',
-    'baton tickets claim <id> [-i KEY] [--url URL] [--offline]   available → in-progress;',
-    '                   a ticket Baton holds past its start is taken over where Baton holds it',
-    'baton tickets set <id> <status> [--pr URL] [--note TEXT] [-i KEY] [--url URL] [--offline]',
+    '                   [--trust T] [--invariants I]',
+    'baton tickets claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]   available → in-progress;',
+    '                   a ticket Baton holds past its start is taken over where Baton holds it;',
+    '                   refused while the ticket cites a rule amended since it was filed, until',
+    '                   --rules-reread names exactly those ids (A,B)',
+    'baton tickets set <id> <status> [--pr URL] [--note TEXT] [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]',
     '                   any live status; --pr adds a pull request; --note is a release\'s "what is left"',
     'baton tickets done <id> [--pr URL]            done, moved to archive/',
     'baton tickets check [--repo DIR] [--quiet]    check the tickets without posting them',
@@ -676,11 +744,14 @@ export function ticketsHelp(): string[] {
     '',
     'Settings are .baton/baton.json\'s: items (tickets/), ticket_prefix (B), legacy_ids (id patterns',
     'still accepted, never allocated), project (the default --project), tags (the default --tags,',
-    'roadmap-item when it names none) and check.depends_line.',
+    'roadmap-item when it names none), check.depends_line, check.sections_since (the day from which a',
+    'filed ticket must carry ### Trust and ### Invariants, filled), check.sections_from_id (the first id',
+    'that must carry a _filed line, so a shallow clone judges it) and check.rules ({history, prefix}: where the',
+    'amendments claim and check read are; spec/BATON_SPEC_HISTORY.md and R-BTN unless set).',
     '',
     'new writes the conventional body unless --body-file names one — **Brief:**, **Spec:**,',
     '**Depends on:** (from --depends-on; none. when empty), **Used by:**, ### What to build,',
-    '### Tests, ### Exit criteria, **Requires:**, ## Status — and judges it as `baton tickets',
+    '### Trust, ### Invariants, ### Tests, ### Exit criteria, **Requires:**, ## Status — and judges it as `baton tickets',
     'check` would before pushing, so a filing introduces no cycle and no undeclared dependency.',
     '',
     'The tags Baton reads:',
@@ -709,9 +780,9 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   if (command === 'check') return ticketsCheckMain(rest, io);
   const COMMON = ['repo', 'branch', 'remote'];
   const allowed: Record<string, string[]> = {
-    new: ['title', 'description', 'project', 'depends-on', 'tags', 'tier', 'order', 'repos', 'course', 'body-file', ...COMMON],
-    claim: ['url', 'offline', ...COMMON],
-    set: ['url', 'offline', 'pr', 'note', ...COMMON],
+    new: ['title', 'description', 'project', 'depends-on', 'tags', 'tier', 'order', 'repos', 'course', 'body-file', 'trust', 'invariants', ...COMMON],
+    claim: ['url', 'offline', 'rules-reread', ...COMMON],
+    set: ['url', 'offline', 'pr', 'note', 'rules-reread', ...COMMON],
     done: ['url', 'offline', 'pr', ...COMMON],
   };
   if (!allowed[command]) throw new Error(`${command}: baton tickets new|claim|set|done|check (baton tickets --help)`);
@@ -761,6 +832,8 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
       ...(deps.length ? { dependsOn: deps } : {}),
       ...(flags.course ? { course: flags.course } : {}),
       ...(body != null ? { body } : {}),
+      ...(flags.trust != null ? { trust: flags.trust } : {}),
+      ...(flags.invariants != null ? { invariants: flags.invariants } : {}),
     });
     return 0;
   }
@@ -768,6 +841,8 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   const status = command === 'claim' ? 'in-progress' : command === 'done' ? 'done' : positional[1];
   if (command === 'set' && status === 'done') throw new Error('done archives a ticket — `baton tickets done <id>`, past this push');
   if (status !== 'done' && !LIVE_STATUSES.includes(status as Status)) throw new Error(`${status} is not a status \`set\` writes — the live ones are ${LIVE_STATUSES.join(', ')}; \`baton tickets done\` archives a ticket`);
+  const reread = flags['rules-reread']?.split(',').map((x) => x.trim()).filter(Boolean);
+  if (flags['rules-reread'] != null && !reread?.length) throw new Error('--rules-reread takes the re-read rule ids, comma-separated: --rules-reread <id>,<id>');
   if (flags.note != null && status !== 'available') throw new Error(`--note is a release's hand-off ("what is left") — \`baton tickets set <id> available --note …\`, not ${status}`);
   // B-129: the ticket commands ask Baton first. A claim refuses on any read it cannot answer —
   // the frontmatter is not a fallback, it is the failure this exists to end; a set or done only
@@ -798,7 +873,7 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
       }
     }
   }
-  moveTicket(root, at, id, status as Status, flags.pr, command === 'claim', baton, flags.note);
+  moveTicket(root, at, id, status as Status, flags.pr, command === 'claim', baton, flags.note, reread);
   if (at.offline && command === 'claim') warn(`… ${id}: claimed on git's word alone (--offline) — Baton's position is unknown, not refuted; the frontmatter may say available of work Baton still holds`);
   return 0;
 }

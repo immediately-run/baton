@@ -3,7 +3,7 @@
 // named for a scenario names one §15 defines and not one the history retired (B-71).
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error a plain .mjs script, no types
-import { check, definedIds, retiredIds, retiredScenarioIds, scenarioIds } from '../../scripts/check-spec.mjs';
+import { check, definedIds, retiredIds, retiredScenarioIds, RULES_LINE_SINCE, scenarioIds, unnamedEntries } from '../../scripts/check-spec.mjs';
 // @ts-expect-error a plain .mjs script, no types
 import { impact, patchNotes, render, units } from '../../scripts/spec-tools.mjs';
 
@@ -123,3 +123,52 @@ describe('spec-tools impact', () => {
   });
 });
 
+
+describe('check-spec: a history entry names the rules it changed (R-BTN-74; round 2, finding 1)', () => {
+  const HISTORY = [
+    '## Changelog',
+    '',
+    '- **2026-11-02 — the restructure, part 1 (B-166).** Before the cutover: not required.',
+    '',
+    '- **2026-11-03 — the owner’s answer.** The cutover’s own day: not required.',
+    '',
+    '- **2026-11-04 — R-BTN-74, R-BTN-31: titled.** Names them in its title.',
+    '',
+    '- **2026-11-04 — the restructure, part 5, its',
+    '  title wrapped.**',
+    '  Rules changed: R-BTN-50, R-BTN-33.',
+    '  The body.',
+    '',
+    '- **2026-11-05 — scenarios only.**',
+    '  Rules changed: none.',
+    '',
+    '- **2026-11-05 — the owner’s rulings on the review’s tickets.** It cites R-BTN-7 in its body only.',
+    '  Rules changed: R-BTN-7.',
+    '',
+    '- **2026-11-05 — a line further down.** The owner said so,',
+    '  and more.',
+    '  Rules changed: R-BTN-9.',
+    '',
+    '- **2026-11-01 to 2026-11-06 — review round two.** No ids anywhere.',
+    '',
+    '- **2026-11-06 — an empty line.**',
+    '  Rules changed:',
+    '',
+    '## Retired requirements',
+    '',
+  ].join('\n');
+
+  it('fails an entry dated after the cutover with no id in its title and no Rules changed line directly under it', () => {
+    expect(RULES_LINE_SINCE).toBe('2026-11-03');
+    expect(unnamedEntries(HISTORY)).toEqual([
+      { date: '2026-11-05', title: 'a line further down' },
+      { date: '2026-11-06', title: 'review round two' },
+      { date: '2026-11-06', title: 'an empty line' },
+    ]);
+    expect(check(SPEC, [], new Set(['R3-1205']), HISTORY)).toEqual([
+      'spec/BATON_SPEC_HISTORY.md: the 2026-11-05 entry "a line further down" names no rule id in its title and has no `Rules changed: <ids>` line under it (R-BTN-74)',
+      'spec/BATON_SPEC_HISTORY.md: the 2026-11-06 entry "review round two" names no rule id in its title and has no `Rules changed: <ids>` line under it (R-BTN-74)',
+      'spec/BATON_SPEC_HISTORY.md: the 2026-11-06 entry "an empty line" names no rule id in its title and has no `Rules changed: <ids>` line under it (R-BTN-74)',
+    ]);
+  });
+});

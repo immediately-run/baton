@@ -34,7 +34,7 @@ For each draft, write a ticket file in the tickets directory (the `items` settin
 - **tags** `[OP]` where the draft marks a person's ticket, so no agent claims it.
 - **course** the repository's `default_course` unless the draft names another course the
   checkout's `.baton/baton.json` lists; never this course.
-- **The body** the draft's, verbatim.
+- **The body** the draft's, verbatim, with its `### Trust` (every new input it adds, who may write it and how it is verified, or "no new input") and `### Invariants` (the rules it must not break, by id, and how the design keeps each) — write them if the draft lacks them — and ending in `## Status` with `_filed <today, YYYY-MM-DD>.`.
 
 Then add a `## file` section to the request naming each child, set the request's `status:` to `done`,
 and commit the children and the request together, with explicit paths, to the default branch.

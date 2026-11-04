@@ -28,6 +28,9 @@ split), ready to be checked and filed.
 - **Architecture:** the decisions, named, each with the alternative it rules out: which module
   owns the logic, which existing helper it reuses (by name), what it must not do. An implementer
   who follows it should not have to invent structure.
+- **Trust:** every new input it adds (a field, a file, a commit trailer, a request), who may write
+  it and how it is verified; or "no new input".
+- **Invariants:** the repository's rules it must not break, by id, and how the design keeps each.
 - **Tests:** the tests by file and by what each proves, including the one that fails today.
   Scenario tests when the repository keeps them.
 - **Exit criteria:** each one checkable by a command, a test or a grep, never "works well".

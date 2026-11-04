@@ -80,6 +80,29 @@ handled by bound courses, resuming by a **restart** (§7). "Workflow" means only
   | transcripts | pointers to them |
   | | runners, messages, readings; keys, grants, owners, settings, bars (R-BTN-66); overrides; conditions, timers and the outbox (§7) |
 
+- **R-BTN-193 (git is never a lock or a counter).** Baton is the one place concurrent writers are
+  serialized: who holds a ticket is Baton's lease (R-BTN-4), and a number that must be unique
+  across concurrent branches is one Baton hands out (B-176). Git records the work; it never decides
+  who holds something or which number is next. Writing a status to git and counting on a refused
+  push to stop a second writer, or choosing the next number by scanning branches, is not how Baton
+  is meant to be used (the owner, 2026-11-03).
+  - **Legacy, phased out as soon as possible.** Until the work that retires each lands, these stay,
+    each marked legacy where it is specified and never extended or copied into a new mechanism:
+    - the git-lock ticket commands — `baton ticket claim | set | done` writing `status:` and
+      retrying a refused push as the mutex (R-BTN-74) — retired by B-178, once Baton holds the
+      repository's leases (R3-1266 for this repository);
+    - every next-free scan of git — a ticket or child id by R-BTN-131's allocator (R-BTN-74's
+      `new` among them), a rule, scenario or gate id by R-BTN-31, a migration number by §13 —
+      retired by B-176, after which a scan only seeds Baton's sequence or serves a session without
+      Baton;
+    - the same pattern in other repositories' own tools (docs' `scripts/claim.sh`, fieldhouse's
+      `scripts/ticket.mjs`), retired when each adopts Baton's.
+  - **Nothing new uses git as a lock or a counter.** A ticket or amendment proposing one is a
+    change to Baton, not in it, and goes to the owner.
+  - A collision a legacy path still produces is caught where it is today — the sync's
+    duplicate-id refusal (R-BTN-74, R-BTN-147), the duplicate number at merge — as a backstop,
+    never the design.
+
 - **R-BTN-33 (Baton holds filter fields, never content).** Per live ticket Baton stores what
   matching (§6) and the dashboard's lists read: id, title, path, course, tier, `requires`,
   expedite, `depends_at`, `parent`, `repos`, rank, the position Baton holds (R-BTN-39), and an
@@ -1131,8 +1154,10 @@ live solely in Baton, and both are exportable (R-BTN-88).
                         #   protocol_files, source?, facts?}]; imports?;
                         #   conditions? (bindings,
                         #   R-BTN-161); for the CLI's defaults (R-BTN-74): items, default_course,
-                        #   repos, agent_command, agent_wrapper (B-95); check: {depends_line}
-                        #   (B-111, `baton ticket check` alone reads it; default off);
+                        #   repos, agent_command, agent_wrapper (B-95); check: {depends_line,
+                        #   sections_since, sections_from_id, rules} (B-111; R-BTN-74 says what
+                        #   each does and what CI judges with them: the ticket check and commands
+                        #   alone read them; default off);
                         #   ticket_prefix, legacy_ids, prefixes, project, tags, projects
                         #   (B-112, the ticket commands alone read them)
     tickets.mjs         # optional ticket source; absent, the CLI's markdown source (R-BTN-74)
@@ -1227,22 +1252,73 @@ live solely in Baton, and both are exportable (R-BTN-88).
     `check: {depends_line: true}` in `.baton/baton.json` (default off) it also holds each markdown
     ticket's `**Depends on:**` body line — which runs to the next blank line or `**Label:**` line;
     a `**Used by:**` line is never read — to its `depends_on`, both ways; a ticket with no such line
-    is not compared. Exit 1 with one `path: message` line per finding, 0 without; an unreadable
-    root or a malformed `baton.json` is an error (exit 2). It reads; it never writes.
+    is not compared. A ticket is dated by the day it was filed: its `## Status` `_filed
+    YYYY-MM-DD` line, else the author day (`%as`) of its file's first commit
+    (`--diff-filter=A`), else — a file not yet committed — today; never by a later edit. The
+    sections check alone dates it by the later of the `_filed` line and that first commit where
+    git shows the commit, so a `_filed` line copied from an older ticket cannot carry a new one
+    back past the cutover in a full clone. With `check: {sections_since: "<YYYY-MM-DD>"}` (default
+    off), a live ticket filed on or after that day whose `### Trust` or `### Invariants` section is
+    absent, empty or still the skeleton's `_(…)_` placeholder is a finding. Not judged: a `kind:
+    project` page, which builds nothing, and a request ticket (`tags: [request]`, as `ticket
+    request` writes it, R-BTN-127), one sentence its course's legs turn into the work's own
+    tickets; and a ticket the runner writes for a condition (`handles:`, R-BTN-161) or a call
+    (`called_by:`, R-BTN-165), whose body is the leg's own subject and body. A child a filing leg
+    writes (`parent:` alone) is the work's own ticket and is judged like any other; the standard
+    filing legs write both sections and the `_filed` line. With `check:
+    {sections_from_id: "<prefix>-<n>"}` beside it (default off; this repository: `B-176`), a live
+    ticket under that prefix numbered `n` or above without a `_filed` line is a finding too, and is
+    otherwise judged by it, so the check decides it without history, in CI's depth-1 clone
+    included; a ticket below `n`, or under a legacy prefix, without a `_filed` line is dated by its
+    first commit, which a shallow clone (`git rev-parse --is-shallow-repository`, whose boundary
+    commit shows every older file as added there) does not show: it is listed as undetermined, on
+    one line, never a finding. `tickets new` writes the `_filed` line into every filing,
+    `--body-file`'s included, as `ticket request` does, and on or after the day refuses, before it
+    pushes, a filing whose either section is absent, empty or a placeholder — the skeleton is
+    filled by `--trust` and `--invariants` — so no unfilled ticket reaches the default branch to
+    fail every open PR's check. It also reports, never as a finding, each live ticket citing a
+    rule id that a dated entry of the spec's history (`check.rules: {history, prefix}`, default
+    `spec/BATON_SPEC_HISTORY.md` and `R-BTN`; no file, no report) amended — one its bold title
+    names (`**YYYY-MM-DD — <ids>: …**`) or its `Rules changed: <ids>` line names, the line
+    directly under the one the title closes on (an id only the entry's body mentions, as evidence
+    or in a review round, is not one it amended) — dated after the day the ticket answered for
+    that rule: the day it was filed, or the day of a later `rules re-read` note in its `## Status`
+    naming the rule (the claim's, below, or `_(<date>: rules re-read: <id>, …)_`, which a spec PR
+    that rewrote a clause adds for the ids it handled). The comparison is by day: an entry dated
+    the same day as that answer is not after it. `npm run check:spec` fails an entry dated after
+    2026-11-03 that names no rule id in its title and has no `Rules changed:` line (`Rules
+    changed: none.` for one that amends no rule); an entry dated on or before 2026-11-03 counts
+    only where its title names ids, so the report covers the amendments from 2026-11-04 on, and of
+    the earlier ones only those whose titles name their rules. One line per ticket, then their
+    count. In a shallow clone the report is skipped with one line saying so; that is never a
+    finding. Exit 1 with one `path: message` line per finding, 0 without; an unreadable root or a
+    malformed `baton.json` is an error (exit 2). It reads; it never writes.
+  - **What the guards trust.** The `_filed` line, `tags: [request]` and the `rules
+    re-read` notes are claims the ticket's author writes in git, which anyone who can push can
+    write (`docs/security-model.mdx`, reach 3); the check and the claim read them and verify
+    nothing about them beyond their form, and review is what verifies them. A `_filed` line dated
+    falsely, a tag written to escape the sections check, or a re-read note naming ids
+    its author did not re-read is the author's false statement, which review catches, not the
+    machine. The guards prevent the honest mistake — a ticket built as written after a ruling, a
+    filing without its sections — and claim no more.
   - **The ticket commands** (B-112, R-BTN-127): `baton ticket new | claim | set | done`, whose behaviour is
     the git-lock commands docs' `claim.sh` and the repositories' `scripts/ticket.mjs` had, kept
-    once in the CLI. Each is one commit pushed straight to the default branch from a throwaway
+    once in the CLI. `claim`, `set` and `done`'s push-retry as the mutex, and `new`'s next free
+    id, are legacy, to be retired (R-BTN-193); `new` itself stays. Each is one commit pushed straight to the default branch from a throwaway
     worktree at the freshly fetched head (`--branch`, else the checkout's `origin/HEAD`, else
     `main`), so the caller's branch, HEAD and working tree are never written; a push refused
     because the branch moved is fetched again and retried, up to six tries, and a refusal for any
     other reason is the operator's, reported in git's own words.
     - `new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y] [--tier T]
-      [--order N] [--repos a,b] [--course C] [--body-file F]` takes the next free `<prefix>-<n>`
+      [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]` takes the next free `<prefix>-<n>`
       on the head it pushes to (across the items folder at any depth, `archive/` included, among
       files whose frontmatter carries an `id`), and writes the conventional body unless
       `--body-file` names one: `**Brief:**` (the description), `**Spec:**`, `**Depends on:**`
       (from `--depends-on`; `none.` when empty), `**Used by:**`, `### What to build`,
-      `### Tests`, `### Exit criteria`, `**Requires:**` and `## Status` with the filing date.
+      `### Trust` (every new input the ticket adds — a field, a file, a commit trailer, a request —
+      who may write it and how it is verified, or "no new input"), `### Invariants` (the rules it
+      must not break, by id, and how the design keeps each), each with a placeholder naming no
+      repository's ids or paths, `### Tests`, `### Exit criteria`, `**Requires:**` and `## Status` with the filing date.
       A `--body-file` whose `**Depends on:**` line disagrees with the flag is refused. Before the
       push it judges what it writes as `baton ticket check` judges it — the body line against
       `depends_on`, every id a live or closed ticket, the board post's validation of §4.4 (the
@@ -1250,7 +1326,7 @@ live solely in Baton, and both are exportable (R-BTN-88).
       no branch at all. Each dependency's `**Used by:**` line gains the new id once: the reverse
       mention. A description that ends with a `Requires:` clause (`… Requires: human-operator,
       drivable-browser.`) has the capabilities it names written on the `**Requires:**` line.
-    - `claim <id> [-i KEY] [--url URL] [--offline]` moves a ticket available → in-progress, and
+    - `claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]` moves a ticket available → in-progress, and
       refuses one that is not available or whose `depends_on` are not all done (archived, or
       carrying any of the markdown source's closed statuses). Before it writes it reads the
       ticket from Baton with the key `-i` names (else `BATON_KEY_FILE`) — the pickup side of the
@@ -1272,7 +1348,17 @@ live solely in Baton, and both are exportable (R-BTN-88).
       unreachable, `forbidden`, no key or a key that cannot be read (judged before any request,
       and named as the key's), or a position on a course whose start neither names — refuses, naming which, rather than fall through to the
       frontmatter, unless `--offline` claims on git's word alone (Baton's position is then
-      unknown, not refuted). `set <id> <status> [--pr URL] [--note TEXT]` writes any live
+      unknown, not refuted). It also refuses a ticket whose body cites a rule that a history
+      entry dated after the ticket answered for it names (the check's stale-rule reading, above,
+      at the head the claim lands on), listing each id with the entry's date and title. In a
+      shallow clone whose boundary would date the ticket, it first runs `git fetch --unshallow`
+      (bounded, quiet), and refuses, naming that fix, when the fetch fails. With `--rules-reread`
+      it claims only when the comma-separated ids it names (`--rules-reread R-BTN-33,R-BTN-50`)
+      are exactly the stale ones, refusing otherwise with the ids not named and those not amended
+      since; the claim's commit adds `_(<date>: rules re-read at claim: <id> (amended <date>),
+      …)_` to the ticket's `## Status`. `set <id> in-progress` is a claim and reads the same, and
+      no other `set` takes the flag. `set <id> <status> [--pr URL] [--note TEXT] [--rules-reread
+      <ids>]` writes any live
       status — `done` is `done`'s — and adds the pull request URL to `prs` once; a release
       (`set <id> available`) keeps every `prs:` entry and refuses a write that would drop a PR
       Baton's record holds while Baton offers the ticket ready past its start. Its commit is the
@@ -2294,7 +2380,7 @@ mean (R-BTN-50).
   | `branch` | R-BTN-96 | R-BTN-96 | branches |
   | `ask`, `deliver`, `announce` | condition handlers (R-BTN-169): `ask` asks through the person leg `answer` | R-BTN-169 | — |
 
-  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder, `archive/` and the open ticket and request branches, as every allocator below), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call — it asks Baton nothing. Where the forge refuses the push because the branch is protected (the CLI's adapter for the forge `--forge` names, else `github` where `origin`'s host is `github.com`, recognises that refusal by the forge's own message: GitHub's `GH006` protected-branch refusal, or a `GH013` ruleset refusal naming a pull-request or update rule and never secret push protection; GitLab's `not allowed to push code to protected branches`; Gitea's `Not allowed to push to protected branch`), it pushes the same commit to `baton-request/<ID>`, or takes the next free id when that branch exists — a branch no `branch_pattern` may match (R-BTN-190), so the request's PR is never one of the new ticket's PRs and no leg continues it (R-BTN-25) — opens a PR from it with the caller's forge credential and prints its URL. With no forge credential it prints the pushed branch and exits non-zero. On a `git` forge, which has no adapter, and for any other refusal — `refs.other` refusing the side branch to a runner under `protected` among them — it reports git's own words (R-BTN-74), opens nothing and exits non-zero. Otherwise the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
+  A course whose course file carries `starts_from: request` (a closed set: `request` alone) is entered by `baton ticket request` (R-BTN-127) — `create-spec`, `build-app` and `spec-to-tickets` do; an ordinary course keeps its hand-filed tickets. `baton ticket request "<one sentence>" --course <course>` files ONE request ticket into `<items>/<ID>.mdx` (§2f R-BTN-74's source; the next free id under the repository's own prefix — the commonest among its ticket files — across the folder, `archive/` and the open ticket and request branches, as every allocator below), the sentence as its `title` and `description`, `course:`, `status: available` and `tags: [request]`, and a `## Status` with the `_filed` line (R-BTN-74), and pushes it as one commit — `<ID>: request — <the sentence> — <course>` — straight to the default branch (§2f; `--branch`, else the checkout's `origin/HEAD`, else `main`), made in a throwaway worktree so the caller's branch, HEAD and working tree are untouched and retried on a moved head, up to six tries. It is a repository command, not an API call — it asks Baton nothing. Where the forge refuses the push because the branch is protected (the CLI's adapter for the forge `--forge` names, else `github` where `origin`'s host is `github.com`, recognises that refusal by the forge's own message: GitHub's `GH006` protected-branch refusal, or a `GH013` ruleset refusal naming a pull-request or update rule and never secret push protection; GitLab's `not allowed to push code to protected branches`; Gitea's `Not allowed to push to protected branch`), it pushes the same commit to `baton-request/<ID>`, or takes the next free id when that branch exists — a branch no `branch_pattern` may match (R-BTN-190), so the request's PR is never one of the new ticket's PRs and no leg continues it (R-BTN-25) — opens a PR from it with the caller's forge credential and prints its URL. With no forge credential it prints the pushed branch and exits non-zero. On a `git` forge, which has no adapter, and for any other refusal — `refs.other` refusing the side branch to a runner under `protected` among them — it reports git's own words (R-BTN-74), opens nothing and exits non-zero. Otherwise the push triggers the sync (§7.1), the Baton places the ticket at the course's `start` with its `start_leg` queued (R-BTN-39), and the next claim starts the course (§6.1). It refuses a course `.baton/baton.json` does not list (R-BTN-74's sync would refuse the ticket) and a course without `starts_from: request`, each as one line.
 
   - **A wait for a person's answer is a person's leg** (R-BTN-116), answered by a
     `std:decision@1`: `decision`'s `answer` and `build-app`'s `decide`. Where the policy admits `sync` for `std:decision@1`, the ticket's `answer:`
@@ -2332,7 +2418,7 @@ mean (R-BTN-50).
         course's `branch_pattern`, and every `baton-request/*` branch (R-BTN-131), with a commit
         not reachable from the default branch (R-BTN-96).
         Every allocator does the same: `baton ticket request`, `baton ticket new` and the source's
-        `file` export. A collision that still happens is caught by the sync's duplicate-id
+        `file` export — a legacy scan, retired by B-176 (R-BTN-193). A collision that still happens is caught by the sync's duplicate-id
         refusal (R-BTN-74), and the owner renumbers;
       - a document.
 
@@ -6452,7 +6538,7 @@ One SQLite database per tenant, in the tenant's Durable Object (or the local hos
 schema below is the current one, together with `BATON_MCP_OAUTH_SPEC` §12's rows (the OAuth
 tables, `mcp_keys`' OAuth columns, `oauth_redirect_uris`, its alarm instants and the `oauth` event
 kind), which B-73 folds in here; `src/migrations/` holds the numbered, append-only migrations that
-reach it, and the object refuses to serve until every migration is applied (§2).
+reach it, each new one the next free number at merge as R-BTN-31 numbers a scenario (legacy until B-176, R-BTN-193), and the object refuses to serve until every migration is applied (§2).
 
 **Conventions.**
 
@@ -6861,8 +6947,9 @@ never through a claim.
   passes on the hosts it runs on (G-BTN-37). A gate `G-BTN-<n>` is an invariant the
   implementation must establish, proved by the scenarios or tests its row names.
 - **R-BTN-31 (scenarios are part of drafting).** Every ticket that changes Baton's behaviour
-  names, under **Tests**, the scenarios it adds or makes pass; a new scenario takes the next
-  number and a row here in the same change, and the ticket's exit criteria require `npm test`
+  names, under **Tests**, the scenarios it adds or makes pass; a new scenario takes the next free
+  number at merge (legacy until B-176, R-BTN-193) — the branch merges main before it merges, and renumbers if main took the
+  number — and a row here in the same change, and the ticket's exit criteria require `npm test`
   green with it. A behaviour change without a scenario is incomplete.
 - **R-BTN-68 (the core is a checked model).**
   - The core's state machine — claims, fencing, stations and legs, observations, ends and their
@@ -6910,8 +6997,8 @@ W*n* are runners. Fixture repositories: `docs` (GitHub), `ops`, `plain` (forge `
 | S-BTN-26 two repositories, two courses | `ops` (weight 50, course `runbook`) beside `docs`, both with `T-1`; W1 declares one course, W2 both; a CLI runner on one checkout declaring two courses | distinct tickets; W1 never offered `ops`; `docs` first, each in default order, per-group limit; tokens per repository; a shared branch blocks pushes while either is held; `min_runner_version` gates W2; the runner declares both courses, claims a leg of either in consecutive claims, loads each from the claim's `course_id` and snapshot, and `--course` narrows it to one (B-103) |
 | S-BTN-42 webhooks | a review delivery, its repeat, a forgery, a 10-delivery burst, Baton's own events, extra fields; a body of 26,214,401 bytes on each notification route | one dispatch, then one trailing after 30 s; repeat, forgery and own events dispatch nothing; only R-BTN-73's fields read; `too-large` before any digest, outside the per-IP rule |
 | S-BTN-171 a dependency cycle is refused | a board post whose live tickets depend on each other in a loop; two of them; a self-dependency; a diamond; a post closing the very ticket it depends on | `invalid-params`, naming `B-1 → B-2 → B-1` once, and nothing of the post stored: no head, no ticket; `B-1 → B-1` alike; the diamond and the closed edge accepted |
-| S-BTN-189 the ticket commands | a bare origin; `baton ticket new` with `--depends-on`, `--tags` and `--project`, a legacy id pattern, a `--body-file` whose line disagrees with the flag, a filing that closes a cycle, a prefix the pattern cannot allocate; `claim` of a held, dependent, in-review and archived ticket; `set` with `--pr` twice; `done`; a peer's push between a command's fetch and its push; `baton repo init`, then an edited `HOW-TICKETS-WORK.md` | one commit on the origin's default branch, the ticket alone, the caller's branch and tree untouched; the next free id under the configured prefix, the skeleton with the flag's `**Depends on:**` line and the dependency's reverse mention; each refusal before the push, nothing landed; the retry takes the id after the peer's; a status, a PR once, the file archived; the page written, its edited copy one finding and exit 1, `init --force` writing it again |
-| S-BTN-172 the ticket check | `baton ticket check` on a clean repository, on one whose tickets loop, on one with no `.baton/baton.json`, and on this repository's own `tickets/` | exit 0 with the count, `✓ no findings`; exit 1 with one `path: message` line (the loop at its first ticket's file) and the count; the CLI's error, exit 2; this repository passes, which CI's `npm run check:tickets` runs |
+| S-BTN-189 the ticket commands | a bare origin; `baton ticket new` with `--depends-on`, `--tags` and `--project`, a legacy id pattern, a `--body-file` whose line disagrees with the flag, a filing that closes a cycle, a prefix the pattern cannot allocate; `claim` of a held, dependent, in-review and archived ticket; `claim` of a ticket citing a rule a history entry dated after the ticket's first commit names, without and then with `--rules-reread`; `set` with `--pr` twice; `done`; a peer's push between a command's fetch and its push; `baton repo init`, then an edited `HOW-TICKETS-WORK.md` | one commit on the origin's default branch, the ticket alone, the caller's branch and tree untouched; the next free id under the configured prefix, the skeleton with the flag's `**Depends on:**` line and the dependency's reverse mention; each refusal before the push, nothing landed; the stale claim refused naming the id, the entry's date and its title, then landed with its dated `rules re-read at claim` Status line; the retry takes the id after the peer's; a status, a PR once, the file archived; the page written, its edited copy one finding and exit 1, `init --force` writing it again |
+| S-BTN-172 the ticket check | `baton ticket check` on a clean repository, on one whose tickets loop, on one with no `.baton/baton.json`, and on this repository's own `tickets/`; on one whose live ticket cites a rule a later history entry names; on tickets filed before and on `check.sections_since`, one without `### Trust`; a depth-1 clone with `check.sections_from_id`, a hand-filed ticket at that id without a `_filed` line | exit 0 with the count, `✓ no findings`; exit 1 with one `path: message` line (the loop at its first ticket's file) and the count; the CLI's error, exit 2; this repository passes, which CI's `npm run check:tickets` runs; the stale ticket's line and the stale count, exit 0; the earlier ticket passing and the later one a finding, exit 1; the hand-filed ticket's missing `_filed` line a finding, exit 1 |
 | S-BTN-54 a Baton without GitHub | `plain` with a `post-receive` running `baton repo sync --defaults-only` on the `branch` course; `Baton-Verdict:` trailers, one without `Baton-Claim`; `--if-wanted` cron | the ticket moves to `merged` on push syncs alone; the unclaimed verdict counts; `wanted` holds until a later-numbered post; no forge credential or link |
 | S-BTN-55 the sync key | a sync key posts; it is registered for a second repository; machine (sync off), mirror and revoked keys post; a replay | accepted; `conflict`; `forbidden`; `unauthenticated` |
 | S-BTN-56 other forges, edges of a want | `lab` and `tea` notifications, good and bad; `#mirror` vs `#sync` tokens; a dispatch answering 500; near-miss URLs; `--defaults-only` with a `sync.mjs`; a push by another pusher with the mirror's author email | bad refused in the Worker, good record wants, the spoofed push's included; `#mirror` `forbidden`; one dispatch retry; only `web_base` URLs kept; the ticket fails |
@@ -7370,6 +7457,7 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 
 **Scope and truth**
 
+- Chose Baton as the only lock and the only counter — its lease decides who holds a ticket, its sequences which number is next — and git as the record of the work alone, over git as a lock (a status pushed, a refused push as the mutex) or a counter (the next free number by a scan): the git-based mechanisms that exist are legacy, kept only until the work that retires each lands, and nothing new is built on them (2026-11-03, the owner, "I want the spec to be very clear that this is not how Baton is meant to be used. And it is merely a legacy to be phased out as soon as possible."; R-BTN-193, R-BTN-4, R-BTN-74, R-BTN-131).
 - Chose standard courses that assume no particular deployment and serve the simpler end of Baton's range, with a factory's security and quality-assurance courses kept by that factory, over standard courses that carry every factory's guarantees: Baton scales from a single user's naive setup to a factory whose threat model shapes its architecture, and only the mechanisms are common to both (2026-10-29; R-BTN-131).
 - Chose a protected default branch that only a deterministic merge runner and humans update, with merge criteria in Baton, over a git proxy, per-worker forks, or accepting unsigned pushes and verifying signatures: protected branches are what engineers already reason with and every forge has one, and the merge decision belongs in deterministic code (2026-10-28; R-BTN-180, R-BTN-182, R-BTN-183).
 - Chose to keep Baton cooperative on one trusted machine and leave enforcement to the deployment, over requiring a merge runner, proxy or sandbox everywhere: Baton must stay usable for a small project run locally (2026-10-28; R-BTN-180).
@@ -7536,6 +7624,8 @@ One line per decision in force; the reasoning and the rejected alternatives in f
 - Chose `timed_out` over `neutral` for a check command's timeout or `exec` error, and no `neutral` at all, over posting a timeout as `failure` beside an advisory `neutral` or stating the gap: a GitHub required check passes on `neutral`, so a change that hung its own tests landed (2026-11-02, the owner, B-175; R-BTN-114, R-BTN-153).
 - Chose a two-step sign-in bind — the code's row previewed (role, client address, age), then bound only on an explicit yes the CLI takes no `--yes` for — over one call that binds at once: the address is the one defence against a relayed code, and it must be read before anything binds (2026-11-03, B-172, written at the owner's request; R-BTN-155).
 - Chose a final retirement that ends everything scoped to the repository — sessions' reach, MCP keys and OAuth grants with their codes, sync, mirror and runner keys and registration tokens, active claims (fenced as a force-reap), outbox entries, wants and dispatches — exports only its tombstone and never re-registers its id, over a reversible flag each surface interprets: nothing scoped to it can come back to life (2026-11-03, B-173, written at the owner's request; R-BTN-47).
+- Chose process guards in the ticket commands and checks over reviewers catching the same faults round by round: a claim refused while its ticket cites a rule amended since the ticket was filed or last re-read it, unless the claimer names the ids it re-read, over a failing check, so a ruling never turns every older ticket's pull request red; and `### Trust` and `### Invariants` required of tickets filed from a cutover day over a sweep of the tickets already filed (2026-11-03, the owner, "I would like you to implement the process changes that prevent the sort of thrashing we are seeing now."; R-BTN-74, R-BTN-31).
+- Chose migration and scenario numbers taken as the next free one at merge, the branch merging main first, until Baton hands every identifier out (B-176), over a ledger of reservations in git: a ledger with git as the lock moved the race onto a file a branch could edit by hand, and Baton is the allocator (2026-11-03, the owner, "Wouldn't it be simpler to solve this if Baton also handed out ticket IDs?"; R-BTN-31, §13).
 
 ## Open questions
 

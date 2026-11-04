@@ -99,15 +99,26 @@ checkout, run the CLI as `node cli/baton.mjs`.
   printed) instead of starting over — overriding only a false `available`, never the git lock or
   a parked or closed status — and refuses, rather than trust the frontmatter, when a read cannot
   be answered (`--offline` for an unreachable Baton). A release (`set <id> available
-  [--note TEXT]`) keeps every `prs:` entry and its commit is the hand-off.
+  [--note TEXT]`) keeps every `prs:` entry and its commit is the hand-off. `claim` also refuses a ticket
+  citing a rule whose `spec/BATON_SPEC_HISTORY.md` entry, by its title, amended it after the ticket was filed or last re-read it, until
+  `--rules-reread <id>,…` names exactly those ids (R-BTN-74); in a shallow clone it deepens the
+  clone first. A new migration or scenario number is the next free one at merge (B-176 moves it
+  into Baton).
 - `npm run check:wiki` — every page in `tickets/` and `docs/` compiles as MDX, uses only known
   components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
 - `npm run check:tickets` (or `node cli/baton.mjs tickets check [--repo DIR]`) — check this
   repository's ticket source without posting it, as `baton repo sync` reads it: the board post's
   validation, every `depends_on` target and dependency cycle, and — with
   `check.depends_line` in `.baton/baton.json` — each ticket's `**Depends on:**` line against its
-  `depends_on` (B-111). One `path: message` line per finding, exit 1 with findings; CI runs it on
-  `tickets/`.
+  `depends_on` (B-111); with `check.sections_since`, a ticket filed on or after that day (the
+  later of its `_filed` line and its first commit) whose `### Trust` or `### Invariants` is absent,
+  empty or a placeholder (R-BTN-74), request tickets and leg-filed children aside; with
+  `check.sections_from_id` (here `B-176`), a ticket at or above that id without a `_filed` line.
+  One `path: message` line per finding, exit 1 with findings; CI runs it on `tickets/`. CI's
+  clone is depth 1, so there it judges the tickets from `B-176` on by their `_filed` lines and
+  only lists, as undetermined, an older ticket without one. It also lists, never as a finding,
+  the live tickets citing a rule amended since they were filed or re-read it (`check.rules`), and
+  says so when a shallow clone skips that list.
 - `node cli/baton.mjs request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B]` —
   start a course whose product is a spec or a ticket — `create-spec`, `build-app` — from one
   sentence (B-98). Files one request ticket (the sentence as title and description, `course: C`,

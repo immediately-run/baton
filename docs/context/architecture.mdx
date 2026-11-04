@@ -74,7 +74,9 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN
   write that changes them; what lapses with time (liveness, readings, bars) is the alarm's, so
   fleet-wide views (counts, blocks, wake-ups, the dashboard) are current within one alarm turn.
 
-- **The server is the only allocator.** Claims, heartbeats and advances are the whole of
+- **The server is the only allocator.** Of leases and of numbers alike: git records the work and is
+  never a lock or a counter; the git-based ones that exist are legacy, phased out (R-BTN-193).
+  Claims, heartbeats and advances are the whole of
   a runner's knowledge: which ticket, which station, which leg — offered by the claim,
   fenced by the heartbeat (R-BTN-6), validated at the advance (the edge, the run limit,
   the gates). Runners never derive state from files; the sync derives the board from

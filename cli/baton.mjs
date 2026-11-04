@@ -64,11 +64,11 @@
 //                   [--eject tickets|stations] [--pin owner/name@commit] [--force]
 //                — a repository's own sync and scaffold (§2f R-BTN-74, R-BTN-131)
 //   baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]
-//                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]
+//                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]
 //                — file one ticket, the next free id under .baton/baton.json's ticket_prefix,
 //                with the conventional body, as one commit pushed to the default branch (B-112)
-//   baton tickets claim <id> [-i KEY] [--url URL] [--offline]
-//   baton tickets set <id> <status> [--pr URL] [--note TEXT] [-i KEY] [--url URL] [--offline] | done <id> [--pr URL]
+//   baton tickets claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]
+//   baton tickets set <id> <status> [--pr URL] [--note TEXT] [-i KEY] [--url URL] [--offline] [--rules-reread <ids>] | done <id> [--pr URL]
 //                — claim asks Baton first (B-129): before it writes, it reads the ticket from
 //                Baton with the key -i names (else BATON_KEY_FILE) — the board for the station,
 //                the ready leg and the live claims, the history for the path and the PRs of the
@@ -80,12 +80,17 @@
 //                rather than trust the frontmatter, unless --offline. set/done write any live
 //                status, each one commit pushed to the default branch (B-112); a release
 //                (set <id> available) keeps every prs: entry and its commit is the hand-off — the
-//                PRs, Baton's station and next leg, the branch and --note's what is left (B-129)
+//                PRs, Baton's station and next leg, the branch and --note's what is left (B-129);
+//                claim refuses a ticket citing a rule the spec's history amended since the ticket
+//                was filed or last re-read it, until --rules-reread names those ids (R-BTN-74)
 //   baton tickets check [--repo DIR] [--quiet]
 //                — check this repository's ticket source without posting it: ids, the board
 //                post's validation, depends_on targets and cycles, (with check.depends_line in
-//                .baton/baton.json) each **Depends on:** line, and the generated "How tickets
-//                work" page; exit 1 naming every finding (B-111, B-112)
+//                .baton/baton.json) each **Depends on:** line, (with check.sections_since) the
+//                ### Trust and ### Invariants sections (with check.sections_from_id, the _filed
+//                line from that id on), and the generated "How tickets work" page;
+//                exit 1 naming every finding (B-111, B-112); live tickets citing a rule amended
+//                since they were filed are listed, never a finding (R-BTN-74)
 //   baton tickets --help
 //                — the commands, the tags Baton reads and their meanings, the Requires: clause (B-112)
 //   baton request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B] [--remote R]
