@@ -26,15 +26,15 @@ requirement no ticket covers: no board-post `markers` are read, there is no `mar
 nothing logs `foreign-write` or raises `baton.foreign-write`. Its scenario S-BTN-25 and gate
 G-BTN-50 were uncovered with it. The adversarial review (adv-1 M6) also made the marker caps
 truncate instead of refuse, and (m9) put the `branch` course's verdicts under the same rule.
-**Spec:** `spec/BATON_SPEC.md` §1 R-BTN-46 (markers carry `claim=<nonce>`, `markers_seen`,
-`foreign-write`, the first snapshot seeding); §4.4 (the board post's `markers` and
-`markers_truncated`; markers never refused); §2.3 R-BTN-149 (20 markers per ticket, 20,000 in
-all); §4.7 R-BTN-85 (the `foreign-write` sub); §3.4 R-BTN-139 (only trusted authors' markers are
-posted) and R-BTN-96 (`branch` verdicts posted as markers); §4.3 R-BTN-62 (a held post's markers
-taken as a refresh); §5.8 (the marker courses' `.baton/markers.jsonl`); §9.5 R-BTN-19 (a fenced-off
-session-mode child noticed as `foreign-write`); §9.1 (the nonce is public); §13.4 `markers_seen`;
-§15 S-BTN-25, S-BTN-54, S-BTN-122, G-BTN-50, G-BTN-142.
-**Depends on:** B-46 (the fact adapters' `trusted` flag, R-BTN-139, which decides what is posted);
+**Spec:** [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) [R-BTN-46](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (markers carry `claim=<nonce>`, `markers_seen`,
+`foreign-write`, the first snapshot seeding); [§4.4](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4) (the board post's `markers` and
+`markers_truncated`; markers never refused); [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3) [R-BTN-149](../spec/BATON_SPEC/02-deployments.md#sec-2-3) (20 markers per ticket, 20,000 in
+all); [§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) [R-BTN-85](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) (the `foreign-write` sub); [§3.4](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) [R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) (only trusted authors' markers are
+posted) and [R-BTN-96](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) (`branch` verdicts posted as markers); [§4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) [R-BTN-62](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) (a held post's markers
+taken as a refresh); [§5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) (the marker courses' `.baton/markers.jsonl`); [§9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5) [R-BTN-19](../spec/BATON_SPEC/09-claims.md#sec-9-5) (a fenced-off
+session-mode child noticed as `foreign-write`); [§9.1](../spec/BATON_SPEC/09-claims.md#sec-9-1) (the nonce is public); [§13.4](../spec/BATON_SPEC/13-data-model.md#sec-13-4) `markers_seen`;
+[§15](../spec/BATON_SPEC/15-verification.md#sec-15) S-BTN-25, [S-BTN-54](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-122](../spec/BATON_SPEC/15-verification.md#scenarios), G-BTN-50, [G-BTN-142](../spec/BATON_SPEC/15-verification.md#gates).
+**Depends on:** B-46 (the fact adapters' `trusted` flag, [R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), which decides what is posted);
 B-57 (`baton.<sub>` conditions); B-77 (`baton.station-jump`, the other half of S-BTN-25, and a held
 post's refresh). R3-1265 writes the `branch` course's `Baton-Claim` trailers and posts its
 verdicts as markers; this ticket judges them.
