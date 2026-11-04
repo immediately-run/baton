@@ -7,6 +7,14 @@ tickets in `tickets/`. Amend the spec here, by pull request, in the section file
 rule, then `npm run spec:index`; docs' `content/specs/BATON_SPEC.mdx` is a stub. Read the item and
 the spec sections it cites before changing anything — open the index, then only the files you need. See `README.md` for the layout.
 
+`spec/` is a Grove bundle beside `tickets/` and `docs/` (B-180): every spec file is a page with
+`title` and `description` frontmatter (`npm run spec:index` writes the section files'), and
+`npm run check:wiki` compiles it as MDX, so a bare `<word>` or `{…}` in prose goes in a code span.
+A new ticket writes its spec citations as relative links to the section's file and heading, e.g.
+`[BATON_SPEC §6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) (R-BTN-120)`,
+never to `spec/BATON_SPEC.md#…` (the index holds no section text); `node scripts/link-spec-refs.mjs`
+writes them from `` `spec/BATON_SPEC.md` §n `` or `BATON_SPEC §n`, and `--check` says when one is due.
+
 ## Claiming a ticket
 
 Ask Baton first (B-129): before `baton tickets claim`, read `node cli/baton.mjs board baton`

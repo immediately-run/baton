@@ -105,7 +105,7 @@ checkout, run the CLI as `node cli/baton.mjs`.
   `--rules-reread <id>,…` names exactly those ids (R-BTN-74); in a shallow clone it deepens the
   clone first. A new migration or scenario number is the next free one at merge (B-176 moves it
   into Baton).
-- `npm run check:wiki` — every page in `tickets/` and `docs/` compiles as MDX, uses only known
+- `npm run check:wiki` — every page in `tickets/`, `docs/` and `spec/` compiles as MDX, uses only known
   components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
 - `npm run check:tickets` (or `node cli/baton.mjs tickets check [--repo DIR]`) — check this
   repository's ticket source without posting it, as `baton repo sync` reads it: the board post's
@@ -136,10 +136,10 @@ checkout, run the CLI as `node cli/baton.mjs`.
 
 ## The wikis
 
-The repository holds two [Grove](https://github.com/immediately-run/grove) wikis, which
-immediately.run opens: `package.json`'s `"immediately.run": {"content": ["tickets", "docs"]}`
+The repository holds three [Grove](https://github.com/immediately-run/grove) wikis, which
+immediately.run opens: `package.json`'s `"immediately.run": {"content": ["tickets", "docs", "spec"]}`
 lists them, and each folder's `immediately.run.json` opens it with the viewer it names —
-`tickets/` with `immediately-run/baton-board` (B-114), `docs/` with the wiki viewer.
+`tickets/` with `immediately-run/baton-board` (B-114), `docs/` and `spec/` with the wiki viewer.
 
 - **`tickets/`**, the tickets:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/home.mdx>.
@@ -153,6 +153,11 @@ lists them, and each folder's `immediately.run.json` opens it with the viewer it
   names in `opensWith` (B-114) — this repository holds no component code for it.
 - **`docs/`**, the documentation:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/home.mdx>.
+- **`spec/`**, the specification (B-180):
+  <https://immediately.run/present/github/immediately-run/baton/main/bundle/spec/home.mdx>.
+  Its pages are `.md`: `BATON_SPEC.md` (the generated index), `BATON_SPEC/` (one file per
+  section), the history and the MCP OAuth companion. Tickets and docs link a section by a relative
+  path to its file and heading (`node scripts/link-spec-refs.mjs` writes them).
 
 Pages are MDX, so `<` and `{` in prose go in backticks or are escaped (`\<`, `\{`).
 
