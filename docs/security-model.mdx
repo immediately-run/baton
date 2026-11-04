@@ -14,7 +14,7 @@ mitigations, with what each costs.</Lede>
 ## The decision
 
 - **The perimeter is push.** Whoever can push a registered repository's default branch, or
-  is in its `pushers`, is a legitimate user of it (BATON_SPEC R-BTN-66, §12
+  is in its `pushers`, is a legitimate user of it (BATON_SPEC R-BTN-66, [§12](../spec/BATON_SPEC/12-security.md#sec-12)
   "Pushers are legitimate"). Baton does not fortify git: people without push gain nothing,
   and people with push are trusted with everything git controls.
 - **What agents must not change lives in Baton, not in git** (R-BTN-66): keys, grants and
@@ -45,7 +45,7 @@ further:
 - **A compromised Baton is recovered, not resisted.** Baton's server is trusted. Reach 0 below is
   described so its recovery (B-125, B-135) is understood, not defended by the spec: Baton holds the
   GitHub App key and the forge trigger tokens and dispatches workflows itself, signs no outbox
-  entry or policy read, and its trusted runners act on its record without pins (BATON_SPEC §12.8).
+  entry or policy read, and its trusted runners act on its record without pins ([BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8)).
 
 ## The core guarantee
 
@@ -55,7 +55,7 @@ is that an unauthorised change never lands, not that it lands and is ignored.
 
 1. **Runners propose, trusted runners land.** Runners write only their own branches. Only trusted
    runners (the merge runner first) and the human-only identity update the default branch and
-   tags. The specification is BATON_SPEC §12.8 (baton#134), which supersedes this page where they
+   tags. The specification is [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) (baton#134), which supersedes this page where they
    differ.
 2. **No runner change to Baton's state lands without a human.**
    - **Courses and leg logic** (`.baton/**`, agent configuration, `.github/workflows/**`): for
@@ -100,7 +100,7 @@ environment limited to that branch, or as a process above the VM level.
 live in the same repository, and a workflow pushed to one runs with whatever secrets the
 repository exposes. Per-worker forks would close that by GitHub's design; they stay the fallback.
 
-**Where Baton ends and Fieldhouse begins.** Baton is cooperative (BATON_SPEC §12): on one machine
+**Where Baton ends and Fieldhouse begins.** Baton is cooperative ([BATON_SPEC §12](../spec/BATON_SPEC/12-security.md#sec-12)): on one machine
 with runners you trust, it needs no merge runner, protected branch, proxy or sandbox, and runners
 may land their own work. Baton's part of the guarantee is never to require a runner to write
 protected state, to hold the policy (protected paths, who lands), and to print each forge's
@@ -139,7 +139,7 @@ every tenant trusts:
 - its database of keys, grants, bars, holds and settings: everything *What a push cannot reach*
   lists;
 - the webhook secrets, the cursor key, the GitHub App's key and the forge trigger tokens
-  (BATON_SPEC R-BTN-94, §12.7): the App's key can dispatch any `workflow_dispatch` workflow, so a
+  (BATON_SPEC R-BTN-94, [§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7)): the App's key can dispatch any `workflow_dispatch` workflow, so a
   compromised server can start a deploy whose workflow accepts dispatch. B-152's move of the key
   to a dispatch courier was dropped with the ruling above (2026-11-01); the recovery is the
   rotation below;
@@ -216,7 +216,7 @@ such secret into an environment with human-only reviewers, narrows the App and r
 
 ### 3. Instructions to agents
 
-A ticket's body and a leg's instructions are the task an agent carries out. BATON_SPEC §12.3
+A ticket's body and a leg's instructions are the task an agent carries out. [BATON_SPEC §12.3](../spec/BATON_SPEC/12-security.md#sec-12-3)
 keeps forge and runner text as quoted data, but the ticket is not quoted data: it is the
 instruction. A pushed ticket can direct the next runner that claims it to do anything that
 runner's credentials allow. In effect it is a prompt injection laundered through the ledger,

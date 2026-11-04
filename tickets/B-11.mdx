@@ -24,11 +24,11 @@ depends_on:
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43); retries became
 the default handler of `error` conditions on 2026-10-20 (§7).
-**Spec:** `spec/BATON_SPEC.md` §7.4 (R-BTN-122 / R-BTN-23), §7.1 (R-BTN-160: `retryable`,
-`LegError(type, …)`, untyped errors as `error.transient`), §7.3 (R-BTN-163: `baton.retries`,
-`baton.contract`), §5.3 R-BTN-83 (held positions, `next_source: retry`), §6.1–§6.2 (the `retry`
-prerequisite and row), §6.6 rule 10, §9.7 (what counts as a failed attempt), §9.9 (activity
-`in-claim-retry`), §13.1's owner `retry` setting, §13.6's `leg_attempts`.
+**Spec:** [BATON_SPEC §7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4) (R-BTN-122 / R-BTN-23), [§7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1) (R-BTN-160: `retryable`,
+`LegError(type, …)`, untyped errors as `error.transient`), [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) (R-BTN-163: `baton.retries`,
+`baton.contract`), [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) R-BTN-83 (held positions, `next_source: retry`), [§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1)–[§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) (the `retry`
+prerequisite and row), [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) rule 10, [§9.7](../spec/BATON_SPEC/09-claims.md#sec-9-7) (what counts as a failed attempt), [§9.9](../spec/BATON_SPEC/09-claims.md#sec-9-9) (activity
+`in-claim-retry`), [§13.1](../spec/BATON_SPEC/13-data-model.md#sec-13-1)'s owner `retry` setting, [§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6)'s `leg_attempts`.
 **Depends on:** B-10 (per-leg rows), B-55 (declared `conditions` with `retryable`, typed
 `LegError`), B-56 (`baton.retries` and `baton.contract` as `suspend` core conditions), B-38 (held
 positions with their `next_source`, for `exhausted`).

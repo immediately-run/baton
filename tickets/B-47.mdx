@@ -20,7 +20,7 @@ depends_on:
 ---
 
 **Brief:** continues B-2 (split 2026-10-19). The owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §8.3 R-BTN-106 (the local channel, the runner checking every move, bounded runs), R-BTN-107 (`attached` and `session` modes), R-BTN-113 (`session_url`), R-BTN-72; §8.1 (the heartbeat); §15 S-BTN-62, S-BTN-75, S-BTN-78, G-BTN-89, G-BTN-99.
+**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) R-BTN-106 (the local channel, the runner checking every move, bounded runs), R-BTN-107 (`attached` and `session` modes), R-BTN-113 (`session_url`), R-BTN-72; [§8.1](../spec/BATON_SPEC/08-runners.md#sec-8-1) (the heartbeat); [§15](../spec/BATON_SPEC/15-verification.md#sec-15) S-BTN-62, S-BTN-75, S-BTN-78, G-BTN-89, G-BTN-99.
 **Depends on:** B-3. The runner checks a session's move as it checks a script's result: `reached` an outcome, `next` a leg leaving it, each named output valid against its schema (R-BTN-108) and every entry requirement of `reached` met (R-BTN-109). S-BTN-62's second move ("a valid move without the station's required output") is refused by B-3's validator and station entry; built first, the channel would check half a move.
 
 ### Requires

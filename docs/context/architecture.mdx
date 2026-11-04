@@ -31,7 +31,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN
   a git write and a check run are outbox entries, delivered by runners that hold the credentials
   and confirmed by reading the effect back. A workflow dispatch is Baton's own call, with the App
   key it holds: Baton's server is trusted, and its compromise is recovered, not resisted
-  (BATON_SPEC §12.8, the owner, 2026-11-01).
+  ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8), the owner, 2026-11-01).
 - **Replies stay replies.** The doorbell's ring, a recommendation and a policy read go to whoever
   asked or holds the socket, and carry no effect.
 
@@ -56,7 +56,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN
   settings (values 12). A threat that needs a runner stopped belongs to the sandbox, the forge
   or the credential proxy, not here.
   A repository's policy may opt into one exception: Baton's trusted runners decide what lands,
-  and the forge lets only them and the human-only identity land it (BATON_SPEC §12.8).
+  and the forge lets only them and the human-only identity land it ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 - **Policy, not modes.** Every rule about authority and trust is a knob of one versioned policy
   document per repository, held in Baton (BATON_SPEC R-BTN-188). Presets such as `cooperative`
   and `protected` fill it; no rule reads a preset. A deployment requires named guarantees, which
@@ -123,7 +123,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN
 - **Capabilities are names, matched; Baton derives none.** Core matches a leg's capabilities
   against what a runner declares, by name (BATON_SPEC R-BTN-174). What the keys and tools a runner
   holds amount to is the runner's own statement, and which model and key a leg uses is the
-  course's — its `rank.mjs` and its instructions read the readings (§6.10). The capability
+  course's — its `rank.mjs` and its instructions read the readings ([§6.10](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-10)). The capability
   ontology and route choices core once evaluated moved out (the owner, 2026-11-01, "Nothing; move
   it out"): the core is small and knows no course.
 - **The formal model names the code.** `model/baton.qnt` and the implementation check

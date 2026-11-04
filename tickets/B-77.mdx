@@ -25,15 +25,15 @@ depends_on:
 adversarial review's fixes to heads, held posts and owner state (spec/BATON_SPEC_HISTORY.md,
 "Adversarial review (2026-10-20)", adv-1 M1–M3, M5, m1, m2; adv-3 F4, F8; adv-4 B2) are built
 only in their older form and ticketed nowhere. This ticket builds them.
-**Spec:** `spec/BATON_SPEC.md` §4.3 R-BTN-11 (held rows, acceptance, `contains`, `posted_by`),
+**Spec:** [BATON_SPEC §4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) R-BTN-11 (held rows, acceptance, `contains`, `posted_by`),
 R-BTN-62 / R-BTN-150 (numbers issued per credential, release with `behind`, lapses, a held post's
 refresh) and R-BTN-147 (founded heads, the lagging fetch, the known sha, the tighten-only list,
-`station-jump`, `ticket-dropped`, `machine-loosened`); §4.4 (`contains`, a returning ticket's kept
-state); §5.3 R-BTN-71 and §9.6 R-BTN-10 (arrivals beyond the expected path); §6.8 R-BTN-12 (owner
-state outlives the board); §1 R-BTN-66 (the residual risk owners see); §4.8 R-BTN-88
-(`closed_tickets` exported with `kept_json`); §2.3 R-BTN-149 (4 held rows per credential); §13.4
-`board_head.behind_since`, `held_snapshots`, `closed_tickets`; §14 the observation and board
-routes; §15 S-BTN-13, S-BTN-39, S-BTN-121, S-BTN-122, G-BTN-7, G-BTN-59, G-BTN-141, G-BTN-142.
+`station-jump`, `ticket-dropped`, `machine-loosened`); [§4.4](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4) (`contains`, a returning ticket's kept
+state); [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) R-BTN-71 and [§9.6](../spec/BATON_SPEC/09-claims.md#sec-9-6) R-BTN-10 (arrivals beyond the expected path); [§6.8](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8) R-BTN-12 (owner
+state outlives the board); [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) R-BTN-66 (the residual risk owners see); [§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) R-BTN-88
+(`closed_tickets` exported with `kept_json`); [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3) R-BTN-149 (4 held rows per credential); [§13.4](../spec/BATON_SPEC/13-data-model.md#sec-13-4)
+`board_head.behind_since`, `held_snapshots`, `closed_tickets`; [§14](../spec/BATON_SPEC/14-api.md#sec-14) the observation and board
+routes; [§15](../spec/BATON_SPEC/15-verification.md#sec-15) S-BTN-13, S-BTN-39, S-BTN-121, S-BTN-122, G-BTN-7, G-BTN-59, G-BTN-141, G-BTN-142.
 **Depends on:** B-46 (its part 3 builds the pre-review form of R-BTN-147 and R-BTN-150: the
 founded-head check, `head-replaced`, renumbering, observation renewal and voiding, the sync bar
 and `observation_lapses`; this ticket changes them as below, and B-46 does not build these

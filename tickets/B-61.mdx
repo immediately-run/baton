@@ -26,12 +26,12 @@ depends_on:
 review of 2026-10-20 (`spec/BATON_SPEC_HISTORY.md`, "Schema review", items 6, 8, 10, 11 and 12),
 which the owner approved. It replaces the per-leg deadline fields `max_ready_s` and
 `max_attempts_s`, which were never built.
-**Spec:** `spec/BATON_SPEC.md` §7.5 R-BTN-167 (shape, when each clock starts, interrupting and
+**Spec:** [BATON_SPEC §7.5](../spec/BATON_SPEC/07-conditions.md#sec-7-5) R-BTN-167 (shape, when each clock starts, interrupting and
 non-interrupting timers, core's default timer, choice stations); R-BTN-90 (the `leg-timeout`
-release and reap, which B-60 built); R-BTN-122 (§7.4, `budget-spent`, the owners' ceiling, the
-reset when a leg reaches an outcome); R-BTN-163 (§7.3, `baton.stalled` and its restarts); R-BTN-83
-(§5.3, held positions); R-BTN-88 (§4.8, owner state); R-BTN-64 (§5.7, renames carry timers);
-R-BTN-69 (§5.2, the validator); §13.6 `ticket_timers` and `ticket_overrides.override_kind`; §15
+release and reap, which B-60 built); R-BTN-122 ([§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4), `budget-spent`, the owners' ceiling, the
+reset when a leg reaches an outcome); R-BTN-163 ([§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3), `baton.stalled` and its restarts); R-BTN-83
+([§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3), held positions); R-BTN-88 ([§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8), owner state); R-BTN-64 ([§5.7](../spec/BATON_SPEC/05-courses.md#sec-5-7), renames carry timers);
+R-BTN-69 ([§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2), the validator); [§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6) `ticket_timers` and `ticket_overrides.override_kind`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15)
 S-BTN-10, S-BTN-37, S-BTN-87, S-BTN-134, G-BTN-64, G-BTN-152. R-BTN-64's per-leg rewrite comes from
 the schema review (`spec/BATON_SPEC_HISTORY.md`, "Schema review (2026-10-20)", item 9).
 **Depends on:**

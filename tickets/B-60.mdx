@@ -21,11 +21,11 @@ depends_on: []
 **Brief:** carved out of R3-1259 (its items 4–6) by the ticket plan for the current-state spec (PR
 #71). `max_duration` is now a timer (R-BTN-167). The owner, 2026-10-15: legs that time out or are
 cancelled administratively.
-**Spec:** `spec/BATON_SPEC.md` §7.5 R-BTN-90 (the `start` deadline, `leg_finished`, the deadline,
+**Spec:** [BATON_SPEC §7.5](../spec/BATON_SPEC/07-conditions.md#sec-7-5) R-BTN-90 (the `start` deadline, `leg_finished`, the deadline,
 the owner's controls) and R-BTN-167 (the timer's shape and range, interrupting timers); R-BTN-122
-(§7.4, the owners' 7-day ceiling on an interrupting `start` timer); R-BTN-19 (§9.5, fence before
-re-issue) and §9.5's reaping; §9.4's end table (`released:leg-timeout`, actor
-`alarm:leg-timeout`); R-BTN-149 (§2.3, once per leg run); §6.8 (Cancel); R-BTN-69 (§5.2, the
+([§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4), the owners' 7-day ceiling on an interrupting `start` timer); R-BTN-19 ([§9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5), fence before
+re-issue) and [§9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5)'s reaping; [§9.4](../spec/BATON_SPEC/09-claims.md#sec-9-4)'s end table (`released:leg-timeout`, actor
+`alarm:leg-timeout`); R-BTN-149 ([§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3), once per leg run); [§6.8](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-8) (Cancel); R-BTN-69 ([§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2), the
 validator); `spec/BATON_SPEC_HISTORY.md`, "Migrations the implementation still carries" (R-BTN-170's
 window: `max_duration`); §13.5 `claims`; §14 (the heartbeat, the deadline route); §15 S-BTN-52,
 G-BTN-80.

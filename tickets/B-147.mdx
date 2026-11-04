@@ -19,14 +19,14 @@ depends_on:
   - B-145
 ---
 
-**Brief:** BATON_SPEC §12.8 as amended 2026-10-30 (baton#145): trust is a property of each grant
+**Brief:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) as amended 2026-10-30 (baton#145): trust is a property of each grant
 and courier, set by the repository policy's `approvers.trust`, and the trusted-runner role is the
 only one offered trusted legs.
 **Spec:** R-BTN-180 (trust levels and domains, one grant per domain), R-BTN-182 (trusted runners:
 the role, rule `trusted`, the refusal-only override), R-BTN-188 (`approvers.trust`,
 `grants.default_trust`, `grants.one_per_domain`, `grants.trusted_domain`, setting `approvers.trust`
 human-only, a policy live grants already break), R-BTN-171 (courier trust), R-BTN-183 (model family
-for `merge.reviews`); §13 grants and `couriers`; S-BTN-180, S-BTN-182.
+for `merge.reviews`); [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) grants and `couriers`; S-BTN-180, S-BTN-182.
 **Depends on:** B-145 (the policy and its approver lists).
 
 ### Requires

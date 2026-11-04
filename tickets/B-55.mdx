@@ -21,10 +21,10 @@ depends_on: []
 **Brief:** the owner, 2026-10-20: conditions bound dynamically to courses, not delivery policy in
 core (`spec/BATON_SPEC_HISTORY.md`, "Decisions in full"). Filed from the ticket plan for the
 current-state spec (PR #71).
-**Spec:** `spec/BATON_SPEC.md` §7's limits, §7.1 R-BTN-160 and R-BTN-125; R-BTN-69 (§5.2, the
-course file), R-BTN-111 (§5.5, the signature), R-BTN-33 (§1, filter fields only), R-BTN-81 (§4.7,
-the history row), §2.1's write budget, §12.3 (`message` is untrusted text); §13.6 `conditions`;
-§14 `POST /v1/runner/claims/{id}/conditions` and `GET /v1/repositories/{repository}/conditions`;
+**Spec:** [BATON_SPEC §7](../spec/BATON_SPEC/07-conditions.md#sec-7)'s limits, [§7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1) R-BTN-160 and R-BTN-125; R-BTN-69 ([§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2), the
+course file), R-BTN-111 ([§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5), the signature), R-BTN-33 ([§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), filter fields only), R-BTN-81 ([§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7),
+the history row), [§2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1)'s write budget, [§12.3](../spec/BATON_SPEC/12-security.md#sec-12-3) (`message` is untrusted text); [§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6) `conditions`;
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) `POST /v1/runner/claims/{id}/conditions` and `GET /v1/repositories/{repository}/conditions`;
 §15 S-BTN-130, S-BTN-134, G-BTN-146. After the adversarial review (adv-2 m1,
 `spec/BATON_SPEC_HISTORY.md`): R-BTN-160's core-only types, §14's raise row (`invalid-params`),
 G-BTN-146's last clause, S-BTN-131.

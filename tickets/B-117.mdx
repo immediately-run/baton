@@ -26,7 +26,7 @@ remote-session tools (`create_session`, `send_message`, `list_events`, `interrup
 `archive_session`). So the launcher is the hosting session acting for the runner, and the
 result channel is a branch the child pushes and the runner polls. This spike measures whether
 that works before B-34 and B-47's session mode are amended to name it.
-**Spec:** `spec/BATON_SPEC.md` §8.3 R-BTN-107 (`session` mode, the child holds no Baton
+**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) R-BTN-107 (`session` mode, the child holds no Baton
 credential), R-BTN-113 (session links), R-BTN-106 (the runner checks every move); B-34 (the
 interactive leg, `confirmed_by`).
 **Depends on:** B-115 (the hosting session and its skill).
