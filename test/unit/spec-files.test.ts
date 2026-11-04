@@ -1,8 +1,8 @@
 // spec-files (B-179): BATON_SPEC as one file per section — the join is the spec, the parts are
 // well formed and in order, a joined line maps back to its file, the index is generated from the
 // parts, check:spec's layout check (`layoutProblems`) fails a stray file, a misordered part or a
-// stale index, the move proof compares bytes, and spec-tools reads a directory as its parts joined
-// with the same impact as the one file.
+// stale index, the move proof compares bytes, and spec-tools reads a directory as its parts joined,
+// spec:impact placing each unit at its file and line.
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -107,7 +107,8 @@ describe('spec-files (B-179)', () => {
     expect(text).toContain('| | 1.1 Sub | R-BTN-1, R-BTN-2, R-BTN-3 |');
     expect(text).toContain('| R-BTN-2 | two at once | [`01-one.md`](BATON_SPEC/01-one.md) |');
     expect(text).toContain('| S-BTN-7 | a scenario | [`02-two.md`](BATON_SPEC/02-two.md) |');
-    expect(text).toContain('| G-BTN-9 | a gate | [`02-two.md`](BATON_SPEC/02-two.md) |');
+    expect(text).toContain('| G-BTN-9 | [`02-two.md`](BATON_SPEC/02-two.md) |');
+    expect(text).not.toContain('a gate');
   });
 
   it('this repository: the directory holds only well-formed parts and the committed index is the generated one', () => {
@@ -126,16 +127,24 @@ describe('spec-files (B-179)', () => {
     expect(file.where(3)).toBe('l. 3');
   });
 
-  it('spec:impact finds the same units in a directory as in the same text as one file', () => {
+  it('spec:impact on the directory finds the units that cite an id, each at its file and line', () => {
     const root = fixture({ '00-front.md': FRONT, '01-one.md': ONE, '02-two.md': TWO + '- **R-BTN-4 (cites).** See R-BTN-1.\n' });
     const dir = readSpecAt(root, 'spec/BATON_SPEC');
-    writeFileSync(join(root, 'spec', 'WHOLE.md'), dir.text);
-    const file = readSpecAt(root, 'spec/WHOLE.md');
-    const files: [string, string][] = [['tickets/B-1.mdx', 'builds R-BTN-1']];
-    const a = impact(dir.text, ['R-BTN-1'], ['each fact'], files);
-    expect(a).toEqual(impact(file.text, ['R-BTN-1'], ['each fact'], files));
-    expect(a.spec.length).toBeGreaterThan(0);
+    const files: [string, string][] = [['tickets/B-1.mdx', 'builds R-BTN-1'], ['tickets/B-2.mdx', 'nothing']];
+    const a = impact(dir.text, ['R-BTN-1'], [], files);
+    expect(a.changed.map((u: { line: number }) => dir.where(u.line))).toEqual([`${SPEC_DIR}/01-one.md:5`]);
+    expect(a.spec.map((u: { line: number }) => dir.where(u.line))).toEqual([`${SPEC_DIR}/02-two.md:5`]);
     expect(a.files.map((f: { path: string }) => f.path)).toEqual(['tickets/B-1.mdx']);
-    expect(a.spec.map((u: { line: number }) => dir.where(u.line))).toContain(`${SPEC_DIR}/02-two.md:5`);
+  });
+
+  it('the front holds no numbered section, and each appendix keeps its own prefix and heading', () => {
+    const front: Part[] = specParts(fixture({ '00-front.md': `${FRONT}\n## 3. Three\n`, '01-one.md': ONE }));
+    expect(partProblems(front)).toEqual([`${SPEC_DIR}/00-front.md: the front holds no numbered section; each is its own part`]);
+    const swapped: Part[] = specParts(fixture({ '00-front.md': FRONT, '01-one.md': ONE, '90-decisions.md': '## Decisions\n', '91-load.md': '## Load-bearing assumptions\n', '93-more.md': '## More\n' }));
+    expect(partProblems(swapped)).toEqual([
+      `${SPEC_DIR}/90-decisions.md: appendix 90 opens with \`## Load-bearing assumptions\``,
+      `${SPEC_DIR}/91-load.md: appendix 91 opens with \`## Decisions\``,
+      `${SPEC_DIR}/93-more.md: no appendix is numbered 93; they are 90 Load-bearing assumptions, 91 Decisions, 92 Open questions`,
+    ]);
   });
 });

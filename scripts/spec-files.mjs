@@ -35,6 +35,9 @@ export const SPEC_INDEX = 'spec/BATON_SPEC.md';
 /** A part file's name: two digits, a dash, a slug, `.md`. */
 const PART = /^\d{2}-[a-z0-9-]+\.md$/;
 
+/** The unnumbered parts after the sections, by prefix, and the heading each opens with. */
+const APPENDICES = { 90: 'Load-bearing assumptions', 91: 'Decisions', 92: 'Open questions' };
+
 /** The entries of `dir` (under `root`), sorted: the part files' names and every other name. */
 function entries(root, dir) {
   const at = join(root, dir);
@@ -69,7 +72,8 @@ export function locate(parts, n, dir = SPEC_DIR) {
  *  The first is the front, `00-…`. Every other opens with its one `## ` heading: `01-…` to `89-…`
  *  are the numbered sections, each headed with its own number (`02-…` opens `## 2. `), numbered
  *  1, 2, 3 … with none missing or repeated, so the name order is the spec's order; `90-…` on are
- *  the unnumbered appendices. */
+ *  the unnumbered appendices, each prefix with its own heading (`APPENDICES`). The front holds
+ *  no numbered section. */
 export function partProblems(parts) {
   const out = [];
   let next = 1;
@@ -79,6 +83,7 @@ export function partProblems(parts) {
     const headings = p.text.split('\n').filter((l) => /^## /.test(l));
     if (i === 0) {
       if (!p.name.startsWith('00-')) out.push(`${p.path}: the first part is the front, named 00-…`);
+      if (p.text.split('\n').some((l) => /^## \d+\. /.test(l))) out.push(`${p.path}: the front holds no numbered section; each is its own part`);
       continue;
     }
     if (!p.text.startsWith('## ')) out.push(`${p.path}: a part opens with its \`## \` heading`);
@@ -91,6 +96,8 @@ export function partProblems(parts) {
       if (!numbered || Number(numbered[1]) !== prefix) out.push(`${p.path}: a numbered part opens with its own number, \`## ${prefix}. \``);
       next = prefix + 1;
     } else if (numbered) out.push(`${p.path}: a part named 90-… or later is an appendix, with no section number`);
+    else if (!(prefix in APPENDICES)) out.push(`${p.path}: no appendix is numbered ${prefix}; they are ${Object.entries(APPENDICES).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+    else if (!p.text.startsWith(`## ${APPENDICES[prefix]}\n`)) out.push(`${p.path}: appendix ${prefix} opens with \`## ${APPENDICES[prefix]}\``);
   }
   return out;
 }
@@ -115,9 +122,10 @@ export function moveProof(before, parts) {
 }
 
 const RULE = /^- \*\*(R-BTN-\d+(?: \/ R-BTN-\d+)*) \(([^)]*?)(?:\)|$)/;
-// A scenario row names itself in its first cell (`| S-BTN-7 a scenario |`); a gate row has the id
-// alone there and its title in the second (`| G-BTN-9 | a gate |`).
-const ROW = /^\| *([SG]-BTN-\d+)\b *([^|]*)\|([^|]*)\|/;
+// A scenario row names itself in its first cell (`| S-BTN-7 a scenario |`). A gate row has the id
+// alone there and its statement in the second, which the index does not repeat: it restates no
+// rule, so a gate is listed by id and file only.
+const ROW = /^\| *([SG]-BTN-\d+)\b *([^|]*)\|/;
 
 /** The index's text, generated from the parts. */
 export function indexText(parts) {
@@ -166,7 +174,7 @@ export function indexText(parts) {
         continue;
       }
       const row = ROW.exec(line);
-      if (row) ids.push({ id: row[1], title: (row[2].trim() || row[3].trim()).replace(/\*\*/g, '') || '—', path: p.path });
+      if (row) ids.push({ id: row[1], title: row[2].trim().replace(/\*\*/g, ''), path: p.path });
     }
     flush();
     const name = p.name.startsWith('00-') ? 'Front matter: status, companions, contents' : section ?? p.name;
@@ -178,9 +186,11 @@ export function indexText(parts) {
   const seen = new Set();
   const uniq = ids.filter((x) => (seen.has(x.id) ? false : (seen.add(x.id), true)));
   for (const [k, heading] of [['R', 'Rules'], ['S', 'Scenarios'], ['G', 'Gates']]) {
-    out.push('', `## ${heading}`, '', '| Id | Title | File |', '|---|---|---|');
+    const titled = k !== 'G';
+    out.push('', `## ${heading}`, '', titled ? '| Id | Title | File |' : '| Id | File |', titled ? '|---|---|---|' : '|---|---|');
     for (const x of uniq.filter((u) => kind(u.id) === k).sort((a, b) => n(a.id) - n(b.id))) {
-      out.push(`| ${x.id} | ${x.title} | [\`${x.path.split('/').pop()}\`](BATON_SPEC/${x.path.split('/').pop()}) |`);
+      const file = `[\`${x.path.split('/').pop()}\`](BATON_SPEC/${x.path.split('/').pop()})`;
+      out.push(titled ? `| ${x.id} | ${x.title || '—'} | ${file} |` : `| ${x.id} | ${file} |`);
     }
   }
   out.push('');
@@ -201,6 +211,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === '-
   console.log(`${after}:${SPEC_DIR}/ (${proof.parts} parts, joined)  sha-256 ${proof.after}`);
   console.log(proof.ok ? 'spec-files --prove: identical, byte for byte' : 'spec-files --prove: DIFFERENT');
   process.exit(proof.ok ? 0 : 1);
+} else if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv.length > 2) {
+  console.error('usage: spec-files.mjs                 write the index\n       spec-files.mjs --prove <before> <after>');
+  process.exit(2);
 } else if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const parts = specParts();
   writeFileSync(join(REPO, SPEC_INDEX), indexText(parts));
