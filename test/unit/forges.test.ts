@@ -3,7 +3,8 @@
 // tokens bound to their project, branch and role, and migration 0012 on a deployed database.
 import { describe, it, expect } from 'vitest';
 import { env, runInDurableObject } from 'cloudflare:test';
-import { fileUrl, isForgePath, isPullRequestUrl, isWebBase, transcriptUrl, underWebBase } from '../../src/core/links';
+import { fileUrl, isForgePath, isPullRequestUrl, isWebBase, transcriptUrl } from '../../src/core/links';
+import { underWebBase } from '../../src/shared/links.mjs';
 import { checkRegistration } from '../../src/core/registry';
 import { MIGRATIONS } from '../../src/migrations';
 import { call, gitlabToken, withCore } from '../helpers';
