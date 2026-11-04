@@ -128,8 +128,10 @@ describe('S-BTN-166 the CLI’s reads (B-90)', () => {
       expect(res.json.ready_by_tier).toEqual(Object.fromEntries(Object.entries(state.ready_by_tier as Record<string, string[]>)
         .map(([tier, ids]) => [tier, ids.filter((id) => id.startsWith('docs:'))])));
       // A section the dashboard never serves is not invented here: the board is these two, the
-      // repository and the key's grant.
-      expect(Object.keys(res.json).sort()).toEqual(['granted_capabilities', 'ready', 'ready_by_tier', 'repository', 'server_time']);
+      // repository, the key's grant — and, since B-129, the repository's live claims (`holders`),
+      // the lock a session claiming through git reads with the same request.
+      expect(Object.keys(res.json).sort()).toEqual(['granted_capabilities', 'holders', 'ready', 'ready_by_tier', 'repository', 'server_time']);
+      expect(res.json.holders).toEqual([]);
     }
     // A key Baton does not know cannot heartbeat at all — the board read above is its only answer.
     expect((await heartbeat(stranger, 'stranger-host')).status).toBe(401);

@@ -5,6 +5,14 @@ Baton is specified by `BATON_SPEC`, `spec/BATON_SPEC.md` in this repository (mov
 here, by pull request; docs' `content/specs/BATON_SPEC.mdx` is a stub. Read the item and the spec
 sections it cites before changing anything. See `README.md` for the layout.
 
+## Claiming a ticket
+
+Ask Baton first (B-129): before `baton tickets claim`, read `node cli/baton.mjs board baton`
+(or `node cli/baton.mjs ticket history baton:<id>`) and trust its station over the ticket's
+frontmatter — a ticket past its course's start already has work and a PR to continue, and the
+claim takes it over there, on its branch. One wrong `status:` line over an open PR must not
+start the work again.
+
 ## Resident context
 
 Before your first change in a session — and before arguing a design — read

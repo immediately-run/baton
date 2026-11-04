@@ -65,12 +65,18 @@ because the branch moved is fetched again and retried on the new head.
 
 ```sh
 baton tickets new --title "…" --project baton    # file a ticket, B-<n>, with the conventional body
-baton tickets claim <id>                   # available → in-progress; refuses a ticket not available,
-                                           # or one whose dependencies are not done
+baton tickets claim <id> [-i KEY]           # available → in-progress; asks Baton first — a ticket
+                                           # past its course's start is taken over where Baton holds it
 baton tickets set <id> <status> [--pr URL] # any live status; --pr adds a pull request URL
 baton tickets done <id> [--pr URL]         # done, moved to archive/
 baton tickets check [--repo DIR]           # check the tickets without posting them
 ```
+
+`claim` reads the ticket from Baton with the key `-i` names (else `BATON_KEY_FILE`) before it
+writes: a ticket Baton holds past its course's start is continued there — the PRs are written
+back and the position printed — never started over; only another live claim refuses, and an
+unanswered read (Baton unreachable, no key) refuses rather than trust the frontmatter, unless
+`--offline` claims on git's word alone.
 
 `baton tickets --help` lists every flag, the tags Baton reads and the `Requires:` clause a
 description ends with.

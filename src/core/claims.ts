@@ -1461,6 +1461,53 @@ export class Claims {
     return { held_by_other: held, fence_pending: fence };
   }
 
+  /** The board read's `holders` (B-129, a field on an existing read — R-BTN-179's one-answer
+   *  rule): every live claim on one of the repository's tickets, each with its holder and when
+   *  its lease ends, so a session claiming through git (`baton tickets claim`) reads the lock
+   *  with the same request that answers the station. A legacy worker's claim has no lease the
+   *  alarm would end, so its `lease_ends_at` is null. Claims on tickets git has dropped stay
+   *  (R-BTN-35) — matched by the repository's qualified-id prefix. */
+  holdersOf(repo: string) {
+    return this.rows<{ ticket_id: string; worker_id: number; hostname: string; session_name: string; kind: string; last_seen_at: number; lease_timeout_ms: number }>(
+      `SELECT c.ticket_id, c.worker_id, w.hostname, w.session_name, w.kind, w.last_seen_at, w.lease_timeout_ms
+       FROM claims c JOIN workers w ON w.id = c.worker_id
+       WHERE c.status = 'active' AND (c.ticket_id IN (SELECT id FROM tickets WHERE repository_id = ?) OR c.ticket_id LIKE ?)
+       ORDER BY c.claimed_at, c.id`,
+      repo, `${repo}:%`).map((c) => ({
+      ticket_id: c.ticket_id,
+      worker_id: c.worker_id,
+      hostname: c.hostname,
+      session_name: c.session_name,
+      lease_ends_at: c.kind === 'legacy' ? null : c.last_seen_at + c.lease_timeout_ms,
+    }));
+  }
+
+  /** The ticket's ended claims' resume records (R-BTN-24), pruned to what a claimant picking
+   *  the ticket up through git needs (B-129): the branches and PRs every ended claim's
+   *  activities recorded, newest claim first and each named once, with how the newest ended —
+   *  the history read's `resume` field, so `baton tickets claim` learns from Baton the PR a
+   *  broken frontmatter lost even when the newest claim (a review that pushed nothing) named
+   *  none. Null when no claim ever ended. */
+  resumeOf(ticket: string) {
+    const ended = this.rows<{ end_reason: string; ended_at: number; resume_json: string | null }>(
+      `SELECT end_reason, ended_at, resume_json FROM claims WHERE ticket_id = ? AND status != 'active' ORDER BY id DESC`, ticket);
+    if (!ended.length) return null;
+    const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+    const branches = new Set<string>();
+    const prs = new Set<string>();
+    for (const r of ended) {
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = r.resume_json ? (JSON.parse(r.resume_json) as Record<string, unknown>) : {};
+      } catch {
+        parsed = {};
+      }
+      for (const b of list(parsed.branches)) branches.add(b);
+      for (const p of list(parsed.prs)) prs.add(p);
+    }
+    return { end_reason: ended[0].end_reason, ended_at: ended[0].ended_at, branches: [...branches], prs: [...prs] };
+  }
+
   /** `GET /v1/runner/branch-holder?repo=&branch=` (§6.3, R-BTN-51): every live ticket the branch
    *  maps to through its course's current or previous `branch_pattern` — `{ticket}` its local id,
    *  `{repository}` its repository's id, `*` anything — among the tickets whose home is that git

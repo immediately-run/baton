@@ -2283,6 +2283,47 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   up now. S-BTN-198 follows. B-172 is superseded into B-76, which builds the code sign-in flow
   for both roles: the two steps are built where the flow is.
 
+- **2026-11-03 — review round one of B-129's pickup** (PR #160; fresh reviewers, given the
+  diff). Findings closed: a takeover skipped every frontmatter status check, so it overrode the
+  git lock and parked or closed statuses as well as a false `available`; the board's `holders`
+  left out legacy claims; "past its start" was judged from any station the path ever reached,
+  not the current one; the history's `resume` read only the newest ended claim, so a review
+  claim that pushed nothing hid the PR; the release's hand-off lacked what is left; a key
+  problem was reported as Baton unreachable; the drop-PR refusal claimed a PR "still open" and
+  could block `done`; `position-disagrees` fired on a release that kept its PRs and deduplicated
+  against any discrepancy; a lease that had ended was reported as not ended. Fixed in R-BTN-74
+  (the takeover overrides only a false `available`; the position is the board's ready station,
+  else the newest reached; the key is judged first; the hand-off's lines are stated, with
+  `set --note`; `done` is never refused), R-BTN-24 (the history read's `resume` across the
+  ended claims, and who may read it), R-BTN-85's `position-disagrees` row (only when the posted
+  `prs` lacks a PR Baton's record holds; both values carry the PR lists), R-BTN-127's CLI row
+  (the flags are R-BTN-74's), the board and history route rows, and S-BTN-199.
+  The reviewers also found that the ticket asks for the discrepancy under Needs you while the
+  2026-11-01 ruling keeps position discrepancies off it. The owner ruled on 2026-11-03: "Keep
+  your Decision" — the discrepancies list only, nothing adopted (R-BTN-85's row, Decisions).
+
+  Review round two (one fresh reviewer) found round one's `position-disagrees` fix had core read
+  the posted opaque `course.prs` and store both PR lists in the discrepancy, against R-BTN-50 and
+  R-BTN-33. Reverted: the row fires on a posted `available` over a ticket the post places past its
+  start, once per station, both values positions, so a release that kept its PRs logs it too —
+  telling the two apart went to the owner, who ruled on 2026-11-03 to accept the extra entries
+  ("Accept the extra entries"): no field for core, no reading of `prs`, until R3-1266 moves the
+  claim onto Baton. Also closed: with no local course file the start was still
+  any reached row (now the standard course's, R-BTN-131, else undetermined, R-BTN-74); a release
+  not past its start without `--note` lacked its subject and `PR` lines (every release writes
+  them, R-BTN-74); the 2026-10-15 Decision still said Baton's state is never a discrepancy (it
+  names the git-lock `status:` exception, and the 2026-11-03 entry keeps only its own choice);
+  the ticket commands copied the API-key shape and `send`'s key dispatch (one copy, in
+  `cli/sign.mjs`); and R-BTN-24 restated the history route row and *reader* (it cites them).
+  Review round three (one fresh reviewer) found round two's standard-course fallback ignored the
+  repository's `default_course`, so a ticket at a build-app repository's start was taken over;
+  an adjudicator reproduced it, and the owner chose "Fix, one more fresh round": the start now
+  follows `default_course`. It also found core reading `display.status` (R-BTN-33) and resume
+  records' `branches` and `prs` (R-BTN-50) against rules saying core reads neither; the owner
+  ruled "Write narrow exceptions", each now in its rule, and R-BTN-85's row cites R-BTN-74 for
+  "past its start".
+  S-BTN-199's row follows.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |
