@@ -47,12 +47,12 @@ describe('check-wiki: the component vocabulary (B-114)', () => {
   });
 
   it('a bundle naming a viewer app takes the viewer’s whole vocabulary — no local map, and the app’s names pass', () => {
-    const r = bundle({ ...WIKI, opensWith: { app: 'github:immediately-run/baton-board', version: '^1' } });
+    const r = bundle({ ...WIKI, opensWith: { app: 'github:immediately-run/baton-board', version: '1.0' } });
     expect(r.code).toBe(0);
   });
 
   it('a bundle naming a viewer app AND keeping a components map is refused: a component belongs to the viewer', () => {
-    const r = bundle({ ...WIKI, opensWith: { app: 'github:immediately-run/baton-board', version: '^1' }, components: { RoadmapBoard: './components/RoadmapBoard.tsx' } });
+    const r = bundle({ ...WIKI, opensWith: { app: 'github:immediately-run/baton-board', version: '1.0' }, components: { RoadmapBoard: './components/RoadmapBoard.tsx' } });
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/names a viewer app \(opensWith\.app\) and a components map/);
   });
