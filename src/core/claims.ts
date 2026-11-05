@@ -431,7 +431,8 @@ export class Claims {
       .filter(([key]) => (g ? resolveLeg(g, key) ?? key : key) === leg).flatMap(([, from]) => from);
     const noChainFrom = [...new Set([...(def?.noChainFrom ?? []), ...owners].map((l) => (g ? resolveLeg(g, l) ?? l : l)))];
     // R-BTN-120: the file's own `requires.capabilities`, which rule 4 reads beside the clause.
-    return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...this.ownerBarTags(item, leg, phase)])], noChainFrom, isolation: def?.isolation ?? null, requires: def?.requires ?? [] };
+    // R-BTN-116: whether the leg is a person's, which rule `person` refuses at a claim or an advance.
+    return { name: leg, state: n?.state ?? null, bars: [...new Set([...posted, ...this.ownerBarTags(item, leg, phase)])], noChainFrom, isolation: def?.isolation ?? null, requires: def?.requires ?? [], person: def?.person ?? false };
   }
 
   /** R-BTN-106: the legs `credential` has run on the ticket, in this claim or an earlier one —
@@ -597,6 +598,8 @@ export class Claims {
                                 UNION
                                 SELECT d.capability FROM worker_derived d
                                  WHERE d.worker_id = :worker AND d.repository_id = w.repository_id) h))        -- D(H), read only from a current set (prepareSets)
+           AND NOT EXISTS (SELECT 1 FROM courses k, json_each(k.person_legs_json) p                                -- rule person (R-BTN-116): a person's leg is
+                           WHERE k.repository_id = w.repository_id AND k.id = w.course_id AND p.value = a.leg)    -- never offered, whatever else it holds
            AND NOT EXISTS (SELECT 1 FROM courses k, json_each(k.leg_capabilities_json) l                           -- rule 4's leg input (R-BTN-120, B-86), read the same
                            WHERE k.repository_id = w.repository_id AND k.id = w.course_id AND l.key = a.leg      -- way as the ticket's clause: H ∪ D(H), the one literal
                              AND EXISTS (SELECT 1 FROM json_each(l.value) q                                     -- human-operator included — rule 6 is retired (R-BTN-121

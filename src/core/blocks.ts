@@ -497,6 +497,14 @@ export class Blocks {
     return [home.web_base, ...repos.map((r) => (r.includes('/') ? r : `${owner}/${r}`)).filter((r) => isForgePath(home.forge as Forge, r)).map((r) => host + r)];
   }
 
+  /** Those bases by ticket id, for a reader that judges a link the same way `posted` judges a
+   *  decision's `url` (R-BTN-92) — a person leg's question among them (R-BTN-116). */
+  linkBases(id: string): string[] {
+    const home = this.rows<{ forge: string; web_base: string | null; github: string }>(
+      'SELECT forge, web_base, github FROM repositories WHERE id = ?', repositoryOf(id))[0];
+    return home ? this.ticketRepos(id, home) : [];
+  }
+
   // ── unblocking wakes work (R-BTN-77) ──────────────────────────────────────────────────────
 
   private unblocked(repo: string, ticket: string, cleared: Cleared[]) {

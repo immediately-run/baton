@@ -29,7 +29,13 @@ export const STD = Object.freeze({
   }, ['uri', 'digest', 'media_type', 'size']),
   'std:url@1': closed({ url: str({ format: 'uri' }) }, ['url']),
   'std:effect@1': closed({ kind: str(), ref: str(), at: str({ format: 'date-time' }) }, ['kind', 'at']),
-  'std:decision@1': closed({ id: str(), option: str(), answered_by: str(), commit: sha }, ['id', 'option', 'commit']),
+  // R-BTN-116: a person's answer to a person leg — `{id, leg, option, reached, ref?, answered_by?,
+  // commit?}`. `ref` names the answer for R-BTN-39's idempotence and is required of a sync
+  // attestation (the commit that wrote it), optional of a person's own; the fields are checked
+  // against the leg's question and options when the answer is applied, not by this shape.
+  'std:decision@1': closed({
+    id: str(), leg: str(), option: str(), reached: str(), ref: str(), answered_by: str(), commit: sha,
+  }, ['id', 'leg', 'option', 'reached']),
   // B-105 (R-BTN-176): the base an API-capacity resource's schema refines. Not an output schema:
   // a DETAIL schema in R-BTN-76's subset, which an external resource's readings carry — so it
   // uses only that subset's keywords (no `pattern`, no `format`) and a fraction in fixed point

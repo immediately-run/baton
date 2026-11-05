@@ -93,7 +93,7 @@ export class Stations {
       if (!t) continue;
       const g = this.graph(repo, t.course_id);
       const unknown = !g ? 'no course in force' : this.unknownNames(g, st);
-      const prevRow = this.rows<{ path: string; station: string; observation: number }>('SELECT path, station, observation FROM ticket_stations WHERE ticket_id = ?', id)[0];
+      const prevRow = this.rows<{ path: string; station: string; observation: number; next_source: string }>('SELECT path, station, observation, next_source FROM ticket_stations WHERE ticket_id = ?', id)[0];
       const prev = prevRow ? (JSON.parse(prevRow.path) as Step[]) : null;
       if (unknown) {
         this.clear(id);
@@ -109,6 +109,16 @@ export class Stations {
       // file from its start.
       const fine = prev ? extendsPath(g!, prev, st.path, g!.start) || st.path.length < prev.length : onGraph(g!, st.path);
       if (!fine) this.offGraph(repo, id, { observation, why: prev ? 'the path does not extend the previous one by edges' : 'the path does not follow the course file from its start', path: st.path, previous: prev });
+      // R-BTN-39, R-BTN-116: a position Baton itself wrote — an applied person's answer or expiry
+      // — stands until git shows the ticket further along (a path that extends it). A snapshot
+      // still placing the ticket where it stood before the answer does not undo the answer: the
+      // station function reads the answer's `answer:` and catches up, and until it does, Baton's
+      // own record is the position. Nothing is logged — about what Baton owns there is no
+      // disagreement (R-BTN-39).
+      if (prevRow && prevRow.next_source === 'baton' && !extendsPath(g!, prev!, st.path, g!.start)) {
+        seen.set(id, { station: st.station, path: st.path, prev, bars: st.bars });
+        continue;
+      }
       this.write(id, g!, st, sha, observation, at, this.c.requiredBars?.(repo) ?? [], t.course_id);
       // R-BTN-81: git moved the ticket and no claim said so — someone else's work.
       if (prevRow && (prevRow.station !== st.station || prevRow.path !== JSON.stringify(st.path)) && !this.claimMoved(id, st.station, Math.max(prevRow.observation, placedBefore))) {
@@ -227,6 +237,20 @@ export class Stations {
                    to_end = excluded.to_end, next_leg = excluded.next_leg, next_source = excluded.next_source, handoff_url = excluded.handoff_url,
                    snapshot_sha = excluded.snapshot_sha, observation = excluded.observation`,
         id, ...row, sha, observation);
+    }
+    // R-BTN-116, R-BTN-167: a person leg's expiry instant. Set when the person leg becomes the
+    // queued leg — the row above just changed, or no instant is held yet — counting from this
+    // moment, by Baton's clock; kept while the ticket stays where it is (the sync re-posts every
+    // quarter hour, and a re-post of the same station and queued leg restarts nothing); cleared
+    // when the queued leg is no longer a person leg with `expires`. `Questions.settle` clears it
+    // with the move it makes itself.
+    {
+      const def = st.next_leg != null ? g.legs.get(st.next_leg) : undefined;
+      const wanted = def?.person && def.expires != null ? at + def.expires.afterS * 1000 : null;
+      const have = this.rows<{ at: number | null }>('SELECT person_expires_at AS at FROM ticket_stations WHERE ticket_id = ?', id)[0]?.at ?? null;
+      const moved = !stored || Object.values(stored).some((v, i) => v !== row[i]);
+      const set = moved ? wanted : wanted == null ? null : have ?? wanted;
+      if (set !== have) this.exec('UPDATE ticket_stations SET person_expires_at = ? WHERE ticket_id = ?', set, id);
     }
     const next = new Map<string, NextRow>();
     for (const posted of st.next) {

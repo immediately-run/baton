@@ -59,6 +59,9 @@ export interface GateLeg {
    *  literal name is `human-operator`, which R-BTN-121 compares as a string; rule 4 checks it as
    *  rule 6 checks the ticket side (review round 6, finding 0). */
   requires?: string[];
+  /** R-BTN-116: a person's leg, which no runner may take (rule `person`), at a claim or an
+   *  advance. */
+  person?: boolean;
 }
 
 export interface GateContext {
@@ -90,7 +93,7 @@ export interface GateContext {
 export type Phase = 'claim' | 'advance';
 
 /** A numbered rule of §7.2, or one §2m names: `chain` (R-BTN-106), `isolation` (R-BTN-107). */
-export type GateRule = keyof typeof GATE_CODES | 'chain' | 'isolation';
+export type GateRule = keyof typeof GATE_CODES | 'chain' | 'isolation' | 'person';
 
 export type GateVerdict = { ok: true } | { ok: false; rule: GateRule; code: string; capability?: string };
 
@@ -182,6 +185,10 @@ export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, p
 
   // R-BTN-107: a leg's isolation floor, against the worker's own word.
   if (leg.isolation && (worker.isolation ?? 'process') !== leg.isolation) return refuse('isolation');
+
+  // Rule `person` (R-BTN-116): a person's leg is answered by a person, never run — no runner may
+  // claim it or advance into it, whatever else it holds.
+  if (leg.person) return refuse('person');
 
   if (phase === 'claim') {
     const declared = worker.courses.find((c) => c.repository === ticket.repository && c.course === ticket.course);
