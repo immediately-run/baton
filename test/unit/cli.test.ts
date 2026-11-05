@@ -7,7 +7,7 @@ import * as http from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createApiKey, duration, main, parseArgs, plan, send } from '../../cli/baton.mjs';
+import { confirmCapacity, createApiKey, duration, main, parseArgs, plan, policyDiff, send } from '../../cli/baton.mjs';
 import { formatDecision, listOnce, plain, watch, WATCH_EVERY_MS } from '../../cli/decisions.mjs';
 import { ORIGIN, setAdminKeys, setClock } from '../helpers';
 import type { TestKey } from '../lib/sshKeys';
@@ -15,6 +15,15 @@ import { call as hostCall } from '#host';
 
 const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwner';
 const key = (p: string) => p;
+
+/** A stdin for confirmCapacity's tests: a TTY that answers `line` once asked. */
+import { EventEmitter } from 'node:events';
+const fakeIn = (line?: string) => {
+  const input = new EventEmitter() as EventEmitter & { isTTY: boolean };
+  input.isTTY = true;
+  if (line !== undefined) process.nextTick(() => input.emit('data', `${line}\n`));
+  return input;
+};
 
 describe('plan: one request per command', () => {
   it('admin commands', () => {
@@ -34,9 +43,45 @@ describe('plan: one request per command', () => {
     expect(plan('admin', ['resource', 'add', 'anthropic-capacity', '--scope', 'account', '--schema', '{"type":"object"}', '--atoms-from', 'any'], key).body)
       .toEqual({ name: 'anthropic-capacity', scope: 'account', detail_schema: { type: 'object' }, atoms_from: 'any' });
     expect(() => plan('admin', ['resource', 'add', 'x', '--scope', 'account', '--schema', '{"type":"object"}', '--atoms-from', 'sometimes'], key)).toThrow('admin or any');
+    // R-BTN-178 (B-106): a capacity is set, cleared and listed — the set carries the read its
+    // confirm prints (`preflight`) and the --yes that answers the prompt beforehand.
+    expect(plan('admin', ['capacity', 'set', 'capability:rdp-lab', '1'], key)).toEqual({
+      method: 'PUT', path: '/v1/admin/capacities', body: { capability: 'capability:rdp-lab', capacity: 1 },
+      preflight: { method: 'GET', path: '/v1/admin/capacities?capability=capability%3Ardp-lab', question: 'set capability:rdp-lab\'s capacity to 1?' }, yes: false,
+    });
+    expect(plan('admin', ['capacity', 'set', 'capability:rdp-lab', '2', '--yes'], key).body).toEqual({ capability: 'capability:rdp-lab', capacity: 2 });
+    expect(plan('admin', ['capacity', 'set', 'capability:rdp-lab', '--clear'], key).body).toEqual({ capability: 'capability:rdp-lab', capacity: null });
+    expect(plan('admin', ['capacity', 'list'], key)).toEqual({ method: 'GET', path: '/v1/admin/capacities' });
+    expect(() => plan('admin', ['capacity', 'set', 'capability:rdp-lab'], key)).toThrow('the capacity (1-64), or --clear');
+    expect(() => plan('admin', ['capacity', 'set', 'capability:rdp-lab', '65'], key)).toThrow('an integer 1 to 64');
+    expect(() => plan('admin', ['capacity', 'set', 'capability:rdp-lab', '2', '--clear'], key)).toThrow('--clear');
+    expect(() => plan('admin', ['capacity', 'raise', 'capability:rdp-lab', '2'], key)).toThrow('baton admin repos');
     expect(() => plan('admin', ['state', 'docs'], key)).toThrow('takes no further argument');
     expect(() => plan('admin', ['state', '--repository', 'docs'], key)).toThrow('not a flag');
     expect(() => plan('admin', ['repo', 'add', 'x/y'], key)).toThrow('--owner-key is required');
+  });
+
+  it('capacity set\'s confirm (R-BTN-178): the courses print, and the prompt decides', async () => {
+    const lines: string[] = [];
+    const out = { write: (s: string) => lines.push(s) };
+    const answer = {
+      capacities: [{ capability: 'capability:rdp-lab', capacity: 1, set_by: 'admin:x', set_at: Date.parse('2026-11-03T12:00:00Z') }],
+      requiring: [{ repository: 'docs', course: 'rdp-course', version: 1, legs: ['implement'], type: { description: 'the lab', values: '^[-a-z0-9]{1,64}$' } }],
+    };
+    // --yes answers beforehand.
+    expect(await confirmCapacity(answer, 'set capability:rdp-lab\'s capacity to 1?', true, out, fakeIn())).toBe(true);
+    expect(lines.shift()).toContain('docs/rdp-course v1: its legs implement require it — the lab (values ^[-a-z0-9]{1,64}$)');
+    expect(lines.shift()).toContain('capability:rdp-lab: capacity 1');
+    // A terminal's y confirms; anything else does not.
+    expect(await confirmCapacity(answer, 'set it?', false, out, fakeIn('y'))).toBe(true);
+    expect(await confirmCapacity(answer, 'set it?', false, out, fakeIn('n'))).toBe(false);
+    // No terminal: refused rather than a prompt on a pipe.
+    const pipe = fakeIn('y'); pipe.isTTY = false;
+    expect(await confirmCapacity(answer, 'set it?', false, out, pipe)).toBe(false);
+    expect(lines.at(-1)).toContain('not confirmed');
+    // No course names it: setting is the administrator's own statement, still confirmed.
+    expect(await confirmCapacity({ capacities: [], requiring: [] }, 'set it?', true, out, fakeIn())).toBe(true);
+    expect(lines.at(-1)).toContain('no course of this Baton names the capability');
   });
 
   it('owner commands, the required bars in their groups', () => {
@@ -387,5 +432,79 @@ describe('baton decision list: the CLI courier (R-BTN-80)', () => {
     expect(warned).toEqual(['baton decision list: fetch failed; trying again in a minute']);
     expect(waits).toEqual([WATCH_EVERY_MS, WATCH_EVERY_MS, WATCH_EVERY_MS]);
     expect(WATCH_EVERY_MS).toBe(60_000);
+  });
+});
+
+describe('baton owner policy: the CLI of §12.8 (B-145)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'baton-cli-policy-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const READ = {
+    repository: 'ops', tenant: 't1', version: 4, hash: 'a'.repeat(64),
+    policy: { human_key: 'any', approvers: { members: ['owner'], trust: ['owner'], policy: ['owner'] } },
+    guarantees: {}, guarantees_hash: 'b'.repeat(64), floors: [], floors_hash: 'c'.repeat(64),
+    at: 1, valid_until: 601_000, kid: 'd'.repeat(16), signature: 'Zm9v',
+  };
+
+  it('policyDiff lists the knobs a file would change, key order aside', () => {
+    expect(policyDiff(READ.policy, { ...READ.policy, human_key: 'hardware' })).toEqual(['human_key']);
+    expect(policyDiff(READ.policy, { human_key: 'any', approvers: { policy: ['owner'], members: ['owner'], trust: ['owner'] } })).toEqual([]);
+  });
+
+  it('show, set, apply, log and the floor commands each make their one request (set on the version --base names)', async () => {
+    const file = join(dir, 'owner.key');
+    createApiKey(file);
+    const policyFile = join(dir, 'policy.json');
+    writeFileSync(policyFile, JSON.stringify({ ...READ.policy, human_key: 'hardware' }));
+    const requests: { method: string; path: string; body: unknown }[] = [];
+    const was = globalThis.fetch;
+    const outs: string[] = [];
+    const outWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => { outs.push(String(chunk)); return true; }) as typeof process.stdout.write;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const u = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+      const body = init?.body == null ? undefined : JSON.parse(String(init.body));
+      requests.push({ method: (init?.method ?? 'GET') as string, path: new URL(u).pathname + new URL(u).search, body });
+      if (u.endsWith('/policy') && (init?.method ?? 'GET') === 'GET') return new Response(JSON.stringify(READ), { status: 200 });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const run = (args: string[]) => main(['owner', 'policy', ...args, '-i', file, '--url', ORIGIN]);
+      await expect(run(['show', 'ops'])).resolves.toBe(0);
+      await expect(run(['diff', 'ops', policyFile])).resolves.toBe(0);
+      await expect(run(['log', 'ops', '--after', '2'])).resolves.toBe(0);
+      await expect(run(['set', 'ops', policyFile, '--base', '4'])).resolves.toBe(0);
+      await expect(run(['apply', 'ops', 'protected', '--base', '5'])).resolves.toBe(0);
+      await expect(run(['floor', 'add', 'ops', 'fieldhouse', '--guarantees', 'no-runner-lands,human-gates', '--remove-by', 'owner'])).resolves.toBe(0);
+      await expect(run(['floor', 'remove', 'ops', 'fieldhouse'])).resolves.toBe(0);
+      // Round 1, findings 9 and 10: `set` without --base refuses rather than fetch-and-overwrite
+      // (the compare-and-set builds on the version the operator read), and `baton owner -i KEY
+      // policy show REPO` — the documented form — reaches the policy commands.
+      await expect(run(['set', 'ops', policyFile])).rejects.toThrow(/--base/);
+      await expect(main(['owner', '-i', file, 'policy', 'show', 'ops', '--url', ORIGIN])).resolves.toBe(0);
+    } finally {
+      globalThis.fetch = was;
+      process.stdout.write = outWrite;
+    }
+    expect(requests.map((r) => `${r.method} ${r.path}`)).toEqual([
+      'GET /v1/repositories/ops/policy',
+      'GET /v1/repositories/ops/policy',
+      'GET /v1/owner/ops/policy/log?after=2',
+      'PUT /v1/owner/ops/policy',
+      'PUT /v1/owner/ops/policy',
+      'POST /v1/owner/ops/policy/floors',
+      'POST /v1/owner/ops/policy/floors',
+      'GET /v1/repositories/ops/policy',
+    ]);
+    // The compare-and-set builds on the version the operator named, never one the CLI fetched.
+    expect(requests[3].body).toEqual({ base_version: 4, policy: { ...READ.policy, human_key: 'hardware' } });
+    expect(requests[4].body).toEqual({ base_version: 5, preset: 'protected' });
+    expect(requests[5].body).toEqual({ name: 'fieldhouse', guarantees: ['no-runner-lands', 'human-gates'], remove_by: 'owner' });
+    expect(requests[6].body).toEqual({ name: 'fieldhouse', remove: true, confirm: true });
+    // diff printed the one knob; show printed the read it verified the fields of.
+    expect(outs.join('')).toContain('human_key');
   });
 });

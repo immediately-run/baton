@@ -80,6 +80,11 @@ export interface GateContext {
   /** R-BTN-106: the legs the asking worker's credential has run on the ticket, in any claim
    *  (`claim_legs` through each claim's worker to its credential), as current leg names. */
   ranByKey?: string[];
+  /** R-BTN-178 (§6.11): the capabilities with a capacity in rule 4's set for this leg, each with
+   *  its capacity and the seats claims other than the asking one hold on it — a claim's own seat
+   *  never counts against it, so the caller excludes the advancing claim before it builds the
+   *  fact. Counted across every repository: one pool, one name (R-BTN-137). */
+  seats?: Record<string, { capacity: number; held: number }>;
 }
 
 export type Phase = 'claim' | 'advance';
@@ -87,7 +92,7 @@ export type Phase = 'claim' | 'advance';
 /** A numbered rule of §7.2, or one §2m names: `chain` (R-BTN-106), `isolation` (R-BTN-107). */
 export type GateRule = keyof typeof GATE_CODES | 'chain' | 'isolation';
 
-export type GateVerdict = { ok: true } | { ok: false; rule: GateRule; code: string };
+export type GateVerdict = { ok: true } | { ok: false; rule: GateRule; code: string; capability?: string };
 
 /** The refusal code of each rule (§7.2, §11). Rule 6 is retired (R-BTN-121 as amended, B-104)
  * and never refuses; its number stays unused, like 12's. */
@@ -100,6 +105,7 @@ export const GATE_CODES = {
   8: 'barred-tag',
   9: 'stale-skills',
   10: 'backing-off',
+  11: 'capacity-full',
 } as const;
 
 const refuse = (rule: GateRule, code: string = typeof rule === 'number' ? GATE_CODES[rule] : rule): GateVerdict => ({ ok: false, rule, code });
@@ -120,6 +126,7 @@ export function claimHolds(c: { status: string; confirmed_at: number | null; fen
  * `chain`, `isolation` and 10 — rule 1 is the
  * edge and run limit the caller checks against the course file, the lease is the holder's own,
  * and rule 9 is not re-checked, so a course change never strands a claim halfway (R-BTN-22).
+ * Rule 11 (R-BTN-178) holds at both: the seats other claims hold, never the asking one's own.
  */
 export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, phase: Phase, facts: GateContext): GateVerdict {
   // Rule 1's blocks (R-BTN-75, R-BTN-78): an open dependency refuses a claim; an open decision on
@@ -153,7 +160,9 @@ export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, p
   // R-BTN-58: a grant entry `<type>:*` admits every holding of that type.
   const admits = (capability: string) => granted ? granted.has(capability) || granted.has(`${capability.split(':')[0]}:*`) : true;
   const derived = new Set(worker.derived?.[ticket.repository] ?? []);
-  for (const need of new Set([...capabilitiesOf(ticket.requires), ...(leg.requires ?? [])])) {
+  // R-BTN-178: rule 11 reads the same set — every capability with a capacity in it holds a seat.
+  const needs = new Set([...capabilitiesOf(ticket.requires), ...(leg.requires ?? [])]);
+  for (const need of needs) {
     const isHolding = need.startsWith('runner:') || admits(need);
     if ((!held.has(need) || !isHolding) && !derived.has(need)) return refuse(4);
   }
@@ -180,6 +189,16 @@ export function gatesFor(worker: GateWorker, ticket: GateTicket, leg: GateLeg, p
   }
 
   if (facts.override?.retry_after != null && facts.override.retry_after > facts.now) return refuse(10);
+
+  // Rule 11 (R-BTN-178, §6.11): every capability with a capacity in rule 4's set for this leg
+  // has a seat no other claim holds. The fact's `held` already excludes the asking claim's own
+  // seats, so an advance into a leg with the same requirements never refuses itself.
+  if (facts.seats) {
+    for (const need of needs) {
+      const s = facts.seats[need];
+      if (s && s.held >= s.capacity) return { ok: false, rule: 11, code: GATE_CODES[11], capability: need };
+    }
+  }
 
   // §6.7, checked last so a ticket that fails a gate says which: a ticket is claimable again only
   // after a snapshot observed after its last end, so its next claimant is never offered legs from

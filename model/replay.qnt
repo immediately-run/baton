@@ -21,7 +21,8 @@ module replay {
                REQUIRED = Set("fix", "merge"), MAX_TIME = 24,
                MAX_ATTEMPTS = 1000, BACKOFF = 0, MAX_BLOCKED = 1000,
                DECLARED = Map("w1" -> Set(), "w2" -> Set(), "w3" -> Set()), GRANTED = Map("w1" -> Set(), "w2" -> Set(), "w3" -> Set()),
-               REQUIRES = Map("t1" -> Set(), "t2" -> Set()), RESOURCES = Set(), NEEDS = Map("implement" -> Set(), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set())).* from "./baton"
+               REQUIRES = Map("t1" -> Set(), "t2" -> Set()), RESOURCES = Set(), NEEDS = Map("implement" -> Set(), "review" -> Set(), "fix" -> Set(), "adjudicate" -> Set(), "merge" -> Set()),
+               CAPPED = Set(), SEATCAP = Map()).* from "./baton"
 
   // the tick of each worker's last authenticated call to Baton
   var seen: str -> int

@@ -7,6 +7,10 @@
   ],
   "project": "baton",
   "default_course": "create-pr",
+  "check": {
+    "sections_since": "2026-11-03",
+    "sections_from_id": "B-176"
+  },
   "repos": {
     "baton": "immediately-run/baton",
     "baton-board": "immediately-run/baton-board",
@@ -14,7 +18,7 @@
     "fieldhouse": "immediately-run/fieldhouse",
     "hq": "immediately-run/hq"
   },
-  "agent_command": "opencode run --auto --model zai-coding-plan/glm-5.3 \"You are a Baton leg agent. The file named by the BATON_INSTRUCTIONS environment variable holds your instructions for this leg: read them and follow them exactly. The environment names your course (BATON_COURSE), your leg (BATON_LEG), the ticket's file (BATON_TICKET_FILE) and the answer rule for your last line (BATON_ANSWER, when one is set); the arguments after this message are the ticket id, your leg and the repository checkout. Work in the current repository checkout. When BATON_ANSWER is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it. Your process's exit is the leg's completion: when the leg is done — the work pushed, the checks green, the final line printed — exit immediately, never waiting for further input.\"",
+  "agent_command": "opencode run --auto --standalone --model zai-coding-plan/glm-5.3 \"You are a Baton leg agent. The file named by the BATON_INSTRUCTIONS environment variable holds your instructions for this leg: read them and follow them exactly. The environment names your course (BATON_COURSE), your leg (BATON_LEG), the ticket's file (BATON_TICKET_FILE) and the answer rule for your last line (BATON_ANSWER, when one is set); the arguments after this message are the ticket id, your leg and the repository checkout. Work in the current repository checkout. When BATON_ANSWER is set, a machine parses the LAST line of your output: exactly the value word (optionally followed by one PR URL) and nothing else after it. Your process's exit is the leg's completion, and nothing resumes it: no scheduler, no wake-up, stdin is closed for good. Never exit with work pending — every test run, subagent and verification you start must be waited on to completion, in the foreground, before your final line (a \\\"background job\\\" is an orphan the moment you exit; never write that you are waiting or will resume). When the leg is done — the work pushed, the checks green, the final line printed — exit immediately.\"",
   "courses": [
     {
       "id": "create-pr",

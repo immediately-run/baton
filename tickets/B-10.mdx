@@ -3,7 +3,7 @@ title: "B-10 — Baton leg prerequisites and capability types: one requires per 
 id: B-10
 project: baton
 status: available
-updated: 2026-10-22
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -19,8 +19,8 @@ depends_on: []
 ---
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §6.1 (R-BTN-120), §5.6 (R-BTN-121), §6.2 (R-BTN-75's `ticket` and
-`capability` rows), §6.6 rules 1 and 4, §13.6's `ticket_blocks`; history, Migrations: the `ROLES`
+**Spec:** [BATON_SPEC §6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) ([R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1)), [§5.6](../spec/BATON_SPEC/05-courses.md#sec-5-6) ([R-BTN-121](../spec/BATON_SPEC/05-courses.md#sec-5-6)), [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2)'s `ticket` and
+`capability` rows), [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) rules 1 and 4, [§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6)'s `ticket_blocks`; history, Migrations: the `ROLES`
 window.
 
 ### Requires
@@ -92,3 +92,4 @@ _(2026-10-20: rescoped to the current-state spec, PR #71 — `select` is `parent
 _(2026-10-22: updated for the ontology and seats spec (§5.9, §6.10, §6.11) — the `why` table
 gains `not-derived` and `busy` rows and R-BTN-121 splits declaration (course file) from
 derivedness (ontology); both named inline above, each arriving with the ticket that builds it.)_
+- 2026-11-02: the spec restructure's part 4 (B-166): the `why` table's `not-derived` row is gone with the ontology (R-BTN-174; B-167), and `busy` is now the capability row's `full`, a capability's capacity being R-BTN-178's (B-106); R-BTN-121 no longer speaks of derived types.

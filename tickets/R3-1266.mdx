@@ -3,7 +3,7 @@ title: "R3-1266 — Baton hosts its own tickets: the baton repository joins Bato
 id: R3-1266
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -24,7 +24,7 @@ depends_on:
 **Brief:** [SELF-HOSTING](https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/plans/self-hosting.mdx). The owner, 2026-10-16: "I want baton to be
 completely self-sufficient as an open source project, no access to the docs repo should be
 required to understand how it works or what is being developed."
-**Spec:** `spec/BATON_SPEC.md` §3.1 R-BTN-47 (registration), §4.2 R-BTN-74 (the markdown source), §5.1 R-BTN-134 (`baton repo init`, course sources; `--course pr` refused), §5.8 (`create-pr`), §1 R-BTN-18, §2.1 (append-only migrations), §16.1 R-BTN-28 (`cut_over: true`).
+**Spec:** [BATON_SPEC §3.1](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) [R-BTN-47](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-1) (registration), [§4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (the markdown source), [§5.1](../spec/BATON_SPEC/05-courses.md#sec-5-1) [R-BTN-134](../spec/BATON_SPEC/05-courses.md#sec-5-1) (`baton repo init`, course sources; `--course pr` refused), [§5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) (`create-pr`), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) [R-BTN-18](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [§2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) (append-only migrations), [§16.1](../spec/BATON_SPEC/16-adoption.md#sec-16-1) [R-BTN-28](../spec/BATON_SPEC/16-adoption.md#sec-16-1) (`cut_over: true`).
 
 ### Why
 
@@ -89,3 +89,5 @@ repository can be one of them once it has a ticket source (R3-1249).
 _(filed 2026-10-16)_
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — `create-pr` read from its source instead of the `pr` course (R-BTN-134), and the acceptance ticket is the next free B-n, since B-1 exists.)_
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton board` and `baton tickets …` are `baton repo board` and `baton ticket …` (R-BTN-127); the built names rename under B-157.)_

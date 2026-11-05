@@ -3,7 +3,7 @@ title: "B-154 — Harden merged-by-hand for every course: which merge counts, th
 id: B-154
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -22,9 +22,9 @@ depends_on:
 **Brief:** the owner, 2026-11-01, on review round two of immediately-run/baton#154, choosing to
 split the `merged-by-hand` hardening out of it: "Split the hardening out".
 
-**Spec:** `spec/BATON_SPEC.md` R-BTN-131 (`create-pr`'s `merged-by-hand`, the record courses),
-R-BTN-192 (`pr-merged`, `fact-legs`), R-BTN-183 (*Continuity*, *Foreign commits*, *Paths*),
-R-BTN-5, R-BTN-74 and §4.3 (`positions`), R-BTN-83 (`route`), R-BTN-96 (plain git), R-BTN-120
+**Spec:** BATON_SPEC [R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8) (`create-pr`'s `merged-by-hand`, the record courses),
+[R-BTN-192](../spec/BATON_SPEC/12-security.md#sec-12-8) (`pr-merged`, `fact-legs`), [R-BTN-183](../spec/BATON_SPEC/12-security.md#sec-12-8) (*Continuity*, *Foreign commits*, *Paths*),
+[R-BTN-5](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-5), [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) and [§4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) (`positions`), [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3) (`route`), [R-BTN-96](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4) (plain git), [R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1)
 (`closed_tickets.final_station`).
 
 ### Why
@@ -86,3 +86,5 @@ record course.
 ## Status
 
 - 2026-11-01: filed from immediately-run/baton#154's review round two.
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton owner route` is `baton ticket route` (R-BTN-127).)_

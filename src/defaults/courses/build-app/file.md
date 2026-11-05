@@ -27,6 +27,7 @@ setting in `.baton/baton.json`, `tickets/` by default):
 
 - **id** `<this ticket's id>-<n>`, `n` the plan's number, so ids and the plan agree.
 - **title** `<id> — <the plan's title>`.
+- **The body** the plan's section, with `### Trust` (every new input it adds, who may write it and how it is verified, or "no new input") and `### Invariants` (the rules it must not break, by id, and how the design keeps each), ending in `## Status` with `_filed <today, YYYY-MM-DD>.`.
 - **parent** this ticket's id. Each child blocks this ticket until it closes; that is how
   `verify` waits for the build.
 - **course** `create-pr`, or the course the plan names for it, written out even when it is the

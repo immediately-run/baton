@@ -19,6 +19,9 @@
 //   baton admin -i KEY probe add --key PUB --label L
 //   baton admin -i KEY resource add NAME --scope worker|account|service --schema FILE|JSON [--atoms-from admin|any]    (R-BTN-76, R-BTN-176)
 //   baton admin -i KEY instance add NAME --serves a,b --repositories x,y
+//   baton admin -i KEY capacity set <capability> <n> [--yes]                 (R-BTN-178)
+//   baton admin -i KEY capacity set <capability> --clear [--yes]             (R-BTN-178)
+//   baton admin -i KEY capacity list
 //   baton admin -i KEY resource set INSTANCE (--available | --unavailable [--until ISO]) [--valid-for 1h] [--detail FILE|JSON]
 //   baton blocked -i KEY TICKET                           baton blocked -i KEY --repository R --on KIND:REF [--transitive]
 //                — why a ticket cannot move, or what waits on a ticket, a resource, a capability or a
@@ -28,6 +31,13 @@
 //   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T]
 //   baton owner -i KEY revoke REPO FINGERPRINT
 //   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
+//   baton owner -i KEY policy show REPO                     — the signed read (R-BTN-189), as JSON
+//   baton owner -i KEY policy diff REPO FILE                — the knobs FILE's document would change
+//   baton owner -i KEY policy log REPO [--after N]          — the append-only change log
+//   baton owner -i KEY policy set REPO FILE --base N        — a compare-and-set on the version you read
+//   baton owner -i KEY policy apply REPO PRESET --base N    — cooperative | protected | protected-signed | plain-git
+//   baton owner -i KEY policy floor add REPO NAME --guarantees a,b [--remove-by human|owner]
+//   baton owner -i KEY policy floor remove REPO NAME        (R-BTN-189: needs the floor's remove_by and approvers.policy)
 //   baton owner -i KEY bar REPO --course C|'*' --tag T [--legs a,b] --applies claim|claim+advance
 //                [--starts-at ISO] [--ends-at ISO] [--release-holders] --reason R
 //   baton owner -i KEY bar lift REPO ID
@@ -54,16 +64,33 @@
 //                   [--eject tickets|stations] [--pin owner/name@commit] [--force]
 //                — a repository's own sync and scaffold (§2f R-BTN-74, R-BTN-131)
 //   baton tickets new --title T [--description D] [--project ID] [--depends-on A,B] [--tags X,Y]
-//                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F]
+//                [--tier T] [--order N] [--repos a,b] [--course C] [--body-file F] [--trust T] [--invariants I]
 //                — file one ticket, the next free id under .baton/baton.json's ticket_prefix,
 //                with the conventional body, as one commit pushed to the default branch (B-112)
-//   baton tickets claim <id> | set <id> <status> [--pr URL] | done <id> [--pr URL]
-//                — claim, move or finish one, each one commit pushed to the default branch (B-112)
+//   baton tickets claim <id> [-i KEY] [--url URL] [--offline] [--rules-reread <ids>]
+//   baton tickets set <id> <status> [--pr URL] [--note TEXT] [-i KEY] [--url URL] [--offline] [--rules-reread <ids>] | done <id> [--pr URL]
+//                — claim asks Baton first (B-129): before it writes, it reads the ticket from
+//                Baton with the key -i names (else BATON_KEY_FILE) — the board for the station,
+//                the ready leg and the live claims, the history for the path and the PRs of the
+//                ended claims, the branch-holder query for the branch — and continues the ticket
+//                where Baton holds it: past its course's start, a false `available` is a takeover
+//                (the PRs are written back, the position printed), never a fresh start, while the
+//                git lock and a parked or closed status still refuse; another claim refuses,
+//                naming its holder and its lease; an unanswered read or an unreadable key refuses
+//                rather than trust the frontmatter, unless --offline. set/done write any live
+//                status, each one commit pushed to the default branch (B-112); a release
+//                (set <id> available) keeps every prs: entry and its commit is the hand-off — the
+//                PRs, Baton's station and next leg, the branch and --note's what is left (B-129);
+//                claim refuses a ticket citing a rule the spec's history amended since the ticket
+//                was filed or last re-read it, until --rules-reread names those ids (R-BTN-74)
 //   baton tickets check [--repo DIR] [--quiet]
 //                — check this repository's ticket source without posting it: ids, the board
 //                post's validation, depends_on targets and cycles, (with check.depends_line in
-//                .baton/baton.json) each **Depends on:** line, and the generated "How tickets
-//                work" page; exit 1 naming every finding (B-111, B-112)
+//                .baton/baton.json) each **Depends on:** line, (with check.sections_since) the
+//                ### Trust and ### Invariants sections (with check.sections_from_id, the _filed
+//                line from that id on), and the generated "How tickets work" page;
+//                exit 1 naming every finding (B-111, B-112); live tickets citing a rule amended
+//                since they were filed are listed, never a finding (R-BTN-74)
 //   baton tickets --help
 //                — the commands, the tags Baton reads and their meanings, the Requires: clause (B-112)
 //   baton request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B] [--remote R]
@@ -89,7 +116,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { signHeaders, signingKey } from './sign.mjs';
+import { requestCredential, signHeaders } from './sign.mjs';
 
 export const DEFAULT_URL = 'https://baton.immediately.run';
 const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -267,7 +294,32 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       const { flags, positional } = parseArgs(rest.slice(1), [], ['serves', 'repositories'], 1);
       return { method: 'POST', path: '/v1/admin/instances', body: { name: need(positional[0], 'the instance name'), serves: need(list(flags.serves), '--serves'), repositories: list(flags.repositories) ?? [] } };
     }
-    throw new Error('baton admin repos|repo|grant|probe|resource|instance|revoke|open');
+    if (cmd === 'capacity' && rest[0] === 'set') {
+      // R-BTN-178: an administrator's statement that the name denotes one thing across every
+      // repository — so the command reads what the courses' legs require first (the preflight
+      // GET) and asks to confirm before it signs the PUT. --yes answers the prompt beforehand.
+      const { flags, positional } = parseArgs(rest.slice(1), ['clear', 'yes'], [], 2);
+      const capability = need(positional[0], 'the capability');
+      let capacity = null;
+      if (!flags.clear) {
+        capacity = Number(need(positional[1], 'the capacity (1-64), or --clear'));
+        if (!Number.isInteger(capacity) || capacity < 1 || capacity > 64) throw new Error(`the capacity is an integer 1 to 64, not ${positional[1]}`);
+      } else if (positional[1] != null) {
+        throw new Error('baton admin capacity set <capability> <n> | baton admin capacity set <capability> --clear');
+      }
+      return {
+        method: 'PUT', path: '/v1/admin/capacities', body: { capability, capacity },
+        // The confirm print's own read, and the prompt's question:
+        preflight: { method: 'GET', path: `/v1/admin/capacities?capability=${encodeURIComponent(capability)}`,
+          question: flags.clear ? `clear ${capability}'s capacity (its seats become unlimited)?` : `set ${capability}'s capacity to ${capacity}?` },
+        yes: !!flags.yes,
+      };
+    }
+    if (cmd === 'capacity' && rest[0] === 'list') {
+      parseArgs(rest.slice(1), [], [], 0);
+      return { method: 'GET', path: '/v1/admin/capacities' };
+    }
+    throw new Error('baton admin repos|repo|grant|probe|resource|instance|capacity|revoke|open');
   }
   if (role === 'owner') {
     if (cmd === 'grants') {
@@ -358,6 +410,34 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
 
 const GRANT_FLAGS = ['key', 'hostname', 'label', 'capabilities', 'max-tier'];
 
+/** R-BTN-178's confirm (B-106): print every course whose legs require the capability, with the
+ *  type's definition in each, then ask. `--yes` answers beforehand; without a TTY the command
+ *  refuses rather than prompt a pipe. `out` and `in` are injected for the test. */
+export async function confirmCapacity(answer, question, yes, out, input) {
+  const requiring = Array.isArray(answer?.requiring) ? answer.requiring : [];
+  if (requiring.length) {
+    for (const c of requiring) {
+      const type = c.type ? ` — ${c.type.description} (values ${c.type.values})` : '';
+      out.write(`${c.repository}/${c.course} v${c.version}: its legs ${c.legs.join(', ')} require it${type}\n`);
+    }
+  } else {
+    out.write(`no course of this Baton names the capability in a leg's requires — setting it is the administrator's own statement of the name\n`);
+  }
+  for (const c of Array.isArray(answer?.capacities) ? answer.capacities : []) {
+    if (c.capacity != null) out.write(`${c.capability}: capacity ${c.capacity} (set ${new Date(c.set_at).toISOString()} by ${c.set_by})\n`);
+  }
+  if (yes) return true;
+  if (!input.isTTY) {
+    out.write('baton: not confirmed — answer the prompt on a terminal, or pass --yes\n');
+    return false;
+  }
+  out.write(`${question} [y/N] `);
+  const line = await new Promise((resolve) => {
+    input.once('data', (d) => resolve(String(d).trim().toLowerCase()));
+  });
+  return line === 'y' || line === 'yes';
+}
+
 /** A JSON argument: inline (`{…}`), else a file holding it. */
 function jsonArg(v, readJson) {
   const text = v.trim().startsWith('{') ? v : readJson(v);
@@ -385,9 +465,6 @@ function grantBody(flags, readKey, extra) {
   };
 }
 
-/** R-BTN-159: an API key, `bak_<id>_<secret>` — an administrator's, an owner's or a worker's. */
-const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
-
 /** `baton key create FILE [--comment TEXT]` (R-BTN-159): an API key, made here and never sent
  *  anywhere. FILE (mode 0600) holds the key, for `-i FILE` or a runner's BATON_KEY_FILE;
  *  FILE.pub holds its public line — what BATON_ADMIN_KEYS lists, `--owner-key FILE.pub` or
@@ -413,11 +490,11 @@ const redirectAnswered = (target, status, to) => new Error(
  *  never followed (B-80): a 3xx is an error naming what answered — a login page in front of
  *  Baton is not Baton's answer. */
 export async function send(url, p, keyFile, fetchImpl = fetch) {
-  const text = readFileSync(keyFile, 'utf8').trim();
+  const cred = requestCredential(keyFile);
   const target = new URL(p.path, url).toString();
   // A GET carries no body; its digest is of the empty one.
   const body = p.method === 'GET' ? undefined : JSON.stringify(p.body ?? {});
-  const auth = API_KEY.test(text) ? { Authorization: `Bearer ${text}` } : signHeaders({ method: p.method, url: target, body, key: signingKey(keyFile) });
+  const auth = cred.bearer ? { Authorization: `Bearer ${cred.bearer}` } : signHeaders({ method: p.method, url: target, body, key: cred.key });
   const headers = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...auth };
   // A Baton that does not answer in 30 seconds is reported, never waited on for ever (round 3, 3-A-5).
   let res;
@@ -493,6 +570,119 @@ async function decisionList(argv) {
   return 0;
 }
 
+// ── `baton owner policy …` (§12.8 R-BTN-188/R-BTN-189, B-145) ────────────────────────────
+
+/** The policy's knobs, dotted, in the spec table's order — the CLI's own copy of
+ *  src/core/policy.ts's KNOBS, which the bundled core cannot share with this file. */
+const POLICY_KNOBS = [
+  'approvers.members', 'approvers.trust', 'approvers.policy', 'human_key',
+  'grants.default_trust', 'grants.one_per_domain', 'grants.trusted_domain',
+  'refs.default_branch', 'refs.tags', 'refs.other', 'refs.baton', 'refs.legs',
+  'paths.protected', 'paths.control', 'paths.tickets',
+  'merge.trusted', 'merge.reviews', 'merge.checks', 'authorship', 'tickets.created', 'leg_state',
+  'outbox.git', 'outbox.forge-check', 'inputs.board', 'inputs.answers', 'attestations', 'readings',
+];
+
+/** One knob's value, read out of a document by its dotted path. */
+const knobOf = (doc, knob) => knob.split('.').reduce((v, seg) => (v && typeof v === 'object' ? v[seg] : undefined), doc);
+
+/** A value as the canonical JSON the core hashes and diffs over: objects with sorted keys, so a
+ *  stored document and a rebuilt one differ in key order alone, which is no change. */
+const canonical = (v) => Array.isArray(v) ? `[${v.map(canonical).join(',')}]`
+  : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}` : (JSON.stringify(v) ?? 'null');
+
+/** The knobs a change from `oldDoc` to `newDoc` touches — `baton owner policy diff` (pure, so
+ *  the tests check it alone). */
+export function policyDiff(oldDoc, newDoc) {
+  return POLICY_KNOBS.filter((k) => canonical(knobOf(oldDoc, k)) !== canonical(knobOf(newDoc, k)));
+}
+
+/** `baton owner policy …`: show and diff read the signed policy read (R-BTN-189 — a deployment
+ *  verifies its signature against the tenant key it pinned; the CLI shows the fields and the
+ *  signature beside them), set and apply compare-and-set on the `--base` version the operator
+ *  READ (never a version the CLI fetches itself: a fresh fetch would overwrite a concurrent
+ *  change sight unseen, defeating the compare-and-set — round 1, finding 9; `show` names the
+ *  version), and the floor commands register and remove a deployment's floors. */
+async function policyMain(argv) {
+  // `-i KEY` and `--url URL` may sit before the subcommand — `baton owner -i KEY policy show
+  // REPO` is the documented form — or after it, as every other command takes them.
+  const isFlagOrValue = (_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url';
+  const { flags: globalFlags } = parseArgs(argv.filter(isFlagOrValue));
+  const args = argv.filter((x, i, a) => !isFlagOrValue(x, i, a));
+  const url = globalFlags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+  const keyFile = need(globalFlags.identity, '-i KEY (an owner key file)');
+  const request = (method, path, body) => send(url, { method, path, body }, keyFile);
+  const write = (text) => process.stdout.write(`${text}\n`);
+  const [sub, ...rest] = args;
+  if (sub === 'show') {
+    const { positional } = parseArgs(rest, [], ['identity', 'url'], 1);
+    const repo = need(positional[0], 'the repository id');
+    const out = await request('GET', `/v1/repositories/${encodeURIComponent(repo)}/policy`);
+    if (out.status !== 200) return write(arrived(out.text)), 1;
+    write(JSON.stringify(out.json));
+    process.stderr.write(`baton: verify ${out.json.repository}@${out.json.version} against your pinned tenant key (${out.json.kid}); the read lives until ${new Date(out.json.valid_until).toISOString()}\n`);
+    return 0;
+  }
+  if (sub === 'diff') {
+    const { positional } = parseArgs(rest, [], ['identity', 'url'], 2);
+    const [repo, file] = positional;
+    const out = await request('GET', `/v1/repositories/${encodeURIComponent(need(repo, 'the repository id'))}/policy`);
+    if (out.status !== 200) return write(arrived(out.text)), 1;
+    let next;
+    try {
+      next = JSON.parse(readFileSync(need(file, 'the policy file'), 'utf8'));
+    } catch (e) {
+      throw new Error(`${file}: not JSON (${e.message})`);
+    }
+    const changed = policyDiff(out.json.policy, next);
+    write(changed.length ? changed.join('\n') : '(no knob changes)');
+    return 0;
+  }
+  if (sub === 'log') {
+    const { flags, positional } = parseArgs(rest, [], ['after', 'identity', 'url'], 1);
+    const q = new URLSearchParams(flags.after ? { after: flags.after } : {});
+    const out = await request('GET', `/v1/owner/${encodeURIComponent(need(positional[0], 'the repository id'))}/policy/log${q.size ? `?${q}` : ''}`);
+    if (out.status !== 200) return write(arrived(out.text)), 1;
+    write(JSON.stringify(out.json));
+    return 0;
+  }
+  if (sub === 'set' || sub === 'apply') {
+    const { flags, positional } = parseArgs(rest, [], ['base', 'identity', 'url'], 2);
+    const [repo, what] = positional.map((x) => need(x, sub === 'set' ? 'the repository id and the policy file' : 'the repository id and the preset name'));
+    // R-BTN-188: the change builds on the version the OPERATOR read — the one `show` printed —
+    // so a concurrent change is a `conflict` the operator sees, never one this overwrites.
+    const base = need(baseOf(flags.base), '--base N (the version your change builds on — `baton owner policy show` names it; a stale one answers conflict)');
+    const body = sub === 'apply' ? { base_version: base, preset: what } : { base_version: base, policy: JSON.parse(readFileSync(what, 'utf8')) };
+    const out = await request('PUT', `/v1/owner/${encodeURIComponent(repo)}/policy`, body);
+    write(JSON.stringify(out.json));
+    return out.status >= 200 && out.status < 300 ? 0 : 1;
+  }
+  if (sub === 'floor' && rest[0] === 'add') {
+    const { flags, positional } = parseArgs(rest.slice(1), [], ['guarantees', 'remove-by', 'identity', 'url'], 2);
+    const out = await request('POST', `/v1/owner/${encodeURIComponent(need(positional[0], 'the repository id'))}/policy/floors`,
+      { name: need(positional[1], 'the floor name'), guarantees: need(list(flags.guarantees), '--guarantees'), ...(flags['remove-by'] ? { remove_by: flags['remove-by'] } : {}) });
+    write(JSON.stringify(out.json));
+    return out.status >= 200 && out.status < 300 ? 0 : 1;
+  }
+  if (sub === 'floor' && rest[0] === 'remove') {
+    const { positional } = parseArgs(rest.slice(1), [], ['identity', 'url'], 2);
+    const out = await request('POST', `/v1/owner/${encodeURIComponent(need(positional[0], 'the repository id'))}/policy/floors`,
+      { name: need(positional[1], 'the floor name'), remove: true, confirm: true });
+    write(JSON.stringify(out.json));
+    return out.status >= 200 && out.status < 300 ? 0 : 1;
+  }
+  throw new Error('baton owner policy show|diff|log|set|apply|floor add|floor remove');
+}
+
+/** `--base` as the version number the PUT carries. */
+function baseOf(v) {
+  if (v == null || v === '') return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) throw new Error('--base must be the version number you read (as `baton owner policy show` printed it)');
+  return n;
+}
+
+
 /** What arrived instead of Baton's JSON: its first 300 characters, an empty body named (B-80). */
 const arrived = (text) => (text.length > 300 ? `${text.slice(0, 300)}…` : text) || '(an empty body)';
 
@@ -511,6 +701,19 @@ export async function main(argv) {
   if (argv[0] === 'decision') {
     if (argv[1] !== 'list') throw new Error('baton decision list -i KEY [--watch | --all]');
     return decisionList(argv.slice(2));
+  }
+  if (argv[0] === 'owner') {
+    // `-i KEY` (and `--url URL`) may sit between `owner` and its subcommand: `baton owner -i KEY
+    // policy show REPO` is the documented form (round 1, finding 10). The flags stay in what
+    // policyMain receives; only the `policy` word is taken out.
+    const rest = argv.slice(1);
+    let cut = -1;
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i] === '-i' || rest[i] === '--url') { i += 1; continue; }
+      if (rest[i] === 'policy') cut = i;
+      break;
+    }
+    if (cut >= 0) return policyMain(rest.filter((_, i) => i !== cut));
   }
   if (argv[0] === 'run') {
     // §6.13: the runner is TypeScript under src/runner; bundle it (a checkout runs the CLI with
@@ -541,7 +744,19 @@ export async function main(argv) {
   const { flags } = parseArgs(rest.filter((_, i, a) => a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
   const args = rest.filter((_, i, a) => !(a[i] === '-i' || a[i - 1] === '-i' || a[i] === '--url' || a[i - 1] === '--url'));
   const p = plan(role, args);
-  const { status, json, text } = await send(flags.url ?? process.env.BATON_URL ?? DEFAULT_URL, p, need(flags.identity, '-i KEY (an administrator, owner or worker key file)'));
+  const url = flags.url ?? process.env.BATON_URL ?? DEFAULT_URL;
+  const keyFile = need(flags.identity, '-i KEY (an administrator, owner or worker key file)');
+  // R-BTN-178: `capacity set` reads what the courses' legs require and asks to confirm before
+  // the PUT goes out — one name, one thing (R-BTN-137) is the administrator's own statement.
+  if (p.preflight) {
+    const read = await send(url, p.preflight, keyFile);
+    if (!(read.status >= 200 && read.status < 300)) {
+      process.stdout.write(`${JSON.stringify(read.json)}\n`);
+      return 1;
+    }
+    if (!(await confirmCapacity(read.json, p.preflight.question, p.yes, process.stdout, process.stdin))) return 1;
+  }
+  const { status, json, text } = await send(url, p, keyFile);
   // A 2xx whose body is not JSON — an intermediary's login page, an HTML error, an empty body —
   // is a refusal, never success (B-80): the command fails, showing what arrived.
   if (status >= 200 && status < 300 && json === null) {

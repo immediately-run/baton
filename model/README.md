@@ -7,9 +7,11 @@ A [Quint](https://quint-lang.org) model of Baton's core state machine, written a
 prerequisites with their blocks, retries and blocked ends (R-BTN-75, -77, -78, -120, -122, -126).
 In sync with the 2026-10-22 spec rewrite: rule 4 reads H ∪ D(H) — the capability ontology's
 derived capabilities join the holdings before the check, and the model receives the union as the
-runner's capabilities (§5.9, R-BTN-174); the ontology's own machinery, route choices (R-BTN-177)
-and seats (R-BTN-178) are not modelled, for the reasons *Not modelled* gives. Section numbers
-below were repointed to the spec's current layout in the same pass.
+runner's capabilities (§5.9, R-BTN-174); the ontology's own machinery and route choices
+(R-BTN-177) are not modelled, for the reasons *Not modelled* gives. Seats are modelled since
+B-106 (R-BTN-178): a capability with a capacity has that many, held by the claims whose tickets
+require it and refused past by rule 11 — `sim` seats one, the proof instances none. Section
+numbers below were repointed to the spec's current layout in the same pass.
 *Not modelled* lists the rest. Each action, helper
 and property names the requirement it models (`R-BTN-n`, §n). A counterexample is a spec
 defect: it is filed against BATON_SPEC with the trace, never fixed by weakening a property.
@@ -421,10 +423,11 @@ depth 5 back, and with it the `unblocked` event.
   `route_last` hysteresis, so no gate or modelled state moves. A dead holding reported in
   `BATON_TAKEN` is removed in the reporting advance's transaction — another way the declared
   set shrinks, in the company of the recount causes below.
-- **Seats** (R-BTN-178): an instance's capacity counts the claims billing it, refusing past it
-  by rule 11 (`instance-busy`) — counting over instances with no interleaving of modelled state;
-  each resource stays the one `service` instance below, and B-106 adds rule 11 to the model
-  when it builds it.
+- **Seats' leg halves** (R-BTN-178, B-106): the seats modelled are the ticket's `requires`
+  intersected with the capped names — a leg's own `requires.capabilities` (below) never joins
+  them, so a capacity only a leg names is never checked here. The capacities are constants, an
+  administrator's statement outside the transition system, and a lower capacity taking no held
+  seat back follows from the refusal reading the same constants.
 - **A leg's own `requires.capabilities`** (R-BTN-120) and **course `capability_types` and
   roles** (R-BTN-121): core has not built them (B-10); a leg's list joins the ticket's for that
   leg, the same check, and types and roles are the course file's acceptance (`baton course

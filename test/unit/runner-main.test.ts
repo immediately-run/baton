@@ -10,7 +10,8 @@ import { capabilitiesOf } from '../../src/shared/vocabulary.mjs';
 import { asksHelp, declareCourses, fetchMain, parseRunArgs, runMain, servedCourses } from '../../src/runner/main';
 import { drainLines, Runner, withTimestamps } from '../../src/runner/runner';
 import { BatonApi, BatonRefusal } from '../../src/runner/api';
-import { HARNESS_AGENTS } from '../../src/runner/harness';
+import { HARNESS_AGENTS, AGENT_PROMPT } from '../../src/runner/harness';
+import { splitWords } from '../../src/defaults/agent-words';
 import { envAuth } from '../../src/runner/api';
 import { courseOf, dropCourse, freshSecret, holdHome, legNeeds, loadCourse, readHead } from '../../src/runner/home';
 import { declarationFrom } from '../../src/runner/runner';
@@ -45,6 +46,13 @@ describe('parseRunArgs', () => {
     expect(parseRunArgs(['--test-harness'], {}).testHarness).toBe(true);
     // B-86: --capabilities narrows; no flag is no declaration (`null`), never `agent-venue` alone.
     expect(parseRunArgs(['--capabilities', 'llm-call'], {}).capabilities).toEqual(['llm-call']);
+    // B-106 (R-BTN-178): --lock <capability>=<path>, repeatable — one machine's singleton. An
+    // unexpanded name is refused: the lock's capability is a thing, typed like any other.
+    expect(parseRunArgs(['--lock', 'mcp:chrome=/run/baton/chrome.lock', '--lock', 'rdp:bench=/run/baton/rdp.lock'], {}).locks)
+      .toEqual({ 'mcp:chrome': '/run/baton/chrome.lock', 'rdp:bench': '/run/baton/rdp.lock' });
+    expect(parseRunArgs([], {}).locks).toEqual({});
+    expect(() => parseRunArgs(['--lock', 'mcp-chrome=/run/x'], {})).toThrow('<capability>=<path>');
+    expect(() => parseRunArgs(['--lock', 'mcp:chrome'], {})).toThrow('<capability>=<path>');
     // Verbose logging (2026-10-23): timestamps, the claim's id and nonce, the leg's command.
     expect(parseRunArgs(['--verbose'], {}).verbose).toBe(true);
   });
@@ -133,6 +141,22 @@ describe('the agent_command a runner runs (B-83)', () => {
     // B-103: the banner's course field names every served course (`create-pr@1, create-spec@2`),
     // in the singular only when `--course` (or a one-course home) left one.
     expect(src).toContain("course${courses.length === 1 ? '' : 's'} ${courses.map((c) => `${c.course}@${c.version}`).join(', ')}");
+  });
+
+  it('the briefing carries the one-shot contract: nothing resumes the agent, so it never exits with work pending (B-181)', () => {
+    // B-180's review round (2026-11-04) was lost whole to an agent that started its second
+    // reviewer and the vitest suite as background jobs, printed "I'll resume when they land",
+    // and exited — the stub reads exit as completion, and a promise is not a verdict. B-108's
+    // lesson, mirrored: the briefing is the one thing guaranteed in every agent_command, so the
+    // contract is stated there and the next drift fails this test, not a round. The phrase is
+    // the sentence the ticket prescribes, capital N and all.
+    expect(AGENT_PROMPT).toContain('nothing resumes it');
+    expect(AGENT_PROMPT).toContain('Never exit with work pending');
+    expect(AGENT_PROMPT).not.toContain('never waiting for further input');
+    // The briefing rides inside the command's double quotes and now carries double quotes of
+    // its own: escaped in HARNESS_AGENTS, the no-shell split (B-84) still spawns it whole.
+    expect(splitWords(HARNESS_AGENTS.opencode).at(-1)).toBe(AGENT_PROMPT);
+    expect(splitWords(HARNESS_AGENTS['claude-code']).at(-1)).toBe(AGENT_PROMPT);
   });
 
   it('settings naming no agent_command drive from --harness, the command logged; a named one is left to the settings', async () => {

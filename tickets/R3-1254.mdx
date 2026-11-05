@@ -3,7 +3,7 @@ title: "R3-1254 — Baton model, remainder of R3-1243: exhaustive liveness on a 
 id: R3-1254
 project: baton
 status: in-progress
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -21,9 +21,9 @@ depends_on:
 ---
 
 **Brief:** the Baton project; the remainder R3-1243 named in baton#10.
-**Spec:** `spec/BATON_SPEC.md` (moved here by R3-1252) §6.1–§6.4 (R-BTN-75–R-BTN-78), §5.4
-R-BTN-79, §9.5 R-BTN-19, §9.6 R-BTN-10, §1 R-BTN-45; widened 2026-10-17 to §5.3 R-BTN-83, §1
-R-BTN-98, §6.1 R-BTN-120, §7.4 R-BTN-122 and §6.2 R-BTN-126 (Status); §15 R-BTN-68;
+**Spec:** BATON_SPEC (moved here by R3-1252) [§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1)–[§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4) ([R-BTN-75](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2)–R-BTN-78), [§5.4](../spec/BATON_SPEC/05-courses.md#sec-5-4)
+[R-BTN-79](../spec/BATON_SPEC/05-courses.md#sec-5-4), [§9.5](../spec/BATON_SPEC/09-claims.md#sec-9-5) [R-BTN-19](../spec/BATON_SPEC/09-claims.md#sec-9-5), [§9.6](../spec/BATON_SPEC/09-claims.md#sec-9-6) [R-BTN-10](../spec/BATON_SPEC/09-claims.md#sec-9-6), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) [R-BTN-45](../spec/BATON_SPEC/01-what-baton-is.md#sec-1); widened 2026-10-17 to [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)
+[R-BTN-98](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [§6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) [R-BTN-120](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1), [§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4) [R-BTN-122](../spec/BATON_SPEC/07-conditions.md#sec-7-4) and [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) [R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) (Status); [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [R-BTN-68](../spec/BATON_SPEC/15-verification.md#sec-15);
 `model/README.md`. R-BTN-80 (notices) is retired (`spec/BATON_SPEC_HISTORY.md`).
 
 ### Why
@@ -180,3 +180,4 @@ ticket is claimed. **Conflicts for the claimant to settle, not rescoped here:**_
 _(2026-10-31, a note only, the ticket being in progress: the courier lease model is now the outbox's (R-BTN-171, `model/lightQuestion.qnt`, renamed by B-64); nothing here models notices.)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): a note only, the ticket being in progress: posted decisions, choice stations, light questions, open-world claims and held snapshots left the spec (R-BTN-78, R-BTN-104, R-BTN-148, R-BTN-166, R-BTN-173 retired); `model/lightQuestion.qnt` models retired behaviour and is deleted with B-74's code; the model gains a person leg's expiry, the `cancelling` hold and the forced Resync's head reset.)_
+- 2026-11-02: the spec restructure's part 4 (B-166): every runner granted on a repository now has the same usable instances (R-BTN-76; no `uses`, no `runner` or `host` scope), so the fleet's resource answer is lost only when the repository has no live granted runner or no usable instance (R-BTN-77); the ontology's derived capabilities left the model's input (R-BTN-174, B-167), and a capability's capacity is R-BTN-178's rule 11 (B-106).

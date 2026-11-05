@@ -3,7 +3,7 @@ title: "R3-1272 — Baton CLI ranks and syncs on the runner: rank.mjs from the r
 id: R3-1272
 project: baton
 status: available
-updated: 2026-10-22
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -24,7 +24,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project; the owner, 2026-10-16: ranking the next leg is the runner's job, and a plain git repository needs nothing on the server.
-**Spec:** `spec/BATON_SPEC.md` §1 R-BTN-98 (the ranking code: where it loads from, `view`, the return shape, the merge between groups), §6.7 R-BTN-99/R-BTN-100 and R-BTN-152 (the views, `prefer`, checking `rank`'s answer), §3.3 R-BTN-105 (every sync input from the commit; triggers; `baton owner sync-want`), §8.2 R-BTN-102 (a machine key syncs), §15 S-BTN-57, S-BTN-59
+**Spec:** [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) [R-BTN-98](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (the ranking code: where it loads from, `view`, the return shape, the merge between groups), [§6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) [R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)/R-BTN-100 and [R-BTN-152](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) (the views, `prefer`, checking `rank`'s answer), [§3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) [R-BTN-105](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) (every sync input from the commit; triggers; `baton owner sync-want`), [§8.2](../spec/BATON_SPEC/08-runners.md#sec-8-2) [R-BTN-102](../spec/BATON_SPEC/08-runners.md#sec-8-2) (a machine key syncs), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-57](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-59](../spec/BATON_SPEC/15-verification.md#scenarios)
 **Depends on:** R3-1245 (`baton runner start`), R3-1265 (the CLI's sync and mirror runners), R3-1269 (the views and `prefer`), R3-1270 (sync under a machine key)
 
 ### Requires
@@ -76,3 +76,4 @@ _2026-10-22 — updated for the seats and route-choice spec: `prefer` entries ar
 `prefer` claim to its next candidate inside Baton's claim transaction, so the runner's claim
 call needs no new path. `BATON_ADVICE` for leg scripts (R-BTN-177) is B-105's, not this
 ticket's._
+- 2026-11-02: the spec restructure's part 4 (B-166): `prefer` entries are `{ticket_id, leg?}` (R-BTN-100), with no `bills`; rule 11 refuses `capacity-full` from the leg's requirements (R-BTN-178); `BATON_ADVICE` is gone (§6.10; B-167).

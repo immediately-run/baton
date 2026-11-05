@@ -3,7 +3,7 @@ title: "B-147 — Grants and couriers carry a trust level, a trust domain, a mod
 id: B-147
 project: baton
 status: available
-updated: 2026-10-31
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -19,14 +19,14 @@ depends_on:
   - B-145
 ---
 
-**Brief:** BATON_SPEC §12.8 as amended 2026-10-30 (baton#145): trust is a property of each grant
+**Brief:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) as amended 2026-10-30 (baton#145): trust is a property of each grant
 and courier, set by the repository policy's `approvers.trust`, and the trusted-runner role is the
 only one offered trusted legs.
-**Spec:** R-BTN-180 (trust levels and domains, one grant per domain), R-BTN-182 (trusted runners:
-the role, rule `trusted`, the refusal-only override), R-BTN-188 (`approvers.trust`,
+**Spec:** [R-BTN-180](../spec/BATON_SPEC/12-security.md#sec-12-8) (trust levels and domains, one grant per domain), [R-BTN-182](../spec/BATON_SPEC/12-security.md#sec-12-8) (trusted runners:
+the role, rule `trusted`, the refusal-only override), [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8) (`approvers.trust`,
 `grants.default_trust`, `grants.one_per_domain`, `grants.trusted_domain`, setting `approvers.trust`
-human-only, a policy live grants already break), R-BTN-171 (courier trust), R-BTN-183 (model family
-for `merge.reviews`); §13 grants and `couriers`; S-BTN-180, S-BTN-182.
+human-only, a policy live grants already break), [R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8) (courier trust), [R-BTN-183](../spec/BATON_SPEC/12-security.md#sec-12-8) (model family
+for `merge.reviews`); [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) grants and `couriers`; [S-BTN-180](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-182](../spec/BATON_SPEC/15-verification.md#scenarios).
 **Depends on:** B-145 (the policy and its approver lists).
 
 ### Requires
@@ -80,3 +80,7 @@ read these attributes, and no ticket built them.
 ## Status
 
 _(filed 2026-10-31 after baton#145's ticket audit: no ticket built the trust attributes.)_
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) rewrites R-BTN-180: a grant carries `role` (`runner`, `trusted-runner`), a `checker` mark on a trusted-runner grant, `domain` (a label) and `set_by`, set by `approvers.roles` (review round one made the checker a mark, not a third role); no trust level, model family, `one_per_domain`, `default_trust` or `trusted_domain`, and no courier rows (B-159). Items 1 to 3 and the migration shrink to the three columns, the role route (`PUT …/grants/{fingerprint}/role`) and the clearing rule when `approvers.roles` becomes human-only; two null domains never count as distinct, and a null domain is never a trusted runner.)_
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): R-BTN-130's closed list is gone; what a delegated key reaches is R-BTN-186's, marked per registry entry (R-BTN-129).)_

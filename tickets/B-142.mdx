@@ -3,7 +3,7 @@ title: "B-142 — Retire the pre-route-choice model tables: model_providers, pea
 id: B-142
 project: baton
 status: available
-updated: 2026-10-30
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -50,3 +50,7 @@ readings; nothing in the route-choice stratum reads these tables.
 - [ ] no code path reads or writes a table this ticket retires; `npm test` and
       `npm run typecheck` green
 - [ ] the spec names no retired surface
+
+## Status
+
+- 2026-11-02: the spec restructure's part 4 (B-166): route choices are gone (R-BTN-176 retired; B-167); the tables this ticket retires are read by nothing in core either way, so its plan stands, citing §6.10 and R-BTN-76 in place of R-BTN-176.

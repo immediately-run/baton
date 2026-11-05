@@ -1,0 +1,67 @@
+---
+title: "B-175 — A check that times out must not pass branch protection: timed_out replaces neutral"
+id: B-175
+project: baton
+status: available
+updated: 2026-11-03
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1177
+tier: routine
+description: "Build R-BTN-114 and R-BTN-153's conclusions, the owner's ruling of 2026-11-02: success, failure and timed_out, no neutral; a timeout or exec error reaches timed_out, else failure; an agent reaches only failure or timed_out; the deliverer posts timed_out as GitHub's conclusion. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Spec:** R-BTN-114 (*Conclusions are the owners'*), R-BTN-153 (*Mapping the status*), R-BTN-115
+(the `forge-check` entry), §10's trust statement ("a check is as trustworthy as … the check
+command"), S-BTN-68, G-BTN-93. Source: PR #165's review round one, on the 2026-11-02 security
+review's S2 (`docs/review/security-review-2026-11-02.mdx`).
+
+### Why
+
+GitHub's required status checks are satisfied by a `success`, `skipped` or `neutral` conclusion.
+R-BTN-153 sends "a timeout or an `exec` error" to the station mapped to `neutral`, and lets an
+agent's `baton-leg-result` or channel `done` reach "only `failure` or `neutral` stations". The
+second was meant to keep an agent from printing its way to a pass; on GitHub `neutral` is one.
+A change whose tests hang until `timeout_s` therefore lands past a required check. PR #165 made
+a change toward `neutral` a loosening of `checks` and added the `failure` fallback where no
+`neutral` is mapped, which narrows the hole but does not close it: the standard map still names
+`neutral`.
+
+### Decided (the owner)
+
+2026-11-02, choosing among this ticket's options: "I accept your recommendations" — option (a).
+`neutral` was never built, so no transition is needed. The spec states it (R-BTN-114, R-BTN-153,
+R-BTN-115's delivery, G-BTN-93; S-BTN-68), PR `claude/baton-spec-review-2fwiga`.
+
+### What to build
+
+1. `PUT /v1/owner/{repository}/settings` validates each `checks` map: exactly one `success`,
+   exactly one `failure`, at most one `timed_out`, and nothing else (`neutral` refused
+   `invalid-params`); a station newly mapped to `success`, or a removed or renamed entry, needs an
+   `approvers.policy` approver (R-BTN-186). (B-169's item 2 is the same validation: build it once,
+   in whichever lands first.)
+2. The check runner maps a timeout or `exec` error to the `timed_out` station, else `failure`;
+   Baton refuses an agent's `baton-leg-result` or channel `done` toward any station but a
+   `failure` or `timed_out` one (R-BTN-153).
+3. The `forge-check` deliverer posts `timed_out` as GitHub's check-run conclusion of that name
+   (checks are GitHub only, R-BTN-115).
+### Tests
+
+S-BTN-68 as §15 states it, green in `npm test`.
+
+### Exit criteria
+
+- [ ] S-BTN-68 green in `npm test`; `npm run typecheck` green
+
+## Status
+
+- 2026-11-02: drafted from PR #165's review round one.
+- 2026-11-02: decided by the owner (option (a)); the spec half written by PR `claude/baton-spec-review-2fwiga`; this ticket now builds it.
+- 2026-11-03: item 4 dropped. The vendored `std:forge.check@1` enum records what GitHub reports on read-back, so it keeps `neutral`; R-BTN-183 counts only `success`, so no docs change is needed.

@@ -3,7 +3,7 @@ title: "B-5 — Baton check courses: check-runner keys, owner-held conclusions a
 id: B-5
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-03
 repos:
   - baton
 tags:
@@ -21,10 +21,10 @@ depends_on:
 ---
 
 **Brief:** the owner, 2026-10-16 and 2026-10-17, as specified by B-1 (baton#43).
-**Spec:** `spec/BATON_SPEC.md` §10 (R-BTN-114, R-BTN-115, R-BTN-153), §8.3 R-BTN-107 (check legs
-require `runner:session`), §1 R-BTN-66 (the owners' `checks` setting), §2.2 R-BTN-136, §13.2's
-`check_runners` and `couriers`, §13.8's `outbox`, §14's courier-entry and check-runner rows;
-R-BTN-171 (the outbox the `forge-check` kind belongs to, since 2026-10-30) and R-BTN-188
+**Spec:** [BATON_SPEC §10](../spec/BATON_SPEC/10-checks.md#sec-10) ([R-BTN-114](../spec/BATON_SPEC/10-checks.md#sec-10), [R-BTN-115](../spec/BATON_SPEC/10-checks.md#sec-10), [R-BTN-153](../spec/BATON_SPEC/10-checks.md#sec-10)), [§8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) [R-BTN-107](../spec/BATON_SPEC/08-runners.md#sec-8-3) (check legs
+require `runner:session`), [§1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) [R-BTN-66](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (the owners' `checks` setting), [§2.2](../spec/BATON_SPEC/02-deployments.md#sec-2-2) [R-BTN-136](../spec/BATON_SPEC/02-deployments.md#sec-2-2), [§13.2](../spec/BATON_SPEC/13-data-model.md#sec-13-2)'s
+`check_runners` and `couriers`, [§13.8](../spec/BATON_SPEC/13-data-model.md#sec-13-8)'s `outbox`, [§14](../spec/BATON_SPEC/14-api.md#sec-14)'s courier-entry and check-runner rows;
+[R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8) (the outbox the `forge-check` kind belongs to, since 2026-10-30) and [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8)
 (`approvers.members` registers couriers and check-runners; the policy's `outbox.forge-check`).
 After the adversarial review (`spec/BATON_SPEC_HISTORY.md`, "Adversarial review (2026-10-20)"):
 R-BTN-114 and §12.1 (adv-3 F5, F6), R-BTN-153 (F4), R-BTN-115 (F7), R-BTN-10 and R-BTN-168's
@@ -73,7 +73,7 @@ R-BTN-114, R-BTN-115 and R-BTN-153 are specified; this ticket builds them.
    `released:stale-board`, with a sync want); add `exec` to the Claude session provider, without
    which no check passes on any runner, and an `advance` or end reaching a success station
    carries `exit_status: 0`; `process` and `attached` runners take no verdict leg (rule 4's
-   `missing-capability` on `runner:session`); an agent reaches only failure or neutral stations;
+   `missing-capability` on `runner:session`); an agent reaches only failure or timed_out stations (no `neutral`: R-BTN-114, B-175);
    never open-world; `courier add --delivers forge-check` refuses an App installed on others'
    repositories or on "All repositories"; S-BTN-123, G-BTN-143.
 7. **The adversarial review's fixes** (2026-10-20):
@@ -144,3 +144,9 @@ _(2026-10-30: the spec folds `forge-check` notices into the outbox (R-BTN-171, R
 _(2026-10-31: rewritten onto B-64's outbox: `forge-check` is an outbox entry, not a notice; B-5 now depends on B-64 so it builds on the outbox rather than code B-64 would migrate.)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): check tickets are never claimed open-world because nothing is (R-BTN-104 retired); a `changes` ticket its source stops posting is superseded and, having no file, closes `withdrawn` at once with no `baton.cancel` (R-BTN-168). The fileless re-verification path is this ticket's alone now.)_
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) rewrites R-BTN-115: the forge courier is a runner declaring `delivers: [forge-check]` whose grant role `outbox.forge-check` admits, holding the check App's key on its host; entries are not signed and `GET /v1/keys/signing` is gone (the run's output carries the entry's `seq`, not a signature); a `std:checks@1` from a check-runner the owner names is optional, forge check runs sufficing for `merge.checks: required` (B-155). Items 2, 3 and 7 and S-BTN-68 read accordingly.)_
+
+_(2026-11-02: the owner's ruling on B-175 — the conclusions are `success`, `failure` and `timed_out`; a timeout or `exec` error reaches `timed_out`, else `failure`; an agent reaches only `failure` or `timed_out` (R-BTN-114, R-BTN-153). B-175 builds the mapping; the line naming an agent's stations is corrected.)_
+
+_(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — check-runners: retirement revokes the repository's check-runners. Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_

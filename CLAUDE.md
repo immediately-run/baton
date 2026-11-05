@@ -1,9 +1,28 @@
 # CLAUDE.md — Baton
 
-Baton is specified by `BATON_SPEC`, `spec/BATON_SPEC.md` in this repository (moved from
-`immediately-run/docs` in R3-1252), and built through the tickets in `tickets/`. Amend the spec
-here, by pull request; docs' `content/specs/BATON_SPEC.mdx` is a stub. Read the item and the spec
-sections it cites before changing anything. See `README.md` for the layout.
+Baton is specified by `BATON_SPEC`, in this repository (moved from `immediately-run/docs` in
+R3-1252): `spec/BATON_SPEC/`, one file per section, and `spec/BATON_SPEC.md`, their generated index
+of sections, subsections and every rule, scenario and gate id (B-179). It is built through the
+tickets in `tickets/`. Amend the spec here, by pull request, in the section file that owns the
+rule, then `npm run spec:index`; docs' `content/specs/BATON_SPEC.mdx` is a stub. Read the item and
+the spec sections it cites before changing anything — open the index, then only the files you need. See `README.md` for the layout.
+
+`spec/` is a Grove bundle beside `tickets/` and `docs/` (B-180): every spec file is a page with
+`title` and `description` frontmatter (`npm run spec:index` writes the section files'), and
+`npm run check:wiki` compiles it as MDX, so a bare `<word>` or `{…}` in prose goes in a code span.
+A new ticket writes its spec citations as relative links to the section's file and heading, e.g.
+`[BATON_SPEC §6.1](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-1) (R-BTN-120)`,
+and a rule id the same way, to its section (`[R-BTN-120](…#sec-6-1)`), never to
+`spec/BATON_SPEC.md#…` (the index holds no section text); `node scripts/link-spec-refs.mjs` writes
+them from `` `spec/BATON_SPEC.md` §n R-BTN-n `` or `BATON_SPEC §n`, and `--check` says when one is due.
+
+## Claiming a ticket
+
+Ask Baton first (B-129): before `baton tickets claim`, read `node cli/baton.mjs board baton`
+(or `node cli/baton.mjs ticket history baton:<id>`) and trust its station over the ticket's
+frontmatter — a ticket past its course's start already has work and a PR to continue, and the
+claim takes it over there, on its branch. One wrong `status:` line over an open PR must not
+start the work again.
 
 ## Resident context
 
@@ -11,8 +30,9 @@ Before your first change in a session — and before arguing a design — read
 `docs/context/`: [what Baton is](docs/context/product.mdx), [the architectural
 decisions](docs/context/architecture.mdx) (git is the ledger, the server is the only
 allocator, verification at the boundary, separate tickets never share a write target),
-[the values](docs/context/values.mdx) and [the vocabulary](docs/context/vocabulary.mdx)
-(core's words, one sentence each — `step_kinds` included). A change that contradicts a
+[the values](docs/context/values.mdx), [the vocabulary](docs/context/vocabulary.mdx)
+(core's words, one sentence each — `step_kinds` included) and [how to read and write the
+spec](docs/context/spec-writing.mdx) (one home per statement, cite by id). A change that contradicts a
 decision there is a change to Baton, not a change in Baton.
 
 ## Rules

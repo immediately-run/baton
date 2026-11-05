@@ -26,12 +26,12 @@ depends_on:
 **Brief:** the Baton project; the owner, 2026-10-15: tickets are sequential and child
 tickets are the parallelism primitive; one Baton per team, with a stated envelope; owner state
 exportable.
-**Spec:** `spec/BATON_SPEC.md` §4.6 R-BTN-86 (children, `spawned`), §2.1 R-BTN-2 (the day's usage
-against the plan's limits), §2.3 R-BTN-87 and R-BTN-149
-(the envelope, the generation cap), §4.8 R-BTN-88 (owner state), §4.7 R-BTN-85
-(`spawned-unposted`), §4.2 R-BTN-74 (the source's `parent`), §13 (`tickets.parent`,
-`closed_tickets.parent`, `pending_owner_state`), §14 (children, freeze, seal, export, import),
-§16.1 (the load test is a cutover precondition), §15 (the load test; S-BTN-49, -50; G-BTN-76,
+**Spec:** [BATON_SPEC §4.6](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6) [R-BTN-86](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-6) (children, `spawned`), [§2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) [R-BTN-2](../spec/BATON_SPEC/02-deployments.md#sec-2-1) (the day's usage
+against the plan's limits), [§2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3) [R-BTN-87](../spec/BATON_SPEC/02-deployments.md#sec-2-3) and [R-BTN-149](../spec/BATON_SPEC/02-deployments.md#sec-2-3)
+(the envelope, the generation cap), [§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) [R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) (owner state), [§4.7](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) [R-BTN-85](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7)
+(`spawned-unposted`), [§4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (the source's `parent`), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13) (`tickets.parent`,
+`closed_tickets.parent`, `pending_owner_state`), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (children, freeze, seal, export, import),
+[§16.1](../spec/BATON_SPEC/16-adoption.md#sec-16-1) (the load test is a cutover precondition), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) (the load test; [S-BTN-49](../spec/BATON_SPEC/15-verification.md#scenarios), -50; [G-BTN-76](../spec/BATON_SPEC/15-verification.md#gates),
 -77, -78)
 **Depends on:** R3-1251 (blocks), R3-1257 (positions and history, which `spawned` and the
 `spawned` rows extend). B-58 (handler tickets) and B-62 (calls) build on this ticket's

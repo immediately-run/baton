@@ -52,6 +52,14 @@ export function addPr(text: string, url: string): string {
   return `---\n${lines.join('\n')}\n---${fence.rest}`;
 }
 
+/** The frontmatter's `prs` entries, as the markdown source would read them back (B-129): what a
+ *  write must keep — a release cannot drop an open PR, and a takeover writes back any Baton
+ *  knows and this list lost. */
+export function prsOf(text: string): string[] {
+  const prs = parseFrontmatter(text)?.prs;
+  return (Array.isArray(prs) ? prs : prs == null ? [] : [prs]).filter((p): p is string => typeof p === 'string' && p.trim() !== '').map((p) => p.trim());
+}
+
 /** A frontmatter scalar, quoted as the markdown source reads it back: a value with a colon, a
  *  `#`, a leading space, brackets, or a colon anywhere (a plain scalar may not carry a
  *  second `key: value` — `Requires: x` inside a description breaks the strict yaml parse) is

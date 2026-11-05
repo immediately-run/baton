@@ -1,74 +1,115 @@
 ---
 title: What Baton is
-description: Baton's product definition and value proposition — what it is, who it is for, and what it deliberately is not.
+description: Baton's product definition and value proposition — what it is, who it is for, what it owns, and what it deliberately is not.
 nav: Product
 order: 1
 tags: [context]
 ---
 
-<Lede>Baton hands tickets to AI coding agents one at a time, keeps each claim alive with a lease,
-and shows the whole factory live. Git keeps every ticket and its evidence; Baton keeps what is
-happening now.</Lede>
+<Lede>Baton lets teams of people and AI agents build software together, each ticket moving
+along a course the team defines in its repository. The same Baton suits a small team that wants
+the simplest course that works, and a factory that needs strict security and quality-assurance
+guarantees.</Lede>
 
-**Baton is the lock and the live record, for workers who cooperate.** It holds the lease on each
-ticket and decides who may take it. It records what runners say they can do, what instruments
-read, and what people and agents tell each other, and it advises on everything else. It does
-not do, verify or confine the work: git and the forge hold what was done, and the sandbox and
-the credentials bound what a runner can do. Every capability, `human-operator` included, is a
-runner's own statement, which Baton records and matches but never grants or checks. Its
-permissions cover its own state — who may take a repository's leases, who may change its
-settings — never the work, and its gates protect the lock, not the work. Its advice is never
-older than the last write Baton accepted for the runner reading it, and its fleet-wide views
-catch up within one alarm cycle. A repository chooses to adopt it; once adopted, its refusals
-bind every worker that uses it, and a worker that ignores them is outside the factory, not
-stopped by it (the owner, 2026-10-22).
+**Baton coordinates the work, and holds the record no push may change.** It decides who may take
+each ticket and keeps that claim alive with a lease. It moves each ticket along its course, and
+shows the whole team live. It also owns the state that someone pushing to the repository must not
+be able to write: each ticket's course history, the attestations that count as evidence, the
+repository's policy, the grants and the owners' bars. Git holds the work itself: every ticket,
+its body and its evidence. Baton does not do, verify or confine the work. Its permissions cover
+its own state, its gates protect the lock, and it advises on everything else. A repository can opt
+into one exception through its policy: Baton's trusted runners decide what lands, and the forge
+lets only them and a human land it ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 
 ## The problem
 
-A team of agents that coordinates through git alone pays three costs that grow with the fleet:
+A team that coordinates people and agents through git alone pays costs that grow with the team
+and with what is at stake:
 
-- **A dead claim blocks a ticket for days.** Nothing watches liveness continuously; a sweep
-  finds the dead holder eventually.
+- **A dead claim blocks a ticket for days.** Nothing watches liveness all the time, so a dead
+  holder is found only when someone sweeps for one.
 - **Eligibility is self-judged.** An agent decides for itself whether it can do a ticket, and
-  finds out it could not after it claimed it.
-- **Nobody can see the factory.** Which workers are up, what each could take and what is
-  running now is inferred after the fact, or not at all.
+  only finds out it could not after claiming it.
+- **People and agents work in different places.** A question for a person, a review, an approval
+  and an agent's leg all travel through separate channels, and no single place shows what is
+  waiting on whom.
+- **One process fits nobody.** A tool with a fixed process is too heavy for two people and a few
+  agents, and too loose for a team that must prove who reviewed and approved what.
+- **Anything in git can be rewritten by a push.** Once agents can push, a record kept only in git
+  can be edited by the very agent it is meant to constrain: who approved a change, which review
+  counted, what the rules are. A compromised runner included.
+- **Nobody can see the factory.** Which workers are up, what each could take, what is running and
+  what needs a person is pieced together after the fact, or not at all.
 
-## What Baton does
+## What Baton gives a team
 
-- **One fenced lease per ticket.** A worker claims a ticket and keeps it by heartbeat. A
-  worker that goes silent loses it at its lease, and a fence stops a revived one from writing.
-- **Gates protect the lock, advice for the rest.** Baton refuses only what would make
-  cooperating workers collide or take work they have said they cannot do — a second holder, a
-  missing capability, a tier above the worker's ceiling, a barred tag — and offers everything
-  else in a default order the worker may override. A gate is the lock's answer, never
-  enforcement of the work.
-- **Courses, not workflows.** Each ticket moves along its repository's course: stations it
-  rests at, legs it runs between them. The course lives in the repository's `.baton/` folder
-  and changes with a commit, not a Baton deploy.
+- **One fenced lease per ticket.** A worker claims a ticket and keeps it by heartbeat. A worker that goes silent loses the claim when its lease runs out, and a fence stops
+  a revived one from writing.
+- **People and agents on one course.** Agents run legs. A person takes part in two ways: by
+  working a leg at a runner that declares `human-operator`, or by answering a person leg, the one
+  way a course waits on a person (R-BTN-116). A suspended or released claim leaves a
+  hand-off for whoever comes next. *Needs you* lists everything waiting on a person.
+- **Courses, defined by the team.** A course is the team's workflow: the stations a ticket rests
+  at and the legs it runs between them. Each repository keeps its courses in its `.baton/` folder
+  and changes them with a commit, not a Baton deploy. Baton ships standard courses that cover the
+  simple end; a team writes its own for the rest.
+- **State no push can write.** Course history, attestations, the policy, grants and owner bars
+  live in Baton. Some of it is copied into git for people to read, and some of it is in git
+  nowhere. If Baton loses that state, it fails closed: the work is reviewed and approved again,
+  never restored from git (the owner, 2026-10-28).
+- **Gates protect the lock; the rest is advice.** Baton refuses only what would make cooperating
+  workers collide, or take work they have said they cannot do: a second holder, a missing
+  capability or seat, a tier above the worker's ceiling, a barred tag. Everything else it offers
+  in a default order that a worker may override, and every override is logged.
 - **A live view.** Workers, claims, timelines, what is ready, what is blocked and what needs a
-  person — on one dashboard, with the course's own record of how long things take.
+  person, all on one dashboard, along with the course's own record of how long things take. Advice
+  is never older than the last write Baton accepted for the runner reading it. Fleet-wide views
+  catch up within one alarm cycle.
 
 ## From one machine to a factory
 
-Baton scales from one person running a few agents on their own machine, where automation and
-the lock are what matter and security is an afterthought, to a software factory with a threat
-model of its own and guarantees that shape its architecture. Core carries the mechanisms both
-ends need: leases and courses for the first, the repository policy, attestations and trusted runners
-for the second. The courses Baton ships assume no particular architecture and serve the simpler end.
-A factory whose guarantees rest on its own architecture writes the courses that rely on it and
-keeps them with that factory: immediately.run's are Fieldhouse's (the owner, 2026-10-29).
+Baton scales from one person running a few agents on their own machine to a software factory with
+a threat model of its own. Both ends run the same core. What differs is the repository's
+**policy**: one versioned document, held in Baton and never read from git, that decides who lands
+on which refs, who approves what, and whose attestations count (BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
+
+- **The simple end.** The `cooperative` preset and the standard courses: leases, courses and the
+  live view, for workers that cooperate. At this end, owner bars and positions are a
+  coordination record, not a boundary, and no guarantee is required.
+- **The strict end.** The `protected` and `protected-hardware` presets turn the same state into a
+  boundary. Trusted runners land only what the policy's attestations allow. Reviews count only
+  from independent domains, and human gates are satisfied only by a human-only key. A deployment
+  that depends on Baton requires named **guarantees**, such as `no-runner-lands`,
+  `independent-review`, `tickets-approved` and `human-gates`, and lists them as **floors**. Baton
+  then refuses any policy change that would break one of them, and stops the repository while one
+  is broken (R-BTN-189).
+- **Everything between.** A preset is a starting point, not a mode: an owner applies one, then
+  tunes it knob by knob. No rule reads a preset's name.
+
+The courses Baton ships assume no particular architecture, and they serve the simpler end. A
+factory whose guarantees rest on its own architecture writes the courses that rely on it and keeps
+them itself: immediately.run's courses are Fieldhouse's (the owner, 2026-10-29).
 
 ## Who it is for
 
-Teams that run many coding agents — or agents and people — against the same repositories, and
-the operator who has to know at a glance what the factory is doing and what it needs.
+Teams of people, agents or both that work on the same repositories, from a solo developer with a
+handful of agents to a factory of several dozen workers. It also serves the operator, who needs
+to see at a glance what the team is doing and what it needs from a person.
 
 ## What it is not
 
-- **Not the record of the work.** Git holds every ticket fact and its evidence; Baton holds
-  the live leases and the limits agents cannot change, and defers to git about tickets.
-- **Not a workflow engine.** Baton runs no repository code; workers decide how to do a leg.
-  For durable execution of your own code, use something like Temporal
-  ([compared](../compared-to-temporal.mdx)).
+- **Not the record of the work.** Git holds every ticket and its evidence, and Baton's board is a
+  cache of it, rebuilt by each sync. Baton holds the live leases, the course history,
+  attestations and the limits agents cannot change. When Baton and git disagree about what Baton
+  owns, Baton wins; about anything else, git wins.
+- **Not a gatekeeper of the work.** Baton never verifies or confines what a runner does. A
+  capability, `human-operator` included, is the runner's own statement, which Baton records and
+  matches but never grants or checks. A threat that needs a runner stopped belongs to the
+  sandbox, the forge or the credential proxy. The one exception is the trusted-runner merge a
+  policy opts into. A repository chooses to adopt Baton; once it has, Baton's refusals bind every
+  worker that uses it, and a worker that ignores them is outside the factory, not stopped by it
+  (the owner, 2026-10-22).
+- **Not a workflow engine.** A course says where a ticket may go next; workers decide how to run
+  each leg. Baton runs no repository code. For durable execution of your own code, use something
+  like Temporal ([compared](../compared-to-temporal.mdx)).
 - **Not tied to GitHub.** Any git forge, or a plain git server, will do.

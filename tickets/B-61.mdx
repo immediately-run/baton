@@ -3,7 +3,7 @@ title: "B-61 — Timers on a leg: arrival, ready and first-attempt clocks, inter
 id: B-61
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-03
 repos:
   - baton
 tags:
@@ -26,13 +26,13 @@ depends_on:
 review of 2026-10-20 (`spec/BATON_SPEC_HISTORY.md`, "Schema review", items 6, 8, 10, 11 and 12),
 which the owner approved. It replaces the per-leg deadline fields `max_ready_s` and
 `max_attempts_s`, which were never built.
-**Spec:** `spec/BATON_SPEC.md` §7.5 R-BTN-167 (shape, when each clock starts, interrupting and
-non-interrupting timers, core's default timer, choice stations); R-BTN-90 (the `leg-timeout`
-release and reap, which B-60 built); R-BTN-122 (§7.4, `budget-spent`, the owners' ceiling, the
-reset when a leg reaches an outcome); R-BTN-163 (§7.3, `baton.stalled` and its restarts); R-BTN-83
-(§5.3, held positions); R-BTN-88 (§4.8, owner state); R-BTN-64 (§5.7, renames carry timers);
-R-BTN-69 (§5.2, the validator); §13.6 `ticket_timers` and `ticket_overrides.override_kind`; §15
-S-BTN-10, S-BTN-37, S-BTN-87, S-BTN-134, G-BTN-64, G-BTN-152. R-BTN-64's per-leg rewrite comes from
+**Spec:** [BATON_SPEC §7.5](../spec/BATON_SPEC/07-conditions.md#sec-7-5) [R-BTN-167](../spec/BATON_SPEC/07-conditions.md#sec-7-5) (shape, when each clock starts, interrupting and
+non-interrupting timers, core's default timer, choice stations); [R-BTN-90](../spec/BATON_SPEC/07-conditions.md#sec-7-5) (the `leg-timeout`
+release and reap, which B-60 built); [R-BTN-122](../spec/BATON_SPEC/07-conditions.md#sec-7-4) ([§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4), `budget-spent`, the owners' ceiling, the
+reset when a leg reaches an outcome); [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ([§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3), `baton.stalled` and its restarts); [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3)
+([§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3), held positions); [R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) ([§4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8), owner state); [R-BTN-64](../spec/BATON_SPEC/05-courses.md#sec-5-7) ([§5.7](../spec/BATON_SPEC/05-courses.md#sec-5-7), renames carry timers);
+[R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2) ([§5.2](../spec/BATON_SPEC/05-courses.md#sec-5-2), the validator); [§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6) `ticket_timers` and `ticket_overrides.override_kind`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15)
+[S-BTN-10](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-37](../spec/BATON_SPEC/15-verification.md#scenarios), S-BTN-87, [S-BTN-134](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-64](../spec/BATON_SPEC/15-verification.md#gates), [G-BTN-152](../spec/BATON_SPEC/15-verification.md#gates). [R-BTN-64](../spec/BATON_SPEC/05-courses.md#sec-5-7)'s per-leg rewrite comes from
 the schema review (`spec/BATON_SPEC_HISTORY.md`, "Schema review (2026-10-20)", item 9).
 **Depends on:**
 - B-60 (the `start` timer, `deadline_at`, and the `leg-timeout` release and reap);
@@ -166,3 +166,5 @@ _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
 _(2026-10-20: extended for the adversarial review's fixes — R-BTN-64's rename (from the schema review) carries every per-leg record, not only timers (item 8); B-11 and B-38 need no rename path of their own.)_
 
 _(2026-11-01: **rescoped** by the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`) on the owner's ruling of 2026-11-01, B-165 "Take review's default": R-BTN-167 is now two clocks on a leg — `deadline_s` (one run's deadline, 60 s–7 d, R-BTN-90) and `stalled_s` (the stalled notice, default 72 h) — and a person leg's `expires` (R-BTN-116); `timers`, `after_s`, `from: arrival|ready|first_attempt`, non-interrupting `raise` timers, a timer's `leg`, `baton.ready-late`, `budget-spent` and the owner's `extend_to` and `cancel_at` are gone. Item by item: 1 — the validator refuses `timers` and `after_s` and bounds `deadline_s`, `stalled_s` and `expires.after_s`. 2 — `ticket_timers (ticket_id, leg, kind)`, `kind` `deadline|stalled|expires`; no `timer` source. 3 — `stalled` arms at the ticket's arrival at the station and counts only while the leg is posted `waiting`; `deadline` is B-60's `deadline_at`; `expires` is B-7's. 4 — a deadline's firing is always a failed attempt; no `leg`, no budget. 5 — retired. 6 — the default stall watch stands as `stalled_s`'s default, overridden per leg by the field. 7 — the model loses the `first_attempt` and `ready` clocks. 8 (renames carry every per-leg record) — unchanged, `ticket_questions` added to the list. Tests: S-BTN-87 is retired; S-BTN-134 is changed; S-BTN-10 and S-BTN-37 stand.)_
+
+_(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — ticket timers: retirement deletes the repository's ticket timers. Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_

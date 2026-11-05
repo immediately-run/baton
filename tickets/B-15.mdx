@@ -3,7 +3,7 @@ title: "B-15 — The roadmap-pr course adopts the course schema: capability type
 id: B-15
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-02
 repos:
   - docs
   - baton
@@ -26,9 +26,9 @@ depends_on:
 
 **Brief:** the owner, 2026-10-17 (B-1, baton#43). docs and `roadmap-pr` are Baton's labelled
 reference deployment, so they should use what the course schema adds once Baton serves it.
-**Spec:** `spec/BATON_SPEC.md` §8.3 (R-BTN-106 `no_chain_from`, R-BTN-123 fresh context), §5.6
-(R-BTN-121), §7.1 (R-BTN-160: declared condition types, `retryable`, `LegError(type, …)`), §7.4
-(R-BTN-122), §6.2 (R-BTN-126: a provider at capacity is a blocked end); history, Migrations: the
+**Spec:** [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-106](../spec/BATON_SPEC/08-runners.md#sec-8-3) `no_chain_from`, [R-BTN-123](../spec/BATON_SPEC/08-runners.md#sec-8-3) fresh context), [§5.6](../spec/BATON_SPEC/05-courses.md#sec-5-6)
+([R-BTN-121](../spec/BATON_SPEC/05-courses.md#sec-5-6)), [§7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1) ([R-BTN-160](../spec/BATON_SPEC/07-conditions.md#sec-7-1): declared condition types, `retryable`, `LegError(type, …)`), [§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4)
+([R-BTN-122](../spec/BATON_SPEC/07-conditions.md#sec-7-4)), [§6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-126](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2): a provider at capacity is a blocked end); history, Migrations: the
 `ROLES` window; docs' `BATON_ROADMAP_PR_COURSE` and `BATON_DOCS_DEPLOYMENT`.
 **Depends on:** B-2 (done), B-10 (capability types), B-11 (retries per leg), B-12 (fresh
 context), B-55 (declared condition types and typed `LegError`).
@@ -81,3 +81,4 @@ counts retries per ticket, and leaves the independence of `review` to convention
 
 _(2026-10-20: rescoped to the current-state spec, PR #71 — item 3 declares `interrupt` condition
 types with `retryable` and throws `LegError(type, …)`; `error_types` is gone.)_
+- 2026-11-02: the spec restructure's part 4 (B-166, B-165's review default): the owners' `required_independence` setting is gone — the course file's `no_chain_from` alone says which legs may not chain (R-BTN-106; B-168). docs' reference course gives `review` its `no_chain_from` and needs no owner setting.

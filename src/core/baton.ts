@@ -14,7 +14,7 @@ import { priceFor } from '../shared/sessionUsage.mjs';
 import { familyOf } from '../shared/baton.mjs';
 import { fitsTier, TIERS } from '../shared/vocabulary.mjs';
 import { WorkerApi } from './workerApi';
-import { parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
+import { parseAdminKeys, parseSshKey, verifyApiKey, verifyRequest, withBody, type SyncCredential } from './auth';
 import { Claims } from './claims';
 import { Ontologies } from './ontologies';
 import { Cutover } from './cutover';
@@ -32,10 +32,16 @@ import { Queues } from './queues';
 import { History, HISTORY_PAGE_MAX } from './history';
 import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
+import { Policies, canonicalJson, sha256HexSync } from './policy';
+import { randomHex } from './db';
 import type { Ports, Row, SqlValue, Store, Workflow } from './ports';
 
 const HELD_AUTO_ACCEPT_MS = 24 * 3_600_000; // §7.1: a held history is accepted after 24 h (R3-1212)
 const ALARM_EVERY_MS = 60_000; // §3: one alarm, every 60 seconds
+/** R-BTN-189: a signed policy read lives this long. */
+const POLICY_READ_MS = 10 * 60_000;
+/** The namespace a signed policy read's Ed25519 signature is made in — never an outbox entry's. */
+const POLICY_SIGNATURE_NAMESPACE = 'baton-policy@1';
 
 export class BatonCore {
   /** The clock (R-BTN-32). Tests replace it; nothing else here reads the time. */
@@ -59,6 +65,8 @@ export class BatonCore {
   readonly notices: Notices;
   readonly queues: Queues;
   readonly history: History;
+  /** §12.8 (B-145): the repository policies, their floors, their guarantees. */
+  readonly policies: Policies;
   readonly store: Store;
   /** §12: workflows to dispatch once the current request or alarm has committed, one per
    *  repository and kind. */
@@ -75,8 +83,12 @@ export class BatonCore {
     this.dispatcher = (wf) => this.sendDispatch(wf);
     this.outside = ports.gate ? (work) => ports.gate!.outside(work) : (work) => work();
     const store = ports.store;
-    this.registry = new Registry({ store, now: () => this.now() });
-    this.courses = new Courses({ store, requiredBars: (repo) => this.admin.requiredBars(repo) });
+    this.registry = new Registry({ store, now: () => this.now(), ensurePolicy: (repository, forge) => this.policies.ensure(repository, forge) });
+    // §12.8 (B-145): the policy store, before everything that reads a knob — the claims' floor
+    // rule, the heartbeat's reports and pins, the owner routes' approver checks.
+    this.policies = new Policies({ store, now: () => this.now() });
+    this.policies.releaseForFloor = (repository) => this.claims.releaseForFloor(repository);
+    this.courses = new Courses({ store, requiredBars: (repo) => this.admin.requiredBars(repo), policies: this.policies });
     this.observations = new Observations({ store, now: () => this.now() });
     this.webhooks = new Webhooks({ store, now: () => this.now() });
     const want = (wf: Workflow) => this.pendingDispatch.set(`${wf.repository}:${wf.kind}`, wf);
@@ -100,11 +112,13 @@ export class BatonCore {
     // §5.9 (B-104): the ontology store — acceptance, memoised programs, derived sets, the alarm cycle.
     this.ontologies = new Ontologies(this, store);
     this.admin = new Admin({ store, now: () => this.now(), registry: this.registry, adminKeys: () => ports.adminKeys.list(), origin: ports.config.BATON_ORIGIN,
-      dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices });
+      dispatchSync: (repository) => want({ repository, kind: 'sync' }), fleetChanged: () => this.blocks.recount(), notices: this.notices,
+      policies: this.policies, humanBreakGlass: () => this.humanBreakGlass() });
     this.stations = new Stations({ store, now: () => this.now(), requiredBars: (repo) => this.admin.requiredBars(repo), history: this.history });
     this.claims = new Claims({ store, now: () => this.now(), stations: this.stations, admin: this.admin, blocks: this.blocks, history: this.history,
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course), ontologies: this.ontologies,
-      dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) });
+      dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
+      policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? 'github' });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
@@ -115,6 +129,9 @@ export class BatonCore {
       couriers: (w, granted, entries) => this.notices.declare(w, granted, entries),
       held: (ticket) => this.blocks.held(ticket, true),
       claimView: (id) => this.claims.holderView(id),
+      // §12.8 (B-145): the protection reports and policy pins a heartbeat carries (R-BTN-180,
+      // R-BTN-189), and the policy hashes the answer carries for its repositories.
+      policies: this.policies,
       // A granted key's repositories are its grants' (R-BTN-58); an ungranted one's, every one it may reach.
       bars: (now, cred) => this.admin.bars(this.workers.credential(cred).granted
         ? this.sql<{ repository_id: string }>('SELECT repository_id FROM worker_grants WHERE credential_id = ? AND revoked_at IS NULL', cred).map((r) => r.repository_id)
@@ -133,6 +150,9 @@ export class BatonCore {
     await this.registry.seedSyncKeys(this.ports.config, this.ports.adminKeys.list());
     await this.admin.seedOwners(seedOwners);
     await this.seedKeys();
+    // §12.8 (B-145): every repository's version 1 — the cooperative preset on a forge,
+    // plain-git where the forge is git — so every reader finds one.
+    this.store.transaction(() => this.policies.seedAll());
     if ((await this.ports.scheduler.get()) == null) await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
     // A trailing webhook dispatch owed from before a restart keeps its time (round 1, 1-A-4);
     // so do a trailing unblocked dispatch and the next reading to lapse (R-BTN-76, R-BTN-77).
@@ -266,7 +286,7 @@ export class BatonCore {
 
   /** §3: the one alarm, every 60 seconds — earlier when a webhook's trailing dispatch or the
    *  webhook path's own backstop is due. */
-  // @model alarmLive sha256:ca9f6ccd8aa0
+  // @model alarmLive sha256:e92b9b16d800
   async alarm(): Promise<void> {
     // Re-armed first, so one failing tick never ends the cycle.
     await this.ports.scheduler.set(this.now() + ALARM_EVERY_MS);
@@ -302,6 +322,10 @@ export class BatonCore {
         this.notices.alarm();
         // R-BTN-81: the history of tickets closed 90 days ago goes.
         this.history.purge();
+        // §12.8 (B-145, R-BTN-189): a protection report that lapsed past its 24 hours stops
+        // feeding `no-runner-lands` — every repository with floors is re-judged, and a newly
+        // broken one stops offering claims and releases its running ones.
+        this.policies.enforceFloors();
         // R-BTN-174: a non-live worker's derived rows go 30 days after it was last live, and a
         // revoked grant's rows go with the grant.
         this.ontologies.upkeep();
@@ -413,6 +437,9 @@ export class BatonCore {
         await this.delivery(req);
         return new Response(null, { status: 204 });
       }
+      // R-BTN-185 (B-145): the human-only keys' own route, beside the administrator's and the
+      // owner's.
+      if (req.method === 'POST' && url.pathname === '/v1/human-keys') return await this.humanKeysRoute(req);
       if (url.pathname.startsWith('/v1/admin/') || url.pathname.startsWith('/v1/owner/')) return await this.adminRoute(req, url);
       if (req.method === 'POST' && url.pathname === '/v1/login') {
         // R-BTN-57, R-BTN-16: the one-time link's token for the session cookie — `__Host-`,
@@ -460,6 +487,101 @@ export class BatonCore {
   private keysNotice(): { refused?: string; revoked_listed?: string[] } | null {
     const raw = this.sql<{ value: string }>(`SELECT value FROM baton_settings WHERE key = 'keys_notice'`)[0]?.value;
     return raw ? JSON.parse(raw) : null;
+  }
+
+  /** R-BTN-185 (B-145): the host's BATON_HUMAN_KEYS lines — the deployment's root of trust, read
+   *  on every call like BATON_ADMIN_KEYS, with each key's stored line (type and base64 alone). */
+  private humanKeyLines(): string[] {
+    return this.ports.humanKeys ? this.ports.humanKeys.list() : parseAdminKeys(this.ports.config.BATON_HUMAN_KEYS ?? '');
+  }
+
+  private async humanBreakGlass(): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    for (const line of this.humanKeyLines()) {
+      try {
+        const k = await parseSshKey(line);
+        out.set(k.fingerprint, `${k.type} ${line.trim().split(/\s+/)[1]}`);
+      } catch {
+        // a line that is no key admits nobody
+      }
+    }
+    return out;
+  }
+
+  /** The tenant's id (§13's `baton_settings.tenant_id`, written at the first request that needs
+   *  it): what a signed policy read names beside its repository, so a reader can check both. */
+  private tenantId(): string {
+    const row = this.sql<{ value: string }>(`SELECT value FROM baton_settings WHERE key = 'tenant_id'`)[0];
+    if (row) return row.value;
+    const id = randomHex(16);
+    this.store.exec(`INSERT INTO baton_settings (key, value) VALUES ('tenant_id', ?)`, id);
+    return id;
+  }
+
+  /** The tenant's Ed25519 policy-signing key (R-BTN-189, R-BTN-114's `SigningKey`): the
+   *  `BATON_SIGNING_KEY` the host hands — a secret on Cloudflare, a key file locally — never a
+   *  key Baton generated and stored (a private key in storage is nobody's tenant key, and its
+   *  `kid` would change under every reader's pin). Its `kid` is the SHA-256 of the public half,
+   *  pinned by a reader's own configuration, never fetched from Baton at the time of use. */
+  private async policySigningKey(): Promise<{ kid: string; jwk: JsonWebKey }> {
+    const raw = this.ports.config.BATON_SIGNING_KEY?.trim();
+    if (!raw) {
+      throw new BatonError('unavailable', 'no BATON_SIGNING_KEY is configured: the signed policy read is signed with the tenant\'s Ed25519 key, set by the host and never generated by Baton (R-BTN-114, R-BTN-189)');
+    }
+    let jwk: JsonWebKey;
+    try {
+      jwk = JSON.parse(raw) as JsonWebKey;
+    } catch {
+      throw new BatonError('internal', 'BATON_SIGNING_KEY must be the JWK of an Ed25519 private key ({"kty":"OKP","crv":"Ed25519","d":…,"x":…})');
+    }
+    if (jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519' || typeof jwk.d !== 'string' || typeof jwk.x !== 'string') {
+      throw new BatonError('internal', 'BATON_SIGNING_KEY must be the JWK of an Ed25519 private key ({"kty":"OKP","crv":"Ed25519","d":…,"x":…})');
+    }
+    return { kid: sha256HexSync(jwk.x), jwk };
+  }
+
+  /** `GET /v1/repositories/{repository}/policy` (R-BTN-189): every field the guarantee binds,
+   *  signed with the tenant's key over `baton-policy@1\n` and the canonical JSON of the rest —
+   *  never mistakable for an outbox entry's signature — and living ten minutes. */
+  private async policyRead(repository: string): Promise<Response> {
+    const cur = this.policies.current(repository);
+    if (!cur) throw new BatonError('not-found', `${repository} has no policy yet`);
+    const { guarantees, guarantees_hash } = this.policies.guaranteesFor(repository);
+    const floors = this.policies.floors(repository);
+    const at = this.now();
+    const fields = {
+      repository,
+      tenant: this.tenantId(),
+      version: cur.version,
+      hash: cur.hash,
+      policy: cur.policy,
+      guarantees,
+      guarantees_hash,
+      floors,
+      floors_hash: this.policies.floorsHashOf(floors),
+      at,
+      valid_until: at + POLICY_READ_MS,
+    };
+    const { kid, jwk } = await this.policySigningKey();
+    const key = await crypto.subtle.importKey('jwk', jwk, { name: 'Ed25519' }, false, ['sign']);
+    const signed = new Uint8Array(await crypto.subtle.sign({ name: 'Ed25519' }, key,
+      new TextEncoder().encode(`${POLICY_SIGNATURE_NAMESPACE}\n${canonicalJson(fields)}`)));
+    return json({ ...fields, kid, signature: btoa(String.fromCharCode(...signed)) });
+  }
+
+  /** `POST /v1/human-keys` (R-BTN-185, B-145): a `human_only` key's own route — each later key
+   *  registered with a signature by an existing one, a revocation refused while a list or a
+   *  floor needs the key. Signed by a human_only key: the tenant's registered ones and the
+   *  host's BATON_HUMAN_KEYS lines. */
+  private async humanKeysRoute(req: Request): Promise<Response> {
+    if (!req.headers.has('X-Baton-Signed')) throw new BatonError('unauthenticated', 'sign with a human_only key (R-BTN-185)');
+    const breakGlass = await this.humanBreakGlass();
+    const registered = new Map(this.sql<{ fingerprint: string; public_key: string }>('SELECT fingerprint, public_key FROM human_keys WHERE revoked_at IS NULL').map((k) => [k.fingerprint, k.public_key]));
+    const lookup = (fp: string) => breakGlass.get(fp) ?? registered.get(fp) ?? null;
+    const signed = await this.verifySigned(req, lookup);
+    if (!lookup(signed.cred)) throw new BatonError('unauthenticated', 'the key is not registered or is revoked');
+    const body = await readJson(signed.req);
+    return json(await this.admin.humanKeys(body, signed.cred, new Set(breakGlass.keys())));
   }
 
   /** A signed request (R3-1239), verified whole by the one verifier: the key its keyid names
@@ -721,13 +843,17 @@ export class BatonCore {
       if (m === 'POST' && p === '/v1/admin/resources') return json(this.resources.addResource(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/instances') return json(this.resources.addInstance(actor, await body()));
       if (m === 'POST' && p === '/v1/admin/readings') return json(this.resources.post({ kind: 'admin', fingerprint: fp }, await body(), null));
+      // R-BTN-178: a capability's capacity, and the courses whose legs require one — the read
+      // `baton admin capacity set` prints before it asks to confirm.
+      if (m === 'PUT' && p === '/v1/admin/capacities') return json(this.resources.setCapacity(actor, await body()));
+      if (m === 'GET' && p === '/v1/admin/capacities') return json(this.resources.capacities(url.searchParams.get('capability') ?? undefined));
       if (m === 'POST' && p === '/v1/admin/grants') {
         const b = await body();
         const repo = checkRepositoryId((b as { repository?: unknown } | null)?.repository);
         return json(await this.admin.grant(actor, repo, b, 'admin'));
       }
       const revoke = /^\/v1\/admin\/keys\/([^/]+)\/revoke$/.exec(p);
-      if (m === 'POST' && revoke) return json(this.admin.revokeKey(actor, seg(revoke[1])));
+      if (m === 'POST' && revoke) return json(await this.admin.revokeKey(actor, seg(revoke[1])));
       if (m === 'POST' && p === '/v1/admin/login-links') return json(await this.admin.loginLink(fp));
       throw new BatonError('not-found', `no route ${m} ${p}`);
     }
@@ -744,13 +870,33 @@ export class BatonCore {
     if (m === 'GET' && rest === 'grants') return json(this.grantsView(repo));
     if (m === 'POST' && rest === 'grants') return json(await this.admin.grant(actor, repo, await body(), 'owner'));
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
-    if (m === 'POST' && rg) return json(this.admin.revokeGrant(actor, repo, seg(rg[1])));
+    if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1])));
     if (m === 'POST' && rest === 'owners') return json(await this.admin.owners(actor, repo, await body()));
     if (m === 'POST' && rest === 'bars') return json(this.admin.setBar(actor, repo, await body()));
     const lift = /^bars\/(\d+)\/lift$/.exec(rest);
     if (m === 'POST' && lift) return json(this.admin.liftBar(actor, repo, Number(lift[1])));
-    if (m === 'PUT' && rest === 'settings') return json(this.admin.setSettings(actor, repo, await body()));
+    if (m === 'PUT' && rest === 'settings') return json(await this.admin.setSettings(actor, repo, await body()));
     if (m === 'POST' && rest === 'couriers') return json(await this.admin.couriers(actor, repo, await body()));
+    // §12.8 (B-145): the repository policy's routes (R-BTN-188, R-BTN-189). A change is one
+    // transaction — the compare-and-set, the approver check against the list in force, the
+    // floors and the satisfiable-list refusals all inside it.
+    if (m === 'PUT' && rest === 'policy') {
+      const repoRow = this.registry.get(repo);
+      if (!repoRow || repoRow.retired_at != null) throw new BatonError('not-found', `${repo} is not registered`);
+      const b = await body();
+      const breakGlass = await this.humanBreakGlass();
+      return json(this.store.transaction(() => this.policies.put(repo, b, repoRow.forge, { credential: fp, label: actor }, new Set(breakGlass.keys()))));
+    }
+    if (m === 'GET' && rest === 'policy/log') {
+      const after = Number(url.searchParams.get('after') ?? 0);
+      if (!Number.isInteger(after) || after < 0) throw new BatonError('invalid-params', 'after: must be a version number');
+      return json({ versions: this.policies.log(repo, after) });
+    }
+    if (m === 'POST' && rest === 'policy/floors') {
+      const b = await body();
+      const breakGlass = await this.humanBreakGlass();
+      return json(this.store.transaction(() => this.policies.floorsRoute(repo, b, { credential: fp, label: actor }, new Set(breakGlass.keys()))));
+    }
     const resolve = /^tickets\/([^/]+)\/resolve$/.exec(rest);
     if (m === 'POST' && resolve) {
       // R-BTN-78: an owner answers one of Baton's own decisions on a ticket of this repository.
@@ -829,7 +975,9 @@ export class BatonCore {
     // B-90: the dashboard's view of one repository, for the same principals — an administrator
     // sees any, an owner its own, a granted key the repositories it is granted on.
     const boardRead = /^\/v1\/repositories\/([^/]+)\/board$/.exec(url.pathname);
-    if (req.method !== 'GET' || (!blocks && !blocked && !history && !boardRead)) return null;
+    // §12.8 (B-145, R-BTN-189): the signed policy read, for the same principals.
+    const policyRead = /^\/v1\/repositories\/([^/]+)\/policy$/.exec(url.pathname);
+    if (req.method !== 'GET' || (!blocks && !blocked && !history && !boardRead && !policyRead)) return null;
     const seg = (raw: string) => {
       try {
         return decodeURIComponent(raw);
@@ -837,7 +985,7 @@ export class BatonCore {
         throw new BatonError('invalid-params', 'a malformed path segment');
       }
     };
-    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? boardRead)![1]));
+    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? boardRead ?? policyRead)![1]));
     if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
     let cred = req.headers.get('X-Baton-Credential');
     let role: 'admin' | 'owner' | 'worker' = 'worker';
@@ -863,6 +1011,7 @@ export class BatonCore {
         : null;
     }
     if (boardRead) return json(this.boardView(repo, granted));
+    if (policyRead) return await this.policyRead(repo);
     if (history) {
       const raw = seg(history[2]);
       const id = raw.includes(':') ? raw : qualify(repo, raw);
@@ -873,7 +1022,9 @@ export class BatonCore {
       const n = limit == null ? 50 : Number(limit);
       if (b != null && !(Number.isInteger(b) && b > 0)) throw new BatonError('invalid-params', 'before: must be the next_before a page gave');
       if (!(Number.isInteger(n) && n >= 1 && n <= HISTORY_PAGE_MAX)) throw new BatonError('invalid-params', `limit: must be an integer from 1 to ${HISTORY_PAGE_MAX}`);
-      return json(this.history.list(id, b, n));
+      // B-129: the ended claims' branches and PRs ride with the path (R-BTN-24's records,
+      // pruned) — the PR a ticket's frontmatter lost, so a claimant continues the change.
+      return json({ ...this.history.list(id, b, n), resume: this.claims.resumeOf(id) });
     }
     if (blocks) {
       const raw = seg(blocks[2]);
@@ -953,7 +1104,7 @@ export class BatonCore {
    * a rewind to a once-accepted history included — is a fresh hold with a fresh row. The 0001
    * schema's "written once" and "the first force post" describe that one hold.
    */
-  // @model syncPost sha256:710161d0a3b7
+  // @model syncPost sha256:e11273132f73
   async board(repo: Repository, p: BoardPayload) {
     // Course graphs are read per post: a registry applied, or a post refused after applying one,
     // must not leave another request reading a graph that is not in force.
@@ -1099,6 +1250,11 @@ export class BatonCore {
       for (const { row } of rows) if (!stations.has(row.id)) this.stations.clear(qualify(r, row.id));
       this.stations.reopened(r, rows.map(({ row }) => row.id));
       const seen = this.stations.apply(r, p.sha, n, stations, p.closed ?? [], at);
+      // B-129 (R-BTN-85, both values): a post whose ticket frontmatter says `available` while
+      // the ticket is past its course's start — the snapshot implying a position Baton has
+      // moved past, the false `available`/`prs: []` of the 2026-10-27 release — is a
+      // discrepancy. Under B-120 it moves nothing; until then it is at least named.
+      this.notePositionDisagreements(r, p, seen, n);
       // R-BTN-75–78: the snapshot's causes — `blocked_by`, `requires`, `needs`, `decisions` and
       // where each ticket is queued — rewrite the changed tickets' blocks in this transaction.
       const dropped = this.applyBlocks(r, stations, upserted, legsBefore, changed.deleted > 0);
@@ -1123,6 +1279,32 @@ export class BatonCore {
       changed.stale_released = judged.stale_released;
     });
     return { ok: true, ...changed };
+  }
+
+  /** B-129 (R-BTN-85, "every disagreement with git is logged", both values): the accepted post's
+   *  tickets whose frontmatter says `available` while the post itself places them past their
+   *  course's start — the false `status: available` a hurried release wrote over an open PR
+   *  (B-91, 2026-10-27). Core reads no course field (R-BTN-50) and stores no PR list (R-BTN-33),
+   *  so it cannot tell that release from one that kept its PRs: both fire. Logged once per
+   *  station (the sync posts every 15 minutes), judged against the ticket's last
+   *  `position-disagrees` row, moving nothing (B-120's rule; until it lands, named). The path's
+   *  length is the witness: a ticket past its start has one. */
+  private notePositionDisagreements(r: string, p: BoardPayload, seen: Map<string, Seen>, n: number): void {
+    if (!p.tickets) return;
+    const statusOf = new Map(p.tickets.map((t) => [qualify(r, t.id), t.display?.status ?? null]));
+    for (const [id, s] of seen) {
+      if (s.path.length === 0 || statusOf.get(id) !== 'available') continue;
+      const last = this.sql<{ detail_json: string }>(
+        `SELECT detail_json FROM events WHERE ticket_id = ? AND kind = 'discrepancy' AND json_extract(detail_json, '$.sub') = 'position-disagrees' ORDER BY seq DESC LIMIT 1`, id)[0];
+      let before: { baton?: { station?: unknown } } = {};
+      try {
+        before = last ? JSON.parse(last.detail_json) : {};
+      } catch {
+        before = {};
+      }
+      if (before.baton?.station === s.station) continue;
+      this.history.discrepancy(id, 'position-disagrees', { station: s.station, path: s.path }, { status: 'available' }, n);
+    }
   }
 
   /** A refresh's stations (§7.1, R-BTN-62): the head's tickets unchanged, where each is replaced. */
@@ -1312,7 +1494,9 @@ export class BatonCore {
    *  derived by the same `readyRows` it derives them with, for one repository — and one field the
    *  dashboard does not have. `granted_capabilities` is the key's grant's capabilities — the
    *  heartbeat answer's field — so a granted runner knows its grant from the read alone; null
-   *  for a key no grant binds and for an owner's or an administrator's key. */
+   *  for a key no grant binds and for an owner's or an administrator's key. `holders` (B-129) is
+   *  the repository's live claims with each holder and its lease's end — the lock a session
+   *  claiming through git reads with the same request (R-BTN-179's one-answer rule). */
   boardView(repo: string, granted: string[] | null = null) {
     const now = this.now();
     const repository = this.uiRepo(this.registry.get(repo)!);
@@ -1321,6 +1505,7 @@ export class BatonCore {
       repository,
       ready,
       ready_by_tier: this.readyByTier(ready, [repo]),
+      holders: this.claims.holdersOf(repo),
       granted_capabilities: granted,
       server_time: now,
     };

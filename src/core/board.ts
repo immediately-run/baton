@@ -254,7 +254,10 @@ function checkNormative(p: BoardPayload) {
     if (typeof t.title !== 'string' || !TEXT.test(t.title)) fail(`${t.id}.title`, 'must be short plain text');
     if (t.tier != null && !NAME.test(t.tier)) fail(`${t.id}.tier`, 'must be a tier name');
     if (!Array.isArray(t.requires)) fail(`${t.id}.requires`, 'must be a list (`none` and no clause are [])');
-    list(t.requires, NAME, `${t.id}: requires`);
+    // B-106 (R-BTN-178, §4.4): `requires` arrives expanded to capabilities — the normative post
+    // admits the typed names the interim one does (B-104), or a ticket whose clause names a
+    // capability could never be posted in the shape every repository but docs uses.
+    list(t.requires, new RegExp(`^(?:${NAME.source}|${HOLDING_TYPE}:${HOLDING_VALUE})$`), `${t.id}: requires`);
     if (typeof t.operator_only !== 'boolean' || typeof t.expedite !== 'boolean') fail(`${t.id}`, 'operator_only and expedite are booleans');
     for (const k of ['depends_on', 'blocked_by'] as const) {
       if (!isObjArr(t[k], DEP_MAX)) fail(`${t.id}.${k}`, `must be a list of at most ${DEP_MAX}`);

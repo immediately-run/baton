@@ -4,8 +4,9 @@ The immediately.run factory's live state — work-item leases, workers, provider
 dashboard at `https://baton.immediately.run` — on a Cloudflare Worker and one SQLite
 Durable Object.
 
-The design is `BATON_SPEC`, [`spec/BATON_SPEC.md`](spec/BATON_SPEC.md) (moved here from the
-`immediately-run/docs` repository in R3-1252); the work is the tickets in [`tickets/`](tickets/). Where
+The design is `BATON_SPEC`: [`spec/BATON_SPEC/`](spec/BATON_SPEC/), one file per section, indexed
+by [`spec/BATON_SPEC.md`](spec/BATON_SPEC.md) (moved here from the `immediately-run/docs`
+repository in R3-1252; split in B-179); the work is the tickets in [`tickets/`](tickets/). Where
 an item says `infra/baton/<path>`, it means `<path>` in this repository (BATON_SPEC §3).
 
 How Baton differs from a durable-execution engine such as Temporal, and where each fits:
@@ -26,6 +27,9 @@ instructions `build:cli` prebuilt into `dist/defaults/`, so it needs no checkout
 `--eject` copies prebuilt defaults the same way. In a
 checkout, run the CLI as `node cli/baton.mjs`.
 
+`baton run --lock` (R-BTN-178) and its tests (`npm test`, `npm run model:pr`) need util-linux
+`flock` on `PATH`; macOS has none — `brew install flock` gives one with the same flags.
+
 ## Layout
 
 | Path | What |
@@ -41,7 +45,7 @@ checkout, run the CLI as `node cli/baton.mjs`.
 | `src/core/registry.ts` | The registered repositories (R-BTN-47): a checked, insert-only registration, the `BATON_REPOSITORIES` seed, the one repository a sync token binds to (R-BTN-15), qualified ticket ids (`docs:R3-1205`) |
 | `src/core/cutover.ts` | The one-way cutover (R-BTN-28): `POST /v1/ui/cutover`, the legacy import, adoption on the owner's confirmation |
 | `src/core/blocks.ts` | Why a ticket cannot move (§2g R-BTN-75, -77, -78): the one writer of `ticket_blocks` and `blocked_since`, the fleet counts, the `unblocked` messages and dispatch, and the `blocks` and `blocked` queries |
-| `src/core/notices.ts` | Requests for people (R-BTN-80, R-BTN-103): the one writer of `notices` and `worker_couriers` — a notice per personal courier and one pool copy per open decision, claimed and marked over `/v1/courier/*`, closed with the decision, reminded and deleted by the alarm |
+| `src/core/notices.ts` | Requests for people, in the retired sense of R-BTN-80 and R-BTN-103 (notice couriers, `/v1/courier/*`); the spec's replacement is R-BTN-163 — a `baton.*` condition on its resolve page and a delivery runner that reads `GET …/conditions` — and the code tickets remove this module with it |
 | `src/core/history.ts` | Each ticket's history and Baton's disagreements with git (R-BTN-81, R-BTN-85): the one writer of `ticket_history`, `GET …/tickets/{ticket}/history`, the 90-day purge, and the `discrepancy` event and row logged before a snapshot's value is adopted |
 | `src/core/resources.ts` | External resources, their account instances, a worker's `uses`, the readings of workers, probes and administrators, and each instance's state (R-BTN-76, R-BTN-101) |
 | `src/core/detailSchema.ts` | Pure: R-BTN-76's JSON Schema subset, interpreted (no code generation), for a reading's `detail` |
@@ -50,7 +54,7 @@ checkout, run the CLI as `node cli/baton.mjs`.
 | `src/core/observations.ts` | The per-repository observation counter (R-BTN-62): `POST /v1/sync/observation` hands out the next number (`sync-busy` while one is outstanding, void after 10 minutes); a board post's number is used once and must be above the last accepted reading's |
 | `src/core/courses.ts` | The course registry each sync posts (R-BTN-48): its shape check, each course file judged by `validateCourse` (a failing one keeps the previous and is listed under Needs you, R-BTN-69), the `min_worker_version` rule 9 reads |
 | `src/core/course.ts` | Pure: `validateCourse`, every way a course file breaks R-BTN-69's rules (stations reachable, an end from everywhere, cycles bounded, `start_leg`, inputs) |
-| `src/core/queues.ts` | Legs are queues (R-BTN-79): the one writer of `leg_queues` — each ticket counted in its queued leg's queue while no claim holds it, moved in the transaction that changes it; a depth over `max_queue` logs `queue-over` and queues a notice per `owner` courier, and closes the course's intake (advice, never a gate) |
+| `src/core/queues.ts` | Legs are queues (R-BTN-79): the one writer of `leg_queues` — each ticket counted in its queued leg's queue while no claim holds it, moved in the transaction that changes it; a depth over `max_queue` logs `queue-over` and raises `baton.queue-over` (R-BTN-163; the code still queues the retired notice), and closes the course's intake (advice, never a gate) |
 | `src/core/stats.ts` | A course's own record (§2d, R3-1248): `GET /v1/repositories/{repository}/stats` — per station and leg wait and run times, ends by reason and detail, suspensions, advice overridden, `off-graph` and foreign writes; aggregates and ids only |
 | `src/core/board.ts` | Pure: snapshot validation, the `tickets` row an item becomes, peaks, prices |
 | `src/core/auth.ts` | JWT verification (R-BTN-15, R-BTN-16); the one verifier of signed requests, SSHSIG over RFC 9421 (R-BTN-13); worker tokens against `TOKEN_HASHES` during the transition |
@@ -59,7 +63,7 @@ checkout, run the CLI as `node cli/baton.mjs`.
 | `src/runner/` | `baton run`'s worker loop (§6.13 R-BTN-72): the claim/leg loop (`runner.ts`), the pure result protocol (`protocol.ts`), the API client (`api.ts`), the state file and spool (`state.ts`), the home checkout's snapshot reads (`home.ts`), the leg child wrapper (`legProcess.mjs`) and the CLI entry (`main.ts`) |
 | `src/migrations/` | Numbered schema migrations, applied before the object serves |
 | `src/ui/` | The dashboard: one HTML page, one stylesheet, one ES module (`textContent` only) |
-| `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list`, the CLI courier (`decisions.mjs`): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton |
+| `cli/` | `baton admin …` and `baton owner …` (`baton.mjs`); `baton decision list` (`decisions.mjs`, R-BTN-163's reader of what waits on a person; its courier half is R-BTN-80's retired sense): one request per command, signed with the key file `-i` names by `ssh-keygen -Y sign` (`sign.mjs`); `baton test-course`, which needs no Baton. The command tree the spec now defines is R-BTN-127's (`baton runner start`, `baton ticket …`, `baton course test`); the built names move to it under B-157 |
 | `src/shared/` | **Vendored** from docs `scripts/lib/` — never edit here (R-BTN-37); `batonSync.mjs` is the board sync's own decision code, which S-BTN-13 drives. Except two of Baton's own, which every part imports: `schema.mjs`, the one validator of leg outputs and readings (R-BTN-108: the subset, the linear-time pattern engine, the refinement check), and `std.mjs`, the `std:` library (R-BTN-110) |
 | `test/unit/`, `test/integration/` | Vitest; `S-BTN-n` scenarios in `integration/`. Project `cloudflare` runs everything in the Workers runtime; project `local` runs every scenario again on the local host, plus the Node-only tests |
 | `test/integration/trace.ts` | R3-1244: every scenario's run on the local host as a trace — one step per request or alarm tick, with the state projection the formal model has — written to `test/.traces/` |
@@ -93,15 +97,32 @@ checkout, run the CLI as `node cli/baton.mjs`.
 - `node cli/baton.mjs tickets new|claim|set|done` — file, claim and move tickets with git as the
   lock, each one commit pushed straight to the default branch from a throwaway worktree (B-112;
   `baton tickets --help`, and the generated `tickets/HOW-TICKETS-WORK.md`), until Baton claims
-  them (R3-1266).
-- `npm run check:wiki` — every page in `tickets/` and `docs/` compiles as MDX, uses only known
+  them (R3-1266). `claim` asks Baton first (B-129): with the session's key (`-i KEY`, else
+  `BATON_KEY_FILE`) it reads the ticket's position from Baton's board and history, continues a
+  ticket past its course's start where Baton holds it (the PRs written back, the position
+  printed) instead of starting over — overriding only a false `available`, never the git lock or
+  a parked or closed status — and refuses, rather than trust the frontmatter, when a read cannot
+  be answered (`--offline` for an unreachable Baton). A release (`set <id> available
+  [--note TEXT]`) keeps every `prs:` entry and its commit is the hand-off. `claim` also refuses a ticket
+  citing a rule whose `spec/BATON_SPEC_HISTORY.md` entry, by its title, amended it after the ticket was filed or last re-read it, until
+  `--rules-reread <id>,…` names exactly those ids (R-BTN-74); in a shallow clone it deepens the
+  clone first. A new migration or scenario number is the next free one at merge (B-176 moves it
+  into Baton).
+- `npm run check:wiki` — every page in `tickets/`, `docs/` and `spec/` compiles as MDX, uses only known
   components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
 - `npm run check:tickets` (or `node cli/baton.mjs tickets check [--repo DIR]`) — check this
   repository's ticket source without posting it, as `baton repo sync` reads it: the board post's
   validation, every `depends_on` target and dependency cycle, and — with
   `check.depends_line` in `.baton/baton.json` — each ticket's `**Depends on:**` line against its
-  `depends_on` (B-111). One `path: message` line per finding, exit 1 with findings; CI runs it on
-  `tickets/`.
+  `depends_on` (B-111); with `check.sections_since`, a ticket filed on or after that day (the
+  later of its `_filed` line and its first commit) whose `### Trust` or `### Invariants` is absent,
+  empty or a placeholder (R-BTN-74), request tickets and leg-filed children aside; with
+  `check.sections_from_id` (here `B-176`), a ticket at or above that id without a `_filed` line.
+  One `path: message` line per finding, exit 1 with findings; CI runs it on `tickets/`. CI's
+  clone is depth 1, so there it judges the tickets from `B-176` on by their `_filed` lines and
+  only lists, as undetermined, an older ticket without one. It also lists, never as a finding,
+  the live tickets citing a rule amended since they were filed or re-read it (`check.rules`), and
+  says so when a shallow clone skips that list.
 - `node cli/baton.mjs request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B]` —
   start a course whose product is a spec or a ticket — `create-spec`, `build-app` — from one
   sentence (B-98). Files one request ticket (the sentence as title and description, `course: C`,
@@ -118,10 +139,10 @@ checkout, run the CLI as `node cli/baton.mjs`.
 
 ## The wikis
 
-The repository holds two [Grove](https://github.com/immediately-run/grove) wikis, which
-immediately.run opens: `package.json`'s `"immediately.run": {"content": ["tickets", "docs"]}`
+The repository holds three [Grove](https://github.com/immediately-run/grove) wikis, which
+immediately.run opens: `package.json`'s `"immediately.run": {"content": ["tickets", "docs", "spec"]}`
 lists them, and each folder's `immediately.run.json` opens it with the viewer it names —
-`tickets/` with `immediately-run/baton-board` (B-114), `docs/` with the wiki viewer.
+`tickets/` with `immediately-run/baton-board` (B-114), `docs/` and `spec/` with the wiki viewer.
 
 - **`tickets/`**, the tickets:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/home.mdx>.
@@ -135,6 +156,11 @@ lists them, and each folder's `immediately.run.json` opens it with the viewer it
   names in `opensWith` (B-114) — this repository holds no component code for it.
 - **`docs/`**, the documentation:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/home.mdx>.
+- **`spec/`**, the specification (B-180):
+  <https://immediately.run/present/github/immediately-run/baton/main/bundle/spec/home.mdx>.
+  Its pages are `.md`: `BATON_SPEC.md` (the generated index), `BATON_SPEC/` (one file per
+  section), the history and the MCP OAuth companion. Tickets and docs link a section by a relative
+  path to its file and heading (`node scripts/link-spec-refs.mjs` writes them).
 
 Pages are MDX, so `<` and `{` in prose go in backticks or are escaped (`\<`, `\{`).
 
@@ -177,7 +203,7 @@ key signs every request and reveals nothing reusable. An API key is a shared sec
 bearer: easier to set up, but anyone who reads one request holds it until it is revoked. `baton
 key create FILE` makes an API key on your machine. `FILE` holds the key (`-i FILE`, or a runner's
 `BATON_KEY_FILE`). `FILE.pub` holds its public line, which goes wherever an SSH public key
-would: `BATON_ADMIN_KEYS`, `--owner-key` or a grant's `--key`. Sync, probe and courier keys stay
+would: `BATON_ADMIN_KEYS`, `--owner-key` or a grant's `--key`. Sync and probe keys stay
 SSH keys. The CLI is the one path:
 
 ```
@@ -199,7 +225,7 @@ baton owner -i ~/.config/baton/docs_owner settings docs --required-bar '*' --cou
 ```
 
 `--url` (or `BATON_URL`) picks the Baton. A key holds one role — administrator, owner, worker,
-probe, courier or sync — and a key in a second is `conflict`. A granted key works only where it
+probe or sync — and a key in a second is `conflict`. A granted key works only where it
 is granted, with what that repository granted (rules 4 and 7) and under its `max_tier`; only an
 administrator grants `human-operator`, or takes over a `BATON_KEYS`-seeded key. Owner bars join the posted barred tags of their course
 (or every course, `*`), at claims and, with `--applies claim+advance`, advances; a leg missing a

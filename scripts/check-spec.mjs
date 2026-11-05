@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // check-spec.mjs — the spec and the code agree on what the spec defines (R3-1252).
 //
-//   npm run check:spec        check spec/BATON_SPEC.md against src/, test/, model/ and cli/ (the
+//   npm run check:spec        check spec/BATON_SPEC/ (its parts joined, B-179) against src/, test/, model/ and cli/ (the
 //                             requirement ids they cite) and tickets/ (the tickets it cites)
 //
 // - every requirement id (`R-BTN-n`) the code cites is defined in the spec — as a bold
@@ -13,15 +13,20 @@
 // - none of the scrub's terms (SCRUBBED) is in the spec: the repository is public;
 // - every test/integration/ file named for a scenario (`S-BTN-n.*.test.ts`) names one §15's
 //   scenario table defines and not one the history retired (B-71) — the RETIRED_TESTS_ALLOWED
-//   list holds the two retired files that still test their rows until B-67 deletes them;
+//   list holds the retired files that still test their rows until B-67 and B-167 delete them;
 // - no rule opens with an italic patch note (`- **R-BTN-35 (…).** *Except …*`): an amendment
 //   rewrites the rule instead of stating an exception on top of a body that still says the
 //   opposite (spec-tools.mjs's `patchNotes`). PATCH_NOTES_ALLOWED holds the ones written before
-//   this check; it only shrinks (B-150).
+//   this check; it only shrinks (B-150);
+// - every dated history entry after RULES_LINE_SINCE names the rule ids it amended — in its bold
+//   title, or on a `Rules changed: <ids>` line (or `Rules changed: none.`) directly under the line
+//   the title closes on — since the stale-rule guard reads only those (R-BTN-74).
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { patchNotes } from './spec-tools.mjs';
+import { joinParts, layoutProblems, specParts } from './spec-files.mjs';
+import { stripFrontmatter } from './lib/stripFrontmatter.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -70,8 +75,9 @@ export function retiredScenarioIds(history) {
 }
 
 /** Test files that may stay named for a retired scenario: they still test their (retired) rows,
- *  and B-67 deletes them — empty the list then. */
-export const RETIRED_TESTS_ALLOWED = ['S-BTN-46', 'S-BTN-60'];
+ *  and B-67 (S-BTN-46, S-BTN-60) and B-167 (S-BTN-139, S-BTN-147: the ontology and route choices,
+ *  retired by the spec restructure's part 4) delete them — empty the list then. */
+export const RETIRED_TESTS_ALLOWED = ['S-BTN-46', 'S-BTN-60', 'S-BTN-139', 'S-BTN-147'];
 
 /** The scenario a test file is named for (`S-BTN-2.silent-runner.test.ts` → `S-BTN-2`), if any. */
 export function fileScenario(name) {
@@ -81,7 +87,38 @@ export function fileScenario(name) {
 /** Rules that carried an italic patch note when the check was added (B-150 folds each into its
  *  rule's body). Only shrinks: a new patch note fails, and so does a listed rule that no longer
  *  has one, so the list stays exact. */
-export const PATCH_NOTES_ALLOWED = ['R-BTN-171'];
+export const PATCH_NOTES_ALLOWED = [];
+
+/** The last day whose history entries may name their rule ids nowhere (R-BTN-74): an entry dated
+ *  after it names them in its title or on a `Rules changed:` line, which the stale-rule guard
+ *  (src/defaults/tickets-rules.ts's `historyEntries`, the same grammar) reads. */
+export const RULES_LINE_SINCE = '2026-11-03';
+
+const ENTRY = /^- \*\*(\d{4}-\d{2}-\d{2})(?: to (\d{4}-\d{2}-\d{2}))? — /;
+
+/** The history's dated entries dated after `since` (a range by its last day) that name no rule id
+ *  in their bold title and have no `Rules changed:` line directly under the line the title closes
+ *  on: `{date, title}` each, in file order. */
+export function unnamedEntries(history, since = RULES_LINE_SINCE, prefix = 'R-BTN') {
+  const id = new RegExp(`(?<![A-Za-z0-9_-])${prefix}-\\d+(?!\\d)`);
+  const out = [];
+  const lines = history.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const m = ENTRY.exec(lines[i]);
+    if (!m) continue;
+    const date = m[2] ?? m[1];
+    if (date <= since) continue;
+    // The title runs to the bold's close, which may be on a later line of the entry.
+    let j = i;
+    let text = lines[i].slice(m[0].length);
+    while (!text.includes('**') && j + 1 < lines.length && lines[j + 1].trim() !== '' && !ENTRY.test(lines[j + 1])) text += ` ${lines[++j].trim()}`;
+    const title = text.split('**')[0].trim().replace(/\.$/, '');
+    if (id.test(title)) continue;
+    if (/^\s*Rules changed:\s*\S/.test(lines[j + 1] ?? '')) continue;
+    out.push({ date, title });
+  }
+  return out;
+}
 
 /** Every `R-BTN-n` in a text. */
 export function citedIds(text) {
@@ -120,6 +157,9 @@ export function check(spec, code, tickets, history = '', testNames = [], allowed
   for (const id of allowed) {
     if (!notes.includes(id)) problems.push(`${id} no longer has a patch note: remove it from PATCH_NOTES_ALLOWED`);
   }
+  for (const e of unnamedEntries(history)) {
+    problems.push(`spec/BATON_SPEC_HISTORY.md: the ${e.date} entry "${e.title.length > 60 ? `${e.title.slice(0, 59)}…` : e.title}" names no rule id in its title and has no \`Rules changed: <ids>\` line under it (R-BTN-74)`);
+  }
   for (const term of SCRUBBED) {
     if (spec.toLowerCase().includes(term)) problems.push(`the spec contains the scrubbed term "${term}"`);
   }
@@ -137,16 +177,20 @@ function files(dir) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const spec = readFileSync(join(REPO, 'spec', 'BATON_SPEC.md'), 'utf8');
+  // The spec is spec/BATON_SPEC/'s parts joined (B-179); spec/BATON_SPEC.md is their generated index.
+  const parts = specParts(REPO);
+  const spec = joinParts(parts);
   const code = ['src', 'test', 'model', 'cli'].flatMap((d) => files(join(REPO, d)))
     .map((p) => [relative(REPO, p), readFileSync(p, 'utf8')]);
   const tickets = new Set(['tickets', 'tickets/archive'].flatMap((d) => readdirSync(join(REPO, d)))
     .filter((n) => n.endsWith('.mdx')).map((n) => n.slice(0, -4)));
   const historyPath = join(REPO, 'spec', 'BATON_SPEC_HISTORY.md');
-  const history = existsSync(historyPath) ? readFileSync(historyPath, 'utf8') : '';
+  // The history is a page of the spec bundle (B-180): its body, past the frontmatter.
+  const history = existsSync(historyPath) ? stripFrontmatter(readFileSync(historyPath, 'utf8')) : '';
   const integration = join(REPO, 'test', 'integration');
   const testNames = existsSync(integration) ? readdirSync(integration) : [];
   const problems = check(spec, code, tickets, history, testNames, PATCH_NOTES_ALLOWED);
+  problems.push(...layoutProblems(REPO));
   for (const w of problems.warnings) console.warn(`! ${w}`);
   if (problems.length) {
     for (const p of problems) console.error(`✗ ${p}`);

@@ -3,7 +3,7 @@ title: "B-56 — The debugger: Needs you lists unhandled conditions and the floo
 id: B-56
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -23,13 +23,13 @@ depends_on:
 and an unhandled condition reaches the debugger (`spec/BATON_SPEC_HISTORY.md`, "Decisions in
 full"). Filed from the ticket plan for the current-state spec (PR #71). With B-55 it supersedes
 B-14: severity is now data, and routing and reminders are retired.
-**Spec:** `spec/BATON_SPEC.md` §7.3 R-BTN-163 (Needs you, resolving, core conditions, posted
-decisions, the floor, reading the list); R-BTN-160's closing table (§7.1), R-BTN-125 (severity),
-R-BTN-78 (§6.4, posted decisions), R-BTN-83 (§5.3, a re-route), R-BTN-122 (§7.4, the holds that
-raise `baton.retries`), R-BTN-82 (§5.5, `baton.contract`), R-BTN-155 (§11.4: resolving a condition is not a confirmed action),
-§11.4's Needs you view, §11.3 (`owner resolve`, `condition.list`), §13.3/§13.6
-(`ticket_decisions`, `ticket_overrides.hold_reason`, `pending_owner_state`), §14 (the resolve and
-conditions routes); §15 S-BTN-6, -7, -10, -44, -47, -131, G-BTN-149.
+**Spec:** [BATON_SPEC §7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3) (Needs you, resolving, core conditions, posted
+decisions, the floor, reading the list); [R-BTN-160](../spec/BATON_SPEC/07-conditions.md#sec-7-1)'s closing table ([§7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1)), [R-BTN-125](../spec/BATON_SPEC/07-conditions.md#sec-7-1) (severity),
+R-BTN-78 ([§6.4](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-4), posted decisions), [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3) ([§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3), a re-route), [R-BTN-122](../spec/BATON_SPEC/07-conditions.md#sec-7-4) ([§7.4](../spec/BATON_SPEC/07-conditions.md#sec-7-4), the holds that
+raise `baton.retries`), [R-BTN-82](../spec/BATON_SPEC/05-courses.md#sec-5-5) ([§5.5](../spec/BATON_SPEC/05-courses.md#sec-5-5), `baton.contract`), [R-BTN-155](../spec/BATON_SPEC/11-people.md#sec-11-4) ([§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4): resolving a condition is not a confirmed action),
+[§11.4](../spec/BATON_SPEC/11-people.md#sec-11-4)'s Needs you view, [§11.3](../spec/BATON_SPEC/11-people.md#sec-11-3) (`owner resolve`, `condition.list`), [§13.3](../spec/BATON_SPEC/13-data-model.md#sec-13-3)/[§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6)
+(`ticket_decisions`, `ticket_overrides.hold_reason`, `pending_owner_state`), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (the resolve and
+conditions routes); [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-6](../spec/BATON_SPEC/15-verification.md#scenarios), -7, -10, -44, -47, -131, [G-BTN-149](../spec/BATON_SPEC/15-verification.md#gates).
 **Depends on:** B-55 (the `conditions` row, the route and `condition.list`).
 
 ### Requires
@@ -171,3 +171,5 @@ _(filed 2026-10-20 from the ticket plan for the current-state spec, PR #71)_
 _(2026-10-20: text corrected to the current spec — a dashboard resolve is one step, `POST /v1/ui/conditions/{condition}/resolve`, not a confirmed action, adv-2 B1 and adv-4 B1.)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): there are no posted decisions and no `hitl.decision`; Needs you and `baton decision list` list every queued person leg with its question instead (R-BTN-116, R-BTN-163), and a `baton.*` condition files no handler ticket: a delivery runner polling `GET …/conditions?open=1&person=1` sends the resolve link (B-155's ruling).)_
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): the action `owner.resolve` is `ticket.resolve`, the command `baton ticket resolve`; never a delegated key (R-BTN-130, R-BTN-163; part 3's round one took `park` out of the delegated set).)_

@@ -13,25 +13,26 @@ change to Baton, not a change in Baton.</Lede>
 
 ## Four nouns at the boundary
 
-Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN-191, R-BTN-171):
+Everything that crosses Baton's boundary is one of four things (BATON_SPEC [R-BTN-191](../../spec/BATON_SPEC/12-security.md#sec-12-8), [R-BTN-171](../../spec/BATON_SPEC/07-conditions.md#sec-7-8)):
 
 | | About the outside world | Between Baton and its caller |
 |---|---|---|
 | **In** | an **attestation**: a statement Baton weighs by its writer | a **command**: a request Baton accepts or refuses |
-| **Out** | an **outbox entry**: an effect a courier delivers | a **reply**: the answer to a command or a read |
+| **Out** | an **outbox entry**: an effect a runner delivers | a **reply**: the answer to a command or a read |
 
 - **One inbound path for facts.** A review, a human's answer, a runner's report of where its leg
-  reached, a fact the sync read from git, a courier's delivery and a provider's quota are all
+  reached, a fact the sync read from git, a deliverer's delivery and a provider's quota are all
   attestations, differing only in writer; the repository's policy decides whose count. So there
   is one place to ask "who may tell Baton this?".
 - **Commands are not evidence.** A claim or an owner's setting asks Baton to change its own state,
   and Baton's gates decide; a command may carry an attestation (an advance carries the holder's
   report of the leg), and the two are judged separately.
-- **One outbound path for effects.** Baton holds no credential that acts outside it: a git write,
-  a check run and a workflow dispatch are outbox entries, delivered by couriers that hold the
-  credentials and confirmed by reading the effect back. A compromised Baton can queue entries,
-  never deliver them.
-- **Replies stay replies.** The doorbell's ring, a recommendation and a signed read go to whoever
+- **One outbound path for effects.** Baton holds no credential that writes git or posts a check:
+  a git write and a check run are outbox entries, delivered by runners that hold the credentials
+  and confirmed by reading the effect back. A workflow dispatch is Baton's own call, with the App
+  key it holds: Baton's server is trusted, and its compromise is recovered, not resisted
+  ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8), the owner, 2026-11-01).
+- **Replies stay replies.** The doorbell's ring, a recommendation and a policy read go to whoever
   asked or holds the socket, and carry no effect.
 
 ## The ledger and the cache
@@ -39,7 +40,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN
 - **Git is the ledger for the work; Baton owns what no push may decide.** Every ticket, its
   body and its evidence live in the repository, and Baton's board is a cache of them, rebuilt
   by each sync. Baton owns the rest: claims and leases, each ticket's course history (B-120),
-  attestations (BATON_SPEC R-BTN-181), owner settings and grants. Some of it is duplicated in
+  attestations (BATON_SPEC [R-BTN-181](../../spec/BATON_SPEC/12-security.md#sec-12-8)), owner settings and grants. Some of it is duplicated in
   git for people to read; some of it is in git nowhere, because a push must not be able to
   write it. Losing it fails closed: work is reviewed and approved again, never restored from
   git (the owner, 2026-10-28).
@@ -55,18 +56,27 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN
   settings (values 12). A threat that needs a runner stopped belongs to the sandbox, the forge
   or the credential proxy, not here.
   A repository's policy may opt into one exception: Baton's trusted runners decide what lands,
-  and the forge lets only them and the human-only identity land it (BATON_SPEC §12.8).
+  and the forge lets only them and the human-only identity land it ([BATON_SPEC §12.8](../../spec/BATON_SPEC/12-security.md#sec-12-8)).
 - **Policy, not modes.** Every rule about authority and trust is a knob of one versioned policy
-  document per repository, held in Baton (BATON_SPEC R-BTN-188). Presets such as `cooperative`
+  document per repository, held in Baton (BATON_SPEC [R-BTN-188](../../spec/BATON_SPEC/12-security.md#sec-12-8)). Presets such as `cooperative`
   and `protected` fill it; no rule reads a preset. A deployment requires named guarantees, which
-  are conditions over the policy, and Baton enforces the floor it registers (R-BTN-189); what Baton
+  are conditions over the policy, and Baton enforces the policy's `floors` ([R-BTN-189](../../spec/BATON_SPEC/12-security.md#sec-12-8)); what Baton
   cannot observe stays the deployment's.
+- **One registry, one check; the credential decides, never the channel.** Every action a
+  credential can take is one entry in one registry, with the principals that may call it, and
+  the API, the CLI, the dashboard and MCP are generated from it behind one `authorize`
+  (BATON_SPEC [R-BTN-129](../../spec/BATON_SPEC/11-people.md#sec-11-3)). A dashboard session is one principal carrying its key's role; an MCP
+  key is a delegated key acting as an owner, narrowed to what [R-BTN-186](../../spec/BATON_SPEC/12-security.md#sec-12-8) admits — tighten, and
+  undo its own (the owner, 2026-10-27 and 2026-11-01). No surface carries a rule of its own.
 - **Advice is fresh for the reader, bounded for the fleet.** A write Baton accepts — a board,
-  a reading, a heartbeat, an ontology — marks what it affects stale, and anything a runner reads
-  afterwards is brought up to date for that runner first; fleet-wide views (counts, blocks,
-  wake-ups, the dashboard) are current within one alarm cycle.
+  a reading, a heartbeat — is in force for the next read: recommendations and gates are computed
+  from the rows as they stand, and counts and blocks are rewritten in the transaction of the
+  write that changes them; what lapses with time (liveness, readings, bars) is the alarm's, so
+  fleet-wide views (counts, blocks, wake-ups, the dashboard) are current within one alarm turn.
 
-- **The server is the only allocator.** Claims, heartbeats and advances are the whole of
+- **The server is the only allocator.** Of leases and of numbers alike: git records the work and is
+  never a lock or a counter; the git-based ones that exist are legacy, phased out (R-BTN-193).
+  Claims, heartbeats and advances are the whole of
   a runner's knowledge: which ticket, which station, which leg — offered by the claim,
   fenced by the heartbeat (R-BTN-6), validated at the advance (the edge, the run limit,
   the gates). Runners never derive state from files; the sync derives the board from
@@ -97,9 +107,8 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN
   its recovery routine (the `reaped:silent` path). A single process multiplexing legs
   across threads or subprocesses is a possible later evolution, decided when the sandbox
   fleet's evidence is in — not the plan.
-  Under the policy's `grants.one_per_domain` a sandbox is one trust domain with one grant per
-  repository (BATON_SPEC R-BTN-180), so several runners in one sandbox count as one for independent
-  review; Fieldhouse runs one runner per VM (FLDH-13).
+  A sandbox is one domain, the label its grants carry (BATON_SPEC [R-BTN-180](../../spec/BATON_SPEC/12-security.md#sec-12-8)), so several runners
+  in one sandbox count as one for independent review; Fieldhouse runs one runner per VM (FLDH-13).
 
 ## Where code lives
 
@@ -111,12 +120,12 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN
   local host (R-BTN-55); migrations are append-only; every behaviour change names its
   `S-BTN-n` scenario. The enforcement surface is `CLAUDE.md`'s rules — this page is why
   they are rules.
-- **A repository's ontology is data core interprets, not code it runs.** The capability
-  ontology (spec §5.9) is a total, bounded logic program with no I/O, evaluated by core the
-  way a course file's state machine is, which is why it may decide a gate without breaking
-  "Baton runs no repository code". Its language grows only by ASP-Core-2 constructs, and
-  readings reach its advice, never its gate; a leg that must gate on a reading says so in its
-  own requirement (BATON_SPEC R-BTN-181).
+- **Capabilities are names, matched; Baton derives none.** Core matches a leg's capabilities
+  against what a runner declares, by name (BATON_SPEC [R-BTN-174](../../spec/BATON_SPEC/05-courses.md#sec-5-9)). What the keys and tools a runner
+  holds amount to is the runner's own statement, and which model and key a leg uses is the
+  course's — its `rank.mjs` and its instructions read the readings ([§6.10](../../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-10)). The capability
+  ontology and route choices core once evaluated moved out (the owner, 2026-11-01, "Nothing; move
+  it out"): the core is small and knows no course.
 - **The formal model names the code.** `model/baton.qnt` and the implementation check
   each other (`model:links`, traces); a change to what the model checks carries a report.
 
@@ -131,7 +140,7 @@ Everything that crosses Baton's boundary is one of four things (BATON_SPEC R-BTN
   course history. Every course that records work is one ticket, one PR, one merge.
 - **The conversation seam** (PR courses, B-101): review rounds live in the forge's PR
   conversation; on plain `git`, which has none, as files on an orphan per-ticket branch,
-  `baton-legs/<ticket>`, which nothing merges. The repository policy's `leg_state` chooses (BATON_SPEC R-BTN-190).
+  `baton-legs/<ticket>`, which nothing merges. The repository's `forge` decides, not a policy knob (BATON_SPEC [R-BTN-190](../../spec/BATON_SPEC/05-courses.md#sec-5-8)).
 - **The entry seam** (B-98): a course whose product is tickets or specs starts from a
   request — one sentence, filed by a command — never ticket-less.
 

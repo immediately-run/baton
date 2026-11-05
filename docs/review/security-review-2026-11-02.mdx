@@ -1,0 +1,364 @@
+---
+title: "Review — the spec's security, read adversarially, 2026-11-02"
+description: A fresh-context review of spec/BATON_SPEC.md (with BATON_MCP_OAUTH_SPEC) whose primary question is whether the security guarantees credibly protect Baton users from attackers — which actors each mechanism actually stops, where the seams are, and what is honestly out of scope. Eight security findings, six contradictions, three unspecified behaviours and a set of naming gotchas; no break in the core model found.
+tags: [review]
+order: 54
+---
+
+<Lede>Commissioned 2026-11-02: a thorough feature review of the Baton specification with security
+as the primary angle — do the guarantees claimed protect users from attackers, and does the spec
+as written contain holes or hidden weaknesses? A fresh reviewer read `spec/BATON_SPEC.md`
+(7,431 lines, `main` at `274f83b`, updated 2026-11-02) whole, with
+`spec/BATON_MCP_OAUTH_SPEC.md`, `docs/security-model.mdx` and `docs/context/` for the threat
+model the spec claims to implement. Every finding cites a rule id, a quoted phrase and a line
+number so it can be checked against the text.</Lede>
+
+Method: I read the spec as an attacker would — for each guarantee, who is the actor it names,
+what credential does the actor hold, and which rule actually refuses them — and then attacked the
+seams: places where two rules or two documents must agree for a protection to hold. Findings are
+classified **Should-fix** (a protection or a rule the implementation will need corrected), **Minor**
+(real, bounded) and **Nit**. "The owner" below means the dated owner decisions the spec quotes,
+not a person.
+
+---
+
+## Verdict
+
+**The guarantees are credible for the actors they name, and the spec is unusually honest about
+the actors they don't.** Three answers, one per attacker:
+
+- **People without push** (outsiders, non-pusher forge users, stolen weak credentials): strong.
+  I could not find a way to authenticate, cross a tenant, forge an attestation writer, turn a
+  non-pusher's words into state, or make the dashboard act cross-site. The signature profile
+  (R-BTN-13), tenancy binding (R-BTN-135–137), CI-identity verification (R-BTN-15/156), forge-id
+  matching (R-BTN-138), the same-site posture (R-BTN-16) and the OAuth flow all held up under
+  attack; §"What holds" lists the specifics.
+- **Pushers under `cooperative`**: deliberately unprotected beyond lock fairness — and said so
+  before this review asked (R-BTN-66: "a **coordination record** … nothing in them is defended
+  against a pusher who wants round them"). Anyone reading §1's "the limits agents must not
+  change" as a security claim against a compromised agent should read that sentence instead: a
+  pusher re-files a held ticket, edits the course its runners execute, and answers person legs in
+  git. `docs/security-model.mdx` reach 1 already rates the blast radius (code execution on every
+  runner granted on the home); the spec carries it in §8's preamble and R-BTN-134's "Name only
+  sources you would let act as your CI".
+- **Under `protected` / `protected-hardware`**: the landing path is closed by mechanisms that
+  re-check rather than trust — the merge runner re-reads attestations against the exact subject
+  (R-BTN-182/183), the protection checker feeds `no-runner-lands` and nothing else does
+  (R-BTN-180), a broken floor stops the repository outright (R-BTN-189) — with the duties Baton
+  cannot observe (domain isolation, key custody) stated as duties, not silently assumed. The
+  trusted-server ruling (§12.8, the owner 2026-11-01 "Out of scope") is the largest accepted
+  risk: Baton names the commit every runner executes and dispatches workflows with the App's key,
+  so one Cloudflare-account compromise is fleet-wide code execution. That is a decision, not a
+  hole; the spec should keep stating its consequence as plainly as §12.8 does.
+
+What I did find are eight seams — a masking list that omits the credentials agents most often
+print (S1), an ungated conclusions map that decides what branch protection sees (S2), a fence
+with no override that can pin a ticket for a day (S3), unthrottled unauthenticated routes (S4),
+and four smaller ones — plus six contradictions, three unspecified behaviours and a set of naming
+gotchas. None of them breaks the model; all of them are cheaper to fix in the spec than in code.
+
+---
+
+## Security findings
+
+### S1. "The one list of what is masked" omits model-provider keys and every OAuth token prefix — Should-fix
+
+R-BTN-144 calls its six classes "the one list of what is masked". Class 4 masks "the git and
+forge tokens the runner holds, and `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` when set"
+(line 4328–4329); class 5 masks "`brt_`, `bak_` or `bmcp_` followed by `[A-Za-z0-9_-]*`"
+(line 4330). But the same rule's environment table keeps "git, forge and **model-provider
+credentials**, `SSH_AUTH_SOCK`" in every leg's environment (line 4317–4318), and R-BTN-84's
+replay environment explicitly keeps "the model provider's key". Meanwhile the OAuth companion
+adds three bearer prefixes — `BATON_MCP_OAUTH_SPEC` §12 "adds `bmo_`, `bmr_` and `bor_`" to the
+bearer rule (line 452–453) and §9 adds `bmo_`/`bmr_` to R-BTN-158's bearers — while the main
+spec's own bearer list (§12.1, line 5470–5473) and class-5 pattern still name only `bak_`,
+`brt_`, `bmcp_` (the fold is planned as B-73, but the main spec is the normative text until it
+lands).
+
+Impact: the credentials an agent is *most* likely to echo are the ones not masked. A leg log
+written under `leg_log_root` — the diagnostic an owner turns on precisely when a leg is
+misbehaving — carries a provider API key verbatim if the leg prints it, and transcript archivers
+"mask classes 5 and 6 in transcripts before pushing" (line 4337–4338), so the same key lands in
+clear in a `transcript_repos` git repository. An OAuth refresh token `bmr_…` lives up to 90 days
+as an owner-scoped delegated key that can hold tickets and stop legs (R-BTN-130, OAuth §7); it is
+not matched by any pattern. The spec's framing ("the one list") makes the omission authoritative
+rather than an implementation detail, and the rule's own stated intent — "keeps a cooperating
+agent from printing a credential it never needed" — argues for including exactly these.
+
+Smallest fix: class 4 becomes "the git, forge and model-provider tokens the runner holds";
+class 5 adds `bmo_`, `bmr_`, `bor_`; S-BTN-98's "output with every kind of credential" gains a
+provider key and an OAuth refresh token among its fixtures.
+
+### S2. The owners' `checks` conclusions map decides what branch protection sees, and neither its validation nor its loosening rule is written — Should-fix
+
+R-BTN-114 defines `checks` — `{<course>: {name, conclusions: {<end station>: "success" | "failure" | "neutral"}}}` — as an owner setting "so no edit in git turns `failed` into `success`"
+(line 4772–4776). R-BTN-153 routes the verdict through it: "Status 0 reaches the station mapped
+to `success`; any other status the one mapped to `failure`" (line 4793–4795) — presupposing
+exactly one station maps to each, which no rule validates. And R-BTN-186, which gates every
+"loosening of an R-BTN-66 setting" behind `approvers.policy`, defines loosening semantics for
+`pushers` ("adding one is a loosening", R-BTN-66) and `unblocked_trigger` ("setting or changing
+it", R-BTN-94) — but is silent on `checks` and `check_runners` (listed at line 6289–6291 only as
+things a *delegated* key may never touch).
+
+Impact, two gaps. (a) Unspecified behaviour: a `conclusions` map with no `failure` entry, or two
+`success` entries, leaves R-BTN-153's mapping undefined at exactly the moment a failing command
+needs one. (b) A trust seam: on GitHub a required check run with a `neutral` conclusion does not
+block a protected merge, so rewriting `failed → neutral` masks failing commands from branch
+protection — the gate §10 stakes its trust on ("A check is as trustworthy as the registered
+check-runner keys … and the check command"). Changing `checks` is a plain owner write under
+R-BTN-66, so an owner's *agent* key can do it unless a conclusions edit counts as a loosening —
+which nothing says. Under `protected` the `attestations` writers are policy-gated; the map that
+interprets them is not.
+
+Smallest fix: state that a check course's `conclusions` must map exactly one reachable end
+station to `success` and one to `failure` (validated at `PUT /v1/owner/{repository}/settings`),
+and that any change to `checks` is a loosening under R-BTN-186.
+
+### S3. A fence-pending claim can pin a ticket for up to 24 hours, and no owner or administrator act clears it — Should-fix
+
+R-BTN-19: a reap of a live runner is `fence_pending` with "`fence_deadline`, the reap instant
+plus the runner's `lease_timeout_ms`" (line 4587–4589), and the ticket "is not claimable until
+that incarnation's sidecar … reports `fenced` … or until `fence_deadline` passes" (line
+4590–4594). `lease_timeout_s` is runner-declared, "clamped to [900, 86400]" (R-BTN-9, line
+3889–3890). `baton.fence-pending` at 30 minutes (line 4597–4598) is a notice, not a control.
+Rule 3 refuses any claim while a fence is pending; adopt releases only an *active* claim
+(R-BTN-39, line 193–194); force-reap acts on active claims. There is no fence-clear in the
+registry (R-BTN-129).
+
+Impact: a runner that is alive but rogue — or the case R-BTN-19 itself anticipates, "a sidecar
+that heartbeats but cannot terminate a process" — pins its ticket for up to 24 h after an
+unacknowledged-release reap (2 h of ignoring a `release`), a `leg-timeout` reap (15 min) or an
+administrator's own force-reap. The administrator who force-reaps a hung machine and then cannot
+un-stick the ticket has no lever. It is an availability defect and a mild DoS amplifier: a
+hostile runner converts its own reap into a day-long hold.
+
+Smallest fix: either add an administrator's fence-clear (a confirmed action that logs
+`fence-cleared {admin: <fp>}` at the operator's risk) or bound `fence_deadline` at reap +
+min(`lease_timeout`, 2 h) — the deadline's own rationale ("Every check of the old incarnation
+has computed its lease as lost by then") needs only `lease_timeout − 4 min` of margin from the
+runner's *own* fence checks, and an administrator who has confirmed the machine dead needs none.
+
+### S4. The forge-notification routes are exempt from the per-IP rule with no body-size cap — Minor
+
+§2.3: "A per-IP rule … applies only to unauthenticated requests, never to `POST
+/v1/github/webhook`" (line 567–568). R-BTN-73/95: "**Both routes** are verified in the Worker
+before anything is read, are outside the per-IP limit (§2), and answer `204`" (line 870–872).
+Nothing caps a notification's body — in contrast with the board post, capped at "8 MB, 10,000
+tickets" with `too-large` (R-BTN-149, line 542). GitHub itself allows webhook payloads up to
+25 MB, and the Worker must buffer and HMAC each body before it can refuse it.
+
+Impact: an unauthenticated, unthrottled CPU/memory sink aimed at the tenant's Worker — bounded
+by Cloudflare's platform limits, but asymmetric with the spec's own admission control everywhere
+else.
+
+Smallest fix: give the two notification routes a body cap (1 MB is far above every field
+R-BTN-73 reads), refused `413` on `Content-Length` before the digest is computed. (See also C4:
+§2.3 and R-BTN-73 disagree about how many routes the exemption covers.)
+
+### S5. One instrument key can post readings for every instance of the tenant — Minor
+
+R-BTN-76: "An instrument key (`POST /v1/admin/probes`, with a label), `POST /v1/probe/readings`:
+**any registered instance**" (line 2795–2797). The `readings` policy default under both presets
+is `{"*": {writers: every writer R-BTN-76 lets report}}` (R-BTN-188 table, line 5724), so every
+instrument counts everywhere until an owner narrows it.
+
+Impact: a single leaked instrument SSH key can post `available: false` for any instance — and a
+requirement that binds `gate` with `missing: block` then blocks every affected leg — or
+`available: true`, sending gated legs at a resource that is down (spend, not merge integrity).
+Instruments are few and administrator-registered, so this is a blast-radius note rather than a
+hole, and the per-key `service:<fingerprint>` narrowing already exists.
+
+Smallest fix: say in the `readings` knob's row (or R-BTN-76) that a deployment relying on a
+gated reading names its writers per resource; optionally scope an instrument key to named
+instances at registration.
+
+### S6. The `sync` writer class silently includes machine keys, and the supersession rule forgets them — Minor
+
+R-BTN-191 defines writer `sync` as "the credential that posted the board (a sync key, the
+registered CI identity, **or a machine key**, R-BTN-93)" (line 6050–6052). The same rule's
+supersession bullet says the sync's attestations "supersede by type and subject whichever sync
+credential posted them (**a sync key or the CI identity**, R-BTN-62)" (line 6090–6092).
+
+Impact: under `cooperative` (`inputs.board` admits `machine`), any granted machine key's board
+post replaces the CI sync's attestations of the same type and subject — readiness, evidence
+(`std:git.evidence@1` is what confirms ends, R-BTN-10), outputs — and vice versa. Within the
+cooperative boundary a machine key is a pusher's agent, so this is by design; but the rule
+disagrees with itself about who the class contains, an implementer reading only the supersession
+bullet builds a different trust boundary than one reading the class definition, and
+`std:git.*` writers are admitted under *every* preset (R-BTN-188 table, line 5723), so the blur
+is worth one exact sentence.
+
+Smallest fix: the supersession bullet names all three posters; R-BTN-187 gains a clause that
+evidence attestations from `sync` are trusted exactly as far as `inputs.board`'s admitted
+posters.
+
+### S7. The sign-in code's relay-phishing residual rests on one line of CLI output — Minor (known)
+
+R-BTN-155: the key holder is shown "the row's role, client address and age" —
+`owner session for <address>, <n> s old` — before binding (line 5290–5296), and the rule's summary — "a process
+that asks for a code of its own gets nothing unless a key holder types that code, read from
+Baton's own page" (line 5301–5303) — holds only if the holder reads that address. An attacker
+who starts a sign-in and relays the code ("please type this into `baton owner open`") is
+defeated by nothing else. The adjacent gap — any key of the session's role, API keys included,
+confirms an authority-changing action — is already an open question (line 7425–7431).
+
+Smallest fix: take the open question's candidate (bind and confirm only with touch-required or
+`sk-` keys), or echo a word derived from the creating page's connection in the CLI prompt; at
+minimum require an explicit yes/no on the displayed address before binding.
+
+### S8. `sk-` signature counters are not checked — Minor
+
+R-BTN-13: "An `sk-` signature must carry the user-presence flag; its counter is not checked"
+(line 4888–4889). A cloned FIDO authenticator is therefore undetectable. With hardware-backed
+keys being the root of `human-gates` (`human_key: hardware`, R-BTN-185/189), the counter is the
+one signal a clone would emit, and presence is already enforced — the remaining check is cheap.
+
+Smallest fix: keep a per-credential high-water mark for `sk-` signatures, refuse a regression
+(`unauthenticated`, raising a `baton.*` condition naming the key), and accept that some
+authenticators reset on re-registration (a re-registered key resets the mark).
+
+---
+
+## Contradictions and inconsistencies
+
+- **C1 — R-BTN-93's first bullet is spliced mid-sentence** (line 748–752): "A repository's sync
+  and mirror authenticate / *A board post from a class the policy's `inputs.board` excludes
+  (`sync-key`, `ci-identity`, `machine`; R-BTN-188) is refused `forbidden`.* / with a sync key, a
+  CI identity token…". The italicised fragment is a sentence from another edit dropped inside
+  this one. Fold it into its own bullet after the sentence it interrupted.
+- **C2 — `baton ticket request` is "a repository command, not an API call" that must nevertheless
+  ask Baton what to do.** R-BTN-131: "pushes it as one commit … straight to the default branch …
+  It is a repository command, not an API call" (line 2218). R-BTN-180: "`baton ticket request`
+  (R-BTN-131) run with a credential the refs exclude **opens a PR, not a push**" (line 5918). A
+  local git command cannot know what `refs.default_branch` admits without reading
+  `GET /v1/repositories/{repository}/policy`. Qualify one of the two (e.g. "not an API call
+  that *changes* Baton state; it reads the policy to choose push or PR"), and say which
+  credential's reach decides.
+- **C3 — the claim response hands out outbox entries R-BTN-171 never mentions.** §14's claim
+  response includes `outbox?: [{id, kind, fields}]` (line 6582), but R-BTN-171 claims entries
+  only through `POST /v1/runner/outbox/claim` under a 10-minute lease and its design is "Woken,
+  not polling" (line 3753–3768). Whether response-carried entries take the same lease, count
+  against `limit?`, or are marked through the same route is unstated. Delete the field or
+  specify its lease.
+- **C4 — the per-IP exemption is stated once for one route and once for two.** §2.3 exempts only
+  `POST /v1/github/webhook` (line 567–568); R-BTN-73/95 says "Both routes … are outside the
+  per-IP limit (§2)" (line 870–872), adding `POST /v1/forges/{repository}/notify` — whose
+  verifier is a per-repository secret that an attacker-driven rate limit would not know to
+  spare. Name both in §2.3.
+- **C5 — the two cookies use different separators.** `__Host-baton_session` (underscore) and
+  `__Host-baton-pending` (hyphen): R-BTN-16 line 5543–5545, R-BTN-155 lines 5288 and 5298.
+  Cosmetic, but cookie names leak into tests and clearing tooling; pick one.
+- **C6 — §12's headline is broader than its own list.** "No push changes Baton's own state:
+  keys, grants, bars, holds and settings" (line 5398–5401) scopes the claim correctly — but
+  under `cooperative` a push *does* move Baton-held state through admitted attestations
+  (positions via fact arrivals, R-BTN-39; confirmations via `std:git.evidence@1`, R-BTN-10), by
+  design. One clause — "no push changes Baton's *authority* state; what a push may move, each
+  policy's `attestations` entry says" — keeps the headline true as read.
+
+## Unspecified behaviour
+
+- **U1 — retirement vs sessions and MCP keys.** Sessions die "with their minting key's role" and
+  lose repositories when "its key stops owning" (R-BTN-155, line 5308–5312); MCP keys end "when
+  the credential that minted it is removed or revoked" (R-BTN-130, line 5228–5230).
+  `admin.repo.retire` (§12.2) is neither. Say whether retirement ends them (it should).
+- **U2 — whether the sidecar re-reads its state file at runtime.** R-BTN-32 honours a
+  `clock-offset` file "only when that state file was written by a sidecar started with
+  `--test-harness`" (line 377–384), and "Only the sidecar writes it" (§8.1, line 3957–3959) —
+  but a leg in `process` mode runs as the same OS user and can rewrite the file and drop the
+  offset file beside it. If a running sidecar never re-reads it, say so; the authoritative fence
+  is the server-side holder query (R-BTN-26, line 4482–4488), which is why the impact is bounded
+  either way.
+- **U3 — cache headers on authenticated API responses.** R-BTN-16 specifies CSP, CORP and
+  friends but no `Cache-Control: no-store` for `/v1/ui/*` and the repository reads; the OAuth
+  spec sets `no-store` on the token endpoint only (line 334–335). One sentence in R-BTN-16
+  closes it.
+
+## UX gotchas and unintuitive names
+
+The 2026-11-01 review covered ergonomics broadly; these are the residuals a security reader
+trips on, kept brief.
+
+- **"Adopt" names three unrelated acts**: the owner's `ticket adopt` (R-BTN-39), a runner's
+  adoption of a legacy claim (§16.1), and the *adoption* appendix label (§16) — which denotes
+  the mirror/cutover features, so `§13`'s "*adoption*" column markers read as "legacy mirror
+  rows" to everyone who already knows that. A different word for one of the three would pay for
+  itself.
+- **"Sync" is four things**: the key role (`sync`), the writer class (which includes machine
+  keys — see S6), the CLI command, and the workflow. The writer class deserves its own word.
+- **"Hold" holds five objects** in the spec's own prose: an owner's hold on a ticket (R-BTN-12),
+  "Baton holds the ticket for nothing else" (R-BTN-39), rule 3's "held", a held position
+  (`ticket_overrides`), and "Baton holds no credential".
+- **`cancelling` (the flag) vs cancelled (the state) vs `closed_as: dropped`** — handled
+  carefully across R-BTN-168 and R-BTN-12, but easy to misread; the dashboard legend should
+  spell out that `cancelling` means "a cancel leg is owed".
+- **Rule 12 is unused** (§6.6). Deliberate, but a one-word reason in the table ("reserved")
+  would stop readers hunting for it.
+
+## What holds
+
+The mechanisms I attacked and could not break — listed so the next review starts from these as
+verified, not assumed:
+
+1. **The signature profile** (R-BTN-13): namespace-separated SSHSIG (`baton-request`) over
+   `@method`, `@authority`, `@path`, `@query`, `content-digest`; `expires` and `alg` refused;
+   the nonce cache (11 minutes) fully covers the ±5-minute `created` window; a signed commit or
+   any other signature by the same key cannot be replayed as a request.
+2. **Tenancy** (R-BTN-135/136/137): every credential bound to the origin, the host check from
+   the URL (never `X-Forwarded-Host`), `workers_dev`/`preview_urls` off, the `x-baton-tenant`
+   handshake recorded at first request, authority covering host and port (a host-only cookie
+   cannot cross ports), per-tenant secrets, a compromised Baton out of scope by decision.
+3. **CI identity** (R-BTN-15/156): pinned issuers, `aud` = the origin, immutable repository ids,
+   default-branch refs, `job_workflow_ref` = `workflow_ref`, `event_name` allowlist; GitLab keys
+   fetched from the configured issuer's URL, never the token's own `iss` — no issuer confusion,
+   no SSRF through a token.
+4. **Forge identity** (R-BTN-138): ids decide and paths don't; renames onto live paths are held;
+   former paths reach the fence only, never authentication or links.
+5. **The browser surface** (R-BTN-16, R-BTN-155, OAuth §6): `__Host-` Strict cookies, CSP with
+   `frame-ancestors 'none'`, Origin/`Sec-Fetch-Site` checks on every session request, no CORS,
+   the consent page's COOP and focus delay, PKCE-only public clients, exact redirect URIs with
+   the RFC 8252 loopback port exemption, refresh rotation with a bounded sibling window and
+   reuse revocation, client-document fetches that refuse redirects, private addresses and the
+   deployment's own host.
+6. **Check integrity** (§10): a verdict is a command's exit status, the command read from the
+   branch tip (never an older `snapshot_sha`), the conclusions map held in Baton, `seq`-monotonic
+   posting under an App whose key Baton never holds, fork changes dropped by head repo id, and
+   the check deliverer barred from trusted legs and merges.
+7. **The merge path** (R-BTN-182/183): trusted legs re-check every attestation against the exact
+   subject at the moment they act, writer-domain independence, symlink/submodule/`.gitmodules`
+   refusal, compare-and-swap at exactly `H`, `.baton-legs` fold detection.
+8. **Fencing** (R-BTN-6/7/19/26): three layers, every check recomputing the lease from the wall
+   clock, the pre-push hook asking Baton and failing closed when unreachable, the holder queries
+   leaking no ticket ids outside grants.
+
+---
+
+**Count:** 8 security findings (3 Should-fix, 5 Minor), 6 contradictions, 3 unspecified
+behaviours, 5 naming gotchas — against the 2026-11-01 whole-spec review's eleven filed tickets,
+whose UX and simplification findings this review does not repeat.
+
+---
+
+## Disposition
+
+Each finding was checked against the spec's text before it was acted on (the same PR), and the
+corrections had one round of fresh review. Small corrections are in `spec/BATON_SPEC.md` here,
+recorded in `spec/BATON_SPEC_HISTORY.md` ("the security review's corrections") and built by
+B-169; findings that need a design choice are tickets B-170 to B-175.
+
+| Finding | Outcome |
+|---|---|
+| S1 | **Split.** Bearer prefixes: fixed — class 5 now masks every bearer prefix Baton issues, `bps_` and `bds_` included, which the review did not list. Provider keys: **B-170** — the runner inherits them and cannot tell which variable is one, so "mask the model-provider tokens the runner holds" needs a mechanism first. Also fixed: R-BTN-84 said replay keeps the provider's key, while R-BTN-144's replay allowlist keeps it only if `replay_env` names it. |
+| S2 | **Fixed.** The map names exactly one `success` and one `failure` station; a change moving a station toward `success` is a loosening, the other way a tightening. Adding a check-runner stays `approvers.members`'s, as §11 and §14 say. The round-one review found that a timeout reaches `neutral`, which a GitHub required check passes: **B-175**. |
+| S3 | **B-171.** An administrator's fence-clear is recommended over bounding the deadline, which would weaken the fence for every runner. |
+| S4 | **Fixed**, with C4: both routes named in §2.3, bodies capped at 25 MB (GitHub's own largest delivery, so no real delivery is refused) before any digest. |
+| S5 | **Not taken.** The `protected` preset's `readings` row already says "the owner narrows the resources a gate reads", and instrument keys are administrator-registered. |
+| S6 | **Fixed** in R-BTN-191's supersession bullet. The proposed R-BTN-187 clause is not needed: R-BTN-187 already applies only where `inputs.board` excludes `machine`. |
+| S7 | **B-172**, widened on checking: the CLI cannot show the row's address before binding, because the login-links routes answer only `{ok: true}`. The display the defence rests on is not specified, so it is not only a matter of reading it. |
+| S8 | **Not taken.** Many FIDO authenticators report no counter, so a monotonic check refuses real keys or exempts them. A cloned key is a custody failure, which §12.8 leaves to the deployment. |
+| C1, C3, C5, C6 | **Fixed.** C3: the field is deleted; nothing built reads it. |
+| C2 | **B-174.** A one-sentence fix left the branch, the credential and the `git` forge undecided (review round one), so the contradiction stays until the ticket lands. |
+| C4 | **Fixed** with S4. |
+| U1 | **B-173**, widened: no rule says what retirement does to anything, not only sessions and MCP keys. |
+| U2 | **Not taken.** A leg runs as the sidecar's own OS user, which R-BTN-144 already puts outside the boundary. The fence's authority is Baton's holder query (R-BTN-26). |
+| U3 | **Fixed** in R-BTN-16. |
+| Naming | **Not taken.** A rename touches every rule, test and ticket that uses the word, and the 2026-11-01 review weighed ergonomics. §6.6 already says rule 12 is unused and why the numbers are stable. |

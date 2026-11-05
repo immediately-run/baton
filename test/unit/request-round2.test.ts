@@ -4,7 +4,7 @@
 // is one line carrying the hook's own words, never a retry.
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nextId, requestFile, ticketPrefix } from '../../src/defaults/request';
@@ -69,8 +69,9 @@ describe('B-98 round 2: the fixes that had no test', () => {
       git(dir, 'add', '-A');
       git(dir, 'commit', '-q', '-m', 'base');
       // Asked from inside the tree, git answers the checkout's top level — which is what the
-      // command uses as the root it files into (2-r0-6).
-      expect(git(join(dir, 'tickets', 'deep'), 'rev-parse', '--show-toplevel')).toBe(dir);
+      // command uses as the root it files into (2-r0-6). Git answers the real path: on macOS the
+      // temporary directory is under /var, a link to /private/var.
+      expect(git(join(dir, 'tickets', 'deep'), 'rev-parse', '--show-toplevel')).toBe(realpathSync(dir));
     } finally {
       rmSync(join(dir, '..'), { recursive: true, force: true });
     }

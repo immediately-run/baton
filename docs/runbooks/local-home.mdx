@@ -1,0 +1,189 @@
+---
+title: Runbook — a plain-git home on one machine, working on a GitHub repository
+description: One operator's Baton on a laptop — a local Baton, a home repository that is plain git, and tickets whose PRs open on a GitHub repository the home does not own. The first slice of B-182.
+tags: [runbook]
+order: 41
+---
+
+<Lede>How one person runs Baton on their own machine for a codebase whose organisation has not
+adopted it: the courses and the tickets live in a **plain git home** on the laptop, a **local
+Baton** serves it, and the tickets' PRs open on a **GitHub repository** they name in `repos:`.
+Nothing is added to that repository but the PRs.</Lede>
+
+**What this is.** One operator's coordination record, under the `cooperative` policy: Baton keeps
+your own agents from colliding and shows you what they are doing. It is no boundary against
+anyone, and it coordinates nobody else — a colleague with their own Baton never sees your claims.
+`protected` and its guarantees are not available here (B-182, point 7).
+
+**What it rests on.** The sync skips a plain-git home's own PR read — it has no forge to read
+(R-BTN-96) — and reads only the repositories the tickets name in `repos:` (B-182's first slice).
+Everything else is Baton as built. The rest of B-182 (code repositories with their own forge and
+host in `code_repos`, pushers per host) is not built: the spec still says a code repository is on
+the home's forge host, and this runbook works because the built sync reads `repos:` without
+consulting `code_repos`.
+
+Every command below was run end to end on 2026-11-05 — registration, a sync with no GitHub token,
+a runner's claim, its leg and its release — except the parts marked **untested**, which need a
+real GitHub repository.
+
+## 0. What you need
+
+- Node 22.13 or later, git, and a checkout of `immediately-run/baton` at `main`
+  (`npm ci` in it). Every command is `node cli/baton.mjs …` from that checkout.
+- An agent harness the legs run: opencode (the default) or Claude Code (`--agent claude-code`).
+- `gh`, signed in as you, with push to the GitHub repository: the agents push branches and open
+  PRs with it, and the implement stub verifies the PR with it.
+- A GitHub token for the **sync**, which reads that repository's PRs, checks, reviews and
+  comments: `GITHUB_TOKEN` in the sync's environment. A fine-grained token on the repository with
+  Pull requests, Contents and Metadata read is the narrowest. Your organisation may require
+  approval for one; that is its call, not Baton's.
+
+The paths below use `~/baton/`; any directory works.
+
+## 1. Keys
+
+Four roles, four keys; Baton refuses a key used in a second role (`conflict`).
+
+```sh
+mkdir -p ~/baton/keys && cd ~/baton/keys
+for k in admin owner sync runner; do ssh-keygen -q -t ed25519 -f baton_$k -C "baton $k"; done
+```
+
+Never load the administrator or owner key into an ssh-agent an agent session can use.
+
+## 2. The home: a bare repository and your checkout
+
+```sh
+cd ~/baton
+git init --bare -b main home.git
+git -C home.git config receive.denyNonFastForwards true
+git -C home.git config receive.denyDeletes true
+git clone home.git home
+```
+
+The two `receive.*` settings are R-BTN-105's: nobody rewrites or deletes the home's branches.
+Runners and your checkout reach the bare repository by its path; nothing needs SSH.
+
+## 3. Scaffold `.baton/`
+
+From inside the home checkout, with the baton checkout at `main` (the scaffold pins the course to
+that commit):
+
+```sh
+cd ~/baton/home
+node <baton checkout>/cli/baton.mjs repo init --course create-pr    # or --agent claude-code
+rm -rf .github                                                       # a plain home runs no Actions
+```
+
+Then edit `.baton/baton.json`:
+
+- `"baton_url": "http://127.0.0.1:8787"`;
+- `"repos": {"mono": "<owner>/<repository>"}` — the GitHub repository, so tickets can say
+  `repos: [mono]`;
+- optionally `"ticket_prefix": "LIN"`, so `baton tickets new` numbers `LIN-<n>`.
+
+Commit and push: `git add -A && git commit -m "baton home" && git push origin main`.
+
+## 4. Start Baton
+
+In its own terminal, from the baton checkout:
+
+```sh
+npm run start:local -- --db ~/baton/baton.db --port 8787 --admin-keys ~/baton/keys/baton_admin.pub
+```
+
+It serves `http://127.0.0.1:8787`, loopback only. Leave it running; the database file is the
+whole Baton. `node cli/baton.mjs admin -i ~/baton/keys/baton_admin open` prints a login link to
+the dashboard.
+
+## 5. Register the home
+
+```sh
+export BATON_URL=http://127.0.0.1:8787
+node cli/baton.mjs admin -i ~/baton/keys/baton_admin repo add <you>/home --id home --forge git \
+  --remote ssh://localhost/<path to>/home.git --default-branch main \
+  --owner-key ~/baton/keys/baton_owner.pub --sync-key ~/baton/keys/baton_sync.pub --cut-over
+node cli/baton.mjs owner -i ~/baton/keys/baton_owner grant home --key ~/baton/keys/baton_runner.pub \
+  --hostname "$(hostname -s)" --capabilities runner:leg-trees
+```
+
+- `--remote` must be an `ssh://` or `user@host:path` URL. Baton only records it: the sync and the
+  runners use their checkout's own `origin`, the path.
+- `--cut-over`: a new home has no git claims to migrate (§16).
+
+Check: both commands answer `{"ok":true, …}`.
+
+## 6. A ticket
+
+`tickets/LIN-1.md` in the home:
+
+```md
+---
+id: LIN-1
+title: The one-line summary
+status: available
+course: create-pr
+repos: [mono]
+depends_on: []
+---
+
+What to change, and how to tell it is done.
+
+## Status
+```
+
+Commit and push it. `tickets/HOW-TICKETS-WORK.md`, written by step 3, lists every key the sync
+reads.
+
+## 7. The sync
+
+```sh
+GITHUB_TOKEN=<the sync's token> BATON_URL=http://127.0.0.1:8787 \
+  node cli/baton.mjs repo sync --root ~/baton/home --sync-key ~/baton/keys/baton_sync
+```
+
+Check: it prints `the home is a plain git repository, not on GitHub — reading only the
+repositories tickets name in repos: (1)`, then `advanced at <sha> … accepted`; `node cli/baton.mjs
+board -i ~/baton/keys/baton_owner home` lists `home:LIN-1` ready at `filed`. With no ticket naming
+a repository, no token is needed at all.
+
+No webhook reaches a loopback Baton, so run the sync on a loop in its own terminal — once a
+minute is R-BTN-105's pace:
+
+```sh
+while true; do GITHUB_TOKEN=… BATON_URL=… node cli/baton.mjs repo sync --root ~/baton/home \
+  --sync-key ~/baton/keys/baton_sync; git -C ~/baton/home pull -q; sleep 60; done
+```
+
+**Untested:** reading the GitHub repository's PRs. If verdicts on your PRs never count and the
+sync logs `this token cannot read collaborator permissions (403)`, the token cannot ask GitHub
+whether a reviewer may push (R-BTN-139). It fails closed: give the token that read.
+
+## 8. Runners
+
+One checkout per runner (architecture: one runner per checkout), each in its own terminal:
+
+```sh
+git clone ~/baton/home.git ~/baton/runner1
+BATON_URL=http://127.0.0.1:8787 BATON_KEY_FILE=~/baton/keys/baton_runner \
+  node cli/baton.mjs run --home ~/baton/runner1 --repository home --hostname "$(hostname -s)"
+```
+
+Check: the log shows `claimed home:LIN-1 at filed, queued leg implement`, then the leg's agent
+starting. An implement leg that opens no PR fails `cannot verify LIN-1's PR …` and the ticket is
+released for the next attempt; that is the stub working (B-81).
+
+**Untested:** the agent's checkout of the GitHub repository. The implement instructions open one
+PR per `repos:` repository "from a branch of the same name, in its own checkout": the agent clones
+it unless it is told where a clone is. For a large repository, give each runner its own clone and
+say where in the ticket body. Two runners must never share one.
+
+## What this does not do yet
+
+- **Tickets from Linear.** Write ticket files by hand or from a script of your own; a tracker
+  source is B-183 and the ticket after it.
+- **Webhooks.** None reach a loopback Baton; the sync loop is the trigger.
+- **The rest of B-182.** `code_repos` with a forge and host per entry, and pushers per host: until
+  then a `repos:` repository is read without `code_repos`' reach check (R-BTN-140).
+- **A second person.** Two operators on one codebase share one Baton, or neither sees the
+  other's claims.

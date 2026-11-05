@@ -3,7 +3,7 @@ title: "R3-1235 — The roadmap-pr course's capacity logic: course data, tags, m
 id: R3-1235
 project: baton
 status: available
-updated: 2026-10-20
+updated: 2026-11-02
 repos:
   - docs
   - baton
@@ -24,7 +24,7 @@ depends_on:
 ---
 
 **Brief:** the Baton project; the owner, 2026-10-16: estimates stay on the runner; measured readings, not forecasts, are shared.
-**Spec:** `docs/content/specs/BATON_ROADMAP_PR_COURSE.mdx` §1 (the ranking code's row), §2, §3 (R-BTN-42), §4 (R-BTN-43 as of 2026-10-16), §5 (R-BTN-49), §6, §7 (G-BTN-28–30, -34, -45, -46 as replaced, -48, -52, -65); `spec/BATON_SPEC.md` §1 R-BTN-98 (`rank.mjs`, `view`, `protocol_files`), §6.6 (matching: gates and advice), §6.7 R-BTN-99, R-BTN-100 (`bills`), §6.3 R-BTN-101 (`measure`), §15 S-BTN-19, -20, -21, -27
+**Spec:** `docs/content/specs/BATON_ROADMAP_PR_COURSE.mdx` §1 (the ranking code's row), §2, §3 (R-BTN-42), §4 (R-BTN-43 as of 2026-10-16), §5 (R-BTN-49), §6, §7 (G-BTN-28–30, -34, -45, -46 as replaced, -48, -52, -65); [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) [R-BTN-98](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (`rank.mjs`, `view`, `protocol_files`), [§6.6](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-6) (matching: gates and advice), [§6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) [R-BTN-99](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7), [R-BTN-100](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7) (`bills`), [§6.3](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3) [R-BTN-101](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-3) (`measure`), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-19](../spec/BATON_SPEC/15-verification.md#scenarios), -20, -21, -27
 **Depends on:** B-31 (docs on Baton's standard courses, which carried R3-1233's course in docs; done), R3-1269 (the views and `bills`), R3-1272 (the CLI that loads `rank.mjs`)
 
 ### Requires
@@ -58,7 +58,7 @@ code on the runner, judging room from measurements. Tier: judgement — one cour
 
 - `scripts/lib/courses/roadmap-pr/rank.test.mjs`: every course-spec §7 gate test over fixture views built from a real board post of docs' sync (R3-1233's `sync.mjs` run on a docs checkout, saved under `scripts/lib/courses/roadmap-pr/fixtures/`) and readings shaped by the registered schema.
 - `scripts/lib/courses/roadmap-pr/room.test.mjs`: exhausted, measured-too-high, at-`max_concurrent`, and roomy cases; a `measure` from another repository counts.
-- Integration in Baton's harness with docs' `.baton/` as the fixture course: S-BTN-19, -20, -21, -27 as BATON_SPEC §15 states them.
+- Integration in Baton's harness with docs' `.baton/` as the fixture course: S-BTN-19, -20, -21, -27 as [BATON_SPEC §15](../spec/BATON_SPEC/15-verification.md#sec-15) states them.
 
 ### Exit criteria
 
@@ -69,8 +69,9 @@ code on the runner, judging room from measurements. Tier: judgement — one cour
 
 ## Status
 
-_2026-10-16 — rescoped for the 2026-10-16 amendment (now BATON_SPEC §1 R-BTN-98, §6.7): the hook becomes `rank.mjs` on the runner, forecast by reservation becomes room from `measure` readings and billing counts; depends on R3-1269 and R3-1272 instead of R3-1236._
+_2026-10-16 — rescoped for the 2026-10-16 amendment (now [BATON_SPEC §1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) [R-BTN-98](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [§6.7](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-7)): the hook becomes `rank.mjs` on the runner, forecast by reservation becomes room from `measure` readings and billing counts; depends on R3-1269 and R3-1272 instead of R3-1236._
 
 _(filed 2026-10-14)_
 
 _2026-10-14 — rewritten for the stations revision of BATON_SPEC (docs#212 head 0d4ef0e4): stations and legs in a course file, owner bars and settings in SQLite, observations, the runner and webhooks._
+- 2026-11-02: the spec restructure's part 4 (B-166, B-165's review default): Baton keeps no billing counts — a claim's `bills` are gone, and a capability's capacity is R-BTN-178's (B-106); `rank.mjs` reads what each claim spends from its reports (R-BTN-99). Route choices and the advance's `advice` are gone (§6.10; B-167).

@@ -3,7 +3,7 @@ title: "B-120 — Baton owns a ticket's course history, and every statement it r
 id: B-120
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -35,13 +35,13 @@ ticket history; tickets in git may get per-leg amendments, but git need not hold
 full history. On adopt: "this is a useful fallback if baton is down". The four mechanism
 choices below were the owner's answers the same day.
 
-**Spec:** `spec/BATON_SPEC.md`, amended with this ticket (immediately-run/baton#150):
-R-BTN-1's table, R-BTN-35, R-BTN-39 (position, fact arrivals, adopt), R-BTN-69 (`arrives`),
-R-BTN-70, R-BTN-74 (`ctx.positions`), R-BTN-81, R-BTN-83, R-BTN-85 (`position-disagrees`),
-R-BTN-63, R-BTN-71 and *Disagreement, not movement*, R-BTN-10, §4.3 (the observation's
-`positions`), §4.4 (the board post's `attestations`; the readiness, arrival and implied-station types are R-BTN-191's, built below), R-BTN-131 (the marker courses
-and `create-spec`'s interactive legs write no machine state), §9, §13, §14's adopt route,
-§15 S-BTN-18, S-BTN-34, S-BTN-47, G-BTN-59, G-BTN-73, and §16's Decisions.
+**Spec:** BATON_SPEC, amended with this ticket (immediately-run/baton#150):
+[R-BTN-1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1)'s table, [R-BTN-35](../spec/BATON_SPEC/01-what-baton-is.md#sec-1), [R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (position, fact arrivals, adopt), [R-BTN-69](../spec/BATON_SPEC/05-courses.md#sec-5-2) (`arrives`),
+[R-BTN-70](../spec/BATON_SPEC/05-courses.md#sec-5-3), [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (`ctx.positions`), [R-BTN-81](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7), [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3), [R-BTN-85](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-7) (`position-disagrees`),
+[R-BTN-63](../spec/BATON_SPEC/05-courses.md#sec-5-3), [R-BTN-71](../spec/BATON_SPEC/05-courses.md#sec-5-3) and *Disagreement, not movement*, [R-BTN-10](../spec/BATON_SPEC/09-claims.md#sec-9-6), [§4.3](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) (the observation's
+`positions`), [§4.4](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4) (the board post's `attestations`; the readiness, arrival and implied-station types are [R-BTN-191](../spec/BATON_SPEC/12-security.md#sec-12-8)'s, built below), [R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8) (the marker courses
+and `create-spec`'s interactive legs write no machine state), [§9](../spec/BATON_SPEC/09-claims.md#sec-9), [§13](../spec/BATON_SPEC/13-data-model.md#sec-13), [§14](../spec/BATON_SPEC/14-api.md#sec-14)'s adopt route,
+[§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-18](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-34](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-47](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-59](../spec/BATON_SPEC/15-verification.md#gates), [G-BTN-73](../spec/BATON_SPEC/15-verification.md#gates), and [§16](../spec/BATON_SPEC/16-adoption.md#sec-16)'s Decisions.
 `docs/context/vocabulary.mdx` (*Path*, *Confirmation*, *Adopt*) is amended with it; values
 and architecture already say it (2026-10-28).
 
@@ -134,3 +134,7 @@ write is a way around them (reset a path to escape `max_runs` or a retry hold).
 - [ ] a leg finished outside the runner is brought into Baton by one owner command
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): an arrival Baton does not apply is an `arrival-unapplied` history row on the ticket and raises nothing; `position-disagrees` and the implied-station comparison are retired (R-BTN-39, R-BTN-85), and the implied station is a hint on the ticket's view and adopt's default only.)_
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`): the writer class `courier` is gone — a delivery is a `std:effect@1` by the writer `runner`, recorded through `POST /v1/runner/outbox/{repository}/{id}` (R-BTN-171, R-BTN-191); attestations carry no `signature`, `uses` or `used_by_claim` (R-BTN-181); item 5 and the writer enum read accordingly.)_
+
+_(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-handoff`, [#163](https://github.com/immediately-run/baton/pull/163)): `baton owner ticket adopt` is `baton ticket adopt` (R-BTN-127); a rename mapped by `renamed_from` needs no adopt (R-BTN-39, R-BTN-64).)_

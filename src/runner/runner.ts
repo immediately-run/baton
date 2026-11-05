@@ -10,8 +10,8 @@
 // next safe point first.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { batonNow } from '../shared/baton.mjs';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
@@ -106,12 +106,113 @@ export interface RunnerOptions {
   /** B-83: a test harness — declared on the heartbeat (R-BTN-32; Baton refuses it from any
    * credential but the test one). */
   testHarness?: boolean;
+  /** B-106 (R-BTN-178): one machine's singleton — a capability mapped to a lock file. The
+   *  capability is declared only while this process holds the file's exclusive lock; the lock is
+   *  taken before a claim for, or the advance into, a leg requiring it and held until the claim
+   *  ends or a leg not requiring it starts. Absent, no lock governs anything. */
+  locks?: Record<string, string>;
 }
 
 interface LegChild {
   process: ReturnType<typeof spawn>;
   resultPath: string;
   ctxPath: string;
+}
+
+/** The watcher a held lock runs: prints one line the moment the lock is its own, then polls the
+ *  runner's pid and exits when it is gone — the lock dies with the runner within a second, even
+ *  a SIGKILL (round 1, finding 3; the test guards exactly this contract). */
+export const LOCK_WATCHER = 'echo baton:held; while kill -0 "$1" 2>/dev/null; do sleep 1; done';
+/** The watcher's argv tail as `MachineLocks` spawns it (the name the watcher runs under, and the
+ *  runner's pid it watches). */
+export const lockWatcherArgv = (pid: number): string[] => ['sh', '-c', LOCK_WATCHER, 'baton-lock-watch', String(pid)];
+
+/** B-106 (R-BTN-178): one machine's singleton is the runner's own business, never Baton's. A
+ *  configured capability is declared only while this process holds an exclusive lock on its file:
+ *  util-linux `flock --nonblock` over a watcher this process keeps alive. The watcher prints one
+ *  line once the lock is held — a take is settled fact, not a spawn that may still fail — and
+ *  polls this process's pid every second, exiting when it is gone: the lock dies with the runner
+ *  within a second, SIGKILL included (review round 1, finding 3), and at once on `release`, which
+ *  kills the watcher's process group. `flock` exit 1 is another process on this machine holding
+ *  the lock. */
+class MachineLocks {
+  private readonly held = new Map<string, { child: ReturnType<typeof spawn>; path: string }>();
+  private readonly busy = new Set<string>();
+  constructor(private readonly paths: Record<string, string>, private readonly log: (line: string) => void) {}
+
+  /** Whether `capability` is one this runner was given a lock file for. */
+  manages(capability: string): boolean {
+    return Object.hasOwn(this.paths, capability);
+  }
+
+  /** Whether the lock is held now. */
+  holds(capability: string): boolean {
+    return this.held.has(capability);
+  }
+
+  /** Try to take the lock without waiting. False when another process on this machine holds it,
+   *  or no `flock` could run (said as such: a missing `flock` is not a busy lock); the line is
+   *  said once per capability per stretch. */
+  take(capability: string): Promise<boolean> {
+    if (this.holds(capability)) return Promise.resolve(true);
+    const path = this.paths[capability];
+    if (path == null) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let settled = false;
+      let buf = '';
+      try {
+        mkdirSync(dirname(path), { recursive: true });
+      } catch { /* an unwritable directory: the spawn below says it */ }
+      const child = spawn('flock', ['--exclusive', '--nonblock', path, ...lockWatcherArgv(process.pid)],
+        { stdio: ['ignore', 'pipe', 'ignore'], detached: true });
+      const done = (ok: boolean, missing = false) => {
+        if (settled) return;
+        settled = true;
+        if (ok) {
+          this.held.set(capability, { child, path });
+          this.busy.delete(capability);
+          this.log(`baton: took the lock of ${capability} (${path}) — held until its claim ends or a leg not requiring it starts (R-BTN-178)`);
+        } else {
+          try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* already gone */ }
+          if (!this.busy.has(capability)) {
+            this.busy.add(capability);
+            this.log(missing
+              ? `baton: no \`flock\` on this machine to take ${capability}'s lock (${path}) — not declaring it, so no leg requiring it is offered here; install util-linux flock (macOS: \`brew install flock\`) (R-BTN-178)`
+              : `baton: ${capability}'s lock (${path}) is held by another process on this machine — not declaring it, so no leg requiring it is offered here (R-BTN-178)`);
+          }
+        }
+        resolve(ok);
+      };
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', (d: string) => {
+        buf += d;
+        if (buf.includes('baton:held')) done(true);
+      });
+      child.on('error', (e: NodeJS.ErrnoException) => done(false, e.code === 'ENOENT'));
+      child.on('close', () => done(false));
+    });
+  }
+
+  /** Release one capability's lock. */
+  release(capability: string): void {
+    const h = this.held.get(capability);
+    if (!h) return;
+    this.held.delete(capability);
+    try { process.kill(-h.child.pid!, 'SIGKILL'); } catch { /* already gone: the lock died with it */ }
+  }
+
+  /** Release every lock, or all but those `keep` names — the claim's end, or its next leg's set. */
+  releaseAll(keep?: (capability: string) => boolean): void {
+    for (const capability of [...this.held.keys()]) {
+      if (!keep || !keep(capability)) this.release(capability);
+    }
+  }
+
+  /** Take every configured lock not held (the idle maintenance of a beat): a lock free again is
+   *  taken and declared, one still held elsewhere stays quiet. */
+  async takeAll(): Promise<void> {
+    await Promise.all(Object.keys(this.paths).map((c) => this.take(c)));
+  }
 }
 
 /** How a leg ended for the runner's own accounting; the claim's end is `end_reason`. */
@@ -208,6 +309,8 @@ export class Runner {
   /** R-BTN-177 (B-105): the taken the leg that just exited wrote, reported on the advance or end
    *  that finishes it and cleared when it is. */
   private pendingTaken: Taken[] | null = null;
+  /** B-106 (R-BTN-178): this machine's locks, null when none were configured. */
+  private readonly locks: MachineLocks | null;
 
   constructor(options: RunnerOptions) {
     this.o = { beatEvery: BEAT_MS, ...options };
@@ -217,6 +320,7 @@ export class Runner {
     this.state = new StateFile(options.stateFile);
     if (!this.state.get().secret) this.state.set({ secret: freshSecret() });
     this.o.api.setSecret(this.state.get().secret);
+    this.locks = options.locks && Object.keys(options.locks).length ? new MachineLocks(options.locks, this.log) : null;
     // B-86: a restart keeps the declaration the last process settled — a granted runner does not
     // ask again, and `runOnce` has no stale `[]` to force a beat for. `--capabilities` still
     // narrows what was read: a flag is the operator's word, the state file's a past answer.
@@ -247,6 +351,8 @@ export class Runner {
     this.stopped = true;
     if (this.beat) clearInterval(this.beat);
     this.beat = null;
+    // B-106 (R-BTN-178): the locks die with the process, but released here they free at once.
+    this.locks?.releaseAll();
   }
 
   /** B-94: what a runner says about itself when it leaves — its claim, the leg in flight and the
@@ -295,6 +401,16 @@ export class Runner {
     }
   }
 
+  /** The declaration as it goes out on a beat or is compared before a claim (B-86, B-106): the
+   *  settled list less what a leg reported dead, and less every lock capability whose file this
+   *  process does not hold — of the runners on one machine only the one holding the lock declares
+   *  it (R-BTN-178). */
+  private declaringList(): string[] {
+    const base = (this.declared ?? this.o.capabilities ?? []).filter((c) => !this.dead.has(c));
+    const locks = this.locks;
+    return locks ? base.filter((c) => !locks.manages(c) || locks.holds(c)) : base;
+  }
+
   private async beatOnce(): Promise<void> {
     const epoch = this.epoch;
     const s = this.state.get();
@@ -303,7 +419,12 @@ export class Runner {
     // answer carries (`grant.capabilities`), so the first beat asks and declares nothing — the
     // registration has no declaration to widen, and the beat after it serves the grant.
     // R-BTN-177: a holding a leg reported dead is never declared again this session.
-    const declaring = (this.declared ?? this.o.capabilities ?? []).filter((c) => !this.dead.has(c));
+    // B-106 (R-BTN-178): a lock free again is taken and declared; one another process on this
+    // machine holds is not declared, so no leg requiring it is offered here. Mid-claim the set
+    // is the claim's own — `ensureLegLocks` holds the legs' locks and releases the rest — so the
+    // idle maintenance stays out until the claim ends.
+    if (this.locks && !this.inflight) await this.locks.takeAll();
+    const declaring = this.declaringList();
     const body: Record<string, unknown> = {
       hostname: this.o.hostname, session_name: this.o.session, harness: this.o.harness, kind: 'vm',
       billing: {}, capabilities: declaring, tier_ceiling: this.o.tierCeiling ?? 'critical',
@@ -750,7 +871,7 @@ export class Runner {
     // loop after its one beat, as it always did — the declaration is unsettled and the claim goes
     // out on what this runner named.
     for (let n = 0; n < MAX_STALE_BEATS; n++) {
-      const claimOn = this.declared ?? this.o.capabilities ?? [];
+      const claimOn = this.declaringList();
       const stale = this.grantAsked || this.sent == null || JSON.stringify(this.sent) !== JSON.stringify(claimOn);
       if (!stale) break;
       await this.tick();
@@ -792,6 +913,9 @@ export class Runner {
     try {
       claim = await this.o.api.claim({ request_id: `run-${randomBytes(8).toString('hex')}`, ...(wanted ? { ticket_id: wanted } : {}) });
     } catch (e) {
+      // B-106 (R-BTN-178): a refused claim releases the locks it would have used — the machine's
+      // singleton is not held by an idle runner.
+      if (this.locks && e instanceof BatonRefusal) this.locks.releaseAll();
       if (e instanceof BatonRefusal && e.code === 'no-eligible-ticket') return null;
       if (e instanceof BatonRefusal && e.code === 'not-eligible' && /already held|worker-holds/.test(e.message)) {
         // The worker still holds a claim Baton knows and this runner does not (its state was
@@ -839,6 +963,38 @@ export class Runner {
     return courseOf(this.o.home, claim.snapshot_sha as string, want);
   }
 
+  /** B-106 (R-BTN-178): take every lock the leg requires before the claim's work or the advance
+   *  starts, and release those an earlier leg of the claim needed and this one does not — the
+   *  lock is held from before the leg starts until the claim ends or leaves the legs requiring
+   *  it. False when a lock another process on this machine holds could not be taken: the caller
+   *  suspends rather than run the leg, or send the advance (R-BTN-121, R-BTN-71). */
+  private async ensureLegLocks(leg: string, course: CourseLoad): Promise<boolean> {
+    const locks = this.locks;
+    if (!locks) return true;
+    const needed = (course.graph.legs.get(leg)?.requires ?? []).filter((c) => locks.manages(c));
+    let ok = true;
+    for (const capability of needed) {
+      if (!(await locks.take(capability))) ok = false;
+    }
+    locks.releaseAll((c) => needed.includes(c));
+    if (!ok) {
+      this.log(`baton: ${leg} requires a lock another process on this machine holds — the claim suspends rather than run it (R-BTN-178)`);
+      return false;
+    }
+    // A take the last answered beat did not declare is followed by a beat before the caller
+    // goes on: rule 4 re-checks the advance against the server's record of the declaration, so
+    // a lock re-taken mid-claim (an unlocked leg between two locked ones released it) must be
+    // declared again before the advance that needs it is sent, or the server refuses
+    // `missing-capability` a machine that holds the thing cannot be refused (review round 1,
+    // finding 2). At most two beats: the first may join the timer's in-flight one, which built
+    // its declaration before the take (round 2, finding 2) — the second is fresh. A capability
+    // the runner's own list never names (one only the server derives, R-BTN-174) cannot be
+    // declared at all, so it asks for no beat (round 2, finding 4).
+    const sendable = needed.filter((c) => (this.declared ?? this.o.capabilities ?? []).includes(c));
+    for (let beats = 0; beats < 2 && sendable.some((c) => this.sent != null && !this.sent.includes(c)); beats++) await this.tick();
+    return true;
+  }
+
   private async runClaim(claim: Record<string, any>): Promise<ClaimOutcome> {
     const claimId = claim.claim_id as number;
     const ticket = claim.ticket_id as string;
@@ -877,6 +1033,13 @@ export class Runner {
     let nextLegs = (claim.next ?? []) as NextLegs;
     try {
       if (legName == null) return await this.finish(claimId, { end_reason: 'done', reached: at }, null);
+      // B-106 (R-BTN-178): the claim's first leg may require a lock this runner can no longer
+      // take — the server's declaration can be a beat behind the lock (the staleness loop's
+      // grant-less break, a lost state file). The claim suspends at once, touching nothing: no
+      // advance, no leg run, and the locks the claim would have used are released.
+      if (!(await this.ensureLegLocks(legName, course))) {
+        return await this.finish(claimId, { end_reason: `suspended:${claim.station}`, reached: claim.station, next: legName }, null);
+      }
       const firstAnswer = await this.advance(claimId, { leg: legName }, at);
       if ('settle' in firstAnswer) return await this.finish(claimId, firstAnswer.settle, null);
       at = firstAnswer.station ?? at;
@@ -1012,6 +1175,12 @@ export class Runner {
         // the evidence `close` wrote; it finishes this leg and starts the next. The finished leg
         // joins the evidenced path only now — the next leg's run number counts what ran. Its
         // taken (R-BTN-177) reports here, on the advance that finishes it.
+        // B-106 (R-BTN-178): the lock of a leg the next one requires is taken before the advance
+        // is sent; one this runner cannot take suspends the claim rather than sending it, the
+        // finished leg's evidence already in git (R-BTN-121, R-BTN-71).
+        if (!(await this.ensureLegLocks(verdict.leg, course))) {
+          return await this.finish(claimId, { end_reason: `suspended:${verdict.reached}`, reached: verdict.reached, next: verdict.leg }, await this.callHandoff(script, ctx) ?? handoffUrl);
+        }
         const answer = await this.advance(claimId, { reached: verdict.reached, leg: verdict.leg, bars: verdict.bars, ...(verdict.outputs ? { outputs: verdict.outputs } : {}), ...(closed ? { evidence: closed } : {}), ...(this.pendingTaken ? { taken: this.pendingTaken } : {}) }, verdict.reached);
         this.pendingTaken = null;
         // 2026-10-24: the advance trail — every finished leg names where it landed and what it
@@ -1236,6 +1405,9 @@ export class Runner {
     }
     for (const id of this.toAck.splice(0)) await this.o.api.ack(id).catch(() => {});
     this.state.set({ claim: null });
+    // B-106 (R-BTN-178): the claim ended — its locks release, and a beat takes them again if
+    // they are free, so an idle runner does not hold the machine's singleton.
+    this.locks?.releaseAll();
     // The lost lease belonged to that claim (R-BTN-6): a fresh claim starts on a fresh lease,
     // so the flag never outlives the claim it fenced — cleared here, not only on success.
     this.lostLease = false;

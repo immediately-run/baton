@@ -3,7 +3,7 @@ title: "B-64 — The outbox and its couriers: every effect Baton intends outside
 id: B-64
 project: baton
 status: available
-updated: 2026-11-01
+updated: 2026-11-03
 repos:
   - baton
 tags:
@@ -27,15 +27,15 @@ the 2026-10-30 amendment (one outbox, couriers; `spec/BATON_SPEC_HISTORY.md`). B
 or forge credential, so the handler tickets of its own conditions (R-BTN-163), the withdrawals of
 superseded tickets (R-BTN-168), promoted light questions' files (R-BTN-173) and check runs
 (R-BTN-115) reach the outside only through a courier.
-**Spec:** `spec/BATON_SPEC.md` §7.8 R-BTN-171 (the outbox and couriers); §10 R-BTN-115 (the
-`forge-check` kind); §7.3 R-BTN-163 ("Binding core's conditions": the handler id `<local>.c<n>` or
-`baton.<sub>.<condition_id>`, `baton.outbox-late` never bound); §4.2 R-BTN-74 (`file(ticket)` and
-`withdraw(ticket, reason)`); §5.3 R-BTN-83 (the `outbox` held position, which queues no leg);
-§12.1 (the courier principal, one role per key); §13.1 `couriers.delivers`; §13.6
+**Spec:** [BATON_SPEC §7.8](../spec/BATON_SPEC/07-conditions.md#sec-7-8) [R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8) (the outbox and couriers); [§10](../spec/BATON_SPEC/10-checks.md#sec-10) [R-BTN-115](../spec/BATON_SPEC/10-checks.md#sec-10) (the
+`forge-check` kind); [§7.3](../spec/BATON_SPEC/07-conditions.md#sec-7-3) [R-BTN-163](../spec/BATON_SPEC/07-conditions.md#sec-7-3) ("Binding core's conditions": the handler id `<local>.c<n>` or
+`baton.<sub>.<condition_id>`, `baton.outbox-late` never bound); [§4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) [R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) (`file(ticket)` and
+`withdraw(ticket, reason)`); [§5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) [R-BTN-83](../spec/BATON_SPEC/05-courses.md#sec-5-3) (the `outbox` held position, which queues no leg);
+[§12.1](../spec/BATON_SPEC/12-security.md#sec-12-1) (the courier principal, one role per key); [§13.1](../spec/BATON_SPEC/13-data-model.md#sec-13-1) `couriers.delivers`; [§13.6](../spec/BATON_SPEC/13-data-model.md#sec-13-6)
 `ticket_overrides` (`override_kind` `outbox`, `hold_reason` `outbox-unlanded`, `outbox-refused`,
-`outbox-collision`); §13.8 the `outbox` table, `outbox_due`, `outbox_alarm`, `outbox_pending`;
-§14 `/v1/owner/{repository}/couriers` and `/v1/courier/entries/*`; §15 S-BTN-136, S-BTN-81,
-G-BTN-156. After the adversarial review (`spec/BATON_SPEC_HISTORY.md`, "Adversarial review
+`outbox-collision`); [§13.8](../spec/BATON_SPEC/13-data-model.md#sec-13-8) the `outbox` table, `outbox_due`, `outbox_alarm`, `outbox_pending`;
+[§14](../spec/BATON_SPEC/14-api.md#sec-14) `/v1/owner/{repository}/couriers` and `/v1/courier/entries/*`; [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-136](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-81](../spec/BATON_SPEC/15-verification.md#scenarios),
+[G-BTN-156](../spec/BATON_SPEC/15-verification.md#gates). After the adversarial review (`spec/BATON_SPEC_HISTORY.md`, "Adversarial review
 (2026-10-20)"): §4.4's top-level `bindings`, R-BTN-163's "Binding core's conditions" and §13's
 `condition_bindings` (adv-2 M12); R-BTN-171's `outbox-collision` (adv-2 m2); S-BTN-131.
 **Depends on:** B-58 (bindings, handler ticket frontmatter, the source's `file` export,
@@ -195,3 +195,9 @@ _(2026-10-20: adversarial review of the spec — the entry state `claimed`, neve
 _(2026-10-30: rescoped by the spec amendment that folds `forge-check` notices into the outbox and replaces the built-in leg `baton.write` with couriers. The earlier plan's `--outbox` flag, `outbox` claim list, `written[]` end and `baton.write` re-verification are gone; the `notices` table migrates here.)_
 
 _(2026-11-01: the spec restructure's part 1 (B-166, the PR `baton-spec-restructure-p1`): the outbox has one git kind, `withdraw` (R-BTN-171): the `handler` and `answer` kinds, `collision`, `skipped`, the provisional handler-ticket row and `tickets.outbox_id` are retired with light questions (R-BTN-173) and with Baton's own handler tickets (R-BTN-163, B-155's ruling). A cancelled ticket is marked `cancelling` (`ticket_overrides.cancelling_at`, a flag beside any hold) until its withdrawal lands (R-BTN-168); the `outbox-unlanded` hold is gone, `baton.outbox-late` alone marks a late entry. The rest of this ticket is part 2's to revisit (couriers into runners, B-159).)_
+
+_(2026-11-02: the spec restructure's part 2 (B-166, the PR `baton-spec-restructure-p2`) rewrites R-BTN-171: couriers are runners (no `courier` credential kind, no `couriers` table, no `owner courier add`, no `/v1/courier/*`; `POST /v1/runner/outbox/claim` and `…/outbox/{repository}/{id}`, a runner's heartbeat `delivers`, the doorbell's `outbox` ring on the runner's socket); the kinds are `withdraw` and `forge-check` alone, the `dispatch` kind gone (Baton dispatches, R-BTN-94); entries carry no `kid` or `signature` and no `SigningKey` exists; `trust` and `min_release` are gone from the policy's `outbox`, which names grant roles. Items 1 to 3 and the migration are to be read against the current R-BTN-171 and §13.8.)_
+
+_(2026-11-02: part 2's review round one: `test/integration/S-BTN-126.people-api-keys.test.ts` asserts an API-key runner's refusal at `/v1/courier/deliveries`; when this ticket builds `/v1/runner/outbox/claim`, retarget that assertion to it (an API-key runner never delivers, R-BTN-171, R-BTN-159).)_
+
+_(2026-11-03: R-BTN-47's *Retirement* (B-173's spec half) reaches the store this ticket builds — the outbox: retirement drops the repository's `queued`, `claimed` and `delivered` entries, logging each, ignores a later mark, and owes no cancel leg for its tickets (R-BTN-171). Whichever of this ticket and B-173 lands second builds that step and adds its S-BTN-198 case.)_
