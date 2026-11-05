@@ -2,8 +2,8 @@
 title: "B-115 — Cloud runner: a script and a skill that make a Claude Code cloud session a process-mode Baton runner"
 id: B-115
 project: baton
-status: available
-updated: 2026-10-26
+status: in-review
+updated: 2026-11-02
 repos:
   - baton
 tags:
@@ -14,7 +14,8 @@ description: "A preflight-and-launch script (scripts/cloud-runner.sh) that check
 topics:
   - baton
 owns: {}
-prs: []
+prs:
+  - https://github.com/immediately-run/baton/pull/162
 depends_on: []
 ---
 
@@ -102,3 +103,8 @@ deterministic part is a script, whose checks pass or fail, and the hosting part 
 ## Status
 
 _(filed 2026-10-26)_
+
+- 2026-11-02: the script, the skill, the packaging and the stubbed preflight tests are on
+  #162 (the first exit criterion). The 24-hour hosting run waits on the owner — the
+  `claude-cloud-session` and the `BATON_KEY`/`BATON_HOSTNAME`/`GH_TOKEN` secrets; nothing
+  measured yet, nothing appended to `docs/lessons.mdx`.
