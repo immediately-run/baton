@@ -305,7 +305,7 @@ jobs:
             if [ "$ref" != "${{ github.ref_name }}" ] && [ "$ref" != "${{ github.sha }}" ]; then
               git checkout --force --quiet "$ref"
             fi
-            npx -y @immediately-run/cli@0.11.0 cache-zip \
+            npx -y @immediately-run/cli@0.12.0 cache-zip \
               --owner "${{ github.repository_owner }}" \
               --repo "${{ github.event.repository.name }}" \
               --ref "$ref" \
