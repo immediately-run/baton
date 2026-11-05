@@ -81,15 +81,19 @@ function readAt(home: string, sha: string, path: string): string | null {
 }
 
 /** R-BTN-34: make sure the home checkout has `sha` — one fetch, then the caller releases
- * `stale-board` if it is still missing. */
+ * `stale-board` if it is still missing. The probes are `rev-parse --verify --quiet`, never
+ * `cat-file -e`: a miss here is the designed path (2026-11-05, run-20261105-142428: a fresh
+ * claim's snapshot lived on origin/main the checkout had not fetched), and `git()` leaves the
+ * child's stderr on the parent's — a miss must not print a raw `fatal:` into the log an
+ * operator tails as a crash. */
 export function ensureSha(home: string, sha: string, fetch: () => void): boolean {
   try {
-    git(home, ['cat-file', '-e', `${sha}^{commit}`]);
+    git(home, ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`]);
     return true;
   } catch {
     fetch();
     try {
-      git(home, ['cat-file', '-e', `${sha}^{commit}`]);
+      git(home, ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`]);
       return true;
     } catch {
       return false;
