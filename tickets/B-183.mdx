@@ -6,6 +6,7 @@ status: available
 updated: 2026-11-05
 tags:
   - roadmap-item
+  - EXPEDITE
 tier: judgement
 description: "The ticket source (R-BTN-74) may already say a ticket is an issue or a row, but two rules still assume a file at a commit: a refresh carries no ticket change (R-BTN-11), so a tracker edit waits for a git push; and the runner re-verifies a claim by reading the file at snapshot_sha (R-BTN-5, R-BTN-34). Give each posted ticket an opaque version string whose meaning is the source's, compared by Baton for equality only; let the source declare whether it can read a ticket at a version (pinned) or only as it is now (current); add a read export; let a refresh carry changed versions; and hand each version back in the observation so the source's own code, never Baton, judges order. The markdown source posts the file's blob id and behaves exactly as today."
 topics:
@@ -164,3 +165,5 @@ fixture `custom` source backed by a JSON file outside git:
 ## Status
 
 _filed 2026-11-05._
+
+_2026-11-05 — expedited (EXPEDITE) at the owner's request: the owner needs Baton for work today._
