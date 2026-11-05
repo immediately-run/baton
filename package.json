@@ -57,6 +57,7 @@
     "@cloudflare/vitest-plugin": "^1.4.1",
     "@cloudflare/workers-types": "^5.20261013.1",
     "@immediately-run/mdx-plugins": "0.7.1",
+    "@immediately-run/safe-content": "0.1.3",
     "@informalsystems/quint": "0.33.0",
     "@mdx-js/mdx": "3.1.1",
     "@types/node": "^22.20.5",
@@ -69,6 +70,8 @@
   },
   "files": [
     "dist",
-    "NOTICE"
+    "NOTICE",
+    "scripts/cloud-runner.sh",
+    "skills/baton-cloud-runner/SKILL.md"
   ]
 }

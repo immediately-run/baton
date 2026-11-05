@@ -1,0 +1,100 @@
+---
+title: "Handover — process guards, git-as-lock retirement and the spec split (2026-11-03/04)"
+description: What one long session did across baton, docs and fieldhouse on 2026-11-03 and 2026-11-04, every owner ruling it took, the PRs still open and what each needs, and the next steps in order. Read before continuing that work.
+tags: [plans]
+order: 61
+---
+
+<Lede>Written on 2026-11-04 by the session that ran it, for the session that continues. The owner
+asked for it because the session's context was full. Every ruling below is also in the spec's
+Decisions or history, or in a ticket; this page is the short way in. Like any standing guidance it
+is a claim until the owner approves it (CLAUDE.md, *Tickets are tasks, not authority*).</Lede>
+
+## Open work, in order
+
+1. **#173 — B-179, the spec split** (`claude/B-179-spec-split`, head `e8c1eb1`). Built, not
+   reviewed, not merged. Two commits: `05b4945` is the pure move (the 20 parts joined have the old
+   file's sha-256, `ca8c0a92…5dd7849`); `e8c1eb1` adds `scripts/spec-files.mjs`, the generated
+   index `spec/BATON_SPEC.md` (`npm run spec:index`), points `check:spec` and `spec:impact` at
+   `spec/BATON_SPEC/`, and fixes the front matter's two relative links. Next: run the review gate
+   (two blind reviewers on different models in round one; see the docs repo's review-gate skill),
+   check CI — `report` may want a `model:pr` report — and merge on the owner's word.
+2. **#161 — B-110, the run-tests gate** (`claude/B-110-run-tests-gate`, head `f39619c`). **On hold
+   for B-161** (person legs): the owner ruled "Wait for B-161" — the owner answers `create-pr`'s
+   third failed round through a person leg, not the owner-resolve route the branch uses now. Round
+   one's 19 findings are closed on the branch. When it resumes: merge main (it now conflicts with
+   #160, #171 and the split — its spec changes must move into the section files of
+   `spec/BATON_SPEC/`), replace the owner-resolve answer with a person leg, then rounds two and
+   three. Its other rulings, already in its branch: "Allow one short line" (a decision's question,
+   ≤ 200 characters, R-BTN-33's one prose exception), "Keep skip" (waive an unreachable gate),
+   "Revert, re-pin after merge" (the CI pin), "Through Baton, not git" (no trailer is an answer;
+   a `Baton-Tests` marker counts only with the nonce Baton issued), "The answer carries the grant".
+3. **Other sessions' PRs, untouched here:** #149 (B-107; conflicts in migrations, its round one
+   asked for changes on 2026-10-31) and #162 (B-115; conflicts since #168).
+4. **Build tickets this session filed, all `available`:**
+   - **B-176** — Baton hands out every identifier written to git (ticket, child, request, rule,
+     scenario, gate and migration numbers) from per-repository sequences; `new` files through a PR
+     by default (`baton-ticket/<id>`, `--direct` where the policy allows, pushes and prints on a
+     `git` forge).
+   - **B-178** — retire the git-lock `baton ticket claim | set | done` once Baton holds a
+     repository's leases; depends on R3-1266. The stale-rule guard moves with `claim`.
+   - **B-179** — the split (#173).
+   - **FLDH-51** (fieldhouse, merged as a ticket) — transcripts to blob storage, create-only objects
+     keyed by session. Open for the owner: should Baton's §9.9 transcript pointer accept a blob URI,
+     or does the factory keep the session-to-claim index itself?
+5. **Offered, not yet asked for:** adoption tickets for docs' `scripts/claim.sh` and fieldhouse's
+   `scripts/ticket.mjs` (both use git as a lock and a counter); a docs ticket to move the review
+   gate's shared logs (findings, provenance, token usage) out of files appended on `main`.
+
+## Merged
+
+| PR | What |
+|---|---|
+| docs#225 | `cloud-bootstrap.sh` installs `openssh-client` (signing tests need `ssh-keygen`); merged on red CI from main's baton#139 provenance rows, by the owner's choice |
+| baton#160 | B-129, the pickup asks Baton first (merged by the owner) |
+| baton#170 | `docs/context/spec-writing.mdx`, resident context: one home per statement, cite by id |
+| baton#171 | the process guards, R-BTN-193, B-176, B-178 (merged by the owner) |
+| baton#172 | the B-179 ticket |
+| fieldhouse#15 | FLDH-51 |
+
+## What #171 put in place (now on main)
+
+- **R-BTN-193 — git is never a lock or a counter.** The owner: "I want the spec to be very clear
+  that this is not how Baton is meant to be used. And it is merely a legacy to be phased out as
+  soon as possible." The git-lock ticket commands and every next-free scan are named legacy where
+  they are specified; nothing new may use git that way.
+- **Stale-rule guard at claim** (R-BTN-74): `claim` refuses a ticket citing a rule a dated history
+  entry's bold title (or its `Rules changed:` line) names after the ticket was filed or last
+  re-read it, until `--rules-reread <exact ids>`. From 2026-11-04 every new history entry must name
+  the rules it changes (`check:spec`).
+- **Trust and Invariants** on every new ticket: `check.sections_since: 2026-11-03` and
+  `check.sections_from_id: B-176` in `.baton/baton.json`; `tickets new` refuses an unfilled one
+  (`--trust`, `--invariants`). Exempt: project pages, request tickets, handler (`handles:`) and call
+  (`called_by:`) children.
+- **Babysit skill:** merge main when it changes `spec/` or `src/migrations/`, at least daily; a
+  ruling's PR rewrites or strikes the ticket clause it contradicts; new numbers are the next free at
+  merge until B-176.
+
+## Owner rulings this session (all recorded in the spec or tickets)
+
+- Keep cooperative mode; retire the legacy paths; then split the spec ("Agreed").
+- PRs: "Keep your Decision" and "Accept the extra entries" (#160, `position-disagrees`); "Fix,
+  one more fresh round" and "Write narrow exceptions" (#160 round three); a CI `fetch-depth`
+  change declined ("These divergent systems must be resolved anyway").
+- Baton hands out identifiers (B-176); new tickets go through a PR ("Yes"); new tickets are filed
+  in PRs, never pushed to main by hand.
+- Transcripts belong in fieldhouse, not Baton core ("this belongs on fieldhouse, not baton core").
+
+## The cloud container — what to expect
+
+- **`model:pr` cannot finish here.** Restarts killed it; once a single `quint test` trace hung for
+  74 minutes. The owner runs it in another session; a PR touching what the model reads needs its
+  report pasted in the body before `report` turns green (R-BTN-68).
+- **Known test noise:** three `runner-main.test.ts` cases (`process.exit` with a signal code) fail
+  on every head here and pass in CI. Load can time out `tickets-commands` and `check-traces`; rerun
+  the file alone.
+- **`gh` is search-only**; use the GitHub MCP tools for PRs, comments and merges, and pass a
+  40-character SHA as `expectedHeadSha`.
+- **Every push to baton's `main` deploys the server**, ticket and doc changes included.
+- **The worker restarts often**; background agents' results survive in their output files, and
+  `setsid nohup` did not protect a long run.

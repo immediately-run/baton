@@ -64,6 +64,23 @@ interface GitFailure { status?: number | null; stderr?: string | Uint8Array }
  * captured stderr, because those are failures the operator must see, and a null slug would make
  * a broken checkout indistinguishable from an origin-less one. Only `git remote get-url`'s own
  * two answers about the absence of a remote go quiet. */
+/** Whether a remote URL names a plain git repository rather than a forge's (B-182, R-BTN-105): a
+ * local path, a `file://` URL, or an `ssh://` URL to any host but github.com. Such a home has no
+ * PRs of its own to read. An `https://` or scp-form (`git@host:owner/name`) URL is a forge's, as
+ * `remoteSlug` reads it. */
+export function plainGitRemote(url: string): boolean {
+  const u = url.trim();
+  if (/^(file:|\/|\.{1,2}[\\/]|~)/.test(u) || /^[A-Za-z]:[\\/]/.test(u)) return true;
+  if (/^ssh:\/\//i.test(u)) {
+    try {
+      return new URL(u).hostname.toLowerCase() !== 'github.com';
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function remoteSlug(root: string): string | null {
   try {
     // The proxy's `…/git/owner/name` form drops its `git/` — only when `owner/name` follows, so an
@@ -675,6 +692,13 @@ const detailQuery = (numbers: number[]): string =>
 export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = []): Promise<PrFact[]> {
   const slug = remoteSlug(root);
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
+  // B-182 (first slice): a plain-git home has no forge, so no adapter reads it (R-BTN-96) — only
+  // the repositories its tickets name in `repos:` are read, and with none nothing is, token or not.
+  const home = plainGitRemote(git(root, 'remote', 'get-url', 'origin')) ? null : slug;
+  if (home == null) {
+    log(`baton: the home is a plain git repository, not on GitHub — reading only the repositories tickets name in repos: (${siblings.length})`);
+    if (siblings.length === 0) return [];
+  }
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error('no GITHUB_TOKEN to read GitHub — pass --facts <file> for recorded facts');
   let requests = 0;
@@ -749,7 +773,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   const out: PrFact[] = [];
   // The home, then each other repository a live ticket names in `repos:` (B-29), under the one
   // budget: a sync that would exceed it refuses rather than post a partial reading.
-  for (const { repository: repo, tickets } of [{ repository: slug, tickets: [] as string[] }, ...siblings.filter((s) => !sameRepoName(s.repository, slug))]) {
+  for (const { repository: repo, tickets } of [...(home != null ? [{ repository: home, tickets: [] as string[] }] : []), ...siblings.filter((s) => home == null || !sameRepoName(s.repository, home))]) {
     const before = out.length;
     out.push(...(await repoFacts(repo, tickets)));
     log(`baton: read ${out.length - before} PRs of ${repo} from GitHub`);

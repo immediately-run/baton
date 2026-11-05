@@ -22,8 +22,10 @@ export function ticketsPage(settings: TicketSettings): string {
   return [
     '# How tickets work',
     '',
-    '<!-- Written by `baton repo init`; do not edit it here. `baton tickets check` reports a page',
-    "that differs from this release's text, and `baton repo init --force` writes it again. -->",
+    // Plain prose, not an HTML comment: a `render: safe` bundle's parser rejects `<!--`, and the
+    // page then renders blank (R3-1340). The note is meant to be read anyway.
+    '_Written by `baton repo init`; do not edit it here. `baton tickets check` reports a page',
+    "that differs from this release's text, and `baton repo init --force` writes it again._",
     '',
     `A ticket is one \`.mdx\` file in \`${items}/\`, named after its id, whose frontmatter carries`,
     'an `id`. `baton repo sync` reads every file under that folder at any depth — done tickets sit',
