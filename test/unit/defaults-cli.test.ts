@@ -11,7 +11,7 @@ import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { courseSchemas, githubFacts, initMain, parseSyncArgs, remoteSlug, syncMain, syncWorkflow } from '../../src/defaults/cli';
+import { courseSchemas, githubFacts, initMain, parseSyncArgs, plainGitRemote, remoteSlug, syncMain, syncWorkflow } from '../../src/defaults/cli';
 import type { Transport } from '../../src/runner/api';
 import { HARNESS_AGENTS } from '../../src/runner/harness';
 import { createHash } from 'node:crypto';
@@ -1373,6 +1373,45 @@ describe('githubFacts (R-BTN-96’s GitHub adapter) against a recorded GitHub', 
     expect(facts[0].reviews.map((r) => r.body)).toEqual(['<!-- baton:verdict approve -->']);
     // The home in another case is no sibling; the unowned sibling PR costs nothing beyond the list.
     expect(calls).toEqual(['/repos/o/r/pulls?state=all', '/repos/o/site/pulls?state=all', 'graphql o/site 7', '/repos/o/site/collaborators/x/permission']);
+  });
+
+  it('a plain-git home is never read: only the repositories tickets name in repos:, and with none no request and no token (B-182, S-BTN-106)', async () => {
+    const plain = mkdtempSync(join(tmpdir(), 'baton-plain-'));
+    try {
+      gitInit(plain);
+      execFileSync('git', ['-C', plain, 'remote', 'add', 'origin', 'ssh://git@localhost/srv/git/home.git']);
+      serve({
+        '/repos/acme/mono/pulls?state=all': [pr(7, 'claude/A-1-x', 'open')],
+        '/repos/acme/mono/commits/s7/check-runs': { check_runs: [] },
+        '/repos/acme/mono/pulls/7/commits': [],
+        '/repos/acme/mono/pulls/7/reviews': [],
+        '/repos/acme/mono/issues/7/comments': [who('MEMBER', '<!-- baton:verdict approve -->', '2026-10-05T00:00:00Z')],
+        ...may('acme/mono', 'x', 'write'),
+      });
+      const lines: string[] = [];
+      const facts = await githubFacts(plain, (l) => lines.push(l), (p) => p.repository === 'acme/mono' && p.head.startsWith('claude/A-1-'), [{ repository: 'acme/mono', tickets: ['A-1'] }]);
+      expect(facts.map((f) => [f.repository, f.number])).toEqual([['acme/mono', 7]]);
+      expect(facts[0].reviews.map((r) => r.body)).toEqual(['<!-- baton:verdict approve -->']);
+      // The home is not asked for: its origin names no GitHub repository.
+      expect(calls).toEqual(['/repos/acme/mono/pulls?state=all', 'graphql acme/mono 7', '/repos/acme/mono/collaborators/x/permission']);
+      expect(lines[0]).toContain('plain git repository');
+      // No repos: at all — nothing to read, so neither a request nor a token is needed.
+      calls.length = 0;
+      delete process.env.GITHUB_TOKEN;
+      try {
+        expect(await githubFacts(plain, () => {}, () => true)).toEqual([]);
+      } finally {
+        process.env.GITHUB_TOKEN = 't';
+      }
+      expect(calls).toEqual([]);
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
+  });
+
+  it('tells a plain git remote from a forge one (B-182)', () => {
+    for (const u of ['/srv/git/home.git', './home.git', '../home', '~/home.git', 'file:///srv/home.git', 'C:\\git\\home', 'ssh://git@localhost/srv/home.git', 'ssh://peter@laptop.local:2222/~/home.git']) expect([u, plainGitRemote(u)]).toEqual([u, true]);
+    for (const u of ['https://github.com/o/r.git', 'git@github.com:o/r.git', 'ssh://git@github.com/o/r.git', 'https://gitlab.example.com/g/r.git', 'http://local_proxy@127.0.0.1:1234/git/o/r']) expect([u, plainGitRemote(u)]).toEqual([u, false]);
   });
 
   /** `pages` pages of 100 open PRs in `repo`, every one on a ticket's branch: a list request a page,

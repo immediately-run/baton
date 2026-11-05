@@ -4,10 +4,7 @@
 // secret. A call Baton refuses comes back as a `BatonRefusal` (never thrown past the loop); a
 // call that cannot reach Baton throws.
 import { readFileSync } from 'node:fs';
-import { signHeaders, signingKey } from '../../cli/sign.mjs';
-
-/** R-BTN-159's API key, as src/core/auth.ts's API_KEY (not imported: it would bring jose). */
-const API_KEY = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
+import { API_KEY, signHeaders, signingKey } from '../../cli/sign.mjs';
 
 /** §6.3: every heartbeat request — and every call a fence depends on — has a 30-second timeout. */
 export const CALL_TIMEOUT_MS = 30_000;

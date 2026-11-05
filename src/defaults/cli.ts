@@ -18,7 +18,7 @@ import { BatonApi, BatonRefusal, envAuth, type Auth, type Transport } from '../r
 import { HARNESS_AGENTS, type Harness } from '../runner/harness';
 import { syncOnce } from '../shared/batonSync.mjs';
 import { DEFAULT_URL } from '../../cli/baton.mjs';
-import { signingKey } from '../../cli/sign.mjs';
+import { API_KEY, signingKey } from '../../cli/sign.mjs';
 import { DEFAULT_BRANCH_PATTERN, matchPatterns, sameRepo as sameRepoName, ticketOwns, type BatonRecord, type PrFact, type StationsResult } from './course-pr';
 import { commitsOf, type BranchCommit } from './pr-markers';
 import { COMMENTING_LEGS, PR_URL as PR_URL_RE } from './pr-close';
@@ -65,6 +65,23 @@ interface GitFailure { status?: number | null; stderr?: string | Uint8Array }
  * captured stderr, because those are failures the operator must see, and a null slug would make
  * a broken checkout indistinguishable from an origin-less one. Only `git remote get-url`'s own
  * two answers about the absence of a remote go quiet. */
+/** Whether a remote URL names a plain git repository rather than a forge's (B-182, R-BTN-105): a
+ * local path, a `file://` URL, or an `ssh://` URL to any host but github.com. Such a home has no
+ * PRs of its own to read. An `https://` or scp-form (`git@host:owner/name`) URL is a forge's, as
+ * `remoteSlug` reads it. */
+export function plainGitRemote(url: string): boolean {
+  const u = url.trim();
+  if (/^(file:|\/|\.{1,2}[\\/]|~)/.test(u) || /^[A-Za-z]:[\\/]/.test(u)) return true;
+  if (/^ssh:\/\//i.test(u)) {
+    try {
+      return new URL(u).hostname.toLowerCase() !== 'github.com';
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function remoteSlug(root: string): string | null {
   try {
     // The proxy's `…/git/owner/name` form drops its `git/` — only when `owner/name` follows, so an
@@ -200,11 +217,6 @@ export const BUSY_RETRY_S = 60;
 const BUSY_RETRY_MAX_S = 600;
 /** `BATON_SYNC_KEY`'s environment form of `--sync-key` (B-88). */
 const SYNC_KEY_ENV = 'BATON_SYNC_KEY';
-
-/** R-BTN-159's API key, as `src/runner/api.ts` names it (its `API_KEY` is module-private): a
- * `--sync-key` file holding one is refused by name — it is a worker's credential, never a
- * sync's, and `envAuth` would spend it as a bearer the sync routes deny. */
-const API_KEY_FILE = /^bak_[0-9a-f]{16}_[0-9a-f]{64}$/;
 
 export function parseSyncArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): Omit<SyncArgs, 'log'> {
   const out: Omit<SyncArgs, 'log'> = {
@@ -636,7 +648,9 @@ function bearerAuth(token: string | null): Auth {
  * key — a worker's credential, never a sync's — is refused by name here instead of being spent as
  * a bearer the server would deny. */
 function syncKeyAuth(file: string): Auth {
-  if (existsSync(file) && API_KEY_FILE.test(readFileSync(file, 'utf8').trim())) {
+  // R-BTN-159's API key (`cli/sign.mjs`): a worker's credential, never a sync's — `envAuth` would
+  // spend it as a bearer the sync routes deny, so it is refused by name.
+  if (existsSync(file) && API_KEY.test(readFileSync(file, 'utf8').trim())) {
     throw new Error(`--sync-key ${file}: an API key is a worker's credential, not a sync key — register an SSH key (\`baton admin repo add --sync-key <key.pub>\`) and pass its private file`);
   }
   let auth: Auth;
@@ -702,6 +716,13 @@ const detailQuery = (numbers: number[]): string =>
 export async function githubFacts(root: string, log: (l: string) => void, owns: (pr: { number: number; head: string; repository: string }) => boolean, siblings: { repository: string; tickets: string[] }[] = []): Promise<PrFact[]> {
   const slug = remoteSlug(root);
   if (slug == null) throw new Error(`${root} has no origin remote to read PRs from — pass --facts <file> for recorded facts`);
+  // B-182 (first slice): a plain-git home has no forge, so no adapter reads it (R-BTN-96) — only
+  // the repositories its tickets name in `repos:` are read, and with none nothing is, token or not.
+  const home = plainGitRemote(git(root, 'remote', 'get-url', 'origin')) ? null : slug;
+  if (home == null) {
+    log(`baton: the home is a plain git repository, not on GitHub — reading only the repositories tickets name in repos: (${siblings.length})`);
+    if (siblings.length === 0) return [];
+  }
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error('no GITHUB_TOKEN to read GitHub — pass --facts <file> for recorded facts');
   let requests = 0;
@@ -776,7 +797,7 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
   const out: PrFact[] = [];
   // The home, then each other repository a live ticket names in `repos:` (B-29), under the one
   // budget: a sync that would exceed it refuses rather than post a partial reading.
-  for (const { repository: repo, tickets } of [{ repository: slug, tickets: [] as string[] }, ...siblings.filter((s) => !sameRepoName(s.repository, slug))]) {
+  for (const { repository: repo, tickets } of [...(home != null ? [{ repository: home, tickets: [] as string[] }] : []), ...siblings.filter((s) => home == null || !sameRepoName(s.repository, home))]) {
     const before = out.length;
     out.push(...(await repoFacts(repo, tickets)));
     log(`baton: read ${out.length - before} PRs of ${repo} from GitHub`);

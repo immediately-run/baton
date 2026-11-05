@@ -144,9 +144,13 @@ async function until(q: () => boolean | Promise<boolean>): Promise<void> {
   throw new Error('condition never became true');
 }
 
-/** An outsider's hold on the machine's lock: `flock` kept alive; kill it to release. */
+/** An outsider's hold on the machine's lock: `flock` kept alive; kill it to release. A day's
+ *  `sleep`, not `sleep infinity`, which BSD `sleep` (macOS) refuses — and a refused sleep frees
+ *  the lock at once. A spawn error fails the test that waits on it, not the worker. */
 function outsiderTakes(): ReturnType<typeof spawn> {
-  return spawn('flock', ['--exclusive', lockPath, 'sleep', 'infinity'], { stdio: 'ignore' });
+  const child = spawn('flock', ['--exclusive', lockPath, 'sleep', '86400'], { stdio: 'ignore' });
+  child.on('error', () => { /* no flock: the test's own wait says so */ });
+  return child;
 }
 const killOutsider = (child: ReturnType<typeof spawn>) => {
   try { if (child.pid) process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ }
@@ -301,6 +305,7 @@ describe('S-BTN-21 the machine lock (R-BTN-178)', () => {
       argv[argv.length - 1] = String(process.pid);
       const child = spawn('flock', ['--exclusive', '--nonblock', process.argv[1], ...argv],
         { stdio: ['ignore', 'pipe', 'ignore'], detached: true });
+      child.on('error', () => process.exit(1));
       child.stdout.on('data', () => process.stdout.write('held'));
       setInterval(() => {}, 1000);
     `, path], { stdio: ['ignore', 'pipe', 'ignore'] });

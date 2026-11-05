@@ -43,7 +43,7 @@ Tier: judgement — five small scripts over one convention.
    keeps the model and starting fresh when it moves the leg to another.
 2. `review.mjs` returns `next: fix | merge | adjudicate` from the round's outcome (open
    findings and the run count), read from the PR the round just reviewed.
-3. Each exports `handoff(ctx)`, posting the `baton:handoff` comment with BATON_SPEC R-BTN-44's
+3. Each exports `handoff(ctx)`, posting the `baton:handoff` comment with BATON_SPEC [R-BTN-44](../spec/BATON_SPEC/09-claims.md#sec-9-3)'s
    sections, written by the session before it stops.
 4. The scripts honour `ctx.signal`: on abort they kill the session they started.
 

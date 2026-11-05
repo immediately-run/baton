@@ -6,6 +6,19 @@ is reproduced by an agent, and no claim runs while you have not answered. The ti
 `reviewed`, listed under **Needs you**, asking:
 
 > **3 failed reviews — manual review or start a 4th round?**
+> **How the stub runs you** — Baton's contract for the `agent_command` author: your command
+> line splits into words as `sh` would (quotes honoured, no substitutions) and executes
+> **without a shell**, with the ticket id, the leg and the checkout appended as arguments.
+> Stdin is never an open pipe: nothing to read, and a read ends at once. Stdout and stderr are
+> captured pipes, and the course reads stdout's last line. Your process's exit **is** your
+> completion: a harness that is a client of a background service must keep its session in
+> process (`opencode run --standalone`, or the equivalent) — a client that can exit before its
+> work ends leaves truncated output and an orphaned session posting to a claim that no longer
+> exists (B-84). A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
+> `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
+> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end
+> with work in flight: the process is the session, and nothing resumes it — wait, in the
+> foreground, on every job you started before printing your final line.
 
 Read the rounds' findings on the ticket's PRs (one per repository its `repos:` names, besides
 this one — the Needs-you entry links the PR whose last round holds them), then answer through

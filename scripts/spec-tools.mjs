@@ -11,16 +11,22 @@
 //       says the opposite. check-spec fails on any not in its shrinking allowlist.
 //
 // The same file lives in immediately-run/baton and immediately-run/fieldhouse (one copy each,
-// since neither imports the other's scripts); CONFIG below is the only difference.
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+// since neither imports the other's scripts). Three differences: CONFIG below; baton's spec is
+// a directory (B-179), which `readSpecAt` reads through baton's own spec-files.mjs; and baton's
+// spec files are Grove pages (B-180), whose frontmatter `readSpecAt` skips through
+// scripts/lib/stripFrontmatter.mjs — re-syncing from fieldhouse's single-file copy keeps all three.
+import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
+import { joinParts, locate, specParts } from './spec-files.mjs';
+import { frontmatterBlock } from './lib/stripFrontmatter.mjs';
 import { fileURLToPath } from 'node:url';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 export const CONFIG = {
   prefix: 'R-BTN',
-  spec: 'spec/BATON_SPEC.md',
+  /** The spec: a file, or a directory of part files joined in name order (BATON_SPEC since B-179). */
+  spec: 'spec/BATON_SPEC',
   /** Live tickets (the archive is history) and the context corpus, which restate rules. */
   dirs: ['tickets', 'docs/context'],
 };
@@ -100,12 +106,29 @@ export function impact(spec, ids, terms = [], files = [], prefix = CONFIG.prefix
   return { changed, spec: spec_hits, files: file_hits };
 }
 
-/** The checklist an amendment's PR body carries. */
-export function render(result, specPath = CONFIG.spec) {
+/** The spec at `path` under `root` as one text, and a locator from a line of it to where it is:
+ *  a file is its body, its frontmatter stripped (B-180), each line placed as the file's own
+ *  (`l. n`); a directory is its parts joined, read as check:spec reads them (spec-files.mjs's
+ *  `specParts`, which strips each part's frontmatter the same way), each line placed as
+ *  `file:line`. */
+export function readSpecAt(root, path) {
+  const at = join(root, path);
+  if (!statSync(at).isDirectory()) {
+    const raw = readFileSync(at, 'utf8');
+    const fm = frontmatterBlock(raw);
+    const offset = fm.split('\n').length - 1;
+    return { text: raw.slice(fm.length), where: (n) => `l. ${n + offset}` };
+  }
+  const parts = specParts(root, path);
+  return { text: joinParts(parts), where: (n) => locate(parts, n, path) };
+}
+
+/** The checklist an amendment's PR body carries. `where` turns a line of the spec into its place. */
+export function render(result, specPath = CONFIG.spec, where = (n) => `l. ${n}`) {
   const out = ['### Impact', ''];
-  out.push(`Changed: ${result.changed.map((u) => `${u.label} (l. ${u.line})`).join('; ') || 'none of the ids is a rule heading'}`, '');
+  out.push(`Changed: ${result.changed.map((u) => `${u.label} (${where(u.line)})`).join('; ') || 'none of the ids is a rule heading'}`, '');
   out.push(`In \`${specPath}\` — mark each **changed** or **still true**:`, '');
-  for (const u of result.spec) out.push(`- [ ] ${u.kind} ${u.label} — l. ${u.line} — ${u.why.join(', ')}`);
+  for (const u of result.spec) out.push(`- [ ] ${u.kind} ${u.label} — ${where(u.line)} — ${u.why.join(', ')}`);
   if (!result.spec.length) out.push('- (nothing else cites them)');
   out.push('', 'Outside the spec (live tickets, context pages):', '');
   for (const f of result.files) out.push(`- [ ] \`${f.path}\` — ${f.why.join(', ')}`);
@@ -132,8 +155,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (args[i] === '--term') terms.push(args[++i]);
     else ids.push(args[i]);
   }
-  const spec = readFileSync(join(REPO, CONFIG.spec), 'utf8');
+  const { text: spec, where } = readSpecAt(REPO, CONFIG.spec);
   const files = CONFIG.dirs.flatMap((d) => mdx(join(REPO, d)))
     .map((p) => [p.slice(REPO.length + 1), readFileSync(p, 'utf8')]);
-  console.log(render(impact(spec, ids, terms, files)));
+  console.log(render(impact(spec, ids, terms, files), CONFIG.spec, where));
 }

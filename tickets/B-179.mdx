@@ -1,0 +1,112 @@
+---
+title: "B-179 — Split BATON_SPEC into one file per section, with a generated index; a text move only, proved byte-identical"
+id: B-179
+project: baton
+status: available
+updated: 2026-11-03
+repos:
+  - baton
+tags:
+  - roadmap-item
+order: 1181
+tier: routine
+description: "Move spec/BATON_SPEC.md's sixteen numbered sections, Load-bearing assumptions, Decisions and Open questions into spec/BATON_SPEC/<nn>-<slug>.md, keep spec/BATON_SPEC.md as a short index with a generated rule-and-scenario table, and point check:spec, spec:impact, check-model-links, the spec-review skill and every doc at the directory; one PR that moves text and changes none, proved by a check that the joined files equal the old spec. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: []
+depends_on: []
+---
+
+**Brief:** the owner, 2026-11-03, on the 7,500-line spec: "It's challenging for agents to work with
+such a large file. But I do like the fact that there are fewer chances of having inconsistencies
+than if we had multiple spec files." Then: "Would having a spec index file pointing to the
+authoritative spec file for a list of topics help navigate the specs for agents and remove the need
+for redundancy?" And, agreeing the plan: "keep cooperative, retire the legacy paths as planned, and
+then split the spec" — "Agreed".
+
+**Spec:** the whole of `spec/BATON_SPEC.md` (moved, not changed); its header (ids `R-BTN-n`,
+`S-BTN-n`, `G-BTN-n` and `§n.m` are stable — code, tests and the Quint model cite them);
+`docs/context/spec-writing.mdx` (one home per statement, cite by id — PR #170); [R-BTN-1](../spec/BATON_SPEC/01-what-baton-is.md#sec-1).
+
+**Depends on:** none. **Sequencing, not a dependency:** land it when no spec PR is open except
+those on hold (#161 waits for B-161 and carries its spec changes over by hand afterwards); #160
+and #171 merge first.
+
+**Used by:** nothing yet.
+
+### Why
+
+The spec is about 7,600 lines (≈190k tokens): no agent reads it whole, so agents already work on
+it in pieces, by grep. A single file buys no consistency an agent can see; what keeps it
+consistent is one home per statement and the id-based checks (`check:spec`, `spec:impact`, the
+spec review), which work the same across files. An index that maps topics to sections and rule ids
+lets an agent open only the file it needs.
+
+### What to build
+
+1. **The move.** `spec/BATON_SPEC/` holds one file per top-level heading, in order:
+   `00-front.md` (title, status, companions, contents preamble), `01-what-baton-is.md` …
+   `16-adoption.md` (the sixteen numbered sections, slug from each heading), and
+   `90-load-bearing-assumptions.md`, `91-decisions.md`, `92-open-questions.md`. Every byte of the
+   old file lands in exactly one new file; headings, ids, `§n.m` numbers and text are unchanged.
+2. **The proof.** `scripts/spec-join.mjs` concatenates the files in order; `check:spec` fails unless
+   the join equals the spec the PR started from, byte for byte, in the PR that moves it (a one-time
+   assertion against the pre-move blob, recorded in the PR), and from then on checks the files'
+   order and that each starts with its heading.
+3. **The index.** `spec/BATON_SPEC.md` becomes the entry point, every line of it **generated**:
+   a topic table (each section file, its `###` subsections and the rule ids each defines —
+   pointers only, never a summary of a rule) and a table of every `R-BTN-n`, `S-BTN-n` and
+   `G-BTN-n`: id → title → file. `npm run spec:index` writes it; `check:spec` fails when it is
+   stale. (The owner, 2026-11-04, on PR #173's round one: keep the topic table generated, not
+   hand-written.)
+4. **The tools follow.** `check-spec.mjs`, `spec-tools.mjs` (`CONFIG.spec` becomes the directory,
+   read as the join), `check-model-links.mjs`, `check-traces.mjs` and any script reading the
+   spec by path; the `baton:spec-review` skill ("the whole of spec/BATON_SPEC.md" becomes the
+   directory, reviewed span by span); `CLAUDE.md`, `README.md`, `docs/context/*.mdx`, the docs
+   stub `content/specs/BATON_SPEC.mdx` (a docs PR, its own); and `§n.m` links in tickets stay valid
+   because the numbers do not change.
+5. **The history file is not split** (`spec/BATON_SPEC_HISTORY.md`); it gains one dated entry
+   recording the move.
+
+### Trust
+
+No new input. The index is derived from the spec files and checked against them; a subsection
+whose title does not name its topic is a review finding against that section, not against the
+index.
+
+### Invariants
+
+- **Stable ids (the spec's header):** no `R-BTN-n`, `S-BTN-n`, `G-BTN-n` or `§n.m` changes number or
+  meaning; the byte-identity check proves the move changed no text.
+- **R-BTN-1 and spec-writing.mdx (one home per statement):** the index restates no rule — topics,
+  files and ids only; a rule's home stays its one section file.
+- **R-BTN-193:** nothing in the move or the index uses git as a lock or a counter.
+- **The model and traces cite rule ids, not lines:** `check-model-links` and `check-traces` stay
+  green against the directory.
+
+### Tests
+
+- `check:spec` against a fixture directory: a join that differs from the recorded pre-move blob
+  fails; files out of order fail; a stale generated index fails.
+- `spec:impact` on the directory lists the same rules, scenarios, gates, decisions, tickets and
+  context pages for a sample id as it did on the single file (a fixture comparison).
+- `npm test` green, with `check-model-links` and `check-traces` reading the directory.
+
+### Exit criteria
+
+- [ ] The joined `spec/BATON_SPEC/` equals the pre-move `spec/BATON_SPEC.md` byte for byte
+      (`npm run check:spec`, the PR's recorded assertion).
+- [ ] `spec/BATON_SPEC.md` is the index; `npm run spec:index` leaves it unchanged; `check:spec` green.
+- [ ] `spec:impact`, `check-model-links`, `check-traces` and the spec-review skill read the
+      directory; `npm test` green.
+
+**Requires:** none.
+
+## Status
+
+_filed 2026-11-03._
+
+_(2026-11-04: built on `claude/B-179-spec-split`. The topic table is generated from the sections' `###` subsections and the rules each defines, rather than hand-written, so nothing in the index can drift; the byte-identity proof is the move commit's, recorded in the history.)_
+
+_(2026-11-04, review round one: the move's byte-identity is a one-time command, `node scripts/spec-files.mjs --prove 616e5d8 05b4945`, run in the PR and recorded there and in the history; `check:spec` keeps the parts' order (numbered parts under their own numbers, none missing or repeated) and fails a stray file. The script is `scripts/spec-files.mjs`, not `spec-join.mjs`: it also writes the index. The generated topic table: the owner, 2026-11-04, "Keep it generated"; What to build 3, Trust and Tests are rewritten to match.)_

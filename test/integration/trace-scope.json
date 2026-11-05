@@ -43,6 +43,10 @@
     "at": 5,
     "reason": "claim 1 imported at cutover (a legacy claim; §16.1, not modelled)"
   },
+  "S-BTN-199.ticket-pickup › S-BTN-199 the git-lock pickup asks Baton > the board answers the lock with each holder and its lease's end; the history answers the PRs a false frontmatter lost": {
+    "at": 11,
+    "reason": "the harness wrote a claim (a state Baton did not reach)"
+  },
   "S-BTN-26.two-repositories › S-BTN-26 two repositories (registry half) > one repository’s sync confirms no completion of another’s (R-BTN-47)": {
     "at": 6,
     "reason": "claim 1 confirmed by the interim post's confirmations (docs' interim shape, not modelled)"

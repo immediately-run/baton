@@ -1,3 +1,8 @@
+---
+title: "Baton specification — history"
+description: "What BATON_SPEC no longer says: its dated amendments, retired requirement, scenario and gate ids, the map from old section numbers, and the decisions in full."
+---
+
 # Baton specification — history
 
 This file holds the history of `spec/BATON_SPEC.md`. The specification itself states only what is
@@ -2360,6 +2365,174 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   builds the store (B-76, B-25, B-73, B-8, B-5, B-46, B-61, B-64), so every ticket can be picked
   up now. S-BTN-198 follows. B-172 is superseded into B-76, which builds the code sign-in flow
   for both roles: the two steps are built where the flow is.
+
+- **2026-11-04 — the spec split into one file per section (B-179).**
+  Rules changed: none.
+  The owner, on the 7,500-line spec: "It's challenging for agents to work with such a large file";
+  asked whether an index "pointing to the authoritative spec file for a list of topics" would help;
+  and agreed the plan "keep cooperative, retire the legacy paths as planned, and then split the
+  spec". `spec/BATON_SPEC.md` (blob `c6656dc`) moved into `spec/BATON_SPEC/`, one file per
+  top-level heading — `00-front.md`, `01-…` to `16-…`, `90-load-bearing-assumptions.md`,
+  `91-decisions.md`, `92-open-questions.md` — with no byte changed: the parts joined in name order
+  have the old file's sha-256 (`ca8c0a92…5dd7849`), which `node scripts/spec-files.mjs --prove
+  616e5d8 05b4945` shows. The only later edit is the front matter's two
+  relative links, one directory deeper. `spec/BATON_SPEC.md` is now the generated index (`npm run
+  spec:index`): each file, its subsections and the rules each defines, and every rule, scenario
+  and gate id with its title and file; `check:spec` fails a stale index, a file in the directory
+  that is not a part, or a part out of order or malformed, and
+  reads the parts joined, as `spec:impact` does, which now names `file:line`. Ids and `§n.m`
+  numbers are unchanged. B-179 asked for a hand-written topic table; review round one flagged the
+  generated one as a deviation, and the owner ruled "Keep it generated" (2026-11-04).
+
+- **2026-11-03 — R-BTN-193: git is never a lock or a counter.** The owner, after the process
+  guards' third review round: "I understand that until the baton spec is fully realized, it may be
+  beneficial to keep the pre-existing Git-based locking and sequencing mechanisms. However, I want
+  the spec to be very clear that this is not how Baton is meant to be used. And it is merely a
+  legacy to be phased out as soon as possible." R-BTN-193 states it beside R-BTN-1, names each
+  legacy mechanism and the work that retires it (R3-1266 and B-120 for the git-lock ticket
+  commands; B-176 for every next-free scan; the other repositories' own tools when they adopt
+  Baton's), and R-BTN-74's ticket commands, R-BTN-131's allocators and R-BTN-31's numbering now
+  say "legacy" where they are specified. The architecture page's allocator decision says the same.
+  Logs and transcripts kept in git, which the owner named as a separate and less critical concern
+  ("blob storage is a better candidate"), are not changed here.
+
+- **2026-11-03 — R-BTN-74, R-BTN-127, R-BTN-31, §13: process guards against review-round
+  thrashing (owner direction).**
+  Rules changed: R-BTN-74, R-BTN-127, R-BTN-31, R-BTN-51, R-BTN-131.
+  The owner: "I would like you to implement the process changes
+  that prevent the sort of thrashing we are seeing now." The evidence was PRs #160 and #161, where
+  six of the seven owner questions came from tickets, not code: tickets filed 2026-10-29 were
+  built as written after later rulings (B-129 kept "listed under Needs you" after the 2026-11-01
+  ruling, though a spec PR touched it on 11-02); tickets prescribed mechanisms that broke standing
+  rules (B-129 had core read `prs`, against R-BTN-50 and R-BTN-33; B-110 asked Baton to store
+  question text, against R-BTN-33); B-110 added two inputs read from git, commit trailers, with no
+  word on who may write them (the security model's reach 3); long-lived branches collided on
+  numbers (B-110 and B-107 both took migration 0028; B-129 and B-145 both took S-BTN-197); and
+  restated rules drifted. Four guards follow. R-BTN-74: `ticket claim` refuses a ticket whose
+  body cites a rule that a dated entry here amended after the ticket answered for it, until
+  `--rules-reread`, which leaves a dated Status line; `ticket check` reports such tickets
+  without failing. R-BTN-74: the skeleton gains `### Trust` and `### Invariants`, and
+  `check.sections_since` (this repository: 2026-11-03) makes a ticket filed from that day without
+  them a finding. The babysit skill brings in main when main changes `spec/` or `src/migrations/`
+  and at least daily, and merges main before reviewing a PR more than a day behind. And a spec PR
+  rewrites or strikes, in place, each live ticket clause an amendment contradicts. R-BTN-127's tree
+  gains the claim's flag; R-BTN-31's new scenario and §13's migrations take the next free number
+  at merge. S-BTN-189 and S-BTN-172 cover the commands and the check. Rejected: failing the check
+  on stale tickets (most of this repository's live tickets cite a rule amended since they were
+  filed, and every pull request would turn red at each ruling); requiring the new sections of
+  tickets already filed.
+
+  Review round one (two reviewers, fifteen findings merged) changed the guards. The first draft
+  had a fifth: `ticket reserve` held migration numbers and scenario ids in `tickets/reserved.json`,
+  and `check:spec` failed a number above a baseline the ledger did not hold. The reviewers found
+  that the ledger never tied a number to its holder, that a branch could hand-edit its own copy,
+  and that entries at or below the baseline and racing reservations went unchecked. The owner:
+  "Wouldn't it be simpler to solve this if Baton also handed out ticket IDs?" — and B-176 files
+  that: Baton hands out every identifier written to git from one sequence per repository and kind.
+  The ledger, `reserve` and the check are removed, and until B-176 lands a migration or scenario
+  number is the next free one at merge, the branch merging main first. A workflow change to give
+  CI the whole history was proposed and declined: "These divergent systems must be resolved
+  anyway." So the guards read git as a shallow clone gives it: `claim` runs `git fetch
+  --unshallow` when a clone's boundary would date the ticket, and refuses naming the fix if it
+  cannot; `check` skips the stale report with one line saying so, and lists as undetermined the
+  tickets it cannot date for the sections check, never a finding. The stale reading had reset on
+  any edit that was not a merge or a `tickets: …` commit, so the spec PR edits the skill asks for
+  cleared it — B-129's own case; now a ticket answers for a rule only by the day it was filed (its
+  `_filed` line, else its file's first commit, by author day) and by a later `rules re-read` note
+  naming that rule, which a spec PR adds for the ids it handled. An entry amends only the ids its
+  bold title names, not every id its text mentions, and `--rules-reread` takes those ids and
+  refuses any other set, so it cannot be a reflex. The sections check had judged only tickets
+  with a `_filed` line, which no hand-filed ticket has, and passed a heading left empty or holding
+  the skeleton's placeholder; it now dates a ticket by its first commit and counts an empty or
+  placeholder section as missing, and the skeleton's placeholders name no repository's ids or
+  paths. R-BTN-51 names the `check` keys and cites R-BTN-74 for them; the same-day boundary (an
+  entry the day of the ticket's answer is not after it) is stated.
+  After the round, `tickets new` refuses an unfilled skeleton after the cutover instead of warning
+  (`--trust` and `--invariants` fill it): a placeholder that reached the default branch would
+  fail every open PR's `check:tickets` until someone filled it.
+
+  Review round two (one reviewer, six findings) made each guard decidable where CI decides it.
+  An entry here had amended only the ids its bold title names, and 53 of the 66 dated entries
+  name none — the restructure's parts, the owner's rulings, every review round — so the stale
+  report missed most amendments. The convention is now enforced going forward: `check:spec`
+  fails an entry dated after 2026-11-03 whose title names no rule id and that has no `Rules
+  changed: <ids>` line (or `Rules changed: none.`) directly under it, and the stale reading takes
+  the ids of both; past entries are not rewritten, so entries dated on or before 2026-11-03 count
+  only where their titles name ids, and R-BTN-74 says the report covers amendments from
+  2026-11-04 on. CI's clone is depth 1, so the sections check had judged only tickets with a
+  `_filed` line and listed every other one as undetermined; `check.sections_from_id` (here
+  `B-176`) makes every ticket at or above that id carry a `_filed` line — a finding without one —
+  and judges it by that line, so a new hand-filed ticket is decided in a depth-1 clone, while an
+  older ticket without one is dated by its first commit as before. A request ticket and a child a
+  leg files (`parent:`) are not judged — their course's legs write the work's own tickets — and
+  `ticket request` writes the `_filed` line too (R-BTN-131). For the sections check a ticket is
+  dated by the later of its `_filed` line and the first commit git shows, so a line copied from an
+  older ticket cannot carry a new one past the cutover in a full clone. R-BTN-74 gains *What the
+  guards trust*: the `_filed` line, the request tag, `parent:` and the `rules re-read` notes are
+  claims the author writes, verified only by review, and a re-read note naming ids its author did
+  not re-read is the author's false statement, which review catches, not the machine. B-176's
+  `floor` reads the default branch and every open branch's head for every kind, as R-BTN-131's
+  ticket scan does, with the duplicate check at merge as the backstop, and it cites §12.3 and
+  `src/core/validate.ts` for validation, not R-BTN-16.
+  Review round three (one reviewer) confirmed round two's six closures and found three problems in
+  what round two added. B-176's PR filing had misread `ticket request` (it pushes first and opens a
+  PR only on a protected-branch refusal, the B-174 Decision) and would have had two open filings
+  rewrite one dependency's `**Used by:**` line; B-176 now has `new` open a PR first by the owner's
+  "Yes" as a recorded departure for `new` alone, carry the new ticket only, and push and print a
+  branch on a `git` forge. The `parent:` exemption claimed a leg's children were judged elsewhere,
+  which `spec-to-tickets`' work tickets are not; children are now judged like any ticket, and the
+  standard filing legs (`draft-ticket`, `bug-report`, `spec-to-tickets`' `decompose`) write both
+  sections. The babysit skill names the `Rules changed:` line.
+  An owner-approved fourth round (one reviewer) confirmed round three's six closures. R-BTN-193's
+  legacy list named no work retiring the CLI's `claim | set | done` (R3-1266 retires only an old
+  script), so B-178 is filed for it, after R3-1266; R-BTN-74 marks only `claim | set | done`'s
+  push-retry and `new`'s next free id legacy, not `new` itself; the list cites R-BTN-131, R-BTN-31
+  and §13 for the scans, not R-BTN-161, whose handler ids are not scanned. Machine-written children
+  — a condition's handler ticket (`handles:`) and a call's child (`called_by:`) — are exempt from
+  the sections check, and the filing legs write the `_filed` line. The transcript ticket first
+  drafted here as B-177 moved to fieldhouse as FLDH-51, at the owner's word ("this belongs on
+  fieldhouse, not baton core"), and was redesigned there as create-only objects keyed by session.
+
+- **2026-11-03 — review round one of B-129's pickup** (PR #160; fresh reviewers, given the
+  diff). Findings closed: a takeover skipped every frontmatter status check, so it overrode the
+  git lock and parked or closed statuses as well as a false `available`; the board's `holders`
+  left out legacy claims; "past its start" was judged from any station the path ever reached,
+  not the current one; the history's `resume` read only the newest ended claim, so a review
+  claim that pushed nothing hid the PR; the release's hand-off lacked what is left; a key
+  problem was reported as Baton unreachable; the drop-PR refusal claimed a PR "still open" and
+  could block `done`; `position-disagrees` fired on a release that kept its PRs and deduplicated
+  against any discrepancy; a lease that had ended was reported as not ended. Fixed in R-BTN-74
+  (the takeover overrides only a false `available`; the position is the board's ready station,
+  else the newest reached; the key is judged first; the hand-off's lines are stated, with
+  `set --note`; `done` is never refused), R-BTN-24 (the history read's `resume` across the
+  ended claims, and who may read it), R-BTN-85's `position-disagrees` row (only when the posted
+  `prs` lacks a PR Baton's record holds; both values carry the PR lists), R-BTN-127's CLI row
+  (the flags are R-BTN-74's), the board and history route rows, and S-BTN-199.
+  The reviewers also found that the ticket asks for the discrepancy under Needs you while the
+  2026-11-01 ruling keeps position discrepancies off it. The owner ruled on 2026-11-03: "Keep
+  your Decision" — the discrepancies list only, nothing adopted (R-BTN-85's row, Decisions).
+
+  Review round two (one fresh reviewer) found round one's `position-disagrees` fix had core read
+  the posted opaque `course.prs` and store both PR lists in the discrepancy, against R-BTN-50 and
+  R-BTN-33. Reverted: the row fires on a posted `available` over a ticket the post places past its
+  start, once per station, both values positions, so a release that kept its PRs logs it too —
+  telling the two apart went to the owner, who ruled on 2026-11-03 to accept the extra entries
+  ("Accept the extra entries"): no field for core, no reading of `prs`, until R3-1266 moves the
+  claim onto Baton. Also closed: with no local course file the start was still
+  any reached row (now the standard course's, R-BTN-131, else undetermined, R-BTN-74); a release
+  not past its start without `--note` lacked its subject and `PR` lines (every release writes
+  them, R-BTN-74); the 2026-10-15 Decision still said Baton's state is never a discrepancy (it
+  names the git-lock `status:` exception, and the 2026-11-03 entry keeps only its own choice);
+  the ticket commands copied the API-key shape and `send`'s key dispatch (one copy, in
+  `cli/sign.mjs`); and R-BTN-24 restated the history route row and *reader* (it cites them).
+  Review round three (one fresh reviewer) found round two's standard-course fallback ignored the
+  repository's `default_course`, so a ticket at a build-app repository's start was taken over;
+  an adjudicator reproduced it, and the owner chose "Fix, one more fresh round": the start now
+  follows `default_course`. It also found core reading `display.status` (R-BTN-33) and resume
+  records' `branches` and `prs` (R-BTN-50) against rules saying core reads neither; the owner
+  ruled "Write narrow exceptions", each now in its rule, and R-BTN-85's row cites R-BTN-74 for
+  "past its start".
+  S-BTN-199's row follows.
 
 ## Retired requirements
 

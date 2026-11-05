@@ -15,9 +15,10 @@ export const HISTORY_KINDS = ['leg-started', 'leg-finished', 'leg-abandoned', 'p
 export type HistoryKind = (typeof HISTORY_KINDS)[number];
 
 /** R-BTN-85: the cases a discrepancy names, exactly. `position-replaced` and `route-overridden`
- *  arrive with B-38, `spawned-unposted` with R3-1258. */
+ *  arrive with B-38, `spawned-unposted` with R3-1258; `position-disagrees` is B-129's pickup
+ *  side of the spec's amended table (B-120 retires `position-replaced`). */
 export const DISCREPANCY_SUBS = ['position-replaced', 'regressed', 'off-graph', 'bars-mismatch', 'foreign-write', 'closed-under-claim',
-  'spawned-unposted', 'route-overridden'] as const;
+  'spawned-unposted', 'route-overridden', 'position-disagrees'] as const;
 export type DiscrepancySub = (typeof DISCREPANCY_SUBS)[number];
 
 /** R-BTN-81: a row's `detail_json` is at most 2 KB; a larger one is replaced by a note saying so,

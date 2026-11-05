@@ -23,11 +23,11 @@ depends_on:
 entries out, replies out) and the one outbound effect left outside the outbox: "Yes, add the model
 and make both changes."
 
-**Spec:** `spec/BATON_SPEC.md` R-BTN-94 (wants, dispatch targets, the unblocked trigger, what Baton
-holds), R-BTN-171 (the `dispatch` kind, the `dispatch` delivery class, couriers woken by the
-doorbell), R-BTN-91 (`outbox` rings on `GET /v1/courier/push`), R-BTN-188 (`outbox.dispatch`),
-R-BTN-55 (the bindings), R-BTN-136 (what a tenant's host holds), §12.7 (the App's key with the
-courier), G-BTN-83, S-BTN-195.
+**Spec:** BATON_SPEC [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) (wants, dispatch targets, the unblocked trigger, what Baton
+holds), [R-BTN-171](../spec/BATON_SPEC/07-conditions.md#sec-7-8) (the `dispatch` kind, the `dispatch` delivery class, couriers woken by the
+doorbell), [R-BTN-91](../spec/BATON_SPEC/08-runners.md#sec-8-1) (`outbox` rings on `GET /v1/courier/push`), [R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8) (`outbox.dispatch`),
+[R-BTN-55](../spec/BATON_SPEC/02-deployments.md#sec-2-1) (the bindings), [R-BTN-136](../spec/BATON_SPEC/02-deployments.md#sec-2-2) (what a tenant's host holds), [§12.7](../spec/BATON_SPEC/12-security.md#sec-12-7) (the App's key with the
+courier), [G-BTN-83](../spec/BATON_SPEC/15-verification.md#gates), [S-BTN-195](../spec/BATON_SPEC/15-verification.md#scenarios).
 
 **Depends on:** B-120 (the courier's `std:effect@1`, R-BTN-191).
 

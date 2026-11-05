@@ -49,9 +49,12 @@ class Repo {
     git(this.dir, 'commit', '-qm', 'scaffold');
     git(this.dir, 'push', '-q', 'origin', 'HEAD:main');
   }
-  /** `baton tickets …` as an operator runs it: the CLI's entry, the checkout as its home. */
+  /** `baton tickets …` as an operator runs it: the CLI's entry, the checkout as its home. The
+   *  harness's own Baton variables are scrubbed — a test's command reads the stand-in Baton its
+   *  test names, or none, never the instance this suite happens to run under. */
   tickets(...argv: string[]): { status: number | null; stdout: string; stderr: string } {
-    const out = spawnSync(process.execPath, [CLI, 'tickets', ...argv], { cwd: this.dir, encoding: 'utf8', env: { ...process.env, BATON_HOME: this.dir } });
+    const { BATON_KEY_FILE: _k, BATON_URL: _u, BATON_HOME: _h, ...env } = process.env;
+    const out = spawnSync(process.execPath, [CLI, 'tickets', ...argv], { cwd: this.dir, encoding: 'utf8', env: { ...env, BATON_HOME: this.dir } });
     return out;
   }
   at(file: string): string | null {
@@ -94,8 +97,9 @@ describe('S-BTN-189 the ticket commands', () => {
     expect(git(repo.dir, 'symbolic-ref', '--short', 'HEAD')).toBe('my-work');
     expect(readFileSync(join(repo.dir, 'draft.txt'), 'utf8')).toBe('uncommitted\n');
 
-    // The rest of a session: claim, a PR, done (archived).
-    expect(repo.tickets('claim', 'B-1').stdout).toMatch(/^✓ tickets: claim B-1 \(in progress\) — pushed as /);
+    // The rest of a session: claim (B-129: with no key in this environment, on git's word
+    // alone — the with-Baton cases are B-129's own suite), a PR, done (archived).
+    expect(repo.tickets('claim', 'B-1', '--offline').stdout).toMatch(/^✓ tickets: claim B-1 \(in progress\) — pushed as /);
     expect(parseFrontmatter(repo.at('tickets/B-1.mdx') as string)?.status).toBe('in-progress');
     const url = 'https://github.com/immediately-run/baton/pull/7';
     expect(repo.tickets('set', 'B-1', 'in-review', '--pr', url).status).toBe(0);
@@ -142,6 +146,37 @@ describe('S-BTN-189 the ticket commands', () => {
     const out = spawnSync(process.execPath, [CLI, 'tickets', 'check', '--repo', ROOT], { encoding: 'utf8', cwd: ROOT });
     expect(out.stderr).toBe('');
     expect(out.status).toBe(0);
-    expect(out.stdout).toMatch(/^baton tickets check: \d+ ticket\(s\), ✓ no findings\n$/);
+    // The stale-rule report may precede the count; it is never a finding (S-BTN-172).
+    expect(out.stdout).toMatch(/(^|\n)baton tickets check: \d+ ticket\(s\), ✓ no findings\n$/);
   }, 60_000);
+
+  it('claim refuses a ticket citing a rule amended since it was filed, until --rules-reread', () => {
+    const repo = new Repo();
+    // The scaffold and a ticket citing R-BTN-50, dated 2026-10-29; then a history entry of
+    // 2026-11-01 naming R-BTN-50.
+    mkdirSync(join(repo.dir, 'tickets'), { recursive: true });
+    mkdirSync(join(repo.dir, 'spec'), { recursive: true });
+    writeFileSync(join(repo.dir, 'tickets', 'B-1.mdx'), '---\ntitle: "B-1 — x"\nid: B-1\nproject: baton\nstatus: available\nupdated: 2026-10-29\ntags:\n  - roadmap-item\nprs: []\ndepends_on: []\n---\n\nThe core reads `prs` (R-BTN-50).\n');
+    const dated = { GIT_COMMITTER_DATE: '2026-10-29T12:00:00Z', GIT_AUTHOR_DATE: '2026-10-29T12:00:00Z' };
+    Object.assign(process.env, dated);
+    try {
+      repo.publish();
+    } finally {
+      for (const k of Object.keys(dated)) delete process.env[k];
+    }
+    writeFileSync(join(repo.dir, 'spec', 'BATON_SPEC_HISTORY.md'), '## Changelog\n\n- **2026-11-01 — R-BTN-50: the ruling on prs.** Core reads no `prs`.\n');
+    git(repo.dir, 'add', '-A');
+    git(repo.dir, 'commit', '-qm', 'the ruling');
+    git(repo.dir, 'push', '-q', 'origin', 'HEAD:main');
+
+    const before = git(repo.bare, 'rev-parse', 'main');
+    const refused = repo.tickets('claim', 'B-1', '--offline');
+    expect(refused.status).toBe(2);
+    expect(refused.stderr).toContain('B-1 cites rules that spec/BATON_SPEC_HISTORY.md amended after the ticket answered for them (filed 2026-10-29, or a later rules re-read note naming the rule):\n  R-BTN-50 — 2026-11-01 — R-BTN-50: the ruling on prs\n');
+    expect(git(repo.bare, 'rev-parse', 'main')).toBe(before);
+    const claimed = repo.tickets('claim', 'B-1', '--offline', '--rules-reread', 'R-BTN-50');
+    expect(claimed.status).toBe(0);
+    expect(parseFrontmatter(repo.at('tickets/B-1.mdx')!)?.status).toBe('in-progress');
+    expect(repo.at('tickets/B-1.mdx')).toMatch(/## Status\n\n_\(\d{4}-\d{2}-\d{2}: rules re-read at claim: R-BTN-50 \(amended 2026-11-01\)\)_\n$/);
+  }, 120_000);
 });

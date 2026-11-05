@@ -22,7 +22,9 @@ ranked alternative and the holdings you found dead — to the file `$BATON_TAKEN
 > work ends leaves truncated output and an orphaned session posting to a claim that no longer
 > exists (B-84). A repository's `agent_wrapper` in `.baton/baton.json`, or the host's
 > `BATON_AGENT_WRAPPER`, which wins, puts a command in front of yours, split the same way, so
-> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95).
+> your command's words, the arguments and 0/1/2 are the wrapper's to pass on (B-95). Never end
+> with work in flight: the process is the session, and nothing resumes it — wait, in the
+> foreground, on every job you started before printing your final line.
 
 ## 1. Read before you write
 

@@ -1026,7 +1026,9 @@ export class BatonCore {
       const n = limit == null ? 50 : Number(limit);
       if (b != null && !(Number.isInteger(b) && b > 0)) throw new BatonError('invalid-params', 'before: must be the next_before a page gave');
       if (!(Number.isInteger(n) && n >= 1 && n <= HISTORY_PAGE_MAX)) throw new BatonError('invalid-params', `limit: must be an integer from 1 to ${HISTORY_PAGE_MAX}`);
-      return json(this.history.list(id, b, n));
+      // B-129: the ended claims' branches and PRs ride with the path (R-BTN-24's records,
+      // pruned) — the PR a ticket's frontmatter lost, so a claimant continues the change.
+      return json({ ...this.history.list(id, b, n), resume: this.claims.resumeOf(id) });
     }
     if (blocks) {
       const raw = seg(blocks[2]);
@@ -1252,6 +1254,11 @@ export class BatonCore {
       for (const { row } of rows) if (!stations.has(row.id)) this.stations.clear(qualify(r, row.id));
       this.stations.reopened(r, rows.map(({ row }) => row.id));
       const seen = this.stations.apply(r, p.sha, n, stations, p.closed ?? [], at);
+      // B-129 (R-BTN-85, both values): a post whose ticket frontmatter says `available` while
+      // the ticket is past its course's start — the snapshot implying a position Baton has
+      // moved past, the false `available`/`prs: []` of the 2026-10-27 release — is a
+      // discrepancy. Under B-120 it moves nothing; until then it is at least named.
+      this.notePositionDisagreements(r, p, seen, n);
       // R-BTN-75–78: the snapshot's causes — `blocked_by`, `requires`, `needs`, `decisions` and
       // where each ticket is queued — rewrite the changed tickets' blocks in this transaction.
       const dropped = this.applyBlocks(r, stations, upserted, legsBefore, changed.deleted > 0);
@@ -1276,6 +1283,32 @@ export class BatonCore {
       changed.stale_released = judged.stale_released;
     });
     return { ok: true, ...changed };
+  }
+
+  /** B-129 (R-BTN-85, "every disagreement with git is logged", both values): the accepted post's
+   *  tickets whose frontmatter says `available` while the post itself places them past their
+   *  course's start — the false `status: available` a hurried release wrote over an open PR
+   *  (B-91, 2026-10-27). Core reads no course field (R-BTN-50) and stores no PR list (R-BTN-33),
+   *  so it cannot tell that release from one that kept its PRs: both fire. Logged once per
+   *  station (the sync posts every 15 minutes), judged against the ticket's last
+   *  `position-disagrees` row, moving nothing (B-120's rule; until it lands, named). The path's
+   *  length is the witness: a ticket past its start has one. */
+  private notePositionDisagreements(r: string, p: BoardPayload, seen: Map<string, Seen>, n: number): void {
+    if (!p.tickets) return;
+    const statusOf = new Map(p.tickets.map((t) => [qualify(r, t.id), t.display?.status ?? null]));
+    for (const [id, s] of seen) {
+      if (s.path.length === 0 || statusOf.get(id) !== 'available') continue;
+      const last = this.sql<{ detail_json: string }>(
+        `SELECT detail_json FROM events WHERE ticket_id = ? AND kind = 'discrepancy' AND json_extract(detail_json, '$.sub') = 'position-disagrees' ORDER BY seq DESC LIMIT 1`, id)[0];
+      let before: { baton?: { station?: unknown } } = {};
+      try {
+        before = last ? JSON.parse(last.detail_json) : {};
+      } catch {
+        before = {};
+      }
+      if (before.baton?.station === s.station) continue;
+      this.history.discrepancy(id, 'position-disagrees', { station: s.station, path: s.path }, { status: 'available' }, n);
+    }
   }
 
   /** A refresh's stations (§7.1, R-BTN-62): the head's tickets unchanged, where each is replaced. */
@@ -1465,7 +1498,9 @@ export class BatonCore {
    *  derived by the same `readyRows` it derives them with, for one repository — and one field the
    *  dashboard does not have. `granted_capabilities` is the key's grant's capabilities — the
    *  heartbeat answer's field — so a granted runner knows its grant from the read alone; null
-   *  for a key no grant binds and for an owner's or an administrator's key. */
+   *  for a key no grant binds and for an owner's or an administrator's key. `holders` (B-129) is
+   *  the repository's live claims with each holder and its lease's end — the lock a session
+   *  claiming through git reads with the same request (R-BTN-179's one-answer rule). */
   boardView(repo: string, granted: string[] | null = null) {
     const now = this.now();
     const repository = this.uiRepo(this.registry.get(repo)!);
@@ -1474,6 +1509,7 @@ export class BatonCore {
       repository,
       ready,
       ready_by_tier: this.readyByTier(ready, [repo]),
+      holders: this.claims.holdersOf(repo),
       granted_capabilities: granted,
       server_time: now,
     };

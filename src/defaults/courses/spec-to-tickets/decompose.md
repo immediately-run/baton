@@ -38,7 +38,10 @@ the board until `file` files it. For each section or numbered decision of the sp
 - **order** the section's number, so the board takes the children in the spec's order.
 - **The body** the section's requirements as the ticket's contract — the architecture it
   prescribes, its tests, its exit criteria — in the spec's own words, each requirement kept
-  whole: `check` counts coverage against them. A live check or a person-only step is its own
+  whole: `check` counts coverage against them — with a `### Trust` section (every new input the
+  section adds, who may write it and how it is verified, or "no new input") and a `### Invariants`
+  section (the rules it must not break, by id), from the spec where it says, else written by you
+  and marked so. A live check or a person-only step is its own
   draft, marked a person's ticket so `file` can tag it.
 
 Commit the request alone, with its drafts under `## decompose`, to the default branch.

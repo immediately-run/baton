@@ -51,6 +51,7 @@
     "test/unit/bounded-git.test.ts",
     "test/unit/pr-markers.test.ts",
     "test/unit/tickets-check.test.ts",
+    "test/unit/spec-files.test.ts",
     "test/unit/tickets.test.ts",
     "test/integration/S-BTN-189.ticket-commands.test.ts",
     "test/unit/request.test.ts",

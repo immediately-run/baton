@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 // check-wiki.mjs — check the repository's Grove wikis: each folder `package.json`'s
-// "immediately.run".content lists (`tickets/`, the tickets; `docs/`, the documentation), each
-// opened on immediately.run through its own immediately.run.json.
+// "immediately.run".content lists (`tickets/`, the tickets; `docs/`, the documentation; `spec/`,
+// the specification, B-180), each opened on immediately.run through its own immediately.run.json.
+// A page is a `.mdx` file, or a `.md` one, as Grove's entry rule has it (`spec/`'s pages are `.md`)
+// — except in an items folder (a bundle with an item.schema.json): there the `.md` files are the
+// folder's own notes, which `baton repo init` writes as `.md` so that the wiki's nav leaves them out
+// (`README.md`, `HOW-TICKETS-WORK.md`, src/defaults/tickets-page.ts), and only `.mdx` files are pages.
 //
 //   npm run check:wiki                 check every bundle; exit 1 on any error
 //   node scripts/check-wiki.mjs DIR…   check these bundle folders instead (the self-test uses this)
@@ -38,12 +42,13 @@ const errors = [];
 const fail = (file, msg) => errors.push(`${relative(REPO, file) || file}: ${msg}`);
 const processor = createProcessor();
 
-/** Every .mdx under a bundle, except `_`-prefixed folders. */
-function pages(dir) {
+/** Every page under a bundle — `.mdx`, and `.md` unless `mdxOnly` — except in `_`-prefixed
+ *  folders. */
+function pages(dir, mdxOnly = false) {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
-    if (statSync(path).isDirectory()) return name.startsWith('_') ? [] : pages(path);
-    return name.endsWith('.mdx') ? [path] : [];
+    if (statSync(path).isDirectory()) return name.startsWith('_') ? [] : pages(path, mdxOnly);
+    return (mdxOnly ? /\.mdx$/ : /\.mdx?$/).test(name) ? [path] : [];
   });
 }
 
@@ -89,7 +94,7 @@ async function checkBundle(root) {
   const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, 'utf8')) : null;
   const idPattern = schema && new RegExp(schema.definitions.itemId.pattern);
   const tickets = new Map(); // id → { file, meta }
-  const files = pages(root);
+  const files = pages(root, schema != null);
 
   for (const file of files) {
     const { meta, body } = split(file, readFileSync(file, 'utf8'));
@@ -100,7 +105,7 @@ async function checkBundle(root) {
     const rel = relative(root, file).split(sep);
     const live = rel.length === 1;
     const archived = rel.length === 2 && rel[0] === 'archive';
-    const stem = name.replace(/\.mdx$/, '');
+    const stem = name.replace(/\.mdx?$/, '');
     if (schema && (live || archived) && idPattern.test(stem)) {
       for (const key of schema.required) if (!(key in meta)) fail(file, `ticket has no ${key}`);
       for (const key of Object.keys(meta)) if (!schema.propertyNames.enum.includes(key)) fail(file, `ticket has an unknown key ${key}`);

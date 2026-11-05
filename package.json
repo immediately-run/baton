@@ -5,7 +5,8 @@
   "immediately.run": {
     "content": [
       "tickets",
-      "docs"
+      "docs",
+      "spec"
     ]
   },
   "repository": {
@@ -46,6 +47,7 @@
     "check:wiki": "node scripts/check-wiki.mjs",
     "check:tickets": "node cli/baton.mjs tickets check --repo .",
     "spec:impact": "node scripts/spec-tools.mjs impact",
+    "spec:index": "node scripts/spec-files.mjs",
     "check:spec": "node scripts/check-spec.mjs"
   },
   "dependencies": {
@@ -54,6 +56,7 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.4.1",
     "@cloudflare/workers-types": "^5.20261013.1",
+    "@immediately-run/mdx-plugins": "0.7.1",
     "@informalsystems/quint": "0.33.0",
     "@mdx-js/mdx": "3.1.1",
     "@types/node": "^22.20.5",

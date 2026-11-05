@@ -151,7 +151,8 @@ class MachineLocks {
   }
 
   /** Try to take the lock without waiting. False when another process on this machine holds it,
-   *  or no `flock` could run; the busy line is said once per capability per stretch. */
+   *  or no `flock` could run (said as such: a missing `flock` is not a busy lock); the line is
+   *  said once per capability per stretch. */
   take(capability: string): Promise<boolean> {
     if (this.holds(capability)) return Promise.resolve(true);
     const path = this.paths[capability];
@@ -164,7 +165,7 @@ class MachineLocks {
       } catch { /* an unwritable directory: the spawn below says it */ }
       const child = spawn('flock', ['--exclusive', '--nonblock', path, ...lockWatcherArgv(process.pid)],
         { stdio: ['ignore', 'pipe', 'ignore'], detached: true });
-      const done = (ok: boolean) => {
+      const done = (ok: boolean, missing = false) => {
         if (settled) return;
         settled = true;
         if (ok) {
@@ -175,7 +176,9 @@ class MachineLocks {
           try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* already gone */ }
           if (!this.busy.has(capability)) {
             this.busy.add(capability);
-            this.log(`baton: ${capability}'s lock (${path}) is held by another process on this machine — not declaring it, so no leg requiring it is offered here (R-BTN-178)`);
+            this.log(missing
+              ? `baton: no \`flock\` on this machine to take ${capability}'s lock (${path}) — not declaring it, so no leg requiring it is offered here; install util-linux flock (macOS: \`brew install flock\`) (R-BTN-178)`
+              : `baton: ${capability}'s lock (${path}) is held by another process on this machine — not declaring it, so no leg requiring it is offered here (R-BTN-178)`);
           }
         }
         resolve(ok);
@@ -185,7 +188,7 @@ class MachineLocks {
         buf += d;
         if (buf.includes('baton:held')) done(true);
       });
-      child.on('error', () => done(false));
+      child.on('error', (e: NodeJS.ErrnoException) => done(false, e.code === 'ENOENT'));
       child.on('close', () => done(false));
     });
   }

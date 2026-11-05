@@ -1,6 +1,6 @@
 ---
 name: spec-review
-description: Review the whole of spec/BATON_SPEC.md for consistency — facts stated in several rules that disagree, owner rulings that reached the context pages or the tickets but not the spec, italic patch notes, cross-references to retired or renamed rules, Decisions entries the rules no longer match, and scenarios and gates that test rules as they used to be. Use when asked to "review the Baton spec", "audit the spec", "run the spec review", "is the spec consistent", or on a periodic schedule. Writes a dated review to docs/review/ with findings ready to become tickets; files them on request.
+description: Review the whole of the Baton spec (spec/BATON_SPEC/, every section file) for consistency — facts stated in several rules that disagree, owner rulings that reached the context pages or the tickets but not the spec, italic patch notes, cross-references to retired or renamed rules, Decisions entries the rules no longer match, and scenarios and gates that test rules as they used to be. Use when asked to "review the Baton spec", "audit the spec", "run the spec review", "is the spec consistent", or on a periodic schedule. Writes a dated review to docs/review/ with findings ready to become tickets; files them on request.
 ---
 
 # Reviewing the whole Baton spec
@@ -11,8 +11,8 @@ babysit skill's *Spec PRs*.
 
 ## Scope
 
-- `spec/BATON_SPEC.md` whole, against:
-  - `docs/context/` (product, architecture, values, vocabulary);
+- `spec/BATON_SPEC/` whole — every section file; `spec/BATON_SPEC.md` is their index — against:
+  - `docs/context/` (product, architecture, values, vocabulary, spec-writing);
   - `spec/BATON_SPEC_HISTORY.md`'s changelog since the previous review (`docs/review/*-spec-review.mdx`, the newest);
   - the live tickets in `tickets/` (not `archive/`) whose brief quotes an owner ruling.
 - Out of scope: whether the design is right. A finding is a disagreement, a gap or a dangling
@@ -27,13 +27,15 @@ babysit skill's *Spec PRs*.
    finding of kind `unpropagated`.
 2. **Facts stated twice.** For each ruling found in step 1, and for each rule changed since the
    previous review, run `npm run spec:impact -- <rule> --term "<key phrase>"`. Read every entry:
-   one that states the fact differently is `contradiction`.
+   one that states the fact differently is `contradiction`; one outside the fact's home that
+   repeats its conditions, numbers or lists instead of citing its id is `restatement`
+   (`docs/context/spec-writing.mdx`, *Writing* 2) — agreeing today, it is the copy that drifts.
 3. **Patch notes and stale lists.** `npm run check:spec` must pass. Any entry still in
    `PATCH_NOTES_ALLOWED` is reported with its age (`patch-note`).
 4. **References.** Every `R-BTN-n` the spec cites is defined and not retired; every `S-BTN`/`G-BTN`
    row cites rules that still say what the row tests; every Decisions entry names rules that
    still carry the decision (`stale-reference`).
-5. **Fresh reviewers.** Split the spec into four to six spans by section. Give each span to one
+5. **Fresh reviewers.** Split the spec into four to six spans of section files. Give each span to one
    fresh reviewer, with the impact lists from step 2 that touch it, and ask only: which facts in
    this span disagree with a fact stated elsewhere (quote both, with line numbers)? Verify each
    answer against the text before keeping it.

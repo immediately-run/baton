@@ -4,8 +4,9 @@ The immediately.run factory's live state — work-item leases, workers, provider
 dashboard at `https://baton.immediately.run` — on a Cloudflare Worker and one SQLite
 Durable Object.
 
-The design is `BATON_SPEC`, [`spec/BATON_SPEC.md`](spec/BATON_SPEC.md) (moved here from the
-`immediately-run/docs` repository in R3-1252); the work is the tickets in [`tickets/`](tickets/). Where
+The design is `BATON_SPEC`: [`spec/BATON_SPEC/`](spec/BATON_SPEC/), one file per section, indexed
+by [`spec/BATON_SPEC.md`](spec/BATON_SPEC.md) (moved here from the `immediately-run/docs`
+repository in R3-1252; split in B-179); the work is the tickets in [`tickets/`](tickets/). Where
 an item says `infra/baton/<path>`, it means `<path>` in this repository (BATON_SPEC §3).
 
 How Baton differs from a durable-execution engine such as Temporal, and where each fits:
@@ -25,6 +26,9 @@ From the package, `baton run`, `baton repo init`, `baton decision list` and the
 instructions `build:cli` prebuilt into `dist/defaults/`, so it needs no checkout and no esbuild.
 `--eject` copies prebuilt defaults the same way. In a
 checkout, run the CLI as `node cli/baton.mjs`.
+
+`baton run --lock` (R-BTN-178) and its tests (`npm test`, `npm run model:pr`) need util-linux
+`flock` on `PATH`; macOS has none — `brew install flock` gives one with the same flags.
 
 ## Layout
 
@@ -93,15 +97,32 @@ checkout, run the CLI as `node cli/baton.mjs`.
 - `node cli/baton.mjs tickets new|claim|set|done` — file, claim and move tickets with git as the
   lock, each one commit pushed straight to the default branch from a throwaway worktree (B-112;
   `baton tickets --help`, and the generated `tickets/HOW-TICKETS-WORK.md`), until Baton claims
-  them (R3-1266).
-- `npm run check:wiki` — every page in `tickets/` and `docs/` compiles as MDX, uses only known
+  them (R3-1266). `claim` asks Baton first (B-129): with the session's key (`-i KEY`, else
+  `BATON_KEY_FILE`) it reads the ticket's position from Baton's board and history, continues a
+  ticket past its course's start where Baton holds it (the PRs written back, the position
+  printed) instead of starting over — overriding only a false `available`, never the git lock or
+  a parked or closed status — and refuses, rather than trust the frontmatter, when a read cannot
+  be answered (`--offline` for an unreachable Baton). A release (`set <id> available
+  [--note TEXT]`) keeps every `prs:` entry and its commit is the hand-off. `claim` also refuses a ticket
+  citing a rule whose `spec/BATON_SPEC_HISTORY.md` entry, by its title, amended it after the ticket was filed or last re-read it, until
+  `--rules-reread <id>,…` names exactly those ids (R-BTN-74); in a shallow clone it deepens the
+  clone first. A new migration or scenario number is the next free one at merge (B-176 moves it
+  into Baton).
+- `npm run check:wiki` — every page in `tickets/`, `docs/` and `spec/` compiles as MDX, uses only known
   components and links only to files that exist; every ticket matches `tickets/item.schema.json`.
 - `npm run check:tickets` (or `node cli/baton.mjs tickets check [--repo DIR]`) — check this
   repository's ticket source without posting it, as `baton repo sync` reads it: the board post's
   validation, every `depends_on` target and dependency cycle, and — with
   `check.depends_line` in `.baton/baton.json` — each ticket's `**Depends on:**` line against its
-  `depends_on` (B-111). One `path: message` line per finding, exit 1 with findings; CI runs it on
-  `tickets/`.
+  `depends_on` (B-111); with `check.sections_since`, a ticket filed on or after that day (the
+  later of its `_filed` line and its first commit) whose `### Trust` or `### Invariants` is absent,
+  empty or a placeholder (R-BTN-74), request tickets and leg-filed children aside; with
+  `check.sections_from_id` (here `B-176`), a ticket at or above that id without a `_filed` line.
+  One `path: message` line per finding, exit 1 with findings; CI runs it on `tickets/`. CI's
+  clone is depth 1, so there it judges the tickets from `B-176` on by their `_filed` lines and
+  only lists, as undetermined, an older ticket without one. It also lists, never as a finding,
+  the live tickets citing a rule amended since they were filed or re-read it (`check.rules`), and
+  says so when a shallow clone skips that list.
 - `node cli/baton.mjs request "<one sentence>" --course C [--repo DIR] [--tier T] [--branch B]` —
   start a course whose product is a spec or a ticket — `create-spec`, `build-app` — from one
   sentence (B-98). Files one request ticket (the sentence as title and description, `course: C`,
@@ -118,10 +139,10 @@ checkout, run the CLI as `node cli/baton.mjs`.
 
 ## The wikis
 
-The repository holds two [Grove](https://github.com/immediately-run/grove) wikis, which
-immediately.run opens: `package.json`'s `"immediately.run": {"content": ["tickets", "docs"]}`
+The repository holds three [Grove](https://github.com/immediately-run/grove) wikis, which
+immediately.run opens: `package.json`'s `"immediately.run": {"content": ["tickets", "docs", "spec"]}`
 lists them, and each folder's `immediately.run.json` opens it with the viewer it names —
-`tickets/` with `immediately-run/baton-board` (B-114), `docs/` with the wiki viewer.
+`tickets/` with `immediately-run/baton-board` (B-114), `docs/` and `spec/` with the wiki viewer.
 
 - **`tickets/`**, the tickets:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/tickets/home.mdx>.
@@ -135,6 +156,11 @@ lists them, and each folder's `immediately.run.json` opens it with the viewer it
   names in `opensWith` (B-114) — this repository holds no component code for it.
 - **`docs/`**, the documentation:
   <https://immediately.run/present/github/immediately-run/baton/main/bundle/docs/home.mdx>.
+- **`spec/`**, the specification (B-180):
+  <https://immediately.run/present/github/immediately-run/baton/main/bundle/spec/home.mdx>.
+  Its pages are `.md`: `BATON_SPEC.md` (the generated index), `BATON_SPEC/` (one file per
+  section), the history and the MCP OAuth companion. Tickets and docs link a section by a relative
+  path to its file and heading (`node scripts/link-spec-refs.mjs` writes them).
 
 Pages are MDX, so `<` and `{` in prose go in backticks or are escaped (`\<`, `\{`).
 

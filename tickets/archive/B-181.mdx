@@ -1,0 +1,166 @@
+---
+title: "B-181 — B-181 — the leg briefing's one-shot contract: nothing resumes you — no exiting with work pending, no promises of work to come (B-180's review round lost to ”I'll resume when they land”)"
+id: B-181
+project: baton
+status: done
+updated: 2026-11-05
+tags:
+  - roadmap-item
+  - EXPEDITE
+tier: judgement
+description: "The leg briefing governs exiting when done but never says never exit with work pending: B-180's review agent started its second reviewer and the vitest suite as background jobs, printed ”I'll resume when they land”, and the harness ended the process at that final message — the stub read exit as completion, the promise was not a verdict, the round was lost (released cannot-finish:transient). Fix the wording everywhere it lives (AGENT_PROMPT, the docs examples, .baton/baton.json, the review legs' mechanism, every leg callout's foreground-wait line), add --standalone per B-84, and pin the contract with a unit test. The third member of the B-86/B-108 family: would-not-exit, idle-detected-late, and now exited-too-early."
+topics:
+  - baton
+owns: {}
+prs:
+  - https://github.com/immediately-run/baton/pull/179
+depends_on: []
+---
+
+**Brief:** B-180's first review round (2026-11-04, the session
+`run-20261104-144136-3664308`) was lost whole to a wording gap, not a defect in
+the change under review. The review agent — a one-shot `opencode run --auto`
+process — started its second reviewer and the vitest suite as **background**
+jobs, printed *"Waiting for the background jobs (reviewer A and the vitest
+suite) — I'll resume when they land."*, and stopped calling tools; the harness
+ends the process at the final message, the stub reads exit as completion and
+stdout's last line as the verdict, and a promise is not `approve` or `changes`:
+
+```
+baton: baton:B-180's review failed (the review agent printed no verdict (approve or
+changes) as its last line — its last line was "The self-test additions match the ticket's
+prescribed tests. Waiting for the background jobs (reviewer A and the vitest suite) — I'll
+resume when they land.")
+baton: baton:B-180 released:cannot-finish:transient at pr-open
+```
+
+The agent believed a future would resume it. Nothing does: stdin is closed for
+good, no scheduler wakes the process, and the exit **is** the leg's completion.
+Every text the agent read governs exiting *when done* — none says *never exit
+with work pending*, and the briefing's closing "never waiting for further
+input" reads, to a model holding pending jobs, like general don't-wait policy.
+This is the third member of the family: B-86 (finished, would not exit), B-108
+(idle, detected late) — and now exited-too-early on a promise.
+
+**Spec:** BATON_SPEC §6.13 (the runner and its legs), §5.8 (the standard
+courses' stubs and briefings), B-84 (the session stays in process), B-86/B-108
+(the mirror cases), R-BTN-69 (course-file versioning, if stubs regenerate).
+
+### The design
+
+1. **The briefing gains the one-shot contract.** The closing sentence of
+   `AGENT_PROMPT` (`src/runner/harness.ts`) — and, in the same PR, the two
+   example `agent_command`s in `docs/standard-courses.mdx` and this
+   repository's own `.baton/baton.json` — is replaced by:
+
+   > Your process's exit is the leg's completion, and nothing resumes it: no
+   > scheduler, no wake-up, stdin is closed for good. Never exit with work
+   > pending — every test run, subagent and verification you start must be
+   > waited on to completion, in the foreground, before your final line (a
+   > "background job" is an orphan the moment you exit; never write that you
+   > are waiting or will resume). When the leg is done — the work pushed, the
+   > checks green, the final line printed — exit immediately.
+
+   B-108's lesson was that the briefing is *the one thing guaranteed in every
+   agent_command* — this is where the contract belongs. Keep it one paragraph:
+   the briefing is a command line.
+
+2. **The review legs name the mechanism.** In
+   `src/defaults/courses/create-pr/review.md`,
+   `src/defaults/courses/create-spec/review.md` and
+   `.baton/courses/create-pr/legs/review.md`, directly after "if your own
+   subagents are still running, wait for them and print the verdict after",
+   insert:
+
+   > — blocking in the foreground on each: start each subagent and each test
+   > run as a synchronous call and keep acting until it returns; your harness
+   > ends your process at your final message, so a job left in the background
+   > dies orphaned and the round is lost — "waiting" or "I'll resume when they
+   > land" in an output is always wrong.
+
+3. **The shared callout gains the mirror of B-86's rule.** The "How the stub
+   runs you" callout box in every other leg (`implement`, `fix`, `adjudicate`,
+   `merge` — `src/defaults/courses/create-pr/*.md` and the `.baton/courses`
+   copies) gains one line at its end:
+
+   > Never end with work in flight: the process is the session, and nothing
+   > resumes it — wait, in the foreground, on every job you started before
+   > printing your final line.
+
+4. **B-84's own prescription, applied.** This repository's
+   `.baton/baton.json` `agent_command` runs `opencode run --auto` against the
+   background service; the leg callouts say a client that can exit before its
+   work ends must keep its session in process (`opencode run --standalone`).
+   Add `--standalone` to the `agent_command` (verified present in the
+   installed CLI), so a leg session is never orphaned in the shared service.
+   If a live check shows `--standalone` changes leg behaviour for the worse
+   (a cold server per leg), record the finding in the PR body and leave the
+   invocation as is — the wording fix stands on its own.
+
+### What not to do
+
+- No change to the verdict protocol or the last-line parser: strict is right,
+  and the failure was the agent's exit, not the parser's judgement.
+- No promise-detection or re-run in the stubs (a bounded "you exited on a
+  promise, re-run synchronously" retry is worth having, but it is a separate
+  code change with its own tests — file it as its own ticket).
+- No runner state, no new env vars, no timeout changes.
+
+### Trust
+
+No new input. Nothing here adds a field, a file, a commit trailer or a
+request: the change is wording in texts that already exist (`AGENT_PROMPT`,
+the docs' example `agent_command`s, this repository's `.baton/baton.json`,
+the leg `.md` files and their `src/defaults` sources), one flag on an existing
+command, and one unit test. Who may write these files is unchanged, and the
+PR review verifies them as it verifies any edit.
+
+### Invariants
+
+- **R-BTN-69 (the course file's rules and versioning):** the leg `.md` edits
+  keep every file inside `validateCourse`'s rules; where a source change
+  regenerates a stub `.mjs`, the course `version` bumps and
+  `min_worker_version` follows what the validator demands —
+  `node cli/baton.mjs test-course . create-pr` proves it.
+- **B-84 (the session stays in process):** design point 4 applies the
+  invariant this repository's own callouts state; where the live check
+  refuses it, the PR body records why, and nothing is left half-applied.
+- **The answer contract (the legs' one-word last line):** untouched — "What
+  not to do" forbids parser and protocol changes; the fix moves the agent's
+  behaviour toward the contract, never the contract toward the agent.
+- **The standard courses stay in step (§5.8):** `src/defaults` sources and
+  the `.baton/courses` copies change together, and `docs/standard-courses.mdx`
+  carries the same briefing text it prescribes, so no regenerated course
+  reintroduces the old wording.
+
+### Tests
+
+- The runner's unit tests beside `src/runner/harness.ts` gain one assertion
+  set: `AGENT_PROMPT` contains "nothing resumes it" and "never exit with work
+  pending" (B-108's own shape — the briefing is the guaranteed carrier, so
+  the next drift fails a test, not a round).
+- `npm run check:wiki` covers the leg `.md` files (known components, links to
+  files that exist); `npm run check:tickets` covers this ticket's own source
+  shape.
+
+### Exit criteria
+
+- [ ] `git grep "never waiting for further input"` finds nothing — the old
+      closing sentence is gone from `src/runner/harness.ts`, both examples in
+      `docs/standard-courses.mdx`, and `.baton/baton.json`.
+- [ ] The three review-leg files carry the mechanism sentence; the other four
+      legs' callouts carry the foreground-wait line; `.baton/courses` copies
+      match their `src/defaults` sources.
+- [ ] The `AGENT_PROMPT` unit test exists and passes; `npm run check:wiki`
+      and `npm run check:tickets` pass; `npm run test:no-quint` is green.
+- [ ] If any leg stub `.mjs` regenerated, the course `version` bumped per
+      R-BTN-69 and `node cli/baton.mjs test-course . create-pr` passes.
+- [ ] The PR body states the rollout: the stub reads `baton.json` and the leg
+      files at the claim's snapshot sha, so the new wording reaches claims
+      whose snapshot is this merge — never an in-flight one.
+
+**Depends on:** none.
+
+## Status
+
+_filed 2026-11-04._

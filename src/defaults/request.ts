@@ -105,7 +105,8 @@ const scalar = (v: string): string => {
 };
 
 /** The request ticket's file (§2f): the sentence as title and description, the course, `available`,
- *  `tags: [request]`; the body names the course and the command that filed it. */
+ *  `tags: [request]`; the body names the course and the command that filed it, and its `## Status`
+ *  the `_filed` day. */
 export function requestFile(id: string, course: string, sentence: string, tier?: string, date = today()): string {
   return [
     '---',
@@ -127,6 +128,11 @@ export function requestFile(id: string, course: string, sentence: string, tier?:
     '',
     `A request on the \`${course}\` course, filed with \`baton request\`. The board places it at the`,
     `course's start, and the next claim starts it: nothing else is needed to begin.`,
+    '',
+    '## Status',
+    '',
+    // The filing day, as `baton ticket new` writes it (R-BTN-74), so a shallow clone dates it.
+    `_filed ${date}._`,
     '',
   ].join('\n');
 }

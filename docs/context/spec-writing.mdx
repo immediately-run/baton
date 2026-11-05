@@ -1,0 +1,46 @@
+---
+title: Reading and writing the spec
+description: How to read BATON_SPEC without reading all of it, and how to amend it without leaving a second copy of a fact behind.
+nav: Spec writing
+order: 5
+tags: [context]
+---
+
+<Lede>The spec stays consistent because every fact in it is stated once, in the section that
+owns it, and everything else cites that statement by id. These rules hold however the spec is
+laid out across files.</Lede>
+
+## Reading
+
+1. **Read the section that owns the topic, not the whole spec.** Start from the index
+   (`spec/BATON_SPEC.md`: each section's file, its subsections and the rules each defines, and
+   every id's file), open the owning section's file and follow its ids outward. `npm run spec:impact -- R-BTN-n` lists every
+   rule, scenario, gate, decision, live ticket and context page that cites the id.
+2. **The rule is the authority.** A rule's body outranks its one-line Decisions entry, and both
+   outrank anything that restates them: a ticket, a context page, the README, a code comment.
+   When a restatement disagrees with the rule, the restatement is wrong.
+3. **Cite by id.** `R-BTN-n`, `S-BTN-n`, `G-BTN-n` and `§n.m` are stable; line numbers and
+   quotations are not.
+
+## Writing
+
+1. **One home per statement.** Each normative statement lives in exactly one rule, in the
+   section that owns its subject. The owner is the section that would have to change if the
+   fact changed. The lease timeout's bounds are stated once, in R-BTN-9 (§8), because the
+   runner declares them; §2's table of clocks cites R-BTN-9 rather than repeating them.
+2. **Elsewhere, cite; don't paraphrase.** Another section names the rule by id, with at most a
+   clause saying what it is about ("the runner's lease timeout (R-BTN-9)"). It does not repeat the
+   rule's conditions, numbers, defaults, enum values or lists: those appear once in the spec.
+   A worked example may use a value, and says which rule defines it.
+3. **Amend in place.** Rewrite the rule so its body says what is true now. Never add an
+   exception on top of a body that still says the opposite: no italic patch notes, no
+   "except …" or "as amended" sentences (`npm run check:spec` fails on new ones).
+4. **Current state only.** Dates, rationale and rejected alternatives go to
+   `spec/BATON_SPEC_HISTORY.md`. A Decisions entry is one line and cites the rules it decides.
+5. **Retire ids; never reuse them.** A rule that goes away leaves its id in the history's
+   Retired requirements table, and the code that cites it is cleaned up.
+6. **An amendment reaches every citation.** Run `spec:impact` on the ids and terms the change
+   touches, update each place it lists or say why it needs no change, and put that checklist
+   in the PR body. Scenarios and gates that test the rule change in the same PR.
+7. **Use core's words.** A term is used as [the vocabulary](vocabulary.mdx) defines it; a new
+   core word lands on that page in the same PR.
