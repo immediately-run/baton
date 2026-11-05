@@ -1,7 +1,7 @@
 # How tickets work
 
-<!-- Written by `baton repo init`; do not edit it here. `baton tickets check` reports a page
-that differs from this release's text, and `baton repo init --force` writes it again. -->
+_Written by `baton repo init`; do not edit it here. `baton tickets check` reports a page
+that differs from this release's text, and `baton repo init --force` writes it again._
 
 A ticket is one `.mdx` file in `tickets/`, named after its id, whose frontmatter carries
 an `id`. `baton repo sync` reads every file under that folder at any depth — done tickets sit
