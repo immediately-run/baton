@@ -590,7 +590,8 @@ export function answerPlan(ticket, option, ref) {
   };
 }
 
-/** The command: one request, the answer's arrival printed as one line (R-BTN-39). */
+/** The command: one request, the answer's arrival printed as one line (R-BTN-39) — deferred
+ *  when a claim holds the ticket, which the alarm applies when the hold ends. */
 async function decisionAnswer(argv) {
   const { flags, positional } = parseArgs(argv, [], ['identity', 'url', 'ref'], 2);
   const p = answerPlan(need(positional[0], 'the ticket, <repository>:<id>'), need(positional[1], 'the option the person chose'), flags.ref);
@@ -598,7 +599,7 @@ async function decisionAnswer(argv) {
   const keyFile = need(flags.identity, '-i KEY (an owner key of the repository, or a human-only key)');
   const { status, json } = await send(url, p, keyFile);
   if (!(status >= 200 && status < 300)) throw new Error(`${json?.code ?? status}: ${json?.message ?? 'refused'}`);
-  process.stdout.write(`${json.ticket ?? positional[0]}: ${p.body.value.option} → ${json.reached}\n`);
+  process.stdout.write(`${json.ticket ?? positional[0]}: ${p.body.value.option} → ${json.reached}${json.deferred ? ' (a claim holds the ticket; applied when it ends)' : ''}\n`);
   return 0;
 }
 

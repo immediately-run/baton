@@ -104,21 +104,32 @@ export class Stations {
         if (last?.why !== unknown) this.offGraph(repo, id, { observation, why: unknown });
         continue;
       }
+      // R-BTN-39, R-BTN-116: a position Baton itself wrote — an applied person's answer or
+      // expiry — stands until git shows the ticket further along. The sync's echo carries the
+      // person step the answer rode, so its path extends Baton's; an answer written only to
+      // Baton (`baton decision answer`, the dashboard) never rides git, and the ticket's next
+      // leg still counts: a posted path that follows the file from its start, covers at least
+      // as many steps and ends no farther from the end (`to_end`) releases the guard too — git
+      // wins (§2e). A snapshot still placing the ticket where it stood before the answer — a
+      // shorter path, or one sideways — does not undo the answer: the station function reads
+      // the answer's `answer:` and catches up, and until it does, Baton's own record is the
+      // position — for the claims' judgement too, which reads `seen`: the stored position, not
+      // the stale post. Nothing is logged — about what Baton owns there is no disagreement
+      // (R-BTN-39).
+      if (prevRow && prevRow.next_source === 'baton' && !extendsPath(g!, prev!, st.path, g!.start)) {
+        const ours = g!.toEnd.get(prevRow.station);
+        const asFar = ours == null
+          || (onGraph(g!, st.path) && st.path.length >= prev!.length && (g!.toEnd.get(st.station) ?? Infinity) <= ours);
+        if (!asFar) {
+          seen.set(id, { station: prevRow.station, path: prev!, prev, bars: st.bars });
+          continue;
+        }
+      }
       // §2e: between two snapshots the path extends by edges, or goes backwards (a regression,
       // judged by the claims); anything else is off-graph. The first placement must follow the
       // file from its start.
       const fine = prev ? extendsPath(g!, prev, st.path, g!.start) || st.path.length < prev.length : onGraph(g!, st.path);
       if (!fine) this.offGraph(repo, id, { observation, why: prev ? 'the path does not extend the previous one by edges' : 'the path does not follow the course file from its start', path: st.path, previous: prev });
-      // R-BTN-39, R-BTN-116: a position Baton itself wrote — an applied person's answer or expiry
-      // — stands until git shows the ticket further along (a path that extends it). A snapshot
-      // still placing the ticket where it stood before the answer does not undo the answer: the
-      // station function reads the answer's `answer:` and catches up, and until it does, Baton's
-      // own record is the position. Nothing is logged — about what Baton owns there is no
-      // disagreement (R-BTN-39).
-      if (prevRow && prevRow.next_source === 'baton' && !extendsPath(g!, prev!, st.path, g!.start)) {
-        seen.set(id, { station: st.station, path: st.path, prev, bars: st.bars });
-        continue;
-      }
       this.write(id, g!, st, sha, observation, at, this.c.requiredBars?.(repo) ?? [], t.course_id);
       // R-BTN-81: git moved the ticket and no claim said so — someone else's work.
       if (prevRow && (prevRow.station !== st.station || prevRow.path !== JSON.stringify(st.path)) && !this.claimMoved(id, st.station, Math.max(prevRow.observation, placedBefore))) {
@@ -228,7 +239,7 @@ export class Stations {
     const before = new Map(this.rows<NextRow>(
       'SELECT leg, state, waiting_on, ready_since, waiting_since FROM ticket_next_legs WHERE ticket_id = ?', id).map((r) => [r.leg, r]));
     const row = [st.station, JSON.stringify(st.path), st.path.length, g.toEnd.get(st.station) ?? 0, st.next_leg, st.next_source, st.handoff_url ?? null];
-    const stored = this.rows<Record<string, unknown>>(
+    const stored = this.rows<{ station: string; path: string; path_len: number; to_end: number; next_leg: string | null; next_source: string; handoff_url: string | null }>(
       'SELECT station, path, path_len, to_end, next_leg, next_source, handoff_url FROM ticket_stations WHERE ticket_id = ?', id)[0];
     if (!stored || Object.values(stored).some((v, i) => v !== row[i])) {
       this.exec(`INSERT INTO ticket_stations (ticket_id, station, path, path_len, to_end, next_leg, next_source, handoff_url, snapshot_sha, observation)
@@ -248,7 +259,11 @@ export class Stations {
       const def = st.next_leg != null ? g.legs.get(st.next_leg) : undefined;
       const wanted = def?.person && def.expires != null ? at + def.expires.afterS * 1000 : null;
       const have = this.rows<{ at: number | null }>('SELECT person_expires_at AS at FROM ticket_stations WHERE ticket_id = ?', id)[0]?.at ?? null;
-      const moved = !stored || Object.values(stored).some((v, i) => v !== row[i]);
+      // §6.4: the clock restarts only when the ticket's station changes — the station's, with
+      // the queued leg, is the change that matters (a route re-queues at the same station); the
+      // row's other columns (`handoff_url`, `next_source`, the path's spelling) restart nothing,
+      // or a churny one would extend the wait without bound.
+      const moved = !stored || stored.station !== st.station || stored.next_leg !== st.next_leg;
       const set = moved ? wanted : wanted == null ? null : have ?? wanted;
       if (set !== have) this.exec('UPDATE ticket_stations SET person_expires_at = ? WHERE ticket_id = ?', set, id);
     }

@@ -327,8 +327,11 @@ export class BatonCore {
           return next;
         });
         this.blocks.expireMessages();
-        // R-BTN-116: a person leg's expiry, due and still unanswered and unheld, arrives at its
-        // `expires.reached` — Baton's own settlement, applied at the instant.
+        // R-BTN-39, R-BTN-116: answers that waited out a hold are applied first — before the
+        // expiries, so a person's word wins over a clock that passed while the ticket was held
+        // — then a person leg's expiry, due and still unanswered and unheld, arrives at its
+        // `expires.reached`: Baton's own settlement, applied at the instant.
+        this.questions.applyPending();
         this.questions.expireDue(this.now());
         this.takeUnblocked();
         // R-BTN-80: lapsed leases and due reminders queue again; old closed notices go.
@@ -494,11 +497,19 @@ export class BatonCore {
           throw new BatonError('unauthenticated', 'sign with an owner key of the repository or a human-only key, or send its API key');
         }
         const admins = await this.admin.adminFingerprints();
-        const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp));
+        // R-BTN-185: an owner key of the repository, or a human-only one — a registered human
+        // key's own public line serves the signature lookup, not the host's break-glass lines
+        // alone (a key registered through POST /v1/human-keys owns nothing, but answers).
+        const signed = await this.authenticated(req, (fp) => admins.get(fp) ?? this.admin.ownerKey(fp) ?? this.admin.humanKeyLine(fp));
         const fp = signed.cred;
-        const human = (await this.humanBreakGlass()).has(fp);
+        const human = await this.admin.isHumanKey(fp);
         if (admins.has(fp)) throw new BatonError('forbidden', 'an administrator’s key is never an owner key (R-BTN-57); a person’s answer is an owner’s or a human-only key’s');
         if (!human && !this.admin.owns(fp, repo)) throw new BatonError('forbidden', `this key neither owns ${repo} nor is a human-only key (R-BTN-116, R-BTN-185)`);
+        // §12.8, R-BTN-191: where the policy's `inputs.answers` is `attestation` (`protected`),
+        // a person's answer counts from a human key alone — an owner key's does not.
+        if (!human && (this.policies.current(repo)?.policy.inputs.answers ?? 'git') === 'attestation') {
+          throw new BatonError('forbidden', `${repo}'s policy counts a person's answer from a human key alone (inputs.answers: attestation)`);
+        }
         const b = checkAttestation(await readJson(signed.req), repo);
         return json(this.store.transaction(() => this.questions.answer(repo, b.ticket, b.value, human ? `human:${fp}` : `owner:${fp}`)));
       }

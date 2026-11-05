@@ -165,6 +165,19 @@ export class Admin {
     return this.rows('SELECT 1 FROM repository_owners WHERE fingerprint = ? AND repository_id = ? AND removed_at IS NULL', fingerprint, repository).length > 0;
   }
 
+  /** R-BTN-185: a registered human-only key's public line (a live one) — the tenant's own, as
+   *  the host's BATON_HUMAN_KEYS lines are the root. It owns nothing by registering; it answers
+   *  a person leg (R-BTN-116) and signs what its role admits. */
+  humanKeyLine(fingerprint: string): string | null {
+    return this.rows<{ public_key: string }>('SELECT public_key FROM human_keys WHERE fingerprint = ? AND revoked_at IS NULL', fingerprint)[0]?.public_key ?? null;
+  }
+
+  /** R-BTN-185: whether the fingerprint counts as a human-only key — registered here, or a
+   *  break-glass line of the host's. */
+  async isHumanKey(fingerprint: string): Promise<boolean> {
+    return (await this.humanMarks()).has(fingerprint);
+  }
+
   /** R-BTN-57: the role a key already holds, if any — one role per key. */
   private roleOf(fingerprint: string, admins: Map<string, string>): string | null {
     if (admins.has(fingerprint)) return 'administrator';
