@@ -1,0 +1,133 @@
+---
+title: Baton compared with LangGraph
+description: Where Baton and LangGraph each fit — a lease server over git for many workers of differing trust, against an in-process runtime for one agent's control flow, checkpointed step by step.
+tags: [concepts]
+order: 22
+---
+
+[LangGraph](https://github.com/langchain-ai/langgraph) calls itself a "low-level orchestration
+framework for building stateful agents". Baton and LangGraph both persist long-running,
+multi-step work that involves agents and people, but they sit at different layers. This page
+states the differences so you can tell which one suits your work, and how the two combine. The
+rules referred to (`R-BTN-n`) are in `BATON_SPEC`, this repository's `spec/BATON_SPEC/`; the
+index `spec/BATON_SPEC.md` names each one's file. LangGraph's behaviour is described as of its
+1.x line (November 2026); its hosted runtime is the Agent Server, part of LangSmith Deployment.
+
+## The one-line difference
+
+- **LangGraph** runs a graph of your functions in-process. Nodes read and update one typed state
+  object, the runtime advances in Pregel-style super-steps, and a checkpointer saves the state
+  after each step. The checkpoints are the record, and the graph's code is the workflow.
+- **Baton** coordinates tickets among many workers, people and agents. It decides who may take
+  each ticket, keeps that claim alive with a lease, and moves the ticket along a course the
+  repository defines as data. Git holds the work; Baton holds what no push may change. Baton
+  runs no repository code and never decides how a leg is done.
+
+LangGraph is therefore on the far side of Baton's "not a workflow engine" line, next to
+Temporal ([compared](compared-to-temporal.mdx)). Its natural place is inside one Baton leg.
+
+## How the concepts map
+
+| LangGraph | Baton | Note |
+|---|---|---|
+| `StateGraph`: nodes and edges, written as code | A **course**: stations and legs in `course.json` | A course is data, checked when the sync posts it: stations reachable, an end from everywhere, cycles bounded (R-BTN-69). LangGraph bounds a runaway loop with `recursion_limit`. |
+| Node, a function: milliseconds to minutes | **Leg**: an agent session, a human review, a merge; minutes to days | Baton's unit of work is far coarser. |
+| Graph state, merged by reducers | The ticket in git: its frontmatter and one heading per leg, on its branch | Baton stores pointers and filter fields, never content (R-BTN-33). LangGraph stores the whole state at every checkpoint. |
+| Thread and its checkpoints | A ticket, its course history in Baton and its git history | |
+| At most one active run per thread | One live claim per ticket (R-BTN-86) | The same rule. |
+| `Send` fan-out, parallel nodes in one super-step | Child tickets; no two legs of one ticket run at once (R-BTN-86) | LangGraph parallelizes inside a run; Baton only across tickets and runners. |
+| `interrupt()` and `Command(resume=…)` | A **person leg**, answered with a `std:decision@1` and listed under *Needs you* (R-BTN-116) | LangGraph's pause is a line of code; Baton's is a state of the course. |
+| Queue workers lease runs, up to `N_JOBS_PER_WORKER` each (10 by default) | Runners claim tickets, keep them by heartbeat and are fenced when silent (R-BTN-6); one leg at a time each | Baton also matches a leg to a runner: capabilities, seats, tier and barred tags (R-BTN-174, R-BTN-178). |
+| Cron jobs | Series tickets, and a queued leg's `not_before` (R-BTN-89) | |
+| Double-texting strategies: reject, enqueue, interrupt, rollback | A second claim on a held ticket is refused | |
+| Custom auth: `@auth.authenticate`, `@auth.on.threads…` | The repository's policy, attestations weighed by their writer, domains and floors (R-BTN-188, R-BTN-189, R-BTN-191) | See *Trust* below. |
+| LangSmith tracing | The dashboard and the course's own stats | LangSmith sees inside a run; Baton sees the fleet. |
+| `update_state` and forking from any checkpoint | Changing git | Baton has no fork or reset; where a ticket is follows from git and its course history. |
+
+## What LangGraph gives that Baton does not
+
+1. **Durability inside the work.** A checkpoint is written after every super-step, in one of
+   three durability modes (`exit`, `async`, `sync`), and results wrapped in `@task` are reused
+   on resume. Baton's unit of durability is the **station**: a leg that dies is run again from
+   its hand-off and resume record (R-BTN-24), and work it had not pushed is lost.
+2. **An agent's control flow.** Tool loops, conditional routing, map-reduce with `Send`,
+   subgraphs, and streaming of tokens and state to a user interface. Baton leaves all of this to
+   the leg's `agent_command`.
+3. **Time travel.** Any checkpoint can be inspected, its state edited, and the run forked from
+   it. Baton has nothing like it; `baton test-course --against-history` is planned
+   ([compared with Temporal](compared-to-temporal.mdx)).
+4. **Application memory.** Threads that work as conversations, and a long-term store shared
+   across threads. Baton has neither, by design.
+5. **Ecosystem and maturity.** A 1.x line with a no-breaking-changes promise, Python and
+   JavaScript implementations, many integrations, and a managed host. Baton is a young system
+   built for one factory.
+
+## What Baton gives that LangGraph does not
+
+1. **Git is the truth, and anyone can move the work.** A person pushes a fix or approves a pull
+   request, the next sync sees it, and the ticket moves (R-BTN-66). Work done outside a
+   LangGraph run is invisible to it until someone writes it in with `update_state`.
+2. **No determinism constraint.** When a LangGraph run resumes after `interrupt()`, the node
+   that paused runs again from its first line. So the code before an interrupt must be safe to
+   repeat, interrupts must keep a fixed order, because resume values are matched by position,
+   and a broad `try/except` around one breaks it. Baton replays nothing. A nondeterministic step,
+   an agent or a person, is simply a leg, and running it again is a new attempt.
+3. **Trust between many parties.** LangGraph's auth decides which user may touch which thread,
+   and it trusts the graph's code and the workers that run it. Baton assumes any worker that can
+   push may be compromised. It weighs every attestation by its writer, counts reviews as
+   independent only from different domains (R-BTN-180), refuses a policy change that would break
+   a guarantee listed in `floors` (R-BTN-189), satisfies a human gate only with a human-only key,
+   and can let only trusted runners land work. LangGraph has no counterpart to any of these.
+4. **Matching work to workers.** A leg's capabilities, seats, tier and barred tags are gates;
+   everything else is advice a worker may override, and every override is logged. Every
+   LangGraph queue worker can run every run.
+5. **People as workers.** A runner can declare `human-operator`, a suspended claim leaves a
+   hand-off for whoever comes next, and *Needs you* lists everything waiting on a person across
+   the fleet. In LangGraph a person answers an interrupt in one thread, through the
+   application's own interface.
+6. **Losing the coordinator loses little.** The work is in git. If Baton loses its own state it
+   fails closed and the work is reviewed and approved again. A LangGraph deployment that loses
+   its Postgres database loses every thread.
+7. **No repository code on the coordinator.** LangGraph's queue workers run the graph's code;
+   Baton's server never runs a repository's code, and its runners hold the credentials.
+
+## Where Baton fits, and where LangGraph does
+
+Baton fits work that:
+
+- is measured in minutes to days per step, by agents and people, with long waits between;
+- already lives in git: tickets as files, steps as commits, reviews in pull requests;
+- is done by many workers of differing trust, where who reviewed and approved what must hold up;
+- must tolerate people and other tools moving it outside the coordinator.
+
+LangGraph fits better when:
+
+- the work is one agent, or a small set of agents, inside one application;
+- steps are many and short, and state is rich and held in memory;
+- a user watches the run stream, and steers it through interrupts;
+- resuming at a node, not at a station, is worth its constraints.
+
+## Using them together
+
+A Baton leg may run a LangGraph graph. Write the leg's `agent_command` as a graph with a
+file-backed checkpointer, such as SQLite, in the claim's checkout, keyed by the ticket's id. The
+leg then resumes at the node within one claim, and Baton's lease, fence and hand-off carry the
+work between legs, runners and people. This is the same combination
+[the Temporal comparison](compared-to-temporal.mdx) describes for a durable-execution engine.
+The checkpoint file is local to the checkout and is not the record: the ticket's headings and
+the pushed branch are, and a leg that moves to another runner starts from them.
+
+Replacing Baton with LangGraph would mean rebuilding the lease and fence, eligibility matching,
+git as the ledger and the policy and attestation layer on top of it, since LangGraph provides
+none of them.
+
+## Sources
+
+- LangGraph: [README](https://github.com/langchain-ai/langgraph),
+  [durable execution](https://docs.langchain.com/oss/python/langgraph/durable-execution),
+  [interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts),
+  [persistence](https://docs.langchain.com/oss/python/persistence),
+  [Send and Command](https://docs.langchain.com/oss/python/langgraph/graph-api-send-command).
+- The Agent Server: [architecture](https://docs.langchain.com/langsmith/agent-server),
+  [double texting](https://docs.langchain.com/langsmith/double-texting),
+  [custom auth](https://docs.langchain.com/langsmith/auth).
