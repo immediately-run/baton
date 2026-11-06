@@ -457,6 +457,8 @@ is stale. Never edit it by hand.
 | S-BTN-197 | the repository policy | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-198 | retirement | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-199 | the git-lock pickup asks Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-200 | a leg's end reaps its group | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-201 | the runner outlives its short waits | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

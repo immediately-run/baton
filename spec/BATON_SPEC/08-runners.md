@@ -177,7 +177,11 @@ runner's full rights; every isolation below binds a cooperating leg, and only `s
   claim's `snapshot_sha`, one leg at a time (B-103; the bullet after this one). It owns the leg
   processes themselves —
   launching them, terminating them when necessary, and realizing they are stuck (§1's division
-  of labor; B-108) — and nothing else does. Idle, it asks for recommendations when
+  of labor; B-108) — and nothing else does. A leg's end is its whole process group's end,
+  whatever ended the leg: the runner kills the group at the wrapper's exit — the lost lease's
+  no-hand-off kill (R-BTN-24) and the wrapper's own return alike — so a process a leg started
+  (a held lock, a background check an agent spawned) never outlives its leg (S-BTN-200). Idle,
+  it asks for recommendations when
   a heartbeat carries `unblocked`, else at its own interval (R-BTN-77).
   - **Course directory** (R-BTN-69, R-BTN-134):
 
