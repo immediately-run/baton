@@ -16,6 +16,7 @@ import { baseChain, PATTERN_STEPS_MAX, unboundedAt, validate, type Schema } from
 import type { Seen, Stations } from './stations';
 import { meetsRequiredBar, requiredBarCovers, type Admin } from './admin';
 import { legStateOf } from './policy';
+import type { LastWrittenBy } from './control';
 import type { Row, SqlValue, Store } from './ports';
 import type { Blocks } from './blocks';
 import type { History } from './history';
@@ -96,6 +97,8 @@ interface ItemFacts {
   operator_only: boolean;
   expedite: boolean;
   rank: number | null;
+  /** B-126 (R-BTN-194): who last changed the ticket, when Baton read its pusher. */
+  last_written_by?: LastWrittenBy | null;
   /** Where the head snapshot places it, or null when it places it nowhere. */
   station: { station: string; path: Step[]; next_leg: string | null; to_end: number; handoff_url: string | null } | null;
 }
@@ -122,6 +125,8 @@ export interface Recommendation {
   flags: string[];
   advice: unknown;
   handoff_url: string | null;
+  /** B-126 (R-BTN-194): who last changed the ticket, when Baton read its pusher. */
+  last_written_by?: LastWrittenBy;
 }
 
 interface HeldClaim {
@@ -380,8 +385,8 @@ export class Claims {
 
   /** A ticket's filter fields and where the head snapshot places it (R-BTN-33, R-BTN-70). */
   private item(id: string): ItemFacts | null {
-    const r = this.rows<{ id: string; repository_id: string; course_id: string; path: string; tier: string | null; requires_clause: string; operator_only: number; rank: number | null; expedite: number }>(
-      'SELECT id, repository_id, course_id, path, tier, requires_clause, operator_only, rank, expedite FROM tickets WHERE id = ?', id)[0];
+    const r = this.rows<{ id: string; repository_id: string; course_id: string; path: string; tier: string | null; requires_clause: string; operator_only: number; rank: number | null; expedite: number; last_written_by: string | null }>(
+      'SELECT id, repository_id, course_id, path, tier, requires_clause, operator_only, rank, expedite, last_written_by FROM tickets WHERE id = ?', id)[0];
     if (!r) return null;
     const requires = r.requires_clause === 'listed'
       ? this.rows<{ name: string }>('SELECT name FROM ticket_requires WHERE ticket_id = ? ORDER BY name', id).map((x) => x.name)
@@ -391,7 +396,26 @@ export class Claims {
     return {
       id: r.id, repository: r.repository_id, course: r.course_id, path: r.path, tier: r.tier, requires, operator_only: !!r.operator_only, rank: r.rank,
       expedite: !!r.expedite || !!this.override(id)?.expedite,
+      ...(r.last_written_by ? { last_written_by: JSON.parse(r.last_written_by) } : {}),
       station: s ? { station: s.station, path: JSON.parse(s.path) as Step[], next_leg: s.next_leg, to_end: s.to_end, handoff_url: s.handoff_url } : null,
+    };
+  }
+
+  /** `GET /v1/repositories/{repository}/tickets/{ticket}` (§11, R-BTN-194): the ticket as Baton
+   *  holds it — its filter fields, where the head snapshot places it, and who last wrote it —
+   *  for the principals that may read its blocks. Null when the ticket is not on the board. */
+  ticketView(id: string): Record<string, unknown> | null {
+    const item = this.item(id);
+    if (!item) return null;
+    const r = this.rows<{ title: string; project: string | null; expedite: number; snapshot_sha: string; course_id: string }>(
+      'SELECT title, project, expedite, snapshot_sha, course_id FROM tickets WHERE id = ?', id)[0];
+    return {
+      ticket_id: item.id, repository: item.repository, course_id: r?.course_id ?? item.course, title: r?.title ?? null,
+      path: item.path, tier: item.tier, requires: item.requires ?? [], operator_only: item.operator_only, expedite: item.expedite,
+      rank: item.rank, snapshot_sha: r?.snapshot_sha ?? null,
+      station: item.station ? { station: item.station.station, path: item.station.path, next_leg: item.station.next_leg, to_end: item.station.to_end,
+        ...(item.station.handoff_url ? { handoff_url: item.station.handoff_url } : {}) } : null,
+      ...(item.last_written_by ? { last_written_by: item.last_written_by } : {}),
     };
   }
 
@@ -705,6 +729,7 @@ export class Claims {
       flags: r.waits ? ['expedite-bound'] : [],
       advice: null,
       handoff_url: r.item.station!.handoff_url,
+      ...(r.item.last_written_by ? { last_written_by: r.item.last_written_by } : {}),
     }));
   }
 
@@ -895,6 +920,9 @@ export class Claims {
       ? this.rows<{ version: number }>('SELECT version FROM courses WHERE repository_id = ? AND id = ?', repositoryOf(c.ticket_id), c.course_id)[0]?.version ?? null
       : null;
     const path = this.rows<{ path: string }>('SELECT path FROM tickets WHERE id = ?', c.ticket_id)[0]?.path ?? null;
+    // B-126 (R-BTN-194): who last changed the ticket — the first thing a privileged session
+    // should know of it, before it reads the body its words steer.
+    const lw = this.rows<{ last_written_by: string | null }>('SELECT last_written_by FROM tickets WHERE id = ?', c.ticket_id)[0]?.last_written_by ?? null;
     // R-BTN-34's default branch (§11's claim answer lists it): the branch a marker leg's line is
     // committed on, whatever branch the runner's checkout was left on (B-96's review round 3).
     const defaultBranch = this.rows<{ default_branch: string }>('SELECT default_branch FROM repositories WHERE id = ?', repositoryOf(c.ticket_id))[0]?.default_branch ?? null;
@@ -913,6 +941,7 @@ export class Claims {
       ...(legState ? { leg_state: legState } : {}),
       station: c.station, legs: c.offered_leg ? [c.offered_leg] : [], next: this.nextLegs(c.ticket_id, c.station),
       ...(handoff ? { handoff_url: handoff } : {}), path, nonce: c.nonce, snapshot_sha: c.snapshot_sha,
+      ...(lw ? { last_written_by: JSON.parse(lw) as LastWrittenBy } : {}),
       ...(defaultBranch ? { default_branch: defaultBranch } : {}),
       previous_attempts: previous.map((p) => ({
         claim_id: p.id, status: p.status, end_reason: p.end_reason, detail: p.end_detail, ended_at: p.ended_at,

@@ -2534,6 +2534,29 @@ listed there gets a warning, not a failure, so it can be cleaned up separately.
   "past its start".
   S-BTN-199's row follows.
 
+- **2026-11-06 — R-BTN-194 added; R-BTN-73, R-BTN-58 amended: control inputs watched, provenance on every ticket (B-126).**
+  Rules changed: R-BTN-73, R-BTN-58. Rule added: R-BTN-194.
+  The security model's hardening option 6 (mitigation G, the owner 2026-10-27): when an accepted
+  board post's head changes a control input — the fixed path list (`.baton/**`, goals,
+  workflows, agent configuration, dependency manifests) plus the owners' `control_paths` and a
+  live ticket's `EXPEDITE`, `tier`, `requires` and `depends_on` watched as fields — and the
+  pusher of the commits that changed it is not one of the owners' recorded forge identities,
+  Baton raises one `control-changed` event under Needs you. Detection only: nothing is refused
+  or held (option 7, B-127, is the gate). The pusher comes from the forge's push deliveries —
+  R-BTN-73's GitHub push now records `sender.id` (immutable; the commit author never counts),
+  `ref`, `before`, `after` and each commit's changed paths, bounded, kept 24 hours — and a
+  missing, truncated or absent delivery fails closed as `pusher-unknown` (a plain git remote
+  included), the writer never assumed an owner's. A push delivery past the bounds is remembered
+  `truncated` with no paths. The owners' identities are the `pushers` setting (R-BTN-139's list,
+  §13, not built before), `baton owner identity add` writing one id of it (R-BTN-58); with none
+  recorded every control change raises, the owner's own pushes included. Every ticket is served
+  with `last_written_by: {pusher, pusher_id?, commit, at}` — the pusher of the newest recorded
+  commit that changed its file — in the board read, the recommendations, the dashboard and the
+  claim answer, whose runner prints it at the claim; `baton ticket show` (new) prints it first;
+  a `signer` joins when B-127 builds owner-signed control. The adversarial review's finding 9
+  (immutable `sender.id`, not `pusher.name`) and finding 19 (default-branch changes after the
+  fact; ticket bodies are provenance's, not the watch's) are taken. Scenario S-BTN-204.
+
 ## Retired requirements
 
 | Id | Title | Retired by | What replaced it |

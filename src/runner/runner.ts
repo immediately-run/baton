@@ -936,7 +936,11 @@ export class Runner {
     const ticket = claim.ticket_id as string;
     const claimId = claim.claim_id as number;
     this.state.set({ claim: { id: claimId, ticket_id: ticket, nonce: claim.nonce } });
-    this.log(`baton: claimed ${ticket} at ${claim.station}, queued leg ${claim.legs?.[0]}${this.verbose ? ` (claim ${claimId}, nonce ${claim.nonce})` : ''}`);
+    // B-126 (R-BTN-194): who last changed the ticket, before any leg reads its body — the
+    // session's first sight of whose words steer it (a hand-off and the memory carry it on).
+    const wrote = claim.last_written_by as { pusher?: string; commit?: string } | undefined;
+    this.log(`baton: claimed ${ticket} at ${claim.station}, queued leg ${claim.legs?.[0]}${this.verbose ? ` (claim ${claimId}, nonce ${claim.nonce})` : ''}`
+      + (wrote?.pusher ? ` — ticket last written by ${wrote.pusher}${wrote.commit ? ` at ${String(wrote.commit).slice(0, 8)}` : ''}` : ''));
     return this.runClaim(claim);
   }
 

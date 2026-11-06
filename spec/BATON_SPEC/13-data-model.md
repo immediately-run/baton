@@ -57,7 +57,7 @@ reach it, each new one the next free number at merge as R-BTN-31 numbers a scena
 | `retry` JSON — the repository's default policy, its ceilings and floors | NULL (core defaults) | R-BTN-122 |
 | `required_bars` JSON `[{course, leg, except?, tag_prefix}]` | `[]` | R-BTN-67 |
 | `unblocked_trigger` JSON (the `dispatch` shape) | NULL | R-BTN-77, R-BTN-94 |
-| `pushers` JSON (forge user ids) | `[]` | R-BTN-139 |
+| `pushers` JSON (forge user ids) | `[]` | R-BTN-139, R-BTN-194 |
 | `code_repos` JSON `[{path, repo_id, former_paths}]` — owners write `path` only; Baton resolves `repo_id` and keeps `former_paths` | `[]` | R-BTN-140 |
 | `api_keys` | 1 | R-BTN-117 |
 | `checks` JSON `{<course>: {name, conclusions}}` | `{}` | R-BTN-114 |
@@ -84,6 +84,7 @@ and never accepted holds no role (§12.1).
 | `action_confirmations` | `code_hash` | `session_id`, `action`, `params` JSON, `created_at`, `expires_at`, `used_at` | A session's action awaiting confirmation by the session's minting key, through `POST /v1/admin/confirm` or `POST /v1/owner/confirm` by its role (R-BTN-155) |
 | `request_nonces` | `(key_fingerprint, nonce)` | `seen_at`; pruned after 11 minutes | Replay cache for every signed request (R-BTN-13) |
 | `webhook_deliveries` | `delivery_id` | `received_at`; pruned after 24 h | R-BTN-73 |
+| `push_deliveries` | `delivery_id` | `repository` (forge path, lowercase), `ref` (`refs/heads/<branch>`), `before_sha`, `after_sha`, `sender_id` (the immutable pusher; NULL when none came), `sender_login`, `commits_json` `[{sha, paths}]`, `truncated`; pruned after 24 h | A push delivery's recorded half (B-126, R-BTN-73): what R-BTN-194 reads |
 | `webhook_syncs` | `(repository_id, workflow)` | `last_dispatch_at` — when the path last sent the workflow a dispatch (a delivery's own, the alarm's backstop or a want's); stale for the sync workflow at `last_dispatch_at + 10 minutes`, when the alarm sends one; `window_until` — the end of the 30-second coalescing window the last send opened; `trailing_wanted` — whether a dispatch was wanted inside it, sent at `window_until` as the trailing dispatch | R-BTN-73, R-BTN-94 (B-89) |
 | `write_budgets` | `(credential_id, repository_id, day)` | `writes` | Non-upkeep row writes per UTC day (R-BTN-149) |
 | `observation_lapses` | `(repository_id, number)` | `credential_id`, `at` | Observation numbers a credential let lapse (R-BTN-150) |
@@ -105,7 +106,7 @@ and never accepted holds no role (§12.1).
 |---|---|---|---|
 | `board_snapshots` | `(repository_id, sha)` | `parent_sha`, `received_at`, `ticket_count`, `posted_by` | Accepted posts (R-BTN-11, R-BTN-102) |
 | `board_head` | `repository_id` | `sha`, `observation`, `last_handed_out`, `observation_holder`, `observation_issued_at`, `observation_renewed_at`, `behind_since` (R-BTN-147), `reset_at` (set by a forced Resync until the next accepted post, R-BTN-11), `fleet_version`, `stations_observation` (the latest accepted snapshot to post stations) | The head and the observation counter (R-BTN-62, R-BTN-150, R-BTN-99); a station row's reading (R-BTN-70) |
-| `tickets` | `id` | `repository_id` (home), `local_id` (`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`), `course_id`, `course_json` (opaque), `path`, `title`, `display_json`, `tier`, `expedite`, `parent`, `repos` JSON, `rank`, `check_sha`, `check_head_repo_id`, `check_head_ref`, `snapshot_sha`, `row_hash`, `blocked_since`, `answer_lost` JSON | Filter fields of each live ticket; an accepted snapshot rewrites only rows whose `row_hash` changed (R-BTN-33, R-BTN-77, R-BTN-86, R-BTN-153) |
+| `tickets` | `id` | `repository_id` (home), `local_id` (`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`), `course_id`, `course_json` (opaque), `path`, `title`, `display_json`, `tier`, `expedite`, `parent`, `repos` JSON, `rank`, `check_sha`, `check_head_repo_id`, `check_head_ref`, `snapshot_sha`, `row_hash`, `blocked_since`, `answer_lost` JSON, `last_written_by` JSON `{pusher, pusher_id?, commit, at, signer?}` (R-BTN-194: Baton's own record, never the post's, no input of `row_hash`) | Filter fields of each live ticket; an accepted snapshot rewrites only rows whose `row_hash` changed (R-BTN-33, R-BTN-77, R-BTN-86, R-BTN-153) |
 | `ticket_requires` | `(ticket_id, name)` | — | The ticket's `requires` clause, expanded to capabilities (R-BTN-120) |
 | `ticket_depends` | `(ticket_id, leg, ref)`; `leg` `''` for every leg | `on_ticket`, `ref` (`<ticket>@at:<station>,…`, `@reached:…`, `@done` or `@withdrawn`) | Posted `depends_at` entries; index `ticket_dependents` on `on_ticket` (R-BTN-120, R-BTN-132) |
 | `ticket_stations` | `ticket_id` | `station`, `path` JSON `[{leg, reached, adopted?}]` (`leg` null on an adopted entry), `path_len`, `to_end`, `next_leg`, `next_source` (`holder`\|`baton`\|`owner`, R-BTN-83), `runs_from` (the `ticket_history` id a person's answer, a route or an adopt restarted the queued leg's run count from; the runs and arrivals after it count, R-BTN-63), `handoff_url`, `snapshot_sha` and `observation` (the snapshot that last changed the row; the latest to show it there is the greater of `observation` and the repository's `stations_observation`) | Where the ticket is: Baton's course history, written by arrivals, settlements, routes and adoption; a snapshot only creates a new ticket's row at `start` (R-BTN-39, R-BTN-70, R-BTN-83, R-BTN-165) |
@@ -180,7 +181,9 @@ Under §12.8 (proposal), `repository_policies` `(repository_id, version)` holds 
 `question-posted`, `question-answered`, `question-expired`, `question-dropped`, `answer-invalid`, `call-settled`,
 `superseded`, `course-closed`, `course-opened`, `capacity`,
 `parent-invalid`, `not-before-invalid`, `output-unclaimed`, `reading-refused`, `invalid-pointer`,
-`admin` (its act in `detail.action`), `frozen`, `unfrozen`, `sealed`, `imported`; *adoption:* `adopted`, `cutover`, `shadow-conflict`,
+`admin` (its act in `detail.action`), `frozen`, `unfrozen`, `sealed`, `imported`, `control-changed`
+(R-BTN-194: one per accepted post that moved the head with a control change by a pusher who is
+not an owner identity — the notice under Needs you); *adoption:* `adopted`, `cutover`, `shadow-conflict`,
 `foreign-claim`.
 
 **Indexes that rules depend on.** `one_active_claim_per_ticket`; `one_active_claim_per_runner`;

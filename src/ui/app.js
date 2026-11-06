@@ -89,8 +89,9 @@ function renderReady() {
     body.append(el('tr', {},
       el('td', { text: i + 1, cls: 'num' }),
       el('td', {}, el('span', { text: r.id, cls: 'muted' }), document.createTextNode(' '), httpsLink(r.title, r.url)),
-      // A ticket's tier is git's: shown beside the commit that last changed the ticket (S-BTN-39).
-      el('td', { text: `${r.tier ?? 'untiered'}${r.changed_in ? ` · ${short(r.changed_in)}` : ''}` }),
+      // A ticket's tier is git's: shown beside the commit that last changed the ticket (S-BTN-39)
+      // and, when Baton read one, the pusher that last wrote it (B-126).
+      el('td', { text: `${r.tier ?? 'untiered'}${r.changed_in ? ` · ${short(r.changed_in)}` : ''}${r.last_written_by ? ` · last by ${r.last_written_by.pusher}` : ''}` }),
       reqs,
       el('td', { text: r.rank_reason, cls: 'muted' })));
   });
@@ -422,6 +423,13 @@ function renderNeeds() {
   // R-BTN-103: a pool copy no worker courier took for an hour; owner decisions no person hears of.
   for (const p of n.pool_unclaimed ?? []) list.append(el('li', { text: `${p.ticket_id}: decision ${p.decision}'s pool copy unclaimed since ${fmtTime(p.since)} — no worker courier is delivering ${p.repository_id}` }));
   for (const r of n.no_owner_channel ?? []) list.append(el('li', { text: `${r.repository_id}: ${r.decisions} owner decision${r.decisions === 1 ? '' : 's'} open and no personal courier for owner — baton owner courier add` }));
+  // B-126 (R-BTN-194): a control input changed by a pusher who is not an owner's recorded forge
+  // identity — detection only; nothing was held, the owner is told whose push it was.
+  for (const c of n.control_changes ?? []) {
+    const who = (c.changes ?? []).flatMap((x) => x.pushers ?? []).map((p) => p.login ?? p.id ?? 'pusher-unknown');
+    const paths = (c.changes ?? []).map((x) => x.path ?? (x.fields?.length ? `its ${x.fields.join(', ')}` : 'paths not recordable (delivery truncated)'));
+    list.append(el('li', { text: `${c.repository_id}: control inputs changed at ${short(c.sha)} by ${[...new Set(who)].join(', ') || 'pusher-unknown'} — ${[...new Set(paths)].join(', ')}; record the owner's forge ids with baton owner identity add` }));
+  }
   for (const fp of n.keys?.revoked_listed ?? []) list.append(el('li', { text: `BATON_KEYS names ${fp}, a revoked key: it stays revoked — give the machine a new key` }));
   for (const h of n.held_items) {
     // §6.10: the owner decides what a hold means — retry (Lift), re-draft, re-tier or park.

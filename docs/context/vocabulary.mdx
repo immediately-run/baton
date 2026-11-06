@@ -148,5 +148,11 @@ acts on attestations alone; the merge runner is the first.
 (`.baton/`, workflows, agent configuration, tickets) plus the owners' own; control paths land
 only by a human.
 
+**Control input.** A path or ticket field a push can use to steer what Baton or a privileged
+session executes: the fixed list of R-BTN-194 (`.baton/`, goals, workflows, agent
+configuration, dependency manifests) plus the owners' `control_paths`, and a live ticket's
+`EXPEDITE`, `tier`, `requires` and `depends_on`. A change by a pusher outside the owners'
+`pushers` is noticed — one event under Needs you — never gated.
+
 **Human-only key.** A key used for nothing else and kept out of every agent's reach; only it
 satisfies a human gate.

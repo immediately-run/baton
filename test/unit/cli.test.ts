@@ -108,6 +108,10 @@ describe('plan: one request per command', () => {
     expect(plan('owner', ['settings', 'docs', '--independence', 'none'], key).body).toEqual({ required_independence: {} });
     expect(() => plan('owner', ['settings', 'docs', '--independence', 'review'], key)).toThrow('leg=a,b');
     expect(() => plan('owner', ['settings', 'docs'], key)).toThrow('at least one setting');
+    // B-126 (R-BTN-194): control paths beside the fixed list, or none to clear them.
+    expect(plan('owner', ['settings', 'docs', '--control-paths', 'src/gen/**,.github/CODEOWNERS'], key).body)
+      .toEqual({ control_paths: ['src/gen/**', '.github/CODEOWNERS'] });
+    expect(plan('owner', ['settings', 'docs', '--control-paths', 'none'], key).body).toEqual({ control_paths: [] });
     // R-BTN-80: remind_after in seconds, from a duration.
     expect(plan('owner', ['settings', 'docs', '--remind-after', '6h'], key).body).toEqual({ remind_after: 21_600 });
   });
@@ -121,7 +125,19 @@ describe('plan: one request per command', () => {
     expect(plan('ticket', ['history', 'docs:R3-1'], key)).toEqual({ method: 'GET', path: '/v1/repositories/docs/tickets/R3-1/history' });
     expect(plan('ticket', ['history', 'docs:R3-1', '--before', '40', '--limit', '20'], key).path).toBe('/v1/repositories/docs/tickets/R3-1/history?before=40&limit=20');
     expect(() => plan('ticket', ['history', 'R3-1'], key)).toThrow('<repository>:<id>');
-    expect(() => plan('ticket', ['show', 'docs:R3-1'], key)).toThrow('baton ticket history');
+    // B-126 (R-BTN-194): the ticket itself, provenance first.
+    expect(plan('ticket', ['show', 'docs:R3-1'], key)).toEqual({ method: 'GET', path: '/v1/repositories/docs/tickets/R3-1', provenance: true });
+    expect(() => plan('ticket', ['show', 'R3-1'], key)).toThrow('<repository>:<id>');
+    expect(() => plan('ticket', ['show', 'docs:R3-1', 'extra'], key)).toThrow('no further argument');
+  });
+
+  it('owner identity commands (B-126: an owner\u2019s recorded forge identity)', () => {
+    expect(plan('owner', ['identity', 'add', 'docs', '707', '--login', 'the-owner'], key))
+      .toEqual({ method: 'POST', path: '/v1/owner/docs/identities', body: { forge_user_id: 707, login: 'the-owner' } });
+    expect(plan('owner', ['identity', 'add', 'docs', '707'], key).body).toEqual({ forge_user_id: 707 });
+    expect(plan('owner', ['identity', 'remove', 'docs', '707'], key).body).toEqual({ forge_user_id: 707, remove: true });
+    expect(() => plan('owner', ['identity', 'docs', '707'], key)).toThrow('identity add|remove');
+    expect(() => plan('owner', ['identity', 'add', 'docs'], key)).toThrow('the forge user id');
   });
 
   it('owner courier commands (R-BTN-80)', () => {

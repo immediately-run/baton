@@ -31,6 +31,7 @@ import { Resources } from './resources';
 import { Notices, type Courier } from './notices';
 import { Queues } from './queues';
 import { History, HISTORY_PAGE_MAX } from './history';
+import { Controls } from './control';
 import { checkBlockedOn, checkNoticeClaim } from './validate';
 import { Registry, TICKET_ID, qualify, repositoryOf, tierPosition, type Repository, type SyncClaims } from './registry';
 import { Policies, canonicalJson, sha256HexSync } from './policy';
@@ -66,6 +67,8 @@ export class BatonCore {
   readonly notices: Notices;
   readonly queues: Queues;
   readonly history: History;
+  /** §4.4 (B-126, R-BTN-194): the control-input watch and each ticket's provenance. */
+  readonly controls: Controls;
   /** §6.4 (R-BTN-116): the person legs' questions, their answers and their expiry. */
   readonly questions: Questions;
   /** §12.8 (B-145): the repository policies, their floors, their guarantees. */
@@ -99,6 +102,9 @@ export class BatonCore {
     // R-BTN-80, R-BTN-81: a decision's notices are queued and closed with it, and its history row written.
     this.notices = new Notices({ store, now: () => this.now() });
     this.history = new History({ store, now: () => this.now() });
+    // B-126 (R-BTN-194): the control-input watch and ticket provenance, read from the push
+    // deliveries the webhooks record — the `pushers` setting's reader beside them.
+    this.controls = new Controls({ store, now: () => this.now() });
     const decisionRows = (ticket: string, ids: string[], kind: 'decision-opened' | 'decision-answered') => {
       for (const id of ids) this.history.record(ticket, { kind, detail: { decision: id } });
     };
@@ -929,6 +935,8 @@ export class BatonCore {
     const rg = /^grants\/([^/]+)\/revoke$/.exec(rest);
     if (m === 'POST' && rg) return json(await this.admin.revokeGrant(actor, repo, seg(rg[1])));
     if (m === 'POST' && rest === 'owners') return json(await this.admin.owners(actor, repo, await body()));
+    // B-126 (R-BTN-194): the owners' forge identities, whose control changes raise nothing.
+    if (m === 'POST' && rest === 'identities') return json(this.admin.identities(actor, repo, await body()));
     if (m === 'POST' && rest === 'bars') return json(this.admin.setBar(actor, repo, await body()));
     const lift = /^bars\/(\d+)\/lift$/.exec(rest);
     if (m === 'POST' && lift) return json(this.admin.liftBar(actor, repo, Number(lift[1])));
@@ -1029,12 +1037,15 @@ export class BatonCore {
     const blocked = /^\/v1\/repositories\/([^/]+)\/blocked$/.exec(url.pathname);
     // R-BTN-81: a ticket's history, read by the principals that may read its blocks (§11).
     const history = /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)\/history$/.exec(url.pathname);
+    // R-BTN-194 (B-126): the ticket itself — its filter fields, where it is and who last wrote
+    // it — for the same principals; `baton ticket show` prints the provenance first.
+    const show = !blocks && !history ? /^\/v1\/repositories\/([^/]+)\/tickets\/([^/]+)$/.exec(url.pathname) : null;
     // B-90: the dashboard's view of one repository, for the same principals — an administrator
     // sees any, an owner its own, a granted key the repositories it is granted on.
     const boardRead = /^\/v1\/repositories\/([^/]+)\/board$/.exec(url.pathname);
     // §12.8 (B-145, R-BTN-189): the signed policy read, for the same principals.
     const policyRead = /^\/v1\/repositories\/([^/]+)\/policy$/.exec(url.pathname);
-    if (req.method !== 'GET' || (!blocks && !blocked && !history && !boardRead && !policyRead)) return null;
+    if (req.method !== 'GET' || (!blocks && !blocked && !history && !show && !boardRead && !policyRead)) return null;
     const seg = (raw: string) => {
       try {
         return decodeURIComponent(raw);
@@ -1042,7 +1053,7 @@ export class BatonCore {
         throw new BatonError('invalid-params', 'a malformed path segment');
       }
     };
-    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? boardRead ?? policyRead)![1]));
+    const repo = checkRepositoryId(seg((blocks ?? blocked ?? history ?? show ?? boardRead ?? policyRead)![1]));
     if (!this.registry.get(repo)) throw new BatonError('not-found', `no repository ${repo}`);
     let cred = req.headers.get('X-Baton-Credential');
     let role: 'admin' | 'owner' | 'worker' = 'worker';
@@ -1069,6 +1080,14 @@ export class BatonCore {
     }
     if (boardRead) return json(this.boardView(repo, granted));
     if (policyRead) return await this.policyRead(repo);
+    if (show) {
+      const raw = seg(show[2]);
+      const id = raw.includes(':') ? raw : qualify(repo, raw);
+      if (!TICKET_ID.test(id) || repositoryOf(id) !== repo) throw new BatonError('invalid-params', `ticket: must be a ticket of ${repo}`);
+      const out = this.claims.ticketView(id);
+      if (!out) throw new BatonError('not-found', `${id} is not on the board`);
+      return json(out);
+    }
     if (history) {
       const raw = seg(history[2]);
       const id = raw.includes(':') ? raw : qualify(repo, raw);
@@ -1261,6 +1280,9 @@ export class BatonCore {
       const refused = this.applyRegistry(r, p, rows.map(({ row }) => row.course_id), at, acceptedRoutes);
       if (refused.length) changed.courses_refused = refused;
       const legsBefore = this.queuedLegs(r);
+      // B-126 (R-BTN-194): the control fields as they stand, read before this post rewrites the
+      // rows, so the frontmatter fields the head changed can be named below.
+      const controlBefore = this.controls.fieldsOf(r);
       const upserted: string[] = [];
       // The repository's own tickets only, keyed by their local ids (R-BTN-47).
       const have = new Map(this.sql<{ local_id: string; row_hash: string }>('SELECT local_id, row_hash FROM tickets WHERE repository_id = ?', r).map((x) => [x.local_id, x.row_hash]));
@@ -1334,6 +1356,11 @@ export class BatonCore {
       // history stays in the events.
       this.store.exec('DELETE FROM held_snapshots WHERE repository_id = ? AND head_sha IS ?', r, head);
       this.event(r, 'snapshot-accepted', { sha: p.sha, parent_sha: p.parent_sha, ticket_count: ticketCount, ...changed, ...(accepted ? { held: true } : {}) }, at);
+      // B-126 (R-BTN-194): the control inputs this head changed, judged against the push
+      // deliveries of the range (never the post's own account of what changed) — detection
+      // only, one `control-changed` event under Needs you — and each changed ticket's
+      // `last_written_by`. The post is accepted whatever this finds (§4.4: no gate).
+      this.controls.advance(repo, head, p.sha, at, rows.map(({ row }) => row), new Set(upserted.map((id) => id.slice(r.length + 1))), controlBefore);
       this.observations.accept(r, n);
       const confirmed = this.claims.confirm(confirmations, n);
       // R-BTN-10, R-BTN-35, §2e: git confirms ends, takes tickets away and goes backwards.
@@ -1585,7 +1612,7 @@ export class BatonCore {
     const byId = new Map(repositories.map((r) => [r.id, r]));
     const items = this.sql<Record<string, SqlValue>>(
       `SELECT t.id, t.repository_id, t.local_id, t.path, t.title, t.project, t.status, t.node, t.queue, t.tags, t.tier, t.requires_clause, t.operator_only, t.ord, t.rank,
-              t.expedite, t.snapshot_sha, s.station, s.next_leg, s.to_end
+              t.expedite, t.snapshot_sha, t.last_written_by, s.station, s.next_leg, s.to_end
        FROM tickets t JOIN repositories p ON p.id = t.repository_id
        JOIN ticket_stations s ON s.ticket_id = t.id
        JOIN ticket_next_legs a ON a.ticket_id = t.id AND a.leg = s.next_leg AND a.state = 'ready'
@@ -1595,6 +1622,15 @@ export class BatonCore {
     for (const r of this.sql<{ ticket_id: string; name: string }>('SELECT ticket_id, name FROM ticket_requires ORDER BY name')) {
       requires.set(r.ticket_id, [...(requires.get(r.ticket_id) ?? []), r.name]);
     }
+    // R-BTN-194: `last_written_by` as stored (JSON), parsed once here, never by each reader.
+    const writtenBy = (v: unknown) => {
+      if (typeof v !== 'string' || !v) return null;
+      try {
+        return JSON.parse(v) as { pusher: string; pusher_id?: number; commit: string; at: number };
+      } catch {
+        return null;
+      }
+    };
     return items.map((r) => ({
       id: r.id,
       repository_id: r.repository_id,
@@ -1605,6 +1641,9 @@ export class BatonCore {
       tier: r.tier,
       // The commit that last changed the ticket's row — a re-tier shows beside it (S-BTN-39).
       changed_in: r.snapshot_sha,
+      // B-126 (R-BTN-194): the pusher of the commit that last changed the ticket's file, served
+      // so a privileged session can see whose words steer it before it reads them.
+      ...((w) => (w ? { last_written_by: w } : {}))(writtenBy(r.last_written_by)),
       queue: r.queue,
       node: r.node,
       rank: r.rank,
@@ -1662,7 +1701,7 @@ export class BatonCore {
       // R-BTN-66: owners, grants, owner bars and settings — read-only; the CLI changes them.
       limits: this.admin.view(now),
       // R-BTN-69: a refused course file, the previous one staying in force.
-      needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), ontologies_refused: this.ontologies.refusals(), keys: this.keysNotice() },
+      needs_you: { ...this.claims.needsYou(now), ...this.blocks.needsYou(now), ...this.notices.needsYou(now), ...this.stations.needsYou(), adoptions: this.cutover.adoptions(), courses_refused: this.courses.refusals(), ontologies_refused: this.ontologies.refusals(), keys: this.keysNotice(), control_changes: this.controls.changesView(now) },
       // R-BTN-75, R-BTN-76: each blocked ticket with its blocks, and the instances' states.
       blocked: this.blocks.view(),
       // R-BTN-85: the disagreements with git of the last 7 days, by kind.

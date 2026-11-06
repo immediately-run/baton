@@ -31,6 +31,10 @@
 //   baton owner -i KEY grant REPO --key PUB [--hostname H] --capabilities a,b [--label L] [--max-tier T]
 //   baton owner -i KEY revoke REPO FINGERPRINT
 //   baton owner -i KEY owners REPO (--add PUB | --remove FINGERPRINT)
+//   baton owner -i KEY identity add REPO <forge user id> [--login LOGIN]   (B-126: an owner's forge
+//                identity — the id a push delivery's sender.id is judged by; a control change one of
+//                them pushed raises nothing; with none recorded, every change raises)
+//   baton owner -i KEY identity remove REPO <forge user id>
 //   baton owner -i KEY policy show REPO                     — the signed read (R-BTN-189), as JSON
 //   baton owner -i KEY policy diff REPO FILE                — the knobs FILE's document would change
 //   baton owner -i KEY policy log REPO [--after N]          — the append-only change log
@@ -45,6 +49,7 @@
 //                [--retry 1h,4h --max-failed 3 | --retry default] [--transcript-repos a,b]
 //                [--unblocked-workflow .github/workflows/F.yml | --unblocked-workflow none] [--remind-after 24h]
 //                [--independence 'review=implement,fix;adjudicate=implement' | --independence none]
+//                [--control-paths a,b | --control-paths none]   (B-126: paths beside the fixed control-input list)
 //   baton owner -i KEY courier add REPO --key PUB --asks owner[,…]      (R-BTN-80: a personal courier)
 //   baton owner -i KEY courier revoke REPO FINGERPRINT
 //   baton owner -i KEY resolve REPO TICKET baton:retries|baton:stalled retry|park   (R-BTN-78)
@@ -55,6 +60,8 @@
 //   baton run [--home <checkout>] [--repository ID] [--course ID] [--capabilities a,b] [--beat-every MS]
 //             [--harness opencode|claude-code] [--verbose]   (R-BTN-72: the worker loop)
 //   baton ticket -i KEY history TICKET [--before ID] [--limit N]                    (R-BTN-81)
+//   baton ticket -i KEY show TICKET                        — the ticket as Baton holds it (B-126): who
+//                last wrote it printed first, then its fields, station and provenance as JSON
 //   baton decision list -i KEY [--watch | --all]
 //                — the CLI courier (R-BTN-80): claims the key's notices, prints them as text and
 //                marks them sent; --watch asks once a minute; --all lists every open decision it delivers
@@ -198,14 +205,25 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
   }
   if (role === 'ticket') {
     // R-BTN-81: a ticket's history, newest first — signed by an owner, an administrator or a key
-    // granted on its repository, the principals of its blocks.
-    if (cmd !== 'history') throw new Error('baton ticket history TICKET [--before ID] [--limit N]');
-    const { flags, positional } = parseArgs(rest, [], ['before', 'limit'], 1);
-    const ticket = need(positional[0], 'the ticket, <repository>:<id>');
-    const i = ticket.indexOf(':');
-    if (i < 1) throw new Error('the ticket is <repository>:<id>');
-    const q = new URLSearchParams({ ...(flags.before ? { before: flags.before } : {}), ...(flags.limit ? { limit: flags.limit } : {}) });
-    return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(ticket.slice(0, i))}/tickets/${encodeURIComponent(ticket.slice(i + 1))}/history${q.size ? `?${q}` : ''}` };
+    // granted on its repository, the principals of its blocks. B-126 (R-BTN-194): `show` reads
+    // the ticket itself, the same three ways.
+    const ticket = (t) => {
+      const i = String(t).indexOf(':');
+      if (i < 1) throw new Error('the ticket is <repository>:<id>');
+      return { repository: String(t).slice(0, i), local: String(t).slice(i + 1) };
+    };
+    if (cmd === 'history') {
+      const { flags, positional } = parseArgs(rest, [], ['before', 'limit'], 1);
+      const t = ticket(need(positional[0], 'the ticket, <repository>:<id>'));
+      const q = new URLSearchParams({ ...(flags.before ? { before: flags.before } : {}), ...(flags.limit ? { limit: flags.limit } : {}) });
+      return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(t.repository)}/tickets/${encodeURIComponent(t.local)}/history${q.size ? `?${q}` : ''}` };
+    }
+    if (cmd === 'show') {
+      const { positional } = parseArgs(rest, [], [], 1);
+      const t = ticket(need(positional[0], 'the ticket, <repository>:<id>'));
+      return { method: 'GET', path: `/v1/repositories/${encodeURIComponent(t.repository)}/tickets/${encodeURIComponent(t.local)}`, provenance: true };
+    }
+    throw new Error('baton ticket history TICKET [--before ID] [--limit N] | baton ticket show TICKET');
   }
   if (role === 'board') {
     // B-90: the board of one repository, as the dashboard reads it — a GET any key granted on the
@@ -347,6 +365,19 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       if (flags.remove) return { method: 'POST', path: `/v1/owner/${repo}/owners`, body: { fingerprint: flags.remove, remove: true } };
       throw new Error('baton owner owners REPO --add PUB | --remove FINGERPRINT');
     }
+    if (cmd === 'identity') {
+      // B-126 (R-BTN-194): an owner's forge identity — the user id (`sender.id`, never the login,
+      // which the forge lets change) whose pushes change control inputs without a notice.
+      const [act, repo, id, ...more] = rest;
+      if (act !== 'add' && act !== 'remove') throw new Error('baton owner identity add|remove REPO <forge user id> [--login LOGIN]');
+      if (act === 'remove') {
+        parseArgs(more, [], [], 0);
+        return { method: 'POST', path: `/v1/owner/${need(repo, 'the repository id')}/identities`, body: { forge_user_id: Number(need(id, 'the forge user id')), remove: true } };
+      }
+      const { flags } = parseArgs(more, [], ['login'], 0);
+      return { method: 'POST', path: `/v1/owner/${need(repo, 'the repository id')}/identities`,
+        body: { forge_user_id: Number(need(id, 'the forge user id')), ...(flags.login ? { login: flags.login } : {}) } };
+    }
     if (cmd === 'bar' && rest[0] === 'lift') {
       parseArgs(rest.slice(3), [], [], 0);
       return { method: 'POST', path: `/v1/owner/${need(rest[1], 'the repository id')}/bars/${need(rest[2], 'the bar id')}/lift`, body: {} };
@@ -361,7 +392,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       } };
     }
     if (cmd === 'settings') {
-      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'independence'], 1);
+      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'independence', 'control-paths'], 1);
       const body = {};
       if (flags['no-required-bars']) {
         if (groups.length) throw new Error('--no-required-bars clears them: name no --required-bar beside it');
@@ -389,6 +420,9 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
           return [leg.trim(), list(from)];
         }));
       }
+      // B-126 (R-BTN-194): control paths beside the fixed list, or `none` to clear them.
+      if (flags['control-paths'] === 'none') body.control_paths = [];
+      else if (flags['control-paths']) body.control_paths = list(flags['control-paths']);
       if (!Object.keys(body).length) throw new Error('baton owner settings REPO names at least one setting');
       return { method: 'PUT', path: `/v1/owner/${need(positional[0], 'the repository id')}/settings`, body };
     }
@@ -408,7 +442,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       return { method: 'POST', path: `/v1/owner/${encodeURIComponent(need(repo, 'the repository id'))}/tickets/${encodeURIComponent(local.includes(':') ? local : `${repo}:${local}`)}/resolve`,
         body: { decision: need(decision, "the decision (baton:retries, baton:stalled or one the ticket's sync posted)"), answer: need(answer, "the answer (retry or park, or one of the posted decision's options)") } };
     }
-    throw new Error('baton owner grants|grant|revoke|owners|bar|settings|courier|resolve');
+    throw new Error('baton owner grants|grant|revoke|owners|identity|bar|settings|courier|resolve');
   }
   throw new Error('baton admin … | baton owner … | baton board REPO');
 }
@@ -800,6 +834,13 @@ export async function main(argv) {
     return 1;
   }
   if (role === 'admin' && args[0] === 'open' && json?.url) process.stdout.write(`${json.url}\n`);
+  else if (role === 'ticket' && args[0] === 'show' && json && status >= 200 && status < 300) {
+    // B-126 (R-BTN-194): the provenance first — a privileged session sees whose words steer the
+    // ticket before it reads anything else of it.
+    const lw = json.last_written_by ?? null;
+    process.stdout.write(`last written by ${lw ? `${lw.pusher}${lw.commit ? ` at ${String(lw.commit).slice(0, 8)}` : ''}${lw.at ? ` (${new Date(lw.at).toISOString()})` : ''}` : 'no one Baton could name'}\n`);
+    process.stdout.write(`${JSON.stringify(json)}\n`);
+  }
   else process.stdout.write(`${JSON.stringify(json)}\n`);
   return status >= 200 && status < 300 ? 0 : 1;
 }

@@ -151,6 +151,9 @@ is summarized in the principal table (§12.1).
       (R-BTN-130);
     - set the owner settings and bars of R-BTN-66 and R-BTN-67, follow renamed bars
       (R-BTN-142), and consent to another repository's `code_repos` entry (R-BTN-140);
+    - record their forge identities (`baton owner identity add`: one entry of the `pushers`
+      setting, R-BTN-139's list — the user ids a control change's pusher is judged by, B-126,
+      R-BTN-194) and add control paths in their settings (`control_paths`, R-BTN-66);
     - set and clear expedite and hold, and cancel (§6); re-route a ticket (R-BTN-83); resolve a
       condition by choosing a restart
       (`baton ticket resolve`, R-BTN-163); stop a running leg (R-BTN-119); record a sync want

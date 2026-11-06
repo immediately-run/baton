@@ -317,6 +317,14 @@ repository reachable over SSH is enough (R-BTN-105).
     | GitLab | `Push Hook`, `Merge Request Hook`, `Note Hook` | `X-Gitlab-Event`, `X-Gitlab-Event-UUID`, `project.path_with_namespace`, `project.id`; push: `user_username`, head commit `author.email` |
     | Gitea | `push`, `pull_request`, `pull_request_review_*`, `issue_comment` | `X-Gitea-Event`, `X-Gitea-Delivery`, `repository.full_name`, `repository.id`, `repository.owner.id`; push: `pusher.login`, `head_commit.author.email` |
 
+    A GitHub push delivery is also **recorded** (B-126, R-BTN-194): `sender.id` (the immutable
+    pusher), `sender.login`, `ref`, `before`, `after` and each commit's `id` with its `added`,
+    `removed` and `modified` paths, bounded (30 commits, 600 paths) — a push past the bounds is
+    remembered `truncated` with no paths, and a shape that does not parse is not recorded, either
+    way the range failing closed (§4.4). The record lives 24 hours beside `webhook_deliveries`
+    (§13): provenance and the control judgement are computed at the post that accepts the head and
+    stored on the ticket, so a delivery is needed only until the next sync.
+
     No pipeline or job event is accepted from GitLab or Gitea.
   - **Dropped:** a delivery id seen in the last 24 hours (`webhook_deliveries`); a
     `workflow_run` whose path is the repository's `sync_workflow` or `mirror_workflow`; and,

@@ -34,7 +34,7 @@ is stale. Never edit it by hand.
 | | 4.1 The `.baton/` folder and the registry | R-BTN-51, R-BTN-48 |
 | | 4.2 What a sync runs | R-BTN-74 |
 | | 4.3 The sync run and the head | R-BTN-62, R-BTN-150, R-BTN-11, R-BTN-147 |
-| | 4.4 The board post | — |
+| | 4.4 The board post | R-BTN-194 |
 | | 4.5 Reading the ticket | R-BTN-5, R-BTN-34 |
 | | 4.6 Children | R-BTN-86 |
 | | 4.7 History and discrepancies | R-BTN-81, R-BTN-85 |
@@ -297,6 +297,7 @@ is stale. Never edit it by hand.
 | R-BTN-191 | every statement Baton receives about the work is an attestation | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-192 | the fact reader: forge facts a trusted runner attests, with no course code | [`12-security.md`](BATON_SPEC/12-security.md) |
 | R-BTN-193 | git is never a lock or a counter | [`01-what-baton-is.md`](BATON_SPEC/01-what-baton-is.md) |
+| R-BTN-194 | control inputs are watched, not gated; every ticket carries who last wrote it | [`04-tickets-syncs-board.md`](BATON_SPEC/04-tickets-syncs-board.md) |
 
 ## Scenarios
 
@@ -459,6 +460,7 @@ is stale. Never edit it by hand.
 | S-BTN-199 | the git-lock pickup asks Baton | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-200 | a leg's end reaps its group | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 | S-BTN-201 | the runner outlives its short waits | [`15-verification.md`](BATON_SPEC/15-verification.md) |
+| S-BTN-204 | control inputs and provenance | [`15-verification.md`](BATON_SPEC/15-verification.md) |
 
 ## Gates
 

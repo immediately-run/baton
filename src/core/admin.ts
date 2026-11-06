@@ -15,6 +15,7 @@ import { parseTranscriptRepo } from './links';
 import { checkRegistration, seedEntries, tierPosition, type Registration, type Registry } from './registry';
 import { graphOf, resolveLeg, type Graph } from './graph';
 import { humanOnlyList, type ApproverEntry, type ApproverFacts, type Policies } from './policy';
+import { checkControlPaths } from './control';
 import type { Config, Store } from './ports';
 import { sha256Hex } from './workerApi';
 
@@ -676,6 +677,40 @@ export class Admin {
     });
   }
 
+  // ── the owners' forge identities (B-126, R-BTN-194) ──────────────────────────────────────
+
+  /** `POST /v1/owner/{repository}/identities`: `{forge_user_id, login?}` records one of the
+   *  owners' forge identities and `{forge_user_id, remove: true}` removes it — one entry of the
+   *  `pushers` setting (R-BTN-139's list), the user id a push delivery's `sender.id` is judged
+   *  by, so a control input its pushes change raises nothing (B-126 item 3). With none recorded,
+   *  every control change raises, the owner's own pushes included: recording is what quietens
+   *  them. The login is kept beside the id as a label; only the id, which the forge keeps
+   *  immutable, is matched. */
+  identities(actor: string, repository: string, body: unknown) {
+    if (!isObj(body)) bad('body', 'must be a JSON object');
+    const b = body as Record<string, unknown>;
+    only(b, ['forge_user_id', 'login', 'remove'], 'body');
+    const id = typeof b.forge_user_id === 'number' && Number.isSafeInteger(b.forge_user_id) && b.forge_user_id > 0
+      ? b.forge_user_id : bad('forge_user_id', 'must be a positive integer (the forge user id, not the login)');
+    if (b.login !== undefined && b.login !== null && (typeof b.login !== 'string' || b.login.length < 1 || b.login.length > 100)) bad('login', 'must be a short login label, or null');
+    return this.c.store.transaction(() => {
+      // The setting is the one list (§13): read, one entry moved, written back whole — the
+      // `PUT …/settings {pushers}` route replaces it, this route edits one id of it.
+      const now = JSON.parse(this.rows<{ pushers: string }>('SELECT pushers FROM repositories WHERE id = ?', repository)[0]?.pushers ?? '[]') as unknown;
+      const list = Array.isArray(now) && now.every((x) => typeof x === 'number') ? now as number[] : [];
+      if (b.remove === true) {
+        if (!list.includes(id)) throw new BatonError('not-found', `no identity ${id} on ${repository}`);
+        this.exec('UPDATE repositories SET pushers = ? WHERE id = ?', JSON.stringify(list.filter((x) => x !== id)), repository);
+        this.event(actor, { act: 'identity-removed', repository, forge_user_id: id }, repository);
+        return { ok: true, pushers: list.filter((x) => x !== id) };
+      }
+      const next = list.includes(id) ? list : [...list, id].sort((a, b2) => a - b2);
+      this.exec('UPDATE repositories SET pushers = ? WHERE id = ?', JSON.stringify(next), repository);
+      this.event(actor, { act: 'identity-added', repository, forge_user_id: id, login: (b.login as string | null) ?? null }, repository);
+      return { ok: true, pushers: next };
+    });
+  }
+
   // ── couriers (R-BTN-80) ─────────────────────────────────────────────────────────────────
 
   /**
@@ -872,14 +907,16 @@ export class Admin {
 
   /** `PUT /v1/owner/{repository}/settings`: `required_bars`, `retry`, `transcript_repos`,
    *  `unblocked_trigger`, `remind_after` (seconds, R-BTN-80), `required_independence`
-   *  (R-BTN-106) — each given replaces that setting whole. R-BTN-188's knob table: every
+   *  (R-BTN-106), `control_paths` (B-126, R-BTN-194: paths beside the fixed control-input list)
+   *  and `pushers` (R-BTN-139's list, replaced whole; `baton owner identity add` edits one id of
+   *  it) — each given replaces that setting whole. R-BTN-188's knob table: every
    *  LOOSENING of an R-BTN-66 setting needs an approver on `approvers.policy` (R-BTN-186 names
    *  `retry`, `transcript_repos` and `required_independence` flatly, and the removing or
    *  narrowing of a bar; tightening — adding a bar — stays open to any owner). */
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'required_independence'], 'body');
+    only(b, ['required_bars', 'retry', 'transcript_repos', 'unblocked_trigger', 'remind_after', 'required_independence', 'control_paths', 'pushers'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     const sets: [string, string | null][] = [];
     if (b.required_bars !== undefined) sets.push(['required_bars', JSON.stringify(this.checkRequiredBars(repository, b.required_bars))]);
@@ -896,6 +933,15 @@ export class Admin {
       sets.push(['remind_after_s', JSON.stringify(r)]);
     }
     if (b.required_independence !== undefined) sets.push(['required_independence', JSON.stringify(checkIndependence(b.required_independence))]);
+    // B-126 (R-BTN-194): control paths beside the fixed list — widening detection, an owner's
+    // own tuning like `remind_after`, never a governed loosening.
+    if (b.control_paths !== undefined) sets.push(['control_paths', JSON.stringify(checkControlPaths(b.control_paths))]);
+    // R-BTN-139's list, replaced whole here (`baton owner identity add` edits one entry of it).
+    if (b.pushers !== undefined) {
+      const p = Array.isArray(b.pushers) && b.pushers.length <= 100 && b.pushers.every((x) => typeof x === 'number' && Number.isSafeInteger(x) && x > 0)
+        ? [...new Set(b.pushers as number[])].sort((a, c) => a - c) : bad('pushers', 'must be a list of forge user ids (positive integers)');
+      sets.push(['pushers', JSON.stringify(p)]);
+    }
     // R-BTN-188/R-BTN-186: the loosening needs an approver on `approvers.policy` as it stands.
     if (this.loosensSettings(repository, sets)) {
       const policies = this.c.policies;
@@ -1019,7 +1065,7 @@ export class Admin {
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
-      settings: this.rows('SELECT id AS repository_id, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, required_independence FROM repositories WHERE retired_at IS NULL ORDER BY id'),
+      settings: this.rows('SELECT id AS repository_id, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, required_independence, control_paths, pushers FROM repositories WHERE retired_at IS NULL ORDER BY id'),
       // R-BTN-80: the personal channels, by repository.
       couriers: this.c.notices?.couriers() ?? [],
     };

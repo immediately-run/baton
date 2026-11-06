@@ -448,6 +448,41 @@ live solely in Baton, and both are exportable (R-BTN-88).
   `state.items[].dependsOn` is the same graph and is refused the same way (B-111, round 1): no
   ticket source can post a loop, whichever shape it posts.
 - Free text and identifiers are validated on write (§12.3).
+- **R-BTN-194 (control inputs are watched, not gated; every ticket carries who last wrote it).**
+  Detection, for the compromised-runner hardening (B-126, the security model's option 6): nothing
+  is refused, held or delayed — owner-signed control inputs (option 7, B-127) are the gate.
+  - **Control inputs** are a fixed list of paths per repository — `.baton/**`, goal files
+    (`**/goals/**`), `.github/workflows/**`, agent configuration (`.claude/**`, `.claude-plugin/**`,
+    every `CLAUDE.md` and `AGENTS.md`, `.mcp.json` and `.opencode/**` and `opencode.json`: what
+    privileged interactive sessions load or execute, OWASP ASI05/ASI06), and dependency manifests
+    and lockfiles (ASI04) — plus the paths its owners add in their settings (`control_paths`,
+    R-BTN-66) and the frontmatter fields `EXPEDITE`, `tier`, `requires` and `depends_on` of a live
+    ticket, watched as fields (a path rule cannot see inside a file). A ticket filed afresh sets
+    its fields as its filing, not a change to an input.
+  - **The check** runs in the transaction that accepts a post moving the head. Baton reads its own
+    record of the forge's push deliveries for the range — the deliveries that chain `before` and
+    `after` from the head left to the head accepted (R-BTN-73) — never the post's account of what
+    changed. A control path changed by a commit whose pusher (the delivery's immutable
+    `sender.id`, never the commit author, which anyone sets) is none of the owners' recorded forge
+    identities (§11.2 — the `pushers` owner setting, R-BTN-139's list, written one id at a time by
+    `baton owner identity add`) raises one `control-changed` event, listed under Needs
+    you (§14) naming the paths, the commits and the pushers. With no identity recorded, every
+    control change raises, the owner's own pushes included: recording is what quietens a pusher.
+  - **Fail closed.** A delivery missing, past the recording bounds or on a forge whose pushes
+    Baton holds no record of — today every forge but github.com through the App (R-BTN-73 records
+    the App's alone; a plain git remote, R-BTN-92, sends nothing at all) — leaves the pusher
+    `pusher-unknown`, and the change raises: the
+    writer is never assumed an owner's. A range Baton cannot trace at all is judged on what it
+    can — the frontmatter fields the rows themselves show changed.
+  - **Provenance.** Each ticket is served with `last_written_by: {pusher, pusher_id?, commit, at}`
+    — the pusher of the newest delivery-recorded commit that changed the ticket's file, `at` the
+    delivery's arrival; `pusher-unknown` where none was traced; a `signer` joins with B-127. It is
+    Baton's own record, never the post's, and no input of `row_hash`. It rides the ticket in the
+    board read (§11), the recommendations and the dashboard's ready rows, and the claim answer,
+    whose runner prints it at the claim, so a privileged session sees whose words steer the ticket
+    before it reads them (`baton ticket show` prints it first); a hand-off document (R-BTN-44)
+    rides the same record, the ticket's file being what it summarizes. Provenance is information,
+    not a gate.
 
 ### 4.5 Reading the ticket
 
