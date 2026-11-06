@@ -113,6 +113,10 @@ export class BatonApi {
   observation(): Promise<Record<string, any>> {
     return this.call('POST', '/v1/sync/observation', {});
   }
+  /** R-BTN-62: give back a number this run will not post under. */
+  releaseObservation(n: number): Promise<Record<string, any>> {
+    return this.call('POST', '/v1/sync/observation', { release: n });
+  }
   head(): Promise<Record<string, any>> {
     return this.call('GET', '/v1/sync/head');
   }
