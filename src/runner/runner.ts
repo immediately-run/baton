@@ -1236,7 +1236,12 @@ export class Runner {
       const shown = await new Promise<NextLegs | null>((resolve) => {
         if (!this.inflight) return resolve(null);
         this.inflight.waiters.push((n) => resolve(n));
-        setTimeout(() => resolve(null), this.o.beatEvery).unref?.();
+        // Ref'd, as idleWait's sleeps are: through this wait no leg child is alive and the
+        // beat's own interval is unref'd, so this timer is what keeps the process alive.
+        // 2026-11-05, run-20261104-144136: unref'd here, the event loop emptied the moment the
+        // wait began — the runner exited 0 mid-claim, no line, no hand-off, the home lock left
+        // behind (S-BTN-201).
+        setTimeout(() => resolve(null), this.o.beatEvery);
       });
       if (shown == null) {
         if (shortWaitSpent(waitedSince, this.now())) return 'spent';
@@ -1320,6 +1325,12 @@ export class Runner {
       this.killGroup(inflight.child);
       return { kind: 'lease-lost' };
     }
+    // The wrapper ended on its own, so the kill above never ran — yet the leg's group can still
+    // hold processes the agent left behind (a held lock, a background check: 2026-11-04's run
+    // left eight flock holders and orphaned model replays burning a CPU each past their legs).
+    // A leg's end is its whole group's end whatever ended it (R-BTN-72, S-BTN-200): the wrapper
+    // is gone already, so only the leftovers feel this.
+    this.killGroup(inflight.child);
     inflight.child = null;
     // R-BTN-177: collect the leg's taken before the files go — reported on the advance or end
     // that finishes this leg. A file that is unparseable or over 4 KB is dropped whole; each
