@@ -119,6 +119,35 @@ describe('S-BTN-157 a busy sync is not a success', () => {
     expect(await boardOf()).toEqual([{ id: `${SLUG.split('/')[1]}:T-1` }]);
   });
 
+  it('a run that fails after taking its number gives it back, so the next run is not busy (R-BTN-62 Release)', async () => {
+    await later();
+    // A ticket naming a repos short name baton.json does not map: the ticket source throws after
+    // the observation was handed out — as a forge read or a course pin check would.
+    writeFileSync(join(dir, 'tickets', 'bad.mdx'), '---\nid: T-2\ntitle: Bad\nrepos: [nowhere]\n---\n');
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' });
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'bad'], { stdio: 'ignore' });
+    await expect(sync(['--busy-retry', '0'])).rejects.toThrow(/nowhere/);
+    // Fixed, and synced again at once — well inside R-BTN-62's ten minutes.
+    rmSync(join(dir, 'tickets', 'bad.mdx'));
+    execFileSync('git', ['-C', dir, 'commit', '-qam', 'fix'], { stdio: 'ignore' });
+    const { code, lines } = await sync(['--busy-retry', '0']);
+    expect(lines.at(-1)).toMatch(/^baton: advanced at /);
+    expect(code).toBe(0);
+  });
+
+  it('a release names only the outstanding number: a stale one voids nothing', async () => {
+    await later();
+    const n = await heldNumber();
+    const release = async (m: unknown) => (await hostCall(new Request(`${ORIGIN}/v1/sync/observation`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ release: m }),
+    }))).status;
+    expect(await release(n - 1)).toBe(200);
+    expect((await observe()).status).toBe(409); // the outstanding number is still held
+    expect(await release('x')).toBe(400);
+    expect(await release(n)).toBe(200);
+    expect((await observe()).status).toBe(200);
+  });
+
   it('the default retry is the workflow’s minute', () => {
     expect(BUSY_RETRY_S).toBe(60);
     expect(parseSyncArgs(['--busy-retry', '30'], {}).busyRetryS).toBe(30);

@@ -552,8 +552,33 @@ export async function syncMain(args: SyncArgs): Promise<number> {
   // run takes be used while that one is out. So the wait comes before the first `observe`, and
   // the retry is a whole second sync from a fresh number.
   const sleep = args.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const once = () => syncOnce(git(root, 'rev-parse', 'HEAD'), {
-    observe: () => asResult(() => api.observation()),
+  // R-BTN-62 (Release): a run that will not post — it ends without posting, or throws after its
+  // number, as a failing ticket source, forge read or course check does — gives its number back,
+  // so the next run is not held `sync-busy` for ten minutes. A post uses the number, accepted or
+  // refused, so only an unposted one is given back. Kept here, not in the vendored syncOnce.
+  let held: number | null = null;
+  const giveBack = async (): Promise<void> => {
+    if (held == null) return;
+    const n = held;
+    held = null;
+    await api.releaseObservation(n).catch(() => {}); // best effort: it lapses in ten minutes anyway
+  };
+  const once = async () => {
+    try {
+      const r = await syncOnceRun();
+      await giveBack();
+      return r;
+    } catch (e) {
+      await giveBack();
+      throw e;
+    }
+  };
+  const syncOnceRun = () => syncOnce(git(root, 'rev-parse', 'HEAD'), {
+    observe: async () => {
+      const o = await asResult(() => api.observation());
+      if (o.ok !== false && Number.isSafeInteger(o.observation)) held = o.observation;
+      return o;
+    },
     // Everything posted under a number is read after it (§7.1 steps 1–2): the commit and the board.
     fetchNext: async () => {
       if (args.latest) {
@@ -565,7 +590,10 @@ export async function syncMain(args: SyncArgs): Promise<number> {
       return git(root, 'rev-parse', 'HEAD');
     },
     readHead: () => asResult(() => api.head()),
-    post: (body: Record<string, unknown>) => asResult(() => api.board(body)),
+    post: (body: Record<string, unknown>) => {
+      held = null;
+      return asResult(() => api.board(body));
+    },
     isAncestor: async (a: string, b: string) => {
       try {
         execFileSync('git', ['-C', root, 'merge-base', '--is-ancestor', a, b], { stdio: 'ignore' });
@@ -836,11 +864,36 @@ export async function githubFacts(root: string, log: (l: string) => void, owns: 
    * any other failure, as a timeout, a 5xx, a rate limit or the budget, is passed through as it is. */
   async function list(repo: string, tickets: string[]): Promise<any[]> {
     try {
+      const author = process.env.BATON_PR_AUTHOR;
+      if (author) return await byAuthor(repo, author);
       return await all<any>(`/repos/${repo}/pulls?state=all`);
     } catch (e) {
       const { status, limited } = e as { status?: number; limited?: boolean };
       if (!tickets.length || limited || (status !== 403 && status !== 404)) throw e;
       throw new Error(`${(e as Error).message} — ${repo} is named in repos: by ${tickets.join(', ')}; the sync's token cannot read it, or it does not exist`);
+    }
+  }
+
+  /** `BATON_PR_AUTHOR`: only that login's PRs, for a repository whose full PR list is longer than
+   * the sync reads (MAX_PAGES). The leg agents open PRs as the operator, so a PR a ticket owns is
+   * among them. GraphQL search, 100 a request, mapped to the REST fields `repoFacts` reads. */
+  async function byAuthor(repo: string, author: string): Promise<any[]> {
+    const query = `query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 100, after: $after) {
+      issueCount pageInfo { hasNextPage endCursor }
+      nodes { ... on PullRequest { number headRefName headRefOid state mergedAt } } } }`;
+    const [owner, name] = repo.split('/');
+    const out: any[] = [];
+    let after: string | null = null;
+    for (;;) {
+      const s: any = (await graphql(query, { q: `repo:${repo} is:pr author:${author}`, after, owner, name }))?.search;
+      // Search answers at most 1000 results: past that the reading would be truncated.
+      if ((s?.issueCount ?? 0) > 1000) throw new Error(`GitHub search (${repo}, author ${author}): ${s.issueCount} PRs, past search's 1000 — the sync will not post a truncated reading`);
+      for (const n of s?.nodes ?? []) {
+        if (n?.number == null) continue;
+        out.push({ number: n.number, head: { ref: n.headRefName, sha: n.headRefOid }, state: n.state === 'OPEN' ? 'open' : 'closed', merged_at: n.mergedAt });
+      }
+      if (!s?.pageInfo?.hasNextPage) return out;
+      after = s.pageInfo.endCursor;
     }
   }
 }

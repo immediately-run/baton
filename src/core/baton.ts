@@ -400,7 +400,15 @@ export class BatonCore {
         if (req.method === 'GET' && url.pathname === '/v1/sync/head') return json(this.head((await this.verifySync(req, 'sync')).repo.id));
         // R-BTN-62: the next number of the repository's counter, before the sync reads anything.
         if (req.method === 'POST' && url.pathname === '/v1/sync/observation') {
-          const repo = (await this.verifySync(req, 'sync')).repo.id;
+          const { repo: { id: repo }, req: signed } = await this.verifySync(req, 'sync');
+          // R-BTN-62 (Release): a run that will not post gives its number back; only the
+          // outstanding number is voided, so a stale release voids nothing.
+          const release = ((await readJson(signed).catch(() => null)) as { release?: unknown } | null)?.release;
+          if (release !== undefined) {
+            if (!Number.isSafeInteger(release)) throw new BatonError('invalid-params', 'release must be the number this credential was handed (R-BTN-62)');
+            this.observations.release(repo, release as number);
+            return json({ released: release });
+          }
           // R-BTN-67: with the owner bars in force or scheduled for the repository, each with its course.
           return json({ ...this.observations.observe(repo), bars: this.admin.bars([repo], this.now(), true).map(({ repository_id: _r, ...b }) => b) });
         }
